@@ -4,6 +4,8 @@ module Main (main) where
 
 import Agentic.Manager.Artifacts
 import Agentic.Manager.Protocol.Artifact (validExportDocument)
+import Agentic.Manager.Credentials (administerCredentials)
+import qualified Agentic.Manager.Protocol.LocalAdmin as Admin
 import Agentic.Manager.Authorization
 import qualified Agentic.Manager.Commands as Commands
 import Agentic.Manager.Configuration
@@ -143,6 +145,16 @@ retentionChecks work = do
       expected <- readIORef original
       check "receipt retirement preserves independently referenced artifact bytes" (Just digest==expected)
     scalar store "SELECT CAST(count(*) AS TEXT) FROM ingestions" >>= check "receipt retirement retains original Runtime history" . (/="0")
+    void $ withAuthorizedView store proof "profile_1" [Command.Observe] (\view ->
+      withArtifactDownload store proof artifact $ \_ _ -> do
+        -- The response still owns file/configuration scopes. Revocation must be SQL-only.
+        response <- administerCredentials store (Admin.RevokeCredential "credential_1")
+        value <- either (const (error "invalid admin result")) pure (eitherDecodeStrict' response)
+        check "local revocation succeeds while response scopes remain held" (field "ok" value == Bool True)
+        awaitAuthorizedView view >>= check "payload-free wakeup needs no response-scope reacquisition" . (==Left Command.Unauthenticated)) >>= right
+    refused <- try @Command.CommandFailure (withArtifactDownload store proof artifact (\_ _ -> error "revoked download callback"))
+    check "revocation refuses retained artifact download before response" (refused == Left Command.Unauthenticated)
+    Commands.readCommand store proof ident >>= check "revocation precedes retained receipt lookup" . (\result -> case result of Left Command.Unauthenticated -> True; _ -> False)
 
 artifactChecks :: FilePath -> FilePath -> IO ()
 artifactChecks work source = do

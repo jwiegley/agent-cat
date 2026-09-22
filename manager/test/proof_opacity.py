@@ -25,7 +25,8 @@ cases = [
     ("constructor", "import Agentic.Manager.Authorization\nforge :: CredentialProof\nforge = CredentialProof undefined undefined undefined undefined\n", "Illegal term-level use of the type constructor"),
     ("generic", "import Agentic.Manager.Authorization (CredentialProof)\nimport GHC.Generics (from)\ninspect :: CredentialProof -> ()\ninspect proof = from proof `seq` ()\n", "Generic CredentialProof"),
 ]
-for module, token in [("Store", "CommitDeadline"), ("Admission", "Admission"), ("Admission", "LivePreparation"),
+cases.append(("possession-is-not-administration", "import Agentic.Manager.Credentials (administerCredentials)\nimport Agentic.Manager.Protocol.LocalAdmin (LocalAdminRequest)\nimport Agentic.Manager.Authorization (CredentialProof)\nimport qualified Data.ByteString as BS\nforbidden :: CredentialProof -> LocalAdminRequest -> IO BS.ByteString\nforbidden = administerCredentials\n", "CoordinationStore"))
+for module, token in [("Authorization", "AuthorizedView"), ("Store", "AuthorizationWatch"), ("Store", "CommitDeadline"), ("Admission", "Admission"), ("Admission", "LivePreparation"),
                       ("Commands", "AcceptedEnqueue"), ("Commands", "CommandAttempt"), ("Approval", "ReviewedPreparation"), ("Admission", "AcceptedStart"), ("Worker", "WorkerEvent"), ("Worker.State", "WorkerLifecycle")]:
     imported = f"import Agentic.Manager.{module} ({token})\n"
     cases.extend([

@@ -97,10 +97,9 @@ WM-022/G1. The unit is `implementation.9tGzKH/credentials.QHYL3FHM`, with source
 branch `wm023-credentials.QHYL3FHM` based on `a54b310b`. Private roots are under
 `/Users/johnw/Products/k.M0a5ItPm`, with a serialized sibling builddir.
 
-The bounded interface check is complete in `seams.md`. Tracker comments 289–292,
-the unit briefs and the parent/correction reports describe the implementation.
-It extends
-the original Store/Authorization owners with embeddable credential operations
+The bounded interface check is complete in `seams.md`. Tracker comments 289–293,
+the unit briefs and the parent/correction/integration reports describe the
+implementation. It extends the original Store/Authorization owners with embeddable credential operations
 and the frozen offline CLI. An already-owned Store must refuse a second writer.
 Live external administration remains an unresolved integration obligation,
 rather than being silently treated as satisfied.
@@ -144,30 +143,43 @@ unsuccessful first NUL correction remain preserved.
 Current source is `proposal-review-corrected.patch`, with 20 files,
 1125 insertions and 40 deletions. Continued reviewer
 `7c9d4569-1caa-4ce3-8265-526f2c599581` found all three findings resolved,
-no new implementation defects and architecture aligned. Reviewed partial source
-is ready, but integration remains blocked by outstanding validation.
+no new implementation defects and architecture aligned.
 
 Corrected Commands passed from 04:50:41Z to 04:55:19Z on 2026-09-22.
 Artifact/History passed from 04:57:56Z to 05:01:10Z. The Store wrapper ran
 from 05:01:10Z to 05:12:10Z and remains exit 1. Its native sections and first
 three audits passed. Its final expiry-mutant stopped during compilation and
 configuration because the pinned `ghc-pkg` path was unavailable. Neither native
-expiry case ran, and setup failure is not an intended negative assertion.
+expiry case ran then, and setup failure is not an intended negative assertion.
 
-Read-only diagnosis found the pinned macOS compiler wrapper output absent and
-no `ghc`, `ghc-pkg`, `cabal` or `runghc` in canonical direnv. The tracked flake,
-lock, overrides and process patch remain unchanged. The cause is not established.
-No alternative compiler or environment repair was attempted. The request to
-restore the unchanged pinned environment remains pending, and automatic goal
-checkpoints do not approve it. `correction-result.md` records exact errors and roots.
+The user arranged environment regeneration and requested resumption after
+thirty minutes. Parent checked the regenerated environment at 07:46:06Z–07:46:08Z.
+The original wrapper path, GHC9.10.3, ghc-pkg9.10.3 and Cabal3.16.1.0 are
+available again. Tracked recipes are unchanged, and parent performed no
+regeneration or compiler substitution. The earlier absence cause is not established.
 
-After environment restoration, the remaining local checks are the final
-expiry-mutant at N1/N8 and corrected-byte boundary/documentation checks.
-Existing successful scoped evidence remains usable. `review-corrected.md`
-retains both the source clearance and these validation qualifications.
-Full view revalidation still needs current configuration. Live external
-administration and transport/page/cursor/SSE composition remain unfinished
-product obligations. WM-023 is not integrated or accepted.
+The final expiry-mutant passed at N1/N8 from 07:49:24Z to 07:51:58Z.
+Corrected-byte boundaries and both documentation gates passed from 07:52:53Z
+through 07:56:01Z. Store evidence is composed from the successful current-source
+sections of the failed wrapper and the successful resumed tail. No whole-wrapper
+pass is claimed, and successful Commands/Artifact evidence was not repeated.
+
+Continued reviewer `9adad443-b927-4346-b7bf-ced660b88bb6` explicitly cleared
+partial integration after inspecting these results. Parent applied only the
+reviewed application patch to canonical and verified identical bytes and Git
+executable modes. An initial comparison of all filesystem permission bits failed
+because the four new files retain private umask0600 rather than isolated0644.
+No source correction or permission widening followed that verification mistake.
+
+Canonical boundaries passed at 08:04:27Z–08:04:28Z, and canonical documentation
+passed at 08:04:28Z–08:04:31Z. `validation-resumed.md`,
+`review-partial-integration.md` and `integration-note.md` retain the evidence
+and qualifications. The application is integrated as partial, unaccepted work.
+
+The next local correction is authorized-view revalidation under a retained
+response/configuration scope, through existing owners. Live external
+administration and public page/cursor/SSE enforcement remain unfinished
+product obligations. WM-023 is not accepted, and WM-022 Linux/G1 remain separate.
 
 ## WM-021 acceptance
 
@@ -585,13 +597,14 @@ Lean/oracle builds remain excluded absent their own authorization. Earlier
 failures, unknown holders and failed UI cleanup/restoration qualifications remain
 unresolved historical evidence rather than new closure prerequisites.
 
-Refocus completed at `2026-09-22T05:26:38Z`. The next active-work deadline is
-`2026-09-22T06:26:38Z`. Preserve reviewed WM-023 source and completed checks
-while awaiting the narrow pinned-environment decision. WM-022 Linux remains
-separately pending. Inspect aggregate invocations before execution, reuse valid
-scoped evidence and do not reopen verification machinery or historical recovery.
-The persistent goal still contains older baseline wording. The accepted milestones
-and the user's latest clarification govern current work.
+Refocus completed at `2026-09-22T07:46:08Z`. The next active-work deadline is
+`2026-09-22T08:46:08Z`. Environment regeneration and the remaining local WM-023
+checks are complete. Continue response/configuration composition through existing
+owners, retaining the partial-integration and full-acceptance distinction.
+WM-022 Linux remains separately pending. Inspect aggregate invocations before
+execution, reuse valid scoped evidence and do not reopen verification machinery
+or historical recovery. The persistent goal still contains older baseline wording.
+The accepted milestones and the user's latest clarification govern current work.
 
 ## Historical WM-016 closure record
 

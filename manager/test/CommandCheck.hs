@@ -5,6 +5,8 @@
 module Main (main) where
 
 import qualified "agentic" Agentic.Manager as Public
+import Agentic.Manager.Credentials (administerCredentials)
+import qualified Agentic.Manager.Protocol.LocalAdmin as Admin
 import Agentic.Manager.Authorization
 import Agentic.Manager.Commands
 import Agentic.Manager.Configuration
@@ -13,8 +15,10 @@ import Agentic.Manager.Protocol.Command
 import Agentic.Manager.Protocol.Json (representableEditorSchema)
 import Agentic.Manager.Schema (schemaVersion, schemaStatements)
 import Agentic.Manager.Store
+import qualified Agentic.Manager.Test.AcceptanceAudit as Audit
 import qualified Agentic.Runtime as Runtime
 import Control.Concurrent (threadDelay)
+import Control.Concurrent.STM (atomically)
 import Control.Concurrent.Async (AsyncCancelled (..), async, cancel, concurrently, poll, wait, waitCatch)
 import Control.Concurrent.MVar (newEmptyMVar, putMVar, takeMVar, tryPutMVar)
 import System.Timeout (timeout)
@@ -22,7 +26,12 @@ import Control.DeepSeq (NFData)
 import Control.Exception (AsyncException (UserInterrupt), bracket, fromException, throwIO, try)
 import Control.Monad (forM_, unless, void)
 import Crypto.Hash (Digest, SHA256, hash)
-import Data.Aeson (FromJSON (parseJSON), Value (..), eitherDecodeStrict', object, withObject, (.:), (.=))
+import Data.Aeson (FromJSON (parseJSON), Value (..), eitherDecodeStrict', object, toJSON, withObject, (.:), (.=))
+import qualified Data.Aeson.Key as Key
+import qualified Data.Aeson.KeyMap as KM
+import Data.Foldable (toList)
+import Data.Bits ((.&.))
+import Data.ByteArray.Encoding (Base (Base16), convertToBase)
 import Data.ByteArray (convert)
 import qualified Data.ByteString as BS
 import Data.IORef (writeIORef, modifyIORef', newIORef, readIORef)
@@ -30,14 +39,16 @@ import Data.Int (Int64)
 import Data.Maybe (isNothing)
 import Data.Text (Text)
 import qualified Data.Text as T
+import qualified Data.Text.Encoding as TE
 import qualified Database.SQLite3 as SQL
 import qualified Database.SQLite3.Direct as Direct
 import Foreign.Ptr (Ptr)
-import System.Directory (createDirectory)
+import Foreign.C.Types (CInt (..))
+import System.Directory (createDirectory, doesFileExist)
 import System.Environment (getArgs)
 import System.FilePath ((</>))
 import System.IO (BufferMode (LineBuffering), hSetBuffering, stdout)
-import System.Posix.Files (setFileMode)
+import System.Posix.Files (setFileMode, fileMode, getSymbolicLinkStatus)
 
 main :: IO ()
 main = do
@@ -46,7 +57,16 @@ main = do
   case args of
     ["quota-pressure",work] -> preflightRetentionChecks work >> capacityChecks work >> rateChecks work
     ["deadline-crossing",work] -> commandDeadlineChecks work
+    ["authorization-commit-gap",work] -> credentialCommitGapChecks work
+    ["hold-credentials",path] -> withInstalled path $ \installed -> withCoordinationStore installed $ \_ ->
+      putStrLn "ready" >> threadDelay 60000000
     [work, source] -> do
+      credentialParserChecks source
+      credentialAdministrationChecks work
+      credentialRepresentationChecks work
+      credentialFailureChecks work
+      credentialMigrationChecks work
+      credentialBoundsChecks work
       publicComposition work
       replayChecks work
       retainedAttemptChecks work
@@ -837,3 +857,292 @@ commandDeadlineChecks work=withFixture work "command-deadline" (64*commandCapaci
     execute "UPDATE clients SET revision='escaped_deadline' WHERE id='client_1'" []
     enforceCommitDeadline escaped
   check "escaped deadline guard cannot authorize a later transaction" (case expiredScope of Left StoreDeadline->True;_->False)
+
+adminField :: Text -> Value -> Value
+adminField key (Object fields) = maybe Null id (KM.lookup (Key.fromText key) fields)
+adminField _ _ = Null
+
+adminText :: Value -> IO Text
+adminText (String value) = pure value
+adminText _ = error "admin metadata field missing"
+
+adminValue :: BS.ByteString -> IO Value
+adminValue = either (const (error "admin response is not JSON")) pure . eitherDecodeStrict'
+
+adminOK :: CoordinationStore -> Admin.LocalAdminRequest -> IO Value
+adminOK store requestValue = do
+  value <- administerCredentials store requestValue >>= adminValue
+  check "local credential operation confirmed" (adminField "ok" value == Bool True)
+  pure (adminField "result" value)
+
+adminRefused :: String -> Admin.AdminFailure -> CoordinationStore -> Admin.LocalAdminRequest -> IO ()
+adminRefused label failure store requestValue = do
+  value <- administerCredentials store requestValue >>= adminValue
+  check label (adminField "ok" value == Bool False && adminField "code" (adminField "error" value) == String (Admin.adminFailureCode failure))
+
+credentialParserChecks :: FilePath -> IO ()
+credentialParserChecks source = do
+  let frozen directory name = BS.readFile (source </> "test/fixtures/manager/v1" </> directory </> (name <> ".json"))
+  forM_ ["status","reload-profiles","list-credentials","issue-credential","rotate-credential","revoke-credential","drain","shutdown","check-store","backup","restore","check-quarantine","release-quarantine"] $ \operation -> do
+    bytes <- frozen "valid" ("admin-" <> operation)
+    check "frozen local request accepted exactly" (case Admin.decodeLocalAdminRequest bytes of Right value -> Admin.adminOperation value == T.pack operation; _ -> False)
+  forM_ [("admin-duplicate",Admin.DuplicateField),("admin-unknown-field",Admin.UnknownField),
+         ("admin-unknown-operation",Admin.UnknownOperation),("admin-unsupported-version",Admin.UnsupportedVersion),
+         ("admin-malformed-request",Admin.MalformedRequest),("admin-missing-operation",Admin.MalformedRequest),
+         ("admin-issue-client-override",Admin.UnknownField),("admin-rotate-client-override",Admin.UnknownField),
+         ("admin-relative-output",Admin.MalformedRequest)] $ \(name,expected) -> do
+    bytes <- frozen "invalid" name
+    check "frozen invalid local request refused before dispatch" (case Admin.decodeLocalAdminRequest bytes of Left actual -> actual == expected; _ -> False)
+    output <- adminValue (Admin.adminError Nothing expected)
+    check "pre-dispatch error neither guesses operation nor echoes input" (adminField "operation" output == Null && adminField "message" (adminField "error" output) == String "")
+  forM_ ["{\"version\":1,\"operation\":\"list-credentials\"} {}",
+         "{\"version\":1,\"operation\":\"list-credentials\",\"secret\":\"private\"}",
+         "{\"version\":1,\"operation\":\"list-credentials\",\"operation\":\"private\"}"] $ \bytes ->
+    check "strict local EOF and duplicate/unknown-field refusal" (case Admin.decodeLocalAdminRequest bytes of Left _ -> True; _ -> False)
+  check "local input bound enforced before parsing" (case Admin.decodeLocalAdminRequest (BS.replicate 2097153 32) of Left Admin.SizeLimit -> True; _ -> False)
+  oversized <- adminValue (Admin.adminSuccess "list-credentials" (String (T.replicate 1048576 "x")))
+  check "whole oversized response refuses within newline-inclusive byte ceiling" (adminField "code" (adminField "error" oversized) == String "size-limit")
+
+credentialAdministrationChecks :: FilePath -> IO ()
+credentialAdministrationChecks work = withFixture work "credentials" (64*commandCapacity) 20 $ \_ _ _ store profile proof -> do
+  let expiry = "2999-01-01T00:00:00Z"
+      issue = Admin.IssueCredential "Terminal" [Observe,Submit,Control,ExportScope] ["profile_1"] expiry
+      destination = work </> "one-time.credential"
+  issued <- adminOK store (issue destination)
+  let metadata = adminField "credential" issued
+  ident <- adminText (adminField "credentialId" metadata)
+  client <- adminText (adminField "clientId" metadata)
+  bearer <- BS.readFile destination
+  check "one-time bearer is exactly 64 lowercase hexadecimal bytes without newline"
+    (BS.length bearer == 64 && BS.all (`elem` BS.unpack "0123456789abcdef") bearer)
+  status <- getSymbolicLinkStatus destination
+  check "one-time file remains private" (fileMode status .&. 0o777 == 0o600)
+  bytes <- administerCredentials store Admin.ListCredentials
+  check "metadata does not disclose bearer, verifier or destination"
+    (all (not . (`BS.isInfixOf` bytes)) [bearer,convertToBase Base16 (verifier bearer),TE.encodeUtf8 (T.pack destination)])
+  stored <- runRead store $ do
+    rows <- query "SELECT verifier FROM credentials WHERE id=?" [SQL.SQLText ident]
+    pure (rows == [[SQL.SQLBlob (verifier bearer)]])
+  check "only exact encoded-bearer verifier persisted" stored
+  issuedProof <- authenticateCredential store bearer >>= right
+  runRead store (currentClient issuedProof) >>= check "issue creates registered client" . (== Right client)
+  adminRefused "exclusive publication collision" Admin.OutputConflict store (issue destination)
+  BS.readFile destination >>= check "collision never replaces one-time bytes" . (== bearer)
+  scalarInt store "SELECT count(*) FROM credentials" >>= check "collision never activates another credential" . (==4)
+  adminRefused "other admin owner not falsely implemented" Admin.StateConflict store (Admin.OtherAdmin "status")
+  req <- request store SetInput "credential-rotation"
+  original <- withAuthorizedView store proof "profile_1" [Observe] (\view -> do
+    submission <- submitCommand store proof req (edit profile (commandResource req) "rotated_revision") >>= right
+    revalidateAuthorizedView view >>= check "ordinary request mutation preserves current authorization view" . (==Right ())
+    pure submission) >>= right
+  first <- adminOK store (Admin.RotateCredential "credential_a" expiry (work </> "rotation-1.credential"))
+  firstId <- adminText (adminField "credentialId" (adminField "credential" first))
+  firstBearer <- BS.readFile (work </> "rotation-1.credential")
+  firstProof <- authenticateCredential store firstBearer >>= right
+  runRead store (currentClient firstProof) >>= check "rotation retains registered client" . (==Right "client_1")
+  replay <- submitCommand store firstProof req (edit profile (commandResource req) "never") >>= right
+  check "rotation preserves client-keyed idempotency receipt" (submissionReceipt replay == submissionReceipt original && isNothing (submissionTicket replay))
+  void (authenticateCredential store bearerA >>= right)
+  scalarInt store "SELECT CAST((julianday(rotation_cutoff)-julianday('now'))*86400 AS INTEGER) FROM credential_administration WHERE credential_id='credential_a'"
+    >>= check "rotation overlap is positive and at most sixty seconds" . (\seconds -> seconds > 0 && seconds <= 60)
+  cutoff <- scalarText store "SELECT rotation_cutoff FROM credential_administration WHERE credential_id='credential_a'"
+  adminRefused "superseded target cannot rotate again" Admin.StateConflict store (Admin.RotateCredential "credential_a" expiry (work </> "rotation-refused.credential"))
+  doesFileExist (work </> "rotation-refused.credential") >>= check "invalid target refused before publication" . not
+  second <- adminOK store (Admin.RotateCredential firstId expiry (work </> "rotation-2.credential"))
+  secondId <- adminText (adminField "credentialId" (adminField "credential" second))
+  scalarText store "SELECT rotation_cutoff FROM credential_administration WHERE credential_id='credential_a'" >>= check "repeated rotation never extends old cutoff" . (==cutoff)
+  expect "older predecessor revoked atomically" Unauthenticated (authenticateCredential store bearerA)
+  scalarInt store "SELECT count(*) FROM credentials WHERE client_id='client_1' AND revoked=0" >>= check "at most current and immediate predecessor remain active" . (==2)
+  void $ withAuthorizedView store firstProof "profile_1" [Observe] (\view -> do
+    void (adminOK store (Admin.RevokeCredential firstId))
+    timeout 1000000 (awaitAuthorizedView view) >>= check "confirmed revocation wakes bound view" . (==Just (Left Unauthenticated))) >>= right
+  secondBearer <- BS.readFile (work </> "rotation-2.credential")
+  secondProof <- authenticateCredential store secondBearer >>= right
+  withStoreWorker store $ \_ _ running -> do
+    void (adminOK store (Admin.RevokeCredential secondId))
+    atomically running >>= check "credential revocation does not cancel original worker ownership"
+  expect "current authorization precedes retained receipt" Unauthenticated (readCommand store secondProof (receiptId (submissionReceipt original)))
+  scalarText store "SELECT supervision FROM runs WHERE id='run_1'" >>= check "revocation leaves already-owned run facts intact" . (=="owned")
+  expired <- scalarText store "SELECT strftime('%Y-%m-%dT%H:%M:%fZ','now','+3 seconds')"
+  void (adminOK store (Admin.IssueCredential "short" [Observe] ["profile_1"] expired (work </> "short.credential")))
+  shortBearer <- BS.readFile (work </> "short.credential")
+  shortProof <- authenticateCredential store shortBearer >>= right
+  void $ withAuthorizedView store shortProof "profile_1" [Observe] (\view -> do
+    threadDelay 3100000
+    timeout 2000000 (awaitAuthorizedView view) >>= check "expiry timer revalidates trusted SQLite time" . (==Just (Left Unauthenticated))) >>= right
+  escaped <- withAuthorizedView store issuedProof "profile_1" [Observe] pure >>= right
+  revalidateAuthorizedView escaped >>= check "view cannot escape reader scope" . (==Left Unauthenticated)
+  withStoreAuthorizationWatch store $ \watch -> do
+    pending <- async (adminOK store (Admin.RevokeCredential ident))
+    void (wait pending)
+    authorizationWatchCurrent watch >>= check "registration before concurrent invalidation cannot lose it" . not
+
+foreign import ccall unsafe "draft_arm_sync_failure" armCredentialSyncFailure :: CInt -> IO ()
+foreign import ccall unsafe "draft_sync_failure_fired" credentialSyncFailureFired :: IO CInt
+
+credentialRepresentationChecks :: FilePath -> IO ()
+credentialRepresentationChecks work = withFixture work "credential-representations" (64*commandCapacity) 20 $ \_ _ _ store _ _ -> do
+  forM_ [("nul-label", "\0", "2999-01-01T00:00:00Z"),
+         ("lower-expiry", "a\0b", "2999-01-01t00:00:00z"),
+         ("unicode-label", "\0" <> T.replicate 255 "𐐀", "2999-01-01t00:00:00+00:00")] $ \(name,label,expiry) -> do
+    let destination = work </> (name <> ".credential")
+        requestValue = Admin.IssueCredential label [Observe] ["profile_1"] expiry destination
+    check "frozen label and expiry grammar accepts representation" (Admin.validAdminRequest requestValue)
+    issued <- adminOK store requestValue
+    let metadata = adminField "credential" issued
+    check "label preserves every Unicode scalar including NUL" (adminField "label" metadata == String label)
+    check "issued expiry uses equivalent SQL-compatible spelling" (adminField "expiresAt" metadata == String (T.toUpper expiry))
+    ident <- adminText (adminField "credentialId" metadata)
+    client <- adminText (adminField "clientId" metadata)
+    proof <- BS.readFile destination >>= authenticateCredential store >>= right
+    runRead store (currentClient proof) >>= check "normalized issue remains authenticatable" . (==Right client)
+    let rotatedDestination = work </> (name <> "-rotated.credential")
+        rotatedExpiry = "2999-02-01t12:34:56.125z"
+    rotated <- adminOK store (Admin.RotateCredential ident rotatedExpiry rotatedDestination)
+    check "rotated expiry uses equivalent SQL-compatible spelling"
+      (adminField "expiresAt" (adminField "credential" rotated) == String (T.toUpper rotatedExpiry))
+    rotatedProof <- BS.readFile rotatedDestination >>= authenticateCredential store >>= right
+    runRead store (currentClient rotatedProof) >>= check "normalized rotation remains authenticatable" . (==Right client)
+    runRead store (currentClient proof) >>= check "normalized rotation preserves positive predecessor overlap" . (==Right client)
+  let oversized = work </> "oversized-label.credential"
+  adminRefused "NUL does not hide an overlong label" Admin.MalformedRequest store
+    (Admin.IssueCredential (T.replicate 257 "\0") [Observe] ["profile_1"] "2999-01-01T00:00:00Z" oversized)
+  doesFileExist oversized >>= check "invalid label refuses before private publication" . not
+
+-- The existing source auditor pauses the original writer after real COMMIT and
+-- before its notification, while the observation retains facts read before it.
+credentialCommitGapChecks :: FilePath -> IO ()
+credentialCommitGapChecks work = withFixture work "credential-commit-gap" (64*commandCapacity) 20 $ \_ _ _ store _ proof ->
+  withStoreAuthorizationWatch store $ \watch ->
+    Audit.withReviewAudit "authorization-commit" $ \audit -> do
+      entered <- newEmptyMVar
+      calls <- newIORef (0 :: Int)
+      bracket (async (takeMVar entered >> adminOK store (Admin.RevokeCredential "credential_a")))
+        (\writer -> Audit.releaseReviewed audit >> cancel writer >> void (waitCatch writer)) $ \writer -> do
+          observed <- try @StoreFailure $ withAuthorizationObservation watch $ do
+            modifyIORef' calls (+1)
+            facts <- runRead store (currentClient proof)
+            check "observation reads authority before concurrent revocation" (facts == Right "client_1")
+            putMVar entered ()
+            void (Audit.waitReviewed audit)
+            pure facts
+          Audit.releaseReviewed audit
+          void (wait writer)
+          check "authorization acknowledgement refuses committed but unnotified state"
+            (case observed of Left StoreBusy -> True; _ -> False)
+          readIORef calls >>= check "commit-gap observation is never replayed" . (==1)
+          authorizationWatchCurrent watch >>= check "committed revocation notification is not consumed" . not
+          runRead store (currentClient proof) >>= check "original revocation completed before owner join" . (==Left Unauthenticated)
+
+credentialFailureChecks :: FilePath -> IO ()
+credentialFailureChecks work = do
+  withFixture work "credential-observation" (64*commandCapacity) 20 $ \_ _ _ store _ _ ->
+    withStoreAuthorizationWatch store $ \watch -> do
+      mutate store (execute "UPDATE clients SET revision='unrelated_view_change' WHERE id='client_1'" [])
+      authorizationWatchCurrent watch >>= check "committed change wakes the original watch" . not
+      withAuthorizationObservation watch (pure ()) >>= check "stable observation acknowledges coalesced notification" . (==Just ())
+      authorizationWatchCurrent watch >>= check "acknowledged watch is current again"
+      entered <- newEmptyMVar
+      calls <- newIORef (0 :: Int)
+      bracket (async (takeMVar entered >> mutate store (execute "UPDATE clients SET revision='racing_view_change' WHERE id='client_1'" [])))
+        (\writer -> cancel writer >> void (waitCatch writer)) $ \writer -> do
+          outcome <- try @StoreFailure $ withAuthorizationObservation watch $ do
+            modifyIORef' calls (+1)
+            putMVar entered ()
+            wait writer
+          check "concurrent commit refuses the observation" (outcome == Left StoreBusy)
+          readIORef calls >>= check "authorization observation is never replayed" . (==1)
+          authorizationWatchCurrent watch >>= check "failed observation does not consume invalidation" . not
+  withFixture work "credential-cutoff" (64*commandCapacity) 20 $ \_ _ _ store _ proof -> do
+    void (adminOK store (Admin.RotateCredential "credential_a" "2999-01-01T00:00:00Z" (work </> "cutoff.credential")))
+    mutate store (execute "UPDATE credential_administration SET rotation_cutoff='2000-01-01T00:00:00Z' WHERE credential_id='credential_a'" [])
+    expect "effective rotation cutoff rejects fresh possession" Unauthenticated (authenticateCredential store bearerA)
+    runRead store (currentClient proof) >>= check "effective cutoff rejects retained proof" . (==Left Unauthenticated)
+    scalarText store "SELECT expires_at FROM credentials WHERE id='credential_a'" >>= check "rotation never rewrites declared expiry" . (=="2999-01-01T00:00:00Z")
+    listing <- adminOK store Admin.ListCredentials
+    check "metadata reflects effective revocation" (case adminField "credentials" listing of
+      Array values -> any (\value -> adminField "credentialId" value == String "credential_a" && adminField "state" value == String "revoked") values
+      _ -> False)
+  forM_ [1,2] $ \nth -> withFixture work ("credential-sync-"<>show nth) (64*commandCapacity) 20 $ \_ _ _ store _ _ -> do
+    let destination = work </> ("sync-"<>show nth<>".credential")
+    armCredentialSyncFailure nth
+    adminRefused (if nth == 1 then "file sync failure refuses activation" else "unconfirmed parent sync refuses activation") Admin.StorageUnavailable store
+      (Admin.IssueCredential "sync" [Observe] ["profile_1"] "2999-01-01T00:00:00Z" destination)
+    credentialSyncFailureFired >>= check "selected file or parent synchronization failed" . (== if nth == 1 then -1 else 1)
+    doesFileExist destination >>= check "only post-publication uncertainty retains the fresh private file" . (== (nth == 2))
+    scalarInt store "SELECT count(*) FROM credentials" >>= check "failed synchronization made no activation attempt" . (==3)
+  withFixture work "credential-sql-refusal" (64*commandCapacity) 20 $ \_ root _ store _ proof -> do
+    withRaw root $ \db -> SQL.exec db "CREATE TRIGGER refuse_credential BEFORE INSERT ON credentials BEGIN SELECT RAISE(ABORT,'fixture refusal'); END"
+    withStoreAuthorizationWatch store $ \watch -> do
+      adminRefused "definite SQL rollback leaves inert file" Admin.StorageUnavailable store
+        (Admin.IssueCredential "rollback" [Observe] ["profile_1"] "2999-01-01T00:00:00Z" (work </> "inert.credential"))
+      authorizationWatchCurrent watch >>= check "constraint rollback does not invalidate readers"
+    inert <- BS.readFile (work </> "inert.credential")
+    expect "confirmed file with SQL refusal is inert" Unauthenticated (authenticateCredential store inert)
+    void (runRead store (currentClient proof) >>= right)
+  withFixture work "credential-commit-uncertain" (64*commandCapacity) 20 $ \_ root _ store _ _ -> do
+    withRaw root $ \db -> SQL.exec db "CREATE TABLE credential_commit_fault(client_id TEXT REFERENCES clients(id) DEFERRABLE INITIALLY DEFERRED); CREATE TRIGGER fail_credential_commit AFTER INSERT ON credentials BEGIN INSERT INTO credential_commit_fault VALUES ('missing_client'); END"
+    withStoreAuthorizationWatch store $ \watch -> do
+      adminRefused "COMMIT failure stays uncertain" Admin.StorageUnavailable store
+        (Admin.IssueCredential "commit" [Observe] ["profile_1"] "2999-01-01T00:00:00Z" (work </> "uncertain.credential"))
+      authorizationWatchCurrent watch >>= check "Store poison invalidates authorization observers" . not
+      failed <- try @StoreFailure (storeIdentity store)
+      check "uncertain COMMIT poisons original Store" (case failed of Left StorePoisoned -> True; _ -> False)
+    doesFileExist (work </> "uncertain.credential") >>= check "COMMIT uncertainty preserves published secret"
+  (path,_) <- fixture work "credential-close" (64*commandCapacity) 20
+  registered <- newEmptyMVar
+  released <- newEmptyMVar
+  observer <- withInstalled path $ \installed -> withCoordinationStore installed $ \store -> do
+    pending <- async $ withStoreAuthorizationWatch store $ \watch -> do
+      putMVar registered ()
+      takeMVar released
+      authorizationWatchCurrent watch
+    takeMVar registered
+    pure pending
+  putMVar released ()
+  timeout 1000000 (wait observer) >>= check "Store close invalidates still-registered observer without joining it" . (==Just False)
+
+credentialMigrationChecks :: FilePath -> IO ()
+credentialMigrationChecks work = do
+  (path,root) <- fixture work "credential-migration" (64*commandCapacity) 20
+  withInstalled path $ \installed -> withCoordinationStore installed $ \store -> mutate store seed
+  withRaw root $ \db -> SQL.exec db "DROP TABLE credential_profiles; DROP TABLE credential_administration; PRAGMA user_version=11"
+  withInstalled path $ \installed -> withCoordinationStore installed $ \store -> do
+    proof <- authenticateCredential store bearerA >>= right
+    runRead store (currentClient proof) >>= check "legacy verifier and client survive migration" . (==Right "client_1")
+    scalarText store "SELECT label FROM credential_administration WHERE credential_id='credential_a'" >>= check "legacy label is retained credential identity" . (=="credential_a")
+    scalarText store "SELECT expires_at FROM credentials WHERE id='credential_a'" >>= check "migration keeps declared expiry" . (=="2999-01-01T00:00:00Z")
+    scalarInt store "SELECT count(*) FROM credential_scopes" >>= check "migration preserves old scopes" . (==12)
+  withRaw root $ \db -> SQL.exec db "PRAGMA user_version=999"
+  withInstalled path $ \installed -> do
+    failure <- try @StoreFailure (withCoordinationStore installed (const (pure ())))
+    check "unknown credential schema refused" (failure == Left StoreVersion)
+  withRaw root $ \db -> do
+    rawRows db "PRAGMA user_version" >>= check "invalid-version refusal does not mutate database version" . (==[[SQL.SQLInteger 999]])
+    rawRows db "SELECT count(*) FROM credentials" >>= check "invalid-version refusal keeps legacy records" . (==[[SQL.SQLInteger 3]])
+
+credentialBoundsChecks :: FilePath -> IO ()
+credentialBoundsChecks work = do
+  (path,_) <- fixture work "credential-bounds" (64*commandCapacity) 20
+  document <- BS.readFile path >>= right . eitherDecodeStrict'
+  let names = ["profile_" <> T.justifyRight 3 '0' (T.pack (show index)) | index <- [1..256 :: Int]]
+  case document of
+    Object fields -> case KM.lookup "profiles" fields of
+      Just (Array profiles) | [Object profile] <- toList profiles ->
+        BS.writeFile path (encoded (Object (KM.insert "profiles" (toJSON [Object (KM.insert "id" (String name) profile) | name <- names]) fields)))
+      _ -> error "profile fixture shape"
+    _ -> error "configuration fixture shape"
+  withInstalled path $ \installed -> withCoordinationStore installed $ \store -> do
+    let destination = work </> "maximum.credential"
+    result <- adminOK store (Admin.IssueCredential "maximum" [Observe,Submit,Control,ExportScope] names "2999-01-01T00:00:00Z" destination)
+    scalarInt store "SELECT count(*) FROM credential_scopes" >>= check "all 256 profiles and four scopes fit original budgets" . (==1024)
+    check "bounded metadata retains all profiles" (adminField "profileIds" (adminField "credential" result) == toJSON names)
+    mutate store $ do
+      execute "INSERT INTO clients WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<255) SELECT 'bound_client_'||x,'revision','authorization',0 FROM n" []
+      execute "INSERT INTO credentials SELECT 'bound_credential_'||id,id,CAST(id AS BLOB),'2999-01-01T00:00:00Z',0 FROM clients WHERE id LIKE 'bound_client_%'" []
+    values <- adminOK store Admin.ListCredentials
+    check "list returns all 256 retained records" (case adminField "credentials" values of Array items -> length items == 256; _ -> False)
+    case names of
+      first:_ -> void (adminOK store (Admin.IssueCredential "beyond list" [] [first] "2999-01-01T00:00:00Z" (work </> "beyond-list.credential")))
+      [] -> error "missing credential-bound profile"
+    adminRefused "257 retained records refuse whole list without lifetime issuance cap" Admin.SizeLimit store Admin.ListCredentials
