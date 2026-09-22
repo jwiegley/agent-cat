@@ -9,8 +9,9 @@ amendment below. The vertical slice was integrated at `ea0fc12c`, and current
 application evidence includes the response correction at `72c2abf`. The accepted
 baseline is WM-001–WM-022 and G0/G1, which is 22 of 44 packages and two of six
 gates. The next product milestone is one frontend completing a full workflow
-through a running manager. Parent targets the existing TUI first, followed by
-the other frontends and operational hardening. G2–G5 remain open.
+through a running manager and the default data broker. The confirmed goal selects
+the existing TUI first, followed by the other frontends and operational hardening.
+G2–G5 remain open.
 
 The user's 2026-09-17 refocus continues to govern delivery. Do not reopen the
 verification-machinery micro-fix loop, paused L08 review or historical recovery
@@ -27,21 +28,51 @@ answer a decision and exercise a supported control, finish, and retrieve verifie
 results through an actual running manager. Additional isolated helper deliveries
 are not substitutes for that result.
 
-Parent proposes the TUI first because it is in this repository and supports
-local acceptance. Reuse its existing presentation and the public client facade,
-while the manager retains workflow interpretation, admission, worker ownership,
-FIFO and artifact authority. Service mode must neither launch a local frontend
+The confirmed goal selects the TUI first. Reuse its existing presentation and
+the public client facade. Runtime remains the sole workflow interpreter, while
+the manager retains admission, original worker ownership, FIFO and artifact
+authority. Service mode must neither launch a local frontend
 nor read manager filesystem paths, and local mode remains intact. The acceptance
 run uses actual keyboard/PTY interaction, protected HTTP and deterministic real
 frontend processes, not mocked manager success.
 
 Backend, client and acceptance work are being reconciled as one delivery path.
-The prior Emacs-before-TUI ordering is a sequencing question to resolve explicitly,
-not evidence that Emacs is implemented or a reason to restart helper milestones.
+The confirmed delivery order does not require completed Emacs work before this
+first TUI milestone. Emacs remains unfinished rather than implicitly accepted.
 Other frontend work and broader hardening follow the first integrated run.
 Required authentication, exact approval, boundedness, truthful outcomes, cleanup
 and non-replay remain prerequisites for the enabled path. A successful first run
 does not by itself close the remaining packages or release gates.
+
+## Data-broker architecture amendment of 2026-09-22
+
+The user requires an injected data broker API and a working default Haskell
+implementation, without new workflow semantics. Runtime offers addressed requests
+through that broker, connected engine adapters return responses through it, and
+runtime consumes those responses to advance the existing plan. Control ingress,
+events, logs and persistence edges also use the broker boundary. A passive copy
+of messages beside unchanged direct execution does not satisfy the requirement.
+
+Runtime retains decoding, retry, failover, memoization, scheduling, policy and
+authored interpretation. The broker routes and distributes data without becoming
+another interpreter or execution authority. Existing bounds, exact consent,
+typed values, original owners, failure distinctions and non-replay remain in
+force. Preserve current protocol/storage behavior and existing private/public
+log destinations rather than silently exposing private diagnostics.
+
+The current scope includes only the API and default in-process implementation.
+RabbitMQ and possible integrations with John Mark's tools are deferred follow-ons,
+not acceptance blockers. The extension contract must distinguish message data
+from local live capabilities, which cannot be serialized or reconstructed from IDs.
+The default broker is a prerequisite inside the first full frontend delivery.
+
+Parent is working in `implementation.9tGzKH/broker.V0Omy9B2/source`, branch
+`broker-default.V0Omy9B2`, based on `4cf7828`. The existing eight-file service/client
+work is preserved in `service-tui.purvEwEv/source` and
+`pre-broker-work-in-progress.patch`, with 986 insertions and 74 deletions.
+Its library builds passed after four preserved compiler failures, but no running
+manager or TUI acceptance has occurred. Reuse that work where it fits the new
+boundary without treating compilation or code proposals as product acceptance.
 
 ## Local-only validation amendment of 2026-09-22
 
@@ -697,13 +728,14 @@ Lean/oracle builds remain excluded absent their own authorization. Earlier
 failures, unknown holders and failed UI cleanup/restoration qualifications remain
 unresolved historical evidence rather than new closure prerequisites.
 
-Refocus completed at `2026-09-22T19:45:19Z`. The next active-work deadline is
-`2026-09-22T20:45:19Z`. WM-022/G1 remain accepted, and the reviewed live local
-administration layer is integrated at `26eaebf`. The next acceptance target is
-the complete TUI-to-running-manager workflow above. Necessary server, client,
-page/cursor and stream work belongs to that integrated path rather than separate
-helper milestones. Validation remains local-only. Reuse valid evidence and
-existing test owners, with no verification-machinery or historical-recovery detour.
+Refocus completed at `2026-09-22T23:04:48Z`. The next active-work deadline is
+`2026-09-23T00:04:48Z`. WM-022/G1 remain accepted, and live local administration
+is integrated at `26eaebf`. Implement the default broker at the existing runtime
+data-handling boundaries, preserving the unfinished service/client work. The
+acceptance target remains the complete broker-backed TUI/manager workflow, not
+isolated helper deliveries. RabbitMQ is deferred and validation remains local-only.
+Reuse valid evidence and existing test owners without verification-machinery or
+historical-recovery detours.
 
 ## Historical WM-016 closure record
 
