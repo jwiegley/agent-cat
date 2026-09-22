@@ -97,8 +97,9 @@ WM-022/G1. The unit is `implementation.9tGzKH/credentials.QHYL3FHM`, with source
 branch `wm023-credentials.QHYL3FHM` based on `a54b310b`. Private roots are under
 `/Users/johnw/Products/k.M0a5ItPm`, with a serialized sibling builddir.
 
-The bounded interface check is complete in `seams.md`. Tracker comments 289–291,
-`decision-note.md`, `brief.md` and `parent-result.md` describe the implementation. It extends
+The bounded interface check is complete in `seams.md`. Tracker comments 289–292,
+the unit briefs and the parent/correction reports describe the implementation.
+It extends
 the original Store/Authorization owners with embeddable credential operations
 and the frozen offline CLI. An already-owned Store must refuse a second writer.
 Live external administration remains an unresolved integration obligation,
@@ -125,19 +126,48 @@ prompt one current-fact observation, acknowledged only across a stable
 generation. A concurrent commit refuses that observation without replay or
 consuming the invalidation. Worker stop cells remain separate.
 
-Current Commands, Artifact/History and Store gates passed at N1 then N8 on
-2026-09-22 from 00:42:09Z through 00:56:41Z. Configuration, Dependency, Worker,
+Before independent review, Commands, Artifact/History and Store passed at N1
+then N8 on 2026-09-22 from 00:42:09Z through 00:56:41Z. Configuration, Dependency, Worker,
 compiler-boundary and documentation checks passed afterward through 01:10:53Z.
 The dependency gate includes local TLS and process-group probes. Their results
 remain ordinary evidence at the recorded scope, without a new sandbox claim.
 All original failures and raw command records remain in the unit.
 
-The current complete review input is `proposal-parent-reviewed-input.patch`,
-with 19 files, 1041 insertions and 34 deletions. Review workflow
-`811cfba7-4f3d-4ce4-889d-0d36ddf03751` is assessing that source and evidence
-read-only. Full view revalidation still needs current configuration, and live
-external administration and transport/page/cursor/SSE composition remain
-unclosed product obligations. WM-023 is not integrated or accepted.
+The first coherent review found a COMMIT-to-notification acknowledgement gap
+and two valid-input defects. Parent corrected final acknowledgement through
+original fail-fast Store admission, NUL-safe label storage with the unchanged
+Unicode grammar, and RFC3339 case normalization before comparison and persistence.
+A deterministic existing-auditor regression reached the actual COMMIT gap before
+the correction and passed at N1/N8 afterward. The failed red command and an
+unsuccessful first NUL correction remain preserved.
+
+Current source is `proposal-review-corrected.patch`, with 20 files,
+1125 insertions and 40 deletions. Continued reviewer
+`7c9d4569-1caa-4ce3-8265-526f2c599581` found all three findings resolved,
+no new implementation defects and architecture aligned. Reviewed partial source
+is ready, but integration remains blocked by outstanding validation.
+
+Corrected Commands passed from 04:50:41Z to 04:55:19Z on 2026-09-22.
+Artifact/History passed from 04:57:56Z to 05:01:10Z. The Store wrapper ran
+from 05:01:10Z to 05:12:10Z and remains exit 1. Its native sections and first
+three audits passed. Its final expiry-mutant stopped during compilation and
+configuration because the pinned `ghc-pkg` path was unavailable. Neither native
+expiry case ran, and setup failure is not an intended negative assertion.
+
+Read-only diagnosis found the pinned macOS compiler wrapper output absent and
+no `ghc`, `ghc-pkg`, `cabal` or `runghc` in canonical direnv. The tracked flake,
+lock, overrides and process patch remain unchanged. The cause is not established.
+No alternative compiler or environment repair was attempted. The request to
+restore the unchanged pinned environment remains pending, and automatic goal
+checkpoints do not approve it. `correction-result.md` records exact errors and roots.
+
+After environment restoration, the remaining local checks are the final
+expiry-mutant at N1/N8 and corrected-byte boundary/documentation checks.
+Existing successful scoped evidence remains usable. `review-corrected.md`
+retains both the source clearance and these validation qualifications.
+Full view revalidation still needs current configuration. Live external
+administration and transport/page/cursor/SSE composition remain unfinished
+product obligations. WM-023 is not integrated or accepted.
 
 ## WM-021 acceptance
 
@@ -555,12 +585,13 @@ Lean/oracle builds remain excluded absent their own authorization. Earlier
 failures, unknown holders and failed UI cleanup/restoration qualifications remain
 unresolved historical evidence rather than new closure prerequisites.
 
-Refocus completed at `2026-09-22T04:16:19Z`. The next active-work deadline is
-`2026-09-22T05:16:19Z`. Continue the WM-022 platform decision and the coherent
-WM-023 review and product corrections through existing owners. Inspect aggregate
-gate invocations before execution and do not reopen verification machinery or
-historical recovery. The persistent goal still contains older baseline wording.
-The accepted milestones and the user's latest clarification govern current work.
+Refocus completed at `2026-09-22T05:26:38Z`. The next active-work deadline is
+`2026-09-22T06:26:38Z`. Preserve reviewed WM-023 source and completed checks
+while awaiting the narrow pinned-environment decision. WM-022 Linux remains
+separately pending. Inspect aggregate invocations before execution, reuse valid
+scoped evidence and do not reopen verification machinery or historical recovery.
+The persistent goal still contains older baseline wording. The accepted milestones
+and the user's latest clarification govern current work.
 
 ## Historical WM-016 closure record
 
