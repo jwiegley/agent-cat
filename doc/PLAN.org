@@ -2226,7 +2226,7 @@ Today both live engines bind EVERY addressee to one backend per run — run/Main
 :LABELS:   ["wm-epic","workflow-manager"]
 :ISSUE_TYPE: epic
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-11 Fri 23:04]
+:MODIFIED: [2026-09-22 Tue 10:00]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/EPIC
 :SOURCE_REPO: agent-cat
@@ -2334,6 +2334,20 @@ Operator-authorized scope amendment 2026-09-12T06:03:20+00:00: user explicitly i
     "created_by": "johnw",
     "metadata": "{}",
     "thread_id": ""
+  }
+]
+#+end_src
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 295,
+    "issue_id": "acat-epic-4xte",
+    "author": "johnw",
+    "text": "# Local-only validation amendment\n\nOn 2026-09-22, the user removed Linux, remote-host and cross-platform testing requirements and confirmed the revised objective for goal mu629ta5-11s8ax. Required builds, tests, compatibility checks and acceptance validation now run only on this macOS machine using the existing Nix/direnv environment. This amendment applies to the entire WM001–WM044/G0–G5 roadmap and overrides conflicting platform-validation clauses in the frozen records and task verification contracts, including WM022/G1. No Linux validation or associated remote approval remains a prerequisite.\n\nThe full functional roadmap, negative assertions, independent review, original ownership, bounded admission, failure distinctions and non-replay rules remain unchanged. Existing source-valid local evidence is reused at its actual scope. Historical platform results and failures remain records, and untested current platforms are not represented as passing. No portability code, behavioral test, frozen research file or historical evidence has been removed. The amendment does not authorize paid backends, deployment, external-host execution, live client/infrastructure changes or new Lean/oracle builds.\n\nWM001–WM021/G0 remain accepted. WM022/G1 are undergoing separate closure assessments using their existing local results, including the complete current-application vertical N1/N8 run from 2026-09-22T08:48:34Z to09:00:58Z and its original audits. The same milestone reviewer is continuing through workflow b650fdb2-66ac-4e0d-9c33-1d66a525c26b. No acceptance follows solely from removal of the Linux requirement. WM023 remains partial and unaccepted, with live external administration, public page/cursor binding and SSE still unfinished.\n\nCanonical source is72c2abfbb24628d787edd863836218ce839f7710. Parent is updating current tracking and handoff without changing application code or rewriting earlier comments. Refocus completed2026-09-22T16:52:05Z, with the next active-work deadline17:52:05Z. The next action is the local WM022/G1 acceptance decision, followed by the remaining product work.\n",
+    "created_at": "2026-09-22T17:00:00Z"
   }
 ]
 #+end_src
@@ -2700,15 +2714,17 @@ G0 accepted under the explicit storage amendment at 2026-09-12T06:35:51+00:00. I
 ]
 #+end_src
 
-* TODO [#B] WM-G1: Verify isolated manager core
+* DONE [#B] WM-G1: Verify isolated manager core
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-g1-h1wc
 :LABELS:   ["wm-release-gate","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-09 Wed 22:34]
+:MODIFIED: [2026-09-22 Tue 10:00]
 :CREATED_BY: johnw
+:FINISHED: [2026-09-22 Tue 10:00]
+:CLOSE_REASON: Accepted isolated manager core under the local-only amendment: accepted WM008-WM021/G0 foundations plus integrated WM022 real-worker lifecycle, crash/cleanup, controls, history and artifacts. Continued reviewer53ee90a0 separately supports G1.
 :EXTERNAL_REF: agent-cat/workflow-manager/G1
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -2891,6 +2907,20 @@ Real deterministic frontend workers complete the entire lifecycle under the mana
     "created_by": "johnw",
     "metadata": "{}",
     "thread_id": ""
+  }
+]
+#+end_src
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 297,
+    "issue_id": "acat-g1-h1wc",
+    "author": "johnw",
+    "text": "G1 is accepted with WM022 on2026-09-22. See WM022 acceptance-note.md and review-local-closure.md in implementation.9tGzKH/vertical.d42c7UhQ. Current application72c2abf passed the complete local vertical N1/N8 sequence and original audits from08:48:34Z to09:00:58Z, with subsequent boundaries and documentation. Earlier failures and composed Store evidence retain their recorded limits. Linux/remote/cross-platform validation is removed by explicit user amendment, not represented as passed. WM023 and G2-G5 remain unaccepted.",
+    "created_at": "2026-09-22T17:00:00Z"
   }
 ]
 #+end_src
@@ -10376,15 +10406,17 @@ WM-008 completed handoff 2026-09-12T02:36:23+00:00: Enforce each configured quot
 ]
 #+end_src
 
-* DOING [#B] WM-022: Prove the complete non-network vertical slice    :p4:
+* DONE [#B] WM-022: Prove the complete non-network vertical slice    :p4:
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-wm-022-j655
 :LABELS:   ["p4","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-21 Mon 15:42]
+:MODIFIED: [2026-09-22 Tue 10:00]
 :CREATED_BY: johnw
+:FINISHED: [2026-09-22 Tue 10:00]
+:CLOSE_REASON: Accepted from integrated real-worker N1/N8 lifecycle, exact semantic comparison and refusal evidence, with continued independent review53ee90a0. Required validation is local-only under the user amendment.
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-022
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -10551,6 +10583,13 @@ manager's correctness boundary.
     "author": "johnw",
     "text": "Independent milestone reviewer 7e8ef36b-3588-40fc-a8fa-9fc53f4a639b found no issues, classified the architecture as aligned and explicitly cleared the six-file WM022 proposal for parent integration. It confirmed valid local evidence, real engine/process boundaries, exact typed comparisons, fixture-supplied causal correspondence, original-owner audit composition and preserved failures. The full verdict is in review.md.\n\nParent applied the reviewed proposal to canonical source on 2026-09-21. At22:39:40Z the exact six-file delta and every file byte matched the reviewed, locally validated isolated proposal, with431 insertions and5 deletions. No stale isolated tracker, handoff, frozen record or unrelated source was overlaid. A transcription parenthesis was corrected before this successful equality check and before any canonical execution. Existing test interfaces and production behavior remain unchanged. Canonical compiler-parsed boundaries passed22:41:21–22:41:23Z, followed by documentation22:41:23–22:41:27Z, both with original exit0. Source-identical isolated Werror/N1/N8/audit/Haskell-documentation evidence is reused honestly.\n\nThe new local vertical gate passed21:54:55–22:09:39Z, including the existing instrumented lineage and control-write audits. All five earlier failed commands and the author timeout remain preserved. The successful native root, audit roots, exact local commands and evidence limits are in parent-result.md. Integration does not retrospectively repair any failed root or prove its cleanup.\n\nWM022 remains in progress and G1 remains open. The next platform check is the new vertical gate on Linux with the unchanged pinned environment, plus the current source-boundary and Haskell-documentation checks. Existing accepted production/platform/client and formal evidence remain reusable only at their unchanged scope. No Linux execution for WM022 has been launched or claimed. Parent retains platform authorization and acceptance decisions, followed by continuation of this same coherent reviewer for closure. No new Lean/oracle, paid provider, deployment, containment or old-resource recovery work is planned.\n\nRefocus completed2026-09-21T22:39:40Z, next active-work deadline23:39:40Z. The next action is the exact integrated checkpoint and the supported-platform decision, not another implementation or evidence framework.\n",
     "created_at": "2026-09-21T22:42:18Z"
+  },
+  {
+    "id": 296,
+    "issue_id": "acat-wm-022-j655",
+    "author": "johnw",
+    "text": "# WM022 and G1 acceptance\n\nParent accepts WM022 and G1 on 2026-09-22 under the user-confirmed local-only validation amendment. This is a behavioral acceptance decision, not an inference that removing Linux requirements establishes completion. The accepted baseline becomes WM001–WM022 and G0/G1, or22 of44 packages and2 of6 gates. WM023 remains partial and unaccepted, and G2–G5 remain open.\n\nThe six-file vertical implementation was integrated at ea0fc12cdd6244706de6934d1d721363dfd31a3b. Current application source is72c2abfbb24628d787edd863836218ce839f7710. Parent confirmed that the gate, comparator and routing fixture are unchanged, while the CLI vertical callbacks only gained ignored authorization-view parameters. Existing result comparisons and refusals remain intact.\n\nWM022 uses actual configured scripted, ACP and deck frontends and the original Runtime/manager owners. Its capture, direct/managed semantic comparison, exact bills, policies, typed lineage, approval, concurrency, ingestion, controls, history, artifact/export and shutdown checks retain meaningful refusals. Physical run/control identities have explicit injective correspondence, and the authored independent-lane relation preserves every event and lane order without semantic normalization. The fixture is not a second interpreter.\n\nThe original complete local vertical gate passed at N1 then N8 on2026-09-21,21:54:55Z–22:09:39Z. Current application evidence in sibling credentials.QHYL3FHM/response-vertical-first passed on2026-09-22,08:48:34Z–09:00:58Z, including the original history-corrections and control-write audits. Their results preserve original-child joins, successful returns and no primary/signalling/wait failures. Boundaries and both documentation checks passed on the same application bytes. Existing source-valid evidence is reused without another native matrix.\n\nContinued reviewer53ee90a0-49e3-48f4-a005-cb64521f9980 found no issues and separately marked WM022 and G1 SUPPORTED. Review-local-closure.md records source and raw-evidence citations. G1 combines the real-worker lifecycle demonstration with already accepted WM008–WM021/G0 storage, ownership, admission, approval, ingestion, restart and cleanup foundations at their established scope. It is not inferred from dependency closure alone.\n\nThe five earlier vertical gate failures and author timeout remain failures. Later results do not establish cleanup of earlier roots. Composed Store evidence remains composed. No total-service resource bound, physical-power-loss durability, arbitrary-descendant containment, cross-process ABA protection or untested-platform pass is claimed. No new Linux or remote execution occurred. WM023 live administration, page/cursor binding and SSE remain the next unfinished product requirements.\n",
+    "created_at": "2026-09-22T17:00:00Z"
   }
 ]
 #+end_src
