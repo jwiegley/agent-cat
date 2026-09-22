@@ -8,8 +8,9 @@ WM-022 and G1 are accepted on 2026-09-22 under the local-only validation
 amendment below. The vertical slice was integrated at `ea0fc12c`, and current
 application evidence includes the response correction at `72c2abf`. The accepted
 baseline is WM-001–WM-022 and G0/G1, which is 22 of 44 packages and two of six
-gates. Next delivery is the unfinished WM-023 work, followed by the remaining
-service, client and release packages. G2–G5 remain open.
+gates. The next product milestone is one frontend completing a full workflow
+through a running manager. Parent targets the existing TUI first, followed by
+the other frontends and operational hardening. G2–G5 remain open.
 
 The user's 2026-09-17 refocus continues to govern delivery. Do not reopen the
 verification-machinery micro-fix loop, paused L08 review or historical recovery
@@ -17,6 +18,30 @@ as a substitute for the next product milestone. The completed
 [closure plan](workflow-manager-closure-plan.md) and implementation plan remain
 the references for their respective scopes, subject to the user's corrections
 below.
+
+## First frontend through the running manager
+
+The user's 2026-09-22 direction makes an integrated frontend run the next
+meaningful milestone. It must submit, explicitly approve, observe live progress,
+answer a decision and exercise a supported control, finish, and retrieve verified
+results through an actual running manager. Additional isolated helper deliveries
+are not substitutes for that result.
+
+Parent proposes the TUI first because it is in this repository and supports
+local acceptance. Reuse its existing presentation and the public client facade,
+while the manager retains workflow interpretation, admission, worker ownership,
+FIFO and artifact authority. Service mode must neither launch a local frontend
+nor read manager filesystem paths, and local mode remains intact. The acceptance
+run uses actual keyboard/PTY interaction, protected HTTP and deterministic real
+frontend processes, not mocked manager success.
+
+Backend, client and acceptance work are being reconciled as one delivery path.
+The prior Emacs-before-TUI ordering is a sequencing question to resolve explicitly,
+not evidence that Emacs is implemented or a reason to restart helper milestones.
+Other frontend work and broader hardening follow the first integrated run.
+Required authentication, exact approval, boundedness, truthful outcomes, cleanup
+and non-replay remain prerequisites for the enabled path. A successful first run
+does not by itself close the remaining packages or release gates.
 
 ## Local-only validation amendment of 2026-09-22
 
@@ -672,13 +697,13 @@ Lean/oracle builds remain excluded absent their own authorization. Earlier
 failures, unknown holders and failed UI cleanup/restoration qualifications remain
 unresolved historical evidence rather than new closure prerequisites.
 
-Refocus completed at `2026-09-22T18:59:12Z`. The next active-work deadline is
-`2026-09-22T19:59:12Z`. The revised goal is running with local-only validation.
-WM-022/G1 remain accepted. The reviewed local-administration layer is integrated,
-and the next work is foreground service composition and the remaining WM-023
-page/cursor and stream requirements. No Linux approval blocker remains. Inspect
-aggregate invocations before execution and reuse valid scoped evidence without
-reopening verification machinery, sandbox work or historical recovery.
+Refocus completed at `2026-09-22T19:45:19Z`. The next active-work deadline is
+`2026-09-22T20:45:19Z`. WM-022/G1 remain accepted, and the reviewed live local
+administration layer is integrated at `26eaebf`. The next acceptance target is
+the complete TUI-to-running-manager workflow above. Necessary server, client,
+page/cursor and stream work belongs to that integrated path rather than separate
+helper milestones. Validation remains local-only. Reuse valid evidence and
+existing test owners, with no verification-machinery or historical-recovery detour.
 
 ## Historical WM-016 closure record
 
