@@ -97,7 +97,7 @@ WM-022/G1. The unit is `implementation.9tGzKH/credentials.QHYL3FHM`, with source
 branch `wm023-credentials.QHYL3FHM` based on `a54b310b`. Private roots are under
 `/Users/johnw/Products/k.M0a5ItPm`, with a serialized sibling builddir.
 
-The bounded interface check is complete in `seams.md`. Tracker comments 289–293,
+The bounded interface check is complete in `seams.md`. Tracker comments 289–294,
 the unit briefs and the parent/correction/integration reports describe the
 implementation. It extends the original Store/Authorization owners with embeddable credential operations
 and the frozen offline CLI. An already-owned Store must refuse a second writer.
@@ -140,8 +140,8 @@ A deterministic existing-auditor regression reached the actual COMMIT gap before
 the correction and passed at N1/N8 afterward. The failed red command and an
 unsuccessful first NUL correction remain preserved.
 
-Current source is `proposal-review-corrected.patch`, with 20 files,
-1125 insertions and 40 deletions. Continued reviewer
+The first integrated partial application is `proposal-review-corrected.patch`,
+with 20 files, 1125 insertions and 40 deletions, committed at `ca9a39d`. Continued reviewer
 `7c9d4569-1caa-4ce3-8265-526f2c599581` found all three findings resolved,
 no new implementation defects and architecture aligned.
 
@@ -176,10 +176,31 @@ passed at 08:04:28Z–08:04:31Z. `validation-resumed.md`,
 `review-partial-integration.md` and `integration-note.md` retain the evidence
 and qualifications. The application is integrated as partial, unaccepted work.
 
-The next local correction is authorized-view revalidation under a retained
-response/configuration scope, through existing owners. Live external
-administration and public page/cursor/SSE enforcement remain unfinished
-product obligations. WM-023 is not accepted, and WM-022 Linux/G1 remain separate.
+The response/configuration composition gap is now corrected through the existing
+owners. The nine-file `response.patch`, 171 insertions and 105 deletions, was
+developed on `wm023-response-composition` in `response-source` based on `ca9a39d`.
+Store composes one reader charge, the configuration loan and an original watch,
+closing the watch before releasing configuration. Ordinary views retain their
+independent configuration checks. Existing artifact, output, export-collection
+and history-result callbacks receive a response-scoped view.
+
+The original valid-response regression failed at 08:21:34Z–08:21:57Z.
+Artifact/History, Commands and the real non-network vertical gate passed at
+N1 then N8 from 08:35:52Z through 09:00:58Z, including existing audits.
+Boundaries, both documentation gates and final composition passed through
+09:08:01Z. Tests cover single-slot quotas, escaped views, unchanged authority,
+unrelated-client changes, actual quiet expiry and revocation. Watch/guard release
+ordering is supported by source structure, not a separately instrumented test.
+
+Continued reviewer `accc4446-513a-4e8c-8c9a-a7ca1a48426e` found no issues and
+cleared integration. Parent verified the exact patch, bytes and Git modes at
+09:21:11Z. Canonical boundaries and documentation passed at 09:21:42Z–09:21:46Z.
+`response-result.md`, `review-response.md` and `response-integration-note.md`
+retain results, qualifications and the original failures.
+
+Live external administration through the original running Store, public
+page/cursor binding and actual SSE/protected transport enforcement remain
+unfinished. WM-023 is not accepted, and WM-022 Linux/G1 remain separate.
 
 ## WM-021 acceptance
 
@@ -597,14 +618,14 @@ Lean/oracle builds remain excluded absent their own authorization. Earlier
 failures, unknown holders and failed UI cleanup/restoration qualifications remain
 unresolved historical evidence rather than new closure prerequisites.
 
-Refocus completed at `2026-09-22T07:46:08Z`. The next active-work deadline is
-`2026-09-22T08:46:08Z`. Environment regeneration and the remaining local WM-023
-checks are complete. Continue response/configuration composition through existing
-owners, retaining the partial-integration and full-acceptance distinction.
-WM-022 Linux remains separately pending. Inspect aggregate invocations before
-execution, reuse valid scoped evidence and do not reopen verification machinery
-or historical recovery. The persistent goal still contains older baseline wording.
-The accepted milestones and the user's latest clarification govern current work.
+Refocus completed at `2026-09-22T09:21:46Z`. The next active-work deadline is
+`2026-09-22T10:21:46Z`. Environment regeneration and response/configuration
+composition are complete. Continue the remaining live administration and
+protected observation requirements through existing owners. WM-022 Linux
+remains separately pending. Inspect aggregate invocations before execution,
+reuse valid scoped evidence and do not reopen verification machinery, sandbox
+work or historical recovery. The persistent goal still contains older baseline
+wording. The accepted milestones and latest user clarification govern current work.
 
 ## Historical WM-016 closure record
 

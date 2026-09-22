@@ -103,14 +103,12 @@ restoreRunProjection store association = withStoreReader store (restoreProjectio
 
 -- | One charged projection and response under current profile authority. Reader
 -- admission precedes the configuration loan, which remains held through response.
-withProfileProjection :: CoordinationStore -> CredentialProof -> RunAssociation -> (RunSnapshot -> IO a) -> IO a
-withProfileProjection store proof association respond = withStoreReader store $ do
-  result <- withStoreConfiguration store $ \_ profiles -> do
-    unless (associationProfile association `elem` map publicId profiles) (throwIO Command.Forbidden)
+withProfileProjection :: CoordinationStore -> CredentialProof -> RunAssociation -> (AuthorizedView -> RunSnapshot -> IO a) -> IO a
+withProfileProjection store proof association respond =
+  withAuthorizedResponse store proof (associationProfile association) [Command.Observe] $ \view -> do
     runRead store (authorizeObservation proof association)
     snapshot <- restoreProjection store association >>= maybe (throwIO Command.ResourceUnavailable) (pure . checkpointSnapshot)
-    respond snapshot
-  either (const (throwIO Command.StorageUnavailable)) pure result
+    respond view snapshot
 
 -- | Record a newly proved terminal fact from an existing immutable Runtime prefix.
 -- This grants neither cleanup nor execution authority and does not change ordinary reads.

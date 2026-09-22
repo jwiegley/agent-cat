@@ -37,6 +37,7 @@ import System.FilePath ((</>))
 import System.IO (hSetBuffering, stdout, BufferMode (LineBuffering))
 import System.IO.Error (isDoesNotExistError, isPermissionError)
 import System.Posix.Files (createSymbolicLink, setFileMode)
+import System.Timeout (timeout)
 
 main :: IO ()
 main = do
@@ -66,12 +67,12 @@ compositionChecks work = do
         refused label action = do
           outcome <- try @StoreFailure (void action)
           check label (outcome == Left StoreLimit)
-        verified = outputs $ \items -> check "charged profile projection returns verified output"
+        verified = outputs $ \_ items -> check "charged profile projection returns verified output"
           (field "state" (field "verification" (last items)) == String "verified")
     withStoreReader store $ do
       verified
       withStoreReader store $ do
-        refused "output quota refuses before response" (outputs (\_ -> writeIORef entered True))
+        refused "output quota refuses before response" (outputs (\_ _ -> writeIORef entered True))
         refused "standalone restoration shares reader quota" (restoreRunProjection store association)
         refused "historical terminal observation shares reader quota" (observeRetainedTerminal store association)
         refused "ingestion shares reader quota" (ingest store association reference)
@@ -83,18 +84,23 @@ compositionChecks work = do
         _ -> error "configuration fixture shape"
       replacement <- loadConfiguration (\args -> if null args then Right () else error "unexpected target") exactPreparedTarget (const False) config >>= right
       void (reloadConfiguration installed replacement >>= right)
-      refused "output uses current lowered global quota" (outputs (\_ -> error "stale reader allowance"))
-    outputs $ \_ -> do
+      refused "output uses current lowered global quota" (outputs (\_ _ -> error "stale reader allowance"))
+    escaped <- newIORef Nothing
+    outputs $ \view _ -> do
+      writeIORef escaped (Just view)
+      revalidateAuthorizedView view >>= check "output view revalidates with sole reader capacity" . (==Right ())
       locked <- withStoreConfiguration store (\_ _ -> pure ())
       check "profile configuration remains held through response" (locked == Left SupervisionUnavailable)
       files <- try @StoreFailure (withStoreFiles store (\_ -> pure ()))
       check "original file owner remains held through response" (files == Left StoreBusy)
-    failed <- try @StoreFailure (outputs (\_ -> throwIO StoreIntegrity))
+    retained <- readIORef escaped >>= maybe (error "missing response view") pure
+    revalidateAuthorizedView retained >>= check "response view cannot escape retained scopes" . (==Left Command.Unauthenticated)
+    failed <- try @StoreFailure (outputs (\_ _ -> throwIO StoreIntegrity))
     check "response failure remains original failure" (failed == Left StoreIntegrity)
     verified
     ready <- newEmptyMVar
     blocked <- newEmptyMVar
-    withAsync (outputs (\_ -> putMVar ready () >> takeMVar blocked)) $ \reader -> do
+    withAsync (outputs (\_ _ -> putMVar ready () >> takeMVar blocked)) $ \reader -> do
       takeMVar ready
       cancel reader
       outcome <- waitCatch reader
@@ -102,15 +108,15 @@ compositionChecks work = do
     verified
     original <- BS.readFile (directory </> "result.json")
     BS.writeFile (directory </> "result.json") "corrupt"
-    outputs $ \items -> check "charged profile projection reports unavailable output"
+    outputs $ \_ items -> check "charged profile projection reports unavailable output"
       (field "state" (field "verification" (last items)) == String "unavailable")
     BS.writeFile (directory </> "result.json") original
     verified
-    absent <- try @Command.CommandFailure (withRunOutputs store proof (association {associationProfile="profile_missing"}) (\_ -> error "absent profile response"))
+    absent <- try @Command.CommandFailure (withRunOutputs store proof (association {associationProfile="profile_missing"}) (\_ _ -> error "absent profile response"))
     check "current profile membership still required" (absent == Left Command.Forbidden)
     verified
     mutate store (execute "DELETE FROM credential_scopes WHERE credential_id='credential_1'" [])
-    denied <- try @Command.CommandFailure (outputs (\_ -> error "unauthorized output response"))
+    denied <- try @Command.CommandFailure (outputs (\_ _ -> error "unauthorized output response"))
     check "current client authorization still required" (denied == Left Command.Forbidden)
     withStoreReader store (check "authorization failure releases sole reader capacity" True)
 
@@ -131,7 +137,7 @@ retentionChecks work = do
     public <- readExport store proof exportId
     let artifact=T.drop(T.length "/v1/artifacts/")(string(field "download" public))
     original <- newIORef Nothing
-    withArtifactDownload store proof artifact $ \_ bytes -> do
+    withArtifactDownload store proof artifact $ \_ _ bytes -> do
       digest <- evaluate(force(convert(hash bytes :: Digest SHA256) :: BS.ByteString))
       writeIORef original (Just digest)
     void(Commands.retainReceipts store "" >>= right)
@@ -140,21 +146,41 @@ retentionChecks work = do
     void(Commands.retainReceipts store "" >>= right)
     receipt <- Commands.readCommand store proof ident
     check "completed linked-run receipt expires only after full observed interval" (case receipt of Left Command.ReceiptExpired -> True; _ -> False)
-    withArtifactDownload store proof artifact $ \_ bytes -> do
+    withArtifactDownload store proof artifact $ \_ _ bytes -> do
       digest <- evaluate(force(convert(hash bytes :: Digest SHA256) :: BS.ByteString))
       expected <- readIORef original
       check "receipt retirement preserves independently referenced artifact bytes" (Just digest==expected)
     scalar store "SELECT CAST(count(*) AS TEXT) FROM ingestions" >>= check "receipt retirement retains original Runtime history" . (/="0")
-    void $ withAuthorizedView store proof "profile_1" [Command.Observe] (\view ->
-      withArtifactDownload store proof artifact $ \_ _ -> do
-        -- The response still owns file/configuration scopes. Revocation must be SQL-only.
-        response <- administerCredentials store (Admin.RevokeCredential "credential_1")
-        value <- either (const (error "invalid admin result")) pure (eitherDecodeStrict' response)
-        check "local revocation succeeds while response scopes remain held" (field "ok" value == Bool True)
-        awaitAuthorizedView view >>= check "payload-free wakeup needs no response-scope reacquisition" . (==Left Command.Unauthenticated)) >>= right
-    refused <- try @Command.CommandFailure (withArtifactDownload store proof artifact (\_ _ -> error "revoked download callback"))
+    let confirmed requestBody = do
+          response <- administerCredentials store requestBody
+          value <- either (const (error "invalid admin result")) pure (eitherDecodeStrict' response)
+          check "local administration confirmed" (field "ok" value == Bool True)
+    confirmed (Admin.IssueCredential "other-response" [Command.Observe] ["profile_1"] "2999-01-01T00:00:00Z" (work </> "other-response.credential"))
+    other <- scalar store "SELECT credential_id FROM credential_administration WHERE label='other-response'"
+    withArtifactDownload store proof artifact $ \view _ _ -> do
+      revalidateAuthorizedView view >>= check "valid authorization revalidates under retained response scopes" . (==Right ())
+      confirmed (Admin.RevokeCredential other)
+      awaitAuthorizedView view >>= check "unrelated client revocation preserves response authority" . (==Right ())
+      -- The response still owns file/configuration scopes. Revocation must be SQL-only.
+      confirmed (Admin.RevokeCredential "credential_1")
+      awaitAuthorizedView view >>= check "payload-free wakeup needs no response-scope reacquisition" . (==Left Command.Unauthenticated)
+    refused <- try @Command.CommandFailure (withArtifactDownload store proof artifact (\_ _ _ -> error "revoked download callback"))
     check "revocation refuses retained artifact download before response" (refused == Left Command.Unauthenticated)
     Commands.readCommand store proof ident >>= check "revocation precedes retained receipt lookup" . (\result -> case result of Left Command.Unauthenticated -> True; _ -> False)
+    expiry <- scalar store "SELECT strftime('%Y-%m-%dT%H:%M:%fZ','now','+3 seconds')"
+    let shortFile = work </> "short-response.credential"
+    confirmed (Admin.IssueCredential "short-response" [Command.Observe] ["profile_1"] expiry shortFile)
+    shortProof <- BS.readFile shortFile >>= authenticateCredential store >>= right
+    withArtifactDownload store shortProof artifact $ \view _ _ -> do
+      revalidateAuthorizedView view >>= check "short-lived response begins authorized" . (==Right ())
+      before <- scalar store "SELECT sequence FROM service_metadata"
+      let awaitExpiry = awaitAuthorizedView view >>= \result -> case result of
+            Right () -> awaitExpiry
+            Left failure -> pure failure
+      outcome <- timeout 7000000 awaitExpiry
+      check "quiet expiry revalidates under retained response scopes" (outcome == Just Command.Unauthenticated)
+      after <- scalar store "SELECT sequence FROM service_metadata"
+      check "quiet expiry requires no Store mutation notification" (before == after)
 
 artifactChecks :: FilePath -> FilePath -> IO ()
 artifactChecks work source = do
@@ -173,15 +199,15 @@ artifactChecks work source = do
       handle <- scalar store "SELECT result_artifact_id FROM runs WHERE id='run_21'"
       actual <- BS.readFile (directory </> "result.json")
       check "native writer matches frozen captured source fixture" (actual == sourceFixture)
-      withArtifactDownload store proof handle $ \metadata bytes -> do
+      withArtifactDownload store proof handle $ \_ metadata bytes -> do
         check "download is exact source bytes, not export document" (bytes == sourceFixture && bytes /= exportFixture)
         BS.writeFile (work </> "source-metadata.json") (Command.encoded metadata)
         BS.writeFile (work </> "source-download.utf8") bytes
       sequenceBefore <- scalar store "SELECT sequence FROM service_metadata"
-      withArtifactDownload store proof handle (\_ bytes -> check "repeat observation still verifies captured bytes" (bytes == sourceFixture))
+      withArtifactDownload store proof handle (\_ _ bytes -> check "repeat observation still verifies captured bytes" (bytes == sourceFixture))
       sequenceAfter <- scalar store "SELECT sequence FROM service_metadata"
       check "unchanged successful verification creates no duplicate invalidation" (sequenceBefore == sequenceAfter)
-      withRunOutputs store proof association $ \items -> do
+      withRunOutputs store proof association $ \_ items -> do
         check "attempt, diagnostic and verified result remain distinct" (map (field "kind") items == map String ["attempt","diagnostic","result"])
         BS.writeFile (work </> "outputs.json") (Command.encoded items)
       rawChecks store proof association handle reference directory sourceFixture
@@ -194,7 +220,7 @@ artifactChecks work source = do
       check "published receipt omits server path" (field "state" receipt == String "published" && not (has "path" receipt))
       BS.writeFile (work </> "export-receipt.json") (Command.encoded receipt)
       let exportHandle = T.drop (T.length "/v1/artifacts/") (string (field "download" receipt))
-      withArtifactDownload store proof exportHandle $ \metadata bytes -> do
+      withArtifactDownload store proof exportHandle $ \_ metadata bytes -> do
         check "download is exact distinct frozen export bytes" (bytes == exportFixture && exportHandle /= handle)
         BS.writeFile (work </> "export-metadata.json") (Command.encoded metadata)
         BS.writeFile (work </> "export-download.utf8") bytes
@@ -253,8 +279,9 @@ artifactChecks work source = do
       refused <- reconcileExport store proof conflict
       check "reopen does not adopt identical foreign publication" (field "state" refused == String "unresolved")
       check "reconciliation never changes existing bytes" =<< ((== exportFixture) <$> BS.readFile (root </> "runs/exports/unwitnessed.json"))
-      withArtifactDownload store proof handle (\_ bytes -> check "trusted handle survives reopen without journal" (bytes == sourceFixture))
-      withRunExports store proof association $ \items -> do
+      withArtifactDownload store proof handle (\_ _ bytes -> check "trusted handle survives reopen without journal" (bytes == sourceFixture))
+      withRunExports store proof association $ \view items -> do
+        revalidateAuthorizedView view >>= check "export collection view revalidates under its configuration guard" . (==Right ())
         check "run export collection exposes published and unresolved receipts separately"
           (length items == 5 && length [() | item <- items,field "state" item == String "published"] == 2
             && length [() | item <- items,field "state" item == String "unresolved",field "download" item == Null] == 3)
@@ -275,14 +302,14 @@ reviewRegressions work = do
     handle <- scalar store "SELECT result_artifact_id FROM runs WHERE id='run_21'"
     let result=directory </> "result.json"
     original <- BS.readFile result
-    withArtifactDownload store proof handle (\_ _ -> pure ())
+    withArtifactDownload store proof handle (\_ _ _ -> pure ())
     staleVerified <- request store association "stale-verified" "stale-verified.json"
     verifiedRevision <- scalar store "SELECT revision FROM artifacts WHERE id=(SELECT result_artifact_id FROM runs WHERE id='run_21')"
     BS.writeFile result "corrupt"
-    withRunOutputs store proof association (\_ -> pure ())
+    withRunOutputs store proof association (\_ _ -> pure ())
     unavailableRevision <- scalar store "SELECT revision FROM artifacts WHERE id=(SELECT result_artifact_id FROM runs WHERE id='run_21')"
     BS.writeFile result original
-    withArtifactDownload store proof handle (\_ _ -> pure ())
+    withArtifactDownload store proof handle (\_ _ _ -> pure ())
     restoredRevision <- scalar store "SELECT revision FROM artifacts WHERE id=(SELECT result_artifact_id FROM runs WHERE id='run_21')"
     check "verified unavailable verified transitions have distinct revisions"
       (verifiedRevision /= unavailableRevision && restoredRevision /= verifiedRevision && restoredRevision /= unavailableRevision)
@@ -500,7 +527,7 @@ typedDocuments store proof documents = do
         void (ingestRuntimeEnvelope store bound (encodeEnvelope (Envelope 2 native (SeqNo number) "2026-09-03T00:00:00Z" event)))
       pure bound
   handle <- scalar store "SELECT result_artifact_id FROM runs WHERE id='run_bad_flag'"
-  refused <- try @Command.CommandFailure (withArtifactDownload store proof handle (\_ _ -> error "ill-typed response"))
+  refused <- try @Command.CommandFailure (withArtifactDownload store proof handle (\_ _ _ -> error "ill-typed response"))
   check "verified envelope with flag/string mismatch never becomes a response" (refused == Left Command.ResourceUnavailable)
   req <- request store association "bad-flag" "bad-flag.json"
   publication <- try @Command.CommandFailure (submitExport store proof association req)
@@ -604,7 +631,7 @@ outputBounds store proof work = do
   mutate store $ execute "INSERT INTO runs(id,revision,control_revision,profile_id,root_identity,native_run_id,supervision,result_state) VALUES ('run_bounded','revision','revision','profile_1',?,'bounded-output','observer','absent')" [SQL.SQLText rootIdentity]
   forM_ (zip [0..] events) $ \(number,event) -> void $ ingestRuntimeEnvelope store association
     (encodeEnvelope (Envelope 2 native (SeqNo number) "2026-09-03T00:00:00Z" event))
-  withRunOutputs store proof association $ \items -> do
+  withRunOutputs store proof association $ \_ items -> do
     check "attempt transport retains bounded attributed tail" (case items of
       item:_ -> field "transportText" item == String (T.takeEnd 65536 transport)
       [] -> False)
@@ -618,24 +645,24 @@ outputBounds store proof work = do
 rawChecks :: CoordinationStore -> CredentialProof -> RunAssociation -> Text -> ResultRef -> FilePath -> BS.ByteString -> IO ()
 rawChecks store proof association handle reference directory original = do
   let result=directory </> "result.json"
-      download=withArtifactDownload store proof handle (\_ _ -> error "unverified content reached response")
+      download=withArtifactDownload store proof handle (\_ _ _ -> error "unverified content reached response")
   BS.writeFile result "synthetic-token <script>\ESC[31m provider diagnostic"
   failed <- try @Command.CommandFailure download
   check "corrupt content never reaches response or incidental exception" (failed == Left Command.ResourceUnavailable)
-  withRunOutputs store proof association $ \items -> do
+  withRunOutputs store proof association $ \_ items -> do
     check "corrupt result is unavailable independently" (field "state" (field "verification" (last items)) == String "unavailable")
     check "sensitive bytes absent from unavailable output" (not ("synthetic-token" `BS.isInfixOf` Command.encoded items))
   snapshot <- requireProjection store association
   check "corrupt result does not change runtime success" (snapshotRunStatus snapshot == RunSucceeded)
   BS.writeFile result original
   BS.writeFile (directory </> "events.ndjson") "not a journal"
-  withArtifactDownload store proof handle (\_ bytes -> check "good known reference ignores damaged journal" (bytes == original))
-  withArtifactDownload store proof handle $ \_ captured -> do
+  withArtifactDownload store proof handle (\_ _ bytes -> check "good known reference ignores damaged journal" (bytes == original))
+  withArtifactDownload store proof handle $ \_ _ captured -> do
     BS.writeFile result "changed after capture"
     check "response owns captured bytes rather than a reopened file" (captured == original)
   BS.writeFile result original
   renameFile result (result<>".retained")
-  withRunOutputs store proof association $ \items ->
+  withRunOutputs store proof association $ \_ items ->
     check "missing result has its distinct unavailable reason" (field "reason" (field "verification" (last items)) == String "missing")
   bracket (openPrivateRoot "missing fixture" directory) closePrivateRoot $ \runtime -> withPrivateDirectoryAt runtime [] $ \descriptor -> do
     legacy <- try @StoreError (readResultArtifactAt directory descriptor (associationNative association) reference)
@@ -648,7 +675,7 @@ rawChecks store proof association handle reference directory original = do
   removeFile result
   renameFile (result<>".retained") result
   setFileMode result 0o000
-  withRunOutputs store proof association $ \items ->
+  withRunOutputs store proof association $ \_ items ->
     check "unreadable result has fixed ownership-unavailable status" (field "reason" (field "verification" (last items)) == String "ownership-unavailable")
   bracket (openPrivateRoot "mode fixture" directory) closePrivateRoot $ \runtime -> withPrivateDirectoryAt runtime [] $ \descriptor -> do
     legacy <- try @StoreError (readResultArtifactAt directory descriptor (associationNative association) reference)
@@ -676,9 +703,9 @@ rawChecks store proof association handle reference directory original = do
       BS.writeFile result original
   entered <- newEmptyMVar
   release <- newEmptyMVar
-  reader <- async (withArtifactDownload store proof handle (\_ _ -> putMVar entered () >> takeMVar release))
+  reader <- async (withArtifactDownload store proof handle (\_ _ _ -> putMVar entered () >> takeMVar release))
   takeMVar entered
-  overlapping <- try @StoreFailure (withArtifactDownload store proof handle (\_ _ -> error "second response admitted"))
+  overlapping <- try @StoreFailure (withArtifactDownload store proof handle (\_ _ _ -> error "second response admitted"))
   check "single aggregate read loan spans response callback" (overlapping == Left StoreBusy)
   putMVar release ()
   wait reader
@@ -700,17 +727,17 @@ submitNamed store proof association name = do
 authChecks :: CoordinationStore -> CredentialProof -> RunAssociation -> Text -> Text -> Text -> IO ()
 authChecks store proof association source exported exportId = do
   mutate store $ execute "DELETE FROM credential_scopes WHERE scope='export'" []
-  withArtifactDownload store proof exported (\_ _ -> check "observe alone may download published content" True)
+  withArtifactDownload store proof exported (\_ _ _ -> check "observe alone may download published content" True)
   unauthorized <- request store association "unauthorized" "unauthorized.json" >>= submitExport store proof association
   check "publication needs export scope" (case unauthorized of Left Command.Forbidden -> True; _ -> False)
   reconciliation <- try @Command.CommandFailure (reconcileExport store proof exportId)
   check "reconciliation needs export scope" (reconciliation == Left Command.Forbidden)
   mutate store $ execute "DELETE FROM credential_scopes WHERE scope='observe'" []
-  denied <- try @Command.CommandFailure (withArtifactDownload store proof source (\_ _ -> error "unauthorized response"))
+  denied <- try @Command.CommandFailure (withArtifactDownload store proof source (\_ _ _ -> error "unauthorized response"))
   check "current observe scope checked before content" (denied == Left Command.Forbidden)
   mutate store $ forM_ ["observe","export"] $ \scope -> execute "INSERT INTO credential_scopes VALUES ('credential_1','profile_1',?)" [SQL.SQLText scope]
   mutate store $ execute "UPDATE credentials SET revoked=1" []
-  revoked <- try @Command.CommandFailure (withArtifactDownload store proof source (\_ _ -> error "revoked response"))
+  revoked <- try @Command.CommandFailure (withArtifactDownload store proof source (\_ _ _ -> error "revoked response"))
   check "credential revoked before download call is refused" (revoked == Left Command.Unauthenticated)
   mutate store $ execute "UPDATE credentials SET revoked=0" []
 
@@ -750,14 +777,14 @@ exportSubstitution store proof handle root = do
       leaf=exports </> "review-result.json"
   renameFile leaf (leaf<>".retained")
   createSymbolicLink (leaf<>".retained") leaf
-  symlink <- try @Command.CommandFailure (withArtifactDownload store proof handle (\_ _ -> error "export symlink response"))
+  symlink <- try @Command.CommandFailure (withArtifactDownload store proof handle (\_ _ _ -> error "export symlink response"))
   check "export leaf symlink cannot produce content" (symlink == Left Command.ResourceUnavailable)
   removeFile leaf
   renameFile (leaf<>".retained") leaf
   renameDirectory exports (exports<>".retained")
   createDirectory exports
   setFileMode exports 0o700
-  failed <- try @Command.CommandFailure (withArtifactDownload store proof handle (\_ _ -> error "substituted export response"))
+  failed <- try @Command.CommandFailure (withArtifactDownload store proof handle (\_ _ _ -> error "substituted export response"))
   check "export root replacement cannot produce content" (failed == Left Command.ResourceUnavailable)
   renameDirectory exports (exports<>".replacement")
   renameDirectory (exports<>".retained") exports
@@ -768,7 +795,7 @@ rootSubstitution store proof _ handle root = do
   renameDirectory runs (runs<>".retained")
   createDirectory runs
   setFileMode runs 0o700
-  failed <- try @Command.CommandFailure (withArtifactDownload store proof handle (\_ _ -> error "substituted state response"))
+  failed <- try @Command.CommandFailure (withArtifactDownload store proof handle (\_ _ _ -> error "substituted state response"))
   check "state root replacement cannot produce content" (failed == Left Command.ResourceUnavailable)
   renameDirectory runs (runs<>".replacement")
   renameDirectory (runs<>".retained") runs
