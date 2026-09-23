@@ -2,10 +2,46 @@
   "version": 1,
   "cases": [
     {
+      "name": "versions-current-manager-store",
+      "file": "valid/versions-current-manager-store.json",
+      "schema": "Versions",
+      "valid": true
+    },
+    {
+      "name": "versions-next-manager-store",
+      "file": "invalid/versions-next-manager-store.json",
+      "schema": "Versions",
+      "valid": false
+    },
+    {
       "name": "capabilities",
       "file": "valid/capabilities.json",
       "schema": "Capabilities",
       "valid": true
+    },
+    {
+      "name": "versions-current-native",
+      "file": "valid/versions-current-native.json",
+      "schema": "Versions",
+      "valid": true
+    },
+    {
+      "name": "runtime-current-protocol",
+      "file": "valid/runtime-current-protocol.json",
+      "schema": "RuntimeSummary",
+      "valid": true
+    },
+    {
+      "name": "runtime-next-protocol",
+      "file": "invalid/runtime-next-protocol.json",
+      "schema": "RuntimeSummary",
+      "valid": false
+    },
+    {
+      "name": "versions-next-session",
+      "file": "invalid/versions-next-session.json",
+      "schema": "Versions",
+      "valid": false
     },
     {
       "name": "profiles",
