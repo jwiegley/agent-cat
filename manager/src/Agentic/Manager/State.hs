@@ -3,19 +3,23 @@
 -- | Durable Runtime observations. Stored associations never grant worker authority.
 module Agentic.Manager.State
   ( RunAssociation (..), ingestAcceptedStart, ingestRuntimeEnvelope, restoreRunProjection, observeRetainedTerminal,
-    submitRunControl, submitDecisionControl, readControlSurface, readDecision, readDecisionHeads,
-    authorizeObservation, requireProjection, withProfileProjection
+    submitRunControl, submitDecisionControl, dispatchRunControl, dispatchDecisionControl, replayControl,
+    resolveRun, resolveDecision, readControlSurface, readClosedControlSurface, readDecision, readDecisionHeads,
+    withControlSurface, withClosedControlSurface, withDecision, decisionInView,
+    authorizeObservation, requireProjection, withProfileProjection, withProfileProjectionSource,
+    ProjectionCut, captureProjectionCut, restoreProjectionCut, publicRecoveryOptionValue
   ) where
 
-import Agentic.Manager.Admission (AcceptedStart, acceptedStartRun, consumeAcceptedStart, acceptedControlContext, acceptControlCommand, observeAcceptedStart)
+import Agentic.Manager.Admission (AcceptedStart, acceptedStartRun, consumeAcceptedStart, acceptedControlContext, acceptControlCommand, acceptAndDeliverControlCommand, observeAcceptedStart)
 import Agentic.Manager.Authorization
 import qualified Agentic.Manager.Commands as Commands
 import qualified Agentic.Manager.Protocol.Command as Command
 import Agentic.Manager.Protocol.Json (decodeStrictValue, representableEditorSchema)
-import Agentic.Manager.Profile (publicId, publicRevision)
+import Agentic.Manager.Profile (ConfigurationLimits, publicId, publicRevision)
 import Agentic.Manager.Store
 import Agentic.Manager.Worker (workerEventBytes, workerEventEnvelope, WorkerObservation (..), WorkerPhase (..))
 import Agentic.Runtime
+import Control.DeepSeq (NFData (rnf))
 import Control.Exception (throwIO, bracket)
 import Control.Monad (unless, when, forM, forM_, void)
 import Crypto.Hash (Digest, SHA256, hash)
@@ -105,10 +109,24 @@ restoreRunProjection store association = withStoreReader store (restoreProjectio
 -- admission precedes the configuration loan, which remains held through response.
 withProfileProjection :: CoordinationStore -> CredentialProof -> RunAssociation -> (AuthorizedView -> RunSnapshot -> IO a) -> IO a
 withProfileProjection store proof association respond =
-  withAuthorizedResponse store proof (associationProfile association) [Command.Observe] $ \view -> do
-    runRead store (authorizeObservation proof association)
-    snapshot <- restoreProjection store association >>= maybe (throwIO Command.ResourceUnavailable) (pure . checkpointSnapshot)
-    respond view snapshot
+  withProfileProjectionSource store proof association $ \view _ materialize -> materialize >>= respond view
+
+-- | Delayed replay under the original reader and response loans. A page owner
+-- can reserve capacity before invoking it. Escaped actions refuse before replay.
+withProfileProjectionSource :: CoordinationStore -> CredentialProof -> RunAssociation
+  -> (AuthorizedView -> ConfigurationLimits -> IO RunSnapshot -> IO a) -> IO a
+withProfileProjectionSource store proof association action =
+  withAuthorizedResponseLimits store proof (associationProfile association) [Command.Observe] $ \view limits ->
+    action view limits $ do
+      revalidateAuthorizedView view >>= either throwIO pure
+      runRead store (authorizeObservation proof association)
+      snapshot <- borrowedProjection store association
+      revalidateAuthorizedView view >>= either throwIO pure
+      pure snapshot
+
+borrowedProjection :: CoordinationStore -> RunAssociation -> IO RunSnapshot
+borrowedProjection store association = restoreProjection store association
+  >>= maybe (throwIO Command.ResourceUnavailable) (pure . checkpointSnapshot)
 
 -- | Record a newly proved terminal fact from an existing immutable Runtime prefix.
 -- This grants neither cleanup nor execution authority and does not change ordinary reads.
@@ -132,19 +150,34 @@ observeRetainedTerminal store association = withStoreReader store $ do
           _ -> refuseTransaction StoreIntegrity
     _ -> pure False
 
+-- | One immutable ingestion-prefix boundary, without observation or execution
+-- authority. The caller keeps its original Store reader loan while replaying it.
+data ProjectionCut = ProjectionCut !RunAssociation !BS.ByteString !(Maybe Text)
+
+instance NFData ProjectionCut where
+  rnf (ProjectionCut association boundary lastKey) = rnf
+    (associationRun association, associationProfile association, associationRoot association,
+     runIdText (associationNative association), boundary, lastKey)
+
+captureProjectionCut :: RunAssociation -> Transaction ProjectionCut
+captureProjectionCut association = do
+  checkAssociation association
+  boundary <- projectionRow association
+  checkEvidenceBound association 0
+  rows <- query "SELECT sequence FROM ingestions WHERE run_id=? ORDER BY length(sequence) DESC,sequence DESC LIMIT 1"
+    [text (associationRun association)]
+  lastKey <- case rows of
+    [] -> pure Nothing
+    [[SQL.SQLText key]] -> pure (Just key)
+    _ -> refuseTransaction StoreIntegrity
+  pure (ProjectionCut association boundary lastKey)
+
 restoreProjection :: CoordinationStore -> RunAssociation -> IO (Maybe SnapshotCheckpoint)
-restoreProjection store association = do
-  (boundary, lastRow) <- runRead store $ do
-    checkAssociation association
-    boundary <- projectionRow association
-    checkEvidenceBound association 0
-    rows <- query "SELECT sequence FROM ingestions WHERE run_id=? ORDER BY length(sequence) DESC,sequence DESC LIMIT 1"
-      [text (associationRun association)]
-    lastKey <- case rows of
-      [] -> pure Nothing
-      [[SQL.SQLText key]] -> pure (Just key)
-      _ -> refuseTransaction StoreIntegrity
-    pure (boundary, lastKey)
+restoreProjection store association =
+  runRead store (captureProjectionCut association) >>= restoreProjectionCut store
+
+restoreProjectionCut :: CoordinationStore -> ProjectionCut -> IO (Maybe SnapshotCheckpoint)
+restoreProjectionCut store (ProjectionCut association boundary lastRow) = do
   empty <- valid (captureSnapshotCheckpoint (associationNative association) [])
   case lastRow of
     Nothing -> do
@@ -320,16 +353,38 @@ valid = either (const (throwIO StoreIntegrity)) pure
 
 -- | Current observations only. Neither this view nor its revision grants a pipe.
 readControlSurface :: AcceptedStart -> CredentialProof -> IO Value
-readControlSurface accepted proof = do
+readControlSurface accepted proof = withControlSurface accepted proof (\_ -> pure)
+
+withControlSurface :: AcceptedStart -> CredentialProof -> (AuthorizedView -> Value -> IO a) -> IO a
+withControlSurface accepted proof respond = do
   (store,profile,_,prepared) <- acceptedControlContext accepted
-  let association=RunAssociation (acceptedStartRun accepted) profile (preparedRootIdentity prepared) (preparedRunId prepared)
-  worker <- observeAcceptedStart accepted
-  let live=observedWorkerPhase worker `elem` [WorkerStartSent,WorkerRunning] && observedWorkerExit worker==Nothing
+  let association = RunAssociation (acceptedStartRun accepted) profile (preparedRootIdentity prepared) (preparedRunId prepared)
+  withAuthorizedResponse store proof profile [Command.Observe] $ \view -> do
+    worker <- observeAcceptedStart accepted
+    let live = observedWorkerPhase worker `elem` [WorkerStartSent,WorkerRunning] && observedWorkerExit worker == Nothing
+    value <- controlSurfaceBorrowed store proof association live
+    revalidateAuthorizedView view >>= either throwIO pure
+    respond view value
+
+-- | Closed observations cannot advertise native control ownership.
+readClosedControlSurface :: CoordinationStore -> CredentialProof -> RunAssociation -> IO Value
+readClosedControlSurface store proof association = withClosedControlSurface store proof association (\_ -> pure)
+
+withClosedControlSurface :: CoordinationStore -> CredentialProof -> RunAssociation
+  -> (AuthorizedView -> Value -> IO a) -> IO a
+withClosedControlSurface store proof association respond =
+  withAuthorizedResponse store proof (associationProfile association) [Command.Observe] $ \view -> do
+    value <- controlSurfaceBorrowed store proof association False
+    revalidateAuthorizedView view >>= either throwIO pure
+    respond view value
+
+controlSurfaceBorrowed :: CoordinationStore -> CredentialProof -> RunAssociation -> Bool -> IO Value
+controlSurfaceBorrowed store proof association live = do
   (revision,supervision) <- runRead store $ do
     authorizeObservation proof association
     rows <- query "SELECT control_revision,supervision FROM runs WHERE id=?" [text(associationRun association)]
     case rows of [[SQL.SQLText revision,SQL.SQLText supervision]] -> pure(revision,supervision); _ -> refuseTransaction StoreIntegrity
-  snapshot <- requireProjection store association
+  snapshot <- borrowedProjection store association
   heads <- runRead store $ do
     authorizeObservation proof association
     rows <- query "SELECT control_revision,supervision FROM runs WHERE id=?" [text(associationRun association)]
@@ -343,7 +398,7 @@ readControlSurface accepted proof = do
       offer operation occurrence attempt generation timings choices targets=object
         ["operation" .= (operation::Text),"address" .= object(["occurrenceId" .= T.pack(show(occurrenceNumber occurrence))] <>
           maybe [] (\a->["attemptId" .= T.pack(show(attemptNumber a))]) attempt),
-         "generation" .= (generation::Maybe Text),"timings" .= (timings::[Text]),"choices" .= (choices::[RecoveryOption]),"targets" .= (targets::[Text])]
+         "generation" .= (generation::Maybe Text),"timings" .= (timings::[Text]),"choices" .= map publicRecoveryOptionValue choices,"targets" .= (targets::[Text])]
       ordinary=concat [
         [offer "steer" (snapshotOccurrenceId occurrence) (Just(snapshotAttemptId attempt)) Nothing ["interrupt-now","next-boundary"] [] [] |
           attempt<-Map.elems(snapshotOccurrenceAttempts occurrence),snapshotAttemptState attempt==AttemptRunning,snapshotAttemptSteerable attempt==Just True] <>
@@ -373,6 +428,10 @@ pendingDecisions association = do
     [SQL.SQLText i,SQL.SQLText o,SQL.SQLText g,SQL.SQLText r,SQL.SQLText k,SQL.SQLText s] -> pure(i,o,g,r,k,s)
     _ -> refuseTransaction StoreIntegrity) rows
 
+-- | Public recovery options have a required nullable target, unlike native JSON.
+publicRecoveryOptionValue :: RecoveryOption -> Value
+publicRecoveryOptionValue choice = object ["choice" .= recoveryChoice choice,"target" .= recoveryTarget choice]
+
 authorizeObservation :: CredentialProof -> RunAssociation -> Transaction ()
 authorizeObservation proof association = do
   _ <- currentClient proof >>= either refuseTransaction pure
@@ -383,20 +442,38 @@ requireProjection :: CoordinationStore -> RunAssociation -> IO RunSnapshot
 requireProjection store association = restoreRunProjection store association >>= maybe (throwIO Command.ResourceUnavailable) (pure . checkpointSnapshot)
 
 readDecision :: CoordinationStore -> CredentialProof -> RunAssociation -> Text -> IO Value
-readDecision store proof association ident = do
+readDecision store proof association ident = withDecision store proof association ident (\_ -> pure)
+
+withDecision :: CoordinationStore -> CredentialProof -> RunAssociation -> Text
+  -> (AuthorizedView -> Value -> IO a) -> IO a
+withDecision store proof association ident respond = withStoreFiles store $ \root ->
+  withAuthorizedResponse store proof (associationProfile association) [Command.Observe] $ \view -> do
+    value <- decisionInView store root proof view association ident
+    respond view value
+
+-- | A decision observation borrowing the caller's original response scope.
+decisionInView :: CoordinationStore -> PrivateRoot -> CredentialProof -> AuthorizedView -> RunAssociation -> Text -> IO Value
+decisionInView store root proof view association ident = do
+  revalidateAuthorizedView view >>= either throwIO pure
+  value <- decisionBorrowed store root proof association ident
+  revalidateAuthorizedView view >>= either throwIO pure
+  pure value
+
+decisionBorrowed :: CoordinationStore -> PrivateRoot -> CredentialProof -> RunAssociation -> Text -> IO Value
+decisionBorrowed store root proof association ident = do
   rows <- runRead store $ authorizeObservation proof association >> pendingDecisions association
   (position,(_,occurrence,generation,revision,kind,state)) <- case [(n,row)| (n,row@(i,_,_,_,_,_))<-zip [0::Int ..] rows,i==ident] of
     [found] -> pure found
     _ -> throwIO Command.ResourceUnavailable
-  snapshot <- requireProjection store association
+  snapshot <- borrowedProjection store association
   current <- maybe (throwIO StoreIntegrity) pure $ lookup occurrence
     [(T.pack(show(occurrenceNumber key)),value)|(key,value)<-Map.toList(snapshotOccurrences snapshot)]
   detail <- if kind=="question" then do
     reference <- maybe (throwIO StoreIntegrity) pure (snapshotOccurrencePersonQuestion current)
-    question <- verifiedQuestion store association current reference
+    question <- verifiedQuestionAt root association current reference
     pure ["question" .= question]
     else case snapshotOccurrenceRecovery current of
-      Just recovery -> pure ["gap" .= snapshotRecoveryGap recovery,"message" .= snapshotRecoveryMessage recovery,"choices" .= snapshotRecoveryChoices recovery]
+      Just recovery -> pure ["gap" .= snapshotRecoveryGap recovery,"message" .= snapshotRecoveryMessage recovery,"choices" .= map publicRecoveryOptionValue (snapshotRecoveryChoices recovery)]
       Nothing -> throwIO StoreIntegrity
   runRead store $ do
     authorizeObservation proof association
@@ -411,6 +488,11 @@ readDecision store proof association ident = do
 
 verifiedQuestion :: CoordinationStore -> RunAssociation -> OccurrenceSnapshot -> QuestionRef -> IO Value
 verifiedQuestion store association occurrence reference = withStoreFiles store $ \root ->
+  verifiedQuestionAt root association occurrence reference
+
+-- | Borrow the original file loan when a response already retains configuration.
+verifiedQuestionAt :: PrivateRoot -> RunAssociation -> OccurrenceSnapshot -> QuestionRef -> IO Value
+verifiedQuestionAt root association occurrence reference =
   bracket (openPrivateSubroot root ["runs"]) closePrivateRoot $ \runs -> do
     unless (T.pack(privateRootIdentity runs)==associationRoot association)(throwIO StoreIntegrity)
     bracket (openPrivateSubroot runs ["runs",T.unpack(runIdText(associationNative association)),"runtime"]) closePrivateRoot $ \runtime -> do
@@ -459,13 +541,59 @@ readDecisionHeads store proof = do
     readDecision store proof (RunAssociation run profile root (RunId native)) ident
 
 submitRunControl :: AcceptedStart -> CredentialProof -> Text -> Maybe Text -> BS.ByteString -> IO (Either Command.CommandFailure Commands.Submission)
-submitRunControl accepted proof = submitControl accepted proof Nothing
+submitRunControl accepted proof = submitControl False accepted proof Nothing
 
 submitDecisionControl :: AcceptedStart -> CredentialProof -> Text -> Text -> Maybe Text -> BS.ByteString -> IO (Either Command.CommandFailure Commands.Submission)
-submitDecisionControl accepted proof decision = submitControl accepted proof (Just decision)
+submitDecisionControl accepted proof decision = submitControl False accepted proof (Just decision)
 
-submitControl :: AcceptedStart -> CredentialProof -> Maybe Text -> Text -> Maybe Text -> BS.ByteString -> IO (Either Command.CommandFailure Commands.Submission)
-submitControl accepted proof decision key precondition body = do
+dispatchRunControl :: AcceptedStart -> CredentialProof -> Text -> Maybe Text -> BS.ByteString
+  -> IO (Either Command.CommandFailure Commands.Submission)
+dispatchRunControl accepted proof = submitControl True accepted proof Nothing
+
+dispatchDecisionControl :: AcceptedStart -> CredentialProof -> Text -> Text -> Maybe Text -> BS.ByteString
+  -> IO (Either Command.CommandFailure Commands.Submission)
+dispatchDecisionControl accepted proof decision = submitControl True accepted proof (Just decision)
+
+-- | Resolve a current authorized observation address, never a live association.
+resolveRun :: CoordinationStore -> CredentialProof -> [Command.Scope] -> Text -> IO RunAssociation
+resolveRun store proof scopes ident = do
+  unless (Command.validId ident) (throwIO Command.InvalidRequest)
+  (profile,root,native) <- runRead store $ do
+    _ <- currentClient proof >>= either refuseTransaction pure
+    rows <- query "SELECT profile_id,root_identity,native_run_id FROM runs WHERE id=?" [text ident]
+    case rows of
+      [[SQL.SQLText profile,SQL.SQLText root,SQL.SQLText native]] -> do
+        _ <- authorizeProfile proof profile scopes >>= either refuseTransaction pure
+        pure (profile,root,native)
+      _ -> refuseTransaction Command.Forbidden
+  nativeId <- either (const (throwIO StoreIntegrity)) pure (mkRunId native)
+  pure (RunAssociation ident profile root nativeId)
+
+resolveDecision :: CoordinationStore -> CredentialProof -> [Command.Scope] -> Text -> IO RunAssociation
+resolveDecision store proof scopes ident = do
+  unless (Command.validId ident) (throwIO Command.InvalidRequest)
+  run <- runRead store $ do
+    _ <- currentClient proof >>= either refuseTransaction pure
+    rows <- query "SELECT run_id FROM decisions WHERE id=?" [text ident]
+    case rows of
+      [[SQL.SQLText value]] -> pure value
+      _ -> refuseTransaction Command.Forbidden
+  resolveRun store proof scopes run
+
+-- | Exact cached receipt replay does not reconstruct a control ticket or Worker.
+replayControl :: CoordinationStore -> CredentialProof -> RunAssociation -> Maybe Text
+  -> Text -> Maybe Text -> BS.ByteString -> IO (Either Command.CommandFailure Commands.Submission)
+replayControl store proof association decision key precondition body = case parseControlBody body of
+  Left failure -> pure (Left failure)
+  Right (operation,_,_)
+    | isJust decision && operation `notElem` [Command.Answer,Command.ChooseRecovery] -> pure (Left Command.InvalidRequest)
+    | otherwise ->
+        let uri = maybe (runURI association <> "/control") ("/v1/decisions/" <>) decision
+            request = Commands.CommandRequest operation (associationProfile association) "POST" uri key "application/json" precondition body
+        in Commands.submitConfiguredCommand store proof request (\_ _ _ -> Left Command.OwnershipUnavailable)
+
+submitControl :: Bool -> AcceptedStart -> CredentialProof -> Maybe Text -> Text -> Maybe Text -> BS.ByteString -> IO (Either Command.CommandFailure Commands.Submission)
+submitControl dispatch accepted proof decision key precondition body = do
   (store,profile,_,prepared) <- acceptedControlContext accepted
   let association=RunAssociation (acceptedStartRun accepted) profile (preparedRootIdentity prepared) (preparedRunId prepared)
       uri=maybe (runURI association<>"/control") ("/v1/decisions/"<>) decision
@@ -479,7 +607,7 @@ submitControl accepted proof decision key precondition body = do
               Nothing -> query "SELECT control_revision FROM runs WHERE id=?" [text(associationRun association)]
               Just ident -> query "SELECT revision FROM decisions WHERE id=? AND run_id=?" [text ident,text(associationRun association)]
             pure $ case rows of [[SQL.SQLText revision]]->Just(uri,profile,revision);_->Nothing
-      acceptControlCommand accepted proof request version $ do
+      (if dispatch then acceptAndDeliverControlCommand else acceptControlCommand) accepted proof request version $ do
           selected <- withStoreConfiguration store $ \_ profiles -> case [publicRevision current|current<-profiles,publicId current==profile] of
             [revision]->pure revision
             _->throwIO Command.Forbidden

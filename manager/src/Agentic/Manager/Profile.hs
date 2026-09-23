@@ -7,13 +7,14 @@ module Agentic.Manager.Profile
     validateConfigurationLimits, validateProfiles, QueryLimits (..), Registry,
     PublicProfile, publicId, publicRevision, Diagnostic (..),
     Selection, selectionContext, selectionInvocation, workflowIdentity, restartBinding,
-    Discovery, discoveryServer, discoveryWorkflows, discoveryRevision, discoveryEntries, discoverySelection, discoveryProfileRevision, currentCatalogues,
+    Discovery, discoveryServer, discoveryWorkflows, discoveryPublicWorkflows, discoveryRevision, discoveryEntries, discoverySelection, discoveryProfileRevision, currentCatalogues,
     newRegistry, reloadProfiles, publicProfiles, profileInvocations, selectProfile, probeProfile, probeProfileCapabilities, probeProfileCapabilitiesWith
   ) where
 
+import Agentic.Manager.Protocol.Draft (InputDeclaration (..))
 import Agentic.Runtime
   ( PersonAnswering, FrontendInvocation (..), FrontendServer (..), FrontendCapabilities (..), FrontendPrepared (..),
-    WorkflowDescriptor (..), DescriptorCapabilities (..),
+    WorkflowDescriptor (..), WorkflowInputDescriptor (..), WorkflowInputSource (..), DescriptorCapabilities (..),
     decodeFrontendCapabilities, decodeWorkflowDescriptors, maxFrontendQueryBytes, frontendOwnedEnvironment,
     ProcessGroup, createProcessGroup,
     terminateProcessGroup, closeGroupPipes, groupOutput, groupErrors, waitProcessGroup )
@@ -23,7 +24,7 @@ import Control.Exception (Exception, IOException, SomeException, finally, mask, 
 import Control.Monad (unless)
 import Crypto.Hash (Digest, SHA256, hash)
 import Crypto.Random (getRandomBytes)
-import Data.Aeson (Result (Success, Error), ToJSON (toJSON), encode, fromJSON, object, (.=))
+import Data.Aeson (Value, Result (Success, Error), ToJSON (toJSON), encode, fromJSON, object, (.=))
 import Data.ByteArray.Encoding (Base (Base16), convertToBase)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as BL
@@ -142,6 +143,7 @@ selectionInvocation (Selection p) = FrontendInvocation
 data Discovery = Discovery
   { discoveryServer :: !FrontendServer,
     discoveryWorkflows :: ![WorkflowDescriptor],
+    discoveryPublicWorkflows :: ![(Text, Value)],
     discoveryRevision :: !Text,
     discoveryEntries :: ![(Text, WorkflowDescriptor)],
     discoverySelection :: !Selection,
@@ -246,7 +248,7 @@ selectProfile (Registry _ _ lock) ident revision = withMVar lock $ \(Snapshot _ 
     maybe (Right (Selection p)) Left (publicFailure view)
 
 -- | Probe only installed authority. Reload cannot revoke between selection and
--- either launch. No public function launches a previously returned selection.
+-- any query launch. No public function launches a previously returned selection.
 -- ponytail: registry lock serializes queries, per-profile leases if contention matters.
 probeProfile :: Registry -> Text -> Text -> IO (Either Diagnostic Discovery)
 probeProfile (Registry _ limits lock) ident revision = mask $ \restore -> do
@@ -300,18 +302,76 @@ discover limits p profileRevision = do
     Right caps | not (supportsMutation caps) -> pure (Left UnsupportedOperation)
     Right caps -> do
       catalogue <- query limits p ["list", "--json", "--descriptor-version", "3"]
-      nonce <- getRandomBytes 16 :: IO BS.ByteString
-      pure $ do
-        bytes <- catalogue
-        rows <- either (const (Left InvalidReply)) Right (decodeWorkflowDescriptors bytes)
-        unless (all ((== frontendServerRunnerVersion (capabilityServer caps)) . workflowRunnerVersion) rows)
-          (Left RunnerVersionMismatch)
-        unless (all supportsWorkflow rows) (Left UnsupportedOperation)
-        unless (Set.size (Set.fromList (map workflowName rows)) == length rows
-          && all ((<= 256) . length . workflowInputs) rows) (Left InvalidReply)
-        let revision = TE.decodeUtf8 (convertToBase Base16 nonce)
-            identifier row = workflowIdentity (operatorId p) (workflowName row)
-        pure (Discovery (capabilityServer caps) rows revision [(identifier row, row) | row <- rows] (Selection p) profileRevision)
+      let validate = do
+            bytes <- catalogue
+            rows <- either (const (Left InvalidReply)) Right (decodeWorkflowDescriptors bytes)
+            unless (all ((== frontendServerRunnerVersion (capabilityServer caps)) . workflowRunnerVersion) rows)
+              (Left RunnerVersionMismatch)
+            unless (all supportsWorkflow rows) (Left UnsupportedOperation)
+            unless (Set.size (Set.fromList (map workflowName rows)) == length rows
+              && all ((<= 256) . length . workflowInputs) rows) (Left InvalidReply)
+            pure rows
+      case validate of
+        Left failure -> pure (Left failure)
+        Right rows -> do
+          nonce <- getRandomBytes 16 :: IO BS.ByteString
+          let revision = TE.decodeUtf8 (convertToBase Base16 nonce)
+              identifier row = workflowIdentity (operatorId p) (workflowName row)
+          projected <- catalogueHelp limits p profileRevision revision rows
+          pure $ do
+            public <- projected
+            pure (Discovery (capabilityServer caps) rows public revision
+              [(identifier row, row) | row <- rows] (Selection p) profileRevision)
+
+-- The complete public catalogue shares the discovery byte ceiling. The help
+-- group has one deadline and each query retains its original process cleanup.
+catalogueHelp :: QueryLimits -> OperatorProfile -> Text -> Text -> [WorkflowDescriptor]
+  -> IO (Either Diagnostic [(Text, Value)])
+catalogueHelp limits profile profileRevision revision rows = do
+  result <- timeout (queryMicros limits) (collect 2 [] rows)
+  pure (maybe (Left QueryTimeout) id result)
+  where
+    collect _ values [] = pure (Right (reverse values))
+    collect total values (row:rest) = do
+      reply <- query (limits {queryBytes = min (queryBytes limits) 1048576}) profile ["help", T.unpack (workflowName row)]
+      case reply >>= either (const (Left InvalidReply)) Right . TE.decodeUtf8' of
+        Left failure -> pure (Left failure)
+        Right help | T.length help > 262144 -> pure (Left OutputOverflow)
+        Right help -> do
+          let value = publicWorkflow (operatorId profile) profileRevision revision row help
+              next = total + fromIntegral (BL.length (encode value)) + 1
+          if next > queryBytes limits then pure (Left OutputOverflow)
+            else collect next ((workflowIdentity (operatorId profile) (workflowName row),value):values) rest
+
+-- | The public catalogue projection, without native invocation or control-FD fields.
+publicWorkflow :: Text -> Text -> Text -> WorkflowDescriptor -> Text -> Value
+publicWorkflow profile profileRevision revision row help = object
+  ["version" .= (1 :: Int), "id" .= workflowIdentity profile (workflowName row),
+   "revision" .= revision, "profileId" .= profile, "profileRevision" .= profileRevision,
+   "descriptorVersion" .= workflowDescriptorVersion row, "runnerVersion" .= workflowRunnerVersion row,
+   "name" .= workflowName row, "blurb" .= workflowBlurb row, "resultCode" .= workflowResultCode row,
+   "level" .= workflowLevel row, "size" .= decimal (workflowSize row),
+   "askNodes" .= decimal (workflowAskNodes row), "minFold" .= fmap decimal (workflowMinFold row),
+   "maxFold" .= fmap decimal (workflowMaxFold row), "paths" .= decimal (workflowPaths row),
+   "inputs" .= [InputDeclaration (workflowInputName input) (source (workflowInputSource input)) | input <- workflowInputs row],
+   "runFacts" .= workflowRunFacts row, "pins" .= workflowPins row, "help" .= help,
+   "capabilities" .= object
+     ["structuredRun" .= descriptorStructuredRun caps, "wholeRunCancel" .= descriptorWholeRunCancel caps,
+      "requestControls" .= descriptorRequestControls caps, "steering" .= descriptorSteering caps,
+      "interactiveRetry" .= descriptorInteractiveRetry caps, "schedulerRedirect" .= descriptorSchedulerRedirect caps,
+      "semanticResume" .= descriptorSemanticResume caps, "immutableFork" .= descriptorImmutableFork caps,
+      "restartFromScratch" .= descriptorRestartFromScratch caps, "protocolNegotiation" .= descriptorProtocolNegotiation caps,
+      "routingInspection" .= descriptorRoutingInspection caps, "personaRouting" .= descriptorPersonaRouting caps,
+      "modelAliasRouting" .= descriptorModelAliasRouting caps, "effectful" .= descriptorEffectful caps,
+      "toolExecution" .= descriptorToolExecution caps, "consults" .= decimal (descriptorConsults caps),
+      "observes" .= decimal (descriptorObserves caps), "effects" .= decimal (descriptorEffects caps),
+      "personAnsweringModes" .= workflowPersonAnsweringModes row]]
+  where
+    caps = workflowCapabilities row
+    decimal = T.pack . show
+    source DescriptorPrompt = "prompt"
+    source DescriptorCommandTail = "command-tail"
+    source DescriptorStdin = "stdin"
 
 -- | A private versioned equality digest of declared configuration and descriptor.
 -- It does not certify function identity. Fresh preparation still runs the current validator.

@@ -3,7 +3,7 @@
 
 -- | Bounded retained observations. Neither an opaque handle nor a native address owns a worker.
 module Agentic.Manager.History
-  ( LegacyHistory, bindLegacyHistory, withHistory, withHistoryResult, createHistoryLineage, retainView ) where
+  ( LegacyHistory, bindLegacyHistory, withHistory, withHistoryResult, createHistoryLineage, retainView, verificationValue, managedRunInView ) where
 
 import Agentic.Manager.Artifacts (withArtifactDownload)
 import Agentic.Manager.Admission (Admission, ownsHistoryRun)
@@ -13,8 +13,9 @@ import Agentic.Manager.Profile
 import qualified Agentic.Manager.Protocol.Command as C
 import Agentic.Manager.Protocol.Json (decodeStrictValue)
 import Agentic.Manager.Store
+import qualified Agentic.Manager.State as State
 import Agentic.Runtime
-import Control.Exception (IOException, SomeException, fromException, bracket, try, throwIO)
+import Control.Exception (IOException, SomeException, SomeAsyncException, fromException, bracket, try, throwIO)
 import System.IO.Error (isDoesNotExistError)
 import Control.Monad (forM, forM_, foldM, unless, when)
 import Crypto.Hash (Digest, SHA256, hash)
@@ -200,13 +201,16 @@ retainHandle store root profile component = do
       _ -> refuseTransaction StoreIntegrity
 
 renderEntry :: CoordinationStore -> PrivateRoot -> Text -> Text -> Text -> Maybe Text -> Value -> Value -> Value -> Text -> Value -> CatalogueEntry -> IO Value
-renderEntry store root profile ident revision workflow request parent lineage supervision result entry = do
+renderEntry store = renderEntryWith (storeInvocations store >>= either (const (throwIO C.StorageUnavailable)) pure)
+
+renderEntryWith :: IO [(Text,FrontendInvocation)] -> PrivateRoot -> Text -> Text -> Text -> Maybe Text -> Value -> Value -> Value -> Text -> Value -> CatalogueEntry -> IO Value
+renderEntryWith configuration root profile ident revision workflow request parent lineage supervision result entry = do
   manifest <- entryManifest root entry
   case manifest of
     Nothing -> pure (object ["version" .= (1::Int),"kind" .= ("unreadable-manifest"::Text),"id" .= ident,"revision" .= revision,
       "profileId" .= profile,"category" .= ("manifest-unavailable"::Text),"links" .= object ["self" .= uri ident]])
     Just value -> do
-      configured <- storeInvocations store >>= either (const (throwIO C.StorageUnavailable)) pure
+      configured <- configuration
       let current = lookup profile configured
       let expectedWorkflow = workflowIdentity profile (frontendWorkflow value)
       unless (maybe True (==expectedWorkflow) workflow) (throwIO C.ResourceUnavailable)
@@ -227,11 +231,60 @@ renderEntry store root profile ident revision workflow request parent lineage su
         "supervision" .= supervision,"integrity" .= (if corrupt then "corrupt" else "valid"::Text),"verification" .= result,"limitations" .= (limitations::[Text]),
         "links" .= object ["self" .= uri ident,"snapshot" .= (uri ident<>"/snapshot"),"control" .= (uri ident<>"/control"),"outputs" .= (uri ident<>"/outputs"),"exports" .= (uri ident<>"/exports"),"lineageRequests" .= (uri ident<>"/lineage-requests")]])
 
+-- | One managed observation under an existing response loan. Runtime summaries
+-- use the manager's immutable ingested prefix, not a later native file suffix.
+managedRunInView :: CoordinationStore -> PrivateRoot -> CredentialProof -> AuthorizedView -> Maybe Admission
+  -> [(Text,FrontendInvocation)] -> Text -> IO Value
+managedRunInView store retainedRoot proof view admission invocations ident = do
+  revalidateAuthorizedView view >>= either throwIO pure
+  (fields,cut) <- runRead store $ do
+    _ <- currentClient proof >>= either refuseTransaction pure
+    unless (C.validId ident) (refuseTransaction C.InvalidRequest)
+    rows <- query "SELECT u.id,u.profile_id,u.root_identity,u.native_run_id,u.revision,u.supervision,r.workflow_id,u.request_id,u.parent_run_id,r.lineage_operation,u.result_artifact_id,u.result_state,a.verification_failure FROM runs u LEFT JOIN requests r ON r.id=u.request_id LEFT JOIN artifacts a ON a.id=u.result_artifact_id WHERE u.id=? AND EXISTS(SELECT 1 FROM credential_scopes s WHERE s.credential_id=? AND s.profile_id=u.profile_id AND s.scope='observe')" [text ident,text (credentialRateKey proof)]
+    row <- case rows of [row] -> pure row; _ -> refuseTransaction C.ResourceUnavailable
+    case row of
+      SQL.SQLText actual:SQL.SQLText profile:SQL.SQLText root:SQL.SQLText native:_ -> do
+        unless (actual == ident && profile `elem` map fst invocations) (refuseTransaction C.Forbidden)
+        nativeId <- either (const (refuseTransaction StoreIntegrity)) pure (mkRunId native)
+        prefix <- State.captureProjectionCut (State.RunAssociation ident profile root nativeId)
+        values <- mapM (\value -> case value of SQL.SQLText t -> pure (Just t); SQL.SQLNull -> pure Nothing; _ -> refuseTransaction StoreIntegrity) row
+        pure (values,prefix)
+      _ -> refuseTransaction StoreIntegrity
+  snapshot <- fmap checkpointSnapshot <$> State.restoreProjectionCut store cut
+  case map (maybe SQL.SQLNull text) fields of
+    [_,SQL.SQLText profile,SQL.SQLText identity,SQL.SQLText native,SQL.SQLText revision,SQL.SQLText supervision,workflow,request,parent,lineage,artifact,state,failure] ->
+      bracket (openPrivateSubroot retainedRoot ["runs"]) closePrivateRoot $ \runs -> do
+        unless (T.pack (privateRootIdentity runs) == identity) (throwIO C.ResourceUnavailable)
+        now <- getCurrentTime
+        let directory = privateRootPath runs </> "runs" </> T.unpack native
+        observed <- try @SomeException $ withPrivateDirectoryAt runs ["runs",T.unpack native] $ \descriptor ->
+          fst <$> readRunRecordWithEnvelopesAt directory descriptor Nothing now
+        owned <- case (admission,observed) of
+          (Just controller,Right record) -> ownsHistoryRun store controller ident (frontendRunId (recordManifest record)) identity
+          _ -> pure False
+        entry <- case observed of
+          Right record -> pure (CatalogueRun record {recordSnapshot = snapshot,
+            recordOwnership = if owned then RunOwnedHere else recordOwnership record})
+          Left exception | Just _ <- (fromException exception :: Maybe SomeAsyncException) -> throwIO exception
+          Left _ -> pure (CatalogueCorrupt directory "")
+        result <- verification artifact state failure
+        value <- renderEntryWith (pure invocations) runs profile ident revision
+          (case workflow of SQL.SQLText item -> Just item; _ -> Nothing)
+          (sqlValue request) (sqlValue parent) (sqlValue lineage)
+          (if supervision == "owned" && not owned then "lost" else supervision) result entry
+        revalidateAuthorizedView view >>= either throwIO pure
+        pure value
+    _ -> throwIO StoreIntegrity
+
 verification :: SQL.SQLData -> SQL.SQLData -> SQL.SQLData -> IO Value
-verification (SQL.SQLText artifact) (SQL.SQLText state) _ | state `elem` ["referenced","verified"] = pure (object ["state" .= state,"artifactId" .= artifact])
-verification (SQL.SQLText artifact) (SQL.SQLText "unavailable") (SQL.SQLText reason) = pure (object ["state" .= ("unavailable"::Text),"artifactId" .= artifact,"reason" .= reason])
-verification SQL.SQLNull (SQL.SQLText "absent") _ = pure (object ["state" .= ("absent"::Text)])
-verification _ _ _ = throwIO StoreIntegrity
+verification artifact state reason = either throwIO pure (verificationValue artifact state reason)
+
+-- | Public verification facts from the existing durable result association.
+verificationValue :: SQL.SQLData -> SQL.SQLData -> SQL.SQLData -> Either StoreFailure Value
+verificationValue (SQL.SQLText artifact) (SQL.SQLText state) _ | state `elem` ["referenced","verified"] = Right (object ["state" .= state,"artifactId" .= artifact])
+verificationValue (SQL.SQLText artifact) (SQL.SQLText "unavailable") (SQL.SQLText reason) = Right (object ["state" .= ("unavailable"::Text),"artifactId" .= artifact,"reason" .= reason])
+verificationValue SQL.SQLNull (SQL.SQLText "absent") _ = Right (object ["state" .= ("absent"::Text)])
+verificationValue _ _ _ = Left StoreIntegrity
 
 retainResult :: CoordinationStore -> Text -> Maybe ResultRef -> IO (Maybe ResultRef)
 retainResult store ident observed = do

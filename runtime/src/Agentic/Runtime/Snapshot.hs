@@ -19,6 +19,10 @@ module Agentic.Runtime.Snapshot
     initialRunSnapshot,
     stepRunSnapshot,
     runSnapshotValue,
+    runStatusText,
+    occurrenceStateText,
+    attemptStateText,
+    failureTextValue,
     controlAcknowledgementLimit,
   )
 where

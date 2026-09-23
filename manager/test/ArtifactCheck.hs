@@ -3,15 +3,19 @@
 module Main (main) where
 
 import Agentic.Manager.Artifacts
+import qualified Agentic.Manager.Admission as Admission
+import qualified Agentic.Manager.Service as Service
 import Agentic.Manager.Protocol.Artifact (validExportDocument)
 import Agentic.Manager.Credentials (administerCredentials)
 import qualified Agentic.Manager.Protocol.LocalAdmin as Admin
 import Agentic.Manager.Authorization
 import qualified Agentic.Manager.Commands as Commands
 import Agentic.Manager.Configuration
-import Agentic.Manager.Profile (Diagnostic (..))
+import Agentic.Manager.Profile (Diagnostic (..), publicId)
 import qualified Agentic.Manager.Protocol.Command as Command
 import Agentic.Manager.State
+import qualified Agentic.Manager.Observation as Observation
+import qualified Agentic.Manager.Events as Events
 import Agentic.Manager.Schema (schemaVersion, schemaStatements, commandMigration, draftMigration, admissionMigration, approvalMigration, ingestionMigration, controlMigration)
 import Agentic.Manager.Store
 import Agentic.Runtime hiding (Checkpoint)
@@ -46,13 +50,204 @@ main = do
   case args of
     ["retention",work] -> retentionChecks work
     ["composition",work] -> compositionChecks work
+    ["observation",work] -> observationChecks work
+    ["events",work] -> eventChecks work
+    ["admission-contention",work] -> admissionContentionChecks work
+    ["response-order",work] -> responseOrderChecks work
     [work,source] -> do
       createDirectory(work </> "composition")
       compositionChecks(work </> "composition")
       createDirectory(work </> "retention")
       retentionChecks(work </> "retention")
+      createDirectory(work </> "observation")
+      observationChecks(work </> "observation")
+      createDirectory(work </> "events")
+      eventChecks(work </> "events")
+      createDirectory(work </> "admission-contention")
+      admissionContentionChecks(work </> "admission-contention")
+      createDirectory(work </> "response-order")
+      responseOrderChecks(work </> "response-order")
       artifactChecks work source
-    _ -> error "usage: manager-artifact-check [retention|composition] PRIVATE_DIRECTORY [PACKAGE_DIRECTORY]"
+    _ -> error "usage: manager-artifact-check [retention|composition|observation|events|admission-contention|response-order] PRIVATE_DIRECTORY [PACKAGE_DIRECTORY]"
+
+responseOrderChecks :: FilePath -> IO ()
+responseOrderChecks work = do
+  (config,_) <- fixture work
+  withInstalled config $ \installed -> withCoordinationStore installed $ \store -> do
+    seed store
+    proof <- authenticateCredential store bearer >>= right
+    Service.withService store $ \service -> do
+      entered <- newIORef False
+      let refused label operation = do
+            outcome <- try @StoreFailure (void operation)
+            check label (outcome == Left StoreBusy)
+          association = RunAssociation "run_missing" "profile_1" "root_missing" (RunId "native_missing")
+      -- Exhaust readers as well as files. A configuration-first response would
+      -- report StoreLimit, rather than refusing at the original file guard.
+      withStoreReader store $ withStoreReader store $ withStoreFiles store $ \_ -> do
+        refused "overview acquires files before reader/configuration"
+          (Service.withOverviewSource service proof (\_ _ _ -> writeIORef entered True))
+        refused "run response acquires files before reader/configuration"
+          (Service.withRun service proof "run_missing" (\_ _ -> writeIORef entered True))
+        refused "decision response acquires files before reader/configuration"
+          (withDecision store proof association "decision_missing" (\_ _ -> writeIORef entered True))
+        readIORef entered >>= check "refused responses never enter their callbacks" . not
+        withStoreConfiguration store (\_ _ -> pure ()) >>= check "refused responses leave configuration available" . (==Right ())
+      escaped <- newIORef Nothing
+      Service.withOverviewSource service proof $ \view _ materialize -> do
+        (_,_,items) <- materialize
+        check "complete empty overview uses its original materialization scope" (null items)
+        refused "overview file loan spans the response callback" (withStoreFiles store (\_ -> pure ()))
+        withStoreConfiguration store (\_ _ -> pure ()) >>= check "overview configuration spans response callback" . (==Left SupervisionUnavailable)
+        revalidateAuthorizedView view >>= check "overview view revalidates under its original loans" . (==Right ())
+        writeIORef escaped (Just materialize)
+      readIORef escaped >>= maybe (error "missing overview materializer") (\materialize -> do
+        result <- try @Command.CommandFailure (void materialize)
+        check "overview materializer cannot outlive its original loans" (result == Left Command.Unauthenticated))
+
+admissionContentionChecks :: FilePath -> IO ()
+admissionContentionChecks work = do
+  (config,_) <- fixture work
+  withInstalled config $ \installed -> withCoordinationStore installed $ \store ->
+    Admission.withAdmission store $ \controller -> do
+      before <- scalar store "SELECT sequence FROM service_metadata WHERE singleton=1"
+      result <- withStoreConfiguration store $ \_ _ -> do
+        deferred <- Admission.pollAdmission controller
+        check "configuration contention is proven before admission selection"
+          (case deferred of Right Admission.AdmissionDeferred -> True; _ -> False)
+        legacy <- Admission.admitOldest controller
+        check "existing admission entry retains its refusal contract"
+          (case legacy of Left Command.StorageUnavailable -> True; _ -> False)
+      right result
+      after <- scalar store "SELECT sequence FROM service_metadata WHERE singleton=1"
+      check "deferred admission publishes no mutation" (before == after)
+      entered <- newIORef False
+      classified <- tryWithStoreCatalogues store $ \_ _ _ -> do
+        writeIORef entered True
+        throwIO SupervisionUnavailable :: IO ()
+      readIORef entered >>= check "entered configuration failure is not a deferred callback"
+      check "entered failure preserves its distinct classification" (classified == Just (Left SupervisionUnavailable))
+      writeIORef entered False
+      withStoreFiles store $ \_ -> do
+        deferred <- tryWithStoreFiles store (\_ -> writeIORef entered True)
+        check "file contention proves the callback did not enter" (deferred == Nothing)
+        legacy <- try @StoreFailure (withStoreFiles store (\_ -> writeIORef entered True))
+        check "existing file entry remains fail-fast" (legacy == Left StoreBusy)
+      readIORef entered >>= check "deferred file operation performs no work" . not
+      failed <- try @StoreFailure (tryWithStoreFiles store (\_ -> throwIO StoreBusy :: IO ()))
+      check "entered file failure is never classified as deferred" (failed == Left StoreBusy)
+      idle <- Admission.pollAdmission controller
+      check "released configuration permits a new admission selection" (case idle of Right Admission.AdmissionIdle -> True; _ -> False)
+
+eventChecks :: FilePath -> IO ()
+eventChecks work = do
+  (config,_) <- fixture work
+  let boundary store proof = Events.withBoundary store proof (\_ cursor floorCursor -> pure (cursor,floorCursor)) $ \view _ pair -> do
+        revision <- authorizedViewRevision view
+        pure (pair,revision)
+      batch store proof cursor = Events.withBatch store proof cursor (\_ -> pure)
+      alias = fst . T.breakOn "."
+  (previous, pageRevision) <- withInstalled config $ \installed -> withCoordinationStore installed $ \store -> do
+    seed store
+    proof <- authenticateCredential store bearer >>= right
+    (association,_,_) <- sourceRun store
+    ((start,_),revision) <- boundary store proof
+    forM_ [1::Int ..65] $ \number -> runTransaction store (pure ((),
+      [Invalidation "request.changed" ("/v1/requests/hidden_" <> T.pack (show number)) "revision"]))
+    runTransaction store (pure ((), [Invalidation "run.changed" ("/v1/runs/" <> associationRun association <> "/snapshot") "revision"]))
+    first <- batch store proof start
+    check "filtered event batch advances over scanned prefix without skipping the tail"
+      (field "events" first == Array mempty && field "hasMore" first == Bool True && string (field "cursor" first) /= start)
+    second <- batch store proof (string (field "cursor" first))
+    check "next event batch retains the authorized tail"
+      (case field "events" second of Array values -> length values == 1 && field "hasMore" second == Bool False; _ -> False)
+    BS.writeFile (work </> "batch.json") (Command.encoded second)
+    escaped <- Events.withBatch store proof (string (field "cursor" second)) (\view _ -> pure view)
+    revalidateAuthorizedView escaped >>= check "event view ends with the original response loan" . (==Left Command.Unauthenticated)
+    pure (string (field "cursor" second), revision)
+  withInstalled config $ \installed -> withCoordinationStore installed $ \store -> do
+    proof <- authenticateCredential store bearer >>= right
+    ((current,_),revision) <- boundary store proof
+    check "ordinary restart preserves the public event stream alias" (alias current == alias previous)
+    check "ordinary restart still changes the page and execution profile binding" (revision /= pageRevision)
+    resumed <- batch store proof previous
+    BS.writeFile (work </> "resumed.json") (Command.encoded resumed)
+    let refused label expected cursor = do
+          outcome <- try @Command.CommandFailure (void (batch store proof cursor))
+          check label (outcome == Left expected)
+    refused "future event cursor requires resnapshot" Command.CursorExpired (alias current <> ".18446744073709551615")
+    refused "noncanonical event cursor refuses" Command.InvalidRequest (alias current <> ".00")
+    mutate store (execute "DELETE FROM credential_scopes WHERE credential_id='credential_1' AND scope='export'" [])
+    refused "permission change invalidates the old event cursor" Command.ViewExpired current
+    forM_ [1::Int ..25] $ \_ -> runTransaction store (pure ((), replicate 32
+      (Invalidation "service.changed" "/v1/capabilities" "aged_fixture")))
+    ((beforeAging,_),_) <- boundary store proof
+    -- Controlled timestamps test selection, not elapsed aging. The mutation
+    -- helper appends one new, unexpired invalidation after the aged prefix.
+    mutate store (execute "UPDATE invalidations SET recorded_at=unixepoch()-604801" [])
+    ((high,floorCursor),_) <- boundary store proof
+    deleted <- scalar store "SELECT retained_floor FROM service_metadata WHERE singleton=1"
+    check "expired prefix beyond one trim chunk has an exact resume floor"
+      (floorCursor == beforeAging && floorCursor /= alias high <> "." <> deleted)
+    retained <- batch store proof floorCursor
+    check "exact floor preserves the fresh invalidation after the expired prefix"
+      (field "cursor" retained == String high && case field "events" retained of Array values -> length values == 1; _ -> False)
+
+observationChecks :: FilePath -> IO ()
+observationChecks work = do
+  (config,_) <- fixture work
+  withInstalled config $ \installed -> withCoordinationStore installed $ \store -> do
+    seed store
+    proof <- authenticateCredential store bearer >>= right
+    escaped <- newIORef Nothing
+    withStoreReader store $ withAuthorizedCatalogues store proof [Command.Observe] $ \view _ profiles catalogues -> do
+      check "catalogue observation uses one reader and filters current grants"
+        (map (publicId . fst) profiles == ["profile_1"] && all ((=="profile_1") . fst) catalogues)
+      revalidateAuthorizedView view >>= check "catalogue view revalidates without reacquiring configuration" . (==Right ())
+      held <- withStoreConfiguration store (\_ _ -> pure ())
+      check "catalogue response retains original configuration" (held == Left SupervisionUnavailable)
+      writeIORef escaped (Just view)
+    readIORef escaped >>= maybe (error "missing catalogue view") (\view ->
+      revalidateAuthorizedView view >>= check "catalogue view cannot outlive its original loan" . (==Left Command.Unauthenticated))
+    withAuthorizedCatalogues store proof [Command.Submit] $ \_ _ profiles catalogues ->
+      check "catalogue excludes profiles missing requested scope" (null profiles && null catalogues)
+    (association,reference,_) <- sourceRun store
+    let occurrence=OccurrenceId 0; attempt=AttemptId occurrence 0
+        events=[RunStartedV2 "fixture" "scripted" PersonAnswerLocalControl,
+          OccurrenceStarted occurrence "flag" "consult" "model reviewer" "Approve?",
+          AttemptStarted attempt "scripted", AttemptOutput attempt "no",
+          AttemptProgress attempt (ProgressMessage "Public update"), AttemptCompleted attempt "scripted",
+          OccurrenceCompleted occurrence "asked:model reviewer" "no", TraceOrdered [occurrence]]
+        append number event = void (ingestRuntimeEnvelope store association
+          (encodeEnvelope (Envelope 2 (associationNative association) (SeqNo number) "2026-09-03T00:00:00Z" event)))
+        document projection = object (Observation.publicSnapshotFields projection <>
+          ["version" .= (1::Int), "items" .= Observation.publicSnapshotItems projection,
+           "page" .= object ["setId" .= ("set_projection_fixture"::Text),
+             "revision" .= Observation.publicSnapshotRevision projection, "expiresAt" .= ("2999-01-01T00:00:00Z"::Text),
+             "index" .= (0::Int), "totalItems" .= length (Observation.publicSnapshotItems projection), "next" .= Null]])
+    forM_ (zip [0..] events) (uncurry append)
+    withStoreReader store $ do
+      cut <- runRead store (Observation.captureSnapshot proof association)
+      append 8 (RunCompletedV2 1 1 reference)
+      before <- Observation.restoreSnapshot store cut
+      let value=document before
+      check "snapshot bindings retain the captured nonterminal prefix"
+        (field "status" (field "runtime" value)==String "running" && field "result" value==Null && field "billFresh" value==Null)
+      BS.writeFile (work </> "snapshot-before.json") (Command.encoded value)
+    Observation.withRunSnapshot store proof (associationRun association) $ \view projection -> do
+      let value=document projection
+      check "public snapshot carries terminal result and exact bills"
+        (field "status" (field "runtime" value)==String "succeeded" && field "billFresh" value==String "1" && field "billMemo" value==String "1"
+          && field "code" (field "result" value)==String "flag")
+      revalidateAuthorizedView view >>= check "public snapshot remains within response authority" . (==Right ())
+      BS.writeFile (work </> "snapshot-after.json") (Command.encoded value)
+    native3 <- right (stepRunSnapshot (initialRunSnapshot (RunId "protocol3"))
+      (Envelope 3 (RunId "protocol3") (SeqNo 0) "2026-09-03T00:00:00Z" (RunStartedV2 "fixture" "scripted" PersonAnswerLocalControl)))
+    summary <- right (Observation.runtimeSummary (Just native3))
+    check "public runtime summary reports actual protocol3 without downgrade" (field "protocolVersion" summary==Number 3)
+    mutate store (execute "DELETE FROM credential_scopes WHERE credential_id='credential_1'" [])
+    withAuthorizedCatalogues store proof [Command.Observe] $ \_ _ profiles catalogues ->
+      check "catalogue observation uses current scope removal" (null profiles && null catalogues)
 
 compositionChecks :: FilePath -> IO ()
 compositionChecks work = do
@@ -91,6 +286,10 @@ compositionChecks work = do
       revalidateAuthorizedView view >>= check "output view revalidates with sole reader capacity" . (==Right ())
       locked <- withStoreConfiguration store (\_ _ -> pure ())
       check "profile configuration remains held through response" (locked == Left SupervisionUnavailable)
+      withAsync (try @StoreFailure (withStoreReader store (writeIORef entered True))) $ \other -> do
+        outcome <- wait other
+        check "competing reader admission preserves typed configuration contention" (outcome == Left StoreBusy)
+      readIORef entered >>= check "configuration contention refuses before reader work" . not
       files <- try @StoreFailure (withStoreFiles store (\_ -> pure ()))
       check "original file owner remains held through response" (files == Left StoreBusy)
     retained <- readIORef escaped >>= maybe (error "missing response view") pure
@@ -164,7 +363,7 @@ retentionChecks work = do
       -- The response still owns file/configuration scopes. Revocation must be SQL-only.
       confirmed (Admin.RevokeCredential "credential_1")
       awaitAuthorizedView view >>= check "payload-free wakeup needs no response-scope reacquisition" . (==Left Command.Unauthenticated)
-    refused <- try @Command.CommandFailure (withArtifactDownload store proof artifact (\_ _ _ -> error "revoked download callback"))
+    refused <- try @Command.CommandFailure (withArtifactDownload store proof artifact (\_ _ _ -> error "revoked download callback" :: IO ()))
     check "revocation refuses retained artifact download before response" (refused == Left Command.Unauthenticated)
     Commands.readCommand store proof ident >>= check "revocation precedes retained receipt lookup" . (\result -> case result of Left Command.Unauthenticated -> True; _ -> False)
     expiry <- scalar store "SELECT strftime('%Y-%m-%dT%H:%M:%fZ','now','+3 seconds')"
@@ -527,7 +726,7 @@ typedDocuments store proof documents = do
         void (ingestRuntimeEnvelope store bound (encodeEnvelope (Envelope 2 native (SeqNo number) "2026-09-03T00:00:00Z" event)))
       pure bound
   handle <- scalar store "SELECT result_artifact_id FROM runs WHERE id='run_bad_flag'"
-  refused <- try @Command.CommandFailure (withArtifactDownload store proof handle (\_ _ _ -> error "ill-typed response"))
+  refused <- try @Command.CommandFailure (withArtifactDownload store proof handle (\_ _ _ -> error "ill-typed response" :: IO ()))
   check "verified envelope with flag/string mismatch never becomes a response" (refused == Left Command.ResourceUnavailable)
   req <- request store association "bad-flag" "bad-flag.json"
   publication <- try @Command.CommandFailure (submitExport store proof association req)
@@ -645,7 +844,7 @@ outputBounds store proof work = do
 rawChecks :: CoordinationStore -> CredentialProof -> RunAssociation -> Text -> ResultRef -> FilePath -> BS.ByteString -> IO ()
 rawChecks store proof association handle reference directory original = do
   let result=directory </> "result.json"
-      download=withArtifactDownload store proof handle (\_ _ _ -> error "unverified content reached response")
+      download=withArtifactDownload store proof handle (\_ _ _ -> error "unverified content reached response" :: IO ())
   BS.writeFile result "synthetic-token <script>\ESC[31m provider diagnostic"
   failed <- try @Command.CommandFailure download
   check "corrupt content never reaches response or incidental exception" (failed == Left Command.ResourceUnavailable)
@@ -705,7 +904,7 @@ rawChecks store proof association handle reference directory original = do
   release <- newEmptyMVar
   reader <- async (withArtifactDownload store proof handle (\_ _ _ -> putMVar entered () >> takeMVar release))
   takeMVar entered
-  overlapping <- try @StoreFailure (withArtifactDownload store proof handle (\_ _ _ -> error "second response admitted"))
+  overlapping <- try @StoreFailure (withArtifactDownload store proof handle (\_ _ _ -> error "second response admitted" :: IO ()))
   check "single aggregate read loan spans response callback" (overlapping == Left StoreBusy)
   putMVar release ()
   wait reader
@@ -733,11 +932,11 @@ authChecks store proof association source exported exportId = do
   reconciliation <- try @Command.CommandFailure (reconcileExport store proof exportId)
   check "reconciliation needs export scope" (reconciliation == Left Command.Forbidden)
   mutate store $ execute "DELETE FROM credential_scopes WHERE scope='observe'" []
-  denied <- try @Command.CommandFailure (withArtifactDownload store proof source (\_ _ _ -> error "unauthorized response"))
+  denied <- try @Command.CommandFailure (withArtifactDownload store proof source (\_ _ _ -> error "unauthorized response" :: IO ()))
   check "current observe scope checked before content" (denied == Left Command.Forbidden)
   mutate store $ forM_ ["observe","export"] $ \scope -> execute "INSERT INTO credential_scopes VALUES ('credential_1','profile_1',?)" [SQL.SQLText scope]
   mutate store $ execute "UPDATE credentials SET revoked=1" []
-  revoked <- try @Command.CommandFailure (withArtifactDownload store proof source (\_ _ _ -> error "revoked response"))
+  revoked <- try @Command.CommandFailure (withArtifactDownload store proof source (\_ _ _ -> error "revoked response" :: IO ()))
   check "credential revoked before download call is refused" (revoked == Left Command.Unauthenticated)
   mutate store $ execute "UPDATE credentials SET revoked=0" []
 
@@ -777,14 +976,14 @@ exportSubstitution store proof handle root = do
       leaf=exports </> "review-result.json"
   renameFile leaf (leaf<>".retained")
   createSymbolicLink (leaf<>".retained") leaf
-  symlink <- try @Command.CommandFailure (withArtifactDownload store proof handle (\_ _ _ -> error "export symlink response"))
+  symlink <- try @Command.CommandFailure (withArtifactDownload store proof handle (\_ _ _ -> error "export symlink response" :: IO ()))
   check "export leaf symlink cannot produce content" (symlink == Left Command.ResourceUnavailable)
   removeFile leaf
   renameFile (leaf<>".retained") leaf
   renameDirectory exports (exports<>".retained")
   createDirectory exports
   setFileMode exports 0o700
-  failed <- try @Command.CommandFailure (withArtifactDownload store proof handle (\_ _ _ -> error "substituted export response"))
+  failed <- try @Command.CommandFailure (withArtifactDownload store proof handle (\_ _ _ -> error "substituted export response" :: IO ()))
   check "export root replacement cannot produce content" (failed == Left Command.ResourceUnavailable)
   renameDirectory exports (exports<>".replacement")
   renameDirectory (exports<>".retained") exports
@@ -795,7 +994,7 @@ rootSubstitution store proof _ handle root = do
   renameDirectory runs (runs<>".retained")
   createDirectory runs
   setFileMode runs 0o700
-  failed <- try @Command.CommandFailure (withArtifactDownload store proof handle (\_ _ _ -> error "substituted state response"))
+  failed <- try @Command.CommandFailure (withArtifactDownload store proof handle (\_ _ _ -> error "substituted state response" :: IO ()))
   check "state root replacement cannot produce content" (failed == Left Command.ResourceUnavailable)
   renameDirectory runs (runs<>".replacement")
   renameDirectory (runs<>".retained") runs

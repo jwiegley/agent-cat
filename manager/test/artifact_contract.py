@@ -4,7 +4,9 @@ from pathlib import Path
 import hashlib
 import sys
 
-source, work = map(Path, sys.argv[1:])
+if len(sys.argv) not in (3, 4) or (len(sys.argv) == 4 and sys.argv[3] not in ("observation", "events")):
+    raise SystemExit("usage: artifact_contract.py SOURCE WORK [observation|events]")
+source, work = map(Path, sys.argv[1:3])
 sys.path.insert(0, str(source / "test"))
 import manager_contract_probe as frozen
 
@@ -15,6 +17,22 @@ def validate(schema, value):
         "allOf": [{"$ref": "#/components/schemas/" + schema}]}, registry=frozen.Registry(), format_checker=frozen.FORMATS)
     failures = list(validator.iter_errors(value))
     frozen.require(not failures, f"{schema}: invalid generated representation")
+
+def validate_observation(directory):
+    for name in ("snapshot-before.json", "snapshot-after.json"):
+        validate("RunSnapshot", frozen.parse_json((directory / name).read_bytes()))
+
+def validate_events(directory):
+    for name in ("batch.json", "resumed.json"):
+        validate("EventBatch", frozen.parse_json((directory / name).read_bytes()))
+
+if len(sys.argv) == 4:
+    if sys.argv[3] == "events":
+        validate_events(work)
+    else:
+        validate_observation(work)
+    print("PASS actual public observation representations")
+    raise SystemExit(0)
 
 for kind in ("source", "export"):
     metadata = frozen.parse_json((work / f"{kind}-metadata.json").read_bytes())
@@ -38,4 +56,6 @@ assert receipt["bytes"] == "30" and receipt["sha256"] == metadata["sha256"]
 validate("ArtifactMetadata", frozen.parse_json((work / "history/history-artifact.json").read_bytes()))
 for item in frozen.parse_json((work / "history/history.json").read_bytes()):
     validate("Run", item)
-print("PASS frozen Run, OutputItem, ArtifactMetadata, ExportReceipt and exact source/export fixtures")
+validate_observation(work / "observation")
+validate_events(work / "events")
+print("PASS frozen Run, RunSnapshot, OutputItem, ArtifactMetadata, ExportReceipt and exact source/export fixtures")

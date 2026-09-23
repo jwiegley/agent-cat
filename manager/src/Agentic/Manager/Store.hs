@@ -8,17 +8,17 @@
 module Agentic.Manager.Store
   ( CoordinationStore, StoreIdentity (..), StoreFailure (..), Checkpoint (..),
     withCoordinationStore, storeIdentity, checkpointStore, withStoreConfiguration, withStoreCatalogues, withStoreRetentionRoot, validateStoreHistoryBindings, revalidateStoreRetentionRoot, storeInvocations, withStoreFiles, withStoreReader, withStoreAdmission, withStoreWorker, StoreWorker, createStoreWorkerGroup, storeWorkerCleanupConfirmed, requestStoreWorkersStop, awaitStoreWorkersStop, retryStoreCleanup, probeStoreCapabilities,
-    withStoreAdministration,
-    AuthorizationWatch, withStoreAuthorizationWatch, withStoreConfigurationWatch, authorizationWatchCurrent, withAuthorizationObservation, awaitAuthorizationChange,
+    withStoreAdministration, tryWithStoreCatalogues, tryWithStoreFiles,
+    AuthorizationWatch, withStoreAuthorizationWatch, withStoreConfigurationWatch, withStoreCataloguesWatch, withStoreCatalogueContextWatch, withStoreCataloguesBorrowed, authorizationWatchCurrent, withAuthorizationObservation, awaitAuthorizationChange,
     CommitDeadline, withCommitDeadline, withPreparedCommitDeadline, enforceCommitDeadline, enforceAdmissionFence, Transaction, execute, query, refuseTransaction, runTransaction, runRead, StoreAdmission (..), runTransactionWithAdmission, runReadWithAdmission, transactionGeneration,
-    Invalidation (..), EventReadFailure (..), RetainedEvents (..), readRetainedEvents, retainEvents, backupCoordinationStore, restoreCoordinationStore, reservationOccupancy
+    Invalidation (..), EventReadFailure (..), RetainedEvents (..), readRetainedEvents, readRetainedEventsWith, retainEvents, backupCoordinationStore, restoreCoordinationStore, reservationOccupancy
   ) where
 
 import Agentic.Manager.Store.Admission (StoreAdmission (..))
 import qualified Agentic.Manager.Store.Admission as Admission
 import Agentic.Manager.Configuration
-  (InstalledConfiguration, acquireConfigurationStorage, releaseConfigurationStorage, withConfigurationAdministration, withConfigurationSnapshot, withConfigurationCatalogues, withConfiguredRetentionRoot, validateHistoryBindings, revalidateRetentionRoot, configuredInvocations, probeConfiguredCapabilities)
-import Agentic.Manager.Profile (ConfigurationLimits (..), PublicProfile, Diagnostic, Discovery)
+  (InstalledConfiguration, acquireConfigurationStorage, releaseConfigurationStorage, withConfigurationAdministration, withConfigurationSnapshot, withConfigurationCatalogues, withConfigurationCatalogueContext, tryConfigurationCatalogueContext, withConfiguredRetentionRoot, validateHistoryBindings, revalidateRetentionRoot, configuredInvocations, probeConfiguredCapabilities)
+import Agentic.Manager.Profile (ConfigurationLimits (..), PublicProfile, Diagnostic (SupervisionUnavailable), Discovery)
 import Agentic.Manager.Worker.State (WorkerLifecycle, acceptingPreparation)
 import Agentic.Manager.Lease (duplicateLease)
 import Agentic.Manager.Root (validateRootSeparation)
@@ -636,6 +636,13 @@ withStoreAdministration store@(CoordinationStore installed _ _ _ _ _ _ _ _ _ _ _
 withStoreCatalogues :: CoordinationStore -> (ConfigurationLimits -> [PublicProfile] -> [(Text, Discovery)] -> IO a) -> IO (Either Diagnostic a)
 withStoreCatalogues (CoordinationStore installed _ _ _ _ _ _ _ _ _ _ _ _) = withConfigurationCatalogues installed
 
+-- | A proven unentered configuration callback is distinguishable from its failures.
+tryWithStoreCatalogues :: CoordinationStore
+  -> (ConfigurationLimits -> [PublicProfile] -> [(Text,Discovery)] -> IO a)
+  -> IO (Maybe (Either Diagnostic a))
+tryWithStoreCatalogues (CoordinationStore installed _ _ _ _ _ _ _ _ _ _ _ _) action =
+  tryConfigurationCatalogueContext installed $ \limits profiles catalogues _ -> action limits profiles catalogues
+
 -- | One fail-fast file operation, joined by store close. Lock order: file, configuration, database.
 -- The retained root and duplicated lease cannot escape this callback's lifetime.
 storeInvocations :: CoordinationStore -> IO (Either Diagnostic [(Text,FrontendInvocation)])
@@ -654,12 +661,17 @@ withStoreRetentionRoot store@(CoordinationStore installed _ _ _ _ _ _ _ _ _ _ _ 
   withStoreFiles store $ \_ -> withConfiguredRetentionRoot installed path profile action
 
 withStoreFiles :: CoordinationStore -> (PrivateRoot -> IO a) -> IO a
-withStoreFiles store@(CoordinationStore _ root _ _ _ closed _ lease (files,_,_) _ _ _ _) action = mask $ \restore -> do
+withStoreFiles store action = tryWithStoreFiles store action >>= maybe (throwIO StoreBusy) pure
+
+-- | Nothing proves that the file guard was not acquired. Failures from acquisition
+-- or the entered callback propagate unchanged and never become a deferred action.
+tryWithStoreFiles :: CoordinationStore -> (PrivateRoot -> IO a) -> IO (Maybe a)
+tryWithStoreFiles store@(CoordinationStore _ root _ _ _ closed _ lease (files,_,_) _ _ _ _) action = mask $ \restore -> do
   readIORef closed >>= \done -> when done (throwIO StoreClosed)
   acquired <- tryTakeMVar files
   case acquired of
-    Nothing -> throwIO StoreBusy
-    Just () -> (bracket acquire release (\(retained, _) -> restore (action retained))) `finally` putMVar files ()
+    Nothing -> pure Nothing
+    Just () -> (Just <$> bracket acquire release (\(retained, _) -> restore (action retained))) `finally` putMVar files ()
   where
     acquire = admitted store $ bracketOnError (openPrivateSubroot root []) closePrivateRoot $ \retained -> do
       copied <- duplicateLease lease
@@ -674,7 +686,10 @@ withStoreReader store@(CoordinationStore _ _ _ _ _ _ _ _ (_,readers,_) _ _ _ _) 
     count <- readTVar readers
     when (count>=limitGlobalDatabaseReaders limits) (throwSTM StoreLimit)
     writeTVar readers (count+1)
-  either (const(throwIO StoreUnavailable)) pure result
+  case result of
+    Left SupervisionUnavailable -> throwIO StoreBusy
+    Left _ -> throwIO StoreUnavailable
+    Right () -> pure ()
   restore action `finally` atomically(modifyTVar' readers (subtract 1))
 
 -- | A scoped, payload-free reader notification. Registration precedes authorization.
@@ -689,6 +704,33 @@ withStoreConfigurationWatch :: CoordinationStore
 withStoreConfigurationWatch store action = withStoreReader store $
   withStoreConfiguration store $ \limits profiles ->
     withAuthorizationWatch store $ \watch -> action watch limits profiles
+
+-- | One charged catalogue response under the same configuration and watch
+-- lifetime. Catalogue consumers do not reacquire the configuration guard.
+withStoreCataloguesWatch :: CoordinationStore
+  -> (AuthorizationWatch -> ConfigurationLimits -> [PublicProfile] -> [(Text, Discovery)] -> IO a)
+  -> IO (Either Diagnostic a)
+withStoreCataloguesWatch store action = withStoreCatalogueContextWatch store $ \watch limits profiles catalogues _ ->
+  action watch limits profiles catalogues
+
+withStoreCatalogueContextWatch :: CoordinationStore
+  -> (AuthorizationWatch -> ConfigurationLimits -> [PublicProfile] -> [(Text, Discovery)] -> [(Text,FrontendInvocation)] -> IO a)
+  -> IO (Either Diagnostic a)
+withStoreCatalogueContextWatch store@(CoordinationStore installed _ _ _ _ _ _ _ _ _ _ _ _) action =
+  withStoreReader store $ withConfigurationCatalogueContext installed $ \limits profiles catalogues invocations ->
+    withAuthorizationWatch store $ \watch -> action watch limits profiles catalogues invocations
+
+-- | Reborrow configuration under the original watch's already charged reader.
+-- The caller retains that original scope throughout the call. The child watch
+-- expires before configuration is released, including between stream batches.
+withStoreCataloguesBorrowed :: AuthorizationWatch
+  -> (CoordinationStore -> AuthorizationWatch -> ConfigurationLimits -> [PublicProfile] -> [(Text, Discovery)] -> IO a)
+  -> IO (Either Diagnostic a)
+withStoreCataloguesBorrowed original@(AuthorizationWatch store _ _ _) action = do
+  alive <- withAuthorizationObservation original (pure ())
+  unless (alive == Just ()) (throwIO StoreClosed)
+  withStoreCatalogues store $ \limits profiles catalogues ->
+    withAuthorizationWatch store $ \watch -> action store watch limits profiles catalogues
 
 withAuthorizationWatch :: CoordinationStore -> (AuthorizationWatch -> IO a) -> IO a
 withAuthorizationWatch store@(CoordinationStore _ _ _ _ _ _ _ _ (_,_,cell) _ _ _ _) action =
@@ -1102,21 +1144,42 @@ trimEvents db = do
 -- | Maintenance and the retained batch share the same commit. No SQLite transaction
 -- escapes to a consumer. Sixty-four maximum-sized events fit the existing read budget.
 readRetainedEvents :: CoordinationStore -> Text -> Word64 -> IO (Either EventReadFailure RetainedEvents)
-readRetainedEvents store expected after = runTransaction store $ Transaction $ \context@(Context db _ _ _ _ _ _) -> do
+readRetainedEvents store expected after =
+  readRetainedEventsWith store (pure (expected, Just after, ())) (\() -> pure)
+
+-- | Authorization, retained-floor validation and public binding capture share
+-- this one transaction. @Nothing@ selects the current high-water for a snapshot.
+-- No transaction or SQLite cursor escapes the callback, and existing bounds apply.
+readRetainedEventsWith :: NFData a => CoordinationStore
+  -> Transaction (Text, Maybe Word64, b)
+  -> (b -> RetainedEvents -> Transaction a)
+  -> IO (Either EventReadFailure a)
+readRetainedEventsWith store (Transaction prepare) project = runTransaction store $ Transaction $ \context@(Context db _ _ _ _ _ _) -> do
+  (expected, requested, binding) <- prepare context
   _ <- trimEvents db
   let Transaction readBatch = do
-        metadata <- query "SELECT stream_id,retained_floor,sequence FROM service_metadata WHERE singleton=1" []
-        (stream,floorKey,high) <- case metadata of
-          [[SQL.SQLText stream,SQL.SQLText floorText,SQL.SQLText highText]] ->
-            (,,) stream <$> sequenceValue floorText <*> sequenceValue highText
+        metadata <- query "SELECT stream_id,retained_floor,sequence,unixepoch()-604800 FROM service_metadata WHERE singleton=1" []
+        (stream,deletedFloor,high,cutoff) <- case metadata of
+          [[SQL.SQLText stream,SQL.SQLText floorText,SQL.SQLText highText,SQL.SQLInteger cutoff]] -> do
+            floorKey <- sequenceValue floorText
+            high <- sequenceValue highText
+            pure (stream,floorKey,high,cutoff)
+          _ -> refuseTransaction StoreIntegrity
+        -- Physical deletion remains bounded. The replay boundary also excludes
+        -- expired records still waiting for a later maintenance chunk.
+        expiredRows <- query "SELECT sequence FROM invalidations WHERE recorded_at<=? ORDER BY length(sequence) DESC,sequence DESC LIMIT 1" [SQL.SQLInteger cutoff]
+        floorKey <- case expiredRows of
+          [] -> pure deletedFloor
+          [[SQL.SQLText value]] -> max deletedFloor <$> sequenceValue value
           _ -> refuseTransaction StoreIntegrity
         unless (floorKey<=high) (refuseTransaction StoreIntegrity)
+        let after = maybe high id requested
         if stream/=expected then pure (Left WrongEventStream)
         else if after<floorKey then pure (Left EventRetentionLost)
         else if after>high then pure (Left EventCursorAhead)
         else do
           let cursor=SQL.SQLText (T.pack (show after))
-          rows <- query "SELECT sequence,kind,resource_uri,revision,recorded_at<=unixepoch()-604800 FROM invalidations WHERE length(sequence)>length(?) OR (length(sequence)=length(?) AND sequence>?) ORDER BY length(sequence),sequence LIMIT 64" [cursor,cursor,cursor]
+          rows <- query "SELECT sequence,kind,resource_uri,revision,recorded_at<=? FROM invalidations WHERE length(sequence)>length(?) OR (length(sequence)=length(?) AND sequence>?) ORDER BY length(sequence),sequence LIMIT 64" [SQL.SQLInteger cutoff,cursor,cursor,cursor]
           events <- forM rows $ \row -> case row of
             [SQL.SQLText key,SQL.SQLText kind,SQL.SQLText uri,SQL.SQLText revision,SQL.SQLInteger expired] -> do
               number <- sequenceValue key
@@ -1128,7 +1191,12 @@ readRetainedEvents store expected after = runTransaction store $ Transaction $ \
           if any snd events then pure (Left EventRetentionLost)
           else pure (Right (RetainedEvents stream floorKey high (map fst events)))
   result <- readBatch context
-  pure (result,[])
+  projected <- case result of
+    Left failure -> pure (Left failure)
+    Right batch -> do
+      let Transaction render = project binding batch
+      Right <$> render context
+  pure (projected,[])
   where
     sequenceValue value = case reads (T.unpack value) of
       [(number,"")] | (number::Integer)>=0 && number<=18446744073709551615 && T.pack(show number)==value -> pure(fromInteger number)
