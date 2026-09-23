@@ -11,7 +11,7 @@ module Agentic.Manager.Worker
   ) where
 
 import Agentic.Manager.Protocol.Command (CommandFailure)
-import Agentic.Manager.Drafts (verifyFrontendFiles)
+import Agentic.Manager.Drafts (verifyFrontendFilesAt)
 import Agentic.Manager.Profile
   (Discovery, discoveryEntries, discoveryRevision, discoveryProfileRevision, discoverySelection,
    Selection, selectionContext, selectionInvocation, OperatorProfile (..))
@@ -27,6 +27,7 @@ import Agentic.Runtime
    maxFrontendReplyBytes, maxFrameBytes, correlatedProtocolVersion, readNdjsonFrame,
    Envelope (..), RuntimeEvent (..), SeqNo, checkSequence, decodeEnvelopeFor,
    Control, encodeControlFor, decodeControlFor)
+import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (async, withAsync, waitCatch, race, concurrently_)
 import Control.Concurrent.MVar (MVar, newMVar, tryTakeMVar, putMVar)
 import Control.Concurrent.STM
@@ -136,8 +137,8 @@ withStartingFrontendWorker store profile revision setup action = mask $ \restore
         Left (StopFailed failure) -> throwIO failure
         Right value -> pure value
     startup worker owner root = do
-      initial <- checkedSelection store profile revision setup
-      files <- try @CommandFailure (try @IOException (verifyFrontendFiles store profile setup))
+      initial <- availableCatalogue (\_ _ catalogues -> selectCurrent profile revision setup catalogues)
+      files <- try @CommandFailure (try @IOException availableFiles)
       case files of
         Right (Right ()) -> pure ()
         _ -> throwIO WorkerConfiguration
@@ -170,8 +171,8 @@ withStartingFrontendWorker store profile revision setup action = mask $ \restore
         exit <- waitProcessGroup group
         unless (exit == ExitSuccess) (throwIO WorkerUnexpectedExit)
         pure exit
-    launch worker owner initial = do
-      result <- withStoreCatalogues store $ \_ _ catalogues -> do
+    launch worker owner initial =
+      availableCatalogue $ \_ _ catalogues -> do
         selected <- selectCurrent profile revision setup catalogues
         unless (discoveryRevision (snd selected) == discoveryRevision (snd initial)) (throwIO WorkerConfiguration)
         let policy = selectionContext (fst selected)
@@ -181,7 +182,17 @@ withStartingFrontendWorker store profile revision setup action = mask $ \restore
         group <- createStoreWorkerGroup owner command
         atomically(writeTVar(nativeProcess worker)(Just group))
         pure (group, selected)
-      either (const (throwIO WorkerConfiguration)) pure result
+    -- The original thirty-second preparation deadline and stop race still own
+    -- these waits. Only callbacks that provably never entered are postponed.
+    -- An entered launch, verification or SQL failure is never replayed.
+    availableCatalogue callback = do
+      result <- tryWithStoreCatalogues store callback
+      case result of
+        Nothing -> threadDelay 10000 >> availableCatalogue callback
+        Just value -> either (const (throwIO WorkerConfiguration)) pure value
+    availableFiles = do
+      result <- tryWithStoreFiles store (\root -> verifyFrontendFilesAt store root profile setup)
+      maybe (threadDelay 10000 >> availableFiles) pure result
 
 preparationDeadline :: FrontendWorker -> IO ()
 preparationDeadline worker = do
@@ -190,11 +201,6 @@ preparationDeadline worker = do
   case completed of
     Just () -> pure ()
     Nothing -> atomically (void (tryPutTMVar (stopReason worker) (StopFailed WorkerStartupTimeout)))
-
-checkedSelection :: CoordinationStore -> Text -> Text -> FrontendSetupRequest -> IO (Selection, Discovery)
-checkedSelection store profile revision setup = do
-  result <- withStoreCatalogues store $ \_ _ catalogues -> selectCurrent profile revision setup catalogues
-  either (const (throwIO WorkerConfiguration)) pure result
 
 selectCurrent :: Text -> Text -> FrontendSetupRequest -> [(Text, Discovery)] -> IO (Selection, Discovery)
 selectCurrent profile revision setup catalogues = do

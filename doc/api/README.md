@@ -1,7 +1,7 @@
 # Workflow-manager protocol version 1
 
 This directory specifies the manager contract established by WM-003. The
-manager service and service-mode clients are not yet implemented. The
+service and service-mode clients implement only part of this contract. The
 [approved design](../research/workflow-manager.md) and
 [implementation plan](../research/workflow-manager-implementation-plan.md)
 remain authoritative for execution meaning, ownership, and release gates.

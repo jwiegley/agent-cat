@@ -264,8 +264,11 @@ where
 
 import qualified Agentic.Cli.Frontend as Frontend
 import qualified Agentic.Manager as Manager
+import Control.Concurrent (myThreadId, throwTo)
 import Control.Exception
-  ( Handler (..),
+  ( AsyncException (UserInterrupt),
+    bracket,
+    Handler (..),
     IOException,
     SomeAsyncException,
     SomeException,
@@ -329,6 +332,7 @@ import System.Posix.IO
     openFd,
   )
 import System.Posix.Types (Fd (..))
+import qualified System.Posix.Signals as Signals
 import Text.Read (readMaybe)
 
 import Agentic.Acp
@@ -861,7 +865,34 @@ cliMainWithBroker broker reg = do
   args <- map T.pack <$> getArgs
   case args of
     ["--manager", "admin", "--config", path] -> runLocalAdmin (loadManagerConfiguration reg) (T.unpack path)
+    ["--manager", "serve", "--config", path] -> managerServeCmd reg (T.unpack path)
     _ -> runOrdinaryCommand broker reg args
+
+managerServeCmd :: Registry -> FilePath -> IO ()
+managerServeCmd reg path = do
+  unless (isAbsolute path) (die reg 1 "manager --config requires an absolute file")
+  withManagerSignals (do
+    configuration <- loadManagerConfiguration reg path >>= either throwIO pure
+    Manager.serveManager configuration)
+    `catches`
+      [ Handler $ \(_ :: Manager.Diagnostic) ->
+          die reg 1 "manager configuration or HTTPS listener is unavailable",
+        Handler $ \(failure :: SomeException) ->
+          case fromException failure :: Maybe SomeAsyncException of
+            Just asynchronous -> throwIO asynchronous
+            Nothing -> die reg 2 "manager service is unavailable"
+      ]
+
+-- Interrupt the foreground owner so its original brackets perform cleanup.
+-- Signals do not reconstruct workers from process identifiers.
+withManagerSignals :: IO a -> IO a
+withManagerSignals action = do
+  owner <- myThreadId
+  let install signal = Signals.installHandler signal
+        (Signals.CatchOnce (throwTo owner UserInterrupt)) Nothing
+      restore signal previous = void (Signals.installHandler signal previous Nothing)
+  bracket (install Signals.softwareTermination) (restore Signals.softwareTermination) $ \_ ->
+    bracket (install Signals.keyboardSignal) (restore Signals.keyboardSignal) $ \_ -> action
 
 runOrdinaryCommand :: DataBroker -> Registry -> [Text] -> IO ()
 runOrdinaryCommand broker reg args =

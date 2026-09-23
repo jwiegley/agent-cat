@@ -8,7 +8,7 @@ import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (AsyncCancelled (..), async, asyncThreadId, cancel, wait, waitCatch, withAsync)
 import Control.Exception (IOException, fromException, try)
 import Control.Monad (forM_, unless, void)
-import Data.Aeson (Value (Object), eitherDecodeStrict', encode, object, toJSON, (.=))
+import Data.Aeson (Value (Object, String), eitherDecodeStrict', encode, object, toJSON, (.=))
 import qualified Data.Aeson.KeyMap as KM
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as BL
@@ -72,10 +72,13 @@ fixture mode observations replies command = do
     "malformed" -> BS.hPut stdout "SYNTHETIC_PRIVATE_DECODER_DATA"
     "dual" -> BS.hPut stderr (BS.replicate 70000 120) >> reply command
     "normal" -> reply command
+    "help-malformed" -> case command of ["help",_] -> BS.hPut stdout (BS.singleton 255); _ -> reply command
+    "help-overflow" -> case command of ["help",_] -> BS.hPut stdout (BS.replicate 70000 120); _ -> reply command
     "gated" -> do
       let phase = case command of
             ["frontend", "--capabilities"] -> "capabilities"
             ["list", "--json", "--descriptor-version", "3"] -> "catalogue"
+            ["help",_] -> "help"
             _ -> error "unexpected gated query"
           gate = observations <> "." <> phase
       BS.writeFile (gate <> ".ready") BS.empty
@@ -85,6 +88,7 @@ fixture mode observations replies command = do
   where
     reply ["frontend", "--capabilities"] = BS.readFile (replies </> "capabilities.json") >>= BS.hPut stdout
     reply ["list", "--json", "--descriptor-version", "3"] = BS.readFile (replies </> "catalogue.json") >>= BS.hPut stdout
+    reply ["help",_] = BS.hPut stdout "Declared workflow help.\n"
     reply _ = error "unexpected query argv"
 
 checks :: FilePath -> FilePath -> IO ()
@@ -143,14 +147,24 @@ checks root source = do
   discovery <- probe registry row >>= right
   check "actual identity distinct from configured wrapper" (discoveryServer discovery == server)
   check "real Runtime descriptor roundtrip" (discoveryWorkflows discovery == [descriptor])
+  case discoveryPublicWorkflows discovery of
+    [(ident,Object fields)] -> do
+      check "public workflow identity and actual help retained"
+        (ident == workflowIdentity "profile_main" (workflowName descriptor) && KM.lookup "help" fields == Just (String "Declared workflow help.\n"))
+      check "public catalogue uses exact decimal size" (KM.lookup "size" fields == Just (String (T.pack (show (workflowSize descriptor)))))
+      case KM.lookup "capabilities" fields of
+        Just (Object capabilities) -> check "private control descriptor is not public" (not (KM.member "controlFd" capabilities))
+        _ -> error "missing public capabilities"
+    _ -> error "missing public workflow"
   selected <- select registry row >>= right
   let context = selectionContext selected
   check "invocation separate from server" (selectionInvocation selected == FrontendInvocation 1 "configured-wrapper" (T.pack executable) (map T.pack (prefix "normal")))
   check "private target preserved without parsing" (operatorTargetArguments context == ["--scripted"])
   observed <- readObservations >>= mapM (right . (eitherDecodeStrict' :: BS.ByteString -> Either String Value)) . filter (not . BS.null) . BS.split 10
   let expected command = object ["args" .= (prefix "normal" <> command), "cwd" .= workspace, "env" .= sort environment]
-  check "exact ordered prefix/cwd/explicit env on both subprocesses"
-    (observed == [expected ["frontend", "--capabilities"], expected ["list", "--json", "--descriptor-version", "3"]])
+  check "exact ordered prefix/cwd/explicit env on all discovery subprocesses"
+    (observed == [expected ["frontend", "--capabilities"], expected ["list", "--json", "--descriptor-version", "3"],
+                  expected ["help", T.unpack (workflowName descriptor)]])
   views <- publicProfiles registry
   golden <- BS.readFile (source </> "test/fixtures/manager/v1/valid/profiles.json") >>= right . (eitherDecodeStrict' :: BS.ByteString -> Either String Value)
   let frozenProfile = case golden of
@@ -223,6 +237,9 @@ checks root source = do
       status <- threadStatus (asyncThreadId reloading)
       check "reload remains blocked through second query" (status == ThreadBlocked BlockedOnMVar)
       BS.writeFile (observations <> ".catalogue.go") BS.empty
+      await "help query reached gate" (doesFileExist (observations <> ".help.ready"))
+      threadStatus (asyncThreadId reloading) >>= check "reload remains blocked through help query" . (== ThreadBlocked BlockedOnMVar)
+      BS.writeFile (observations <> ".help.go") BS.empty
       void (wait probing >>= right)
       replaced <- wait reloading
       check "serialized reload changes revision" (publicRevision replaced /= publicRevision gated)
@@ -275,7 +292,8 @@ checks root source = do
   putStrLn "PASS capabilities: 22 native advertisement omissions, 11 descriptor deficiencies, version mismatch, native codec failures"
 
   forM_ [("overflow-out", OutputOverflow), ("overflow-err", OutputOverflow),
-         ("failure", ProcessFailure), ("malformed", InvalidReply)] $ \(mode, failure) -> do
+         ("failure", ProcessFailure), ("malformed", InvalidReply),
+         ("help-malformed", InvalidReply), ("help-overflow", OutputOverflow)] $ \(mode, failure) -> do
     bad <- rowOf registry (definition mode)
     probe registry bad >>= expect ("bounded/safe " <> mode) failure
     assertReaped

@@ -8,7 +8,7 @@
 module Agentic.Manager.Commands
   ( CommandRequest (..), Mutation (..), Intent (..), CommandReferences (..), noReferences,
     Submission, submissionReceipt, submissionReplayed, submissionTicket, submissionReferences, submissionEnqueue, AcceptedEnqueue, acceptedRequest, checkAcceptedEnqueue, currentAcceptedEnqueues, restoreAcceptedEnqueues,
-    CommandAttempt, newCommandAttempt, newControlCommandAttempt, submitCommandAttempt, submitCommandAttemptWithDeadline, reconcileCommandAttempt, reconcileCommandAttemptWithAdmission, DispatchTicket, dispatchCommandId, submitCommand, submitConfiguredCommand, submitStreamedCommand, commandPreflight, commandPreflightVersion, readCommand,
+    CommandAttempt, newCommandAttempt, newControlCommandAttempt, submitCommandAttempt, submitCommandAttemptWithDeadline, reconcileCommandAttempt, reconcileCommandAttemptWithAdmission, DispatchTicket, dispatchCommandId, submitCommand, submitConfiguredCommand, submitStreamedCommand, commandPreflight, commandPreflightVersion, readCommand, withCommand,
     BodyBinding, measureCommandBody, bodyBindingBytes, bodyBindingSha256,
     reserveDispatch, reserveDispatchWithAdmission, attemptDispatch, attemptDispatchWithAdmission, attemptControlDispatch, discardControlPayload, discardControlAttempt, recordAcknowledgement, recordEffect, recordEffectWith, recordEffectWithAdmission, recordUnresolved, recordRefusal,
     recordRuntimeObservation, recordExportObservation, retireReceipt, retainReceipts, requestInactive, commandCapacity, tombstoneCapacity
@@ -412,20 +412,34 @@ readCommand :: CoordinationStore -> CredentialProof -> Text -> IO (Either Comman
 readCommand store proof ident
   | not (validId ident) = pure (Left InvalidRequest)
   | otherwise = configured store proof $ \_ profiles _ -> transaction store $ do
-      _ <- checked =<< lift (currentClient proof)
-      let allowed = map publicId profiles
-      metadata <- sql
-        "SELECT c.profile_id,c.operation FROM commands c WHERE c.id=? AND EXISTS(SELECT 1 FROM credential_scopes s WHERE s.credential_id=? AND s.profile_id=c.profile_id AND s.scope='observe')"
-        [text ident, text (credentialRateKey proof)]
-      case metadata of
-        [[SQL.SQLText profile, SQL.SQLText operation]] -> do
-          require (profile `elem` allowed) Forbidden
-          op <- maybe (throwE StorageUnavailable) pure (parseOperation operation)
-          _ <- checked =<< lift (authorizeProfile proof profile (Observe : requiredScopes op))
-          receipt <- currentReceipt ident
-          require (receiptProfile receipt == profile && receiptOperation receipt == op) StorageUnavailable
-          pure (receipt, [])
-        _ -> throwE Forbidden
+      receipt <- commandProjection proof profiles ident
+      pure (receipt, [])
+
+withCommand :: CoordinationStore -> CredentialProof -> Text
+  -> (AuthorizedView -> CommandReceipt -> IO a) -> IO a
+withCommand store proof ident respond = do
+  unless (validId ident) (throwIO InvalidRequest)
+  withAuthorizedCatalogues store proof [Observe] $ \view _ visible _ -> do
+    receipt <- runRead store (runExceptT (commandProjection proof (map fst visible) ident))
+      >>= either throwIO pure
+    revalidateAuthorizedView view >>= either throwIO pure
+    respond view receipt
+
+commandProjection :: CredentialProof -> [PublicProfile] -> Text -> CommandTx CommandReceipt
+commandProjection proof profiles ident = do
+  _ <- checked =<< lift (currentClient proof)
+  metadata <- sql
+    "SELECT c.profile_id,c.operation FROM commands c WHERE c.id=? AND EXISTS(SELECT 1 FROM credential_scopes s WHERE s.credential_id=? AND s.profile_id=c.profile_id AND s.scope='observe')"
+    [text ident, text (credentialRateKey proof)]
+  case metadata of
+    [[SQL.SQLText profile, SQL.SQLText operation]] -> do
+      require (profile `elem` map publicId profiles) Forbidden
+      op <- maybe (throwE StorageUnavailable) pure (parseOperation operation)
+      _ <- checked =<< lift (authorizeProfile proof profile (Observe : requiredScopes op))
+      receipt <- currentReceipt ident
+      require (receiptProfile receipt == profile && receiptOperation receipt == op) StorageUnavailable
+      pure receipt
+    _ -> throwE Forbidden
 
 reserveDispatch :: DispatchTicket -> IO (Either CommandFailure ())
 reserveDispatch = reserveDispatchWithAdmission FailFast

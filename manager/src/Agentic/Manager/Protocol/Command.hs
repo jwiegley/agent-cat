@@ -77,7 +77,7 @@ data CommandFailure = Unauthenticated | Forbidden | AuthorityChanged | InvalidPr
   | PreconditionRequired | StaleRevision | StateConflict | IdempotencyConflict | ReceiptExpired
   | StorageQuota | RateLimit | StorageUnavailable | ResourceUnavailable | InvalidRequest
   | UnsupportedMediaType | OwnershipUnavailable | SizeLimit | InvalidInput | ViewTooLarge
-  | DecisionNotHead | UnsupportedOperation
+  | DecisionNotHead | UnsupportedOperation | UnsupportedVersion | ViewExpired | CursorExpired
   deriving (Eq, Show, Generic, NFData)
 instance Exception CommandFailure
 
@@ -85,6 +85,9 @@ failureCode :: CommandFailure -> Text
 failureCode failure = case failure of
   DecisionNotHead -> "decision-not-head"
   UnsupportedOperation -> "unsupported-operation"
+  UnsupportedVersion -> "unsupported-version"
+  ViewExpired -> "view-expired"
+  CursorExpired -> "cursor-expired"
   InvalidInput -> "invalid-input"
   ViewTooLarge -> "view-too-large"
   SizeLimit -> "size-limit"
@@ -119,6 +122,8 @@ failureStatus failure = case failure of
   IdempotencyConflict -> 409
   OwnershipUnavailable -> 409
   ReceiptExpired -> 410
+  ViewExpired -> 410
+  CursorExpired -> 410
   StaleRevision -> 412
   UnsupportedMediaType -> 415
   PreconditionRequired -> 428

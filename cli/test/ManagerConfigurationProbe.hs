@@ -6,7 +6,7 @@ import qualified Agentic.Cli as Cli
 import Agentic.Manager
 import Agentic.Runtime
   ( PersonAnswering (..), FrontendServer (..), frontendCapabilities,
-    decodeWorkflowDescriptor )
+    decodeWorkflowDescriptor, workflowName )
 import Control.Exception (bracket, fromException)
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (AsyncCancelled (..), withAsync, asyncThreadId, cancel, wait, waitCatch)
@@ -298,7 +298,8 @@ checks work source fixture = do
   records <- BS.readFile observations >>= mapM (right . (eitherDecodeStrict' :: BS.ByteString -> Either String Value)) . filter (not . BS.null) . BS.split 10
   let expected command = object ["args" .= (prefix <> command), "cwd" .= workspace, "env" .= sort environment]
   check "real fixture sees exact prefix/cwd/explicit environment" (records ==
-    [expected ["frontend", "--capabilities"], expected ["list", "--json", "--descriptor-version", "3"]])
+    [expected ["frontend", "--capabilities"], expected ["list", "--json", "--descriptor-version", "3"],
+     expected ["help", T.unpack (workflowName descriptor)]])
   before <- snapshot installed
   markerBytes <- BS.readFile marker
   markerStatus <- getSymbolicLinkStatus marker
@@ -362,13 +363,16 @@ checks work source fixture = do
         await "catalogue query gate reached" (doesFileExist (gatedObservations <> ".catalogue.ready"))
         threadStatus (asyncThreadId reload) >>= check "reload cannot interleave between discovery queries" . (== ThreadBlocked BlockedOnMVar)
         BS.writeFile (gatedObservations <> ".catalogue.go") BS.empty
+        await "help query gate reached" (doesFileExist (gatedObservations <> ".help.ready"))
+        threadStatus (asyncThreadId reload) >>= check "reload cannot interleave with help query" . (== ThreadBlocked BlockedOnMVar)
+        BS.writeFile (gatedObservations <> ".help.go") BS.empty
         void (wait query >>= right)
         changed <- wait reload >>= right
         (viewLimits, viewProfiles) <- wait viewer >>= right
         check "observer sees coherent limits and revision snapshot" $
           (viewProfiles == changed && limitExecutionReservations viewLimits == 2)
           || (map publicRevision viewProfiles == [publicRevision gatedRow] && viewLimits == limits)
-  putStrLn "PASS concurrent configuration reload: probe excludes reload through both queries, observers receive coherent limits/revisions"
+  putStrLn "PASS concurrent configuration reload: probe excludes reload through all discovery queries, observers receive coherent limits/revisions"
   stable <- snapshot installed
   renameDirectory retention (retention <> ".original")
   createSymbolicLink manager retention

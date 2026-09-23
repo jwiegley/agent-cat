@@ -6,7 +6,7 @@
 
 -- | Durable input representations and verified captures, never workflow execution.
 module Agentic.Manager.Drafts
-  ( reconcileDrafts, createDraft, createLineageDraft, withLineageRequests, checkLineageParent, changeDraftInput, changeDraftInputGuarded, InputTransition (..), RequestState, requestView, requestOwner, requestState, currentVersion, editable, checkDraftCapacity, uploadCapture, collectCaptures, readDraft, assembleDraft, DraftAssembly, assemblyRequest, assemblyRevision, assemblyProfile, assemblyProfileRevision, assemblySetup, assemblyFrame, assemblyInputSummaries, assemblySelection, assemblyParentBinding, validateAssemblyParent, assembleDraftSnapshot, assembleAcceptedDraft, structuralReadiness, verifyFrontendFiles ) where
+  ( reconcileDrafts, createDraft, createLineageDraft, withLineageRequests, checkLineageParent, changeDraftInput, changeDraftInputGuarded, InputTransition (..), RequestState, requestView, requestOwner, requestState, currentVersion, editable, checkDraftCapacity, uploadCapture, collectCaptures, readDraft, readDraftAt, withDraft, assembleDraft, DraftAssembly, assemblyRequest, assemblyRevision, assemblyProfile, assemblyProfileRevision, assemblySetup, assemblyFrame, assemblyInputSummaries, assemblySelection, assemblyParentBinding, validateAssemblyParent, assembleDraftSnapshot, assembleAcceptedDraft, structuralReadiness, verifyFrontendFiles, verifyFrontendFilesAt ) where
 
 import Agentic.Manager.Authorization
 import Agentic.Manager.Commands
@@ -27,6 +27,7 @@ import Agentic.Runtime
    RunId (..), mkRunId, openPrivateSubroot, closePrivateRoot, privateRootIdentity,
    readRunRecordWithEnvelopesAt, revalidateLineageParentAt, readFrontendInputBytesBoundedAt,
    retainLineageInvocation, encodeFrontendManifest, FrontendPrepared (..))
+import Control.Concurrent (threadDelay)
 import Control.DeepSeq (NFData)
 import Control.Exception (IOException, SomeException, bracket, evaluate, throwIO, try)
 import Control.Monad (forM, forM_, unless, when, void)
@@ -489,8 +490,21 @@ collectCaptures store after = draftIO $ withStoreFiles store $ \root -> timed 50
       releaseUpload store ident
   pure(case reverse candidates of (ident,_,_,_,_,_):_ -> Just ident; _ -> Nothing)
 
+withDraft :: CoordinationStore -> CredentialProof -> Text
+  -> (AuthorizedView -> DraftView -> IO a) -> IO a
+withDraft store proof ident respond = do
+  original <- runRead store (requestState proof ident [Observe])
+  withStoreFiles store $ \root ->
+    withAuthorizedResponse store proof (draftProfile (requestView original)) [Observe] $ \view -> do
+      draft <- readDraftAt store root proof ident
+      revalidateAuthorizedView view >>= requireEither
+      respond view draft
+
 readDraft :: CoordinationStore -> CredentialProof -> Text -> IO (Either CommandFailure DraftView)
-readDraft store proof ident = draftIO $ withStoreFiles store $ \root -> timed 5000000 $ do
+readDraft store proof ident = draftIO $ withStoreFiles store $ \root -> readDraftAt store root proof ident
+
+readDraftAt :: CoordinationStore -> PrivateRoot -> CredentialProof -> Text -> IO DraftView
+readDraftAt store root proof ident = timed 5000000 $ do
   snapshot@(RequestState view _ _) <- runRead store (requestState proof ident [Observe])
   inputs <- runRead store (inputStates ident)
   lower <- pure (sum [n | InputState _ _ (Just "literal") (Just n) _ _ _ _ <- inputs])
@@ -568,10 +582,17 @@ assembleDraftSnapshot :: CoordinationStore -> CredentialProof -> Text -> IO (Eit
 assembleDraftSnapshot store proof = assembleWith store (ClientAccess proof)
 
 assembleAcceptedDraft :: CoordinationStore -> AcceptedEnqueue -> IO (Either CommandFailure DraftAssembly)
-assembleAcceptedDraft store permit = assembleWith store (AcceptedAccess permit) (acceptedRequest permit)
+assembleAcceptedDraft store permit = draftIO $ timed 5000000 available
+  where
+    available = do
+      result <- tryWithStoreFiles store (assembleAt store (AcceptedAccess permit) (acceptedRequest permit))
+      maybe (threadDelay 10000 >> available) pure result
 
 assembleWith :: CoordinationStore -> DraftAccess -> Text -> IO (Either CommandFailure DraftAssembly)
-assembleWith store access ident = draftIO $ withStoreFiles store $ \root -> timed 5000000 $ do
+assembleWith store access ident = draftIO $ withStoreFiles store $ \root -> timed 5000000 (assembleAt store access ident root)
+
+assembleAt :: CoordinationStore -> DraftAccess -> Text -> PrivateRoot -> IO DraftAssembly
+assembleAt store access ident root = do
   snapshot@(RequestState view _ _) <- runRead store(requestStateWith access ident [Submit])
   (catalogue,descriptor) <- currentCatalogue store access view
   assembleSnapshot store access root snapshot catalogue descriptor
@@ -640,7 +661,11 @@ assembleRoot store access root snapshot@(RequestState view _ _) catalogue descri
 -- | Worker-side revalidation of File sources against actual retained capture records.
 -- Literal/Transport sources carry values, not paths. This grants no approval authority.
 verifyFrontendFiles :: CoordinationStore -> Text -> FrontendSetupRequest -> IO ()
-verifyFrontendFiles store profile setup = withStoreFiles store $ \root -> timed 5000000 $ do
+verifyFrontendFiles store profile setup = withStoreFiles store $ \root -> verifyFrontendFilesAt store root profile setup
+
+-- | Revalidation under the original Store file loan, never an unowned path.
+verifyFrontendFilesAt :: CoordinationStore -> PrivateRoot -> Text -> FrontendSetupRequest -> IO ()
+verifyFrontendFilesAt store root profile setup = timed 5000000 $ do
   let (directory, sources) = case setup of
         RootSetup request -> (setupDirectory request, map snd (setupInputs request))
         DerivedSetup path _ _ _ _ _ -> (path, [])
@@ -806,13 +831,24 @@ selectCatalogue catalogues profile policy workflow revision = do
   descriptor<-maybe(Left ResourceUnavailable)Right(lookup workflow (discoveryEntries catalogue))
   pure(catalogue,descriptor)
 currentCatalogue :: CoordinationStore -> DraftAccess -> DraftView -> IO (Discovery,WorkflowDescriptor)
-currentCatalogue store access view = do
-  result<-withStoreCatalogues store $ \_ _ catalogues -> pure $ do
-    case access of
-      RestartAccess _ -> maybe(Left ResourceUnavailable)(const(Right()))(lookup(draftProfile view)catalogues)
-      _ -> Right()
-    selectCatalogue catalogues (draftProfile view) (draftProfileRevision view) (draftWorkflow view) (draftDescriptorRevision view)
-  either(const(throwIO StorageUnavailable)) requireEither result
+currentCatalogue store access view = case access of
+  AcceptedAccess _ -> accepted
+  _ -> withStoreCatalogues store observe >>= resolved
+  where
+    observe _ _ catalogues = pure $ do
+      case access of
+        RestartAccess _ -> maybe (Left ResourceUnavailable) (const (Right ())) (lookup (draftProfile view) catalogues)
+        _ -> Right ()
+      selectCatalogue catalogues (draftProfile view) (draftProfileRevision view) (draftWorkflow view) (draftDescriptorRevision view)
+    resolved = either (const (throwIO StorageUnavailable)) requireEither
+    -- The original accepted assembly's five-second read budget bounds this wait.
+    -- Nothing proves no lookup ran. Entered failures are never replayed, and no
+    -- input read, directory publication or preparation operation is repeated.
+    accepted = do
+      attempted <- tryWithStoreCatalogues store observe
+      case attempted of
+        Nothing -> threadDelay 10000 >> accepted
+        Just result -> resolved result
 
 persistErrors :: CoordinationStore -> CredentialProof -> RequestState -> [InputError] -> DraftView -> IO DraftView
 persistErrors store proof snapshot@(RequestState view _ previous) errors result

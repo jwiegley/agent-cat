@@ -3,16 +3,16 @@
 
 -- | Authorized observations and exclusive exports of retained Runtime artifacts.
 module Agentic.Manager.Artifacts
-  ( withArtifactDownload, withRunOutputs, withRunExports, submitExport, readExport, reconcileExport
+  ( withArtifactDownload, withRunOutputs, withRunOutputsSource, withRunExports, submitExport, readExport, reconcileExport
   ) where
 
 import Agentic.Manager.Authorization
 import qualified Agentic.Manager.Commands as Commands
-import Agentic.Manager.Profile (publicId, publicRevision)
+import Agentic.Manager.Profile (ConfigurationLimits, publicId, publicRevision)
 import qualified Agentic.Manager.Protocol.Command as Command
 import Agentic.Manager.Protocol.Json (decodeStrictValue)
 import Agentic.Manager.Protocol.Artifact (validExportDocument, validExportName)
-import Agentic.Manager.State (RunAssociation (..), authorizeObservation, withProfileProjection)
+import Agentic.Manager.State (RunAssociation (..), authorizeObservation, withProfileProjectionSource)
 import Agentic.Manager.Store
 import Agentic.Runtime
 import Control.Exception (IOException, SomeException, bracket, fromException, throwIO, try)
@@ -104,7 +104,7 @@ metadata ident run kind code bytes = object
 -- | The callback must finish sending before returning and must not retain bytes.
 -- Store's single file loan covers capture, verification, authorization and response.
 -- At most one <=64MiB artifact is served per Store, with no unaccounted response queue.
-withArtifactDownload :: CoordinationStore -> CredentialProof -> Text -> (AuthorizedView -> Value -> BS.ByteString -> IO ()) -> IO ()
+withArtifactDownload :: CoordinationStore -> CredentialProof -> Text -> (AuthorizedView -> Value -> BS.ByteString -> IO a) -> IO a
 withArtifactDownload store proof ident respond = do
   legacy <- runRead store $ do
     _ <- currentClient proof >>= either refuseTransaction pure
@@ -133,7 +133,7 @@ withArtifactDownload store proof ident respond = do
           respond view (metadata ident run "source-result" (resultArtifactCode ref) bytes) bytes
       either (const (throwIO Command.ResourceUnavailable)) pure result
 
-withManagedArtifactDownload :: CoordinationStore -> CredentialProof -> Text -> (AuthorizedView -> Value -> BS.ByteString -> IO ()) -> IO ()
+withManagedArtifactDownload :: CoordinationStore -> CredentialProof -> Text -> (AuthorizedView -> Value -> BS.ByteString -> IO a) -> IO a
 withManagedArtifactDownload store proof ident respond = withStoreFiles store $ \root -> do
   ArtifactBinding association _ code reference <- binding store proof ident
   withAuthorizedResponse store proof (associationProfile association) [Command.Observe] $ \view -> do
@@ -156,8 +156,20 @@ withManagedArtifactDownload store proof ident respond = withStoreFiles store $ \
 -- | Bounded output items, not a page-set service. Oversized views refuse rather
 -- than pretending that a truncated set is a complete page.
 withRunOutputs :: CoordinationStore -> CredentialProof -> RunAssociation -> (AuthorizedView -> [Value] -> IO ()) -> IO ()
-withRunOutputs store proof association respond = withStoreFiles store $ \root ->
-  withProfileProjection store proof association $ \view snapshot -> do
+withRunOutputs store proof association respond =
+  withRunOutputsSource store proof association $ \view _ materialize -> materialize >>= respond view
+
+withRunOutputsSource :: CoordinationStore -> CredentialProof -> RunAssociation
+  -> (AuthorizedView -> ConfigurationLimits -> IO [Value] -> IO a) -> IO a
+withRunOutputsSource store proof association action = withStoreFiles store $ \root ->
+  withProfileProjectionSource store proof association $ \view limits readSnapshot ->
+    action view limits $ do
+      snapshot <- readSnapshot
+      items <- materialize root snapshot
+      revalidateAuthorizedView view >>= either throwIO pure
+      pure items
+  where
+  materialize root snapshot = do
     artifact <- runRead store $ do
       authorizeObservation proof association
       rows <- query "SELECT result_artifact_id FROM runs WHERE id=?" [text (associationRun association)]
@@ -189,7 +201,7 @@ withRunOutputs store proof association respond = withStoreFiles store $ \root ->
         items = outputs <> diagnostics <> [object ["kind" .= ("result"::Text),"verification" .= fst result,"artifact" .= snd result]]
     when (length items > 256 || BS.length (Command.encoded items) > 1048576) (throwIO Command.ViewTooLarge)
     runRead store (authorizeObservation proof association)
-    respond view items
+    pure items
 
 contentRead :: IO a -> IO a
 contentRead action = try @SomeException action >>= either (\failure -> verificationFailure failure >> throwIO Command.ResourceUnavailable) pure
