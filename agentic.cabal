@@ -178,6 +178,7 @@ library
     Agentic.DSL.Plan
     Agentic.Engine
     Agentic.Manager
+    Agentic.Manager.Client
     Agentic.Plan
     Agentic.Planning
     Agentic.Route
@@ -393,6 +394,13 @@ executable schema-probe
     , agentic:bisim-support
     , agentic:examples
     , agentic:verification
+
+executable manager-client-check
+  import:          settings
+  hs-source-dirs:  manager/test
+  main-is:         ClientCheck.hs
+  build-depends:   agentic
+  ghc-options:     -threaded -rtsopts
 
 executable manager-profile-probe
   import:          settings
