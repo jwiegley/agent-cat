@@ -14,6 +14,7 @@ build-type:      Simple
 extra-source-files:
   runtime/BROKER.md
   nix/haskell-overrides.nix
+  nix/crypton-x509-validation-san.patch
   nix/process-close-fds-linux.patch
   cli/ci/policies.sh
   test/fixtures/runtime/descriptor-v2/*.json
@@ -127,7 +128,7 @@ common settings
     , http-client-tls
     , http-types
     , libyaml
-    , memory
+    , ram
     , process
     , QuickCheck
     , scientific
