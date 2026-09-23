@@ -66,13 +66,33 @@ not acceptance blockers. The extension contract must distinguish message data
 from local live capabilities, which cannot be serialized or reconstructed from IDs.
 The default broker is a prerequisite inside the first full frontend delivery.
 
-Parent is working in `implementation.9tGzKH/broker.V0Omy9B2/source`, branch
-`broker-default.V0Omy9B2`, based on `4cf7828`. The existing eight-file service/client
-work is preserved in `service-tui.purvEwEv/source` and
-`pre-broker-work-in-progress.patch`, with 986 insertions and 74 deletions.
-Its library builds passed after four preserved compiler failures, but no running
-manager or TUI acceptance has occurred. Reuse that work where it fits the new
-boundary without treating compilation or code proposals as product acceptance.
+The default broker implementation is integrated after independent review. The
+reviewed delta is `implementation.9tGzKH/broker.V0Omy9B2/broker-corrected.patch`,
+with 17 files, 684 insertions and 156 deletions. Canonical application bytes and
+Git executable modes match that candidate. `DataBroker`, `runPlanBrokered` and
+`cliMainWithBroker` carry actual execution traffic through the shared owners,
+with the operation and extension contract in `runtime/BROKER.md`.
+
+Reviewer `e0d3c715-755c-48bb-80b2-21103d455dcf` found no remaining issues and
+supported this bounded integration. The original candidate was blocked because
+steering swallowed asynchronous scope cancellation. The correction at the shared
+control-delivery owner preserves synchronous failure acknowledgements and allows
+the original reader to terminate and join. The deterministic red and corrected
+N1/N8 results remain in the unit alongside the prior failures.
+
+Local evidence includes actual ACP replies and final publication through an
+injected broker, Hello World, exact bills and authored traces, controls and typed
+person answers, prepared frontend execution, lineage, and the deterministic deck
+gate. `validation.md`, `correction.md` and both review reports retain the exact
+scopes. Canonical boundary and documentation checks passed on 2026-09-23.
+This does not accept WM-023, a protected manager service or the TUI journey.
+
+The existing eight-file service/client work remains preserved in
+`service-tui.purvEwEv/source` and `pre-broker-work-in-progress.patch`, with 986
+insertions and 74 deletions. Its library builds are not native service acceptance.
+Reuse that work for the first complete TUI path. The public-observation proposal
+remains unimplemented and requires assessment of its version-domain mismatch
+claim and the missing SSE handler before public capabilities are advertised.
 
 ## Local-only validation amendment of 2026-09-22
 
@@ -728,14 +748,14 @@ Lean/oracle builds remain excluded absent their own authorization. Earlier
 failures, unknown holders and failed UI cleanup/restoration qualifications remain
 unresolved historical evidence rather than new closure prerequisites.
 
-Refocus completed at `2026-09-22T23:04:48Z`. The next active-work deadline is
-`2026-09-23T00:04:48Z`. WM-022/G1 remain accepted, and live local administration
-is integrated at `26eaebf`. Implement the default broker at the existing runtime
-data-handling boundaries, preserving the unfinished service/client work. The
-acceptance target remains the complete broker-backed TUI/manager workflow, not
-isolated helper deliveries. RabbitMQ is deferred and validation remains local-only.
-Reuse valid evidence and existing test owners without verification-machinery or
-historical-recovery detours.
+Refocus completed at `2026-09-23T01:18:27Z`. The next active-work deadline is
+`2026-09-23T02:18:27Z`. WM-022/G1 remain accepted, and the default broker now has
+real local execution evidence and independent integration clearance. Resume the
+unfinished service/client/TUI delivery using that implementation. Assess the
+public-observation version domains and complete truthful public projections and
+transports as part of the actual frontend path, not another helper milestone.
+RabbitMQ remains deferred and validation remains local-only. No historical
+closure or verification-machinery detour is required.
 
 ## Historical WM-016 closure record
 

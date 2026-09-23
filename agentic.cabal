@@ -12,6 +12,7 @@ author:          John Wiegley
 maintainer:      jwiegley@positron.ai
 build-type:      Simple
 extra-source-files:
+  runtime/BROKER.md
   nix/haskell-overrides.nix
   nix/process-close-fds-linux.patch
   cli/ci/policies.sh
@@ -228,6 +229,7 @@ library
     Agentic.RoutingDiscovery
     Agentic.RoutingInspect
     Agentic.RoutingSecrets
+    Agentic.Runtime.Broker
     Agentic.Runtime.Catalogue
     Agentic.Runtime.Control
     Agentic.Runtime.Descriptor
@@ -428,6 +430,7 @@ test-suite runtime-contract-test
   hs-source-dirs:   runtime/test
   main-is:          Main.hs
   other-modules:
+    BrokerTests
     BucketEvidence
     CaptureTests
     FrontendProtocolTests

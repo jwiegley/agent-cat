@@ -5,13 +5,15 @@
 module Main (main) where
 
 import Agentic.Runtime
+import BrokerTests (brokerTests)
 import CaptureTests (captureTests)
 import FrontendProtocolTests (frontendProtocolTests, frontendCodecCheck)
 import SnapshotCheckpointTests (snapshotCheckpointTests)
 import RootRoleTests (rootRoleTests)
 import Control.Concurrent (forkIO, killThread, myThreadId, threadDelay, yield)
+import Control.Concurrent.Async (poll, waitCatch, withAsync)
 import Control.Concurrent.MVar (newEmptyMVar, putMVar, takeMVar, tryPutMVar, tryReadMVar)
-import Control.Exception (IOException, SomeException, bracket, finally, throwIO, try)
+import Control.Exception (AsyncException (ThreadKilled), IOException, SomeException, bracket, displayException, finally, throwIO, try)
 import Data.Bits ((.&.))
 import Crypto.Hash (Digest, SHA256, hash)
 import Data.Aeson (Value (..), eitherDecodeStrict', encode, object, toJSON, (.=))
@@ -37,7 +39,7 @@ import System.FilePath ((</>))
 import System.Posix.Files (createNamedPipe, createSymbolicLink, fileMode, getFileStatus, setFileMode)
 import System.IO (IOMode (ReadMode, WriteMode), hClose, hPutStrLn, openBinaryFile, stderr, stdin, withBinaryFile)
 import System.Exit (ExitCode (..), exitWith)
-import System.Process (CreateProcess (close_fds), proc, readCreateProcessWithExitCode)
+import System.Process (CreateProcess (close_fds), createPipe, proc, readCreateProcessWithExitCode)
 import System.Timeout (timeout)
 
 main :: IO ()
@@ -54,10 +56,12 @@ main = getArgs >>= \case
     request <- BS.hGet stdin (fromInteger maxArtifactBytes + 1)
     let response = decodeSnapshotCheckpoint request >>= encodeSnapshotCheckpoint
     either (\failure -> hPutStrLn stderr (T.unpack failure) >> exitWith (ExitFailure 3)) BS.putStr response
+  ["--broker-test"] -> brokerTests >> boundedControlFrameProbe >> controlScopeCancellationProbe >> durableMirrorFailureProbe
   _ -> contractTests
 
 contractTests :: IO ()
 contractTests = do
+  brokerTests
   frontendProtocolTests
   snapshotCheckpointTests "."
   privateRootContractTests
@@ -68,6 +72,7 @@ contractTests = do
   recoveryFifoProbe
   durableMirrorFailureProbe
   boundedControlFrameProbe
+  controlScopeCancellationProbe
   expect "descriptor v2 round trip" (decodeWorkflowDescriptor (encodeWorkflowDescriptor descriptorV2) == Right descriptorV2)
   expect "descriptor input order" (map workflowInputName (workflowInputs descriptorV2) == ["subject", "notes"])
   expectLeft "descriptor unknown field" (decodeWorkflowDescriptor (encoded (insertField "future" (Bool True) descriptorV2)))
@@ -1036,7 +1041,10 @@ boundedControlFrameProbe = do
       bufferedRuntime <- newControlRuntime
       bufferedEvents <- newIORef []
       bufferedReader <- newEmptyMVar
-      let sink event = do
+      brokerControls <- newIORef []
+      let broker = inProcessBroker {brokerControl = \receive command ->
+            modifyIORef' brokerControls (<> [command]) >> receive command}
+          sink event = do
             reader <- myThreadId
             _ <- tryPutMVar bufferedReader reader
             modifyIORef' bufferedEvents (<> [event])
@@ -1052,14 +1060,76 @@ boundedControlFrameProbe = do
             either throwIO pure first
       cancelled <- withBinaryFile path ReadMode $ \handle ->
         try @MachineCancelled
-          (withBufferedControlInputFor 2 handle (cancellation <> "\n") sink bufferedRuntime cancelledAction)
+          (withBufferedControlInputBrokered broker 2 handle (cancellation <> "\n") sink bufferedRuntime cancelledAction)
+      receivedControls <- readIORef brokerControls
+      expect "original control receiver consumes broker-delivered command"
+        (receivedControls == [Control (ControlId "buffered") Nothing Nothing CancelRun])
       delivered <- readIORef bufferedEvents
       expect ("retained controls are consumed before EOF without losing correlation: " <> show (cancelled, delivered)) $
         case (cancelled, delivered) of
           (Left failure, [ControlAcknowledgedV2 "buffered" "accepted" _ _ _ _]) -> machineCancellationReason failure == "cancelled by control"
           _ -> False
+      unavailableRuntime <- newControlRuntime
+      let unavailable = inProcessBroker {brokerControl = \_ _ -> ioError (userError "broker control unavailable")}
+      unavailableResult <- withBinaryFile path ReadMode $ \handle ->
+        timeout 2000000 . try @IOException $
+          withBufferedControlInputBrokered unavailable 2 handle (cancellation <> "\n")
+            nullEventSink unavailableRuntime (threadDelay 5000000)
+      expect "broker control failure reaches owning runtime" $ case unavailableResult of
+        Just (Left failure) -> "broker control unavailable" `T.isInfixOf` T.pack (displayException failure)
+        _ -> False
     )
     `finally` removeFile path
+
+-- Scope exit must cancel a blocked steerer without manufacturing a failed ack
+-- and must wait for the original receiver's finalizer. The failure-ack sink
+-- rescues the pre-fix reader so this regression fails rather than hanging.
+controlScopeCancellationProbe :: IO ()
+controlScopeCancellationProbe = do
+  runtime <- newControlRuntimeFor 2
+  entered <- newEmptyMVar
+  blocked <- newEmptyMVar @()
+  finalizing <- newEmptyMVar
+  releaseFinalizer <- newEmptyMVar
+  finalized <- newEmptyMVar
+  swallowed <- newIORef False
+  let occurrence = OccurrenceId 0
+      attempt = AttemptId occurrence 0
+      control = Control (ControlId "scope-steer") (Just occurrence) (Just attempt) (Steer NextBoundary "focus")
+      broker = inProcessBroker {brokerControl = \receive command ->
+        receive command `finally` (putMVar finalizing () >> takeMVar releaseFinalizer >> putMVar finalized ())}
+      sink event = case event of
+        ControlAcknowledgedV2 "scope-steer" "failed" _ _ _ _ -> do
+          modifyIORef' swallowed (const True)
+          throwIO ThreadKilled
+        _ -> pure ()
+  frame <- either (fail . T.unpack) pure (encodeControlFor 2 control)
+  registerControlAttempt runtime attempt (Just (\_ _ -> putMVar entered () >> takeMVar blocked >> pure (Right ())))
+  outcome <- timeout 2000000 $
+    bracket createPipe (\(input, output) -> hClose input >> hClose output) $ \(input, _output) ->
+      withAsync (withBufferedControlInputBrokered broker 2 input (frame <> "\n") sink runtime (takeMVar entered)) $ \owner -> do
+        before <- bracket (takeMVar finalizing) (const (putMVar releaseFinalizer ())) (const (poll owner))
+        finished <- waitCatch owner
+        released <- tryReadMVar finalized
+        let waiting = case before of
+              Nothing -> True
+              Just _ -> False
+        pure (waiting, finished, released)
+  unregisterControlAttempt runtime attempt
+  expect "control scope joins original receiver after its finalizer" $ case outcome of
+    Just (True, Right (), Just ()) -> True
+    _ -> False
+  wasSwallowed <- readIORef swallowed
+  expect "scope cancellation is not a failed steering acknowledgement" (not wasSwallowed)
+  synchronous <- newControlRuntimeFor 2
+  registerControlAttempt synchronous attempt (Just (\_ _ -> ioError (userError "steering unavailable")))
+  (_, delivery) <- decideRuntimeControl synchronous control
+  failed <- case delivery of
+    Just action -> deliverRuntimeAction synchronous control action
+    Nothing -> fail "synchronous steering fixture was not admitted"
+  unregisterControlAttempt synchronous attempt
+  expect "synchronous steering failure remains a failed acknowledgement"
+    (acknowledgementState failed == ControlFailed && "steering unavailable" `T.isInfixOf` acknowledgementMessage failed)
 
 durableMirrorFailureProbe :: IO ()
 durableMirrorFailureProbe = do

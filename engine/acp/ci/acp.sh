@@ -573,8 +573,10 @@ note "configured-options: explicit ACP ignored ambient routing, 7/7, exit 0"
 scenario=public-progress
 runner=$("$shell" test/cabal.sh list-bin agentic-run)
 mkdir -p "$work/progress-config"
-if env -u AGENT_CAT_PERSONA XDG_CONFIG_HOME="$work/progress-config" python3 test/progress_probe.py "$runner"; then
-  note "public-progress: v2 tool/todo/usage updates persisted without changing v1 answers or bills"
+if "$shell" test/cabal.sh build -v0 routing-fixed-point-probe \
+    && broker_runner=$("$shell" test/cabal.sh list-bin routing-fixed-point-probe) \
+    && env -u AGENT_CAT_PERSONA XDG_CONFIG_HOME="$work/progress-config" python3 test/progress_probe.py "$runner" "$broker_runner"; then
+  note "public-progress: v2 updates preserve v1 semantics and real ACP replies traverse the injected broker"
 else
   bad "public progress probe failed"
 fi

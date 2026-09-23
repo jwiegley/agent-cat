@@ -100,6 +100,8 @@ module Agentic.Exec
     runPlanWith,
     runPlanObserved,
     runPlanPersisted,
+    runPlanBrokered,
+    attemptLog,
     PersistenceHooks (..),
     nullPersistenceHooks,
     runPlanControlled,
@@ -199,6 +201,7 @@ import Agentic.Plan
     requestShapeOf,
     withRequestPrompt,
   )
+import Agentic.Runtime.Broker (DataBroker (..), inProcessBroker, PersistenceHooks (..), nullPersistenceHooks)
 import Agentic.Runtime.Control
   ( AttemptSteerer,
     awaitRuntimeRedirect,
@@ -317,7 +320,8 @@ data AttemptContext = AttemptContext
     attemptControlRuntime :: !(Maybe ControlRuntime),
     attemptSteerer :: !(Maybe AttemptSteerer),
     attemptFailoverAvailable :: !(IO Bool),
-    attemptStoreQuestion :: !(Text -> Value -> IO (Maybe QuestionRef))
+    attemptStoreQuestion :: !(Text -> Value -> IO (Maybe QuestionRef)),
+    attemptBroker :: !DataBroker
   }
 
 -- | @Oracle IO@ plus the stateful lane and an attempt-aware realization path.
@@ -404,14 +408,14 @@ pureWorldIO w = concurrentWorld (\c r -> pure (worldAnswer w c (reqQuestion r)))
 announcingWorld :: (Text -> IO ()) -> WorldIO -> WorldIO
 announcingWorld out inner =
   WorldIO
-    { worldAskIO = \c q -> announce c q (worldAskIO inner c q),
-      worldAskAttemptIO = \context c q -> announce c q (worldAskAttemptIO inner context c q),
+    { worldAskIO = \c q -> announce (brokerLog inProcessBroker out) c q (worldAskIO inner c q),
+      worldAskAttemptIO = \context c q -> announce (attemptLog context out) c q (worldAskAttemptIO inner context c q),
       worldTurnLane = worldTurnLane inner
     }
   where
-    announce :: forall c. SCode c -> Request c -> IO (El c) -> IO (El c)
-    announce c q action = do
-      out $
+    announce :: forall c. (Text -> IO ()) -> SCode c -> Request c -> IO (El c) -> IO (El c)
+    announce writeLog c q action = do
+      writeLog $
         intentName (reqIntent q)
           <> " "
           <> codeWord (fromSCode c)
@@ -420,7 +424,7 @@ announcingWorld out inner =
           <> ": "
           <> oneLine (qPrompt (reqQuestion q))
       a <- action
-      out $ "  <- " <> oneLine (sayEl c a)
+      writeLog $ "  <- " <> oneLine (sayEl c a)
       pure a
 
 -- | Interpret one engine with the default runtime policy.
@@ -438,12 +442,13 @@ worldOfEngineWith settings engine =
   where
     engineAsk :: Maybe AttemptContext -> SCode c -> Request c -> IO (El c)
     engineAsk context code request =
-      let controlledSettings = maybe settings (`attemptExecSettings` settings) context
+      let broker = maybe inProcessBroker attemptBroker context
+          controlledSettings = maybe settings (`attemptExecSettings` settings) context
        in withTransportGaps controlledSettings engineGap code request $ do
             let neutral = engineRequest code request
-            conversation <- startEngine engine (engineContextFor (enginePublicRedactionValues engine) context) neutral
+            conversation <- brokerStart broker engine (engineContextFor (enginePublicRedactionValues engine) context) neutral
             askDecodingWith controlledSettings code request
-              (engineTurn controlledSettings code request neutral conversation)
+              (engineTurn broker controlledSettings code request neutral conversation)
 
 -- | Translate one typed request at the runtime boundary.
 engineRequest :: SCode c -> Request c -> EngineRequest
@@ -495,13 +500,14 @@ renderRequest code request =
 
 engineContextFor :: [Text] -> Maybe AttemptContext -> EngineContext
 engineContextFor _ Nothing =
-  EngineContext {runEngineAttempt = \_ _ action -> action (const (pure ()))}
+  EngineContext {runEngineAttempt = \_ _ action -> action (brokerUpdate inProcessBroker (const (pure ())))}
 engineContextFor redactions (Just context) =
   EngineContext
     { runEngineAttempt = \steerer target action ->
-        let controlled = maybe context (withAttemptSteering context . runtimeSteerer) steerer
+        let broker = attemptBroker context
+            controlled = maybe context (withAttemptSteering context . runtimeSteerer . brokerSteer broker) steerer
          in withPhysicalAttempt controlled target $ \attempt ->
-              action (emitEngineUpdate redactions controlled attempt)
+              action (brokerUpdate broker (emitEngineUpdate redactions controlled attempt))
     }
 
 emitEngineUpdate :: [Text] -> AttemptContext -> AttemptId -> EngineUpdate -> IO ()
@@ -592,9 +598,9 @@ runtimeSteerer steer timing =
   steer
     (case timing of InterruptNow -> Engine.InterruptNow; NextBoundary -> Engine.NextBoundary)
 
-engineTurn :: ExecSettings -> SCode c -> Request c -> EngineRequest -> EngineConversation -> Text -> IO Text
-engineTurn settings code request neutral conversation extra = do
-  result <- runEngineTurn conversation extra
+engineTurn :: DataBroker -> ExecSettings -> SCode c -> Request c -> EngineRequest -> EngineConversation -> Text -> IO Text
+engineTurn broker settings code request neutral conversation extra = do
+  result <- brokerTurn broker conversation extra
   let answer = engineAnswer result
       what = "the " <> codeWord (fromSCode code) <> " question put to " <> engineTarget neutral
   when (not (T.null (engineNarration result))) $
@@ -688,28 +694,9 @@ data Scheduler = Scheduler
     schedulerNextOccurrence :: !(TVar Word64),
     schedulerPersistence :: !PersistenceHooks,
     schedulerSink :: !EventSink,
-    schedulerControlRuntime :: !(Maybe ControlRuntime)
+    schedulerControlRuntime :: !(Maybe ControlRuntime),
+    schedulerBroker :: !DataBroker
   }
-
-data PersistenceHooks = PersistenceHooks
-  { persistenceLookupAnswer :: Value -> IO (Maybe (Value, Text)),
-    persistenceStoreAnswer :: OccurrenceId -> Value -> Value -> Bool -> IO (),
-    persistenceStartEffect :: OccurrenceId -> Value -> IO (),
-    persistenceCompleteEffect :: OccurrenceId -> Value -> Value -> IO (),
-    persistenceStoreQuestion :: OccurrenceId -> Text -> Value -> IO (Maybe QuestionRef),
-    persistenceCheckpoint :: OccurrenceId -> IO ()
-  }
-
-nullPersistenceHooks :: PersistenceHooks
-nullPersistenceHooks =
-  PersistenceHooks
-    { persistenceLookupAnswer = const (pure Nothing),
-      persistenceStoreAnswer = \_ _ _ _ -> pure (),
-      persistenceStartEffect = \_ _ -> pure (),
-      persistenceCompleteEffect = \_ _ _ -> pure (),
-      persistenceStoreQuestion = \_ _ _ -> pure Nothing,
-      persistenceCheckpoint = const (pure ())
-    }
 
 data Claim
   = ClaimCached !OccurrenceId !Event
@@ -754,15 +741,23 @@ runPlanPersisted :: Maybe ControlRuntime -> PersistenceHooks -> EventSink -> Cha
 runPlanPersisted = runPlanObservedWith
 
 runPlanObservedWith :: Maybe ControlRuntime -> PersistenceHooks -> EventSink -> Chains -> WorldIO -> Plan '[] a -> IO (a, ExecTrace)
-runPlanObservedWith controls persistence sink ch w p = mask $ \restore -> do
+runPlanObservedWith = runPlanBrokered inProcessBroker
+
+-- | Run the existing interpreter with injected data delivery. The supplied
+-- sinks and persistence hooks are original, unwrapped resource loans. Workflow
+-- transitions, decoding, lane reservations and memo claims remain here.
+runPlanBrokered :: DataBroker -> Maybe ControlRuntime -> PersistenceHooks -> EventSink -> Chains -> WorldIO -> Plan '[] a -> IO (a, ExecTrace)
+runPlanBrokered broker controls persistence sink ch w p = mask $ \restore -> do
   memo <- newTVarIO (Memo Map.empty Map.empty Set.empty)
   threads <- newTVarIO []
   failed <- newEmptyTMVarIO
   effects <- newTurnLaneIO
   nextOccurrence <- newTVarIO 0
-  let scheduler = Scheduler memo threads failed effects nextOccurrence persistence sink controls
+  let scheduler = Scheduler memo threads failed effects nextOccurrence
+        (brokerPersistence broker persistence) (brokerEvent broker sink) controls broker
+      chains = ch {chainLog = brokerLog broker (chainLog ch)}
       run = do
-        (a, tickets) <- execIn scheduler w ch PendingNil p
+        (a, tickets) <- execIn scheduler w chains PendingNil p
         ordered <- traverse (awaitTicket scheduler) tickets
         let occurrenceIds = map fst ordered
             trace = map snd ordered
@@ -968,14 +963,15 @@ newAttemptContext scheduler occurrence = do
         attemptSteerer = Nothing,
         attemptFailoverAvailable = pure False,
         attemptStoreQuestion =
-          persistenceStoreQuestion (schedulerPersistence scheduler) occurrence
+          persistenceStoreQuestion (schedulerPersistence scheduler) occurrence,
+        attemptBroker = schedulerBroker scheduler
       }
 
 withAttemptSteering :: AttemptContext -> AttemptSteerer -> AttemptContext
 withAttemptSteering context steerer = context {attemptSteerer = Just steerer}
 
 attemptExecSettings :: AttemptContext -> ExecSettings -> ExecSettings
-attemptExecSettings context settings = case attemptControlRuntime context of
+attemptExecSettings context original = case attemptControlRuntime context of
   Nothing -> settings
   Just controls ->
     settings
@@ -1018,6 +1014,13 @@ attemptExecSettings context settings = case attemptControlRuntime context of
                     pure FailOver
                   RecoveryAbandon -> pure Abandon
       }
+  where
+    settings = original {esLog = attemptLog context (esLog original)}
+
+-- | Deliver a runtime log to its existing destination through this occurrence's
+-- broker. This does not change diagnostic or narration visibility.
+attemptLog :: AttemptContext -> (Text -> IO ()) -> Text -> IO ()
+attemptLog context = brokerLog (attemptBroker context)
 
 withPhysicalAttempt :: AttemptContext -> Text -> (AttemptId -> IO a) -> IO a
 withPhysicalAttempt context target action = mask $ \restore -> do
@@ -1254,7 +1257,7 @@ nextLive scheduler qs = atomically $ do
 
 
 dispatchAttempt :: WorldIO -> AttemptContext -> SCode c -> Request c -> IO (El c)
-dispatchAttempt w context c dispatched = worldAskAttemptIO w context c dispatched
+dispatchAttempt w context = brokerRequest (attemptBroker context) (worldAskAttemptIO w context)
 
 claimQuestion :: Scheduler -> EventKey -> OccurrenceId -> STM Claim
 claimQuestion scheduler key owner = do

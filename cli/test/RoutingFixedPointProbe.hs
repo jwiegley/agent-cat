@@ -8,7 +8,9 @@
 
 module Main (main) where
 
-import Agentic.Cli (Registry (..), Row (..), cliMain)
+import Agentic.Cli (Registry (..), Row (..), cliMain, cliMainWithBroker)
+import qualified Agentic.Engine as Engine
+import Agentic.Runtime (DataBroker (..), PersistenceHooks (..), inProcessBroker)
 import Agentic.Runtime.Facts (runFactEngine, runFactName, runFactRoutes, sharesOneSession)
 import qualified Agentic.Builder as B
 import qualified Agentic.Schema as S
@@ -20,9 +22,23 @@ import Data.String (fromString)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Prelude
+import System.Environment (getArgs, withArgs)
 
 main :: IO ()
-main = cliMain registry
+main = do
+  arguments <- getArgs
+  case arguments of
+    "--broker-test" : rest -> withArgs rest $ cliMainWithBroker
+      inProcessBroker
+        { brokerTurn = \conversation extra -> do
+            response <- Engine.runEngineTurn conversation extra
+            pure response {Engine.engineAnswer = "broker-delivered response"},
+          brokerPersistence = \hooks -> hooks
+            { persistenceStoreResult = \code resultValue _ ->
+                persistenceStoreResult hooks code resultValue "broker-delivered result"
+            }
+        } registry
+    _ -> cliMain registry
 
 registry :: Registry
 registry =

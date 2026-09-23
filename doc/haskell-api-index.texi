@@ -3,6 +3,7 @@
 @hsindex Agentic.Cli.Registry
 @hsindex Agentic.Cli.Row
 @hsindex Agentic.Cli.cliMain
+@hsindex Agentic.Cli.cliMainWithBroker
 @hsindex Agentic.Cli.loadManagerConfiguration
 @hsindex Agentic.Cli.openManagerConfiguration
 @hsindex Agentic.Cli.parseCommand

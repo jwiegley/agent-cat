@@ -2355,6 +2355,16 @@ page and deterministic reply table for every row.
 Run the shared parser and dispatcher for a registry.  Its binary and row noun
 come from the Registry, so downstream tools receive the same verbs, input rules,
 routing, transports, terminal mode, and exit statuses as @command{agentic-run}.
+It selects the default in-process data broker.
+
+@c COVER API Agentic.Cli.cliMainWithBroker support
+@item cliMainWithBroker broker registry
+Run the same parser and dispatcher with an injected @code{DataBroker} from
+@code{Agentic.Runtime}.  The object governs actual request, reply, control,
+event, log and persistence delivery for the execution.  Runtime retains
+workflow interpretation and policy, while the original receivers retain
+their resource ownership.  The operation and extension contracts are stated
+in @file{runtime/BROKER.md}.
 
 @c COVER API Agentic.Cli.Command support
 @item Command

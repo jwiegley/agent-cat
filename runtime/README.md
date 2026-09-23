@@ -1,10 +1,12 @@
 # runtime
 
-`runtime/src` executes typed plans against any `Agentic.Engine.Engine`. It owns
-scheduling, memoization, decoding and re-asking, recovery and fail-over, the
-ordering and journaling of effects, generic routing, controls, the machine
-protocol, persistence, and support for restart, resume, and fork. It also
-executes the commands that a program authors.
+`runtime/src` executes typed plans through an injected [data broker](BROKER.md),
+whose default implementation connects the existing `Agentic.Engine.Engine`
+values. Runtime owns scheduling, memoization, decoding and re-asking, recovery
+and fail-over, effect ordering, generic routing, controls and workflow transitions.
+The broker delivers requests, replies, events, logs and persistence operations
+through their existing owners. Protocols and support for restart, resume and fork
+remain in runtime, which also executes the commands that a program authors.
 
 ## Public modules
 
