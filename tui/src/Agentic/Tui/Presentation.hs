@@ -8,10 +8,13 @@ module Agentic.Tui.Presentation
     ActiveLayer (..),
     Presentation (..),
     staticPresentation,
+    emptyPresentation,
     drawPresentation,
     presentationAttributes,
     confirmationDetails,
     launchReviewAllowed,
+    serviceReviewAllowed,
+    serviceReviewRows,
     wrapDisplayLines,
   )
 where
@@ -43,11 +46,13 @@ import Agentic.Tui.Model
 import Agentic.Tui.Person
 import Agentic.Tui.RunModel
 import Agentic.Tui.Types
+import qualified Agentic.Tui.Service as Service
+import qualified Agentic.Manager.Client as Manager
 import Brick
 import Brick.Widgets.Border (borderWithLabel, hBorder, hBorderWithLabel, vBorder)
 import Brick.Widgets.Center (hCenter)
 import qualified Brick.Widgets.Edit as Edit
-import Data.Aeson (Value (..), encode)
+import Data.Aeson (Value (..), encode, toJSON)
 import qualified Data.ByteString.Lazy as BL
 import Data.Char (isControl, isSpace)
 import Data.List (intersperse)
@@ -104,7 +109,12 @@ data Presentation = Presentation
     presentationExactDetails :: !Bool,
     presentationRunning :: !Bool,
     presentationNoColor :: !Bool,
-    presentationConfig :: !TuiConfig,
+    presentationService :: !Bool,
+    presentationServiceMutation :: !(Maybe (Text,Text,Bool)),
+    presentationServiceResendConfirm :: !Bool,
+    presentationServiceApproval :: !(Maybe Text),
+    presentationServiceReviewAvailable :: !Bool,
+    presentationConfig :: !(Maybe TuiConfig),
     presentationPersonPrompt :: !(Maybe PersonPrompt),
     presentationPersonSubmitted :: !Bool,
     presentationPersonError :: !(Maybe Text),
@@ -123,7 +133,11 @@ data Presentation = Presentation
 
 -- | Minimal state for rendering static browser and launch-review fixtures.
 staticPresentation :: TuiConfig -> TuiModel -> Presentation
-staticPresentation config model =
+staticPresentation config model = (emptyPresentation model) {presentationConfig = Just config}
+
+-- | Presentation defaults without a local executable or private-root configuration.
+emptyPresentation :: TuiModel -> Presentation
+emptyPresentation model =
   Presentation
     { presentationModel = model,
       presentationEditor = Edit.editorText InputEditor Nothing "",
@@ -136,7 +150,12 @@ staticPresentation config model =
       presentationExactDetails = False,
       presentationRunning = False,
       presentationNoColor = False,
-      presentationConfig = config,
+      presentationService = False,
+      presentationServiceMutation = Nothing,
+      presentationServiceResendConfirm = False,
+      presentationServiceApproval = Nothing,
+      presentationServiceReviewAvailable = False,
+      presentationConfig = Nothing,
       presentationPersonPrompt = Nothing,
       presentationPersonSubmitted = False,
       presentationPersonError = Nothing,
@@ -216,6 +235,7 @@ bar width widget = hLimit width (padRight Max widget)
 
 headerContext :: Presentation -> Widget Name
 headerContext presentation = case modelScreen model of
+  BrowserScreen | presentationService presentation -> displayText "Manager workflows"
   BrowserScreen -> tabs (modelTab model)
   LiveScreen _ -> hBox [withAttr (attrName "title") (displayText (liveContext presentation))]
   LaunchingScreen _ -> displayText "Starting runner…"
@@ -249,6 +269,12 @@ browserStatus model = case modelTab model of
     Right routing -> "persona " <> fromMaybe "none" (routingSummaryPersona routing) <> maybe "" (\source -> " (" <> source <> ")") (routingSummaryPersonaSource routing)
 
 layerView :: Presentation -> Int -> Int -> Int -> Widget Name
+layerView presentation width _ mainHeight
+  | presentationServiceResendConfirm presentation, Just (operation,uri,_) <- presentationServiceMutation presentation =
+      dialog width mainHeight " Confirm exact resend " (vBox (map displayTextWrap
+        [ "Resend the retained " <> operation <> " attempt?", uri,
+          "The original body, idempotency key and If-Match stay unchanged.",
+          "Its previous outcome may be uncertain. No fresh attempt is created.", "y RESEND EXACT ATTEMPT   n BACK" ]))
 layerView presentation width totalHeight mainHeight = case presentationLayer presentation of
   KeyHelpLayer -> keyHelpView presentation width mainHeight
   CancelLayer -> cancelView width mainHeight
@@ -264,8 +290,13 @@ layerView presentation width totalHeight mainHeight = case presentationLayer pre
 
 screenView :: Presentation -> Int -> Int -> Int -> Widget Name
 screenView presentation width totalHeight mainHeight = case modelScreen model of
+  InitialLoading | presentationService presentation -> loadingView presentation "Loading manager profiles..." "q detaches"
   InitialLoading -> loadingView presentation "Loading workflows, stored runs, and offline routing..." "q cancels"
   BrowserScreen -> browserView presentation width totalHeight
+  ServiceProfilesScreen _ _ -> browserView presentation width totalHeight
+  ServiceRequestScreen request -> serviceRequestView presentation request
+  ServiceReviewScreen preparation tag -> serviceReviewView presentation preparation tag width totalHeight mainHeight
+  ServiceCommandScreen message -> pane "Manager command" (viewport FailureViewport Vertical (displayTextWrap message))
   InputScreen index -> inputView presentation index width mainHeight
   TargetScreen -> targetView presentation width
   HelpLoading -> loadingView presentation "Loading bounded runner help..." "Esc cancels"
@@ -278,6 +309,56 @@ screenView presentation width totalHeight mainHeight = case modelScreen model of
   FailureScreen failure -> viewport FailureViewport Vertical (withAttr (attrName "error") (displayTextWrap ("ERROR: " <> failure)))
   where
     model = presentationModel presentation
+
+serviceRequestView :: Presentation -> Manager.DraftView -> Widget Name
+serviceRequestView presentation request = pane "Manager request" $ viewport FailureViewport Vertical $ vBox $ map displayTextWrap $
+  [ "Request: " <> Manager.draftId request, "Profile: " <> Manager.draftProfile request,
+    "Phase: " <> Manager.draftPhase request, "Admission: " <> Manager.draftAdmission request,
+    "Position: " <> maybe "none" shown (Manager.draftPosition request),
+    "Blocking reasons: " <> T.intercalate ", " (Manager.draftReasons request),
+    "Run: " <> fromMaybe "none" (Manager.draftRun request),
+    "Approval receipt: " <> fromMaybe "none" (presentationServiceApproval presentation),
+    "Runtime completion and result verification are not inferred from this request.", "", "Retained operator literals:" ]
+  <> concat [[name, value] | (name,value) <- Map.toList (modelInputs (presentationModel presentation))]
+
+serviceReviewRows :: Manager.Preparation -> Text -> [Text]
+serviceReviewRows preparation tag =
+  [ "Explicit approval starts execution through the manager.",
+    "Request: " <> Manager.preparationRequest preparation,
+    "Preparation: " <> Manager.preparationId preparation,
+    "Profile: " <> Manager.preparationProfile preparation,
+    "Expires: " <> Manager.preparationExpiresAt preparation,
+    "If-Match: " <> tag ] <> Service.approvalSelectors preparation
+      <> ["d shows the complete exact review.", "Only y approves. Enter does not approve."]
+
+serviceReviewAllowed :: Manager.Preparation -> Text -> (Int,Int) -> Bool
+serviceReviewAllowed preparation tag (width,height) = width >= 40 &&
+  length (concatMap (wrapDisplayLines innerWidth) (serviceReviewRows preparation tag)) <= max 0 (shellMainRows width height - 2)
+  where innerWidth = max 1 (min 84 width - 4)
+
+serviceReviewView :: Presentation -> Manager.Preparation -> Text -> Int -> Int -> Int -> Widget Name
+serviceReviewView presentation preparation tag width _ mainHeight
+  | presentationExactDetails presentation = dialog width mainHeight " Exact manager review " $
+      viewport ConfirmDetailsViewport Vertical $ vBox $ map displayTextWrap details
+  | otherwise = dialog width mainHeight " Approve exact manager review " $
+      vBox (map displayText (concatMap (wrapDisplayLines innerWidth) (serviceReviewRows preparation tag)))
+  where
+    innerWidth = max 1 (min 84 width - 4)
+    review = Manager.preparationReview preparation
+    details = Service.approvalSelectors preparation <>
+      [ "Program SHA-256: " <> Manager.reviewProgramHash review,
+        "Person answering: " <> Manager.reviewPerson review,
+        "Workflow: " <> Manager.reviewWorkflow review,
+        "Profile: " <> Manager.reviewProfile review,
+        "Workspace: " <> Manager.reviewWorkspaceLabel review,
+        "Target: " <> Manager.reviewTargetLabel review,
+        "Policy:", jsonTextValue (Manager.policyValue (Manager.reviewPolicy review)),
+        "Exact native input identities:", jsonTextValue (toJSON (Manager.reviewInputs review)),
+        "Exact plan:", Manager.reviewPlan review,
+        "Run facts:", jsonTextValue (toJSON (Manager.reviewRunFacts review)),
+        "Pins:", jsonTextValue (toJSON (Manager.reviewPins review)),
+        "Warnings:", jsonTextValue (toJSON (Manager.reviewWarnings review)),
+        "Result code:", jsonTextValue (Manager.reviewResultCode review) ]
 
 loadingView :: Presentation -> Text -> Text -> Widget Name
 loadingView presentation message action = padLeftRight 2 (vBox [displayText "", withAttr (attrName "title") (displayTextWrap (presentationSpinner presentation <> "  " <> message)), muted (displayText action)])
@@ -292,13 +373,20 @@ browserView presentation width totalHeight
     wide = width >= 72 && totalHeight >= 16
     listWidth = min 38 (max 26 (width `div` 3))
     primaryFocused = presentationPaneFocus presentation == PrimaryPane
-    listPane = pane (tabName (modelTab model) <> focusMark primaryFocused) $
+    listTitle = case modelScreen model of ServiceProfilesScreen _ _ -> "Manager profiles"; _ -> tabName (modelTab model)
+    listPane = pane (listTitle <> focusMark primaryFocused) $
       viewport BrowserListViewport Vertical $
-        if null rows then displayTextWrap "No matches. Press / to change the search." else vBox rows
-    rows = case modelTab model of
-      WorkflowsTab -> [selectedRow index (displayText (marker index <> workflowName workflow)) | (index, workflow) <- zip [0 ..] (visibleWorkflows model)]
-      RunsTab -> [selectedRow index (runCard index entry) | (index, entry) <- zip [0 ..] (modelRuns model)]
-      RoutingTab -> zipWith (\index line -> selectedRow index (displayTextWrap line)) [0 ..] (browserRows model)
+        if null rows then displayTextWrap emptyMessage else vBox rows
+    emptyMessage = case modelScreen model of
+      ServiceProfilesScreen _ _ -> "No manager profiles are authorized."
+      _ -> "No matches. Press / to change the search."
+    rows
+      | ServiceProfilesScreen _ _ <- modelScreen model =
+          zipWith (\index line -> selectedRow index (displayTextWrap line)) [0..] (browserRows model)
+      | otherwise = case modelTab model of
+          WorkflowsTab -> [selectedRow index (displayText (marker index <> workflowName workflow)) | (index, workflow) <- zip [0 ..] (visibleWorkflows model)]
+          RunsTab -> [selectedRow index (runCard index entry) | (index, entry) <- zip [0 ..] (modelRuns model)]
+          RoutingTab -> zipWith (\index line -> selectedRow index (displayTextWrap line)) [0 ..] (browserRows model)
     listContentWidth = (if wide then listWidth else width) - 2
     runCard index (CatalogueRun record) =
       let manifest = recordManifest record
@@ -306,20 +394,24 @@ browserView presentation width totalHeight
     runCard index (CatalogueCorrupt _ _) = displayText (marker index <> "Unreadable run")
     marker index = if index == selectedIndex then "> " else "  "
     detailPane = pane ("Details" <> focusMark (not primaryFocused)) (viewport BrowserDetailViewport Vertical detailBody)
-    detailBody = case modelTab model of
-      WorkflowsTab -> maybe (displayText "Select a workflow.") workflowOverview (selectedWorkflow model)
-      _ -> vBox (map detailLine (browserDetailLines model))
-    selectedIndex = case modelTab model of
-      WorkflowsTab -> modelWorkflowIndex model
-      RunsTab -> modelRunIndex model
-      RoutingTab -> modelEngineIndex model
+    detailBody
+      | ServiceProfilesScreen _ _ <- modelScreen model = vBox (map detailLine (browserDetailLines model))
+      | otherwise = case modelTab model of
+          WorkflowsTab -> maybe (displayText "Select a workflow.") (workflowOverview (presentationService presentation)) (selectedWorkflow model)
+          _ -> vBox (map detailLine (browserDetailLines model))
+    selectedIndex
+      | ServiceProfilesScreen _ index <- modelScreen model = index
+      | otherwise = case modelTab model of
+          WorkflowsTab -> modelWorkflowIndex model
+          RunsTab -> modelRunIndex model
+          RoutingTab -> modelEngineIndex model
     selectedRow index widget =
       let selected = index == selectedIndex
           styled = if selected then withAttr (attrName "selected") (padRight Max widget) else widget
        in if selected && primaryFocused then visible styled else styled
 
-workflowOverview :: WorkflowDescriptor -> Widget Name
-workflowOverview workflow = vBox
+workflowOverview :: Bool -> WorkflowDescriptor -> Widget Name
+workflowOverview service workflow = vBox
   [ withAttr (attrName "title") (displayTextWrap (workflowName workflow)),
     displayText "",
     displayTextWrap (workflowBlurb workflow),
@@ -335,7 +427,7 @@ workflowOverview workflow = vBox
     withAttr (attrName (if descriptorEffectful capabilities || descriptorToolExecution capabilities then "warning" else "muted"))
       (displayTextWrap ("Effects: " <> yesNo (descriptorEffectful capabilities) <> " · Tool execution: " <> yesNo (descriptorToolExecution capabilities))),
     displayText "",
-    shortcutLine "Enter CONFIGURE   h HELP",
+    shortcutLine (if service then "Enter NEW REQUEST   h HELP" else "Enter CONFIGURE   h HELP"),
     displayText "",
     muted (displayTextWrap ("Profiles: " <> commaOrNone (workflowPins workflow)))
   ]
@@ -428,11 +520,11 @@ confirmSummaryView presentation width totalHeight mainHeight =
     preview = confirmPreview presentation
     live = maybe False previewIsLive preview
     title = if live then " Review live run " else " Review scripted run "
-    summaryLines = case preview of
-      Nothing -> [("ERROR: launch preview unavailable", "error")]
-      Just value
-        | launchReviewAllowed (presentationConfig presentation) value (width, totalHeight) -> confirmationSummary (presentationConfig presentation) value
-        | otherwise -> blockedConfirmationSummary (presentationConfig presentation) value width totalHeight
+    summaryLines = case (presentationConfig presentation,preview) of
+      (Just config,Just value)
+        | launchReviewAllowed config value (width, totalHeight) -> confirmationSummary config value
+        | otherwise -> blockedConfirmationSummary config value width totalHeight
+      _ -> [("ERROR: local launch preview unavailable", "error")]
     renderLine (line, attribute)
       | T.null attribute =
         let (label, value) = T.breakOn " " line
@@ -481,7 +573,9 @@ confirmDetailsView presentation width mainHeight =
   dialog width mainHeight " Launch details " $
     viewport ConfirmDetailsViewport Vertical (vBox (map detailLine details))
   where
-    details = maybe ["ERROR: launch preview unavailable"] (confirmationDetails (presentationConfig presentation)) (confirmPreview presentation)
+    details = case (presentationConfig presentation,confirmPreview presentation) of
+      (Just config,Just preview) -> confirmationDetails config preview
+      _ -> ["ERROR: local launch preview unavailable"]
 
 confirmationDetails :: TuiConfig -> LaunchPreview -> [Text]
 confirmationDetails config preview =
@@ -682,6 +776,8 @@ keyHelpView presentation width mainHeight =
 
 keyHelpLines :: Presentation -> [Text]
 keyHelpLines presentation = case modelScreen model of
+  BrowserScreen | presentationService presentation ->
+    ["Up/Down select", "Enter creates a manager request", "Right/Left focus details/list", "h workflow help", "Esc profiles", "q detach", "? or Esc close this help"]
   BrowserScreen ->
     [ "Up/Down       select",
       "Right/Left    focus details/list",
@@ -690,6 +786,10 @@ keyHelpLines presentation = case modelScreen model of
       <> browserKeys
       <> ownershipKeys
       <> ["? or Esc      close this help"]
+  ServiceProfilesScreen _ _ -> ["Up/Down select profile", "Right/Left focus details/list", "Enter select ready profile", "r refresh profiles", "q detach", "? or Esc close this help"]
+  ServiceRequestScreen _ -> ["Enter requests review when the draft is ready", "e edits draft inputs", "g refreshes observations", "q detaches without cancelling the manager run"]
+  ServiceReviewScreen {} -> ["y approves the exact visible selectors", "Enter does not approve", "d toggles complete review details", "Up/Down scroll details", "q detaches"]
+  ServiceCommandScreen _ -> ["g refreshes observations without sending a mutation", "x requests confirmation of an exact resend", "q detaches"]
   InitialLoading -> ["q or Esc      cancel discovery and quit", "? or Esc      close this help"]
   TargetScreen -> ["Up/Down scroll", "p persona", "s scripted review", "l or Enter routing review", "Esc previous", "? or Esc close this help"]
   HelpLoading -> ["Esc cancel bounded help load", "? or Esc close this help"]
@@ -826,7 +926,9 @@ footerItems presentation width height = case presentationLayer presentation of
   ScreenLayer -> screenItems
   where
     compact = width < 72 || height < 16
-    allowed = maybe False (\preview -> launchReviewAllowed (presentationConfig presentation) preview (width, height)) (confirmPreview presentation)
+    allowed = case (presentationConfig presentation,confirmPreview presentation) of
+      (Just config,Just preview) -> launchReviewAllowed config preview (width, height)
+      _ -> False
     recoveryItems current = case presentationRecovery current of
       Nothing -> []
       Just (_, recovery) -> [recoveryKeyText (recoveryChoice option) <> " " <> T.toUpper (recoveryChoice option) | option <- snapshotRecoveryChoices recovery]
@@ -839,7 +941,20 @@ footerItems presentation width height = case presentationLayer presentation of
     model = presentationModel presentation
     screenItems = case modelScreen model of
       InitialLoading -> ["q/Esc QUIT"]
+      ServiceProfilesScreen _ _ -> ["Enter SELECT", "r REFRESH", browserPaneHint, "? KEYS", "q DETACH"]
+      ServiceRequestScreen request ->
+        ["g REFRESH", "q DETACH"]
+          <> (if Manager.draftPhase request == "draft" && presentationServiceMutation presentation == Nothing
+              then ["e EDIT INPUTS"] <> ["Enter REQUEST REVIEW" | Service.requestReady request] else [])
+      ServiceReviewScreen preparation tag -> ["d EXACT DETAILS", "q DETACH"] <>
+        ["y APPROVE EXACT REVIEW" | not (presentationExactDetails presentation), presentationServiceReviewAvailable presentation,
+          serviceReviewAllowed preparation tag (width,height)]
+        <> ["RESIZE TO REVIEW" | not (serviceReviewAllowed preparation tag (width,height))]
+      ServiceCommandScreen _ -> ["g REFRESH", "q DETACH"] <>
+        ["x EXACT RESEND" | Just (_,_,True) <- [presentationServiceMutation presentation]]
       BrowserScreen
+        | presentationService presentation -> ["h HELP", "Esc PROFILES", browserPaneHint, "? KEYS", "q DETACH"]
+            <> ["Enter NEW REQUEST" | presentationServiceMutation presentation == Nothing]
         | presentationRunning presentation -> ["Esc REATTACH", "c CANCEL RUN", "Tab SECTION", "? KEYS", browserPaneHint]
         | compact -> ["Enter OPEN", browserPaneHint, "? KEYS", "Tab SECTION", "q QUIT"] <> case modelTab model of WorkflowsTab -> ["/ FILTER"]; RunsTab -> ["r/m/f LINEAGE"]; RoutingTab -> ["p PERSONA"]
         | modelTab model == RunsTab -> ["Enter INSPECT", "r RESTART", "m RESUME", "f FORK", "Tab SECTION", "? KEYS", "q QUIT"]
@@ -922,6 +1037,10 @@ screenTitle :: Screen -> Text
 screenTitle = \case
   InitialLoading -> "loading"
   BrowserScreen -> "browser"
+  ServiceProfilesScreen _ _ -> "manager profiles"
+  ServiceRequestScreen _ -> "manager request"
+  ServiceReviewScreen {} -> "exact manager review"
+  ServiceCommandScreen _ -> "manager command"
   InputScreen _ -> "configure"
   TargetScreen -> "configure / target"
   HelpLoading -> "workflow help"

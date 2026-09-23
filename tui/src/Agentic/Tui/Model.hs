@@ -6,6 +6,8 @@ module Agentic.Tui.Model
     Screen (..),
     TuiModel (..),
     initialModel,
+    initialServiceModel,
+    selectedServiceProfile,
     selectedWorkflow,
     visibleWorkflows,
     setWorkflowFilter,
@@ -48,6 +50,8 @@ import Agentic.Runtime
   )
 import Agentic.Tui.RunModel (occurrenceStateLabel, runFailureLines, runStatusLabel)
 import Agentic.Tui.Types
+import qualified Agentic.Tui.Service as Service
+import qualified Agentic.Manager.Client as Manager
 import Data.Aeson (Value (..), encode)
 import qualified Data.Aeson.KeyMap as KeyMap
 import Data.List (nub)
@@ -68,6 +72,10 @@ data BrowserTab = WorkflowsTab | RunsTab | RoutingTab
 data Screen
   = InitialLoading
   | BrowserScreen
+  | ServiceProfilesScreen ![Service.Profile] !Int
+  | ServiceRequestScreen !Manager.DraftView
+  | ServiceReviewScreen !Manager.Preparation !Text
+  | ServiceCommandScreen !Text
   | InputScreen !Int
   | TargetScreen
   | PreviewLoading
@@ -118,6 +126,16 @@ initialModel workflows runs routing =
       modelStatus = "ready"
     }
 
+-- | An authenticated manager catalogue without local invocation or state paths.
+initialServiceModel :: [Service.Profile] -> TuiModel
+initialServiceModel profiles = (initialModel [] [] (Left "manager profile catalogue"))
+  { modelScreen = ServiceProfilesScreen profiles 0, modelStatus = "select a manager profile" }
+
+selectedServiceProfile :: TuiModel -> Maybe Service.Profile
+selectedServiceProfile model = case modelScreen model of
+  ServiceProfilesScreen profiles index -> atMay profiles index
+  _ -> Nothing
+
 selectedWorkflow :: TuiModel -> Maybe WorkflowDescriptor
 selectedWorkflow model = atMay (visibleWorkflows model) (modelWorkflowIndex model)
 
@@ -145,10 +163,13 @@ selectedRun :: TuiModel -> Maybe CatalogueEntry
 selectedRun model = atMay (modelRuns model) (modelRunIndex model)
 
 moveSelection :: Int -> TuiModel -> TuiModel
-moveSelection delta model = case modelTab model of
-  WorkflowsTab -> model {modelWorkflowIndex = boundedIndex (length (visibleWorkflows model)) (modelWorkflowIndex model + delta)}
-  RunsTab -> model {modelRunIndex = boundedIndex (length (modelRuns model)) (modelRunIndex model + delta)}
-  RoutingTab -> model {modelEngineIndex = boundedIndex (length (routingEngines model)) (modelEngineIndex model + delta)}
+moveSelection delta model
+  | ServiceProfilesScreen profiles index <- modelScreen model = model
+      { modelScreen = ServiceProfilesScreen profiles (boundedIndex (length profiles) (index + delta)) }
+  | otherwise = case modelTab model of
+      WorkflowsTab -> model {modelWorkflowIndex = boundedIndex (length (visibleWorkflows model)) (modelWorkflowIndex model + delta)}
+      RunsTab -> model {modelRunIndex = boundedIndex (length (modelRuns model)) (modelRunIndex model + delta)}
+      RoutingTab -> model {modelEngineIndex = boundedIndex (length (routingEngines model)) (modelEngineIndex model + delta)}
 
 cycleTab :: TuiModel -> TuiModel
 cycleTab model =
@@ -261,6 +282,9 @@ returnToBrowser model =
     }
 
 browserRows :: TuiModel -> [Text]
+browserRows model | ServiceProfilesScreen profiles selected <- modelScreen model =
+  [ marker index selected <> Service.profileId profile <> "  " <> Service.profileReadiness profile
+  | (index,profile) <- zip [0..] profiles ]
 browserRows model = case modelTab model of
   WorkflowsTab ->
     [ marker index (modelWorkflowIndex model)
@@ -286,6 +310,14 @@ browserRows model = case modelTab model of
       ]
 
 browserDetailLines :: TuiModel -> [Text]
+browserDetailLines model | ServiceProfilesScreen _ _ <- modelScreen model =
+  maybe ["No manager profile selected."] (\profile ->
+    [ "Profile: " <> Service.profileId profile,
+      "Revision: " <> Service.profileRevision profile,
+      "Workspace: " <> Service.profileWorkspace profile,
+      "Target: " <> Service.profileTarget profile,
+      "Readiness: " <> Service.profileReadiness profile,
+      "Refusal: " <> fromMaybe "none" (Service.profileRefusal profile) ]) (selectedServiceProfile model)
 browserDetailLines model = case modelTab model of
   WorkflowsTab -> maybe ["No workflow selected."] workflowDetail (selectedWorkflow model)
   RunsTab -> maybe ["No run selected."] runDetail (selectedRun model)
