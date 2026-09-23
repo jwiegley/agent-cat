@@ -142,7 +142,7 @@ common settings
 
 library
   import:          settings
-  build-depends:   direct-sqlite, deepseq, transformers, network
+  build-depends:   direct-sqlite, deepseq, transformers, network, wai, warp, warp-tls, tls
   c-sources:       runtime/cbits/process_group.c
                    runtime/cbits/private_directory.c
                    runtime/cbits/private_sync.c
@@ -175,6 +175,7 @@ library
     Agentic.DSL.Plan
     Agentic.Engine
     Agentic.Manager
+    Agentic.Manager.Client
     Agentic.Plan
     Agentic.Planning
     Agentic.Route
@@ -193,6 +194,8 @@ library
     Agentic.Cli.LocalAdmin
     Agentic.Manager.Credentials
     Agentic.Manager.LocalAdmin
+    Agentic.Manager.Transport
+    Agentic.Manager.Service
     Agentic.Manager.Protocol.LocalAdmin
     Agentic.Cli.Frontend
     Agentic.DSL.Json

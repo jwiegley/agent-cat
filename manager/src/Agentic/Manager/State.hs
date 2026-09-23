@@ -3,11 +3,12 @@
 -- | Durable Runtime observations. Stored associations never grant worker authority.
 module Agentic.Manager.State
   ( RunAssociation (..), ingestAcceptedStart, ingestRuntimeEnvelope, restoreRunProjection, observeRetainedTerminal,
-    submitRunControl, submitDecisionControl, readControlSurface, readDecision, readDecisionHeads,
+    submitRunControl, submitDecisionControl, dispatchRunControl, dispatchDecisionControl, replayControl,
+    resolveRun, resolveDecision, readControlSurface, readClosedControlSurface, readDecision, readDecisionHeads,
     authorizeObservation, requireProjection, withProfileProjection
   ) where
 
-import Agentic.Manager.Admission (AcceptedStart, acceptedStartRun, consumeAcceptedStart, acceptedControlContext, acceptControlCommand, observeAcceptedStart)
+import Agentic.Manager.Admission (AcceptedStart, acceptedStartRun, consumeAcceptedStart, acceptedControlContext, acceptControlCommand, acceptAndDeliverControlCommand, observeAcceptedStart)
 import Agentic.Manager.Authorization
 import qualified Agentic.Manager.Commands as Commands
 import qualified Agentic.Manager.Protocol.Command as Command
@@ -325,6 +326,14 @@ readControlSurface accepted proof = do
   let association=RunAssociation (acceptedStartRun accepted) profile (preparedRootIdentity prepared) (preparedRunId prepared)
   worker <- observeAcceptedStart accepted
   let live=observedWorkerPhase worker `elem` [WorkerStartSent,WorkerRunning] && observedWorkerExit worker==Nothing
+  controlSurface store proof association live
+
+-- | Closed observations cannot advertise native control ownership.
+readClosedControlSurface :: CoordinationStore -> CredentialProof -> RunAssociation -> IO Value
+readClosedControlSurface store proof association = controlSurface store proof association False
+
+controlSurface :: CoordinationStore -> CredentialProof -> RunAssociation -> Bool -> IO Value
+controlSurface store proof association live = do
   (revision,supervision) <- runRead store $ do
     authorizeObservation proof association
     rows <- query "SELECT control_revision,supervision FROM runs WHERE id=?" [text(associationRun association)]
@@ -459,13 +468,59 @@ readDecisionHeads store proof = do
     readDecision store proof (RunAssociation run profile root (RunId native)) ident
 
 submitRunControl :: AcceptedStart -> CredentialProof -> Text -> Maybe Text -> BS.ByteString -> IO (Either Command.CommandFailure Commands.Submission)
-submitRunControl accepted proof = submitControl accepted proof Nothing
+submitRunControl accepted proof = submitControl False accepted proof Nothing
 
 submitDecisionControl :: AcceptedStart -> CredentialProof -> Text -> Text -> Maybe Text -> BS.ByteString -> IO (Either Command.CommandFailure Commands.Submission)
-submitDecisionControl accepted proof decision = submitControl accepted proof (Just decision)
+submitDecisionControl accepted proof decision = submitControl False accepted proof (Just decision)
 
-submitControl :: AcceptedStart -> CredentialProof -> Maybe Text -> Text -> Maybe Text -> BS.ByteString -> IO (Either Command.CommandFailure Commands.Submission)
-submitControl accepted proof decision key precondition body = do
+dispatchRunControl :: AcceptedStart -> CredentialProof -> Text -> Maybe Text -> BS.ByteString
+  -> IO (Either Command.CommandFailure Commands.Submission)
+dispatchRunControl accepted proof = submitControl True accepted proof Nothing
+
+dispatchDecisionControl :: AcceptedStart -> CredentialProof -> Text -> Text -> Maybe Text -> BS.ByteString
+  -> IO (Either Command.CommandFailure Commands.Submission)
+dispatchDecisionControl accepted proof decision = submitControl True accepted proof (Just decision)
+
+-- | Resolve a current authorized observation address, never a live association.
+resolveRun :: CoordinationStore -> CredentialProof -> [Command.Scope] -> Text -> IO RunAssociation
+resolveRun store proof scopes ident = do
+  unless (Command.validId ident) (throwIO Command.InvalidRequest)
+  (profile,root,native) <- runRead store $ do
+    _ <- currentClient proof >>= either refuseTransaction pure
+    rows <- query "SELECT profile_id,root_identity,native_run_id FROM runs WHERE id=?" [text ident]
+    case rows of
+      [[SQL.SQLText profile,SQL.SQLText root,SQL.SQLText native]] -> do
+        _ <- authorizeProfile proof profile scopes >>= either refuseTransaction pure
+        pure (profile,root,native)
+      _ -> refuseTransaction Command.Forbidden
+  nativeId <- either (const (throwIO StoreIntegrity)) pure (mkRunId native)
+  pure (RunAssociation ident profile root nativeId)
+
+resolveDecision :: CoordinationStore -> CredentialProof -> [Command.Scope] -> Text -> IO RunAssociation
+resolveDecision store proof scopes ident = do
+  unless (Command.validId ident) (throwIO Command.InvalidRequest)
+  run <- runRead store $ do
+    _ <- currentClient proof >>= either refuseTransaction pure
+    rows <- query "SELECT run_id FROM decisions WHERE id=?" [text ident]
+    case rows of
+      [[SQL.SQLText value]] -> pure value
+      _ -> refuseTransaction Command.Forbidden
+  resolveRun store proof scopes run
+
+-- | Exact cached receipt replay does not reconstruct a control ticket or Worker.
+replayControl :: CoordinationStore -> CredentialProof -> RunAssociation -> Maybe Text
+  -> Text -> Maybe Text -> BS.ByteString -> IO (Either Command.CommandFailure Commands.Submission)
+replayControl store proof association decision key precondition body = case parseControlBody body of
+  Left failure -> pure (Left failure)
+  Right (operation,_,_)
+    | isJust decision && operation `notElem` [Command.Answer,Command.ChooseRecovery] -> pure (Left Command.InvalidRequest)
+    | otherwise ->
+        let uri = maybe (runURI association <> "/control") ("/v1/decisions/" <>) decision
+            request = Commands.CommandRequest operation (associationProfile association) "POST" uri key "application/json" precondition body
+        in Commands.submitConfiguredCommand store proof request (\_ _ _ -> Left Command.OwnershipUnavailable)
+
+submitControl :: Bool -> AcceptedStart -> CredentialProof -> Maybe Text -> Text -> Maybe Text -> BS.ByteString -> IO (Either Command.CommandFailure Commands.Submission)
+submitControl dispatch accepted proof decision key precondition body = do
   (store,profile,_,prepared) <- acceptedControlContext accepted
   let association=RunAssociation (acceptedStartRun accepted) profile (preparedRootIdentity prepared) (preparedRunId prepared)
       uri=maybe (runURI association<>"/control") ("/v1/decisions/"<>) decision
@@ -479,7 +534,7 @@ submitControl accepted proof decision key precondition body = do
               Nothing -> query "SELECT control_revision FROM runs WHERE id=?" [text(associationRun association)]
               Just ident -> query "SELECT revision FROM decisions WHERE id=? AND run_id=?" [text ident,text(associationRun association)]
             pure $ case rows of [[SQL.SQLText revision]]->Just(uri,profile,revision);_->Nothing
-      acceptControlCommand accepted proof request version $ do
+      (if dispatch then acceptAndDeliverControlCommand else acceptControlCommand) accepted proof request version $ do
           selected <- withStoreConfiguration store $ \_ profiles -> case [publicRevision current|current<-profiles,publicId current==profile] of
             [revision]->pure revision
             _->throwIO Command.Forbidden

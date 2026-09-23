@@ -9,8 +9,9 @@ module Agentic.Manager.Admission
     withAdmission, withAdmissionClock, enqueueRequest, admitOldest,
     editRequestInput, withdrawRequest, awaitReview, withReviewAcceptance,
     retryAdmissionCleanup, awaitAdmissionCleanup, closeAdmission, ShutdownMode (..), ShutdownResult (..), shutdownAdmission, reservationIdentity, observeLivePreparation, ownsHistoryRun,
-    acceptControlCommand, deliverAcceptedControl, acceptedControlContext,
-    AcceptedStart, acceptStartCommand, deliverAcceptedStart, stopAcceptedStart, observeAcceptedStart, acceptedStartRun, acceptedTimerRetired, invalidateLivePreparation, consumeAcceptedStart
+    awaitAdmissionWork, preparationRequestIdentity, awaitAcceptedStart, requestPreparationStop,
+    acceptControlCommand, acceptAndDeliverControlCommand, deliverAcceptedControl, acceptedControlContext,
+    AcceptedStart, acceptStartCommand, acceptAndDeliverStartCommand, deliverAcceptedStart, stopAcceptedStart, observeAcceptedStart, acceptedStartRun, acceptedTimerRetired, invalidateLivePreparation, consumeAcceptedStart
   ) where
 
 import Agentic.Manager.Admission.Policy
@@ -32,7 +33,7 @@ import Control.Concurrent.Async (Async, async, waitCatch, poll, race, withAsync)
 import Control.Concurrent.MVar (MVar, newMVar, withMVar)
 import Control.Concurrent.STM
   (STM, TVar, TMVar, atomically, newTVarIO, readTVar, writeTVar, modifyTVar',
-   newEmptyTMVarIO, readTMVar, tryReadTMVar, putTMVar, tryPutTMVar, swapTMVar, check, throwSTM)
+   newEmptyTMVarIO, newTMVarIO, readTMVar, takeTMVar, tryReadTMVar, putTMVar, tryPutTMVar, swapTMVar, check, retry, orElse, throwSTM)
 import Control.DeepSeq (NFData)
 import Control.Exception (SomeException, mask, uninterruptibleMask_, finally, onException, try, throwIO, fromException)
 import Control.Monad (forM, forM_, unless, when, void)
@@ -79,7 +80,8 @@ data Admission = Admission
     shutdownMode :: !(TVar (Maybe ShutdownMode)), cancelled :: !(TVar Bool), drainExpired :: !(TVar Bool),
     queued :: !(TVar (Map.Map Text AcceptedEnqueue)), entries :: !(TVar (Map.Map Text Entry)),
     attempts :: !(TVar (Map.Map Text CommandAttempt)),
-    operations :: !(TVar [TMVar (Maybe (Async ()))]), finished :: !(TMVar (Either CommandFailure ())) }
+    operations :: !(TVar [TMVar (Maybe (Async ()))]), finished :: !(TMVar (Either CommandFailure ())),
+    workReady :: !(TMVar ()) }
 
 -- | Local shutdown policy. Deadlines are absolute monotonic nanoseconds, not wire fields.
 data ShutdownMode = DrainUntil !Word64 | CancelNow deriving (Eq, Show)
@@ -93,6 +95,16 @@ data ShutdownResult = ShutdownResult
 data LivePreparation = LivePreparation !Admission !Entry
 reservationIdentity :: LivePreparation -> Text
 reservationIdentity (LivePreparation _ entry) = entryReservation entry
+
+preparationRequestIdentity :: LivePreparation -> Text
+preparationRequestIdentity (LivePreparation _ entry) = entryRequest entry
+
+-- | Coalesced notification of new admission facts, not a replay queue.
+awaitAdmissionWork :: Admission -> STM ()
+awaitAdmissionWork = takeTMVar . workReady
+
+notifyAdmission :: Admission -> STM ()
+notifyAdmission controller = void (tryPutTMVar (workReady controller) ())
 
 data Entry = Entry
   { entryRequest :: !Text, entryReservation :: !Text, entryGeneration :: !Text,
@@ -121,7 +133,7 @@ withAdmissionClock :: MonotonicClock -> CoordinationStore -> (Admission -> IO a)
 withAdmissionClock timer owner action = mask $ \restore -> do
   controller <- Admission owner timer <$> newMVar () <*> newTVarIO False <*> newTVarIO (pure False)
     <*> newTVarIO Nothing <*> newTVarIO False <*> newTVarIO False
-    <*> newTVarIO Map.empty <*> newTVarIO Map.empty <*> newTVarIO Map.empty <*> newTVarIO [] <*> newEmptyTMVarIO
+    <*> newTVarIO Map.empty <*> newTVarIO Map.empty <*> newTVarIO Map.empty <*> newTVarIO [] <*> newEmptyTMVarIO <*> newTMVarIO ()
   ready <- newEmptyTMVarIO
   supervisor <- async $ do
     result <- try @SomeException $ withStoreAdmission owner $ \alive -> do
@@ -267,7 +279,7 @@ enqueueRequest controller proof requestId key precondition body = operation cont
                 pure([requestEvent requestId revision],Just effect)
       accepted <- submitRetained controller proof requestId "enqueue" request builder >>= need
       case submissionEnqueue accepted of
-        Just permit -> atomically(modifyTVar'(queued controller)(Map.insert requestId permit))
+        Just permit -> atomically $ modifyTVar' (queued controller) (Map.insert requestId permit) >> notifyAdmission controller
         Nothing -> unless(submissionReplayed accepted)(throwIO StorageUnavailable)
       pure(submissionReceipt accepted)
 
@@ -364,6 +376,17 @@ observeLivePreparation (LivePreparation _ entry) = atomically(tryReadTMVar(entry
 
 awaitReview :: LivePreparation -> IO (Either CommandFailure ReviewContext)
 awaitReview (LivePreparation _ entry)=atomically(readTMVar(entryReview entry))
+
+-- | Loan the original committed start, including when its accepting waiter left.
+awaitAcceptedStart :: LivePreparation -> IO (Maybe AcceptedStart)
+awaitAcceptedStart (LivePreparation _ entry) = atomically $
+  (readTVar (entryStart entry) >>= maybe retry (pure . Just))
+    `orElse` (readTMVar (entryResult entry) >> pure Nothing)
+
+-- | Stop only this retained entry. No identity or observation recreates ownership.
+requestPreparationStop :: LivePreparation -> IO ()
+requestPreparationStop (LivePreparation _ entry) =
+  atomically (void (tryPutTMVar (entryStop entry) (StopService "closed")))
 
 -- The callback is a short local acceptance transaction, not process or network IO.
 withReviewAcceptance :: LivePreparation -> (ReviewContext -> CommitDeadline -> IO a) -> IO (Either CommandFailure a)
@@ -602,6 +625,7 @@ finalizeKnown controller entry = locked controller $ do
       void(recordEffectWithAdmission WaitWithinBudget actual effect publish >>= need)
   atomically $ do
     modifyTVar'(queued controller)(Map.delete(entryRequest entry))
+    notifyAdmission controller
 
 changeRunSupervision :: Entry -> Text -> Text -> Text -> Transaction [Invalidation]
 changeRunSupervision entry previous next revision = do
@@ -744,7 +768,7 @@ publishRetained = publishRetainedWithAdmission FailFast
 publishRetainedWithAdmission :: StoreAdmission -> Admission -> Text -> Text -> Submission -> IO ()
 publishRetainedWithAdmission admission controller requestId kind accepted =
   if kind=="approve" then retainStartWithAdmission admission controller requestId accepted else if kind=="enqueue" then case submissionEnqueue accepted of
-    Just permit -> atomically(modifyTVar'(queued controller)(Map.insert requestId permit))
+    Just permit -> atomically $ modifyTVar' (queued controller) (Map.insert requestId permit) >> notifyAdmission controller
     Nothing -> pure()
   else if kind=="control" then unless (submissionReplayed accepted) $ do
     entry <- Map.lookup requestId <$> readTVarIO(entries controller) >>= maybe(throwIO OwnershipUnavailable)pure
@@ -776,7 +800,23 @@ retainStartWithAdmission admission controller requestId accepted = unless(submis
 acceptStartCommand :: LivePreparation -> CredentialProof -> CommandRequest
   -> (ReviewContext -> Text -> ConfigurationLimits -> [(Text,Discovery)] -> Either CommandFailure Mutation)
   -> IO (Either CommandFailure (Submission,Maybe AcceptedStart))
-acceptStartCommand (LivePreparation controller entry) proof request builder = operation controller $ locked controller $ do
+acceptStartCommand live@(LivePreparation controller _) proof request builder =
+  operation controller (acceptStartNow live proof request builder)
+
+-- | Accept and dispatch within one existing retained operation. Losing the
+-- caller abandons its wait, not the committed delivery. A replay never dispatches.
+acceptAndDeliverStartCommand :: LivePreparation -> CredentialProof -> CommandRequest
+  -> (ReviewContext -> Text -> ConfigurationLimits -> [(Text,Discovery)] -> Either CommandFailure Mutation)
+  -> IO (Either CommandFailure (Submission,Maybe AcceptedStart))
+acceptAndDeliverStartCommand live@(LivePreparation controller _) proof request builder = operation controller $ do
+  result@(submission,retained) <- acceptStartNow live proof request builder
+  unless (submissionReplayed submission) (maybe (throwIO OwnershipUnavailable) deliverStartNow retained)
+  pure result
+
+acceptStartNow :: LivePreparation -> CredentialProof -> CommandRequest
+  -> (ReviewContext -> Text -> ConfigurationLimits -> [(Text,Discovery)] -> Either CommandFailure Mutation)
+  -> IO (Submission,Maybe AcceptedStart)
+acceptStartNow (LivePreparation controller entry) proof request builder = locked controller $ do
   ensureController controller
   unless(commandOperation request==Approve)(throwIO InvalidRequest)
   replay<-commandPreflight(store controller)proof request(\_ _ _ exists->pure(exists,[])) >>= need
@@ -804,7 +844,10 @@ invalidateLivePreparation (LivePreparation controller entry) reason = operation 
   atomically(readTMVar(entryResult entry)) >>= need
 
 deliverAcceptedStart :: AcceptedStart -> IO (Either CommandFailure ())
-deliverAcceptedStart (AcceptedStart controller entry ticket run) = runOperation controller $ do
+deliverAcceptedStart original@(AcceptedStart controller _ _ _) = runOperation controller (deliverStartNow original)
+
+deliverStartNow :: AcceptedStart -> IO ()
+deliverStartNow (AcceptedStart controller entry ticket run) = do
   worker<-locked controller $ do
     ensureRunController controller
     dbRead controller $ do
@@ -830,32 +873,51 @@ acceptControlCommand :: AcceptedStart -> CredentialProof -> CommandRequest
   -> IO (Text -> Either CommandFailure BS.ByteString,
          Text -> ConfigurationLimits -> [(Text,Discovery)] -> Either CommandFailure Mutation)
   -> IO (Either CommandFailure Submission)
-acceptControlCommand (AcceptedStart controller entry _ run) proof request version prepare = runOperation controller $
+acceptControlCommand original@(AcceptedStart controller entry _ _) proof request version prepare = runOperation controller $
+  withMVar (entryControlGate entry) $ \_ -> acceptControlNow original proof request version prepare
+
+-- | The retained control operation owns both acceptance and its one dispatch.
+acceptAndDeliverControlCommand :: AcceptedStart -> CredentialProof -> CommandRequest
+  -> Transaction (Maybe (Text,Text,Text))
+  -> IO (Text -> Either CommandFailure BS.ByteString,
+         Text -> ConfigurationLimits -> [(Text,Discovery)] -> Either CommandFailure Mutation)
+  -> IO (Either CommandFailure Submission)
+acceptAndDeliverControlCommand original@(AcceptedStart controller entry _ _) proof request version prepare = runOperation controller $
   withMVar (entryControlGate entry) $ \_ -> do
-    ensureRunController controller
-    unless(commandOperation request `elem` [Cancel,Steer,Retry,ChooseRecovery,Redirect,Answer]
-      && commandProfile request==entryProfile entry)(throwIO InvalidRequest)
-    replay <- commandPreflightVersion (store controller) proof request version >>= need
-    if replay then locked controller $ submitConfiguredCommand (store controller) proof request (\_ _ _->Left StateConflict) >>= need
-    else do
+    submission <- acceptControlNow original proof request version prepare
+    unless (submissionReplayed submission) (deliverControlNow original (receiptId (submissionReceipt submission)))
+    pure submission
+
+acceptControlNow :: AcceptedStart -> CredentialProof -> CommandRequest
+  -> Transaction (Maybe (Text,Text,Text))
+  -> IO (Text -> Either CommandFailure BS.ByteString,
+         Text -> ConfigurationLimits -> [(Text,Discovery)] -> Either CommandFailure Mutation)
+  -> IO Submission
+acceptControlNow (AcceptedStart controller entry _ run) proof request version prepare = do
+  ensureRunController controller
+  unless(commandOperation request `elem` [Cancel,Steer,Retry,ChooseRecovery,Redirect,Answer]
+    && commandProfile request==entryProfile entry)(throwIO InvalidRequest)
+  replay <- commandPreflightVersion (store controller) proof request version >>= need
+  if replay then locked controller $ submitConfiguredCommand (store controller) proof request (\_ _ _->Left StateConflict) >>= need
+  else do
+    checkLive
+    available <- capacityAvailable
+    unless available(throwIO SizeLimit)
+    -- Never hold global admission or configuration locks during restoration.
+    (encoder,builder) <- prepare
+    locked controller $ do
       checkLive
-      available <- capacityAvailable
-      unless available(throwIO SizeLimit)
-      -- Never hold global admission or configuration locks during restoration.
-      (encoder,builder) <- prepare
-      locked controller $ do
-        checkLive
-        capacity <- capacityAvailable
-        let checked candidate limits catalogues = do
-              mutation <- builder candidate limits catalogues
-              pure mutation {mutationValidate = do
-                validateOwner entry ["start-pending","associated"] ["held"]
-                rows <- query "SELECT id FROM runs WHERE id=? AND request_id=? AND supervision='owned'"
-                  [text run,text(entryRequest entry)]
-                unless(rows==[[text run]])(refuseTransaction OwnershipUnavailable)
-                result <- mutationValidate mutation
-                pure $ case result of Right _ | not capacity -> Left SizeLimit; _ -> result}
-        submitRetainedGuarded controller proof (entryRequest entry) "control" request Nothing (Just encoder) checked >>= need
+      capacity <- capacityAvailable
+      let checked candidate limits catalogues = do
+            mutation <- builder candidate limits catalogues
+            pure mutation {mutationValidate = do
+              validateOwner entry ["start-pending","associated"] ["held"]
+              rows <- query "SELECT id FROM runs WHERE id=? AND request_id=? AND supervision='owned'"
+                [text run,text(entryRequest entry)]
+              unless(rows==[[text run]])(refuseTransaction OwnershipUnavailable)
+              result <- mutationValidate mutation
+              pure $ case result of Right _ | not capacity -> Left SizeLimit; _ -> result}
+      submitRetainedGuarded controller proof (entryRequest entry) "control" request Nothing (Just encoder) checked >>= need
   where
     checkLive = do
       ensureRunController controller
@@ -875,7 +937,10 @@ acceptControlCommand (AcceptedStart controller entry _ run) proof request versio
 -- | Explicit one-shot dispatch through the original ticket, Worker and pipe.
 -- Only the original ticket supplies bytes. Stored bindings cannot recreate them.
 deliverAcceptedControl :: AcceptedStart -> Text -> IO (Either CommandFailure ())
-deliverAcceptedControl (AcceptedStart controller entry _ run) command = runOperation controller $ do
+deliverAcceptedControl original@(AcceptedStart controller _ _ _) command = runOperation controller (deliverControlNow original command)
+
+deliverControlNow :: AcceptedStart -> Text -> IO ()
+deliverControlNow (AcceptedStart controller entry _ run) command = do
   (ticket,worker) <- locked controller $ do
     ensureRunController controller
     (_,ticket) <- Map.lookup command <$> readTVarIO(entryControls entry) >>= maybe(throwIO OwnershipUnavailable)pure

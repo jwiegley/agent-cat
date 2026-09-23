@@ -3,7 +3,7 @@
 
 -- | Exact public consent and private binding to one original native preparation.
 module Agentic.Manager.Approval
-  ( ReviewedPreparation, projectReview, publishReview, readPreparation, acceptApproval, approve,
+  ( ReviewedPreparation, reviewedView, projectReview, publishReview, readPreparation, acceptApproval, approve, replayApproval,
     AcceptedStart, deliverAcceptedStart, stopAcceptedStart, observeAcceptedStart, acceptedStartRun, acceptedTimerRetired ) where
 
 import Agentic.Manager.Admission
@@ -36,6 +36,10 @@ import qualified Database.SQLite3 as SQL
 -- | An original live loan paired with its persisted exact public/private binding.
 -- No constructor, Generic or receipt lookup creates this authority.
 data ReviewedPreparation = ReviewedPreparation !CoordinationStore !LivePreparation !P.Preparation !BS.ByteString
+
+-- | The already published public review, not another observation or a capability.
+reviewedView :: ReviewedPreparation -> P.Preparation
+reviewedView (ReviewedPreparation _ _ public _) = public
 
 publishReview :: CoordinationStore -> LivePreparation -> IO (Either CommandFailure ReviewedPreparation)
 publishReview store live = attempt $ withReviewAcceptance live $ \context guard -> do
@@ -115,7 +119,11 @@ readPreparation store proof ident = attemptIO $ do
   either(const(throwIO StorageUnavailable))pure result
 
 acceptApproval :: ReviewedPreparation -> CredentialProof -> Text -> Maybe Text -> BS.ByteString -> IO (Either CommandFailure (Submission,Maybe AcceptedStart))
-acceptApproval (ReviewedPreparation store live preparation privateBytes) proof key precondition body = attempt $ do
+acceptApproval = acceptApprovalWithDelivery False
+
+acceptApprovalWithDelivery :: Bool -> ReviewedPreparation -> CredentialProof -> Text -> Maybe Text -> BS.ByteString
+  -> IO (Either CommandFailure (Submission,Maybe AcceptedStart))
+acceptApprovalWithDelivery dispatch (ReviewedPreparation store live preparation privateBytes) proof key precondition body = attempt $ do
   selectors<-need(P.decodeApproval body)
   requestRevision<-fresh "request_revision_"
   preparationRevision<-fresh "preparation_revision_"
@@ -153,7 +161,7 @@ acceptApproval (ReviewedPreparation store live preparation privateBytes) proof k
         _<-authorizeProfile proof (P.preparationProfile preparation) [Submit,Control] >>= needT
         rows<-query "SELECT revision FROM preparations WHERE id=?" [text(P.preparationId preparation)]
         case rows of [[SQL.SQLText revision]]->pure(Just(preparationURI(P.preparationId preparation),P.preparationProfile preparation,revision));_->pure Nothing
-  result<-acceptStartCommand live proof request builder
+  result <- (if dispatch then acceptAndDeliverStartCommand else acceptStartCommand) live proof request builder
   case result of
     Left StaleRevision -> do
       current<-withStoreCatalogues store $ \_ _ catalogues->pure $ case lookup(P.preparationProfile preparation)catalogues of
@@ -167,10 +175,25 @@ acceptApproval (ReviewedPreparation store live preparation privateBytes) proof k
     _->pure result
 
 approve :: ReviewedPreparation -> CredentialProof -> Text -> Maybe Text -> BS.ByteString -> IO (Either CommandFailure CommandReceipt)
-approve prepared proof key precondition body = attemptIO $ do
-  (submission,start)<-acceptApproval prepared proof key precondition body >>= need
-  unless(submissionReplayed submission) $ maybe(throwIO OwnershipUnavailable)(\owned->deliverAcceptedStart owned >>= need)start
-  pure(submissionReceipt submission)
+approve prepared proof key precondition body =
+  fmap (fmap (submissionReceipt . fst)) (acceptApprovalWithDelivery True prepared proof key precondition body)
+
+-- | Resolve an exact cached receipt without recovering any live preparation.
+replayApproval :: CoordinationStore -> CredentialProof -> Text -> Text -> Maybe Text -> BS.ByteString
+  -> IO (Either CommandFailure CommandReceipt)
+replayApproval store proof ident key precondition body = attemptIO $ do
+  unless (validId ident) (throwIO InvalidRequest)
+  _ <- need (P.decodeApproval body)
+  profile <- runRead store $ do
+    _ <- currentClient proof >>= needT
+    rows <- query "SELECT r.profile_id FROM preparations p JOIN requests r ON r.id=p.request_id WHERE p.id=?" [text ident]
+    selected <- case rows of
+      [[SQL.SQLText value]] -> pure value
+      _ -> refuseTransaction Forbidden
+    _ <- authorizeProfile proof selected [Submit,Control] >>= needT
+    pure selected
+  let request = CommandRequest Approve profile "POST" (preparationURI ident) key "application/json" precondition body
+  submissionReceipt <$> (submitConfiguredCommand store proof request (\_ _ _ -> Left OwnershipUnavailable) >>= need)
 
 projectReview :: Text -> ReviewContext -> Either CommandFailure P.Review
 projectReview workflow context = do
