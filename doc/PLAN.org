@@ -10712,7 +10712,7 @@ manager's correctness boundary.
 :LABELS:   ["p5","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-23 Wed 12:49]
+:MODIFIED: [2026-09-23 Wed 13:49]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-023
 :SOURCE_REPO: agent-cat
@@ -10876,6 +10876,13 @@ callers. Worker environments contain no manager credential material.
     "author": "johnw",
     "text": "User-approved TLS update pins both affected certificate packages to1.9.1 and corrects IP-only SAN precedence at the shared dependency owner, without disabling checks. Compatible Nix dependencies changed, but GHC9.10.3 and the flake lock did not. Reviewer63fdf53f-c03b-463a-9c3d-bbdfdb66a43f approved bounded integration with a source-archive note, which parent corrected. Eighteen client cases and actual public Client/protected-manager observation passed N1/N8. Canonical dependency probes and archive verification passed. The combined documentation command timed out during its Haskell build, and the separate resumed Haskell gate passed19:43:35–19:45:39Z. All prior failures remain preserved. A subsequent full workflow retest failed at N1 with a request still queued before preparation. No cause or successful retry is inferred. Residual Name Constraints concerns remain acat-tls-name-forms-6gbo, and original update issue0h7q remains in progress pending complete general-CA acceptance. Current application WIP remains isolated, actual TUI service mode is unfinished, and no WM/G milestone is accepted. Details are in service-tui.purvEwEv/tls-update.md. Refocus19:47:05Z, next deadline20:47:05Z.",
     "created_at": "2026-09-23T19:49:06Z"
+  },
+  {
+    "id": 305,
+    "issue_id": "acat-wm-023-d20b",
+    "author": "johnw",
+    "text": "The isolated broker-source now runs an actual read-only TUI through the protected manager using --tui --service ABS_CLIENT_PROFILE. It reuses App/Model/Presentation, with disjoint local and service owners, no dummy local configuration or root, strict public Profile/Workflow decoders, complete page assembly, one ticketed HTTP read slot and joined service cleanup. Profiles, workflow selection and server help work through real140x36 keyboard/PTY interaction. Local launch/control shortcuts are not enabled in this mode. Full model/property/golden/render/root-role checks and real TUI quit/SIGTERM restoration passed N1 then N8 in tui-service-shell-native-guards,2026-09-23T20:44:12Z–20:44:55Z, under /Users/johnw/Products/k.M0a5ItPm/tmp/tui-service.YzPIbJaT. Compiler-parsed boundaries passed20:41:41Z–20:41:43Z with48 syntax/frontend and343 forbidden-edge fixtures. Original build failures remain preserved. This is read-only interaction, not the required workflow milestone. Mutation/uncertainty handling, complete Overview/event attachment, Unicode submission, exact approval, typed false, recovery and verified result retrieval remain to wire. Queue-stall and residual certificate-validation obligations remain open. Canonical stays70bf071 with all application changes uncommitted and unreviewed in the isolated branch. No WM/G acceptance or task completion is claimed. Refocus20:44:55Z, next deadline21:44:55Z. Details are in service-tui.purvEwEv/broker-brief.md.",
+    "created_at": "2026-09-23T20:49:08Z"
   }
 ]
 #+end_src
