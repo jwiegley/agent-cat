@@ -3142,9 +3142,9 @@ live handle where no live scope exists.
 @chapter Runner Reference
 
 This chapter is the complete command-line reference for @command{agentic-run}.
-All commands operate on the registry that is supplied to
+Local commands operate on the registry that is supplied to
 @code{Agentic.Cli.cliMain}.  The noun below is @samp{example} in this
-repository.
+repository.  Terminal service mode uses the selected manager's catalogue.
 
 @include runner-index.texi
 
@@ -3152,6 +3152,7 @@ repository.
 
 @example
 agentic-run --tui
+agentic-run --tui --service CLIENT_PROFILE
 agentic-run frontend --capabilities
 agentic-run frontend
 agentic-run frontend-io < request.json
@@ -3181,6 +3182,7 @@ refused rather than interpreted as help or execution.
 @section Terminal frontend
 
 @c COVER CLI --tui author
+@c COVER CLI --service author
 @table @code
 @item --tui
 Open the terminal frontend for the current executable's registry.  The command
@@ -3188,10 +3190,27 @@ requires terminal input and output and refuses pipes before initializing Vty.
 A downstream executable that calls @code{cliMain}, including @command{wf},
 therefore browses and launches its own registry rather than this repository's
 example table.
+@item --service CLIENT_PROFILE
+Select the manager backend with @option{--tui}.  The argument is an absolute
+path to a private version-1 JSON client profile identifying an HTTPS API
+endpoint, a @code{credentialFile}, and a @code{caFile}.  These files belong to
+the client.  They are not manager registry or store paths.  Certificate and
+hostname verification remain enabled.
+
+Service mode browses the manager's profiles, workflows, and help.  It creates
+requests, submits literal inputs, and displays the exact manager review before
+explicit approval.  The client retains the original pending command and permits
+an uncertain send to be repeated only after explicit confirmation.  Receipt
+status is separate from request association and runtime outcome.  Exiting the
+frontend closes its transport without cancelling manager-owned work.
+
+The current service frontend ends at approval and association.  Live run views,
+decision answers, recovery controls, and verified result retrieval are not yet
+connected to this UI.  Service mode remains an unaccepted implementation.
 @end table
 
-The application enters its Brick screen before runner discovery begins.  Its
-trusted configuration keeps the runner alias, executable, and ordered prefix
+In local mode, the application enters its Brick screen before runner discovery
+begins.  Its trusted configuration keeps the runner alias, executable, and ordered prefix
 arguments as invocation data.  Before workflow or routing discovery, a bounded
 subprocess obtains the capability server record from that exact configured
 invocation.  Child manifests take @code{runnerId}, @code{runnerExecutable}, and

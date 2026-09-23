@@ -27,6 +27,7 @@
 @clindex --routing
 @clindex --scratch
 @clindex --scripted
+@clindex --service
 @clindex --session
 @clindex --set-answer
 @clindex --state
