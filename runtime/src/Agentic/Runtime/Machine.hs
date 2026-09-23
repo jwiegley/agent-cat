@@ -9,6 +9,7 @@ module Agentic.Runtime.Machine
     newDeferredEventSink,
     deferredEventSink,
     activateEventSink,
+    activateEventSinkBrokered,
     eventSinkActive,
     handleEventSink,
     handleEventSinkFor,
@@ -19,10 +20,12 @@ module Agentic.Runtime.Machine
     withControlInput,
     withControlInputFor,
     withBufferedControlInputFor,
+    withBufferedControlInputBrokered,
     readNdjsonFrame,
   )
 where
 
+import Agentic.Runtime.Broker (DataBroker (..), inProcessBroker)
 import Agentic.Runtime.Control
   ( AckState (ControlFailed, Delivered),
     Control (controlId),
@@ -55,9 +58,10 @@ import Agentic.Runtime.Protocol
     maxFrameBytes,
     protocolVersion,
   )
-import Control.Concurrent (forkIOWithUnmask, killThread, myThreadId, throwTo)
+import Control.Concurrent (myThreadId, throwTo)
+import Control.Concurrent.Async (withAsyncWithUnmask)
 import Control.Concurrent.MVar (MVar, modifyMVar, modifyMVarMasked, modifyMVar_, newMVar, readMVar)
-import Control.Exception (Exception, SomeException, bracket, throwIO, try)
+import Control.Exception (Exception, SomeAsyncException, SomeException, catch, fromException, throwIO, try)
 import Control.Monad (when)
 import qualified Data.ByteString as BS
 import qualified Data.Text as T
@@ -82,12 +86,17 @@ deferredEventSink (DeferredEventSink state) event =
 
 -- | Emit @run.started@ first, then queued controls, and forward future events.
 activateEventSink :: DeferredEventSink -> EventSink -> RuntimeEvent -> IO Bool
-activateEventSink (DeferredEventSink state) sink started = do
+activateEventSink = activateEventSinkBrokered inProcessBroker
+
+-- | Publish the start through the broker before forwarding already-brokered
+-- queued events to the newly attached sink.
+activateEventSinkBrokered :: DataBroker -> DeferredEventSink -> EventSink -> RuntimeEvent -> IO Bool
+activateEventSinkBrokered broker (DeferredEventSink state) sink started = do
   result <-
     modifyMVar state $ \current -> case current of
       Activated _ -> pure (current, Right False)
       Deferred events -> do
-        outcome <- try @SomeException (sink started >> mapM_ sink (reverse events))
+        outcome <- try @SomeException (brokerEvent broker sink started >> mapM_ sink (reverse events))
         pure (Activated sink, either Left (const (Right True)) outcome)
   either throwIO pure result
 
@@ -259,13 +268,23 @@ withControlInputFor version handle = withBufferedControlInputFor version handle 
 
 -- | Begin controls with bytes retained from the same transport before activation.
 withBufferedControlInputFor :: Int -> Handle -> BS.ByteString -> EventSink -> ControlRuntime -> IO a -> IO a
-withBufferedControlInputFor version handle initial sink runtime action = do
+withBufferedControlInputFor = withBufferedControlInputBrokered inProcessBroker
+
+-- | Deliver validated controls and their events through the injected broker.
+-- The original input thread and control runtime retain cancellation and policy.
+withBufferedControlInputBrokered :: DataBroker -> Int -> Handle -> BS.ByteString -> EventSink -> ControlRuntime -> IO a -> IO a
+withBufferedControlInputBrokered broker version handle initial originalSink runtime action = do
   owner <- myThreadId
-  bracket
-    (forkIOWithUnmask (\unmask -> unmask (loop owner initial)))
-    killThread
+  withAsyncWithUnmask
+    (\unmask -> unmask (loop owner initial) `catch` reportFailure owner)
     (const action)
   where
+    -- A failed receiver must not leave its runtime waiting without a control
+    -- channel. Scope exit cancels and joins this original reader before return.
+    reportFailure owner failure = case fromException failure :: Maybe SomeAsyncException of
+      Just _ -> throwIO failure
+      Nothing -> throwTo owner (failure :: SomeException)
+    sink = brokerEvent broker originalSink
     loop owner buffered = do
       frame <- readNdjsonFrame maxFrameBytes "runtime control" handle buffered
       case frame of
@@ -279,25 +298,29 @@ withBufferedControlInputFor version handle initial sink runtime action = do
               sink (invalidAckEventFor version (ControlAck (ControlId "invalid") ControlFailed why))
               throwTo owner (MachineCancelled (T.unpack why))
             Right control -> do
-              (ack, next) <- decideRuntimeControl runtime control
-              sink (ackEventFor version control ack)
-              case next of
-                -- Cancellation is terminal. A following EOF must not replace its reason.
-                Just ActCancel -> throwTo owner (MachineCancelled "cancelled by control")
-                Just delivery -> do
-                  (delivered, afterAcknowledgement) <- deliverRuntimeActionDeferred runtime control delivery
-                  case delivery of
-                    ActSteer attempt timing text
-                      | acknowledgementState delivered == Delivered ->
-                          sink (AttemptSteered attempt (controlIdText (controlId control)) (timingWord timing) text)
-                    ActRedirect occurrence target
-                      | acknowledgementState delivered == Delivered ->
-                          sink (OccurrenceRedirected occurrence (controlIdText (controlId control)) target)
-                    _ -> pure ()
-                  sink (ackEventFor version control delivered)
-                  afterAcknowledgement
-                  loop owner rest
-                Nothing -> loop owner rest
+              continue <- brokerControl broker (receive owner) control
+              when continue (loop owner rest)
+
+    receive owner control = do
+      (ack, next) <- decideRuntimeControl runtime control
+      sink (ackEventFor version control ack)
+      case next of
+        -- Cancellation is terminal. A following EOF must not replace its reason.
+        Just ActCancel -> throwTo owner (MachineCancelled "cancelled by control") >> pure False
+        Just delivery -> do
+          (delivered, afterAcknowledgement) <- deliverRuntimeActionDeferred runtime control delivery
+          case delivery of
+            ActSteer attempt timing text
+              | acknowledgementState delivered == Delivered ->
+                  sink (AttemptSteered attempt (controlIdText (controlId control)) (timingWord timing) text)
+            ActRedirect occurrence target
+              | acknowledgementState delivered == Delivered ->
+                  sink (OccurrenceRedirected occurrence (controlIdText (controlId control)) target)
+            _ -> pure ()
+          sink (ackEventFor version control delivered)
+          afterAcknowledgement
+          pure True
+        Nothing -> pure True
 
     timingWord InterruptNow = "interrupt-now"
     timingWord NextBoundary = "next-boundary"

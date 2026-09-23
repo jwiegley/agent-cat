@@ -82,6 +82,7 @@ import Agentic.Exec
     codeWord,
     oneLine,
     withPhysicalAttempt,
+    attemptLog,
     raiseGap,
     trimAscii,
   )
@@ -193,7 +194,7 @@ executingWorld cfg inner =
       worldAskAttemptIO = \context c q -> case qAddressee (reqQuestion q) of
         AddrToolExec _ cmd args ->
           withPhysicalAttempt context (addresseeWord (qAddressee (reqQuestion q))) $
-            \_ -> answerByRunning cfg c q cmd args
+            \_ -> answerByRunning cfg {shellLog = attemptLog context (shellLog cfg)} c q cmd args
         _ -> worldAskAttemptIO inner context c q,
       worldTurnLane = \c shape -> case shAddressee (rsQuestion shape) of
         AddrToolExec {} -> Nothing

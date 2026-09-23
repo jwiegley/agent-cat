@@ -244,6 +244,7 @@ module Agentic.Cli
 
     -- * The runner
     cliMain,
+    cliMainWithBroker,
     validateManagerTarget,
     validateManagerPreparedTarget,
     loadManagerConfiguration,
@@ -385,22 +386,22 @@ import Agentic.Runtime
     chainsOf,
     noChains,
     nullPersistenceHooks,
-    runPlanPersisted,
+    runPlanBrokered,
     scriptedWorld,
     sayEl,
     stderrLog,
   )
-import Agentic.Runtime (ControlRuntime, newControlRuntimeFor)
+import Agentic.Runtime (DataBroker (..), inProcessBroker, ControlRuntime, newControlRuntimeFor)
 import Agentic.Runtime
   ( DeferredEventSink,
     MachineCancelled (..),
-    activateEventSink,
+    activateEventSinkBrokered,
     deferredEventSink,
     eventSinkActive,
     handlesEventSinkFor,
     newDeferredEventSink,
     stdoutEventSinkFor,
-    withBufferedControlInputFor,
+    withBufferedControlInputBrokered,
   )
 import Agentic.Runtime
   ( LineageOperation (ForkRun, RestartRun, ResumeRun, RootRun),
@@ -875,7 +876,12 @@ engineRouteSpelling route =
 
 -- | The runner, over the registry it serves.
 cliMain :: Registry -> IO ()
-cliMain reg = do
+cliMain = cliMainWithBroker inProcessBroker
+
+-- | Compose every execution path with the same data broker. Backend selection,
+-- approval, decoding and workflow interpretation retain their existing owners.
+cliMainWithBroker :: DataBroker -> Registry -> IO ()
+cliMainWithBroker broker reg = do
   bootstrapTuiControlFd
   -- A run's questions and answers are the output, and they arrive over
   -- minutes; line buffering is what makes them appear as they happen rather
@@ -887,16 +893,16 @@ cliMain reg = do
   args <- map T.pack <$> getArgs
   case args of
     ["--manager", "admin", "--config", path] -> runLocalAdmin (loadManagerConfiguration reg) (T.unpack path)
-    _ -> runOrdinaryCommand reg args
+    _ -> runOrdinaryCommand broker reg args
 
-runOrdinaryCommand :: Registry -> [Text] -> IO ()
-runOrdinaryCommand reg args =
+runOrdinaryCommand :: DataBroker -> Registry -> [Text] -> IO ()
+runOrdinaryCommand broker reg args =
   case parseCommand reg args of
     Left problem -> die reg 1 problem
     Right cmd ->
       ( do
           configured <- loadCommandRouting cmd
-          either (die reg 1 . ("routing configuration: " <>)) (execute reg) configured
+          either (die reg 1 . ("routing configuration: " <>)) (execute broker reg) configured
       )
         `catches` [ Handler $ \(e :: DeckError) -> die reg 2 ("transport: " <> renderDeckError e),
                     Handler $ \(e :: AcpError) -> die reg 2 ("transport: " <> renderAcpError e),
@@ -981,11 +987,11 @@ loadCommandRouting = \case
 -- 'Usage' prints a text that is a function of the registry's four fields, and
 -- 'Help' builds one program at every input empty, which is what @list@ already
 -- does for every row.
-execute :: Registry -> Command -> IO ()
-execute reg = \case
+execute :: DataBroker -> Registry -> Command -> IO ()
+execute broker reg = \case
   Tui -> tuiCmd reg
   FrontendCapabilities -> Frontend.runFrontendCapabilities (regBinary reg) runnerVersion
-  FrontendSession -> frontendCmd reg
+  FrontendSession -> frontendCmd broker reg
   FrontendIo -> do
     request <- readFrontendRequest
     response <- runFrontendQuery request
@@ -1003,20 +1009,20 @@ execute reg = \case
   Cost name ins -> withExample reg False False noRefusal name [] ins (\f _ -> costCmd f)
   Run name target pinned ins ->
     withRunExample reg pinned name target ins $ \effective _ program bindings ->
-      withFinalTarget reg name effective program (\finalTarget -> runCmd reg name finalTarget program bindings)
+      withFinalTarget reg name effective program (\finalTarget -> runCmd broker reg name finalTarget program bindings)
   Machine options runId name target pinned ins -> do
     validateMachineEnvironment options
-    withMachineControls options runId name target $ \control ->
+    withMachineControls broker options runId name target $ \control ->
       withRunExample reg pinned name target ins $ \effective _ program bindings ->
-        withFinalTarget reg name effective program (\finalTarget -> runMachineCmd options control reg runId name finalTarget program bindings)
+        withFinalTarget reg name effective program (\finalTarget -> runMachineCmd broker options control reg runId name finalTarget program bindings)
   LineageCheck options lineage parent edits name target pinned ins ->
     withRunExample reg pinned name target ins $ \effective _ program _ ->
       withFinalTarget reg name effective program (\finalTarget -> void (validateLineage options (inProcessNames reg name) lineage parent edits name finalTarget program))
   MachineLineage options lineage runId parent edits name target pinned ins -> do
     validateMachineEnvironment options
-    withMachineControls options runId name target $ \control ->
+    withMachineControls broker options runId name target $ \control ->
       withRunExample reg pinned name target ins $ \effective _ program bindings ->
-        withFinalTarget reg name effective program (\finalTarget -> runMachineLineageCmd options control reg lineage runId parent edits name finalTarget program bindings)
+        withFinalTarget reg name effective program (\finalTarget -> runMachineLineageCmd broker options control reg lineage runId parent edits name finalTarget program bindings)
 
 readFrontendRequest :: IO BS.ByteString
 readFrontendRequest = go (maxFrontendQueryBytes + 1) []
@@ -1029,8 +1035,8 @@ readFrontendRequest = go (maxFrontendQueryBytes + 1) []
             then pure (BS.concat (reverse chunks))
             else go (remaining - BS.length chunk) (chunk : chunks)
 
-frontendCmd :: Registry -> IO ()
-frontendCmd reg = Frontend.runFrontendSession (regBinary reg) runnerVersion credentialArgument describe prepare
+frontendCmd :: DataBroker -> Registry -> IO ()
+frontendCmd broker reg = Frontend.runFrontendSession (regBinary reg) runnerVersion credentialArgument describe prepare
   where
     requireRow name = maybe (die reg 1 (noSuchRow reg name)) pure (regLookup reg name)
     require = either (ioError . userError . T.unpack) pure
@@ -1093,7 +1099,7 @@ frontendCmd reg = Frontend.runFrontendSession (regBinary reg) runnerVersion cred
                 validateMachineEnvironment options
                 current <- checkParent
                 unless (current == inherited) (ioError (userError "parent answers changed after frontend approval"))
-                runMachineWith options (Just (MachineControlInput control buffered)) lineage (fst <$> inherited) (maybe [] snd inherited) reg runId name frozen program bindings
+                runMachineWith broker options (Just (MachineControlInput control buffered)) lineage (fst <$> inherited) (maybe [] snd inherited) reg runId name frozen program bindings
             }
     frontendEdit (Frontend.DropAnswer occurrence) = ForkDrop occurrence
     frontendEdit (Frontend.ReplaceAnswer occurrence value) = ForkReplaceValue occurrence (PrivateForkAnswer value)
@@ -1197,8 +1203,8 @@ data MachineControl
   | MachineControlInput Handle BS.ByteString
 
 -- | Start controls before stdin or route-dependent program construction.
-withMachineControls :: MachineOptions -> RunId -> Text -> Target -> (Maybe MachineControl -> IO ()) -> IO ()
-withMachineControls options runId name initialTarget action = do
+withMachineControls :: DataBroker -> MachineOptions -> RunId -> Text -> Target -> (Maybe MachineControl -> IO ()) -> IO ()
+withMachineControls broker options runId name initialTarget action = do
   handle <- machineControlHandle
   case handle of
     Nothing -> action Nothing
@@ -1206,7 +1212,7 @@ withMachineControls options runId name initialTarget action = do
       runtime <- newControlRuntimeFor (machineProtocolVersion options)
       deferred <- newDeferredEventSink
       let sink = deferredEventSink deferred
-      outcome <- try (withBufferedControlInputFor (machineProtocolVersion options) controlHandle BS.empty sink runtime (action (Just (MachineControl runtime deferred sink))))
+      outcome <- try (withBufferedControlInputBrokered broker (machineProtocolVersion options) controlHandle BS.empty sink runtime (action (Just (MachineControl runtime deferred sink))))
       case outcome of
         Right () -> pure ()
         Left (err :: SomeException)
@@ -1214,8 +1220,8 @@ withMachineControls options runId name initialTarget action = do
               active <- eventSinkActive deferred
               unless active $ do
                 actual <- stdoutEventSinkFor (machineProtocolVersion options) runId
-                void (activateEventSink deferred actual (machineStarted options name initialTarget))
-              sink (RunCancelled (T.pack why))
+                void (activateEventSinkBrokered broker deferred actual (machineStarted options name initialTarget))
+              brokerEvent broker sink (RunCancelled (T.pack why))
               throwIO (ExitFailure 130)
           | otherwise -> throwIO err
 
@@ -2170,14 +2176,14 @@ costCmd f gs = do
 -- ill-defined one refuses the run before anything is asked. That is a runner
 -- precondition and not a language refusal: the program is well-formed and its
 -- meaning is unchanged; what is ill-defined is this table.
-runCmd :: Registry -> Text -> Target -> ProgramOf r -> [Given] -> IO ()
-runCmd reg name target prog gs =
-  void (runCmdObserved nullEventSink say reg name target prog gs)
+runCmd :: DataBroker -> Registry -> Text -> Target -> ProgramOf r -> [Given] -> IO ()
+runCmd broker reg name target prog gs =
+  void (runCmdObserved broker nullEventSink say reg name target prog gs)
 
-runCmdObserved :: EventSink -> (Text -> IO ()) -> Registry -> Text -> Target -> ProgramOf r -> [Given] -> IO ExecTrace
-runCmdObserved observer output reg name target prog gs =
+runCmdObserved :: DataBroker -> EventSink -> (Text -> IO ()) -> Registry -> Text -> Target -> ProgramOf r -> [Given] -> IO ExecTrace
+runCmdObserved broker observer output reg name target prog gs =
   snd
-    <$> runCmdControlled
+    <$> runCmdControlled broker
       PersonAnswerEngine
       Nothing
       nullPersistenceHooks
@@ -2189,8 +2195,8 @@ runCmdObserved observer output reg name target prog gs =
       prog
       gs
 
-runCmdControlled :: forall r. PersonAnswering -> Maybe ControlRuntime -> PersistenceHooks -> EventSink -> (Text -> IO ()) -> Registry -> Text -> Target -> ProgramOf r -> [Given] -> IO (El r, ExecTrace)
-runCmdControlled personAnswering runtimeControls persistence observer output reg name target prog gs = case target of
+runCmdControlled :: forall r. DataBroker -> PersonAnswering -> Maybe ControlRuntime -> PersistenceHooks -> EventSink -> (Text -> IO ()) -> Registry -> Text -> Target -> ProgramOf r -> [Given] -> IO (El r, ExecTrace)
+runCmdControlled broker personAnswering runtimeControls persistence observer outputReceiver reg name target prog gs = case target of
   Scripted -> do
     authored <- requiredChains
     output $
@@ -2282,6 +2288,7 @@ runCmdControlled personAnswering runtimeControls persistence observer output reg
       world <- localPersonAnswers baseWorld
       walkWith (resolvedChains resolved) world
   where
+    output = brokerLog broker outputReceiver
     -- The canned table is the row's own, which is why `run` looks the row up
     -- again rather than being handed a program: a script that lived anywhere
     -- but beside its program is a script that drifts from it.
@@ -2303,7 +2310,7 @@ runCmdControlled personAnswering runtimeControls persistence observer output reg
       defaultShellConfig
         { shellCwd = dir,
           shellTimeoutMs = 120000,
-          shellLog = output . ("  " <>)
+          shellLog = outputReceiver . ("  " <>)
         }
 
     isAcp route = schemeOf (engineRouteBackend route) == SchemeAcp
@@ -2582,9 +2589,9 @@ runCmdControlled personAnswering runtimeControls persistence observer output reg
       mapM_ (output . chainLine) [entry | entry <- Map.toList chainTable, not (null (snd entry))]
       output ""
       (result, tr) <-
-        runPlanPersisted runtimeControls persistence observer
+        runPlanBrokered broker runtimeControls persistence observer
           chains
-          (announcingWorld (output . ("  " <>)) world)
+          (announcingWorld (outputReceiver . ("  " <>)) world)
           (progPlan prog)
       output ""
       report (progResultCode prog) result tr
@@ -2610,15 +2617,15 @@ runCmdControlled personAnswering runtimeControls persistence observer output reg
       output $ "    billMemo    " <> tshow (billMemo tr)
         <> " (reusable requests once between acts, every effect occurrence)"
 
-runMachineCmd :: MachineOptions -> Maybe MachineControl -> Registry -> RunId -> Text -> Target -> ProgramOf r -> [Given] -> IO ()
-runMachineCmd options control = runMachineWith options control RootRun Nothing []
+runMachineCmd :: DataBroker -> MachineOptions -> Maybe MachineControl -> Registry -> RunId -> Text -> Target -> ProgramOf r -> [Given] -> IO ()
+runMachineCmd broker options control = runMachineWith broker options control RootRun Nothing []
 
-runMachineLineageCmd :: MachineOptions -> Maybe MachineControl -> Registry -> LineageOperation -> RunId -> FilePath -> [ForkEdit] -> Text -> Target -> ProgramOf r -> [Given] -> IO ()
-runMachineLineageCmd options control reg lineage runId parentDirectory edits name target prog gs = do
+runMachineLineageCmd :: DataBroker -> MachineOptions -> Maybe MachineControl -> Registry -> LineageOperation -> RunId -> FilePath -> [ForkEdit] -> Text -> Target -> ProgramOf r -> [Given] -> IO ()
+runMachineLineageCmd broker options control reg lineage runId parentDirectory edits name target prog gs = do
   childStore <- lookupEnv "AGENT_CAT_RUN_STORE"
   when (childStore == Nothing) (ioError (userError "lineage operations require AGENT_CAT_RUN_STORE for the new child run"))
   (parentRunId, inheritedAnswers) <- validateLineage options (inProcessNames reg name) lineage parentDirectory edits name target prog
-  runMachineWith options control lineage (Just parentRunId) inheritedAnswers reg runId name target prog gs
+  runMachineWith broker options control lineage (Just parentRunId) inheritedAnswers reg runId name target prog gs
 
 validateLineage :: MachineOptions -> [Text] -> LineageOperation -> FilePath -> [ForkEdit] -> Text -> Target -> ProgramOf r -> IO (RunId, [AnswerRecord])
 validateLineage options tools lineage parentDirectory edits name target prog = do
@@ -2751,20 +2758,20 @@ validateInheritedAnswers answers = do
       Left why -> ioError (userError ("parent answer store is incompatible: " <> why))
       Right () -> pure ()
 
-runMachineWith :: MachineOptions -> Maybe MachineControl -> LineageOperation -> Maybe RunId -> [AnswerRecord] -> Registry -> RunId -> Text -> Target -> ProgramOf r -> [Given] -> IO ()
-runMachineWith options control lineage parent inherited reg runId name target prog gs = do
+runMachineWith :: DataBroker -> MachineOptions -> Maybe MachineControl -> LineageOperation -> Maybe RunId -> [AnswerRecord] -> Registry -> RunId -> Text -> Target -> ProgramOf r -> [Given] -> IO ()
+runMachineWith broker options control lineage parent inherited reg runId name target prog gs = do
   effectiveTarget <- either (ioError . userError . T.unpack) pure (resolveTargetForProgram (inProcessNames reg name) target prog)
   store <- lookupEnv "AGENT_CAT_RUN_STORE"
   owner <- fmap T.pack <$> lookupEnv "AGENT_CAT_RUN_OWNER"
   let version = machineProtocolVersion options
       storeFormat = if version == protocolVersion then storeVersion else latestStoreVersion
   case store of
-    Nothing -> stdoutEventSinkFor version runId >>= runWith effectiveTarget nullPersistenceHooks Nothing
+    Nothing -> stdoutEventSinkFor version runId >>= runWith effectiveTarget nullPersistenceHooks
     Just directory ->
       withRunStoreSeededVersioned storeFormat version directory (manifest effectiveTarget owner) inherited $ \runStore -> do
         persistence <- persistenceFor runId runStore (printedValue prog) (length inherited)
         handlesEventSinkFor version [storeEventHandle runStore, stdout] runId
-          >>= runWith effectiveTarget persistence (Just runStore)
+          >>= runWith effectiveTarget persistence
   where
     manifest effectiveTarget owner =
       RunManifest
@@ -2781,26 +2788,27 @@ runMachineWith options control lineage parent inherited reg runId name target pr
             then Nothing
             else Just (machinePersonAnswering options)
         )
-    runWith effectiveTarget persistence runStore actualSink = do
+    runWith effectiveTarget persistence actualSink = do
       let started = machineStarted options name effectiveTarget
       case control of
-        Nothing -> actualSink started >> executeRun Nothing actualSink id
+        Nothing -> brokerEvent broker actualSink started >> executeRun Nothing actualSink id
         Just (MachineControl controls deferred sink) -> do
-          activated <- activateEventSink deferred actualSink started
+          activated <- activateEventSinkBrokered broker deferred actualSink started
           unless activated (ioError (userError "machine event sink was activated twice"))
           executeRun (Just controls) sink id
         Just (MachineControlInput handle buffered) -> do
           controls <- newControlRuntimeFor (machineProtocolVersion options)
           -- Prepared runs establish durable history before consuming queued controls.
-          actualSink started
+          brokerEvent broker actualSink started
           executeRun (Just controls) actualSink
-            (withBufferedControlInputFor (machineProtocolVersion options) handle buffered actualSink controls)
+            (withBufferedControlInputBrokered broker (machineProtocolVersion options) handle buffered actualSink controls)
       where
         executeRun runtimeControls sink supervise = do
           -- Machine events are the trace. Human narration would duplicate full,
           -- input-expanded prompts into diagnostic stderr.
-          let run =
-                runCmdControlled
+          let emitEvent = brokerEvent broker sink
+              run =
+                runCmdControlled broker
                   (machinePersonAnswering options)
                   runtimeControls
                   persistence
@@ -2814,31 +2822,24 @@ runMachineWith options control lineage parent inherited reg runId name target pr
           outcome <- try $ supervise $ do
             (result, tr) <- run
             if machineProtocolVersion options == protocolVersion
-              then sink (RunCompleted (billExecFresh tr) (billMemo tr))
+              then emitEvent (RunCompleted (billExecFresh tr) (billMemo tr))
               else do
-                durableStore <-
-                  maybe
-                    (ioError (userError "protocol version 2 lost its required run store"))
-                    pure
-                    runStore
                 reference <-
-                  writeResultArtifact
-                    durableStore
-                    runId
+                  persistenceStoreResult (brokerPersistence broker persistence)
                     (codeJson (fromSCode (progResultCode prog)))
                     (answerJson (progResultCode prog) result)
                     (sayEl (progResultCode prog) result)
-                sink (RunCompletedV2 (billExecFresh tr) (billMemo tr) reference)
+                emitEvent (RunCompletedV2 (billExecFresh tr) (billMemo tr) reference)
           case outcome of
             Right () -> pure ()
             Left (e :: SomeException)
               | Just (MachineCancelled why) <- fromException e -> do
-                  sink (RunCancelled (T.pack why))
+                  emitEvent (RunCancelled (T.pack why))
                   throwIO (ExitFailure 130)
               | Just (_ :: SomeAsyncException) <- fromException e ->
-                  sink (RunCancelled (T.pack (displayException e))) >> throwIO e
+                  emitEvent (RunCancelled (T.pack (displayException e))) >> throwIO e
               | otherwise ->
-                  sink (RunFailed (machineFailureClass e) (T.pack (displayException e))) >> throwIO e
+                  emitEvent (RunFailed (machineFailureClass e) (T.pack (displayException e))) >> throwIO e
 
 machineControlHandle :: IO (Maybe Handle)
 machineControlHandle = do
@@ -2873,7 +2874,8 @@ persistenceFor runId store program inheritedAnswers = do
           Just <$> writeQuestionArtifact store runId occurrence intent question,
         persistenceCheckpoint = \occurrence -> do
           (answers, effects) <- readIORef counts
-          writeCheckpoint store (Checkpoint program (Just occurrence) answers effects)
+          writeCheckpoint store (Checkpoint program (Just occurrence) answers effects),
+        persistenceStoreResult = writeResultArtifact store runId
       }
 
 resolveTargetForProgram :: [Text] -> Target -> ProgramOf r -> Either Text Target

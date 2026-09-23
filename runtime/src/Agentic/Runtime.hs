@@ -2,6 +2,8 @@
 module Agentic.Runtime
   ( answerSchemaForObservationCode,
     module Agentic.Exec,
+    DataBroker (..),
+    inProcessBroker,
     module Agentic.InProcess,
     module Agentic.Runtime.Catalogue,
     module Agentic.Runtime.Control,
@@ -26,6 +28,7 @@ where
 import Agentic.Planning (answerSchemaForObservationCode)
 import Agentic.Exec
 import Agentic.InProcess
+import Agentic.Runtime.Broker (DataBroker (..), inProcessBroker)
 import Agentic.Runtime.Catalogue
 import Agentic.Runtime.Control
 import Agentic.Runtime.Descriptor

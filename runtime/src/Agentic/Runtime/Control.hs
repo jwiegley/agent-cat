@@ -63,7 +63,7 @@ import Control.Concurrent.MVar
     takeMVar,
     tryPutMVar,
   )
-import Control.Exception (SomeException, displayException, finally, try)
+import Control.Exception (SomeAsyncException, SomeException, displayException, finally, fromException, tryJust)
 import Control.Monad (when)
 import System.Timeout (timeout)
 import Data.Aeson
@@ -409,7 +409,12 @@ recordAck (ControlRuntime state) ack =
   modifyMVar_ state $ \live -> pure live {liveAcks = Map.insert (acknowledgedControl ack) ack (liveAcks live)}
 
 tryDelivery :: IO a -> IO (Either SomeException a)
-tryDelivery = try
+tryDelivery = tryJust $ \failure ->
+  -- Scope cancellation must stop the original receiver, not become an
+  -- acknowledgement followed by another blocking read.
+  case fromException failure :: Maybe SomeAsyncException of
+    Just _ -> Nothing
+    Nothing -> Just failure
 
 joinMaybe :: Maybe (Maybe a) -> Maybe a
 joinMaybe (Just value) = value

@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import subprocess
@@ -11,14 +12,17 @@ import tempfile
 from pathlib import Path
 
 
-def machine(runner: Path, root: Path, run_id: str, protocol: int, target: list[str]) -> tuple[list[dict], Path]:
+def machine(
+    runner: Path, root: Path, run_id: str, protocol: int, target: list[str],
+    *, workflow: str = "harden", prefix: tuple[str, ...] = (),
+) -> tuple[list[dict], Path]:
     run_root = root / run_id
     scratch = run_root / "scratch"
     store = run_root / "runtime"
     scratch.mkdir(parents=True)
     environment = os.environ.copy()
     environment["AGENT_CAT_RUN_STORE"] = str(store)
-    command = [str(runner), "machine", run_id, "harden", *target]
+    command = [str(runner), *prefix, "machine", run_id, workflow, *target]
     if "--engine" in target:
         command.extend(["--timeout", "60000", "--scratch", str(scratch)])
     command.extend(["--protocol-version", str(protocol)])
@@ -49,8 +53,8 @@ def semantic_projection(events: list[dict]) -> tuple[list, list, tuple]:
 
 
 def main() -> None:
-    if len(sys.argv) != 2:
-        raise SystemExit("usage: progress_probe.py AGENTIC_RUN")
+    if len(sys.argv) not in (2, 3):
+        raise SystemExit("usage: progress_probe.py AGENTIC_RUN [BROKER_RUNNER]")
     runner = Path(sys.argv[1]).resolve()
     with tempfile.TemporaryDirectory(prefix="agent-cat-progress-") as directory:
         root = Path(directory)
@@ -73,6 +77,32 @@ def main() -> None:
 
         scripted, _ = machine(runner, root, "progress-none", 2, ["--scripted"])
         assert not any(event["event"]["type"] == "attempt.progress" for event in scripted)
+        if len(sys.argv) == 3:
+            hello, _ = machine(runner, root, "broker-hello", 2, target, workflow="hello")
+            assert hello[-1]["event"]["type"] == "run.completed"
+            assert semantic_projection(hello)[2] == ("3", "3")
+            broker_runner = Path(sys.argv[2]).resolve()
+            brokered, broker_store = machine(
+                broker_runner, root, "broker-injected", 2,
+                [*target, "--input-arg", "input=broker request"],
+                workflow="prompt-source", prefix=("--broker-test",),
+            )
+            occurrences, trace, bills = semantic_projection(brokered)
+            assert len(occurrences) == 1 and occurrences[0][2] == "broker-delivered response"
+            assert trace == [occurrences[0][0]] and bills == ("1", "1")
+            assert brokered[-1]["event"]["type"] == "run.completed"
+            persisted_broker = [json.loads(line) for line in (broker_store / "events.ndjson").read_text().splitlines()]
+            assert [event["event"] for event in persisted_broker] == [event["event"] for event in brokered]
+            reference = brokered[-1]["event"]["result"]
+            assert reference["preview"] == "broker-delivered result" and reference["path"] == "result.json"
+            result_bytes = (broker_store / "result.json").read_bytes()
+            assert len(result_bytes) == int(reference["bytes"])
+            assert hashlib.sha256(result_bytes).hexdigest() == reference["sha256"]
+            artifact = json.loads(result_bytes)
+            assert artifact["runId"] == "broker-injected"
+            assert artifact["result"] == {"code": "receipt", "value": None}
+            assert artifact["result"]["code"] == reference["code"]
+            print("broker probe: real ACP replies and verified final publication cross the injected broker")
     print("progress probe: bounded public progress is persisted, redacted, optional, and answer-neutral")
 
 

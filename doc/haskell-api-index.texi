@@ -4,6 +4,7 @@
 @hsindex Agentic.Cli.Row
 @hsindex Agentic.Cli.Tool
 @hsindex Agentic.Cli.cliMain
+@hsindex Agentic.Cli.cliMainWithBroker
 @hsindex Agentic.Cli.flagTool
 @hsindex Agentic.Cli.loadManagerConfiguration
 @hsindex Agentic.Cli.openManagerConfiguration
