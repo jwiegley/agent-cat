@@ -20,6 +20,45 @@ as a substitute for the next product milestone. The completed
 the references for their respective scopes, subject to the user's corrections
 below.
 
+## Current dependency authorization blocker
+
+Service-client enablement is blocked pending explicit authorization to update
+the pinned certificate-validation packages. Local inspection found
+`crypton-x509-validation-1.6.14` and `crypton-x509-1.7.7`. Both are affected by
+[CVE-2026-9648](https://haskell.github.io/security-advisories/advisory/HSEC-2026-0008.html),
+which permits certificate chains that violate Name Constraints. The advisory
+identifies fixed versions `1.9.1`. Issue `acat-tls-name-constraints-0h7q` records
+the evidence and required local checks. No dependency version, lock file, compiler,
+trust policy or live configuration has been changed.
+
+The isolated source remains in
+`implementation.9tGzKH/service-tui.purvEwEv/broker-source`, based on canonical
+`678326b`. Its protected HTTP `mixed-controls` journey passed N1 and N8 at
+2026-09-23 09:17:56–09:19:14Z, including exact approval, typed false, retry,
+native completion, verified result bytes and cleanup-governed admission release.
+This is not actual TUI interaction, and no new WM package or gate is accepted.
+
+The public Client now has an explicit client-profile loader, bounded page
+assembly, exact-URI GET observations, polling and response validation. Twelve
+client-boundary cases passed N1 and N8. A subsequent real-manager check failed,
+and a focused positive IP-SAN case reproduced certificate rejection. That
+interoperability failure is distinct from the Name Constraints vulnerability.
+The positive assertion remains intact. Do not bypass hostname validation or
+change the fixture merely to obtain a passing result.
+
+The service-liveness review blocked the prior loan-order composition. Parent
+corrected overview, run and decision owners and passed local ordering checks,
+but continued review clearance and further negative checks remain pending.
+The separate slow-response liveness limit is not resolved. Current records are
+`broker-brief.md`, `mixed-http-validation.md`, `service-liveness-review.md` and
+`client-security-blocker.md` in the service unit. All original failures and roots
+remain preserved. The TUI service implementation is still unfinished.
+
+After authorization, perform the targeted update through the existing Nix
+environment, verify fixed certificate validation locally without weakening
+assertions, and resume the client/TUI path. No paid backend, external-host test,
+deployment or new Lean/oracle build is implied.
+
 ## First frontend through the running manager
 
 The user's 2026-09-22 direction makes an integrated frontend run the next
@@ -87,12 +126,12 @@ gate. `validation.md`, `correction.md` and both review reports retain the exact
 scopes. Canonical boundary and documentation checks passed on 2026-09-23.
 This does not accept WM-023, a protected manager service or the TUI journey.
 
-The existing eight-file service/client work remains preserved in
+The original eight-file service/client work remains preserved in
 `service-tui.purvEwEv/source` and `pre-broker-work-in-progress.patch`, with 986
-insertions and 74 deletions. Its library builds are not native service acceptance.
-Reuse that work for the first complete TUI path. The public-observation proposal
-remains unimplemented and requires assessment of its version-domain mismatch
-claim and the missing SSE handler before public capabilities are advertised.
+insertions and 74 deletions. Its continuation is in `broker-source` on the
+integrated broker base. The current isolated service executes real protected
+HTTP traffic, with explicit native-version domain corrections and both polling
+and SSE. Neither source has been overlaid onto canonical without review.
 
 ## Local-only validation amendment of 2026-09-22
 
@@ -748,14 +787,13 @@ Lean/oracle builds remain excluded absent their own authorization. Earlier
 failures, unknown holders and failed UI cleanup/restoration qualifications remain
 unresolved historical evidence rather than new closure prerequisites.
 
-Refocus completed at `2026-09-23T01:18:27Z`. The next active-work deadline is
-`2026-09-23T02:18:27Z`. WM-022/G1 remain accepted, and the default broker now has
-real local execution evidence and independent integration clearance. Resume the
-unfinished service/client/TUI delivery using that implementation. Assess the
-public-observation version domains and complete truthful public projections and
-transports as part of the actual frontend path, not another helper milestone.
-RabbitMQ remains deferred and validation remains local-only. No historical
-closure or verification-machinery detour is required.
+The latest clock-backed refocus for this checkpoint is
+`2026-09-23T09:58:41Z`. The protected HTTP execution prerequisite has current N1/N8
+evidence, while the actual TUI journey remains unfinished. Dependency authorization
+is now a concrete blocker, as described above. Recheck the goal and clock on
+resumption. WM-022/G1 remain accepted, RabbitMQ remains deferred, and validation
+remains local-only. No historical closure or verification-machinery detour is
+required.
 
 ## Historical WM-016 closure record
 
