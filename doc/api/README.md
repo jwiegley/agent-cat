@@ -29,6 +29,17 @@ Unsupported versions refuse rather than selecting a guessed downgrade.
 Unversioned legacy manifests are distinct from a manifest whose version is
 null, one, or unsupported. Existing native fixtures remain unchanged.
 
+The native-version domain amendment of 2026-09-23 admits frontend session 2
+and runtime observation protocol 3, which the current manager worker already
+negotiates. Session 2 retains control protocol 2. Public API, snapshot and event
+versions remain 1, and the existing native version cases remain valid. A run
+reports its actual native protocol version rather than a relabelled public
+version. Unknown future versions still refuse. This changes the advertised
+compatibility domains, not the native wire or storage formats. The same
+amendment admits manager coordination schemas 1 through 12, which the existing
+Store already reads or migrates. The service reports these supported schemas
+instead of advertising only the original schema 1. Schema 13 remains unsupported.
+
 ## HTTP framing and limits
 
 JSON is UTF-8 with `Content-Type: application/json`. Captures use
