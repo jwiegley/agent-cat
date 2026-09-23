@@ -264,6 +264,7 @@ library
     Agentic.Tui.Process
     Agentic.Tui.RunModel
     Agentic.Tui.Root
+    Agentic.Tui.Service
     Agentic.Tui.Types
     Agentic.Schema.Conformance
     Agentic.Shell
@@ -474,8 +475,10 @@ test-suite tui-model-test
     Agentic.Tui.Process
     Agentic.Tui.Root
     Agentic.Tui.RunModel
+    Agentic.Tui.Service
     Agentic.Tui.Types
     TuiRootRoleTests
+    ServiceTests
   build-depends:
     , agentic
     , base

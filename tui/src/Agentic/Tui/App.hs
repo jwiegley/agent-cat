@@ -5,6 +5,7 @@
 -- | Thin Brick adapter over the pure TUI model and machine snapshot reducer.
 module Agentic.Tui.App
   ( runApp,
+    runServiceApp,
     withTerminationHandlers,
   )
 where
@@ -34,10 +35,13 @@ import Agentic.Runtime
     SteeringTiming (..),
     SnapshotError (snapshotErrorMessage),
     WorkflowDescriptor (..),
+    WorkflowInputDescriptor (workflowInputName),
     initialRunSnapshot,
     readResultArtifactAt,
     stepRunSnapshot,
   )
+import qualified Agentic.Manager.Client as Manager
+import qualified Agentic.Tui.Service as Service
 import Agentic.Tui.Client
 import Agentic.Tui.Model
 import Agentic.Tui.Person
@@ -49,7 +53,7 @@ import Agentic.Tui.Types
 import Brick
 import Brick.BChan (BChan, newBChan, writeBChan, writeBChanNonBlocking)
 import qualified Brick.Widgets.Edit as Edit
-import Control.Concurrent (forkIO, killThread, myThreadId, threadDelay, throwTo)
+import Control.Concurrent (forkIO, myThreadId, threadDelay, throwTo)
 import Control.Concurrent.Async (Async, asyncWithUnmask, cancel)
 import Control.Concurrent.MVar (MVar, modifyMVarMasked_, newMVar, readMVar, tryReadMVar)
 import Control.Concurrent.STM
@@ -64,10 +68,11 @@ import Control.Concurrent.STM
     readTVar,
     writeTVar,
   )
-import Control.Exception (AsyncException (UserInterrupt), SomeAsyncException, SomeException, bracket, displayException, finally, fromException, mask, onException, throwIO, try, uninterruptibleMask_)
+import Control.Exception (AsyncException (UserInterrupt), SomeAsyncException, SomeException, bracket, displayException, finally, fromException, mask, mask_, onException, throwIO, try, uninterruptibleMask_)
 import Control.Monad (forever, void, when)
 import Control.Monad.IO.Class (liftIO)
-import Data.Aeson (Value, encode)
+import Control.Monad.Trans.Except (ExceptT (..), runExceptT)
+import Data.Aeson (Value (..), encode)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as BL
 import Data.IORef (IORef, atomicModifyIORef', newIORef, readIORef, writeIORef)
@@ -85,7 +90,7 @@ import qualified Graphics.Vty.Output as VtyOutput
 import Graphics.Vty.Platform.Unix (mkVty)
 import System.Environment (lookupEnv)
 import System.FilePath (isAbsolute, (</>))
-import System.IO (hClose)
+import System.IO (hClose, hPutStrLn, stderr)
 import System.Posix.Files (ownerReadMode, ownerWriteMode, unionFileModes)
 import System.Posix.IO (OpenFileFlags (cloexec, creat, exclusive, nofollow), OpenMode (WriteOnly), closeFd, defaultFileFlags, fdToHandle, openFd)
 import System.Posix.Signals (Handler (Catch, Ignore), installHandler, sigINT, sigTERM)
@@ -103,10 +108,30 @@ data AppEvent
   | ChildStopped !Int !MachineExit
   | PersonPromptReady !MandatoryDecision !Int !(Either Text PersonPrompt)
   | FinalResultReady !RunId !(Either Text Value)
+  | ServiceProfilesReady !Int !(Either Manager.ClientFailure [Service.Profile])
+  | ServiceWorkflowsReady !Int !Service.Profile !(Either Manager.ClientFailure [Service.Workflow])
+  | ServicePrepared !Int !(Either Manager.ClientFailure Manager.PendingCommand)
+  | ServiceSent !Int !(Either Manager.ClientFailure Manager.ClientResponse)
+  | ServiceRequestReady !Int !(Either Manager.ClientFailure ServiceObservation)
 
 -- | Bounded frontend IO slots, each retaining at most one cancellable task.
 data Work = InitialWork | PreviewWork | HelpWork | RunsWork | RoutingWork | MachineWork | PersonWork | ResultWork
+  | ServiceReadWork | ServicePrepareWork | ServiceSendWork
   deriving (Eq, Ord)
+
+-- | Disjoint original local and manager-client owners.
+data Backend = LocalBackend !TuiConfig !PrivateRoot | ServiceBackend !Manager.Client
+
+-- Each attempted mutation retains the original immutable pending command.
+data MutationState
+  = MutationIdle
+  | MutationPreparing !Int !Service.Mutation
+  | MutationSending !Int !Service.Mutation !Manager.PendingCommand
+  | MutationAwaiting !Service.Mutation !Manager.PendingCommand !Manager.Reference
+  | MutationUncertain !Service.Mutation !Manager.PendingCommand !(Maybe Manager.Reference) !Text
+
+data ServiceObservation = ServiceObservation !Manager.Observed !Manager.DraftView
+  !(Maybe (Manager.Observed,Manager.Preparation)) !(Maybe (Either Manager.ClientFailure Manager.CommandReceipt))
 
 -- | Brick-only editor/process state around the pure model.
 data AppState = AppState
@@ -160,30 +185,52 @@ data AppState = AppState
     stateNoColor :: !Bool,
     stateTerminalSize :: !(Int, Int),
     stateServer :: !(Maybe FrontendServer),
-    stateConfig :: !TuiConfig,
-    stateRoot :: !PrivateRoot
+    stateBackend :: !Backend,
+    stateServiceReadTicket :: !(Maybe Int),
+    stateServiceProfiles :: ![Service.Profile],
+    stateServiceWorkflows :: ![Service.Workflow],
+    stateServiceWorkflow :: !(Maybe Service.Workflow),
+    stateServiceRequestId :: !(Maybe Text),
+    stateServiceRequest :: !(Maybe (Manager.Observed,Manager.DraftView)),
+    stateServicePreparation :: !(Maybe (Manager.Observed,Manager.Preparation)),
+    stateServiceMutation :: !MutationState,
+    stateServiceApproval :: !(Maybe (Service.Mutation,Manager.PendingCommand,Maybe Manager.Reference)),
+    stateServiceApprovalStatus :: !(Maybe Text),
+    stateServiceLastReceipt :: !(Maybe Manager.CommandReceipt),
+    stateServiceResendConfirm :: !Bool,
+    stateServiceUncertainExit :: !(IORef Bool)
   }
 
 runApp :: TuiConfig -> PrivateRoot -> IO ()
-runApp config root = mask $ \restore -> do
+runApp config root = runAppWith (LocalBackend config root)
+
+runServiceApp :: Manager.Client -> IO ()
+runServiceApp = runAppWith . ServiceBackend
+
+runAppWith :: Backend -> IO ()
+runAppWith backend = mask $ \restore -> do
   channel <- newBChan 64
   now <- getCurrentTime
   noColor <- maybe False (not . null) <$> lookupEnv "NO_COLOR"
-  ticker <- forkIO . forever $ do
-    threadDelay 1000000
-    current <- getCurrentTime
-    void (writeBChanNonBlocking channel (Tick current))
   events <- newTBQueueIO 2048
   framePending <- newTVarIO False
   owned <- newIORef Nothing
   workers <- newMVar Map.empty
+  uncertainExit <- newIORef False
   let buildVty = do
         value <- mkVty Vty.defaultConfig
-        enableBracketedPaste value
+        enableBracketedPaste value `onException` Vty.shutdown value
         pure value
   initialVty <- buildVty
-  terminalSize <- VtyOutput.displayBounds (Vty.outputIface initialVty)
-  let loadingModel = (initialModel [] [] (Left "routing is loading")) {modelScreen = InitialLoading, modelStatus = "loading runner catalogue"}
+  terminalSize <- VtyOutput.displayBounds (Vty.outputIface initialVty) `onException` Vty.shutdown initialVty
+  ticker <- (asyncWithUnmask $ \unmask -> unmask . forever $ do
+    threadDelay 1000000
+    current <- getCurrentTime
+    void (writeBChanNonBlocking channel (Tick current))) `onException` Vty.shutdown initialVty
+  let loadingModel = (initialModel [] [] (Left "catalogue is loading"))
+        { modelScreen = InitialLoading, modelStatus = case backend of
+            LocalBackend {} -> "loading runner catalogue"
+            ServiceBackend {} -> "loading manager profiles" }
       initialState =
         AppState
           { stateModel = loadingModel,
@@ -236,16 +283,35 @@ runApp config root = mask $ \restore -> do
             stateNoColor = noColor,
             stateTerminalSize = terminalSize,
             stateServer = Nothing,
-            stateConfig = config,
-            stateRoot = root
+            stateBackend = backend,
+            stateServiceReadTicket = Nothing,
+            stateServiceProfiles = [],
+            stateServiceWorkflows = [],
+            stateServiceWorkflow = Nothing,
+            stateServiceRequestId = Nothing,
+            stateServiceRequest = Nothing,
+            stateServicePreparation = Nothing,
+            stateServiceMutation = MutationIdle,
+            stateServiceApproval = Nothing,
+            stateServiceApprovalStatus = Nothing,
+            stateServiceLastReceipt = Nothing,
+            stateServiceResendConfirm = False,
+            stateServiceUncertainExit = uncertainExit
           }
-      -- Vty shutdown is idempotent, so this also closes Brick's signal-time cleanup window.
+      stopAll [] = pure ()
+      stopAll (worker : rest) = cancel worker `finally` stopAll rest
       cleanup = do
-        uninterruptibleMask_ (ignoreTerminationSignals >> Vty.shutdown initialVty)
-          `finally` ( uninterruptibleMask_ (killThread ticker >> (readMVar workers >>= mapM_ cancel))
-                        `finally` (readIORef owned >>= mapM_ terminateMachine)
-                    )
-        writeIORef owned Nothing
+        uninterruptibleMask_ (ignoreTerminationSignals >> Vty.shutdown initialVty) `finally`
+          case backend of
+            LocalBackend {} ->
+              (uninterruptibleMask_ (cancel ticker >> (readMVar workers >>= mapM_ cancel))
+                `finally` (readIORef owned >>= mapM_ terminateMachine))
+                `finally` writeIORef owned Nothing
+            ServiceBackend client -> mask_ $
+              (Manager.closeClient client `finally`
+                (readMVar workers >>= stopAll . (ticker :) . Map.elems)) `finally` do
+                  unresolved <- readIORef uncertainExit
+                  when unresolved (hPutStrLn stderr "Manager command outcome may be uncertain. The manager run was not cancelled.")
   restore (void (customMain initialVty buildVty (Just channel) app initialState)) `finally` cleanup
 
 ignoreTerminationSignals :: IO ()
@@ -258,6 +324,331 @@ enableBracketedPaste :: Vty.Vty -> IO ()
 enableBracketedPaste vty = do
   let output = Vty.outputIface vty
   when (VtyOutput.supportsMode output VtyOutput.BracketedPaste) (VtyOutput.setMode output VtyOutput.BracketedPaste True)
+
+-- The local action boundary cannot recover a local root from a service identity.
+withLocalBackend :: (TuiConfig -> PrivateRoot -> EventM Name AppState ()) -> EventM Name AppState ()
+withLocalBackend action = do
+  state <- get
+  case stateBackend state of
+    LocalBackend config root -> action config root
+    ServiceBackend {} -> put state {stateModel = (stateModel state) {modelStatus = "local action unavailable in service mode"}}
+
+localReviewAllowed :: AppState -> LaunchPreview -> (Int,Int) -> Bool
+localReviewAllowed state preview size = case stateBackend state of
+  LocalBackend config _ -> launchReviewAllowed config preview size
+  ServiceBackend {} -> False
+
+-- One read slot owns the actual HTTP operation, not a detached wrapper task.
+startServiceRead :: (Int -> IO AppEvent) -> EventM Name AppState ()
+startServiceRead action = do
+  state <- get
+  case stateServiceReadTicket state of
+    Just _ -> pure ()
+    Nothing -> do
+      let ticket = stateRequestSerial state + 1
+      put state {stateRequestSerial = ticket, stateServiceReadTicket = Just ticket,
+        stateModel = (stateModel state) {modelStatus = "loading manager catalogue"}}
+      liftIO . startWorker state ServiceReadWork $ action ticket >>= writeBChan (stateChannel state)
+
+startServiceProfiles :: Manager.Client -> EventM Name AppState ()
+startServiceProfiles client = startServiceRead $ \ticket ->
+  ServiceProfilesReady ticket <$> Service.loadProfiles client
+
+startServiceWorkflows :: Manager.Client -> Service.Profile -> EventM Name AppState ()
+startServiceWorkflows client profile = startServiceRead $ \ticket ->
+  ServiceWorkflowsReady ticket profile <$> Service.loadWorkflows client profile
+
+serviceIdle :: AppState -> Bool
+serviceIdle state = case stateServiceMutation state of MutationIdle -> True; _ -> False
+
+serviceSending :: AppState -> Bool
+serviceSending state = case stateServiceMutation state of
+  MutationPreparing {} -> True
+  MutationSending {} -> True
+  _ -> False
+
+safeService :: IO (Either Manager.ClientFailure a) -> IO (Either Manager.ClientFailure a)
+safeService action = do
+  outcome <- try @SomeException action
+  case outcome of
+    Left failure | Just _ <- fromException @SomeAsyncException failure -> throwIO failure
+    Left _ -> pure (Left Manager.TransportUnavailable)
+    Right result -> pure result
+
+refreshServiceRequest :: Manager.Client -> EventM Name AppState ()
+refreshServiceRequest client = do
+  state <- get
+  case (stateServiceWorkflow state,stateServiceRequestId state) of
+    (Just workflow,Just ident) | not (serviceSending state) -> do
+      let pending = case stateServiceMutation state of
+            MutationAwaiting mutation _ location -> Just (mutation,location)
+            MutationUncertain mutation _ (Just location) _ -> Just (mutation,location)
+            _ -> case stateServiceApproval state of Just (mutation,_,Just location) -> Just (mutation,location); _ -> Nothing
+      startServiceRead $ \ticket -> ServiceRequestReady ticket <$> safeService (runExceptT $ do
+        -- Receipt visibility and request visibility are independently authorized.
+        receipt <- liftIO (traverse (\(mutation,location) -> safeService (Service.observeReceipt client mutation location)) pending)
+        (observed,request) <- ExceptT (Service.observeDraft client workflow ident)
+        preparation <- if Manager.draftPhase request == "review" && isJust (Manager.draftPreparation request)
+          then Just <$> ExceptT (Service.observePreparation client request) else pure Nothing
+        pure (ServiceObservation observed request preparation receipt))
+    _ -> pure ()
+
+beginServiceMutation :: Manager.Client -> Service.Mutation -> Maybe Manager.Observed -> EventM Name AppState ()
+beginServiceMutation client mutation observation = do
+  state <- get
+  when (serviceIdle state) $ do
+    now <- liftIO getCurrentTime
+    let ticket = stateRequestSerial state + 1
+    put state {stateServiceReadTicket = Nothing, stateRequestSerial = ticket,
+      stateServiceMutation = MutationPreparing ticket mutation, stateServiceResendConfirm = False, stateServiceLastReceipt = Nothing,
+      stateModel = (stateModel state) {modelStatus = "preparing explicit " <> Service.mutationOperation mutation}}
+    liftIO (cancelWorker state ServiceReadWork)
+    liftIO . startWorker state ServicePrepareWork $
+      safeService (Service.prepareMutation client now mutation observation) >>= writeBChan (stateChannel state) . ServicePrepared ticket
+
+sendServicePending :: Manager.Client -> Int -> Service.Mutation -> Manager.PendingCommand -> EventM Name AppState ()
+sendServicePending client ticket mutation pending = do
+  state <- get
+  put state {stateServiceMutation = MutationSending ticket mutation pending, stateServiceResendConfirm = False,
+    stateModel = (stateModel state) {modelStatus = "sending one " <> Service.mutationOperation mutation <> " attempt"}}
+  liftIO (writeIORef (stateServiceUncertainExit state) True)
+  liftIO . startWorker state ServiceSendWork $
+    safeService (Manager.sendCommand client pending) >>= writeBChan (stateChannel state) . ServiceSent ticket
+
+uncertainService :: AppState -> Service.Mutation -> Manager.PendingCommand -> Maybe Manager.Reference -> Text -> EventM Name AppState ()
+uncertainService state mutation pending location failure =
+  put state {stateServiceMutation = MutationUncertain mutation pending location failure,
+    stateServiceReadTicket = Nothing, stateServiceResendConfirm = False,
+    stateModel = (stateModel state) {modelScreen = ServiceCommandScreen
+      ("Outcome unresolved: " <> failure <> "\nOriginal " <> Service.mutationOperation mutation <> " attempt retained.\n"
+        <> Service.mutationURI mutation <> "\ng refreshes observations. x requests an exact resend. q detaches."),
+      modelStatus = "no automatic resend"}}
+
+handleServiceSent :: Manager.Client -> Int -> Either Manager.ClientFailure Manager.ClientResponse -> EventM Name AppState ()
+handleServiceSent client ticket result = do
+  state <- get
+  case stateServiceMutation state of
+    MutationSending expected mutation pending | ticket == expected -> case result of
+      Left failure -> uncertainService state mutation pending Nothing (T.pack (show failure))
+      Right response -> case mutation of
+        Service.Create workflow -> case Manager.decodeObservation (Manager.responseValue response) of
+          Right request | Manager.responseStatus response == 201, Service.requestMatches workflow request,
+            Manager.draftPhase request == "draft", Manager.draftRun request == Nothing,
+            Manager.draftParent request == Nothing, Manager.draftLineage request == Nothing,
+            fmap Manager.referenceURI (Manager.responseLocation response) == Just ("/v1/requests/" <> Manager.draftId request) -> do
+              let descriptor = Service.workflowDisplay workflow
+                  model = (stateModel state) {modelWorkflow = Just descriptor, modelInputs = Map.empty,
+                    modelScreen = if null (workflowInputs descriptor) then ServiceRequestScreen request else InputScreen 0,
+                    modelStatus = "request created; fetching its exact validator"}
+              put state {stateServiceMutation = MutationIdle, stateServiceRequestId = Just (Manager.draftId request),
+                stateServiceRequest = Nothing, stateServiceWorkflow = Just workflow, stateModel = model, stateEditor = blankEditor}
+              liftIO (writeIORef (stateServiceUncertainExit state) False)
+              refreshServiceRequest client
+          _ -> uncertainService state mutation pending Nothing "invalid creation response"
+        _ -> case (Manager.decodeObservation (Manager.responseValue response),Manager.responseLocation response) of
+          (Right receipt,Just location) | Manager.responseStatus response == 202, Service.receiptMatches mutation receipt,
+            Manager.referenceURI location == "/v1/commands/" <> Manager.receiptId receipt -> do
+              put state {stateServiceMutation = MutationAwaiting mutation pending location, stateServiceLastReceipt = Just receipt,
+                stateModel = (stateModel state) {modelStatus = "manager intent accepted; awaiting independent effect"}}
+              refreshServiceRequest client
+          _ -> uncertainService state mutation pending Nothing "invalid command response"
+    _ -> pure ()
+
+applyServiceObservation :: ServiceObservation -> EventM Name AppState ()
+applyServiceObservation (ServiceObservation observed request preparation receiptResult) = do
+  before <- get
+  let receipt = case receiptResult of Just (Right received) -> Just received; _ -> stateServiceLastReceipt before
+      receiptStatus = maybe "outcome unresolved" (Manager.stateName . Manager.receiptState) receipt
+        <> case receiptResult of Just (Left _) -> " (receipt read unavailable)"; _ -> ""
+      state = before {stateServiceReadTicket = Nothing, stateServiceRequest = Just (observed,request),
+        stateServiceLastReceipt = receipt, stateServicePreparation = preparation,
+        stateServiceApprovalStatus = case stateServiceApproval before of
+          Nothing -> stateServiceApprovalStatus before
+          Just (approval,_,_) -> case receipt of
+            Just received | Service.receiptMatches approval received -> Just receiptStatus
+            _ -> stateServiceApprovalStatus before}
+      pending = case stateServiceMutation state of
+        MutationAwaiting mutation command location -> Just (mutation,command,Just location)
+        MutationUncertain mutation command location _ -> Just (mutation,command,location)
+        _ -> Nothing
+      confirmed kind = maybe False (\value -> Manager.stateName (Manager.receiptState value) == "effect-observed"
+        && Service.receiptEffectKind value == Just kind
+        && maybe False (\(mutation,_,_) -> Service.receiptMatches mutation value) pending) receipt
+  put state
+  case pending of
+    Just (mutation@(Service.SaveLiteral _ name value index),command,location)
+      | confirmed "input-changed" ->
+          if Service.literalInputs request == Map.insert name value (modelInputs (stateModel state))
+            && Manager.draftPhase request == "draft"
+          then do
+            let model = (stateModel state) {modelInputs = Map.insert name value (modelInputs (stateModel state)),
+                  modelScreen = case modelWorkflow (stateModel state) of
+                    Just descriptor | index + 1 < length (workflowInputs descriptor) -> InputScreen (index + 1)
+                    _ -> ServiceRequestScreen request, modelStatus = "input effect observed"}
+            put state {stateServiceMutation = MutationIdle, stateModel = model,
+              stateEditor = Edit.editorText InputEditor Nothing (inputValue model)}
+            liftIO (writeIORef (stateServiceUncertainExit state) (isJust (stateServiceApproval state)))
+          else uncertainService state mutation command location "request no longer matches the submitted literals"
+    Just (Service.Enqueue _,_,_) | confirmed "enqueued" -> do
+      put state {stateServiceMutation = MutationIdle, stateModel = (stateModel state) {modelScreen = ServiceRequestScreen request}}
+      liftIO (writeIORef (stateServiceUncertainExit state) (isJust (stateServiceApproval state)))
+    Just (mutation@(Service.Approve approvedRequest _),command,location)
+      | Manager.draftPhase request == "associated", isJust (Manager.draftRun request),
+        Manager.draftId request == Manager.draftId approvedRequest,
+        Service.literalInputs request == modelInputs (stateModel state) ->
+          put state {stateServiceMutation = MutationIdle, stateServiceApproval = Just (mutation,command,location),
+            stateServiceApprovalStatus = Just receiptStatus,
+            stateModel = (stateModel state) {modelScreen = ServiceRequestScreen request,
+              modelStatus = "run associated; approval receipt remains distinct from runtime outcome"}}
+    Just (mutation,command,location) | Just received <- receipt, Manager.stateName (Manager.receiptState received) `elem` ["refused","unresolved"] ->
+      uncertainService state mutation command location (Manager.stateName (Manager.receiptState received))
+    _ -> pure ()
+  current <- get
+  when (serviceIdle current) $ case modelScreen (stateModel current) of
+    InputScreen _ -> put current {stateModel = (stateModel current) {modelStatus = "request validator current; Ctrl-D sends the literal"}}
+    _ -> case (stateServiceWorkflow current,preparation) of
+      (Just workflow,Just (prepObserved,prep))
+        | Service.reviewMatches workflow request prep, Service.literalInputs request == modelInputs (stateModel current),
+          Service.reviewLive (stateNow current) prep -> do
+            let screen = ServiceReviewScreen prep (Manager.observedETag prepObserved)
+            put current {stateConfirmDetails = stateConfirmDetails current && modelScreen (stateModel current) == screen,
+              stateModel = (stateModel current) {modelScreen = screen, modelStatus = "exact manager review; y explicitly approves"}}
+      _ -> put current {stateConfirmDetails = False, stateModel = (stateModel current)
+        {modelScreen = ServiceRequestScreen request, modelStatus = "manager request: " <> Manager.draftPhase request}}
+
+handleServiceEvent :: Manager.Client -> BrickEvent Name AppEvent -> EventM Name AppState ()
+handleServiceEvent client event = do
+  state <- get
+  let failed problem = state {stateServiceReadTicket = Nothing, stateServiceRequest = Nothing, stateServicePreparation = Nothing,
+        stateModel = (stateModel state) {modelScreen = ServiceCommandScreen ("Observation refused: " <> T.pack (show problem)),
+          modelStatus = "previous command outcomes are unchanged"}}
+  case event of
+    AppEvent (ServiceProfilesReady ticket result) ->
+      when (stateServiceReadTicket state == Just ticket) $ case result of
+        Left problem -> put (failed problem)
+        Right profiles -> put state {stateServiceReadTicket = Nothing, stateServiceProfiles = profiles,
+          stateServiceWorkflows = [], stateModel = initialServiceModel profiles, statePaneFocus = PrimaryPane}
+    AppEvent (ServiceWorkflowsReady ticket profile result) ->
+      when (stateServiceReadTicket state == Just ticket) $ case result of
+        Left problem -> put (failed problem)
+        Right workflows -> put state {stateServiceReadTicket = Nothing, stateServiceWorkflows = workflows,
+          stateModel = (initialModel (map Service.workflowDisplay workflows) [] (Left "manager owns routing"))
+            {modelStatus = "manager catalogue: " <> Service.profileId profile}, statePaneFocus = PrimaryPane}
+    AppEvent (ServicePrepared ticket result) -> case stateServiceMutation state of
+      MutationPreparing expected mutation | ticket == expected -> case result of
+        Left failure -> put state {stateServiceMutation = MutationIdle,
+          stateModel = (stateModel state) {modelStatus = "preflight refused before send: " <> T.pack (show failure)}}
+        Right pending -> sendServicePending client ticket mutation pending
+      _ -> pure ()
+    AppEvent (ServiceSent ticket result) -> handleServiceSent client ticket result
+    AppEvent (ServiceRequestReady ticket result) ->
+      when (stateServiceReadTicket state == Just ticket) $ either (put . failed) applyServiceObservation result
+    AppEvent (Tick now) -> do
+      put state {stateNow = now}
+      refreshServiceRequest client
+    VtyEvent (Vty.EvResize width height) -> put state {stateTerminalSize = (width,height)}
+    VtyEvent (Vty.EvKey (Vty.KChar 'c') [Vty.MCtrl]) -> halt
+    VtyEvent key | InputScreen index <- modelScreen (stateModel state) -> case key of
+      Vty.EvKey (Vty.KChar 'd') [Vty.MCtrl] | serviceIdle state ->
+        case (stateServiceRequest state,modelWorkflow (stateModel state)) of
+          (Just (observed,request),Just descriptor) | Just input <- atMay (workflowInputs descriptor) index ->
+            beginServiceMutation client (Service.SaveLiteral request (workflowInputName input)
+              (T.intercalate "\n" (Edit.getEditContents (stateEditor state))) index) (Just observed)
+          _ -> pure ()
+      Vty.EvKey Vty.KEsc [] | serviceIdle state -> case stateServiceRequest state of
+        Just (_,request) -> put state {stateModel = (stateModel state) {modelScreen = ServiceRequestScreen request}}
+        _ -> pure ()
+      _ | serviceIdle state -> handleEditorInput event
+        | otherwise -> pure ()
+    VtyEvent (Vty.EvKey key modifiers)
+      | key == Vty.KChar 'q' && null modifiers -> halt
+      | key == Vty.KChar '?' && null modifiers && not (stateServiceResendConfirm state) -> put state {stateKeyHelp = not (stateKeyHelp state)}
+      | stateKeyHelp state -> when (key == Vty.KEsc) (put state {stateKeyHelp = False})
+      | stateServiceResendConfirm state -> case key of
+          Vty.KChar 'y' | null modifiers -> case stateServiceMutation state of
+            MutationUncertain mutation pending _ _ -> do
+              let ticket = stateRequestSerial state + 1
+              put state {stateRequestSerial = ticket, stateServiceReadTicket = Nothing}
+              liftIO (cancelWorker state ServiceReadWork)
+              sendServicePending client ticket mutation pending
+            _ -> pure ()
+          Vty.KChar 'n' -> put state {stateServiceResendConfirm = False}
+          Vty.KEsc -> put state {stateServiceResendConfirm = False}
+          _ -> pure ()
+      | serviceSending state -> pure ()
+      | null modifiers -> case key of
+          Vty.KEsc -> serviceBack state
+          Vty.KUp -> serviceMove (-1) state
+          Vty.KDown -> serviceMove 1 state
+          Vty.KPageUp -> vScrollPage (viewportScroll (serviceViewport state)) Up
+          Vty.KPageDown -> vScrollPage (viewportScroll (serviceViewport state)) Down
+          Vty.KLeft -> put state {statePaneFocus = PrimaryPane}
+          Vty.KRight -> put state {statePaneFocus = SecondaryPane}
+          Vty.KEnter | serviceIdle state -> case modelScreen (stateModel state) of
+            ServiceProfilesScreen {} -> case selectedServiceProfile (stateModel state) of
+              Just profile | Service.profileReadiness profile == "ready", Service.profileRefusal profile == Nothing -> startServiceWorkflows client profile
+              _ -> pure ()
+            BrowserScreen -> case atMay (stateServiceWorkflows state) (modelWorkflowIndex (stateModel state)) of
+              Just workflow -> do
+                put state {stateServiceWorkflow = Just workflow, stateServiceRequestId = Nothing, stateServiceRequest = Nothing,
+                  stateModel = (stateModel state) {modelInputs = Map.empty, modelWorkflow = Just (Service.workflowDisplay workflow)}}
+                beginServiceMutation client (Service.Create workflow) Nothing
+              Nothing -> pure ()
+            ServiceRequestScreen request | Service.requestReady request, Manager.draftPhase request == "draft" ->
+              beginServiceMutation client (Service.Enqueue request) (fst <$> stateServiceRequest state)
+            _ -> pure ()
+          Vty.KChar 'y' | serviceIdle state, not (stateConfirmDetails state), stateServiceReadTicket state == Nothing ->
+            case (modelScreen (stateModel state),stateServiceWorkflow state,stateServiceRequest state,stateServicePreparation state) of
+              (ServiceReviewScreen displayed tag,Just workflow,Just (_,request),Just (observed,preparation))
+                | displayed == preparation, tag == Manager.observedETag observed,
+                  Service.reviewMatches workflow request preparation, Service.literalInputs request == modelInputs (stateModel state),
+                  serviceReviewAllowed displayed tag (stateTerminalSize state) -> beginServiceMutation client (Service.Approve request displayed) (Just observed)
+              _ -> pure ()
+          Vty.KChar 'd' | ServiceReviewScreen {} <- modelScreen (stateModel state) -> do
+            put state {stateConfirmDetails = not (stateConfirmDetails state)}
+            vScrollToBeginning (viewportScroll ConfirmDetailsViewport)
+          Vty.KChar 'e' | serviceIdle state, ServiceRequestScreen request <- modelScreen (stateModel state), Manager.draftPhase request == "draft" ->
+            case modelWorkflow (stateModel state) of
+              Just descriptor | not (null (workflowInputs descriptor)) ->
+                let model = (stateModel state) {modelScreen = InputScreen 0}
+                in put state {stateModel = model, stateEditor = Edit.editorText InputEditor Nothing (inputValue model)}
+              _ -> pure ()
+          Vty.KChar 'h' | modelScreen (stateModel state) == BrowserScreen ->
+            case atMay (stateServiceWorkflows state) (modelWorkflowIndex (stateModel state)) of
+              Just workflow -> put state {stateModel = (stateModel state) {modelScreen = HelpScreen (Service.workflowHelp workflow)}}
+              Nothing -> pure ()
+          Vty.KChar 'g' -> refreshServiceRequest client
+          Vty.KChar 'x' | MutationUncertain {} <- stateServiceMutation state -> put state {stateServiceResendConfirm = True}
+          Vty.KChar 'r' | ServiceProfilesScreen {} <- modelScreen (stateModel state) -> startServiceProfiles client
+          _ -> pure ()
+    _ -> pure ()
+  where
+    serviceBack state = case modelScreen (stateModel state) of
+      ServiceProfilesScreen {} -> halt
+      InitialLoading -> halt
+      ServiceReviewScreen {} | stateConfirmDetails state -> put state {stateConfirmDetails = False}
+      HelpScreen _ -> put state {stateModel = (stateModel state) {modelScreen = BrowserScreen}}
+      BrowserScreen | serviceIdle state -> do
+        put state {stateServiceReadTicket = Nothing, stateServiceWorkflows = [],
+          stateModel = initialServiceModel (stateServiceProfiles state), statePaneFocus = PrimaryPane}
+        liftIO (cancelWorker state ServiceReadWork)
+      _ -> pure ()
+    serviceMove delta state = case modelScreen (stateModel state) of
+      HelpScreen _ -> vScrollBy (viewportScroll HelpViewport) delta
+      FailureScreen _ -> vScrollBy (viewportScroll FailureViewport) delta
+      ServiceRequestScreen _ -> vScrollBy (viewportScroll FailureViewport) delta
+      ServiceReviewScreen {} | stateConfirmDetails state -> vScrollBy (viewportScroll ConfirmDetailsViewport) delta
+      _ | statePaneFocus state == SecondaryPane -> vScrollBy (viewportScroll BrowserDetailViewport) delta
+        | otherwise -> do
+            put state {stateModel = moveSelection delta (stateModel state)}
+            vScrollToBeginning (viewportScroll BrowserDetailViewport)
+    serviceViewport state = case modelScreen (stateModel state) of
+      HelpScreen _ -> HelpViewport
+      FailureScreen _ -> FailureViewport
+      ServiceRequestScreen _ -> FailureViewport
+      ServiceReviewScreen {} -> ConfirmDetailsViewport
+      _ | statePaneFocus state == SecondaryPane -> BrowserDetailViewport
+        | otherwise -> BrowserListViewport
 
 blankEditor :: Edit.Editor Text Name
 blankEditor = Edit.editorText InputEditor Nothing ""
@@ -298,18 +689,37 @@ app =
 startInitialLoad :: EventM Name AppState ()
 startInitialLoad = do
   state <- get
-  let channel = stateChannel state
-      config = stateConfig state
-      root = stateRoot state
-  liftIO . startWorker state InitialWork $ loadInitialData config root >>= writeBChan channel . InitialReady
+  case stateBackend state of
+    LocalBackend config root ->
+      liftIO . startWorker state InitialWork $ loadInitialData config root >>= writeBChan (stateChannel state) . InitialReady
+    ServiceBackend client -> startServiceProfiles client
 
 draw :: AppState -> [Widget Name]
 draw = drawPresentation . toPresentation
 
+serviceMutationNotice :: AppState -> Maybe (Text,Text,Bool)
+serviceMutationNotice state = case stateServiceMutation state of
+  MutationIdle -> Nothing
+  MutationPreparing _ mutation -> entry mutation False
+  MutationSending _ mutation _ -> entry mutation False
+  MutationAwaiting mutation _ _ -> entry mutation False
+  MutationUncertain mutation _ _ _ -> entry mutation True
+  where entry mutation uncertain = Just (Service.mutationOperation mutation,Service.mutationURI mutation,uncertain)
+
 toPresentation :: AppState -> Presentation
 toPresentation state =
-  (staticPresentation (stateConfig state) (stateModel state))
-    { presentationEditor = currentEditor state,
+  (emptyPresentation (stateModel state))
+    { presentationConfig = case stateBackend state of LocalBackend config _ -> Just config; ServiceBackend {} -> Nothing,
+      presentationService = case stateBackend state of ServiceBackend {} -> True; LocalBackend {} -> False,
+      presentationServiceMutation = serviceMutationNotice state,
+      presentationServiceResendConfirm = stateServiceResendConfirm state,
+      presentationServiceApproval = stateServiceApprovalStatus state,
+      presentationServiceReviewAvailable = serviceIdle state && stateServiceReadTicket state == Nothing
+        && case (stateServiceWorkflow state,stateServiceRequest state,stateServicePreparation state) of
+          (Just workflow,Just (_,request),Just (_,preparation)) -> Service.reviewLive (stateNow state) preparation
+            && Service.reviewMatches workflow request preparation && Service.literalInputs request == modelInputs (stateModel state)
+          _ -> False,
+      presentationEditor = currentEditor state,
       presentationRunView = stateRunView state,
       presentationPaneFocus = statePaneFocus state,
       presentationOutputFollow = stateOutputFollow state,
@@ -393,7 +803,19 @@ handleEvent event = do
   resetEnteredViewport before after
 
 handleEventCore :: BrickEvent Name AppEvent -> EventM Name AppState ()
-handleEventCore event = case event of
+handleEventCore event = do
+  state <- get
+  case stateBackend state of
+    LocalBackend {} -> handleLocalEvent event
+    ServiceBackend client -> handleServiceEvent client event
+
+handleLocalEvent :: BrickEvent Name AppEvent -> EventM Name AppState ()
+handleLocalEvent event = case event of
+  AppEvent (ServiceProfilesReady _ _) -> pure ()
+  AppEvent (ServiceWorkflowsReady _ _ _) -> pure ()
+  AppEvent (ServicePrepared _ _) -> pure ()
+  AppEvent (ServiceSent _ _) -> pure ()
+  AppEvent (ServiceRequestReady _ _) -> pure ()
   AppEvent FrameReady -> handleFrame
   AppEvent (InitialReady result) -> do
     state <- get
@@ -497,7 +919,7 @@ handleEventCore event = case event of
     let model = stateModel state
         status = case modelScreen model of
           ConfirmScreen preview
-            | launchReviewAllowed (stateConfig state) preview (width, height) -> "complete launch review is visible"
+            | localReviewAllowed state preview (width, height) -> "complete launch review is visible"
             | otherwise -> "launch disabled until the complete review fits"
           _ -> modelStatus model
      in state {stateTerminalSize = (width, height), stateModel = model {modelStatus = status}}
@@ -908,7 +1330,7 @@ privateOutputFlags =
     }
 
 cycleRoutingPersona :: EventM Name AppState ()
-cycleRoutingPersona = do
+cycleRoutingPersona = withLocalBackend $ \config _ -> do
   state <- get
   let model = stateModel state
       allowedScreen = modelScreen model == TargetScreen || (modelScreen model == BrowserScreen && modelTab model == RoutingTab)
@@ -920,7 +1342,6 @@ cycleRoutingPersona = do
         let current = routingSummaryPersona routing >>= (`elemIndex` personas)
             next = personas !! ((fromMaybe (-1) current + 1) `mod` length personas)
             channel = stateChannel state
-            config = stateConfig state
         put state {stateRoutingRequest = Just next, stateModel = model {modelStatus = "loading routing persona " <> next}}
         liftIO . startWorker state RoutingWork $ loadRoutingSummary config (Just next) >>= writeBChan channel . RoutingReady next
 
@@ -933,11 +1354,10 @@ cycleBrowserTab = do
   when (modelTab model == RunsTab) refreshRuns
 
 refreshRuns :: EventM Name AppState ()
-refreshRuns = do
+refreshRuns = withLocalBackend $ \config root -> do
   state <- get
-  let config = stateConfig state
-      channel = stateChannel state
-  liftIO . startWorker state RunsWork $ loadRunCatalogue config (stateRoot state) >>= writeBChan channel . RunsReady
+  let channel = stateChannel state
+  liftIO . startWorker state RunsWork $ loadRunCatalogue config root >>= writeBChan channel . RunsReady
 
 handleMove :: Int -> EventM Name AppState ()
 handleMove delta = do
@@ -1015,7 +1435,7 @@ openSelectedRun = do
         ensureAuxiliaryLoads
 
 beginLineage :: LineageOperation -> EventM Name AppState ()
-beginLineage operation = do
+beginLineage operation = withLocalBackend $ \config root -> do
   state <- get
   if isJust (stateRunning state)
     then put state {stateModel = (stateModel state) {modelStatus = "an owned run is already active; reattach or cancel it first"}}
@@ -1041,7 +1461,7 @@ beginLineage operation = do
                           }
                       channel = stateChannel state
                   put state {stateModel = model, stateRequestSerial = request, statePreviewRequest = Just request}
-                  liftIO . startWorker state PreviewWork $ buildLineagePreview (stateConfig state) (stateRoot state) descriptor record operation >>= writeBChan channel . PreviewReady request
+                  liftIO . startWorker state PreviewWork $ buildLineagePreview config root descriptor record operation >>= writeBChan channel . PreviewReady request
 
 submitEditor :: EventM Name AppState ()
 submitEditor = do
@@ -1076,14 +1496,13 @@ chooseLive = do
               )
 
 beginPreview :: TargetSelection -> EventM Name AppState ()
-beginPreview target = do
+beginPreview target = withLocalBackend $ \config root -> do
   state <- get
   case modelWorkflow (stateModel state) of
     Nothing -> put state {stateModel = (stateModel state) {modelScreen = FailureScreen "no workflow selected"}}
     Just descriptor -> do
       let request = stateRequestSerial state + 1
           model = chooseTarget target (stateModel state)
-          config = stateConfig state
           inputs = modelInputs model
           channel = stateChannel state
           routing = case target of
@@ -1092,15 +1511,15 @@ beginPreview target = do
             TargetRestored {} -> Nothing
       put state {stateModel = model, stateRequestSerial = request, statePreviewRequest = Just request}
       liftIO . startWorker state PreviewWork $ do
-        result <- buildLaunchPreview config (stateRoot state) descriptor inputs target
+        result <- buildLaunchPreview config root descriptor inputs target
         writeBChan channel (PreviewReady request (fmap (\preview -> preview {previewRouting = routing}) result))
 
 confirmLaunch :: EventM Name AppState ()
-confirmLaunch = do
+confirmLaunch = withLocalBackend $ \config root -> do
   state <- get
   case modelScreen (stateModel state) of
     ConfirmScreen preview
-      | not (launchReviewAllowed (stateConfig state) preview (stateTerminalSize state)) ->
+      | not (launchReviewAllowed config preview (stateTerminalSize state)) ->
           put state {stateModel = (stateModel state) {modelStatus = "launch disabled until the complete review fits"}}
       | otherwise -> do
           let request = stateRequestSerial state + 1
@@ -1120,7 +1539,7 @@ confirmLaunch = do
             result <- case stateServer state of
               Nothing -> pure (Left "capability server identity is unavailable")
               Just server -> mask $ \_ -> do
-                launched <- startMachine server (stateConfig state) (stateRoot state) preview queue notify stopped
+                launched <- startMachine server config root preview queue notify stopped
                 case launched of
                   Right running -> writeIORef (stateOwned state) (Just running)
                   Left _ -> pure ()
@@ -1296,7 +1715,7 @@ consumeFrame state = do
         (value :) <$> drain (count - 1) queue
 
 ensureAuxiliaryLoads :: EventM Name AppState ()
-ensureAuxiliaryLoads = do
+ensureAuxiliaryLoads = withLocalBackend $ \_ root -> do
   original <- get
   case modelSnapshot (stateModel original) of
     Nothing -> pure ()
@@ -1330,7 +1749,7 @@ ensureAuxiliaryLoads = do
                   channel = stateChannel state
                   runId = snapshotRunId snapshot
               put state {statePersonLoadGeneration = generation, statePersonLoading = Just (decision, generation)}
-              liftIO . startWorker state PersonWork $ loadPersonPrompt (stateRoot state) runtimeDirectory runId occurrence >>= writeBChan channel . PersonPromptReady decision generation
+              liftIO . startWorker state PersonWork $ loadPersonPrompt root runtimeDirectory runId occurrence >>= writeBChan channel . PersonPromptReady decision generation
         _ -> pure ()
       latest <- get
       case (snapshotResult snapshot, stateRuntimeDirectory latest, stateFinalResult latest, stateFinalLoading latest) of
@@ -1340,8 +1759,8 @@ ensureAuxiliaryLoads = do
           put latest {stateFinalLoading = True}
           liftIO . startWorker latest ResultWork $ do
             outcome <- try @SomeException $ do
-              components <- privatePathComponents (stateRoot latest) runtimeDirectory
-              withPrivateDirectoryAt (stateRoot latest) components $ \descriptor ->
+              components <- privatePathComponents root runtimeDirectory
+              withPrivateDirectoryAt root components $ \descriptor ->
                 readResultArtifactAt runtimeDirectory descriptor runId reference
             case outcome of
               Left failure | Just _ <- fromException @SomeAsyncException failure -> throwIO failure
@@ -1559,7 +1978,7 @@ terminalStatus RunCancelling = False
 terminalStatus RunOrphaned = False
 
 showSelectedHelp :: EventM Name AppState ()
-showSelectedHelp = do
+showSelectedHelp = withLocalBackend $ \config _ -> do
   state <- get
   let model = stateModel state
   if isJust (stateRunning state)
@@ -1570,7 +1989,6 @@ showSelectedHelp = do
         Just descriptor -> do
           let request = stateRequestSerial state + 1
               channel = stateChannel state
-              config = stateConfig state
           put
             state
               { stateModel = model {modelScreen = HelpLoading, modelStatus = "loading workflow help"},

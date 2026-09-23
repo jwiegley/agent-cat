@@ -529,7 +529,7 @@ import Agentic.Plan
 import Agentic.Schema (El, SCode (..), SomeCode (..), fromSCode)
 import Agentic.Schema.Json (codeFromJson, codeJson)
 import Agentic.WF (wft)
-import Agentic.Tui (TuiConfig (..), runTui)
+import Agentic.Tui (TuiConfig (..), runTui, runServiceTui)
 import Agentic.Runtime.Facts
   ( reservedInput,
     routeDefaultLabel,
@@ -659,6 +659,8 @@ defaultMachineOptions = MachineOptions protocolVersion PersonAnswerEngine
 data Command
   = -- | Explicit full-screen terminal frontend.
     Tui
+  | -- | A terminal client using an explicit manager client-profile file.
+    TuiService !FilePath
   | -- | Workflow-independent process-interface discovery.
     FrontendCapabilities
   | -- | Read-only, versioned private-store queries for native frontends.
@@ -989,6 +991,7 @@ loadCommandRouting = \case
 execute :: DataBroker -> Registry -> Command -> IO ()
 execute broker reg = \case
   Tui -> tuiCmd reg
+  TuiService profile -> runServiceTui profile
   FrontendCapabilities -> Frontend.runFrontendCapabilities (regBinary reg) runnerVersion
   FrontendSession -> frontendCmd broker reg
   FrontendIo -> do
@@ -3419,6 +3422,10 @@ parseCommand reg = \case
   [] -> Left (usage reg)
   ["--help"] -> Right Usage
   ["--tui"] -> Right Tui
+  ["--tui", "--service", profile]
+    | isAbsolute (T.unpack profile),
+      BS.length (encodeUtf8 profile) <= 4096,
+      not (T.any (`elem` ['\NUL','\n','\r']) profile) -> Right (TuiService (T.unpack profile))
   ["frontend"] -> Right FrontendSession
   ["frontend", "--capabilities"] -> Right FrontendCapabilities
   ["frontend", "--help"] -> Right Usage
@@ -3948,6 +3955,7 @@ usage reg =
     [ bin <> " — " <> regBanner reg,
       "",
       "  " <> bin <> " --tui",
+      "  " <> bin <> " --tui --service ABS_CLIENT_PROFILE",
       "  " <> bin <> " frontend --capabilities",
       "  " <> bin <> " frontend",
       "  " <> bin <> " frontend-io < request.json",

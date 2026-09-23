@@ -71,6 +71,7 @@ import System.IO (hFlush, stdout)
 import System.Timeout (timeout)
 import Test.QuickCheck (Testable, isSuccess, maxSuccess, quickCheckWithResult, stdArgs)
 import TuiRootRoleTests (tuiRootRoleTests)
+import ServiceTests (serviceTests)
 
 main :: IO ()
 main = do
@@ -85,6 +86,7 @@ main = do
 
 runTests :: IO ()
 runTests = do
+  serviceTests
   descriptorBytes <- BS.readFile "test/fixtures/runtime/descriptor-v3/valid.json"
   startedBytes <- firstLine <$> BS.readFile "test/fixtures/runtime/protocol-v1/success.ndjson"
   manifestBytes <- BS.readFile "test/fixtures/runtime/frontend-manifest/v2.json"
