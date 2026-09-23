@@ -1,5 +1,31 @@
 pkgs: final: prev:
 {
+  # Use the upstream Name Constraints update and its compatible TLS family.
+  crypton = prev.crypton_1_1_2;
+  crypto-token = prev.crypto-token_0_2_0;
+  hpke = prev.hpke_0_1_0;
+  tls-session-manager = prev.tls-session-manager_0_1_0;
+  crypton-x509 = final.callHackageDirect {
+    pkg = "crypton-x509";
+    ver = "1.9.1";
+    sha256 = "sha256-8VZ64FbEiLj4o+Nm9ZzpNH7ZYs9w6rTkLvT9p2PgBf4=";
+  } {};
+  # SAN presence, including IP-only SANs, takes precedence over the common name.
+  crypton-x509-validation = pkgs.haskell.lib.appendPatch (final.callHackageDirect {
+    pkg = "crypton-x509-validation";
+    ver = "1.9.1";
+    sha256 = "sha256-YKufVgXC8qz80tScE3vENVrwJD1MgZYRNnjqirscrLA=";
+  } {}) ./crypton-x509-validation-san.patch;
+  crypton-x509-store = prev.crypton-x509-store_1_9_0;
+  crypton-x509-system = prev.crypton-x509-system_1_9_0;
+  crypton-connection = prev.crypton-connection_0_4_6;
+  http-client-tls = prev.http-client-tls_0_4_0;
+  tls = final.callHackageDirect {
+    pkg = "tls";
+    ver = "2.3.0";
+    sha256 = "sha256-kip1dltP9SvauoTYSJ7Hi0bwM6bg5nVJnjTgQlZByhI=";
+  } {};
+
   # Include upstream descriptor-exhaustion, shutdown, and response-header fixes.
   wai = final.callHackageDirect {
     pkg = "wai";

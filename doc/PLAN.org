@@ -5984,46 +5984,29 @@ From acat-vbl: muExt_indep_of_peak_eq_zero anchors the count semantically only a
 
 Owner 2026-08-13, after the DSL/MCP work: (1) reconstruct the hardenPatch Lean example as a PROGRAM TEXT in the DSL — a file in the repo (examples/harden.wf or similar), not just a string constant in a test; (2) a single executable 'agent-cat' with three subcommands over that file: 'agent-cat run <program>' parses, type-checks, and EXECUTES the plan against a live agent (ACP adapter as in harden_demo; --adapter stub|claude|codex), printing the transcript, bill and certificate; 'agent-cat cost <program>' parses, type-checks and prints the COST analysis without executing — level, shape sequence, cost tree leaves, min/max, and the reachable-bill set where the level permits it, stating plainly when a bound is sound but unattained; 'agent-cat plan <program>' parses, type-checks and PRINTS THE PLAN — a readable rendering of the checked term (structure, questions with addressee/scope, binders, branches, revision bounds), i.e. what the author wrote as the library understands it. All three share one parseAndCheck front end and must report type errors identically with position and message. Exit nonzero on type error. Keep harden_demo working or fold it into 'agent-cat run' with the demo's assertions behind a flag. Depends on the DSL landing (workflow wlkbf4jne).
 
-* TODO [#B] Update affected TLS certificate validation before enabling service clients
+* DOING [#B] Update affected TLS certificate validation before enabling service clients
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-tls-name-constraints-0h7q
 :LABELS:   []
 :ISSUE_TYPE: bug
 :CREATED:  [2026-09-23 Wed 03:00]
-:MODIFIED: [2026-09-23 Wed 03:00]
+:MODIFIED: [2026-09-23 Wed 12:50]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
 :END:
 
-# Pinned TLS certificate validation blocks service-client enablement
+The user authorized the targeted Nix update on2026-09-23. crypton-x509 and crypton-x509-validation are now pinned to1.9.1 with compatible crypto/TLS dependencies. GHC remains9.10.3 and flake.lock is unchanged. A one-line dependency patch makes SAN presence, including IP-only SANs, select the existing matcher rather than common-name fallback. No trust bypass or disabled certificate check was introduced.
 
-The pinned local environment reports crypton-x509-validation1.6.14 and crypton-x5091.7.7. Both are affected by CVE-2026-9648, according to HSEC-2026-0008 and CERT/CC VU#862559. Certificate Name Constraints are not enforced. A compromised name-constrained intermediate CA can therefore issue certificates outside its authorized namespace that affected clients accept.
+Independent review cleared the Nix override, SAN patch and memory-to-ram change with a packaging note. Parent then added the recommended source-distribution entry and strengthened the existing TLS probe fixture. The service/client implementation remains isolated and is not accepted by this integration.
 
-The Haskell advisory identifies fixes in crypton-x509-validation1.9.1 and crypton-x5091.9.1. The installed versions were rechecked with ghc-pkg in canonical direnv and the private environment at2026-09-23T09:58:41Z. No dependency version, lock file, compiler or live configuration has been changed.
+Eighteen public-client cases and real protected-manager observation passed N1 then N8. The old excluded-DNS acceptance was reproduced as a failing regression before the update. Current canonical dependency probes and source-archive verification passed, and the Haskell documentation gate passed on its resumed invocation. Original failed builds, stale-executable results and the first documentation timeout remain preserved.
 
-Sources:
+This issue remains in progress because general-CA acceptance is not complete. acat-tls-name-forms-6gbo records residual upstream Name Constraints concerns, including unsupported IP forms. A later full workflow retest also remained queued without preparation, and the actual TUI remains unfinished. Do not infer full certificate conformance, workflow completion or new WM/G acceptance from these bounded results.
 
-- https://haskell.github.io/security-advisories/advisory/HSEC-2026-0008.html
-- https://www.kb.cert.org/vuls/id/862559
-
-The current task forbids dependency-version changes without explicit authorization. Mandatory authentication safety must precede enabled frontend functionality. The next authorized decision is whether to update the affected certificate packages, and any compatibility-required dependent packages, through the existing Nix setup. Validation must remain local. Do not disable certificate checks, add permissive hooks, alter trust implicitly, or weaken negative assertions.
-
-Separately, the real-manager public Client check failed with TransportUnavailable. A focused fixture reproduced rejection of a trusted certificate with CN localhost and the correct IP SAN127.0.0.1 when connecting to127.0.0.1. The same client boundary suite passed with a matching CN. This IP-SAN interoperability failure is distinct from the Name Constraints vulnerability. Its positive assertion remains in client_native.py and must not be changed to accept failure merely to pass the suite.
-
-Preserved evidence in the service-tui.purvEwEv unit:
-
-- client-profile-build-first,09:30:24–09:30:32Z, failed because the proposed readSignedObject name was not exported. Inspection of the pinned module identified readSignedObjectFromMemory.
-- client-profile-build-second,09:31:53–09:31:58Z, passed Werror compilation.
-- client-check-build-first,09:43:14–09:43:19Z, failed because header-limit record selectors are not public. The pinned public managerSetMaxHeaderLength and managerSetMaxNumberHeaders setters are now used.
-- client-check-build-second,09:47:52–09:48:05Z, passed.
-- client-native-first,09:48:25–09:48:40Z, passed twelve client-boundary cases at N1 then N8, including trusted/untrusted TLS, wrong host, exact maximum-length nonce, lost reply without retry, changed credential, page mismatch, and original HTTP task cancellation/join. These are an external API fixture, not workflow or TUI acceptance. Root: /Users/johnw/Products/k.M0a5ItPm/tmp/client.imzrX3px.
-- client-manager-native-first,09:50:49–09:51:08Z, failed at N1 before client observations completed. Root: /Users/johnw/Products/k.M0a5ItPm/tmp/client-manager.pG6gynLA.
-- client-ip-san-diagnostic,09:54:49–09:54:50Z, failed the newly added positive IP-SAN case at N1. Root: /Users/johnw/Products/k.M0a5ItPm/tmp/client.YNNO3FpX.
-
-Completion requires explicit approval for the targeted dependency update, verified fixed certificate validation including constrained-CA refusal, correction or explicit supported handling of the positive IP-SAN case without hostname bypass, relevant owning local gates at N1 then N8, and continuation of the real public-client/TUI journey. Existing WM001–WM022/G0/G1 acceptance records remain closed. The pending service application remains isolated and unreviewed, and no new WM/G milestone is accepted.
+Exact sources, checks, scope and continued work are recorded in /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/tls-update.md and tls-update-review.tls-update-review.md. The original authorization blocker and failure evidence remain in client-security-blocker.md and Git history.
 
 ** Acceptance Criteria
 
@@ -6038,6 +6021,52 @@ Operator authorizes the targeted pinned-dependency update. Fixed Name Constraint
     "depends_on_id": "acat-wm-023-d20b",
     "type": "discovered-from",
     "created_at": "2026-09-23T10:00:28.571356Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 303,
+    "issue_id": "acat-tls-name-constraints-0h7q",
+    "author": "johnw",
+    "text": "The user explicitly approved the targeted update of crypton-x509 and crypton-x509-validation to1.9.1 through Nix. Resume local implementation and validation without TLS bypasses, unrelated upgrades, compiler changes or external-host execution. Refocus18:33:19Z, next deadline19:33:19Z.",
+    "created_at": "2026-09-23T18:34:38Z"
+  }
+]
+#+end_src
+
+* TODO [#B] Correct residual unsupported Name Constraints validation
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-tls-name-forms-6gbo
+:LABELS:   []
+:ISSUE_TYPE: bug
+:CREATED:  [2026-09-23 Wed 12:05]
+:MODIFIED: [2026-09-23 Wed 12:05]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+The targeted1.9.1 upgrade fixes the exercised DNS permitted/excluded cases, but its Data/X509/Validation.hs isIncludedIn has no AltNameIP branch. Such comparisons fall through to Nothing, and nsNotMatch treats Nothing as no exclusion. This is a source-grounded security concern, not a successful native exploit claim. Validate and correct unsupported name forms, DNS normalization/subdomain boundaries and constraint inheritance before accepting general-CA service-client enablement. Do not weaken certificate checks or substitute a custom frontend trust bypass. Current upstream source is /nix/store/jh44fs0mcsklfql5sj9sc8iylrjqq9cs-crypton-x509-validation-1.9.1.tar.gz/Data/X509/Validation.hs. The bounded dependency update and IP-only SAN precedence correction remain separate from complete PKIX assurance.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-tls-name-forms-6gbo",
+    "depends_on_id": "acat-tls-name-constraints-0h7q",
+    "type": "discovered-from",
+    "created_at": "2026-09-23T19:05:30.671107Z",
     "created_by": "johnw",
     "metadata": "{}",
     "thread_id": ""
@@ -10683,7 +10712,7 @@ manager's correctness boundary.
 :LABELS:   ["p5","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-23 Wed 03:01]
+:MODIFIED: [2026-09-23 Wed 12:49]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-023
 :SOURCE_REPO: agent-cat
@@ -10840,6 +10869,13 @@ callers. Worker environments contain no manager credential material.
     "author": "johnw",
     "text": "The isolated broker-source continuation now executes the complete protected HTTP mixed-controls workflow at N1 and N8. The current complete run is http-mixed-ordered-loans,2026-09-23T09:17:56–09:19:14Z, exit0, under /Users/johnw/Products/k.M0a5ItPm/tmp/mixed-http.n7QrnvFN. It includes exact approval, typed false, recovery retry, native completion, verified result bytes, cleanup-governed release, polling/SSE, quotas, revocation and original joins. It is not actual TUI interaction and accepts no new WM/G milestone. All earlier failures remain recorded in the service unit's mixed-http-validation.md.\n\nIndependent service-liveness review blocked the previous response loan order. Parent corrected overview, run and decision readers to acquire files before configuration and added N1/N8 ordering/lifetime checks. Continued independent clearance, further negative checks and the separate slow-response liveness disposition remain pending. No service application delta has been canonically integrated.\n\nPublic Client profile loading, verified TLS, strict capabilities, exact-URI GET observations, bounded page assembly, polling and 22-character command nonces are implemented in the isolated branch. The twelve-case native client boundary suite passed N1 then N8. A real-manager client check then failed, and a focused positive IP-SAN test reproduced the rejection. Research separately confirmed CVE-2026-9648 affects the pinned crypton-x509-validation1.6.14 and crypton-x5091.7.7. HSEC-2026-0008 identifies fixes in1.9.1. Issue acat-tls-name-constraints-0h7q records the blocker and sources.\n\nDependency-version changes require explicit operator authorization. No such update, compiler change, trust bypass, live configuration mutation or deployment has occurred. Service-client enablement is stopped pending that decision. The actual TUI path remains unimplemented. WM001–WM022/G0/G1 remain closed and WM023 remains partial. Canonical application baseline is still678326b. Full details are in service-tui.purvEwEv/broker-brief.md and client-security-blocker.md.\n",
     "created_at": "2026-09-23T10:01:11Z"
+  },
+  {
+    "id": 304,
+    "issue_id": "acat-wm-023-d20b",
+    "author": "johnw",
+    "text": "User-approved TLS update pins both affected certificate packages to1.9.1 and corrects IP-only SAN precedence at the shared dependency owner, without disabling checks. Compatible Nix dependencies changed, but GHC9.10.3 and the flake lock did not. Reviewer63fdf53f-c03b-463a-9c3d-bbdfdb66a43f approved bounded integration with a source-archive note, which parent corrected. Eighteen client cases and actual public Client/protected-manager observation passed N1/N8. Canonical dependency probes and archive verification passed. The combined documentation command timed out during its Haskell build, and the separate resumed Haskell gate passed19:43:35–19:45:39Z. All prior failures remain preserved. A subsequent full workflow retest failed at N1 with a request still queued before preparation. No cause or successful retry is inferred. Residual Name Constraints concerns remain acat-tls-name-forms-6gbo, and original update issue0h7q remains in progress pending complete general-CA acceptance. Current application WIP remains isolated, actual TUI service mode is unfinished, and no WM/G milestone is accepted. Details are in service-tui.purvEwEv/tls-update.md. Refocus19:47:05Z, next deadline20:47:05Z.",
+    "created_at": "2026-09-23T19:49:06Z"
   }
 ]
 #+end_src

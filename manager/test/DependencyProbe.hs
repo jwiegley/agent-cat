@@ -125,7 +125,7 @@ tlsChecks root = do
   (status, _, diagnostic) <- readProcessWithExitCode "openssl"
     [ "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-sha256",
       "-keyout", key, "-out", certificate, "-days", "1",
-      "-subj", "/CN=127.0.0.1", "-addext", "subjectAltName=IP:127.0.0.1",
+      "-subj", "/CN=localhost", "-addext", "subjectAltName=IP:127.0.0.1",
       "-addext", "basicConstraints=critical,CA:TRUE",
       "-addext", "keyUsage=critical,digitalSignature,keyEncipherment,keyCertSign",
       "-addext", "extendedKeyUsage=serverAuth"

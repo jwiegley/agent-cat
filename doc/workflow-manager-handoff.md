@@ -20,44 +20,52 @@ as a substitute for the next product milestone. The completed
 the references for their respective scopes, subject to the user's corrections
 below.
 
-## Current dependency authorization blocker
+## Current TLS update and isolated progress
 
-Service-client enablement is blocked pending explicit authorization to update
-the pinned certificate-validation packages. Local inspection found
-`crypton-x509-validation-1.6.14` and `crypton-x509-1.7.7`. Both are affected by
-[CVE-2026-9648](https://haskell.github.io/security-advisories/advisory/HSEC-2026-0008.html),
-which permits certificate chains that violate Name Constraints. The advisory
-identifies fixed versions `1.9.1`. Issue `acat-tls-name-constraints-0h7q` records
-the evidence and required local checks. No dependency version, lock file, compiler,
-trust policy or live configuration has been changed.
+The user authorized the targeted Nix dependency update on 2026-09-23.
+`crypton-x509` and `crypton-x509-validation` are now pinned to `1.9.1`, with
+compatible crypto/TLS dependencies and unchanged GHC 9.10.3 and flake lock.
+The upstream release addresses the exercised DNS Name Constraints failure in
+[CVE-2026-9648](https://haskell.github.io/security-advisories/advisory/HSEC-2026-0008.html).
+A one-line shared-validator patch also fixes IP-only SAN precedence over common
+names. Normal certificate, signature and hostname checks remain enabled.
 
-The isolated source remains in
-`implementation.9tGzKH/service-tui.purvEwEv/broker-source`, based on canonical
-`678326b`. Its protected HTTP `mixed-controls` journey passed N1 and N8 at
-2026-09-23 09:17:56–09:19:14Z, including exact approval, typed false, retry,
-native completion, verified result bytes and cleanup-governed admission release.
-This is not actual TUI interaction, and no new WM package or gate is accepted.
+The canonical change is limited to Nix overrides, that patch, its source-archive
+entry, the `memory`-to-`ram` dependency change and the existing TLS probe fixture.
+Reviewer `63fdf53f-c03b-463a-9c3d-bbdfdb66a43f` approved bounded integration with a
+packaging note. Parent added the missing archive entry and confirmed its exact
+bytes in the source distribution. Service/client application code remains isolated
+in `implementation.9tGzKH/service-tui.purvEwEv/broker-source`.
 
-The public Client now has an explicit client-profile loader, bounded page
-assembly, exact-URI GET observations, polling and response validation. Twelve
-client-boundary cases passed N1 and N8. A subsequent real-manager check failed,
-and a focused positive IP-SAN case reproduced certificate rejection. That
-interoperability failure is distinct from the Name Constraints vulnerability.
-The positive assertion remains intact. Do not bypass hostname validation or
-change the fixture merely to obtain a passing result.
+After actual relinking, all 18 public-client cases passed at N1 and N8.
+They include permitted and excluded DNS constraints, IP-only SAN success,
+matching-CN rejection, credential changes, bounded pages and original request
+cancellation. The public Haskell Client also passed real protected-manager
+observation at N1 and N8, including actual pages, polling and session binding.
+Earlier certificate failures and the stale-executable run remain preserved.
 
-The service-liveness review blocked the prior loan-order composition. Parent
-corrected overview, run and decision owners and passed local ordering checks,
-but continued review clearance and further negative checks remain pending.
-The separate slow-response liveness limit is not resolved. Current records are
-`broker-brief.md`, `mixed-http-validation.md`, `service-liveness-review.md` and
-`client-security-blocker.md` in the service unit. All original failures and roots
-remain preserved. The TUI service implementation is still unfinished.
+General-CA service acceptance remains open. Issue `acat-tls-name-forms-6gbo`
+records unsupported IP Name Constraints and further upstream validation concerns.
+The passing cases are not complete PKIX assurance. The original update issue
+`acat-tls-name-constraints-0h7q` retains that qualification rather than claiming
+all certificate-validation obligations are complete.
 
-After authorization, perform the targeted update through the existing Nix
-environment, verify fixed certificate validation locally without weakening
-assertions, and resume the client/TUI path. No paid backend, external-host test,
-deployment or new Lean/oracle build is implied.
+The earlier protected HTTP `mixed-controls` journey passed at N1 and N8 at
+09:17:56–09:19:14Z. A later retest with the updated environment failed at N1
+because its request stayed queued without preparation until the observation
+deadline. The cause is not established, and the request was not replayed.
+Neither run is actual TUI interaction, and no new WM package or gate is accepted.
+
+Canonical dependency checks passed at N1 and N8. The first combined check timed
+out while compiling the Haskell documentation workspace, after its native checks,
+archive check and prose gate completed. The separate resumed Haskell documentation
+gate passed at 19:43:35–19:45:39Z. Its success does not certify the earlier timeout
+or its cleanup. Exact scopes and failures are in the service unit's `tls-update.md`.
+
+The service-liveness review still needs continued clearance after the loan-order
+correction, and its separate slow-response limit remains unresolved. The TUI
+service implementation is unfinished. Continue that product path and its required
+security work without a trust bypass, opaque replay or historical-recovery detour.
 
 ## First frontend through the running manager
 
@@ -788,12 +796,12 @@ failures, unknown holders and failed UI cleanup/restoration qualifications remai
 unresolved historical evidence rather than new closure prerequisites.
 
 The latest clock-backed refocus for this checkpoint is
-`2026-09-23T09:58:41Z`. The protected HTTP execution prerequisite has current N1/N8
-evidence, while the actual TUI journey remains unfinished. Dependency authorization
-is now a concrete blocker, as described above. Recheck the goal and clock on
-resumption. WM-022/G1 remain accepted, RabbitMQ remains deferred, and validation
-remains local-only. No historical closure or verification-machinery detour is
-required.
+`2026-09-23T19:47:05Z`, with the next active-work deadline at `20:47:05Z`.
+The authorized dependency update and public-client observation now have local
+evidence. The TUI journey, full workflow retest and remaining certificate-validation
+work remain unfinished. WM-022/G1 stay accepted, RabbitMQ remains deferred, and
+validation remains local-only. No historical closure or verification-machinery
+detour is required.
 
 ## Historical WM-016 closure record
 

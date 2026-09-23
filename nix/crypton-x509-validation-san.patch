@@ -1,0 +1,11 @@
+--- a/Data/X509/Validation.hs
++++ b/Data/X509/Validation.hs
+@@ -519,7 +519,7 @@
+ -- in (non-transitional) IDNA2008 A-label form.
+ validateCertificateName :: HostName -> Certificate -> [FailedReason]
+ validateCertificateName fqhn cert
+-    | not $ null altNames =
++    | isJust (extensionGet (certExtensions cert) :: Maybe ExtSubjectAltName) =
+         case parseIPAddress fqhn of
+             Nothing -> findMatch [] $ map matchDomain altNames
+             Just ip ->
