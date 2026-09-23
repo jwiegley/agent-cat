@@ -10712,7 +10712,7 @@ manager's correctness boundary.
 :LABELS:   ["p5","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-23 Wed 13:49]
+:MODIFIED: [2026-09-23 Wed 15:28]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-023
 :SOURCE_REPO: agent-cat
@@ -10883,6 +10883,13 @@ callers. Worker environments contain no manager credential material.
     "author": "johnw",
     "text": "The isolated broker-source now runs an actual read-only TUI through the protected manager using --tui --service ABS_CLIENT_PROFILE. It reuses App/Model/Presentation, with disjoint local and service owners, no dummy local configuration or root, strict public Profile/Workflow decoders, complete page assembly, one ticketed HTTP read slot and joined service cleanup. Profiles, workflow selection and server help work through real140x36 keyboard/PTY interaction. Local launch/control shortcuts are not enabled in this mode. Full model/property/golden/render/root-role checks and real TUI quit/SIGTERM restoration passed N1 then N8 in tui-service-shell-native-guards,2026-09-23T20:44:12Z–20:44:55Z, under /Users/johnw/Products/k.M0a5ItPm/tmp/tui-service.YzPIbJaT. Compiler-parsed boundaries passed20:41:41Z–20:41:43Z with48 syntax/frontend and343 forbidden-edge fixtures. Original build failures remain preserved. This is read-only interaction, not the required workflow milestone. Mutation/uncertainty handling, complete Overview/event attachment, Unicode submission, exact approval, typed false, recovery and verified result retrieval remain to wire. Queue-stall and residual certificate-validation obligations remain open. Canonical stays70bf071 with all application changes uncommitted and unreviewed in the isolated branch. No WM/G acceptance or task completion is claimed. Refocus20:44:55Z, next deadline21:44:55Z. Details are in service-tui.purvEwEv/broker-brief.md.",
     "created_at": "2026-09-23T20:49:08Z"
+  },
+  {
+    "id": 306,
+    "issue_id": "acat-wm-023-d20b",
+    "author": "johnw",
+    "text": "The isolated TUI now creates a real manager request, submits the exact Unicode literal, verifies native prompt bytes including the Runtime-declared LF, displays all five complete review selectors, and approves only through explicit summary y. Enter and detail-view y are tested not to approve. Shared public Protocol Draft/Preparation/Command codecs are reused through Agentic.Manager.Client. The original PendingCommand is retained before its one send, and uncertainty permits only an explicit confirmed resend of that same object. Request/run observations do not invent receipt effects. Two failed native attempts remain preserved:21:49:36–21:50:48Z before review and21:57:06–21:58:13Z after a run was already associated. The UI had required successful receipt polling before request observation and incorrectly required preparationId to persist after association. Those frontend assumptions were corrected without changing Store policy or retrying an opaque operation. The observed503 cause was not established. The strengthened actual140x36 PTY sequence passed N1/N8 at22:18:11–22:19:12Z, root /Users/johnw/Products/k.M0a5ItPm/tmp/tui-approval.4bm7f1sn. After frontend quit and SIGTERM, the actual RunControl remained owned with cancellation allowed and a pending answer offer. The fixture then shut down the original manager. Full local TUI regressions passed, and import boundaries passed22:20:25–22:20:27Z. This is submission and approval, not full workflow completion. Live snapshot/decision adapters, typed false, offered retry, verified result retrieval, Overview/event attachment and the remaining service/security obligations stay open. All application changes remain uncommitted and unreviewed in broker-source, and no WM/G milestone is accepted. Refocus22:20:27Z, next deadline23:20:27Z. Details and original failures are in service-tui.purvEwEv/broker-brief.md.",
+    "created_at": "2026-09-23T22:28:32Z"
   }
 ]
 #+end_src
