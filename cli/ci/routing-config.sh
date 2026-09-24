@@ -35,7 +35,7 @@ DECK_STUB_STATE="$tmp/explicit-deck" DECK_STUB_BUSY=0 XDG_CONFIG_HOME="$tmp/xdg"
   +RTS -N8 -RTS >"$tmp/explicit-deck.out" 2>&1
 grep -q 'running harden against agent-deck session hello' "$tmp/explicit-deck.out"
 ! grep -q 'routing configuration:' "$tmp/explicit-deck.out"
-[ "$(cat "$tmp/explicit-deck/sends")" -eq 7 ]
+[ "$(cat "$tmp/explicit-deck/sends")" -eq 6 ]
 
 set +e
 exclusive_acp=$(XDG_CONFIG_HOME="$tmp/xdg" "$bin" run harden \
@@ -92,7 +92,7 @@ EOF
 
 # Routing-only execution proves every engine-bound question has a configured pin.
 set +e
-tool_uncovered=$(XDG_CONFIG_HOME="$tmp/xdg" "$bin" run harden +RTS -N8 -RTS 2>&1)
+tool_uncovered=$(XDG_CONFIG_HOME="$tmp/xdg" "$bin" run hello +RTS -N8 -RTS 2>&1)
 tool_status=$?
 model_uncovered=$(XDG_CONFIG_HOME="$tmp/xdg" "$bin" run structured +RTS -N8 -RTS 2>&1)
 model_status=$?

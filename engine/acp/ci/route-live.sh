@@ -83,10 +83,11 @@ bill_of() {
 # that person is a real one behind a real adapter — and before that question,
 # three real reviewers may object and send the author around the revise loop.
 # So a live run's bill is not pinnable to any single path: harden's own price
-# is `minFold 5, maxFold 15, over 9 paths` (ci/examples.sh pins those numbers
-# by equality), and the first live run of this lane landed on 11/11 — a
-# reviewer objected, the patch was revised, and the owner then said yes. That
-# run was the machinery working, not failing.
+# is `minFold 4, maxFold 14, over 9 paths` (ci/examples.sh pins those numbers
+# by equality), and the first live run of this lane, when the style guide was
+# still a question, landed on 11/11 — a reviewer objected, the patch was
+# revised, and the owner then said yes. That run was the machinery working, not
+# failing.
 #
 # What *is* pinnable is the pre-spend contract itself, which is the whole
 # thesis: the bills agree with each other, the bill lands inside the priced
@@ -103,8 +104,8 @@ want_owner_branch() {
     || bad "no bill lines in the output:$(printf '\n  %s' "$(cat "$out")")"
   [ "$fresh" = "$memo" ] \
     || bad "billFresh $fresh and billMemo $memo disagree, and harden asks no question twice"
-  [ "$fresh" -ge 5 ] && [ "$fresh" -le 15 ] \
-    || bad "billFresh $fresh is outside harden's own price (minFold 5, maxFold 15) — the pre-spend contract broke"
+  [ "$fresh" -ge 4 ] && [ "$fresh" -le 14 ] \
+    || bad "billFresh $fresh is outside harden's own price (minFold 4, maxFold 14) — the pre-spend contract broke"
   if grep -qE '^ +<- yes$' "$out"; then
     owner_said=yes
     grep -qF -- "ack -> tool apply" "$out" \

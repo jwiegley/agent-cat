@@ -107,15 +107,15 @@ want_sends_split() {
 # ---------------------------------------------------------------------------
 # 1. The flagship settles.
 #
-# Seven ask nodes, seven distinct questions, seven messages: the same bills the
-# frozen corpus records for example-000 under its own world (billFresh 7,
-# billMemo 7), reached here over a transport instead of by the pure fold.
+# Six ask nodes, six distinct questions, six messages: the same bills the
+# frozen corpus records for example-000 under its own world (billFresh 6,
+# billMemo 6), reached here over a transport instead of by the pure fold.
 # ---------------------------------------------------------------------------
 play happy happy run harden --session stub --poll 20 --timeout 30000
 want_code 0
-want_line "billFresh   7"
-want_line "billMemo    7"
-want_sends 7
+want_line "billFresh   6"
+want_line "billMemo    6"
+want_sends 6
 if grep -qE '^\[question for |^(intent|model|mode|draw):|^answer \(' "$state/prompts"; then
   bad "session prompts contain runtime bookkeeping"
 fi
@@ -123,19 +123,19 @@ fi
   || bad "the authored flag format was duplicated or lost"
 grep -qF 'Do what was asked, then reply with exactly DONE.' "$state/prompts" \
   || bad "the receipt format was not sent"
-note "happy: settled in 7 turns without bookkeeping in prompts, exit 0"
+note "happy: settled in 6 turns without bookkeeping in prompts, exit 0"
 
 # ---------------------------------------------------------------------------
 # 2. The memo table, from outside.
 #
 # Every reviewer objects and every revision answers with the same patch, so the
 # second and third review rounds put questions that were already answered. The
-# run walks 13 ask nodes — one of the nine path costs `agentic-run cost harden`
-# prints — and sends 6 messages. The gap is the memo table doing its work, and
+# run walks 12 ask nodes — one of the nine path costs `agentic-run cost harden`
+# prints — and sends 5 messages. The gap is the memo table doing its work, and
 # it is observable here in a way no pure test can observe it: a question that
 # was memoized is a message the session never received.
 #
-#   round 1  guide, draft, three reviews, one amendment      6 fresh
+#   round 1  draft, three reviews, one amendment             5 fresh
 #   round 2  three reviews and one amendment, all repeats    4 memo hits
 #   round 3  three reviews, all repeats                      3 memo hits
 #            the amendment budget (2) is spent: unsettled, stop
@@ -145,38 +145,37 @@ note "happy: settled in 7 turns without bookkeeping in prompts, exit 0"
 # a `WorldSpec` because this stub's every answer is a function of the prompt —
 #
 #   WorldSpec
-#     (TByPrefix [ ("Write out the house style guide", GUIDE)
-#                , ("Draft a patch satisfying:",       PATCH) ] PATCH)
+#     (TByPrefix [ ("Draft a patch satisfying:", PATCH) ] PATCH)
 #     (VConst (VLitObject ["the buffer bound is still unchecked"]))
 #     (FConst True)
 #
-# — and `trace (toWorld it) (progPlan hardenProgram)` is 13 events long with
-# `billFresh 13, billMemo 6`. So the transport run, the scripted run and the
-# pure fold agree on the same program at the same world, and `13` is one of the
+# — and `trace (toWorld it) (progPlan hardenProgram)` is 12 events long with
+# `billFresh 12, billMemo 5`. So the transport run, the scripted run and the
+# pure fold agree on the same program at the same world, and `12` is one of the
 # nine path costs `agentic-run cost harden` prints. The `happy` scenario above
-# is pinned harder still: its 7/7 is what the *frozen corpus* records for
+# is pinned harder still: its 6/6 is what the *frozen corpus* records for
 # example-000, and tier1 already holds the pure side against it.
 # ---------------------------------------------------------------------------
 play objects objects run harden --session stub --binary "$state/bin/agent-deck" --poll 20 --timeout 30000
 want_code 0
-want_line "billFresh   13"
-want_line "billMemo    6"
-want_sends 6
-note "objects: 13 ask nodes, 6 questions put, exit 0"
+want_line "billFresh   12"
+want_line "billMemo    5"
+want_sends 5
+note "objects: 12 ask nodes, 5 questions put, exit 0"
 
 # ---------------------------------------------------------------------------
 # 3. An answer nobody can read.
 #
 # The owner says `maybe` to a flag question, twice. `Agentic.Exec` re-asks once
 # with the nudge that quotes the reply back, gets the same word, and abandons
-# the run rather than recording a consent nobody gave. Five turns settle the
-# patch, the sixth and seventh are the two attempts at the flag.
+# the run rather than recording a consent nobody gave. Four turns settle the
+# patch, the fifth and sixth are the two attempts at the flag.
 # ---------------------------------------------------------------------------
 play undecodable undecodable run harden --session stub --poll 20 --timeout 30000
 want_code 3
 want_line "no readable flag from person owner after 2 attempts"
 want_line "maybe"
-want_sends 7
+want_sends 6
 note "undecodable: re-asked once, then abandoned, exit 3"
 
 # ---------------------------------------------------------------------------
@@ -208,7 +207,7 @@ note "hang: bounded by the turn budget, exit 2"
 #
 # The send count is the sharp assertion here, not the message: an adapter
 # *without* the timestamp guard would read the stale text as each question's
-# answer, sail through all seven turns and exit 0. Stopping on the second send
+# answer, sail through all six turns and exit 0. Stopping on the second send
 # is the guard, and it is the only thing that produces this number. (Which of
 # the two `DeckTimedOut` sites fires — the poll loop, or a shell-out that
 # outran what was left of the budget — depends on how many polls fit in the
@@ -235,19 +234,19 @@ note "missing: named as a transport failure, exit 2"
 # ---------------------------------------------------------------------------
 play empty-stamp empty-stamp run harden --session stub --poll 20 --timeout 30000
 want_code 0
-want_line "billFresh   7"
-want_line "billMemo    7"
-want_sends 7
-note "empty-stamp: unstamped replies settled in 7 turns, exit 0"
+want_line "billFresh   6"
+want_line "billMemo    6"
+want_sends 6
+note "empty-stamp: unstamped replies settled in 6 turns, exit 0"
 
 # ---------------------------------------------------------------------------
 # 9. An explicit deck session outranks even an explicit routing request.
 # ---------------------------------------------------------------------------
 play options happy run harden --session stub --routing --poll 20 --timeout 30000
 want_code 0
-want_sends 7
+want_sends 6
 want_no_line "agent-deck exposes no generic metadata for backend-specific options"
-note "options: explicit session ignored ambient routing, 7/7, exit 0"
+note "options: explicit session ignored ambient routing, 6/6, exit 0"
 # ---------------------------------------------------------------------------
 # 10. One program, two panes: the routed pin answered in one and everything else
 #    in the other.
@@ -275,7 +274,7 @@ note "options: explicit session ignored ambient routing, 7/7, exit 0"
 #
 # Under `happy` all three reviewers approve, so the revision settles in its first
 # round and the amendment — the second `served by "deep"` — is never put. One
-# question is the pin's, six are not, and 1 + 6 is scenario 1's own 7.
+# question is the pin's, five are not, and 1 + 5 is scenario 1's own 6.
 # ---------------------------------------------------------------------------
 scenario=two-panes
 state="$work/$scenario"
@@ -302,8 +301,8 @@ code=$?
 want_code 0
 # Routing changes no bill: no field of an `EventKey` names a backend, so the
 # numbers are scenario 1's exactly.
-want_line "billFresh   7"
-want_line "billMemo    7"
+want_line "billFresh   6"
+want_line "billMemo    6"
 
 # The header, before the first question — and these two lines are `run.routes`'
 # two lines, from the same `routeDefault`-then-`routeNamed` walk of the same
@@ -320,28 +319,29 @@ grep -qE '^  deep +agent-deck session pane-b$' "$out" \
 # code of every consultation it paid for. It says the questions were put; it does
 # not say where, because no field of a question names a backend.
 want_line "text -> model author: Draft a patch satisfying:"
-want_line "text -> tool cat: Write out the house style guide"
+want_line "verdict -> model reviewer-correct: House style:"
 
 # The second, and the one that is the gate: each pane's own transcript. The
 # routed pin's question is in the routed pane and in no other, and everything
-# with no axis to route by — the tool, the reviewers, the person, the act — is in
-# the default's. The two negative pairs are what a run that sent both questions
+# with no axis to route by — the reviewers, the person, the act — is in the
+# default's. The reviewers quote the house style guide, so it witnesses the
+# default pane. The two negative pairs are what a run that sent both questions
 # to both panes would fail.
 saw     pane-b 'Draft a patch satisfying:'
 saw_not pane-a 'Draft a patch satisfying:'
 
-saw     pane-a 'Write out the house style guide'
+saw     pane-a 'House style:'
 saw     pane-a 'Is this patch correct?'
 saw     pane-a 'Apply this patch?'
-saw_not pane-b 'Write out the house style guide'
+saw_not pane-b 'House style:'
 saw_not pane-b 'Is this patch correct?'
 saw_not pane-b 'Apply this patch?'
 
 # Neither pane idle, and the two summing to the run's own bill: 1 for the pin,
-# 6 for everything else. The amendment is the second `served by "deep"` and is
+# 5 for everything else. The amendment is the second `served by "deep"` and is
 # never put, because `happy` settles the revision in its first round.
-want_sends_split pane-a pane-b 7 6 1
-note "two-panes: one run, two sessions, the pin in its own pane, 6+1 of 7, exit 0"
+want_sends_split pane-a pane-b 6 5 1
+note "two-panes: one run, two sessions, the pin in its own pane, 5+1 of 6, exit 0"
 
 # ---------------------------------------------------------------------------
 

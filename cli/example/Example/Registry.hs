@@ -22,7 +22,7 @@ import Example.StructuredInfo
     structuredResultHelp,
     structuredScript,
   )
-import Harden (hardenProgram)
+import Harden (guide, hardenProgram)
 import Hello (helloProgram)
 import Structured (structuredProgram, structuredResultProgram)
 
@@ -130,14 +130,15 @@ helpFor n = isaacHelp n
 hardenHelp :: Text
 hardenHelp =
   [wft|
-    Corpus entry `example-000` as a program: read the house style guide from a
-    tool, draft a patch against it, review the draft by a three-model panel
-    under a bounded revision, and — if the owner says yes — apply it. It is the
+    Corpus entry `example-000` as a program: draft a patch, review the draft
+    against the house style guide by a three-model panel under a bounded
+    revision, and — if the owner says yes — apply it. It is the
     same value tier1 rebuilds and tier0 replays, so what a run of it demonstrates
     is the language rather than this executable.
 
-    **Inputs.** none. What it hardens is a `define` written in the source
-    (`Example.Harden.spec`, "harden the parser") and not a flag: the frozen
+    **Inputs.** none. What it hardens and the style it is held to are two
+    `define`s written in the source (`Example.Harden.spec`, "harden the
+    parser", and `Example.Harden.guide`) and not flags: the frozen
     corpus entry has no input, and a program that took one would be a different
     text from the one tier0 compares against.
 
@@ -241,14 +242,13 @@ helloHelp =
 -- the last two rows come home.
 scriptFor :: Text -> [(Text, Text)]
 scriptFor "harden" =
-  [ ("Write out the house style guide", guideText),
-    ("Draft a patch satisfying:", patchText),
-    (guideText <> "\nIs this patch correct?", "APPROVE"),
-    (guideText <> "\nIs this patch secure?", "APPROVE"),
+  [ ("Draft a patch satisfying:", patchText),
+    (guide <> "\nIs this patch correct?", "APPROVE"),
+    (guide <> "\nIs this patch secure?", "APPROVE"),
     ("Could this patch be simpler?", "APPROVE"),
     -- Unreachable while all three reviews approve, and here so that a run with
     -- an objecting table amends with a patch rather than with prose.
-    (guideText <> "\nRevise this patch:", patchText),
+    (guide <> "\nRevise this patch:", patchText),
     ("Apply this patch?", "yes"),
     ("Apply:", "DONE")
   ]
@@ -266,26 +266,15 @@ scriptFor "capital" = capitalScript
 -- a table living beside a program in another file cannot promise.
 scriptFor name = isaacScript name
 
--- | @stub_adapter.py:131@'s @GUIDE@, byte for byte.
+-- | The reviews and the revision quote 'Harden.guide', the flagship's own
+-- define, so the table keys on the define itself rather than on a copy of it.
 --
--- __Written on one line of source, and that is not an accident.__ These two
--- texts are documented twins of the stub adapter's @GUIDE@ and @PATCH@, and
--- @ci/acp.sh@ greps their wording, so their bytes may not move. The owner's
--- ruling of 2026-08-21 is total — every multi-line string in this tree is a
--- @[wft|…|]@ — and a fence joins its lines with @\n@, so a text that carries
--- no newline has exactly one spelling at the fence: one line, however wide.
--- The width is the price of the ruling and is paid here on purpose. The
--- adapter is Python and is outside the ruling; the sync claim holds because
--- nothing on this side moved.
---
--- 'patchText' is the same rule the other way. Its text /does/ carry the
--- newlines, so it is a block fence written with its own margin at the minimum
--- — the @---@, @+++@, @\@\@@, @-@ and @+@ columns — which is what leaves the
--- diff's two-space body indentation standing after the common strip. The
+-- 'patchText' is the documented twin of the stub adapter's @PATCH@, and
+-- @ci/acp.sh@ greps its wording, so its bytes may not move. Its text carries
+-- the newlines, so it is a block fence written with its own margin at the
+-- minimum — the @---@, @+++@, @\@\@@, @-@ and @+@ columns — which is what leaves
+-- the diff's two-space body indentation standing after the common strip. The
 -- trailing newline is @'<>' "\\n"@, because a fence never ends in one.
-guideText :: Text
-guideText =
-  [wft|House style: two-space indent, no tabs, every public name documented, and failures returned rather than raised.|]
 
 -- | @stub_adapter.py:136@'s @PATCH@ — a real unified diff, because the act's
 -- prompt wraps it and a run that applied it would have something to apply.

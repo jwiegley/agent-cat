@@ -5,7 +5,7 @@
 {-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE RebindableSyntax #-}
 
-module Harden (hardenProgram) where
+module Harden (hardenProgram, guide) where
 
 import Agentic.Workflow
 import qualified Agentic.Workflow.Do as W
@@ -21,6 +21,12 @@ import Prelude
 spec :: Text
 spec = "harden the parser"
 
+-- | @define guide = …@ — the house style guide that two reviewers and every
+-- revision quote.
+guide :: Text
+guide =
+  "House style: two-space indent, no tabs, every public name documented, and failures returned rather than raised."
+
 -- | @define verdictSpec = …@ — the format line every reviewer's prompt ends
 -- with.
 verdictSpec :: Text
@@ -35,17 +41,15 @@ flagSpec = "Reply with exactly yes or no."
 -- The flagship
 -- ---------------------------------------------------------------------------
 
--- | The flagship, corpus entry @example-000@: read the house style, draft a
--- patch, review it by a three-model panel under a bounded revision, and — if
+-- | The flagship, corpus entry @example-000@: draft a patch, review it against
+-- the house style by a three-model panel under a bounded revision, and — if
 -- the owner says so — apply it.
 --
--- Level @branch@, size 36, 19 ask nodes, 9 paths folding between 5 and 15.
+-- Level @branch@, size 35, 18 ask nodes, 9 paths folding between 4 and 14.
 -- @codes@ is @null@: a program that branches has no single sequence of answer
 -- kinds, which is exactly what separates the flagship from 'helloProgram'.
 hardenProgram :: Program
 hardenProgram = workflow W.do
-    guide <- ask (tool "cat") [wf|Write out the house style guide, at most four short lines.|]
-
     draft <- ask (model "author" `servedBy` "deep") [wf|
         Draft a patch satisfying:
         {spec}

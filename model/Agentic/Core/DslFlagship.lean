@@ -18,7 +18,7 @@ no `.wf` file any more: the conformance boundary is `RawProgram`-in
 flagship, and the file it agrees with is `bisim/corpus/example-000-the-flagship-
 single-file.json` — whose `request.program` is `flagshipProgram` and whose
 `reply` carries the very numbers proved here (`level = branch`, `paths = 9`,
-`minFold = 5`, `maxFold = 15`). That agreement is not asserted in this module: it
+`minFold = 4`, `maxFold = 14`). That agreement is not asserted in this module: it
 is the corpus's, re-observed by `lake exe corpus-gen` and reproduced by the
 Haskell implementation with no Lean in the loop. What died with the parser is
 exactly one theorem, `parseAndCheck_flagship`, whose hypothesis was that a parser
@@ -28,9 +28,9 @@ read a string as this term.
 
 `Agentic/Core/HardenPatch.lean` is **kept**. It is not `.wf` machinery: it
 imports `Agentic.Core.Morphism` and nothing of the DSL, it is the root module's
-Stage-5 worked example of the meaning space (consent gates the act, the guide is
-read once, the level is `branch`, at most three drafts, nine leaves with min 5
-and max 15, `run` total), and it predates the language whose flagship agrees with
+Stage-5 worked example of the meaning space (consent gates the act, the level is
+`branch`, at most three drafts, nine leaves with min 4 and max 14, `run` total),
+and it predates the language whose flagship agrees with
 it. Nothing in the elaboration imports it, so it was free to go by import graph
 alone — and it stays because the four `Plan.trace … flagshipPlan = Plan.trace …
 Harden.demo` equations below are the *strongest* anchor the `Raw` term has: they
@@ -45,7 +45,7 @@ memory.** Almost all of it is nine `decide +kernel` proofs, four of them at
 `maxRecDepth 1000000`. That is not accidental expense and it is not a
 proof-engineering failure: it is the price of the statements being true *by
 computation* rather than by assertion. `level flagshipPlan = Level.branch`,
-`Multiset.card (costM …) = 9`, `minFold = 5`, `maxFold = 15` and the four
+`Multiset.card (costM …) = 9`, `minFold = 4`, `maxFold = 14` and the four
 `Plan.trace` equations are proved by the kernel running the checker, the cost
 algebra and the interpreter on this concrete program in these concrete worlds,
 and reporting the answer — including on `ωEcho`, the longest path the workload
@@ -65,7 +65,7 @@ conformance-oracle` builds in seconds. Keep it that way.
   rung computed exactly (`level_flagshipPlan`), the cost tree
   (`card_leaves_flagship`, `minFold_flagship`, `maxFold_flagship`), the four
   transcript agreements, the four bills transferred rather than recomputed, and
-  the budget type the program inhabits at fifteen (`flagshipUpTo`).
+  the budget type the program inhabits at fourteen (`flagshipUpTo`).
 * The section "What is not proved" at the foot.
 -/
 
@@ -75,13 +75,14 @@ open Agentic.Core
 
 /-! ## The flagship, as raw syntax
 
-`Harden.demo` — read the house style guide, draft under the deep model, review
+`Harden.demo` — draft under the deep model, review against the house style guide
 and amend up to twice, ask the owner, apply if and only if the owner consented —
 written as the first-order syntax the checker takes. -/
 
-/-- `[[flagshipRaw]]` = **the flagship, and the definition of record**: read the
-house style guide, draft under the deep model, review by a panel and amend up to
-twice, ask the owner, apply if and only if the owner consented.
+/-- `[[flagshipRaw]]` = **the flagship, and the definition of record**: draft
+under the deep model, review by a panel against the house style guide and amend
+up to twice, ask the owner, apply if and only if the owner consented. The guide
+is a define, so each prompt that quotes it holds it as a literal chunk.
 
 This term is corpus entry `bisim/corpus/example-000-the-flagship-single-file.json`
 — it is that file's `request.program.main`, position for position, and the file's
@@ -98,111 +99,101 @@ kernel; a front end over characters is not. So the term is the artifact and the
 theorems reduce on it. -/
 def flagshipRaw : Raw :=
   RawBlock.bind
-    "guide"
+    "draft"
     none
     (RawSource.rhs
       (RawRhs.ask
-        { model := none,
-          target := { addressee := Addressee.tool "cat", draw := 0 },
-          prompt := [Chunk.lit "Write out the house style guide, at most four short lines."],
-          pos := { line := 7, col := 12 } }))
+        { model := some ⟨"deep", []⟩,
+          target := { addressee := Addressee.model "author", draw := 0 },
+          prompt := [Chunk.lit "Draft a patch satisfying:\n",
+                     Chunk.lit "harden the parser",
+                     Chunk.lit "\nReply with a unified diff only."],
+          pos := { line := 10, col := 12 } }))
     (RawBlock.bind
-      "draft"
+      "result"
       none
-      (RawSource.rhs
+      (RawSource.revising
+        "draft"
+        "patch"
+        2
+        "verdict"
+        none
+        (RawRhs.panel
+          [{ model := none,
+             target := { addressee := Addressee.model "reviewer-correct", draw := 0 },
+             prompt := [Chunk.lit "House style: two-space indent, no tabs, every public name documented, and failures returned rather than raised.",
+                        Chunk.lit "\nIs this patch correct?\n",
+                        Chunk.interp "patch",
+                        Chunk.lit "\n",
+                        Chunk.lit
+                          "Reply with exactly APPROVE if acceptable, or OBJECTION: <one line> if not."],
+             pos := { line := 19, col := 7 } },
+           { model := none,
+             target := { addressee := Addressee.model "reviewer-secure", draw := 0 },
+             prompt := [Chunk.lit "House style: two-space indent, no tabs, every public name documented, and failures returned rather than raised.",
+                        Chunk.lit "\nIs this patch secure?\n",
+                        Chunk.interp "patch",
+                        Chunk.lit "\n",
+                        Chunk.lit
+                          "Reply with exactly APPROVE if acceptable, or OBJECTION: <one line> if not."],
+             pos := { line := 25, col := 7 } },
+           { model := none,
+             target := { addressee := Addressee.model "reviewer-simple", draw := 0 },
+             prompt := [Chunk.lit "Could this patch be simpler?\n",
+                        Chunk.interp "patch",
+                        Chunk.lit "\n",
+                        Chunk.lit
+                          "Reply with exactly APPROVE if acceptable, or OBJECTION: <one line> if not."],
+             pos := { line := 31, col := 7 } }]
+          { line := 18, col := 16 })
         (RawRhs.ask
           { model := some ⟨"deep", []⟩,
             target := { addressee := Addressee.model "author", draw := 0 },
-            prompt := [Chunk.lit "Draft a patch satisfying:\n",
-                       Chunk.lit "harden the parser",
-                       Chunk.lit "\nReply with a unified diff only."],
-            pos := { line := 10, col := 12 } }))
-      (RawBlock.bind
+            prompt := [Chunk.lit "House style: two-space indent, no tabs, every public name documented, and failures returned rather than raised.",
+                       Chunk.lit "\nRevise this patch:\n",
+                       Chunk.interp "patch",
+                       Chunk.lit "\n",
+                       Chunk.interp "verdict",
+                       Chunk.lit "\nReply with the revised diff only."],
+            pos := { line := 39, col := 7 } })
+        { line := 16, col := 13 })
+      (RawBlock.caseResult
         "result"
-        none
-        (RawSource.revising
-          "draft"
-          "patch"
-          2
-          "verdict"
+        "patch"
+        -- The unsettled binder (D3). Both arms are built at the same depth, so
+        -- an authoring surface names them alike; the flagship's unsettled arm
+        -- is `stop`, and this is the name it does not read.
+        "patch"
+        (RawBlock.bind
+          "ok"
           none
-          (RawRhs.panel
-            [{ model := none,
-               target := { addressee := Addressee.model "reviewer-correct", draw := 0 },
-               prompt := [Chunk.interp "guide",
-                          Chunk.lit "\nIs this patch correct?\n",
-                          Chunk.interp "patch",
-                          Chunk.lit "\n",
-                          Chunk.lit
-                            "Reply with exactly APPROVE if acceptable, or OBJECTION: <one line> if not."],
-               pos := { line := 19, col := 7 } },
-             { model := none,
-               target := { addressee := Addressee.model "reviewer-secure", draw := 0 },
-               prompt := [Chunk.interp "guide",
-                          Chunk.lit "\nIs this patch secure?\n",
-                          Chunk.interp "patch",
-                          Chunk.lit "\n",
-                          Chunk.lit
-                            "Reply with exactly APPROVE if acceptable, or OBJECTION: <one line> if not."],
-               pos := { line := 25, col := 7 } },
-             { model := none,
-               target := { addressee := Addressee.model "reviewer-simple", draw := 0 },
-               prompt := [Chunk.lit "Could this patch be simpler?\n",
-                          Chunk.interp "patch",
-                          Chunk.lit "\n",
-                          Chunk.lit
-                            "Reply with exactly APPROVE if acceptable, or OBJECTION: <one line> if not."],
-               pos := { line := 31, col := 7 } }]
-            { line := 18, col := 16 })
-          (RawRhs.ask
-            { model := some ⟨"deep", []⟩,
-              target := { addressee := Addressee.model "author", draw := 0 },
-              prompt := [Chunk.interp "guide",
-                         Chunk.lit "\nRevise this patch:\n",
-                         Chunk.interp "patch",
-                         Chunk.lit "\n",
-                         Chunk.interp "verdict",
-                         Chunk.lit "\nReply with the revised diff only."],
-              pos := { line := 39, col := 7 } })
-          { line := 16, col := 13 })
-        (RawBlock.caseResult
-          "result"
-          "patch"
-          -- The unsettled binder (D3). Both arms are built at the same depth, so
-          -- an authoring surface names them alike; the flagship's unsettled arm
-          -- is `stop`, and this is the name it does not read.
-          "patch"
-          (RawBlock.bind
+          (RawSource.rhs
+            (RawRhs.ask
+              { model := none,
+                target := { addressee := Addressee.person "owner", draw := 0 },
+                prompt := [Chunk.lit "Apply this patch?\n",
+                           Chunk.interp "patch",
+                           Chunk.lit "\n",
+                           Chunk.lit "Reply with exactly yes or no."],
+                pos := { line := 52, col := 13 } }))
+          (RawBlock.ifFlag
             "ok"
-            none
-            (RawSource.rhs
-              (RawRhs.ask
-                { model := none,
-                  target := { addressee := Addressee.person "owner", draw := 0 },
-                  prompt := [Chunk.lit "Apply this patch?\n",
-                             Chunk.interp "patch",
-                             Chunk.lit "\n",
-                             Chunk.lit "Reply with exactly yes or no."],
-                  pos := { line := 52, col := 13 } }))
-            (RawBlock.ifFlag
-              "ok"
-              (RawBlock.act
-                { model := none,
-                  target := { addressee := Addressee.tool "apply", draw := 0 },
-                  prompt := [Chunk.lit "Apply:\n",
-                             Chunk.interp "patch",
-                             Chunk.lit "\nWrite the patched file here, then reply DONE."],
-                  pos := { line := 59, col := 9 } }
-                (RawBlock.empty { line := 58, col := 13 })
-                { line := 59, col := 9 })
-              (RawBlock.empty { line := 64, col := 16 })
-              { line := 58, col := 7 })
-            { line := 52, col := 7 })
-          (RawBlock.empty { line := 67, col := 17 })
-          { line := 49, col := 3 })
-        { line := 16, col := 3 })
-      { line := 10, col := 3 })
-    { line := 7, col := 3 }
+            (RawBlock.act
+              { model := none,
+                target := { addressee := Addressee.tool "apply", draw := 0 },
+                prompt := [Chunk.lit "Apply:\n",
+                           Chunk.interp "patch",
+                           Chunk.lit "\nWrite the patched file here, then reply DONE."],
+                pos := { line := 59, col := 9 } }
+              (RawBlock.empty { line := 58, col := 13 })
+              { line := 59, col := 9 })
+            (RawBlock.empty { line := 64, col := 16 })
+            { line := 58, col := 7 })
+          { line := 52, col := 7 })
+        (RawBlock.empty { line := 67, col := 17 })
+        { line := 49, col := 3 })
+      { line := 16, col := 3 })
+    { line := 10, col := 3 }
 
 /-- `[[flagshipPlan]]` = the plan `flagshipRaw` checks to.
 
@@ -248,7 +239,7 @@ def flagshipProgram : RawProgram := ⟨[], flagshipRaw⟩
 
 /-- The program front end accepts the flagship exactly as the block checker
 does: the table is empty, and the affordability guard is arithmetic the
-elaborator reduces on the spot (19 questions against a bound of 4096). -/
+elaborator reduces on the spot (18 questions against a bound of 4096). -/
 theorem checkProgram_flagship : checkProgram flagshipProgram = .ok flagshipPlan := by
   have h : checkProgram flagshipProgram = check [] [] flagshipRaw := rfl
   rw [h]
@@ -278,18 +269,18 @@ theorem card_leaves_flagship :
   decide +kernel
 
 set_option maxRecDepth 20000 in
-/-- **Cheapest leaf is 5 request occurrences**, unattainable by any world; see
+/-- **Cheapest leaf is 4 request occurrences**, unattainable by any world; see
 `Harden.minFold_not_attained_demo`. -/
 theorem minFold_flagship :
     minFold (costM tick flagshipPlan level_flagshipPlan_le Env.nil)
-      = ((Multiplicative.ofAdd 5 : Multiplicative Nat) : WithTop (Multiplicative Nat)) := by
+      = ((Multiplicative.ofAdd 4 : Multiplicative Nat) : WithTop (Multiplicative Nat)) := by
   decide +kernel
 
 set_option maxRecDepth 20000 in
-/-- **Dearest leaf is 15 request occurrences**, and it is attained. -/
+/-- **Dearest leaf is 14 request occurrences**, and it is attained. -/
 theorem maxFold_flagship :
     maxFold (costM tick flagshipPlan level_flagshipPlan_le Env.nil)
-      = ((Multiplicative.ofAdd 15 : Multiplicative Nat) : WithBot (Multiplicative Nat)) := by
+      = ((Multiplicative.ofAdd 14 : Multiplicative Nat) : WithBot (Multiplicative Nat)) := by
   decide +kernel
 
 /-! ### The flagship elaborates to the hand-written flagship, world by world
@@ -342,44 +333,44 @@ theorem trace_flagship_echo :
 
 /-! ### …hence the bills, transferred rather than recomputed -/
 
-/-- Six consultations when the owner refuses (`Harden.bill_refuse_demo`). -/
+/-- Five consultations when the owner refuses (`Harden.bill_refuse_demo`). -/
 theorem bill_flagship_refuse :
     billFresh tick (Plan.trace Harden.ωRefuse flagshipPlan Env.nil)
-      = Multiplicative.ofAdd 6 := by
+      = Multiplicative.ofAdd 5 := by
   rw [trace_flagship_refuse]; exact Harden.bill_refuse_demo
 
-/-- Seven when the owner applies (`Harden.bill_apply_demo`). -/
+/-- Six when the owner applies (`Harden.bill_apply_demo`). -/
 theorem bill_flagship_apply :
     billFresh tick (Plan.trace Harden.ωApply flagshipPlan Env.nil)
-      = Multiplicative.ofAdd 7 := by
+      = Multiplicative.ofAdd 6 := by
   rw [trace_flagship_apply]; exact Harden.bill_apply_demo
 
-/-- Thirteen when the panel never approves (`Harden.bill_stubborn_demo`). -/
+/-- Twelve when the panel never approves (`Harden.bill_stubborn_demo`). -/
 theorem bill_flagship_stubborn :
     billFresh tick (Plan.trace Harden.ωStubborn flagshipPlan Env.nil)
-      = Multiplicative.ofAdd 13 := by
+      = Multiplicative.ofAdd 12 := by
   rw [trace_flagship_stubborn]; exact Harden.bill_stubborn_demo
 
-/-- Fifteen on the dearest path, which is `maxFold_flagship` attained
+/-- Fourteen on the dearest path, which is `maxFold_flagship` attained
 (`Harden.bill_echo_demo`). -/
 theorem bill_flagship_echo :
     billFresh tick (Plan.trace Harden.ωEcho flagshipPlan Env.nil)
-      = Multiplicative.ofAdd 15 := by
+      = Multiplicative.ofAdd 14 := by
   rw [trace_flagship_echo]; exact Harden.bill_echo_demo
 
-/-- **The budget is a type, and the DSL program inhabits it at fifteen.**
+/-- **The budget is a type, and the DSL program inhabits it at fourteen.**
 `Harden.demoUpTo` says so of the hand-written flagship; this says so of the one
 the checker built, and the two bounds are the same number for the same
 reason. -/
-def flagshipUpTo : PlanUpTo tick (Multiplicative.ofAdd 15 : Multiplicative Nat) Unit :=
+def flagshipUpTo : PlanUpTo tick (Multiplicative.ofAdd 14 : Multiplicative Nat) Unit :=
   ⟨flagshipPlan, level_flagshipPlan_le, le_of_eq maxFold_flagship⟩
 
-/-- …so every world bills at most fifteen request occurrences. -/
+/-- …so every world bills at most fourteen request occurrences. -/
 theorem flagship_bill_le (ω : Ω) :
-    billFresh tick (Plan.trace ω flagshipPlan Env.nil) ≤ Multiplicative.ofAdd 15 :=
+    billFresh tick (Plan.trace ω flagshipPlan Env.nil) ≤ Multiplicative.ofAdd 14 :=
   PlanUpTo.bill_le Harden.tick_pricesByShape flagshipUpTo ω
 
-/-- …and at least the cheapest achievable one: `minFold_flagship` is `5`, and no
+/-- …and at least the cheapest achievable one: `minFold_flagship` is `4`, and no
 world attains it, exactly as on the hand-written flagship. -/
 theorem minFold_flagship_le_bill (ω : Ω) :
     minFold (costM tick flagshipPlan level_flagshipPlan_le Env.nil)

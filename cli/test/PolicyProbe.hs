@@ -1890,14 +1890,14 @@ main = do
 
   probe failures "defaults abandon after 2 attempts" d
     (Left "after 2 attempts")
-  probe failures "loud-arm yes takes the act (7/7)" d {esLoudArm = Just True}
-    (Right (7, 7))
-  probe failures "loud-arm no skips the act (6/6)" d {esLoudArm = Just False}
+  probe failures "loud-arm yes takes the act (6/6)" d {esLoudArm = Just True}
     (Right (6, 6))
+  probe failures "loud-arm no skips the act (5/5)" d {esLoudArm = Just False}
+    (Right (5, 5))
   probeLogged failures "…and the warning owns the safety"
     d {esLoudArm = Just False} "that safety is the operator's"
-  probe failures "standing answer 'no' never asks the person (6/6)"
-    d {esStandingAnswer = Just "no"} (Right (6, 6))
+  probe failures "standing answer 'no' never asks the person (5/5)"
+    d {esStandingAnswer = Just "no"} (Right (5, 5))
   -- With no spare declared, a policy that asks for fail-over gets the
   -- abandonment the run would have raised with no chain at all: the layer that
   -- knows whether there is anywhere to go is `askOrMemo`, and it degrades a
@@ -2411,7 +2411,7 @@ main = do
         ("billMemo", billMemo bare == billMemo routed),
         -- And they are the flagship's own numbers, so the row cannot pass by
         -- finding two equally wrong runs.
-        ("the flagship's bills", (billExecFresh routed, billMemo routed) == (7, 7)),
+        ("the flagship's bills", (billExecFresh routed, billMemo routed) == (6, 6)),
         ("the unrouted run reached the default and nothing else", nub bareSeen == ["default"]),
         ("the routed run put the pinned questions to deep", "deep" `elem` routedSeen),
         ("…and every other question to the default", sort (nub routedSeen) == ["deep", "default"]),

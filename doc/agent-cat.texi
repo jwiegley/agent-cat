@@ -468,20 +468,23 @@ scheme.
 @section The flagship meaning
 
 @cindex flagship workflow
-The flagship workflow reads a guide and asks for a draft.  It reviews the
-draft through a three-member panel under at most two amendments, asks a person
-for consent, and performs an apply effect only on the consenting branch.  Its
+The flagship workflow asks for a draft and reviews it through a three-member
+panel under at most two amendments.  Two reviewers and every amendment quote a
+house style guide that the source defines.  The workflow then asks a person for
+consent, and it performs an apply effect only on the consenting branch.  Its
 meaning is written directly as a dialogue in
 @file{model/Agentic/Core/HardenPatch.lean}, and the same module represents it
 as a Plan.
 
-The named theorems establish six principal facts.  Refusal of consent excludes
-the apply receipt from the semantic trace.  The guide is consulted exactly
-once in every world.  The Plan lies at the branch rung.  At most three drafts
-are requested.  Its cost tree has nine leaves with a folded minimum of five and
-maximum of fifteen request occurrences.  The minimum leaf is unattainable, and
-every actual world produces one of seven bills: 6, 7, 10, 11, 13, 14, or 15.
-The dialogue run is total.
+The named theorems establish five principal facts.  Refusal of consent excludes
+the apply receipt from the semantic trace.  The Plan lies at the branch rung.
+At most three drafts are requested.  Its cost tree has nine leaves with a
+folded minimum of four and maximum of fourteen request occurrences.  The
+minimum leaf is unattainable, and every actual world produces one of seven
+bills: 5, 6, 9, 10, 12, 13, or 14.  The dialogue run is total.  The guide is a
+define and is consulted by no question, so the property that a shared reading
+costs one event is proved instead on the two-reviewer example of
+@file{model/Agentic/Core/Denote.lean}.
 
 @file{model/Agentic/Core/DslFlagship.lean} checks the first-order flagship
 term.  It proves that the transcript of the term agrees with the transcript of
