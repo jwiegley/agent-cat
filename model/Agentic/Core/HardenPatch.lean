@@ -1,11 +1,14 @@
 import Agentic.Core.Morphism
 
 /-!
-# `hardenPatch`, as a `Plan`, and six theorems about its meaning
+# `hardenPatch`, as a `Plan`, and five theorems about its meaning
 
 Stage 5. This module writes the owner's workflow as a term of the first-order
-syntax `Plan` and proves, **in the meaning space**, the six things the kernel
-promises about it.
+syntax `Plan` and proves, **in the meaning space**, five of the six things the
+kernel promises about it. The house style guide is a define of the workflow and
+not a question, so the second promise, that a shared reading of the guide costs
+one event, has no subject here. `Agentic/Core/Denote.lean` proves that property
+on its own two-reviewer example.
 
 It is the anchor the flagship `Raw` term of `Agentic/Core/DslFlagship.lean` is
 held to: four `Plan.trace` equations there say the checker's output consults the
@@ -21,8 +24,8 @@ the branch-rung cost theorems on this workload.
 The method is the doctrine's: **the meaning is written first** (`hardenD`, an
 ordinary recursion over `Dlg`), the plan second, and the two are joined by one
 morphism equation (`denote_hardenPatch`). Every subsequent proof is about
-`hardenD`, which is a five-line dialogue, and not about the unrolled term, which
-is fifteen request occurrences deep.
+`hardenD`, which is a four-line dialogue, and not about the unrolled term, which
+is fourteen request occurrences deep.
 -/
 
 namespace Agentic.Core
@@ -33,12 +36,10 @@ open Plan (Cont)
 
 /-! ## The questions
 
-Eight questions, one per thing the workflow says, and seven distinct
-addressees —
+Seven questions, one per thing the workflow asks, and six distinct addressees —
 which is load-bearing rather than cosmetic: the addressee is a field of
-`Q.shape`, so "the guide was read once" and "at most three drafts were asked
-for" are statements about a *shape*, provable without ever comparing prompt
-text. -/
+`Q.shape`, so "at most three drafts were asked for" is a statement about a
+*shape*, provable without ever comparing prompt text. -/
 
 /-- Under which model the drafting happens. `[[deep]] = atModel "deep"`, the
 scope override the surface writes as `model "deep" <| …`. -/
@@ -64,12 +65,10 @@ def verdictSpec : String :=
 /-- `[[flagSpec]]` = how a yes/no question must be answered. -/
 def flagSpec : String := "Reply with exactly yes or no."
 
-/-- `[[guideQ]]` = the one closed question of the workflow: read the house style
-guide. Closed, so the plan starts at the `batch` rung. -/
-def guideQ : Q .text :=
-  { addressee := .tool "cat", scope := 1,
-    prompt := "Write out the house style guide, at most four short lines.",
-    draw := 0 }
+/-- `[[guide]]` = the house style guide, a define of the workflow: the text the
+two reviewers and every revision quote. -/
+def guide : String :=
+  "House style: two-space indent, no tabs, every public name documented, and failures returned rather than raised."
 
 /-- `[[authorShape]]` = whom a patch is asked of, and under what: the shape
 shared by the first draft and every revision. Written in the term at both
@@ -218,11 +217,10 @@ def finishD (o : El .text × Bool) : Dlg Unit :=
       if ok = true then Dlg.ask1 .ack (applyQ o.1) >>= fun _ => pure () else pure ()
   else pure ()
 
-/-- `[[hardenD spec]]` = the workflow. Read the guide; draft under the deep
-model; review-and-revise up to twice; ask the owner; apply if and only if the
-owner consented. -/
+/-- `[[hardenD spec]]` = the workflow. Draft under the deep model;
+review-and-revise up to twice against the guide; ask the owner; apply if and
+only if the owner consented. -/
 def hardenD (spec : String) : Dlg Unit :=
-  Dlg.ask1 .text guideQ >>= fun guide =>
   Dlg.ask1 .text (deep.onQ .text (draftQ spec)) >>= fun draft =>
   loopD guide 2 draft >>= fun final =>
   finishD final
@@ -230,25 +228,25 @@ def hardenD (spec : String) : Dlg Unit :=
 /-! ## The plan
 
 The same workflow as a term of the five formers. Read it against `hardenD`: one
-`askC` for the guide, one `askC` under `deep` for the draft, `revising` for the
-bounded loop, and two `caseB`s for "did the loop produce a patch" and "did the
-owner consent". -/
+`askC` under `deep` for the draft, `revising` for the bounded loop, and two
+`caseB`s for "did the loop produce a patch" and "did the owner consent". The
+guide is a constant of the prompts, so nothing is in scope at the top. -/
 
 /-- `[[review]]` = the panel, as a continuation of the loop: `check`, in
 `revising`'s sense. **Morphism equation** (`denotes_review`): it denotes
-`panelD` at the guide in scope. -/
-def review : Cont [.text] (El .text) Verdict := fun _ σ patch =>
+`panelD` at the guide. -/
+def review : Cont [] (El .text) Verdict := fun _ _ patch =>
   Plan.panel
-    [ Plan.ask1 .verdict correctShape (fun δ => correctText (σ δ).head (patch δ)),
-      Plan.ask1 .verdict secureShape (fun δ => secureText (σ δ).head (patch δ)),
+    [ Plan.ask1 .verdict correctShape (fun δ => correctText guide (patch δ)),
+      Plan.ask1 .verdict secureShape (fun δ => secureText guide (patch δ)),
       Plan.ask1 .verdict simplerShape (fun δ => simplerText (patch δ)) ]
 
 /-- `[[redraft]]` = the revision, as a continuation of the loop: `revise`, in
 `revising`'s sense, with the verdict threaded into the prompt. **Morphism
 equation** (`denotes_redraft`): it denotes `redraftD`. -/
-def redraft : Cont [.text] (El .text × Verdict) (El .text) := fun _ σ av =>
+def redraft : Cont [] (El .text × Verdict) (El .text) := fun _ _ av =>
   Plan.under deep
-    (Plan.ask1 .text authorShape (fun δ => reviseText (σ δ).head (av δ).1 (av δ).2))
+    (Plan.ask1 .text authorShape (fun δ => reviseText guide (av δ).1 (av δ).2))
 
 /-- `[[patchOf o]]` = the candidate the loop was holding when it left off.
 Since D3 that is `Prod.fst` and nothing else: the loop hands back the artefact
@@ -275,7 +273,7 @@ def finishK (Γ : Ctx) : Cont Γ (El .text × Bool) Unit := fun _ _ final =>
 
 /-- `[[bodyK]]` = the body of the workflow after the draft: review-and-revise up
 to twice, then finish. -/
-def bodyK : Cont [.text] (El .text) Unit := fun Δ σ draft =>
+def bodyK : Cont [] (El .text) Unit := fun Δ σ draft =>
   -- final ← revising (panel …) (redraft …) 2 draft
   Plan.graft (Plan.revising review redraft 2 Δ σ draft) (finishK Δ)
 
@@ -283,11 +281,9 @@ def bodyK : Cont [.text] (El .text) Unit := fun Δ σ draft =>
 
 **Morphism equation** (`denote_hardenPatch`): `⟦hardenPatch spec⟧ · = hardenD spec`. -/
 def hardenPatch (spec : String) : Plan [] Unit :=
-  -- guide ← ask "Write out the house style guide."
-  .askC .text (Request.consult guideQ) <|
-    -- draft ← model "deep" <| ask "Draft a patch satisfying: …"
-    Plan.graft (Plan.under deep
-      (Plan.askC1 .text (Request.consult (draftQ spec)))) bodyK
+  -- draft ← model "deep" <| ask "Draft a patch satisfying: …"
+  Plan.graft (Plan.under deep
+    (Plan.askC1 .text (Request.consult (draftQ spec)))) bodyK
 
 /-! ## The morphism equation: the plan means the dialogue
 
@@ -295,12 +291,12 @@ One equation joins the two halves. Everything after it is a theorem about
 `hardenD`, i.e. about the meaning, and never about the term. -/
 
 /-- `[[Kreview]]` = the semantic continuation of `review`: the panel, read at
-the guide in scope. -/
-def Kreview : El .text → Env [.text] → Dlg Verdict := fun patch γ => panelD γ.head patch
+the guide. -/
+def Kreview : El .text → Env [] → Dlg Verdict := fun patch _ => panelD guide patch
 
 /-- `[[Kredraft]]` = the semantic continuation of `redraft`. -/
-def Kredraft : El .text × Verdict → Env [.text] → Dlg (El .text) :=
-  fun av γ => redraftD γ.head av.1 av.2
+def Kredraft : El .text × Verdict → Env [] → Dlg (El .text) :=
+  fun av _ => redraftD guide av.1 av.2
 
 /-! ### Why all four `Denotes` obligations are still discharged by hand
 
@@ -355,12 +351,12 @@ theorem denotes_redraft : Plan.Denotes redraft Kredraft := by
 
 /-- **The loop square.** `revising`'s semantic loop, instantiated here, *is*
 `loopD` — two independently written recursions agreeing at every fuel. -/
-theorem reviseLoop_eq_loopD (n : Nat) (a : El .text) (γ : Env [.text]) :
-    reviseLoop Kreview Kredraft n a γ = loopD γ.head n a := by
+theorem reviseLoop_eq_loopD (n : Nat) (a : El .text) (γ : Env []) :
+    reviseLoop Kreview Kredraft n a γ = loopD guide n a := by
   induction n generalizing a with
   | zero => rfl
   | succ n ih =>
-    show reviseLoop Kreview Kredraft (n + 1) a γ = loopD γ.head (n + 1) a
+    show reviseLoop Kreview Kredraft (n + 1) a γ = loopD guide (n + 1) a
     rw [Morphism.reviseLoop_succ]
     simp only [loopD, Kreview, Kredraft]
     refine congrArg _ (funext fun v => ?_)
@@ -388,8 +384,8 @@ theorem denotes_finishK (Γ : Ctx) :
 
 /-- `[[Kbody]]` = the semantic continuation of the workflow's body: the bounded
 loop, then the consent gate. -/
-def Kbody : El .text → Env [.text] → Dlg Unit := fun draft γ =>
-  loopD γ.head 2 draft >>= fun final => finishD final
+def Kbody : El .text → Env [] → Dlg Unit := fun draft _ =>
+  loopD guide 2 draft >>= fun final => finishD final
 
 /-- **The body square.** -/
 theorem denotes_bodyK : Plan.Denotes bodyK Kbody := by
@@ -406,23 +402,10 @@ This is the only bridge between the two halves, and every theorem below is on
 the meaning side of it. -/
 theorem denote_hardenPatch (spec : String) :
     denote (hardenPatch spec) Env.nil = hardenD spec := by
-  have key : ∀ guide : El .text,
-      denote (Plan.graft (Plan.under deep
-        (Plan.askC1 .text (Request.consult (draftQ spec)))) bodyK)
-          (Env.cons guide Env.nil)
-        = (Dlg.ask1 .text (deep.onQ .text (draftQ spec)) >>= fun draft =>
-            loopD guide 2 draft >>= fun final => finishD final) := by
-    intro guide
-    rw [Agentic.Core.denote_graft _ Kbody bodyK denotes_bodyK (Env.cons guide Env.nil)]
-    rfl
-  show Dlg.ask .text guideQ
-      (fun guide => denote (Plan.graft (Plan.under deep
-        (Plan.askC1 .text (Request.consult (draftQ spec)))) bodyK)
-        (Env.cons guide Env.nil))
-    = Dlg.ask .text guideQ (fun guide =>
-        Dlg.ask1 .text (deep.onQ .text (draftQ spec)) >>= fun draft =>
-          loopD guide 2 draft >>= fun final => finishD final)
-  exact congrArg _ (funext key)
+  show denote (Plan.graft (Plan.under deep
+      (Plan.askC1 .text (Request.consult (draftQ spec)))) bodyK) Env.nil = hardenD spec
+  rw [Agentic.Core.denote_graft _ Kbody bodyK denotes_bodyK Env.nil]
+  rfl
 
 /-- `run` of the plan is `run` of the dialogue. -/
 theorem run_hardenPatch (ω : Ω) (spec : String) :
@@ -518,68 +501,29 @@ theorem trace_finishD_settled (p : El .text) :
     Dlg.trace_bind', Dlg.trace_ask1, Dlg.trace_pure]
   simp
 
-/-- The transcript of the whole workflow: the guide, the draft, the loop, the
-tail. Everything the six theorems say is read off this line. -/
+/-- The transcript of the whole workflow: the draft, the loop, the tail.
+Everything the five theorems say is read off this line. -/
 theorem trace_hardenD (spec : String) :
     Dlg.trace ω (hardenD spec)
-      = ⟨.text, guideQ, ω .text guideQ⟩
-        :: ⟨.text, deep.onQ .text (draftQ spec),
+      = ⟨.text, deep.onQ .text (draftQ spec),
              ω .text (deep.onQ .text (draftQ spec))⟩
-        :: (Dlg.trace ω (loopD (ω .text guideQ) 2
+        :: (Dlg.trace ω (loopD guide 2
               (ω .text (deep.onQ .text (draftQ spec))))
             ++ Dlg.trace ω
                 (finishD (Dlg.run ω
-                  (loopD (ω .text guideQ) 2
+                  (loopD guide 2
                     (ω .text (deep.onQ .text (draftQ spec))))))) := by
   simp only [hardenD, Dlg.trace_bind', Dlg.trace_ask1, Dlg.run_ask1,
     List.cons_append, List.nil_append]
 
 /-! ### What a review round and a revision can say
 
-Three facts about the loop, each an induction on the fuel and each two lines
-once the unrollings above are in place. -/
-
-/-- `[[guideKey]]` = the guide question, as a point of question space. -/
-def guideKey : Key := ⟨.text, guideQ⟩
-
-/-- An event that asked for a different *code* did not ask the guide question. -/
-theorem key_ne_of_code {e : Event} (h : e.c ≠ Code.text) : e.key ≠ guideKey :=
-  fun heq => h (congrArg Sigma.fst heq)
-
-/-- An event addressed to somebody else did not ask the guide question. The
-proof goes through `Key.shape`, so no dependent-pair injection is needed. -/
-theorem key_ne_of_addressee {e : Event} (h : e.q.addressee ≠ guideQ.addressee) :
-    e.key ≠ guideKey :=
-  fun heq => h (congrArg (fun k => (Key.shape k).addressee) heq)
+Facts about the loop, each an induction on the fuel and each two lines once the
+unrollings above are in place. -/
 
 /-- `[[isDraft e]]` = the event asked the author for a patch: the draft, or one
 of the revisions. -/
 def isDraft (e : Event) : Bool := decide (e.q.addressee = (Addressee.model "author"))
-
-theorem loopD_key_ne_guide (g : String) :
-    ∀ (n : Nat) (a : El .text), ∀ e ∈ Dlg.trace ω (loopD g n a), e.key ≠ guideKey := by
-  intro n
-  induction n with
-  | zero =>
-    intro a e he
-    rw [trace_loopD_zero, trace_panelD] at he
-    simp only [List.mem_cons, List.not_mem_nil, or_false] at he
-    rcases he with rfl | rfl | rfl <;> exact key_ne_of_code (by simp)
-  | succ n ih =>
-    intro a e he
-    rw [trace_loopD_succ] at he
-    rcases List.mem_append.mp he with h | h
-    · rw [trace_panelD] at h
-      simp only [List.mem_cons, List.not_mem_nil, or_false] at h
-      rcases h with rfl | rfl | rfl <;> exact key_ne_of_code (by simp)
-    · split at h
-      · exact absurd h (by simp)
-      · rcases List.mem_append.mp h with h' | h'
-        · rw [trace_redraftD] at h'
-          simp only [List.mem_cons, List.not_mem_nil, or_false] at h'
-          subst h'
-          exact key_ne_of_addressee (by simp [deep, atModel, reviseQ, guideQ, authorShape])
-        · exact ih _ e h'
 
 theorem loopD_code_ne_ack (g : String) :
     ∀ (n : Nat) (a : El .text), ∀ e ∈ Dlg.trace ω (loopD g n a), e.c ≠ Code.ack := by
@@ -668,19 +612,6 @@ theorem length_trace_finishD_settled (p : El .text) :
   rw [trace_finishD_settled]
   split <;> simp
 
-theorem finishD_key_ne_guide :
-    ∀ (o : El .text × Bool), ∀ e ∈ Dlg.trace ω (finishD o), e.key ≠ guideKey := by
-  rintro ⟨p, (_ | _)⟩ e he
-  · exact absurd he (by simp)
-  · rw [trace_finishD_settled] at he
-    simp only [List.mem_cons] at he
-    rcases he with rfl | he
-    · exact key_ne_of_code (by simp)
-    · split at he
-      · simp only [List.mem_cons, List.not_mem_nil, or_false] at he
-        subst he; exact key_ne_of_code (by simp)
-      · exact absurd he (by simp)
-
 theorem finishD_countP_draft (o : El .text × Bool) :
     (Dlg.trace ω (finishD o)).countP isDraft = 0 := by
   obtain ⟨p, b⟩ := o
@@ -691,7 +622,7 @@ theorem finishD_countP_draft (o : El .text × Bool) :
 
 end Transcript
 
-/-! ## The six theorems
+/-! ## The five theorems
 
 Each is stated about `⟦hardenPatch spec⟧` — `Plan.run` and `Plan.trace` are
 *defined* as `Dlg.run` and `Dlg.trace` of the denotation — so none of them is a
@@ -711,13 +642,12 @@ theorem consent_of_ack (e : Event) (he : e ∈ Plan.trace ω (hardenPatch spec) 
     (hc : e.c = Code.ack) : ∃ p : El .text, ω .flag (consentQ p) = true := by
   rw [trace_hardenPatch, trace_hardenD] at he
   simp only [List.mem_cons] at he
-  rcases he with rfl | rfl | he
-  · exact absurd hc (by simp)
+  rcases he with rfl | he
   · exact absurd hc (by simp)
   rcases List.mem_append.mp he with h | h
   · exact absurd hc (loopD_code_ne_ack ω _ 2 _ e h)
   · revert h
-    rcases hfin : Dlg.run ω (loopD (ω .text guideQ) 2
+    rcases hfin : Dlg.run ω (loopD guide 2
         (ω .text (deep.onQ .text (draftQ spec)))) with ⟨p, (_ | _)⟩
     · intro h; exact absurd h (by simp)
     · intro h
@@ -776,31 +706,12 @@ theorem apply_not_mem_of_refused (h : ∀ p : El .text, ω .flag (consentQ p) = 
       ∉ Plan.trace ω (hardenPatch spec) Env.nil :=
   fun he => no_ack_of_refused ω spec h _ he rfl
 
-/-! ### 2. The guide is read exactly once -/
+/-! ### 2. The guide is read exactly once
 
-/-- `[[isGuide e]]` = the event put the guide question. -/
-def isGuide (e : Event) : Bool := decide (e.key = guideKey)
-
-/-- **Kernel theorem 2.** In every world the guide question occurs exactly once
-in the transcript — not "once per reviewer", and not "once because the author
-hoisted it". Sharing is a variable used twice and it costs one event (§3 q2),
-and here that is checked against the workload rather than against a two-line
-example. -/
-theorem guide_once :
-    (Plan.trace ω (hardenPatch spec) Env.nil).countP isGuide = 1 := by
-  have hzero : ∀ l : Trace, (∀ e ∈ l, e.key ≠ guideKey) → l.countP isGuide = 0 := by
-    intro l hl
-    exact List.countP_eq_zero.mpr fun e he => by simpa [isGuide] using hl e he
-  rw [trace_hardenPatch, trace_hardenD, List.countP_cons, List.countP_cons, List.countP_append,
-    hzero _ (loopD_key_ne_guide ω _ 2 _), hzero _ (finishD_key_ne_guide ω _)]
-  have hd : isGuide ⟨.text, deep.onQ .text (draftQ spec),
-      ω .text (deep.onQ .text (draftQ spec))⟩ = false := by
-    simp only [isGuide, decide_eq_false_iff_not]
-    exact key_ne_of_addressee (by simp [deep, atModel, draftQ, guideQ, authorShape])
-  have hg : isGuide ⟨.text, guideQ, ω .text guideQ⟩ = true := by
-    simp [isGuide, Event.key, guideKey]
-  rw [hd, hg]
-  rfl
+Not a theorem of this workflow. The guide is a define, so no question reads it
+and there is nothing to count. The kernel's second promise, that a variable used
+twice costs one event, is proved on the two-reviewer example in
+`Agentic/Core/Denote.lean`. -/
 
 /-! ### 4. At most three drafts -/
 
@@ -810,16 +721,14 @@ what its English says — three reviews and *two* revisions, never a revision
 that is paid for and discarded unreviewed (`attack-adequacy` A1). -/
 theorem draft_count_le_three :
     (Plan.trace ω (hardenPatch spec) Env.nil).countP isDraft ≤ 3 := by
-  rw [trace_hardenPatch, trace_hardenD, List.countP_cons, List.countP_cons, List.countP_append,
+  rw [trace_hardenPatch, trace_hardenD, List.countP_cons, List.countP_append,
     finishD_countP_draft ω _]
-  have hg : isDraft ⟨.text, guideQ, ω .text guideQ⟩ = false := by
-    simp [isDraft, guideQ]
   have hd : isDraft ⟨.text, deep.onQ .text (draftQ spec),
       ω .text (deep.onQ .text (draftQ spec))⟩ = true := by
     simp [isDraft, deep, atModel, draftQ, authorShape]
-  have hloop := loopD_countP_draft ω (ω .text guideQ) 2
+  have hloop := loopD_countP_draft ω guide 2
     (ω .text (deep.onQ .text (draftQ spec)))
-  simp only [hg, hd, if_true, Bool.false_eq_true, if_false, Nat.add_zero]
+  simp only [hd, if_true, Nat.add_zero]
   omega
 
 /-! ### 6. Totality -/
@@ -833,17 +742,17 @@ theorem run_terminates : Plan.run ω (hardenPatch spec) Env.nil = () := rfl
 
 /-! ### The length of a transcript, exactly -/
 
-/-- **Every possible trace length.** Seven values: `4k + 6` or `4k + 7` for
+/-- **Every possible trace length.** Seven values: `4k + 5` or `4k + 6` for
 `k ≤ 2` revisions when a patch survives review (owner asked; effect skipped or
-performed), and `13` when revision exhausts before owner. -/
+performed), and `12` when revision exhausts before owner. -/
 theorem length_trace_hardenPatch :
-    (Plan.trace ω (hardenPatch spec) Env.nil).length ∈ [6, 7, 10, 11, 13, 14, 15] := by
+    (Plan.trace ω (hardenPatch spec) Env.nil).length ∈ [5, 6, 9, 10, 12, 13, 14] := by
   rw [trace_hardenPatch, trace_hardenD]
   obtain ⟨k, hk, hlen, hnone⟩ :=
-    loopD_rounds ω (ω .text guideQ) 2
+    loopD_rounds ω guide 2
       (ω .text (deep.onQ .text (draftQ spec)))
   simp only [List.length_cons, List.length_append, hlen]
-  rcases hfin : Dlg.run ω (loopD (ω .text guideQ) 2
+  rcases hfin : Dlg.run ω (loopD guide 2
       (ω .text (deep.onQ .text (draftQ spec)))) with ⟨p, (_ | _)⟩
   · rw [hnone (by rw [hfin])]
     simp
@@ -851,14 +760,14 @@ theorem length_trace_hardenPatch :
     simp only [List.mem_cons, List.not_mem_nil, or_false]
     split <;> omega
 
-/-- Hence every run has at least six request occurrences… -/
-theorem six_le_length : 6 ≤ (Plan.trace ω (hardenPatch spec) Env.nil).length := by
+/-- Hence every run has at least five request occurrences… -/
+theorem five_le_length : 5 ≤ (Plan.trace ω (hardenPatch spec) Env.nil).length := by
   have := length_trace_hardenPatch ω spec
   simp only [List.mem_cons, List.not_mem_nil, or_false] at this
   omega
 
-/-- …and at most fifteen. -/
-theorem length_le_fifteen : (Plan.trace ω (hardenPatch spec) Env.nil).length ≤ 15 := by
+/-- …and at most fourteen. -/
+theorem length_le_fourteen : (Plan.trace ω (hardenPatch spec) Env.nil).length ≤ 14 := by
   have := length_trace_hardenPatch ω spec
   simp only [List.mem_cons, List.not_mem_nil, or_false] at this
   omega
@@ -877,7 +786,7 @@ the node and there is nothing left to establish. -/
 /-- **Kernel theorem 3.** `level (hardenPatch spec) = branch`, by `rfl`.
 
 Not `dynamic`: the whole workflow — a scoped draft, a three-member panel over a
-shared guide, check-then-revise twice, a human consent gate and a gated act —
+fixed guide, check-then-revise twice, a human consent gate and a gated act —
 contains no `dyn`, because every answer flows either into a *prompt* (`ask`) or
 into a *finite tag* (`case`). That is exactly the claim `attack-adequacy` A3
 shows the four dossier kernels cannot make: in all of them this workload is
@@ -899,7 +808,7 @@ theorem tick_pricesByShape : PricesByShape tick := fun _ _ _ _ => rfl
 workload and is exactly `Cost.bill_mem_leaves` instantiated, but checking that
 instantiation costs Lean about a minute: `∈` on a `Multiset` is `Quot.liftOn`,
 so `isDefEq` tries to iota-reduce the quotient and therefore to evaluate the
-whole fifteen-request cost analysis. The two order forms below say the usable
+whole fourteen-request cost analysis. The two order forms below say the usable
 half at no cost — `≤` on `WithTop`/`WithBot` forces no reduction — and
 `bill_hardenPatch` below is strictly sharper than membership anyway: it names
 the seven bills a world can actually produce, where the tree has nine leaves. -/
@@ -922,7 +831,7 @@ theorem minFold_le_bill_hardenPatch (spec : String) (ω : Ω) :
 /-- **The bill of a run, in every world**: `Multiplicative.ofAdd` of one of seven
 numbers. -/
 theorem bill_hardenPatch (spec : String) (ω : Ω) :
-    ∃ n ∈ [6, 7, 10, 11, 13, 14, 15],
+    ∃ n ∈ [5, 6, 9, 10, 12, 13, 14],
       billFresh tick (Plan.trace ω (hardenPatch spec) Env.nil) = Multiplicative.ofAdd n :=
   ⟨_, length_trace_hardenPatch ω spec, billFresh_tick _⟩
 
@@ -946,18 +855,18 @@ theorem card_leaves_demo : Multiset.card (costM tick demo level_demo Env.nil) = 
   decide
 
 set_option maxRecDepth 10000 in
-/-- **Cheapest leaf is 5 request occurrences** and unattainable; see
+/-- **Cheapest leaf is 4 request occurrences** and unattainable; see
 `minFold_not_attained_demo`. -/
 theorem minFold_demo :
     minFold (costM tick demo level_demo Env.nil)
-      = ((Multiplicative.ofAdd 5 : Multiplicative Nat) : WithTop (Multiplicative Nat)) := by
+      = ((Multiplicative.ofAdd 4 : Multiplicative Nat) : WithTop (Multiplicative Nat)) := by
   decide
 
 set_option maxRecDepth 10000 in
-/-- **Dearest leaf is 15 request occurrences**, attained by `bill_echo_demo`. -/
+/-- **Dearest leaf is 14 request occurrences**, attained by `bill_echo_demo`. -/
 theorem maxFold_demo :
     maxFold (costM tick demo level_demo Env.nil)
-      = ((Multiplicative.ofAdd 15 : Multiplicative Nat) : WithBot (Multiplicative Nat)) := by
+      = ((Multiplicative.ofAdd 14 : Multiplicative Nat) : WithBot (Multiplicative Nat)) := by
   decide
 
 /-- `[[ωRefuse]]` = the world in which the panel approves at once and the owner
@@ -991,62 +900,62 @@ def ωStubborn : Ω := fun c => match c with
 /-- `[[ωEcho]]` = the world that echoes every prompt back and whose reviewers
 approve only a patch long enough to have been revised twice: it objects at
 rounds 1 and 2 and approves at round 3. At `demo`'s specification the threshold sits above round
-2's longest reviewer prompt (355 characters) and below round 3's shortest
-(425). Only a world that can tell the rounds apart reaches the dearest leaf, and
+2's longest reviewer prompt (461 characters) and below round 3's shortest
+(531). Only a world that can tell the rounds apart reaches the dearest leaf, and
 the only thing that distinguishes them is the patch under review — which is why
 attaining the maximum needs a world that reads prompt text.
 
 The threshold is a function of the *words* of the questions, which is why it
 moved when they were rewritten to tell a real model how to answer: 190 was the
-number when a reviewer's prompt was the guide, the patch and nothing else. That
-is the one thing in this module prompt text can change, and it changes a `def`
-in a world, never a theorem — `bill_echo_demo` below is the same statement it
-was, and it is still 15. -/
+number when a reviewer's prompt was the guide, the patch and nothing else, and
+400 was the number while the guide was the echo of a question. That is the one
+thing in this module prompt text can change, and it changes a `def` in a world,
+never a theorem. -/
 def ωEcho : Ω := fun c => match c with
   | .text => fun q => q.prompt
-  | .verdict => fun q => if 400 ≤ q.prompt.length then Verdict.approve else Verdict.object ["no"]
+  | .verdict => fun q => if 500 ≤ q.prompt.length then Verdict.approve else Verdict.object ["no"]
   | .flag => fun _ => true
   | .ack => fun _ => ()
   | .structured _ => fun _ => default
 
 set_option maxRecDepth 20000 in
 theorem bill_refuse_demo :
-    billFresh tick (Plan.trace ωRefuse demo Env.nil) = Multiplicative.ofAdd 6 := by
+    billFresh tick (Plan.trace ωRefuse demo Env.nil) = Multiplicative.ofAdd 5 := by
   rw [billFresh_tick]
   exact congrArg _ (by decide)
 
 set_option maxRecDepth 20000 in
 theorem bill_apply_demo :
-    billFresh tick (Plan.trace ωApply demo Env.nil) = Multiplicative.ofAdd 7 := by
+    billFresh tick (Plan.trace ωApply demo Env.nil) = Multiplicative.ofAdd 6 := by
   rw [billFresh_tick]
   exact congrArg _ (by decide)
 
 set_option maxRecDepth 20000 in
 theorem bill_stubborn_demo :
-    billFresh tick (Plan.trace ωStubborn demo Env.nil) = Multiplicative.ofAdd 13 := by
+    billFresh tick (Plan.trace ωStubborn demo Env.nil) = Multiplicative.ofAdd 12 := by
   rw [billFresh_tick]
   exact congrArg _ (by decide)
 
 set_option maxRecDepth 100000 in
-set_option maxHeartbeats 1000000 in
-/-- **Maximum attained.** Fifteen requests: guide, draft, three panels of three,
-two revisions, owner consultation, and effect.
+set_option maxHeartbeats 4000000 in
+/-- **Maximum attained.** Fourteen requests: draft, three panels of three, two
+revisions, owner consultation, and effect.
 
 The heartbeat budget above is what a `decide` on this world costs: `ωEcho` is
 the one world in the module that *reads* prompt text, so the kernel evaluates
 every prompt of the dearest run — three rounds of a patch that quotes the
-previous patch, which is 478 characters by round three. -/
+previous patch, which is 637 characters by round three. -/
 theorem bill_echo_demo :
-    billFresh tick (Plan.trace ωEcho demo Env.nil) = Multiplicative.ofAdd 15 := by
+    billFresh tick (Plan.trace ωEcho demo Env.nil) = Multiplicative.ofAdd 14 := by
   rw [billFresh_tick]
   exact congrArg _ (by decide)
 
-/-- **Tree minimum is unattained**, with a one-request gap: `minFold = 5`,
-every run costs at least `6`, and `bill_refuse_demo` realizes `6`. Read against
+/-- **Tree minimum is unattained**, with a one-request gap: `minFold = 4`,
+every run costs at least `5`, and `bill_refuse_demo` realizes `5`. Read against
 `attack-adequacy` A2's
-audit of the dossier's worked cost for this workload ("min 7, max 15"): the
-maximum lands on 15 and is attained (`bill_echo_demo`), while the minimum is 6
-attained and 5 as a leaf — neither of them 7.
+audit of the dossier's worked cost for this workload ("min 7, max 15", when the
+guide was a question): the maximum lands on 14 and is attained
+(`bill_echo_demo`), while the minimum is 5 attained and 4 as a leaf.
 
 The unreachable leaf is "the panel approves at round 1 *and* the loop returns
 `none`", which no world realizes: approval at any round makes the answer
@@ -1054,21 +963,21 @@ The unreachable leaf is "the panel approves at round 1 *and* the loop returns
 workload, and it is why `exists_min_bill` — the extreme of the *achievable*
 bills — is the theorem a budget argument may use. -/
 theorem minFold_not_attained_demo (ω : Ω) :
-    billFresh tick (Plan.trace ω demo Env.nil) ≠ Multiplicative.ofAdd 5 := by
-  have h6 := six_le_length ω "harden the parser"
+    billFresh tick (Plan.trace ω demo Env.nil) ≠ Multiplicative.ofAdd 4 := by
+  have h5 := five_le_length ω "harden the parser"
   rw [show demo = hardenPatch "harden the parser" from rfl, billFresh_tick]
   intro h
-  have h5 : (Plan.trace ω (hardenPatch "harden the parser") Env.nil).length = 5 :=
+  have h4 : (Plan.trace ω (hardenPatch "harden the parser") Env.nil).length = 4 :=
     Multiplicative.ofAdd.injective h
   omega
 
 /-- `[[demoUpTo]]` = the workflow, presented as an inhabitant of the budget
-type. **The budget is a type, and this workflow inhabits it at fifteen.** -/
-def demoUpTo : PlanUpTo tick (Multiplicative.ofAdd 15 : Multiplicative Nat) Unit :=
+type. **The budget is a type, and this workflow inhabits it at fourteen.** -/
+def demoUpTo : PlanUpTo tick (Multiplicative.ofAdd 14 : Multiplicative Nat) Unit :=
   ⟨demo, level_demo, le_of_eq maxFold_demo⟩
 
 theorem demoUpTo_bill_le (ω : Ω) :
-    billFresh tick (Plan.trace ω demo Env.nil) ≤ Multiplicative.ofAdd 15 :=
+    billFresh tick (Plan.trace ω demo Env.nil) ≤ Multiplicative.ofAdd 14 :=
   PlanUpTo.bill_le tick_pricesByShape demoUpTo ω
 
 end Theorems

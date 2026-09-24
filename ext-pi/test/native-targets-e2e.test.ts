@@ -29,7 +29,7 @@ describe.runIf(Boolean(runnerPath))("native agent-cat targets through the extens
     });
     isolateRouting(launch, directory);
     const result = await new RunSupervisor().start(launch).finished;
-    expect(result, `${result.failureClass}: ${result.failure}`).toMatchObject({ status: "succeeded", billFresh: "7", billMemo: "7" });
+    expect(result, `${result.failureClass}: ${result.failure}`).toMatchObject({ status: "succeeded", billFresh: "6", billMemo: "6" });
     expect([...result.occurrences.values()].some((occurrence) => occurrence.attempts.size > 0)).toBe(true);
   }, 60_000);
 
@@ -74,11 +74,11 @@ describe.runIf(Boolean(runnerPath))("native agent-cat targets through the extens
     isolateRouting(launch, directory);
     Object.assign(launch.env, { DECK_STUB_STATE: deckState, DECK_STUB_MODE: "happy" });
     const result = await new RunSupervisor().start(launch).finished;
-    expect(result, `${result.failureClass}: ${result.failure}`).toMatchObject({ status: "succeeded", billFresh: "7", billMemo: "7" });
-    expect(await readFile(join(deckState, "sends"), "utf8")).toBe("7\n");
+    expect(result, `${result.failureClass}: ${result.failure}`).toMatchObject({ status: "succeeded", billFresh: "6", billMemo: "6" });
+    expect(await readFile(join(deckState, "sends"), "utf8")).toBe("6\n");
     expect(await readFile(join(deckState, "message-mode"), "utf8")).toBe("600\n");
     expect(await readFile(join(deckState, "prompts"), "utf8")).not.toContain("[question for");
-    expect(await readFile(join(deckState, "argv"), "utf8")).not.toContain("Write out the house style guide");
+    expect(await readFile(join(deckState, "argv"), "utf8")).not.toContain("House style:");
   }, 60_000);
 
   it("keeps Agent Deck prompt text out of argv and failure diagnostics", async () => {

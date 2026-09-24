@@ -31,12 +31,12 @@
 #
 # The modes, and what each one is for:
 #
-#   happy        the flagship settles: guide, patch, three approvals, consent,
-#                a receipt. Seven turns, seven sends.
+#   happy        the flagship settles: patch, three approvals, consent, a
+#                receipt. Six turns, six sends.
 #   objects      every reviewer objects and every revision returns the *same*
 #                patch, so the second and third review rounds ask questions
-#                that were already answered. The run walks thirteen ask nodes
-#                and this script is sent six messages: the difference is the
+#                that were already answered. The run walks twelve ask nodes
+#                and this script is sent five messages: the difference is the
 #                memo table, observed from outside the process.
 #   undecodable  the owner answers the flag question with `maybe`, twice. The
 #                run re-asks once with the nudge and then abandons.
@@ -93,7 +93,6 @@ json_escape() {
 # act's prompt wraps it, and it is *stable*: the `objects` mode answers every
 # revision with this same text, which is what makes the second review round
 # ask a question the first one already answered.
-GUIDE='House style: two-space indent, no tabs, every public name documented, and failures returned rather than raised.'
 PATCH='--- a/src/parse.c
 +++ b/src/parse.c
 @@
@@ -107,7 +106,6 @@ PATCH='--- a/src/parse.c
 answer_for() {
   local prompt="$1"
   case "$prompt" in
-    'Write out the house style guide'*) printf '%s' "$GUIDE" ;;
     'Draft a patch satisfying:'*)       printf '%s' "$PATCH" ;;
     *'Revise this patch:'*)             printf '%s' "$PATCH" ;;
     *'Do what was asked, then reply with exactly DONE.'*) printf '%s' 'DONE' ;;

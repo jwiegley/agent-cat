@@ -134,6 +134,9 @@ data RunStore = RunStore
 
 data AnswerRecord = AnswerRecord
   { answerQuestion :: !Value,
+    -- | the number of effects before the occurrence that answered, which
+    -- keeps reuse from crossing an effect on resume and in lineage
+    answerEpoch :: !Int,
     answerValue :: !Value,
     answerOccurrence :: !OccurrenceId,
     answerReplayable :: !Bool,
@@ -345,15 +348,19 @@ privateProgramReference = object ["privateProgram" .= ("program.json" :: Text)]
 writeSnapshot :: RunStore -> Value -> IO ()
 writeSnapshot store = writeAtomicJson store "snapshot.json"
 
-lookupStoredAnswer :: RunStore -> Value -> IO (Maybe AnswerRecord)
-lookupStoredAnswer store question =
+lookupStoredAnswer :: RunStore -> Int -> Value -> IO (Maybe AnswerRecord)
+lookupStoredAnswer store epoch question =
   modifyMVar (runStoreAnswers store) $ \answers ->
-    pure (answers, find (\answer -> answerReplayable answer && answerQuestion answer == question) answers)
+    pure (answers, find (\answer -> answerReplayable answer && answerKey answer == (epoch, question)) answers)
+
+-- | Reusable identity in the store: the epoch and the bare question.
+answerKey :: AnswerRecord -> (Int, Value)
+answerKey answer = (answerEpoch answer, answerQuestion answer)
 
 storeReusableAnswer :: RunStore -> AnswerRecord -> IO ()
 storeReusableAnswer store answer =
   modifyMVar_ (runStoreAnswers store) $ \answers -> do
-    let next = answer : filter ((/= answerQuestion answer) . answerQuestion) answers
+    let next = answer : filter ((/= answerKey answer) . answerKey) answers
     writeAtomicJson store "answers.json" (StoredAnswers semanticStoreVersion next)
     pure next
 
@@ -368,6 +375,7 @@ instance ToJSON AnswerRecord where
   toJSON answer =
     object
       [ "question" .= answerQuestion answer,
+        "epoch" .= answerEpoch answer,
         "answer" .= answerValue answer,
         "occurrenceId" .= occurrenceText (answerOccurrence answer),
         "replayable" .= answerReplayable answer,
@@ -378,6 +386,7 @@ instance FromJSON AnswerRecord where
   parseJSON = withObject "stored answer" $ \o ->
     AnswerRecord
       <$> o .: "question"
+      <*> (fromMaybe 0 <$> o .:? "epoch")
       <*> o .: "answer"
       <*> (o .: "occurrenceId" >>= parseOccurrence)
       <*> o .: "replayable"

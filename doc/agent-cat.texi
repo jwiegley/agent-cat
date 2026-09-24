@@ -468,20 +468,23 @@ scheme.
 @section The flagship meaning
 
 @cindex flagship workflow
-The flagship workflow reads a guide and asks for a draft.  It reviews the
-draft through a three-member panel under at most two amendments, asks a person
-for consent, and performs an apply effect only on the consenting branch.  Its
+The flagship workflow asks for a draft and reviews it through a three-member
+panel under at most two amendments.  Two reviewers and every amendment quote a
+house style guide that the source defines.  The workflow then asks a person for
+consent, and it performs an apply effect only on the consenting branch.  Its
 meaning is written directly as a dialogue in
 @file{model/Agentic/Core/HardenPatch.lean}, and the same module represents it
 as a Plan.
 
-The named theorems establish six principal facts.  Refusal of consent excludes
-the apply receipt from the semantic trace.  The guide is consulted exactly
-once in every world.  The Plan lies at the branch rung.  At most three drafts
-are requested.  Its cost tree has nine leaves with a folded minimum of five and
-maximum of fifteen request occurrences.  The minimum leaf is unattainable, and
-every actual world produces one of seven bills: 6, 7, 10, 11, 13, 14, or 15.
-The dialogue run is total.
+The named theorems establish five principal facts.  Refusal of consent excludes
+the apply receipt from the semantic trace.  The Plan lies at the branch rung.
+At most three drafts are requested.  Its cost tree has nine leaves with a
+folded minimum of four and maximum of fourteen request occurrences.  The
+minimum leaf is unattainable, and every actual world produces one of seven
+bills: 5, 6, 9, 10, 12, 13, or 14.  The dialogue run is total.  The guide is a
+define and is consulted by no question, so the property that a shared reading
+costs one event is proved instead on the two-reviewer example of
+@file{model/Agentic/Core/Denote.lean}.
 
 @file{model/Agentic/Core/DslFlagship.lean} checks the first-order flagship
 term.  It proves that the transcript of the term agrees with the transcript of
@@ -694,8 +697,8 @@ proves that every actual world bills at least six.  A displayed minimum is
 therefore the folded tree minimum, unless a reachability theorem says more.
 
 @code{billMemo} belongs to execution rather than to principal meaning.  Consult
-and observe occurrences can share one answer by bare question identity, whereas
-effects are retained per occurrence.  The operational bill can consequently
+and observe occurrences can share one answer by bare question identity between
+two acts, whereas effects are retained per occurrence.  The operational bill can consequently
 fall below the fresh semantic bill when repeated reusable questions occur.
 @ref{Operational Model} gives the policy that produces this difference.
 
@@ -766,11 +769,11 @@ reflexivity.
 @headitem Intent @tab Source position @tab Reuse policy @tab Operational role
 @item consult
 @tab Ordinary value question
-@tab Reusable by bare question
+@tab Reusable by bare question until the next act
 @tab Obtain an answer from a model, tool, or person.
 @item observe
 @tab Executable tool in value position
-@tab Reusable by bare question
+@tab Reusable by bare question until the next act
 @tab Run an argv to obtain a typed observation.
 @item effect
 @tab Statement-position act
@@ -794,7 +797,9 @@ earlier answers cannot alter it.
 
 The annotation gives the runtime five things that the bare question cannot
 give.  Consult and observe occurrences share one memo table that is keyed by
-the bare question, so a repeated question is answered once.  Effect
+the bare question, so a repeated question is answered once between two acts.
+An act clears the table, because it may change what any later question
+answers, so a question repeated after an act is asked again.  Effect
 occurrences never read or populate that table.  The runtime dispatches every
 effect and bills each one per occurrence, and this is the difference between
 @code{billFresh} and @code{billMemo}.  Under the ACP transport, only an effect
@@ -802,7 +807,8 @@ receives tool permission, and the runtime denies permission to consultations
 and observations in the words of the protocol.  Effects enter an ordered lane,
 so a later act cannot overtake an earlier one.  Every other occurrence waits
 behind that lane, so it starts only after each effect that precedes it in Plan
-order has completed.  ACP requires a completed turn
+order has completed.  An effect in turn waits for every occurrence that
+precedes it, so an act cannot change what an earlier question reads.  ACP requires a completed turn
 before an effect is credited with a receipt.  Every execution event retains the
 authored request beside its answer source.  A trace therefore states whether an
 answer was reused, or which dispatched question produced it after a fail-over.
@@ -829,9 +835,13 @@ as @ref{Permission and external effects} describes.
 @section Memoization and event identity
 
 @cindex memoization
-The reusable memo table is keyed by the bare typed question.  Consult and
+The reusable memo table is keyed by the bare typed question together with the
+number of effects that precede the occurrence in Plan order.  Consult and
 observe occurrences read and populate it.  Effect occurrences bypass it in both
-directions, which preserves each authored effect and its operational charge.  A
+directions, which preserves each authored effect and its operational charge,
+and each effect starts a new stretch in which nothing earlier is reused.
+Persisted answers carry the same key, so a resumed run and a lineage child
+reuse an answer only within the stretch that produced it.  A
 consultation and an observation of the same bare question can therefore share
 one underlying answer, and they still produce two annotated execution events
 with their respective intents.
@@ -854,7 +864,7 @@ changing the represented Plan.
 @cindex scheduler
 The interpreter schedules a request when every variable used by its prompt
 expression is available and every effect that precedes it in Plan order has
-completed.  Independent siblings that no effect separates can overlap even when
+completed.  An effect also waits for every request that precedes it.  Independent siblings that no effect separates can overlap even when
 their authored order is sequential in the Plan.  A finite branch schedules only
 the selected arm.  Equal reusable requests racing for the same key share one
 memo reservation.
@@ -865,7 +875,9 @@ reserved during traversal, which prevents a later ready request from overtaking
 an earlier blocked request on the same lane.  A consultation or an observation
 waits behind the tail of the effect lane without taking a position in it.  It
 therefore observes every earlier effect, and it does not delay the requests
-that wait beside it.
+that wait beside it.  An effect waits for every consultation and observation
+reserved since the previous effect, so each act is ordered against everything
+before it and everything after it.
 
 This concurrency policy is a realization of the Plan's data dependencies.  The
 semantic transcript remains the ordered authored observation, while wall-clock
@@ -884,8 +896,8 @@ flag receives success or failure.  A verdict receives approval on success and
 the first failing line on failure.  A result kind without such a representation
 causes the run to abandon.  Statement position produces a receipt only through
 the effect policy.  A command in value position that follows an act starts after
-the act has completed, so it reads what the act wrote.  A repeated observation
-is still answered from the memo table, even when an act intervenes.
+the act has completed, so it reads what the act wrote.  The act also clears the
+memo table, so an observation repeated after it runs the command again.
 
 The program-authored intent cannot establish the physical nature of an argv.
 An observation tag does not make a command read-only.  An effect tag controls
@@ -919,7 +931,8 @@ capitalTools =
 
 Intent follows the source position, as it does for every question.  A
 registered tool whose answer is bound is a consultation, so its answer is
-reused by bare question.  A registered tool in statement position is an
+reused by bare question until the next act.  A registered tool in statement
+position is an
 effect.  It runs once per occurrence in the ordered effect lane, and every
 later question waits for it to complete.
 
@@ -1177,7 +1190,7 @@ retries, timeouts, and selected backends are execution metadata, and they never
 rewrite the authored question in @code{semanticTrace}.  Version 2 deduplicates
 bare questions in its memo bill, and the version-2 corpus entries pin that
 billing.  Versions 3 and 4 share consult and observe answers by bare question
-and retain every effect occurrence.  The pure oracle itself executes no
+between two effects and retain every effect occurrence.  The pure oracle itself executes no
 command.
 
 @section The string layer
@@ -3932,8 +3945,8 @@ request occurrence.
 
 @cindex bill, memo
 @item billMemo
-The operational bill that deduplicates reusable bare questions and retains every
-effect occurrence.
+The operational bill that deduplicates reusable bare questions between two
+effects and retains every effect occurrence.
 
 @cindex binding
 @item binding
@@ -3999,9 +4012,9 @@ questions and memo keys.
 @cindex effect intent
 @item effect
 Occurrence-sensitive execution intent for a statement-position act.  It uses
-the receipt code, bypasses reusable memo state, reserves the effect lane, and
-can request permission.  Every later occurrence in Plan order starts after it
-completes.
+the receipt code, bypasses reusable memo state and clears it, reserves the
+effect lane, and can request permission.  It starts after every earlier occurrence in Plan order
+has completed, and every later occurrence starts after it completes.
 
 @cindex environment
 @item environment
@@ -4035,8 +4048,9 @@ guides execution and is erased by denotation.
 
 @cindex memo table
 @item memo table
-The typed runtime table that is keyed by bare questions.  Consult and observe
-use it, and effects bypass it.
+The typed runtime table that is keyed by bare questions and the number of
+earlier effects.  Consult and observe use it, and effects bypass it and begin
+a new stretch of it.
 
 @cindex observe intent
 @item observe

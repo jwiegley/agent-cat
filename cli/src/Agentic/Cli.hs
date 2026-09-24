@@ -2494,7 +2494,7 @@ runCmdControlled personAnswering runtimeControls persistence observer output reg
           output (indentBy 6 (sayEl code result))
       output $ "    billFresh   " <> tshow (billExecFresh tr) <> " (request occurrences reached)"
       output $ "    billMemo    " <> tshow (billMemo tr)
-        <> " (reusable requests once, every effect occurrence)"
+        <> " (reusable requests once between acts, every effect occurrence)"
 
 runMachineCmd :: MachineOptions -> Maybe MachineControl -> Registry -> RunId -> Text -> Target -> ProgramOf r -> [Given] -> IO ()
 runMachineCmd options control = runMachineWith options control RootRun Nothing []
@@ -2624,8 +2624,8 @@ validateInheritedAnswers answers = do
   case firstDuplicate (map answerOccurrence answers) of
     Just occurrence -> ioError (userError ("parent answer store duplicates occurrence " <> show (occurrenceNumber occurrence)))
     Nothing -> pure ()
-  case firstDuplicate (map answerQuestion answers) of
-    Just _ -> ioError (userError "parent answer store duplicates a bare question")
+  case firstDuplicate (map (\answer -> (answerEpoch answer, answerQuestion answer)) answers) of
+    Just _ -> ioError (userError "parent answer store duplicates a bare question within one epoch")
     Nothing -> pure ()
   mapM_ validate answers
   where
@@ -2736,12 +2736,12 @@ persistenceFor runId store program inheritedAnswers = do
   counts <- newIORef (inheritedAnswers, 0 :: Int)
   pure
     PersistenceHooks
-      { persistenceLookupAnswer = \question ->
+      { persistenceLookupAnswer = \epoch question ->
           fmap (\answer -> (answerValue answer, if answerReplaced answer then "replacement" else "persistent"))
-            <$> lookupStoredAnswer store question,
-        persistenceStoreAnswer = \occurrence question answer replayable ->
+            <$> lookupStoredAnswer store epoch question,
+        persistenceStoreAnswer = \occurrence epoch question answer replayable ->
           when replayable $ do
-            storeReusableAnswer store (AnswerRecord question answer occurrence True False)
+            storeReusableAnswer store (AnswerRecord question epoch answer occurrence True False)
             atomicModifyIORef' counts (\(answers, effects) -> ((answers + 1, effects), ())),
         persistenceStartEffect = \occurrence question ->
           appendEffectRecord store (EffectRecord question Nothing occurrence EffectStarted),

@@ -48,7 +48,7 @@
 --
 -- > harden :: Program
 -- > harden = workflow W.do
--- >     guide <- ask (tool "cat") [wf|Write out the house style guide.|]
+-- >     draft <- ask (model "author") [wf|Draft a patch satisfying: {spec}|]
 -- >     result <- revising draft (atMost 2) \patch -> W.do
 -- >         verdict <- panel [ ask (model "reviewer") [wf|{guide}…{patch}|] ]
 -- >         amend (ask (model "author") [wf|…{patch}…{verdict}|])

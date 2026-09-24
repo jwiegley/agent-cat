@@ -148,13 +148,14 @@ pin() {
 #   name              level     size asks  min  max paths fresh memo
 
 # The flagship. Also `bisim/corpus/example-000-the-flagship-single-file.json`
-# (`level branch, size 36, askNodes 19, costSummary {5, 15, 9}`), which tier0
+# (`level branch, size 35, askNodes 18, costSummary {4, 14, 9}`), which tier0
 # replays and tier1 rebuilds from `Harden.hardenProgram` itself;
-# the haddock on that value; README.md; and isaac-workflows §3's reference
-# line. The 7/7 bill is the corpus's own world, and is reached three further
-# ways: engine/agent-deck/ci/deck.sh's `happy`, engine/acp/ci/acp.sh's `happy`, and the Lean demo's
-# `expectedApply`.
-pin harden            branch      36   19    5   15     9     7    7
+# the haddock on that value; README.md; and the Lean flagship's
+# `minFold_flagship` and `maxFold_flagship`. The 6/6 bill is the corpus's own
+# world, and is reached three further ways: engine/agent-deck/ci/deck.sh's
+# `happy`, engine/acp/ci/acp.sh's `happy`, and the Lean demo's
+# `bill_apply_demo`.
+pin harden            branch      35   18    4   14     9     6    6
 
 # The small one. Also `bisim/corpus/example-001-hello.json` (`level pipeline,
 # size 4, askNodes 3, codes [text, text, receipt], costSummary {3, 3, 1}`), the

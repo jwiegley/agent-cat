@@ -25,13 +25,20 @@ reusable; consult and observe annotations compare only their bare questions. -/
 def ExecEvent.sameReusableQuestion (e later : ExecEvent) : Bool :=
   !later.authored.isEffect && decide (e.semanticKey = later.semanticKey)
 
-/-- Retain the last reusable occurrence of each bare question and every effect
-occurrence. The retained event keeps its own authored annotation. -/
+/-- The occurrences before the next effect: the stretch in which a reusable
+answer may be reused. -/
+def untilEffect (es : ExecTrace) : ExecTrace :=
+  es.takeWhile (fun e => !e.authored.isEffect)
+
+/-- Retain the last reusable occurrence of each bare question in every stretch
+between effects, and every effect occurrence. An effect clears reuse, so the
+same question on both sides of one is charged twice. The retained event keeps
+its own authored annotation. -/
 def execMemoEvents : ExecTrace → ExecTrace
   | [] => []
   | e :: es =>
       if e.authored.isEffect then e :: execMemoEvents es
-      else if es.any (e.sameReusableQuestion ·) then execMemoEvents es
+      else if (untilEffect es).any (e.sameReusableQuestion ·) then execMemoEvents es
       else e :: execMemoEvents es
 
 /-- Operational memo projection only removes occurrences. -/
@@ -55,7 +62,8 @@ def billExecEvents [Monoid S] (price : ExecPrice S) (es : ExecTrace) : S :=
 def billExecFresh [Monoid S] (price : ExecPrice S) (es : ExecTrace) : S :=
   billExecEvents price es
 
-/-- Runtime memo bill: bare-Q reusable identity, every effect occurrence. -/
+/-- Runtime memo bill: bare-Q reusable identity within each stretch between
+effects, and every effect occurrence. -/
 def billMemo [Monoid S] (price : ExecPrice S) (es : ExecTrace) : S :=
   billExecEvents price (execMemoEvents es)
 
@@ -107,6 +115,15 @@ def observeTickQ : Request .ack := Request.observe effectTickQ.question
       ⟨.ack, consultTickQ, .asked consultTickQ.question, ()⟩
     let observe : ExecEvent := ⟨.ack, observeTickQ, .reused, ()⟩
     billMemo execTick [consult, observe] = Multiplicative.ofAdd 1 := by
+  decide
+
+/-- An effect between two consultations of one bare question clears reuse:
+both consultations and the effect are charged. -/
+@[simp] theorem billMemo_effect_clears_reuse :
+    let consult : ExecEvent :=
+      ⟨.ack, consultTickQ, .asked consultTickQ.question, ()⟩
+    let effect : ExecEvent := ⟨.ack, effectTickQ, .asked effectTickQ.question, ()⟩
+    billMemo execTick [consult, effect, consult] = Multiplicative.ofAdd 3 := by
   decide
 
 @[simp] theorem billMemoLegacy_mixed_intent :

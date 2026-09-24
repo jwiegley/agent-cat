@@ -319,7 +319,7 @@ semantics to reconcile.
 
 The two layers are different objects, and the design rests on the asymmetry
 between them. The meaning supports quantification over every world, so a
-theorem can say that in all worlds the guide is consulted exactly once. The
+theorem can say that in all worlds the act follows the owner's consent. The
 meaning supports the definition of equality, because two workflows are the
 same when their meanings agree. The meaning can be infinite and uncomputable
 without difficulty, because a specification that cannot run cannot be mistaken
@@ -436,9 +436,10 @@ drift is a build failure.
 
 ## Part VI. The flagship workflow and its theorems
 
-The flagship is a patch-hardening workflow of about a dozen lines. It reads a
-style guide and drafts a patch under a designated model. It submits the draft
-to three reviewers, two of whom read the guide, and it revises the patch up to
+The flagship is a patch-hardening workflow of about a dozen lines. It drafts a
+patch under a designated model and submits the draft to three reviewers, two of
+whom are held to a house style guide that the source defines, and it revises
+the patch up to
 twice on objection. It then puts the question of consent to a person, and it
 applies the patch only after assent. Its Haskell source is
 `workflow/example/Harden.hs`. Its meaning and its plan are written in
@@ -456,12 +457,11 @@ and it allows a computation on the syntax to be believed about all worlds.
 | `denote_hardenPatch` | bridge | The denotation of the written workflow is a particular dialogue that is given independently. Every meaning theorem below rewrites with this equation and then reasons in the meaning space alone. |
 | `consent_of_ack`, `no_ack_of_refused` | meaning | The apply question can occur only after affirmative consent. Refusal removes every acknowledgement question. |
 | `consent_of_effect`, `no_effect_of_refused` | bridge | The annotated execution trace classifies the apply occurrence as an effect. The proof factors through `ExecEvent.forget`. |
-| `guide_once` | meaning | The style guide is consulted exactly once in every world. |
 | `draft_count_le_three` | meaning | At most three drafts are requested in every world. |
 | `level_hardenPatch` | representation | The level fold returns `branch` by reflexivity. |
-| `card_leaves_demo`, `minFold_demo`, `maxFold_demo` | representation | The cost tree that is computed from the term has nine leaves, with extremes of 5 and 15 request occurrences. |
-| `bill_hardenPatch` | meaning | In every world the bill that is read from the transcript is one of 6, 7, 10, 11, 13, 14, or 15, and a world is exhibited for each end of the range. |
-| `minFold_not_attained_demo` | meaning | No world attains the minimum of 5 that the tree computes. The computed bound is sound and slack by one request. |
+| `card_leaves_demo`, `minFold_demo`, `maxFold_demo` | representation | The cost tree that is computed from the term has nine leaves, with extremes of 4 and 14 request occurrences. |
+| `bill_hardenPatch` | meaning | In every world the bill that is read from the transcript is one of 5, 6, 9, 10, 12, 13, or 14, and a world is exhibited for each end of the range. |
+| `minFold_not_attained_demo` | meaning | No world attains the minimum of 4 that the tree computes. The computed bound is sound and slack by one request. |
 
 The same pattern applies beyond the flagship. A property of interest is proved
 in the meaning space, where worlds can be quantified over and nothing depends
@@ -482,11 +482,11 @@ for all worlds is not proved.
 The same plan is what `agentic-run` executes, through a scripted table, an ACP
 adapter, or an agent-deck session. The replies of a live model form one world
 among many, so the theorems transfer to a live run without any weakening. A run
-in which every reviewer approves consults the guide once, asks for one draft,
-and bills seven request occurrences, one of them an effect. If a reviewer
+in which every reviewer approves asks for one draft and bills six request
+occurrences, one of them an effect. If a reviewer
 objects, the run takes a revision round and lands on another member of the
 same proved set of bills. A run that differs only in the answer to the consent
-question bills six, produces no effect occurrence, and leaves the working tree
+question bills five, produces no effect occurrence, and leaves the working tree
 untouched.
 
 ## Part VII. The boundary of proof
@@ -536,7 +536,8 @@ agreement with the mathematics.
 
 The arrangement secures the property that the discipline exists for. A
 workflow value can be treated as being its meaning. When a run reports that
-the guide was consulted once, that report is a theorem about every world, and
+its act followed the owner's consent, that report is a theorem about every
+world, and
 the run is evidence that the machinery beneath the theorem told the truth.
 
 The Lean sources are `model/Agentic/Core/{Question, World, Dlg, Request,

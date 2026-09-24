@@ -125,10 +125,10 @@ want_no_file() {
 # ---------------------------------------------------------------------------
 # 1. The flagship settles, and the act acts.
 #
-# Seven ask nodes, seven distinct questions, seven prompts: the same bills the
-# frozen corpus records for example-000 (billFresh 7, billMemo 7), reached over
-# a real protocol instead of by the pure fold. The same 7 is what the kernel
-# proves of the flagship's apply path (Agentic/Core/DslFlagship.lean).
+# Six ask nodes, six distinct questions, six prompts: the same bills the frozen
+# corpus records for example-000 (billFresh 6, billMemo 6), reached over a real
+# protocol instead of by the pure fold. The same 6 is what the kernel proves of
+# the flagship's apply path (Agentic/Core/DslFlagship.lean).
 #
 # `applied.c` is the sharp assertion, not the bill: `Decode .ack` is total, so a
 # receipt proves only that something replied. The stub's `Apply:` turn asks
@@ -138,27 +138,27 @@ want_no_file() {
 # ---------------------------------------------------------------------------
 play happy run harden --engine acp --adapter stub --timeout 60000
 want_code 0
-want_bills 7 7
+want_bills 6 6
 want_line "permission granted to 'apply the patch' during the ack question put to tool apply"
 want_file applied.c
 grep -qF 'snprintf(buf, sizeof buf' "$state/applied.c" \
   || bad "applied.c does not hold the line the patch adds"
-note "happy: settled in 7 turns, the act wrote applied.c, exit 0"
+note "happy: settled in 6 turns, the act wrote applied.c, exit 0"
 
 # ---------------------------------------------------------------------------
 # 2. The owner refuses.
 #
 # `--refuse` makes the stub answer *no* to the consent question, which is
 # `Harden.no_ack_of_refused`'s hypothesis made of bytes. The apply question is
-# then never put: six consultations instead of seven — `Harden.bill_refuse_demo`
-# (Agentic/Core/HardenPatch.lean:967) — and nothing is written, because no act
-# ran to write it.
+# then never put: five consultations instead of six — `Harden.bill_refuse_demo`
+# (Agentic/Core/HardenPatch.lean) — and nothing is written, because no act ran
+# to write it.
 # ---------------------------------------------------------------------------
 play refuse run harden --engine acp --adapter stub --adapter-arg --refuse --timeout 60000
 want_code 0
-want_bills 6 6
+want_bills 5 5
 want_no_file applied.c
-note "refuse: 6 consultations and no act, exit 0"
+note "refuse: 5 consultations and no act, exit 0"
 
 # ---------------------------------------------------------------------------
 # 3. The smallest program.
@@ -182,12 +182,12 @@ note "hello: 3 consultations, exit 0"
 # workspace changes during a turn that asked for nothing but words.
 #
 # `Exec.permissionByIntent` grants only semantic effects, so this consultation is
-# denied while the final act is granted. The run still bills 7/7 — denial costs
+# denied while the final act is granted. The run still bills 6/6 — denial costs
 # nothing because the stub answers anyway. File assertions pin both outcomes.
 # ---------------------------------------------------------------------------
 play write-on-ask run harden --engine acp --adapter stub --adapter-arg --write-on-ask --timeout 60000
 want_code 0
-want_bills 7 7
+want_bills 6 6
 want_line "permission DENIED  to 'edit parse.c while answering' during the text question put to model author"
 want_line "permission granted to 'apply the patch' during the ack question put to tool apply"
 want_file applied.c
@@ -221,11 +221,11 @@ note "cancelled-act: the receipt was refused, exit 3"
 # The other half of the same rule, and the reason it is a rule and not a panic:
 # a review that was cut off mid-sentence is still a review, so a cancelled
 # `verdict` from a model is warned about and recorded. The run settles, bills
-# 7/7 and exits 0 — refusal is an answer, and so is an interrupted opinion.
+# 6/6 and exits 0 — refusal is an answer, and so is an interrupted opinion.
 # ---------------------------------------------------------------------------
 play cancelled-ask run harden --engine acp --adapter stub --adapter-arg '--cancel=correct?' --timeout 60000
 want_code 0
-want_bills 7 7
+want_bills 6 6
 want_line "turn for a verdict from model reviewer-correct ended 'cancelled', not 'end_turn'"
 note "cancelled-ask: warned, recorded and settled, exit 0"
 
@@ -239,7 +239,7 @@ note "cancelled-ask: warned, recorded and settled, exit 0"
 # ---------------------------------------------------------------------------
 play default-adapter run harden --engine acp --timeout 60000
 want_code 0
-want_bills 7 7
+want_bills 6 6
 want_line "no --adapter given, so the stub answers"
 note "default-adapter: the default is the stub, and it says so, exit 0"
 
@@ -313,9 +313,8 @@ note "crossed-flags: refused before anything was spawned, exit 1"
 # THE routing scenario, and it needs no new fixture: the flagship already
 # contains one distinct pin (`model author served by "deep"`), three
 # *deliberately unpinned* model asks (the three reviewers, so the lenses stay
-# comparable), a tool, a person and an act — the `Just` case and the `Nothing`
-# case of the resolution rule in one program, with the tool question asked
-# *before* the routed one so that ordering is observable.
+# comparable), a person and an act — the `Just` case and the `Nothing` case of
+# the resolution rule in one program.
 #
 # The two backends are both stubs, distinguished by *outcome* rather than by a
 # flag. `deep` is routed to a two-line wrapper script that runs the same stub
@@ -354,12 +353,12 @@ want_no_file parse.c
 want_file applied.c
 # Identical to scenario 1, because routing changes no bill: no field of an
 # EventKey names a backend, so a route table cannot move a number.
-want_bills 7 7
+want_bills 6 6
 want_line "running harden against 2 backends:"
 want_line "— every unpinned ask, every tool and every person"
 grep -qE '^  deep +the .*stub-writing adapter: ' "$out" \
   || bad "the header does not put deep on its own line with its own adapter"
-note "two-adapters: the pin went to the routed stub, everything else to the default, 7/7, exit 0"
+note "two-adapters: the pin went to the routed stub, everything else to the default, 6/6, exit 0"
 
 # ---------------------------------------------------------------------------
 # 14. A route to a dead adapter fails before anything is spent.
@@ -369,9 +368,11 @@ note "two-adapters: the pin went to the routed stub, everything else to the defa
 # `--adapter`. What this scenario pins that scenario 8 cannot is *eager
 # startup*: every routed backend is connected before the first question, so a
 # run whose third backend will not start fails before its first backend answers
-# anything. Under lazy startup this same command line would answer the `cat`
-# question first and *then* fail, and `billFresh` would appear. Asserting its
-# absence is asserting the startup order.
+# anything. The flagship's first question is the routed one, so the startup
+# order is asserted by the `grind-tests` run below, whose first question is an
+# unpinned tool question: under lazy startup the default would answer it and
+# the run would *then* fail, and `billFresh` would appear. Asserting its absence
+# is asserting the startup order.
 #
 # It is also where the header is held to being *true before the first question
 # is put*: `deep` and the program it was routed to are named in it, printed
@@ -392,7 +393,8 @@ note "dead-route: eager startup failed before anything was spent, exit 2"
 # --route claims are printed on their own line, so that a mistyped route reads
 # as a mistyped route and not as an absent one. `grind-tests` pins four profiles,
 # which is why it is the fixture here and the flagship is not; the run dies at
-# the same connect, so this costs no turns.
+# the same connect, so this costs no turns, and its unpinned first question is
+# the one lazy startup would have answered.
 play unclaimed-pins run grind-tests --engine acp --adapter stub \
   --route 'review=acp:/usr/bin/false' --timeout 10000
 want_code 2
@@ -450,26 +452,27 @@ note "route-usage: four refusals, each before anything was spawned, exit 1"
 # banner rode verbatim into every prompt that quoted that answer.
 #
 # `Exec.splitTransportNarration` separates it at the transport boundary, so:
-# every one of the seven prompts is clean *as the adapter sees it*, which is the
-# assertion no client-side log can make; the run bills 7/7 like scenario 1,
+# every one of the six prompts is clean *as the adapter sees it*, which is the
+# assertion no client-side log can make; the run bills 6/6 like scenario 1,
 # because the verdicts are read as the approvals they are; and each separation
 # is announced through `stderrLog`, unconditionally — the run must not be able
 # to edit what an addressee appears to have said in silence.
 #
 # The negative control is not a flag but a measurement, taken by hand at
-# `transportBanners = []` on this same command line: the banner rode into
+# `transportBanners = []` on this same command line while the flagship still
+# put its style guide as a question: the banner rode into
 # prompts 3 through 10, all three verdicts read as objections, the revision
 # round it bought re-drafted the patch into the stub's "nothing canned for that"
 # refusal, the panel objected again, and the run ended Unsettled — billFresh 13,
 # billMemo 10, `applied.c` never written, exit 0. A run that quietly did
-# nothing, which is why 7/7 here is the assertion and not the exit code.
+# nothing, which is why 6/6 here is the assertion and not the exit code.
 # ---------------------------------------------------------------------------
 play narrating-adapter run harden --engine acp --adapter engine/acp/test/acp-narrator.py --timeout 60000
 want_code 0
 # Every prompt clean, at the far end of the pipe: the first that quotes an
 # answer, and the last, which quotes the patch the act is about to write.
-want_line "acp-narrator: prompt 3 carried no transport banner"
-want_line "acp-narrator: prompt 7 carried no transport banner"
+want_line "acp-narrator: prompt 2 carried no transport banner"
+want_line "acp-narrator: prompt 6 carried no transport banner"
 want_no_line "CARRIED THE TRANSPORT BANNER"
 # The banner did arrive — the separation was real work and not a vacuous pass —
 # and it is named where the operator reads it, on a verdict, which is the
@@ -477,14 +480,14 @@ want_no_line "CARRIED THE TRANSPORT BANNER"
 want_line "agentic: transport narration separated from the answer to the verdict question put to model reviewer-correct: '**Model fallback:** claude-fable-5 declined this request (cyber)"
 # Scenario 1's bills and scenario 1's artifact: a narrating adapter costs a run
 # nothing once the narration is not part of the answer.
-want_bills 7 7
+want_bills 6 6
 want_file applied.c
 grep -qF 'snprintf(buf, sizeof buf' "$state/applied.c" \
   || bad "applied.c does not hold the line the patch adds"
 # And the run's own transcript: no recorded answer begins with the banner, which
 # is the same fact from the other end — what the table holds is what travels.
 want_no_line "<- **Model fallback:**"
-note "narrating-adapter: the banner was separated and announced, 7/7 clean prompts, exit 0"
+note "narrating-adapter: the banner was separated and announced, 6/6 clean prompts, exit 0"
 
 # ---------------------------------------------------------------------------
 # 17. Factory Droid's built-in name is the native ACP command, default or routed.
@@ -522,14 +525,14 @@ PATH="$droid_bin:$PATH"
 play droid-default run harden --engine acp --adapter droid \
   --adapter-arg --argv-probe --adapter-arg ./cli/test/PolicyProbe.hs --timeout 60000
 want_code 0
-want_bills 7 7
+want_bills 6 6
 want_file applied.c
 want_line "permission DENIED  to 'apply the patch' during no active matching ACP prompt"
 want_line "permission granted to 'apply the patch' during the ack question put to tool apply"
 printf '%s\n' exec --output-format acp --argv-probe ./cli/test/PolicyProbe.hs > "$work/droid/expected"
 cmp -s "$work/droid/expected" "$droid_argv" \
   || bad "droid argv was:$(printf '\n  %s' "$(cat "$droid_argv")")"
-note "droid-default: foreign-session chunks ignored; native argv preserved, 7/7, exit 0"
+note "droid-default: foreign-session chunks ignored; native argv preserved, 6/6, exit 0"
 
 play droid-route run harden --engine acp --adapter stub \
   --route 'deep=acp:droid' --adapter-arg --route-probe --timeout 60000
@@ -537,11 +540,11 @@ want_code 0
 want_line "permission DENIED  to 'edit parse.c while answering' during the text question put to model author"
 want_line "permission DENIED  to 'edit parse.c while answering' during no active matching ACP prompt"
 want_no_line "during the text question put to model reviewer-correct"
-want_bills 7 7
+want_bills 6 6
 printf '%s\n' exec --output-format acp --route-probe > "$work/droid/expected"
 cmp -s "$work/droid/expected" "$droid_argv" \
   || bad "routed droid argv was:$(printf '\n  %s' "$(cat "$droid_argv")")"
-note "droid-route: deep reached acp:droid; unpinned asks kept the default, 7/7, exit 0"
+note "droid-route: deep reached acp:droid; unpinned asks kept the default, 6/6, exit 0"
 
 cat > "$droid_bin/droid" <<'EOF'
 #!/bin/sh
@@ -560,9 +563,9 @@ PATH=$old_path
 # ---------------------------------------------------------------------------
 play configured-options run harden --engine acp --adapter stub --routing --timeout 60000
 want_code 0
-want_bills 7 7
+want_bills 6 6
 want_no_line "set config"
-note "configured-options: explicit ACP ignored ambient routing, 7/7, exit 0"
+note "configured-options: explicit ACP ignored ambient routing, 6/6, exit 0"
 
 # ---------------------------------------------------------------------------
 # 19. Protocol-v2 public progress is optional, redacted, persisted, and answer-neutral.

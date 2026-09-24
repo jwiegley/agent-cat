@@ -196,8 +196,10 @@ import Control.Concurrent.STM
     newEmptyTMVarIO,
     newTVarIO,
     putTMVar,
+    readTMVar,
     readTVar,
     readTVarIO,
+    writeTVar,
     retry,
     takeTMVar,
     tryPutTMVar,
@@ -921,6 +923,100 @@ readsAfterEffectOverlapProbe failures = do
         Just (Left e) -> [("the run threw: " <> show e, False)]
         Nothing -> [("the reads did not overlap after the write", False)]
 
+-- | An effect waits for every question before it, even one its prompt does not
+-- read. Two independent reads overlap one another, and a later write that
+-- reads neither starts only after both complete, so it cannot change what an
+-- earlier read observes.
+writeAfterReadsProbe :: IORef Int -> IO ()
+writeAfterReadsProbe failures = do
+  firstStarted <- newSignal
+  secondStarted <- newSignal
+  releaseReads <- newSignal
+  contacts <- newTVarIO ([] :: [Text])
+  done <- newEmptyTMVarIO
+  let plan :: Plan '[] ((Text, Text), ())
+      plan =
+        pairP
+          (pairP (askC1 SText (textQuestion "read-one")) (askC1 SText (textQuestion "read-two")))
+          (askC1 SAck (ackQuestion "later-write"))
+      world = concurrentWorld $ \c q -> do
+        atomically (modifyTVar' contacts (<> [promptOf q]))
+        case c of
+          SText -> case promptOf q of
+            "read-one" -> do
+              atomically (putTMVar firstStarted ())
+              atomically (readTMVar releaseReads)
+              pure "one"
+            "read-two" -> do
+              atomically (putTMVar secondStarted ())
+              atomically (readTMVar releaseReads)
+              pure "two"
+            _ -> pure "unexpected"
+          _ -> pure (defaultEl c)
+  tid <- forkFinally (runPlanIO world plan) (atomically . putTMVar done)
+  both <- timeout 2000000 . atomically $ do
+    takeTMVar firstStarted
+    takeTMVar secondStarted
+  threadDelay orderingWindowUs
+  duringReads <- readTVarIO contacts
+  case both of
+    Nothing -> killThread tid
+    Just () -> atomically (putTMVar releaseReads ())
+  finished <- case both of
+    Nothing -> pure Nothing
+    Just () -> timeout 2000000 (atomically (takeTMVar done))
+  after <- readTVarIO contacts
+  pureProbe failures "an effect waits for every earlier question" $
+    [ ("the two reads overlapped", both == Just ()),
+      ("the later write did not start while the reads were held", "later-write" `notElem` duringReads),
+      ("the write came last", lastMaybe after == Just "later-write")
+    ]
+      ++ case finished of
+        Just (Right _) -> []
+        Just (Left e) -> [("the run threw: " <> show e, False)]
+        Nothing -> [("the run did not finish", False)]
+  where
+    lastMaybe xs = if null xs then Nothing else Just (last xs)
+
+-- | An act clears reuse. The same consultation on both sides of an act is put
+-- to the world twice, the persisted answers are keyed apart by the number of
+-- acts before them, and without an act between them it is put once.
+memoAcrossEffectProbe :: IORef Int -> IO ()
+memoAcrossEffectProbe failures = do
+  putToWorld <- newTVarIO ([] :: [Text])
+  stored <- newTVarIO ([] :: [(Int, Text)])
+  let world = concurrentWorld $ \c q -> do
+        atomically (modifyTVar' putToWorld (<> [promptOf q]))
+        pure (defaultEl c)
+      hooks =
+        nullPersistenceHooks
+          { persistenceStoreAnswer = \_ epoch question _ _ ->
+              atomically (modifyTVar' stored (<> [(epoch, T.pack (show question))]))
+          }
+      across :: Plan '[] ((Text, ()), Text)
+      across =
+        pairP
+          (pairP (askC1 SText (textQuestion "reading")) (askC1 SAck (ackQuestion "change")))
+          (askC1 SText (textQuestion "reading"))
+      within :: Plan '[] (Text, Text)
+      within = pairP (askC1 SText (textQuestion "reading")) (askC1 SText (textQuestion "reading"))
+  acrossOut <- try @SomeException (runPlanPersisted Nothing hooks nullEventSink noChains world across)
+  acrossAsked <- readTVarIO putToWorld
+  epochs <- map fst <$> readTVarIO stored
+  atomically (writeTVar putToWorld [])
+  withinOut <- try @SomeException (runPlanIO world within)
+  withinAsked <- readTVarIO putToWorld
+  pureProbe failures "an act clears reuse" $ case (acrossOut, withinOut) of
+    (Right (_, acrossTrace), Right (_, withinTrace)) ->
+      [ ("a question repeated across an act is putToWorld twice", acrossAsked == ["reading", "change", "reading"]),
+        ("its answers persist under two epochs", epochs == [0, 1]),
+        ("the memo bill charges both", billMemo acrossTrace == 3),
+        ("without an act between them it is putToWorld once", withinAsked == ["reading"]),
+        ("and charged once", billMemo withinTrace == 1)
+      ]
+    (Left e, _) -> [("the run across an act threw: " <> show e, False)]
+    (_, Left e) -> [("the run within a stretch threw: " <> show e, False)]
+
 -- | The regression that motivated the rule, through the executing layer: a
 -- command in statement position writes a file slowly, and a command in value
 -- position then reads it.  The read must see what the write wrote.
@@ -1332,7 +1428,7 @@ storeProbe failures = do
       gap = envelope 3 (RunFailed FailureRuntime "gap")
       question = object ["prompt" .= ("persist me" :: Text)]
       answer = object ["value" .= ("answer" :: Text)]
-      answerRecord = AnswerRecord question answer (OccurrenceId 0) True False
+      answerRecord = AnswerRecord question 0 answer (OccurrenceId 0) True False
       effectRecord = EffectRecord question (Just answer) (OccurrenceId 1) EffectCompleted
       checkpoint = Checkpoint (object ["program" .= ("fixture" :: Text)]) (Just (OccurrenceId 2)) 1 1
       olderCheckpoint = Checkpoint (object ["program" .= ("fixture" :: Text)]) (Just (OccurrenceId 1)) 2 1
@@ -1346,7 +1442,7 @@ storeProbe failures = do
           gapResult <- try @StoreError (appendStoredEvent store gap)
           writeSnapshot store (object ["state" .= ("done" :: Text)])
           storeReusableAnswer store answerRecord
-          lookedUp <- lookupStoredAnswer store question
+          lookedUp <- lookupStoredAnswer store 0 question
           appendEffectRecord store effectRecord
           writeCheckpoint store checkpoint
           writeCheckpoint store olderCheckpoint
@@ -1794,14 +1890,14 @@ main = do
 
   probe failures "defaults abandon after 2 attempts" d
     (Left "after 2 attempts")
-  probe failures "loud-arm yes takes the act (7/7)" d {esLoudArm = Just True}
-    (Right (7, 7))
-  probe failures "loud-arm no skips the act (6/6)" d {esLoudArm = Just False}
+  probe failures "loud-arm yes takes the act (6/6)" d {esLoudArm = Just True}
     (Right (6, 6))
+  probe failures "loud-arm no skips the act (5/5)" d {esLoudArm = Just False}
+    (Right (5, 5))
   probeLogged failures "…and the warning owns the safety"
     d {esLoudArm = Just False} "that safety is the operator's"
-  probe failures "standing answer 'no' never asks the person (6/6)"
-    d {esStandingAnswer = Just "no"} (Right (6, 6))
+  probe failures "standing answer 'no' never asks the person (5/5)"
+    d {esStandingAnswer = Just "no"} (Right (5, 5))
   -- With no spare declared, a policy that asks for fail-over gets the
   -- abandonment the run would have raised with no chain at all: the layer that
   -- knows whether there is anywhere to go is `askOrMemo`, and it degrades a
@@ -1814,6 +1910,8 @@ main = do
   overlapProbe failures
   effectOrderProbe failures
   readsAfterEffectOverlapProbe failures
+  writeAfterReadsProbe failures
+  memoAcrossEffectProbe failures
   readAfterWriteProbe failures
   inProcessProbe failures
   inProcessMismatchProbe failures
@@ -2313,7 +2411,7 @@ main = do
         ("billMemo", billMemo bare == billMemo routed),
         -- And they are the flagship's own numbers, so the row cannot pass by
         -- finding two equally wrong runs.
-        ("the flagship's bills", (billExecFresh routed, billMemo routed) == (7, 7)),
+        ("the flagship's bills", (billExecFresh routed, billMemo routed) == (6, 6)),
         ("the unrouted run reached the default and nothing else", nub bareSeen == ["default"]),
         ("the routed run put the pinned questions to deep", "deep" `elem` routedSeen),
         ("…and every other question to the default", sort (nub routedSeen) == ["deep", "default"]),

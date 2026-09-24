@@ -23,7 +23,6 @@ network:
     "Apply this patch?"                  -> yes   (no, with --refuse)
     "Apply:"                             -> DONE, and the patch is applied
     "Draft"                              -> a fixed patch
-    "style guide"                        -> a fixed guide
     "capital of France"                  -> Paris
     anything else                        -> a fixed refusal
 
@@ -146,11 +145,6 @@ PROTOCOL_VERSION = 1
 SESSION_ID = "9f3f7b1e-2c4a-4d5e-8f00-000000000001"
 FOREIGN_SESSION_ID = "9f3f7b1e-2c4a-4d5e-8f00-000000000002"
 
-GUIDE = (
-    "House style: two-space indent, no tabs, every public name documented, "
-    "and failures returned rather than raised."
-)
-
 PATCH = (
     "--- a/src/parse.c\n"
     "+++ b/src/parse.c\n"
@@ -204,7 +198,6 @@ ANSWERS = [
     ("Apply this patch?", CONSENT),
     ("Apply:", "DONE"),
     ("Draft", PATCH),
-    ("style guide", GUIDE),
     ("capital of France", "Paris"),
 ]
 
