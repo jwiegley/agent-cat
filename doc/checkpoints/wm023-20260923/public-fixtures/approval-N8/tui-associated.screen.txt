@@ -1,0 +1,36 @@
+ agent-cat  /  manager request
+ workflow mixed-controls
+────────────────────────────────────────────────────────────── Manager request ─────────────────────────────────────────────────────────────
+ Request: request_729d9315d3d6bfca30305cf893fd325bf8050554619c6aaa
+ Profile: profile_1
+ Phase: associated
+ Admission: reserved
+ Position: none
+ Blocking reasons:
+ Run: run_ace17d5a7360be622f418aabf4685f49ab330c4e26c31bb2
+ Approval receipt: dispatch-attempted
+ Runtime completion and result verification are not inferred from this request.
+
+ Retained operator literals:
+ input
+ Café λ — explicit false.
+ Second line.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+manager request: associated
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+g REFRESH   q DETACH
