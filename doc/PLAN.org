@@ -4304,15 +4304,17 @@ Owner request: the artifact §VII example as REAL compiling Lean — Op signatur
 
 Add Example.Structured under haskell/example/Example, register it with agentic-run, and derive its schema, witness, and SchemaEl conversion mechanically from the Haskell record with Template Haskell.
 
-* TODO [#C] Give the harden style-guide question an honest addressee
+* DONE [#C] Give the harden style-guide question an honest addressee
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-harden-cat-addressee-3yz2
 :LABELS:   []
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-24 Thu 11:02]
-:MODIFIED: [2026-09-24 Thu 11:02]
+:MODIFIED: [2026-09-24 Thu 14:06]
 :CREATED_BY: johnw
+:FINISHED: [2026-09-24 Thu 14:06]
+:CLOSE_REASON: The style guide is Harden.guide, a define quoted by two reviewers and every revision. example-000 rewritten (size 35, askNodes 18, costSummary {4,14,9}, bills 6/6); HardenPatch and DslFlagship re-proved at 5/6/12/14 with footprints unchanged; guide_once removed because it has no subject. All gates pass.
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
@@ -5785,15 +5787,17 @@ Independent native UI review found that Pi 0.85.1 showExtensionCustom closes ove
 ]
 #+end_src
 
-* TODO [#B] A repeated question after an effect is answered from before it
+* DONE [#B] A repeated question after an effect is answered from before it
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-memo-across-effect-bgyt
 :LABELS:   []
 :ISSUE_TYPE: bug
 :CREATED:  [2026-09-24 Thu 11:13]
-:MODIFIED: [2026-09-24 Thu 11:13]
+:MODIFIED: [2026-09-24 Thu 13:24]
 :CREATED_BY: johnw
+:FINISHED: [2026-09-24 Thu 13:24]
+:CLOSE_REASON: An effect clears reuse: the runtime keys reusable answers and persisted answers by (epoch, bare question), and Lean's execAnnotated clears its table at an effect with billMemo counting per stretch between effects. Corpus byte-identical (193 re-observed); bisim 500/500; all deterministic and documentation gates pass.
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
@@ -6958,6 +6962,52 @@ Prior session context: three round-17 lexer edits were made and reverted (record
     "depends_on_id": "acat-k28",
     "type": "blocks",
     "created_at": "2026-08-16T05:20:19.938320Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
+* TODO [#D] Give the remaining tool "cat" questions honest addressees
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-remaining-cat-addressees-dhfm
+:LABELS:   []
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-24 Thu 13:52]
+:MODIFIED: [2026-09-24 Thu 13:52]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+The flagship's style guide is now a define (acat-harden-cat-addressee-3yz2),
+but other programs still ask `tool "cat"` with no `running` argv, so a live run
+sends each of those questions to a model backend under a name that claims a
+command:
+
+- `workflow/example/Hello.hs`: "Name one thing worth greeting." (corpus
+  entry example-001, frozen).
+- `workflow/extra/Isaac.hs`: three questions (`readRequest` twice and
+  `grindFactsBrief`), which ask an agent to read files and report them.
+
+Each needs its own decision. A fixed value becomes a define, a file read
+becomes a `running` command, and a genuine model question becomes a `model`
+addressee. Hello's change is a specification change to example-001. The
+Isaac questions are live agent work, and `ci/acp.sh` scenario 14 relies on
+grind-tests opening with an unpinned question.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-remaining-cat-addressees-dhfm",
+    "depends_on_id": "acat-harden-cat-addressee-3yz2",
+    "type": "discovered-from",
+    "created_at": "2026-09-24T20:52:24.021993Z",
     "created_by": "johnw",
     "metadata": "{}",
     "thread_id": ""
@@ -15358,15 +15408,17 @@ is ready, not that an operator has deployed it.
 ]
 #+end_src
 
-* TODO [#C] An effect can run before an earlier read of what it changes
+* DONE [#C] An effect can run before an earlier read of what it changes
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-write-after-read-1aax
 :LABELS:   []
 :ISSUE_TYPE: bug
 :CREATED:  [2026-09-24 Thu 11:13]
-:MODIFIED: [2026-09-24 Thu 11:13]
+:MODIFIED: [2026-09-24 Thu 13:06]
 :CREATED_BY: johnw
+:FINISHED: [2026-09-24 Thu 13:06]
+:CLOSE_REASON: An effect now waits for every question reserved since the previous effect (runtime/src/Agentic/Exec.hs writeBehind), so each act is ordered against everything before and after it. Pinned by the write-after-reads probe; all deterministic and documentation gates pass.
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
