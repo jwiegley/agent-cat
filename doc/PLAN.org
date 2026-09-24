@@ -1516,6 +1516,40 @@ alexey + comments + abstraction. (1) Check.lean:28-33: 'three binders are not co
 ]
 #+end_src
 
+* TODO [#D] Record the third S1 reproduction in the A1 records
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-90jm
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-24 Thu 02:50]
+:MODIFIED: [2026-09-24 Thu 02:50]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+The A1 fess audit round 3 (fess/A-A1-r3.md) found a low-severity record-accuracy defect. /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A1/impl-r3/A1-completion-record.md:55 and impl-r3/A1-classification.md:24 (and :10 in both) say that the S1 failure occurred in two of two runs, and they define V as verify-r2 only. The round-3 verifier then reproduced the same durable signature a third time (verify-r3/V3-mixed-http.log, V3-mixed-classify.log, root /Users/johnw/Products/k.M0a5ItPm/tmp/A1-mixed.VztqwomL/N1).
+
+Acceptance: both records state 3 of 3 runs and cite verify-r3/V3-mixed-http.log and the A1-mixed.VztqwomL/N1 root. No source change is involved.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-90jm",
+    "depends_on_id": "acat-wm-035-9uqq",
+    "type": "discovered-from",
+    "created_at": "2026-09-24T09:50:47.648613Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
 * DOING [#B] Keep cancellation classification across pipe teardown
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -4694,6 +4728,40 @@ Add first-class --adapter droid and acp:droid support using Droid CLI native ACP
 :END:
 
 Rename the agent-cat Pi extension catalogue command from /workflows to /wf so pi-dynamic-workflows retains /workflows; update regression coverage and current documentation.
+
+* TODO [#D] Correct the A1 root mtime citation
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-l4va
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-24 Thu 02:50]
+:MODIFIED: [2026-09-24 Thu 02:50]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+The A1 fess audit round 3 (fess/A-A1-r3.md) found a low-severity verification gap. /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A1/impl-r3/A1-completion-record.md:62 cites impl-r3/A1-roots.log for the database modification times, but the mtime lines in that log are GNU stat errors ('stat: cannot read file system information for %N %Sm'). A1-roots.exit is 0 only because the last command in the loop set the exit status. The valid mtime evidence is impl-r3/A1-roots-mtime.log.
+
+Acceptance: the completion record cites only A1-roots-mtime.log for the mtimes and notes that the stat lines in A1-roots failed and that its exit code does not reflect that failure. No source change is involved.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-l4va",
+    "depends_on_id": "acat-wm-035-9uqq",
+    "type": "discovered-from",
+    "created_at": "2026-09-24T09:50:47.878698Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
 
 * DONE [#B] Resolve bounded 0 vs static: scale is not monotone in its body
 :PROPERTIES:
@@ -11645,7 +11713,7 @@ and enforce advertised bounds. G2 is complete with mutations still unavailable.
 :LABELS:   ["p5","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-09 Wed 22:34]
+:MODIFIED: [2026-09-24 Thu 02:50]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-027
 :SOURCE_REPO: agent-cat
@@ -11810,6 +11878,20 @@ Network mutation remains behind G3 until the required evidence is complete.
 ]
 #+end_src
 
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 311,
+    "issue_id": "acat-wm-027-gcu6",
+    "author": "johnw",
+    "text": "A1 baseline on unchanged source at HEAD 32c72f80. S1, the Python protected-HTTP mixed workflow (deterministic native fixture), failed at N1 in 3 of 3 independent runs, and N8 did not run. The request route committed the enqueue (durable command effect-observed, effect enqueued, admission released, phase draft), but the protected response was 503 storage-unavailable. One reservation exists with state released, no slot and pending_kind closed. Runs, preparations, admission observations, start intents, ingestions and reservation resources are all zero. The read-only classification places the failure at the protected response to an already committed mutation, not at admission refusal or ingestion. The cause of the 503 and the source of the closed release are unproved. Evidence: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A1/verify-r3/V3-mixed-http.log, V3-mixed-classify.log, impl-r3/A1-classification.md, and preserved roots A1-mixed.CG34SN9q, A1-mixed.tXBqMFus and A1-mixed.VztqwomL under /Users/johnw/Products/k.M0a5ItPm/tmp. No source change, replay or fix was attempted. The issue stays open.\n",
+    "created_at": "2026-09-24T09:50:41Z"
+  }
+]
+#+end_src
+
 * TODO [#B] WM-028: Complete the HTTP/security and failure-boundary gate    :p5:
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -11932,7 +12014,7 @@ public or production deployment.
 :LABELS:   ["p6","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-09 Wed 22:34]
+:MODIFIED: [2026-09-24 Thu 02:50]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-029
 :SOURCE_REPO: agent-cat
@@ -12044,6 +12126,20 @@ coordination or SQL into the TUI.
     "created_by": "johnw",
     "metadata": "{}",
     "thread_id": ""
+  }
+]
+#+end_src
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 312,
+    "issue_id": "acat-wm-029-nlmg",
+    "author": "johnw",
+    "text": "A1 baseline on unchanged source at HEAD 32c72f80. S3, manager/test/client_native.py with manager-client-check, passed at N1 and N8 as a deterministic native fixture: 36 lines 'PASS public client <scenario>', each of the 18 scenarios exactly twice, covering endpoint-bound references, credentials and redirects (verify-r3/V3-client-native.log under /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A1). Separately, the S4 all-target -Werror -fforce-recomp build found three pre-existing failures in manager-store-check and manager-command-check (missing-home-modules for Agentic.Manager.Protocol.Command and Protocol.Draft, traced to 910db084) and policy-probe (incomplete pattern at cli/test/PolicyProbe.hs:533 for TuiService, traced to d8c0609a) (verify-r3/V3-build-all-werror.log). They await an orchestrator decision before A13. The issue stays open.\n",
+    "created_at": "2026-09-24T09:50:41Z"
   }
 ]
 #+end_src
@@ -12468,7 +12564,7 @@ Local-mode behavior remains intact without a duplicated service runtime model.
 :LABELS:   ["p7","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-24 Thu 00:53]
+:MODIFIED: [2026-09-24 Thu 02:50]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-035
 :SOURCE_REPO: agent-cat
@@ -12546,6 +12642,13 @@ check fail.
     "author": "johnw",
     "text": "Resume subtask A0 (workflow-manager-checkpoint-20260923, unchanged source at b95ce6d1d597b0f8e71f960952e5ed7bb37e1542) re-established the checkpoint baseline. It changed no source, so it advances this package only as a baseline and closes nothing.\n\nEvidence under /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A0/impl-r1, each result labelled by its ceiling:\n- Operator exercise: the toolchain is GHC 9.10.3, crypton-x509-validation-1.9.1 and Cabal 3.16.1.0 (A0-toolchain.*).\n- Package build: the forced build with -Werror -threaded -rtsopts -fforce-recomp of agentic-run, routing-fixed-point-probe, manager-client-check, manager-artifact-check and tui-model-test exited 0 (A0-build-force.*). All five executables were relinked before the first built binary ran at 07:47:57Z (A0-list-bin-gnu.*).\n- Deterministic native fixture (contract probe): manager/ci/contract.sh exited 0 with 99 schemas, 29 operations, 333 payload cases, 20 SSE cases and 3 byte-bound downloads (A0-contract.*). The probe runs no service.\n- Pure codec or model test: tui-model-test exited 0 at -N1 and then at -N8, with 45 PASS lines per run (A0-model-N1.*, A0-model-N8.*).\n- Actual UI interaction (PTY): tui-approval printed both required PASS lines at N1 and then at N8 (A0-tui-approval-N1.*, A0-tui-approval-N8.*). The fixture root is /Users/johnw/Products/k.M0a5ItPm/tmp/tui-resume-A0.fcm4x8Z9 and remains preserved.\n\nLimitations: the baseline ends at approval and detach, not workflow completion. Both PTY runs recorded manager exit status -2, and the driver does not assert it. Nothing records whether the exact-resend branch ran. acat-tui-consent-barrier-wby2 still limits the negative Enter and detail-view assertions. The fess audit (resume-20260923/fess/A-A0-r1.md) found no blocking defect.\n",
     "created_at": "2026-09-24T07:53:57Z"
+  },
+  {
+    "id": 310,
+    "issue_id": "acat-wm-035-9uqq",
+    "author": "johnw",
+    "text": "A1 baseline (workflow-manager resume, Phase A) on unchanged source at HEAD 32c72f80, which equals b95ce6d1 apart from doc/PLAN.org. No source change and no commit resulted. Evidence is in the private directory /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A1 (impl-r1, impl-r2, impl-r3, verify-r3).\n\nS2, the read-only service TUI scenario, passed at N1 and N8 in an actual UI interaction (PTY): catalogue and help, local-action refusal, original quit and signal joins, terminal restoration and no local runner state (verify-r3/V3-service-readonly-tui.log lines 5 and 8). S5, bash tui/ci/tui.sh, passed with compiler-parsed import boundaries and the local PTY probe (verify-r3/V3-tui-local.log lines 3 and 54). S1, the protected-HTTP mixed workflow that the TUI journey will drive, failed at N1 in 3 of 3 independent runs. The enqueue was committed as effect-observed/enqueued, yet HTTP returned 503 storage-unavailable, and one reservation was released with pending_kind closed. No preparation or ingestion exists. The cause is unproved and the evidence does not implicate acat-response-ingestion-budget-zaoi (verify-r3/V3-mixed-http.log, V3-mixed-classify.log, root /Users/johnw/Products/k.M0a5ItPm/tmp/A1-mixed.VztqwomL/N1). S1 blocks A6 onward until a diagnosis subtask is inserted. The issue stays open.\n",
+    "created_at": "2026-09-24T09:50:41Z"
   }
 ]
 #+end_src
