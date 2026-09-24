@@ -114,7 +114,7 @@ data AppEvent
   | ServiceWorkflowsReady !Int !Service.Profile !(Lane.CallOutcome [Service.Workflow])
   | ServicePrepared !Int !(Lane.CallOutcome Manager.PendingCommand)
   | ServiceSent !Int !(Lane.CallOutcome Manager.ClientResponse)
-  | ServiceRequestReady !Int !(Lane.CallOutcome ServiceObservation)
+  | ServiceRequestReady !Int !(Lane.CallOutcome (Service.RequestRead Manager.Observed))
 
 -- | Bounded frontend IO slots, each retaining at most one cancellable task.
 data Work = InitialWork | PreviewWork | HelpWork | RunsWork | RoutingWork | MachineWork | PersonWork | ResultWork
@@ -130,9 +130,6 @@ type MutationState = Lane.MutationState Manager.PendingCommand Manager.Reference
 type Attempt = Lane.Attempt Manager.PendingCommand Manager.Reference
 
 type ServiceLane = Lane.Lane Manager.PendingCommand Manager.Reference
-
-data ServiceObservation = ServiceObservation !Manager.Observed !Manager.DraftView
-  !(Maybe (Manager.Observed,Manager.Preparation)) !(Maybe (Either Manager.ClientFailure Manager.CommandReceipt))
 
 -- | Brick-only editor/process state around the pure model.
 data AppState = AppState
@@ -195,8 +192,9 @@ data AppState = AppState
     stateServiceWorkflows :: ![Service.Workflow],
     stateServiceWorkflow :: !(Maybe Service.Workflow),
     stateServiceRequestId :: !(Maybe Text),
-    stateServiceRequest :: !(Maybe (Manager.Observed,Manager.DraftView)),
-    stateServicePreparation :: !(Maybe (Manager.Observed,Manager.Preparation)),
+    -- | The last complete composite read of the selected request and its
+    -- stale mark. Only 'Lane.requestStep' installs a read or marks it stale.
+    stateServiceObservation :: !(Lane.Installed (Service.RequestRead Manager.Observed)),
     stateServiceApproval :: !(Maybe (Service.Mutation,Manager.PendingCommand,Maybe Manager.Reference)),
     stateServiceApprovalStatus :: !(Maybe Text),
     stateServiceLastReceipt :: !(Maybe Manager.CommandReceipt),
@@ -208,6 +206,11 @@ data AppState = AppState
     -- | The notice of the latest approval-key press. Only the approval-key
     -- handler sets it, and 'Approval.retainNotice' alone ends or replaces it.
     stateServiceNotice :: !(Maybe Approval.KeyNotice),
+    -- | The outcome of the latest mutation key that started nothing, and the
+    -- number of such presses in the session. 'serviceKeyOutcome' sets it,
+    -- and 'Lane.retainKeyOutcome' alone ends or replaces it.
+    stateServiceKeyOutcome :: !(Maybe Lane.KeyOutcome),
+    stateServiceOutcomeSerial :: !Int,
     stateServiceUncertainExit :: !(IORef Bool),
     stateServiceFaultExit :: !(IORef Bool)
   }
@@ -301,14 +304,15 @@ runAppWith backend = mask $ \restore -> do
             stateServiceWorkflows = [],
             stateServiceWorkflow = Nothing,
             stateServiceRequestId = Nothing,
-            stateServiceRequest = Nothing,
-            stateServicePreparation = Nothing,
+            stateServiceObservation = Lane.noObservation,
             stateServiceApproval = Nothing,
             stateServiceApprovalStatus = Nothing,
             stateServiceLastReceipt = Nothing,
             stateServiceKeySerial = 0,
             stateServiceApprovalPress = Nothing,
             stateServiceNotice = Nothing,
+            stateServiceKeyOutcome = Nothing,
+            stateServiceOutcomeSerial = 0,
             stateServiceUncertainExit = uncertainExit,
             stateServiceFaultExit = faultExit
           }
@@ -354,30 +358,41 @@ localReviewAllowed state preview size = case stateBackend state of
   ServiceBackend {} -> False
 
 -- One read slot owns the actual HTTP operation, not a detached wrapper task.
-startServiceRead :: (Int -> IO AppEvent) -> EventM Name AppState ()
-startServiceRead action = do
+-- No read starts while another holds the ticket.
+startServiceRead :: Lane.ReadKind -> (Int -> IO AppEvent) -> EventM Name AppState ()
+startServiceRead kind action = do
   state <- get
-  case serviceReadTicket state of
-    Just _ -> pure ()
-    Nothing -> do
-      let ticket = stateRequestSerial state + 1
-      put (onLane (\lane -> lane {Lane.laneReadTicket = Just ticket}) state) {stateRequestSerial = ticket,
+  let ticket = stateRequestSerial state + 1
+  case Lane.startRead ticket kind (stateServiceLane state) of
+    Nothing -> pure ()
+    Just lane -> do
+      put state {stateServiceLane = lane, stateRequestSerial = ticket,
         stateModel = (stateModel state) {modelStatus = "loading manager catalogue"}}
       liftIO . startWorker state ServiceReadWork $ action ticket >>= writeBChan (stateChannel state)
 
 startServiceProfiles :: Manager.Client -> EventM Name AppState ()
-startServiceProfiles client = startServiceRead $ \ticket ->
+startServiceProfiles client = startServiceRead Lane.PageSetRead $ \ticket ->
   ServiceProfilesReady ticket <$> Lane.serviceCall (Service.loadProfiles client)
 
 startServiceWorkflows :: Manager.Client -> Service.Profile -> EventM Name AppState ()
-startServiceWorkflows client profile = startServiceRead $ \ticket ->
+startServiceWorkflows client profile = startServiceRead Lane.PageSetRead $ \ticket ->
   ServiceWorkflowsReady ticket profile <$> Lane.serviceCall (Service.loadWorkflows client profile)
 
 serviceMutation :: AppState -> MutationState
 serviceMutation = Lane.laneMutation . stateServiceLane
 
-serviceReadTicket :: AppState -> Maybe Int
-serviceReadTicket = Lane.laneReadTicket . stateServiceLane
+-- | The installed request observation.
+serviceRequest :: AppState -> Maybe (Manager.Observed,Manager.DraftView)
+serviceRequest = fmap Service.readRequest . Lane.installedRead . stateServiceObservation
+
+-- | The installed preparation observation.
+servicePreparation :: AppState -> Maybe (Manager.Observed,Manager.Preparation)
+servicePreparation state = Lane.installedRead (stateServiceObservation state) >>= Service.readPreparation
+
+-- | The selected request and the run that its installed observation names.
+serviceSelection :: AppState -> Maybe Service.Selection
+serviceSelection state = (\ident -> Service.Selection ident (serviceRequest state >>= Manager.draftRun . snd))
+  <$> stateServiceRequestId state
 
 serviceResendConfirm :: AppState -> Bool
 serviceResendConfirm = Lane.laneResendConfirm . stateServiceLane
@@ -425,24 +440,54 @@ refreshServiceRequest client = do
             Lane.MutationAwaiting mutation _ location -> Just (mutation,location)
             Lane.MutationUncertain (Lane.Attempt mutation _ (Just location)) _ -> Just (mutation,location)
             _ -> case stateServiceApproval state of Just (mutation,_,Just location) -> Just (mutation,location); _ -> Nothing
-      startServiceRead $ \ticket -> ServiceRequestReady ticket <$> Lane.serviceCall (runExceptT $ do
-        -- Receipt visibility and request visibility are independently authorized.
-        -- A declared receipt failure stays in its slot. An internal fault faults the whole read.
-        receipt <- liftIO (traverse (\(mutation,location) -> Lane.declaredCall (Service.observeReceipt client mutation location)) pending)
-        (observed,request) <- ExceptT (Service.observeDraft client workflow ident)
-        preparation <- if Manager.draftPhase request == "review" && isJust (Manager.draftPreparation request)
-          then Just <$> ExceptT (Service.observePreparation client request) else pure Nothing
-        pure (ServiceObservation observed request preparation receipt))
+          -- The run components are read only for the run that the installed
+          -- request names, so the read kind is known before the read starts.
+          run = serviceSelection state >>= Service.selectedRun
+      startServiceRead (maybe Lane.SingleResourceRead (const Lane.PageSetRead) run) $ \ticket ->
+        ServiceRequestReady ticket <$> Lane.serviceCall (runExceptT $ do
+          -- Receipt visibility and request visibility are independently authorized.
+          -- A declared receipt failure stays in its slot. An internal fault faults the whole read.
+          receipt <- liftIO (traverse (\(mutation,location) -> (,) mutation <$> Lane.declaredCall (Service.observeReceipt client mutation location)) pending)
+          (observed,request) <- ExceptT (Service.observeDraft client workflow ident)
+          preparation <- if Manager.draftPhase request == "review" && isJust (Manager.draftPreparation request)
+            then Just <$> ExceptT (Service.observePreparation client request) else pure Nothing
+          -- Any declared refusal of a run component refuses the whole read, so
+          -- no partial composite reaches the install.
+          components <- traverse (\runId -> do
+            snapshot <- ExceptT (Service.observeSnapshot client runId)
+            control <- ExceptT (Service.observeControl client runId)
+            decision <- traverse (ExceptT . Service.observeDecision client (Manager.draftProfile request) runId)
+              (Service.controlHead (snd control))
+            pure (Service.RunRead snapshot control decision)) run
+          pure (Service.RequestRead (observed,request) preparation receipt components))
     _ -> pure ()
 
+-- | Decide one key that asks for a new mutation with 'Lane.mutationAdmission'.
+-- A start runs the given action. Every other outcome shows its fixed text as
+-- a key outcome, and the key is not replayed later.
+serviceMutationKey :: Text -> EventM Name AppState () -> EventM Name AppState ()
+serviceMutationKey operation start = do
+  state <- get
+  case Lane.admissionText operation (Lane.mutationAdmission (stateServiceLane state)) of
+    Nothing -> start
+    Just refusal -> serviceKeyOutcome refusal
+
+-- | Show the fixed text of a mutation key that started nothing as the next
+-- numbered key outcome.
+serviceKeyOutcome :: Text -> EventM Name AppState ()
+serviceKeyOutcome text = modify $ \state ->
+  let serial = stateServiceOutcomeSerial state + 1
+   in state {stateServiceOutcomeSerial = serial, stateServiceKeyOutcome = Just (Lane.KeyOutcome serial text)}
+
+-- | Begin a mutation that 'Lane.mutationAdmission' started. Any
+-- single-resource read ends and is cancelled, so it delivers nothing.
 beginServiceMutation :: Manager.Client -> Service.Mutation -> Maybe Manager.Observed -> EventM Name AppState ()
 beginServiceMutation client mutation observation = do
   state <- get
-  when (serviceMutable state) $ do
+  when (Lane.mutationAdmission (stateServiceLane state) == Lane.KeyStart) $ do
     now <- liftIO getCurrentTime
     let ticket = stateRequestSerial state + 1
-    put (onLane (\lane -> lane {Lane.laneReadTicket = Nothing, Lane.laneMutation = Lane.MutationPreparing ticket mutation,
-        Lane.laneResendConfirm = False}) state) {stateRequestSerial = ticket, stateServiceLastReceipt = Nothing,
+    put (onLane (Lane.beginMutation ticket mutation) state) {stateRequestSerial = ticket, stateServiceLastReceipt = Nothing,
       stateModel = (stateModel state) {modelStatus = "preparing explicit " <> Service.mutationOperation mutation}}
     liftIO (cancelWorker state ServiceReadWork)
     liftIO . startWorker state ServicePrepareWork $
@@ -488,7 +533,7 @@ handleServiceSent client ticket result = do
                     modelScreen = if null (workflowInputs descriptor) then ServiceRequestScreen request else InputScreen 0,
                     modelStatus = "request created; fetching its exact validator"}
               put (idleService state) {stateServiceRequestId = Just (Manager.draftId request),
-                stateServiceRequest = Nothing, stateServiceWorkflow = Just workflow, stateModel = model, stateEditor = blankEditor}
+                stateServiceObservation = Lane.noObservation, stateServiceWorkflow = Just workflow, stateModel = model, stateEditor = blankEditor}
               liftIO (writeIORef (stateServiceUncertainExit state) False)
               refreshServiceRequest client
           _ -> uncertainService state (Lane.declaredSendUncertain attempt "invalid creation response" (stateServiceLane state))
@@ -500,26 +545,25 @@ handleServiceSent client ticket result = do
               refreshServiceRequest client
           _ -> uncertainService state (Lane.declaredSendUncertain attempt "invalid command response" (stateServiceLane state))
 
-applyServiceObservation :: ServiceObservation -> EventM Name AppState ()
-applyServiceObservation (ServiceObservation observed request preparation receiptResult) = do
+-- | Apply one installed composite read. 'Lane.requestStep' has already
+-- installed it. Only a receipt read in this read can confirm an effect or
+-- settle an attempt. An unreadable receipt keeps the last receipt for display,
+-- confirms nothing and offers no resend.
+applyServiceObservation :: Service.RequestRead Manager.Observed -> EventM Name AppState ()
+applyServiceObservation (Service.RequestRead (_,request) preparation receiptResult _) = do
   before <- get
-  let receipt = case receiptResult of Just (Right received) -> Just received; _ -> stateServiceLastReceipt before
-      receiptStatus = maybe "outcome unresolved" (Manager.stateName . Manager.receiptState) receipt
-        <> case receiptResult of Just (Left _) -> " (receipt read unavailable)"; _ -> ""
-      state = before {stateServiceRequest = Just (observed,request),
-        stateServiceLastReceipt = receipt, stateServicePreparation = preparation,
+  let fresh = case receiptResult of Just (_,Right received) -> Just received; _ -> Nothing
+      state = before {stateServiceLastReceipt = maybe (stateServiceLastReceipt before) Just fresh,
         stateServiceApprovalStatus = case stateServiceApproval before of
           Nothing -> stateServiceApprovalStatus before
-          Just (approval,_,_) -> case receipt of
-            Just received | Service.receiptMatches approval received -> Just receiptStatus
-            _ -> stateServiceApprovalStatus before}
+          Just (approval,_,_) -> Just (Service.approvalStatus approval receiptResult (stateServiceApprovalStatus before))}
       pending = case serviceMutation state of
         Lane.MutationAwaiting mutation command location -> Just (mutation,command,Just location)
         Lane.MutationUncertain (Lane.Attempt mutation command location) _ -> Just (mutation,command,location)
         _ -> Nothing
       confirmed kind = maybe False (\value -> Manager.stateName (Manager.receiptState value) == "effect-observed"
         && Service.receiptEffectKind value == Just kind
-        && maybe False (\(mutation,_,_) -> Service.receiptMatches mutation value) pending) receipt
+        && maybe False (\(mutation,_,_) -> Service.receiptMatches mutation value) pending) fresh
   put state
   case pending of
     Just (mutation@(Service.SaveLiteral _ name value index),command,location)
@@ -543,11 +587,11 @@ applyServiceObservation (ServiceObservation observed request preparation receipt
         Manager.draftId request == Manager.draftId approvedRequest,
         Service.literalInputs request == modelInputs (stateModel state) ->
           put (idleService state) {stateServiceApproval = Just (mutation,command,location),
-            stateServiceApprovalStatus = Just receiptStatus,
+            stateServiceApprovalStatus = Just (Service.approvalStatus mutation receiptResult Nothing),
             stateModel = (stateModel state) {modelScreen = ServiceRequestScreen request,
               modelStatus = "run associated; approval receipt remains distinct from runtime outcome"}}
-    Just (mutation,command,location) | Just received <- receipt, Manager.stateName (Manager.receiptState received) `elem` ["refused","unresolved"] ->
-      settleService state (Lane.Attempt mutation command location) (Manager.stateName (Manager.receiptState received))
+    Just (mutation,command,location) | Just reason <- Service.receiptSettlement mutation receiptResult ->
+      settleService state (Lane.Attempt mutation command location) reason
     _ -> pure ()
   current <- get
   when (serviceIdle current) $ case modelScreen (stateModel current) of
@@ -562,7 +606,8 @@ applyServiceObservation (ServiceObservation observed request preparation receipt
       _ -> put current {stateConfirmDetails = False, stateModel = (stateModel current)
         {modelScreen = ServiceRequestScreen request, modelStatus = "manager request: " <> Manager.draftPhase request}}
 
--- | Handle one service event, then apply the approval-notice lifetime.
+-- | Handle one service event, then apply the approval-notice and key-outcome
+-- lifetimes.
 handleServiceEvent :: Manager.Client -> BrickEvent Name AppEvent -> EventM Name AppState ()
 handleServiceEvent client event = do
   before <- get
@@ -576,7 +621,9 @@ handleServiceEvent client event = do
           Approval.eventReviewShown = case modelScreen (stateModel after) of ServiceReviewScreen {} -> True; _ -> False,
           Approval.eventUnsentApproval = Approval.unsentApproval (stateServiceApprovalPress after) (serviceMutation before) (serviceMutation after)
         }
-  put after {stateServiceNotice = Approval.retainNotice noticeEvent (stateServiceNotice before) (stateServiceNotice after)}
+  put after {stateServiceNotice = Approval.retainNotice noticeEvent (stateServiceNotice before) (stateServiceNotice after),
+    stateServiceKeyOutcome = Lane.retainKeyOutcome (Approval.eventKeyPress noticeEvent) (view before) (view after)
+      (stateServiceKeyOutcome before) (stateServiceKeyOutcome after)}
 
 -- | Decide one approval-key press on the displayed review with
 -- 'Approval.approvalDecision', show its notice, and start the approval only
@@ -603,14 +650,13 @@ serviceReviewView state = Approval.reviewView (stateKeyHelp state) (stateConfirm
 serviceReviewCheck :: AppState -> Manager.Preparation -> Text -> Approval.ReviewCheck (Manager.DraftView, Manager.Observed)
 serviceReviewCheck state displayed tag =
   Approval.checkReview Manager.observedETag (stateNow state) (serviceReviewAllowed displayed tag (stateTerminalSize state))
-    (stateServiceWorkflow state) (stateServiceRequest state) (stateServicePreparation state) (modelInputs (stateModel state)) displayed tag
+    (stateServiceWorkflow state) (serviceRequest state) (servicePreparation state) (modelInputs (stateModel state)) displayed tag
 
 handleServiceEventCore :: Manager.Client -> BrickEvent Name AppEvent -> EventM Name AppState ()
 handleServiceEventCore client event = do
   state <- get
-  let failed lane problem = state {stateServiceLane = lane, stateServiceRequest = Nothing, stateServicePreparation = Nothing,
-        stateModel = (stateModel state) {modelScreen = ServiceCommandScreen ("Observation refused: " <> T.pack (show problem)),
-          modelStatus = "previous command outcomes are unchanged"}}
+  -- A refused catalogue read has no earlier observation to keep.
+  let failed lane problem = state {stateServiceLane = lane, stateModel = refuseCatalogueRead (T.pack (show problem)) (stateModel state)}
   case event of
     AppEvent (ServiceProfilesReady ticket result) -> case Lane.readStep ticket result (stateServiceLane state) of
       (Lane.ReadStale,_) -> pure ()
@@ -632,11 +678,17 @@ handleServiceEventCore client event = do
         stateModel = (stateModel state) {modelStatus = "preflight refused before send: " <> T.pack (show failure)}}
       (Lane.PrepareSend attempt,_) -> sendServicePending client ticket attempt
     AppEvent (ServiceSent ticket result) -> handleServiceSent client ticket result
-    AppEvent (ServiceRequestReady ticket result) -> case Lane.readStep ticket result (stateServiceLane state) of
-      (Lane.ReadStale,_) -> pure ()
-      (Lane.ReadFaulted,lane) -> faultService state lane
-      (Lane.ReadRefused problem,lane) -> put (failed lane problem)
-      (Lane.ReadDelivered observation,lane) -> put state {stateServiceLane = lane} >> applyServiceObservation observation
+    -- A refused request read keeps the screen, the command lane and the last
+    -- complete observation, and marks that observation stale.
+    AppEvent (ServiceRequestReady ticket result) ->
+      let verdict = maybe (const Service.ReadForeign) (Service.readVerdict Service.observedBinding) (serviceSelection state)
+      in case Lane.requestStep verdict ticket result (stateServiceLane state) (stateServiceObservation state) of
+        (Lane.RequestStale,lane,_) -> put state {stateServiceLane = lane}
+        (Lane.RequestFaulted,lane,_) -> faultService state lane
+        (Lane.RequestRefused problem,lane,installed) -> put state {stateServiceLane = lane, stateServiceObservation = installed,
+          stateModel = refuseRequestRead (Lane.refusalCode problem) (isJust (Lane.installedRead installed)) (stateModel state)}
+        (Lane.RequestInstalled observation,lane,installed) ->
+          put state {stateServiceLane = lane, stateServiceObservation = installed} >> applyServiceObservation observation
     AppEvent (Tick now) -> do
       put state {stateNow = now}
       -- After an internal fault, observations refresh only on an explicit g.
@@ -644,13 +696,13 @@ handleServiceEventCore client event = do
     VtyEvent (Vty.EvResize width height) -> put state {stateTerminalSize = (width,height)}
     VtyEvent (Vty.EvKey (Vty.KChar 'c') [Vty.MCtrl]) -> halt
     VtyEvent key | InputScreen index <- modelScreen (stateModel state) -> case key of
-      Vty.EvKey (Vty.KChar 'd') [Vty.MCtrl] | serviceMutable state ->
-        case (stateServiceRequest state,modelWorkflow (stateModel state)) of
+      Vty.EvKey (Vty.KChar 'd') [Vty.MCtrl] ->
+        case (serviceRequest state,modelWorkflow (stateModel state)) of
           (Just (observed,request),Just descriptor) | Just input <- atMay (workflowInputs descriptor) index ->
-            beginServiceMutation client (Service.SaveLiteral request (workflowInputName input)
+            serviceMutationKey "set-input" $ beginServiceMutation client (Service.SaveLiteral request (workflowInputName input)
               (T.intercalate "\n" (Edit.getEditContents (stateEditor state))) index) (Just observed)
-          _ -> pure ()
-      Vty.EvKey Vty.KEsc [] | serviceIdle state -> case stateServiceRequest state of
+          _ -> serviceKeyOutcome (Lane.unobservedText "set-input")
+      Vty.EvKey Vty.KEsc [] | serviceIdle state -> case serviceRequest state of
         Just (_,request) -> put state {stateModel = (stateModel state) {modelScreen = ServiceRequestScreen request}}
         _ -> pure ()
       _ | serviceIdle state -> handleEditorInput event
@@ -660,23 +712,35 @@ handleServiceEventCore client event = do
       | key == Vty.KChar '?' && null modifiers && not (serviceResendConfirm state) -> put state {stateKeyHelp = not (stateKeyHelp state)}
       -- Under the key help, an approval key on the review still has one
       -- visible outcome, and only Esc closes the help.
+      -- A mutation key under the key help is refused visibly.
       | stateKeyHelp state -> case Approval.reviewApprovalKey (modelScreen (stateModel state)) key modifiers of
           Just press -> handleApprovalKey client press
-          Nothing -> when (key == Vty.KEsc) (put state {stateKeyHelp = False})
+          Nothing -> case serviceNewMutationKey state key modifiers of
+            Just (operation,_) -> serviceKeyOutcome (Lane.keyHelpText operation)
+            Nothing -> when (key == Vty.KEsc) (put state {stateKeyHelp = False})
+      -- The confirmation of an exact resend has one visible outcome. A
+      -- deferral keeps the confirmation open for another explicit y. A key
+      -- that asks for a new mutation is decided as everywhere else.
       | serviceResendConfirm state -> case key of
-          Vty.KChar 'y' | null modifiers -> case Lane.resendAttempt (stateServiceLane state) of
-            Just attempt -> do
+          Vty.KChar 'y' | null modifiers -> case Lane.resendAdmission (stateServiceLane state) of
+            Lane.ResendStart attempt -> do
               let ticket = stateRequestSerial state + 1
               put (onLane (\lane -> lane {Lane.laneReadTicket = Nothing}) state) {stateRequestSerial = ticket}
               liftIO (cancelWorker state ServiceReadWork)
               sendServicePending client ticket attempt
-            Nothing -> pure ()
+            Lane.ResendDeferred -> serviceKeyOutcome Lane.resendDeferredText
+            Lane.ResendUnoffered -> put (onLane (\lane -> lane {Lane.laneResendConfirm = False}) state)
+              >> serviceKeyOutcome Lane.resendUnofferedText
           Vty.KChar 'n' -> put (onLane (\lane -> lane {Lane.laneResendConfirm = False}) state)
           Vty.KEsc -> put (onLane (\lane -> lane {Lane.laneResendConfirm = False}) state)
+          _ | Just (operation,start) <- serviceNewMutationKey state key modifiers -> serviceMutationKey operation start
           _ -> pure ()
       -- Every approval-key press on the review has exactly one visible
       -- outcome, whatever the command and read lanes hold.
       | Just press <- Approval.reviewApprovalKey (modelScreen (stateModel state)) key modifiers -> handleApprovalKey client press
+      -- Every key that asks for a new mutation has exactly one visible
+      -- outcome, including while a command is in progress.
+      | Just (operation,start) <- serviceNewMutationKey state key modifiers -> serviceMutationKey operation start
       | serviceSending state -> pure ()
       | null modifiers -> case key of
           Vty.KEsc -> serviceBack state
@@ -690,14 +754,6 @@ handleServiceEventCore client event = do
             ServiceProfilesScreen {} -> case selectedServiceProfile (stateModel state) of
               Just profile | Service.profileReadiness profile == "ready", Service.profileRefusal profile == Nothing -> startServiceWorkflows client profile
               _ -> pure ()
-            BrowserScreen | serviceMutable state -> case atMay (stateServiceWorkflows state) (modelWorkflowIndex (stateModel state)) of
-              Just workflow -> do
-                put state {stateServiceWorkflow = Just workflow, stateServiceRequestId = Nothing, stateServiceRequest = Nothing,
-                  stateModel = (stateModel state) {modelInputs = Map.empty, modelWorkflow = Just (Service.workflowDisplay workflow)}}
-                beginServiceMutation client (Service.Create workflow) Nothing
-              Nothing -> pure ()
-            ServiceRequestScreen request | Service.requestReady request, Manager.draftPhase request == "draft" ->
-              beginServiceMutation client (Service.Enqueue request) (fst <$> stateServiceRequest state)
             _ -> pure ()
           Vty.KChar 'd' | ServiceReviewScreen {} <- modelScreen (stateModel state) -> do
             put state {stateConfirmDetails = not (stateConfirmDetails state)}
@@ -718,6 +774,17 @@ handleServiceEventCore client event = do
           _ -> pure ()
     _ -> pure ()
   where
+    -- The key that asks for a new mutation on the current screen, with its
+    -- operation and the action that starts it.
+    serviceNewMutationKey state key modifiers = case (modelScreen (stateModel state), key, modifiers) of
+      (BrowserScreen, Vty.KEnter, []) | Just workflow <- atMay (stateServiceWorkflows state) (modelWorkflowIndex (stateModel state)) ->
+        Just ("create", do
+          put state {stateServiceWorkflow = Just workflow, stateServiceRequestId = Nothing, stateServiceObservation = Lane.noObservation,
+            stateModel = (stateModel state) {modelInputs = Map.empty, modelWorkflow = Just (Service.workflowDisplay workflow)}}
+          beginServiceMutation client (Service.Create workflow) Nothing)
+      (ServiceRequestScreen request, Vty.KEnter, []) | Service.requestReady request, Manager.draftPhase request == "draft" ->
+        Just ("enqueue", beginServiceMutation client (Service.Enqueue request) (fst <$> serviceRequest state))
+      _ -> Nothing
     serviceBack state = case modelScreen (stateModel state) of
       ServiceProfilesScreen {} -> halt
       InitialLoading -> halt
@@ -801,6 +868,10 @@ toPresentation state =
       presentationServiceResendConfirm = serviceResendConfirm state,
       presentationServiceApproval = stateServiceApprovalStatus state,
       presentationServiceFault = serviceFaulted state,
+      presentationServiceKeyOutcome = stateServiceKeyOutcome state,
+      presentationServiceObservation = let installed = stateServiceObservation state in
+        Service.observationLines (Lane.installedStale installed) (isJust (Lane.installedRead installed))
+          (Service.runReadSnapshot <$> (Lane.installedRead installed >>= Service.readRun)),
       presentationServiceApprovalOffered = case modelScreen (stateModel state) of
         ServiceReviewScreen displayed tag ->
           Approval.approvalOffered (serviceReviewView state) (stateServiceLane state) (serviceReviewCheck state displayed tag)

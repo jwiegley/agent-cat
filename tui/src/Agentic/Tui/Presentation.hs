@@ -48,7 +48,7 @@ import Agentic.Tui.Person
 import Agentic.Tui.RunModel
 import Agentic.Tui.Types
 import qualified Agentic.Tui.Service as Service
-import Agentic.Tui.ServiceLane (internalFaultStatus)
+import Agentic.Tui.ServiceLane (KeyOutcome, internalFaultStatus, keyOutcomeLine)
 import qualified Agentic.Manager.Client as Manager
 import Brick
 import Brick.Widgets.Border (borderWithLabel, hBorder, hBorderWithLabel, vBorder)
@@ -126,6 +126,12 @@ data Presentation = Presentation
     -- | An internal frontend fault occurred. No mutation starts, no exact
     -- resend is offered, and only read-only actions remain.
     presentationServiceFault :: !Bool,
+    -- | The lines that describe the installed request observation, its stale
+    -- mark and the published runtime status.
+    presentationServiceObservation :: ![Text],
+    -- | The outcome of the latest mutation key that started nothing. The
+    -- status line shows it until the next key press or view change.
+    presentationServiceKeyOutcome :: !(Maybe KeyOutcome),
     presentationConfig :: !(Maybe TuiConfig),
     presentationPersonPrompt :: !(Maybe PersonPrompt),
     presentationPersonSubmitted :: !Bool,
@@ -169,6 +175,8 @@ emptyPresentation model =
       presentationServiceApprovalOffered = False,
       presentationServiceNotice = Nothing,
       presentationServiceFault = False,
+      presentationServiceObservation = [],
+      presentationServiceKeyOutcome = Nothing,
       presentationConfig = Nothing,
       presentationPersonPrompt = Nothing,
       presentationPersonSubmitted = False,
@@ -262,6 +270,7 @@ statusView presentation width = withAttr attribute (displayText (oneLine width m
   where
     model = presentationModel presentation
     (attribute, message)
+      | Just outcome <- presentationServiceKeyOutcome presentation = (attrName "warning", keyOutcomeLine outcome)
       | presentationServiceFault presentation = (attrName "error", internalFaultStatus)
       | Just failure <- presentationControlError presentation = (attrName "error", "ERROR: " <> failure)
       | RecoveryLayer <- presentationLayer presentation = (attrName "warning", "Recovery required")
@@ -331,8 +340,9 @@ serviceRequestView presentation request = pane "Manager request" $ viewport Fail
     "Phase: " <> Manager.draftPhase request, "Admission: " <> Manager.draftAdmission request,
     "Position: " <> maybe "none" shown (Manager.draftPosition request),
     "Blocking reasons: " <> T.intercalate ", " (Manager.draftReasons request),
-    "Run: " <> fromMaybe "none" (Manager.draftRun request),
-    "Approval receipt: " <> fromMaybe "none" (presentationServiceApproval presentation),
+    "Run: " <> fromMaybe "none" (Manager.draftRun request) ]
+  <> presentationServiceObservation presentation
+  <> [ "Approval receipt: " <> fromMaybe "none" (presentationServiceApproval presentation),
     "Runtime completion and result verification are not inferred from this request.", "", "Retained operator literals:" ]
   <> concat [[name, value] | (name,value) <- Map.toList (modelInputs (presentationModel presentation))]
 

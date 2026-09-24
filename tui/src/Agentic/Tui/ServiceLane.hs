@@ -13,9 +13,25 @@
 -- The 'Lane' holds the read ticket, the one command lane, the internal-fault
 -- flag and the resend confirmation. The completion of every read,
 -- preparation and send is a pure transition of the lane. Observations are not
--- lane facts, so no transition can change them. The lane values are
+-- lane facts, so no lane transition can change them. The lane values are
 -- polymorphic in the pending command and receipt location. The lane only
 -- retains them. It never inspects, rebuilds or retargets them.
+--
+-- The read lane is single-flight. A read ticket records whether the read in
+-- flight reads a page set or only single resources. The completion of the
+-- composite read of the selected request is also a pure transition of the
+-- 'Installed' observation: 'requestStep' installs a complete current read in
+-- one step, and a declared refusal keeps the last complete observation and
+-- marks it stale with the refusal code.
+--
+-- Every mutation key has exactly one visible outcome, which
+-- 'mutationAdmission' and 'resendAdmission' decide from the lane: a start, a
+-- refusal or a deferral. A key never cancels a page-set read, because an
+-- abandoned page set holds a manager slot until it expires. It defers
+-- instead, and a deferred key is never replayed. A key during a
+-- single-resource read ends and cancels that read and starts. A refusal or a
+-- deferral is a numbered 'KeyOutcome', and 'retainKeyOutcome' keeps it on
+-- the status line until the next key press or until the view changes.
 module Agentic.Tui.ServiceLane
   ( CallOutcome (..),
     serviceCall,
@@ -23,12 +39,34 @@ module Agentic.Tui.ServiceLane
     Attempt (..),
     Uncertainty (..),
     MutationState (..),
+    ReadKind (..),
+    ReadTicket (..),
     Lane (..),
     faultLane,
     settleUncertain,
     declaredSendUncertain,
+    startRead,
+    beginMutation,
     ReadStep (..),
     readStep,
+    Installed (..),
+    noObservation,
+    RequestStep (..),
+    requestStep,
+    refusalCode,
+    staleStatus,
+    KeyAdmission (..),
+    mutationAdmission,
+    ResendAdmission (..),
+    resendAdmission,
+    admissionText,
+    resendDeferredText,
+    resendUnofferedText,
+    keyHelpText,
+    unobservedText,
+    KeyOutcome (..),
+    keyOutcomeLine,
+    retainKeyOutcome,
     PrepareStep (..),
     prepareStep,
     SendStep (..),
@@ -45,7 +83,7 @@ module Agentic.Tui.ServiceLane
 where
 
 import qualified Agentic.Manager.Client as C
-import Agentic.Tui.Service (Mutation, mutationOperation, mutationURI)
+import Agentic.Tui.Service (Mutation, ReadVerdict (..), mutationOperation, mutationURI)
 import Control.Exception (SomeAsyncException, SomeException, evaluate, fromException, throwIO, try)
 import Data.Maybe (isJust)
 import Data.Text (Text)
@@ -106,12 +144,25 @@ data MutationState pending location
   | MutationAwaiting !Mutation !pending !location
   | MutationUncertain !(Attempt pending location) !Uncertainty
 
+-- | What the read in flight reads.
+data ReadKind
+  = -- | Only single resources: the request, its preparation and a receipt.
+    SingleResourceRead
+  | -- | At least one page set: the profiles, the workflows, or the composite
+    -- read of an associated request with its snapshot page set.
+    PageSetRead
+  deriving (Eq, Show, Enum, Bounded)
+
+-- | The ticket of the one read in flight and what that read reads.
+data ReadTicket = ReadTicket {ticketNumber :: !Int, ticketKind :: !ReadKind}
+  deriving (Eq, Show)
+
 -- | The lane-owned facts of one service session: the read ticket, the one
 -- command lane, whether an internal fault occurred in this session, and
 -- whether an exact resend awaits confirmation. Observations, approvals and
 -- receipts are not lane facts, so no lane transition can change them.
 data Lane pending location = Lane
-  { laneReadTicket :: !(Maybe Int),
+  { laneReadTicket :: !(Maybe ReadTicket),
     laneMutation :: !(MutationState pending location),
     laneFault :: !Bool,
     laneResendConfirm :: !Bool
@@ -135,6 +186,20 @@ declaredSendUncertain :: Attempt pending location -> Text -> Lane pending locati
 declaredSendUncertain attempt failure =
   settleUncertain attempt {attemptLocation = Nothing} (DeclaredUncertainty failure)
 
+-- | Start a read with this ticket number and kind. No read starts while
+-- another read holds the ticket, so at most one read is ever in flight.
+startRead :: Int -> ReadKind -> Lane pending location -> Maybe (Lane pending location)
+startRead ticket kind lane = case laneReadTicket lane of
+  Just _ -> Nothing
+  Nothing -> Just lane {laneReadTicket = Just (ReadTicket ticket kind)}
+
+-- | Begin preparing a mutation that 'mutationAdmission' started. The read
+-- ticket ends, and the caller cancels that single-resource read, so it
+-- delivers nothing afterwards. Any resend confirmation ends.
+beginMutation :: Int -> Mutation -> Lane pending location -> Lane pending location
+beginMutation ticket mutation lane =
+  lane {laneReadTicket = Nothing, laneMutation = MutationPreparing ticket mutation, laneResendConfirm = False}
+
 -- | The meaning of one completed read for the read lane.
 data ReadStep a
   = -- | The read no longer owns the lane. The lane is unchanged.
@@ -150,11 +215,76 @@ data ReadStep a
 -- | Complete the read that holds the given ticket.
 readStep :: Int -> CallOutcome a -> Lane pending location -> (ReadStep a, Lane pending location)
 readStep ticket outcome lane
-  | laneReadTicket lane /= Just ticket = (ReadStale, lane)
+  | fmap ticketNumber (laneReadTicket lane) /= Just ticket = (ReadStale, lane)
   | otherwise = case outcome of
       InternalFault -> (ReadFaulted, faultLane lane)
       Declared (Left failure) -> (ReadRefused failure, lane {laneReadTicket = Nothing})
       Declared (Right value) -> (ReadDelivered value, lane {laneReadTicket = Nothing})
+
+-- | The installed observation of the selected request: the last complete
+-- read that was installed, and the refusal code of the latest read when that
+-- read was refused.
+data Installed a = Installed
+  { installedRead :: !(Maybe a),
+    installedStale :: !(Maybe Text)
+  }
+  deriving (Eq, Show)
+
+-- | No installed observation, as for a newly selected request.
+noObservation :: Installed a
+noObservation = Installed Nothing Nothing
+
+-- | The meaning of one completed composite read of the selected request.
+data RequestStep a
+  = -- | The read no longer owns the lane, or it concerns another request.
+    -- Nothing is installed.
+    RequestStale
+  | -- | The read failed with an internal fault. Nothing is installed.
+    RequestFaulted
+  | -- | The manager refused the read, a component was invalid, or the
+    -- request named another run than the selected one. Nothing is installed.
+    -- The last complete observation stays and is marked stale.
+    RequestRefused !C.ClientFailure
+  | -- | The complete current read is installed in one step.
+    RequestInstalled !a
+
+-- | Complete the composite read that holds the given ticket, given the
+-- verdict of a delivered read against the current selection. The lane
+-- changes as 'readStep' states, so a refusal leaves the command lane
+-- unchanged. Only a current read replaces the installed observation, and it
+-- clears the stale mark. A refusal keeps the installed read and marks it
+-- stale.
+requestStep ::
+  (a -> ReadVerdict) ->
+  Int ->
+  CallOutcome a ->
+  Lane pending location ->
+  Installed a ->
+  (RequestStep a, Lane pending location, Installed a)
+requestStep verdict ticket outcome lane installed = case readStep ticket outcome lane of
+  (ReadStale, next) -> (RequestStale, next, installed)
+  (ReadFaulted, next) -> (RequestFaulted, next, installed)
+  (ReadRefused failure, next) -> refused failure next
+  (ReadDelivered value, next) -> case verdict value of
+    ReadForeign -> (RequestStale, next, installed)
+    ReadInvalid -> refused C.InvalidResponse next
+    ReadCurrent -> (RequestInstalled value, next, Installed (Just value) Nothing)
+  where
+    refused failure next = (RequestRefused failure, next, installed {installedStale = Just (refusalCode failure)})
+
+-- | The public code of a declared failure: the status and problem code of a
+-- manager refusal, or the name of a client failure.
+refusalCode :: C.ClientFailure -> Text
+refusalCode failure = case failure of
+  C.Refused status code -> T.pack (show status) <> " " <> code
+  _ -> T.pack (show failure)
+
+-- | The status line after a refused request read, given the refusal code
+-- and whether a complete observation is installed.
+staleStatus :: Text -> Bool -> Text
+staleStatus code retained
+  | retained = "observation stale: " <> code <> "; the last complete observation is retained"
+  | otherwise = "observation refused: " <> code <> "; no complete observation is installed"
 
 -- | The meaning of one completed preparation for the command lane.
 data PrepareStep pending location
@@ -201,6 +331,104 @@ mutationAllowed :: Lane pending location -> Bool
 mutationAllowed lane = case laneMutation lane of
   MutationIdle -> not (laneFault lane)
   _ -> False
+
+-- | The one visible outcome of a key that asks for a new mutation.
+data KeyAdmission
+  = -- | Start now. A single-resource read in flight ends and is cancelled.
+    KeyStart
+  | -- | Nothing starts while a page-set read is in flight. The key is not
+    -- replayed later.
+    KeyDeferred
+  | -- | Nothing starts while a command is in progress or unresolved.
+    KeyBusy
+  | -- | Nothing starts after an internal fault.
+    KeyFaulted
+  deriving (Eq, Show, Enum, Bounded)
+
+-- | Decide a key that asks for a new mutation. The command lane decides
+-- first, then the fault flag, then the read in flight.
+mutationAdmission :: Lane pending location -> KeyAdmission
+mutationAdmission lane = case laneMutation lane of
+  MutationIdle
+    | laneFault lane -> KeyFaulted
+    | pageSetRead lane -> KeyDeferred
+    | otherwise -> KeyStart
+  _ -> KeyBusy
+
+-- | The one visible outcome of the key that confirms an exact resend.
+data ResendAdmission pending location
+  = -- | Send this retained attempt again now. A single-resource read in
+    -- flight ends and is cancelled.
+    ResendStart !(Attempt pending location)
+  | -- | Nothing is sent while a page-set read is in flight. The confirmation
+    -- stays open, and the key is not replayed later.
+    ResendDeferred
+  | -- | No exact resend is offered.
+    ResendUnoffered
+
+-- | Decide the key that confirms an exact resend.
+resendAdmission :: Lane pending location -> ResendAdmission pending location
+resendAdmission lane = case resendAttempt lane of
+  Nothing -> ResendUnoffered
+  Just attempt
+    | pageSetRead lane -> ResendDeferred
+    | otherwise -> ResendStart attempt
+
+pageSetRead :: Lane pending location -> Bool
+pageSetRead lane = fmap ticketKind (laneReadTicket lane) == Just PageSetRead
+
+-- | The fixed text of a key outcome that starts nothing, given the operation
+-- that the key asks for. Every such text fits an 80-column status line with
+-- its key number.
+admissionText :: Text -> KeyAdmission -> Maybe Text
+admissionText operation admission = case admission of
+  KeyStart -> Nothing
+  KeyDeferred -> Just (operation <> " deferred during a page-set read. Press the key again.")
+  KeyBusy -> Just (operation <> " did not start: a command is in progress or unresolved.")
+  KeyFaulted -> Just (operation <> " did not start: an internal fault stopped all mutations.")
+
+-- | The fixed status text of a deferred resend confirmation.
+resendDeferredText :: Text
+resendDeferredText = "exact resend deferred during a page-set read. Press y again."
+
+-- | The fixed status text of a resend confirmation without an offered resend.
+resendUnofferedText :: Text
+resendUnofferedText = "exact resend did not start: no exact resend is offered."
+
+-- | The fixed status text of a mutation key under the key help.
+keyHelpText :: Text -> Text
+keyHelpText operation = operation <> " did not start: the key help is open. Esc closes it."
+
+-- | The fixed status text of a mutation key whose request validator is not
+-- yet observed.
+unobservedText :: Text -> Text
+unobservedText operation = operation <> " did not start: the request validator is not yet observed."
+
+-- | The visible outcome of one mutation-key press that started nothing: the
+-- sequence number of the press among such presses of the session, and its
+-- fixed text.
+data KeyOutcome = KeyOutcome
+  { outcomeKey :: !Int,
+    outcomeText :: !Text
+  }
+  deriving (Eq, Show)
+
+-- | The status line of a key outcome.
+keyOutcomeLine :: KeyOutcome -> Text
+keyOutcomeLine outcome = "Key " <> T.pack (show (outcomeKey outcome)) <> ": " <> outcomeText outcome
+
+-- | The key outcome that remains after one service event, given whether the
+-- event was a key press, the view before and after the event, and the key
+-- outcome before and after the event.
+--
+-- An outcome that the event produced is shown. An earlier outcome lasts until
+-- the next key press or until an event changes the view, so reads, installs
+-- and ticks that keep the view never remove it.
+retainKeyOutcome :: (Eq view) => Bool -> view -> view -> Maybe KeyOutcome -> Maybe KeyOutcome -> Maybe KeyOutcome
+retainKeyOutcome keyPress viewBefore viewAfter previous current
+  | current /= previous = current
+  | keyPress || viewBefore /= viewAfter = Nothing
+  | otherwise = current
 
 -- | The retained attempt that an explicit exact resend may send again.
 -- Only a declared uncertainty offers one, and no fault may have occurred.

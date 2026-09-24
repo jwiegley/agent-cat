@@ -20,6 +20,40 @@
 
 Allow prompts whose dependencies are satisfied to execute in parallel, while coordinating readiness, completion, failure, and dependent unblocking atomically with STM. Add deterministic regression coverage.
 
+* TODO [#D] Remove unused A5 read accessors and ReadKind instances
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-05l1
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-24 Thu 09:19]
+:MODIFIED: [2026-09-24 Thu 09:19]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+A5 fess round 2 (fess/A-A5-r2.md), low, loose ends. Service.readRequestId and Service.readRequestRun (tui/src/Agentic/Tui/Service.hs near 862-866) are exported but unused. The derived Enum and Bounded instances on ServiceLane.ReadKind (tui/src/Agentic/Tui/ServiceLane.hs near 154) are also unused.
+
+Acceptance: the unused functions and derived instances are removed, and the Werror build and tui-model-test still pass.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-05l1",
+    "depends_on_id": "acat-wm-034-3vqz",
+    "type": "discovered-from",
+    "created_at": "2026-09-24T16:19:44.902372Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
 * DONE [#C] The consent gate is decorative against a live adapter: permission is granted per connection, not per question
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -1366,6 +1400,40 @@ At +RTS -N8, two simultaneous identical deep asks once shared only a single cand
 ]
 #+end_src
 
+* TODO [#D] Test key-outcome retention with the real App view value
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-6l1e
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-24 Thu 09:19]
+:MODIFIED: [2026-09-24 Thu 09:19]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+A5 fess round 2 (fess/A-A5-r2.md), low, test abstraction. The retainKeyOutcome tests (tui/test/ServiceTests.hs near 547) model the view as constant strings. In App (tui/src/Agentic/Tui/App.hs near 616) the view includes ServiceRequestScreen with the full DraftView, so an install that changes only request data counts as a view change and clears the key outcome. No current path reaches this while an outcome is shown.
+
+Acceptance: the view comparison uses the screen constructor rather than the request data, or a test uses the real view value and shows the intended behavior when an install changes only request data.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-6l1e",
+    "depends_on_id": "acat-wm-034-3vqz",
+    "type": "discovered-from",
+    "created_at": "2026-09-24T16:19:43.969187Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
 * DONE [#C] Fix a package-wide classical Decidable convention before the folds
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -2543,6 +2611,40 @@ Discipline: mutation testing showed the theorems complement the string pins (a �
 
 Found by the connection-research attack pass (acat-lean-haskell-connection-lhi): the parser's freshOfTables refuses a function name that spells an earlier function, but checkFnsList (Check.lean) never checks the accumulating table for a duplicate name, and Fns.find? / fnSigsOf are first-wins list lookups — so a hand-built RawProgram with two  entries (different arity or different bodies) checks, with every call silently resolving to the FIRST and bodyAsks pricing against it. Same shape as the served-by gap (acat-served-by-check-gap-i5d, fixed): mirror the parser's refusal in checkFnsList with the existing diagnosis wording, one hand-built battery case in the check_panel_nil style, audit the new site.
 
+* TODO [#B] Diagnose the A5 round-1 tui-approval N8 closed-release failure
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-dxos
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-24 Thu 09:19]
+:MODIFIED: [2026-09-24 Thu 09:19]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+A5 fess round 2 (fess/A-A5-r2.md), medium, verification gap. The round-1 A5 verifier's tui-approval run at N8 failed with "TUI preparation deadline after at most one operator-confirmed exact resend" after an effect-observed enqueue and a closed release (root /Users/johnw/Products/k.M0a5ItPm/tmp/tui-A5v1.HiOeMcH7/tui-approval-N8, log /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A5/verify-r1/A5v-tui-approval-N8.log). On A5-family source the N8 record is three passes and one failure. Before association, the A5 request read performs the same HTTP calls as HEAD (/Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A5/impl-r2/A5r2-h1-inspection.log), and the same closed-release class occurs on unchanged source in the A1 S1 baseline (/Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A1/impl-r3/A1-classification.md).
+
+Acceptance: the scheduled S1 diagnosis subtask examines this root together with the A1 S1 roots and proves the source of the closed release. If A5 source is implicated, the proved cause is fixed with a regression test. Until then the A5 N8 acceptance stays marked as passed with an earlier unexplained failure.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-dxos",
+    "depends_on_id": "acat-wm-034-3vqz",
+    "type": "discovered-from",
+    "created_at": "2026-09-24T16:19:42.981902Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
 * DONE [#B] Design a remote single-user workflow manager and unified client API
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -3028,6 +3130,40 @@ Design question from acat-444: sumT is symmetric in muS (matAdd_comm) but leftmo
     "author": "johnw",
     "text": "Closed with the stratum it concerned: the pre-re-derivation Term algebra was excised at 4aed549 under acat-q1i (owner-approved hybrid, 2026-08-20). This ticket's subject, its state at closure, and why it retires are recorded — with the machine-checked results it relates to transcribed exactly — in doc/research/term-algebra-results.md (the ticket graveyard section names this issue individually). The mathematics is preserved as a document and in git history at b98e25f; the six theory threads are recorded there as future directions should the program ever be revived.",
     "created_at": "2026-08-20T18:42:43Z"
+  }
+]
+#+end_src
+
+* TODO [#C] Decide refresh behavior while a mutation key is deferred
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-ftw9
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-24 Thu 09:19]
+:MODIFIED: [2026-09-24 Thu 09:19]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+A5 fess round 2 (fess/A-A5-r2.md), medium, design risk. After association, every one-second tick starts a PageSetRead whenever no ticket is held (tui/src/Agentic/Tui/App.hs near 446, 242 and 695), and ServiceLane.mutationAdmission (tui/src/Agentic/Tui/ServiceLane.hs near 350-355) defers every new-mutation key while such a read is in flight. With a slow manager, a page-set read is in flight almost continuously, so the post-association mutation keys that A7, A8 and A10 add could be deferred repeatedly. No measurement records the page-set read duty cycle.
+
+Acceptance: before A7 starts, a recorded specification decision states either that refresh pauses while a deferral outcome is shown or that a key waits for the current read to finish. The A6 journey measures how often a page-set read is in flight after association, and a model test covers the chosen rule.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-ftw9",
+    "depends_on_id": "acat-wm-034-3vqz",
+    "type": "discovered-from",
+    "created_at": "2026-09-24T16:19:43.269856Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
   }
 ]
 #+end_src
@@ -4398,6 +4534,74 @@ work is finished.
 ]
 #+end_src
 
+* TODO [#C] Assert the composite install and decision head in the PTY journey
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-i9aj
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-24 Thu 09:19]
+:MODIFIED: [2026-09-24 Thu 09:19]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+A5 fess round 2 (fess/A-A5-r2.md), low, fixture coverage. manager/test/service_http.py near 532 waits only for "Phase: associated". It does not assert "Observation: current" or "Runtime: Running", so a regression in the A5 composite install would not fail tui-approval. No PTY run shows a decision-head component installed through the real observedBinding (A5 limitation L3).
+
+Acceptance: the A6 journey asserts the composite install lines on the associated screen and records an associated screen while the control names a decision head, and a broken-step control shows that the assertion is load-bearing.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-i9aj",
+    "depends_on_id": "acat-wm-034-3vqz",
+    "type": "discovered-from",
+    "created_at": "2026-09-24T16:19:45.117537Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
+* TODO [#D] Correct the PLAN.org Ctrl-D silent-refusal entry
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-iea9
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-24 Thu 09:19]
+:MODIFIED: [2026-09-24 Thu 09:19]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+A5 fess round 2 (fess/A-A5-r2.md), low, documentation drift. doc/PLAN.org near line 15032 says that Ctrl-D "does nothing silently" after serviceMutable refuses it. Since A5 the key shows a visible key outcome.
+
+Acceptance: the entry describes the visible key outcome. As the refocus note requires, this change waits for documentation reconciliation after the Phase A journey passes.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-iea9",
+    "depends_on_id": "acat-wm-034-3vqz",
+    "type": "discovered-from",
+    "created_at": "2026-09-24T16:19:45.338975Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
 * DONE [#B] Isaac-review decisions D1-D11: surface calls, panelText, revisingYielding, failure vocabulary, citation regate
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -4482,6 +4686,40 @@ doc/research/isaac-workflows.md §6 holds ten yes/no decisions from the incite/a
     "author": "johnw",
     "text": "D-SLATE COMPLETE. All eleven rulings plus ask_ are in the tree, verified,\naudited, and pushed (waves: a39c4f3+b212614, e47c4c1+5f22d09,\nd63deb9+bd51043; designs 68d6f1b).\n\nThe wiggum Definition of Done, with evidence:\n1. Every ruling implemented - D1 calls/D8 inputs (wave 2), D2 panelText,\n   D3 revising-yields (Raw refreeze spent request-side only; replies\n   moved on 0 of 128), D4 revisingOn, D5 world-authored receipts, D6\n   full incl. fail-over wired to the transports, D7 deciders + loud-arm,\n   D9 pin guard, D10 examples pin + G9 documented, D11 citations\n   re-derived + gated (246 over a 200 floor), ask_ (wave 1).\n2. Full suite green, shown: lake 2085 jobs; corpus-gen idempotent at 189;\n   tier0 189/189; tier1 29/29 (24 exact + 5 alpha incl. the call vectors\n   and the yield gate); bisim clean (P1 40/40, P2 960/960 after one\n   load-phantom retry - see acat-bisim-ping-retry); ci/acp 12/12;\n   ci/deck 7/7; ci/examples 7/0; ci/policies 19; ci/citations resolving.\n3. The last work commit (d63deb9) fess-audited: FINDINGS(4), no false\n   claims, central movement claim reproduced at byte level by the\n   auditor; all findings folded (bd51043), incl. F1 turning D3's Lean\n   theorem into a cross-implementation gate (semantic-008's trace ends\n   \"yielded: fix draft: thin\" - the amendment, not the draft).\n4. No partner observations outstanding (no observations dir).\n5. main == origin/main, clean tree.\nThree audits across the slate: FINDINGS(6)/(4)/(4), every finding an\nomission or gap rather than a falsehood, every one folded. Two\ncoordination incidents (snapshot clobber; resume twins), both resolved,\nlessons in memory. The corpus grew 128 -> 189, every growth additive,\nthe one authorized refreeze spent entirely on request-side fields.\n",
     "created_at": "2026-08-19T13:03:34Z"
+  }
+]
+#+end_src
+
+* TODO [#D] Keep the TUI stale status visible across a refresh start
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-iv7d
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-24 Thu 09:19]
+:MODIFIED: [2026-09-24 Thu 09:19]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+A5 fess round 2 (fess/A-A5-r2.md), low, honesty. The stale status line that Model.refuseRequestRead sets is overwritten by "loading manager catalogue" at the next tick, about one second later (tui/src/Agentic/Tui/App.hs near 370 and 689). The refusal code stays visible in the observation line of the request pane. The render checks show the status only immediately after the refusal.
+
+Acceptance: either the stale status (or the unchanged modelStatus) survives the start of a request refresh, with a model test across a refresh start, or the current-state documentation states that the pane line carries the stale state.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-iv7d",
+    "depends_on_id": "acat-wm-034-3vqz",
+    "type": "discovered-from",
+    "created_at": "2026-09-24T16:19:43.713479Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
   }
 ]
 #+end_src
@@ -5295,6 +5533,40 @@ Phase 1 gate of acat-haskell-program-xgw. Research the four mechanisms with 2026
 
 Remove the unconditional question envelope from the shared live-prompt renderer. Text questions must send authored prompt bytes only. Typed replies retain decoder-required format instructions without role, intent, routing, mode, or draw bookkeeping in the message. Preserve request metadata, routing, permission policy, memoization, decoding, and retries. Verify the runtime boundary and deterministic deck and ACP transports. No live model calls or activation.
 
+* TODO [#C] Exercise the A5 App refusal and key-outcome wiring through a PTY
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-lzlp
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-24 Thu 09:19]
+:MODIFIED: [2026-09-24 Thu 09:19]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+A5 fess round 2 (fess/A-A5-r2.md), medium, verification gap. Only code inspection covers the App.hs calls to Model.refuseRequestRead, ServiceLane.serviceMutationKey, serviceKeyOutcome and retainKeyOutcome (tui/src/Agentic/Tui/App.hs near 625, 688-689, 704 and 743). tui-model-test does not compile App.hs, and no PTY run exercises a refused request read (503, 429 or 410), the stale or refused display, or a deferral, busy, key-help or resend-deferral key outcome. Related: acat-5k82 covers the App approval wiring.
+
+Acceptance: the A6 PTY journey, or a harness that includes App, exercises at least one refused request read with the stale display and at least one visible key outcome, and a guard-breaking control shows that the check fails when the App wiring is broken.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-lzlp",
+    "depends_on_id": "acat-wm-034-3vqz",
+    "type": "discovered-from",
+    "created_at": "2026-09-24T16:19:43.480401Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
 * DONE [#D] Rendering homomorphism out of the term algebra
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -5330,6 +5602,40 @@ The design names three homomorphisms: extensional, quantitative, rendering. Term
     "author": "johnw",
     "text": "Triage 2026-08-20: done in the live stratum — the third homomorphism exists out of Plan rather than Term: Agentic/Core/Report.lean:409-510 is the rendering stratum with totality and one-line-per-item as theorems, and Alg.lean lists explain among the structural recursions that ARE the fold at an algebra. The blocker (unconstrained i/o) was dissolved by Question.El. As written against Term: superseded.",
     "created_at": "2026-08-20T17:11:22Z"
+  }
+]
+#+end_src
+
+* TODO [#D] Give each missing Ctrl-D prerequisite its own outcome text
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-m67s
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-24 Thu 09:19]
+:MODIFIED: [2026-09-24 Thu 09:19]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+A5 fess round 2 (fess/A-A5-r2.md), low, honesty. The Ctrl-D fallback in tui/src/Agentic/Tui/App.hs near 704 always says "the request validator is not yet observed". The same text appears when the workflow descriptor or the input at the selected index is missing, and in those cases it is wrong.
+
+Acceptance: each of the three missing cases has its own key outcome text, and a model test or render check covers each text.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-m67s",
+    "depends_on_id": "acat-wm-034-3vqz",
+    "type": "discovered-from",
+    "created_at": "2026-09-24T16:19:44.451815Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
   }
 ]
 #+end_src
@@ -6952,6 +7258,40 @@ The targeted1.9.1 upgrade fixes the exercised DNS permitted/excluded cases, but 
 ]
 #+end_src
 
+* TODO [#D] Make the refusal resendOffered assertion non-vacuous
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-tpea
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-24 Thu 09:19]
+:MODIFIED: [2026-09-24 Thu 09:19]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+A5 fess round 2 (fess/A-A5-r2.md), low, vacuous subassertion. In the refusal helper "retained" (tui/test/ServiceTests.hs near 383-385), the clause "not (L.resendOffered lane)" is always true, because every lane in those checks is MutationAwaiting, which never offers a resend. The rest of the helper is load-bearing (verifier controls c02, c11 and c12 make it fail).
+
+Acceptance: a refusal case on a declared-uncertainty lane asserts that resendOffered is unchanged by the refusal, or the vacuous clause is removed.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-tpea",
+    "depends_on_id": "acat-wm-034-3vqz",
+    "type": "discovered-from",
+    "created_at": "2026-09-24T16:19:44.212982Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
 * TODO [#D] Assert the manager exit status in the tui-approval driver
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -7638,6 +7978,40 @@ dead-code pass, medium, two signals each. README.md:13-23 claims 'no Mathlib dep
     "author": "johnw",
     "text": "Both halves done: flake.nix comment corrected at a30613b (lean-toolchain exists, Mathlib required); README.md rewritten at HEAD (the Agentic.Term/Meaning era description replaced with the current tree: formalization + flagship, .wf language, CLI with both engines and session handoff, Haskell implementation with the final surface, conformance, build discipline, doc map). Pushed.",
     "created_at": "2026-08-18T17:44:38Z"
+  }
+]
+#+end_src
+
+* TODO [#D] Replace the silent admission guard in beginServiceMutation
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-u6lo
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-24 Thu 09:19]
+:MODIFIED: [2026-09-24 Thu 09:19]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+A5 fess round 2 (fess/A-A5-r2.md), low, silent failure. beginServiceMutation (tui/src/Agentic/Tui/App.hs near 487) re-checks admission with a silent "when". Both callers check admission immediately before with no lane change in between, so the false branch is unreachable today. If the invariant broke, a create key would clear the selection and start nothing, with no visible outcome.
+
+Acceptance: the silent guard is replaced by an internal-fault classification (A2) or a visible key outcome, so the false branch cannot drop a key silently.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-u6lo",
+    "depends_on_id": "acat-wm-034-3vqz",
+    "type": "discovered-from",
+    "created_at": "2026-09-24T16:19:44.685250Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
   }
 ]
 #+end_src
@@ -12645,7 +13019,7 @@ public or production deployment.
 :LABELS:   ["p6","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-24 Thu 02:50]
+:MODIFIED: [2026-09-24 Thu 09:19]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-029
 :SOURCE_REPO: agent-cat
@@ -12771,6 +13145,13 @@ coordination or SQL into the TUI.
     "author": "johnw",
     "text": "A1 baseline on unchanged source at HEAD 32c72f80. S3, manager/test/client_native.py with manager-client-check, passed at N1 and N8 as a deterministic native fixture: 36 lines 'PASS public client <scenario>', each of the 18 scenarios exactly twice, covering endpoint-bound references, credentials and redirects (verify-r3/V3-client-native.log under /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A1). Separately, the S4 all-target -Werror -fforce-recomp build found three pre-existing failures in manager-store-check and manager-command-check (missing-home-modules for Agentic.Manager.Protocol.Command and Protocol.Draft, traced to 910db084) and policy-probe (incomplete pattern at cli/test/PolicyProbe.hs:533 for TuiService, traced to d8c0609a) (verify-r3/V3-build-all-werror.log). They await an orchestrator decision before A13. The issue stays open.\n",
     "created_at": "2026-09-24T09:50:41Z"
+  },
+  {
+    "id": 321,
+    "issue_id": "acat-wm-029-nlmg",
+    "author": "johnw",
+    "text": "Phase A subtask A5 (resume-20260923) advances this package. It does not complete it. The TUI service read lane now issues one composite read through the original single-flight lane: request, receipt, preparation, snapshot, control and the head decision. The composite installs in one event only when the ticket, request id and run id match the current selection and every component validates. A declared refusal (503, 429, 410) keeps the last complete observation and marks it stale without changing mutation state. An unreadable receipt leaves the approval outcome unresolved and offers no resend. A compiled mutation-key admission predicate gives every key exactly one visible outcome.\n\nEvidence and ceilings: Werror package build passed (package build). tui-model-test passed at N1 and N8, 387 checks (pure model test), and 27 verifier guard-breaking overlays each fail a named check. tui-approval passed at N1 then N8 twice, and the PTY consent control failed as required at N1 and N8 (actual UI interaction, deterministic native fixture). tui/ci/tui.sh passed. Evidence: resume-20260923/A/A5/impl-r2 and A/A5/verify-r2 in the private evidence directory. Fess: fess/A-A5-r2.md, not blocking.\n\nLimits: no PTY run exercises a refused request read, the stale display, a key outcome or a decision-head install (acat-lzlp, acat-i9aj). The round-1 N8 failure is unexplained (acat-dxos). Deferral starvation risk for post-association keys is open (acat-ftw9).\n",
+    "created_at": "2026-09-24T16:19:58Z"
   }
 ]
 #+end_src
@@ -13013,7 +13394,7 @@ until WM-039 supplies it.
 :LABELS:   ["p7","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-24 Thu 06:40]
+:MODIFIED: [2026-09-24 Thu 09:19]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-033
 :SOURCE_REPO: agent-cat
@@ -13122,6 +13503,13 @@ to an unapproved local launch.
     "author": "johnw",
     "text": "Subtask A3 (resume workflow wm023-20260923) advanced the TUI service transport frontend by making approval-key admissibility a compiled pure predicate, tui/src/Agentic/Tui/Approval.hs, with fixed visible refusals and notices that survive observation installs. Evidence: 288 model checks at N1 and N8, 26 guard-breaking controls, a forced Werror build, tracked tui-approval at N1 then N8, and the tui gate, all under /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A3/verify-r2. Local-mode key handling is byte-identical. This package is not closed by a subtask.\n",
     "created_at": "2026-09-24T13:40:48Z"
+  },
+  {
+    "id": 322,
+    "issue_id": "acat-wm-033-4g77",
+    "author": "johnw",
+    "text": "Phase A subtask A5 (resume-20260923) advances this package. It does not complete it. The TUI service read lane now issues one composite read through the original single-flight lane: request, receipt, preparation, snapshot, control and the head decision. The composite installs in one event only when the ticket, request id and run id match the current selection and every component validates. A declared refusal (503, 429, 410) keeps the last complete observation and marks it stale without changing mutation state. An unreadable receipt leaves the approval outcome unresolved and offers no resend. A compiled mutation-key admission predicate gives every key exactly one visible outcome.\n\nEvidence and ceilings: Werror package build passed (package build). tui-model-test passed at N1 and N8, 387 checks (pure model test), and 27 verifier guard-breaking overlays each fail a named check. tui-approval passed at N1 then N8 twice, and the PTY consent control failed as required at N1 and N8 (actual UI interaction, deterministic native fixture). tui/ci/tui.sh passed. Evidence: resume-20260923/A/A5/impl-r2 and A/A5/verify-r2 in the private evidence directory. Fess: fess/A-A5-r2.md, not blocking.\n\nLimits: no PTY run exercises a refused request read, the stale display, a key outcome or a decision-head install (acat-lzlp, acat-i9aj). The round-1 N8 failure is unexplained (acat-dxos). Deferral starvation risk for post-association keys is open (acat-ftw9).\n",
+    "created_at": "2026-09-24T16:19:59Z"
   }
 ]
 #+end_src
@@ -13133,7 +13521,7 @@ to an unapproved local launch.
 :LABELS:   ["p7","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-09 Wed 22:34]
+:MODIFIED: [2026-09-24 Thu 09:19]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-034
 :SOURCE_REPO: agent-cat
@@ -13198,6 +13586,20 @@ Local-mode behavior remains intact without a duplicated service runtime model.
     "created_by": "johnw",
     "metadata": "{}",
     "thread_id": ""
+  }
+]
+#+end_src
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 320,
+    "issue_id": "acat-wm-034-3vqz",
+    "author": "johnw",
+    "text": "Phase A subtask A5 (resume-20260923) advances this package. It does not complete it. The TUI service read lane now issues one composite read through the original single-flight lane: request, receipt, preparation, snapshot, control and the head decision. The composite installs in one event only when the ticket, request id and run id match the current selection and every component validates. A declared refusal (503, 429, 410) keeps the last complete observation and marks it stale without changing mutation state. An unreadable receipt leaves the approval outcome unresolved and offers no resend. A compiled mutation-key admission predicate gives every key exactly one visible outcome.\n\nEvidence and ceilings: Werror package build passed (package build). tui-model-test passed at N1 and N8, 387 checks (pure model test), and 27 verifier guard-breaking overlays each fail a named check. tui-approval passed at N1 then N8 twice, and the PTY consent control failed as required at N1 and N8 (actual UI interaction, deterministic native fixture). tui/ci/tui.sh passed. Evidence: resume-20260923/A/A5/impl-r2 and A/A5/verify-r2 in the private evidence directory. Fess: fess/A-A5-r2.md, not blocking.\n\nLimits: no PTY run exercises a refused request read, the stale display, a key outcome or a decision-head install (acat-lzlp, acat-i9aj). The round-1 N8 failure is unexplained (acat-dxos). Deferral starvation risk for post-association keys is open (acat-ftw9).\n",
+    "created_at": "2026-09-24T16:19:58Z"
   }
 ]
 #+end_src

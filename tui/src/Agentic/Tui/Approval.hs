@@ -9,15 +9,16 @@
 -- 'approvalDecision' decides the one outcome of each press. Forbidden keys and
 -- views are refused first, before any command-lane, read-lane or review fact
 -- is consulted. No key approves under the key help, Enter never approves, and
--- y never approves in the detail view. A y in the summary then requires an
--- idle command lane without an internal fault, and a displayed review that is
--- current, live, bound to the request and its literals, and complete on the
--- screen.
+-- y never approves in the detail view. A y in the summary then requires the
+-- mutation-key admission of 'mutationAdmission' to start, and a displayed
+-- review that is current, live, bound to the request and its literals, and
+-- complete on the screen.
 --
--- A read in flight does not decide any outcome. On the review screen the only
--- read is the refresh of the current request, preparation and receipt. An
--- approval start ends its read ticket and cancels it, so that read delivers
--- nothing afterwards, and no page set is abandoned.
+-- A single-resource read in flight does not decide any outcome. An approval
+-- start ends its read ticket and cancels it, so that read delivers nothing
+-- afterwards. A page-set read in flight defers a summary y visibly, so no
+-- page set is abandoned. On the review screen the refresh reads only the
+-- request, its preparation and a receipt, which are single resources.
 --
 -- Every press yields a 'KeyNotice' with a fixed text and the sequence number
 -- of the press among the approval-key presses of the session. 'retainNotice'
@@ -52,7 +53,7 @@ import qualified Agentic.Manager.Client as C
 import Agentic.Tui.Model (Screen (..))
 import Agentic.Tui.Service (Workflow, literalInputs, reviewLive, reviewMatches)
 import qualified Agentic.Tui.Service as Service
-import Agentic.Tui.ServiceLane (Lane (..), MutationState (..))
+import Agentic.Tui.ServiceLane (KeyAdmission (..), Lane, MutationState (..), mutationAdmission)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -154,6 +155,8 @@ data Refusal
     HelpRefused
   | CommandBusy
   | FaultStopped
+  | -- | A summary y while a page-set read is in flight.
+    ReadDeferred
   | StaleReview
   | ExpiredReview
   | MismatchedReview
@@ -171,26 +174,24 @@ data ApprovalDecision a
 -- checked review.
 --
 -- The view and the key decide first, so no forbidden-key refusal depends on
--- the lane or the review. The read ticket of the lane is never consulted.
+-- the lane or the review. A summary y then takes the mutation-key admission
+-- of the lane, and only a start consults the review.
 approvalDecision :: ApprovalKey -> ReviewView -> Lane pending location -> ReviewCheck a -> ApprovalDecision a
 approvalDecision key view lane review = case (view, key) of
   (KeyHelpView, _) -> Refuse HelpRefused
   (DetailView, EnterKey) -> Refuse EnterDetailRefused
   (SummaryView, EnterKey) -> Refuse EnterRefused
   (DetailView, ApproveKey) -> Refuse DetailRefused
-  (SummaryView, ApproveKey)
-    | not idle -> Refuse CommandBusy
-    | laneFault lane -> Refuse FaultStopped
-    | otherwise -> case review of
-        ReviewStale -> Refuse StaleReview
-        ReviewExpired -> Refuse ExpiredReview
-        ReviewMismatched -> Refuse MismatchedReview
-        ReviewClipped -> Refuse ClippedReview
-        ReviewCurrent value -> Approve value
-  where
-    idle = case laneMutation lane of
-      MutationIdle -> True
-      _ -> False
+  (SummaryView, ApproveKey) -> case mutationAdmission lane of
+    KeyBusy -> Refuse CommandBusy
+    KeyFaulted -> Refuse FaultStopped
+    KeyDeferred -> Refuse ReadDeferred
+    KeyStart -> case review of
+      ReviewStale -> Refuse StaleReview
+      ReviewExpired -> Refuse ExpiredReview
+      ReviewMismatched -> Refuse MismatchedReview
+      ReviewClipped -> Refuse ClippedReview
+      ReviewCurrent value -> Approve value
 
 -- | Whether y would approve in the current view. The approval hint is shown
 -- exactly when this holds.
@@ -222,6 +223,7 @@ refusalText refusal = case refusal of
   HelpRefused -> "Approval did not start: the key help is open. Esc closes it."
   CommandBusy -> "Approval did not start: a manager command is in progress or unresolved."
   FaultStopped -> "Approval did not start: an internal frontend fault stopped all mutations."
+  ReadDeferred -> "Approval did not start: a manager page-set read is in progress. Press y again."
   StaleReview -> "Approval did not start: the displayed review is stale."
   ExpiredReview -> "Approval did not start: the displayed review has expired or is no longer live."
   MismatchedReview -> "Approval did not start: the review does not match the request and its literals."

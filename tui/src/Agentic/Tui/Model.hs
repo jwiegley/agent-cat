@@ -8,6 +8,8 @@ module Agentic.Tui.Model
     initialModel,
     initialServiceModel,
     selectedServiceProfile,
+    refuseRequestRead,
+    refuseCatalogueRead,
     selectedWorkflow,
     visibleWorkflows,
     setWorkflowFilter,
@@ -51,6 +53,7 @@ import Agentic.Runtime
 import Agentic.Tui.RunModel (occurrenceStateLabel, runFailureLines, runStatusLabel)
 import Agentic.Tui.Types
 import qualified Agentic.Tui.Service as Service
+import qualified Agentic.Tui.ServiceLane as Lane
 import qualified Agentic.Manager.Client as Manager
 import Data.Aeson (Value (..), encode)
 import qualified Data.Aeson.KeyMap as KeyMap
@@ -135,6 +138,19 @@ selectedServiceProfile :: TuiModel -> Maybe Service.Profile
 selectedServiceProfile model = case modelScreen model of
   ServiceProfilesScreen profiles index -> atMay profiles index
   _ -> Nothing
+
+-- | The model after a refused read of the selected request, given the
+-- refusal code and whether a complete observation is installed. The screen
+-- stays, so the request and its last complete observation remain visible,
+-- and the status line states the refusal.
+refuseRequestRead :: Text -> Bool -> TuiModel -> TuiModel
+refuseRequestRead code retained model = model {modelStatus = Lane.staleStatus code retained}
+
+-- | The model after a refused profile or workflow catalogue read. No earlier
+-- observation of that catalogue is kept, so the screen names the refusal.
+refuseCatalogueRead :: Text -> TuiModel -> TuiModel
+refuseCatalogueRead problem model =
+  model {modelScreen = ServiceCommandScreen ("Observation refused: " <> problem), modelStatus = "previous command outcomes are unchanged"}
 
 selectedWorkflow :: TuiModel -> Maybe WorkflowDescriptor
 selectedWorkflow model = atMay (visibleWorkflows model) (modelWorkflowIndex model)

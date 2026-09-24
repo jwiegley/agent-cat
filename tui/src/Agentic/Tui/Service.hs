@@ -11,7 +11,10 @@ module Agentic.Tui.Service
     RunObservation (..), ResultReference (..), Verification (..), Artifact (..),
     ControlView (..), ControlOffer (..), DecisionView (..), DecisionContent (..),
     observeSnapshot, observeControl, observeDecision, observeResult, decodeSnapshot, decodeControl, decodeDecision,
-    decisionPrompt, answerValue, answerOffered, retryOffer, headMatches
+    decisionPrompt, answerValue, answerOffered, retryOffer, headMatches,
+    observedBinding, RunRead (..), RequestRead (..), Selection (..), ReadVerdict (..), readVerdict, runReadValid,
+    readRequestId, readRequestRun, runtimeStatus, observationLines,
+    approvalStatus, receiptSettlement
   ) where
 
 import qualified Agentic.Manager.Client as C
@@ -24,6 +27,7 @@ import Agentic.Runtime
     SteerSnapshot (..), ControlAckSnapshot (..), PublicToolUpdate (..), PublicTodoItem (..),
     PublicUsage (..), FailureClass (..), PersonAnswering (..), mkRunId )
 import Agentic.Tui.Person (PersonPrompt (..), personAnswerValue)
+import Agentic.Tui.RunModel (runStatusLabel)
 import Control.Monad (unless)
 import Crypto.Hash (Digest, SHA256, hash)
 import qualified Data.ByteString as BS
@@ -92,6 +96,7 @@ data Mutation
   | SaveLiteral !C.DraftView !Text !Text !Int
   | Enqueue !C.DraftView
   | Approve !C.DraftView !C.Preparation
+  deriving (Eq, Show)
 
 mutationOperation :: Mutation -> Text
 mutationOperation mutation = case mutation of
@@ -155,8 +160,17 @@ prepareMutation client now mutation observed
       _ -> pure (Left C.InvalidResponse)
 
 owned :: C.Observed -> Text -> Text -> Bool
-owned observed uri revision = C.referenceURI (C.observedReference observed) == uri
-  && C.observedETag observed == "\"" <> revision <> "\""
+owned = bound observedBinding
+
+-- | The URI and entity tag of one observation. They are display and
+-- precondition data, not an owner.
+observedBinding :: C.Observed -> (Text, Text)
+observedBinding observed = (C.referenceURI (C.observedReference observed), C.observedETag observed)
+
+-- | Whether an observation is the resource at this URI with the strong entity
+-- tag of this revision.
+bound :: (observed -> (Text, Text)) -> observed -> Text -> Text -> Bool
+bound binding observed uri revision = binding observed == (uri, "\"" <> revision <> "\"")
 
 observeDraft :: C.Client -> Workflow -> Text -> IO (Either C.ClientFailure (C.Observed,C.DraftView))
 observeDraft client row ident = case C.reference client ("/v1/requests/" <> ident) of
@@ -807,6 +821,133 @@ answerValue :: DecisionView -> Text -> Either Text Value
 answerValue decision input = case decisionContent decision of
   QuestionContent (String code) _ -> personAnswerValue code input
   _ -> Left "structured answer editor is not available"
+
+-- | The run components of one composite read: the complete snapshot page
+-- set, the run controls with their observation, and the observation of the
+-- decision at the head of the control queue when the controls name one. The
+-- observations are display and precondition data only.
+data RunRead observed = RunRead
+  { runReadSnapshot :: !RunObservation,
+    runReadControl :: !(observed, ControlView),
+    runReadDecision :: !(Maybe (observed, DecisionView))
+  } deriving (Eq, Show)
+
+-- | One composite read of the selected request: the request, its
+-- preparation in the review phase, the result of the receipt read for a
+-- retained command together with that command's mutation, and the run
+-- components when the selection names a run. A declared receipt failure
+-- stays in its slot.
+data RequestRead observed = RequestRead
+  { readRequest :: !(observed, C.DraftView),
+    readPreparation :: !(Maybe (observed, C.Preparation)),
+    readReceipt :: !(Maybe (Mutation, Either C.ClientFailure C.CommandReceipt)),
+    readRun :: !(Maybe (RunRead observed))
+  } deriving (Eq, Show)
+
+-- | The selected request and the run that its installed observation names.
+-- A read of the run components takes place only when the run is known.
+data Selection = Selection { selectedRequest :: !Text, selectedRun :: !(Maybe Text) }
+  deriving (Eq, Show)
+
+-- | How a delivered composite read relates to the current selection.
+data ReadVerdict
+  = -- | Every component is valid for the selection. The read may be installed.
+    ReadCurrent
+  | -- | The read concerns another request. It is not installed.
+    ReadForeign
+  | -- | A component is invalid or missing. The read is not installed.
+    ReadInvalid
+  deriving (Eq, Show)
+
+readRequestId :: RequestRead observed -> Text
+readRequestId = C.draftId . snd . readRequest
+
+readRequestRun :: RequestRead observed -> Maybe Text
+readRequestRun = C.draftRun . snd . readRequest
+
+-- | Decide a delivered composite read against the current selection. The
+-- first argument reads the URI and entity tag of an observation.
+--
+-- A read for another request is foreign. A read whose request names another
+-- run than the selected one, or no run, is invalid, so a changed association
+-- marks the installed observation stale and is never discarded silently. A
+-- read is current only when the request and any preparation are
+-- bound to their own URIs and revisions, and when the run components are
+-- present exactly when the selection names a run and are valid for that run
+-- and the request profile. A read before association that observes the first
+-- association carries no run components. The next read reads them.
+readVerdict :: (observed -> (Text, Text)) -> Selection -> RequestRead observed -> ReadVerdict
+readVerdict binding selection composite
+  | C.draftId request /= selectedRequest selection = ReadForeign
+  | Just run <- selectedRun selection, C.draftRun request /= Just run = ReadInvalid
+  | not (bound binding requestObserved ("/v1/requests/" <> C.draftId request) (C.draftRevision request)) = ReadInvalid
+  | not (all preparationBound (readPreparation composite)) = ReadInvalid
+  | otherwise = case (selectedRun selection, readRun composite) of
+      (Nothing, Nothing) -> ReadCurrent
+      (Just run, Just components) | runReadValid binding (C.draftProfile request) run components -> ReadCurrent
+      _ -> ReadInvalid
+  where
+    (requestObserved, request) = readRequest composite
+    preparationBound (observed, preparation) = C.draftPreparation request == Just (C.preparationId preparation)
+      && bound binding observed ("/v1/preparations/" <> C.preparationId preparation) (C.preparationRevision preparation)
+
+-- | Whether the run components are valid for this profile and run. The
+-- snapshot and the controls name the run, the controls observation carries
+-- the entity tag of their revision, and a decision is present exactly when
+-- the controls name a head. That decision is the head, belongs to the run and
+-- the profile, and its observation carries the entity tag of its revision.
+runReadValid :: (observed -> (Text, Text)) -> Text -> Text -> RunRead observed -> Bool
+runReadValid binding profile run (RunRead snapshot (controlObserved, control) decision) =
+  runIdentity snapshot == run && controlRun control == run
+    && bound binding controlObserved ("/v1/runs/" <> run <> "/control") (controlRevision control)
+    && case (controlHead control, decision) of
+      (Nothing, Nothing) -> True
+      (Just headId, Just (decisionObserved, view)) -> decisionId view == headId && decisionRun view == run
+        && decisionProfile view == profile && bound binding decisionObserved ("/v1/decisions/" <> headId) (decisionRevision view)
+      _ -> False
+
+-- | The runtime status that the snapshot publishes. A null runtime publishes
+-- none, and none is invented.
+runtimeStatus :: RunObservation -> Maybe RunStatus
+runtimeStatus = fmap snapshotRunStatus . runSnapshot
+
+-- | Display lines for the installed observation, given the refusal code of
+-- the latest read when that read was refused, whether a complete read is
+-- installed, and the installed run snapshot.
+observationLines :: Maybe Text -> Bool -> Maybe RunObservation -> [Text]
+observationLines stale installed run = case (stale, installed) of
+  (Nothing, False) -> []
+  (Nothing, True) -> "Observation: current" : runtime
+  (Just code, True) -> ("Observation: stale (" <> code <> "); the last complete observation is retained") : runtime
+  (Just code, False) -> ["Observation: refused (" <> code <> "); no complete observation is installed"]
+  where runtime = maybe [] (\observed -> ["Runtime: " <> maybe "not reported" runStatusLabel (runtimeStatus observed)]) run
+
+-- | The displayed approval receipt status after one request read, given the
+-- retained approval, the receipt read of this read with the mutation whose
+-- receipt it read, and the status before it. An approval always has a
+-- status, and "outcome unresolved" stands in for a status that no readable
+-- receipt has set. Only a readable receipt of the approval sets a receipt
+-- state. An unreadable receipt of the approval keeps the earlier state and
+-- states that the read was unavailable. A receipt read of another command,
+-- or no receipt read, changes nothing. No case supplies a resolved state.
+approvalStatus :: Mutation -> Maybe (Mutation, Either C.ClientFailure C.CommandReceipt) -> Maybe Text -> Text
+approvalStatus approval result before = case result of
+  Just (_, Right received) | receiptMatches approval received -> C.stateName (C.receiptState received)
+  Just (owner, Left _) | owner == approval -> maybe unresolved (\status -> maybe status id (T.stripSuffix unavailable status)) before <> unavailable
+  _ -> maybe unresolved id before
+  where
+    unresolved = "outcome unresolved"
+    unavailable = " (receipt read unavailable)"
+
+-- | The declared reason to leave a pending attempt unresolved, taken from the
+-- receipt read of this read. Only a readable receipt of that attempt that the
+-- manager reports as refused or unresolved settles it. An unreadable receipt
+-- settles nothing, so it never offers an exact resend.
+receiptSettlement :: Mutation -> Maybe (Mutation, Either C.ClientFailure C.CommandReceipt) -> Maybe Text
+receiptSettlement mutation result = case result of
+  Just (_, Right received) | receiptMatches mutation received, C.stateName (C.receiptState received) `elem` ["refused","unresolved"] ->
+    Just (C.stateName (C.receiptState received))
+  _ -> Nothing
 
 parseOutput :: Value -> Parser (Maybe Artifact)
 parseOutput = withObject "output" $ \fields -> do
