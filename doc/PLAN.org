@@ -6969,15 +6969,17 @@ Prior session context: three round-17 lexer edits were made and reverted (record
 ]
 #+end_src
 
-* TODO [#D] Give the remaining tool "cat" questions honest addressees
+* DONE [#D] Give the remaining tool "cat" questions honest addressees
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-remaining-cat-addressees-dhfm
 :LABELS:   []
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-24 Thu 13:52]
-:MODIFIED: [2026-09-24 Thu 13:52]
+:MODIFIED: [2026-09-24 Thu 14:54]
 :CREATED_BY: johnw
+:FINISHED: [2026-09-24 Thu 14:54]
+:CLOSE_REASON: Hello's subject is asked of model namer (example-001 rewritten; bills 3/3 unchanged); plan-feature and ship-feature-lite take the change request as an input (pins 13/12/12 and 148/77/3-23, bills 12 and 11); grind-tests' facts are asked of model facts. All gates pass.
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
