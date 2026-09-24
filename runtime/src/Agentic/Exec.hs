@@ -23,8 +23,9 @@
 --    this package that decides what an addressee's bytes mean. A second copy of
 --    that decision is exactly what @Exec.lean:248@–@:249@ says must not exist.
 -- 2. __The annotated Plan realization__ — 'runPlanIO' schedules dependency-ready
---    asks concurrently. STM memo reservations key reusable answers by bare Q;
---    every Plan occurrence constructs its own 'ExecEvent'; effects bypass reuse.
+--    asks concurrently. STM memo reservations key reusable answers by bare Q
+--    and the number of earlier effects; every Plan occurrence constructs its
+--    own 'ExecEvent'; effects bypass reuse and end it.
 --    Plan-order tickets restore the authored occurrence order.
 -- 3. __The answering service__ — 'WorldIO' consumes annotated `Request`; scripted,
 --    deck, ACP, routing and shell layers interpret that representation policy.
@@ -35,9 +36,10 @@
 -- memo hit or not. Each event keeps the authored request and says whether its
 -- answer was reused or which failover-relabelled question was dispatched.
 --
--- The memo stores semantic answer events keyed by bare Q, never authored event
--- annotations. Thus `consult q` followed by `observe q` invokes the service once
--- while the trace retains both intents. Effects are always dispatched.
+-- The memo stores semantic answer events keyed by bare Q and epoch, never
+-- authored event annotations. Thus `consult q` followed by `observe q` invokes
+-- the service once while the trace retains both intents, and the same pair
+-- with an effect between them invokes it twice. Effects are always dispatched.
 --
 -- Operational bills read this annotated trace:
 --
@@ -643,10 +645,15 @@ engineGap exception = do
 data Memo = Memo
   { -- The occurrence that first owned the bare-Q answer is its run-local
     -- answer-group identity; it never enters the semantic key.
-    memoTable :: !(Map EventKey (OccurrenceId, Event)),
-    memoPending :: !(Map EventKey (OccurrenceId, TMVar (Either SomeException PendingAnswer))),
+    memoTable :: !(Map MemoKey (OccurrenceId, Event)),
+    memoPending :: !(Map MemoKey (OccurrenceId, TMVar (Either SomeException PendingAnswer))),
     memoSpent :: !(Set Text)
   }
+
+-- | Reusable identity: the bare question, and the number of effects that
+-- precede the occurrence in plan order. An effect may change what any later
+-- question answers, so reuse never crosses one.
+type MemoKey = (Int, EventKey)
 
 data PendingAnswer = PendingAnswer !Event !Bool
 
@@ -671,6 +678,8 @@ data Scheduler = Scheduler
     -- | the completion of every question reserved since the last effect, which
     -- the next effect waits for
     schedulerReadsSinceEffect :: !(TVar [TMVar ()]),
+    -- | the number of effects reserved so far, in plan order
+    schedulerEpoch :: !(TVar Int),
     schedulerNextOccurrence :: !(TVar Word64),
     schedulerPersistence :: !PersistenceHooks,
     schedulerSink :: !EventSink,
@@ -678,8 +687,10 @@ data Scheduler = Scheduler
   }
 
 data PersistenceHooks = PersistenceHooks
-  { persistenceLookupAnswer :: Value -> IO (Maybe (Value, Text)),
-    persistenceStoreAnswer :: OccurrenceId -> Value -> Value -> Bool -> IO (),
+  { -- | a persisted reusable answer, by epoch and bare question
+    persistenceLookupAnswer :: Int -> Value -> IO (Maybe (Value, Text)),
+    -- | record a reusable answer under its occurrence, epoch and bare question
+    persistenceStoreAnswer :: OccurrenceId -> Int -> Value -> Value -> Bool -> IO (),
     persistenceStartEffect :: OccurrenceId -> Value -> IO (),
     persistenceCompleteEffect :: OccurrenceId -> Value -> Value -> IO (),
     persistenceStoreQuestion :: OccurrenceId -> Text -> Value -> IO (Maybe QuestionRef),
@@ -689,8 +700,8 @@ data PersistenceHooks = PersistenceHooks
 nullPersistenceHooks :: PersistenceHooks
 nullPersistenceHooks =
   PersistenceHooks
-    { persistenceLookupAnswer = const (pure Nothing),
-      persistenceStoreAnswer = \_ _ _ _ -> pure (),
+    { persistenceLookupAnswer = \_ _ -> pure Nothing,
+      persistenceStoreAnswer = \_ _ _ _ _ -> pure (),
       persistenceStartEffect = \_ _ -> pure (),
       persistenceCompleteEffect = \_ _ _ -> pure (),
       persistenceStoreQuestion = \_ _ _ -> pure Nothing,
@@ -749,8 +760,9 @@ runPlanObservedWith controls persistence sink ch w p = mask $ \restore -> do
   failed <- newEmptyTMVarIO
   effects <- newTurnLaneIO
   readsSinceEffect <- newTVarIO []
+  epochs <- newTVarIO 0
   nextOccurrence <- newTVarIO 0
-  let scheduler = Scheduler memo threads failed effects readsSinceEffect nextOccurrence persistence sink controls
+  let scheduler = Scheduler memo threads failed effects readsSinceEffect epochs nextOccurrence persistence sink controls
       run = do
         (a, tickets) <- execIn scheduler w ch PendingNil p
         ordered <- traverse (awaitTicket scheduler) tickets
@@ -769,16 +781,18 @@ execIn scheduler w ch y pl = case pl of
     pure (a, [])
   PAskC c q k -> do
     occurrence <- freshOccurrence scheduler
+    epoch <- occurrenceEpoch scheduler (intentIsEffect (reqIntent q))
     cell <-
       spawn scheduler (reserveQuestion scheduler occurrence w ch c (requestShapeOf q)) $
-        runOccurrence scheduler w ch occurrence c q
+        runOccurrence scheduler w ch occurrence epoch c q
     (result, tickets) <- execIn scheduler w ch (PendingCons cell y) k
     pure (result, Ticket occurrence cell : tickets)
   PAsk c shape prompt k -> do
     occurrence <- freshOccurrence scheduler
+    epoch <- occurrenceEpoch scheduler (intentIsEffect (rsIntent shape))
     cell <- spawn scheduler (reserveQuestion scheduler occurrence w ch c shape) $ do
       words' <- awaitExpr scheduler prompt y
-      runOccurrence scheduler w ch occurrence c (withRequestPrompt shape words')
+      runOccurrence scheduler w ch occurrence epoch c (withRequestPrompt shape words')
     (result, tickets) <- execIn scheduler w ch (PendingCons cell y) k
     pure (result, Ticket occurrence cell : tickets)
   PCase _ e arms -> do
@@ -881,6 +895,15 @@ cancelWorkers :: Scheduler -> IO ()
 cancelWorkers scheduler =
   atomically (readTVar (schedulerThreads scheduler)) >>= mapM_ killThread
 
+-- | The epoch of an occurrence reached in traversal order: the number of
+-- effects before it. An effect advances the count for everything after it.
+occurrenceEpoch :: Scheduler -> Bool -> IO Int
+occurrenceEpoch scheduler isEffect =
+  atomically $ do
+    n <- readTVar (schedulerEpoch scheduler)
+    when isEffect (writeTVar (schedulerEpoch scheduler) (n + 1))
+    pure n
+
 freshOccurrence :: Scheduler -> IO OccurrenceId
 freshOccurrence scheduler =
   atomically $ do
@@ -926,8 +949,8 @@ pendingEnv uses (PendingCons cell rest) = do
 dropHead :: IntSet -> IntSet
 dropHead = IntSet.mapMonotonic (subtract 1) . IntSet.delete 0
 
-runOccurrence :: Scheduler -> WorldIO -> Chains -> OccurrenceId -> SCode c -> Request c -> IO (NodeResult c)
-runOccurrence scheduler w ch occurrence c request = do
+runOccurrence :: Scheduler -> WorldIO -> Chains -> OccurrenceId -> Int -> SCode c -> Request c -> IO (NodeResult c)
+runOccurrence scheduler w ch occurrence epoch c request = do
   emit scheduler $
     OccurrenceStarted
       occurrence
@@ -943,7 +966,7 @@ runOccurrence scheduler w ch occurrence c request = do
         Nothing -> pure ()
         Just targets -> emit scheduler (OccurrenceDispatchPending occurrence targets)
   context <- newAttemptContext scheduler occurrence
-  outcome <- try (askOrMemo scheduler w ch context c request)
+  outcome <- try (askOrMemo scheduler w ch context epoch c request)
   case outcome of
     Right (answer, event@(ExecEvent _ _ source _)) -> do
       persistenceCheckpoint (schedulerPersistence scheduler) occurrence
@@ -1080,14 +1103,15 @@ failureClassOf e
 -- | Consult a whole fail-over chain under one concurrent memo reservation.
 -- A waiter shares the owner's final answer or final failure; it never starts a
 -- second walk between rungs. Once a failed reservation is removed, a genuinely
--- later occurrence may retry the transient gap.
-askOrMemo :: forall c. Scheduler -> WorldIO -> Chains -> AttemptContext -> SCode c -> Request c -> IO (El c, ExecEvent)
-askOrMemo scheduler w ch context c q = do
+-- later occurrence may retry the transient gap. Reuse is keyed by the epoch as
+-- well as the bare question, so no answer is reused across an effect.
+askOrMemo :: forall c. Scheduler -> WorldIO -> Chains -> AttemptContext -> Int -> SCode c -> Request c -> IO (El c, ExecEvent)
+askOrMemo scheduler w ch context epoch c q = do
   let question = questionJson c (reqQuestion q)
   persisted <-
     if intentIsEffect (reqIntent q)
       then pure Nothing
-      else persistenceLookupAnswer (schedulerPersistence scheduler) question
+      else persistenceLookupAnswer (schedulerPersistence scheduler) epoch question
   case persisted of
     Just (raw, provenance) -> case answerFromJson c raw of
       Nothing -> ioError (userError "persisted answer does not match the current question code/schema")
@@ -1112,7 +1136,7 @@ askOrMemo scheduler w ch context c q = do
 
     memoWalk :: [Request c] -> IO (El c, ExecEvent)
     memoWalk candidates' = mask $ \restore -> do
-      let key = questionKey c q
+      let key = (epoch, questionKey c q)
       claim <- atomically (claimQuestion scheduler key (attemptOccurrenceId context))
       case claim of
         ClaimCached owner event -> reuse owner event
@@ -1133,6 +1157,7 @@ askOrMemo scheduler w ch context c q = do
               persistenceStoreAnswer
                 (schedulerPersistence scheduler)
                 owner
+                epoch
                 (questionJson c (reqQuestion q))
                 (answerJson c answer)
                 replayable
@@ -1241,7 +1266,7 @@ nextLive scheduler qs = atomically $ do
 dispatchAttempt :: WorldIO -> AttemptContext -> SCode c -> Request c -> IO (El c)
 dispatchAttempt w context c dispatched = worldAskAttemptIO w context c dispatched
 
-claimQuestion :: Scheduler -> EventKey -> OccurrenceId -> STM Claim
+claimQuestion :: Scheduler -> MemoKey -> OccurrenceId -> STM Claim
 claimQuestion scheduler key owner = do
   memo <- readTVar (schedulerMemo scheduler)
   case Map.lookup key (memoTable memo) of

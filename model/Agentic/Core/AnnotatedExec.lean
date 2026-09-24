@@ -4,8 +4,10 @@ import Agentic.Core.SemanticExec
 # Sequential reference execution of annotated Plans
 
 Intent is interpreted here, below denotation. Reusable identity is the authored
-bare question; effects bypass memo. Production scheduling remains Haskell and is
-accepted empirically against these representation observations.
+bare question within a stretch of the run that contains no effect: an effect
+bypasses the memo and clears it, so a question repeated after an effect is put
+again. Production scheduling remains Haskell and is accepted empirically
+against these representation observations.
 -/
 
 namespace Agentic.Core
@@ -22,13 +24,15 @@ structure ExecResult (A : Type) where
   trace : ExecTrace
 
 /-- Put or reuse one annotated occurrence. Memo identity is bare `Q`; the memo
-stores only its typed answer, while the caller constructs the current event. -/
+stores only its typed answer, while the caller constructs the current event.
+An effect is always put, and it returns an empty table: an effect may change
+what any later question answers, so nothing reused across it is sound. -/
 def execRequest {m : Type → Type} [Monad m] (o : ExecOracle m)
     (c : Code) (r : Request c) (t : Table) :
     m (El c × Table × AnswerSource c) :=
   if r.isEffect then do
     let a ← o c r t
-    pure (a, t, .asked r.question)
+    pure (a, Table.nil, .asked r.question)
   else
     match lookup t c r.question with
     | some a => pure (a, t, .reused)
@@ -66,7 +70,7 @@ def execRequestPure (ω : Ω) (c : Code) (r : Request c) (t : Table) :
     El c × Table × AnswerSource c :=
   if r.isEffect then
     let a := ω c r.question
-    (a, t, .asked r.question)
+    (a, Table.nil, .asked r.question)
   else
     match lookup t c r.question with
     | some a => (a, t, .reused)
@@ -105,7 +109,7 @@ def Plan.execAnnotated {Γ : Ctx} {A : Type} (ω : Ω)
     Plan.execAnnotated ω (.askC c r k) γ t =
       if r.isEffect then
         let a := ω c r.question
-        let result := Plan.execAnnotated ω k (.cons a γ) t
+        let result := Plan.execAnnotated ω k (.cons a γ) Table.nil
         ⟨result.value, result.table, ⟨c, r, .asked r.question, a⟩ :: result.trace⟩
       else
         match lookup t c r.question with
@@ -132,7 +136,7 @@ def Plan.execAnnotated {Γ : Ctx} {A : Type} (ω : Ω)
     Plan.execAnnotated ω (.ask c s e k) γ t =
       if r.isEffect then
         let a := ω c r.question
-        let result := Plan.execAnnotated ω k (.cons a γ) t
+        let result := Plan.execAnnotated ω k (.cons a γ) Table.nil
         ⟨result.value, result.table, ⟨c, r, .asked r.question, a⟩ :: result.trace⟩
       else
         match lookup t c r.question with
@@ -177,6 +181,18 @@ def effectThenConsult (q : Q .ack) : Plan [] Unit :=
 @[simp] theorem effectThenConsult_not_reused (ω : Ω) (q : Q .ack) :
     ((Plan.execAnnotated ω (effectThenConsult q) Env.nil Table.nil).trace.map
       ExecEvent.reusedB) = [false, false] := rfl
+
+/-- Regression: an effect clears the reusable answer table. A consultation
+repeated after an intervening effect is dispatched again rather than reused,
+because the effect may have changed what the question answers. -/
+def consultEffectConsult (q w : Q .ack) : Plan [] Unit :=
+  .askC .ack (Request.consult q)
+    (.askC .ack (Request.effect w)
+      (.askC .ack (Request.consult q) (.ret fun _ => ())))
+
+@[simp] theorem consultEffectConsult_not_reused (ω : Ω) (q w : Q .ack) :
+    ((Plan.execAnnotated ω (consultEffectConsult q w) Env.nil Table.nil).trace.map
+      ExecEvent.reusedB) = [false, false, false] := rfl
 
 /-- Correctness relation for the actual pure K5 annotated executor. -/
 def ExecResult.Correct (ω : Ω) (p : Plan Γ A) (γ : Env Γ)
@@ -232,7 +248,7 @@ theorem Plan.execAnnotated_correct (ω : Ω) (p : Plan Γ A) :
     | effect =>
       intro γ t ht
       simp only [Plan.execAnnotated_askC, Request.isEffect, Intent.isEffect, if_true]
-      obtain ⟨hv, ht', htr⟩ := ih (.cons () γ) t ht
+      obtain ⟨hv, ht', htr⟩ := ih (.cons () γ) Table.nil (extends_nil ω)
       exact ⟨hv, ht', congrArg (fun xs => (⟨.ack, q, ()⟩ : Event) :: xs) htr⟩
   | ask c s e k ih =>
     rcases s with ⟨shape, intent⟩
@@ -276,7 +292,7 @@ theorem Plan.execAnnotated_correct (ω : Ω) (p : Plan Γ A) :
       simp only [Plan.execAnnotated_ask, Request.isEffect, Request.intent_withPrompt,
         Request.question_withPrompt, Intent.isEffect, if_true]
       let q := shape.withPrompt (e γ)
-      obtain ⟨hv, ht', htr⟩ := ih (.cons () γ) t ht
+      obtain ⟨hv, ht', htr⟩ := ih (.cons () γ) Table.nil (extends_nil ω)
       exact ⟨hv, ht', congrArg (fun xs => (⟨.ack, q, ()⟩ : Event) :: xs) htr⟩
   | case tag e arms ih =>
     intro γ t ht

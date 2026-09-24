@@ -5785,15 +5785,17 @@ Independent native UI review found that Pi 0.85.1 showExtensionCustom closes ove
 ]
 #+end_src
 
-* DOING [#B] A repeated question after an effect is answered from before it
+* DONE [#B] A repeated question after an effect is answered from before it
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-memo-across-effect-bgyt
 :LABELS:   []
 :ISSUE_TYPE: bug
 :CREATED:  [2026-09-24 Thu 11:13]
-:MODIFIED: [2026-09-24 Thu 12:55]
+:MODIFIED: [2026-09-24 Thu 13:24]
 :CREATED_BY: johnw
+:FINISHED: [2026-09-24 Thu 13:24]
+:CLOSE_REASON: An effect clears reuse: the runtime keys reusable answers and persisted answers by (epoch, bare question), and Lean's execAnnotated clears its table at an effect with billMemo counting per stretch between effects. Corpus byte-identical (193 re-observed); bisim 500/500; all deterministic and documentation gates pass.
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0

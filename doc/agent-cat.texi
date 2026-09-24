@@ -694,8 +694,8 @@ proves that every actual world bills at least six.  A displayed minimum is
 therefore the folded tree minimum, unless a reachability theorem says more.
 
 @code{billMemo} belongs to execution rather than to principal meaning.  Consult
-and observe occurrences can share one answer by bare question identity, whereas
-effects are retained per occurrence.  The operational bill can consequently
+and observe occurrences can share one answer by bare question identity between
+two acts, whereas effects are retained per occurrence.  The operational bill can consequently
 fall below the fresh semantic bill when repeated reusable questions occur.
 @ref{Operational Model} gives the policy that produces this difference.
 
@@ -766,11 +766,11 @@ reflexivity.
 @headitem Intent @tab Source position @tab Reuse policy @tab Operational role
 @item consult
 @tab Ordinary value question
-@tab Reusable by bare question
+@tab Reusable by bare question until the next act
 @tab Obtain an answer from a model, tool, or person.
 @item observe
 @tab Executable tool in value position
-@tab Reusable by bare question
+@tab Reusable by bare question until the next act
 @tab Run an argv to obtain a typed observation.
 @item effect
 @tab Statement-position act
@@ -794,7 +794,9 @@ earlier answers cannot alter it.
 
 The annotation gives the runtime five things that the bare question cannot
 give.  Consult and observe occurrences share one memo table that is keyed by
-the bare question, so a repeated question is answered once.  Effect
+the bare question, so a repeated question is answered once between two acts.
+An act clears the table, because it may change what any later question
+answers, so a question repeated after an act is asked again.  Effect
 occurrences never read or populate that table.  The runtime dispatches every
 effect and bills each one per occurrence, and this is the difference between
 @code{billFresh} and @code{billMemo}.  Under the ACP transport, only an effect
@@ -830,9 +832,13 @@ as @ref{Permission and external effects} describes.
 @section Memoization and event identity
 
 @cindex memoization
-The reusable memo table is keyed by the bare typed question.  Consult and
+The reusable memo table is keyed by the bare typed question together with the
+number of effects that precede the occurrence in Plan order.  Consult and
 observe occurrences read and populate it.  Effect occurrences bypass it in both
-directions, which preserves each authored effect and its operational charge.  A
+directions, which preserves each authored effect and its operational charge,
+and each effect starts a new stretch in which nothing earlier is reused.
+Persisted answers carry the same key, so a resumed run and a lineage child
+reuse an answer only within the stretch that produced it.  A
 consultation and an observation of the same bare question can therefore share
 one underlying answer, and they still produce two annotated execution events
 with their respective intents.
@@ -887,8 +893,8 @@ flag receives success or failure.  A verdict receives approval on success and
 the first failing line on failure.  A result kind without such a representation
 causes the run to abandon.  Statement position produces a receipt only through
 the effect policy.  A command in value position that follows an act starts after
-the act has completed, so it reads what the act wrote.  A repeated observation
-is still answered from the memo table, even when an act intervenes.
+the act has completed, so it reads what the act wrote.  The act also clears the
+memo table, so an observation repeated after it runs the command again.
 
 The program-authored intent cannot establish the physical nature of an argv.
 An observation tag does not make a command read-only.  An effect tag controls
@@ -922,7 +928,8 @@ capitalTools =
 
 Intent follows the source position, as it does for every question.  A
 registered tool whose answer is bound is a consultation, so its answer is
-reused by bare question.  A registered tool in statement position is an
+reused by bare question until the next act.  A registered tool in statement
+position is an
 effect.  It runs once per occurrence in the ordered effect lane, and every
 later question waits for it to complete.
 
@@ -1180,7 +1187,7 @@ retries, timeouts, and selected backends are execution metadata, and they never
 rewrite the authored question in @code{semanticTrace}.  Version 2 deduplicates
 bare questions in its memo bill, and the version-2 corpus entries pin that
 billing.  Versions 3 and 4 share consult and observe answers by bare question
-and retain every effect occurrence.  The pure oracle itself executes no
+between two effects and retain every effect occurrence.  The pure oracle itself executes no
 command.
 
 @section The string layer
@@ -3935,8 +3942,8 @@ request occurrence.
 
 @cindex bill, memo
 @item billMemo
-The operational bill that deduplicates reusable bare questions and retains every
-effect occurrence.
+The operational bill that deduplicates reusable bare questions between two
+effects and retains every effect occurrence.
 
 @cindex binding
 @item binding
@@ -4002,8 +4009,8 @@ questions and memo keys.
 @cindex effect intent
 @item effect
 Occurrence-sensitive execution intent for a statement-position act.  It uses
-the receipt code, bypasses reusable memo state, reserves the effect lane, and
-can request permission.  It starts after every earlier occurrence in Plan order
+the receipt code, bypasses reusable memo state and clears it, reserves the
+effect lane, and can request permission.  It starts after every earlier occurrence in Plan order
 has completed, and every later occurrence starts after it completes.
 
 @cindex environment
@@ -4038,8 +4045,9 @@ guides execution and is erased by denotation.
 
 @cindex memo table
 @item memo table
-The typed runtime table that is keyed by bare questions.  Consult and observe
-use it, and effects bypass it.
+The typed runtime table that is keyed by bare questions and the number of
+earlier effects.  Consult and observe use it, and effects bypass it and begin
+a new stretch of it.
 
 @cindex observe intent
 @item observe

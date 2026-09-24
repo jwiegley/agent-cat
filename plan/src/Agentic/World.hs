@@ -482,13 +482,15 @@ billFresh = fromIntegral . length
 billExecFresh :: ExecTrace -> Integer
 billExecFresh = fromIntegral . length
 
--- | Operational memo projection: reusable identity is bare Q, effects are kept
--- per occurrence, and retained events preserve their own authored annotation.
+-- | Operational memo projection (@ExecCost.execMemoEvents@): reusable identity
+-- is bare Q within each stretch between effects, effects are kept per
+-- occurrence, and retained events preserve their own authored annotation. An
+-- effect clears reuse, so one question on both sides of it is charged twice.
 execMemoEvents :: ExecTrace -> ExecTrace
 execMemoEvents [] = []
 execMemoEvents (e : es)
   | execEventIsEffect e = e : execMemoEvents es
-  | execEventKey e `elem` map execEventKey (filter (not . execEventIsEffect) es) =
+  | execEventKey e `elem` map execEventKey (takeWhile (not . execEventIsEffect) es) =
       execMemoEvents es
   | otherwise = e : execMemoEvents es
 

@@ -199,6 +199,7 @@ import Control.Concurrent.STM
     readTMVar,
     readTVar,
     readTVarIO,
+    writeTVar,
     retry,
     takeTMVar,
     tryPutTMVar,
@@ -977,6 +978,45 @@ writeAfterReadsProbe failures = do
   where
     lastMaybe xs = if null xs then Nothing else Just (last xs)
 
+-- | An act clears reuse. The same consultation on both sides of an act is put
+-- to the world twice, the persisted answers are keyed apart by the number of
+-- acts before them, and without an act between them it is put once.
+memoAcrossEffectProbe :: IORef Int -> IO ()
+memoAcrossEffectProbe failures = do
+  putToWorld <- newTVarIO ([] :: [Text])
+  stored <- newTVarIO ([] :: [(Int, Text)])
+  let world = concurrentWorld $ \c q -> do
+        atomically (modifyTVar' putToWorld (<> [promptOf q]))
+        pure (defaultEl c)
+      hooks =
+        nullPersistenceHooks
+          { persistenceStoreAnswer = \_ epoch question _ _ ->
+              atomically (modifyTVar' stored (<> [(epoch, T.pack (show question))]))
+          }
+      across :: Plan '[] ((Text, ()), Text)
+      across =
+        pairP
+          (pairP (askC1 SText (textQuestion "reading")) (askC1 SAck (ackQuestion "change")))
+          (askC1 SText (textQuestion "reading"))
+      within :: Plan '[] (Text, Text)
+      within = pairP (askC1 SText (textQuestion "reading")) (askC1 SText (textQuestion "reading"))
+  acrossOut <- try @SomeException (runPlanPersisted Nothing hooks nullEventSink noChains world across)
+  acrossAsked <- readTVarIO putToWorld
+  epochs <- map fst <$> readTVarIO stored
+  atomically (writeTVar putToWorld [])
+  withinOut <- try @SomeException (runPlanIO world within)
+  withinAsked <- readTVarIO putToWorld
+  pureProbe failures "an act clears reuse" $ case (acrossOut, withinOut) of
+    (Right (_, acrossTrace), Right (_, withinTrace)) ->
+      [ ("a question repeated across an act is putToWorld twice", acrossAsked == ["reading", "change", "reading"]),
+        ("its answers persist under two epochs", epochs == [0, 1]),
+        ("the memo bill charges both", billMemo acrossTrace == 3),
+        ("without an act between them it is putToWorld once", withinAsked == ["reading"]),
+        ("and charged once", billMemo withinTrace == 1)
+      ]
+    (Left e, _) -> [("the run across an act threw: " <> show e, False)]
+    (_, Left e) -> [("the run within a stretch threw: " <> show e, False)]
+
 -- | The regression that motivated the rule, through the executing layer: a
 -- command in statement position writes a file slowly, and a command in value
 -- position then reads it.  The read must see what the write wrote.
@@ -1388,7 +1428,7 @@ storeProbe failures = do
       gap = envelope 3 (RunFailed FailureRuntime "gap")
       question = object ["prompt" .= ("persist me" :: Text)]
       answer = object ["value" .= ("answer" :: Text)]
-      answerRecord = AnswerRecord question answer (OccurrenceId 0) True False
+      answerRecord = AnswerRecord question 0 answer (OccurrenceId 0) True False
       effectRecord = EffectRecord question (Just answer) (OccurrenceId 1) EffectCompleted
       checkpoint = Checkpoint (object ["program" .= ("fixture" :: Text)]) (Just (OccurrenceId 2)) 1 1
       olderCheckpoint = Checkpoint (object ["program" .= ("fixture" :: Text)]) (Just (OccurrenceId 1)) 2 1
@@ -1402,7 +1442,7 @@ storeProbe failures = do
           gapResult <- try @StoreError (appendStoredEvent store gap)
           writeSnapshot store (object ["state" .= ("done" :: Text)])
           storeReusableAnswer store answerRecord
-          lookedUp <- lookupStoredAnswer store question
+          lookedUp <- lookupStoredAnswer store 0 question
           appendEffectRecord store effectRecord
           writeCheckpoint store checkpoint
           writeCheckpoint store olderCheckpoint
@@ -1871,6 +1911,7 @@ main = do
   effectOrderProbe failures
   readsAfterEffectOverlapProbe failures
   writeAfterReadsProbe failures
+  memoAcrossEffectProbe failures
   readAfterWriteProbe failures
   inProcessProbe failures
   inProcessMismatchProbe failures
