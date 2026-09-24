@@ -476,6 +476,40 @@ Certify verdict: NOT yet certified; 25 declarations. V1: Mat.powSum/sumPow ARE M
 
 Mat vs Matrix (Fintype-bound HMul), MSemiring vs MonoidAlgebra (finite support), Env/Ext vs Option Kleisli — absences real, nowhere stated. After steps 1-7 the survivor registry is checkable by eye.
 
+* DONE [#C] Run the current Chord checks from the Pi integration launcher
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-3ajx
+:LABELS:   []
+:ISSUE_TYPE: bug
+:CREATED:  [2026-09-16 Wed 16:11]
+:MODIFIED: [2026-09-16 Wed 16:13]
+:CREATED_BY: johnw
+:FINISHED: [2026-09-16 Wed 16:13]
+:CLOSE_REASON: Replaced the removed RemoteSession import and deleted remote test reference with the existing Chord executable check after the four maintained Vitest integration suites. The launcher now passes eight integration tests and the Chord ownership, steering, cancellation, and reattach checks against the Nix-provided Pi 0.85.1 runtime.
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+npm run test:integration imports the removed pi-coding-agent/client RemoteSession API and names deleted pi-remote-acp.test.ts. The maintained Chord transport check is test/pi-remote-current.mjs. Update the launcher to run the existing native/owned/current/child suites plus that executable check without dropping transport coverage.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-3ajx",
+    "depends_on_id": "acat-lijk",
+    "type": "discovered-from",
+    "created_at": "2026-09-16T23:11:12.514718Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
 * DONE [#D] Leastness at expectation: SqZero star has no order; IdemAdd (SqZero P M) derivable when M's accumulation is idempotent
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -504,6 +538,38 @@ From acat-ozh: acat-jmm's first hard consumer. At SqZero Prop Prop / Cost / Prob
     "author": "johnw",
     "text": "Closed with the stratum it concerned: the pre-re-derivation Term algebra was excised at 4aed549 under acat-q1i (owner-approved hybrid, 2026-08-20). This ticket's subject, its state at closure, and why it retires are recorded — with the machine-checked results it relates to transcribed exactly — in doc/research/term-algebra-results.md (the ticket graveyard section names this issue individually). The mathematics is preserved as a document and in git history at b98e25f; the six theory threads are recorded there as future directions should the program ever be revived.",
     "created_at": "2026-08-20T18:42:46Z"
+  }
+]
+#+end_src
+
+* TODO [#C] Declare the Chord prerequisite for the Pi integration gate
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-3sq1
+:LABELS:   []
+:ISSUE_TYPE: bug
+:CREATED:  [2026-09-17 Thu 16:01]
+:MODIFIED: [2026-09-17 Thu 16:01]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+A clean npm ci in ext-pi followed by npm run test:integration passes all eight Vitest integration cases, then test/pi-remote-current.mjs fails with ERR_MODULE_NOT_FOUND for @earendil-works/chord. The package is imported directly but is absent from ext-pi/package.json and its installed dependency tree. Reproduced at base 1858e000 while checking the /wf rename. Reconcile the integration prerequisite with the pinned package setup and verify the complete gate after a clean install. No dependency changes were made during the command rename.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-3sq1",
+    "depends_on_id": "acat-jg00",
+    "type": "discovered-from",
+    "created_at": "2026-09-17T23:01:38.597073Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
   }
 ]
 #+end_src
@@ -874,6 +940,38 @@ Completed doc/research/workflow-manager-implementation-plan.md and its research 
     "author": "johnw",
     "text": "Post-close corrections to the review record: (a) the review's 'Cost order re-derived in Star' was use, not duplication — grep found no third development; (b) Frag.par deliberately gets no monoid instance (one carrier one op; a Frag.Par newtype is the repair if a fold ever needs it).",
     "created_at": "2026-08-12T05:36:07Z"
+  }
+]
+#+end_src
+
+* TODO [#C] Define compatible semantic validation for stored result values
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-4978
+:LABELS:   []
+:ISSUE_TYPE: question
+:CREATED:  [2026-09-19 Sat 01:12]
+:MODIFIED: [2026-09-19 Sat 01:12]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Runtime.Store verifies canonical envelope, reference code, run, size and digest but does not fully decode value at code. Planning.answerFromJson uses exact native structured numbers encoded as numerator/denominator, while the frozen manager ExportDocument fixture artifact-structured-decimal accepts 0.125. These are distinct representation contracts. Any stricter shared stored-value verifier must preserve supported native and frozen wire behavior through an explicit compatible policy rather than an ad hoc dual decoder or narrowed corpus. WM-017 retains the existing shared artifact verifier and validates the manager public document shape exactly as frozen, without claiming full structured semantic-schema conformance. This records a future semantic-contract question, not a new implementation prerequisite or authority to change frozen fixtures.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-4978",
+    "depends_on_id": "acat-wm-017-1hda",
+    "type": "discovered-from",
+    "created_at": "2026-09-19T08:12:28.630692Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
   }
 ]
 #+end_src
@@ -1807,6 +1905,42 @@ cachedAt := f makes cached_eq a tautology about the identity function; the non-v
 :END:
 
 V4 (wave-2 fess) predicted and wave-3 close-out reproduced it: under machine load (loadavg ~11) the oracle's cold spawn can exceed bisim's 60s ping timeout, producing a phantom transport failure ('the oracle is wedged') on a healthy tree; the immediate direct ping answered instantly and the rerun was clean. Fix: one retry of the initial ping (or a spawn-aware first-ping budget) before declaring the wedge. Evidence on acat-isaac-decisions-vtt.
+
+* TODO [#E] Identify the writer of bisim/.lake/.metadata_never_index
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-bisim-spotlight-marker-e443
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-24 Thu 00:54]
+:MODIFIED: [2026-09-24 Thu 00:54]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+The ignored Spotlight marker bisim/.lake/.metadata_never_index appeared in /Users/johnw/src/agent-cat/.worktrees/tui at 07:48:17Z on 2026-09-24, the same second that the tui-approval N1 run of resume subtask A0 started. No file in the repository writes it, and no Lean build occurred (bisim/.lake/build dates from 06:57:11Z). Git ignores the file, so it is not a source change.
+
+Required: identify the writer (a macOS indexer, a tool in the direnv environment, or a test driver) and record it, so that ignored-file changes during verification stages have a known cause.
+
+Source: fess audit /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/fess/A-A0-r1.md (low, loose-ends).
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-bisim-spotlight-marker-e443",
+    "depends_on_id": "acat-wm-035-9uqq",
+    "type": "discovered-from",
+    "created_at": "2026-09-24T07:54:11.470327Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
 
 * DONE [#C] shareT label collision across unequal bodies
 :PROPERTIES:
@@ -4085,6 +4219,40 @@ Pi integration identified two missing shared contracts. Workflow descriptor v3 d
 ]
 #+end_src
 
+* DONE [#C] Use the /wf namespace for every Pi extension command
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-jg00
+:LABELS:   []
+:ISSUE_TYPE: bug
+:CREATED:  [2026-09-17 Thu 15:56]
+:MODIFIED: [2026-09-17 Thu 16:01]
+:CREATED_BY: johnw
+:FINISHED: [2026-09-17 Thu 16:01]
+:CLOSE_REASON: Renamed all remaining Pi slash commands to /wf-*, preserving /wf current-session behavior, the alternate-target wizard as /wf-launch, and the agent_cat_workflow API. Updated both current READMEs. Registration regression failed before the fix and passes now. In the Nix shell, typecheck, all 94 extension tests, eight integration cases, and both documentation gates passed. The remote integration script remains blocked by the separately recorded missing @earendil-works/chord dependency.
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Replace the remaining /workflow command namespace in the Pi extension with /wf names. Preserve /wf current-session launch, expose the alternate-target wizard as /wf-launch, and rename help, controls, and grant guidance to /wf-*. Update current documentation and add registration regression coverage that rejects the old namespace. Prior acat-l3z renamed only the catalogue, and acat-4qa retained compatibility commands.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-jg00",
+    "depends_on_id": "acat-l3z",
+    "type": "discovered-from",
+    "created_at": "2026-09-17T22:56:59.233286Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
 * DONE [#D] Ordered-carrier class: resource semiring with monotone +,*,csum
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -4608,6 +4776,24 @@ Phase 1 gate of acat-haskell-program-xgw. Research the four mechanisms with 2026
   }
 ]
 #+end_src
+
+* DONE [#B] Keep runtime bookkeeping out of live session prompts
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-lijk
+:LABELS:   []
+:ISSUE_TYPE: bug
+:CREATED:  [2026-09-16 Wed 15:45]
+:MODIFIED: [2026-09-16 Wed 16:13]
+:CREATED_BY: johnw
+:FINISHED: [2026-09-16 Wed 16:13]
+:CLOSE_REASON: Removed the shared live-prompt envelope. Text is sent byte-for-byte. Non-text requests retain only decoder format instructions and avoid an authored suffix duplicate. Routing, intent, scope, draw, completion policy, and traces retain their metadata. Added a failing-before/passing-after rendering probe, deck prompt and route assertions, and Pi native coverage. Build, Haskell tests, tier0/tier1, policies, examples, routing, 19 ACP scenarios, 10 deck scenarios, both documentation gates, Pi typecheck, 93 Pi tests, and the current integration checks pass. No corpus or Lean changes and no live calls or activation.
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Remove the unconditional question envelope from the shared live-prompt renderer. Text questions must send authored prompt bytes only. Typed replies retain decoder-required format instructions without role, intent, routing, mode, or draw bookkeeping in the message. Preserve request metadata, routing, permission policy, memoization, decoding, and retries. Verify the runtime boundary and deterministic deck and ACP transports. No live model calls or activation.
 
 * DONE [#D] Rendering homomorphism out of the term algebra
 :PROPERTIES:
@@ -6106,6 +6292,78 @@ The targeted1.9.1 upgrade fixes the exercised DNS permitted/excluded cases, but 
 ]
 #+end_src
 
+* TODO [#D] Assert the manager exit status in the tui-approval driver
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-tui-approval-exit-status-e6wo
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: bug
+:CREATED:  [2026-09-24 Thu 00:54]
+:MODIFIED: [2026-09-24 Thu 00:54]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+The tui-approval driver in manager/test/service_http.py writes the manager exit status to server-0.exit (around line 527) but never asserts it. In resume subtask A0, both PTY runs recorded -2 (death by SIGINT) in /Users/johnw/Products/k.M0a5ItPm/tmp/tui-resume-A0.fcm4x8Z9/N1/server-0.exit and N8/server-0.exit. The driver sends SIGTERM, the CLI converts it to UserInterrupt (cli/src/Agentic/Cli/Frontend.hs:225), and the RTS re-raises SIGINT. The PASS line 'original protected manager shutdown after TUI approval fixture' checks only that the admin socket is gone and that no bearer token appears in the logs.
+
+Required: decide whether -2 is the accepted protected shutdown status, then either assert that exact status in the driver or change the shutdown path so that the status is explicit. Record the decision in the manager documentation.
+
+Source: fess audit /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/fess/A-A0-r1.md (low, verification-gap).
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-tui-approval-exit-status-e6wo",
+    "depends_on_id": "acat-wm-035-9uqq",
+    "type": "discovered-from",
+    "created_at": "2026-09-24T07:54:10.956118Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
+* TODO [#D] Record the approval path taken in the tui-approval driver
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-tui-approval-resend-path-l9am
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-24 Thu 00:54]
+:MODIFIED: [2026-09-24 Thu 00:54]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+The tui-approval approval loop in manager/test/service_http.py (lines 370-384) may take one operator-confirmed exact resend (keys x, then y) before the review appears. The driver sets a local flag named resent but never prints or records it. In resume subtask A0, nothing shows whether the PASS line at N1 or at N8 came from the direct path or from the resend path.
+
+Required: print the path taken (direct or one exact resend) into the driver log, so that each tui-approval PASS names the path that produced it.
+
+Source: fess audit /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/fess/A-A0-r1.md (low, verification-gap).
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-tui-approval-resend-path-l9am",
+    "depends_on_id": "acat-wm-035-9uqq",
+    "type": "discovered-from",
+    "created_at": "2026-09-24T07:54:11.224715Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
 * TODO [#C] Synchronize forbidden TUI approval assertions
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -6903,6 +7161,42 @@ Review finding 2: widthT re-runs the grade arithmetic, so widthT_eq_width is a h
 :END:
 
 Probe P8: w(join)=sup, w(par)=+, w(scale n)=n*max 1 w — Frag is ENat encoded four times (Frag, Option Nat width, ENat widthE, Keys.Width). Collapse: static=0, bounded n=n, monadic=T, join=sup, par=+, scale n=n*max 1. Fixes FIX-NOW 1 (scale 0 monadic = monadic contradicts the proved peak=0 — the grade lies about a provable constant); deletes the Frag order development and the ofWidth case-bashes; removes grade casts from Workflow.seq_assoc. Cost: join noncomputable (decide still closes goals). Subsumes acat-b22 and retires the l59 max-1 patch story.
+
+* TODO [#D] Make the verifier stage record its own log readings
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-verifier-independent-log-reading-8oub
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-24 Thu 00:54]
+:MODIFIED: [2026-09-24 Thu 00:54]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+In resume subtask A0, the verifier stage report copied the implementer command list word for word (the same name, command and evidence strings), and it left every window and result field empty. The report therefore does not show that the verifier read any log itself. The fess auditor read every log independently and confirmed the claims, so A0 is not affected.
+
+Required: the verifier stage records its own reading of each cited log, including the key output lines and the start and end times, instead of copying the implementer claims.
+
+Source: fess audit /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/fess/A-A0-r1.md (low, verification-process).
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-verifier-independent-log-reading-8oub",
+    "depends_on_id": "acat-wm-035-9uqq",
+    "type": "discovered-from",
+    "created_at": "2026-09-24T07:54:11.689702Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
 
 * DONE [#C] pinT/forkT: syntax above Env.pin and the Brzozowski derivative
 :PROPERTIES:
@@ -11992,7 +12286,7 @@ until WM-039 supplies it.
 :LABELS:   ["p7","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-09 Wed 22:34]
+:MODIFIED: [2026-09-24 Thu 00:53]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-033
 :SOURCE_REPO: agent-cat
@@ -12073,6 +12367,20 @@ to an unapproved local launch.
     "created_by": "johnw",
     "metadata": "{}",
     "thread_id": ""
+  }
+]
+#+end_src
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 308,
+    "issue_id": "acat-wm-033-4g77",
+    "author": "johnw",
+    "text": "Resume subtask A0 (workflow-manager-checkpoint-20260923, unchanged source at b95ce6d1d597b0f8e71f960952e5ed7bb37e1542) re-established the checkpoint baseline. It changed no source, so it advances this package only as a baseline and closes nothing.\n\nEvidence under /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A0/impl-r1, each result labelled by its ceiling:\n- Operator exercise: the toolchain is GHC 9.10.3, crypton-x509-validation-1.9.1 and Cabal 3.16.1.0 (A0-toolchain.*).\n- Package build: the forced build with -Werror -threaded -rtsopts -fforce-recomp of agentic-run, routing-fixed-point-probe, manager-client-check, manager-artifact-check and tui-model-test exited 0 (A0-build-force.*). All five executables were relinked before the first built binary ran at 07:47:57Z (A0-list-bin-gnu.*).\n- Deterministic native fixture (contract probe): manager/ci/contract.sh exited 0 with 99 schemas, 29 operations, 333 payload cases, 20 SSE cases and 3 byte-bound downloads (A0-contract.*). The probe runs no service.\n- Pure codec or model test: tui-model-test exited 0 at -N1 and then at -N8, with 45 PASS lines per run (A0-model-N1.*, A0-model-N8.*).\n- Actual UI interaction (PTY): tui-approval printed both required PASS lines at N1 and then at N8 (A0-tui-approval-N1.*, A0-tui-approval-N8.*). The fixture root is /Users/johnw/Products/k.M0a5ItPm/tmp/tui-resume-A0.fcm4x8Z9 and remains preserved.\n\nLimitations: the baseline ends at approval and detach, not workflow completion. Both PTY runs recorded manager exit status -2, and the driver does not assert it. Nothing records whether the exact-resend branch ran. acat-tui-consent-barrier-wby2 still limits the negative Enter and detail-view assertions. The fess audit (resume-20260923/fess/A-A0-r1.md) found no blocking defect.\n",
+    "created_at": "2026-09-24T07:53:56Z"
   }
 ]
 #+end_src
@@ -12160,7 +12468,7 @@ Local-mode behavior remains intact without a duplicated service runtime model.
 :LABELS:   ["p7","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-09 Wed 22:34]
+:MODIFIED: [2026-09-24 Thu 00:53]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-035
 :SOURCE_REPO: agent-cat
@@ -12224,6 +12532,20 @@ check fail.
     "created_by": "johnw",
     "metadata": "{}",
     "thread_id": ""
+  }
+]
+#+end_src
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 309,
+    "issue_id": "acat-wm-035-9uqq",
+    "author": "johnw",
+    "text": "Resume subtask A0 (workflow-manager-checkpoint-20260923, unchanged source at b95ce6d1d597b0f8e71f960952e5ed7bb37e1542) re-established the checkpoint baseline. It changed no source, so it advances this package only as a baseline and closes nothing.\n\nEvidence under /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A0/impl-r1, each result labelled by its ceiling:\n- Operator exercise: the toolchain is GHC 9.10.3, crypton-x509-validation-1.9.1 and Cabal 3.16.1.0 (A0-toolchain.*).\n- Package build: the forced build with -Werror -threaded -rtsopts -fforce-recomp of agentic-run, routing-fixed-point-probe, manager-client-check, manager-artifact-check and tui-model-test exited 0 (A0-build-force.*). All five executables were relinked before the first built binary ran at 07:47:57Z (A0-list-bin-gnu.*).\n- Deterministic native fixture (contract probe): manager/ci/contract.sh exited 0 with 99 schemas, 29 operations, 333 payload cases, 20 SSE cases and 3 byte-bound downloads (A0-contract.*). The probe runs no service.\n- Pure codec or model test: tui-model-test exited 0 at -N1 and then at -N8, with 45 PASS lines per run (A0-model-N1.*, A0-model-N8.*).\n- Actual UI interaction (PTY): tui-approval printed both required PASS lines at N1 and then at N8 (A0-tui-approval-N1.*, A0-tui-approval-N8.*). The fixture root is /Users/johnw/Products/k.M0a5ItPm/tmp/tui-resume-A0.fcm4x8Z9 and remains preserved.\n\nLimitations: the baseline ends at approval and detach, not workflow completion. Both PTY runs recorded manager exit status -2, and the driver does not assert it. Nothing records whether the exact-resend branch ran. acat-tui-consent-barrier-wby2 still limits the negative Enter and detail-view assertions. The fess audit (resume-20260923/fess/A-A0-r1.md) found no blocking defect.\n",
+    "created_at": "2026-09-24T07:53:57Z"
   }
 ]
 #+end_src
@@ -14182,36 +14504,4 @@ HIGH (validated, machine-checked): at Cost with mA=d=fin 0, mB=fin 3, all of fin
 :SOURCE_REPO: .
 :ORIGINAL_SIZE: 0
 :END:
-
-* TODO [#C] Define compatible semantic validation for stored result values
-:PROPERTIES:
-:OBR_SCHEMA_VERSION: 17
-:ID:       acat-4978
-:LABELS:   []
-:ISSUE_TYPE: question
-:CREATED:  [2026-09-19 Sat 01:12]
-:MODIFIED: [2026-09-19 Sat 01:12]
-:CREATED_BY: johnw
-:SOURCE_REPO: agent-cat
-:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
-:ORIGINAL_SIZE: 0
-:END:
-
-Runtime.Store verifies canonical envelope, reference code, run, size and digest but does not fully decode value at code. Planning.answerFromJson uses exact native structured numbers encoded as numerator/denominator, while the frozen manager ExportDocument fixture artifact-structured-decimal accepts 0.125. These are distinct representation contracts. Any stricter shared stored-value verifier must preserve supported native and frozen wire behavior through an explicit compatible policy rather than an ad hoc dual decoder or narrowed corpus. WM-017 retains the existing shared artifact verifier and validates the manager public document shape exactly as frozen, without claiming full structured semantic-schema conformance. This records a future semantic-contract question, not a new implementation prerequisite or authority to change frozen fixtures.
-
-** Dependencies
-
-#+begin_src json
-[
-  {
-    "issue_id": "acat-4978",
-    "depends_on_id": "acat-wm-017-1hda",
-    "type": "discovered-from",
-    "created_at": "2026-09-19T08:12:28.630692Z",
-    "created_by": "johnw",
-    "metadata": "{}",
-    "thread_id": ""
-  }
-]
-#+end_src
 
