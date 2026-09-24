@@ -20,15 +20,16 @@ import Isaac
 
 -- | The five, in the order they were written.
 --
--- Four are whole programs; @review-lite@ is a program of its subject, which is
--- what @agentic-run … --input@ supplies. The distinction is the registry's and
+-- Two are whole programs; @review-lite@ is a program of its subject, and
+-- @plan-feature@ and @ship-feature-lite@ are programs of their change request,
+-- which is what @agentic-run … --input@ supplies. The distinction is the registry's and
 -- not the language's: a 'Parameterized' is an ordinary Haskell function to a
 -- 'Program', and every fold the CLI prints is the same for every input.
 isaacExamples :: [(Text, Example)]
 isaacExamples =
-  [ ("plan-feature", Fixed planFeatureProgram),
+  [ ("plan-feature", Needs planFeature),
     ("review-lite", Needs reviewLite),
-    ("ship-feature-lite", Fixed shipFeatureLiteProgram),
+    ("ship-feature-lite", Needs shipFeatureLite),
     ("grind-tests", Fixed grindTestsProgram),
     ("stack-prs", Fixed stackPRsProgram)
   ]
@@ -66,21 +67,24 @@ isaacBlurb = \case
 --
 -- __Four of the five refuse @--require-pinned@, and each says so.__ The
 -- unpinned leaves are deliberate — @editPlan@'s paragraph defending the absence
--- of a pin is the whole of 'planFeatureProgram''s six plan lenses — so the
+-- of a pin is the whole of 'planFeature''s six plan lenses — so the
 -- refusal is the language reporting a design decision, and a page that let an
 -- operator discover it from a failed invocation would be hiding the decision.
 isaacHelp :: Text -> Text
 isaacHelp = \case
   "plan-feature" ->
     [wft|
-    @incite@'s @plan-feature@ as a program: the request read from a tool, four
-    exploration stances taken independently, a planner over them, and six plan
-    lenses run in sequence — each one holing the answer before it, so the plan
-    is narrowed rather than re-written six times.
+    @incite@'s @plan-feature@ as a program: the change request given as an
+    input, four exploration stances taken independently, a planner over them,
+    and six plan lenses run in sequence — each one holing the answer before it,
+    so the plan is narrowed rather than re-written six times.
 
-    **Inputs.** none. The request is asked of a tool, which is what the original
-    does; giving it an input would be a conversion rather than a translation,
-    and this module is an experiment in faithfulness.
+    **Inputs.**
+
+    * `request` — the change to plan, spliced into every stance's prompt as a
+      `define`, as the original's `workflowReq` demands an input at the CLI. It
+      is declared with `stdinInputAs "request"`, so a direct run reads strict
+      UTF-8 from standard input when no explicit input flag supplies it.
 
     **Transport.** Fine anywhere. It asks nobody's permission and writes no file
     of yours — every statement is a question — so a watched pane answers it as
@@ -88,14 +92,15 @@ isaacHelp = \case
     what it means.
 
     ```sh
-    agentic-run run plan-feature --engine acp --adapter claude
+    agentic-run run plan-feature --engine acp --adapter claude \
+       --input-file request=./request.md
     ```
 
-    **Rehearsal.** Every question answered from the row's own canned table,
-    consulting nobody:
+    **Rehearsal.** The one input named empty, every question answered from the
+    row's own canned table, consulting nobody:
 
     ```sh
-    agentic-run run plan-feature --scripted
+    agentic-run run plan-feature --scripted --input-arg request=
     ```
 
     **Caveats.**
@@ -156,13 +161,18 @@ isaacHelp = \case
     |]
   "ship-feature-lite" ->
     [wft|
-    @incite@'s @ship-feature-lite@ as a program: the request read from a tool, a
-    plan, a steering question, a capped worker loop, the review panel,
+    @incite@'s @ship-feature-lite@ as a program: the change request given as an
+    input, a plan, a steering question, a capped worker loop, the review panel,
     remediation, and a green gate at the end. It is the one of the five that
     carries the most of the original's failure policy, and the place that policy
     does not fit is named in the caveats rather than papered over.
 
-    **Inputs.** none. The request is asked of a tool, as the original does.
+    **Inputs.**
+
+    * `request` — the change to ship, spliced into the plan's prompt as a
+      `define`, as the original's `workflowReq` demands an input at the CLI. It
+      is declared with `stdinInputAs "request"`, so a direct run reads strict
+      UTF-8 from standard input when no explicit input flag supplies it.
 
     **Transport.** Fine anywhere. There is no act in this program and no person
     to ask, so it writes no file of yours and nothing waits on you; an adapter
@@ -170,14 +180,15 @@ isaacHelp = \case
     what it means.
 
     ```sh
-    agentic-run run ship-feature-lite --engine acp --adapter claude
+    agentic-run run ship-feature-lite --engine acp --adapter claude \
+       --input-file request=./request.md
     ```
 
-    **Rehearsal.** Every question answered from the row's own canned table,
-    consulting nobody:
+    **Rehearsal.** The one input named empty, every question answered from the
+    row's own canned table, consulting nobody:
 
     ```sh
-    agentic-run run ship-feature-lite --scripted
+    agentic-run run ship-feature-lite --scripted --input-arg request=
     ```
 
     **Caveats.**
@@ -196,12 +207,14 @@ isaacHelp = \case
     |]
   "grind-tests" ->
     [wft|
-    @incite@'s @grind-tests@ as a program: the facts read from a tool, a spread
+    @incite@'s @grind-tests@ as a program: the facts read by a model, a spread
     of six lenses — vacuity, coverage, properties, mutation, stubbing, sleeps —
     one per serving model, a synthesis that is allowed to *refuse*, a facts gate,
     and a bounded fixer loop with an audit inside it.
 
-    **Inputs.** none. The facts are asked of a tool, as the original does.
+    **Inputs.** none. The facts are asked of a model, which reads the target
+    checkout's facts file and probes every path it names, as the original's
+    agent does.
 
     **Transport.** Fine anywhere: every statement is a question, there is no act
     and no person, so it writes no file of yours. An adapter of the run's own is
@@ -297,9 +310,11 @@ isaacHelp = \case
 -- five before it. So every text question is answered here, shortly.
 isaacScript :: Text -> [(Text, Text)]
 isaacScript = \case
+  -- The change request is an @--input@ and not an answer, so no entry answers
+  -- it: the text it used to return is what @ci\/examples.sh@ passes as
+  -- @--input-file request=…@.
   "plan-feature" ->
-    [ (readRequest, "Add a --dry-run flag to the exporter."),
-      (intrepidStance, "Path: add the flag in Cli.hs, thread it to Export.run, short-circuit the write."),
+    [ (intrepidStance, "Path: add the flag in Cli.hs, thread it to Export.run, short-circuit the write."),
       (skepticStance, "Risk: Export.run is called by two other entry points; both pattern-match its result."),
       (contemplativeStance, "Options: a flag threaded, or a Writer of intended effects. The second is testable."),
       (architectStance, "Shape: the flag belongs in Cli.Options; Export must not learn about the CLI."),
@@ -323,8 +338,7 @@ isaacScript = \case
       (haskellHouseLens, "Totality: `head paths` at line 9 is partial on an empty export set.")
     ]
   "ship-feature-lite" ->
-    [ (readRequest, "Make the exporter atomic."),
-      (planBrief, "1. Write to a temp file. 2. Rename into place. 3. Test the crash window."),
+    [ (planBrief, "1. Write to a temp file. 2. Rename into place. 3. Test the crash window."),
       (planSteerBrief, "The bar: a kill -9 mid-write must leave the old file intact."),
       (tripStatusBrief, "APPROVE"),
       (implementBrief, "Wrote to Export.hs: temp file plus rename. Tests pass, 41/0.\nWORK COMPLETE"),

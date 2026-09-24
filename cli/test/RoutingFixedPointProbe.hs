@@ -35,7 +35,8 @@ registry =
           ("controlled-single", row controlledSingleExample),
           ("person-controlled", row personControlledExample),
           ("in-process", toolRow inProcessProgram [("record", recordTool)]),
-          ("in-process-mismatch", toolRow mismatchProgram [("record", textTool (\_ words' -> pure words'))])
+          ("in-process-mismatch", toolRow mismatchProgram [("record", textTool (\_ words' -> pure words'))]),
+          ("plain-tool", toolRow plainToolProgram [])
         ]
     }
   where
@@ -52,6 +53,12 @@ inProcessProgram :: Program
 inProcessProgram = workflow W.do
   capital <- ask (model "geographer" `servedBy` "deep") [wf|What is the capital of France?|]
   ask_ (tool "record") [wf|{capital}|]
+
+-- | A tool no row answers in process, so a routing-only run has no backend for
+-- it.
+plainToolProgram :: Program
+plainToolProgram = workflow W.do
+  ask_ (tool "lookup") [wf|hello|]
 
 -- | A tool registered to answer text, asked in statement position.
 mismatchProgram :: Program

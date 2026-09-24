@@ -15,14 +15,13 @@
 {-# LANGUAGE TypeApplications #-}
 
 module Isaac
-  ( planFeatureProgram,
+  ( planFeature,
     reviewLite,
-    shipFeatureLiteProgram,
+    shipFeatureLite,
     grindTestsProgram,
     stackPRsProgram,
     reviewPanelOver,
     reviewReport,
-    readRequest,
     intrepidStance,
     skepticStance,
     contemplativeStance,
@@ -415,17 +414,6 @@ reviewReportBrief = [wft|
 
 -- The acting half ----------------------------------------------------------
 
--- | The subject every one of these workflows opens by fetching.
---
--- @incite@'s workflows are @Flow Text Text@ and @workflowReq@ /demands/ an
--- input at the CLI. A 'Program' has no input, so the subject is asked of a
--- tool. This is a real difference and not a paraphrase: the operator's text
--- reaches @incite@'s first leaf as data, and reaches this one as an answer.
-readRequest :: Text
-readRequest = [wft|
-  Read the change request for this run and reply with it verbatim,
-  and with nothing else.|]
-
 -- | @planSteer "implementation"@, verbatim.
 --
 -- It asks for the acceptance bar, not for \"any guidance\", because
@@ -467,7 +455,7 @@ implementBrief = [wft|
 -- @incite@ spends nothing on this: @tripEnding@ is a pure fold over the
 -- summary's last non-empty line, classifying it four ways. An answer here is a
 -- handle and not a value, so the classification is a leaf. Two of the four
--- endings survive the translation; see 'shipFeatureLiteProgram'.
+-- endings survive the translation; see 'shipFeatureLite'.
 tripStatusBrief :: Text
 tripStatusBrief = [wft|
   You are the orchestrator, not a reviewer. Read ONLY the last non-empty
@@ -766,7 +754,7 @@ verdictSpec =
 -- A /question/ shares here exactly as well: this is an ordinary Haskell
 -- function from a live handle to a list of 'Ask's, and it can be applied at any
 -- scope where the handle is live, which is what @KnownIx h s@ says. What does
--- not share is a run of /statements/ — see the gap on 'shipFeatureLiteProgram'.
+-- not share is a run of /statements/ — see the gap on 'shipFeatureLite'.
 --
 -- The sixth reviewer is missing on purpose: it stands behind a router, and a
 -- router cannot stand inside a panel. See 'reviewLite'.
@@ -815,19 +803,20 @@ reviewPanelOver subject =
 --   * @editPlan@'s six lenses are six sequential rewrites of one text, which is
 --     six binds each holing the one before it. They carry no @\`servedBy\`@,
 --     deliberately, which is exactly @editPlan@'s \"deliberately unpinned so
---     all six run on the same backend and stay comparable\".
+--     all six run on the same backend and stay comparable\";
+--   * the change request is an input, as @incite@'s @workflowReq@ demands one
+--     at the CLI, so it reaches every stance as data and not as an answer.
 --
 -- Level @pipeline@: no branch, no loop, one path, and @codes@ is a full
--- sequence — twelve text answers and a receipt.
+-- sequence — eleven text answers and a receipt.
 --
--- > level pipeline, size 14, askNodes 13
--- > codes text ×12, receipt
--- > cost  minFold 13, maxFold 13, over 1 path
--- > run --scripted: billFresh 13, billMemo 13
-planFeatureProgram :: Program
-planFeatureProgram = workflow W.do
-    request <- ask (tool "cat") [wf|{readRequest}|]
-
+-- > level pipeline, size 13, askNodes 12
+-- > codes text ×11, receipt
+-- > cost  minFold 12, maxFold 12, over 1 path
+-- > run --scripted: billFresh 12, billMemo 12
+planFeature :: Parameterized
+planFeature = taking (stdinInputAs "request" :> noInputs) \request ->
+  workflow W.do
     intrepid <- ask (model "intrepid" `servedBy` "review") [wf|
         {intrepidStance}
         {request}|]
@@ -1157,14 +1146,13 @@ reviewLite = taking (stdinInputAs "subject" :> noInputs) \subject ->
 -- (\"worst case is fenced at 21 leaves\"): a single worst case, where this
 -- says what the cheapest run costs too, and over how many paths.
 --
--- > level branch, size 149, askNodes 78
--- > cost  minFold 4, maxFold 24, over 36 paths
--- > run --scripted: billFresh 12, billMemo 12 (settled on the first check,
+-- > level branch, size 148, askNodes 77
+-- > cost  minFold 3, maxFold 23, over 36 paths
+-- > run --scripted: billFresh 11, billMemo 11 (settled on the first check,
 -- >   green on the first gate)
-shipFeatureLiteProgram :: Program
-shipFeatureLiteProgram = workflow W.do
-    request <- ask (tool "cat") [wf|{readRequest}|]
-
+shipFeatureLite :: Parameterized
+shipFeatureLite = taking (stdinInputAs "request" :> noInputs) \request ->
+  workflow W.do
     drafted <- ask (model "plan" `servedBy` "balanced") [wf|
         {planBrief}
         {request}|]
@@ -1297,7 +1285,7 @@ shipFeatureLiteProgram = workflow W.do
 -- > run --scripted: billFresh 15, billMemo 15
 grindTestsProgram :: Program
 grindTestsProgram = workflow W.do
-    facts <- ask (tool "cat") [wf|{grindFactsBrief}|]
+    facts <- ask (model "facts") [wf|{grindFactsBrief}|]
 
     -- The spread. Six statements where `incite` writes one list comprehension:
     -- the serving models cycle by hand, because the fan-out is not a list here.
@@ -1442,7 +1430,7 @@ grindTestsProgram = workflow W.do
 --     act, and its budget re-read is a sentence in 'stackPromoteBrief' that
 --     nothing enforces.
 --   * __Gap: @WORK BLOCKED@ still cannot end a loop.__ As in
---     'shipFeatureLiteProgram': the review clause's verdict is consumed by the
+--     'shipFeatureLite': the review clause's verdict is consumed by the
 --     revision, so a blocked ending buys another trip instead of stopping.
 --     @stack-prs@ is the workflow @WORK BLOCKED@ was invented for — a design
 --     disagreement, an approved branch that must not be rewritten, a starved

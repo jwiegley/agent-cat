@@ -23,8 +23,8 @@
 #   agentic-run run  <name> --scripted [input]   exit 0, billFresh, billMemo
 #
 # where `[input]` is the input flag a program that takes one needs (D8) —
-# `review-lite` is the only such program, and `inputsFor` below is where its
-# subject comes from.
+# `review-lite`, `plan-feature` and `ship-feature-lite` are the programs that
+# take one, and `inputsFor` below is where each input comes from.
 #
 # and holds each field against the table below. Every pinned line cites where
 # the same number is also published; a mismatch here means one of those places
@@ -181,9 +181,11 @@ pin capital           pipeline     5    4    4    4     1     4    4
 # `doc/research/isaac-workflows.md` §3's table. Nothing else pins them — that is
 # what this script is for.
 
-# Isaac.hs:957-960; isaac-workflows §3, `plan-feature` row. The one pipeline of
-# the five: one path, so its price is exact and its bill must equal it.
-pin plan-feature      pipeline    14   13   13   13     1    13   13
+# Isaac.hs, `planFeature`'s haddock. The one pipeline of the five: one path, so
+# its price is exact and its bill must equal it. isaac-workflows §3 records the
+# numbers from before the change request became an input (D8, as for
+# `review-lite` below): the opening tool leaf left, so every number fell by one.
+pin plan-feature      pipeline    13   12   12   12     1    12   12
 
 # Isaac.hs:1127-1129; isaac-workflows §3 and Finding 3.2. The two paths are the
 # router's two outcomes priced apart; the scripted run takes the `yes` arm, so
@@ -219,10 +221,12 @@ pin plan-feature      pipeline    14   13   13   13     1    13   13
 # Finding 3.2 states the duplicated tail in the past tense.
 pin review-lite       branch      12    9    7    8     2     8    8
 
-# Isaac.hs:1288-1290; isaac-workflows §3 and Finding 3.3. Two loops, so the
-# range is real; the scripted world settles on the first check, which is why 12
-# sits well below `maxFold`.
-pin ship-feature-lite branch     149   78    4   24    36    12   12
+# Isaac.hs, `shipFeatureLite`'s haddock; isaac-workflows §3 and Finding 3.3
+# record the numbers from before the change request became an input, which
+# took one node from the prefix every path shares. Two loops, so the range is
+# real; the scripted world settles on the first check, which is why 11 sits
+# well below `maxFold`.
+pin ship-feature-lite branch     148   77    3   23    36    11   11
 
 # Isaac.hs:1420-1422; isaac-workflows §3 and Finding 3.4. The `atMost 4` fixer
 # loop is G9's bounded refusal made of numbers: 27 is a bound an operator can
@@ -271,6 +275,12 @@ printf '%s\n' \
   'diff --git a/src/Export.hs b/src/Export.hs' \
   '+  writeFile path body' > "$work/review-lite.subject"
 
+# `plan-feature` and `ship-feature-lite` take their change request the same
+# way, and the text each is given is the text its deleted script entry
+# returned.
+printf '%s\n' 'Add a --dry-run flag to the exporter.' > "$work/plan-feature.request"
+printf '%s\n' 'Make the exporter atomic.' > "$work/ship-feature-lite.request"
+
 # The flags are carried in an __array__ rather than echoed as a string, because
 # the value of `--input-file` is a path under $TMPDIR, and a $TMPDIR with a
 # space in it is one this gate must still work under. A string would have to be
@@ -283,6 +293,7 @@ ins=()
 inputsFor() {
   case "$1" in
     review-lite) ins=(--input-file "subject=$work/review-lite.subject") ;;
+    plan-feature | ship-feature-lite) ins=(--input-file "request=$work/$1.request") ;;
     *) ins=() ;;
   esac
 }
