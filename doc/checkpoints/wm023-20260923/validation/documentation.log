@@ -1,0 +1,11 @@
+GHCRTS and AGENT_CAT_* absent
+make: Entering directory '/Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/broker-source/doc'
+cd .. && bash manager/ci/contract.sh
+manager contract: 99 schemas, 29 operations, 333 payload cases, 20 SSE cases and 3 byte-bound downloads passed; no service execution claimed
+python3 check-manual-sources.py
+manual examples: 6 source excerpts and 2 complete Haskell files
+python3 check-manual-coverage.py
+missing CLI coverage: --service
+missing CLI index: --service
+make: *** [Makefile:28: check] Error 1
+make: Leaving directory '/Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/broker-source/doc'
