@@ -92,7 +92,7 @@ EOF
 
 # Routing-only execution proves every engine-bound question has a configured pin.
 set +e
-tool_uncovered=$(XDG_CONFIG_HOME="$tmp/xdg" "$bin" run hello +RTS -N8 -RTS 2>&1)
+tool_uncovered=$(XDG_CONFIG_HOME="$tmp/xdg" "$fixed_bin" run plain-tool +RTS -N8 -RTS 2>&1)
 tool_status=$?
 model_uncovered=$(XDG_CONFIG_HOME="$tmp/xdg" "$bin" run structured +RTS -N8 -RTS 2>&1)
 model_status=$?
@@ -105,7 +105,7 @@ set -e
 [ "$model_status" -eq 1 ]
 [ "$person_status" -eq 1 ]
 [ "$missing_profile_status" -eq 1 ]
-grep -q 'requires full pin coverage, but tool `cat` cannot carry `served by`' <<<"$tool_uncovered"
+grep -q 'requires full pin coverage, but tool `lookup` cannot carry `served by`' <<<"$tool_uncovered"
 grep -q 'requires full pin coverage, but model `' <<<"$model_uncovered"
 grep -q 'requires full pin coverage, but person `first` cannot carry `served by`' <<<"$person_uncovered"
 grep -q "routing configuration has no route for pinned model 'primary'" <<<"$missing_profile"

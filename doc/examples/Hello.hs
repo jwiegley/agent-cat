@@ -11,7 +11,7 @@ import Data.Text (Text)
 
 helloProgram :: Program
 helloProgram = workflow W.do
-    subject <- ask (tool "cat") [wf|
+    subject <- ask (model "namer") [wf|
         Name one thing worth greeting.
         {brief}|]
 

@@ -12,7 +12,7 @@
       {"r":
        {"ask":
         {"a":
-         {"target": {"draw": 0, "addressee": {"tool": {"id": "cat"}}},
+         {"target": {"draw": 0, "addressee": {"model": {"id": "namer"}}},
           "prompt":
           [{"lit": {"s": "Name one thing worth greeting.\n"}},
            {"lit": {"s": "Reply in one short line."}}],
@@ -61,7 +61,7 @@
       "draw": 0,
       "code": "text",
       "answer": "Name one thing worth greeting.\nReply in one short line.",
-      "addressee": {"tool": {"id": "cat"}}},
+      "addressee": {"model": {"id": "namer"}}},
      {"scope": {"model": null, "mode": null},
       "prompt":
       "Write a greeting for this, and nothing else:\nName one thing worth greeting.\nReply in one short line.\nReply in one short line.",

@@ -180,7 +180,7 @@ helloHelp :: Text
 helloHelp =
   [wft|
     Corpus entry `example-001`, and the smallest thing that is still a workflow:
-    ask a tool for something worth greeting, ask a model to greet it, say it.
+    ask one model for something worth greeting, ask another to greet it, say it.
     It exists so that the CLI has a subject that is not the flagship.
 
     **Inputs.** none.

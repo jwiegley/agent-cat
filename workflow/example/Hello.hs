@@ -28,7 +28,7 @@ import Data.Text (Text)
 -- prompts, unfused with the literal beside it.
 helloProgram :: Program
 helloProgram = workflow W.do
-    subject <- ask (tool "cat") [wf|
+    subject <- ask (model "namer") [wf|
         Name one thing worth greeting.
         {brief}|]
 

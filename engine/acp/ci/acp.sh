@@ -370,7 +370,7 @@ note "two-adapters: the pin went to the routed stub, everything else to the defa
 # run whose third backend will not start fails before its first backend answers
 # anything. The flagship's first question is the routed one, so the startup
 # order is asserted by the `grind-tests` run below, whose first question is an
-# unpinned tool question: under lazy startup the default would answer it and
+# unpinned model question: under lazy startup the default would answer it and
 # the run would *then* fail, and `billFresh` would appear. Asserting its absence
 # is asserting the startup order.
 #
