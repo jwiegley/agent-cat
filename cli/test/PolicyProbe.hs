@@ -196,6 +196,7 @@ import Control.Concurrent.STM
     newEmptyTMVarIO,
     newTVarIO,
     putTMVar,
+    readTMVar,
     readTVar,
     readTVarIO,
     retry,
@@ -920,6 +921,61 @@ readsAfterEffectOverlapProbe failures = do
         Just (Right (answer, _)) -> [("both reads rendezvoused after the write", answer == ("one", "two"))]
         Just (Left e) -> [("the run threw: " <> show e, False)]
         Nothing -> [("the reads did not overlap after the write", False)]
+
+-- | An effect waits for every question before it, even one its prompt does not
+-- read. Two independent reads overlap one another, and a later write that
+-- reads neither starts only after both complete, so it cannot change what an
+-- earlier read observes.
+writeAfterReadsProbe :: IORef Int -> IO ()
+writeAfterReadsProbe failures = do
+  firstStarted <- newSignal
+  secondStarted <- newSignal
+  releaseReads <- newSignal
+  contacts <- newTVarIO ([] :: [Text])
+  done <- newEmptyTMVarIO
+  let plan :: Plan '[] ((Text, Text), ())
+      plan =
+        pairP
+          (pairP (askC1 SText (textQuestion "read-one")) (askC1 SText (textQuestion "read-two")))
+          (askC1 SAck (ackQuestion "later-write"))
+      world = concurrentWorld $ \c q -> do
+        atomically (modifyTVar' contacts (<> [promptOf q]))
+        case c of
+          SText -> case promptOf q of
+            "read-one" -> do
+              atomically (putTMVar firstStarted ())
+              atomically (readTMVar releaseReads)
+              pure "one"
+            "read-two" -> do
+              atomically (putTMVar secondStarted ())
+              atomically (readTMVar releaseReads)
+              pure "two"
+            _ -> pure "unexpected"
+          _ -> pure (defaultEl c)
+  tid <- forkFinally (runPlanIO world plan) (atomically . putTMVar done)
+  both <- timeout 2000000 . atomically $ do
+    takeTMVar firstStarted
+    takeTMVar secondStarted
+  threadDelay orderingWindowUs
+  duringReads <- readTVarIO contacts
+  case both of
+    Nothing -> killThread tid
+    Just () -> atomically (putTMVar releaseReads ())
+  finished <- case both of
+    Nothing -> pure Nothing
+    Just () -> timeout 2000000 (atomically (takeTMVar done))
+  after <- readTVarIO contacts
+  pureProbe failures "an effect waits for every earlier question" $
+    [ ("the two reads overlapped", both == Just ()),
+      ("the later write did not start while the reads were held", "later-write" `notElem` duringReads),
+      ("the write came last", lastMaybe after == Just "later-write")
+    ]
+      ++ case finished of
+        Just (Right _) -> []
+        Just (Left e) -> [("the run threw: " <> show e, False)]
+        Nothing -> [("the run did not finish", False)]
+  where
+    lastMaybe xs = if null xs then Nothing else Just (last xs)
 
 -- | The regression that motivated the rule, through the executing layer: a
 -- command in statement position writes a file slowly, and a command in value
@@ -1814,6 +1870,7 @@ main = do
   overlapProbe failures
   effectOrderProbe failures
   readsAfterEffectOverlapProbe failures
+  writeAfterReadsProbe failures
   readAfterWriteProbe failures
   inProcessProbe failures
   inProcessMismatchProbe failures

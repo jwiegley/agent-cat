@@ -4304,14 +4304,14 @@ Owner request: the artifact §VII example as REAL compiling Lean — Op signatur
 
 Add Example.Structured under haskell/example/Example, register it with agentic-run, and derive its schema, witness, and SchemaEl conversion mechanically from the Haskell record with Template Haskell.
 
-* TODO [#C] Give the harden style-guide question an honest addressee
+* DOING [#C] Give the harden style-guide question an honest addressee
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-harden-cat-addressee-3yz2
 :LABELS:   []
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-24 Thu 11:02]
-:MODIFIED: [2026-09-24 Thu 11:02]
+:MODIFIED: [2026-09-24 Thu 12:55]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -5785,14 +5785,14 @@ Independent native UI review found that Pi 0.85.1 showExtensionCustom closes ove
 ]
 #+end_src
 
-* TODO [#B] A repeated question after an effect is answered from before it
+* DOING [#B] A repeated question after an effect is answered from before it
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-memo-across-effect-bgyt
 :LABELS:   []
 :ISSUE_TYPE: bug
 :CREATED:  [2026-09-24 Thu 11:13]
-:MODIFIED: [2026-09-24 Thu 11:13]
+:MODIFIED: [2026-09-24 Thu 12:55]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -15358,15 +15358,17 @@ is ready, not that an operator has deployed it.
 ]
 #+end_src
 
-* TODO [#C] An effect can run before an earlier read of what it changes
+* DONE [#C] An effect can run before an earlier read of what it changes
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-write-after-read-1aax
 :LABELS:   []
 :ISSUE_TYPE: bug
 :CREATED:  [2026-09-24 Thu 11:13]
-:MODIFIED: [2026-09-24 Thu 11:13]
+:MODIFIED: [2026-09-24 Thu 13:06]
 :CREATED_BY: johnw
+:FINISHED: [2026-09-24 Thu 13:06]
+:CLOSE_REASON: An effect now waits for every question reserved since the previous effect (runtime/src/Agentic/Exec.hs writeBehind), so each act is ordered against everything before and after it. Pinned by the write-after-reads probe; all deterministic and documentation gates pass.
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
