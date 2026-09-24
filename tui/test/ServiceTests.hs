@@ -7,14 +7,15 @@ import qualified Agentic.Manager.Client as C
 import Agentic.Runtime (DescriptorCapabilities (..), WorkflowDescriptor (..), WorkflowInputDescriptor (..), WorkflowInputSource (..),
   OccurrenceId (..), AttemptId (..), RunSnapshot (..), OccurrenceSnapshot (..), AttemptSnapshot (..))
 import Agentic.Tui.Model
-import Agentic.Tui.Presentation (Presentation (..), emptyPresentation, serviceReviewAllowed, serviceReviewRows)
+import qualified Agentic.Tui.Approval as A
+import Agentic.Tui.Presentation (ActiveLayer (..), Presentation (..), emptyPresentation, serviceReviewAllowed, serviceReviewRows, wrapDisplayLines)
 import qualified Agentic.Tui.Service as S
 import qualified Agentic.Tui.ServiceLane as L
 import Control.Concurrent (forkIO, newEmptyMVar, putMVar, takeMVar, threadDelay, throwTo)
 import Control.Exception (AsyncException (ThreadKilled), ErrorCall (ErrorCall), SomeException, fromException, throwIO, try)
 import Control.Monad (unless)
 import Crypto.Hash (Digest, SHA256, hash)
-import Data.Time.Clock (addUTCTime)
+import Data.Time.Clock (UTCTime, addUTCTime)
 import Data.Time.Format.ISO8601 (iso8601ParseM)
 import qualified Data.Text.Encoding as TE
 import Data.Aeson (Value (..), eitherDecodeStrict', object, (.=))
@@ -24,6 +25,7 @@ import qualified Data.ByteString as BS
 import qualified Data.Text as T
 import qualified Data.Vector as V
 import qualified Data.Map.Strict as Map
+import qualified Graphics.Vty as Vty
 import System.Exit (die)
 import System.Timeout (timeout)
 
@@ -103,6 +105,7 @@ serviceTests render = do
   expiry <- maybe (die "invalid fixture expiry") pure (iso8601ParseM (T.unpack (C.preparationExpiresAt preparation)))
   check "review expiry is not extended by a frontend observation"
     (S.reviewLive (addUTCTime (-1) expiry) preparation && not (S.reviewLive expiry preparation))
+  approvalTests render profile selectedWorkflowRow request preparation expiry
   receiptValue <- BS.readFile "test/fixtures/manager/v1/valid/request-command.json" >>= either die pure . eitherDecodeStrict'
   receipt <- either (die . show) pure (C.decodeObservation receiptValue)
   let mutation = S.SaveLiteral request "subject" logical 0
@@ -323,3 +326,264 @@ checks :: [(String,Bool)] -> IO ()
 checks group = do
   mapM_ (\(label,passed) -> putStrLn ((if passed then "PASS " else "FAIL ") <> label)) group
   unless (all snd group) (die ("FAIL " <> show (length (filter (not . snd) group)) <> " checks in the group"))
+
+-- | Model and fixed-size render tests for approval-key admissibility on the
+-- exact manager review. The expected notice texts are written out here, so a
+-- change to any fixed text fails a check.
+approvalTests :: ((Int,Int) -> Presentation -> T.Text) -> S.Profile -> S.Workflow -> C.DraftView -> C.Preparation -> UTCTime -> IO ()
+approvalTests render profile row request preparation expiry = do
+  let live = addUTCTime (-1) expiry
+      tag = "\"preprev_1\"" :: T.Text
+      literals = S.literalInputs request
+      review now fits installed draft inputs = A.checkReview id now fits (Just row) (fmap ((,) ()) draft) installed inputs preparation tag
+  check "a current, live, bound and complete review is current and yields its request and validator"
+    (case review live True (Just (tag,preparation)) (Just request) literals of
+      A.ReviewCurrent (draft,validator) -> draft == request && validator == tag; _ -> False)
+  checks
+    [ ("another installed validator makes the displayed review stale",
+        review live True (Just ("\"preprev_2\"",preparation)) (Just request) literals == A.ReviewStale),
+      ("another installed preparation makes the displayed review stale",
+        review live True (Just (tag,preparation {C.preparationDigest = "other"})) (Just request) literals == A.ReviewStale),
+      ("a missing installed preparation makes the displayed review stale",
+        review live True Nothing (Just request) literals == A.ReviewStale),
+      ("a missing installed request makes the displayed review stale",
+        review live True (Just (tag,preparation)) Nothing literals == A.ReviewStale),
+      ("a missing workflow makes the displayed review stale",
+        A.checkReview id live True Nothing (Just ((),request)) (Just (tag,preparation)) literals preparation tag == A.ReviewStale),
+      ("a review at its expiry is expired", review expiry True (Just (tag,preparation)) (Just request) literals == A.ReviewExpired),
+      ("a review for another request revision is mismatched",
+        review live True (Just (tag,preparation)) (Just (request {C.draftRevision = "other"})) literals == A.ReviewMismatched),
+      ("a review for other operator literals is mismatched",
+        review live True (Just (tag,preparation)) (Just request) (Map.insert "subject" "other" literals) == A.ReviewMismatched),
+      ("a review that does not fit is clipped", review live False (Just (tag,preparation)) (Just request) literals == A.ReviewClipped),
+      ("the clipped acceptance size supplies a review that does not fit",
+        not (serviceReviewAllowed preparation tag (40,8)) && serviceReviewAllowed preparation tag (140,36))
+    ]
+  checks
+    [ ("Enter without modifiers is the Enter approval key", A.approvalKey Vty.KEnter [] == Just A.EnterKey),
+      ("y without modifiers is the approval key", A.approvalKey (Vty.KChar 'y') [] == Just A.ApproveKey),
+      ("other keys are not approval keys",
+        all (\(key,modifiers) -> A.approvalKey key modifiers == Nothing)
+          [(Vty.KChar 'Y',[]), (Vty.KChar 'y',[Vty.MCtrl]), (Vty.KChar 'n',[]), (Vty.KChar 'd',[]), (Vty.KEsc,[])]),
+      ("the key help covers either review view, and the detail flag selects the detail view",
+        A.reviewView True False == A.KeyHelpView && A.reviewView True True == A.KeyHelpView
+          && A.reviewView False True == A.DetailView && A.reviewView False False == A.SummaryView)
+    ]
+  let create = S.Create row
+      approve = S.Approve request preparation
+      attempt = L.Attempt create ("pending" :: T.Text) (Just ("/v1/commands/cmd_1" :: T.Text))
+      preparingApproval = L.MutationPreparing 3 approve :: L.MutationState T.Text T.Text
+      mutations =
+        [ ("idle", L.MutationIdle), ("preparing", L.MutationPreparing 3 create), ("preparing approval", preparingApproval),
+          ("sending", L.MutationSending 3 attempt), ("awaiting", L.MutationAwaiting create "pending" "/v1/commands/cmd_1"),
+          ("declared uncertainty", L.MutationUncertain attempt (L.DeclaredUncertainty "TransportUnavailable")),
+          ("fault uncertainty", L.MutationUncertain attempt L.FaultUncertainty) ]
+      reviews =
+        [ ("current", A.ReviewCurrent ()), ("stale", A.ReviewStale), ("expired", A.ReviewExpired),
+          ("mismatched", A.ReviewMismatched), ("clipped", A.ReviewClipped) ] :: [(String, A.ReviewCheck ())]
+      reviewScreen = ServiceReviewScreen preparation tag
+      screens =
+        [ ("initial loading", InitialLoading), ("browser", BrowserScreen), ("profiles", ServiceProfilesScreen [profile] 0),
+          ("request", ServiceRequestScreen request), ("review", reviewScreen), ("command", ServiceCommandScreen "notice"),
+          ("input", InputScreen 0), ("target", TargetScreen), ("preview loading", PreviewLoading), ("help loading", HelpLoading),
+          ("workflow help", HelpScreen "help"), ("failure", FailureScreen "failure") ] :: [(String, Screen)]
+      keys =
+        [ ("Enter", Vty.KEnter, []), ("y", Vty.KChar 'y', []), ("Y", Vty.KChar 'Y', []),
+          ("Ctrl-y", Vty.KChar 'y', [Vty.MCtrl]), ("Meta-Enter", Vty.KEnter, [Vty.MMeta]) ] :: [(String, Vty.Key, [Vty.Modifier])]
+      views = [minBound .. maxBound] :: [A.ReviewView]
+      cases = [ (screen,key,view,mutation,readTicket,faulted,checked)
+              | screen <- screens, key <- keys, view <- views, mutation <- mutations,
+                readTicket <- [Nothing, Just 4], faulted <- [False,True], checked <- reviews ]
+      laneOf (_,m) readTicket faulted = L.Lane readTicket m faulted False :: L.Lane T.Text T.Text
+      press ((_,screen),(_,key,modifiers),_,_,_,_,_) = A.reviewApprovalKey screen key modifiers
+      -- The outcome of one case: Nothing when the press is not an approval
+      -- press and keeps its other meaning, otherwise the decision.
+      decide c@(_,_,view,mutation,readTicket,faulted,(_,checked)) =
+        fmap (\(approval,_,_) -> A.approvalDecision approval view (laneOf mutation readTicket faulted) checked) (press c)
+      onReview ((name,_),_,_,_,_,_,_) = name == ("review" :: String)
+      keyName (_,(name,_,_),_,_,_,_,_) = name :: String
+      viewOf (_,_,view,_,_,_,_) = view
+      idle (name,_) = name == ("idle" :: String)
+      approves outcome = case outcome of Just (A.Approve ()) -> True; _ -> False
+      refuses refusal outcome = outcome == Just (A.Refuse refusal)
+      fixedText refusal = case refusal of
+        A.EnterRefused -> "Enter does not approve; y approves the exact review"
+        A.EnterDetailRefused -> "Enter does not approve; Esc returns to the summary, where y approves"
+        A.DetailRefused -> "y does not approve in the detail view"
+        A.HelpRefused -> "Approval did not start: the key help is open. Esc closes it."
+        A.CommandBusy -> "Approval did not start: a manager command is in progress or unresolved."
+        A.FaultStopped -> "Approval did not start: an internal frontend fault stopped all mutations."
+        A.StaleReview -> "Approval did not start: the displayed review is stale."
+        A.ExpiredReview -> "Approval did not start: the displayed review has expired or is no longer live."
+        A.MismatchedReview -> "Approval did not start: the review does not match the request and its literals."
+        A.ClippedReview -> "Approval did not start: the complete review does not fit. Resize the terminal." :: T.Text
+      startText = "Approval started for the exact displayed review." :: T.Text
+      notSentText = "Approval was not sent: the preflight check refused it before any send." :: T.Text
+      expectedReviewRefusal name = case name of
+        "stale" -> Just A.StaleReview; "expired" -> Just A.ExpiredReview
+        "mismatched" -> Just A.MismatchedReview; "clipped" -> Just A.ClippedReview; _ -> Nothing
+      reviewCases = filter onReview cases
+  -- A fixture-shape guard: the enumeration must keep every dimension.
+  check "the enumeration spans 12 screens, 5 keys, 3 views, 7 command states, 2 read states, 2 fault states and 5 review states"
+    ((length screens, length keys, length views, length mutations, length reviews, length cases) == (12, 5, 3, 7, 5, 12 * 5 * 3 * 7 * 2 * 2 * 5))
+  checks
+    [ ("only an unmodified Enter or y on the review screen reaches the predicate, with the displayed review and validator",
+        and [ fmap (\(approval,displayed,shownTag) -> (approval, displayed == preparation && shownTag == tag)) (press c)
+                == if onReview c then lookup (keyName c) [("Enter",(A.EnterKey,True)),("y",(A.ApproveKey,True))] else Nothing
+            | c <- cases ]),
+      ("Enter on the review always refuses, whatever the view, command, read, fault and review state",
+        and [not (approves (decide c)) && decide c /= Nothing | c <- reviewCases, keyName c == "Enter"]),
+      ("Enter in the summary refuses with the summary Enter text",
+        and [refuses A.EnterRefused (decide c) | c <- reviewCases, keyName c == "Enter", viewOf c == A.SummaryView]),
+      ("Enter in the detail view refuses without pointing to y in that view",
+        and [refuses A.EnterDetailRefused (decide c) | c <- reviewCases, keyName c == "Enter", viewOf c == A.DetailView]),
+      ("y in the detail view always refuses, including while a read is in flight",
+        and [refuses A.DetailRefused (decide c) | c <- reviewCases, keyName c == "y", viewOf c == A.DetailView]
+          && not (null [() | c@(_,_,A.DetailView,_,Just _,_,_) <- reviewCases, keyName c == "y"])),
+      ("every approval key under the key help refuses",
+        and [refuses A.HelpRefused (decide c) | c <- reviewCases, keyName c `elem` ["Enter","y"], viewOf c == A.KeyHelpView]),
+      ("no forbidden-key refusal depends on the command, read, fault or review state",
+        and [ length (foldr (\x acc -> if x `elem` acc then acc else x : acc) []
+                [decide c | c@(_,(name,_,_),view,_,_,_,_) <- reviewCases, name == kname, view == v]) == 1
+            | kname <- ["Enter","y"], v <- views, not (kname == "y" && v == A.SummaryView) ]),
+      ("approval occurs only for summary y on the review with a current review and an idle lane without a fault",
+        and [approves (decide c) == (onReview c && keyName c == "y" && view == A.SummaryView && idle mutation && not faulted && name == "current")
+            | c@(_,_,view,mutation,_,faulted,(name,_)) <- cases]),
+      ("a read in flight changes no outcome",
+        and [decide (screen,key,view,mutation,Nothing,faulted,checked) == decide (screen,key,view,mutation,Just 4,faulted,checked)
+            | (screen,key,view,mutation,_,faulted,checked) <- cases]),
+      ("a summary y during a command refuses as busy before any review fact",
+        and [refuses A.CommandBusy (decide c) | c@(_,_,A.SummaryView,mutation,_,_,_) <- reviewCases, keyName c == "y", not (idle mutation)]),
+      ("a summary y after an internal fault refuses before any review fact",
+        and [refuses A.FaultStopped (decide c) | c@(_,_,A.SummaryView,mutation,_,True,_) <- reviewCases, keyName c == "y", idle mutation]),
+      ("a summary y on an idle lane refuses a stale, expired, mismatched or clipped review by name",
+        and [fmap A.Refuse (expectedReviewRefusal name) == decide c
+            | c@(_,_,A.SummaryView,mutation,_,False,(name,_)) <- reviewCases, keyName c == "y", idle mutation, name /= "current"]),
+      ("every non-approve outcome carries its fixed notice text and the key number",
+        and [A.decisionNotice 7 outcome == A.KeyNotice 7 (fixedText refusal) | c <- cases, Just outcome@(A.Refuse refusal) <- [decide c]]),
+      ("an approval start carries its own fixed notice", A.decisionNotice 7 (A.Approve ()) == A.KeyNotice 7 startText),
+      ("the approval hint is offered exactly when summary y would approve",
+        and [A.approvalOffered view (laneOf mutation readTicket faulted) checked == approves (decide c)
+            | c@(_,(name,_,_),view,mutation,readTicket,faulted,(_,checked)) <- reviewCases, name == "y"]),
+      ("the notice line names the key number", A.noticeLine (A.KeyNotice 12 "text") == "Approval key 12: text"),
+      ("every fixed text is listed for layout reservation",
+        all (`elem` A.noticeTexts) (startText : notSentText : map fixedText [minBound .. maxBound]))
+    ]
+  -- An approval that the preflight refuses returns to idle before any send.
+  checks
+    [ ("a preflight refusal returns the approval of its press to idle before any send",
+        A.unsentApproval (Just 5) preparingApproval L.MutationIdle == Just 5),
+      ("an approval that proceeds to its send is not unsent",
+        A.unsentApproval (Just 5) preparingApproval (L.MutationSending 3 attempt) == Nothing),
+      ("an approval that stays in preparation is not unsent", A.unsentApproval (Just 5) preparingApproval preparingApproval == Nothing),
+      ("another preparing mutation that returns to idle is not an unsent approval",
+        A.unsentApproval (Just 5) (L.MutationPreparing 3 create) (L.MutationIdle :: L.MutationState T.Text T.Text) == Nothing),
+      ("an idle lane is not an unsent approval", A.unsentApproval (Just 5) L.MutationIdle (L.MutationIdle :: L.MutationState T.Text T.Text) == Nothing)
+    ]
+  -- The notice lifetime over key presses, observation installs, ticks and
+  -- the preflight of an approval.
+  let renewedScreen = ServiceReviewScreen preparation "\"preprev_2\""
+      requestScreen = ServiceRequestScreen request
+      first = A.KeyNotice 1 (fixedText A.EnterRefused)
+      second = A.KeyNotice 2 (fixedText A.DetailRefused)
+      started = A.KeyNotice 3 startText
+      busy = A.KeyNotice 4 (fixedText A.CommandBusy)
+      notSent = A.KeyNotice 3 notSentText
+      summary screen = (screen, False)
+      detailed screen = (screen, True)
+      event keyPress before after shown unsent = A.NoticeEvent keyPress before after shown unsent
+  checks
+    [ ("the key that produced a notice keeps it",
+        A.retainNotice (event True (summary reviewScreen) (summary reviewScreen) True Nothing) Nothing (Just first) == Just first),
+      ("an installed observation that renews the review keeps the notice",
+        A.retainNotice (event False (summary reviewScreen) (summary renewedScreen) True Nothing) (Just first) (Just first) == Just first),
+      ("a tick keeps the notice",
+        A.retainNotice (event False (summary reviewScreen) (summary reviewScreen) True Nothing) (Just first) (Just first) == Just first),
+      ("a key that changes neither screen nor mode keeps the notice",
+        A.retainNotice (event True (detailed reviewScreen) (detailed reviewScreen) True Nothing) (Just first) (Just first) == Just first),
+      ("a key that changes the mode ends the notice",
+        A.retainNotice (event True (summary reviewScreen) (detailed reviewScreen) True Nothing) (Just first) (Just first) == Nothing),
+      ("a key that changes the screen ends the notice",
+        A.retainNotice (event True (summary reviewScreen) (summary requestScreen) False Nothing) (Just first) (Just first) == Nothing),
+      ("an installed observation that removes the review ends the notice",
+        A.retainNotice (event False (summary reviewScreen) (summary requestScreen) False Nothing) (Just first) (Just first) == Nothing),
+      ("a later approval key replaces the earlier notice",
+        A.retainNotice (event True (detailed reviewScreen) (detailed reviewScreen) True Nothing) (Just first) (Just second) == Just second),
+      ("a preflight refusal after an approval start does not keep the approval-start notice",
+        A.retainNotice (event False (summary reviewScreen) (summary reviewScreen) True (Just 3)) (Just started) (Just started) /= Just started),
+      ("a preflight refusal replaces the approval-start notice with the fixed not-sent notice of that press",
+        A.retainNotice (event False (summary reviewScreen) (summary reviewScreen) True (Just 3)) (Just started) (Just started) == Just notSent),
+      ("a preflight refusal replaces a later busy notice with the not-sent notice of the approval press",
+        A.retainNotice (event False (summary reviewScreen) (summary reviewScreen) True (Just 3)) (Just busy) (Just busy) == Just notSent),
+      ("a preflight refusal after the review left the screen leaves no notice",
+        A.retainNotice (event False (summary reviewScreen) (summary requestScreen) False (Just 3)) (Just started) (Just started) == Nothing)
+    ]
+  -- The same lifetime driven through a sequence of service events, each with
+  -- the command lane before and after it, as the App wrapper supplies them.
+  let step notice (keyPress,before,after,shown,approvalPress,laneBefore,laneAfter,produced) =
+        A.retainNotice (event keyPress before after shown (A.unsentApproval approvalPress laneBefore laneAfter)) notice (maybe notice Just produced)
+      sending = L.MutationSending 3 (L.Attempt approve "pending" (Just "/v1/commands/cmd_1")) :: L.MutationState T.Text T.Text
+      awaiting = L.MutationAwaiting approve "pending" "/v1/commands/cmd_1" :: L.MutationState T.Text T.Text
+      s = summary reviewScreen
+      refused = scanl step Nothing
+        [ (True, s, s, True, Just 3, L.MutationIdle, preparingApproval, Just started),
+          (False, s, s, True, Just 3, preparingApproval, preparingApproval, Nothing),
+          (True, s, s, True, Just 3, preparingApproval, preparingApproval, Just busy),
+          (False, s, s, True, Just 3, preparingApproval, L.MutationIdle, Nothing),
+          (False, s, summary renewedScreen, True, Just 3, L.MutationIdle, L.MutationIdle, Nothing),
+          (False, summary renewedScreen, summary renewedScreen, True, Just 3, L.MutationIdle, L.MutationIdle, Nothing) ]
+      proceeded = scanl step Nothing
+        [ (True, s, s, True, Just 3, L.MutationIdle, preparingApproval, Just started),
+          (False, s, s, True, Just 3, preparingApproval, sending, Nothing),
+          (False, s, s, True, Just 3, sending, awaiting, Nothing),
+          (False, s, summary renewedScreen, True, Just 3, awaiting, awaiting, Nothing) ]
+  checks
+    [ ("an approval press, a tick, a busy press, a preflight refusal, an install and a tick end with the not-sent notice",
+        refused == [Nothing, Just started, Just started, Just busy, Just notSent, Just notSent, Just notSent]),
+      ("an approval that proceeds to its send keeps the approval-start notice while the review stays",
+        proceeded == [Nothing, Just started, Just started, Just started, Just started])
+    ]
+  -- Fixed-size renders of every notice in both review views and under the
+  -- key help, before and after an installed observation that renews the
+  -- review and its status.
+  let serviceModel = initialServiceModel [profile]
+      reviewPresentation screen status view notice offered = (emptyPresentation (serviceModel {modelScreen = screen, modelStatus = status}))
+        {presentationService = True, presentationExactDetails = view == A.DetailView, presentationServiceNotice = notice,
+          presentationServiceApprovalOffered = offered, presentationNoColor = True,
+          presentationLayer = if view == A.KeyHelpView then KeyHelpLayer else presentationLayer (emptyPresentation serviceModel {modelScreen = screen})}
+      noticeShown size frame notice = all (`T.isInfixOf` frame) (wrapDisplayLines (min 84 (fst size) - 4) (A.noticeLine notice))
+      notices = notSent : map (A.decisionNotice 9) (A.Approve () : map A.Refuse [minBound .. maxBound] :: [A.ApprovalDecision ()])
+  mapM_ (\notice -> mapM_ (\(size,view) -> do
+      let before = render size (reviewPresentation reviewScreen "exact manager review observed" view (Just notice) False)
+          kept = A.retainNotice (event False (reviewScreen,view) (renewedScreen,view) True Nothing) (Just notice) (Just notice)
+          after = render size (reviewPresentation renewedScreen "manager request: review" view kept False)
+          viewName = case view of A.SummaryView -> "summary review"; A.DetailView -> "detail view"; A.KeyHelpView -> "key help"
+      check ("the notice " <> show (A.noticeText notice) <> " renders in the " <> viewName <> " at " <> show size)
+        (noticeShown size before notice)
+      check ("the notice " <> show (A.noticeText notice) <> " survives an installed observation in the " <> viewName <> " at " <> show size)
+        (noticeShown size after notice && "manager request: review" `T.isInfixOf` after))
+    [(size,view) | size <- [(140,36),(80,24)], view <- views]) notices
+  let shownRefusal view = case view of
+        A.SummaryView -> A.EnterRefused
+        A.DetailView -> A.DetailRefused
+        A.KeyHelpView -> A.HelpRefused
+      refusalNotice view = A.decisionNotice 3 (A.Refuse (shownRefusal view) :: A.ApprovalDecision ())
+  mapM_ (\view -> putStrLn ("RENDER approval-key refusal in the " <> show view <> " at (80,24):")
+      >> putStr (T.unpack (render (80,24) (reviewPresentation reviewScreen "exact manager review observed" view (Just (refusalNotice view)) False))))
+    views
+  putStrLn "RENDER preflight refusal after an approval start in the summary review at (80,24):"
+    >> putStr (T.unpack (render (80,24) (reviewPresentation renewedScreen "exact manager review observed" A.SummaryView (Just notSent) True)))
+  checks
+    [ ("the approval hint renders when the predicate offers approval",
+        "y APPROVE EXACT REVIEW" `T.isInfixOf` render (140,36) (reviewPresentation reviewScreen "review" A.SummaryView Nothing True)),
+      ("the approval hint is absent when the predicate refuses",
+        not ("y APPROVE EXACT REVIEW" `T.isInfixOf` render (140,36) (reviewPresentation reviewScreen "review" A.SummaryView Nothing False)))
+    ]
+  smallest <- case filter (\height -> serviceReviewAllowed preparation tag (100,height)) [8 .. 60] of
+    height : _ -> pure height
+    [] -> die "FAIL no admissible review height at width 100"
+  let longest = snd (maximum [(T.length text,text) | text <- A.noticeTexts])
+      tight = render (100,smallest) (reviewPresentation reviewScreen "review" A.SummaryView (Just (A.KeyNotice maxBound longest)) True)
+  check ("the longest notice does not clip the review at the smallest admissible height " <> show smallest)
+    (all (`T.isInfixOf` tight) (concatMap (wrapDisplayLines 80) (serviceReviewRows preparation tag))
+      && noticeShown (100,smallest) tight (A.KeyNotice maxBound longest))

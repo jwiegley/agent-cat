@@ -3299,6 +3299,23 @@ an uncertain send to be repeated only after explicit confirmation.  Receipt
 status is separate from request association and runtime outcome.  Exiting the
 frontend closes its transport without cancelling manager-owned work.
 
+On the exact review, only @kbd{y} in the summary view approves.  @key{RET}
+never approves, @kbd{y} never approves in the detail view that @kbd{d} opens,
+and no key approves while the key help is open.  A summary @kbd{y} starts an
+approval only when no manager command is in progress or unresolved, no internal
+fault has occurred, and the displayed review is the installed one, is still
+live, binds the request and its literals, and fits the terminal in full.  An
+observation read in flight does not prevent the approval, because the approval
+ends that read before it prepares the command.  Every press of @key{RET} or
+@kbd{y} on the review shows one fixed notice that carries the sequence number of
+the press among the approval-key presses of the session.  The notice appears in
+the summary, in the detail view and in the key help.  It remains until a key
+changes the screen or the view, or until the review leaves the screen, and
+observation refreshes that keep the review do not remove it.  When the
+preflight check refuses an approval before any send, the notice of that press
+changes to state that the approval was not sent.  The approval hint appears
+exactly when @kbd{y} would approve.
+
 A declared client failure keeps its declared meaning.  Any other failure of a
 manager call inside the frontend is an internal frontend fault, and the
 frontend reports it with fixed text that contains no exception detail.  After

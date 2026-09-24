@@ -41,6 +41,7 @@ import Agentic.Runtime
     WorkflowInputDescriptor (..),
     WorkflowInputSource (..),
   )
+import Agentic.Tui.Approval (KeyNotice (..), noticeLine, noticeTexts)
 import Agentic.Tui.Highlight
 import Agentic.Tui.Model
 import Agentic.Tui.Person
@@ -115,7 +116,13 @@ data Presentation = Presentation
     presentationServiceMutation :: !(Maybe (Text,Text,Bool)),
     presentationServiceResendConfirm :: !Bool,
     presentationServiceApproval :: !(Maybe Text),
-    presentationServiceReviewAvailable :: !Bool,
+    -- | Whether y would approve the exact summary review now, as
+    -- 'Agentic.Tui.Approval.approvalOffered' decides. The approval hint is
+    -- shown exactly when this holds.
+    presentationServiceApprovalOffered :: !Bool,
+    -- | The notice of the latest approval-key press, shown in both review
+    -- views and in the key help while the review is on the screen.
+    presentationServiceNotice :: !(Maybe KeyNotice),
     -- | An internal frontend fault occurred. No mutation starts, no exact
     -- resend is offered, and only read-only actions remain.
     presentationServiceFault :: !Bool,
@@ -159,7 +166,8 @@ emptyPresentation model =
       presentationServiceMutation = Nothing,
       presentationServiceResendConfirm = False,
       presentationServiceApproval = Nothing,
-      presentationServiceReviewAvailable = False,
+      presentationServiceApprovalOffered = False,
+      presentationServiceNotice = Nothing,
       presentationServiceFault = False,
       presentationConfig = Nothing,
       presentationPersonPrompt = Nothing,
@@ -338,19 +346,38 @@ serviceReviewRows preparation tag =
     "If-Match: " <> tag ] <> Service.approvalSelectors preparation
       <> ["d shows the complete exact review.", "Only y approves. Enter does not approve."]
 
+-- | Whether the complete summary review fits. The rows of the longest
+-- approval-key notice are always reserved, so a notice never clips the review.
 serviceReviewAllowed :: Manager.Preparation -> Text -> (Int,Int) -> Bool
 serviceReviewAllowed preparation tag (width,height) = width >= 40 &&
-  length (concatMap (wrapDisplayLines innerWidth) (serviceReviewRows preparation tag)) <= max 0 (shellMainRows width height - 2)
+  length (concatMap (wrapDisplayLines innerWidth) (serviceReviewRows preparation tag)) + serviceNoticeRows innerWidth
+    <= max 0 (shellMainRows width height - 2)
   where innerWidth = max 1 (min 84 width - 4)
+
+-- | The rows that the longest approval-key notice needs at this inner width,
+-- with the widest possible key number.
+serviceNoticeRows :: Int -> Int
+serviceNoticeRows innerWidth =
+  maximum (0 : [length (wrapDisplayLines innerWidth (noticeLine (KeyNotice maxBound text))) | text <- noticeTexts])
+
+-- | The lines of the approval-key notice in a dialog of this width. Each
+-- view places them first, so a clipped review cannot hide them.
+serviceNoticeWidgets :: Presentation -> Int -> [Widget Name]
+serviceNoticeWidgets presentation width =
+  [ withAttr (attrName "warning") (displayText line)
+  | Just current <- [presentationServiceNotice presentation],
+    line <- wrapDisplayLines (max 1 (min 84 width - 4)) (noticeLine current)
+  ]
 
 serviceReviewView :: Presentation -> Manager.Preparation -> Text -> Int -> Int -> Int -> Widget Name
 serviceReviewView presentation preparation tag width _ mainHeight
   | presentationExactDetails presentation = dialog width mainHeight " Exact manager review " $
-      viewport ConfirmDetailsViewport Vertical $ vBox $ map displayTextWrap details
+      vBox (notice <> [viewport ConfirmDetailsViewport Vertical $ vBox $ map displayTextWrap details])
   | otherwise = dialog width mainHeight " Approve exact manager review " $
-      vBox (map displayText (concatMap (wrapDisplayLines innerWidth) (serviceReviewRows preparation tag)))
+      vBox (notice <> map displayText (concatMap (wrapDisplayLines innerWidth) (serviceReviewRows preparation tag)))
   where
     innerWidth = max 1 (min 84 width - 4)
+    notice = serviceNoticeWidgets presentation width
     review = Manager.preparationReview preparation
     details = Service.approvalSelectors preparation <>
       [ "Program SHA-256: " <> Manager.reviewProgramHash review,
@@ -779,7 +806,8 @@ steerView presentation width mainHeight = case presentationSteerTiming presentat
 
 keyHelpView :: Presentation -> Int -> Int -> Widget Name
 keyHelpView presentation width mainHeight =
-  dialog width mainHeight " Keyboard shortcuts " (viewport KeyHelpViewport Vertical (vBox (map displayTextWrap (keyHelpLines presentation))))
+  dialog width mainHeight " Keyboard shortcuts " $
+    vBox (serviceNoticeWidgets presentation width <> [viewport KeyHelpViewport Vertical (vBox (map displayTextWrap (keyHelpLines presentation)))])
 
 keyHelpLines :: Presentation -> [Text]
 keyHelpLines presentation = case modelScreen model of
@@ -960,8 +988,7 @@ footerItems presentation width height = case presentationLayer presentation of
                 && not (presentationServiceFault presentation)
               then ["e EDIT INPUTS"] <> ["Enter REQUEST REVIEW" | Service.requestReady request] else [])
       ServiceReviewScreen preparation tag -> ["d EXACT DETAILS", "q DETACH"] <>
-        ["y APPROVE EXACT REVIEW" | not (presentationExactDetails presentation), presentationServiceReviewAvailable presentation,
-          serviceReviewAllowed preparation tag (width,height)]
+        ["y APPROVE EXACT REVIEW" | presentationServiceApprovalOffered presentation]
         <> ["RESIZE TO REVIEW" | not (serviceReviewAllowed preparation tag (width,height))]
       ServiceCommandScreen _ -> ["g REFRESH", "q DETACH"] <>
         ["x EXACT RESEND" | Just (_,_,True) <- [presentationServiceMutation presentation]]

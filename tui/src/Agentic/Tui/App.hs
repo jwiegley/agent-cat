@@ -41,6 +41,7 @@ import Agentic.Runtime
     stepRunSnapshot,
   )
 import qualified Agentic.Manager.Client as Manager
+import qualified Agentic.Tui.Approval as Approval
 import qualified Agentic.Tui.Service as Service
 import qualified Agentic.Tui.ServiceLane as Lane
 import Agentic.Tui.Client
@@ -199,6 +200,14 @@ data AppState = AppState
     stateServiceApproval :: !(Maybe (Service.Mutation,Manager.PendingCommand,Maybe Manager.Reference)),
     stateServiceApprovalStatus :: !(Maybe Text),
     stateServiceLastReceipt :: !(Maybe Manager.CommandReceipt),
+    -- | The sequence number of the latest approval-key press on the review.
+    -- It counts approval-key presses only, not every key event.
+    stateServiceKeySerial :: !Int,
+    -- | The sequence number of the press that started the latest approval.
+    stateServiceApprovalPress :: !(Maybe Int),
+    -- | The notice of the latest approval-key press. Only the approval-key
+    -- handler sets it, and 'Approval.retainNotice' alone ends or replaces it.
+    stateServiceNotice :: !(Maybe Approval.KeyNotice),
     stateServiceUncertainExit :: !(IORef Bool),
     stateServiceFaultExit :: !(IORef Bool)
   }
@@ -297,6 +306,9 @@ runAppWith backend = mask $ \restore -> do
             stateServiceApproval = Nothing,
             stateServiceApprovalStatus = Nothing,
             stateServiceLastReceipt = Nothing,
+            stateServiceKeySerial = 0,
+            stateServiceApprovalPress = Nothing,
+            stateServiceNotice = Nothing,
             stateServiceUncertainExit = uncertainExit,
             stateServiceFaultExit = faultExit
           }
@@ -546,12 +558,55 @@ applyServiceObservation (ServiceObservation observed request preparation receipt
           Service.reviewLive (stateNow current) prep -> do
             let screen = ServiceReviewScreen prep (Manager.observedETag prepObserved)
             put current {stateConfirmDetails = stateConfirmDetails current && modelScreen (stateModel current) == screen,
-              stateModel = (stateModel current) {modelScreen = screen, modelStatus = "exact manager review; y explicitly approves"}}
+              stateModel = (stateModel current) {modelScreen = screen, modelStatus = "exact manager review observed"}}
       _ -> put current {stateConfirmDetails = False, stateModel = (stateModel current)
         {modelScreen = ServiceRequestScreen request, modelStatus = "manager request: " <> Manager.draftPhase request}}
 
+-- | Handle one service event, then apply the approval-notice lifetime.
 handleServiceEvent :: Manager.Client -> BrickEvent Name AppEvent -> EventM Name AppState ()
 handleServiceEvent client event = do
+  before <- get
+  handleServiceEventCore client event
+  after <- get
+  let view current = (modelScreen (stateModel current), stateConfirmDetails current, stateKeyHelp current, serviceResendConfirm current)
+      noticeEvent = Approval.NoticeEvent
+        { Approval.eventKeyPress = case event of VtyEvent Vty.EvKey {} -> True; _ -> False,
+          Approval.eventViewBefore = view before,
+          Approval.eventViewAfter = view after,
+          Approval.eventReviewShown = case modelScreen (stateModel after) of ServiceReviewScreen {} -> True; _ -> False,
+          Approval.eventUnsentApproval = Approval.unsentApproval (stateServiceApprovalPress after) (serviceMutation before) (serviceMutation after)
+        }
+  put after {stateServiceNotice = Approval.retainNotice noticeEvent (stateServiceNotice before) (stateServiceNotice after)}
+
+-- | Decide one approval-key press on the displayed review with
+-- 'Approval.approvalDecision', show its notice, and start the approval only
+-- when the decision approves. An approval start records its press, and it
+-- ends and cancels any read in flight through 'beginServiceMutation'.
+handleApprovalKey :: Manager.Client -> (Approval.ApprovalKey, Manager.Preparation, Text) -> EventM Name AppState ()
+handleApprovalKey client (key,displayed,tag) = do
+  state <- get
+  let serial = stateServiceKeySerial state + 1
+      decision = Approval.approvalDecision key (serviceReviewView state) (stateServiceLane state) (serviceReviewCheck state displayed tag)
+      pressed = state {stateServiceKeySerial = serial, stateServiceNotice = Just (Approval.decisionNotice serial decision)}
+  case decision of
+    Approval.Approve (request,observed) -> do
+      put pressed {stateServiceApprovalPress = Just serial}
+      beginServiceMutation client (Service.Approve request displayed) (Just observed)
+    Approval.Refuse _ -> put pressed
+
+-- | The view of the review screen that the operator sees.
+serviceReviewView :: AppState -> Approval.ReviewView
+serviceReviewView state = Approval.reviewView (stateKeyHelp state) (stateConfirmDetails state)
+
+-- | Check the displayed review against the installed observations, the
+-- current time and the terminal size.
+serviceReviewCheck :: AppState -> Manager.Preparation -> Text -> Approval.ReviewCheck (Manager.DraftView, Manager.Observed)
+serviceReviewCheck state displayed tag =
+  Approval.checkReview Manager.observedETag (stateNow state) (serviceReviewAllowed displayed tag (stateTerminalSize state))
+    (stateServiceWorkflow state) (stateServiceRequest state) (stateServicePreparation state) (modelInputs (stateModel state)) displayed tag
+
+handleServiceEventCore :: Manager.Client -> BrickEvent Name AppEvent -> EventM Name AppState ()
+handleServiceEventCore client event = do
   state <- get
   let failed lane problem = state {stateServiceLane = lane, stateServiceRequest = Nothing, stateServicePreparation = Nothing,
         stateModel = (stateModel state) {modelScreen = ServiceCommandScreen ("Observation refused: " <> T.pack (show problem)),
@@ -603,7 +658,11 @@ handleServiceEvent client event = do
     VtyEvent (Vty.EvKey key modifiers)
       | key == Vty.KChar 'q' && null modifiers -> halt
       | key == Vty.KChar '?' && null modifiers && not (serviceResendConfirm state) -> put state {stateKeyHelp = not (stateKeyHelp state)}
-      | stateKeyHelp state -> when (key == Vty.KEsc) (put state {stateKeyHelp = False})
+      -- Under the key help, an approval key on the review still has one
+      -- visible outcome, and only Esc closes the help.
+      | stateKeyHelp state -> case Approval.reviewApprovalKey (modelScreen (stateModel state)) key modifiers of
+          Just press -> handleApprovalKey client press
+          Nothing -> when (key == Vty.KEsc) (put state {stateKeyHelp = False})
       | serviceResendConfirm state -> case key of
           Vty.KChar 'y' | null modifiers -> case Lane.resendAttempt (stateServiceLane state) of
             Just attempt -> do
@@ -615,6 +674,9 @@ handleServiceEvent client event = do
           Vty.KChar 'n' -> put (onLane (\lane -> lane {Lane.laneResendConfirm = False}) state)
           Vty.KEsc -> put (onLane (\lane -> lane {Lane.laneResendConfirm = False}) state)
           _ -> pure ()
+      -- Every approval-key press on the review has exactly one visible
+      -- outcome, whatever the command and read lanes hold.
+      | Just press <- Approval.reviewApprovalKey (modelScreen (stateModel state)) key modifiers -> handleApprovalKey client press
       | serviceSending state -> pure ()
       | null modifiers -> case key of
           Vty.KEsc -> serviceBack state
@@ -637,13 +699,6 @@ handleServiceEvent client event = do
             ServiceRequestScreen request | Service.requestReady request, Manager.draftPhase request == "draft" ->
               beginServiceMutation client (Service.Enqueue request) (fst <$> stateServiceRequest state)
             _ -> pure ()
-          Vty.KChar 'y' | serviceMutable state, not (stateConfirmDetails state), serviceReadTicket state == Nothing ->
-            case (modelScreen (stateModel state),stateServiceWorkflow state,stateServiceRequest state,stateServicePreparation state) of
-              (ServiceReviewScreen displayed tag,Just workflow,Just (_,request),Just (observed,preparation))
-                | displayed == preparation, tag == Manager.observedETag observed,
-                  Service.reviewMatches workflow request preparation, Service.literalInputs request == modelInputs (stateModel state),
-                  serviceReviewAllowed displayed tag (stateTerminalSize state) -> beginServiceMutation client (Service.Approve request displayed) (Just observed)
-              _ -> pure ()
           Vty.KChar 'd' | ServiceReviewScreen {} <- modelScreen (stateModel state) -> do
             put state {stateConfirmDetails = not (stateConfirmDetails state)}
             vScrollToBeginning (viewportScroll ConfirmDetailsViewport)
@@ -746,11 +801,11 @@ toPresentation state =
       presentationServiceResendConfirm = serviceResendConfirm state,
       presentationServiceApproval = stateServiceApprovalStatus state,
       presentationServiceFault = serviceFaulted state,
-      presentationServiceReviewAvailable = serviceMutable state && serviceReadTicket state == Nothing
-        && case (stateServiceWorkflow state,stateServiceRequest state,stateServicePreparation state) of
-          (Just workflow,Just (_,request),Just (_,preparation)) -> Service.reviewLive (stateNow state) preparation
-            && Service.reviewMatches workflow request preparation && Service.literalInputs request == modelInputs (stateModel state)
-          _ -> False,
+      presentationServiceApprovalOffered = case modelScreen (stateModel state) of
+        ServiceReviewScreen displayed tag ->
+          Approval.approvalOffered (serviceReviewView state) (stateServiceLane state) (serviceReviewCheck state displayed tag)
+        _ -> False,
+      presentationServiceNotice = stateServiceNotice state,
       presentationEditor = currentEditor state,
       presentationRunView = stateRunView state,
       presentationPaneFocus = statePaneFocus state,

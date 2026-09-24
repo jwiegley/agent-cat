@@ -1101,6 +1101,38 @@ Owner 2026-08-12, verbatim: 'I need theorems in the mathematical space of ⟦har
 
 Review FIX-NOW on acat-444 (machine-checked probes): WEq quantifies keys inside the comparison, so gateT true A, scopeT unit A, seq-assoc and seq-unit ALL fail to be WEq — the quotient has one operation and no laws, and deleting a no-op counts as a semantic change. Fix direction per review: key-renaming/site-relabelling invariance (a groupoid quotient on keys FIRST); naive outside-quantification still fails associativity because the two shapes assign different site-sets. Blocks any real use of Workflow; also the prerequisite for pi (the folds are incomparable until this lands: muS does not respect WEq and WEq does not respect muS — one_add_one_of_muS_respects_WEq + probes).
 
+* TODO [#D] Qualify the TUI review key-help line about y
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-5eys
+:LABELS:   []
+:ISSUE_TYPE: bug
+:CREATED:  [2026-09-24 Thu 06:41]
+:MODIFIED: [2026-09-24 Thu 06:41]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+A3 fess finding (low). Presentation.hs near line 828, the review key-help line says 'y approves the exact visible selectors' without a summary qualifier. y refuses under the key help and in the detail view. Change the line to state that y approves only in the summary view. The manual paragraph in doc/agent-cat.texi near 3207-3222 already states the rule correctly.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-5eys",
+    "depends_on_id": "acat-tui-consent-barrier-wby2",
+    "type": "discovered-from",
+    "created_at": "2026-09-24T13:41:01.460412Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
 * TODO [#D] Establish which transport exceptions escape Manager.Client.clientIO
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -1126,6 +1158,38 @@ A2 fess finding (low). Manager.Client.clientIO catches only HttpException and Cl
     "depends_on_id": "acat-tui-internal-faults-jj13",
     "type": "discovered-from",
     "created_at": "2026-09-24T11:35:32.624649Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
+* TODO [#C] Exercise the TUI App approval wiring in a test
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-5k82
+:LABELS:   []
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-24 Thu 06:41]
+:MODIFIED: [2026-09-24 Thu 06:41]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+A3 fess finding (medium). No test executes the App wiring of the approval predicate and no guard-breaking control covers it: the handleServiceEvent wrapper that feeds Approval.unsentApproval with stateServiceApprovalPress and the lane before and after each event (App.hs near 567-579), handleApprovalKey (near 586-594) and the toPresentation hint (near 804-807). tui-model-test does not compile App.hs, so reading the press from the wrong lane, swapping the lanes or dropping the retainNotice call would pass every tracked test. Drive handleServiceEvent, or a pure extraction of the wrapper step, in a harness that includes App, or add an App.hs overlay control. Cover the PrepareRefused-after-approval transition and the hint mapping.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-5k82",
+    "depends_on_id": "acat-tui-consent-barrier-wby2",
+    "type": "discovered-from",
+    "created_at": "2026-09-24T13:41:01.008585Z",
     "created_by": "johnw",
     "metadata": "{}",
     "thread_id": ""
@@ -1541,6 +1605,38 @@ Shared dependency acat-j79f remains in progress with no frozen schemas. Parent o
 ]
 #+end_src
 
+* TODO [#D] Decide the TUI review notice row reservation
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-8upd
+:LABELS:   []
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-24 Thu 06:41]
+:MODIFIED: [2026-09-24 Thu 06:41]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+A3 fess finding (low). Presentation.serviceReviewAllowed (near 351-362) always reserves the rows of the longest approval notice with a maximal key number, even when no notice shows. The smallest admissible review height at width 100 rose from 21 to 23 rows, so at 100x21 and 100x22 y now refuses with ClippedReview. Accept this and state it in the handoff, or reserve rows only while a notice is present with a matching clip rule.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-8upd",
+    "depends_on_id": "acat-tui-consent-barrier-wby2",
+    "type": "discovered-from",
+    "created_at": "2026-09-24T13:41:01.906441Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
 * DONE [#D] DSL docstring corrections: binder account, under_askC1 routing, expectKwSaying scope, render spellings, n+1 checks
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -1706,6 +1802,38 @@ From acat-ruz: reach = csum of powers is carrier-generic except star_eq_left nee
     "author": "johnw",
     "text": "SUBSUMED by shortest-list 6 (one star via CsumIsSup): the csum-of-powers construction sidesteps the reindexing-law route entirely.",
     "created_at": "2026-08-12T20:31:39Z"
+  }
+]
+#+end_src
+
+* TODO [#E] Move terminal key decoding out of Agentic.Tui.Approval
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-9q07
+:LABELS:   []
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-24 Thu 06:41]
+:MODIFIED: [2026-09-24 Thu 06:41]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+A3 fess finding (low, optional). Approval.hs imports Graphics.Vty and decodes terminal keys (near lines 60 and 72-83). The other pure model module, Model.hs, does not import Vty, and tui/AGENTS.md assigns terminal events to Brick. Purity holds, but consider moving approvalKey and reviewApprovalKey decoding into App so the predicate takes ApprovalKey and Screen facts.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-9q07",
+    "depends_on_id": "acat-tui-consent-barrier-wby2",
+    "type": "discovered-from",
+    "created_at": "2026-09-24T13:41:02.351300Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
   }
 ]
 #+end_src
@@ -4673,6 +4801,38 @@ Review: highest-consequence gap. pureT admits copy, so parT (prim q) (prim q) is
 :ORIGINAL_SIZE: 0
 :END:
 
+* TODO [#D] Account for decreasing TUI notice key numbers in A4
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-kmem
+:LABELS:   []
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-24 Thu 06:41]
+:MODIFIED: [2026-09-24 Thu 06:41]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+A3 fess finding (low). The approval notice number counts approval-key presses on the review, not all key events (App.hs near 588-593). The not-sent notice (Approval.hs near 286) replaces a later busy notice with the number of the approving press, so the displayed number can go down. The A4 post-key boundary must allow for this. Otherwise give the not-sent notice a new serial, or document that the displayed numbers do not always increase.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-kmem",
+    "depends_on_id": "acat-tui-consent-barrier-wby2",
+    "type": "discovered-from",
+    "created_at": "2026-09-24T13:41:01.687642Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
 * DONE [#E] Prob->Rat faithfulness bridge blocked by core Rat's proof poverty
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -5248,6 +5408,38 @@ FROZEN PLAN (owner-approved 2026-08-20, artifact e949eac0): Step 1 housekeeping 
     "author": "johnw",
     "text": "Step 3 COMPLETE: agent-cat 74a8b61 + agent-workflows 6a35ccc pushed, fess-audited (safe-to-push verdict, all folds landed), flake relocked, two-session guide committed (057c36b). Deferred on the record: owa part 2 + hard-wrap banner test; freshSentinel uniqueness test; fuk fixture; qzl lows; bisim ping retry; f8e. The frozen plan's three steps are done.",
     "created_at": "2026-08-20T22:01:20Z"
+  }
+]
+#+end_src
+
+* TODO [#D] Remove the overclaim from the TUI detail-view Enter notice
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-nhfo
+:LABELS:   []
+:ISSUE_TYPE: bug
+:CREATED:  [2026-09-24 Thu 06:41]
+:MODIFIED: [2026-09-24 Thu 06:41]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+A3 fess finding (low). Approval.hs near line 220, EnterDetailRefused reads 'Enter does not approve; Esc returns to the summary, where y approves'. Both claims can be false: while a command prepares or sends, the serviceSending guard precedes serviceBack and Esc is dropped, and summary y refuses when the lane is busy or faulted or the review is stale, expired, mismatched or clipped. Reduce the text to facts that always hold, for example by removing 'where y approves'.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-nhfo",
+    "depends_on_id": "acat-tui-consent-barrier-wby2",
+    "type": "discovered-from",
+    "created_at": "2026-09-24T13:41:01.239674Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
   }
 ]
 #+end_src
@@ -6215,6 +6407,38 @@ From acat-ozh: both carriers are complete-because-suprema-attained with parallel
 ]
 #+end_src
 
+* TODO [#D] Rename the TUI notice survival and hint checks
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-s283
+:LABELS:   []
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-24 Thu 06:41]
+:MODIFIED: [2026-09-24 Thu 06:41]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+A3 fess finding (low). ServiceTests.hs near 563, the check 'survives an installed observation' computes the kept notice with Approval.retainNotice and would pass even if App never called retainNotice. Near 466, the hint-equivalence check is definitional because approvalOffered is defined through approvalDecision. Rename both checks to state what they test, or back them with the App-level harness.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-s283",
+    "depends_on_id": "acat-tui-consent-barrier-wby2",
+    "type": "discovered-from",
+    "created_at": "2026-09-24T13:41:02.135033Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
 * DONE [#E] Environment note: PAL MCP provider keys are broken (blocks multi-model review)
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -6599,7 +6823,7 @@ Source: fess audit /Users/johnw/Products/agent-cat-workflow-manager/implementati
 :LABELS:   []
 :ISSUE_TYPE: bug
 :CREATED:  [2026-09-23 Wed 16:24]
-:MODIFIED: [2026-09-23 Wed 16:24]
+:MODIFIED: [2026-09-24 Thu 06:40]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -6620,6 +6844,20 @@ Halt fess finding: manager/test/service_http.py sends Enter or detail-view y and
     "created_by": "johnw",
     "metadata": "{}",
     "thread_id": ""
+  }
+]
+#+end_src
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 315,
+    "issue_id": "acat-tui-consent-barrier-wby2",
+    "author": "johnw",
+    "text": "Subtask A3 (resume workflow wm023-20260923) completed the frontend part of this issue. Approval-key admissibility is now one pure predicate in the compiled module tui/src/Agentic/Tui/Approval.hs (Agentic.Tui.Approval), and App dispatches every unmodified Enter or y on the review screen to it before the serviceSending guard. Forbidden keys are decided first and do not depend on read-lane or mutation state: Enter on the review refuses, and y in the detail view or under the key help refuses. Next come the busy and fault refusals, then the stale, expired, mismatched and clipped review refusals, and then approval. The read ticket takes no part in any decision. Each outcome shows a fixed notice with a key number in the summary, detail and key-help views. Observation installs and ticks do not remove it, and it ends at the next key that changes screen or mode. A preflight refusal after an approval start replaces the start notice with a fixed not-sent notice. The approve hint appears exactly when summary y would approve. Evidence ceilings: pure model tests and fixed-size renders (288 checks at N1 and N8, /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A3/verify-r2/A3v2-model-N1.log and -N8.log, enumerating 25200 cases), 26 verifier guard-breaking controls on Approval.hs and Presentation.hs that each fail a named check (/Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A3/verify-r2/A3v2-controls.log), read-only App wiring source checks (/Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A3/verify-r2/A3v2-source-checks.log), a forced Werror package build (/Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A3/verify-r2/A3v2-build-forced.log), the tracked tui-approval fixture at N1 then N8 as actual UI interaction (/Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A3/verify-r2/A3v2-tui-approval-N1.log and -N8.log), and the tui gate (/Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A3/verify-r2/A3v2-tui-gate.log). The implementer's private PTY variant observed the Enter, detail-y and key-help notices at N1 and N8 (/Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A3/impl-r2/A3r2-pty-notices-N1.log and -N8.log). The verifier's repetition of that variant failed in its prelude with a manager 503 storage-unavailable of the A1 class, before any A3 step (/Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A3/verify-r2/A3v2-pty-notices-N1.log, root preserved, not rerun). This issue stays open: the deterministic post-key processing boundary in the tracked manager/test/service_http.py fixture, with a control that breaks the guard, belongs to subtask A4. No test or control yet covers the App-level wiring. Fess audit: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/fess/A-A3-r2.md, non-blocking.\n",
+    "created_at": "2026-09-24T13:40:48Z"
   }
 ]
 #+end_src
@@ -12558,7 +12796,7 @@ until WM-039 supplies it.
 :LABELS:   ["p7","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-24 Thu 04:35]
+:MODIFIED: [2026-09-24 Thu 06:40]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-033
 :SOURCE_REPO: agent-cat
@@ -12660,6 +12898,13 @@ to an unapproved local launch.
     "author": "johnw",
     "text": "Advanced by subtask A2: TUI service-lane internal-fault classification. Subtask A2 (resume workflow wm023-20260923) replaced App.safeService with the compiled module Agentic.Tui.ServiceLane. serviceCall keeps declared ClientFailure values, maps every other synchronous exception to the nullary InternalFault, and rethrows asynchronous exceptions. App routes all eight Client and Service calls through serviceCall or declaredCall and contains no TransportUnavailable construction. Read, preparation and send completions are pure Lane transitions: a read fault clears the read ticket and keeps command state, a preparation fault creates no uncertainty, and a send fault keeps the original pending command, operation, URI and receipt location with uncertainty but offers no exact resend. Fault renders show fixed text only. Evidence ceilings: pure model tests and fixed-size model renders (89 checks at N1 and N8, /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A2/verify-r2/A2v2-model-N1.log and -N8.log), eleven negative controls that each fail a named check (/Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A2/verify-r2/A2v2-control-*), a source-level routing proof (/Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A2/verify-r2/A2v2-source-checks.log), a Werror package build, and tui-approval at N1 then N8 as an actual UI regression on the success path only. No PTY run injects a fault, so actual UI fault handling is not demonstrated. Fess audit: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A2/../../fess/A-A2-r2.md, non-blocking. WM-033 stays open.",
     "created_at": "2026-09-24T11:35:22Z"
+  },
+  {
+    "id": 316,
+    "issue_id": "acat-wm-033-4g77",
+    "author": "johnw",
+    "text": "Subtask A3 (resume workflow wm023-20260923) advanced the TUI service transport frontend by making approval-key admissibility a compiled pure predicate, tui/src/Agentic/Tui/Approval.hs, with fixed visible refusals and notices that survive observation installs. Evidence: 288 model checks at N1 and N8, 26 guard-breaking controls, a forced Werror build, tracked tui-approval at N1 then N8, and the tui gate, all under /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A3/verify-r2. Local-mode key handling is byte-identical. This package is not closed by a subtask.\n",
+    "created_at": "2026-09-24T13:40:48Z"
   }
 ]
 #+end_src

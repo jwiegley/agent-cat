@@ -257,6 +257,7 @@ library
     Agentic.Runtime.Snapshot.Checkpoint
     Agentic.Runtime.Store
     Agentic.Tui.App
+    Agentic.Tui.Approval
     Agentic.Tui.Client
     Agentic.Tui.Highlight
     Agentic.Tui.Model
@@ -471,6 +472,7 @@ test-suite tui-model-test
     tui/src
   main-is:          Main.hs
   other-modules:
+    Agentic.Tui.Approval
     Agentic.Tui.Client
     Agentic.Tui.Highlight
     Agentic.Tui.Model
