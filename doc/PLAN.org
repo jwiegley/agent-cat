@@ -2182,6 +2182,41 @@ Owner directive 2026-08-12: use the standard libraries as much as possible; do n
 ]
 #+end_src
 
+* DONE [#B] Order every question after the effects that precede it
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-effect-ordering-tr4t
+:LABELS:   []
+:ISSUE_TYPE: bug
+:CREATED:  [2026-09-24 Thu 11:02]
+:MODIFIED: [2026-09-24 Thu 11:13]
+:CREATED_BY: johnw
+:FINISHED: [2026-09-24 Thu 11:13]
+:CLOSE_REASON: Every non-effect question waits behind the effect lane's tail (runtime/src/Agentic/Exec.hs watchLane). Pinned by three policy probes; all deterministic and documentation gates pass.
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+A question that a Plan asks after an effect can be dispatched before that
+effect completes. `runPlanIO` (runtime/src/Agentic/Exec.hs) starts each
+occurrence as soon as the answers its prompt reads are ready. The write-effect
+lane orders effects only among themselves, so a consult or observe that reads
+nothing from an earlier act does not wait for it.
+
+Reproduction: an act `tool "save" running ("sh", ["-c", "sleep 2; cat > capital.txt"])`
+followed by `ask (tool "readback" running ("cat", ["capital.txt"]))`. The read
+runs first and the run abandons with `cat: capital.txt: No such file or
+directory`.
+
+Required behaviour (owner decision, 2026-09-24): every occurrence that follows
+an effect in plan order starts only after that effect has completed. Questions
+between two effects remain concurrent with one another.
+
+Done when the scheduler enforces the rule, a policy probe pins it with a slow
+effect followed by a read, the manual states the rule, and the runtime gates
+pass.
+
 * DONE [#D] Weakening fold: Term f -> Term g for f <= g
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -3584,6 +3619,35 @@ Owner request: the artifact §VII example as REAL compiling Lean — Op signatur
 
 Add Example.Structured under haskell/example/Example, register it with agentic-run, and derive its schema, witness, and SchemaEl conversion mechanically from the Haskell record with Template Haskell.
 
+* TODO [#C] Give the harden style-guide question an honest addressee
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-harden-cat-addressee-3yz2
+:LABELS:   []
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-24 Thu 11:02]
+:MODIFIED: [2026-09-24 Thu 11:02]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+The flagship asks `tool "cat"` for the house style guide. That addressee has no
+`running` argv, so no command runs: a live run sends the question to the
+default backend, and a model writes a style guide. The name survives from an
+earlier term whose prompt was "STYLE.md" (model/Agentic/Core/Denote.lean), and
+it now claims a meaning that it does not have.
+
+Two honest forms exist. If the guide is fixed text, it is a define. If it is
+read from the repository, it is `tool "style" running ("cat", ["STYLE.md"])`,
+an observation. Either form changes corpus entry example-000, the Lean
+flagship (DslFlagship.lean, HardenPatch.lean), and the routing scenarios that
+use the tool question as an ordering witness. It is therefore a specification
+change and needs owner review before it is made.
+
+The same name appears in Hello.hs, Isaac.hs, and several probes.
+
 * DONE [#B] The Haskell program: typed workflow library + evaluator/runner, Lean retained as the proven specification
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -3845,6 +3909,51 @@ work is finished.
     "author": "johnw",
     "text": "Weeks three, four and five are done, and with them the whole program of\nrecord (connection.md phase 2, weeks 1-5).\n\nWeeks 3-4 (agentic-hs 7516a85): Agentic.Gen - QuickCheck generators THROUGH\nthe builder (the eleven index-level entry points are now the definitions,\nthe type-level-name forms wrappers, so the print/elaborate pairing exists\nonce); a refusal-biased raw generator; trap-text strings; a generatesWithin\nself-test. Agentic.Oracle - the Lean oracle as a byte-clean subprocess with\nids checked, timeouts named, desync poisoned. bisim - four properties\nagainst the LIVE oracle; ~19,000 comparisons green across six seeds\nincluding n=1000; negative controls (askCounts+1, Unicode toLower,\nperturbed cases) each went loudly red first. P3 other-rate ~18-22%, far\nunder the retune threshold.\n\nWeek 5 (agentic-hs a2cf554; agent-cat flake fix): the firstDiff plumbing\ndeduplicated into Agentic.Observe; ci/tier0.sh (every commit, no Lean) and\nci/tier1.sh (nightly, prebuilt oracle, fails loudly when missing) encode\nSection 3.9's lanes; agent-cat's flake comment stopped claiming there is no\nlean-toolchain and no Mathlib.\n\nFinal state: tier0 124/124, tier1 19/19, bisim 0 failures at every seed\ntried. The owner's brief is delivered: pure Haskell implementation of the\noperational terms with an evaluator (runPlan/trace), bisimulated against\nmock agents (WorldSpec worlds) both sides operate against, property-tested\nagainst the Lean representation, with Lean retained as the full\nformalization and the normative oracle.\n\nExplicitly NOT built (boundary, not debt): a Haskell IO runner against real\nagents (ACP adapters) - the Lean side keeps the production runner; watched\nand never reproduced: one transient $.size off-by-one seen only against a\nmid-edit file snapshot, absent across ~20k live comparisons.\n",
     "created_at": "2026-08-17T08:48:20Z"
+  }
+]
+#+end_src
+
+* TODO [#C] Answer named tools with registered Haskell functions
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-in-process-tools-ttuw
+:LABELS:   []
+:ISSUE_TYPE: feature
+:CREATED:  [2026-09-24 Thu 11:02]
+:MODIFIED: [2026-09-24 Thu 11:02]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Allow a registered Haskell function to answer a question put to a named tool,
+in the way that `executingWorld` answers a `running` tool by running a command.
+
+The workflow term does not change. A workflow writes `ask (tool "shout")
+[wf|{capital}|]`, and the runner answers that question from a table that maps
+tool names to Haskell functions. A function receives the rendered prompt and
+returns the answer at the question's code. The table is supplied by the
+composition root, beside the program's registry entry, so that workflow sources
+stay symbolic.
+
+Done when the runtime has the layer, the CLI composes it for live runs, a probe
+shows a function's answer flowing into a later prompt and an act-position
+function ordered with other effects, the manual documents it, and the gates
+pass.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-in-process-tools-ttuw",
+    "depends_on_id": "acat-effect-ordering-tr4t",
+    "type": "blocks",
+    "created_at": "2026-09-24T18:02:09.810939Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
   }
 ]
 #+end_src
@@ -4664,6 +4773,51 @@ Independent native UI review found that Pi 0.85.1 showExtensionCustom closes ove
     "depends_on_id": "acat-8hq9",
     "type": "discovered-from",
     "created_at": "2026-09-09T11:54:02.282213Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
+* TODO [#B] A repeated question after an effect is answered from before it
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-memo-across-effect-bgyt
+:LABELS:   []
+:ISSUE_TYPE: bug
+:CREATED:  [2026-09-24 Thu 11:13]
+:MODIFIED: [2026-09-24 Thu 11:13]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+A consultation or observation is reused by bare question. When the same
+question is asked before and after an effect, the second occurrence now waits
+for the effect, and is then answered from the memo table with the reading taken
+before the effect.
+
+Example: `a <- ask (tool "r" running ("cat", ["f"]))`, then an act that
+rewrites `f`, then the same `ask` again. The second answer equals the first,
+although the file changed.
+
+The memo policy is documented and `billMemo` prices it, so a change here is a
+change to what the memo bill means. Options: key reusable answers by the number
+of effects that precede them in plan order, or keep the policy and refuse or
+warn when a reusable question repeats across an effect. Needs an owner
+decision.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-memo-across-effect-bgyt",
+    "depends_on_id": "acat-effect-ordering-tr4t",
+    "type": "discovered-from",
+    "created_at": "2026-09-24T18:13:25.411388Z",
     "created_by": "johnw",
     "metadata": "{}",
     "thread_id": ""
@@ -11995,6 +12149,50 @@ is ready, not that an operator has deployed it.
     "depends_on_id": "acat-wm-043-zm3d",
     "type": "blocks",
     "created_at": "2026-09-10T05:34:27.531734Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
+* TODO [#C] An effect can run before an earlier read of what it changes
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-write-after-read-1aax
+:LABELS:   []
+:ISSUE_TYPE: bug
+:CREATED:  [2026-09-24 Thu 11:13]
+:MODIFIED: [2026-09-24 Thu 11:13]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+A question that precedes an effect in plan order does not hold the effect back
+unless the effect's prompt reads its answer. An effect can therefore complete
+before an earlier read of the state it changes starts, and the read observes
+the later state.
+
+Example: `before <- ask (tool "snap" running ("cat", ["f"]))`, then an act that
+rewrites `f` and does not mention `{before}`. The snapshot can be taken after
+the rewrite.
+
+The rule that closed acat-effect-ordering-tr4t covers reads after writes only.
+Making an effect wait for every earlier occurrence as well would give the whole
+run the order of the Plan around each effect. Needs an owner decision, because
+it delays effects that currently start early.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-write-after-read-1aax",
+    "depends_on_id": "acat-effect-ordering-tr4t",
+    "type": "discovered-from",
+    "created_at": "2026-09-24T18:13:25.726979Z",
     "created_by": "johnw",
     "metadata": "{}",
     "thread_id": ""

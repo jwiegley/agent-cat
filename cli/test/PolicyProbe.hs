@@ -155,7 +155,7 @@ import Agentic.Plan
     scopeUnit,
     verdictApprove,
   )
-import Agentic.DSL (Addressee (AddrModel, AddrPerson, AddrTool))
+import Agentic.DSL (Addressee (AddrModel, AddrPerson, AddrTool, AddrToolExec))
 import Agentic.Route
   ( Backend (BackendAcp, BackendDeck),
     backendSpelling,
@@ -197,13 +197,14 @@ import Control.Concurrent.STM
     newTVarIO,
     putTMVar,
     readTVar,
+    readTVarIO,
     retry,
     takeTMVar,
     tryPutTMVar,
   )
 import Control.Exception (ErrorCall, SomeException, evaluate, finally, try)
 import Data.Bits ((.&.))
-import Control.Monad (void)
+import Control.Monad (void, when)
 import Data.IORef
 import Data.List (nub, sort)
 import Data.Maybe (fromMaybe)
@@ -784,14 +785,26 @@ overlapProbe failures = do
     Just (Left e) -> [("the run threw: " <> show e, False)]
     Nothing -> [("the independent pair deadlocked", False)]
 
+-- | How long a probe holds a question back before it asserts that nothing
+-- behind it started.  "Did not start" can be observed only over a window, so a
+-- scheduler that let a later node overtake had this long to do it.  A slow
+-- machine can make such an assertion pass when it should fail, and never the
+-- reverse.
+orderingWindowUs :: Int
+orderingWindowUs = 200000
+
+-- | Write effects keep plan order, and a question after them waits for them.
+-- The source blocks the first write.  The second write and the sentinel are
+-- ready at once, and neither may reach the world while the source is held: the
+-- effect lane orders the second write after the first, and a question that
+-- follows an effect in plan order starts only after that effect completes.
 effectOrderProbe :: IORef Int -> IO ()
 effectOrderProbe failures = do
   sourceStarted <- newSignal
   releaseSource <- newSignal
-  sentinelStarted <- newSignal
   firstEffectStarted <- newSignal
   releaseFirstEffect <- newSignal
-  effects <- newTVarIO ([] :: [Text])
+  contacts <- newTVarIO ([] :: [Text])
   done <- newEmptyTMVarIO
   let plan :: Plan '[] (((), ()), Text)
       plan =
@@ -811,45 +824,134 @@ effectOrderProbe failures = do
             atomically (putTMVar sourceStarted ())
             atomically (takeTMVar releaseSource)
             pure "seed"
-          "effect-sentinel" -> atomically (putTMVar sentinelStarted ()) >> pure "sentinel-answer"
+          "effect-sentinel" -> do
+            atomically (modifyTVar' contacts (<> ["effect-sentinel"]))
+            pure "sentinel-answer"
           _ -> pure "unexpected"
         SAck -> do
-          atomically (modifyTVar' effects (<> [promptOf q]))
-          if promptOf q == "write-one:seed"
-            then do
-              atomically (putTMVar firstEffectStarted ())
-              atomically (takeTMVar releaseFirstEffect)
-            else pure ()
+          atomically (modifyTVar' contacts (<> [promptOf q]))
+          when (promptOf q == "write-one:seed") $ do
+            atomically (putTMVar firstEffectStarted ())
+            atomically (takeTMVar releaseFirstEffect)
         _ -> pure (defaultEl c)
   tid <- forkFinally (runPlanIO world plan) (atomically . putTMVar done)
-  ready <-
-    timeout 2000000 . atomically $ do
-      takeTMVar sourceStarted
-      takeTMVar sentinelStarted
-  beforeSource <- atomically (readTVar effects)
+  ready <- timeout 2000000 (atomically (takeTMVar sourceStarted))
+  threadDelay orderingWindowUs
+  beforeSource <- readTVarIO contacts
   case ready of
     Nothing -> killThread tid
     Just () -> atomically (putTMVar releaseSource ())
   firstReady <- case ready of
     Nothing -> pure Nothing
     Just () -> timeout 2000000 (atomically (takeTMVar firstEffectStarted))
-  duringFirst <- atomically (readTVar effects)
+  threadDelay orderingWindowUs
+  duringFirst <- readTVarIO contacts
   case firstReady of
     Nothing -> killThread tid
     Just () -> atomically (putTMVar releaseFirstEffect ())
   finished <- case firstReady of
     Nothing -> pure Nothing
     Just () -> timeout 2000000 (atomically (takeTMVar done))
-  after <- atomically (readTVar effects)
-  pureProbe failures "write effects keep plan order across dependency waits" $
-    [ ("the later ready write did not overtake the blocked first write", null beforeSource),
-      ("the second write did not overlap the first", duringFirst == ["write-one:seed"]),
-      ("actual effect order is plan order", after == ["write-one:seed", "write-two"])
+  after <- readTVarIO contacts
+  pureProbe failures "effects keep plan order, and a later question waits for them" $
+    [ ("the source started", ready == Just ()),
+      ("nothing behind the blocked first write reached the world", null beforeSource),
+      ("nothing overlapped the first write", duringFirst == ["write-one:seed"]),
+      ("the world was contacted in plan order", after == ["write-one:seed", "write-two", "effect-sentinel"])
     ]
       ++ case finished of
         Just (Right (_, tr)) -> [("the trace has the same order", tracePrompts tr == ["effect-source", "write-one:seed", "write-two", "effect-sentinel"])]
         Just (Left e) -> [("the run threw: " <> show e, False)]
         Nothing -> [("the ordered effects did not finish", False)]
+
+-- | Waiting behind an effect does not serialize the questions that wait.  Two
+-- independent reads after one write each start only after the write, and then
+-- they overlap: each completes only once the other has started.
+readsAfterEffectOverlapProbe :: IORef Int -> IO ()
+readsAfterEffectOverlapProbe failures = do
+  writeStarted <- newSignal
+  releaseWrite <- newSignal
+  firstStarted <- newSignal
+  secondStarted <- newSignal
+  contacts <- newTVarIO ([] :: [Text])
+  done <- newEmptyTMVarIO
+  let plan :: Plan '[] (Text, Text)
+      plan =
+        graft
+          (askC1 SAck (ackQuestion "gate-write"))
+          ( Cont $ \_ _ ->
+              pairP
+                (askC1 SText (textQuestion "read-one"))
+                (askC1 SText (textQuestion "read-two"))
+          )
+      world = concurrentWorld $ \c q -> case c of
+        SAck -> do
+          atomically (modifyTVar' contacts (<> [promptOf q]))
+          atomically (putTMVar writeStarted ())
+          atomically (takeTMVar releaseWrite)
+        SText -> do
+          atomically (modifyTVar' contacts (<> [promptOf q]))
+          case promptOf q of
+            "read-one" -> do
+              atomically (putTMVar firstStarted ())
+              atomically (takeTMVar secondStarted)
+              pure "one"
+            "read-two" -> do
+              atomically (putTMVar secondStarted ())
+              atomically (takeTMVar firstStarted)
+              pure "two"
+            _ -> pure "unexpected"
+        _ -> pure (defaultEl c)
+  tid <- forkFinally (runPlanIO world plan) (atomically . putTMVar done)
+  ready <- timeout 2000000 (atomically (takeTMVar writeStarted))
+  threadDelay orderingWindowUs
+  duringWrite <- readTVarIO contacts
+  case ready of
+    Nothing -> killThread tid
+    Just () -> atomically (putTMVar releaseWrite ())
+  finished <- case ready of
+    Nothing -> pure Nothing
+    Just () -> timeout 2000000 (atomically (takeTMVar done))
+  pureProbe failures "questions that wait behind one effect still overlap one another" $
+    [ ("the write started", ready == Just ()),
+      ("neither read started during the write", duringWrite == ["gate-write"])
+    ]
+      ++ case finished of
+        Just (Right (answer, _)) -> [("both reads rendezvoused after the write", answer == ("one", "two"))]
+        Just (Left e) -> [("the run threw: " <> show e, False)]
+        Nothing -> [("the reads did not overlap after the write", False)]
+
+-- | The regression that motivated the rule, through the executing layer: a
+-- command in statement position writes a file slowly, and a command in value
+-- position then reads it.  The read must see what the write wrote.
+readAfterWriteProbe :: IORef Int -> IO ()
+readAfterWriteProbe failures = do
+  temp <- getTemporaryDirectory
+  stamp <- getMonotonicTimeNSec
+  let dir = temp </> ("agentic-read-after-write-" <> show stamp)
+      cfg = defaultShellConfig {shellCwd = dir}
+      plan :: Plan '[] Text
+      plan =
+        graft
+          ( askC1
+              SAck
+              ( effectRequest
+                  (Q (AddrToolExec "save" "sh" ["-c", "sleep 0.5; cat > capital.txt"]) scopeUnit "Paris" 0)
+              )
+          )
+          ( Cont $ \_ _ ->
+              askC1
+                SText
+                (observeRequest (Q (AddrToolExec "readback" "cat" ["capital.txt"]) scopeUnit "" 0))
+          )
+  createDirectoryIfMissing True dir
+  out <-
+    timeout 10000000 (try @SomeException (runPlanIO (executingWorld cfg noWorld) plan))
+      `finally` removePathForcibly dir
+  pureProbe failures "a command that reads after a slow write sees what it wrote" $ case out of
+    Just (Right (answer, _)) -> [("the read returned the written text", answer == "Paris")]
+    Just (Left e) -> [("the run threw: " <> show e, False)]
+    Nothing -> [("the run did not finish", False)]
 
 statefulTurnOrderProbe :: IORef Int -> IO ()
 statefulTurnOrderProbe failures = do
@@ -1649,6 +1751,8 @@ main = do
 
   overlapProbe failures
   effectOrderProbe failures
+  readsAfterEffectOverlapProbe failures
+  readAfterWriteProbe failures
   statefulTurnOrderProbe failures
   dependencyProbe failures
   memoConcurrencyProbe failures

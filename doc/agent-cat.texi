@@ -800,7 +800,9 @@ effect and bills each one per occurrence, and this is the difference between
 @code{billFresh} and @code{billMemo}.  Under the ACP transport, only an effect
 receives tool permission, and the runtime denies permission to consultations
 and observations in the words of the protocol.  Effects enter an ordered lane,
-so a later act cannot overtake an earlier one.  ACP requires a completed turn
+so a later act cannot overtake an earlier one.  Every other occurrence waits
+behind that lane, so it starts only after each effect that precedes it in Plan
+order has completed.  ACP requires a completed turn
 before an effect is credited with a receipt.  Every execution event retains the
 authored request beside its answer source.  A trace therefore states whether an
 answer was reused, or which dispatched question produced it after a fail-over.
@@ -851,15 +853,19 @@ changing the represented Plan.
 
 @cindex scheduler
 The interpreter schedules a request when every variable used by its prompt
-expression is available.  Independent siblings can overlap even when their
-authored order is sequential in the Plan.  A finite branch schedules only the
-selected arm.  Equal reusable requests racing for the same key share one memo
-reservation.
+expression is available and every effect that precedes it in Plan order has
+completed.  Independent siblings that no effect separates can overlap even when
+their authored order is sequential in the Plan.  A finite branch schedules only
+the selected arm.  Equal reusable requests racing for the same key share one
+memo reservation.
 
 Observed traces remain in Plan order.  Stateful ACP and agent-deck backends have
 FIFO lanes, and effects use an intent-selected ordered lane.  Lane positions are
 reserved during traversal, which prevents a later ready request from overtaking
-an earlier blocked request on the same lane.
+an earlier blocked request on the same lane.  A consultation or an observation
+waits behind the tail of the effect lane without taking a position in it.  It
+therefore observes every earlier effect, and it does not delay the requests
+that wait beside it.
 
 This concurrency policy is a realization of the Plan's data dependencies.  The
 semantic transcript remains the ordered authored observation, while wall-clock
@@ -877,7 +883,9 @@ The exit status is converted where the answer kind can express failure.  A
 flag receives success or failure.  A verdict receives approval on success and
 the first failing line on failure.  A result kind without such a representation
 causes the run to abandon.  Statement position produces a receipt only through
-the effect policy.
+the effect policy.  A command in value position that follows an act starts after
+the act has completed, so it reads what the act wrote.  A repeated observation
+is still answered from the memo table, even when an act intervenes.
 
 The program-authored intent cannot establish the physical nature of an argv.
 An observation tag does not make a command read-only.  An effect tag controls
@@ -3922,7 +3930,8 @@ questions and memo keys.
 @item effect
 Occurrence-sensitive execution intent for a statement-position act.  It uses
 the receipt code, bypasses reusable memo state, reserves the effect lane, and
-can request permission.
+can request permission.  Every later occurrence in Plan order starts after it
+completes.
 
 @cindex environment
 @item environment
