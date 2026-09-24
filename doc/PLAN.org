@@ -2966,6 +2966,23 @@ Operator-authorized scope amendment 2026-09-12T06:03:20+00:00: user explicitly i
 ]
 #+end_src
 
+* DONE [#C] ext-pi cannot load its remote runtime from a Pi workspace checkout
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-eszt
+:LABELS:   []
+:ISSUE_TYPE: bug
+:CREATED:  [2026-09-24 Thu 16:49]
+:MODIFIED: [2026-09-24 Thu 16:49]
+:CREATED_BY: johnw
+:FINISHED: [2026-09-24 Thu 16:49]
+:CLOSE_REASON: findPackage now walks the enclosing node_modules directories from the resolved pi-coding-agent, as Node resolution does. Against the Pi fork, npm run check passes and npm test passes all 10 files (89 tests). A simulated registry layout with pi-client hoisted and chord nested also loads. npm run test:integration passes its 4 vitest files (8 tests), and pi-remote-current.mjs passes with a short TMPDIR (see acat-n98b).
+:SOURCE_REPO: .
+:ORIGINAL_SIZE: 0
+:END:
+
+ext-pi/src/pi-remote-runtime.mjs found pi-client and chord only as siblings of the resolved pi-coding-agent directory or inside that package's own node_modules. Node resolves a linked package to its real path, and a Pi workspace keeps its packages in the checkout's root node_modules, so linking ext-pi to the Pi fork at ~/src/fork/pi made test/extension.test.ts fail with "Pi runtime package pi-client is unavailable". The lookup should walk the enclosing node_modules directories as Node does, which covers both the registry layout and a workspace checkout.
+
 * DONE [#D] Matrix star at Prob: attained suprema may make aggregate-of-powers go through
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -5916,6 +5933,39 @@ From acat-zms: star_star, sliding a(ba)* = (ab)*a, denesting, (a+b)* are now pro
     "author": "johnw",
     "text": "Closed with the stratum it concerned: the pre-re-derivation Term algebra was excised at 4aed549 under acat-q1i (owner-approved hybrid, 2026-08-20). This ticket's subject, its state at closure, and why it retires are recorded — with the machine-checked results it relates to transcribed exactly — in doc/research/term-algebra-results.md (the ticket graveyard section names this issue individually). The mathematics is preserved as a document and in git history at b98e25f; the six theory threads are recorded there as future directions should the program ever be revived.",
     "created_at": "2026-08-20T18:42:52Z"
+  }
+]
+#+end_src
+
+* DONE [#D] The Pi remote-session integration script fails on macOS with the default TMPDIR
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-n98b
+:LABELS:   []
+:ISSUE_TYPE: bug
+:CREATED:  [2026-09-24 Thu 16:49]
+:MODIFIED: [2026-09-24 Thu 16:58]
+:CREATED_BY: johnw
+:FINISHED: [2026-09-24 Thu 16:58]
+:CLOSE_REASON: pi-remote-current.mjs now creates its socket directory under /tmp, which keeps the socket path at 74 bytes. npm run check passes, and npm run test:integration passes with the default macOS TMPDIR: 4 vitest files (8 tests) and the remote-session script.
+:SOURCE_REPO: .
+:ORIGINAL_SIZE: 0
+:END:
+
+ext-pi/test/pi-remote-current.mjs puts its fixture server socket under mkdtemp(tmpdir()). On macOS the default TMPDIR under /var/folders makes the path 118 bytes, which exceeds the 104-byte limit for a Unix socket path. The server starts and the socket file exists, but the client's connect fails with ENOENT, and npm run test:integration exits 1. With TMPDIR=/tmp/claude-501 the script passes. Either the script should place the socket under a short directory, or the Pi client should connect to long paths as the listener binds them.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-n98b",
+    "depends_on_id": "acat-eszt",
+    "type": "discovered-from",
+    "created_at": "2026-09-24T23:49:23.463535Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
   }
 ]
 #+end_src

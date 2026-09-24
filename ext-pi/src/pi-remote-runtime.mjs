@@ -4,15 +4,14 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 const packageRoot = process.env.PI_PACKAGE_DIR
   ?? dirname(dirname(fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent"))));
-const packageParent = dirname(packageRoot);
 
 function findPackage(name) {
-  const root = [
-    join(packageParent, name),
-    join(packageRoot, "node_modules/@earendil-works", name),
-  ].find(existsSync);
-  if (!root) throw new Error(`Pi runtime package ${name} is unavailable`);
-  return root;
+  for (let directory = packageRoot; ; directory = dirname(directory)) {
+    const root = join(directory, "node_modules/@earendil-works", name);
+    if (existsSync(root)) return root;
+    if (dirname(directory) === directory) break;
+  }
+  throw new Error(`Pi runtime package ${name} is unavailable`);
 }
 
 function moduleUrl(root, path) {
