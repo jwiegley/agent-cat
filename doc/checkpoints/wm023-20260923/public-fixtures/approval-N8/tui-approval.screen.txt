@@ -1,0 +1,36 @@
+ agent-cat  /  exact manager review
+ workflow mixed-controls
+                              ┌──────────────────────── Approve exact manager review ───────────────────────┐
+                              │ Explicit approval starts execution through the manager.                     │
+                              │ Request: request_729d9315d3d6bfca30305cf893fd325bf8050554619c6aaa           │
+                              │ Preparation: preparation_e89c9b7f4e57cd01bd43c1f6d134777de4484e146cf7072d   │
+                              │ Profile: profile_1                                                          │
+                              │ Expires: 2026-09-23T22:28:58.675Z                                           │
+                              │ If-Match:                                                                   │
+                              │ "preparation_revision_aa01bf292773ff08e4b02059c8800107c14cc041107ce130"     │
+                              │ reviewDigest                                                                │
+                              │ 482f5c86350f3f55322bd0b9c28b5982e2905d003c5e5629ab3a243f9c45723b            │
+                              │ requestRevision                                                             │
+                              │ request_revision_6bce0f3a0d653264f5e49f33735c433390812403f2fa551d           │
+                              │ profileRevision    a2814b98c630b01c647d0ca7c305eac2_1                       │
+                              │ descriptorRevision 1a97650ce52540fd0723d0d2ad1b0dd0                         │
+                              │ processGeneration                                                           │
+                              │ generation_7c73c31d398e573315dc57351d4d7753e1a8d2bacc149f5b492c8d0468488c50 │
+                              │ d shows the complete exact review.                                          │
+                              │ Only y approves. Enter does not approve.                                    │
+                              └─────────────────────────────────────────────────────────────────────────────┘
+
+
+
+
+
+
+
+
+
+
+
+
+exact manager review; y explicitly approves
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+d EXACT DETAILS   q DETACH   y APPROVE EXACT REVIEW

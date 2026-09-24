@@ -5689,6 +5689,38 @@ Prior session context: three round-17 lexer edits were made and reverted (record
 ]
 #+end_src
 
+* TODO [#B] Resolve protected-response ingestion contention
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-response-ingestion-budget-zaoi
+:LABELS:   []
+:ISSUE_TYPE: bug
+:CREATED:  [2026-09-23 Wed 16:24]
+:MODIFIED: [2026-09-23 Wed 16:24]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Service-liveness and halt fess reviews identify a source-proved ceiling: protected responses retain configuration through sends, each16KiB write may take5seconds, while accepted ingestion retries StoreBusy for only5seconds and then stops its original preparation. Reproduce a held authorized response alongside actual ingestion, then correct the existing response/ingestion ownership composition without widening waits or budgets, dropping authorization before sends, global cancellation on ordinary contention, or opaque replay. Corrected files-before-configuration ordering does not resolve this separate issue. Do not infer this as the cause of earlier queued/preparation failures.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-response-ingestion-budget-zaoi",
+    "depends_on_id": "acat-wm-023-d20b",
+    "type": "discovered-from",
+    "created_at": "2026-09-23T23:24:34.160223Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
 * DONE [#B] Star repair: decouple star from commutativity so matrices can carry it
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -6067,6 +6099,70 @@ The targeted1.9.1 upgrade fixes the exercised DNS permitted/excluded cases, but 
     "depends_on_id": "acat-tls-name-constraints-0h7q",
     "type": "discovered-from",
     "created_at": "2026-09-23T19:05:30.671107Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
+* TODO [#C] Synchronize forbidden TUI approval assertions
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-tui-consent-barrier-wby2
+:LABELS:   []
+:ISSUE_TYPE: bug
+:CREATED:  [2026-09-23 Wed 16:24]
+:MODIFIED: [2026-09-23 Wed 16:24]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Halt fess finding: manager/test/service_http.py sends Enter or detail-view y and immediately reads manager state. PTY send proves delivery of input bytes, not completed frontend event handling or HTTP mutation. Add a deterministic post-key processing boundary and show the test fails when the corresponding approval guard is broken. Preserve the real five-selector, Unicode and detach checks. Until then, the existing negative checks are timing-limited evidence, not a complete approval-safety proof.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-tui-consent-barrier-wby2",
+    "depends_on_id": "acat-wm-023-d20b",
+    "type": "discovered-from",
+    "created_at": "2026-09-23T23:24:33.830139Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
+* TODO [#C] Preserve internal frontend failures as faults
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-tui-internal-faults-jj13
+:LABELS:   []
+:ISSUE_TYPE: bug
+:CREATED:  [2026-09-23 Wed 16:24]
+:MODIFIED: [2026-09-23 Wed 16:24]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Halt fess finding: tui/src/Agentic/Tui/App.hs safeService catches every synchronous SomeException and returns TransportUnavailable. Unexpected programming or invariant failures therefore enter the ordinary uncertain-command resend path. Narrow recovery to declared failures, or produce a distinct fatal internal state while retaining pending-command uncertainty and terminal cleanup. Do not expose private exception text. Verify injected unexpected failures cannot appear as routine transport retryability. This remains open at the WIP checkpoint.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-tui-internal-faults-jj13",
+    "depends_on_id": "acat-wm-023-d20b",
+    "type": "discovered-from",
+    "created_at": "2026-09-23T23:24:33.463688Z",
     "created_by": "johnw",
     "metadata": "{}",
     "thread_id": ""
@@ -10712,7 +10808,7 @@ manager's correctness boundary.
 :LABELS:   ["p5","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-23 Wed 15:28]
+:MODIFIED: [2026-09-23 Wed 16:35]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-023
 :SOURCE_REPO: agent-cat
@@ -10890,6 +10986,13 @@ callers. Worker environments contain no manager credential material.
     "author": "johnw",
     "text": "The isolated TUI now creates a real manager request, submits the exact Unicode literal, verifies native prompt bytes including the Runtime-declared LF, displays all five complete review selectors, and approves only through explicit summary y. Enter and detail-view y are tested not to approve. Shared public Protocol Draft/Preparation/Command codecs are reused through Agentic.Manager.Client. The original PendingCommand is retained before its one send, and uncertainty permits only an explicit confirmed resend of that same object. Request/run observations do not invent receipt effects. Two failed native attempts remain preserved:21:49:36–21:50:48Z before review and21:57:06–21:58:13Z after a run was already associated. The UI had required successful receipt polling before request observation and incorrectly required preparationId to persist after association. Those frontend assumptions were corrected without changing Store policy or retrying an opaque operation. The observed503 cause was not established. The strengthened actual140x36 PTY sequence passed N1/N8 at22:18:11–22:19:12Z, root /Users/johnw/Products/k.M0a5ItPm/tmp/tui-approval.4bm7f1sn. After frontend quit and SIGTERM, the actual RunControl remained owned with cancellation allowed and a pending answer offer. The fixture then shut down the original manager. Full local TUI regressions passed, and import boundaries passed22:20:25–22:20:27Z. This is submission and approval, not full workflow completion. Live snapshot/decision adapters, typed false, offered retry, verified result retrieval, Overview/event attachment and the remaining service/security obligations stay open. All application changes remain uncommitted and unreviewed in broker-source, and no WM/G milestone is accepted. Refocus22:20:27Z, next deadline23:20:27Z. Details and original failures are in service-tui.purvEwEv/broker-brief.md.",
     "created_at": "2026-09-23T22:28:32Z"
+  },
+  {
+    "id": 307,
+    "issue_id": "acat-wm-023-d20b",
+    "author": "johnw",
+    "text": "Operator requested halt, logical commits, push and a complete remaining-scope report on2026-09-23. Current source is preserved on workflow-manager-checkpoint-20260923 based on canonical a8bf8c1:12fc322 compatibility domains,910db084 protected service,073508ff public client,d8c0609a TUI request/approval plus unwired observation adapters. Each committed source boundary has recorded checks. Exact service, client and TUI commit worktrees passed their scoped N1/N8 checks, with TUI approval/detach and import boundaries complete by23:12:49Z. The original eight-file prototype is archived separately at74ad50e9 on archive/service-tui-pre-broker-20260923 and compiled with its original package set. It is not the resume target. New observation adapters compile and have public-fixture checks, but remain unwired. No full TUI workflow or new WM/G acceptance is claimed. Halt fess allows WIP preservation only and blocks application acceptance. P1 liveness is now acat-response-ingestion-budget-zaoi, P2 exception classification is acat-tui-internal-faults-jj13, and P2 negative-approval synchronization is acat-tui-consent-barrier-wby2. General-CA issue6gbo remains open. Tracked checkpoint documentation preserves non-secret notes, reviews, public observations and validation history. Private credentials/keys/databases and build caches are excluded from publication. Resume instructions are in doc/checkpoints/wm023-20260923/README.md and the primary handoff. The complete roadmap is /Users/johnw/dl/agent-cat-workflow-manager-remaining-2026-09-23.md and requires downstream fess at the end of every subtask. Goal mu629ta5-11s8ax will be paused when publication checks finish. Accepted baseline remains WM001–WM022/G0/G1.",
+    "created_at": "2026-09-23T23:35:47Z"
   }
 ]
 #+end_src

@@ -1,6 +1,59 @@
 # Workflow-manager handoff
 
-<!-- handoff-id: wm016-20260915; status: wm022-g1-accepted; accepted: WM-001..WM-022,G0,G1 -->
+<!-- handoff-id: wm023-20260923; status: paused-unaccepted-wip; accepted: WM-001..WM-022,G0,G1; resume-branch: workflow-manager-checkpoint-20260923; fess: every-subtask -->
+
+## Halt checkpoint of 2026-09-23
+
+The operator requested a clean stopping point, commits, publication and a
+complete remaining-scope report. Resume from
+**`origin/workflow-manager-checkpoint-20260923`**, not the archived pre-broker
+prototype. The [portable checkpoint](checkpoints/wm023-20260923/README.md) contains
+the exact source sequence, verification scope, preserved non-secret evidence,
+known findings and commands for this machine or a fresh clone.
+
+The checkpoint contains four logical code commits: compatibility domains
+(`12fc322`), the protected service (`910db084`), the public client (`073508ff`),
+and TUI request/approval support (`d8c0609a`). Each committed source boundary has
+its own recorded validation. The older prototype is preserved separately as
+`archive/service-tui-pre-broker-20260923` at `74ad50e9`. It is not the resume target.
+
+The actual TUI reaches Unicode submission, complete five-selector review,
+explicit approval, association and detach through the manager and default broker.
+N1/N8 PTY checks confirm that the manager-owned run remains controllable after
+frontend exit. The newest run/control/decision/output adapters compile and pass
+focused public-fixture tests, but are not wired into App. Live display, typed
+`False`, offered retry, genuine terminal completion and verified result retrieval
+through one uninterrupted TUI session remain unfinished.
+
+Accepted state remains **WM001–WM022 and G0/G1**, or **22/44 packages and 2/6
+gates**. The halt fess audit permits WIP preservation only and blocks application
+acceptance. Its history isolation was not independently verified. The response
+liveness issue (`acat-response-ingestion-budget-zaoi`), general-CA validation
+(`acat-tls-name-forms-6gbo`), internal-exception classification
+(`acat-tui-internal-faults-jj13`) and approval-test synchronization
+(`acat-tui-consent-barrier-wby2`) remain open.
+
+The full remaining-scope report is
+`~/dl/agent-cat-workflow-manager-remaining-2026-09-23.md`. Its complete target
+retains WM023–WM044 and G2–G5 under the broker, TUI-first and local-only amendments.
+The corresponding requirements also remain in the tracked plan and checkpoint
+so source recovery does not depend on the report's local file.
+
+Run the **`fess` skill at the end of every downstream subtask**, including failed
+attempts, tests, documentation, cleanup and review. Record findings and verification
+ceilings before moving to the next subtask. Do not silently waive the audit when
+the skill is unavailable.
+
+The shared build directory was last used for the historical prototype. Rebuild
+the chosen current source before running binaries. Preserve exact command objects,
+original resource handles, Store policy and all recorded failures. Never treat
+an old PID, path, cursor, receipt or process absence as execution or cleanup
+authority. No paid provider, deployment, external-host execution, live configuration
+change or new Lean/oracle build is authorized by this halt.
+
+The following sections retain the development chronology. This halt section and
+the portable checkpoint supersede their earlier current-state descriptions,
+without altering historical evidence or completed task states.
 
 ## Current delivery direction
 
