@@ -5,6 +5,7 @@ import hashlib
 import http.client
 import json
 import os
+import re
 import secrets
 import socket
 import ssl
@@ -14,8 +15,13 @@ import time
 
 source, work, runner = map(Path, sys.argv[1:4])
 native = sys.argv[4]
-tui_approval = len(sys.argv) == 6 and sys.argv[5] == "tui-approval"
-mixed = len(sys.argv) == 6 and sys.argv[5] in ("mixed", "mixed-confirm", "tui-approval")
+tui_approval = len(sys.argv) == 6 and sys.argv[5] in ("tui-approval", "tui-consent-control")
+# The consent control presses y in the summary, where the approval really
+# starts, at the step that expects the detail-view refusal. It must fail with
+# the detail-view consent message. It shows only that this assertion detects
+# an approval. It does not break an approval guard.
+consent_control = len(sys.argv) == 6 and sys.argv[5] == "tui-consent-control"
+mixed = len(sys.argv) == 6 and sys.argv[5] in ("mixed", "mixed-confirm", "tui-approval", "tui-consent-control")
 confirm_uncertain = mixed and sys.argv[5] == "mixed-confirm"
 assert len(sys.argv) == 5 or mixed
 assert not tui_approval or os.environ.get("TUI_CHECK")
@@ -119,15 +125,85 @@ def exchange(path, headers=None, method="GET", payload=None):
 
 
 def request(path, headers=None, method="GET", payload=None):
+    return fetch(path, headers, method, payload)[:3]
+
+
+def fetch(path, headers=None, method="GET", payload=None):
     deadline = time.monotonic() + 5
     while True:
-        status, value, raw = exchange(path, headers, method, payload)[:3]
+        status, value, raw, received = exchange(path, headers, method, payload)
         if method != "GET" or status != 503 or time.monotonic() >= deadline:
-            return status, value, raw
+            return status, value, raw, received
         assert value["code"] == "storage-unavailable"
         # Fresh read observations may contend with original coordinator work.
         # No POST enters this loop.
         time.sleep(0.05)
+
+
+# The TUI answers every Enter or y on the exact review with one notice line,
+# "Approval key N: <fixed text>", where N counts the approval-key presses of
+# the session. Only the handling of that press renders its number, so the
+# first appearance of a number above every earlier one is the boundary at
+# which the TUI has finished processing the press. The not-sent notice keeps
+# the number of the approving press, so it never counts as a new press.
+#
+# The notices are read from the PTY output written after the key, not from
+# the final screen. An approval-start notice lasts only until the TUI observes
+# the association, and several frames can arrive in one read. Vty rewrites a
+# changed row as a whole and the notice text is one span, so a complete row
+# ends at the next escape sequence or at the dialog border.
+NOTICE = re.compile(r"Approval key (\d+): ([^\x1b\u2502\r\n]*)(?=[\x1b\u2502\r\n])")
+ENTER_REFUSED = "Enter does not approve; y approves the exact review"
+DETAIL_REFUSED = "y does not approve in the detail view"
+APPROVAL_STARTED = "Approval started for the exact displayed review."
+NOT_SENT = "Approval was not sent: the preflight check refused it before any send."
+# These refusals report a transient lane or observation state that a later
+# observation clears, so the positive approval may press y again after one.
+APPROVAL_DEFERRED = ("Approval did not start: a manager command is in progress or unresolved.",
+                     "Approval did not start: the displayed review is stale.")
+OUTPUT_LIMIT = 16 * 1024 * 1024
+
+
+def notice_is(line, number, text):
+    """Whether the first displayed row of a notice starts the given notice.
+
+    The TUI wraps a long notice at 80 columns. Every first row is long enough
+    to tell the fixed texts apart, and no fixed text is a prefix of another.
+    """
+    full = f"Approval key {number}: {text}"
+    return full.startswith(line) and len(line) >= min(len(full), len(f"Approval key {number}: ") + 30)
+
+
+def notices(session, start):
+    """The notice rows in the PTY output after the byte offset start, in order."""
+    # TuiSession keeps the whole output until it reaches this limit.
+    assert len(session.output) < OUTPUT_LIMIT, "PTY output reached the retention limit"
+    text = bytes(session.output[start:]).decode("utf-8", "replace")
+    return [(int(match.group(1)), ("Approval key " + match.group(1) + ": " + match.group(2)).rstrip())
+            for match in NOTICE.finditer(text)]
+
+
+def key_notice(session, key, after, failure):
+    """Send one approval key and return the byte offset before it, and the
+    number and first row of its notice.
+
+    The wait ends at the first notice numbered above after in the output
+    written after the key, or fails with the given message at the deadline.
+    No fixed delay takes part.
+    """
+    start = len(session.output)
+    session.send(key)
+    deadline = time.monotonic() + 15
+    while True:
+        newer = [item for item in notices(session, start) if item[0] > after]
+        if newer:
+            return start, newer[0]
+        if time.monotonic() >= deadline or session.process.poll() is not None:
+            break
+        session.pump()
+    (work / "tui-missing-notice.screen.txt").write_text(session.screen.text())
+    print("KEY OUTCOME: no approval-key notice above", after, "before the deadline", flush=True)
+    raise AssertionError(failure)
 
 
 def run_mixed(created, workflow, capabilities, authorized):
@@ -392,35 +468,72 @@ for iteration in range(2):
                                 assert len(drafts) == 1
                                 submitted = drafts[0]
                                 assert submitted["readiness"]["supplied"] == [{"name": "input", "source": "literal", "value": literal}]
-                                status, preparation, _ = request("/v1/preparations/" + submitted["preparationId"], authorized)
+                                preparation_uri = "/v1/preparations/" + submitted["preparationId"]
+                                status, preparation, _, received = fetch(preparation_uri, authorized)
                                 assert status == 200
                                 validate("Preparation", preparation)
-                                session.send(b"\r")
-                                status, not_started, _ = request(submitted["links"]["self"], authorized)
-                                assert status == 200 and not_started["runId"] is None, "Enter approved without exact consent"
+                                preparation_tag = received.get("etag")
+                                assert preparation_tag is not None and preparation["state"] == "live"
+                                last_key = 0
+
+                                def refused(key, text, failure, name):
+                                    """Press a forbidden key and require its refusal and an unapproved manager state.
+
+                                    The harness reads the manager only after the notice of this press
+                                    shows that the TUI finished handling it. Any other notice, or none
+                                    before the deadline, fails with the consent message.
+                                    """
+                                    global last_key
+                                    _, (number, line) = key_notice(session, key, last_key, failure)
+                                    (work / ("tui-" + name + ".screen.txt")).write_text(session.screen.text())
+                                    print("KEY OUTCOME:", line, flush=True)
+                                    assert notice_is(line, number, text), failure
+                                    last_key = number
+                                    status, current, raw = request(submitted["links"]["self"], authorized)
+                                    assert status == 200, failure
+                                    validate("Request", current, raw)
+                                    assert current["runId"] is None and current["phase"] == "review", failure
+                                    assert current["preparationId"] == preparation["id"], failure
+                                    status, still, raw, received = fetch(preparation_uri, authorized)
+                                    assert status == 200, failure
+                                    validate("Preparation", still, raw)
+                                    assert still["state"] == "live" and still["revision"] == preparation["revision"], failure
+                                    assert received.get("etag") == preparation_tag, failure
+                                    print("PASS actual TUI", name, "refusal left the request in review and the preparation live and unchanged", flush=True)
+
+                                refused(b"\r", ENTER_REFUSED, "Enter approved without exact consent", "summary-enter")
+                                if consent_control:
+                                    session.wait_screen("y APPROVE EXACT REVIEW")
+                                else:
+                                    session.send(b"d")
+                                    session.wait_screen("Exact manager review")
+                                refused(b"y", DETAIL_REFUSED, "detail-view key approved a review", "detail-y")
                                 session.send(b"d")
-                                session.wait_screen("Exact manager review")
-                                session.send(b"y")
-                                status, not_started, _ = request(submitted["links"]["self"], authorized)
-                                assert status == 200 and not_started["runId"] is None, "detail-view key approved a review"
-                                session.send(b"d")
-                                for _ in range(3):
+                                for _ in range(5):
                                     visible = session.wait_screen("y APPROVE EXACT REVIEW")
                                     compact = "".join(char for char in visible if not char.isspace() and not "\u2500" <= char <= "\u257f")
                                     for selector in ("reviewDigest", "requestRevision", "profileRevision", "descriptorRevision", "processGeneration"):
                                         assert selector + preparation[selector] in compact, ("clipped selector", selector)
                                     (work / "tui-approval.screen.txt").write_text(visible)
-                                    session.send(b"y")
-                                    session.settle()
-                                    status, associated, raw = request(submitted["links"]["self"], authorized)
-                                    assert status == 200
-                                    if associated["runId"] is not None:
+                                    approval_start, (last_key, line) = key_notice(session, b"y", last_key, "explicit TUI approval showed no notice")
+                                    print("KEY OUTCOME:", line, flush=True)
+                                    if notice_is(line, last_key, APPROVAL_STARTED):
                                         break
+                                    # Only a visible deferral permits another y. A visible start never does.
+                                    assert any(notice_is(line, last_key, text) for text in APPROVAL_DEFERRED), ("explicit TUI approval refused", line)
                                 else:
-                                    raise AssertionError("explicit TUI approval did not associate a run")
+                                    raise AssertionError("explicit TUI approval deferred five times")
+                                deadline = time.monotonic() + 45
+                                while "Phase: associated" not in session.screen.text():
+                                    assert not any(number == last_key and notice_is(row, number, NOT_SENT)
+                                                   for number, row in notices(session, approval_start)), "explicit TUI approval was not sent"
+                                    assert time.monotonic() < deadline and session.process.poll() is None, "explicit TUI approval did not associate a run"
+                                    session.pump()
+                                (work / "tui-associated.screen.txt").write_text(session.wait_screen("Phase: associated"))
+                                status, associated, raw = request(submitted["links"]["self"], authorized)
+                                assert status == 200 and associated["runId"] is not None, "explicit TUI approval did not associate a run"
                                 validate("Request", associated)
                                 (work / "tui-associated-request.json").write_bytes(raw)
-                                (work / "tui-associated.screen.txt").write_text(session.wait_screen("Phase: associated"))
                                 assert process.poll() is None, "manager exited during frontend approval"
                             session.send(b"q")
                             assert session.wait_exit() == 0, "service TUI did not exit successfully"

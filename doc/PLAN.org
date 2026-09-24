@@ -90,6 +90,38 @@ The native Pi client baseline npm audit reports moderate path traversal/arbitrar
 ]
 #+end_src
 
+* TODO [#D] Raise the notice prefix threshold in tui-approval
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-0stq
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-24 Thu 07:15]
+:MODIFIED: [2026-09-24 Thu 07:15]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+A4 fess finding (low, correctness). notice_is in manager/test/service_http.py (near lines 167-174) accepts a first row with 30 or more characters after the key prefix. The StaleReview and ExpiredReview texts (tui/src/Agentic/Tui/Approval.hs near 225-226) share a 45-character prefix, so a truncated row of 30 to 44 characters matches both. Required: raise the minimum to 46 characters after the key prefix, or require the full text when the row does not end at the wrap width. Source: fess audit /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/fess/A-A4-r1.md.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-0stq",
+    "depends_on_id": "acat-tui-consent-barrier-wby2",
+    "type": "discovered-from",
+    "created_at": "2026-09-24T14:15:10.956893Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
 * DONE [#C] shareT under retryT/fanT: iteration and fan indices in the site key, or ask-once semantics
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -166,6 +198,38 @@ Session demands CompleteCSemiring that no proof uses (probe: class-free restatem
     "author": "johnw",
     "text": "Closed with the stratum it concerned: the pre-re-derivation Term algebra was excised at 4aed549 under acat-q1i (owner-approved hybrid, 2026-08-20). This ticket's subject, its state at closure, and why it retires are recorded — with the machine-checked results it relates to transcribed exactly — in doc/research/term-algebra-results.md (the ticket graveyard section names this issue individually). The mathematics is preserved as a document and in git history at b98e25f; the six theory threads are recorded there as future directions should the program ever be revived.",
     "created_at": "2026-08-20T18:42:48Z"
+  }
+]
+#+end_src
+
+* TODO [#D] Exercise the deferral branch of the tui-approval y loop
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-13dy
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-24 Thu 07:15]
+:MODIFIED: [2026-09-24 Thu 07:15]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+A4 fess verification gap. The positive approval loop in manager/test/service_http.py (near lines 515-530) presses y again only after a visible busy or stale deferral notice, at most five times. Every A4 run approved on the first y, so the deferral branch was never observed in the actual UI, and only source inspection supports the claim that y is never repeated after a visible start. Required: a deterministic fixture step that produces one deferral before the approval, with a log line that names the path taken. Source: fess audit /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/fess/A-A4-r1.md.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-13dy",
+    "depends_on_id": "acat-tui-consent-barrier-wby2",
+    "type": "discovered-from",
+    "created_at": "2026-09-24T14:15:19.724225Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
   }
 ]
 #+end_src
@@ -929,6 +993,38 @@ Completed doc/research/workflow-manager-implementation-plan.md and its research 
     "author": "johnw",
     "text": "Triage 2026-08-20: done in substance at ef61ff5 (Prob := ENNReal at Instances.lean:684; SqZero := TrivSqZeroExt at :965 replacing eleven hand-proved laws; attainment lemmas retired and the distributive law re-proved via ENNReal.mul_iSup with no attainment argument). Tropical considered and rejected with the reason on record (:202-208). PMF and Stoch never adopted and out of scope by the owner's 2026-08-12 standing-policy directive recorded in this issue's own last comment.",
     "created_at": "2026-08-20T17:11:22Z"
+  }
+]
+#+end_src
+
+* TODO [#C] Prove the post-boundary GETs of tui-approval detect a send
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-47ax
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-24 Thu 07:15]
+:MODIFIED: [2026-09-24 Thu 07:15]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+A4 fess finding (medium, verification-gap). In manager/test/service_http.py (near lines 492-501), after each refusal boundary the harness GETs check runId null, phase review, the same preparationId, and a live preparation with its original revision and ETag. Every control and mutant of A4 fails first at the notice assertion (near line 490), so no run has shown that these GETs detect anything. An App-level break that renders the refusal notice but still dispatches a send would be caught only if the asynchronous POST landed before the read. Required: add a supplementary App-level control that renders a refusal notice while still dispatching the send, and show that the GETs fail it, or state the bound in the handoff. Related: acat-5k82. Source: fess audit /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/fess/A-A4-r1.md.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-47ax",
+    "depends_on_id": "acat-tui-consent-barrier-wby2",
+    "type": "discovered-from",
+    "created_at": "2026-09-24T14:15:10.490273Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
   }
 ]
 #+end_src
@@ -3852,6 +3948,38 @@ alexey (high) + comments + dead-code. (1) HANDOFF.md:447-450 claims the grammar 
 ]
 #+end_src
 
+* TODO [#D] Label read failures and TUI exits honestly in tui-approval
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-gghu
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-24 Thu 07:15]
+:MODIFIED: [2026-09-24 Thu 07:15]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+A4 fess finding (low, diagnostics). In manager/test/service_http.py, the post-boundary status-200 assertions (near lines 493 and 498) raise the consent messages for any non-200 read, including the known S1 503 storage-unavailable class that fetch() returns after its 5 s retry. key_notice (near lines 201-206) prints 'before the deadline' and raises a consent message also when the TUI process has exited. Required: print the HTTP status and problem code before asserting status 200, and print 'TUI exited' instead of 'before the deadline' when the process has ended. Source: fess audit /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/fess/A-A4-r1.md.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-gghu",
+    "depends_on_id": "acat-tui-consent-barrier-wby2",
+    "type": "discovered-from",
+    "created_at": "2026-09-24T14:15:10.752721Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
 * DONE [#D] Deliberate-diamond decision: CSemiring/IdemAdd instances on MSemiring
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -4786,6 +4914,38 @@ Review: highest-consequence gap. pureT admits copy, so parT (prim q) (prim q) is
 ]
 #+end_src
 
+* TODO [#E] Share the TuiSession output limit with service_http
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-k355
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-24 Thu 07:15]
+:MODIFIED: [2026-09-24 Thu 07:15]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+A4 fess finding (low, loose-ends). OUTPUT_LIMIT in manager/test/service_http.py (near lines 164 and 180) repeats the 16 MiB trim constant of TuiSession in test/tui_probe.py (near lines 293-294) without a shared name. The offset-validity assertion is correct only while the two values agree. Required: expose the limit as a TuiSession attribute and read it from the harness. Source: fess audit /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/fess/A-A4-r1.md.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-k355",
+    "depends_on_id": "acat-tui-consent-barrier-wby2",
+    "type": "discovered-from",
+    "created_at": "2026-09-24T14:15:11.378315Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
 * DONE [#C] Demote global LE (a x b) Pareto instance to the named ParetoLE relation (instance-clash hazard)
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -4801,15 +4961,17 @@ Review: highest-consequence gap. pureT admits copy, so parT (prim q) (prim q) is
 :ORIGINAL_SIZE: 0
 :END:
 
-* TODO [#D] Account for decreasing TUI notice key numbers in A4
+* DONE [#D] Account for decreasing TUI notice key numbers in A4
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-kmem
 :LABELS:   []
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-24 Thu 06:41]
-:MODIFIED: [2026-09-24 Thu 06:41]
+:MODIFIED: [2026-09-24 Thu 07:14]
 :CREATED_BY: johnw
+:FINISHED: [2026-09-24 Thu 07:14]
+:CLOSE_REASON: The A4 boundary allows the not-sent notice to keep the approving press number
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
@@ -4829,6 +4991,20 @@ A3 fess finding (low). The approval notice number counts approval-key presses on
     "created_by": "johnw",
     "metadata": "{}",
     "thread_id": ""
+  }
+]
+#+end_src
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 319,
+    "issue_id": "acat-kmem",
+    "author": "johnw",
+    "text": "Subtask A4 addressed this finding in the post-key boundary. key_notice in manager/test/service_http.py accepts only a notice numbered above every earlier notice as the boundary of a new press, and its comment states that the not-sent notice keeps the number of the approving press and never counts as a new press. After the positive approval, the driver fails early with \"explicit TUI approval was not sent\" if a not-sent notice with the number of that press appears. Evidence ceiling: read-only source inspection of the committed diff. No actual UI run produced a not-sent notice. Diff: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A4/impl-r1/A4-final.diff.\n",
+    "created_at": "2026-09-24T14:14:54Z"
   }
 ]
 #+end_src
@@ -5185,6 +5361,38 @@ Independent native UI review found that Pi 0.85.1 showExtensionCustom closes ove
     "depends_on_id": "acat-8hq9",
     "type": "discovered-from",
     "created_at": "2026-09-09T11:54:02.282213Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
+* TODO [#D] Require the next notice number in the tui-approval boundary
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-mgda
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-24 Thu 07:15]
+:MODIFIED: [2026-09-24 Thu 07:15]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+A4 fess finding (low, test-strictness). key_notice in manager/test/service_http.py (near lines 196-200) accepts any notice number above the previous one rather than exactly the previous number plus one. A doubled handling of one press, or a skipped press count, would go undetected. Required: require number == after + 1 for the first new notice. The not-sent notice keeps the approving press number and stays outside this rule. Source: fess audit /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/fess/A-A4-r1.md.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-mgda",
+    "depends_on_id": "acat-tui-consent-barrier-wby2",
+    "type": "discovered-from",
+    "created_at": "2026-09-24T14:15:11.173522Z",
     "created_by": "johnw",
     "metadata": "{}",
     "thread_id": ""
@@ -6751,14 +6959,14 @@ The targeted1.9.1 upgrade fixes the exercised DNS permitted/excluded cases, but 
 :LABELS:   ["workflow-manager"]
 :ISSUE_TYPE: bug
 :CREATED:  [2026-09-24 Thu 00:54]
-:MODIFIED: [2026-09-24 Thu 00:54]
+:MODIFIED: [2026-09-24 Thu 07:15]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
 :END:
 
-The tui-approval driver in manager/test/service_http.py writes the manager exit status to server-0.exit (around line 527) but never asserts it. In resume subtask A0, both PTY runs recorded -2 (death by SIGINT) in /Users/johnw/Products/k.M0a5ItPm/tmp/tui-resume-A0.fcm4x8Z9/N1/server-0.exit and N8/server-0.exit. The driver sends SIGTERM, the CLI converts it to UserInterrupt (cli/src/Agentic/Cli/Frontend.hs:225), and the RTS re-raises SIGINT. The PASS line 'original protected manager shutdown after TUI approval fixture' checks only that the admin socket is gone and that no bearer token appears in the logs.
+The tui-approval driver in manager/test/service_http.py writes the manager exit status to server-0.exit (around line 640) but never asserts it. In resume subtask A0, both PTY runs recorded -2 (death by SIGINT) in /Users/johnw/Products/k.M0a5ItPm/tmp/tui-resume-A0.fcm4x8Z9/N1/server-0.exit and N8/server-0.exit. The driver sends SIGTERM, the CLI converts it to UserInterrupt (cli/src/Agentic/Cli/Frontend.hs:225), and the RTS re-raises SIGINT. The PASS line 'original protected manager shutdown after TUI approval fixture' checks only that the admin socket is gone and that no bearer token appears in the logs.
 
 Required: decide whether -2 is the accepted protected shutdown status, then either assert that exact status in the driver or change the shutdown path so that the status is explicit. Record the decision in the manager documentation.
 
@@ -6787,14 +6995,14 @@ Source: fess audit /Users/johnw/Products/agent-cat-workflow-manager/implementati
 :LABELS:   ["workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-24 Thu 00:54]
-:MODIFIED: [2026-09-24 Thu 00:54]
+:MODIFIED: [2026-09-24 Thu 07:15]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
 :END:
 
-The tui-approval approval loop in manager/test/service_http.py (lines 370-384) may take one operator-confirmed exact resend (keys x, then y) before the review appears. The driver sets a local flag named resent but never prints or records it. In resume subtask A0, nothing shows whether the PASS line at N1 or at N8 came from the direct path or from the resend path.
+The tui-approval approval loop in manager/test/service_http.py (lines 450-460) may take one operator-confirmed exact resend (keys x, then y) before the review appears. The driver sets a local flag named resent but never prints or records it. In resume subtask A0, nothing shows whether the PASS line at N1 or at N8 came from the direct path or from the resend path.
 
 Required: print the path taken (direct or one exact resend) into the driver log, so that each tui-approval PASS names the path that produced it.
 
@@ -6816,15 +7024,17 @@ Source: fess audit /Users/johnw/Products/agent-cat-workflow-manager/implementati
 ]
 #+end_src
 
-* TODO [#C] Synchronize forbidden TUI approval assertions
+* DONE [#C] Synchronize forbidden TUI approval assertions
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-tui-consent-barrier-wby2
 :LABELS:   []
 :ISSUE_TYPE: bug
 :CREATED:  [2026-09-23 Wed 16:24]
-:MODIFIED: [2026-09-24 Thu 06:40]
+:MODIFIED: [2026-09-24 Thu 07:14]
 :CREATED_BY: johnw
+:FINISHED: [2026-09-24 Thu 07:14]
+:CLOSE_REASON: A4 added the deterministic post-key boundary and guard-breaking mutant controls M1 and M2; evidence in the A4 comment
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
@@ -6858,6 +7068,13 @@ Halt fess finding: manager/test/service_http.py sends Enter or detail-view y and
     "author": "johnw",
     "text": "Subtask A3 (resume workflow wm023-20260923) completed the frontend part of this issue. Approval-key admissibility is now one pure predicate in the compiled module tui/src/Agentic/Tui/Approval.hs (Agentic.Tui.Approval), and App dispatches every unmodified Enter or y on the review screen to it before the serviceSending guard. Forbidden keys are decided first and do not depend on read-lane or mutation state: Enter on the review refuses, and y in the detail view or under the key help refuses. Next come the busy and fault refusals, then the stale, expired, mismatched and clipped review refusals, and then approval. The read ticket takes no part in any decision. Each outcome shows a fixed notice with a key number in the summary, detail and key-help views. Observation installs and ticks do not remove it, and it ends at the next key that changes screen or mode. A preflight refusal after an approval start replaces the start notice with a fixed not-sent notice. The approve hint appears exactly when summary y would approve. Evidence ceilings: pure model tests and fixed-size renders (288 checks at N1 and N8, /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A3/verify-r2/A3v2-model-N1.log and -N8.log, enumerating 25200 cases), 26 verifier guard-breaking controls on Approval.hs and Presentation.hs that each fail a named check (/Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A3/verify-r2/A3v2-controls.log), read-only App wiring source checks (/Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A3/verify-r2/A3v2-source-checks.log), a forced Werror package build (/Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A3/verify-r2/A3v2-build-forced.log), the tracked tui-approval fixture at N1 then N8 as actual UI interaction (/Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A3/verify-r2/A3v2-tui-approval-N1.log and -N8.log), and the tui gate (/Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A3/verify-r2/A3v2-tui-gate.log). The implementer's private PTY variant observed the Enter, detail-y and key-help notices at N1 and N8 (/Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A3/impl-r2/A3r2-pty-notices-N1.log and -N8.log). The verifier's repetition of that variant failed in its prelude with a manager 503 storage-unavailable of the A1 class, before any A3 step (/Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A3/verify-r2/A3v2-pty-notices-N1.log, root preserved, not rerun). This issue stays open: the deterministic post-key processing boundary in the tracked manager/test/service_http.py fixture, with a control that breaks the guard, belongs to subtask A4. No test or control yet covers the App-level wiring. Fess audit: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/fess/A-A3-r2.md, non-blocking.\n",
     "created_at": "2026-09-24T13:40:48Z"
+  },
+  {
+    "id": 317,
+    "issue_id": "acat-tui-consent-barrier-wby2",
+    "author": "johnw",
+    "text": "Subtask A4 (resume workflow wm023-20260923) completed the PTY part of this issue. The tui-approval scenario in manager/test/service_http.py no longer reads manager state immediately after a forbidden key. The helper key_notice records the PTY output offset, sends the key, and waits under a bounded 15 s deadline for the first \"Approval key N\" notice row whose number is higher than any earlier notice, read from the raw PTY output written after the key. Only the handling of that press renders its number, so that row is the completed-processing boundary, and no sleep takes part. Any outcome other than the exact refusal text of that key fails with \"Enter approved without exact consent\" or \"detail-view key approved a review\". After the boundary, harness GETs confirm runId null, phase review, the same preparationId, and a live preparation with its original revision and ETag. The positive approval waits for the hint, presses y at most five times, repeats only after a visible busy or stale deferral, and never repeats after a visible start. The Unicode submission, five-selector and detach checks are kept. The supplementary mode tui-consent-control is registered in the mixed tuple.\n\nEvidence (actual UI interaction against a deterministic native fixture unless stated): tui-approval passed at N1 then N8 (verifier: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A4/verify-r1/A4v-tui-approval-N1.log and -N8.log). tui-consent-control failed at N1 with \"detail-view key approved a review\" after a visible approval start (supplementary; /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A4/verify-r1/A4v-consent-control.log and A4v-consent-control-check.log). Guard-breaking mutants of tui/src/Agentic/Tui/Approval.hs: M1 (detail-view y admissible under the summary rules) failed at N1 with \"detail-view key approved a review\", and M2 (Enter on the summary approves) failed at N1 with \"Enter approved without exact consent\", each after a visible approval start and not at a deadline (/Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A4/verify-r1/A4v-M1-pty.log, A4v-M2-pty.log, M1.diff, M2.diff; the implementer obtained the same outcomes independently under /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A4/impl-r1). The mutant tui-model-test runs failed with named checks (pure model test, supplementary). Each restore matched SHA-256 86338fe2... and gave an empty git diff against ac4c43b8, and a rebuild preceded every later binary run. On restored source tui-model-test passed at N1 and N8 (pure model test) and tui-approval passed again at N1 then N8 (/Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A4/verify-r1/A4v-tui-approval-restored-N1.log and -N8.log). No mutant was committed.\n\nThe stated criteria of this issue are met, so it is closed. Residual limits: no control reaches the post-boundary GETs, the deferral branch of the positive loop was never observed, and the App-level wiring remains covered by acat-5k82. Fess audit: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/fess/A-A4-r1.md, non-blocking.\n",
+    "created_at": "2026-09-24T14:14:53Z"
   }
 ]
 #+end_src
@@ -12992,7 +13209,7 @@ Local-mode behavior remains intact without a duplicated service runtime model.
 :LABELS:   ["p7","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-24 Thu 02:50]
+:MODIFIED: [2026-09-24 Thu 07:14]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-035
 :SOURCE_REPO: agent-cat
@@ -13077,6 +13294,13 @@ check fail.
     "author": "johnw",
     "text": "A1 baseline (workflow-manager resume, Phase A) on unchanged source at HEAD 32c72f80, which equals b95ce6d1 apart from doc/PLAN.org. No source change and no commit resulted. Evidence is in the private directory /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A1 (impl-r1, impl-r2, impl-r3, verify-r3).\n\nS2, the read-only service TUI scenario, passed at N1 and N8 in an actual UI interaction (PTY): catalogue and help, local-action refusal, original quit and signal joins, terminal restoration and no local runner state (verify-r3/V3-service-readonly-tui.log lines 5 and 8). S5, bash tui/ci/tui.sh, passed with compiler-parsed import boundaries and the local PTY probe (verify-r3/V3-tui-local.log lines 3 and 54). S1, the protected-HTTP mixed workflow that the TUI journey will drive, failed at N1 in 3 of 3 independent runs. The enqueue was committed as effect-observed/enqueued, yet HTTP returned 503 storage-unavailable, and one reservation was released with pending_kind closed. No preparation or ingestion exists. The cause is unproved and the evidence does not implicate acat-response-ingestion-budget-zaoi (verify-r3/V3-mixed-http.log, V3-mixed-classify.log, root /Users/johnw/Products/k.M0a5ItPm/tmp/A1-mixed.VztqwomL/N1). S1 blocks A6 onward until a diagnosis subtask is inserted. The issue stays open.\n",
     "created_at": "2026-09-24T09:50:41Z"
+  },
+  {
+    "id": 318,
+    "issue_id": "acat-wm-035-9uqq",
+    "author": "johnw",
+    "text": "Subtask A4 (resume workflow wm023-20260923) advanced the PTY acceptance of the service approval path. The tui-approval scenario in manager/test/service_http.py now waits for each approval key's own notice as a deterministic post-key boundary, and two guard-breaking mutants of tui/src/Agentic/Tui/Approval.hs each make it fail with the literal consent message after a visible approval start. tui-approval passed at N1 then N8 before and after the mutant cycle (actual UI interaction against a deterministic native fixture; /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A4/verify-r1/A4v-tui-approval-N1.log, -N8.log, A4v-tui-approval-restored-N1.log, -N8.log; mutant evidence A4v-M1-pty.log and A4v-M2-pty.log in the same directory). This package stays open.\n",
+    "created_at": "2026-09-24T14:14:53Z"
   }
 ]
 #+end_src
