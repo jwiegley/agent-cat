@@ -800,7 +800,9 @@ effect and bills each one per occurrence, and this is the difference between
 @code{billFresh} and @code{billMemo}.  Under the ACP transport, only an effect
 receives tool permission, and the runtime denies permission to consultations
 and observations in the words of the protocol.  Effects enter an ordered lane,
-so a later act cannot overtake an earlier one.  ACP requires a completed turn
+so a later act cannot overtake an earlier one.  Every other occurrence waits
+behind that lane, so it starts only after each effect that precedes it in Plan
+order has completed.  ACP requires a completed turn
 before an effect is credited with a receipt.  Every execution event retains the
 authored request beside its answer source.  A trace therefore states whether an
 answer was reused, or which dispatched question produced it after a fail-over.
@@ -851,15 +853,19 @@ changing the represented Plan.
 
 @cindex scheduler
 The interpreter schedules a request when every variable used by its prompt
-expression is available.  Independent siblings can overlap even when their
-authored order is sequential in the Plan.  A finite branch schedules only the
-selected arm.  Equal reusable requests racing for the same key share one memo
-reservation.
+expression is available and every effect that precedes it in Plan order has
+completed.  Independent siblings that no effect separates can overlap even when
+their authored order is sequential in the Plan.  A finite branch schedules only
+the selected arm.  Equal reusable requests racing for the same key share one
+memo reservation.
 
 Observed traces remain in Plan order.  Stateful ACP and agent-deck backends have
 FIFO lanes, and effects use an intent-selected ordered lane.  Lane positions are
 reserved during traversal, which prevents a later ready request from overtaking
-an earlier blocked request on the same lane.
+an earlier blocked request on the same lane.  A consultation or an observation
+waits behind the tail of the effect lane without taking a position in it.  It
+therefore observes every earlier effect, and it does not delay the requests
+that wait beside it.
 
 This concurrency policy is a realization of the Plan's data dependencies.  The
 semantic transcript remains the ordered authored observation, while wall-clock
@@ -877,12 +883,58 @@ The exit status is converted where the answer kind can express failure.  A
 flag receives success or failure.  A verdict receives approval on success and
 the first failing line on failure.  A result kind without such a representation
 causes the run to abandon.  Statement position produces a receipt only through
-the effect policy.
+the effect policy.  A command in value position that follows an act starts after
+the act has completed, so it reads what the act wrote.  A repeated observation
+is still answered from the memo table, even when an act intervenes.
 
 The program-authored intent cannot establish the physical nature of an argv.
 An observation tag does not make a command read-only.  An effect tag controls
 the runner's permission and ordering decision, while verification of the
 external result remains an operational responsibility.
+
+@section In-process tools
+
+@cindex in-process tool
+A registry row can answer named tools with Haskell functions.  The field
+@code{rowTools} of a @code{Row} maps a tool identifier to a @code{Tool}, and a
+live run answers every question put to that identifier by calling the
+function.  The registration leaves the workflow unchanged.  It still writes
+@code{ask (tool "shout") [wf|@{capital@}|]}, and its printed Program, its
+analyses, and its bills are those of any other tool question.
+
+A @code{Tool} pairs one answer code with a function of the run's working
+directory and the rendered prompt.  @code{textTool}, @code{flagTool}, and
+@code{receiptTool} build the text, flag, and receipt forms.  The directory is
+the one in which @code{running} commands execute, so a tool that writes a file
+writes it beside the files that the acts of the run write.
+
+@example
+capitalTools :: [(Text, Tool)]
+capitalTools =
+  [ ("save", receiptTool (\dir words' -> TIO.writeFile (dir </> "capital.txt") words')),
+    ("shout", textTool (\_ words' -> pure (T.toUpper words'))),
+    ("announce", receiptTool (\dir words' -> TIO.writeFile (dir </> "announcement.txt") words'))
+  ]
+@end example
+
+Intent follows the source position, as it does for every question.  A
+registered tool whose answer is bound is a consultation, so its answer is
+reused by bare question.  A registered tool in statement position is an
+effect.  It runs once per occurrence in the ordered effect lane, and every
+later question waits for it to complete.
+
+A registered tool answers at one code.  A Program that asks a registered tool
+at another code is refused with exit status 1 before any backend starts.  A
+question behind a dynamic continuation is invisible to that check, and it
+abandons the run when it is reached.
+
+An in-process tool is not engine-bound.  It takes no transport lane, it needs
+no route, and routing-only coverage requires no pin for it.  The run header
+names the tools that are answered in process and the directory in which they
+run.  Scripted execution calls no registered tool, and its table answers those
+questions in the same way as every other question.  The @code{capital} example
+registers three tools and carries a model answer through them to two written
+files.
 
 @section Answer decoding and recovery
 
@@ -911,7 +963,8 @@ The runner can obtain answers from three kinds of service.
 @table @asis
 @item Scripted table
 @code{--scripted} uses the registered program's canned replies.  It starts no
-adapter, asks no person, and executes no external tool.  Replies still pass
+adapter, asks no person, executes no external tool, and calls no in-process
+tool.  Replies still pass
 through the normal decoder.
 
 @item ACP adapter
@@ -1284,8 +1337,8 @@ result is ignored.
 
 @cindex registry
 A program becomes available to @command{agentic-run} through a @code{Registry}.
-Each row carries an @code{Example}, a one-line description, a help page, and a
-scripted answer table.  @code{Fixed helloProgram} registers a complete Program.
+Each row carries an @code{Example}, a one-line description, a help page, a
+scripted answer table, and the tools that the row answers in process.  @code{Fixed helloProgram} registers a complete Program.
 @code{Needs parameterizedProgram} registers a program whose operator inputs are
 supplied before the Program is built.
 
@@ -1813,9 +1866,10 @@ starting an adapter or asking an addressee.
 @section List and help
 
 @code{agentic-run list} prints the registry in declaration order.  The current
-repository has nine rows, named @code{harden}, @code{hello}, @code{structured},
-@code{structured-result}, @code{plan-feature}, @code{review-lite},
-@code{ship-feature-lite}, @code{grind-tests}, and @code{stack-prs}.  Each line
+repository has ten rows, named @code{harden}, @code{hello}, @code{structured},
+@code{structured-result}, @code{capital}, @code{plan-feature},
+@code{review-lite}, @code{ship-feature-lite}, @code{grind-tests}, and
+@code{stack-prs}.  Each line
 includes the short description of the row.
 
 @code{agentic-run help NAME} and @code{agentic-run NAME --help} print the same
@@ -2008,7 +2062,8 @@ changes.  This staleness guard prevents the output of the previous turn from
 becoming the current answer.
 
 When no @code{--route} option is present, every model, tool, and person question
-goes to the selected session.  Text questions send the authored prompt unchanged.
+goes to the selected session, except the tools that the row answers in process.
+Text questions send the authored prompt unchanged.
 For verdicts, flags, receipts, and structured answers, the runtime appends the
 required reply-format instruction unless the authored prompt already ends with
 it.  Structured instructions include the JSON Schema used by the decoder.
@@ -2035,7 +2090,8 @@ that backend by serving-model pin:
 @code{fallingBackTo} names, and it is not a model-party identifier.  A route
 name that is absent from the pin set of the Program is refused before
 execution.  One name can appear only once.  Pinned questions without a route,
-unpinned model questions, tools, and people use the explicit default backend.
+unpinned model questions, people, and the tools that the row does not answer in
+process use the explicit default backend.
 
 Routes can mix ACP and deck backends.  Engine-specific flags are accepted when
 at least one backend of the corresponding scheme uses them.  @code{--adapter},
@@ -2052,7 +2108,8 @@ Scripted execution accepts no routes, because its table does not dispatch by
 serving-model scope.  A raw route also requires an explicit default live
 answerer.  Without an explicit target, routing configuration must cover every
 engine-bound question.  Every model ask therefore needs a configured pin, while
-a tool or person question requires @code{--engine} or @code{--session}.
+a person question, or a tool question that the row does not answer in process,
+requires @code{--engine} or @code{--session}.
 
 @section Inputs and preflight checks
 
@@ -2351,8 +2408,29 @@ record constructor, as shown in @ref{Registration}.
 @c COVER API Agentic.Cli.Row support
 @item Row
 One registered entry with fields @code{rowExample}, @code{rowDoc},
-@code{rowHelp}, and @code{rowScript}.  The record constructor requires a help
-page and deterministic reply table for every row.
+@code{rowHelp}, @code{rowScript}, and @code{rowTools}.  The record constructor
+requires a help page, a deterministic reply table, and a tool table for every
+row.  The tool table of most rows is empty.
+
+@c COVER API Agentic.Cli.Tool support
+@item Tool
+A function that answers a named tool in process.  The constructor
+@code{Tool :: SCode c -> (FilePath -> Text -> IO (El c)) -> Tool} pairs the
+code at which the tool answers with a function of the working directory of the
+run and the rendered prompt.  The section on in-process tools in
+@ref{Operational Model} describes how a run answers with it.
+
+@c COVER API Agentic.Cli.textTool support
+@item textTool function
+Build a @code{Tool} that answers text.
+
+@c COVER API Agentic.Cli.flagTool support
+@item flagTool function
+Build a @code{Tool} that answers a flag.
+
+@c COVER API Agentic.Cli.receiptTool support
+@item receiptTool function
+Build a @code{Tool} that stands in statement position and answers a receipt.
 
 @c COVER API Agentic.Cli.cliMain author
 @item cliMain registry
@@ -3922,7 +4000,8 @@ questions and memo keys.
 @item effect
 Occurrence-sensitive execution intent for a statement-position act.  It uses
 the receipt code, bypasses reusable memo state, reserves the effect lane, and
-can request permission.
+can request permission.  Every later occurrence in Plan order starts after it
+completes.
 
 @cindex environment
 @item environment

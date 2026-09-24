@@ -709,7 +709,10 @@ data Reservation = Reservation !(TMVar ()) !(TMVar ())
 -- another start together. Stateful transport lanes and the write-effect lane
 -- reserve FIFO links during this traversal, before workers await dependencies;
 -- every possible fail-over backend is reserved, so later ready work cannot
--- overtake an earlier blocked node on any lane it may use.
+-- overtake an earlier blocked node on any lane it may use. A question that is
+-- not an effect waits behind the effect lane's tail without joining it, so no
+-- question starts before an effect that precedes it in plan order has
+-- completed.
 --
 -- The observable remains the sequential meaning: the result is evaluated from
 -- the same answers, and tickets are collected in plan order rather than worker
@@ -786,7 +789,7 @@ reserveQuestion scheduler occurrence w ch c shape = do
   when (length targets > 1) $ case schedulerControlRuntime scheduler of
     Nothing -> pure ()
     Just controls -> registerRuntimeRedirects controls occurrence targets
-  atomically (traverse reserveLane (nub lanes))
+  atomically ((:) <$> effectOrder <*> traverse reserveLane (nub transportLanes))
   where
     q = withRequestPrompt shape T.empty
     candidates' = requestCandidates ch Set.empty q
@@ -795,9 +798,13 @@ reserveQuestion scheduler occurrence w ch c shape = do
       mapMaybe
         (\candidate -> worldTurnLane w c (requestShapeOf candidate))
         (requestCandidates ch Set.empty q)
-    lanes =
-      (if intentIsEffect (rsIntent shape) then [schedulerEffects scheduler] else [])
-        <> transportLanes
+    -- An effect joins the effect lane. Every other question waits behind the
+    -- lane's current tail without joining it, so it starts only after every
+    -- effect that precedes it in plan order, and questions between two effects
+    -- still overlap one another.
+    effectOrder
+      | intentIsEffect (rsIntent shape) = reserveLane (schedulerEffects scheduler)
+      | otherwise = watchLane (schedulerEffects scheduler)
 
 reserveLane :: TurnLane -> STM Reservation
 reserveLane (TurnLane tailCell) = do
@@ -805,6 +812,14 @@ reserveLane (TurnLane tailCell) = do
   completed <- newEmptyTMVar
   writeTVar tailCell completed
   pure (Reservation previous completed)
+
+-- | Wait behind a lane's current tail without joining it. The holder starts
+-- after every member reserved so far has completed, and no later member waits
+-- for the holder.
+watchLane :: TurnLane -> STM Reservation
+watchLane (TurnLane tailCell) = do
+  previous <- readTVar tailCell
+  Reservation previous <$> newEmptyTMVar
 
 spawn :: Scheduler -> IO [Reservation] -> IO a -> IO (TMVar (Either SomeException a))
 spawn scheduler reserve action = mask $ \restore -> do

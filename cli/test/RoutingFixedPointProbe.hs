@@ -7,13 +7,15 @@
 
 module Main (main) where
 
-import Agentic.Cli (Registry (..), Row (..), cliMain)
+import Agentic.Cli (Registry (..), Row (..), Tool, cliMain, receiptTool, textTool)
 import Agentic.Runtime.Facts (runFactName, runFactRoutes)
 import Agentic.Workflow
 import qualified Agentic.Workflow.Do as W
 import Data.String (fromString)
 import Data.Text (Text)
 import qualified Data.Text as T
+import qualified Data.Text.IO as TIO
+import System.FilePath ((</>))
 import Prelude
 
 main :: IO ()
@@ -31,11 +33,30 @@ registry =
           ("cyclic", row cyclicExample),
           ("controlled", row controlledExample),
           ("controlled-single", row controlledSingleExample),
-          ("person-controlled", row personControlledExample)
+          ("person-controlled", row personControlledExample),
+          ("in-process", toolRow inProcessProgram [("record", recordTool)]),
+          ("in-process-mismatch", toolRow mismatchProgram [("record", textTool (\_ words' -> pure words'))])
         ]
     }
   where
-    row example = Row example "fixture" "Routing fixed-point fixture." [("fixed-point", "ok")]
+    row example = Row example "fixture" "Routing fixed-point fixture." [("fixed-point", "ok")] []
+    toolRow program = Row (Fixed program) "fixture" "In-process tool fixture." [("fixed-point", "ok")]
+
+-- | Writes its words to @record.txt@ in the run's working directory.
+recordTool :: Tool
+recordTool = receiptTool (\dir words' -> TIO.writeFile (dir </> "record.txt") words')
+
+-- | A pinned model question whose answer an in-process tool records. Routing
+-- covers the model, and nothing routes the tool.
+inProcessProgram :: Program
+inProcessProgram = workflow W.do
+  capital <- ask (model "geographer" `servedBy` "deep") [wf|What is the capital of France?|]
+  ask_ (tool "record") [wf|{capital}|]
+
+-- | A tool registered to answer text, asked in statement position.
+mismatchProgram :: Program
+mismatchProgram = workflow W.do
+  ask_ (tool "record") [wf|hello|]
 
 convergentExample :: Example
 convergentExample =

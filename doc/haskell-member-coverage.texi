@@ -78,6 +78,12 @@ checked by the documentation gates.
 @c MEMBER Agentic.Cli.Row.member:rowScript support
 @hsindex Agentic.Cli.Row.rowScript
 @item @code{Agentic.Cli.Row} @tab @code{rowScript} @tab @code{Agentic.Cli.Row}
+@c MEMBER Agentic.Cli.Row.member:rowTools support
+@hsindex Agentic.Cli.Row.rowTools
+@item @code{Agentic.Cli.Row} @tab @code{rowTools} @tab @code{Agentic.Cli.Row}
+@c MEMBER Agentic.Cli.Tool.member:Tool support
+@hsindex Agentic.Cli.Tool.Tool
+@item @code{Agentic.Cli.Tool} @tab @code{Tool} @tab @code{Agentic.Cli.Tool}
 @c MEMBER Agentic.Schema.Code.member:CodeAck support
 @hsindex Agentic.Schema.Code.CodeAck
 @item @code{Agentic.Schema.Code} @tab @code{CodeAck} @tab @code{Agentic.Schema.Code}

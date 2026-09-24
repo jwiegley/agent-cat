@@ -2,9 +2,13 @@
 @hsindex Agentic.Cli.Command
 @hsindex Agentic.Cli.Registry
 @hsindex Agentic.Cli.Row
+@hsindex Agentic.Cli.Tool
 @hsindex Agentic.Cli.cliMain
+@hsindex Agentic.Cli.flagTool
 @hsindex Agentic.Cli.parseCommand
+@hsindex Agentic.Cli.receiptTool
 @hsindex Agentic.Cli.routesFact
+@hsindex Agentic.Cli.textTool
 @hsindex Agentic.Runtime.Facts.oneSessionPhrase
 @hsindex Agentic.Runtime.Facts.reservedInput
 @hsindex Agentic.Runtime.Facts.routeDefaultLabel
