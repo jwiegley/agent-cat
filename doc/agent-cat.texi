@@ -3299,6 +3299,17 @@ an uncertain send to be repeated only after explicit confirmation.  Receipt
 status is separate from request association and runtime outcome.  Exiting the
 frontend closes its transport without cancelling manager-owned work.
 
+A declared client failure keeps its declared meaning.  Any other failure of a
+manager call inside the frontend is an internal frontend fault, and the
+frontend reports it with fixed text that contains no exception detail.  After
+such a fault, the session starts no further mutation and offers no exact
+resend.  Only read-only actions remain available.  These include an explicit
+observation refresh with @kbd{g} when a request exists, and detachment with
+@kbd{q}.  The session also stops automatic refresh, and the fault notice names
+any command whose intent the manager accepted but whose effect it has not yet
+observed.  A send that the fault interrupted keeps its original pending command
+and any earlier receipt location, and its outcome stays uncertain.
+
 The current service frontend ends at approval and association.  Live run views,
 decision answers, recovery controls, and verified result retrieval are not yet
 connected to this UI.  Service mode remains an unaccepted implementation.

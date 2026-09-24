@@ -266,6 +266,7 @@ library
     Agentic.Tui.RunModel
     Agentic.Tui.Root
     Agentic.Tui.Service
+    Agentic.Tui.ServiceLane
     Agentic.Tui.Types
     Agentic.Schema.Conformance
     Agentic.Shell
@@ -479,6 +480,7 @@ test-suite tui-model-test
     Agentic.Tui.Root
     Agentic.Tui.RunModel
     Agentic.Tui.Service
+    Agentic.Tui.ServiceLane
     Agentic.Tui.Types
     TuiRootRoleTests
     ServiceTests

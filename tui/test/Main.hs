@@ -86,7 +86,7 @@ main = do
 
 runTests :: IO ()
 runTests = do
-  serviceTests
+  serviceTests (\size -> frameText . renderFrame size)
   descriptorBytes <- BS.readFile "test/fixtures/runtime/descriptor-v3/valid.json"
   startedBytes <- firstLine <$> BS.readFile "test/fixtures/runtime/protocol-v1/success.ndjson"
   manifestBytes <- BS.readFile "test/fixtures/runtime/frontend-manifest/v2.json"

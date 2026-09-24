@@ -47,6 +47,7 @@ import Agentic.Tui.Person
 import Agentic.Tui.RunModel
 import Agentic.Tui.Types
 import qualified Agentic.Tui.Service as Service
+import Agentic.Tui.ServiceLane (internalFaultStatus)
 import qualified Agentic.Manager.Client as Manager
 import Brick
 import Brick.Widgets.Border (borderWithLabel, hBorder, hBorderWithLabel, vBorder)
@@ -110,10 +111,14 @@ data Presentation = Presentation
     presentationRunning :: !Bool,
     presentationNoColor :: !Bool,
     presentationService :: !Bool,
+    -- | Operation, URI, and whether an explicit exact resend is offered.
     presentationServiceMutation :: !(Maybe (Text,Text,Bool)),
     presentationServiceResendConfirm :: !Bool,
     presentationServiceApproval :: !(Maybe Text),
     presentationServiceReviewAvailable :: !Bool,
+    -- | An internal frontend fault occurred. No mutation starts, no exact
+    -- resend is offered, and only read-only actions remain.
+    presentationServiceFault :: !Bool,
     presentationConfig :: !(Maybe TuiConfig),
     presentationPersonPrompt :: !(Maybe PersonPrompt),
     presentationPersonSubmitted :: !Bool,
@@ -155,6 +160,7 @@ emptyPresentation model =
       presentationServiceResendConfirm = False,
       presentationServiceApproval = Nothing,
       presentationServiceReviewAvailable = False,
+      presentationServiceFault = False,
       presentationConfig = Nothing,
       presentationPersonPrompt = Nothing,
       presentationPersonSubmitted = False,
@@ -248,6 +254,7 @@ statusView presentation width = withAttr attribute (displayText (oneLine width m
   where
     model = presentationModel presentation
     (attribute, message)
+      | presentationServiceFault presentation = (attrName "error", internalFaultStatus)
       | Just failure <- presentationControlError presentation = (attrName "error", "ERROR: " <> failure)
       | RecoveryLayer <- presentationLayer presentation = (attrName "warning", "Recovery required")
       | FilterLayer <- presentationLayer presentation = (attrName "status", browserStatus (setWorkflowFilter (T.unwords (T.words (T.intercalate "\n" (Edit.getEditContents (presentationEditor presentation))))) model))
@@ -777,7 +784,8 @@ keyHelpView presentation width mainHeight =
 keyHelpLines :: Presentation -> [Text]
 keyHelpLines presentation = case modelScreen model of
   BrowserScreen | presentationService presentation ->
-    ["Up/Down select", "Enter creates a manager request", "Right/Left focus details/list", "h workflow help", "Esc profiles", "q detach", "? or Esc close this help"]
+    ["Up/Down select"] <> ["Enter creates a manager request" | not faulted]
+      <> ["Right/Left focus details/list", "h workflow help", "Esc profiles", "q detach", "? or Esc close this help"]
   BrowserScreen ->
     [ "Up/Down       select",
       "Right/Left    focus details/list",
@@ -787,9 +795,12 @@ keyHelpLines presentation = case modelScreen model of
       <> ownershipKeys
       <> ["? or Esc      close this help"]
   ServiceProfilesScreen _ _ -> ["Up/Down select profile", "Right/Left focus details/list", "Enter select ready profile", "r refresh profiles", "q detach", "? or Esc close this help"]
-  ServiceRequestScreen _ -> ["Enter requests review when the draft is ready", "e edits draft inputs", "g refreshes observations", "q detaches without cancelling the manager run"]
-  ServiceReviewScreen {} -> ["y approves the exact visible selectors", "Enter does not approve", "d toggles complete review details", "Up/Down scroll details", "q detaches"]
-  ServiceCommandScreen _ -> ["g refreshes observations without sending a mutation", "x requests confirmation of an exact resend", "q detaches"]
+  ServiceRequestScreen _ -> ["Enter requests review when the draft is ready" | not faulted] <> ["e edits draft inputs" | not faulted]
+    <> ["g refreshes observations", "q detaches without cancelling the manager run"]
+  ServiceReviewScreen {} -> ["y approves the exact visible selectors" | not faulted]
+    <> ["Enter does not approve", "d toggles complete review details", "Up/Down scroll details", "q detaches"]
+  ServiceCommandScreen _ -> ["g refreshes observations without sending a mutation"]
+    <> ["x requests confirmation of an exact resend" | Just (_,_,True) <- [presentationServiceMutation presentation]] <> ["q detaches"]
   InitialLoading -> ["q or Esc      cancel discovery and quit", "? or Esc      close this help"]
   TargetScreen -> ["Up/Down scroll", "p persona", "s scripted review", "l or Enter routing review", "Esc previous", "? or Esc close this help"]
   HelpLoading -> ["Esc cancel bounded help load", "? or Esc close this help"]
@@ -808,6 +819,7 @@ keyHelpLines presentation = case modelScreen model of
   InputScreen _ -> []
   where
     model = presentationModel presentation
+    faulted = presentationServiceFault presentation
     browserKeys
       | presentationRunning presentation = []
       | otherwise = case modelTab model of
@@ -945,6 +957,7 @@ footerItems presentation width height = case presentationLayer presentation of
       ServiceRequestScreen request ->
         ["g REFRESH", "q DETACH"]
           <> (if Manager.draftPhase request == "draft" && presentationServiceMutation presentation == Nothing
+                && not (presentationServiceFault presentation)
               then ["e EDIT INPUTS"] <> ["Enter REQUEST REVIEW" | Service.requestReady request] else [])
       ServiceReviewScreen preparation tag -> ["d EXACT DETAILS", "q DETACH"] <>
         ["y APPROVE EXACT REVIEW" | not (presentationExactDetails presentation), presentationServiceReviewAvailable presentation,
@@ -954,7 +967,7 @@ footerItems presentation width height = case presentationLayer presentation of
         ["x EXACT RESEND" | Just (_,_,True) <- [presentationServiceMutation presentation]]
       BrowserScreen
         | presentationService presentation -> ["h HELP", "Esc PROFILES", browserPaneHint, "? KEYS", "q DETACH"]
-            <> ["Enter NEW REQUEST" | presentationServiceMutation presentation == Nothing]
+            <> ["Enter NEW REQUEST" | presentationServiceMutation presentation == Nothing, not (presentationServiceFault presentation)]
         | presentationRunning presentation -> ["Esc REATTACH", "c CANCEL RUN", "Tab SECTION", "? KEYS", browserPaneHint]
         | compact -> ["Enter OPEN", browserPaneHint, "? KEYS", "Tab SECTION", "q QUIT"] <> case modelTab model of WorkflowsTab -> ["/ FILTER"]; RunsTab -> ["r/m/f LINEAGE"]; RoutingTab -> ["p PERSONA"]
         | modelTab model == RunsTab -> ["Enter INSPECT", "r RESTART", "m RESUME", "f FORK", "Tab SECTION", "? KEYS", "q QUIT"]

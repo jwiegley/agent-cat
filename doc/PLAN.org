@@ -606,6 +606,38 @@ From acat-5b7's honest scope: retryT/fanT need an n-ary Key.splice (provable, un
 ]
 #+end_src
 
+* TODO [#D] Remove the unreachable fallback in TUI uncertainService
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-3vuv
+:LABELS:   []
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-24 Thu 04:35]
+:MODIFIED: [2026-09-24 Thu 04:35]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+A2 fess finding (low). App.hs near line 453, uncertainService has a fallback for unresolvedNotice returning Nothing, but every caller passes a lane in MutationUncertain, so it cannot run. Remove it or document that it cannot run.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-3vuv",
+    "depends_on_id": "acat-tui-internal-faults-jj13",
+    "type": "discovered-from",
+    "created_at": "2026-09-24T11:35:32.869795Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
 * DONE [#B] Write complete Texinfo manual and reusable authoring workflow
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -1068,6 +1100,38 @@ Owner 2026-08-12, verbatim: 'I need theorems in the mathematical space of ⟦har
 :END:
 
 Review FIX-NOW on acat-444 (machine-checked probes): WEq quantifies keys inside the comparison, so gateT true A, scopeT unit A, seq-assoc and seq-unit ALL fail to be WEq — the quotient has one operation and no laws, and deleting a no-op counts as a semantic change. Fix direction per review: key-renaming/site-relabelling invariance (a groupoid quotient on keys FIRST); naive outside-quantification still fails associativity because the two shapes assign different site-sets. Blocks any real use of Workflow; also the prerequisite for pi (the folds are incomparable until this lands: muS does not respect WEq and WEq does not respect muS — one_add_one_of_muS_respects_WEq + probes).
+
+* TODO [#D] Establish which transport exceptions escape Manager.Client.clientIO
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-5guw
+:LABELS:   []
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-24 Thu 04:35]
+:MODIFIED: [2026-09-24 Thu 04:35]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+A2 fess finding (low). Manager.Client.clientIO catches only HttpException and ClientFailure. Any other real transport exception would be reported by the TUI as an internal frontend fault and would block mutations for the session. Establish which exception classes can escape http-client during a call, and declare them as ClientFailure in the facade if they are transport failures.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-5guw",
+    "depends_on_id": "acat-tui-internal-faults-jj13",
+    "type": "discovered-from",
+    "created_at": "2026-09-24T11:35:32.624649Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
 
 * DONE [#E] Note: Tally/Width deriving DecidableEq now unconsumed; Cost.add_mono deleted with its only consumer
 :PROPERTIES:
@@ -2777,6 +2841,38 @@ From the runtime adversarial pass (commit 71a212a). MEDIUM: (1) Exec.say logs bu
     "author": "johnw",
     "text": "Triage 2026-08-20, scope narrowed: items 1-2 DONE — requiresCompletedTurn (Exec.hs:696-699) closes ack and person-addressed turns in one exported decision, enforced at Acp.hs:1280-1285; the Lean-transport items are OBSOLETE (transport retired). Live residue (~2-3h): the comment's item 4, a fixture exercising the completed-turn refusal.",
     "created_at": "2026-08-20T17:12:10Z"
+  }
+]
+#+end_src
+
+* TODO [#D] Decide TUI behaviour after an internal service fault
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-fzxb
+:LABELS:   []
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-24 Thu 04:35]
+:MODIFIED: [2026-09-24 Thu 04:35]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+A2 fess finding (low, scope interpretation). After an internal fault, automatic Tick refresh stops (App.hs near 588) and mutations stay blocked for the rest of the session (ServiceLane.hs near 200-203). After a startup profile-load fault, g does nothing and only q works. These choices are disclosed and documented but go beyond the literal A2 requirement. The orchestrator or operator accepts or changes them explicitly.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-fzxb",
+    "depends_on_id": "acat-tui-internal-faults-jj13",
+    "type": "discovered-from",
+    "created_at": "2026-09-24T11:35:32.376222Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
   }
 ]
 #+end_src
@@ -5754,6 +5850,38 @@ Owner directive 2026-08-17: think about profunctors improving the design, term l
 ]
 #+end_src
 
+* TODO [#D] Correct the ServiceLane comment on thrown declared failures
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-puxv
+:LABELS:   []
+:ISSUE_TYPE: bug
+:CREATED:  [2026-09-24 Thu 04:35]
+:MODIFIED: [2026-09-24 Thu 04:35]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+A2 fess finding (low). tui/src/Agentic/Tui/ServiceLane.hs lines 6-8 and 69-70 say a declared failure keeps its meaning whether the call returned it or threw it. evaluate runs outside declaredCall, so a ClientFailure thrown while forcing a lazy returned payload becomes InternalFault. Change the comment to 'threw it during the call', or move evaluation inside declaredCall. Also add a control showing that the failing-returned-payload test fails when WHNF evaluation is removed.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-puxv",
+    "depends_on_id": "acat-tui-internal-faults-jj13",
+    "type": "discovered-from",
+    "created_at": "2026-09-24T11:35:32.126972Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
 * DONE [#C] Kill the condemned stratum; re-point the surface at Plan; example verbatim-stable
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -5782,6 +5910,38 @@ After the Plan flagship lands: re-point Agentic/Surface.lean internals (W/ask/as
     "author": "johnw",
     "text": "Closed by commit 4aed549 ('The condemned stratum retires; its results stay'), executing the owner-approved hybrid of 2026-08-20: the no-consumer stratum excised (16 files, 9,931 lines; Agentic/ is now Core/ + Scope.lean), the results preserved with exact citations in doc/research/term-algebra-results.md, this ticket's residue folded in the same pass (see the commit message), all gates green (lake 1490 jobs, corpus-gen 189 byte-identical, tier0 189/189, tier1 29/29, bisim clean, examples 7/0, acp 15/15, deck 7/7, citations 249/249), independently verified and fess-audited before push.",
     "created_at": "2026-08-20T18:42:24Z"
+  }
+]
+#+end_src
+
+* TODO [#D] Rename the TUI fault-status wording check
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-q4nf
+:LABELS:   []
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-24 Thu 04:35]
+:MODIFIED: [2026-09-24 Thu 04:35]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+A2 fess finding (low). ServiceTests.hs near 223-224, check 'fault status names only what remains available', compares internalFaultStatus with its own literal text. It detects wording changes only. Rename it as a wording check or remove it, because the render checks already require the status text in every fault frame.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-q4nf",
+    "depends_on_id": "acat-tui-internal-faults-jj13",
+    "type": "discovered-from",
+    "created_at": "2026-09-24T11:35:31.872Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
   }
 ]
 #+end_src
@@ -6464,15 +6624,17 @@ Halt fess finding: manager/test/service_http.py sends Enter or detail-view y and
 ]
 #+end_src
 
-* TODO [#C] Preserve internal frontend failures as faults
+* DONE [#C] Preserve internal frontend failures as faults
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-tui-internal-faults-jj13
 :LABELS:   []
 :ISSUE_TYPE: bug
 :CREATED:  [2026-09-23 Wed 16:24]
-:MODIFIED: [2026-09-23 Wed 16:24]
+:MODIFIED: [2026-09-24 Thu 04:35]
 :CREATED_BY: johnw
+:FINISHED: [2026-09-24 Thu 04:35]
+:CLOSE_REASON: Criteria met at the ceilings recorded by subtask A2: unexpected synchronous exceptions become a distinct internal fault, pending-command uncertainty and terminal cleanup are retained, no exception text reaches the UI, and model tests plus negative controls show injected failures never become transport retryability. Actual UI fault handling is not demonstrated. Follow-ups: acat-y9a7 acat-zbpx acat-q4nf acat-puxv acat-fzxb acat-5guw acat-3vuv.
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
@@ -6492,6 +6654,20 @@ Halt fess finding: tui/src/Agentic/Tui/App.hs safeService catches every synchron
     "created_by": "johnw",
     "metadata": "{}",
     "thread_id": ""
+  }
+]
+#+end_src
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 313,
+    "issue_id": "acat-tui-internal-faults-jj13",
+    "author": "johnw",
+    "text": "Subtask A2 (resume workflow wm023-20260923) replaced App.safeService with the compiled module Agentic.Tui.ServiceLane. serviceCall keeps declared ClientFailure values, maps every other synchronous exception to the nullary InternalFault, and rethrows asynchronous exceptions. App routes all eight Client and Service calls through serviceCall or declaredCall and contains no TransportUnavailable construction. Read, preparation and send completions are pure Lane transitions: a read fault clears the read ticket and keeps command state, a preparation fault creates no uncertainty, and a send fault keeps the original pending command, operation, URI and receipt location with uncertainty but offers no exact resend. Fault renders show fixed text only. Evidence ceilings: pure model tests and fixed-size model renders (89 checks at N1 and N8, /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A2/verify-r2/A2v2-model-N1.log and -N8.log), eleven negative controls that each fail a named check (/Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A2/verify-r2/A2v2-control-*), a source-level routing proof (/Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A2/verify-r2/A2v2-source-checks.log), a Werror package build, and tui-approval at N1 then N8 as an actual UI regression on the success path only. No PTY run injects a fault, so actual UI fault handling is not demonstrated. Fess audit: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A2/../../fess/A-A2-r2.md, non-blocking.",
+    "created_at": "2026-09-24T11:35:21Z"
   }
 ]
 #+end_src
@@ -12382,7 +12558,7 @@ until WM-039 supplies it.
 :LABELS:   ["p7","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-24 Thu 00:53]
+:MODIFIED: [2026-09-24 Thu 04:35]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-033
 :SOURCE_REPO: agent-cat
@@ -12477,6 +12653,13 @@ to an unapproved local launch.
     "author": "johnw",
     "text": "Resume subtask A0 (workflow-manager-checkpoint-20260923, unchanged source at b95ce6d1d597b0f8e71f960952e5ed7bb37e1542) re-established the checkpoint baseline. It changed no source, so it advances this package only as a baseline and closes nothing.\n\nEvidence under /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A0/impl-r1, each result labelled by its ceiling:\n- Operator exercise: the toolchain is GHC 9.10.3, crypton-x509-validation-1.9.1 and Cabal 3.16.1.0 (A0-toolchain.*).\n- Package build: the forced build with -Werror -threaded -rtsopts -fforce-recomp of agentic-run, routing-fixed-point-probe, manager-client-check, manager-artifact-check and tui-model-test exited 0 (A0-build-force.*). All five executables were relinked before the first built binary ran at 07:47:57Z (A0-list-bin-gnu.*).\n- Deterministic native fixture (contract probe): manager/ci/contract.sh exited 0 with 99 schemas, 29 operations, 333 payload cases, 20 SSE cases and 3 byte-bound downloads (A0-contract.*). The probe runs no service.\n- Pure codec or model test: tui-model-test exited 0 at -N1 and then at -N8, with 45 PASS lines per run (A0-model-N1.*, A0-model-N8.*).\n- Actual UI interaction (PTY): tui-approval printed both required PASS lines at N1 and then at N8 (A0-tui-approval-N1.*, A0-tui-approval-N8.*). The fixture root is /Users/johnw/Products/k.M0a5ItPm/tmp/tui-resume-A0.fcm4x8Z9 and remains preserved.\n\nLimitations: the baseline ends at approval and detach, not workflow completion. Both PTY runs recorded manager exit status -2, and the driver does not assert it. Nothing records whether the exact-resend branch ran. acat-tui-consent-barrier-wby2 still limits the negative Enter and detail-view assertions. The fess audit (resume-20260923/fess/A-A0-r1.md) found no blocking defect.\n",
     "created_at": "2026-09-24T07:53:56Z"
+  },
+  {
+    "id": 314,
+    "issue_id": "acat-wm-033-4g77",
+    "author": "johnw",
+    "text": "Advanced by subtask A2: TUI service-lane internal-fault classification. Subtask A2 (resume workflow wm023-20260923) replaced App.safeService with the compiled module Agentic.Tui.ServiceLane. serviceCall keeps declared ClientFailure values, maps every other synchronous exception to the nullary InternalFault, and rethrows asynchronous exceptions. App routes all eight Client and Service calls through serviceCall or declaredCall and contains no TransportUnavailable construction. Read, preparation and send completions are pure Lane transitions: a read fault clears the read ticket and keeps command state, a preparation fault creates no uncertainty, and a send fault keeps the original pending command, operation, URI and receipt location with uncertainty but offers no exact resend. Fault renders show fixed text only. Evidence ceilings: pure model tests and fixed-size model renders (89 checks at N1 and N8, /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A2/verify-r2/A2v2-model-N1.log and -N8.log), eleven negative controls that each fail a named check (/Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A2/verify-r2/A2v2-control-*), a source-level routing proof (/Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A2/verify-r2/A2v2-source-checks.log), a Werror package build, and tui-approval at N1 then N8 as an actual UI regression on the success path only. No PTY run injects a fault, so actual UI fault handling is not demonstrated. Fess audit: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A2/../../fess/A-A2-r2.md, non-blocking. WM-033 stays open.",
+    "created_at": "2026-09-24T11:35:22Z"
   }
 ]
 #+end_src
@@ -14363,6 +14546,38 @@ bindT discards both sub-grades (monadic outright); toMonadic is the only route f
 ]
 #+end_src
 
+* TODO [#D] Hide TUI InputScreen continue key after a service fault
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-y9a7
+:LABELS:   []
+:ISSUE_TYPE: bug
+:CREATED:  [2026-09-24 Thu 04:35]
+:MODIFIED: [2026-09-24 Thu 04:35]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+A2 fess finding (low). Presentation.hs near line 976 shows 'Ctrl-D CONTINUE' on InputScreen with no fault check. After a read fault while a SaveLiteral awaits its effect, g can deliver the effect and applyServiceObservation (App.hs near 518-522) moves to InputScreen. Ctrl-D is then refused by serviceMutable and does nothing silently. No mutation starts. Hide the footer item when presentationServiceFault is set, or skip the move to InputScreen after a fault, and add a render test.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-y9a7",
+    "depends_on_id": "acat-tui-internal-faults-jj13",
+    "type": "discovered-from",
+    "created_at": "2026-09-24T11:35:31.336744Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
 * DONE [#D] Pareto: n-ary axes, strict dominance, frontier, tie to Cost
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -14482,6 +14697,38 @@ Update manual and generated indexes together; make -C doc check and make -C doc 
 :END:
 
 Site.strip = List.dropPrefix? (proved; the survivor docstring names the WRONG function — false absence claim, fix it); foldPanel and Mat.listProd = List.prod (rfl); Mat.pow = ^ ; Ext's three laws = Option monad laws. All probe-proved.
+
+* TODO [#D] Share the TUI service presentation mapping with the render tests
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-zbpx
+:LABELS:   []
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-24 Thu 04:35]
+:MODIFIED: [2026-09-24 Thu 04:35]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+A2 fess finding (low). tui/test/ServiceTests.hs lanePresentation (near 281-283) copies the service fields of App.toPresentation (App.hs near 744-749) by hand, so a divergence in App would not fail the render tests. Move the service-field part of toPresentation into a compiled module that App and the tests both call.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-zbpx",
+    "depends_on_id": "acat-tui-internal-faults-jj13",
+    "type": "discovered-from",
+    "created_at": "2026-09-24T11:35:31.627602Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
 
 * DONE [#C] agent-cat CLI polish (5 low findings from the clean verification pass)
 :PROPERTIES:
