@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import readline from "node:readline";
 import {
@@ -22,7 +21,9 @@ const SessionManagement = defineService("pi.session-management");
 const AgentController = defineService("pi.agent-controller");
 const Transcript = defineService("pi.transcript");
 const children = new Set();
-const directory = await mkdtemp(join(tmpdir(), "agent-cat-pi-current-"));
+// A Unix socket path holds at most 104 bytes on macOS, and the socket path
+// below would exceed that under the default macOS tmpdir().
+const directory = await mkdtemp("/tmp/agent-cat-pi-current-");
 const socketPath = join(directory, `${serverId}.sock`);
 const host = createHost(["session-a", "session-b"]);
 let server = createUnixServer(host, { path: socketPath, serverId });

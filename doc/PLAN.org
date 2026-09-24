@@ -5937,15 +5937,17 @@ From acat-zms: star_star, sliding a(ba)* = (ab)*a, denesting, (a+b)* are now pro
 ]
 #+end_src
 
-* TODO [#D] The Pi remote-session integration script fails on macOS with the default TMPDIR
+* DONE [#D] The Pi remote-session integration script fails on macOS with the default TMPDIR
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-n98b
 :LABELS:   []
 :ISSUE_TYPE: bug
 :CREATED:  [2026-09-24 Thu 16:49]
-:MODIFIED: [2026-09-24 Thu 16:49]
+:MODIFIED: [2026-09-24 Thu 16:58]
 :CREATED_BY: johnw
+:FINISHED: [2026-09-24 Thu 16:58]
+:CLOSE_REASON: pi-remote-current.mjs now creates its socket directory under /tmp, which keeps the socket path at 74 bytes. npm run check passes, and npm run test:integration passes with the default macOS TMPDIR: 4 vitest files (8 tests) and the remote-session script.
 :SOURCE_REPO: .
 :ORIGINAL_SIZE: 0
 :END:
