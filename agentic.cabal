@@ -111,6 +111,7 @@ library
     Agentic.Chains
     Agentic.DSL.Json
     Agentic.Exec
+    Agentic.InProcess
     Agentic.Plan.Value
     Agentic.Raw
     Agentic.RequirePinned
@@ -152,10 +153,12 @@ library examples
     workflow/extra
     cli/example
   exposed-modules:
+    Capital
     Harden
     Hello
     Structured
     Isaac
+    Example.CapitalInfo
     Example.IsaacInfo
     Example.Registry
     Example.StructuredInfo

@@ -7,7 +7,8 @@ library of the `agentic` package.
 
 ## Layout
 
-`example` holds the teaching workflows `Harden`, `Hello`, and `Structured`.
+`example` holds the teaching workflows `Harden`, `Hello`, `Structured`, and
+`Capital`.
 `extra` holds `Isaac`, which contains the five workflows that were derived from
 incite. `core` is reserved for stable workflows of general use. It holds no
 module at present, and `agentic.cabal` does not list it.

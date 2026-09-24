@@ -9,9 +9,11 @@ module Example.Registry
   )
 where
 
-import Agentic.Cli (Registry (..), Row (..))
+import Agentic.Cli (Registry (..), Row (..), Tool)
 import Agentic.Workflow (Example (..), wft)
+import Capital (capitalProgram)
 import Data.Text (Text)
+import Example.CapitalInfo (capitalBlurb, capitalHelp, capitalScript, capitalTools)
 import Example.IsaacInfo (isaacBlurb, isaacExamples, isaacHelp, isaacScript)
 import Example.StructuredInfo
   ( structuredBlurb,
@@ -32,7 +34,8 @@ import Structured (structuredProgram, structuredResultProgram)
 --
 -- The two walked examples first, because they are the ones tier1 pins against
 -- the frozen corpus and the ones the documentation walks. The structured row
--- follows as the worked representation-boundary example. After it,
+-- follows as the worked representation-boundary example, and @capital@ as the
+-- worked example of tools answered in process. After it,
 -- "Example.Isaac"'s five — Isaac Shapira's @incite@ workflows written in this
 -- surface, which are an /experiment/ about what the language can express and
 -- not conformance fixtures: nothing pins them, and each carries in its haddock
@@ -48,7 +51,8 @@ examples =
   [ ("harden", Fixed hardenProgram),
     ("hello", Fixed helloProgram),
     ("structured", Fixed structuredProgram),
-    ("structured-result", Fixed structuredResultProgram)
+    ("structured-result", Fixed structuredResultProgram),
+    ("capital", Fixed capitalProgram)
   ]
     <> isaacExamples
 
@@ -74,8 +78,13 @@ examplesRegistry =
     { regBinary = "agentic-run",
       regNoun = "example",
       regBanner = "list, plan, price and run the worked examples",
-      regRows = [(n, Row ex (blurbFor n) (helpFor n) (scriptFor n)) | (n, ex) <- examples]
+      regRows = [(n, Row ex (blurbFor n) (helpFor n) (scriptFor n) (toolsFor n)) | (n, ex) <- examples]
     }
+
+-- | The tools a live run of each program answers in process.
+toolsFor :: Text -> [(Text, Tool)]
+toolsFor "capital" = capitalTools
+toolsFor _ = []
 
 -- | The one line @list@ prints beside a name.
 blurbFor :: Text -> Text
@@ -83,6 +92,7 @@ blurbFor "harden" = "the flagship: draft a patch, review it by panel under a bou
 blurbFor "hello" = "the smallest thing that is still a workflow: two questions and an act"
 blurbFor "structured" = structuredBlurb
 blurbFor "structured-result" = structuredResultBlurb
+blurbFor "capital" = capitalBlurb
 blurbFor n = isaacBlurb n
 
 -- ---------------------------------------------------------------------------
@@ -100,7 +110,7 @@ blurbFor n = isaacBlurb n
 -- hand-copied price is drift with a schedule, and the one place a page may talk
 -- about cost is a caveat pointing at @agentic-run cost@.
 --
--- These nine are the reference implementation the downstream rows in
+-- These ten are the reference implementation the downstream rows in
 -- @agent-workflows@ are written against, which is why each says the
 -- same six things in the same order even where a row could have said less.
 --
@@ -113,6 +123,7 @@ helpFor "harden" = hardenHelp
 helpFor "hello" = helloHelp
 helpFor "structured" = structuredHelp
 helpFor "structured-result" = structuredResultHelp
+helpFor "capital" = capitalHelp
 helpFor n = isaacHelp n
 
 -- | 'hardenProgram''s page.
@@ -248,6 +259,7 @@ scriptFor "hello" =
   ]
 scriptFor "structured" = structuredScript
 scriptFor "structured-result" = structuredScript
+scriptFor "capital" = capitalScript
 -- "Example.Isaac"'s five carry their own table, in their own module, because
 -- its keys /are/ the prompt defines those programs are written from: a key
 -- there is a prefix by construction rather than by proofreading, which is what

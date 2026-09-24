@@ -111,6 +111,26 @@ grep -q 'requires full pin coverage, but person `first` cannot carry `served by`
 grep -q "routing configuration has no route for pinned model 'primary'" <<<"$missing_profile"
 ! grep -q 'transport:' <<<"$tool_uncovered$model_uncovered$person_uncovered$missing_profile"
 
+# A tool the row answers in process is not engine-bound, so routing-only
+# coverage does not refuse it, and the tool writes where the run's acts write.
+mkdir -p "$tmp/in-process-work"
+XDG_CONFIG_HOME="$tmp/xdg" "$fixed_bin" run in-process \
+  --scratch "$tmp/in-process-work" \
+  +RTS -N8 -RTS >"$tmp/in-process.out" 2>&1
+grep -q 'in process: tool record' "$tmp/in-process.out"
+grep -q 'call tool record in process (for the ack question)' "$tmp/in-process.out"
+[ "$(cat "$tmp/in-process-work/record.txt")" = "Paris" ]
+
+# A registered tool asked at another code is refused before anything starts.
+set +e
+mismatch=$(XDG_CONFIG_HOME="$tmp/xdg" "$fixed_bin" run in-process-mismatch \
+  --engine acp --adapter definitely-not-an-adapter +RTS -N8 -RTS 2>&1)
+status=$?
+set -e
+[ "$status" -eq 1 ]
+grep -q 'refused: tool `record` is registered to answer at the text code, and it was asked at the ack code' <<<"$mismatch"
+! grep -q 'transport:' <<<"$mismatch"
+
 mkdir -p "$tmp/fixed-work"
 XDG_CONFIG_HOME="$tmp/xdg" "$fixed_bin" run convergent \
   --scratch "$tmp/fixed-work" \

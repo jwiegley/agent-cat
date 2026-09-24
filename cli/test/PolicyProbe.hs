@@ -520,7 +520,7 @@ collidingRegistry =
       regRows = [(n, row) | n <- ["run", "machine", "plan", "cost", "list", "help", "ordinary"]]
     }
   where
-    row = Row (Fixed hardenProgram) "one line" "a page" []
+    row = Row (Fixed hardenProgram) "one line" "a page" [] []
 
 -- | What a parse came back as, in one word plus the name it settled on.
 --
@@ -952,6 +952,68 @@ readAfterWriteProbe failures = do
     Just (Right (answer, _)) -> [("the read returned the written text", answer == "Paris")]
     Just (Left e) -> [("the run threw: " <> show e, False)]
     Nothing -> [("the run did not finish", False)]
+
+-- | A text tool's answer flows into a later prompt, an unregistered tool falls
+-- through to the world beneath, and a registered act runs once per occurrence
+-- with every later question waiting for it.
+inProcessProbe :: IORef Int -> IO ()
+inProcessProbe failures = do
+  seen <- newTVarIO ([] :: [Text])
+  calls <- newTVarIO ([] :: [Text])
+  let toolShape i = consultShape (Shape (AddrTool i) scopeUnit 0)
+      slowWrite = receiptTool $ \_ words' -> do
+        threadDelay orderingWindowUs
+        atomically (modifyTVar' calls (<> ["write:" <> words']))
+      readBack = textTool $ \_ _ -> do
+        written <- readTVarIO calls
+        pure (T.intercalate "," written)
+      tools =
+        [ ("shout", textTool (\_ words' -> pure (T.toUpper words'))),
+          ("write", slowWrite),
+          ("read", readBack)
+        ]
+      inner = concurrentWorld $ \c q -> do
+        atomically (modifyTVar' seen (<> [addresseeWord (addresseeOf q) <> ": " <> promptOf q]))
+        case c of
+          SText -> pure "paris"
+          _ -> pure (defaultEl c)
+      writeShape = effectShape (Shape (AddrTool "write") scopeUnit 0)
+      plan :: Plan '[] (((), ()), Text)
+      plan =
+        graft
+          (askC1 SText (textQuestion "capital"))
+          ( Cont $ \_ capital ->
+              graft
+                (ask1 SText (toolShape "shout") capital)
+                ( Cont $ \_ shouted ->
+                    pairP
+                      (pairP (ask1 SAck writeShape shouted) (ask1 SAck writeShape shouted))
+                      ( graft
+                          (askC1 SText (consultRequest (Q (AddrTool "read") scopeUnit "back" 0)))
+                          (Cont $ \_ back -> ask1 SText (toolShape "say") (("after:" <>) <$> back))
+                      )
+                )
+          )
+  out <- timeout 10000000 (try @SomeException (runPlanIO (answeringTools (const (pure ())) "." tools inner) plan))
+  prompts <- readTVarIO seen
+  pureProbe failures "a registered tool answers in process, and its answer flows on" $ case out of
+    Just (Right (((_, _), _), _)) ->
+      [ ("the world beneath saw the model and the unregistered tool, and no registered tool", prompts == ["model capital: capital", "tool say: after:write:PARIS,write:PARIS"])
+      ]
+    Just (Left e) -> [("the run threw: " <> show e, False)]
+    Nothing -> [("the run did not finish", False)]
+
+-- | A registered tool asked at a code it does not answer abandons the run and
+-- says why.
+inProcessMismatchProbe :: IORef Int -> IO ()
+inProcessMismatchProbe failures = do
+  let tools = [("record", textTool (\_ words' -> pure words'))]
+      plan :: Plan '[] ()
+      plan = askC1 SAck (effectRequest (Q (AddrTool "record") scopeUnit "hello" 0))
+  out <- try @SomeException (runPlanIO (answeringTools (const (pure ())) "." tools noWorld) plan)
+  pureProbe failures "a registered tool asked at another code abandons the run" $ case out of
+    Left e -> [("the refusal names both codes", "registered to answer at the text code, and it was asked at the ack code" `T.isInfixOf` T.pack (show e))]
+    Right _ -> [("the run completed", False)]
 
 statefulTurnOrderProbe :: IORef Int -> IO ()
 statefulTurnOrderProbe failures = do
@@ -1753,6 +1815,8 @@ main = do
   effectOrderProbe failures
   readsAfterEffectOverlapProbe failures
   readAfterWriteProbe failures
+  inProcessProbe failures
+  inProcessMismatchProbe failures
   statefulTurnOrderProbe failures
   dependencyProbe failures
   memoConcurrencyProbe failures

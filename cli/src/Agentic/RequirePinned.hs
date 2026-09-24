@@ -97,9 +97,10 @@ guardUnpinnedAsk prog = refusal <$> firstAsk askUnpinned prog
 
 -- | Refuse routing-only execution unless every engine-bound question carries a
 -- model pin. Program-authored commands are already answered by the executing
--- layer and therefore need no backend route.
-guardFullPinCoverage :: RawProgram -> Maybe Text
-guardFullPinCoverage prog = refusal <$> firstAsk coverageGap prog
+-- layer, and the tools named in the first argument are answered in process, so
+-- neither needs a backend route.
+guardFullPinCoverage :: [Text] -> RawProgram -> Maybe Text
+guardFullPinCoverage inProcess prog = refusal <$> firstAsk (coverageGap inProcess) prog
   where
     refusal (whereAt, gap) =
       "routing without --engine or --session requires full pin coverage, but "
@@ -114,10 +115,12 @@ askUnpinned (RawAsk override (RawTarget adr _) _ _) = case (override, adr) of
   (Nothing, AddrModel i) -> Just i
   _ -> Nothing
 
-coverageGap :: RawAsk -> Maybe Text
-coverageGap (RawAsk override (RawTarget adr _) _ _) = case (override, adr) of
+coverageGap :: [Text] -> RawAsk -> Maybe Text
+coverageGap inProcess (RawAsk override (RawTarget adr _) _ _) = case (override, adr) of
   (Nothing, AddrModel i) -> Just ("model `" <> i <> "` is asked without `served by`")
-  (_, AddrTool i) -> Just ("tool `" <> i <> "` cannot carry `served by`")
+  (_, AddrTool i)
+    | i `elem` inProcess -> Nothing
+    | otherwise -> Just ("tool `" <> i <> "` cannot carry `served by`")
   (_, AddrPerson i) -> Just ("person `" <> i <> "` cannot carry `served by`")
   (_, AddrToolExec {}) -> Nothing
   _ -> Nothing

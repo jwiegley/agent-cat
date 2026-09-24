@@ -31,12 +31,13 @@ module Agentic.Plan
     askNodes,
     intentCounts,
     toolExecNodes,
+    toolAsks,
     codes,
     schemaRequirements,
   )
 where
 
-import Agentic.DSL (Addressee (AddrToolExec))
+import Agentic.DSL (Addressee (AddrTool, AddrToolExec))
 import Agentic.DSL.Plan
 import Agentic.Schema (Code, SomeCode, SomeSchema (..))
 import Data.Text (Text)
@@ -167,6 +168,21 @@ toolExecNodes = \case
   where
     at AddrToolExec {} = 1
     at _ = 0
+
+-- | The tool identifiers asked without a command, each with the code it is
+-- asked at, across every finite branch. A 'PDyn' continuation is not visible
+-- to a fold of the term, so questions behind one are not listed.
+toolAsks :: Plan g a -> [(Text, SomeCode)]
+toolAsks = \case
+  PRet _ -> []
+  PAskC c request rest -> at c (qAddressee (reqQuestion request)) ++ toolAsks rest
+  PAsk c shape _ rest -> at c (shAddressee (rsQuestion shape)) ++ toolAsks rest
+  PCase tag _ arms -> concatMap (toolAsks . arms) (tagValues tag)
+  PDyn {} -> []
+  where
+    at :: SCode c -> Addressee -> [(Text, SomeCode)]
+    at c (AddrTool i) = [(i, fromSCode c)]
+    at _ _ = []
 
 -- | @codes@ (@Agentic/Core/Cost.lean:329@): the sequence of answer codes the
 -- term will ask for, if that sequence is fixed by the term.

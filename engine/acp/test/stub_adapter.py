@@ -24,6 +24,7 @@ network:
     "Apply:"                             -> DONE, and the patch is applied
     "Draft"                              -> a fixed patch
     "style guide"                        -> a fixed guide
+    "capital of France"                  -> Paris
     anything else                        -> a fixed refusal
 
 Order matters: the review prompts embed the guide and the patch, so the most
@@ -204,6 +205,7 @@ ANSWERS = [
     ("Apply:", "DONE"),
     ("Draft", PATCH),
     ("style guide", GUIDE),
+    ("capital of France", "Paris"),
 ]
 
 # The session's configuration catalogue, in claude's shape: `session/new`

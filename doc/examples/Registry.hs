@@ -22,7 +22,8 @@ registry =
                   [ ("Name one thing worth greeting.", "the sunrise"),
                     ("Write a greeting for this, and nothing else:", "Good morning, sunrise."),
                     ("Say it:", "DONE")
-                  ]
+                  ],
+                rowTools = []
               }
           )
         ]

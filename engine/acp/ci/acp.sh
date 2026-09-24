@@ -576,10 +576,37 @@ else
   bad "public progress probe failed"
 fi
 
+# ---------------------------------------------------------------------------
+# 20. Tools answered in process.
+#
+# `capital` asks the adapter one question and three tools that its row answers
+# with Haskell functions. The adapter answers `Paris`. `save` writes that to
+# `capital.txt`, `shout` returns it in upper case, and `announce` writes the
+# shouted form to `announcement.txt`. The files are the evidence that the
+# functions ran, in the run's scratch directory, and that the shouted text
+# reached the statement after the shout. The adapter is asked once: the
+# stub's own `prompt matched` narration appears for the model and for nothing
+# else.
+# ---------------------------------------------------------------------------
+play capital run capital --engine acp --adapter stub --timeout 60000
+want_code 0
+want_bills 4 4
+want_line "in process: tool save, tool shout, tool announce, in $state"
+want_line "call tool shout in process (for the text question)"
+want_line "except the tools answered in process"
+want_file capital.txt
+want_file announcement.txt
+[ "$(cat "$state/capital.txt")" = "Paris" ] \
+  || bad "capital.txt holds '$(cat "$state/capital.txt")', wanted 'Paris'"
+[ "$(cat "$state/announcement.txt")" = "$(printf 'Announce this:\nPARIS')" ] \
+  || bad "announcement.txt holds '$(cat "$state/announcement.txt")', wanted the shouted announcement"
+[ "$(grep -c 'prompt matched' "$out")" = 1 ] \
+  || bad "the adapter matched $(grep -c 'prompt matched' "$out") prompts, wanted 1"
+note "capital: 1 consultation of the adapter, 3 tools in process, 4/4, exit 0"
 
 scenario=summary
 if [ "$failures" = 0 ]; then
-  echo "ci/acp: 19 scenarios passed, 0 failed"
+  echo "ci/acp: 20 scenarios passed, 0 failed"
 else
   echo "ci/acp: $failures scenario assertion(s) failed" >&2
 fi

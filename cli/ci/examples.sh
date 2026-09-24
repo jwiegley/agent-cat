@@ -5,9 +5,10 @@
 #
 #     ./ci/examples.sh
 #
-# `Example.Harden.examples` is nine programs: the two walked ones the frozen
+# `Example.Harden.examples` is ten programs: the two walked ones the frozen
 # corpus holds, `Example.Structured` as the representation-boundary pair
-# (`structured` and `structured-result`), and "Example.Isaac"'s five, which are
+# (`structured` and `structured-result`), `capital` as the example of tools
+# answered in process, and "Example.Isaac"'s five, which are
 # express and are deliberately **not** frozen (isaac-workflows §6, D10: "keep
 # them out of the frozen corpus, and pin their numbers anyway").
 # That decision leaves the five with numbers published in three places — each
@@ -41,7 +42,7 @@
 # the two frozen corpus entries, so their static folds are already pinned twice
 # over (tier0 replays them, tier1 rebuilds them from the very values this script
 # runs); repeating them here is what makes this gate a statement about *the
-# registry* rather than about the six unfrozen programs alone — another Isaac
+# registry* rather than about the eight unfrozen programs alone — another Isaac
 # program, or a change that moved any existing row, has to come through this table.
 #
 # The registry itself is read from the binary rather than transcribed: an
@@ -125,9 +126,9 @@ cat_run() {
 #   pin <name> <level> <size> <askNodes> <minFold> <maxFold> <paths> \
 #              <billFresh> <billMemo>
 #
-# `codes` is not pinned here: it is `null` on six of the nine (they branch);
-# `hello`, `structured` and `structured-result` are straight lines whose codes
-# are exercised by their scripted runs.
+# `codes` is not pinned here: it is `null` on six of the ten (they branch);
+# `hello`, `structured`, `structured-result` and `capital` are straight lines
+# whose codes are exercised by their scripted runs.
 
 names=()
 declare -A pinLevel pinSize pinAsks pinMin pinMax pinPaths pinFresh pinMemo
@@ -168,6 +169,11 @@ pin structured        batch        2    1    1    1     1     1    1
 # The same question returned from the closed program. A pure result terminal
 # adds no node, path or bill, so every number is deliberately identical.
 pin structured-result batch        2    1    1    1     1     1    1
+
+# The in-process tools example. One model question and three tool questions,
+# which a scripted run answers from its table. Also the haddock on
+# `Capital.capitalProgram`, and engine/acp/ci/acp.sh's `capital` for the bill.
+pin capital           pipeline     5    4    4    4     1     4    4
 
 # The five Isaac programs. Each number below is published twice more: in the
 # program's own haddock in `example/Example/Isaac.hs`, and in
@@ -368,9 +374,9 @@ grep -q '^    answer  *()' "$work/structured-result.run" \
 # if any of them moved, the work stops — and this block is the evidence that the
 # prose is true.
 #
-# The nine pages here are dispatched by `Text` in `Example.Harden.helpFor` and
+# The ten pages here are dispatched by `Text` in `Example.Harden.helpFor` and
 # `Example.Isaac.isaacHelp`, neither of which is exhaustiveness-checked, so a
-# row added and not documented is a RUNTIME error. Running all nine is the only
+# row added and not documented is a RUNTIME error. Running all ten is the only
 # thing that catches it.
 #
 # The binary is resolved once. Everything above goes through `cat_run`, which is

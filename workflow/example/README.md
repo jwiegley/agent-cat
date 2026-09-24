@@ -6,7 +6,8 @@ first-order term as entry `example-000`, and `model/Agentic/Core/DslFlagship.lea
 proves that the checker accepts that term. `Hello` exports `helloProgram`, the
 smallest complete program, which the first chapter of the manual walks through.
 `Structured` exports the structured-answer programs and the host record whose
-schema one `deriveSchema` splice derives.
+schema one `deriveSchema` splice derives. `Capital` exports `capitalProgram`,
+which names three tools that its registry row answers with Haskell functions.
 
 ## Dependencies
 

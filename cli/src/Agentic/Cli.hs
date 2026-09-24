@@ -235,6 +235,12 @@ module Agentic.Cli
     Registry (..),
     Row (..),
 
+    -- * Tools a row answers in process
+    Tool (..),
+    textTool,
+    flagTool,
+    receiptTool,
+
     -- * The runner
     cliMain,
 
@@ -493,8 +499,15 @@ import Agentic.RoutingInspect
 import qualified Data.Set as Set
 import Agentic.Runtime
   ( ShellConfig (shellCwd, shellLog, shellTimeoutMs),
+    Tool (..),
+    answeringTools,
+    codeMismatch,
     defaultShellConfig,
     executingWorld,
+    flagTool,
+    receiptTool,
+    textTool,
+    toolCode,
   )
 import Agentic.DSL (codeName, printedValue, render, renderString)
 import Agentic.RequirePinned (guardFullPinCoverage, guardUnpinnedAsk)
@@ -507,6 +520,7 @@ import Agentic.Plan
     level,
     levelName,
     size,
+    toolAsks,
     toolExecNodes,
   )
 import Agentic.Schema (El, SCode (..), SomeCode (..), fromSCode)
@@ -593,7 +607,9 @@ data Row = Row
     -- it is the one 'Facts' every verb reads
     rowHelp :: !Text,
     -- | the canned replies @--scripted@ answers from, keyed by prefix
-    rowScript :: ![(Text, Text)]
+    rowScript :: ![(Text, Text)],
+    -- | the tools a live run answers in process, by tool identifier
+    rowTools :: ![(Text, Tool)]
   }
 
 -- | What a CLI is a CLI /of/: a name for the binary, a word for what it holds,
@@ -621,6 +637,22 @@ regNames = map fst . regRows
 -- | A row by name.
 regLookup :: Registry -> Text -> Maybe Row
 regLookup reg n = lookup n (regRows reg)
+
+-- | The identifiers of the tools a row answers in process.
+inProcessNames :: Registry -> Text -> [Text]
+inProcessNames reg n = maybe [] (map fst . rowTools) (regLookup reg n)
+
+-- | Refuse a program that asks a registered tool at a code the tool does not
+-- answer, before anything is started. A question behind a 'PDyn' is checked
+-- when it is reached instead.
+toolRefusal :: Row -> ProgramOf r -> Maybe Text
+toolRefusal row prog =
+  listToMaybe
+    [ codeMismatch i (toolCode tool) asked
+      | (i, asked) <- toolAsks (progPlan prog),
+        Just tool <- [lookup i (rowTools row)],
+        toolCode tool /= asked
+    ]
 
 -- ---------------------------------------------------------------------------
 -- What was asked for
@@ -944,20 +976,20 @@ execute reg = \case
   Cost name ins -> withExample reg False False noRefusal name [] ins (\f _ -> costCmd f)
   Run name target pinned ins ->
     withRunExample reg pinned name target ins $ \effective _ program bindings ->
-      withFinalTarget reg effective program (\finalTarget -> runCmd reg name finalTarget program bindings)
+      withFinalTarget reg name effective program (\finalTarget -> runCmd reg name finalTarget program bindings)
   Machine options runId name target pinned ins -> do
     validateMachineEnvironment options
     withMachineControls options runId name target $ \control ->
       withRunExample reg pinned name target ins $ \effective _ program bindings ->
-        withFinalTarget reg effective program (\finalTarget -> runMachineCmd options control reg runId name finalTarget program bindings)
+        withFinalTarget reg name effective program (\finalTarget -> runMachineCmd options control reg runId name finalTarget program bindings)
   LineageCheck options lineage parent edits name target pinned ins ->
     withRunExample reg pinned name target ins $ \effective _ program _ ->
-      withFinalTarget reg effective program (\finalTarget -> void (validateLineage options lineage parent edits name finalTarget program))
+      withFinalTarget reg name effective program (\finalTarget -> void (validateLineage options (inProcessNames reg name) lineage parent edits name finalTarget program))
   MachineLineage options lineage runId parent edits name target pinned ins -> do
     validateMachineEnvironment options
     withMachineControls options runId name target $ \control ->
       withRunExample reg pinned name target ins $ \effective _ program bindings ->
-        withFinalTarget reg effective program (\finalTarget -> runMachineLineageCmd options control reg lineage runId parent edits name finalTarget program bindings)
+        withFinalTarget reg name effective program (\finalTarget -> runMachineLineageCmd options control reg lineage runId parent edits name finalTarget program bindings)
 
 tuiCmd :: Registry -> IO ()
 tuiCmd reg = do
@@ -1039,9 +1071,9 @@ migrateRoutingCmd reg source outputPath = do
   hClose handle
   say ("wrote version-2 routing to " <> T.pack outputPath)
 
-withFinalTarget :: Registry -> Target -> ProgramOf r -> (Target -> IO a) -> IO a
-withFinalTarget reg target program action = do
-  finalized <- finalizeTargetForProgram target program
+withFinalTarget :: Registry -> Text -> Target -> ProgramOf r -> (Target -> IO a) -> IO a
+withFinalTarget reg name target program action = do
+  finalized <- finalizeTargetForProgram (inProcessNames reg name) target program
   either (die reg 1 . ("routing configuration: " <>)) action finalized
 
 data MachineControl = MachineControl ControlRuntime DeferredEventSink EventSink
@@ -1197,7 +1229,7 @@ withRunExample reg pinned name initialTarget inputs k = case regLookup reg name 
           resolved <- resolveInputs name True runFacts' (rowExample row) inputs'
           case resolved of
             Left why -> die reg 1 why
-            Right (SomeProgram prog, bindings) -> case resolveTargetForProgram target prog of
+            Right (SomeProgram prog, bindings) -> case resolveTargetForProgram (map fst (rowTools row)) target prog of
               Left why -> die reg 1 why
               Right effective
                 | targetPolicy effective == targetPolicy target ->
@@ -1212,7 +1244,9 @@ withRunExample reg pinned name initialTarget inputs k = case regLookup reg name 
     finish :: forall r. Row -> Target -> ProgramOf r -> [Given] -> IO ()
     finish row effective prog bindings = case routeRefusal reg effective prog of
       Just why -> die reg 1 why
-      Nothing -> k effective (factsOf name row prog) prog bindings >> exitSuccess
+      Nothing -> case toolRefusal row prog of
+        Just why -> die reg 1 ("refused: " <> why)
+        Nothing -> k effective (factsOf name row prog) prog bindings >> exitSuccess
 
 -- | The refusal a name no row answers to earns, from whichever verb was asking.
 --
@@ -2055,6 +2089,8 @@ runCmdControlled personAnswering runtimeControls persistence observer output reg
     -- gate passed, which is the same class of mistake D5 exists to fix.
     output
       ("  " <> [wft|no command was run; every gate in this program was answered from the table|])
+    unless (null tools) $
+      output ("  no tool was called in process; the table answered tool " <> T.intercalate ", tool " tools)
     world <- localPersonAnswers (scriptedWorld script)
     walkWith authored world
   Routing _ -> refuse "routing target was not resolved against the program"
@@ -2074,7 +2110,7 @@ runCmdControlled personAnswering runtimeControls persistence observer output reg
         _ ->
           case resolveRoutingConfig (loadedRouting (rrRouting parsedRoutes)) (rrCommandRoutes parsedRoutes) authored of
             Left why -> refuse why
-            Right value -> either refuse pure (coveredIfRequired parsedRoutes prog value)
+            Right value -> either refuse pure (coveredIfRequired tools parsedRoutes prog value)
     let rr =
           parsedRoutes
             { rrRoutes = resolvedRoutes resolved,
@@ -2104,6 +2140,7 @@ runCmdControlled personAnswering runtimeControls persistence observer output reg
           pure d
         else pure "."
     sayBackends rr dir backends
+    sayTools dir
     -- Startup is eager, so every backend named by the truthful header exists
     -- before the first question. The explicit default or routing-only canonical
     -- extension comes first, followed by named routes in their printed order.
@@ -2125,7 +2162,9 @@ runCmdControlled personAnswering runtimeControls persistence observer output reg
             Nothing ->
               concurrentWorld $ \_ _ ->
                 ioError (userError ("no answering service was made for backend " <> show b))
-      let baseWorld = executingWorld (shellAt dir) (routedWorld (fmap connected rs))
+      let baseWorld =
+            answeringTools (output . ("  " <>)) dir rowTools'
+              (executingWorld (shellAt dir) (routedWorld (fmap connected rs)))
       world <- localPersonAnswers baseWorld
       walkWith (resolvedChains resolved) world
   where
@@ -2133,6 +2172,17 @@ runCmdControlled personAnswering runtimeControls persistence observer output reg
     -- again rather than being handed a program: a script that lived anywhere
     -- but beside its program is a script that drifts from it.
     script = maybe [] rowScript (regLookup reg name)
+    rowTools' = maybe [] rowTools (regLookup reg name)
+    tools = map fst rowTools'
+
+    -- The backends' sentences say who answers every tool, so a run that
+    -- answers some tools in process says which, and where they read and write.
+    exceptTools = if null tools then "" else ", except the tools answered in process"
+
+    sayTools :: FilePath -> IO ()
+    sayTools dir =
+      unless (null tools) $
+        output ("  in process: tool " <> T.intercalate ", tool " tools <> ", in " <> T.pack dir)
 
     shellAt :: FilePath -> ShellConfig
     shellAt dir =
@@ -2265,6 +2315,7 @@ runCmdControlled personAnswering runtimeControls persistence observer output reg
             <> "ms to a turn, "
             <> acpSessionPolicy cfg
             <> "; every addressee — model, tool and person — is this one adapter"
+            <> exceptTools
         output $ "  a `running` tool's command runs in " <> T.pack dir
       BackendDeck session -> do
         let cfg = deckConfigFor rr session
@@ -2277,6 +2328,7 @@ runCmdControlled personAnswering runtimeControls persistence observer output reg
             <> "ms to a turn, "
             <> deckSessionPolicy
             <> "; every addressee — model, tool and person — is this one session"
+            <> exceptTools
         output
           ("  " <> [wft|a `running` tool's command runs in this process's directory, which the deck session — started by somebody else — need not share|])
     sayBackends rr dir routes' = sayManyBackends rr dir routes'
@@ -2294,7 +2346,7 @@ runCmdControlled personAnswering runtimeControls persistence observer output reg
         Nothing -> output "  full pin coverage — no default backend"
         Just defaultRoute -> do
           output $ pad routeDefaultLabel <> backendWords rr defaultRoute
-          output $ pad "" <> "— every unpinned ask, every tool and every person"
+          output $ pad "" <> "— every unpinned ask, every tool and every person" <> exceptTools
       mapM_ route (routeNamed realizedRoutes)
       unless (isNothing (routeDefault realizedRoutes) || null unclaimed) $
         output $ pad (T.intercalate ", " unclaimed) <> "the default (no --route names them)"
@@ -2451,12 +2503,12 @@ runMachineLineageCmd :: MachineOptions -> Maybe MachineControl -> Registry -> Li
 runMachineLineageCmd options control reg lineage runId parentDirectory edits name target prog gs = do
   childStore <- lookupEnv "AGENT_CAT_RUN_STORE"
   when (childStore == Nothing) (ioError (userError "lineage operations require AGENT_CAT_RUN_STORE for the new child run"))
-  (parentRunId, inheritedAnswers) <- validateLineage options lineage parentDirectory edits name target prog
+  (parentRunId, inheritedAnswers) <- validateLineage options (inProcessNames reg name) lineage parentDirectory edits name target prog
   runMachineWith options control lineage (Just parentRunId) inheritedAnswers reg runId name target prog gs
 
-validateLineage :: MachineOptions -> LineageOperation -> FilePath -> [ForkEdit] -> Text -> Target -> ProgramOf r -> IO (RunId, [AnswerRecord])
-validateLineage options lineage parentDirectory edits name target prog = do
-  effectiveTarget <- either (ioError . userError . T.unpack) pure (resolveTargetForProgram target prog)
+validateLineage :: MachineOptions -> [Text] -> LineageOperation -> FilePath -> [ForkEdit] -> Text -> Target -> ProgramOf r -> IO (RunId, [AnswerRecord])
+validateLineage options tools lineage parentDirectory edits name target prog = do
+  effectiveTarget <- either (ioError . userError . T.unpack) pure (resolveTargetForProgram tools target prog)
   parentManifest <- readManifest parentDirectory
   let program = printedValue prog
       exactLaunch =
@@ -2583,7 +2635,7 @@ validateInheritedAnswers answers = do
 
 runMachineWith :: MachineOptions -> Maybe MachineControl -> LineageOperation -> Maybe RunId -> [AnswerRecord] -> Registry -> RunId -> Text -> Target -> ProgramOf r -> [Given] -> IO ()
 runMachineWith options control lineage parent inherited reg runId name target prog gs = do
-  effectiveTarget <- either (ioError . userError . T.unpack) pure (resolveTargetForProgram target prog)
+  effectiveTarget <- either (ioError . userError . T.unpack) pure (resolveTargetForProgram (inProcessNames reg name) target prog)
   store <- lookupEnv "AGENT_CAT_RUN_STORE"
   owner <- fmap T.pack <$> lookupEnv "AGENT_CAT_RUN_OWNER"
   let version = machineProtocolVersion options
@@ -2703,16 +2755,16 @@ persistenceFor runId store program inheritedAnswers = do
           writeCheckpoint store (Checkpoint program (Just occurrence) answers effects)
       }
 
-resolveTargetForProgram :: Target -> ProgramOf r -> Either Text Target
-resolveTargetForProgram Scripted _ = Right Scripted
-resolveTargetForProgram (Routing routing) prog = resolveRoutingOnly routing prog
-resolveTargetForProgram target@(Routed rr) _ | rrV2Frozen rr = Right target
-resolveTargetForProgram (Routed rr) prog = do
+resolveTargetForProgram :: [Text] -> Target -> ProgramOf r -> Either Text Target
+resolveTargetForProgram _ Scripted _ = Right Scripted
+resolveTargetForProgram tools (Routing routing) prog = resolveRoutingOnly tools routing prog
+resolveTargetForProgram _ target@(Routed rr) _ | rrV2Frozen rr = Right target
+resolveTargetForProgram tools (Routed rr) prog = do
   authored <- servedChains (progRawOut prog)
   resolved0 <- case rrSelectedRoutingV2 rr of
     Nothing -> resolveRoutingConfig (loadedRouting (rrRouting rr)) (rrCommandRoutes rr) authored
     Just selected -> expandRoutingConfigV2 selected (rrRealizeOverrides rr) (rrCommandRoutes rr) authored
-  resolved <- coveredIfRequired rr prog resolved0
+  resolved <- coveredIfRequired tools rr prog resolved0
   pure
     ( Routed
         rr
@@ -2721,15 +2773,15 @@ resolveTargetForProgram (Routed rr) prog = do
           }
     )
 
-resolveRoutingOnly :: RoutingTarget -> ProgramOf r -> Either Text Target
-resolveRoutingOnly (RoutingUnloaded _) _ = Left "routing configuration was not loaded"
-resolveRoutingOnly (RoutingLoaded options loaded selected) prog = do
+resolveRoutingOnly :: [Text] -> RoutingTarget -> ProgramOf r -> Either Text Target
+resolveRoutingOnly _ (RoutingUnloaded _) _ = Left "routing configuration was not loaded"
+resolveRoutingOnly tools (RoutingLoaded options loaded selected) prog = do
   overrides <- parseRealizations (roRealizations options)
   authored <- servedChains (progRawOut prog)
   resolved0 <- case selected of
     Nothing -> resolveRoutingConfig (loadedRouting loaded) (routesCovered []) authored
     Just selected' -> expandRoutingConfigV2 selected' overrides (routesCovered []) authored
-  resolved <- requireFullCoverage prog resolved0
+  resolved <- requireFullCoverage tools prog resolved0
   validateRoutingOnlyFlags options (resolvedRoutes resolved)
   let table = resolvedRoutes resolved
   pure . Routed $
@@ -2758,9 +2810,9 @@ resolveRoutingOnly (RoutingLoaded options loaded selected) prog = do
 -- | Prove that named routing is total over every question which can reach an
 -- engine. For every reachable question @q@, the proved equation is
 -- @backendFor table q = Just routeByModel[name(q)]@.
-requireFullCoverage :: ProgramOf r -> ResolvedRouting -> Either Text ResolvedRouting
-requireFullCoverage prog resolved = do
-  maybe (Right ()) Left (guardFullPinCoverage (progRawOut prog))
+requireFullCoverage :: [Text] -> ProgramOf r -> ResolvedRouting -> Either Text ResolvedRouting
+requireFullCoverage tools prog resolved = do
+  maybe (Right ()) Left (guardFullPinCoverage tools (progRawOut prog))
   let table = resolvedRoutes resolved
       named = routeNamed table
       names = map fst named
@@ -2771,9 +2823,9 @@ requireFullCoverage prog resolved = do
     [] -> Left "routing configuration resolves no backend for this program"
     _ -> Right resolved
 
-coveredIfRequired :: RunRoutes -> ProgramOf r -> ResolvedRouting -> Either Text ResolvedRouting
-coveredIfRequired rr prog
-  | isNothing (routeDefault (rrCommandRoutes rr)) = requireFullCoverage prog
+coveredIfRequired :: [Text] -> RunRoutes -> ProgramOf r -> ResolvedRouting -> Either Text ResolvedRouting
+coveredIfRequired tools rr prog
+  | isNothing (routeDefault (rrCommandRoutes rr)) = requireFullCoverage tools prog
   | otherwise = Right
 
 validateRoutingOnlyFlags :: RunOpts -> Routes Backend -> Either Text ()
@@ -2790,14 +2842,14 @@ validateRoutingOnlyFlags options table = mapM_ forbidUnused [SchemeAcp, SchemeDe
 
 -- | Resolve secrets and inventories only after the run-fact/routing fixed point.
 -- The resulting target is immutable and safe to persist before any child starts.
-finalizeTargetForProgram :: Target -> ProgramOf r -> IO (Either Text Target)
-finalizeTargetForProgram Scripted _ = pure (Right Scripted)
-finalizeTargetForProgram (Routing _) _ = pure (Left "routing target was not resolved against the program")
-finalizeTargetForProgram target@(Routed rr) _ | rrV2Frozen rr = pure (Right target)
-finalizeTargetForProgram (Routed rr) prog = case rrSelectedRoutingV2 rr of
+finalizeTargetForProgram :: [Text] -> Target -> ProgramOf r -> IO (Either Text Target)
+finalizeTargetForProgram _ Scripted _ = pure (Right Scripted)
+finalizeTargetForProgram _ (Routing _) _ = pure (Left "routing target was not resolved against the program")
+finalizeTargetForProgram _ target@(Routed rr) _ | rrV2Frozen rr = pure (Right target)
+finalizeTargetForProgram tools (Routed rr) prog = case rrSelectedRoutingV2 rr of
   Nothing
     | isJust (rrExpectedRoutingFingerprint rr) -> pure (Left "--expect-routing-fingerprint requires version-2 routing")
-    | otherwise -> pure (resolveTargetForProgram (Routed rr) prog)
+    | otherwise -> pure (resolveTargetForProgram tools (Routed rr) prog)
   Just selected
     | any credentialArgument (rrAdapterArgs rr) ->
         pure (Left "credential-bearing adapter argv is forbidden for version-2 routing; use an environment secret reference")
@@ -2827,7 +2879,7 @@ finalizeTargetForProgram (Routed rr) prog = case rrSelectedRoutingV2 rr of
             pure $ do
               inventories <- discovered
               frozen <- freezeRoutingConfigV2 selected inventories expanded
-              coveredFrozen <- coveredIfRequired rr prog frozen
+              coveredFrozen <- coveredIfRequired tools rr prog frozen
               fingerprintFrozen <- freezeRoutingConfigV2 selected inventories fingerprintExpanded
               let childEnvironments =
                     Map.fromList

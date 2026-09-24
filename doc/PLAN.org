@@ -3913,15 +3913,17 @@ work is finished.
 ]
 #+end_src
 
-* TODO [#C] Answer named tools with registered Haskell functions
+* DONE [#C] Answer named tools with registered Haskell functions
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-in-process-tools-ttuw
 :LABELS:   []
 :ISSUE_TYPE: feature
 :CREATED:  [2026-09-24 Thu 11:02]
-:MODIFIED: [2026-09-24 Thu 11:02]
+:MODIFIED: [2026-09-24 Thu 11:36]
 :CREATED_BY: johnw
+:FINISHED: [2026-09-24 Thu 11:36]
+:CLOSE_REASON: Row gains rowTools; Agentic.InProcess.answeringTools answers registered tools with Haskell functions in the run directory; routing coverage exempts them; a code mismatch is refused before the run. Worked example capital; policy, routing-config, ACP, examples, deck, tier0, and both doc gates pass.
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0

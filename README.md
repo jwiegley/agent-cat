@@ -318,8 +318,8 @@ persist an immutable manifest, append-only events, reusable typed answers, an
 effect journal, and checkpoints; lineage verbs create immutable child runs.
 `list --json` preserves descriptor version 2. `--descriptor-version 3` selects
 the routing and protocol-negotiation capabilities of the current frontend.
-The registry currently holds nine programs: `harden`, `hello`,
-`structured`, `structured-result`, `plan-feature`, `review-lite`,
+The registry currently holds ten programs: `harden`, `hello`,
+`structured`, `structured-result`, `capital`, `plan-feature`, `review-lite`,
 `ship-feature-lite`, `grind-tests`, and `stack-prs`.
 
 ## The terminal interface
