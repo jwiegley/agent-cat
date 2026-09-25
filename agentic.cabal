@@ -508,6 +508,8 @@ executable manager-store-check
   other-modules:
     Agentic.Manager.Test.StoreAdmissionCheck
     Agentic.Manager.Configuration
+    Agentic.Manager.Protocol.Draft
+    Agentic.Manager.Protocol.Command
     Agentic.Manager.Protocol.Json
     Agentic.Manager.Profile
     Agentic.Manager.Root
@@ -532,6 +534,7 @@ executable manager-command-check
     Agentic.Manager.Commands
     Agentic.Manager.Protocol.Artifact
     Agentic.Manager.Authorization
+    Agentic.Manager.Protocol.Draft
     Agentic.Manager.Protocol.Command
     Agentic.Manager.Configuration
     Agentic.Manager.Protocol.Json

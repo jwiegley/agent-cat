@@ -536,6 +536,7 @@ collidingRegistry =
 parsedAs :: [Text] -> String
 parsedAs args = case parseCommand collidingRegistry args of
   Right Tui -> "tui"
+  Right (TuiService profile) -> "tui-service " <> profile
   Right FrontendCapabilities -> "frontend-capabilities"
   Right FrontendIo -> "frontend-io"
   Right (FrontendExport _) -> "frontend-export"
@@ -2685,6 +2686,8 @@ main = do
       ("cost NAME is the verb", parsedAs ["cost", "ordinary"] == "cost ordinary"),
       ("`list` is the verb", parsedAs ["list"] == "list"),
       ("leading --tui cannot collide with a workflow name", parsedAs ["--tui"] == "tui"),
+      ("--tui --service takes an absolute client-profile path", parsedAs ["--tui", "--service", "/tmp/client-profile.json"] == "tui-service /tmp/client-profile.json"),
+      ("--tui --service refuses a relative client-profile path", parsedAs ["--tui", "--service", "client-profile.json"] == "no-verb"),
       ("frontend is the prepared-session verb", parsedAs ["frontend"] == "frontend"),
       ("frontend capabilities are a distinct discovery command", parsedAs ["frontend", "--capabilities"] == "frontend-capabilities"),
       ("frontend-io is the read-only query verb", parsedAs ["frontend-io"] == "frontend-io"),
