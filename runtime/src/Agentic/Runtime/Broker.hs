@@ -88,6 +88,8 @@ inProcessBroker =
 -- | Existing durable data operations, loaned by the original run-store owner.
 -- Workflow interpretation and the decision to invoke each operation remain in
 -- runtime. A broker may replace delivery, never infer permission to replay it.
+-- Reusable answers are keyed by the act epoch and the bare question, so a
+-- broker that wraps the lookup or the store delivers the epoch unchanged.
 data PersistenceHooks = PersistenceHooks
   { -- | a persisted reusable answer, by epoch and bare question
     persistenceLookupAnswer :: Int -> Value -> IO (Maybe (Value, Text)),

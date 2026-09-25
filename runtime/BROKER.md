@@ -35,6 +35,11 @@ The broker delivers their data without assuming any of those authorities.
 | `brokerLog` | Deliver diagnostic or narration text to its supplied receiver. |
 | `brokerPersistence` | Supply the existing run-store operations, including final result publication, under their original ownership and failure contracts. |
 
+Tools that a registry row answers in process run inside the answering receiver
+that runtime supplies to `brokerRequest`, in the same place as shell tools.
+`brokerRequest` therefore delivers their questions, and their call log reaches
+its receiver through `brokerLog`. They start no engine conversation.
+
 Receivers may discard data according to their existing policy. A log receiver
 that suppresses machine-mode narration does not authorize a broker to publish
 that narration elsewhere. Public progress validation and redaction remain in
@@ -50,11 +55,21 @@ conversations and steerers are local attachments and are not wire values.
 
 Runtime reserves the original stateful and effect lanes in authored order.
 Delivery preserves that order and the causal order within each conversation,
-without inventing a total order between independent requests. The existing event
-writer assigns sequence numbers and writes durable journal data before mirrors.
+without inventing a total order between independent requests. Every effect
+waits for the completion of each question reserved since the previous effect,
+and every other question waits for the tail of the effect lane. Runtime applies
+these waits before it offers a request to the broker. The existing event writer
+assigns sequence numbers and writes durable journal data before mirrors.
 Deferred activation publishes the start before forwarding queued control events.
 A broker must not reorder those publications or acknowledge a mirror as though
 it were the durable writer.
+
+Reusable answers are scoped to one act. The epoch of a question is the number
+of effects that runtime reserved before it in plan order, so each effect starts
+a new epoch for the questions after it. Runtime looks up and stores a reusable
+answer by its epoch and bare question, and no reusable answer crosses an effect.
+A broker that wraps `persistenceLookupAnswer` or `persistenceStoreAnswer` must
+deliver the epoch unchanged and must not supply an answer from another epoch.
 
 The default broker adds no queue or execution worker. Existing frame, payload,
 reader and Store-admission bounds continue to apply. An implementation that adds
