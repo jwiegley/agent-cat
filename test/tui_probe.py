@@ -1691,7 +1691,7 @@ def test_confirmed_machine_launch(runner: Path, root: Path) -> None:
         launching = session.wait_for(b"validated run.started", after=confirmation)
         live = session.wait_for("Requests •".encode(), after=launching)
         session.wait_for(b"hello |", after=launching)
-        session.wait_for(b"target tool cat", after=launching)
+        session.wait_for(b"target model namer", after=launching)
         session.wait_for(b"elapsed", after=launching)
         assert live > launching
         terminal = session.wait_for(b"Succeeded", after=live)
@@ -1795,14 +1795,14 @@ def test_local_person_answer_and_cancel(runner: Path, root: Path) -> None:
         quit_completed_run(session, terminal)
         session.assert_restored()
     record = runs(answer_state)[0]
-    assert mode(record / "runtime" / "person" / "questions" / "5.json") == 0o600
+    assert mode(record / "runtime" / "person" / "questions" / "4.json") == 0o600
     events = [json.loads(line)["event"] for line in (record / "runtime" / "events.ndjson").read_text().splitlines()]
     acknowledgements = [event for event in events if event["type"] == "control.ack" and event.get("command") == "answerPerson"]
     assert [event["state"] for event in acknowledgements] == ["accepted", "delivered"]
     pending_index = next(index for index, event in enumerate(events) if event["type"] == "occurrence.person-answer-pending")
     accepted_index = events.index(acknowledgements[0])
     delivered_index = events.index(acknowledgements[1])
-    completed_index = next(index for index, event in enumerate(events) if event["type"] == "occurrence.completed" and event["occurrenceId"] == "5")
+    completed_index = next(index for index, event in enumerate(events) if event["type"] == "occurrence.completed" and event["occurrenceId"] == "4")
     assert pending_index < accepted_index < delivered_index < completed_index
     assert events[-1]["type"] == "run.completed"
 

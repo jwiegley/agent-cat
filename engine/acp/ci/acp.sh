@@ -612,7 +612,9 @@ want_file announcement.txt
   || bad "the adapter matched $(grep -c 'prompt matched' "$out") prompts, wanted 1"
 note "capital: 1 consultation of the adapter, 3 tools in process, 4/4, exit 0"
 
-# Startup failures reach machine clients through the standard Exception interface.
+# ---------------------------------------------------------------------------
+# 21. Startup failures reach machine clients through the standard Exception interface.
+# ---------------------------------------------------------------------------
 scenario=exception-display
 cat > "$work/display-acp-error.hs" <<'EOF'
 {-# LANGUAGE OverloadedStrings #-}
@@ -642,7 +644,7 @@ fi
 
 scenario=summary
 if [ "$failures" = 0 ]; then
-  echo "ci/acp: 20 scenarios passed, 0 failed"
+  echo "ci/acp: 21 scenarios passed, 0 failed"
 else
   echo "ci/acp: $failures scenario assertion(s) failed" >&2
 fi
