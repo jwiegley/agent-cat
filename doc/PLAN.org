@@ -2706,6 +2706,41 @@ Owner directive 2026-08-12: use the standard libraries as much as possible; do n
 ]
 #+end_src
 
+* DONE [#B] Order every question after the effects that precede it
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-effect-ordering-tr4t
+:LABELS:   []
+:ISSUE_TYPE: bug
+:CREATED:  [2026-09-24 Thu 11:02]
+:MODIFIED: [2026-09-24 Thu 11:13]
+:CREATED_BY: johnw
+:FINISHED: [2026-09-24 Thu 11:13]
+:CLOSE_REASON: Every non-effect question waits behind the effect lane's tail (runtime/src/Agentic/Exec.hs watchLane). Pinned by three policy probes; all deterministic and documentation gates pass.
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+A question that a Plan asks after an effect can be dispatched before that
+effect completes. `runPlanIO` (runtime/src/Agentic/Exec.hs) starts each
+occurrence as soon as the answers its prompt reads are ready. The write-effect
+lane orders effects only among themselves, so a consult or observe that reads
+nothing from an earlier act does not wait for it.
+
+Reproduction: an act `tool "save" running ("sh", ["-c", "sleep 2; cat > capital.txt"])`
+followed by `ask (tool "readback" running ("cat", ["capital.txt"]))`. The read
+runs first and the run abandons with `cat: capital.txt: No such file or
+directory`.
+
+Required behaviour (owner decision, 2026-09-24): every occurrence that follows
+an effect in plan order starts only after that effect has completed. Questions
+between two effects remain concurrent with one another.
+
+Done when the scheduler enforces the rule, a policy probe pins it with a slow
+effect followed by a read, the manual states the rule, and the runtime gates
+pass.
+
 * DONE [#D] Weakening fold: Term f -> Term g for f <= g
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -2930,6 +2965,23 @@ Operator-authorized scope amendment 2026-09-12T06:03:20+00:00: user explicitly i
   }
 ]
 #+end_src
+
+* DONE [#C] ext-pi cannot load its remote runtime from a Pi workspace checkout
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-eszt
+:LABELS:   []
+:ISSUE_TYPE: bug
+:CREATED:  [2026-09-24 Thu 16:49]
+:MODIFIED: [2026-09-24 Thu 16:49]
+:CREATED_BY: johnw
+:FINISHED: [2026-09-24 Thu 16:49]
+:CLOSE_REASON: findPackage now walks the enclosing node_modules directories from the resolved pi-coding-agent, as Node resolution does. Against the Pi fork, npm run check passes and npm test passes all 10 files (89 tests). A simulated registry layout with pi-client hoisted and chord nested also loads. npm run test:integration passes its 4 vitest files (8 tests), and pi-remote-current.mjs passes with a short TMPDIR (see acat-n98b).
+:SOURCE_REPO: .
+:ORIGINAL_SIZE: 0
+:END:
+
+ext-pi/src/pi-remote-runtime.mjs found pi-client and chord only as siblings of the resolved pi-coding-agent directory or inside that package's own node_modules. Node resolves a linked package to its real path, and a Pi workspace keeps its packages in the checkout's root node_modules, so linking ext-pi to the Pi fork at ~/src/fork/pi made test/extension.test.ts fail with "Pi runtime package pi-client is unavailable". The lookup should walk the enclosing node_modules directories as Node does, which covers both the registry layout and a workspace checkout.
 
 * DONE [#D] Matrix star at Prob: attained suprema may make aggregate-of-powers go through
 :PROPERTIES:
@@ -4269,6 +4321,37 @@ Owner request: the artifact §VII example as REAL compiling Lean — Op signatur
 
 Add Example.Structured under haskell/example/Example, register it with agentic-run, and derive its schema, witness, and SchemaEl conversion mechanically from the Haskell record with Template Haskell.
 
+* DONE [#C] Give the harden style-guide question an honest addressee
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-harden-cat-addressee-3yz2
+:LABELS:   []
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-24 Thu 11:02]
+:MODIFIED: [2026-09-24 Thu 14:06]
+:CREATED_BY: johnw
+:FINISHED: [2026-09-24 Thu 14:06]
+:CLOSE_REASON: The style guide is Harden.guide, a define quoted by two reviewers and every revision. example-000 rewritten (size 35, askNodes 18, costSummary {4,14,9}, bills 6/6); HardenPatch and DslFlagship re-proved at 5/6/12/14 with footprints unchanged; guide_once removed because it has no subject. All gates pass.
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+The flagship asks `tool "cat"` for the house style guide. That addressee has no
+`running` argv, so no command runs: a live run sends the question to the
+default backend, and a model writes a style guide. The name survives from an
+earlier term whose prompt was "STYLE.md" (model/Agentic/Core/Denote.lean), and
+it now claims a meaning that it does not have.
+
+Two honest forms exist. If the guide is fixed text, it is a define. If it is
+read from the repository, it is `tool "style" running ("cat", ["STYLE.md"])`,
+an observation. Either form changes corpus entry example-000, the Lean
+flagship (DslFlagship.lean, HardenPatch.lean), and the routing scenarios that
+use the tool question as an ordering witness. It is therefore a specification
+change and needs owner review before it is made.
+
+The same name appears in Hello.hs, Isaac.hs, and several probes.
+
 * DONE [#B] The Haskell program: typed workflow library + evaluator/runner, Lean retained as the proven specification
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -4595,6 +4678,53 @@ Acceptance: the entry describes the visible key outcome. As the refocus note req
     "depends_on_id": "acat-wm-034-3vqz",
     "type": "discovered-from",
     "created_at": "2026-09-24T16:19:45.338975Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
+* DONE [#C] Answer named tools with registered Haskell functions
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-in-process-tools-ttuw
+:LABELS:   []
+:ISSUE_TYPE: feature
+:CREATED:  [2026-09-24 Thu 11:02]
+:MODIFIED: [2026-09-24 Thu 11:36]
+:CREATED_BY: johnw
+:FINISHED: [2026-09-24 Thu 11:36]
+:CLOSE_REASON: Row gains rowTools; Agentic.InProcess.answeringTools answers registered tools with Haskell functions in the run directory; routing coverage exempts them; a code mismatch is refused before the run. Worked example capital; policy, routing-config, ACP, examples, deck, tier0, and both doc gates pass.
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Allow a registered Haskell function to answer a question put to a named tool,
+in the way that `executingWorld` answers a `running` tool by running a command.
+
+The workflow term does not change. A workflow writes `ask (tool "shout")
+[wf|{capital}|]`, and the runner answers that question from a table that maps
+tool names to Haskell functions. A function receives the rendered prompt and
+returns the answer at the question's code. The table is supplied by the
+composition root, beside the program's registry entry, so that workflow sources
+stay symbolic.
+
+Done when the runtime has the layer, the CLI composes it for live runs, a probe
+shows a function's answer flowing into a later prompt and an act-position
+function ordered with other effects, the manual documents it, and the gates
+pass.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-in-process-tools-ttuw",
+    "depends_on_id": "acat-effect-ordering-tr4t",
+    "type": "blocks",
+    "created_at": "2026-09-24T18:02:09.810939Z",
     "created_by": "johnw",
     "metadata": "{}",
     "thread_id": ""
@@ -5674,6 +5804,53 @@ Independent native UI review found that Pi 0.85.1 showExtensionCustom closes ove
 ]
 #+end_src
 
+* DONE [#B] A repeated question after an effect is answered from before it
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-memo-across-effect-bgyt
+:LABELS:   []
+:ISSUE_TYPE: bug
+:CREATED:  [2026-09-24 Thu 11:13]
+:MODIFIED: [2026-09-24 Thu 13:24]
+:CREATED_BY: johnw
+:FINISHED: [2026-09-24 Thu 13:24]
+:CLOSE_REASON: An effect clears reuse: the runtime keys reusable answers and persisted answers by (epoch, bare question), and Lean's execAnnotated clears its table at an effect with billMemo counting per stretch between effects. Corpus byte-identical (193 re-observed); bisim 500/500; all deterministic and documentation gates pass.
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+A consultation or observation is reused by bare question. When the same
+question is asked before and after an effect, the second occurrence now waits
+for the effect, and is then answered from the memo table with the reading taken
+before the effect.
+
+Example: `a <- ask (tool "r" running ("cat", ["f"]))`, then an act that
+rewrites `f`, then the same `ask` again. The second answer equals the first,
+although the file changed.
+
+The memo policy is documented and `billMemo` prices it, so a change here is a
+change to what the memo bill means. Options: key reusable answers by the number
+of effects that precede them in plan order, or keep the policy and refuse or
+warn when a reusable question repeats across an effect. Needs an owner
+decision.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-memo-across-effect-bgyt",
+    "depends_on_id": "acat-effect-ordering-tr4t",
+    "type": "discovered-from",
+    "created_at": "2026-09-24T18:13:25.411388Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
 * TODO [#D] Require the next notice number in the tui-approval boundary
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -5756,6 +5933,39 @@ From acat-zms: star_star, sliding a(ba)* = (ab)*a, denesting, (a+b)* are now pro
     "author": "johnw",
     "text": "Closed with the stratum it concerned: the pre-re-derivation Term algebra was excised at 4aed549 under acat-q1i (owner-approved hybrid, 2026-08-20). This ticket's subject, its state at closure, and why it retires are recorded — with the machine-checked results it relates to transcribed exactly — in doc/research/term-algebra-results.md (the ticket graveyard section names this issue individually). The mathematics is preserved as a document and in git history at b98e25f; the six theory threads are recorded there as future directions should the program ever be revived.",
     "created_at": "2026-08-20T18:42:52Z"
+  }
+]
+#+end_src
+
+* DONE [#D] The Pi remote-session integration script fails on macOS with the default TMPDIR
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-n98b
+:LABELS:   []
+:ISSUE_TYPE: bug
+:CREATED:  [2026-09-24 Thu 16:49]
+:MODIFIED: [2026-09-24 Thu 16:58]
+:CREATED_BY: johnw
+:FINISHED: [2026-09-24 Thu 16:58]
+:CLOSE_REASON: pi-remote-current.mjs now creates its socket directory under /tmp, which keeps the socket path at 74 bytes. npm run check passes, and npm run test:integration passes with the default macOS TMPDIR: 4 vitest files (8 tests) and the remote-session script.
+:SOURCE_REPO: .
+:ORIGINAL_SIZE: 0
+:END:
+
+ext-pi/test/pi-remote-current.mjs puts its fixture server socket under mkdtemp(tmpdir()). On macOS the default TMPDIR under /var/folders makes the path 118 bytes, which exceeds the 104-byte limit for a Unix socket path. The server starts and the socket file exists, but the client's connect fails with ENOENT, and npm run test:integration exits 1. With TMPDIR=/tmp/claude-501 the script passes. Either the script should place the socket under a short directory, or the Pi client should connect to long paths as the listener binds them.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-n98b",
+    "depends_on_id": "acat-eszt",
+    "type": "discovered-from",
+    "created_at": "2026-09-24T23:49:23.463535Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
   }
 ]
 #+end_src
@@ -6802,6 +7012,54 @@ Prior session context: three round-17 lexer edits were made and reverted (record
     "depends_on_id": "acat-k28",
     "type": "blocks",
     "created_at": "2026-08-16T05:20:19.938320Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
+* DONE [#D] Give the remaining tool "cat" questions honest addressees
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-remaining-cat-addressees-dhfm
+:LABELS:   []
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-24 Thu 13:52]
+:MODIFIED: [2026-09-24 Thu 14:54]
+:CREATED_BY: johnw
+:FINISHED: [2026-09-24 Thu 14:54]
+:CLOSE_REASON: Hello's subject is asked of model namer (example-001 rewritten; bills 3/3 unchanged); plan-feature and ship-feature-lite take the change request as an input (pins 13/12/12 and 148/77/3-23, bills 12 and 11); grind-tests' facts are asked of model facts. All gates pass.
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+The flagship's style guide is now a define (acat-harden-cat-addressee-3yz2),
+but other programs still ask `tool "cat"` with no `running` argv, so a live run
+sends each of those questions to a model backend under a name that claims a
+command:
+
+- `workflow/example/Hello.hs`: "Name one thing worth greeting." (corpus
+  entry example-001, frozen).
+- `workflow/extra/Isaac.hs`: three questions (`readRequest` twice and
+  `grindFactsBrief`), which ask an agent to read files and report them.
+
+Each needs its own decision. A fixed value becomes a define, a file read
+becomes a `running` command, and a genuine model question becomes a `model`
+addressee. Hello's change is a specification change to example-001. The
+Isaac questions are live agent work, and `ci/acp.sh` scenario 14 relies on
+grind-tests opening with an unpinned question.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-remaining-cat-addressees-dhfm",
+    "depends_on_id": "acat-harden-cat-addressee-3yz2",
+    "type": "discovered-from",
+    "created_at": "2026-09-24T20:52:24.021993Z",
     "created_by": "johnw",
     "metadata": "{}",
     "thread_id": ""
@@ -15195,6 +15453,52 @@ is ready, not that an operator has deployed it.
     "depends_on_id": "acat-wm-043-zm3d",
     "type": "blocks",
     "created_at": "2026-09-10T05:34:27.531734Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
+* DONE [#C] An effect can run before an earlier read of what it changes
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-write-after-read-1aax
+:LABELS:   []
+:ISSUE_TYPE: bug
+:CREATED:  [2026-09-24 Thu 11:13]
+:MODIFIED: [2026-09-24 Thu 13:06]
+:CREATED_BY: johnw
+:FINISHED: [2026-09-24 Thu 13:06]
+:CLOSE_REASON: An effect now waits for every question reserved since the previous effect (runtime/src/Agentic/Exec.hs writeBehind), so each act is ordered against everything before and after it. Pinned by the write-after-reads probe; all deterministic and documentation gates pass.
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+A question that precedes an effect in plan order does not hold the effect back
+unless the effect's prompt reads its answer. An effect can therefore complete
+before an earlier read of the state it changes starts, and the read observes
+the later state.
+
+Example: `before <- ask (tool "snap" running ("cat", ["f"]))`, then an act that
+rewrites `f` and does not mention `{before}`. The snapshot can be taken after
+the rewrite.
+
+The rule that closed acat-effect-ordering-tr4t covers reads after writes only.
+Making an effect wait for every earlier occurrence as well would give the whole
+run the order of the Plan around each effect. Needs an owner decision, because
+it delays effects that currently start early.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-write-after-read-1aax",
+    "depends_on_id": "acat-effect-ordering-tr4t",
+    "type": "discovered-from",
+    "created_at": "2026-09-24T18:13:25.726979Z",
     "created_by": "johnw",
     "metadata": "{}",
     "thread_id": ""
