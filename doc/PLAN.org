@@ -1516,6 +1516,37 @@ join exists; 'lowest fragment that expresses the job' as an infimum wants meet +
 ]
 #+end_src
 
+* TODO [#B] Add the ManagerBroker worker-session seam
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-7z2x
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-25 Fri 22:32]
+:MODIFIED: [2026-09-25 Fri 22:32]
+:CREATED_BY: johnw
+:SOURCE_REPO: .
+:ORIGINAL_SIZE: 0
+:END:
+
+Stage M1 of the manager broker amendment decided on 2026-09-25. Add Agentic.Manager.Broker with an injected ManagerBroker (brokerToWorker, brokerFromWorker) and the default directBroker, which applies the original private-pipe operations unchanged. The Worker enforces that the delivered bytes equal the original frame and that each lent operation runs once, on the calling thread, before the broker call returns, so a broker can carry, delay or fail a frame but cannot alter, repeat, reorder or replay one. Thread the broker to a new serveManagerWith. Add manager/BROKER.md, a placement sentence in manager/WORKERS.md and a cross-reference in runtime/BROKER.md. Tests: a counting broker proves every worker frame passes through the seam, a withholding broker proves delivery depends on it, and delivery-check and cancellation negatives cover the Worker check. Place after the first TUI workflow milestone (Phase A) is accepted and before WM-028. Revalidate the worker, admission, approval, control, ingestion and vertical owners at N1 and then N8, with fess and independent review.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-7z2x",
+    "depends_on_id": "acat-dz25",
+    "type": "blocks",
+    "created_at": "2026-09-26T05:32:10.912886Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
 * DONE [#E] Note: finite-index aggregation law (csum over Fin n / lists) derivable from csum_pair + csum_zero by induction
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -1574,6 +1605,38 @@ validated pass (P1, single-model; verified against source by the pass agent). Ve
     "author": "johnw",
     "text": "Triage 2026-08-20: half discharged in code docstrings — the collapse is stated on purpose in BOTH implementations (Dsl/Syntax.lean:88 render_declined; Plan.hs:243-245 verdictMul Declined annihilates, Plan.hs:262-270 comment). Live half: make refusal separable from objections in what amend receives, or state the loss where amend is defined. Semantics live in both Lean and Haskell panels, so this SURVIVES q1i.",
     "created_at": "2026-08-20T17:12:11Z"
+  }
+]
+#+end_src
+
+* TODO [#E] Handoff: give separate reasons why controls K42 and K45 pass    :documentation:
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-89kw
+:LABELS:   ["documentation","workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-26 Sat 07:20]
+:MODIFIED: [2026-09-26 Sat 07:20]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Source: fess audit /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/fess/Z-HANDOFF-r3.md, finding L3. doc/workflow-manager-handoff.md lines 232-233 say 'Both controls pass because both service fixtures feed only that value.' fess/A-A5S1C-r3.md finding HIGH 1 shows that the poll fixture never reaches Service.hs:125, because it takes line 126. K42 passes because line 125 is unreached, not because of the input class. The sentence is correct for K45 (Service.hs:162). Fix: K42 passes because no fixture reaches Service.hs:125. K45 passes because the preparation fixture feeds Service.drive only the declared StorageUnavailable. Apply the same correction to the 2026-09-26 remaining-scope report if it repeats the sentence.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-89kw",
+    "depends_on_id": "acat-wm-023-d20b",
+    "type": "discovered-from",
+    "created_at": "2026-09-26T14:20:57.709514Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
   }
 ]
 #+end_src
@@ -2020,6 +2083,40 @@ A3 fess finding (low, optional). Approval.hs imports Graphics.Vty and decodes te
 
 Agent-deck 1.15 falsely reports delivery=typed for fast Pi/DeepSeek turns after Pi accepted the prompt, and terminal-derived Pi output carries no timestamp. Teach agent-deck to recognize Pi's empty composer as submission and read Pi's structured JSONL response with its timestamp. Treat empty legacy timestamps as absent in Agentic.AgentDeck. Reproduced and verified with agent-workflows hello-world session run.
 
+* TODO [#E] Keep complete evidence sets for implementer scans and mutants
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-a12w-evidence-convention-9cet
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-25 Fri 15:49]
+:MODIFIED: [2026-09-25 Fri 15:49]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+The A12W implementer evidence does not follow the evidence convention in two places. The negative diff scan (/Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A12W/impl-r1/A12W-negative-diff-scan.*) has no .start, .end or .exit files. The invalid mutant run (A12W-policy-probe-mutant.command) leaves out the sed step that A12W-policy-probe-mutant.INVALID.txt describes, and that note says both that the chain stopped and that the probe passed. No accepted claim rests on these files, and the verifier set in verify-r1 is complete. Source: fess audit /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/fess/A-A12W-r1.md.
+
+Required work: implementer stages keep the complete .command, .start, .end, .exit and .log set for every cited command and record every mutation step inside the .command file. This is a process item. It adds no new evidence tooling.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-a12w-evidence-convention-9cet",
+    "depends_on_id": "acat-wm-035-9uqq",
+    "type": "discovered-from",
+    "created_at": "2026-09-25T22:49:40.310759Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
 * DONE [#B] DSL: caseVerdict arm mapping is unproved and untested — permuting arms passes the whole package
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -2410,6 +2507,40 @@ deep-review + alexey + validated. (1) End-of-input errors report 0:0 (Parse.lean
 ]
 #+end_src
 
+* TODO [#E] Record that the Cabal 3.16.1.0 expectation means cabal-install
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-cabal-version-reading-0fnq
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-25 Fri 15:49]
+:MODIFIED: [2026-09-25 Fri 15:49]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+The workflow expects 'Cabal 3.16.1.0'. The environment has cabal-install 3.16.1.0 and the Cabal library 3.12.1.0, which ships with GHC 9.10.3 (/Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A12W/impl-r1/A12W-toolchain.log, /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A12W/verify-r1/toolchain-pkgs.log). Every stage so far has read the expectation as the cabal-install version. That reading is an interpretation and is not recorded in the resume guide. Source: fess audit /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/fess/A-A12W-r1.md.
+
+Required work: the orchestrator confirms that the expected version refers to cabal-install and records that reading in doc/checkpoints/wm023-20260923/README.md at the next documentation pass.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-cabal-version-reading-0fnq",
+    "depends_on_id": "acat-wm-035-9uqq",
+    "type": "discovered-from",
+    "created_at": "2026-09-25T22:49:40.535876Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
 * DONE [#C] Split a non-commutative semiring base class out of CSemiring
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -2548,6 +2679,40 @@ PMonoid/CMonoid -> Monoid/CommMonoid (or Add* where additive); IdemCMonoid + its
 
 Both now carry + * 0 1 via NSemiring but theorems still spell matAdd/comp/conv; make comp_assoc/id_comp/comp_id wrappers of mul_assoc/one_mul/mul_one. Deferred in acat-ci8 to keep names stable.
 
+* TODO [#C] Diagnose manager-draft-check ProcessFailure that keeps cli/ci/policies.sh red
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-drafts-processfailure-j1h0
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: bug
+:CREATED:  [2026-09-25 Fri 15:49]
+:MODIFIED: [2026-09-25 Fri 15:49]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+cli/ci/policies.sh now gets past profiles.sh, configuration.sh, store.sh and commands.sh. It then fails in manager/ci/drafts.sh at N1, on the first retention check, with 'manager-draft-check: ProcessFailure' raised from manager/test/DraftCheck.hs:90:14. The first failure after A12W is /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A12W/verify-r1/policies-gate.log (lines 1421-1423), with fixture root /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/credentials.QHYL3FHM/build/manager-drafts.nSYL4D. The same signature appears in drafts runs made before A12W: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/R/verify-haskell-r1/V-gate-drafts.log, /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A5S1/verify-r2/V-gate-drafts.log and /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A5S1/impl-r3/A5S1r3-gate-drafts.log. A12W does not touch the manager-draft-check component.
+
+Required work: diagnose the cause of the ProcessFailure in one bounded subtask, fix only the proved cause at its owner with a regression test, and show that bash manager/ci/drafts.sh and bash cli/ci/policies.sh exit 0 at N1 and N8. Do not rerun the failed check to obtain a pass before the cause is established.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-drafts-processfailure-j1h0",
+    "depends_on_id": "acat-wm-035-9uqq",
+    "type": "discovered-from",
+    "created_at": "2026-09-25T22:49:39.624023Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
 * DONE [#C] DSL: state the guard-correctness and projection theorems the battery only samples
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -2644,6 +2809,21 @@ Acceptance: the scheduled S1 diagnosis subtask examines this root together with 
   }
 ]
 #+end_src
+
+* TODO [#B] Record the manager broker amendment
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-dz25
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: docs
+:CREATED:  [2026-09-25 Fri 22:32]
+:MODIFIED: [2026-09-25 Fri 22:32]
+:CREATED_BY: johnw
+:SOURCE_REPO: .
+:ORIGINAL_SIZE: 0
+:END:
+
+Stage M0 of the manager broker amendment that the operator decided on 2026-09-25. Write the dated record doc/research/workflow-manager-broker-amendment.md in the form of the storage amendment. It states the motive (carriage of manager-to-worker traffic), the scope (the worker session only, with commands and observer notices kept on their frozen /v1 forms), the ManagerBroker contract and its delivery check, the retained guarantees, the carriage rules, and that the seam narrows the frozen design and plan exclusion of a message broker without changing any behavioral guarantee. Source: the design record proposals/manager-broker-design.md and the amendment appended to GOAL.md in the private resume-20260923 evidence directory. Leave the frozen design, plan and storage amendment unchanged. Update the handoff with a dated amendment section.
 
 * DONE [#B] Design a remote single-user workflow manager and unified client API
 :PROPERTIES:
@@ -5883,6 +6063,38 @@ A4 fess finding (low, test-strictness). key_notice in manager/test/service_http.
 ]
 #+end_src
 
+* TODO [#E] Handoff: correct the nix shim statement for gates that call nix develop    :documentation:
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-mu0p
+:LABELS:   ["documentation","workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-26 Sat 07:20]
+:MODIFIED: [2026-09-26 Sat 07:20]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Source: fess audit /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/fess/Z-HANDOFF-r3.md, finding L2. doc/workflow-manager-handoff.md lines 78-80 and report line 55 say that a gate calling 'nix develop path:. -c CMD' runs with a nix shim first on PATH inside direnv. Under direnv exec with the private environment, 'command -v nix' finds the system binary /nix/var/nix/profiles/default/bin/nix. The shim exists only at resume-20260923/R/bin/nix, and earlier stages put it on PATH themselves. The only tracked non-doc script that calls nix develop is the forbidden engine/acp/ci/route-live.sh. Fix: state that such a gate needs resume-20260923/R/bin/nix first on PATH inside the direnv shell and that no permitted Phase A gate calls nix develop, or drop the sentence.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-mu0p",
+    "depends_on_id": "acat-wm-023-d20b",
+    "type": "discovered-from",
+    "created_at": "2026-09-26T14:20:57.484548Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
 * DONE [#C] Add typed top-level results to registered programs
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -7342,6 +7554,38 @@ Discovered while verifying acat-3vv. `nix develop -c ./ci/deck.sh` completed sce
 :ORIGINAL_SIZE: 0
 :END:
 
+* TODO [#E] Handoff: state that the broker amendment was decided after the proposal    :documentation:
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-syuu
+:LABELS:   ["documentation","workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-26 Sat 07:20]
+:MODIFIED: [2026-09-26 Sat 07:20]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Source: fess audit /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/fess/Z-HANDOFF-r3.md, finding L1. doc/workflow-manager-handoff.md (2026-09-26 section, lines 13-17) presents the manager-broker proposal as a proposal for operator decision, dated 2026-09-26 02:55Z (UTC), for the operator amendment of 2026-09-25 (PDT). GOAL.md line 38 says that the operator decided the amendment on 2026-09-25 after this design record and adopted its defaults. The mixed time zones make the proposal look later than the amendment, and the present tense suggests a pending decision. Fix: state that the operator decided the amendment after the proposal (GOAL.md line 38), that the proposal header still reads 'proposal for operator decision', and give both times in one zone. Apply the same correction to /Users/johnw/dl/agent-cat-workflow-manager-remaining-2026-09-26.md.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-syuu",
+    "depends_on_id": "acat-wm-023-d20b",
+    "type": "discovered-from",
+    "created_at": "2026-09-26T14:20:57.200494Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
 * DONE [#B] Bound secure subprocess startup under very large RLIMIT_NOFILE
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -8208,6 +8452,74 @@ Docs, help, and schema agree; all applicable non-paid agent-cat, ext-pi, and dow
 ]
 #+end_src
 
+* TODO [#D] Record a mutant that kills the --tui --service isAbsolute guard
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-tui-service-isabsolute-mutant-mt3d
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-25 Fri 15:49]
+:MODIFIED: [2026-09-25 Fri 15:49]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+The A12W guard-breaking mutants change only the test helper arm of parsedAs (cli/test/PolicyProbe.hs:539). No recorded mutant removes the production isAbsolute guard in the '--tui --service' parse arm (cli/src/Agentic/Cli.hs:3477-3480) to show that the probe case '--tui --service refuses a relative client-profile path' (cli/test/PolicyProbe.hs:2690) fails. Code reading says it would fail, so the case is not vacuous, but the kill is inferred and not recorded. Source: fess audit /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/fess/A-A12W-r1.md.
+
+Required work: record one mutant that removes isAbsolute from that parse arm, show that the probe fails on the relative-path case, restore the source, and show that the probe passes again.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-tui-service-isabsolute-mutant-mt3d",
+    "depends_on_id": "acat-wm-035-9uqq",
+    "type": "discovered-from",
+    "created_at": "2026-09-25T22:49:39.866191Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
+* TODO [#E] Decide whether the relative-profile probe case pins the no-verb text
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-tui-service-relative-pin-l7ny
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-25 Fri 15:49]
+:MODIFIED: [2026-09-25 Fri 15:49]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+The probe case at cli/test/PolicyProbe.hs:2690 expects the generic "no verb '--tui'" fallthrough (parsedAs result "no-verb") for a relative client-profile path. The documented contract (cli/src/Agentic/Cli.hs:4010, ABS_CLIENT_PROFILE) requires only an absolute path. A later dedicated refusal message for a relative path would fail this case even though the contract still holds. Source: fess audit /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/fess/A-A12W-r1.md.
+
+Required work: decide whether the pin is deliberate. If it is not, make the case accept any refusal (any Left) instead of the specific no-verb fallthrough.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-tui-service-relative-pin-l7ny",
+    "depends_on_id": "acat-wm-035-9uqq",
+    "type": "discovered-from",
+    "created_at": "2026-09-25T22:49:40.090935Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
 * DONE [#C] Front-door docs describe a repository two re-derivations old: README and flake.nix
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -8453,6 +8765,38 @@ From the 2026-08-14 heavy review (7 passes; sources: deep-review, alexey, valida
     "author": "johnw",
     "text": "Closed by the .wf retirement: the define macro system died with the parser in the .wf retirement",
     "created_at": "2026-08-18T20:05:37Z"
+  }
+]
+#+end_src
+
+* TODO [#E] Handoff: cite the fix116b records for the 116-118 squash    :documentation:
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-uxkh
+:LABELS:   ["documentation","workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-26 Sat 07:20]
+:MODIFIED: [2026-09-26 Sat 07:20]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Source: fess audit /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/fess/Z-HANDOFF-r3.md, finding L4. doc/workflow-manager-handoff.md lines 95-103 and report line 71 say that R/history/adaptations.md records each change of the history fix and then list the 116-118 squash. adaptations.md does not mention 116, 117, 118 or a squash. The squash is recorded in R/history/fix116b-rebase.log, map-fix116.tsv and fess-every-commit.md (section 6 and the step-116 row). Fix: cite R/history/fix116b-rebase.log and fess-every-commit.md after the squash sentence in both documents.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-uxkh",
+    "depends_on_id": "acat-wm-023-d20b",
+    "type": "discovered-from",
+    "created_at": "2026-09-26T14:20:57.912805Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
   }
 ]
 #+end_src
@@ -12433,7 +12777,7 @@ manager's correctness boundary.
 :LABELS:   ["p5","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-23 Wed 16:35]
+:MODIFIED: [2026-09-26 Sat 07:21]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-023
 :SOURCE_REPO: agent-cat
@@ -12618,6 +12962,13 @@ callers. Worker environments contain no manager credential material.
     "author": "johnw",
     "text": "Operator requested halt, logical commits, push and a complete remaining-scope report on2026-09-23. Current source is preserved on workflow-manager-checkpoint-20260923 based on canonical a8bf8c1:12fc322 compatibility domains,910db084 protected service,073508ff public client,d8c0609a TUI request/approval plus unwired observation adapters. Each committed source boundary has recorded checks. Exact service, client and TUI commit worktrees passed their scoped N1/N8 checks, with TUI approval/detach and import boundaries complete by23:12:49Z. The original eight-file prototype is archived separately at74ad50e9 on archive/service-tui-pre-broker-20260923 and compiled with its original package set. It is not the resume target. New observation adapters compile and have public-fixture checks, but remain unwired. No full TUI workflow or new WM/G acceptance is claimed. Halt fess allows WIP preservation only and blocks application acceptance. P1 liveness is now acat-response-ingestion-budget-zaoi, P2 exception classification is acat-tui-internal-faults-jj13, and P2 negative-approval synchronization is acat-tui-consent-barrier-wby2. General-CA issue6gbo remains open. Tracked checkpoint documentation preserves non-secret notes, reviews, public observations and validation history. Private credentials/keys/databases and build caches are excluded from publication. Resume instructions are in doc/checkpoints/wm023-20260923/README.md and the primary handoff. The complete roadmap is /Users/johnw/dl/agent-cat-workflow-manager-remaining-2026-09-23.md and requires downstream fess at the end of every subtask. Goal mu629ta5-11s8ax will be paused when publication checks finish. Accepted baseline remains WM001–WM022/G0/G1.",
     "created_at": "2026-09-23T23:35:47Z"
+  },
+  {
+    "id": 324,
+    "issue_id": "acat-wm-023-d20b",
+    "author": "johnw",
+    "text": "Closeout subtask HANDOFF (workflow resumed from checkpoint wm023-20260923) recorded the stopping point. It adds a dated 2026-09-26 section at the top of doc/workflow-manager-handoff.md and writes the external report /Users/johnw/dl/agent-cat-workflow-manager-remaining-2026-09-26.md (SHA-256 7e9172d3...). The workflow stopped because subtask A5S1C failed after three rounds: the fess audit fess/A-A5S1C-r3.md is blocking on the unchecked classification at Service.hs:125 and Service.hs:162 (controls K42 and K45 pass). The A5S1C work stays uncommitted in the worktree (A5S1C-only diff digest b7bbe942...). Phase A is not met, and no package or gate is accepted beyond WM-001..WM-022/G0/G1. Evidence: make -C doc check exit 0 (Z/HANDOFF/impl-r3/H3-doc-check, verify-r3/V3-doc-check, documentation check only, it does not read the handoff). Accuracy rests on read-only cross-checks against git, obr and the evidence directory (H3-accuracy-2, V3-git, V3-tracker, V3-rangediff). Final fess fess/Z-HANDOFF-r3.md is non-blocking with four low wording findings, recorded as acat-syuu, acat-mu0p, acat-89kw and acat-uxkh. Integrator actions still open: commit A5S1C once clean, create the Approval.hs:96 gap issue and an S1-c tracker candidate, and widen the acat-dxos scope.",
+    "created_at": "2026-09-26T14:21:05Z"
   }
 ]
 #+end_src
@@ -13162,7 +13513,7 @@ Network mutation remains behind G3 until the required evidence is complete.
 :LABELS:   ["p5","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-09 Wed 22:34]
+:MODIFIED: [2026-09-25 Fri 22:32]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-028
 :SOURCE_REPO: agent-cat
@@ -13231,6 +13582,15 @@ public or production deployment.
 
 #+begin_src json
 [
+  {
+    "issue_id": "acat-wm-028-g1n0",
+    "depends_on_id": "acat-7z2x",
+    "type": "blocks",
+    "created_at": "2026-09-26T05:32:11.212250Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  },
   {
     "issue_id": "acat-wm-028-g1n0",
     "depends_on_id": "acat-wm-024-28bb",
@@ -13869,7 +14229,7 @@ Local-mode behavior remains intact without a duplicated service runtime model.
 :LABELS:   ["p7","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-24 Thu 07:14]
+:MODIFIED: [2026-09-25 Fri 15:49]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-035
 :SOURCE_REPO: agent-cat
@@ -13961,6 +14321,13 @@ check fail.
     "author": "johnw",
     "text": "Subtask A4 (resume workflow wm023-20260923) advanced the PTY acceptance of the service approval path. The tui-approval scenario in manager/test/service_http.py now waits for each approval key's own notice as a deterministic post-key boundary, and two guard-breaking mutants of tui/src/Agentic/Tui/Approval.hs each make it fail with the literal consent message after a visible approval start. tui-approval passed at N1 then N8 before and after the mutant cycle (actual UI interaction against a deterministic native fixture; /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A4/verify-r1/A4v-tui-approval-N1.log, -N8.log, A4v-tui-approval-restored-N1.log, -N8.log; mutant evidence A4v-M1-pty.log and A4v-M2-pty.log in the same directory). This package stays open.\n",
     "created_at": "2026-09-24T14:14:53Z"
+  },
+  {
+    "id": 323,
+    "issue_id": "acat-wm-035-9uqq",
+    "author": "johnw",
+    "text": "A12W (Phase A) closes the three pre-existing -Werror gaps that kept the manager gates from building. exe:manager-store-check now declares Agentic.Manager.Protocol.Draft and Agentic.Manager.Protocol.Command in other-modules, exe:manager-command-check now declares Agentic.Manager.Protocol.Draft, and parsedAs in cli/test/PolicyProbe.hs gains the TuiService arm. Two probe cases cover '--tui --service' with an absolute and a relative client-profile path. The diff adds 6 lines and removes none, and it contains no warning suppression and no ghc-options change.\n\nEvidence (source is tree f5083527 plus the A12W diff): FINALBUILD exits 0 with no GHC -W diagnostic, both as a full recompile in the shared builddir (/Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A12W/impl-r1/A12W-finalbuild-2.*) and from scratch in a fresh builddir (/Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A12W/verify-r1/finalbuild-fresh.*). A supplementary build with --enable-tests also exits 0 (verify-r1/supp-enable-tests.*). These are package builds. bash manager/ci/store.sh and bash manager/ci/commands.sh exit 0 at N1 and N8 (verify-r1/store-gate.*, verify-r1/commands-gate.*), which are deterministic native fixtures. policy-probe passes at N1 and N8, and a guard-breaking mutant of the new arm fails it (verify-r1/control-mutant.*). These are pure model tests. A red control on the pre-fix source fails all three targets with the expected warnings (verify-r1/control-red.*). The fess audit (/Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/fess/A-A12W-r1.md) is non-blocking.\n\nThis issue stays open. A12W is a build prerequisite and does not meet the WM-035 completion criteria. cli/ci/policies.sh still fails at a pre-existing drafts step (manager-draft-check: ProcessFailure at manager/test/DraftCheck.hs:90), which a separate issue tracks.\n",
+    "created_at": "2026-09-25T22:49:19Z"
   }
 ]
 #+end_src

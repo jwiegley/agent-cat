@@ -2,6 +2,395 @@
 
 <!-- handoff-id: wm023-20260923; status: paused-unaccepted-wip; accepted: WM-001..WM-022,G0,G1; resume-branch: workflow-manager-checkpoint-20260923; fess: every-subtask -->
 
+## Resume workflow stopping point of 2026-09-26
+
+The resume workflow that started from checkpoint `wm023-20260923` stopped on
+2026-09-26 at about 13:24Z. Subtask A5S1C did not reach a clean state after
+three rounds, and its uncommitted work remains in the worktree for inspection.
+Accepted state is unchanged at WM-001–WM-022 and G0/G1, which is 22 of 44
+packages and two of six gates. WM-023 (`acat-wm-023-d20b`) is still in
+progress. Phase A of the remaining-scope report is not met. The run made no
+implementation change for Phases B to G. The evidence directory also holds
+the proposal `resume-20260923/proposals/manager-broker-design.md`, dated
+2026-09-26 at about 02:55Z, for the operator amendment of 2026-09-25. It is a
+proposal for operator decision on source baseline `290e0232`, and it changes
+no code. This section and the report
+`~/dl/agent-cat-workflow-manager-remaining-2026-09-26.md` describe the current
+state. Where they differ from the halt section below, they supersede it. The
+older sections remain as chronology.
+
+Since 2026-09-25, `~/dl` resolves to `~/Downloads` through a home-manager
+link. The 2026-09-23 report that the governing goal cites is therefore at
+`~/Desktop/agent-cat-workflow-manager-remaining-2026-09-23.md`. The 2026-09-24
+report beside it is an unaccepted draft from a failed closeout, and its
+description of the first S1 variant is wrong.
+
+### Governing objective
+
+The operator set a new governing goal on 2026-09-23 at about 23:50 PDT. Its
+verbatim text is in the private evidence directory at
+`/Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/GOAL.md`.
+It replaces Pi goal `mu629ta5-11s8ax`, revision 914, and it prevails over older
+records where they conflict. The goal keeps the completed tasks
+`wm016-closure-plan`, `wm016-functional-closure`, `wm016-integrated-validation`,
+`wm016-acceptance` and `broker-api-default`. Its current task,
+`first-frontend-broker-workflow`, is Phase A of the remaining-scope report. The
+task `remaining-frontends` is Phases C, D and E, and the task
+`operational-hardening-roadmap-closure` is Phases B, F and G. The former Pi
+ledger under `.pi/goals` was destroyed with the former worktree. It is not
+restored, and the workflow orchestrator tracks the goal.
+
+The same file holds an operator amendment of 2026-09-25 on a manager broker.
+It adds an injected `ManagerBroker` in `Agentic.Manager.Broker` that carries
+each native worker frame byte-exact to the original private-pipe writer or
+receiver, with the default `directBroker`. It changes no behavioral guarantee.
+Commands and observer notices keep their frozen `/v1` forms. The reviewed seam
+(stage M1, `acat-7z2x`) lands after Phase A is accepted and before the Phase B
+gate WM-028. It depends on the dated record
+`doc/research/workflow-manager-broker-amendment.md` (stage M0, `acat-dz25`).
+RabbitMQ and John Mark integrations remain deferred.
+
+### Worktrees and environment
+
+The worktree `/Users/johnw/src/agent-cat/.worktrees/tui` was removed on
+2026-09-23 at 23:00:10 PDT. The goal attributes the removal to the deletion of
+the agent-deck session `agent-cat`, which force-removed the worktree. The
+worktree was recreated on 2026-09-23, and it now holds the work branch
+`workflow-manager-checkpoint-20260923`. The goal states that no committed work
+was lost. The former work worktree
+`/Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/broker-source`
+is detached at `b95ce6d1` and stays unmodified. The canonical branch `tui`
+stays at `6b7c90b79b47c85d07162bb11d038349dbac9131` until reviewed integration.
+
+No procedure runs `nix develop` in any form. The operator generates the direnv
+environment in the worktree with `de`, which writes `.envrc` and
+`.envrc.cache`. Every build, test and project tool runs through
+`direnv exec .` from the worktree, with the private environment
+`/Users/johnw/Products/k.M0a5ItPm/environment.sh` sourced inside that shell.
+When `flake.nix` or `flake.lock` changes, or when direnv reports a stale or
+blocked environment, `de` regenerates the environment. Neither `.envrc` nor
+`.envrc.cache` is edited by hand or committed. The private environment sets
+`HOME`, `TMPDIR`, the XDG directories and the shared serialized
+`CABAL_BUILDDIR`. The expected toolchain is GHC 9.10.3,
+`crypton-x509-validation` 1.9.1 and Cabal 3.16.1.0, which the stages read as
+the cabal-install version (`acat-cabal-version-reading-0fnq`). Git and `obr` run
+in a plain shell outside the private environment, because the private `HOME`
+lacks the operator Git configuration. A gate that calls
+`nix develop path:. -c CMD` internally runs with a `nix` shim first on `PATH`
+inside direnv, which runs `CMD` directly. This rule supersedes the
+`nix develop` commands and the `broker-source` worktree path in the
+[checkpoint README](checkpoints/wm023-20260923/README.md).
+
+### Branch history and publication
+
+On 2026-09-25 the work branch was rebased onto `main` at `0427fe27`, as an
+operator brief of 2026-09-24 directed. The brief is preserved as
+`resume-20260923/REBASE-BRIEF-0427fe27.md`. The rebase log
+`resume-20260923/R/rebase/conflicts.md` records which replayed commits
+changed. Steps 1, 5, 17, 19, 34, 36 and 186 needed a conflict resolution.
+Steps 2, 26, 38, 123 and 175 changed only in their diff context. Step 16 went
+through the merge driver for `doc/PLAN.org` and keeps the branch's historical
+copy of that file.
+
+A history fix then changed the replayed commits again, and
+`resume-20260923/R/history/adaptations.md` records each change. It folded a
+frontend-preparation call-site correction into step 1. At step 2 it renamed
+the local binding `execute` to `executeRun` in `cli/src/Agentic/Cli.hs`,
+because the binding shadowed a top-level name and failed `-Werror`. Step 4
+made the same rename, so its own copy of that change became empty. At step
+123 only one line of diff context changed. A later pass squashed old steps
+116, 117 and 118 into one commit, which is now step 116. The final tree is
+the same as before the history fix.
+
+The rewrite changed every commit identifier after the merge base. The halt
+checkpoint `b95ce6d1` is now `7769b08e`, and the checkpoint code commits
+`12fc3228`, `910db084`, `073508ff` and `d8c0609a` are now `3f82b883`,
+`b0ae240c`, `1c4a1f02` and `8b8e9e9c`. The command
+`git range-diff main..fb7ff091 main..0697de28` marks these five mappings, the
+mapping of `bf516dba` to `95f144e3`, and the A0 to A5 mappings in the table
+below as patch-identical. It does not mark every rewritten commit that way.
+It marks old steps 1, 2, 4, 5, 17, 19, 26, 34, 36 and 38 as modified, and also
+old steps 118, 123, 175 and 186, which it pairs with steps 116, 121, 173 and
+184. It shows old steps 116 and 117 without a counterpart, and it does not pair
+old step 16 with new step 16. The commit identifiers in the older sections
+below refer to the history before the rebase.
+
+Three tip commits adapt the branch to the new `main`. Commit `59af2476` states
+act-scoped reuse and in-process tools in `runtime/BROKER.md`. Commit `c9c86eee`
+recomputes the ACP and TUI probe expectations against the new examples.
+Commit `fb292465` takes the tracker export of `doc/PLAN.org`. The rebase audit
+(`resume-20260923/R/fess-rebase.md`) found no critical or high finding. It
+recorded that the edited `test/tui_probe.py` expectations were never run
+(M3), that the epoch obligation of the broker contract has no conformance
+test (M4), and that frontend preparation of a row with in-process tools is
+untested (M5). The audit of the rewritten history
+(`resume-20260923/R/history/fess-every-commit.md`) supports this statement
+under the definition in its section 2: every commit builds `lib:agentic` with
+`-Werror` and every default-flag component without `-Werror`, with the
+recorded package sets on macOS. For 64 of the 203 commits, the tree is
+identical to a tree with recorded passing builds. The audit covers the other
+139 commits by inference, because each differs from such a tree only in paths
+that no component compiles. A warnings-fatal build of all components fails at
+steps 190 to 203. A12W fixes that failure at the current head.
+
+Nothing from this run is published. As read from the remote-tracking refs
+without a fetch, `origin/workflow-manager-checkpoint-20260923` is still
+`b95ce6d1` and `origin/tui` is `6b7c90b7`. Because the history is rewritten,
+publication of the branch needs a force-push. The rebase brief reserves that
+step for John's approval, and no such approval is recorded.
+
+### Commits and subtask results
+
+At the stop, the branch head is `290e02323bc1aa091c3547f7197ef48e4209c635`,
+which is the A12W commit. The table gives each subtask's current commit and
+the identifier that the workflow ledger recorded before the rebase. Each row
+states its strongest evidence and that evidence's ceiling. The private
+evidence for subtask `X` is under `resume-20260923/A/X`, and its audits are
+under `resume-20260923/fess`. The audits of this closeout subtask are
+`fess/Z-HANDOFF-r1.md` to `fess/Z-HANDOFF-r3.md`. Rounds 1 and 2 replaced the
+2026-09-24 closeout audits of the same names. A copy of the 2026-09-24 round-3
+audit is kept at `Z/HANDOFF/impl-r3/H3-preserved-fess-Z-HANDOFF-r3-20260924.md`.
+
+| Subtask | Commit (ledger) | Result and evidence ceiling |
+| --- | --- | --- |
+| A0 | `25709730` (`32c72f80`) | The checkpoint rebuilt on unchanged source. The forced Werror build, the contract probe, `tui-model-test` at N1 and N8, and `tui-approval` at N1 then N8 (actual UI interaction) passed. This baseline ends at approval and detach. |
+| A1 | `3adfbdcb` (`9d437202`) | Independent baselines on unchanged source. The read-only service TUI, the 18 public-client scenarios, `tui/ci/tui.sh` and `make -C doc check` passed. The protected-HTTP mixed workflow (S1) failed at N1 in three of three runs. The all-target Werror build (S4) failed in `manager-store-check`, `manager-command-check` and `policy-probe`, and `make -C doc check-haskell` failed on the omitted `Agentic.Cli.Command.TuiService`. |
+| A2 | `040a478b` (`1c391627`) | `Agentic.Tui.ServiceLane` classifies unexpected synchronous exceptions as an internal fault, and `acat-tui-internal-faults-jj13` is closed. The evidence is pure model tests, fixed-size renders and eleven negative controls. No PTY run injected a fault. |
+| A3 | `eb109664` (`ac4c43b8`) | Approval-key admissibility is the compiled predicate `Agentic.Tui.Approval`, with numbered visible refusals. The evidence is pure model tests over 25200 cases, 26 guard-breaking controls and `tui-approval` at N1 then N8. Most refusal notices were not observed in the actual UI. |
+| A4 | `75a3c28b` (`495c3eda`) | `tui-approval` waits for the numbered refusal notice before it reads manager state. The guard-breaking mutants M1 and M2 of `Approval.hs` each failed `tui-approval` at N1 with their consent message, and `acat-tui-consent-barrier-wby2` is closed. |
+| A5 | `0697de28` (`fb7ff091`) | Run snapshot, control and decision reads install through the single-flight lane as one composite, with stale rejection, refusal retention and the mutation-key policy `ServiceLane.mutationAdmission`. The evidence is 387 model checks at N1 and N8, 27 guard-breaking overlays and `tui-approval` at N1 then N8. An earlier N8 run failed with the S1 class (`acat-dxos`). |
+| A12W | `290e0232` (`290e0232`) | The three pre-existing Werror gaps are fixed at their owners: two manager check executables declare their home modules, and the policy probe classifies `TuiService`. The full `-ftui-tests all tui-model-test` build with `-Werror -fforce-recomp` passed in the shared and in a fresh build directory (package build). `manager/ci/store.sh` and `manager/ci/commands.sh` pass. The audit has no blocking finding. |
+| A6 | none | Failed on 2026-09-24 after three rounds. The verifier's `tui-journey` run at N8 hit the S1 class before any step that A6 changed. The round-3 diff is parked, with the unaccepted draft handoff, at `refs/wip/a6-r3-20260924-final` (`3ed13d96`). The current plan lists A6 as not started. |
+| A5S1 | none | Two audited rounds, both blocking. Round 3 escalated for an owner decision on `Approval.hs:96` and is parked at `refs/wip/a5s1-r3-20260925-final` (`090477d2`). A5S1C superseded it. |
+| A5S1C | none | Failed after three rounds, as the next subsection states. |
+| A5R, A5G1, A5G2, A5S2, A7–A14 | none | Not started. |
+
+These are subtask results. None of them accepts a package or a gate. The
+refocus note asked for confirmation that the `wby2` consent test includes a
+guard-breaking control. The A4 mutants M1 and M2 broke the approval guard, but
+they ran at N1 only and are not a repeatable mode in the tree. The committed
+mode `tui-consent-control` performs a real approval where a refusal is
+expected. It shows that the assertion detects an approval, and it does not
+break a guard.
+
+### Uncommitted A5S1C work
+
+Subtask A5S1C was to complete the A5S1 fault classification on the rebased
+branch. It failed after three rounds, and its work is not committed. The
+worktree holds 13 modified files and 3 untracked files, and nothing is
+staged. The modified files are `agentic.cabal`, ten modules under
+`manager/src/Agentic/Manager` (`Admission`, `Approval`, `Authorization`,
+`Drafts`, `Events`, `Overview`, `Pages`, `Service`, `Store` and `Transport`),
+and `manager/test/AdmissionCheck.hs` and `manager/test/ArtifactCheck.hs`. The
+untracked files are `manager/src/Agentic/Manager/Fault.hs`,
+`manager/src/Agentic/Manager/Fault/Record.hs` and
+`manager/test/Agentic/Manager/Test/PrivateLog.hs`. The handoff change is also
+uncommitted when the workflow stops, so the digest of the A5S1C change
+excludes this file. The SHA-256 of
+`git diff HEAD -- . ':!doc/workflow-manager-handoff.md'` is
+`b7bbe942216ea165d114ada63d6be630f4e186e076b96c7010ee1b3812ad3d66`. The
+untracked files do not appear in `git diff`, and their SHA-256 digests are as
+follows:
+
+```text
+4ca08c1fdd27d7ad78f004dca22ead05379ae91d690e7e93bc2a65de38a452c6  manager/src/Agentic/Manager/Fault.hs
+fb588a8d2dc7e220e3187ad07f796d2c0e75810f6cf33ac73f8431a760d85c46  manager/src/Agentic/Manager/Fault/Record.hs
+e54755e2ff758a40ff52bdc2fdc5fc5cfc46b73cb396e40801e7e4c3dd34eb45  manager/test/Agentic/Manager/Test/PrivateLog.hs
+```
+
+The diff adds the fault classification `Agentic.Manager.Fault`. The diagnosis
+record `A/A5S1C/impl-r3/A5S1C3-diagnosis.md` states that at each site that
+A5S1 and A5S1C converted, a refusal that replaces its cause also writes a
+private line with the class of that cause. The conversion is partial. Section
+5 of that record lists the sites that still replace a cause without a record.
+Section 6 states that each converted site has a check and a control, except
+`Approval.hs:96`, which is the accepted gap below. The blocking audit below
+shows that this statement is untrue for the classification at two further
+sites. The fault-classification model tests check that a declared refusal
+keeps its own public problem, that Store contention, Store I/O failures and
+the other classes keep the public storage-unavailable problem, and that no
+public problem, private record or erasure record holds exception text. No
+check covers the public status of every path.
+
+On this source the round-3 verifier passed the Werror build of every manager
+target and `tui-model-test` (package build), the 83 fault-classification
+model tests at N1 and N8, and the eight `service-faults` checks at N1 and N8
+(deterministic native fixture). The owning gates `configuration`, `commands`,
+`store`, `ingestion` and `admission` passed at N1 then N8 with 16, 753, 518,
+1064 and 622 checks. The six red manager gates kept their baseline signatures
+and counts. Of 39 carried guard-breaking controls, 38 made at least one
+checker fail, and K19 passed, as the operator-accepted gap requires. The
+policy and privacy scans passed. The evidence is under
+`resume-20260923/A/A5S1C/verify-r3`.
+
+The audit `fess/A-A5S1C-r3.md` is blocking. Two converted classification sites
+have no check. The verifier's control K42 restores a constant
+`StorageUnavailable` at `Service.hs:125` (an uncaught failure of the admission
+poll) and passes the `service-faults`, full admission and fault-classification
+checks. Control K45 does the same at `Service.hs:162` (`Service.drive`) and
+passes the `service-faults` and fault-classification checks. It was not run
+against the full admission check. Both controls pass because both service
+fixtures feed only that value. The diagnosis record
+`A/A5S1C/impl-r3/A5S1C3-diagnosis.md` claims coverage for these sites in its
+sections 3 and 6 and omits them from its section 7.
+
+### S1 failure family
+
+The diagnosis of the S1 family rests on 16 valid capture starts from A5S1
+round 1 and its verifier. The declared budget of 20 starts is spent, and the
+operator did not extend it. What follows is from `A5S1C3-diagnosis.md` and
+the A5S1 round-3 record it carries forward
+(`A/A5S1/impl-r3/A5S1r3-diagnosis.md`).
+
+- S1-a is proven at its owning layer. In 16 of 16 valid starts the receipt
+  response `Application.receipt`, which is
+  `Authorization.withAuthorizedResponse`, failed fast with a raw `StoreBusy`
+  before the response started. The enqueue had committed once inside
+  `Admission.operation`. The client treated the outcome as uncertain, and no
+  operation was replayed. Which of five candidate steps raised the `StoreBusy`
+  is unproven, and so is the holder of the gate or guard. The admission poll
+  that the enqueue notified is the likely holder, by inference only.
+- S1-b, a request that stays queued with admission waiting, was not captured.
+- S1-c, a refusal of the first profile read, was not captured. In a related
+  in-process observation, a draft creation and an enqueue issued at once
+  inside `Service.withService` were refused in four of four N1 attempts with
+  no private line. That reproduction exists only as prose and preserved
+  roots.
+- In the captured roots, the closed releases timed with teardown are proven
+  to be the manager shutdown after the fixture's SIGTERM. The serving-time
+  release in root `tui-A5v1.HiOeMcH7/tui-approval-N8` remains unproven
+  (`acat-dxos`).
+- `acat-response-ingestion-budget-zaoi` is a sibling of the same contention
+  family. It is not the S1-a mechanism, because no run and no ingestion
+  existed at any captured S1-a refusal.
+- The earlier roots from A1, A5 round 1 and A6 hold no private fault line,
+  so whether they failed through the S1-a step is unproven. In their Store,
+  the A6 round-2 implementer `tui-journey` N1 root and the A6 round-3
+  verifier `tui-journey` N8 root each hold one preparation row that is
+  invalidated with the reason `worker-lost`. The three A1 roots and the A5
+  round-1 root hold no preparation row. The A6 round-1 and round-2
+  `tui-approval` N1 roots, whose request stays queued with admission waiting,
+  hold no preparation row either. The 2026-09-24 closeout verifier
+  queried copies of these databases (`Z/HANDOFF/verify-r3/HV3-s1-db-counts.log`,
+  `HV3-s1-variant1.log` and `HV3-s1-preparations.log`).
+
+The fixture roots are under `/Users/johnw/Products/k.M0a5ItPm/tmp`.
+
+### Open findings and decisions
+
+- A5S1C, blocking: give `Service.hs:125` and `Service.hs:162` a deterministic
+  non-storage input class so that K42 and K45 fail, or escalate a site that
+  cannot be reached without a production hook as a recorded gap with its
+  control and a tracker issue. Correct sections 3, 6 and 7 of the diagnosis
+  record in the same change.
+- Operator decisions of 2026-09-25, recorded in section 2 of the A5S1C
+  diagnosis: the configuration loan of `Approval.publishReview`
+  (`Approval.hs:96`) is an accepted gap that control K19 demonstrates, and the
+  capture budget is not extended. The tracker issue for the accepted gap and a
+  tracker candidate for the S1-c reproduction do not exist yet. The Integrator
+  creates them.
+- `acat-dxos`, P1: its title still names only the A5 round-1 `tui-approval`
+  N8 failure. The planned subtask A5S2 is to fix the proven S1 cause at its
+  owner and to re-establish the manager-path baselines.
+- Six manager gates are red with unchanged signatures: `approval` (history
+  policy), `artifacts` (`manager-history-check: ProcessFailure`), `drafts`
+  (`manager-draft-check: ProcessFailure`), `vertical`
+  (`WorkerPreparedFraming`), `workers` (configured ordered prefix) and
+  `controls` (the `Machine.hs` boundary anchor). The rebase audit classifies
+  them as red before the rebase. The planned subtasks A5G1 and A5G2 diagnose
+  and restore them. `cli/ci/policies.sh` stops at the `drafts` failure
+  (`acat-drafts-processfailure-j1h0`, P2).
+- `make -C doc check-haskell` fails because the manual omits
+  `Agentic.Cli.Command.TuiService` (`R/verify-docs-r1/doc-check-haskell.log`).
+  A14 owns that reconciliation. `make -C doc check` passes.
+- The rebase audit findings M3, M4 and M5 belong to the planned subtask A5R.
+- `acat-response-ingestion-budget-zaoi` and `acat-tls-name-forms-6gbo`, P1,
+  are unchanged and open. `acat-tls-name-constraints-0h7q` stays in progress.
+- `acat-ftw9`, P2: a recorded decision on refresh while a mutation key is
+  deferred is required before A7. `acat-lzlp`, `acat-5k82`, `acat-47ax` and
+  `acat-i9aj`, P2: App wiring for refusals, key outcomes, approval and the
+  composite install is covered by inspection only, and the post-boundary
+  reads of `tui-approval` have no control that reaches them.
+- The Integrator recorded the A0 to A5 audit follow-ups as tracker issues. Of
+  those, 27 at P3 and 3 at P4 remain open. The A12W audit added
+  `acat-tui-service-isabsolute-mutant-mt3d` at P3 and
+  `acat-cabal-version-reading-0fnq`, `acat-a12w-evidence-convention-9cet` and
+  `acat-tui-service-relative-pin-l7ny` at P4.
+
+The workflow record lists no pending authorization request. Publication of
+the rewritten branch waits for the force-push approval described above. The
+standing restrictions of the halt section remain in force.
+
+### Resume procedure
+
+The first commands run in a plain shell. The toolchain check runs through
+`direnv exec .` with the private environment:
+
+```bash
+cd /Users/johnw/src/agent-cat/.worktrees/tui
+git status --short --branch
+git log -1 --format='%H %P'
+git rev-parse tui
+git diff HEAD -- . ':!doc/workflow-manager-handoff.md' | shasum -a 256
+shasum -a 256 manager/src/Agentic/Manager/Fault.hs \
+  manager/src/Agentic/Manager/Fault/Record.hs \
+  manager/test/Agentic/Manager/Test/PrivateLog.hs
+direnv exec . bash -c 'source /Users/johnw/Products/k.M0a5ItPm/environment.sh &&
+  cd /Users/johnw/src/agent-cat/.worktrees/tui &&
+  ghc --numeric-version && cabal --numeric-version &&
+  ghc-pkg field crypton-x509-validation version'
+```
+
+Two states are expected. Before the Integrator commits this section, HEAD is
+`290e02323bc1aa091c3547f7197ef48e4209c635`, and the worktree holds the
+uncommitted A5S1C change and this handoff change. After the Integrator
+commits this section and nothing else, HEAD is that commit, its parent is
+`290e02323bc1aa091c3547f7197ef48e4209c635`, and the worktree holds only the
+uncommitted A5S1C change. In both states `tui` is
+`6b7c90b79b47c85d07162bb11d038349dbac9131`, the digest command prints
+`b7bbe942216ea165d114ada63d6be630f4e186e076b96c7010ee1b3812ad3d66`, and the
+three untracked files have the digests that the previous subsection gives.
+Any other result means that the branch or the worktree changed after this
+section was written, and the reader establishes that change before
+continuing. If direnv reports a stale or blocked environment, run `de` in the
+worktree and repeat the check. Rebuild before any binary runs, with the build
+set that A5S1C used:
+
+```bash
+direnv exec . bash -c 'source /Users/johnw/Products/k.M0a5ItPm/environment.sh &&
+  cd /Users/johnw/src/agent-cat/.worktrees/tui &&
+  bash test/cabal.sh build lib:agentic agentic-run routing-fixed-point-probe \
+    manager-client-check manager-profile-probe manager-root-probe \
+    manager-configuration-probe manager-store-check manager-command-check \
+    manager-draft-check manager-worker-check manager-admission-check \
+    manager-approval-check manager-vertical-check manager-artifact-check \
+    manager-history-check tui-model-test \
+    --with-compiler="$(command -v ghc)" --with-hc-pkg="$(command -v ghc-pkg)" \
+    --ghc-options="-Werror -threaded -rtsopts"'
+```
+
+The next work proceeds in this order:
+
+1. Resolve the blocking A5S1C finding and correct the diagnosis record. The
+   Integrator then commits A5S1C and creates the two tracker issues named
+   above.
+2. Resolve the rebase audit follow-ups (A5R).
+3. Diagnose and restore the six red manager gates at their owners (A5G1 and
+   A5G2).
+4. Fix the proven S1 cause at its owner with a regression test, and
+   re-establish the manager-path baselines at N1 and then N8 (A5S2).
+5. Restore the parked A6 diff without its draft handoff, and continue with A6
+   to A14: live progress, the Bool `false` answer, the offered retry, native
+   completion, `Client.downloadVerified` with an exclusive save, and one
+   uninterrupted PTY journey at N1 and then N8 with a broken-step negative
+   control. Documentation follows only after the journey passes.
+6. Record the manager broker amendment (M0). After Phase A is accepted, land
+   its seam (M1) before WM-028.
+
+Run the `fess` audit at the end of every subtask, preserve the first failure of
+any check with its fixture root, and label every result with its evidence
+ceiling.
+
 ## Halt checkpoint of 2026-09-23
 
 The operator requested a clean stopping point, commits, publication and a
