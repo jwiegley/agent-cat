@@ -1,0 +1,90 @@
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TypeApplications #-}
+
+-- | The private fault log and the internal causes that owners below the
+-- command layer record. A record holds fixed words, validated identifiers,
+-- the validated public resource path of a response and constructor or type
+-- names only. It never holds an exception message, request content,
+-- credential, file path or SQL text.
+module Agentic.Manager.Fault.Record
+  ( ManagerFault (..), loanFault, internalLabel, refusalLabel, ioExceptionName,
+    faultLine, recordFaultLine, recordErasure ) where
+
+import Agentic.Manager.Profile (Diagnostic (SupervisionUnavailable))
+import Control.Exception (Exception, IOException, try)
+import qualified Data.ByteString as BS
+import Data.Text (Text)
+import qualified Data.Text as T
+import qualified Data.Text.Encoding as TE
+import Data.Time (UTCTime, getCurrentTime)
+import Data.Time.Format.ISO8601 (iso8601Show)
+import System.IO (stderr)
+import System.IO.Error (ioeGetErrorType)
+
+-- | Internal causes that are neither declared Store failures nor declared
+-- command refusals. Each constructor names one cause and carries no text.
+data ManagerFault
+  = ConfigurationBusy
+    -- ^ A configuration loan found the original configuration guard held by
+    -- another owner. It is a fail-fast refusal and never a wait.
+  | ConfigurationRefused !Diagnostic
+    -- ^ An entered configuration loan ended with this fixed diagnostic.
+  | AuthorizationChanged
+    -- ^ A writable commit advanced the authorization revision during one
+    -- authorization observation.
+  | PageSetCollision
+    -- ^ A fresh page-set identifier was already reserved.
+  | ResponseWriteTimeout
+    -- ^ One bounded response write did not complete within its allowance.
+  | DeadlineElapsed
+    -- ^ One bounded file operation or materialization did not complete within
+    -- its allowance.
+  | AdmissionStopping
+    -- ^ The admission controller fence of the caller was set, because a drain
+    -- or a cancellation had begun.
+  | AdmissionStoreInactive
+    -- ^ The admission controller held no live Store admission, because the
+    -- admission never started or the Store ended it.
+  | AdmissionCapacity
+    -- ^ The admission controller already held its fixed number of operations
+    -- in flight.
+  deriving (Eq, Show)
+instance Exception ManagerFault
+
+-- | The internal cause of one unsuccessful configuration loan. A loan that
+-- could not acquire the original configuration guard reports
+-- 'SupervisionUnavailable'. Every other diagnostic remains distinct.
+loanFault :: Diagnostic -> ManagerFault
+loanFault SupervisionUnavailable = ConfigurationBusy
+loanFault diagnostic = ConfigurationRefused diagnostic
+
+internalLabel :: ManagerFault -> Text
+internalLabel fault = "internal " <> T.pack (show fault)
+
+-- | A family word and a constructor name, for example @store StoreBusy@.
+refusalLabel :: Show a => Text -> a -> Text
+refusalLabel family value = family <> " " <> T.pack (show value)
+
+-- | The type name of an I/O exception and its fixed error type.
+ioExceptionName :: IOException -> Text
+ioExceptionName failure = "IOException " <> T.pack (show (ioeGetErrorType failure))
+
+-- | One private log line. The caller supplies a context of fixed words and
+-- validated public identifiers only.
+faultLine :: UTCTime -> Text -> Text -> Text
+faultLine time context label =
+  "manager-fault " <> T.pack (iso8601Show time) <> " " <> context <> " class=" <> label
+
+-- | Append one line to the private standard error log. The log is not
+-- authoritative, so a failed write changes no coordination outcome and is
+-- deliberately not reported.
+recordFaultLine :: Text -> Text -> IO ()
+recordFaultLine context label = do
+  now <- getCurrentTime
+  written <- try @IOException (BS.hPut stderr (TE.encodeUtf8 (faultLine now context label <> "\n")))
+  either (const (pure ())) pure written
+
+-- | Record the distinct cause at the point where an owner replaces it with a
+-- declared value. The caller then refuses with that declared value unchanged.
+recordErasure :: Text -> Text -> Text -> IO ()
+recordErasure context cause erased = recordFaultLine context (cause <> " erased=" <> erased)

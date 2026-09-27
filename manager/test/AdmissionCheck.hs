@@ -4,6 +4,7 @@
 module Main (main) where
 
 import qualified Agentic.Manager.Test.AcceptanceAudit as Audit
+import Agentic.Manager.Test.PrivateLog (withPrivateStderr, recordCount)
 import Control.Concurrent (throwTo)
 import Control.Exception (AsyncException (UserInterrupt))
 import Agentic.Manager.Admission
@@ -15,6 +16,8 @@ import Agentic.Manager.Drafts
 import Agentic.Manager.Profile hiding (StaleRevision)
 import Agentic.Manager.Protocol.Command
 import Agentic.Manager.Protocol.Draft
+import qualified Agentic.Manager.Service as Service
+import Agentic.Manager.Fault (FaultClass (CommandRefusal, UnexpectedFault))
 import Agentic.Manager.Store
 import qualified Agentic.Manager.Worker as Worker
 import Agentic.Runtime (WorkflowDescriptor (..), FrontendPrepared (..), RunId (..), createProcessGroup, terminateProcessGroup, closeGroupPipes, groupOutput, groupErrors, waitProcessGroup)
@@ -64,6 +67,7 @@ main = do
     ["interrupted-acceptance",work,native] -> interruptedAcceptanceChecks work native
     ["active-retry",work,native] -> activeRetryChecks work native
     ["completion-failure",work,native] -> completionFailureChild work native
+    ["service-faults",work,native,source,python] -> serviceFaultChecks work native source python
     [work,native,source,python] -> do
       policyChecks
       activeRetryChecks work native
@@ -81,6 +85,7 @@ main = do
       saturationChecks work native
       completionFailureChecks work native
       preparingChecks work native source python
+      serviceFaultChecks work native source python
       loanCancellationChecks work native
       commitDeadlineChecks work native
       storeClosureChecks work native
@@ -305,8 +310,10 @@ shutdownChecks work = do
     withAdmissionClock clock owner $ \controller -> do
       result <- await(closeAdmission controller 20)
       assertion "empty healthy drain completes without invented cancellation" (result==ShutdownResult False(Right()))
-      refusal <- admitOldest controller
+      (refusal,drainRecord) <- withPrivateStderr (work </> "shutdown-empty-drain-stderr.log") (admitOldest controller)
       assertion "drain fences new admission" (case refusal of Left StorageUnavailable -> True; _ -> False)
+      assertion "a drained controller is recorded as stopping"
+        (recordCount drainRecord "admission operation class=internal AdmissionStopping erased=command StorageUnavailable"==1)
       repeated <- shutdownAdmission controller CancelNow
       assertion "completed shutdown result is immutable" (repeated==result)
     withAdmissionClock clock owner $ \controller -> do
@@ -447,8 +454,11 @@ shutdownNativeChecks work native = do
                   _ -> threadDelay 1000 >> waiting
           await waiting
           pure task
-        refused <- withReviewAcceptance live(\_ _ -> error "seventeenth operation entered")
+        (refused,capacityRecord) <- withPrivateStderr (work </> ("shutdown-capacity-" <> show expiry <> "-stderr.log"))
+          (withReviewAcceptance live(\_ _ -> error "seventeenth operation entered"))
         assertion "sixteen actual Admission operation slots are occupied" (case refused of Left StorageUnavailable -> True; _ -> False)
+        assertion "a full operation table is recorded as admission capacity"
+          (recordCount capacityRecord "admission operation class=internal AdmissionCapacity erased=command StorageUnavailable"==1)
         cancel first
         withCommitDeadline owner (putMVar held () >> readMVar releaseSQL >> pure 0) 1 $ \guard -> do
           holder <- async(runTransaction owner(enforceCommitDeadline guard >> pure((),[])))
@@ -620,8 +630,11 @@ viewNow (Fixture _ _ owner _ proofs) credential ident=readDraft owner(proofs!!cr
 lifecycleChecks :: FilePath -> FilePath -> IO ()
 lifecycleChecks work native=withFixture work native "lifecycle" 2 [("a",[]),("b",[]),("c",["unclassified"])] $ \fixture@(Fixture root _ owner _ proofs)->
   withAdmission owner $ \controller->do
-    duplicateOwner<-try @CommandFailure(withAdmission owner(const(error "duplicate admission callback")))
+    (duplicateOwner,duplicateRecord)<-withPrivateStderr(work </> "lifecycle-duplicate-stderr.log")
+      (try @CommandFailure(withAdmission owner(const(error "duplicate admission callback"))))
     assertion "one actual Store permits only one scoped admission owner" (case duplicateOwner of Left StorageUnavailable->True;_->False)
+    assertion "a controller without a live Store admission is recorded as inactive"
+      (recordCount duplicateRecord "admission fence class=internal AdmissionStoreInactive erased=command StorageUnavailable"==1)
     a<-newDraft fixture 0 "a" "a"
     b<-newDraft fixture 1 "b" "b"
     c<-newDraft fixture 2 "c" "c"
@@ -640,6 +653,11 @@ lifecycleChecks work native=withFixture work native "lifecycle" 2 [("a",[]),("b"
     number owner "SELECT count(*) FROM reservations WHERE state='held'" >>=assertion "review occupies both global slots" . (==2)
     number owner "SELECT count(*) FROM preparations" >>=assertion "native observation is not a fabricated public review" . (==0)
     forM_ [preparedA,preparedC] $ \review->doesDirectoryExist(root </> "runs" </> "runs" </> T.unpack(runIdText(preparedRunId(reviewNative review)))) >>=assertion "review has no started native run directory" . not
+    (contendedLoan,loanRecord)<-withPrivateStderr(work </> "lifecycle-configured-stderr.log")
+      (withStoreConfiguration owner(\_ _->withReviewAcceptance first(\_ _->error "contended review acceptance entered")))
+    assertion "held configuration refuses review acceptance with the declared refusal" (contendedLoan==Right(Left StorageUnavailable :: Either CommandFailure ()))
+    assertion "review acceptance records configuration contention"
+      (recordCount loanRecord "admission configured class=internal ConfigurationBusy erased=command StorageUnavailable"==1)
     withReviewAcceptance first (\review _->pure(reviewReservation review)) >>=right >>=assertion "guarded handoff loans original association" . (==reservationIdentity first)
     number owner "SELECT count(*) FROM reservations WHERE state='held'" >>=assertion "returning handoff retains occupancy" . (==2)
     retry<-enqueueRequest controller(proofs!!0)(draftId a)enqueueKey(etag a)(body "enqueue")>>=right
@@ -660,6 +678,11 @@ lifecycleChecks work native=withFixture work native "lifecycle" 2 [("a",[]),("b"
     assertion "escaped invalidated loan cannot be reused" (case rejectedLoan of Left _->True;_->False)
     currentC<-viewNow fixture 2(draftId c)
     withdrawKey<-key owner "live_withdraw"
+    (contendedWithdraw,withdrawRecord)<-withPrivateStderr(work </> "lifecycle-profile-revision-stderr.log")
+      (withStoreConfiguration owner(\_ _->withdrawRequest controller(proofs!!2)(draftId c)withdrawKey(etag currentC)(body "withdraw")))
+    assertion "held configuration refuses withdrawal with the declared refusal" (fmap(fmap(const()))contendedWithdraw==Right(Left StorageUnavailable))
+    assertion "withdrawal records configuration contention"
+      (recordCount withdrawRecord "admission profile-revision class=internal ConfigurationBusy erased=command StorageUnavailable"==1)
     withdrawal<-withdrawRequest controller(proofs!!2)(draftId c)withdrawKey(etag currentC)(body "withdraw")>>=right
     await(awaitAdmissionCleanup second)>>=right
     retryWithdrawal<-withdrawRequest controller(proofs!!2)(draftId c)withdrawKey(etag currentC)(body "withdraw")>>=right
@@ -861,7 +884,13 @@ completionFailureChecks work native=do
     diagnostic<-BS.hGetSome errors 65536
     BS.writeFile(private </> "stdout.log") bytes
     BS.writeFile(private </> "stderr.log") diagnostic
-    assertion "owned child verifies failed completion report and retained lease" (status==ExitSuccess && "PASS completion-report quarantine" `BS.isInfixOf` bytes && BS.null diagnostic)
+    -- The child's standard error is the private fault log. It holds only the
+    -- record of the worker cause that the failed preparation replaced.
+    let recorded=T.lines(TE.decodeUtf8 diagnostic)
+        workerCause line="manager-fault " `T.isPrefixOf` line && " admission preparation reservation_" `T.isInfixOf` line
+          && " class=worker WorkerCleanupUnproven erased=command StorageUnavailable" `T.isSuffixOf` line
+    assertion "owned child verifies failed completion report and retained lease" (status==ExitSuccess && "PASS completion-report quarantine" `BS.isInfixOf` bytes)
+    assertion "owned child records only the worker cause of its failed preparation" (length recorded==1 && all workerCause recorded)
 
 completionFailureChild :: FilePath -> FilePath -> IO ()
 completionFailureChild work native=do
@@ -951,6 +980,212 @@ preparingChecks work native source python=do
     number owner "SELECT count(*) FROM reservations WHERE state!='released'" >>=assertion "edit interrupts and joins actual constructing process" . (==0)
     observation<-await(awaitReview live)
     assertion "cancelled construction never fabricates native preparation" (case observation of Left _->True;_->False)
+
+-- One service preparation fails in native startup. The request is queued by
+-- an earlier admission scope, so the first admission poll of the service
+-- admits it and no caller operation runs beside that poll. The admission
+-- owner records the worker cause that it replaces with the declared refusal,
+-- and the service records the preparation that ended with that refusal. A
+-- second service then meets a held Store write lock at its first admission
+-- poll and records that poll refusal. A third service approves one
+-- preparation whose first runtime ingestion fails in the Store, and records
+-- the Store class of that failure. A fourth service approves one preparation
+-- whose stored run association is undecodable, and records the unexpected
+-- class of that ingestion failure. A fifth service meets undecodable Store
+-- text at its first admission poll, and records the unexpected class of that
+-- uncaught poll failure.
+serviceFaultChecks :: FilePath -> FilePath -> FilePath -> FilePath -> IO ()
+serviceFaultChecks work native source python=do
+  let evidence=work </> "service-faults.ndjson"
+      captured=work </> "service-faults-stderr.log"
+  withFixtureUsing work python [source </> "manager/test/worker_fixture.py",native,"startup-exit",evidence] "service-faults" 1 [("a",[])] $ \fixture@(Fixture root _ owner _ _)->do
+    draft<-newDraft fixture 0 "a" "service_faults"
+    _<-withAdmission owner $ \controller->enqueue controller fixture 0 draft "service_faults"
+    -- The wait reads through a separate SQLite connection, so it takes no
+    -- Store guard and writes no private line. The service scope then joins
+    -- the preparation task, which records after original-owner cleanup.
+    let released=do
+          rows<-bracket(SQL.open(T.pack(root </> "coordination.sqlite3")))SQL.close $ \database->do
+            statement<-SQL.prepare database "SELECT count(*) FROM reservations WHERE state='released'"
+            (SQL.step statement>>SQL.columns statement) `finally` SQL.finalize statement
+          unless(rows==[SQL.SQLInteger 1])(threadDelay 1000>>released)
+    (_,recorded)<-withPrivateStderr captured $ Service.withService owner $ \_->await released
+    reservation<-scalarText owner "SELECT id FROM reservations"
+    number owner "SELECT count(*) FROM reservations WHERE state!='released'" >>=assertion "a failed service preparation releases its reservation" . (==0)
+    assertion "the admission owner records the worker cause of a failed preparation"
+      (recordCount recorded("admission preparation "<>reservation<>" class=worker WorkerPreparedFraming erased=command StorageUnavailable")==1)
+    assertion "the service records the preparation that ended with the declared refusal"
+      (recordCount recorded("service preparation "<>reservation<>" class=command StorageUnavailable")==1)
+    -- A later poll of the same service may meet a Store operation of the
+    -- starting preparation and refuse fail-fast. That refusal writes its own
+    -- two classified lines and nothing else.
+    let pollCollision line=any(`T.isSuffixOf` line)
+          [" admission operation class=store StoreBusy erased=command StorageUnavailable"," service admission-poll class=command StorageUnavailable"]
+        preparationLine line=any(`T.isSuffixOf` line)
+          [" admission preparation "<>reservation<>" class=worker WorkerPreparedFraming erased=command StorageUnavailable",
+           " service preparation "<>reservation<>" class=command StorageUnavailable"]
+    assertion "every private line is one of the two preparation records or a classified admission-poll refusal"
+      (all(\line->"manager-fault " `T.isPrefixOf` line && (preparationLine line || pollCollision line))(T.lines(TE.decodeUtf8 recorded)))
+  -- A separate SQLite connection holds the Store write lock before the
+  -- service starts, and the queue is empty. Service startup only reads, which
+  -- write-ahead logging permits beside the held lock. The first admission poll
+  -- opens a write transaction, meets the held lock, and the admission
+  -- operation replaces that Store failure with the declared refusal. The
+  -- service keeps the refusal in its fault cell and records it once. No
+  -- notification follows, so no second poll runs while the lock is held.
+  let pollCaptured=work </> "service-poll-stderr.log"
+      faulted service=Service.serviceFault service>>=maybe(threadDelay 1000>>faulted service)pure
+  withFixture work native "service-poll" 1 [("a",[])] $ \(Fixture root _ owner _ _)->do
+    (observed,recorded)<-withPrivateStderr pollCaptured $
+      bracket(SQL.open(T.pack(root </> "coordination.sqlite3")))SQL.close $ \database->do
+        SQL.exec database "BEGIN IMMEDIATE"
+        Service.withService owner $ \service->do
+          fault<-await(faulted service)
+          SQL.exec database "ROLLBACK"
+          pure fault
+    assertion "the service keeps the admission-poll refusal in its fault cell" (observed==CommandRefusal StorageUnavailable)
+    assertion "the service records the admission-poll refusal"
+      (recordCount recorded " service admission-poll class=command StorageUnavailable"==1)
+    assertion "the admission operation records the Store failure that the poll refusal replaces"
+      (recordCount recorded " admission operation class=store StoreUnavailable erased=command StorageUnavailable"==1)
+    assertion "the poll refusal writes only these two private lines"
+      (length(T.lines(TE.decodeUtf8 recorded))==2)
+  -- A third service prepares one request and approves it through the service.
+  -- Before the approval, a separate SQLite connection installs a trigger that
+  -- aborts every insert into the ingestion table, so the first runtime
+  -- ingestion of the approved run fails in SQLite. The Store replaces that
+  -- SQLite error with its StoreUnavailable failure. The ingestion loop of
+  -- the service retries only StoreBusy, so the Store failure ends the service
+  -- preparation, and the service records its Store class. This input differs
+  -- from the declared storage-unavailable refusal of the first fixture.
+  -- The same approval sequence serves the fourth service below with another
+  -- trigger. The function returns the reservation, the approval receipt and
+  -- the captured private log.
+  let approvedIngestion name trigger repair=withFixture work native name 1 [("a",[])] $ \fixture@(Fixture root _ owner _ proofs)->do
+        let suffix=T.replace "-" "_" (T.pack name)
+        draft<-newDraft fixture 0 "a" suffix
+        _<-withAdmission owner $ \controller->enqueue controller fixture 0 draft suffix
+        approveKey<-key owner (suffix<>"_approve")
+        -- The reads use a separate read-only SQLite connection, so they take no
+        -- Store guard and write no private line.
+        let rawRows statement parameters=bracket(SQL.open2(T.pack(root </> "coordination.sqlite3"))[SQL.SQLOpenReadOnly,SQL.SQLOpenFullMutex,SQL.SQLOpenNoFollow]SQL.SQLVFSDefault)SQL.close $ \database->
+              bracket(SQL.prepare database statement)SQL.finalize $ \query'->do
+                SQL.bind query' parameters
+                let rowsFrom=SQL.step query'>>= \step->if step==SQL.Row then (:) <$> SQL.columns query' <*> rowsFrom else pure []
+                rowsFrom
+            published=rawRows "SELECT p.id,p.revision,p.request_revision,p.profile_revision,r.descriptor_revision,p.process_generation,p.review_digest FROM preparations p JOIN requests r ON r.id=p.request_id WHERE p.request_id=? AND p.state='live'" [SQL.SQLText(draftId draft)]
+              >>= \rows->case rows of
+                [[SQL.SQLText ident,SQL.SQLText revision,SQL.SQLText requestRevision,SQL.SQLText profileRevision,SQL.SQLText descriptorRevision,SQL.SQLText generation,SQL.SQLText digest']]->
+                  pure(ident,Just("\""<>revision<>"\""),encoded(object["operation" .= ("approve"::Text),"reviewDigest" .= digest',"requestRevision" .= requestRevision,
+                    "profileRevision" .= profileRevision,"descriptorRevision" .= descriptorRevision,"processGeneration" .= generation]))
+                _->threadDelay 1000>>published
+            released=rawRows "SELECT count(*) FROM reservations WHERE state='released'" []
+              >>= \rows->unless(rows==[[SQL.SQLInteger 1]])(threadDelay 1000>>released)
+            writable statement=bracket(SQL.open(T.pack(root </> "coordination.sqlite3")))SQL.close(`SQL.exec` statement)
+        (receipt,recorded)<-withPrivateStderr(work </> (name<>"-stderr.log")) $ Service.withService owner $ \service->do
+          (ident,precondition,approval)<-await published
+          writable trigger
+          -- The service publishes the preparation row before it holds the
+          -- reviewed preparation. Until then an approval takes the replay path,
+          -- which finds no receipt for this key and refuses before any mutation.
+          let approved=Service.approve service(proofs!!0)ident approveKey precondition approval>>= \outcome->case outcome of
+                Left OwnershipUnavailable->threadDelay 1000>>approved
+                _->right outcome
+          accepted<-await approved
+          await released
+          mapM_ writable repair
+          pure accepted
+        reservation<-scalarText owner "SELECT id FROM reservations"
+        ingestions<-number owner "SELECT count(*) FROM ingestions"
+        pure(reservation,receipt,ingestions,recorded)
+      pollCollision line=any(`T.isSuffixOf` line)
+        [" admission operation class=store StoreBusy erased=command StorageUnavailable"," service admission-poll class=command StorageUnavailable"]
+  (reservation,receipt,ingestions,ingestionRecorded)<-approvedIngestion "service-ingestion"
+    "CREATE TRIGGER fail_ingestion BEFORE INSERT ON ingestions BEGIN SELECT RAISE(ABORT,'controlled ingestion failure'); END" Nothing
+  assertion "the service accepts the approval of its own reviewed preparation" (receiptOperation receipt==Approve)
+  assertion "the aborted runtime ingestion stores no ingestion" (ingestions==0)
+  assertion "the service records the Store class of a failed runtime ingestion"
+    (recordCount ingestionRecorded("service preparation "<>reservation<>" class=store StoreUnavailable")==1)
+  assertion "the service does not record a failed runtime ingestion as the declared refusal"
+    (recordCount ingestionRecorded("service preparation "<>reservation<>" class=command StorageUnavailable")==0)
+  let ingestionLine line=(" service preparation "<>reservation<>" class=store StoreUnavailable") `T.isSuffixOf` line
+  assertion "every private line is the ingestion record or a classified admission-poll refusal"
+    (all(\line->"manager-fault " `T.isPrefixOf` line && (ingestionLine line || pollCollision line))(T.lines(TE.decodeUtf8 ingestionRecorded)))
+  -- A fourth service approves one preparation whose run row receives a
+  -- profile identifier that is not UTF-8. The Store never writes such a
+  -- value, so a trigger installed by a separate SQLite connection rewrites the
+  -- column when the approval inserts the run. The start association compares
+  -- the root and native run identities of that row, not its profile. The
+  -- first reader that decodes the profile is the association check of the
+  -- first runtime ingestion, and the SQLite binding raises a Unicode decoding
+  -- exception. No Store, Worker or ingestion owner converts that exception
+  -- type, so it ends the service preparation with its unexpected class. This
+  -- input differs from the declared refusal and from every Store class. The
+  -- separate connection restores the profile from the request row after the
+  -- reservation is released.
+  (undecodable,decodingReceipt,decodingIngestions,decodingRecorded)<-approvedIngestion "service-association"
+    "CREATE TRIGGER undecodable_run AFTER INSERT ON runs BEGIN UPDATE runs SET profile_id=CAST(X'C0FF' AS TEXT) WHERE id=NEW.id; END"
+    (Just "UPDATE runs SET profile_id=(SELECT q.profile_id FROM requests q WHERE q.id=runs.request_id)")
+  assertion "the service accepts the approval of a run whose stored association is undecodable" (receiptOperation decodingReceipt==Approve)
+  assertion "the undecodable run association stores no ingestion" (decodingIngestions==0)
+  assertion "the service records the unexpected class of an undecodable run association"
+    (recordCount decodingRecorded("service preparation "<>undecodable<>" class=unexpected UnicodeException")==1)
+  assertion "the service records no other class for the preparation of an undecodable run association"
+    (recordCount decodingRecorded("service preparation "<>undecodable<>" class=unexpected UnicodeException")
+      ==length(filter(T.isInfixOf("service preparation "<>undecodable<>" class="))(T.lines(TE.decodeUtf8 decodingRecorded))))
+  let decodingLine line=(" service preparation "<>undecodable<>" class=unexpected UnicodeException") `T.isSuffixOf` line
+  assertion "every private line is the undecodable association record or a classified admission-poll refusal"
+    (all(\line->"manager-fault " `T.isPrefixOf` line && (decodingLine line || pollCollision line))(T.lines(TE.decodeUtf8 decodingRecorded)))
+  assertion "the private record of an undecodable run association holds no exception message"
+    (not(any(`T.isInfixOf` TE.decodeUtf8 decodingRecorded)["UTF-8","columnText","Invalid"]))
+  -- A fifth service meets a queued request whose workflow identifier holds
+  -- bytes that are not UTF-8. The Store never writes such a value, so a
+  -- separate SQLite connection writes it before the service starts. The
+  -- startup reconciliation of an admission scope reads every draft or queued
+  -- request that holds a restart binding, so the connection also removes the
+  -- restart binding of this request. The first reader of the value is then
+  -- the queue read of the first admission poll. It reads inside the poll
+  -- transaction, and the SQLite binding raises a Unicode decoding exception.
+  -- No Store, configuration or admission owner converts that exception type,
+  -- so it reaches the uncaught branch of the service poll. The service
+  -- records the unexpected class and keeps it in its fault cell. The poll
+  -- transaction ends without a commit, so the poll admits nothing. No
+  -- notification follows, so no second poll runs. The separate connection
+  -- restores the original value before the service scope ends.
+  let decodingCaptured=work </> "service-decoding-stderr.log"
+  withFixture work native "service-decoding" 1 [("a",[])] $ \fixture@(Fixture root _ owner _ _)->do
+    draft<-newDraft fixture 0 "a" "service_decoding"
+    _<-withAdmission owner $ \controller->enqueue controller fixture 0 draft "service_decoding"
+    let rewrite statement parameters=bracket(SQL.open(T.pack(root </> "coordination.sqlite3")))SQL.close $ \database->
+          bracket(SQL.prepare database statement)SQL.finalize $ \update->do
+            SQL.bind update(parameters<>[SQL.SQLText(draftId draft)])
+            done<-SQL.step update
+            unless(done==SQL.Done)(error "the separate connection did not complete its update")
+            SQL.changes database
+    workflow<-runRead owner $ query "SELECT workflow_id FROM requests WHERE id=?" [SQL.SQLText(draftId draft)] >>= \rows->case rows of
+      [[SQL.SQLText value]]->pure value
+      _->refuseTransaction StoreIntegrity
+    unbound<-rewrite "DELETE FROM request_restart_bindings WHERE request_id=?" []
+    corrupted<-rewrite "UPDATE requests SET workflow_id=CAST(X'C0FF' AS TEXT) WHERE id=? AND phase='queued'" []
+    assertion "the separate connection stores undecodable text in the queued request" (unbound==1 && corrupted==1)
+    (observed,recorded)<-withPrivateStderr decodingCaptured $ Service.withService owner $ \service->do
+      fault<-await(faulted service)
+      restored<-rewrite "UPDATE requests SET workflow_id=? WHERE id=?" [SQL.SQLText workflow]
+      unless(restored==1)(error "the separate connection did not restore the queued request")
+      pure fault
+    assertion "the service keeps the unexpected class of an uncaught poll failure in its fault cell"
+      (observed==UnexpectedFault "UnicodeException")
+    assertion "the service records the unexpected class of an uncaught poll failure"
+      (recordCount recorded " service admission-poll class=unexpected UnicodeException"==1)
+    assertion "the service does not record an uncaught poll failure as the declared refusal"
+      (recordCount recorded " service admission-poll class=command StorageUnavailable"==0)
+    assertion "the uncaught poll failure writes only its own private line"
+      (length(T.lines(TE.decodeUtf8 recorded))==1)
+    assertion "the private record of the uncaught poll failure holds no exception message"
+      (not(any(`T.isInfixOf` TE.decodeUtf8 recorded)["UTF-8","columnText","Invalid"]))
+    queued<-number owner "SELECT count(*) FROM requests WHERE phase='queued'"
+    reservations<-number owner "SELECT count(*) FROM reservations"
+    assertion "the uncaught poll failure admits nothing" (queued==1 && reservations==0)
 
 loanCancellationChecks :: FilePath -> FilePath -> IO ()
 loanCancellationChecks work native=withFixture work native "loan-cancellation" 1 [("a",[])] $ \fixture@(Fixture _ _ owner _ _)->do

@@ -18,6 +18,7 @@ import Agentic.Manager.Admission.Policy
 import Agentic.Manager.Authorization
 import Agentic.Manager.Commands
 import Agentic.Manager.Drafts
+import Agentic.Manager.Fault (FaultClass (InternalFault, StoreRefusal), ManagerFault (..), configurationLoan, recordUndeclaredRefusal, refuseStorageUnavailable)
 import Agentic.Manager.Profile
   (ConfigurationLimits (..), Discovery, discoverySelection, discoveryProfileRevision,
    discoveryRevision, discoveryEntries, selectionContext, Selection, OperatorProfile (..), publicId, publicRevision)
@@ -201,11 +202,19 @@ ensureController controller = ensureOpen controller (closed controller)
 ensureRunController :: Admission -> IO ()
 ensureRunController controller = ensureOpen controller (cancelled controller)
 
+-- A closed fence or an inactive Store admission keeps the declared
+-- storage-unavailable refusal, and its distinct cause is recorded privately.
 ensureOpen :: Admission -> TVar Bool -> IO ()
-ensureOpen controller fence = atomically $ do
+ensureOpen controller fence =
+  atomically (controllerFault controller fence) >>= mapM_ (refuseStorageUnavailable "admission fence" . InternalFault)
+
+-- The controller fence is observed before the Store admission, so a
+-- controller that drains after its Store admission ended reports stopping.
+controllerFault :: Admission -> TVar Bool -> STM (Maybe ManagerFault)
+controllerFault controller fence = do
   stopping <- readTVar fence
   active <- readTVar(liveStore controller) >>= id
-  unless (not stopping && active) (throwSTM StorageUnavailable)
+  pure $ if stopping then Just AdmissionStopping else if active then Nothing else Just AdmissionStoreInactive
 
 -- A cancelled caller abandons only its wait, not the retained acceptance/cleanup job.
 operation :: Admission -> IO a -> IO (Either CommandFailure a)
@@ -215,19 +224,23 @@ operation controller = operationWithFence controller (closed controller)
 runOperation :: Admission -> IO a -> IO (Either CommandFailure a)
 runOperation controller = operationWithFence controller (cancelled controller)
 
+-- A closed fence, an inactive Store admission, a full operation table and a
+-- Store failure inside the operation each keep the declared
+-- storage-unavailable refusal, and each distinct cause is recorded privately
+-- first.
 operationWithFence :: Admission -> TVar Bool -> IO a -> IO (Either CommandFailure a)
 operationWithFence controller fence action = do
   outcome <- try @CommandFailure $ mask $ \restore -> do
     slot <- newEmptyTMVarIO
     start <- newEmptyTMVarIO
     result <- newEmptyTMVarIO
-    atomically $ do
-      stopping <- readTVar fence
-      active <- readTVar(liveStore controller) >>= id
-      unless (not stopping && active) (throwSTM StorageUnavailable)
+    refused <- atomically $ do
+      fault <- controllerFault controller fence
       current <- readTVar(operations controller)
-      when(length current>=16)(throwSTM StorageUnavailable)
-      writeTVar(operations controller)(slot:current)
+      let refusal = maybe (if length current>=16 then Just AdmissionCapacity else Nothing) Just fault
+      when (refusal == Nothing) (writeTVar(operations controller)(slot:current))
+      pure refusal
+    forM_ refused (refuseStorageUnavailable "admission operation" . InternalFault)
     worker <- (async $ (do
       atomically(readTMVar start)
       value <- try @SomeException action
@@ -236,7 +249,7 @@ operationWithFence controller fence action = do
         atomically(putTMVar slot Nothing >> modifyTVar'(operations controller)(filter (/=slot)))
     atomically(putTMVar slot (Just worker) >> putTMVar start ())
     restore(atomically(readTMVar result)) >>= either (\failure -> case fromException failure :: Maybe StoreFailure of
-      Just _ -> throwIO StorageUnavailable
+      Just stored -> refuseStorageUnavailable "admission operation" (StoreRefusal stored)
       Nothing -> throwIO failure) pure
   pure outcome
 
@@ -352,7 +365,7 @@ pollAdmission controller = operation controller $ locked controller $ do
     pure (selected,permits,reservation,generation)
   case attempted of
     Nothing -> pure AdmissionDeferred
-    Just (Left _) -> throwIO StorageUnavailable
+    Just (Left diagnostic) -> configurationLoan "admission poll" (Left diagnostic)
     Just (Right (Nothing,_,_,_)) -> pure AdmissionIdle
     Just (Right (Just(ident,profile,policy),permits,reservation,generation)) -> do
       permit <- maybe(throwIO StateConflict)pure(Map.lookup ident permits)
@@ -482,8 +495,7 @@ runEntry controller entry = do
       void(tryPutTMVar(entryReview entry)(Left StateConflict))
       void(tryPutTMVar(entryResult entry)(Right ()))
     Left failure -> do
-      let reason=classify failure
-      atomically(void(tryPutTMVar(entryReview entry)(Left reason)))
+      atomically(void(tryPutTMVar(entryReview entry)(Left(classify failure))))
       worker <- atomically(tryReadTMVar(entryWorker entry))
       began <- readTVarIO constructing
       final <- tryCommand $ do
@@ -499,6 +511,10 @@ runEntry controller entry = do
           Right () -> atomically(writeTVar(entryCleanupConfirmed entry)True)
         either throwIO (const(finalizeKnown controller entry)) selected
       atomically(void(tryPutTMVar(entryResult entry)final))
+      -- The private record of the cause that the declared refusal replaces
+      -- follows the review release, original-owner cleanup and the result, so
+      -- a slow log write cannot delay any of them.
+      recordUndeclaredRefusal ("admission preparation "<>entryReservation entry) failure
 
 -- Select after acquiring the gate, so an accepted mutation cannot be overtaken
 -- by a cleanup continuation that read its pending state before the commit.
@@ -1178,9 +1194,9 @@ dbRead controller action = runRead(store controller)action
 dbChange :: NFData a => Admission -> Transaction (a,[Invalidation]) -> IO a
 dbChange controller action = runTransaction(store controller)action
 configured :: Admission -> (ConfigurationLimits -> [(Text,Discovery)] -> IO a) -> IO a
-configured controller action = withStoreCatalogues(store controller)(\limits _ catalogues->action limits catalogues) >>= either(const(throwIO StorageUnavailable))pure
+configured controller action = withStoreCatalogues(store controller)(\limits _ catalogues->action limits catalogues) >>= configurationLoan "admission configured"
 profileRevisionNow :: Admission -> Text -> IO Text
-profileRevisionNow controller ident = withStoreConfiguration(store controller)(\_ profiles->case [publicRevision p|p<-profiles,publicId p==ident]of [value]->pure value;_->throwIO Forbidden) >>= either(const(throwIO StorageUnavailable))pure
+profileRevisionNow controller ident = withStoreConfiguration(store controller)(\_ profiles->case [publicRevision p|p<-profiles,publicId p==ident]of [value]->pure value;_->throwIO Forbidden) >>= configurationLoan "admission profile-revision"
 requireBody :: Text -> BS.ByteString -> IO ()
 requireBody name bytes = do
   unless(BS.length bytes<=2097152)(throwIO SizeLimit)

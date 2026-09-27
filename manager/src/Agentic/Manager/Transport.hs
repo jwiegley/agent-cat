@@ -10,17 +10,18 @@ module Agentic.Manager.Transport
 
 import Agentic.Manager.Authorization (CredentialProof, authenticateCredential)
 import Agentic.Manager.Configuration (HttpsConfiguration (..))
+import Agentic.Manager.Fault (FaultClass, ManagerFault (ResponseWriteTimeout), classifyFault, faultProblem, recordFault)
 import Agentic.Manager.Profile (ConfigurationLimits (..))
-import Agentic.Manager.Protocol.Command (CommandFailure (..), failureCode, failureStatus, encoded, validResource)
+import Agentic.Manager.Protocol.Command (CommandFailure (..), encoded, validResource)
 import Agentic.Manager.Protocol.Json (decodeStrictValue)
-import Agentic.Manager.Store (CoordinationStore, StoreFailure)
+import Agentic.Manager.Store (CoordinationStore)
 import Agentic.Runtime (readPrivateConfigurationFile)
 import Control.Concurrent (forkIOWithUnmask)
 import Control.Concurrent.QSem (newQSem, waitQSem, signalQSem)
 import Control.Exception
   (Exception, SomeException, SomeAsyncException, bracket, catch,
    finally, fromException, mask, onException, throwIO)
-import Control.Monad (replicateM_, unless, void, when)
+import Control.Monad (forM_, replicateM_, unless, void, when)
 import Data.Aeson (Value, object, (.=))
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BC
@@ -90,6 +91,9 @@ runHttps configuration limits application = do
 
 -- | Authenticate resource requests after bounded framing and exact origin checks.
 -- Only policy-conforming preflight is unauthenticated, and it exposes no state.
+-- A refusal with a 5xx status, and any failure after the response started, is
+-- recorded privately with its distinct class. The public problem never
+-- carries that class or any exception text.
 authenticated :: HttpsConfiguration -> CoordinationStore
   -> ([Text] -> [HTTP.Method]) -> AuthenticatedApplication -> Wai.Application
 authenticated configuration store methods application request respond = do
@@ -97,9 +101,12 @@ authenticated configuration store methods application request respond = do
   let send response = writeIORef started True >> respond (withCors response)
   handle send `catch` \failure -> do
     sent <- readIORef started
-    if sent then throwIO failure else case fromException failure :: Maybe SomeAsyncException of
+    case fromException failure :: Maybe SomeAsyncException of
       Just asynchronous -> throwIO asynchronous
-      Nothing -> send (failureResponse failure)
+      Nothing -> do
+        let (status, code, classified) = failureResponse failure
+        forM_ classified $ \fault -> when (sent || status >= 500) (recordFault (context sent status code) fault)
+        if sent then throwIO failure else send (problem safeInstance status code)
   where
     headers = Wai.requestHeaders request
     path = Wai.pathInfo request
@@ -107,9 +114,10 @@ authenticated configuration store methods application request respond = do
     origin = lookup "Origin" headers
     allowedOrigin = maybe True (`elem` map TE.encodeUtf8 (httpsAllowedOrigins configuration)) origin
     allowedMethods = methods path
-    safeInstance = case TE.decodeUtf8' (Wai.rawPathInfo request) of
-      Right value | validResource value -> value
-      _ -> "/v1/capabilities"
+    validPath = case TE.decodeUtf8' (Wai.rawPathInfo request) of
+      Right value | validResource value -> Just value
+      _ -> Nothing
+    safeInstance = maybe "/v1/capabilities" id validPath
     protected = [("Cache-Control","no-store"),("X-Content-Type-Options","nosniff"),("Vary","Origin")]
     withCors = Wai.mapResponseHeaders $ \old -> protected <>
       (case origin of
@@ -163,14 +171,19 @@ authenticated configuration store methods application request respond = do
       send (Wai.responseLBS HTTP.status204
         [("Access-Control-Allow-Methods",requested),
          ("Access-Control-Allow-Headers",BC.intercalate ", " requestedHeaders)] "")
-    failureResponse :: SomeException -> Wai.Response
+    failureResponse :: SomeException -> (Int, Text, Maybe FaultClass)
     failureResponse failure = case fromException failure of
-      Just (HttpFailure status code) -> problem safeInstance status code
-      Nothing -> case fromException failure of
-        Just refusal -> problem safeInstance (failureStatus refusal) (failureCode refusal)
-        Nothing -> case fromException failure :: Maybe StoreFailure of
-          Just _ -> problem safeInstance 503 "storage-unavailable"
-          Nothing -> problem safeInstance 503 "storage-unavailable"
+      Just (HttpFailure status code) -> (status, code, Nothing)
+      Nothing -> let fault = classifyFault failure; (status, code) = faultProblem fault in (status, code, Just fault)
+    -- Fixed words and the validated resource path only. An invalid path is
+    -- recorded as the fixed word invalid-path, not as the public fallback.
+    context sent status code = "response " <> knownMethod <> " " <> maybe "invalid-path" id validPath
+      <> (if sent then " started" else " unstarted") <> " public=" <> T.pack (show (status :: Int)) <> " " <> code
+    knownMethod = case method of
+      "GET" -> "GET"
+      "POST" -> "POST"
+      "OPTIONS" -> "OPTIONS"
+      _ -> "other"
     trim = BC.dropWhile (== ' ') . BC.dropWhileEnd (== ' ')
 
 readJsonRequest :: Wai.Request -> IO BS.ByteString
@@ -216,7 +229,7 @@ respondBytes status headers authorize bytes respond = do
     let send chunk = do
           authorize
           outcome <- timeout 5000000 (write (Builder.byteString chunk) >> flush)
-          maybe (throwIO (HttpFailure 503 "storage-unavailable")) pure outcome
+          maybe (throwIO ResponseWriteTimeout) pure outcome
         chunks value | BS.null value = pure ()
                      | otherwise = let (chunk,rest) = BS.splitAt 16384 value in send chunk >> chunks rest
     chunks bytes

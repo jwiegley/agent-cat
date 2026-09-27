@@ -8,6 +8,7 @@ module Agentic.Manager.Approval
 
 import Agentic.Manager.Admission
 import Agentic.Manager.Drafts (checkLineageParent, assemblyParentBinding)
+import Agentic.Manager.Fault (configurationLoan, storeFailureRefusal)
 import Agentic.Manager.Admission.Policy (Resource (..), effectiveResources)
 import Agentic.Manager.Authorization
 import Agentic.Manager.Commands
@@ -42,7 +43,7 @@ reviewedView :: ReviewedPreparation -> P.Preparation
 reviewedView (ReviewedPreparation _ _ public _) = public
 
 publishReview :: CoordinationStore -> LivePreparation -> IO (Either CommandFailure ReviewedPreparation)
-publishReview store live = attempt $ withReviewAcceptance live $ \context guard -> do
+publishReview store live = attempt "approval publish-review" $ withReviewAcceptance live $ \context guard -> do
   (workflow,descriptor,expires) <- runRead store $ do
     rows<-query "SELECT r.workflow_id,r.descriptor_revision,o.review_expires_at FROM requests r JOIN admission_observations o ON o.reservation_id=? WHERE r.id=? AND o.state='prepared'"
       [text(reviewReservation context),text(reviewRequest context)]
@@ -92,14 +93,14 @@ publishReview store live = attempt $ withReviewAcceptance live $ \context guard 
         execute "UPDATE reservations SET request_revision=? WHERE id=?" [text requestRevision,text(reviewReservation context)]
         pure((view,privateBytes),[Invalidation "preparation.changed" (preparationURI ident) revision,Invalidation "request.changed" (requestURI(reviewRequest context))requestRevision])
       _->refuseTransaction StateConflict
-  (view,binding)<-either(const(throwIO StorageUnavailable))pure published
+  (view,binding)<-configurationLoan "approval publish-review" published
   pure(ReviewedPreparation store live view binding)
 
 readPreparation :: CoordinationStore -> CredentialProof -> Text -> IO (Either CommandFailure P.Preparation)
-readPreparation store proof ident = attemptIO $ do
+readPreparation store proof ident = attemptIO "approval preparation-read" $ do
   unless(validId ident)(throwIO InvalidRequest)
   result <- withStoreConfiguration store $ \_ profiles -> runRead store (preparationProjection proof profiles ident)
-  either (const (throwIO StorageUnavailable)) pure result
+  configurationLoan "approval preparation-read" result
 
 withPreparation :: CoordinationStore -> CredentialProof -> Text
   -> (AuthorizedView -> P.Preparation -> IO a) -> IO a
@@ -110,6 +111,10 @@ withPreparation store proof ident respond = do
     revalidateAuthorizedView view >>= need
     respond view preparation
 
+-- | A stored preparation that fails to decode or to match its own digests is a
+-- Store integrity failure, distinct from contention or an unavailable Store.
+-- The nullable reason is projected as text. Its schema check admits no empty
+-- reason, so the empty text denotes an absent reason.
 preparationProjection :: CredentialProof -> [PublicProfile] -> Text -> Transaction P.Preparation
 preparationProjection proof profiles ident = do
   _ <- currentClient proof >>= needT
@@ -117,16 +122,15 @@ preparationProjection proof profiles ident = do
   profile <- case metadata of [[SQL.SQLText value]] | value `elem` map publicId profiles -> pure value; _ -> refuseTransaction Forbidden
   _ <- authorizeProfile proof profile [Observe] >>= needT
   generation <- transactionGeneration
-  rows <- query "SELECT p.id,p.revision,p.request_id,p.request_revision,r.profile_id,p.profile_revision,r.descriptor_revision,p.state,p.expires_at,p.review_digest,p.process_generation,p.review,p.reason,p.private_binding FROM preparations p JOIN requests r ON r.id=p.request_id WHERE p.id=?" [text ident]
+  rows <- query "SELECT p.id,p.revision,p.request_id,p.request_revision,r.profile_id,p.profile_revision,r.descriptor_revision,p.state,p.expires_at,p.review_digest,p.process_generation,p.review,coalesce(p.reason,''),p.private_binding FROM preparations p JOIN requests r ON r.id=p.request_id WHERE p.id=?" [text ident]
   view <- case rows of
-    [[SQL.SQLText a,SQL.SQLText b,SQL.SQLText c,SQL.SQLText d,SQL.SQLText e,SQL.SQLText f,SQL.SQLText g,SQL.SQLText h,SQL.SQLText i,SQL.SQLText j,SQL.SQLText k,SQL.SQLBlob body,reason,SQL.SQLBlob privateBytes]] -> do
+    [[SQL.SQLText a,SQL.SQLText b,SQL.SQLText c,SQL.SQLText d,SQL.SQLText e,SQL.SQLText f,SQL.SQLText g,SQL.SQLText h,SQL.SQLText i,SQL.SQLText j,SQL.SQLText k,SQL.SQLBlob body,SQL.SQLText reason,SQL.SQLBlob privateBytes]] -> do
       public <- decodeT body
       binding <- decodeT privateBytes
-      unless (digest privateBytes == j && field "reviewSha256" binding == Just (String (digest (encoded (public :: P.Review))))) (refuseTransaction StorageUnavailable)
-      why <- case reason of SQL.SQLNull -> pure Nothing; SQL.SQLText value -> pure (Just value); _ -> refuseTransaction StorageUnavailable
-      pure (P.Preparation a b c d e f g h i j k public why)
+      unless (digest privateBytes == j && field "reviewSha256" binding == Just (String (digest (encoded (public :: P.Review))))) (refuseTransaction StoreIntegrity)
+      pure (P.Preparation a b c d e f g h i j k public (if T.null reason then Nothing else Just reason))
     _ -> refuseTransaction ResourceUnavailable
-  _ <- needT (either (const (Left StorageUnavailable)) Right (parseEither parseJSON (toJSON view)) :: Either CommandFailure P.Preparation)
+  either (const (refuseTransaction StoreIntegrity)) (const (pure ())) (parseEither parseJSON (toJSON view) :: Either String P.Preparation)
   unless (P.preparationGeneration view == generation) (refuseTransaction ResourceUnavailable)
   pure view
 
@@ -135,7 +139,7 @@ acceptApproval = acceptApprovalWithDelivery False
 
 acceptApprovalWithDelivery :: Bool -> ReviewedPreparation -> CredentialProof -> Text -> Maybe Text -> BS.ByteString
   -> IO (Either CommandFailure (Submission,Maybe AcceptedStart))
-acceptApprovalWithDelivery dispatch (ReviewedPreparation store live preparation privateBytes) proof key precondition body = attempt $ do
+acceptApprovalWithDelivery dispatch (ReviewedPreparation store live preparation privateBytes) proof key precondition body = attempt "approval acceptance" $ do
   selectors<-need(P.decodeApproval body)
   requestRevision<-fresh "request_revision_"
   preparationRevision<-fresh "preparation_revision_"
@@ -193,7 +197,7 @@ approve prepared proof key precondition body =
 -- | Resolve an exact cached receipt without recovering any live preparation.
 replayApproval :: CoordinationStore -> CredentialProof -> Text -> Text -> Maybe Text -> BS.ByteString
   -> IO (Either CommandFailure CommandReceipt)
-replayApproval store proof ident key precondition body = attemptIO $ do
+replayApproval store proof ident key precondition body = attemptIO "approval replay" $ do
   unless (validId ident) (throwIO InvalidRequest)
   _ <- need (P.decodeApproval body)
   profile <- runRead store $ do
@@ -317,14 +321,17 @@ need=either throwIO pure
 needT :: Either CommandFailure a -> Transaction a
 needT=either refuseTransaction pure
 decodeT :: FromJSON a => BS.ByteString -> Transaction a
-decodeT=either(const(refuseTransaction StorageUnavailable))pure.eitherDecodeStrict'
-attempt :: IO (Either CommandFailure a) -> IO (Either CommandFailure a)
-attempt action=attemptIO(action >>= need)
-attemptIO :: IO a -> IO (Either CommandFailure a)
-attemptIO action=do
+decodeT=either(const(refuseTransaction StoreIntegrity))pure.eitherDecodeStrict'
+attempt :: Text -> IO (Either CommandFailure a) -> IO (Either CommandFailure a)
+attempt context action=attemptIO context(action >>= need)
+-- | A declared refusal is returned. A Store failure keeps the declared
+-- storage-unavailable refusal, and its Store constructor is recorded privately
+-- first under the named context. Every other exception propagates.
+attemptIO :: Text -> IO a -> IO (Either CommandFailure a)
+attemptIO context action=do
   result<-try @SomeException action
   case result of
     Right value->pure(Right value)
     Left failure->case fromException failure of
       Just reason->pure(Left reason)
-      Nothing->case fromException failure::Maybe StoreFailure of Just _->pure(Left StorageUnavailable);Nothing->throwIO failure
+      Nothing->case fromException failure::Maybe StoreFailure of Just stored->storeFailureRefusal context stored;Nothing->throwIO failure

@@ -6,10 +6,11 @@
 
 -- | Durable input representations and verified captures, never workflow execution.
 module Agentic.Manager.Drafts
-  ( reconcileDrafts, createDraft, createLineageDraft, withLineageRequests, checkLineageParent, changeDraftInput, changeDraftInputGuarded, InputTransition (..), RequestState, requestView, requestOwner, requestState, currentVersion, editable, checkDraftCapacity, uploadCapture, collectCaptures, readDraft, readDraftAt, withDraft, assembleDraft, DraftAssembly, assemblyRequest, assemblyRevision, assemblyProfile, assemblyProfileRevision, assemblySetup, assemblyFrame, assemblyInputSummaries, assemblySelection, assemblyParentBinding, validateAssemblyParent, assembleDraftSnapshot, assembleAcceptedDraft, structuralReadiness, verifyFrontendFiles, verifyFrontendFilesAt ) where
+  ( reconcileDrafts, createDraft, createLineageDraft, withLineageRequests, checkLineageParent, changeDraftInput, changeDraftInputGuarded, InputTransition (..), RequestState, requestView, requestOwner, requestState, currentVersion, editable, checkDraftCapacity, uploadCapture, collectCaptures, readDraft, readDraftAt, withDraft, assembleDraft, DraftAssembly, assemblyRequest, assemblyRevision, assemblyProfile, assemblyProfileRevision, assemblySetup, assemblyFrame, assemblyInputSummaries, assemblySelection, assemblyParentBinding, validateAssemblyParent, assembleDraftSnapshot, assembleAcceptedDraft, structuralReadiness, verifyFrontendFiles, verifyFrontendFilesAt, timed ) where
 
 import Agentic.Manager.Authorization
 import Agentic.Manager.Commands
+import Agentic.Manager.Fault (FaultClass (InternalFault), ManagerFault (DeadlineElapsed), refuseStorageUnavailable)
 import Agentic.Manager.Profile
   (ConfigurationLimits (..), Discovery, discoveryEntries, discoveryRevision, discoveryProfileRevision,
    discoverySelection, restartBinding, Selection, selectionContext, selectionInvocation, OperatorProfile (..))
@@ -915,8 +916,10 @@ utf8Source limit source = do
       writeIORef count (previous+fromIntegral(BS.length bytes))
     pure bytes
 
+-- | One bounded file operation. An elapsed deadline keeps the declared
+-- storage-unavailable refusal, and its distinct cause is recorded privately.
 timed :: Int -> IO a -> IO a
-timed micros action=timeout micros action >>= maybe(throwIO StorageUnavailable)pure
+timed micros action=timeout micros action >>= maybe(refuseStorageUnavailable "drafts deadline" (InternalFault DeadlineElapsed))pure
 draftIO :: IO a -> IO (Either CommandFailure a)
 draftIO action=do
   result<-try @CommandFailure (try @StoreFailure (try @IOException action))

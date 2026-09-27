@@ -467,6 +467,38 @@ alexey, low. parseAndCheckRawWith and RawBlock.revisionBounds are defined in Exp
 ]
 #+end_src
 
+* TODO [#E] Restate the A5S1D approval-loop claim without 'before any mutation'    :documentation:
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-20yy
+:LABELS:   ["documentation","workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-26 Sat 22:44]
+:MODIFIED: [2026-09-26 Sat 22:44]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Source: fess audit /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/fess/A-A5S1D-r2.md, finding L1 (low, documentation accuracy). The A5S1D round-2 implementer report says the service-fault fixtures repeat Service.approve only while it returns OwnershipUnavailable 'before any mutation'. The loop at manager/test/AdmissionCheck.hs:1090-1093 repeats on every OwnershipUnavailable and cannot tell a refusal before the commit from one after it. The preserved first attempt /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A5S1D/impl-r2/A5S1D2-service-faults-N1-association-first.cause shows a committed approval followed by OwnershipUnavailable from retainStartWithAdmission, and the loop repeated until the rendezvous bound. Each repeat uses the same idempotency key, so no duplicate mutation follows, and production does not resend. Fix: wherever the claim is restated (subtask records, handoff, commit summaries), state 'repeats with the same idempotency key only on OwnershipUnavailable' and remove 'before any mutation'.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-20yy",
+    "depends_on_id": "acat-dxos",
+    "type": "discovered-from",
+    "created_at": "2026-09-27T05:44:58.006224Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
 * DONE [#B] DSL: no meaning function for the surface — state [[RawBlock]] and prove denote-after-check equations
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -601,6 +633,38 @@ npm run test:integration imports the removed pi-coding-agent/client RemoteSessio
     "depends_on_id": "acat-lijk",
     "type": "discovered-from",
     "created_at": "2026-09-16T23:11:12.514718Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
+* TODO [#E] Record that K41 covers the K40 site, which fails by timeout    :documentation:
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-3ker
+:LABELS:   ["documentation","workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-26 Sat 22:44]
+:MODIFIED: [2026-09-26 Sat 22:44]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Source: fess audit /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/fess/A-A5S1D-r2.md, finding L4 (low, negative-check wording). Control K40 fails with 'admission rendezvous timed out' (manager/test/AdmissionCheck.hs:100) and not with a named FAIL assertion, while the A5S1D negative check asks for a named check. The failure is deterministic, K41 kills the same site with a named check, and the A5S1C round-3 audit accepted it. No behavior change is needed. Fix: state in the diagnosis record (/Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A5S1C/impl-r3/A5S1C3-diagnosis.md section 6) that the K40 site is also covered by the named check that K41 fails, or give K40 a named check if one can be added without a production hook.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-3ker",
+    "depends_on_id": "acat-dxos",
+    "type": "discovered-from",
+    "created_at": "2026-09-27T05:44:58.667131Z",
     "created_by": "johnw",
     "metadata": "{}",
     "thread_id": ""
@@ -1516,15 +1580,17 @@ join exists; 'lowest fragment that expresses the job' as an infimum wants meet +
 ]
 #+end_src
 
-* TODO [#B] Add the ManagerBroker worker-session seam
+* DONE [#B] Add the ManagerBroker worker-session seam
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-7z2x
 :LABELS:   ["workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-25 Fri 22:32]
-:MODIFIED: [2026-09-25 Fri 22:32]
+:MODIFIED: [2026-09-26 Sat 11:00]
 :CREATED_BY: johnw
+:FINISHED: [2026-09-26 Sat 11:00]
+:CLOSE_REASON: Superseded on 2026-09-26: the operator chose an actor-flow architecture (users, tools and LLMs as actors exchanging messages through a visible, routable, recorded broker, with the workflow as router until a stop condition). A design workflow replaces the narrow manager-to-worker seam.
 :SOURCE_REPO: .
 :ORIGINAL_SIZE: 0
 :END:
@@ -1616,7 +1682,7 @@ validated pass (P1, single-model; verified against source by the pass agent). Ve
 :LABELS:   ["documentation","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-26 Sat 07:20]
-:MODIFIED: [2026-09-26 Sat 07:20]
+:MODIFIED: [2026-09-26 Sat 22:45]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -1637,6 +1703,20 @@ Source: fess audit /Users/johnw/Products/agent-cat-workflow-manager/implementati
     "created_by": "johnw",
     "metadata": "{}",
     "thread_id": ""
+  }
+]
+#+end_src
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 327,
+    "issue_id": "acat-89kw",
+    "author": "johnw",
+    "text": "A5S1D round 2 supersedes the premise of this finding: controls K42 and K45 now both fail named checks at N1 and N8 (see acat-dxos comment and /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A5S1D/verify-r2/V-controls-summary.log). The handoff sentence at lines 232-233 should now say that neither control passes, rather than give separate reasons for passing.",
+    "created_at": "2026-09-27T05:45:12Z"
   }
 ]
 #+end_src
@@ -2312,6 +2392,42 @@ The owner's full architecture note is preserved below for the design round.
 ]
 #+end_src
 
+* TODO [#D] Accepted gap: no classification check at Approval.hs:96 (K19)
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-approval-publish-loan-gap-isjw
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-26 Sat 22:44]
+:MODIFIED: [2026-09-26 Sat 22:44]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Source: subtask A5S1D (and A5S1C round 3), operator decision of 2026-09-26. The diagnosis record is /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A5S1C/impl-r3/A5S1C3-diagnosis.md, sections 2 (decision 1), 6 and 7.
+
+The publication configuration loan of Approval.publishReview at manager/src/Agentic/Manager/Approval.hs:96 ('(view,binding)<-configurationLoan "approval publish-review" published') has no deterministic classification regression check. The operator accepts this site as an explicit recorded gap. Control K19 restores the silent erasure at that site, and it passes every check of manager-artifact-check and manager-admission-check (evidence: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A5S1D/verify-r2/V-controls-summary.log and /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A5S1D/impl-r2/A5S1D2-controls-summary.log). No hook-free fixture is known to reach the site. No production test hook and no restructuring of the admission locks may be added to close it.
+
+Acceptance: either a deterministic hook-free fixture that makes control K19 fail a named check, or a later operator decision that retires the gap. Until then the diagnosis record lists the site as the only accepted classification gap.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-approval-publish-loan-gap-isjw",
+    "depends_on_id": "acat-dxos",
+    "type": "discovered-from",
+    "created_at": "2026-09-27T05:44:45.192168Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
 * DONE [#E] Alternative: make bounded 0 unrepresentable (normalize to static)
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -2329,6 +2445,38 @@ The owner's full architecture note is preserved below for the design round.
 :END:
 
 From acat-l59: would delete the residual join-slack paragraph and make static/bounded-0 indistinguishable outright; larger index-type change interacting with fanT 0. Candidate simplification, weigh against the definitional-reduction discipline.
+
+* TODO [#E] Qualify A5S1D reachability record section 1 poll bullets    :documentation:
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-bagg
+:LABELS:   ["documentation","workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-26 Sat 22:44]
+:MODIFIED: [2026-09-26 Sat 22:44]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Source: fess audit /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/fess/A-A5S1D-r2.md, finding L2 (low, documentation drift). /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A5S1D/impl-r1/A5S1D1-site-reachability.md section 1 still asserts without qualification that every transaction step of the admission poll refuses with a CommandFailure or StoreFailure, and that queueRows row decoding has a refusing fallback for every unexpected row shape. A later paragraph of the same record, and the A5S1D round-2 fixture, show that Store text that is not UTF-8 raises UnicodeException, which no owner on the poll path converts. Fix: qualify both bullets as applying to row shapes and not to text decoding, or strike them.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-bagg",
+    "depends_on_id": "acat-dxos",
+    "type": "discovered-from",
+    "created_at": "2026-09-27T05:44:58.243056Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
 
 * DONE [#C] Format bare CLI registry as bounded rows
 :PROPERTIES:
@@ -2783,7 +2931,7 @@ Found by the connection-research attack pass (acat-lean-haskell-connection-lhi):
 :LABELS:   ["workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-24 Thu 09:19]
-:MODIFIED: [2026-09-24 Thu 09:19]
+:MODIFIED: [2026-09-26 Sat 22:45]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -2810,15 +2958,31 @@ Acceptance: the scheduled S1 diagnosis subtask examines this root together with 
 ]
 #+end_src
 
-* TODO [#B] Record the manager broker amendment
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 325,
+    "issue_id": "acat-dxos",
+    "author": "johnw",
+    "text": "Subtasks A5S1C and A5S1D (committed together on branch workflow-manager-checkpoint-20260923) make the manager storage-unavailable classification honest. A new Agentic.Manager.Fault module and its private record distinguish command refusals, Store failures and unexpected exceptions on every converted site. Genuine Store busy and I/O failures keep the public 503 storage-unavailable response. Service.hs:125 (uncaught admission-poll failure) and Service.hs:162 (Service.drive) now each have a hook-free deterministic check, and controls K42 and K45 fail named checks at N1 and N8. Approval.hs:96 remains the only accepted gap (acat-approval-publish-loan-gap-isjw).\n\nEvidence and ceilings: Werror package build of all manager targets and tui-model-test (/Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A5S1D/verify-r2/V-build-werror.*); fault-classification 83 of 83 at N1 and N8, pure codec and model tests (V-fault-N1/N8); service-faults 26 of 26 at N1 and N8 and the admission gate at 658 PASS, deterministic native fixtures; 65 guard-breaking control runs on an overlay built without -Werror, mostly at N1 (V-controls-summary.log); gates configuration, commands, store, ingestion and admission green, and the six red gates unchanged against the A5S1C verify-r3 baselines (V-gate-comparison.log, unexpected-difference=0). Final fess audit /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/fess/A-A5S1D-r2.md is non-blocking. Its low findings are acat-20yy, acat-bagg, acat-qcpi, acat-3ker and acat-q8fk.\n\nWhat this does not establish: the source of the closed release and the cause of the S1 503 in the tui-approval N8 journey are still unproved, so this issue stays open. The values that are not UTF-8 enter only through an external SQLite writer in the fixtures. Other input classes at Service.hs:125 and Service.hs:162 are not exercised.\n",
+    "created_at": "2026-09-27T05:45:11Z"
+  }
+]
+#+end_src
+
+* DONE [#B] Record the manager broker amendment
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-dz25
 :LABELS:   ["workflow-manager"]
 :ISSUE_TYPE: docs
 :CREATED:  [2026-09-25 Fri 22:32]
-:MODIFIED: [2026-09-25 Fri 22:32]
+:MODIFIED: [2026-09-26 Sat 11:00]
 :CREATED_BY: johnw
+:FINISHED: [2026-09-26 Sat 11:00]
+:CLOSE_REASON: Superseded on 2026-09-26: the operator chose an actor-flow architecture (users, tools and LLMs as actors exchanging messages through a visible, routable, recorded broker, with the workflow as router until a stop condition). A design workflow replaces the narrow manager-to-worker seam.
 :SOURCE_REPO: .
 :ORIGINAL_SIZE: 0
 :END:
@@ -7074,6 +7238,70 @@ A2 fess finding (low). ServiceTests.hs near 223-224, check 'fault status names o
 ]
 #+end_src
 
+* TODO [#E] Remove duplicate pollCollision predicate in AdmissionCheck.hs    :test:
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-q8fk
+:LABELS:   ["test","workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-26 Sat 22:44]
+:MODIFIED: [2026-09-26 Sat 22:44]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Source: fess audit /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/fess/A-A5S1D-r2.md, finding L5 (low, loose end). The pollCollision predicate is defined twice in serviceFaultChecks of manager/test/AdmissionCheck.hs, at lines 1022-1023 and 1101-1102. After the A5S1D round-2 refactor of the approval sequence, the function-level binding makes the inner copy redundant. Fix: remove the inner definition and use the function-level binding, then rebuild with -Werror and rerun manager-admission-check service-faults at N1 and N8.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-q8fk",
+    "depends_on_id": "acat-dxos",
+    "type": "discovered-from",
+    "created_at": "2026-09-27T05:44:58.891624Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
+* TODO [#E] Correct control checker assignment in A5S1C diagnosis section 6    :documentation:
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-qcpi
+:LABELS:   ["documentation","workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-26 Sat 22:44]
+:MODIFIED: [2026-09-26 Sat 22:44]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Source: fess audit /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/fess/A-A5S1D-r2.md, finding L3 (low, documentation drift). /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A5S1C/impl-r3/A5S1C3-diagnosis.md section 6, first paragraph, says 'Controls K01 to K31 and K37 run against manager-artifact-check. The others run against manager-admission-check.' According to /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A5S1D/impl-r2/controls/plan.txt, K22 and K23 run only against the admission checker, and K05, K20, K42 and K45 run against both checkers. The table rows name the correct checks, so the kill evidence is unaffected. Fix: replace the sentence with the actual checker assignment from plan.txt.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-qcpi",
+    "depends_on_id": "acat-dxos",
+    "type": "discovered-from",
+    "created_at": "2026-09-27T05:44:58.454261Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
 * DONE [#C] pi after coarsening: relate muS and muExt over the coarsened quotient
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -7286,7 +7514,7 @@ grind-tests opening with an unpinned question.
 :LABELS:   []
 :ISSUE_TYPE: bug
 :CREATED:  [2026-09-23 Wed 16:24]
-:MODIFIED: [2026-09-23 Wed 16:24]
+:MODIFIED: [2026-09-26 Sat 22:45]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -7307,6 +7535,20 @@ Service-liveness and halt fess reviews identify a source-proved ceiling: protect
     "created_by": "johnw",
     "metadata": "{}",
     "thread_id": ""
+  }
+]
+#+end_src
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 326,
+    "issue_id": "acat-response-ingestion-budget-zaoi",
+    "author": "johnw",
+    "text": "Subtasks A5S1C and A5S1D touch the classification of Store failures on the response and ingestion paths only. They change no wait, bound, budget or Store policy (policy scan /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A5S1D/verify-r2/V-policy-scan.log). The Service.drive fixture (Service.hs:162) checks that a failed runtime ingestion records the Store class and that an undecodable run association records the unexpected class, at N1 and N8 (deterministic native fixture, /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A5S1D/verify-r2/V-service-faults-N1.* and -N8.*). The contention between a held protected response and accepted ingestion that this issue describes was not reproduced or corrected, so this issue stays open.\n",
+    "created_at": "2026-09-27T05:45:12Z"
   }
 ]
 #+end_src

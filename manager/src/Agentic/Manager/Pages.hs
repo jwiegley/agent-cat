@@ -1,8 +1,9 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 -- | Bounded immutable page sets, with scoped response loans and absolute expiry.
-module Agentic.Manager.Pages (PageSets, newPageSets, withPage) where
+module Agentic.Manager.Pages (PageSets, newPageSets, withPage, reservePageSet) where
 
+import Agentic.Manager.Fault (ManagerFault (PageSetCollision))
 import Agentic.Manager.Protocol.Command
 import Control.Concurrent.STM
 import Control.Exception (mask, onException)
@@ -47,13 +48,7 @@ withPage (PageSets entries) client view query limit token produce send = mask $ 
       expiry <- T.pack . formatTime defaultTimeLocale "%FT%T%QZ" . addUTCTime 60 <$> getCurrentTime
       random <- getRandomBytes 16 :: IO BS.ByteString
       let ident = "set_" <> TE.decodeUtf8 (convertToBase Base16 random)
-          entry = Entry client view query (now + lifetime) Nothing 1 False
-      atomically $ do
-        current <- clean now <$> readTVar entries
-        when (Map.member ident current) (throwSTM StorageUnavailable)
-        when (Map.size current >= limit || length (filter ((== client) . entryClient) (Map.elems current)) >= 2)
-          (throwSTM StorageQuota)
-        writeTVar entries (Map.insert ident entry current)
+      atomically (reservePageSet (PageSets entries) client view query limit now ident)
       let abandon = atomically (release entries ident True)
       (value, terminal) <- (restore $ do
         (revision, fields, values) <- produce
@@ -88,6 +83,17 @@ withPage (PageSets entries) client view query limit token produce send = mask $ 
       value <- restore (send revision bytes) `onException` atomically (release entries ident True)
       atomically (release entries ident terminal)
       pure value
+
+-- | Reserve one fresh page-set identifier and its capacity before construction.
+-- An identifier that is already reserved is an internal collision, and the
+-- capacity limits are the declared storage-quota refusal.
+reservePageSet :: PageSets -> Text -> Text -> Text -> Int -> Word64 -> Text -> STM ()
+reservePageSet (PageSets entries) client view query limit now ident = do
+  current <- clean now <$> readTVar entries
+  when (Map.member ident current) (throwSTM PageSetCollision)
+  when (Map.size current >= limit || length (filter ((== client) . entryClient) (Map.elems current)) >= 2)
+    (throwSTM StorageQuota)
+  writeTVar entries (Map.insert ident (Entry client view query (now + lifetime) Nothing 1 False) current)
 
 -- Expired or retired sends remain charged until their original callbacks unwind.
 clean :: Word64 -> Map.Map Text Entry -> Map.Map Text Entry

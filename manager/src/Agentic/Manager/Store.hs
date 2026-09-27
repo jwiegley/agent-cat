@@ -19,6 +19,7 @@ import qualified Agentic.Manager.Store.Admission as Admission
 import Agentic.Manager.Configuration
   (InstalledConfiguration, acquireConfigurationStorage, releaseConfigurationStorage, withConfigurationAdministration, withConfigurationSnapshot, withConfigurationCatalogues, withConfigurationCatalogueContext, tryConfigurationCatalogueContext, withConfiguredRetentionRoot, validateHistoryBindings, revalidateRetentionRoot, configuredInvocations, probeConfiguredCapabilities)
 import Agentic.Manager.Profile (ConfigurationLimits (..), PublicProfile, Diagnostic (SupervisionUnavailable), Discovery)
+import Agentic.Manager.Fault.Record (ManagerFault (AuthorizationChanged), loanFault, internalLabel, refusalLabel, recordErasure)
 import Agentic.Manager.Worker.State (WorkerLifecycle, acceptingPreparation)
 import Agentic.Manager.Lease (duplicateLease)
 import Agentic.Manager.Root (validateRootSeparation)
@@ -680,6 +681,9 @@ tryWithStoreFiles store@(CoordinationStore _ root _ _ _ closed _ lease (files,_,
 
 -- | A bounded materialization lifetime at the existing file/read owner. Acquisition
 -- uses current configuration, but neither configuration nor SQL is held by a reader.
+-- An unsuccessful configuration loan keeps its declared Store refusal: a held
+-- guard is 'StoreBusy' and every other diagnostic is 'StoreUnavailable'. The
+-- distinct configuration cause is recorded privately before that refusal.
 withStoreReader :: CoordinationStore -> IO a -> IO a
 withStoreReader store@(CoordinationStore _ _ _ _ _ _ _ _ (_,readers,_) _ _ _ _) action = mask $ \restore -> do
   result <- withStoreConfiguration store $ \limits _ -> admitted store $ atomically $ do
@@ -687,10 +691,17 @@ withStoreReader store@(CoordinationStore _ _ _ _ _ _ _ _ (_,readers,_) _ _ _ _) 
     when (count>=limitGlobalDatabaseReaders limits) (throwSTM StoreLimit)
     writeTVar readers (count+1)
   case result of
-    Left SupervisionUnavailable -> throwIO StoreBusy
-    Left _ -> throwIO StoreUnavailable
+    Left diagnostic -> refuseErased "store reader-admission" (loanFault diagnostic)
+      (if diagnostic == SupervisionUnavailable then StoreBusy else StoreUnavailable)
     Right () -> pure ()
   restore action `finally` atomically(modifyTVar' readers (subtract 1))
+
+-- | Refuse with a declared Store failure after one private record of the
+-- distinct internal cause that it replaces.
+refuseErased :: Text -> ManagerFault -> StoreFailure -> IO a
+refuseErased context cause failure = do
+  recordErasure context (internalLabel cause) (refusalLabel "store" failure)
+  throwIO failure
 
 -- | A scoped, payload-free reader notification. Registration precedes authorization.
 data AuthorizationWatch = AuthorizationWatch !CoordinationStore !(TVar (Maybe Word64)) !(TVar Word64) !(TVar Bool)
@@ -747,9 +758,11 @@ authorizationWatchCurrent (AuthorizationWatch _ cell revision active) = atomical
 
 -- | Observe current authorization once and acknowledge only a stable generation.
 -- A notification is not revocation. Closed scopes stay invalid, and a concurrent
--- commit refuses this observation rather than replaying its action. Final
--- acknowledgement uses the original fail-fast Store gate, closing the interval
--- between SQL COMMIT and its notification without re-entering the observation.
+-- commit refuses this observation rather than replaying its action. That
+-- refusal keeps the declared 'StoreBusy' value, and its distinct cause is
+-- recorded privately after the gate is released. Final acknowledgement uses
+-- the original fail-fast Store gate, closing the interval between SQL COMMIT
+-- and its notification without re-entering the observation.
 withAuthorizationObservation :: NFData a => AuthorizationWatch -> IO a -> IO (Maybe a)
 withAuthorizationObservation (AuthorizationWatch store cell revision active) action = do
   initial <- atomically $ do
@@ -759,13 +772,13 @@ withAuthorizationObservation (AuthorizationWatch store cell revision active) act
     Nothing -> pure Nothing
     Just expected -> do
       value <- action >>= evaluate . force
-      admitted store $ atomically $ do
+      acknowledged <- admitted store $ atomically $ do
         live <- readTVar active
         current <- readTVar cell
-        if not live || current == Nothing then pure Nothing else do
-          unless (current == Just expected) (throwSTM StoreBusy)
-          writeTVar revision expected
-          pure (Just value)
+        if not live || current == Nothing then pure (Right Nothing)
+        else if current /= Just expected then pure (Left ())
+        else writeTVar revision expected >> pure (Right (Just value))
+      either (const (refuseErased "store authorization-observation" AuthorizationChanged StoreBusy)) pure acknowledged
 
 -- | At most one second before trusted-time revalidation, even without a commit.
 -- No callbacks, file/configuration locks, or worker cancellation participate.

@@ -211,6 +211,7 @@ library
     Agentic.InProcess
     Agentic.Manager.Profile
     Agentic.Manager.Configuration
+    Agentic.Manager.Fault.Record
     Agentic.Manager.Protocol.Json
     Agentic.Manager.Root
     Agentic.Manager.Lease
@@ -232,6 +233,7 @@ library
     Agentic.Manager.Protocol.Draft
     Agentic.Manager.Lineage
     Agentic.Manager.Authorization
+    Agentic.Manager.Fault
     Agentic.Manager.Protocol.Command
     Agentic.Plan.Value
     Agentic.Raw
@@ -508,6 +510,7 @@ executable manager-store-check
   other-modules:
     Agentic.Manager.Test.StoreAdmissionCheck
     Agentic.Manager.Configuration
+    Agentic.Manager.Fault.Record
     Agentic.Manager.Protocol.Draft
     Agentic.Manager.Protocol.Command
     Agentic.Manager.Protocol.Json
@@ -534,9 +537,11 @@ executable manager-command-check
     Agentic.Manager.Commands
     Agentic.Manager.Protocol.Artifact
     Agentic.Manager.Authorization
+    Agentic.Manager.Fault
     Agentic.Manager.Protocol.Draft
     Agentic.Manager.Protocol.Command
     Agentic.Manager.Configuration
+    Agentic.Manager.Fault.Record
     Agentic.Manager.Protocol.Json
     Agentic.Manager.Profile
     Agentic.Manager.Root
@@ -559,11 +564,13 @@ executable manager-draft-check
     Agentic.Manager.Commands
     Agentic.Manager.Protocol.Artifact
     Agentic.Manager.Authorization
+    Agentic.Manager.Fault
     Agentic.Manager.Protocol.Draft
     Agentic.Manager.Lineage
     Agentic.Manager.Protocol.Command
     Agentic.Manager.Protocol.Json
     Agentic.Manager.Configuration
+    Agentic.Manager.Fault.Record
     Agentic.Manager.Profile
     Agentic.Manager.Root
     Agentic.Manager.Lease
@@ -586,11 +593,13 @@ executable manager-worker-check
     Agentic.Manager.Commands
     Agentic.Manager.Protocol.Artifact
     Agentic.Manager.Authorization
+    Agentic.Manager.Fault
     Agentic.Manager.Protocol.Draft
     Agentic.Manager.Lineage
     Agentic.Manager.Protocol.Command
     Agentic.Manager.Protocol.Json
     Agentic.Manager.Configuration
+    Agentic.Manager.Fault.Record
     Agentic.Manager.Profile
     Agentic.Manager.Root
     Agentic.Manager.Lease
@@ -608,6 +617,15 @@ executable manager-admission-check
   c-sources:       manager/test/admission_cleanup_fault.c
   other-modules:
     Agentic.Manager.Test.AcceptanceAudit
+    Agentic.Manager.Test.PrivateLog
+    Agentic.Manager.Service
+    Agentic.Manager.Approval
+    Agentic.Manager.Artifacts
+    Agentic.Manager.History
+    Agentic.Manager.Overview
+    Agentic.Manager.Observation
+    Agentic.Manager.Events
+    Agentic.Manager.State
     Agentic.Manager.Admission
     Agentic.Manager.Admission.Policy
     Agentic.Manager.Worker
@@ -616,11 +634,13 @@ executable manager-admission-check
     Agentic.Manager.Commands
     Agentic.Manager.Protocol.Artifact
     Agentic.Manager.Authorization
+    Agentic.Manager.Fault
     Agentic.Manager.Protocol.Draft
     Agentic.Manager.Lineage
     Agentic.Manager.Protocol.Command
     Agentic.Manager.Protocol.Json
     Agentic.Manager.Configuration
+    Agentic.Manager.Fault.Record
     Agentic.Manager.Profile
     Agentic.Manager.Root
     Agentic.Manager.Lease
@@ -650,11 +670,13 @@ common manager-lifecycle-checks
     Agentic.Manager.Commands
     Agentic.Manager.Protocol.Artifact
     Agentic.Manager.Authorization
+    Agentic.Manager.Fault
     Agentic.Manager.Protocol.Draft
     Agentic.Manager.Lineage
     Agentic.Manager.Protocol.Command
     Agentic.Manager.Protocol.Json
     Agentic.Manager.Configuration
+    Agentic.Manager.Fault.Record
     Agentic.Manager.Profile
     Agentic.Manager.Root
     Agentic.Manager.Lease
@@ -678,6 +700,9 @@ executable manager-artifact-check
   hs-source-dirs:  manager/src manager/test
   main-is:         ArtifactCheck.hs
   other-modules:
+    Agentic.Manager.Test.PrivateLog
+    Agentic.Manager.Transport
+    Agentic.Manager.Pages
     Agentic.Manager.Credentials
     Agentic.Manager.Protocol.LocalAdmin
     Agentic.Manager.Artifacts
@@ -696,11 +721,13 @@ executable manager-artifact-check
     Agentic.Manager.Protocol.Preparation
     Agentic.Manager.Commands
     Agentic.Manager.Authorization
+    Agentic.Manager.Fault
     Agentic.Manager.Protocol.Draft
     Agentic.Manager.Lineage
     Agentic.Manager.Protocol.Command
     Agentic.Manager.Protocol.Json
     Agentic.Manager.Configuration
+    Agentic.Manager.Fault.Record
     Agentic.Manager.Profile
     Agentic.Manager.Root
     Agentic.Manager.Lease
@@ -708,7 +735,7 @@ executable manager-artifact-check
     Agentic.Manager.Store
     Agentic.Manager.Store.Admission
     Agentic.Manager.Worker.State
-  build-depends:   agentic, direct-sqlite, deepseq, transformers
+  build-depends:   agentic, direct-sqlite, deepseq, transformers, network, tls, wai, warp, warp-tls
   ghc-options:     -threaded -rtsopts
 
 executable manager-history-check
@@ -728,11 +755,13 @@ executable manager-history-check
     Agentic.Manager.Protocol.Preparation
     Agentic.Manager.Commands
     Agentic.Manager.Authorization
+    Agentic.Manager.Fault
     Agentic.Manager.Protocol.Draft
     Agentic.Manager.Lineage
     Agentic.Manager.Protocol.Command
     Agentic.Manager.Protocol.Json
     Agentic.Manager.Configuration
+    Agentic.Manager.Fault.Record
     Agentic.Manager.Profile
     Agentic.Manager.Root
     Agentic.Manager.Lease

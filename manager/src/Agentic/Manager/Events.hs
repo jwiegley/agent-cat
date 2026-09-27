@@ -6,6 +6,7 @@ module Agentic.Manager.Events
     StreamReaders, newStreamReaders, StreamPump, withStream ) where
 
 import Agentic.Manager.Authorization
+import Agentic.Manager.Fault (FaultClass (InternalFault), ManagerFault (ResponseWriteTimeout), refuseStorageUnavailable)
 import Agentic.Manager.Profile (ConfigurationLimits, PublicProfile)
 import Agentic.Manager.Protocol.Command
 import Agentic.Manager.Store
@@ -154,7 +155,7 @@ withStream (StreamReaders readers) store proof supplied action = do
         when (populated || due) $ do
           revalidateAuthorizedView view >>= either throwIO pure
           result <- timeout 5000000 (if populated then send view batch else heartbeat view)
-          maybe (throwIO StorageUnavailable) pure result
+          maybe (refuseStorageUnavailable "events write" (InternalFault ResponseWriteTimeout)) pure result
         pure (next,more,if populated || due then Just now else lastWrite)
       unless more $ do
         alive <- withAuthorizationObservation watch (pure ())

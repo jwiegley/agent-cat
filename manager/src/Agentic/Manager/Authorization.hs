@@ -6,6 +6,7 @@ module Agentic.Manager.Authorization
   ( CredentialProof, authenticateCredential, currentClient, authorizeProfile, proofGeneration, credentialRateKey,
     AuthorizedView, withAuthorizedView, withAuthorizedResponse, withAuthorizedResponseLimits, withAuthorizedCatalogues, withAuthorizedCatalogueContext, withBorrowedAuthorizedCatalogues, authorizedViewRevision, authorizedCursorRevision, catalogueAuthorization, revalidateAuthorizedView, awaitAuthorizedView ) where
 
+import Agentic.Manager.Fault (configurationLoan, storeFailureRefusal)
 import Agentic.Manager.Profile (ConfigurationLimits, Discovery, PublicProfile, publicId, publicRevision)
 import Agentic.Manager.Protocol.Command
 import Agentic.Manager.Store
@@ -36,23 +37,23 @@ credentialRateKey (CredentialProof credential _ _ _) = credential
 proofGeneration :: CredentialProof -> Text
 proofGeneration (CredentialProof _ _ _ generation) = generation
 
+-- | A declared refusal is returned. A Store failure propagates unchanged, so the
+-- transport records its distinct class behind the unchanged public problem.
 authenticateCredential :: CoordinationStore -> BS.ByteString -> IO (Either CommandFailure CredentialProof)
 authenticateCredential store bearer
   | BS.length bearer < 32 || BS.length bearer > 512 = pure (Left Unauthenticated)
   | otherwise = do
-      result <- try @StoreFailure $ do
-        generation <- storeProcessGeneration <$> storeIdentity store
-        let verifier = convert (hash bearer :: Digest SHA256) :: BS.ByteString
-        runRead store $ do
-          rows <- query
-            "SELECT c.id,c.client_id,c.verifier FROM credentials c JOIN clients p ON p.id=c.client_id WHERE c.verifier=? AND c.revoked=0 AND p.retired=0 AND julianday(c.expires_at)>julianday('now') AND NOT EXISTS(SELECT 1 FROM credential_administration a WHERE a.credential_id=c.id AND julianday(a.rotation_cutoff)<=julianday('now'))"
-            [SQL.SQLBlob verifier]
-          pure $ case rows of
-            [[SQL.SQLText credential, SQL.SQLText client, SQL.SQLBlob actual]]
-              | validId credential && validId client && BS.length actual == 32 && constEq actual verifier ->
-                  Right (CredentialProof credential client verifier generation)
-            _ -> Left Unauthenticated
-      pure (either (const (Left StorageUnavailable)) id result)
+      generation <- storeProcessGeneration <$> storeIdentity store
+      let verifier = convert (hash bearer :: Digest SHA256) :: BS.ByteString
+      runRead store $ do
+        rows <- query
+          "SELECT c.id,c.client_id,c.verifier FROM credentials c JOIN clients p ON p.id=c.client_id WHERE c.verifier=? AND c.revoked=0 AND p.retired=0 AND julianday(c.expires_at)>julianday('now') AND NOT EXISTS(SELECT 1 FROM credential_administration a WHERE a.credential_id=c.id AND julianday(a.rotation_cutoff)<=julianday('now'))"
+          [SQL.SQLBlob verifier]
+        pure $ case rows of
+          [[SQL.SQLText credential, SQL.SQLText client, SQL.SQLBlob actual]]
+            | validId credential && validId client && BS.length actual == 32 && constEq actual verifier ->
+                Right (CredentialProof credential client verifier generation)
+          _ -> Left Unauthenticated
 
 -- Trusted time is obtained from SQLite in the same transaction as authorization.
 currentClient :: CredentialProof -> Transaction (Either CommandFailure Text)
@@ -90,7 +91,7 @@ type ViewFacts = ((Text, [Text]), [Text])
 
 withAuthorizedView :: CoordinationStore -> CredentialProof -> Text -> [Scope]
   -> (AuthorizedView -> IO a) -> IO (Either CommandFailure a)
-withAuthorizedView store proof profile scopes action = authorizationIO $ do
+withAuthorizedView store proof profile scopes action = authorizationIO "authorization view" $ do
   unless (validId profile && length (take 5 scopes) <= 4) (throwIO InvalidRequest)
   withStoreAuthorizationWatch store $ \watch ->
     withView watch (currentViewFacts store proof profile scopes) action
@@ -110,7 +111,7 @@ withAuthorizedResponseLimits store proof profile scopes action = do
   runRead store (currentClient proof) >>= either throwIO (const (pure ()))
   result <- withStoreConfigurationWatch store $ \watch limits profiles ->
     withView watch (profileViewFacts store proof profile scopes profiles) $ \view -> action view limits
-  either (const (throwIO StorageUnavailable)) pure result
+  configurationLoan "authorization response" result
 
 withView :: AuthorizationWatch -> IO ViewFacts -> (AuthorizedView -> IO a) -> IO a
 withView watch observe action = withViewResult watch ((\facts -> (facts, ())) <$> observe) (\view () -> action view)
@@ -146,7 +147,7 @@ withAuthorizedCatalogueContext store proof scopes action = do
       action view current visible selected
         [(ident,invocation) | (ident,invocation) <- invocations, ident `elem` map (publicId . fst) visible])
       watch limits profiles catalogues
-  either (const (throwIO StorageUnavailable)) pure result
+  configurationLoan "authorization catalogue-context" result
 
 -- | A batch response borrowing the stream's original charged reader. Each
 -- call owns only its configuration/watch scope, not a second reader slot.
@@ -156,7 +157,7 @@ withBorrowedAuthorizedCatalogues :: AuthorizationWatch -> CredentialProof -> [Sc
 withBorrowedAuthorizedCatalogues original proof scopes action = do
   unless (length (take 5 scopes) <= 4) (throwIO InvalidRequest)
   result <- withStoreCataloguesBorrowed original $ \store -> catalogueView store proof scopes action
-  either (const (throwIO StorageUnavailable)) pure result
+  configurationLoan "authorization borrowed-catalogues" result
 
 catalogueView :: CoordinationStore -> CredentialProof -> [Scope]
   -> (AuthorizedView -> ConfigurationLimits -> [(PublicProfile, [Scope])] -> [(Text, Discovery)] -> IO a)
@@ -196,7 +197,7 @@ catalogueAuthorization proof profiles = do
   pure (cursorRevision facts, grants)
 
 revalidateAuthorizedView :: AuthorizedView -> IO (Either CommandFailure ())
-revalidateAuthorizedView (AuthorizedView watch observe bound) = authorizationIO $ do
+revalidateAuthorizedView (AuthorizedView watch observe bound) = authorizationIO "authorization revalidation" $ do
   observed <- withAuthorizationObservation watch $ do
     facts <- observe
     unless (facts == bound) (throwIO Unauthenticated)
@@ -212,7 +213,7 @@ currentViewFacts store proof profile scopes = do
   runRead store (currentClient proof) >>= either throwIO (const (pure ()))
   result <- withStoreConfiguration store $ \_ profiles ->
     profileViewFacts store proof profile scopes profiles
-  either (const (throwIO StorageUnavailable)) pure result
+  configurationLoan "authorization view-facts" result
 
 profileViewFacts :: CoordinationStore -> CredentialProof -> Text -> [Scope] -> [PublicProfile] -> IO ViewFacts
 profileViewFacts store proof@(CredentialProof credential client _ generation) profile scopes profiles =
@@ -257,5 +258,8 @@ catalogueFacts proof@(CredentialProof credential client _ generation) required p
       Just scope | validId ident -> pure (ident, scope)
       _ -> refuseTransaction StoreIntegrity
 
-authorizationIO :: IO a -> IO (Either CommandFailure a)
-authorizationIO action = either (const (Left StorageUnavailable)) id <$> try @StoreFailure (try @CommandFailure action)
+-- | A declared refusal is returned. A Store failure keeps the declared
+-- storage-unavailable refusal, and its Store constructor is recorded privately
+-- first under the named context.
+authorizationIO :: Text -> IO a -> IO (Either CommandFailure a)
+authorizationIO context action = try @StoreFailure (try @CommandFailure action) >>= either (storeFailureRefusal context) pure

@@ -3,7 +3,7 @@
 
 -- | One live coordinator and bounded indexes of its original owned associations.
 module Agentic.Manager.Service
-  ( Service, ServiceFault (..), withService, serviceStore, serviceFault,
+  ( Service, withService, serviceStore, serviceFault,
     enqueue, editInput, withdraw, approve, controlRun, controlDecision, readControl, withControl,
     withSnapshot, withSnapshotSource, withOverviewSource, withRun, withOutputs, withOutputsSource, download
   ) where
@@ -12,6 +12,7 @@ import qualified Agentic.Manager.Admission as A
 import qualified Agentic.Manager.Approval as Approval
 import qualified Agentic.Manager.Artifacts as Artifacts
 import Agentic.Manager.Authorization (CredentialProof, AuthorizedView, withAuthorizedCatalogueContext)
+import Agentic.Manager.Fault (FaultClass (CommandRefusal), classifyFault, recordFault)
 import qualified Agentic.Manager.History as History
 import qualified Agentic.Manager.Overview as Overview
 import Agentic.Manager.Commands (submissionReceipt)
@@ -22,7 +23,7 @@ import qualified Agentic.Manager.Protocol.Preparation as P
 import qualified Agentic.Manager.State as State
 import qualified Agentic.Manager.Observation as Observation
 import Agentic.Manager.Store (CoordinationStore, StoreFailure (..), withStoreFiles)
-import Agentic.Manager.Worker (WorkerFailure, WorkerObservation (..))
+import Agentic.Manager.Worker (WorkerObservation (..))
 import Agentic.Runtime (FrontendPrepared (..))
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (Async, asyncWithUnmask, link, poll, waitCatch, withAsync)
@@ -36,16 +37,14 @@ import Data.Maybe (listToMaybe)
 import Data.Text (Text)
 import GHC.Clock (getMonotonicTimeNSec)
 
--- | Fixed internal faults. No exception text, credentials or private input is retained.
-data ServiceFault = CommandFault !CommandFailure | StoreFault !StoreFailure
-  | WorkerFault !WorkerFailure | UnexpectedFault deriving (Eq, Show)
-
 -- | The original preparation's current public handoff, never authority from an ID.
 data Phase = Preparing | Reviewing !Approval.ReviewedPreparation
   | Following !Approval.ReviewedPreparation !A.AcceptedStart !State.RunAssociation
   | Retired !(Maybe State.RunAssociation)
 
-data Completion = Completion !(Maybe State.RunAssociation) !(Maybe ServiceFault)
+-- | The fault is the fixed classification of 'Agentic.Manager.Fault'. No
+-- exception text, credentials or private input is retained.
+data Completion = Completion !(Maybe State.RunAssociation) !(Maybe FaultClass)
   !(Either CommandFailure ()) !(Maybe WorkerObservation)
 
 data Owned = Working !A.LivePreparation !(TVar Phase) !(Async Completion)
@@ -55,9 +54,9 @@ data Owned = Working !A.LivePreparation !(TVar Phase) !(Async Completion)
 data Service = Service
   { serviceStore :: !CoordinationStore, admission :: !A.Admission,
     stopping :: !(TVar Bool), owned :: !(TVar (Map.Map Text Owned)),
-    faultCell :: !(TVar (Maybe ServiceFault)), scheduler :: !(TMVar (Async ())) }
+    faultCell :: !(TVar (Maybe FaultClass)), scheduler :: !(TMVar (Async ())) }
 
-serviceFault :: Service -> IO (Maybe ServiceFault)
+serviceFault :: Service -> IO (Maybe FaultClass)
 serviceFault = readTVarIO . faultCell
 
 withService :: CoordinationStore -> (Service -> IO a) -> IO a
@@ -111,7 +110,8 @@ schedule service = loop False
 
 -- Each notification denotes new queue or released-reservation facts. Only a
 -- proven unentered configuration callback keeps that notification pending.
--- Opaque failures are recorded, never retried by the timer or made cancellation.
+-- Opaque failures are recorded in the fault cell and the private log. They
+-- are never retried by the timer or made cancellation.
 fill :: Service -> IO Bool
 fill service = do
   room <- atomically $ do
@@ -122,13 +122,18 @@ fill service = do
     outcome <- try @SomeException (A.pollAdmission (admission service))
     case outcome of
       Left failure | Just asynchronous <- (fromException failure :: Maybe SomeAsyncException) -> throwIO asynchronous
-      Left failure -> atomically (writeTVar (faultCell service) (Just (fault failure))) >> pure False
-      Right (Left failure) -> atomically (writeTVar (faultCell service) (Just (CommandFault failure))) >> pure False
+      Left failure -> faulted (classifyFault failure)
+      Right (Left failure) -> faulted (CommandRefusal failure)
       Right (Right A.AdmissionDeferred) -> pure True
       Right (Right A.AdmissionIdle) -> atomically (writeTVar (faultCell service) Nothing) >> pure False
       Right (Right (A.AdmissionReady live)) -> do
         atomically (writeTVar (faultCell service) Nothing)
         startLoan service live >> fill service
+  where
+    faulted problem = do
+      recordFault "service admission-poll" problem
+      atomically (writeTVar (faultCell service) (Just problem))
+      pure False
 
 startLoan :: Service -> A.LivePreparation -> IO ()
 startLoan service live = mask_ $ do
@@ -154,6 +159,7 @@ drive service live phase = mask $ \restore -> do
             (preparedRootIdentity native) (preparedRunId native)
       atomically (writeTVar phase (Following reviewed original association))
       ingest original
+  let problem = either (Just . classifyFault) (const Nothing) outcome
   association <- atomically $ do
     current <- readTVar phase
     let remembered = case current of Following _ _ value -> Just value; Retired value -> value; _ -> Nothing
@@ -162,7 +168,10 @@ drive service live phase = mask $ \restore -> do
   A.requestPreparationStop live
   cleanup <- A.awaitAdmissionCleanup live
   observation <- A.observeLivePreparation live
-  pure (Completion association (either (Just . fault) (const Nothing) outcome) cleanup observation)
+  -- The private record follows original-owner cleanup, so a slow log write
+  -- cannot delay the stop request or the cleanup join.
+  forM_ problem (recordFault ("service preparation " <> A.reservationIdentity live))
+  pure (Completion association problem cleanup observation)
 
 -- Only typed contention retries the exact original retained ingestion head.
 ingest :: A.AcceptedStart -> IO ()
@@ -299,9 +308,3 @@ download service = Artifacts.withArtifactDownload (serviceStore service)
 need :: Either CommandFailure a -> IO a
 need = either throwIO pure
 
-fault :: SomeException -> ServiceFault
-fault exception
-  | Just value <- fromException exception = CommandFault value
-  | Just value <- fromException exception = StoreFault value
-  | Just value <- fromException exception = WorkerFault value
-  | otherwise = UnexpectedFault

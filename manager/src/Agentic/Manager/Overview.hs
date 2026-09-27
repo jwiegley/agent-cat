@@ -2,12 +2,13 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 
 -- | A complete authorized graph at one durable manager commit boundary.
-module Agentic.Manager.Overview (withOverviewSource) where
+module Agentic.Manager.Overview (withOverviewSource, withOverviewSourceWithin) where
 
 import Agentic.Manager.Admission (Admission)
 import Agentic.Manager.Approval (preparationProjection)
 import Agentic.Manager.Authorization
 import Agentic.Manager.Drafts (readDraftAt)
+import Agentic.Manager.Fault (FaultClass (InternalFault), ManagerFault (DeadlineElapsed), refuseStorageUnavailable)
 import qualified Agentic.Manager.Events as Events
 import Agentic.Manager.History (managedRunInView)
 import Agentic.Manager.Profile (ConfigurationLimits, publicId)
@@ -31,17 +32,26 @@ import System.Timeout (timeout)
 -- | Reservation precedes the supplied materializer. The original reader and
 -- response loans span collection and sending. The final boundary check refuses
 -- a concurrent commit, rather than replaying reads or combining different cuts.
+-- Materialization has an allowance of five seconds.
 withOverviewSource :: CoordinationStore -> CredentialProof -> Maybe Admission
   -> (AuthorizedView -> ConfigurationLimits -> IO (Text,[Pair],[Value]) -> IO a) -> IO a
-withOverviewSource store proof admission action = withStoreFiles store $ \root ->
+withOverviewSource = withOverviewSourceWithin 5000000
+
+-- | 'withOverviewSource' with an explicit materialization allowance in
+-- microseconds. A materialization that exceeds the allowance keeps the
+-- declared storage-unavailable refusal, and its elapsed deadline is recorded
+-- privately first.
+withOverviewSourceWithin :: Int -> CoordinationStore -> CredentialProof -> Maybe Admission
+  -> (AuthorizedView -> ConfigurationLimits -> IO (Text,[Pair],[Value]) -> IO a) -> IO a
+withOverviewSourceWithin allowance store proof admission action = withStoreFiles store $ \root ->
   withAuthorizedCatalogueContext store proof [C.Observe] $ \view limits visible _ invocations ->
     action view limits $ do
       revalidateAuthorizedView view >>= either throwIO pure
-      result <- timeout 5000000 (materialize root view (map fst visible) invocations)
+      result <- timeout allowance (materialize root view (map fst visible) invocations)
         `catch` \(failure :: StoreFailure) -> case failure of
           StoreLimit -> throwIO C.ViewTooLarge
           _ -> throwIO failure
-      maybe (throwIO C.StorageUnavailable) pure result
+      maybe (refuseStorageUnavailable "overview materialization" (InternalFault DeadlineElapsed)) pure result
   where
     materialize root view profiles invocations = do
       revision <- authorizedCursorRevision view

@@ -3,6 +3,16 @@
 module Main (main) where
 
 import Agentic.Manager.Artifacts
+import Agentic.Manager.Approval (readPreparation, withPreparation)
+import qualified Agentic.Manager.Drafts as Drafts
+import Agentic.Manager.Test.PrivateLog (withPrivateStderr, recordCount)
+import Agentic.Manager.Fault
+import Agentic.Manager.Fault.Record (faultLine)
+import qualified Agentic.Manager.Overview as Overview
+import Agentic.Manager.Pages (newPageSets, reservePageSet)
+import qualified Agentic.Manager.Protocol.Preparation as P
+import qualified Agentic.Manager.Transport as Transport
+import Agentic.Manager.Worker.State (WorkerFailure (WorkerUnexpectedExit))
 import qualified Agentic.Manager.Admission as Admission
 import qualified Agentic.Manager.Service as Service
 import Agentic.Manager.Protocol.Artifact (validExportDocument)
@@ -11,6 +21,15 @@ import qualified Agentic.Manager.Protocol.LocalAdmin as Admin
 import Agentic.Manager.Authorization
 import qualified Agentic.Manager.Commands as Commands
 import Agentic.Manager.Configuration
+import Control.Concurrent (threadDelay)
+import Control.Concurrent.STM (atomically)
+import Control.Exception (ErrorCall (..), SomeException, toException)
+import qualified Data.ByteString.Builder as Builder
+import qualified Data.Text.Encoding as TE
+import Data.Time (getCurrentTime)
+import qualified Network.HTTP.Types as HTTP
+import qualified Network.Wai as Wai
+import Network.Wai.Internal (ResponseReceived (..))
 import Agentic.Manager.Profile (Diagnostic (..), publicId)
 import qualified Agentic.Manager.Protocol.Command as Command
 import Agentic.Manager.State
@@ -54,6 +73,7 @@ main = do
     ["events",work] -> eventChecks work
     ["admission-contention",work] -> admissionContentionChecks work
     ["response-order",work] -> responseOrderChecks work
+    ["fault-classification",work] -> faultClassificationChecks work
     [work,source] -> do
       createDirectory(work </> "composition")
       compositionChecks(work </> "composition")
@@ -67,8 +87,294 @@ main = do
       admissionContentionChecks(work </> "admission-contention")
       createDirectory(work </> "response-order")
       responseOrderChecks(work </> "response-order")
+      createDirectory(work </> "fault-classification")
+      faultClassificationChecks(work </> "fault-classification")
       artifactChecks work source
-    _ -> error "usage: manager-artifact-check [retention|composition|observation|events|admission-contention|response-order] PRIVATE_DIRECTORY [PACKAGE_DIRECTORY]"
+    _ -> error "usage: manager-artifact-check [retention|composition|observation|events|admission-contention|response-order|fault-classification] PRIVATE_DIRECTORY [PACKAGE_DIRECTORY]"
+
+-- Each converted cause site keeps its own class or records its own erased
+-- cause, genuine Store failures keep the storage-unavailable problem, and the
+-- private record holds no exception text.
+faultClassificationChecks :: FilePath -> IO ()
+faultClassificationChecks work = do
+  let classOf :: SomeException -> FaultClass
+      classOf = classifyFault
+      marker = "synthetic-token"
+      markerBytes = TE.encodeUtf8 (T.pack marker)
+      storageUnavailable = Left (CommandRefusal Command.StorageUnavailable)
+  check "an unexpected exception keeps its own type" (classOf (toException (ErrorCall marker)) == UnexpectedFault "ErrorCall")
+  check "an I/O exception keeps its fixed error type" (classOf (toException (userError marker)) == UnexpectedFault "IOException user error")
+  check "Store contention remains a Store refusal" (classOf (toException StoreBusy) == StoreRefusal StoreBusy)
+  check "a Store I/O failure remains a Store refusal" (classOf (toException StoreUnavailable) == StoreRefusal StoreUnavailable)
+  check "a configuration diagnostic keeps its own class" (classOf (toException InvalidConfiguration) == ConfigurationFault InvalidConfiguration)
+  check "a worker failure keeps its own class" (classOf (toException WorkerUnexpectedExit) == WorkerRefusal WorkerUnexpectedExit)
+  check "an internal cause keeps its own class" (classOf (toException ConfigurationBusy) == InternalFault ConfigurationBusy)
+  check "a declared refusal keeps its own public problem" (faultProblem (classOf (toException Command.Forbidden)) == (403,"insufficient-scope"))
+  check "Store contention and Store I/O keep the public storage-unavailable problem"
+    (all ((== (503,"storage-unavailable")) . faultProblem) [StoreRefusal StoreBusy, StoreRefusal StoreUnavailable])
+  check "every other class uses the declared storage-unavailable problem"
+    (all ((== (503,"storage-unavailable")) . faultProblem)
+      [UnexpectedFault "ErrorCall", ConfigurationFault InvalidConfiguration, WorkerRefusal WorkerUnexpectedExit, InternalFault ConfigurationBusy])
+  let classes = [classOf (toException (ErrorCall marker)), StoreRefusal StoreBusy, StoreRefusal StoreUnavailable,
+        ConfigurationFault InvalidConfiguration, WorkerRefusal WorkerUnexpectedExit, InternalFault ConfigurationBusy,
+        InternalFault (ConfigurationRefused InvalidConfiguration), InternalFault AuthorizationChanged,
+        InternalFault PageSetCollision, InternalFault ResponseWriteTimeout, InternalFault DeadlineElapsed,
+        InternalFault AdmissionStopping, InternalFault AdmissionStoreInactive, InternalFault AdmissionCapacity,
+        CommandRefusal Command.StorageUnavailable]
+  check "each class has a distinct private label" (length (distinctText (map faultLabel classes)) == length classes)
+  now <- getCurrentTime
+  check "the private record holds no exception text"
+    (not (T.pack marker `T.isInfixOf` faultLine now "context" (faultLabel (classOf (toException (ErrorCall marker))))))
+  ((busyLoan, refusedLoan, deadline), loanRecord) <- withPrivateStderr (work </> "loan-stderr.log") $ do
+    busyLoan <- faultOf (configurationLoan "check loan" (Left SupervisionUnavailable :: Either Diagnostic ()))
+    refusedLoan <- faultOf (configurationLoan "check loan" (Left InvalidConfiguration :: Either Diagnostic ()))
+    deadline <- faultOf (Drafts.timed 1000 (threadDelay 1000000))
+    pure (busyLoan, refusedLoan, deadline)
+  check "an unsuccessful configuration loan keeps the declared refusal" (busyLoan == storageUnavailable && refusedLoan == storageUnavailable)
+  check "an unacquired configuration guard is recorded as configuration contention"
+    (recordCount loanRecord "check loan class=internal ConfigurationBusy erased=command StorageUnavailable" == 1)
+  check "another configuration diagnostic is recorded distinctly"
+    (recordCount loanRecord "check loan class=internal ConfigurationRefused InvalidConfiguration erased=command StorageUnavailable" == 1)
+  check "a draft deadline keeps the declared refusal" (deadline == storageUnavailable)
+  check "a draft deadline is recorded as an elapsed deadline"
+    (recordCount loanRecord "drafts deadline class=internal DeadlineElapsed erased=command StorageUnavailable" == 1)
+  ((), undeclaredRecord) <- withPrivateStderr (work </> "undeclared-stderr.log") $ do
+    recordUndeclaredRefusal "check preparation" (toException Command.Forbidden)
+    recordUndeclaredRefusal "check preparation" (toException WorkerUnexpectedExit)
+  check "an undeclared failure is recorded by its own class"
+    (recordCount undeclaredRecord "check preparation class=worker WorkerUnexpectedExit erased=command StorageUnavailable" == 1)
+  check "a declared command refusal is not recorded as an erasure"
+    (length (T.lines (TE.decodeUtf8 undeclaredRecord)) == 1)
+  pages <- newPageSets
+  atomically (reservePageSet pages "client_1" "view" "/v1/profiles" 2 0 "set_a")
+  collided <- faultOf (atomically (reservePageSet pages "client_2" "view" "/v1/profiles" 2 0 "set_a"))
+  check "a reserved page-set identifier is an internal collision" (collided == Left (InternalFault PageSetCollision))
+  atomically (reservePageSet pages "client_2" "view" "/v1/profiles" 2 0 "set_b")
+  quota <- faultOf (atomically (reservePageSet pages "client_3" "view" "/v1/profiles" 2 0 "set_c"))
+  check "page-set capacity keeps the declared quota refusal" (quota == Left (CommandRefusal Command.StorageQuota))
+  stalled <- faultOf (Transport.respondBytes HTTP.status200 [] (pure ()) "bytes" $ \response -> do
+    let (_, _, withBody) = Wai.responseToStream response
+    withBody (\body -> body (\_ -> threadDelay 10000000) (pure ()))
+    pure ResponseReceived)
+  check "a stalled response write is its own internal cause" (fmap (const ()) stalled == Left (InternalFault ResponseWriteTimeout))
+  createDirectory (work </> "sites")
+  (config,_) <- fixture (work </> "sites")
+  escaped <- withInstalled config $ \installed -> withCoordinationStore installed $ \store -> do
+    seed store
+    proof <- authenticateCredential store bearer >>= right
+    contended <- withHeldGate store (faultOf (authenticateCredential store bearer >>= right))
+    check "authentication preserves typed Store contention" (fmap (const ()) contended == Left (StoreRefusal StoreBusy))
+    streams <- Events.newStreamReaders
+    start <- Events.withBoundary store proof (\_ cursor _ -> pure cursor) (\_ _ cursor -> pure cursor)
+    (sites, siteRecord) <- withPrivateStderr (work </> "sites-stderr.log") $ do
+      reader <- withStoreConfiguration store $ \_ _ -> faultOf (withStoreReader store (pure ()))
+      observed <- withStoreAuthorizationWatch store $ \watch ->
+        faultOf (withAuthorizationObservation watch (mutate store (execute "UPDATE clients SET retired=0 WHERE id='client_1'" [])))
+      callback <- withStoreConfiguration store (\_ _ -> ioError (userError marker) :: IO ())
+      responseLoan <- faultOf (withAuthorizedResponse store proof "profile_1" [Command.Observe] (\_ -> throwIO ProcessFailure :: IO ()))
+      catalogue <- faultOf (withAuthorizedCatalogueContext store proof [Command.Observe] (\_ _ _ _ _ -> throwIO ProcessFailure :: IO ()))
+      borrowed <- withStoreAuthorizationWatch store $ \watch -> withStoreConfiguration store $ \_ _ ->
+        faultOf (withBorrowedAuthorizedCatalogues watch proof [Command.Observe] (\_ _ _ _ -> pure ()))
+      available <- withStoreAuthorizationWatch store $ \watch ->
+        faultOf (withBorrowedAuthorizedCatalogues watch proof [Command.Observe] (\_ _ _ _ -> pure ()))
+      viewFacts <- withAuthorizedView store proof "profile_1" [Command.Observe] $ \view ->
+        withStoreConfiguration store (\_ _ -> revalidateAuthorizedView view)
+      preparationRead <- withStoreConfiguration store $ \_ _ -> fmap (const ()) <$> readPreparation store proof "preparation_1"
+      operation <- Admission.withAdmission store $ \controller ->
+        withHeldGate store (fmap (const ()) <$> Admission.pollAdmission controller)
+      streamed <- faultOf (Events.withStream streams store proof start $ \pump -> pump (\_ _ -> pure ()) (\_ -> threadDelay 7000000))
+      pure (reader, observed, callback, responseLoan, catalogue, borrowed, available, viewFacts, preparationRead, operation, streamed)
+    let (reader, observed, callback, responseLoan, catalogue, borrowed, available, viewFacts, preparationRead, operation, streamed) = sites
+        erased context cause value = recordCount siteRecord (context <> " class=" <> cause <> " erased=" <> value) == 1
+        declared = "command StorageUnavailable"
+    check "reader admission keeps configuration contention as Store contention" (reader == Right (Left (StoreRefusal StoreBusy)))
+    check "reader admission records configuration contention"
+      (erased "store reader-admission" "internal ConfigurationBusy" "store StoreBusy")
+    check "a concurrent commit keeps the declared observation refusal" (fmap (const ()) observed == Left (StoreRefusal StoreBusy))
+    check "a concurrent commit is recorded as an authorization change"
+      (erased "store authorization-observation" "internal AuthorizationChanged" "store StoreBusy")
+    -- Characterization of a known gap: configurationIO has no private sink
+    -- that the local administration command does not share, so this
+    -- replacement is not recorded.
+    check "characterization of the unrecorded gap: an I/O failure inside a configuration loan becomes the declared diagnostic" (callback == Left InvalidConfiguration)
+    check "a response loan keeps the declared refusal" (responseLoan == storageUnavailable)
+    check "a response loan records its own configuration cause"
+      (erased "authorization response" "internal ConfigurationRefused ProcessFailure" declared)
+    check "a catalogue loan keeps the declared refusal" (catalogue == storageUnavailable)
+    check "a catalogue loan records its own configuration cause"
+      (erased "authorization catalogue-context" "internal ConfigurationRefused ProcessFailure" declared)
+    check "a borrowed catalogue loan keeps the declared refusal" (borrowed == Right storageUnavailable)
+    check "a borrowed catalogue loan records configuration contention"
+      (erased "authorization borrowed-catalogues" "internal ConfigurationBusy" declared)
+    check "the borrowed catalogue loan succeeds when the guard is free" (available == Right ())
+    check "view revalidation keeps its declared refusal" (viewFacts == Right (Right (Left Command.StorageUnavailable)))
+    check "view revalidation records configuration contention"
+      (erased "authorization view-facts" "internal ConfigurationBusy" declared)
+    check "a preparation read keeps its declared refusal" (preparationRead == Right (Left Command.StorageUnavailable))
+    check "a preparation read records configuration contention"
+      (erased "approval preparation-read" "internal ConfigurationBusy" declared)
+    check "an admission operation keeps its declared refusal" (operation == Left Command.StorageUnavailable)
+    check "an admission operation records its Store cause"
+      (erased "admission operation" "store StoreBusy" declared)
+    check "a stalled event write keeps the declared refusal" (streamed == storageUnavailable)
+    check "a stalled event write is recorded as a write timeout"
+      (erased "events write" "internal ResponseWriteTimeout" declared)
+    check "no erasure record holds exception text" (not (markerBytes `BS.isInfixOf` siteRecord))
+    generation <- storeProcessGeneration <$> storeIdentity store
+    policy <- right (P.projectPolicy (object ["kind" .= ("scripted"::Text)]))
+    let review = P.Review (T.replicate 64 "a") "local-control" policy "workflow_1" "profile_1" "fixture" "no execution"
+          [] "plan" [] [] [] (String "flag")
+        reviewBytes = Command.encoded review
+        binding = Command.encoded (object ["reviewSha256" .= hexDigest reviewBytes])
+        insertPreparation ident requestId reviewStored digestStored expires = mutate store $ do
+          execute "INSERT INTO requests(id,revision,client_id,workflow_id,descriptor_revision,profile_id,profile_revision,phase,admission,blocking_reasons,validation_errors) VALUES (?,'revision_1','client_1','workflow_1','descriptor_1','profile_1','profile_revision_1','review','reserved',?,?)"
+            [SQL.SQLText requestId,SQL.SQLBlob "[]",SQL.SQLBlob "[]"]
+          execute "INSERT INTO reservations(id,request_id,slot,process_generation,state) VALUES (?,?,NULL,?,'released')"
+            [SQL.SQLText ("reservation_" <> ident),SQL.SQLText requestId,SQL.SQLText generation]
+          execute "INSERT INTO preparations VALUES (?,'preparation_revision_1',?,'request_revision_1','profile_revision_1',?,?,'worker_1','root_1','native_1',?,?,?,?,'live',NULL)"
+            [SQL.SQLText ident,SQL.SQLText requestId,SQL.SQLText ("reservation_" <> ident),SQL.SQLText generation,SQL.SQLText expires,
+             SQL.SQLText digestStored,SQL.SQLBlob reviewStored,SQL.SQLBlob binding]
+        stored ident = faultOf (withPreparation store proof ident (\_ preparation -> pure (P.preparationId preparation)))
+        timestamp = "2999-01-01T00:00:00Z"
+    insertPreparation "preparation_ok" "request_ok" reviewBytes (hexDigest binding) timestamp
+    stored "preparation_ok" >>= check "a consistent stored preparation projects" . (== Right "preparation_ok")
+    insertPreparation "preparation_undecodable" "request_undecodable" "not json" (hexDigest binding) timestamp
+    stored "preparation_undecodable" >>= check "an undecodable stored review is a Store integrity failure" . (== Left (StoreRefusal StoreIntegrity))
+    insertPreparation "preparation_digest" "request_digest" reviewBytes (T.replicate 64 "b") timestamp
+    stored "preparation_digest" >>= check "a stored binding digest mismatch is a Store integrity failure" . (== Left (StoreRefusal StoreIntegrity))
+    insertPreparation "preparation_public" "request_public" reviewBytes (hexDigest binding) "not-a-timestamp"
+    stored "preparation_public" >>= check "a stored preparation outside the public contract is a Store integrity failure" . (== Left (StoreRefusal StoreIntegrity))
+    let https = HttpsConfiguration "127.0.0.1" 1 "unused" "unused" ["manager.invalid"] [] ["127.0.0.1"]
+        profilesRequest = Wai.defaultRequest
+          { Wai.isSecure = True, Wai.requestMethod = "GET", Wai.rawPathInfo = "/v1/profiles", Wai.pathInfo = ["v1","profiles"],
+            Wai.requestHeaders = [("Host","manager.invalid"),("Authorization","Bearer " <> bearer)],
+            Wai.requestBodyLength = Wai.KnownLength 0 }
+        invalidRequest = profilesRequest { Wai.rawPathInfo = "/v1/profiles:x", Wai.pathInfo = ["v1","profiles:x"] }
+        serveAt wanted failure = do
+          answered <- newIORef Nothing
+          _ <- Transport.authenticated https store (const ["GET"]) (\_ _ _ -> throwIO failure) wanted $ \response -> do
+            body <- newIORef BS.empty
+            let (status, _, withBody) = Wai.responseToStream response
+            withBody (\stream -> stream (\chunk -> readIORef body >>= \old -> writeIORef body (old <> BS.toStrict (Builder.toLazyByteString chunk))) (pure ()))
+            bytes <- readIORef body
+            writeIORef answered (Just (HTTP.statusCode status, either (const Null) (field "code") (eitherDecodeStrict' bytes), bytes))
+            pure ResponseReceived
+          readIORef answered
+        serve = serveAt profilesRequest
+        started failure = try @SomeException $ Transport.authenticated https store (const ["GET"]) (\_ _ respond -> do
+          _ <- respond (Wai.responseLBS HTTP.status200 [] "")
+          throwIO failure) profilesRequest (\_ -> pure ResponseReceived)
+    ((busy, unavailable, unexpected, internal, declaredRefusal, late, invalid), recorded) <- withPrivateStderr (work </> "private-stderr.log") $ do
+      busy <- serve (toException StoreBusy)
+      unavailable <- serve (toException StoreUnavailable)
+      unexpected <- serve (toException (ErrorCall marker))
+      internal <- serve (toException ConfigurationBusy)
+      declaredRefusal <- serve (toException Command.Forbidden)
+      late <- started (toException StoreBusy)
+      invalid <- serveAt invalidRequest (toException StoreBusy)
+      pure (busy, unavailable, unexpected, internal, declaredRefusal, late, invalid)
+    let answer = fmap (\(status, code, _) -> (status, code))
+        recordLines = T.lines (TE.decodeUtf8 recorded)
+        recordFor = recordCount recorded
+        publicStorageUnavailable = Just (503, String "storage-unavailable")
+    check "transport Store contention keeps the public storage-unavailable problem" (answer busy == publicStorageUnavailable)
+    check "transport Store I/O failure keeps the public storage-unavailable problem" (answer unavailable == publicStorageUnavailable)
+    check "transport unexpected failure keeps the declared public problem" (answer unexpected == publicStorageUnavailable)
+    check "transport internal cause keeps the declared public problem" (answer internal == publicStorageUnavailable)
+    check "transport declared refusal keeps its own problem" (answer declaredRefusal == Just (403, String "insufficient-scope"))
+    check "transport invalid path keeps the public storage-unavailable problem" (answer invalid == publicStorageUnavailable)
+    check "no public problem carries exception text"
+      (not (any (maybe False (\(_, _, bytes) -> markerBytes `BS.isInfixOf` bytes)) [busy, unavailable, unexpected, internal, declaredRefusal, invalid]))
+    check "transport records Store contention privately" (recordFor "response GET /v1/profiles unstarted public=503 storage-unavailable class=store StoreBusy" == 1)
+    check "transport records Store I/O failure privately" (recordFor "response GET /v1/profiles unstarted public=503 storage-unavailable class=store StoreUnavailable" == 1)
+    check "transport records an unexpected failure by type" (recordFor "response GET /v1/profiles unstarted public=503 storage-unavailable class=unexpected ErrorCall" == 1)
+    check "transport records an internal cause privately" (recordFor "response GET /v1/profiles unstarted public=503 storage-unavailable class=internal ConfigurationBusy" == 1)
+    check "transport records a failure after the response started" (recordFor "response GET /v1/profiles started public=503 storage-unavailable class=store StoreBusy" == 1)
+    check "transport records an invalid path by a fixed word" (recordFor "response GET invalid-path unstarted public=503 storage-unavailable class=store StoreBusy" == 1)
+    check "a failure after the response started is rethrown" (fmap (const ()) (either (Left . classifyFault) Right late) == Left (StoreRefusal StoreBusy))
+    check "a declared refusal is not recorded" (not (any ("insufficient-scope" `T.isInfixOf`) recordLines))
+    check "the private record holds no exception text" (not (markerBytes `BS.isInfixOf` recorded))
+    check "the private record holds only the six fault lines" (all ("manager-fault " `T.isPrefixOf`) recordLines && length recordLines == 6)
+    (contendedServe, contendedRecord) <- withPrivateStderr (work </> "transport-contention-stderr.log") $
+      withHeldGate store (serve (toException (ErrorCall marker)))
+    check "transport refuses real Store contention with the public storage-unavailable problem" (answer contendedServe == publicStorageUnavailable)
+    check "transport records real Store contention during authentication"
+      (recordCount contendedRecord "response GET /v1/profiles unstarted public=503 storage-unavailable class=store StoreBusy" == 1)
+    check "the application does not run under real Store contention during authentication"
+      (length (T.lines (TE.decodeUtf8 contendedRecord)) == 1)
+    ((viewStore, revalidatedStore, preparationStore, overviewDeadline), storeRecord) <- withPrivateStderr (work </> "store-erasure-stderr.log") $ do
+      viewStore <- withHeldGate store (withAuthorizedView store proof "profile_1" [Command.Observe] (\_ -> pure ()))
+      revalidatedStore <- withAuthorizedView store proof "profile_1" [Command.Observe] (\view -> withHeldGate store (revalidateAuthorizedView view))
+      preparationStore <- withHeldGate store (fmap (const ()) <$> readPreparation store proof "preparation_ok")
+      overviewDeadline <- faultOf (Overview.withOverviewSourceWithin 0 store proof Nothing (\_ _ materialize -> fmap (const ()) materialize))
+      pure (viewStore, revalidatedStore, preparationStore, overviewDeadline)
+    let storeErased context = recordCount storeRecord (context <> " class=store StoreBusy erased=command StorageUnavailable") == 1
+    check "an authorized view keeps the declared refusal for a Store failure" (viewStore == Left Command.StorageUnavailable)
+    check "an authorized view records its Store cause" (storeErased "authorization view")
+    check "view revalidation keeps the declared refusal for a Store failure" (revalidatedStore == Right (Left Command.StorageUnavailable))
+    check "view revalidation records its Store cause" (storeErased "authorization revalidation")
+    check "a preparation read keeps the declared refusal for a Store failure" (preparationStore == Left Command.StorageUnavailable)
+    check "a preparation read records its Store cause" (storeErased "approval preparation-read")
+    check "an overview materialization deadline keeps the declared refusal" (overviewDeadline == storageUnavailable)
+    check "an overview materialization deadline is recorded as an elapsed deadline"
+      (recordCount storeRecord "overview materialization class=internal DeadlineElapsed erased=command StorageUnavailable" == 1)
+    check "the Store erasure record holds only the four erasure lines"
+      (all ("manager-fault " `T.isPrefixOf`) (T.lines (TE.decodeUtf8 storeRecord)) && length (T.lines (TE.decodeUtf8 storeRecord)) == 4)
+    pure store
+  closed <- faultOf (authenticateCredential escaped bearer >>= right)
+  check "authentication preserves the closed-Store refusal" (fmap (const ()) closed == Left (StoreRefusal StoreClosed))
+  createDirectory (work </> "closed-configuration")
+  (closedConfig,_) <- fixture (work </> "closed-configuration")
+  ((closedReader, closedPoll), closedRecord) <- withInstalled closedConfig $ \installed -> withCoordinationStore installed $ \store ->
+    Admission.withAdmission store $ \controller -> withPrivateStderr (work </> "closed-configuration-stderr.log") $ do
+      closeConfiguration installed
+      closedReader <- faultOf (withStoreReader store (pure ()))
+      closedPoll <- fmap (const ()) <$> Admission.pollAdmission controller
+      pure (closedReader, closedPoll)
+  check "reader admission keeps a refused configuration as the Store I/O refusal" (closedReader == Left (StoreRefusal StoreUnavailable))
+  check "reader admission records the refused configuration distinctly"
+    (recordCount closedRecord "store reader-admission class=internal ConfigurationRefused InvalidConfiguration erased=store StoreUnavailable" == 1)
+  check "an admission poll keeps its declared refusal for a refused configuration" (closedPoll == Left Command.StorageUnavailable)
+  check "an admission poll records the refused configuration"
+    (recordCount closedRecord "admission poll class=internal ConfigurationRefused InvalidConfiguration erased=command StorageUnavailable" == 1)
+  createDirectory (work </> "credential-query")
+  (queryConfig,_) <- fixture (work </> "credential-query")
+  failedQuery <- withInstalled queryConfig $ \installed -> withCoordinationStore installed $ \store -> do
+    seed store
+    let hidden statement = withRaw (work </> "credential-query" </> "manager") (\db -> SQL.exec db statement)
+    hidden "ALTER TABLE credential_administration RENAME TO credential_administration_hidden"
+    outcome <- faultOf (authenticateCredential store bearer >>= right)
+    hidden "ALTER TABLE credential_administration_hidden RENAME TO credential_administration"
+    pure outcome
+  check "authentication preserves a typed credential-query Store failure" (fmap (const ()) failedQuery == Left (StoreRefusal StoreUnavailable))
+
+faultOf :: IO a -> IO (Either FaultClass a)
+faultOf action = either (Left . classifyFault) Right <$> try @SomeException action
+
+-- The occupier is itself a fail-fast caller, so it retries only its own
+-- refused admission until it owns the gate. The probe then observes the held
+-- gate before the action under test runs.
+withHeldGate :: CoordinationStore -> IO a -> IO a
+withHeldGate store action = withAsync occupy $ \_ -> do
+  timeout 4000000 held >>= maybe (error "Store gate fixture was not held") pure
+  action
+  where
+    held = do
+      outcome <- try @StoreFailure (runRead store (pure ()))
+      case outcome of
+        Left StoreBusy -> pure ()
+        _ -> threadDelay 1000 >> held
+    occupy = do
+      outcome <- try @StoreFailure (runRead store (query "WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<1000000000000) SELECT sum(x) FROM n" [] >> pure ()))
+      case outcome of
+        Left StoreBusy -> occupy
+        _ -> pure ()
+
+hexDigest :: BS.ByteString -> Text
+hexDigest bytes = T.pack (show (hash bytes :: Digest SHA256))
+
+distinctText :: [Text] -> [Text]
+distinctText = foldr (\value kept -> if value `elem` kept then kept else value : kept) []
 
 responseOrderChecks :: FilePath -> IO ()
 responseOrderChecks work = do
