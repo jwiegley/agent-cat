@@ -1430,6 +1430,37 @@ Two small residues of acat-192/acat-9kn: prune the deriving clauses if nothing w
 ]
 #+end_src
 
+* TODO [#B] Actor flow increment 1b: manager log with users and consent in the flow
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-5m60
+:LABELS:   ["actor-flow","workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-26 Sat 23:41]
+:MODIFIED: [2026-09-26 Sat 23:41]
+:CREATED_BY: johnw
+:SOURCE_REPO: .
+:ORIGINAL_SIZE: 0
+:END:
+
+Actor-flow increment 1, delta 1b (at most 8 engineering days). Add the manager log, one per Store stream identity, in the private root outside SQLite. It has a leaf lock, synchronized appends, gap notices and a ceiling equal to the mutation-ledger ceiling with the cancel reserve. It records each command after the Store admits it and before COMMIT, plus receipts, reviews with their private binding, relays to workers, requests that end without a run, lifetimes and administration changes. A command whose record cannot be written is refused with storage-unavailable, except a cancel. At the ceiling, ordinary commands are refused with storage-quota (operator decision). Extend the reader to the manager log and its joins. Gate: the unchanged Phase A tui-journey at N1 and then N8, with the reader showing and verifying the whole consent chain and every user step, and a negative control for each check (section 6.1 of the design record). Increment 1 is accepted only as a whole. Design record: proposals/actor-flow-architecture-v2.md (revision 4) in the private resume-20260923 evidence directory. Governing amendment: the "Operator amendment of 2026-09-26: actor flow" section of GOAL.md there.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-5m60",
+    "depends_on_id": "acat-e6cp",
+    "type": "blocks",
+    "created_at": "2026-09-27T06:41:08.015459Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
 * DONE [#B] Concurrent equal failover asks can abort nondeterministically
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -1457,6 +1488,38 @@ At +RTS -N8, two simultaneous identical deep asks once shared only a single cand
     "depends_on_id": "acat-lb5",
     "type": "discovered-from",
     "created_at": "2026-08-29T08:41:23.917866Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
+* TODO [#E] Handoff: name only the audit rounds the 2026-09-27 closeout wrote    :documentation:
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-6bih
+:LABELS:   ["documentation","workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-27 Sun 08:27]
+:MODIFIED: [2026-09-27 Sun 08:27]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Source: fess audit /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/fess/Z-HANDOFF-r2.md (2026-09-27), finding 1 (low). doc/workflow-manager-handoff.md lines 107-110 (2026-09-27 section) and /Users/johnw/dl/agent-cat-workflow-manager-remaining-2026-09-27.md line 313 say that the audits of this closeout are fess/Z-HANDOFF-r1.md to fess/Z-HANDOFF-r3.md and that each round replaces the 2026-09-26 audit of the same name. The closeout ended at round 2. fess/Z-HANDOFF-r3.md is still the 2026-09-26 round-3 audit (sha256 a47b78ce, identical to the preserved copy in Z/HANDOFF/impl-r2), and acat-syuu, acat-mu0p, acat-89kw and acat-uxkh cite it. Fix: name only r1 and r2 as audits of the 2026-09-27 closeout and state that fess/Z-HANDOFF-r3.md remains the 2026-09-26 round-3 audit, in both documents.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-6bih",
+    "depends_on_id": "acat-wm-023-d20b",
+    "type": "discovered-from",
+    "created_at": "2026-09-27T15:27:58.334591Z",
     "created_by": "johnw",
     "metadata": "{}",
     "thread_id": ""
@@ -2655,6 +2718,46 @@ deep-review + alexey + validated. (1) End-of-input errors report 0:0 (Parse.lean
 ]
 #+end_src
 
+* TODO [#B] Actor flow increment 3: live re-route and asks answered by people
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-c18n
+:LABELS:   ["actor-flow","workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-26 Sat 23:41]
+:MODIFIED: [2026-09-26 Sat 23:41]
+:CREATED_BY: johnw
+:SOURCE_REPO: .
+:ORIGINAL_SIZE: 0
+:END:
+
+Actor-flow increment 3, live re-route and asks answered by people (6 to 9 engineering days, after WM-027 and before WM-028, which carries its negative checks). The runtime accepts a redirect of an in-flight attempt that is not an effect, stops the attempt through its original owner, appends a failure for the current question, counts the re-route against the approved fail-over budget, and asks the chosen candidate in a new question (difference D6). A reviewed policy field names the plan addresses whose asks a person answers, through the existing person gate, and exact approval covers the field. Design record: proposals/actor-flow-architecture-v2.md (revision 4) in the private resume-20260923 evidence directory. Governing amendment: the "Operator amendment of 2026-09-26: actor flow" section of GOAL.md there.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-c18n",
+    "depends_on_id": "acat-en4g",
+    "type": "blocks",
+    "created_at": "2026-09-27T06:41:08.555637Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  },
+  {
+    "issue_id": "acat-c18n",
+    "depends_on_id": "acat-wm-027-gcu6",
+    "type": "blocks",
+    "created_at": "2026-09-27T06:41:08.843101Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
 * TODO [#E] Record that the Cabal 3.16.1.0 expectation means cabal-install
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -3050,6 +3153,21 @@ Owner directive 2026-08-12: use the standard libraries as much as possible; do n
 ]
 #+end_src
 
+* TODO [#B] Actor flow increment 1a: run log, flow broker, strict codecs and reader
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-e6cp
+:LABELS:   ["actor-flow","workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-26 Sat 23:41]
+:MODIFIED: [2026-09-26 Sat 23:41]
+:CREATED_BY: johnw
+:SOURCE_REPO: .
+:ORIGINAL_SIZE: 0
+:END:
+
+Actor-flow increment 1, delta 1a (at most 8 engineering days, after the operator accepts Phase A and before Phase B resumes WM-025 to WM-027). Add Agentic.Runtime.Flow with the record, the seventeen schemas, strict bounded codecs, claim checks above 64 KiB and the reader. Generalize the run writer at runMachineWith, and add flowBroker, which appends each record before delivery and makes the receiver act on the decoded value. Route the four direct inProcessBroker paths through the run's broker. Add the strict request decoder beside questionJson, versioned engine codecs in engine/api, and the EnginePermission update with its ACP report. Add the verb agentic-run flow PATH [--follow] [--route PREDICATE] [--from CURSOR]. Update runtime/BROKER.md, and add the dated record doc/research/actor-flow-amendment.md, which narrows the frozen exclusion of a message broker to permit these in-process logs. Checkpoints: the record, the run writer and a run-log reader by day 4, and the delta complete by day 8. Design record: proposals/actor-flow-architecture-v2.md (revision 4) in the private resume-20260923 evidence directory. Governing amendment: the "Operator amendment of 2026-09-26: actor flow" section of GOAL.md there.
+
 * DONE [#B] Order every question after the effects that precede it
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -3120,6 +3238,37 @@ Deliberately not a constructor; castGrade covers =. The <= case is a structural 
     "author": "johnw",
     "text": "Closed with the stratum it concerned: the pre-re-derivation Term algebra was excised at 4aed549 under acat-q1i (owner-approved hybrid, 2026-08-20). This ticket's subject, its state at closure, and why it retires are recorded — with the machine-checked results it relates to transcribed exactly — in doc/research/term-algebra-results.md (the ticket graveyard section names this issue individually). The mathematics is preserved as a document and in git history at b98e25f; the six theory threads are recorded there as future directions should the program ever be revived.",
     "created_at": "2026-08-20T18:42:49Z"
+  }
+]
+#+end_src
+
+* TODO [#B] Actor flow increment 2: service route subscription
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-en4g
+:LABELS:   ["actor-flow","workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-26 Sat 23:41]
+:MODIFIED: [2026-09-26 Sat 23:41]
+:CREATED_BY: johnw
+:SOURCE_REPO: .
+:ORIGINAL_SIZE: 0
+:END:
+
+Actor-flow increment 2, service subscription (4 to 6 engineering days, inside WM-025 and WM-026, with its negative checks in WM-028). Add a /v1 route resource, paged and served as server-sent events, starting with a written threat model. Authorization maps route classes onto the existing scopes (operator decision): observe reads the public class, observe with control also reads the actor class, and the restricted class stays with the owning account. Revalidate authorization before each write, bind each cursor to the stream identity and the authorization revision, answer 410 below the retained floor or after a restore, and add no SQLite write. Design record: proposals/actor-flow-architecture-v2.md (revision 4) in the private resume-20260923 evidence directory. Governing amendment: the "Operator amendment of 2026-09-26: actor flow" section of GOAL.md there.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-en4g",
+    "depends_on_id": "acat-5m60",
+    "type": "blocks",
+    "created_at": "2026-09-27T06:41:08.298936Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
   }
 ]
 #+end_src
@@ -4961,6 +5110,38 @@ work is finished.
 ]
 #+end_src
 
+* TODO [#E] Report: qualify 'diagnosed the six red manager gates'    :documentation:
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-hzs9
+:LABELS:   ["documentation","workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-27 Sun 08:27]
+:MODIFIED: [2026-09-27 Sun 08:27]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Source: fess audit /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/fess/Z-HANDOFF-r2.md (2026-09-27), finding 3 (low), a residual of round-1 L2. Section 14 of /Users/johnw/dl/agent-cat-workflow-manager-remaining-2026-09-27.md (line 270) says the workflow 'diagnosed the six red manager gates'. The reviewed A5G1 record leaves the tip cause of the approval and vertical gates unproven (fess/A-A5G1-r2.md line 92), and the handoff's A5G1 row says so. A5G2 implementer runs, which have no verifier or audit, support the PATH cause. Fix: write 'diagnosed the six red manager gates, with the tip cause of two of them unproven in the reviewed record', and apply the same qualifier wherever the handoff repeats the claim.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-hzs9",
+    "depends_on_id": "acat-wm-023-d20b",
+    "type": "discovered-from",
+    "created_at": "2026-09-27T15:27:58.837097Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
 * TODO [#C] Assert the composite install and decision head in the PTY journey
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -5069,6 +5250,42 @@ pass.
     "depends_on_id": "acat-effect-ordering-tr4t",
     "type": "blocks",
     "created_at": "2026-09-24T18:02:09.810939Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
+* TODO [#D] Test in-process tool log delivery through brokerLog
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-inprocess-brokerlog-test-y43j
+:LABELS:   []
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-27 Sun 01:54]
+:MODIFIED: [2026-09-27 Sun 01:54]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+runtime/BROKER.md:42-43 states that the CLI applies brokerLog to the receiver that it gives the in-process tools (cli/src/Agentic/Cli.hs:2325). This claim rests on code reading only. checkShellLogDelivery in runtime/test/BrokerTests.hs covers only the runtime shell attempt path (Shell.hs:197).
+
+Add a test that runs an in-process tool through the CLI path with a broker whose brokerLog adds a prefix, and assert that the in-process "call ..." log line reaches the receiver with that prefix exactly once. Add a negative control in which Cli.hs:2325 gives the raw outputReceiver to the in-process tools, and confirm that the test fails.
+
+Source: A5R round-2 fess audit, finding L1 (resume-20260923/fess/A-A5R-r2.md).
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-inprocess-brokerlog-test-y43j",
+    "depends_on_id": "acat-wm-029-nlmg",
+    "type": "discovered-from",
+    "created_at": "2026-09-27T08:54:44.923988Z",
     "created_by": "johnw",
     "metadata": "{}",
     "thread_id": ""
@@ -6234,7 +6451,7 @@ A4 fess finding (low, test-strictness). key_notice in manager/test/service_http.
 :LABELS:   ["documentation","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-26 Sat 07:20]
-:MODIFIED: [2026-09-26 Sat 07:20]
+:MODIFIED: [2026-09-27 Sun 08:28]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -6255,6 +6472,20 @@ Source: fess audit /Users/johnw/Products/agent-cat-workflow-manager/implementati
     "created_by": "johnw",
     "metadata": "{}",
     "thread_id": ""
+  }
+]
+#+end_src
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 331,
+    "issue_id": "acat-mu0p",
+    "author": "johnw",
+    "text": "2026-09-27 closeout: the new 2026-09-27 handoff section and /Users/johnw/dl/agent-cat-workflow-manager-remaining-2026-09-27.md section 2 now state that nix resolves only to /nix/var/nix/profiles/default/bin/nix under direnv exec with the private environment, that the shim exists only at resume-20260923/R/bin/nix, and that only the forbidden engine/acp/ci/route-live.sh calls nix develop. Evidence: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/Z/HANDOFF/impl-r2/H28-env-facts and /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/Z/HANDOFF/verify-r2/V06-env-nix. The 2026-09-26 section and the 2026-09-26 report keep the original sentence as chronology, so the in-place fix this issue names was not made. Left open for the owner to decide whether the current-state correction closes it.",
+    "created_at": "2026-09-27T15:28:08Z"
   }
 ]
 #+end_src
@@ -7911,6 +8142,38 @@ From acat-vbl: muExt_indep_of_peak_eq_zero anchors the count semantically only a
 :END:
 
 Owner 2026-08-13, after the DSL/MCP work: (1) reconstruct the hardenPatch Lean example as a PROGRAM TEXT in the DSL — a file in the repo (examples/harden.wf or similar), not just a string constant in a test; (2) a single executable 'agent-cat' with three subcommands over that file: 'agent-cat run <program>' parses, type-checks, and EXECUTES the plan against a live agent (ACP adapter as in harden_demo; --adapter stub|claude|codex), printing the transcript, bill and certificate; 'agent-cat cost <program>' parses, type-checks and prints the COST analysis without executing — level, shape sequence, cost tree leaves, min/max, and the reachable-bill set where the level permits it, stating plainly when a bound is sound but unattained; 'agent-cat plan <program>' parses, type-checks and PRINTS THE PLAN — a readable rendering of the checked term (structure, questions with addressee/scope, binders, branches, revision bounds), i.e. what the author wrote as the library understands it. All three share one parseAndCheck front end and must report type errors identically with position and message. Exit nonzero on type error. Keep harden_demo working or fold it into 'agent-cat run' with the demo's assertions behind a flag. Depends on the DSL landing (workflow wlkbf4jne).
+
+* TODO [#E] Handoff: give A5S2 one scope in the handoff and the report    :documentation:
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-tlhm
+:LABELS:   ["documentation","workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-27 Sun 08:27]
+:MODIFIED: [2026-09-27 Sun 08:27]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Source: fess audit /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/fess/Z-HANDOFF-r2.md (2026-09-27), finding 2 (low). The order rationale in doc/workflow-manager-handoff.md lines 298-308 says A5S2 must re-establish the manager-path baselines after its fix, but the handoff's own resume step 2 follows the refocus note ('fix it with a regression test, and stop there') and omits the baselines. Section 6 step 2 of /Users/johnw/dl/agent-cat-workflow-manager-remaining-2026-09-27.md (line 147) includes 're-establish the manager-path baselines at N1 and then N8'. Fix: choose one scope for A5S2 (the refocus note's stop-there scope or the ledger's baseline re-establishment), use it in both documents, and adjust the rationale to match.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-tlhm",
+    "depends_on_id": "acat-wm-023-d20b",
+    "type": "discovered-from",
+    "created_at": "2026-09-27T15:27:58.616340Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
 
 * DOING [#B] Update affected TLS certificate validation before enabling service clients
 :PROPERTIES:
@@ -13019,7 +13282,7 @@ manager's correctness boundary.
 :LABELS:   ["p5","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-26 Sat 07:21]
+:MODIFIED: [2026-09-27 Sun 08:28]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-023
 :SOURCE_REPO: agent-cat
@@ -13211,6 +13474,13 @@ callers. Worker environments contain no manager credential material.
     "author": "johnw",
     "text": "Closeout subtask HANDOFF (workflow resumed from checkpoint wm023-20260923) recorded the stopping point. It adds a dated 2026-09-26 section at the top of doc/workflow-manager-handoff.md and writes the external report /Users/johnw/dl/agent-cat-workflow-manager-remaining-2026-09-26.md (SHA-256 7e9172d3...). The workflow stopped because subtask A5S1C failed after three rounds: the fess audit fess/A-A5S1C-r3.md is blocking on the unchecked classification at Service.hs:125 and Service.hs:162 (controls K42 and K45 pass). The A5S1C work stays uncommitted in the worktree (A5S1C-only diff digest b7bbe942...). Phase A is not met, and no package or gate is accepted beyond WM-001..WM-022/G0/G1. Evidence: make -C doc check exit 0 (Z/HANDOFF/impl-r3/H3-doc-check, verify-r3/V3-doc-check, documentation check only, it does not read the handoff). Accuracy rests on read-only cross-checks against git, obr and the evidence directory (H3-accuracy-2, V3-git, V3-tracker, V3-rangediff). Final fess fess/Z-HANDOFF-r3.md is non-blocking with four low wording findings, recorded as acat-syuu, acat-mu0p, acat-89kw and acat-uxkh. Integrator actions still open: commit A5S1C once clean, create the Approval.hs:96 gap issue and an S1-c tracker candidate, and widen the acat-dxos scope.",
     "created_at": "2026-09-26T14:21:05Z"
+  },
+  {
+    "id": 330,
+    "issue_id": "acat-wm-023-d20b",
+    "author": "johnw",
+    "text": "2026-09-27 closeout (HANDOFF round 2): the handoff gains a dated 2026-09-27 section that records the workflow stopping point. The workflow stopped on an owner-decision escalation from A5G2: catalogueHelp in manager/src/Agentic/Manager/Profile.hs launches one help query per catalogue row under one 30 s group deadline, so the 257-row catalogue that cataloguePageChecks requires times out. Phase A is not met. No package or gate is accepted beyond WM-001 to WM-022, G0 and G1. The A5G2 work stays uncommitted in the worktree (diff digest 879a9c21) with implementer evidence only and no verifier or audit. The matching remaining-scope report is /Users/johnw/dl/agent-cat-workflow-manager-remaining-2026-09-27.md. Evidence scope: make -C doc check exited 0 through direnv exec with the private environment (/Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/Z/HANDOFF/impl-r2/H28-doc-check, /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/Z/HANDOFF/verify-r2/V02-doc-check). That check does not read the handoff. Accuracy rests on read-only cross-checks against git, the tracker and the evidence directory (/Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/Z/HANDOFF/verify-r2/V03 to V07). No build, model test, fixture or UI interaction ran. Final fess audit fess/Z-HANDOFF-r2.md is non-blocking. Its three low findings are acat-6bih, acat-tlhm and acat-hzs9. This issue stays open.",
+    "created_at": "2026-09-27T15:28:08Z"
   }
 ]
 #+end_src
@@ -13328,7 +13598,7 @@ leak private errors. There is no plaintext bearer development exception.
 :LABELS:   ["p5","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-09 Wed 22:34]
+:MODIFIED: [2026-09-26 Sat 23:41]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-025
 :SOURCE_REPO: agent-cat
@@ -13389,6 +13659,24 @@ through the actual HTTP response path.
 
 #+begin_src json
 [
+  {
+    "issue_id": "acat-wm-025-3utw",
+    "depends_on_id": "acat-5m60",
+    "type": "blocks",
+    "created_at": "2026-09-27T06:41:09.116663Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  },
+  {
+    "issue_id": "acat-wm-025-3utw",
+    "depends_on_id": "acat-en4g",
+    "type": "blocks",
+    "created_at": "2026-09-27T06:41:09.949230Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  },
   {
     "issue_id": "acat-wm-025-3utw",
     "depends_on_id": "acat-wm-006-bdxu",
@@ -13453,7 +13741,7 @@ through the actual HTTP response path.
 :LABELS:   ["p5","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-09 Wed 22:34]
+:MODIFIED: [2026-09-26 Sat 23:41]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-026
 :SOURCE_REPO: agent-cat
@@ -13516,6 +13804,24 @@ and enforce advertised bounds. G2 is complete with mutations still unavailable.
 [
   {
     "issue_id": "acat-wm-026-qo1e",
+    "depends_on_id": "acat-5m60",
+    "type": "blocks",
+    "created_at": "2026-09-27T06:41:09.408216Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  },
+  {
+    "issue_id": "acat-wm-026-qo1e",
+    "depends_on_id": "acat-en4g",
+    "type": "blocks",
+    "created_at": "2026-09-27T06:41:10.206027Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  },
+  {
+    "issue_id": "acat-wm-026-qo1e",
     "depends_on_id": "acat-wm-015-wzl9",
     "type": "blocks",
     "created_at": "2026-09-10T05:33:57.087558Z",
@@ -13569,7 +13875,7 @@ and enforce advertised bounds. G2 is complete with mutations still unavailable.
 :LABELS:   ["p5","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-24 Thu 02:50]
+:MODIFIED: [2026-09-26 Sat 23:41]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-027
 :SOURCE_REPO: agent-cat
@@ -13632,6 +13938,15 @@ Network mutation remains behind G3 until the required evidence is complete.
 
 #+begin_src json
 [
+  {
+    "issue_id": "acat-wm-027-gcu6",
+    "depends_on_id": "acat-5m60",
+    "type": "blocks",
+    "created_at": "2026-09-27T06:41:09.681719Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  },
   {
     "issue_id": "acat-wm-027-gcu6",
     "depends_on_id": "acat-wm-010-hbip",
@@ -13755,7 +14070,7 @@ Network mutation remains behind G3 until the required evidence is complete.
 :LABELS:   ["p5","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-25 Fri 22:32]
+:MODIFIED: [2026-09-26 Sat 23:41]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-028
 :SOURCE_REPO: agent-cat
@@ -13835,6 +14150,15 @@ public or production deployment.
   },
   {
     "issue_id": "acat-wm-028-g1n0",
+    "depends_on_id": "acat-c18n",
+    "type": "blocks",
+    "created_at": "2026-09-27T06:41:10.495975Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  },
+  {
+    "issue_id": "acat-wm-028-g1n0",
     "depends_on_id": "acat-wm-024-28bb",
     "type": "blocks",
     "created_at": "2026-09-10T05:34:00.707614Z",
@@ -13879,7 +14203,7 @@ public or production deployment.
 :LABELS:   ["p6","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-24 Thu 09:19]
+:MODIFIED: [2026-09-27 Sun 01:54]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-029
 :SOURCE_REPO: agent-cat
@@ -14012,6 +14336,13 @@ coordination or SQL into the TUI.
     "author": "johnw",
     "text": "Phase A subtask A5 (resume-20260923) advances this package. It does not complete it. The TUI service read lane now issues one composite read through the original single-flight lane: request, receipt, preparation, snapshot, control and the head decision. The composite installs in one event only when the ticket, request id and run id match the current selection and every component validates. A declared refusal (503, 429, 410) keeps the last complete observation and marks it stale without changing mutation state. An unreadable receipt leaves the approval outcome unresolved and offers no resend. A compiled mutation-key admission predicate gives every key exactly one visible outcome.\n\nEvidence and ceilings: Werror package build passed (package build). tui-model-test passed at N1 and N8, 387 checks (pure model test), and 27 verifier guard-breaking overlays each fail a named check. tui-approval passed at N1 then N8 twice, and the PTY consent control failed as required at N1 and N8 (actual UI interaction, deterministic native fixture). tui/ci/tui.sh passed. Evidence: resume-20260923/A/A5/impl-r2 and A/A5/verify-r2 in the private evidence directory. Fess: fess/A-A5-r2.md, not blocking.\n\nLimits: no PTY run exercises a refused request read, the stale display, a key outcome or a decision-head install (acat-lzlp, acat-i9aj). The round-1 N8 failure is unexplained (acat-dxos). Deferral starvation risk for post-association keys is open (acat-ftw9).\n",
     "created_at": "2026-09-24T16:19:58Z"
+  },
+  {
+    "id": 328,
+    "issue_id": "acat-wm-029-nlmg",
+    "author": "johnw",
+    "text": "Subtask A5R (rebase audit follow-ups) is integrated on branch workflow-manager-checkpoint-20260923. It adds runtime broker tests for epoch passthrough and shell tool log delivery through brokerLog, a frontend preparation and lineage test on the probe row 'in-process' with non-empty rowTools, and current-state corrections to runtime/BROKER.md, doc/tui-release-evidence.md and doc/tui-design.md. It removes the assertion-free ext-pi/test/pi-remote-acp.test.mjs. Evidence: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A5R/impl-r2 and /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A5R/verify-r2. Broker and runtime tests pass at N1 and N8 (model tests). The frontend session probe passes at N1 and N8 (deterministic native fixture). Five mutants fail as expected. tui/ci/tui.sh passes (deterministic PTY fixture, second verifier run after a first failure under host load 88 to 97, root kept). The ACP gate reports 21 scenarios. ext-pi npm test gives 89 passed and 5 skipped. No actual UI interaction or operator exercise was performed. This comment does not close the package.",
+    "created_at": "2026-09-27T08:54:44Z"
   }
 ]
 #+end_src
@@ -14471,7 +14802,7 @@ Local-mode behavior remains intact without a duplicated service runtime model.
 :LABELS:   ["p7","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-25 Fri 15:49]
+:MODIFIED: [2026-09-27 Sun 01:54]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-035
 :SOURCE_REPO: agent-cat
@@ -14570,6 +14901,13 @@ check fail.
     "author": "johnw",
     "text": "A12W (Phase A) closes the three pre-existing -Werror gaps that kept the manager gates from building. exe:manager-store-check now declares Agentic.Manager.Protocol.Draft and Agentic.Manager.Protocol.Command in other-modules, exe:manager-command-check now declares Agentic.Manager.Protocol.Draft, and parsedAs in cli/test/PolicyProbe.hs gains the TuiService arm. Two probe cases cover '--tui --service' with an absolute and a relative client-profile path. The diff adds 6 lines and removes none, and it contains no warning suppression and no ghc-options change.\n\nEvidence (source is tree f5083527 plus the A12W diff): FINALBUILD exits 0 with no GHC -W diagnostic, both as a full recompile in the shared builddir (/Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A12W/impl-r1/A12W-finalbuild-2.*) and from scratch in a fresh builddir (/Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A12W/verify-r1/finalbuild-fresh.*). A supplementary build with --enable-tests also exits 0 (verify-r1/supp-enable-tests.*). These are package builds. bash manager/ci/store.sh and bash manager/ci/commands.sh exit 0 at N1 and N8 (verify-r1/store-gate.*, verify-r1/commands-gate.*), which are deterministic native fixtures. policy-probe passes at N1 and N8, and a guard-breaking mutant of the new arm fails it (verify-r1/control-mutant.*). These are pure model tests. A red control on the pre-fix source fails all three targets with the expected warnings (verify-r1/control-red.*). The fess audit (/Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/fess/A-A12W-r1.md) is non-blocking.\n\nThis issue stays open. A12W is a build prerequisite and does not meet the WM-035 completion criteria. cli/ci/policies.sh still fails at a pre-existing drafts step (manager-draft-check: ProcessFailure at manager/test/DraftCheck.hs:90), which a separate issue tracks.\n",
     "created_at": "2026-09-25T22:49:19Z"
+  },
+  {
+    "id": 329,
+    "issue_id": "acat-wm-035-9uqq",
+    "author": "johnw",
+    "text": "Subtask A5R (rebase audit follow-ups) is integrated on branch workflow-manager-checkpoint-20260923. It adds runtime broker tests for epoch passthrough and shell tool log delivery through brokerLog, a frontend preparation and lineage test on the probe row 'in-process' with non-empty rowTools, and current-state corrections to runtime/BROKER.md, doc/tui-release-evidence.md and doc/tui-design.md. It removes the assertion-free ext-pi/test/pi-remote-acp.test.mjs. Evidence: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A5R/impl-r2 and /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A5R/verify-r2. Broker and runtime tests pass at N1 and N8 (model tests). The frontend session probe passes at N1 and N8 (deterministic native fixture). Five mutants fail as expected. tui/ci/tui.sh passes (deterministic PTY fixture, second verifier run after a first failure under host load 88 to 97, root kept). The ACP gate reports 21 scenarios. ext-pi npm test gives 89 passed and 5 skipped. No actual UI interaction or operator exercise was performed. This comment does not close the package.",
+    "created_at": "2026-09-27T08:54:44Z"
   }
 ]
 #+end_src
