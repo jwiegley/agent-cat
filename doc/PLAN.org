@@ -1495,15 +1495,17 @@ At +RTS -N8, two simultaneous identical deep asks once shared only a single cand
 ]
 #+end_src
 
-* TODO [#E] Handoff: name only the audit rounds the 2026-09-27 closeout wrote    :documentation:
+* DONE [#E] Handoff: name only the audit rounds the 2026-09-27 closeout wrote    :documentation:
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-6bih
 :LABELS:   ["documentation","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-27 Sun 08:27]
-:MODIFIED: [2026-09-27 Sun 08:27]
+:MODIFIED: [2026-09-27 Sun 12:44]
 :CREATED_BY: johnw
+:FINISHED: [2026-09-27 Sun 12:44]
+:CLOSE_REASON: Correction applied in both documents, confirmed by fess Z-HANDOFF-r1
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
@@ -1520,6 +1522,52 @@ Source: fess audit /Users/johnw/Products/agent-cat-workflow-manager/implementati
     "depends_on_id": "acat-wm-023-d20b",
     "type": "discovered-from",
     "created_at": "2026-09-27T15:27:58.334591Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 335,
+    "issue_id": "acat-6bih",
+    "author": "johnw",
+    "text": "Applied in the second 2026-09-27 closeout: the new handoff section and report revision 3 carry this correction. The fess audit Z-HANDOFF-r1 (2026-09-27, second closeout) confirms that the acat-hzs9, acat-tlhm and acat-6bih corrections are applied. Evidence: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/Z/HANDOFF/impl-r1/H29-accuracy.log, /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/Z/HANDOFF/verify-r1/V8-report-structure.log.",
+    "created_at": "2026-09-27T19:44:25Z"
+  }
+]
+#+end_src
+
+* TODO [#E] Closeout checks: make acceptance-wording scans fail on hits    :documentation:
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-6h6z
+:LABELS:   ["documentation","workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-27 Sun 12:44]
+:MODIFIED: [2026-09-27 Sun 12:44]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Source: fess audit /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/fess/Z-HANDOFF-r1.md (2026-09-27, second closeout), finding 6 (low). The acceptance-wording block of Z/HANDOFF/impl-r1/H29-accuracy.sh ends with '|| ok', so it printed six unannotated hits and still reported fail=0. The negative claim rests on a judgement that the log does not record (the verifier's V9-claim-scan.log does record it). Fix: in future closeouts, make such scans fail on unexplained hits or record the per-hit judgement.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-6h6z",
+    "depends_on_id": "acat-wm-023-d20b",
+    "type": "discovered-from",
+    "created_at": "2026-09-27T19:44:14.012754Z",
     "created_by": "johnw",
     "metadata": "{}",
     "thread_id": ""
@@ -1704,6 +1752,38 @@ Any later n-ary-panel-equals-fold theorem wants it; record before it is rediscov
     "author": "johnw",
     "text": "Closed with the stratum it concerned: the pre-re-derivation Term algebra was excised at 4aed549 under acat-q1i (owner-approved hybrid, 2026-08-20). This ticket's subject, its state at closure, and why it retires are recorded — with the machine-checked results it relates to transcribed exactly — in doc/research/term-algebra-results.md (the ticket graveyard section names this issue individually). The mathematics is preserved as a document and in git history at b98e25f; the six theory threads are recorded there as future directions should the program ever be revived.",
     "created_at": "2026-08-20T18:42:48Z"
+  }
+]
+#+end_src
+
+* TODO [#E] Handoff: name 'Never signal a stored PID' for the null-signal probe    :documentation:
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-871r
+:LABELS:   ["documentation","workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-27 Sun 12:44]
+:MODIFIED: [2026-09-27 Sun 12:44]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Source: fess audit /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/fess/Z-HANDOFF-r1.md (2026-09-27, second closeout), finding 4 (low). The open-finding item at doc/workflow-manager-handoff.md lines 171-175 weighs the null-signal probe in manager/test/DraftCheck.hs (signalProcess nullSignal on a PID read from the .help file) only against 'process absence is not cleanup proof'. The binding rule 'Never signal a stored PID' is not named, and manager/test/ProfileCheck.hs:127-130 at HEAD does the same. Fix: name both rules in the item so the A5G2b audit weighs them.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-871r",
+    "depends_on_id": "acat-wm-023-d20b",
+    "type": "discovered-from",
+    "created_at": "2026-09-27T19:44:13.353040Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
   }
 ]
 #+end_src
@@ -5110,15 +5190,17 @@ work is finished.
 ]
 #+end_src
 
-* TODO [#E] Report: qualify 'diagnosed the six red manager gates'    :documentation:
+* DONE [#E] Report: qualify 'diagnosed the six red manager gates'    :documentation:
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-hzs9
 :LABELS:   ["documentation","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-27 Sun 08:27]
-:MODIFIED: [2026-09-27 Sun 08:27]
+:MODIFIED: [2026-09-27 Sun 12:44]
 :CREATED_BY: johnw
+:FINISHED: [2026-09-27 Sun 12:44]
+:CLOSE_REASON: Correction applied in both documents, confirmed by fess Z-HANDOFF-r1
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
@@ -5138,6 +5220,20 @@ Source: fess audit /Users/johnw/Products/agent-cat-workflow-manager/implementati
     "created_by": "johnw",
     "metadata": "{}",
     "thread_id": ""
+  }
+]
+#+end_src
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 333,
+    "issue_id": "acat-hzs9",
+    "author": "johnw",
+    "text": "Applied in the second 2026-09-27 closeout: the new handoff section and report revision 3 carry this correction. The fess audit Z-HANDOFF-r1 (2026-09-27, second closeout) confirms that the acat-hzs9, acat-tlhm and acat-6bih corrections are applied. Evidence: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/Z/HANDOFF/impl-r1/H29-accuracy.log, /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/Z/HANDOFF/verify-r1/V8-report-structure.log.",
+    "created_at": "2026-09-27T19:44:23Z"
   }
 ]
 #+end_src
@@ -5408,6 +5504,38 @@ Acceptance: either the stale status (or the unchanged modelStatus) survives the 
     "depends_on_id": "acat-wm-034-3vqz",
     "type": "discovered-from",
     "created_at": "2026-09-24T16:19:43.713479Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
+* TODO [#E] Handoff: state the Git-config dependence of the resume digest    :documentation:
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-iyvu
+:LABELS:   ["documentation","workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-27 Sun 12:44]
+:MODIFIED: [2026-09-27 Sun 12:44]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Source: fess audit /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/fess/Z-HANDOFF-r1.md (2026-09-27, second closeout), finding 2 (low). The resume digest 53ee2ec4... in doc/workflow-manager-handoff.md lines 220-246 and report lines 283-292 depends on the operator Git configuration (diff.mnemonicprefix true, diff.algorithm histogram). With -c diff.mnemonicPrefix=false the same tree hashes to ce804cfa..., and the A5G2b gate logs, run under the private HOME, record aaec1d42... for the same tree. Fix: state that the digest assumes the operator Git configuration in a plain shell and that the gate logs record aaec1d42... for the same tree.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-iyvu",
+    "depends_on_id": "acat-wm-023-d20b",
+    "type": "discovered-from",
+    "created_at": "2026-09-27T19:44:12.680948Z",
     "created_by": "johnw",
     "metadata": "{}",
     "thread_id": ""
@@ -7045,6 +7173,38 @@ Run one explicitly authorized read-only/no-tool Factory Droid ACP acceptance wit
 ]
 #+end_src
 
+* TODO [#D] Handoff: cite the D02 default-limit drafts failure and D01    :documentation:
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-o2ud
+:LABELS:   ["documentation","workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-27 Sun 12:44]
+:MODIFIED: [2026-09-27 Sun 12:44]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Source: fess audit /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/fess/Z-HANDOFF-r1.md (2026-09-27, second closeout), finding 1 (medium). doc/workflow-manager-handoff.md lines 137-150 (second 2026-09-27 section) and /Users/johnw/dl/agent-cat-workflow-manager-remaining-2026-09-27.md line 117 cite D02 only for its passing leg at soft RLIMIT_NOFILE 4096. A/A5G2b/impl-r1/D02-catalogue-fd-limit.log also records a leg at 1048576 (root a5g2b-fdlimit-1048576.dET5xq) that failed with 'manager-draft-check: QueryTimeout', status 1, help phase 30.200 s, while D02.exit is 0 because the loop hid the inner status. D01-runner-help-timing.log (24 help spawns through Python at 1048576: 1.55 s sequential, 1.43 s with close_fds=False, 0.39 s four-way) bears on the close_fds attribution and is not cited. The escalation's '30.2 s QueryTimeout (G07)' is the D02 figure. Fix: add the D02 default-limit failure (30.200 s, QueryTimeout, root, exit 0 despite the inner failure) and one sentence on D01 to both documents.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-o2ud",
+    "depends_on_id": "acat-wm-023-d20b",
+    "type": "discovered-from",
+    "created_at": "2026-09-27T19:44:12.218246Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
 * DONE [#C] DSL over-engineering: ~230 deletable lines (bounded chain, duplicated helpers, identity pass, unused theorems)
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -7832,6 +7992,38 @@ HIGH (deep/alexey/validated): ConwayStar extends commutative CSemiring; Mat.comp
 ]
 #+end_src
 
+* TODO [#E] Handoff: phrase the A13 baseline reassignment as a proposal    :documentation:
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-rxkl
+:LABELS:   ["documentation","workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-27 Sun 12:44]
+:MODIFIED: [2026-09-27 Sun 12:44]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Source: fess audit /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/fess/Z-HANDOFF-r1.md (2026-09-27, second closeout), finding 3 (low). doc/workflow-manager-handoff.md lines 261-264 and report line 152 say that the A5S2 manager-path baselines are re-established by the integrated gate of A13. No ledger entry, specification, GOAL.md or earlier report defines that scope for A13. Fix: phrase the reassignment as a proposal for the orchestrator to assign.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-rxkl",
+    "depends_on_id": "acat-wm-023-d20b",
+    "type": "discovered-from",
+    "created_at": "2026-09-27T19:44:13.004737Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
 * DONE [#D] Unify Cost.csum and Prob.csum: one IsSup-based completeness construction
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -8143,15 +8335,17 @@ From acat-vbl: muExt_indep_of_peak_eq_zero anchors the count semantically only a
 
 Owner 2026-08-13, after the DSL/MCP work: (1) reconstruct the hardenPatch Lean example as a PROGRAM TEXT in the DSL — a file in the repo (examples/harden.wf or similar), not just a string constant in a test; (2) a single executable 'agent-cat' with three subcommands over that file: 'agent-cat run <program>' parses, type-checks, and EXECUTES the plan against a live agent (ACP adapter as in harden_demo; --adapter stub|claude|codex), printing the transcript, bill and certificate; 'agent-cat cost <program>' parses, type-checks and prints the COST analysis without executing — level, shape sequence, cost tree leaves, min/max, and the reachable-bill set where the level permits it, stating plainly when a bound is sound but unattained; 'agent-cat plan <program>' parses, type-checks and PRINTS THE PLAN — a readable rendering of the checked term (structure, questions with addressee/scope, binders, branches, revision bounds), i.e. what the author wrote as the library understands it. All three share one parseAndCheck front end and must report type errors identically with position and message. Exit nonzero on type error. Keep harden_demo working or fold it into 'agent-cat run' with the demo's assertions behind a flag. Depends on the DSL landing (workflow wlkbf4jne).
 
-* TODO [#E] Handoff: give A5S2 one scope in the handoff and the report    :documentation:
+* DONE [#E] Handoff: give A5S2 one scope in the handoff and the report    :documentation:
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-tlhm
 :LABELS:   ["documentation","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-27 Sun 08:27]
-:MODIFIED: [2026-09-27 Sun 08:27]
+:MODIFIED: [2026-09-27 Sun 12:44]
 :CREATED_BY: johnw
+:FINISHED: [2026-09-27 Sun 12:44]
+:CLOSE_REASON: Correction applied in both documents, confirmed by fess Z-HANDOFF-r1
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
@@ -8171,6 +8365,20 @@ Source: fess audit /Users/johnw/Products/agent-cat-workflow-manager/implementati
     "created_by": "johnw",
     "metadata": "{}",
     "thread_id": ""
+  }
+]
+#+end_src
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 334,
+    "issue_id": "acat-tlhm",
+    "author": "johnw",
+    "text": "Applied in the second 2026-09-27 closeout: the new handoff section and report revision 3 carry this correction. The fess audit Z-HANDOFF-r1 (2026-09-27, second closeout) confirms that the acat-hzs9, acat-tlhm and acat-6bih corrections are applied. Evidence: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/Z/HANDOFF/impl-r1/H29-accuracy.log, /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/Z/HANDOFF/verify-r1/V8-report-structure.log.",
+    "created_at": "2026-09-27T19:44:24Z"
   }
 ]
 #+end_src
@@ -9270,6 +9478,38 @@ From the 2026-08-14 heavy review (7 passes; sources: deep-review, alexey, valida
     "author": "johnw",
     "text": "Closed by the .wf retirement: the define macro system died with the parser in the .wf retirement",
     "created_at": "2026-08-18T20:05:37Z"
+  }
+]
+#+end_src
+
+* TODO [#E] Handoff: cite the source of the 2026-09-27 catalogueHelp decision    :documentation:
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-uv2h
+:LABELS:   ["documentation","workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-27 Sun 12:44]
+:MODIFIED: [2026-09-27 Sun 12:44]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Source: fess audit /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/fess/Z-HANDOFF-r1.md (2026-09-27, second closeout), finding 5 (low). The operator decision of 2026-09-27 (four concurrent help queries) cited at doc/workflow-manager-handoff.md lines 11-12 and report lines 89 and 117 has no recorded source in the evidence directory, GOAL.md or the tracker. Its only sources are the A5G2b escalation text and a Profile.hs comment. The report says the decision is 'implemented and tested' without an implementer-level qualifier, and the implementation runs consecutive batches, which the A5G2b review should weigh against 'four concurrent'. Fix: cite the decision's record or state that the workflow record is its only source, and qualify the report cell.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-uv2h",
+    "depends_on_id": "acat-wm-023-d20b",
+    "type": "discovered-from",
+    "created_at": "2026-09-27T19:44:13.665302Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
   }
 ]
 #+end_src
@@ -13282,7 +13522,7 @@ manager's correctness boundary.
 :LABELS:   ["p5","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-27 Sun 08:28]
+:MODIFIED: [2026-09-27 Sun 12:44]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-023
 :SOURCE_REPO: agent-cat
@@ -13481,6 +13721,13 @@ callers. Worker environments contain no manager credential material.
     "author": "johnw",
     "text": "2026-09-27 closeout (HANDOFF round 2): the handoff gains a dated 2026-09-27 section that records the workflow stopping point. The workflow stopped on an owner-decision escalation from A5G2: catalogueHelp in manager/src/Agentic/Manager/Profile.hs launches one help query per catalogue row under one 30 s group deadline, so the 257-row catalogue that cataloguePageChecks requires times out. Phase A is not met. No package or gate is accepted beyond WM-001 to WM-022, G0 and G1. The A5G2 work stays uncommitted in the worktree (diff digest 879a9c21) with implementer evidence only and no verifier or audit. The matching remaining-scope report is /Users/johnw/dl/agent-cat-workflow-manager-remaining-2026-09-27.md. Evidence scope: make -C doc check exited 0 through direnv exec with the private environment (/Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/Z/HANDOFF/impl-r2/H28-doc-check, /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/Z/HANDOFF/verify-r2/V02-doc-check). That check does not read the handoff. Accuracy rests on read-only cross-checks against git, the tracker and the evidence directory (/Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/Z/HANDOFF/verify-r2/V03 to V07). No build, model test, fixture or UI interaction ran. Final fess audit fess/Z-HANDOFF-r2.md is non-blocking. Its three low findings are acat-6bih, acat-tlhm and acat-hzs9. This issue stays open.",
     "created_at": "2026-09-27T15:28:08Z"
+  },
+  {
+    "id": 332,
+    "issue_id": "acat-wm-023-d20b",
+    "author": "johnw",
+    "text": "Second 2026-09-27 closeout (HANDOFF round 1): new top section 'Second resume workflow stopping point of 2026-09-27' in doc/workflow-manager-handoff.md and revision 3 of /Users/johnw/dl/agent-cat-workflow-manager-remaining-2026-09-27.md. The run stopped on the A5G2b owner-decision escalation (drafts QueryTimeout, options a-e). Accepted state unchanged: WM-001..WM-022, G0, G1. Phase A not met. A5G2/A5G2b code stays uncommitted (digest 53ee2ec4...). Evidence: make -C doc check exit 0 (documentation check only, /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/Z/HANDOFF/impl-r1/H29-doc-check.log, /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/Z/HANDOFF/verify-r1/V2-doc-check.log); accuracy by read-only cross-checks (/Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/Z/HANDOFF/impl-r1/H29-accuracy.log, /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/Z/HANDOFF/verify-r1/V3b-V11). fess Z-HANDOFF-r1 non-blocking; findings filed as acat-o2ud, acat-iyvu, acat-rxkl, acat-871r, acat-uv2h, acat-6h6z, acat-xj7c. This package issue stays open.",
+    "created_at": "2026-09-27T19:44:23Z"
   }
 ]
 #+end_src
@@ -16531,6 +16778,38 @@ parT is the tensor skeleton only; §7 says the panel is a primitive, not derivab
     "author": "johnw",
     "text": "Closed with the stratum it concerned: the pre-re-derivation Term algebra was excised at 4aed549 under acat-q1i (owner-approved hybrid, 2026-08-20). This ticket's subject, its state at closure, and why it retires are recorded — with the machine-checked results it relates to transcribed exactly — in doc/research/term-algebra-results.md (the ticket graveyard section names this issue individually). The mathematics is preserved as a document and in git history at b98e25f; the six theory threads are recorded there as future directions should the program ever be revived.",
     "created_at": "2026-08-20T18:42:44Z"
+  }
+]
+#+end_src
+
+* TODO [#E] Closeout verifier: record the opening binding with full evidence    :documentation:
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-xj7c
+:LABELS:   ["documentation","workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-27 Sun 12:44]
+:MODIFIED: [2026-09-27 Sun 12:44]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Source: fess audit /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/fess/Z-HANDOFF-r1.md (2026-09-27, second closeout), finding 7 (low). Z/HANDOFF/verify-r1/V1-binding.log has only a .log file, with no .command, .start, .end or .exit. V11 repeats the binding with the full set, so no fact depends on V1 alone. Fix: record the opening binding through the standard evidence convention in future rounds.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-xj7c",
+    "depends_on_id": "acat-wm-023-d20b",
+    "type": "discovered-from",
+    "created_at": "2026-09-27T19:44:14.383244Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
   }
 ]
 #+end_src

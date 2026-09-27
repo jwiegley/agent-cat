@@ -2,6 +2,285 @@
 
 <!-- handoff-id: wm023-20260923; status: paused-unaccepted-wip; accepted: WM-001..WM-022,G0,G1; resume-branch: workflow-manager-checkpoint-20260923; fess: every-subtask -->
 
+## Second resume workflow stopping point of 2026-09-27
+
+The resume workflow that started from checkpoint `wm023-20260923` ran a
+second time on 2026-09-27, after the Integrator committed the first
+2026-09-27 closeout as `72329fc9`. Its first recorded command ran at
+16:18:28Z, and it stopped at about 19:23Z. The run executed one subtask,
+A5G2b, which applied the operator decision of 2026-09-27 on
+`Profile.catalogueHelp`. That subtask escalated for a second owner decision,
+as the subsection "Stop reason and owner decision" states. Accepted state is
+unchanged at WM-001–WM-022 and G0/G1, which is 22 of 44 packages and two of
+six gates. WM-023 (`acat-wm-023-d20b`) is still in progress. Phase A of the
+remaining-scope report is not met, because the run did not reach its exit
+check, and the run made no change for Phases B to G. This section and
+revision 3 of `~/dl/agent-cat-workflow-manager-remaining-2026-09-27.md`
+describe the current state. Where they differ from the sections below, they
+supersede them, and the older sections remain as chronology. Revision 3
+replaces revision 2 of the same file, which the first 2026-09-27 section
+cites. A byte-identical copy of revision 2 is at
+`Z/HANDOFF/impl-r1/H29-preserved-report-2026-09-27-rev2.md`
+(`Z/HANDOFF/impl-r1/H29-preserve.log`). `~/dl` resolves to `~/Downloads`.
+
+### Objective, worktrees and environment
+
+The governing goal of 2026-09-23 remains the current objective, with its
+actor-flow amendment of 2026-09-26. Its verbatim text is in
+`/Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/GOAL.md`.
+It replaces Pi goal `mu629ta5-11s8ax`, revision 914, and it prevails over
+older records where they conflict. The subsection "Governing objective" of
+the first 2026-09-27 section below states its task mapping and the actor-flow
+increments, and that text remains current. The former Pi ledger under
+`.pi/goals` is not restored, and the workflow orchestrator tracks the goal.
+
+The worktree `/Users/johnw/src/agent-cat/.worktrees/tui` was recreated on
+2026-09-23 after an unexplained removal, and it holds the work branch
+`workflow-manager-checkpoint-20260923`. The former work worktree
+`/Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/broker-source`
+is still detached at `b95ce6d1` with no local change. The canonical branch
+`tui` stays at `6b7c90b79b47c85d07162bb11d038349dbac9131`
+(`Z/HANDOFF/impl-r1/H29-start-binding.log`).
+
+No procedure runs `nix develop` in any form. The operator generates the
+direnv environment in the worktree with `de`. Every build, test and project
+tool runs through `direnv exec .` from the worktree, with
+`/Users/johnw/Products/k.M0a5ItPm/environment.sh` sourced inside that shell,
+and `de` runs again when `flake.nix` or `flake.lock` changes or when direnv
+reports a stale or blocked environment. Git and `obr` run in a plain shell.
+At the stop the environment reported GHC 9.10.3, Cabal 3.16.1.0 and
+`crypton-x509-validation` 1.9.1, and `nix` resolved to
+`/nix/var/nix/profiles/default/bin/nix`
+(`Z/HANDOFF/impl-r1/H29-doc-check-before.log`).
+
+### Commits and subtask results
+
+This run made no commit. The branch head is
+`72329fc9172801d106beee3ee5180606baff9b6f`, whose parent is the A5R commit
+`84ea887b`. As read from the remote-tracking refs without a fetch,
+`origin/workflow-manager-checkpoint-20260923` is still `b95ce6d1` and
+`origin/tui` is `6b7c90b7`. Nothing from this workflow is published. The
+subtask table of the first 2026-09-27 section below stays current for A0 to
+A5, A12W, A5S1D, A5R and A5G1, with one qualification of the A5G1 row. The
+reviewed A5G1 record leaves the tip cause of the `approval` and `vertical`
+gates unproven. The A5G2b implementer evidence below supports the `PATH`
+cause at the tip, and that evidence has no verifier run or audit. The
+subtask A5G2 of the first 2026-09-27 section continues as A5G2b.
+
+| Subtask | Commit | Result and evidence ceiling |
+| --- | --- | --- |
+| A5G2b | none | Escalated after one implementer round, with its work uncommitted, no verifier run and no `fess` audit. The evidence is under `A/A5G2b/impl-r1`. |
+| A5S2, A6–A14 | none | Not started. |
+
+These are subtask results. None of them accepts a package or a gate.
+
+### Uncommitted A5G2b work
+
+The worktree holds nine modified files, no untracked file, and nothing
+staged. The SHA-256 of
+`git diff HEAD -- . ':!doc/workflow-manager-handoff.md' ':!doc/PLAN.org'` is
+`53ee2ec4c9e5f12c73ae5ff38da78c917a028c3b1338c050623d3f06b39e0757`
+(`Z/HANDOFF/impl-r1/H29-start-binding.log`, which matches
+`A/A5G2b/impl-r1/I02-final-binding.log`). Six of the files carry the A5G2
+change that the first 2026-09-27 section describes. A5G2b left
+`cli/src/Agentic/RoutingDiscovery.hs`, `cli/test/RoutingDiscoveryProbe.hs`,
+`manager/test/HistoryCheck.hs`, `manager/test/admission_audit.py` and
+`manager/test/worker_evidence.py` unchanged, and it changed four files:
+
+- `manager/src/Agentic/Manager/Profile.hs` runs the help queries of
+  `catalogueHelp` in consecutive batches of `helpConcurrency`, which is 4,
+  inside the unchanged group deadline of `queryMicros`. Each query keeps its
+  own process cleanup. At the deadline the batch in flight is cancelled, and
+  each of its queries completes its cleanup before the group reports
+  `QueryTimeout`. Replies are checked in catalogue order.
+- `manager/test/ProfileCheck.hs` adds fixture runners that hold the first
+  four help queries until four have started and that delay help replies. Its
+  new check requires at most four live help queries, one help query for each
+  row in any order, and cleanup at the group deadline.
+- `manager/test/DraftCheck.hs` records the name and process ID of each help
+  query. Its catalogue check requires one help query for each of the 257
+  rows, and it requires each recorded process to be absent when discovery
+  returns, by a null-signal probe of the recorded process ID. The existing
+  `ProfileCheck.hs` uses the same probe.
+- `manager/README.md` describes the help queries, their batches of four and
+  the shared deadline.
+
+The implementer results follow, and each is implementer evidence only. With
+the previous sequential `catalogueHelp` and the new checks, `profiles.sh`
+failed with `QueryTimeout` and the 257-row catalogue check failed with
+`QueryTimeout` at N1 (`S03-sequential-profiles`,
+`S04-sequential-catalogue-N1`). With the change, `profiles.sh` passed
+(`C03-concurrent-profiles`, deterministic native fixture) after a first run
+failed on a timing flaw of the new fixture, which `C02-note.txt` records. The
+Werror build of all targets with tests passed twice (`B01` and `B02`, package
+build). The gates `drafts`, `artifacts`, `workers`, `vertical`,
+`routing-config`, `approval` and `controls` passed, and the routing discovery
+probe passed at N1 and N8 (`G01` to `G06`, `G08` and `G09`, deterministic
+native fixtures). `cli/ci/policies.sh` failed in its `drafts` leg with
+`manager-draft-check: QueryTimeout` at `DraftCheck.hs:101`, with fixture root
+`credentials.QHYL3FHM/build/manager-drafts.xSMgV2` (`G07-policies`). The
+gates `admission` and `ingestion` last ran in the A5G2 round on the source
+before `Profile.hs` changed. The negative controls failed as intended. The
+sequential `Profile.hs` under the final checks failed the profile probe at N8
+with `ProcessFailure` and the catalogue check at N1 with `QueryTimeout`
+(`N02`, `N03`). A mutant with `helpConcurrency` set to 8 failed the check
+that allows at most four live queries (`N04`). With
+`RoutingDiscovery.hs` reverted to its HEAD text, the routing discovery probe
+failed because `security` could not be spawned, and the vertical and history
+policy checks failed (`P02-tip-prefix-policy-fulllog`, `P03`, `P04`). With
+the change restored, the history policy check passed (`P06`). `P02` recorded
+exit 0 for a failed run because of a status-capture error, which
+`P02-note.txt` records.
+
+### Stop reason and owner decision
+
+The help phase of the 257-row catalogue check took 29.444 seconds at N1 and
+29.443 seconds at N8 in the passing `drafts` gate, against a deadline of 30
+seconds. It took 30.264 seconds in the failing `policies.sh` run
+(`Z/HANDOFF/impl-r1/H29-facts.log`, from the file times of the fixture
+roots). The soft `RLIMIT_NOFILE` of the environment is 1048576. With the
+same code and a soft limit of 4096, the help phase took 6.476 seconds and
+the check passed. With the sequential code and a soft limit of 4096, it took
+18.477 seconds and passed (`A/A5G2b/impl-r1/D02-catalogue-fd-limit`,
+`D03-sequential-fd-limit`). The implementer attributes the difference to
+the descriptor-closing sweep of `createProcess` with `close_fds` in
+`process` 1.6.26.1, at about 100 milliseconds for each spawn at the high
+limit, with the spawns behaving as serialized. The evidence shows the
+dependence on the limit, but no record isolates the sweep itself. The
+decision of 2026-09-27 therefore does not make the 257-row catalogue
+reliably discoverable on this host. The owner chooses one of five options:
+
+1. Change `createProcessGroup` in Runtime to spawn without a sweep over
+   every possible descriptor, for example through `posix_spawn` with
+   `POSIX_SPAWN_CLOEXEC_DEFAULT` and `POSIX_SPAWN_SETSID` in `runtime/cbits`.
+   This changes an accepted Runtime owner that every worker uses, and the
+   gates that own it must be revalidated.
+2. Have the manager service set a bounded soft `RLIMIT_NOFILE` at startup,
+   derived from its configured limits. This is a new operational policy.
+3. Lower the soft descriptor limit in the gate scripts only. This leaves
+   production behavior on this host unchanged.
+4. Patch the `process` dependency. This needs separate authorization.
+5. Declare a catalogue row ceiling in `manager/DRAFTS.md` and change the
+   257-row fixture.
+
+A longer or absent group deadline stays excluded. The escalation makes no
+recommendation.
+
+### Open findings and authorizations
+
+- A5G2b, owner decision, as above. After the decision, A5G2b completes on
+  the uncommitted change with its verifier and `fess` audit. The audit also
+  examines whether the null-signal probe of recorded process IDs in
+  `DraftCheck.hs` and `ProfileCheck.hs` meets the rule that process absence
+  is not cleanup proof.
+- Refocus note. The note stops the classification work after A5S1D, asks
+  for one diagnosis round on the S1 503 and the closed release with a fresh
+  N8 root, then the uninterrupted PTY journey, and holds every handoff and
+  documentation edit until the journey passes. This run again worked on the
+  manager gates first. The source change of A5G2b is confined to
+  `Profile.hs` and its tests and documentation. This section is a handoff
+  edit made before the journey passes, which the closeout specification
+  requires.
+- S1 family, `acat-dxos`, P1. This run made no new S1 diagnosis. The
+  subsection "S1 failure family" of the 2026-09-26 section remains current.
+- `acat-drafts-processfailure-j1h0`, P2, stays open. Its `ProcessFailure`
+  no longer occurs with the uncommitted change, and the `QueryTimeout` that
+  replaces it waits on the owner decision.
+- The first 2026-09-27 closeout ended at audit round 2. Its audits were
+  `fess/Z-HANDOFF-r1.md` and `fess/Z-HANDOFF-r2.md`, and
+  `fess/Z-HANDOFF-r3.md` was still the 2026-09-26 round-3 audit. The audits
+  of this closeout replace the files of the same round number. Copies of the
+  first 2026-09-27 audits are at
+  `Z/HANDOFF/impl-r1/H29-preserved-fess-Z-HANDOFF-r1-20260927.md` and
+  `Z/HANDOFF/impl-r1/H29-preserved-fess-Z-HANDOFF-r2-20260927.md`, and the
+  copy of the 2026-09-26 round-3 audit is at
+  `Z/HANDOFF/impl-r2/H28-preserved-fess-Z-HANDOFF-r3-20260926.md`. The round-2
+  audit of the first 2026-09-27 closeout raised `acat-hzs9`, `acat-tlhm` and
+  `acat-6bih` (P4). This section and revision 3 of the report apply their
+  corrections, and the tracker items stay open for the Integrator.
+- The other open findings of the first 2026-09-27 section below are
+  unchanged, including `acat-response-ingestion-budget-zaoi` and
+  `acat-tls-name-forms-6gbo` (P1), `acat-ftw9` (P2) and the omission of
+  `Agentic.Cli.Command.TuiService` from the manual. The export in
+  `doc/PLAN.org`, which the first 2026-09-27 section reports as stale, was
+  refreshed in `72329fc9` and lists the actor-flow items,
+  `acat-inprocess-brokerlog-test-y43j` and the three P4 items above. The
+  tracker holds 95 open and 5 in-progress issues
+  (`Z/HANDOFF/impl-r1/H29-tracker.log`).
+
+The workflow record lists no pending authorization request. Option 4 of the
+owner decision would need one. Publication of the rewritten branch still
+waits for the force-push approval that the 2026-09-26 section describes, and
+no such approval is recorded.
+
+### Resume procedure
+
+The first commands run in a plain shell. The toolchain check runs through
+`direnv exec .` with the private environment:
+
+```bash
+cd /Users/johnw/src/agent-cat/.worktrees/tui
+git status --short --branch
+git log -1 --format='%H %P'
+git rev-parse tui
+git diff HEAD -- . ':!doc/workflow-manager-handoff.md' ':!doc/PLAN.org' |
+  shasum -a 256
+direnv exec . bash -c 'source /Users/johnw/Products/k.M0a5ItPm/environment.sh &&
+  cd /Users/johnw/src/agent-cat/.worktrees/tui &&
+  ghc --numeric-version && cabal --numeric-version &&
+  ghc-pkg field crypton-x509-validation version'
+```
+
+Two states are expected. Before the Integrator commits this section, HEAD is
+`72329fc9172801d106beee3ee5180606baff9b6f`, and the worktree holds the nine
+files of the uncommitted A5G2b change and this handoff change. After the
+Integrator commits this section, with `doc/PLAN.org` at most, HEAD is that
+commit, its parent is `72329fc9172801d106beee3ee5180606baff9b6f`, and the
+worktree holds only the nine files. In both states `tui` is
+`6b7c90b79b47c85d07162bb11d038349dbac9131`, no file is untracked, and the
+digest command prints
+`53ee2ec4c9e5f12c73ae5ff38da78c917a028c3b1338c050623d3f06b39e0757`. Any
+other result means that the branch or the worktree changed after this
+section was written, and the reader establishes that change before
+continuing. If direnv reports a stale or blocked environment, run `de` in
+the worktree and repeat the check. Rebuild with the build command of the
+first 2026-09-27 section below before any binary runs.
+
+The next work proceeds in this order:
+
+1. Obtain the owner decision above. Complete A5G2b on the uncommitted
+   change, restore `drafts` and `cli/ci/policies.sh` at N1 and N8, rerun
+   `admission` and `ingestion` on the final source, and run the verifier and
+   the `fess` audit. The Integrator then commits A5G2b. The S1 diagnosis
+   would otherwise bind to unreviewed source that includes the production
+   change in `cli/src/Agentic/RoutingDiscovery.hs`. The refocus note puts
+   the S1 diagnosis first, so if the decision is delayed, the orchestrator
+   decides whether A5S2 runs first on the worktree as it stands.
+2. Run A5S2 with the scope of the refocus note: one diagnosis round on the
+   S1 503 and the closed release with a fresh N8 root, a proof of the cause,
+   a fix at its owner with a regression test, and a stop. Widen `acat-dxos`
+   and record the S1-c candidate. The manager-path baselines that the
+   ledger title of A5S2 names are re-established by the integrated gate of
+   A13.
+3. Restore the parked A6 diff (`refs/wip/a6-r3-20260924-final`) without its
+   draft handoff, and build the uninterrupted PTY journey at N1 and then N8
+   in the existing `manager/test/service_http.py` harness (A6 to A11): exact
+   Unicode submission, approval of the five selectors, observed progress,
+   snapshot display, the Bool `false` answer, the offered retry, native
+   completion, and a `Client.downloadVerified` exclusive save with digest
+   and byte checks, with a broken-step negative control. Add no new helper
+   or evidence tooling.
+4. Run the mutants and the integrated code gate on the final source (A12 and
+   A13). Only after the journey passes, document the first TUI service
+   workflow and reconcile the manual (A14).
+5. After Phase A is accepted, land actor-flow increment 1 (`acat-e6cp`,
+   `acat-5m60`) before Phase B resumes WM-025 to WM-027.
+
+Run the `fess` audit at the end of every subtask, keep each subtask to one
+audit round, preserve the first failure of any check with its fixture root,
+and label every result with its evidence ceiling. The evidence of this
+closeout is under `Z/HANDOFF/impl-r1`, in the files that begin with `H29-`.
+
 ## Resume workflow stopping point of 2026-09-27
 
 The resume workflow that started from checkpoint `wm023-20260923` ran again
