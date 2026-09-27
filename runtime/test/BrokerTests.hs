@@ -8,7 +8,7 @@ module BrokerTests (brokerTests) where
 
 import qualified Agentic.Engine as Engine
 import Agentic.Plan
-import Agentic.Planning (Addressee (AddrModel), Code (CodeAck, CodeFlag), billExecFresh, billMemo)
+import Agentic.Planning (Addressee (AddrModel, AddrToolExec), Code (CodeAck, CodeFlag, CodeText), billExecFresh, billMemo)
 import Agentic.Runtime
 import Control.Exception (IOException, displayException, try)
 import Control.Monad (unless)
@@ -40,11 +40,18 @@ actRequest = effectRequest (Q (AddrModel "broker") scopeUnit "perform" 0)
 plan :: Plan '[] Bool
 plan = PAskC SFlag flagRequest (PAskC SFlag flagRequest (PAskC SAck actRequest (PRet (exprVar (VThere VHere)))))
 
+-- | The same reusable question on both sides of one effect, so it has epoch 0
+-- before the effect and epoch 1 after it.
+epochPlan :: Plan '[] Bool
+epochPlan = PAskC SFlag flagRequest (PAskC SAck actRequest (PAskC SFlag flagRequest (PRet (exprVar VHere))))
+
 brokerTests :: IO ()
 brokerTests = do
   checkDelivery False
   checkDelivery True
   checkUncertainReply
+  checkEpochDelivery
+  checkShellLogDelivery
 
 checkDelivery :: Bool -> IO ()
 checkDelivery injected = do
@@ -150,6 +157,96 @@ checkUncertainReply = do
   actualRequests <- readIORef requests
   actualEffects <- readIORef effects
   expect "uncertain effect reply is neither replayed nor marked complete" (length actualRequests == 1 && actualEffects == ["started"])
+
+-- | A broker that wraps the reusable-answer hooks must deliver the epoch
+-- unchanged. The identity broker and a forwarding wrapper satisfy the check. A
+-- wrapper that rewrites every epoch to 0 is the negative control: the check
+-- must report each consequence of the rewrite.
+checkEpochDelivery :: IO ()
+checkEpochDelivery = do
+  identity <- epochViolations inProcessBroker
+  expect ("identity broker delivers the epoch unchanged: " <> show identity) (null identity)
+  forwarded <- epochViolations (epochWrapper id)
+  expect ("wrapping broker delivers the epoch unchanged: " <> show forwarded) (null forwarded)
+  rewritten <- epochViolations (epochWrapper (const 0))
+  expect ("epoch check detects a broker that rewrites every epoch to 0: " <> show rewritten) $
+    rewritten == [lookupEpochs, storedEpochs, askedAgain, notReused]
+
+-- | Wrap both reusable-answer hooks and pass each epoch through @deliver@.
+epochWrapper :: (Int -> Int) -> DataBroker
+epochWrapper deliver =
+  inProcessBroker
+    { brokerPersistence = \hooks -> hooks
+        { persistenceLookupAnswer = \epoch question ->
+            persistenceLookupAnswer hooks (deliver epoch) question,
+          persistenceStoreAnswer = \occurrence epoch question answer reusable ->
+            persistenceStoreAnswer hooks occurrence (deliver epoch) question answer reusable
+        }
+    }
+
+lookupEpochs, storedEpochs, askedAgain, notReused :: String
+lookupEpochs = "lookups carry the epochs [0, 1]"
+storedEpochs = "stored answers carry the epochs [0, 1]"
+askedAgain = "the question after the effect reaches the engine again"
+notReused = "no answer crosses the effect"
+
+-- | Run 'epochPlan' over a durable answer store keyed by epoch and bare
+-- question, and name every epoch obligation that the broker violated.
+epochViolations :: DataBroker -> IO [String]
+epochViolations broker = do
+  requests <- newIORef []
+  steering <- newIORef []
+  rows <- newIORef ([] :: [((Int, Value), Value)])
+  looked <- newIORef []
+  stored <- newIORef []
+  lane <- newTurnLaneIO
+  let persistence = nullPersistenceHooks
+        { persistenceLookupAnswer = \epoch question -> do
+            append looked epoch
+            found <- lookup (epoch, question) <$> readIORef rows
+            pure ((\answer -> (answer, "epoch store")) <$> found),
+          persistenceStoreAnswer = \_ epoch question answer _ -> do
+            append stored epoch
+            append rows ((epoch, question), answer)
+        }
+      world = worldOfEngineWith defaultExecSettings {esLog = const (pure ())} (ProbeEngine lane requests steering)
+  (answer, trace) <- runPlanBrokered broker Nothing persistence nullEventSink noChains world epochPlan
+  expect "epoch plan returns the engine answer" answer
+  actualLooked <- readIORef looked
+  actualStored <- readIORef stored
+  physical <- readIORef requests
+  let asked = case trace of
+        [ExecEvent SFlag _ (AnswerAsked _) _, ExecEvent SAck _ (AnswerAsked _) (), ExecEvent SFlag _ (AnswerAsked _) _] -> True
+        _ -> False
+  pure
+    [ name
+      | (name, holds) <-
+          [ (lookupEpochs, actualLooked == [0, 1]),
+            (storedEpochs, actualStored == [0, 1]),
+            (askedAgain, map Engine.engineIntent physical == [Engine.Consult, Engine.Effect, Engine.Consult]),
+            (notReused, asked)
+          ],
+        not holds
+    ]
+
+-- | The command log of a shell tool reaches its receiver through 'brokerLog'
+-- of the broker that runs the plan. The runtime attempt path applies that
+-- broker to the log that the shell configuration names.
+checkShellLogDelivery :: IO ()
+checkShellLogDelivery = do
+  received <- newIORef ([] :: [Text])
+  let broker = inProcessBroker {brokerLog = \receive text -> receive ("broker: " <> text)}
+      config = defaultShellConfig {shellLog = append received}
+      shellRequest :: Request 'CodeText
+      shellRequest = consultRequest (Q (AddrToolExec "copy" "cat" []) scopeUnit "shell bytes" 0)
+      noEngine = concurrentWorld $ \_ _ -> ioError (userError "broker test: no engine answers a shell tool")
+  (answer, _) <-
+    runPlanBrokered broker Nothing nullPersistenceHooks nullEventSink noChains
+      (executingWorld config noEngine) (askC1 SText shellRequest)
+  expect "shell tool answer is the command output" (answer == "shell bytes")
+  logs <- readIORef received
+  expect ("shell command log crosses brokerLog: " <> show logs) $
+    map (T.isPrefixOf "broker: run cat ") logs == [True]
 
 append :: IORef [a] -> a -> IO ()
 append ref value = atomicModifyIORef' ref (\values -> (values <> [value], ()))

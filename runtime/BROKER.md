@@ -35,10 +35,13 @@ The broker delivers their data without assuming any of those authorities.
 | `brokerLog` | Deliver diagnostic or narration text to its supplied receiver. |
 | `brokerPersistence` | Supply the existing run-store operations, including final result publication, under their original ownership and failure contracts. |
 
-Tools that a registry row answers in process run inside the answering receiver
-that runtime supplies to `brokerRequest`, in the same place as shell tools.
-`brokerRequest` therefore delivers their questions, and their call log reaches
-its receiver through `brokerLog`. They start no engine conversation.
+Tools that a registry row answers in process and shell tools both run inside
+the answering receiver that runtime supplies to `brokerRequest`. `brokerRequest`
+therefore delivers their questions, and neither kind of tool starts an engine
+conversation. The logs of both kinds of tool reach their receivers through
+`brokerLog` of the broker that runs the plan. The CLI applies `brokerLog` to the
+receiver that it gives the in-process tools. For each shell tool attempt,
+runtime applies `brokerLog` to the log that the shell configuration names.
 
 Receivers may discard data according to their existing policy. A log receiver
 that suppresses machine-mode narration does not authorize a broker to publish
@@ -96,7 +99,8 @@ is included. Native JSON, protocol versions, store formats and artifact encoding
 remain owned by their existing adapters.
 
 The runtime broker checks exercise consumed replies, authored traces, exact bills,
-steering, event/log delivery, persistence and uncertainty without effect replay.
+steering, event/log delivery, shell tool log delivery, persistence, unchanged
+epoch delivery for reusable answers and uncertainty without effect replay.
 The ACP progress probe also runs Hello World and an injected-reply fixture through
 real local ACP processes, checking consumed answers and durable events. These
 checks do not establish completion of the manager service or a frontend journey.

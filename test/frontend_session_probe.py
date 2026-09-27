@@ -520,6 +520,55 @@ def frozen_routing(runner: Path, directory: Path) -> None:
     assert explicit.finish() == [] and not (case / "replacement.started").exists()
 
 
+def in_process_tools(runner: Path, directory: Path) -> None:
+    """Prepare, run and revalidate a row whose tool the row answers in process.
+
+    Routing-only execution requires every engine-bound question to carry a
+    pin, and the tool `record` carries none. Preparation and the lineage
+    check at preparation therefore succeed only when they receive the row's
+    in-process tool names. Both prepared runs must also complete and record
+    the tool's answer.
+    """
+    case = directory / "in-process-tools"
+    case.mkdir()
+    scratch_parent = case / "scratch-parent"
+    scratch_parent.mkdir()
+    stub = Path(__file__).resolve().parents[1] / "engine/acp/test/stub_adapter.py"
+    adapter = case / "adapter"
+    adapter.write_text(f"#!{sys.executable}\nimport os\n"
+                       f"os.execv({sys.executable!r}, [{sys.executable!r}, {str(stub)!r}])\n")
+    adapter.chmod(0o755)
+    config = case / "config/agent-cat/routing.yaml"
+    config.parent.mkdir(parents=True)
+    config.write_text("version: 1\nrouters:\n  - name: fixture\n"
+                      f"    backend: {json.dumps('acp:' + str(adapter))}\n"
+                      "    provider: fixture\nprofiles:\n  - name: deep\n"
+                      "    chain:\n      - router: fixture\n        model: stub-default\n"
+                      "        thinking: high\n        max-output: 65536\n")
+    environment = {"TMPDIR": str(scratch_parent)}
+    parent = Session(runner, case, "in-process", [], ["--routing", "--timeout", "10000"], environment=environment)
+    assert parent.preview["targetKind"] == "routing", parent.preview
+    assert parent.preview["policy"]["coverage"] == "full", parent.preview["policy"]
+    scratch = Path(parent.preview["policy"]["scratch"])
+    assert scratch.parent == scratch_parent and not scratch.exists()
+    parent.send(parent.decision("start"))
+    events = parent.finish()
+    assert events[-1]["event"]["type"] == "run.completed", events[-3:]
+    record = scratch / "record.txt"
+    assert record.read_text(encoding="utf-8") == "Paris"
+    record.unlink()
+    child = Session(runner, case, "", [], environment=environment, request={
+        "version": 1, "operation": "prepare-lineage", "stateDirectory": str(parent.root),
+        "parentRunId": parent.preview["runId"], "lineage": "restart", "edits": [],
+    })
+    assert child.preview["parentRunId"] == parent.preview["runId"] and child.preview["lineage"] == "restart"
+    assert child.preview["policy"]["coverage"] == "full", child.preview["policy"]
+    child.send(child.decision("start"))
+    events = child.finish()
+    assert events[-1]["event"]["type"] == "run.completed", events[-3:]
+    assert record.read_text(encoding="utf-8") == "Paris"
+
+
 def process_parents() -> dict[int, int]:
     rows = subprocess.check_output(["ps", "-axo", "pid=,ppid="], text=True, timeout=10).splitlines()
     return {int(pid): int(parent) for pid, parent in (row.split() for row in rows)}
@@ -927,6 +976,7 @@ def main() -> None:
         decisions(runner, root)
         targets(runner, root)
         frozen_routing(runner, root)
+        in_process_tools(runner, root)
         native_cleanup(runner, root)
         person(runner, root)
         native_controls(runner, root)
@@ -942,7 +992,7 @@ def main() -> None:
         session.send(session.decision("discard"))
         assert session.finish() == []
     shutil.rmtree(temporary)
-    print("native session: capability discovery, exact invocation retention, v2/v3 lineage, transport capture, approval, controls, and local human answers passed")
+    print("native session: capability discovery, exact invocation retention, v2/v3 lineage, transport capture, approval, in-process tool routing, controls, and local human answers passed")
 
 
 if __name__ == "__main__":
