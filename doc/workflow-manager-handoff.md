@@ -2,6 +2,403 @@
 
 <!-- handoff-id: wm023-20260923; status: paused-unaccepted-wip; accepted: WM-001..WM-022,G0,G1; resume-branch: workflow-manager-checkpoint-20260923; fess: every-subtask -->
 
+## Resume workflow stopping point of 2026-09-28
+
+The resume workflow that started from checkpoint `wm023-20260923` ran again
+after the Integrator committed the second 2026-09-27 closeout as
+`9e3926c1`. Its first recorded command started at 2026-09-27T23:30:08Z, and
+the last command of its only roadmap subtask, A5G2c, ended at
+2026-09-28T18:17:12Z (`Z/HANDOFF/impl-r1/H30-facts.log`). The closeout
+stage that wrote this section ran after that time, and its commands have
+their own recorded times under `Z/HANDOFF`. A5G2c applied the owner decision
+on the A5G2b escalation, and it escalated after three implementer rounds,
+two verifier rounds and two `fess` audits, as the subsection "Stop reason
+and owner decision" states. Accepted state is
+unchanged at WM-001–WM-022 and G0/G1, which is 22 of 44 packages and two of
+six gates. WM-023 (`acat-wm-023-d20b`) is still in progress. Phase A of the
+remaining-scope report is not met, because the run did not reach its exit
+check, and the run made no change for Phases B to G. This section and
+`~/dl/agent-cat-workflow-manager-remaining-2026-09-28.md` describe the
+current state. Where they differ from the sections below, they supersede
+them, and the older sections remain as chronology. `~/dl` resolves to
+`~/Downloads`.
+
+### Objective, worktrees and environment
+
+The governing goal of 2026-09-23 remains the current objective, with its
+actor-flow amendment of 2026-09-26. Its verbatim text is in
+`/Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/GOAL.md`.
+It replaces Pi goal `mu629ta5-11s8ax`, revision 914, and it prevails over
+older records where they conflict. The subsection "Governing objective" of
+the first 2026-09-27 section below states its task mapping and the actor-flow
+increments, and that text remains current. The former Pi ledger under
+`.pi/goals` is not restored, and the workflow orchestrator tracks the goal.
+
+The worktree `/Users/johnw/src/agent-cat/.worktrees/tui` was recreated on
+2026-09-23 after an unexplained removal, and it holds the work branch
+`workflow-manager-checkpoint-20260923`. The former work worktree
+`/Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/broker-source`
+is still detached at `b95ce6d1` with no local change. The canonical branch
+`tui` stays at `6b7c90b79b47c85d07162bb11d038349dbac9131`
+(`Z/HANDOFF/impl-r1/H30-start-binding.log`).
+
+No procedure runs `nix develop` in any form. The operator generates the
+direnv environment in the worktree with `de`. Every build, test and project
+tool runs through `direnv exec .` from the worktree, with
+`/Users/johnw/Products/k.M0a5ItPm/environment.sh` sourced inside that shell,
+and `de` runs again when `flake.nix` or `flake.lock` changes or when direnv
+reports a stale or blocked environment. Git and `obr` run in a plain shell.
+At the stop the environment reported GHC 9.10.3, Cabal 3.16.1.0 and
+`crypton-x509-validation` 1.9.1, and `nix` resolved to
+`/nix/var/nix/profiles/default/bin/nix`
+(`Z/HANDOFF/impl-r1/H30-doc-check-before.log`).
+
+### Commits and subtask results
+
+This run made no commit. The branch head is
+`9e3926c1871e77bd220fbb744fafaff5c9753fa8`, whose parent is `72329fc9`. As
+read from the remote-tracking refs without a fetch,
+`origin/workflow-manager-checkpoint-20260923` is still `b95ce6d1` and
+`origin/tui` is `6b7c90b7`. Nothing from this workflow is published. The
+subtask table of the first 2026-09-27 section below stays current for A0 to
+A5, A12W, A5S1D, A5R and A5G1, with the qualification of the A5G1 row that
+the second 2026-09-27 section states. That qualification now has
+verifier-level support: with only `RoutingDiscovery.hs` reverted, the
+routing probe fails because `security` cannot be spawned, and the vertical
+check fails with `WorkerPreparedFraming` (`A/A5G2c/verify-r2/PRE01`,
+`PRE02b`). The subtask A5G2b of the second 2026-09-27 section continued as
+A5G2c.
+
+| Subtask | Commit | Result and evidence ceiling |
+| --- | --- | --- |
+| A5G2c | none | Escalated after three implementer rounds, two verifier rounds and two `fess` audits, with its work uncommitted. The round-3 source, which is the current worktree, has implementer evidence only, with no verifier run and no audit. The evidence is under `A/A5G2c`, and the audits are `fess/A-A5G2c-r1.md` and `fess/A-A5G2c-r2.md`. |
+| A5S2, A6–A14 | none | Not started. |
+
+These are subtask results. None of them accepts a package or a gate.
+
+### Decision that A5G2c applied
+
+The A5G2c specification chose option 1 of the five options that the second
+2026-09-27 section lists. Runtime `createProcessGroup` spawns through a C
+helper in `runtime/cbits` that uses `posix_spawn` with
+`POSIX_SPAWN_CLOEXEC_DEFAULT`, `POSIX_SPAWN_SETSID` and
+`posix_spawn_file_actions_addchdir_np`. The non-Apple path stays unchanged,
+and the `process` dependency is not patched. The specification also kept
+`catalogueHelp` at a concurrency of four inside the single group deadline.
+Section 4 of `fess/A-A5G2c-r2.md` restates these specification items. The
+workflow record is the only source of this decision. Neither the governing
+goal nor the tracker nor the evidence directory holds a separate record of
+it. The same holds for the decision of 2026-09-27 on four help queries,
+whose only sources are the A5G2b escalation text and a comment in
+`Profile.hs` (`acat-uv2h`).
+
+### Uncommitted A5G2c work
+
+The worktree holds 13 modified files, two untracked files and nothing
+staged. In a plain shell with the operator Git configuration, the SHA-256 of
+`git diff HEAD -- . ':!doc/workflow-manager-handoff.md' ':!doc/PLAN.org'` is
+`a52ada5a8af77b90e5543f0aa669a0b429ae679f431d807bcc799267aca0dd6b`. The
+untracked `runtime/cbits/process_spawn.c` has the SHA-256
+`5e0f74634e40c8b415b01ff8581df4e593b873b249198be8e7dfe6b2768ed75c`, and the
+untracked `runtime/test/ProcessGroupTests.hs` has
+`ba70d23bf07192e7d5ff625baeeab40ba3e8a6fe08e458c3a5b58dd191a998f3`
+(`Z/HANDOFF/impl-r1/H30-start-binding.log`). These values match the final
+binding of the round-3 implementer (`A/A5G2c/impl-r3/I02-final-binding.log`).
+The digest depends on the Git configuration. The operator configuration sets
+`diff.mnemonicprefix` to true and `diff.algorithm` to histogram, and with
+`-c diff.mnemonicPrefix=false` the same tree hashes to
+`08050fde237aba8b91cb8fd059f7887167ba421f322a91212dad0ee4302fb77e`, which
+the A5G2c records call the prefixed digest (`Z/HANDOFF/impl-r1/H30-facts.log`).
+
+The change has three parts:
+
+- Runtime. The new `runtime/cbits/process_spawn.c` spawns the child as a
+  session leader through `posix_spawn` with `POSIX_SPAWN_CLOEXEC_DEFAULT`, so
+  that the child receives only the descriptors that it names, and it changes
+  the working directory with `posix_spawn_file_actions_addchdir_np`. It
+  resolves the executable with its own copies of the `find_executable` of
+  `process` 1.6.26.1 and of the BSD `execvP` candidate loop. The implementer
+  recorded that `posix_spawnp` with a working-directory action and a relative
+  `PATH` entry misbehaves on macOS (`A/A5G2c/impl-r2/X04`, `X05`). The helper
+  sets `O_NONBLOCK` on each parent pipe end, and it leaves a closed inherited
+  standard descriptor closed when a pipe end takes its number.
+  `runtime/src/Agentic/Runtime/ProcessGroup.hs` calls the helper on Apple
+  platforms through a safe foreign call and keeps the process-library path
+  on other platforms. The new `runtime/test/ProcessGroupTests.hs` runs in the
+  default contract tests, and `runtime/test/Main.hs` adds the mode
+  `--process-group-spawn-cost-test`. `agentic.cabal`,
+  `runtime/ci/capture.sh` and `test/capture_build_evidence.py` add the new
+  files to their lists.
+- Manager help queries. In the round-3 source, which no verifier has run,
+  `manager/src/Agentic/Manager/Profile.hs` runs the help queries of
+  `catalogueHelp` in a pool of `helpConcurrency` workers, which is 4, inside
+  the unchanged group deadline of `queryMicros`. Rows start in catalogue
+  order, and replies are accepted in the same order. Each reply is checked
+  for UTF-8 and for the bound of 262144 characters when it arrives. Replies
+  that wait behind an earlier row count against `queryBytes` together with
+  the accepted total, and claims stop after a rejected reply or once that
+  sum crosses the ceiling. When in-order acceptance reaches a failure, the
+  remaining workers are cancelled and the failure is returned. The code
+  comment in `Profile.hs` states that each query in flight completes its own
+  cleanup, but no recorded check shows that cleanup after a cancellation.
+  `manager/test/ProfileCheck.hs` adds fixtures for the barrier of four, the
+  pool, the shared deadline, invalid and oversized replies, the byte ceiling
+  and a decided failure behind a hung query.
+- Discovery and gate fixtures. `cli/src/Agentic/RoutingDiscovery.hs`
+  constructs the standard TLS manager at most once, and only when an engine
+  needs a network refresh of its catalogue. `cli/test/RoutingDiscoveryProbe.hs`
+  checks an engine without a catalogue under a `PATH` that names one empty
+  directory. `manager/test/DraftCheck.hs`, `manager/test/HistoryCheck.hs`,
+  `manager/test/worker_evidence.py` and `manager/test/admission_audit.py`
+  carry the A5G2 and A5G2b fixture changes that the second 2026-09-27
+  section describes.
+
+Four documentation edits, to `doc/tui-design.md`, `manager/README.md`,
+`runtime/README.md` and `tui/README.md`, are held outside the worktree under
+the refocus note as `A/A5G2c/impl-r3/held-doc-edits.diff`, which applies
+cleanly to HEAD (`Z/HANDOFF/impl-r1/H30-facts.log`). The A5G2b edit of
+`manager/README.md` is part of that diff and is no longer in the worktree.
+Until the held edits land, those four files do not describe the new spawn
+path or the help pool.
+
+The round-2 source was verified independently under `A/A5G2c/verify-r2`.
+The Werror build of all targets with tests passed, and so did a build of the
+Runtime commit alone (`B01`, `B02`, `B03`, package build). The Runtime
+contract tests passed at N1 and N8, and `engine-api-test` passed (`G01`).
+`vertical.sh`, `tui/ci/tui.sh`, `dependencies.sh`, `routing-config.sh`,
+`profiles.sh` and `cli/ci/policies.sh` passed (`G02` to `G05`, `P01`,
+`P03`, deterministic native fixtures, with `tui.sh` as a PTY fixture).
+`policies.sh` runs the capture, profile, configuration, store, command,
+draft, worker, admission, approval, ingestion, control and artifact gates,
+and it printed 8507 `PASS` lines and no `FAIL` line. The 257-row catalogue
+check passed with a help phase of 5.169 seconds at the soft `RLIMIT_NOFILE`
+of 1048576 and 4.872 seconds at 4096 (`D01`). The negative controls failed
+as intended. Without `POSIX_SPAWN_CLOEXEC_DEFAULT` the child held extra
+descriptors (`M02`), without `POSIX_SPAWN_SETSID` the session check failed
+(`M03`), and the process-library spawn took 5623 milliseconds for 64 spawns
+against a bound of 1000 milliseconds (`M04a`). Sequential help failed the
+pool checks (`M06`). On the HEAD text, the routing probe failed because
+`security` could not be spawned, the vertical check failed with
+`WorkerPreparedFraming`, and the draft check failed with `ProcessFailure`
+(`PRE01`, `PRE02b`, `PRE03`).
+
+Round 3 changed `Profile.hs`, `ProfileCheck.hs`, `ProcessGroup.hs`,
+`process_spawn.c` and `ProcessGroupTests.hs` to answer the round-2 audit.
+The following results for the round-3 source are implementer evidence only,
+under `A/A5G2c/impl-r3`. The Werror build of all targets with tests passed,
+and the Runtime commit alone built (`B01`, `B02`, `B03`, package build). The
+Runtime contract tests, `engine-api-test` and the process-group checks
+passed at N1 and N8, with 64 spawns taking 42 to 69 milliseconds at either
+limit (`G01`, `R01`). `vertical.sh`, `tui/ci/tui.sh`, `dependencies.sh`,
+`routing-config.sh` and `profiles.sh` passed (`G02` to `G05`, `P05`), and
+`cli/ci/policies.sh` printed 8509 `PASS` lines and no `FAIL` line (`P06`),
+all deterministic native fixtures. The 257-row check passed with a help
+phase of 4.829 seconds at 1048576 and 4.792 seconds at 4096 (`D01`). The
+four new `ProfileCheck.hs` fixtures failed on the round-2 source (`P01` to
+`P04`), sequential help failed (`M06`), and a mutant without the
+`O_NONBLOCK` step failed the new nonblocking check (`M07`). The non-Apple
+branches typecheck under `-Wall -Werror -fno-code` with the platform macro
+renamed (`NA02`), and a control copy with one unused import fails that
+check (`NA03`). That is a typecheck only, and no non-Apple executable was
+built or run.
+
+### Stop reason and owner decision
+
+The round-1 and round-2 audits both raised finding M1. The specification
+required the cause of the `approval` and `vertical` failures to be fixed at
+the owner that sets the worker environment or at the fixture, with a written
+justification. The fix is in `cli/src/Agentic/RoutingDiscovery.hs` instead.
+The round-2 audit accepts the fix as proven at the tip (`verify-r2/PRE01`,
+`PRE02b`, and `G02` with the fix in place), and it rates the owner deviation
+as blocking spec drift until the orchestrator rules on it. The implementer
+states in `A/A5G2c/impl-r1/J01-approval-vertical-justification.txt` why
+neither named owner fits. Adding `/usr/bin` to the worker environment would
+break the manager's contract to pass a worker its exact explicit
+environment. Adding `/usr/bin` to the fixture `PATH` would hide a defect
+that a production worker with a narrow `PATH` meets. The round-3 implementer
+made no code change for M1 and returned the question as an escalation
+(`A/A5G2c/impl-r3/J03-round3-findings-record.txt`).
+
+The owner chooses one of two rulings:
+
+1. Accept `RoutingDiscovery` as the owner. The remaining case becomes a
+   separate follow-up. A worker whose explicit `PATH` lacks `/usr/bin` still
+   fails to construct the TLS manager when an engine with a catalogue needs
+   a refresh, because `crypton-x509-system` 1.9.0 runs the bare name
+   `security` (`A/A5G2c/impl-r2/J02-open-findings-record.txt`). No check
+   covers that case.
+2. Send the fix back to the worker environment or to the fixture, and name
+   which of the two and what change is authorized.
+
+No code work in A5G2c depends on the ruling.
+
+### Open findings and authorizations
+
+- A5G2c, owner ruling, as above. After the ruling, A5G2c completes on the
+  round-3 source with its verifier and one `fess` audit. The round-3
+  implementer reports these dispositions of the round-2 audit, and none of
+  them has been verified or audited. M2, the help pool, was changed as the
+  manager part above describes. L1 was answered with the nonblocking check
+  and the `M07` mutant. L2, a suspected duplicate import on non-Apple
+  platforms, was disproven by the typecheck above. L3 was recorded in the
+  helper's header comment: the build uses `apple-sdk-14.4`, whose `spawn.h`
+  does not deprecate `posix_spawn_file_actions_addchdir_np`, and the macOS
+  26 SDK deprecates it while `capture.sh` compiles the helper with
+  `-optc-Werror` (`X10`). L4 corrected the haddock and the check label. L5
+  is unchanged: `acceptAndDeliverControlCommand` takes the same
+  `entryControlGate` as the audited `acceptControlCommand` and stays
+  unaudited, a gap that predates this subtask. L6 refreshed the held
+  documentation diff.
+- The fixtures in `DraftCheck.hs` and `ProfileCheck.hs` test the absence of
+  each recorded help process with `signalProcess nullSignal` on its recorded
+  process ID, a pattern that `ProfileCheck.hs` already used at HEAD. The
+  round-2 audit found that no delivered signal reaches a stored process ID.
+  The A5G2c audit still weighs the pattern against two binding rules: never
+  signal a stored PID, and process absence is not cleanup proof
+  (`acat-871r`).
+- `manager/ci/supervision.sh` failed on the round-2 source and on a copy
+  with the HEAD `admission_audit.py`, each with `AssertionError: unexpected
+  test-process exit for success`. The case report of the second run names
+  the coordination failure "supervisor completed before
+  original-handle-retained" (`A/A5G2c/verify-r2/G06-supervision`,
+  `G06b-supervision-head-audit`). The gate has no `createProcessGroup`
+  caller and lies outside A5G2c. No tracker item holds it.
+- Refocus note. The note stops the classification work after A5S1D, asks
+  for one diagnosis round on the S1 503 and the closed release with a fresh
+  N8 root, then the uninterrupted PTY journey, and holds every handoff and
+  documentation edit until the journey passes. This run again worked on the
+  manager gates first, and A5G2c took two audit rounds and a third
+  implementer round against the rule of one audit round for each subtask.
+  A5G2c made four documentation edits in round 1, reverted them in round 2
+  after the round-1 audit raised the hold, and keeps them in the held diff.
+  This section is a handoff edit made before the journey passes, which the
+  closeout specification requires.
+- S1 family, `acat-dxos`, P1. This run made no new S1 diagnosis. The
+  subsection "S1 failure family" of the 2026-09-26 section remains current.
+- `acat-drafts-processfailure-j1h0`, P2, stays open. With the uncommitted
+  change, neither its `ProcessFailure` nor the later `QueryTimeout` occurs in
+  the `drafts` leg of `policies.sh`, in the verified round-2 run and in the
+  round-3 implementer run.
+- Correction to the second 2026-09-27 section (`acat-o2ud`). Its stop reason
+  cites `A/A5G2b/impl-r1/D02-catalogue-fd-limit` only for the leg at a soft
+  limit of 4096. The same record holds a leg at 1048576, root
+  `credentials.QHYL3FHM/build/a5g2b-fdlimit-1048576.dET5xq`, that failed
+  with `manager-draft-check: QueryTimeout` after a help phase of 30.200
+  seconds, although `D02.exit` is 0 because the loop hid the inner status.
+  `A/A5G2b/impl-r1/D01-runner-help-timing` timed 24 help spawns through
+  Python at 1048576: 1.55 seconds sequential with `close_fds`, 1.43 seconds
+  sequential without it, and 0.39 seconds four at a time.
+- The tracker holds 99 open and 5 in-progress issues
+  (`Z/HANDOFF/impl-r1/H30-tracker.log`). The Integrator closed `acat-hzs9`,
+  `acat-tlhm` and `acat-6bih`. The round-1 audit of the second 2026-09-27
+  closeout raised `acat-o2ud` (P3) and `acat-xj7c`, `acat-6h6z`,
+  `acat-uv2h`, `acat-871r`, `acat-rxkl` and `acat-iyvu` (P4). This section
+  applies the corrections of `acat-o2ud`, `acat-uv2h`, `acat-871r`,
+  `acat-rxkl` and `acat-iyvu`, and the tracker items stay open for the
+  Integrator. The other open findings of the first 2026-09-27 section below
+  are unchanged, including `acat-response-ingestion-budget-zaoi` and
+  `acat-tls-name-forms-6gbo` (P1), `acat-ftw9` (P2) and the omission of
+  `Agentic.Cli.Command.TuiService` from the manual.
+- The audit of this closeout replaces `fess/Z-HANDOFF-r1.md`, which is the
+  round-1 audit of the second 2026-09-27 closeout and the source that the
+  seven items above cite. A byte-identical copy is at
+  `Z/HANDOFF/impl-r1/H30-preserved-fess-Z-HANDOFF-r1-20260927b.md`
+  (`Z/HANDOFF/impl-r1/H30-preserve.log`). The round-2 audit of this
+  closeout replaces `fess/Z-HANDOFF-r2.md`, which was the round-2 audit of
+  the first 2026-09-27 closeout, with the SHA-256 prefix `03f0b353`. A
+  byte-identical copy is at
+  `Z/HANDOFF/impl-r1/H29-preserved-fess-Z-HANDOFF-r2-20260927.md`
+  (`Z/HANDOFF/impl-r1/H29-preserve.log`). The round-3 audit of this
+  closeout replaced `fess/Z-HANDOFF-r3.md`, which was the 2026-09-26
+  round-3 audit. A byte-identical copy is at
+  `Z/HANDOFF/impl-r2/H28-preserved-fess-Z-HANDOFF-r3-20260926.md`
+  (`Z/HANDOFF/impl-r3/H32-preserve.log`).
+
+The workflow record lists no pending authorization request. Publication of
+the rewritten branch still waits for the force-push approval that the
+2026-09-26 section describes, and no such approval is recorded.
+
+### Resume procedure
+
+The first commands run in a plain shell with the operator Git configuration.
+The toolchain check runs through `direnv exec .` with the private
+environment:
+
+```bash
+cd /Users/johnw/src/agent-cat/.worktrees/tui
+git status --short --branch
+git log -1 --format='%H %P'
+git rev-parse tui
+git diff HEAD -- . ':!doc/workflow-manager-handoff.md' ':!doc/PLAN.org' |
+  shasum -a 256
+shasum -a 256 runtime/cbits/process_spawn.c runtime/test/ProcessGroupTests.hs
+direnv exec . bash -c 'source /Users/johnw/Products/k.M0a5ItPm/environment.sh &&
+  cd /Users/johnw/src/agent-cat/.worktrees/tui &&
+  ghc --numeric-version && cabal --numeric-version &&
+  ghc-pkg field crypton-x509-validation version'
+```
+
+Two states are expected. Before the Integrator commits this section, HEAD is
+`9e3926c1871e77bd220fbb744fafaff5c9753fa8`, and the worktree holds the 13
+modified and two untracked files of the A5G2c change and this handoff
+change. After the Integrator commits this section, with `doc/PLAN.org` at
+most, HEAD is that commit, its parent is
+`9e3926c1871e77bd220fbb744fafaff5c9753fa8`, and the worktree holds only the
+15 files of the A5G2c change. In both states `tui` is
+`6b7c90b79b47c85d07162bb11d038349dbac9131`, the digest command prints
+`a52ada5a8af77b90e5543f0aa669a0b429ae679f431d807bcc799267aca0dd6b`, and the
+two untracked files have the digests that the subsection "Uncommitted A5G2c
+work" states. Any other result means that the branch or the worktree
+changed after this section was written, and the reader establishes that
+change before continuing. If direnv reports a stale or blocked environment,
+run `de` in the worktree and repeat the check. Rebuild with the build
+command of the first 2026-09-27 section below, and build
+`runtime-contract-test` with `--enable-tests`, before any binary runs.
+
+The next work proceeds in this order:
+
+1. Obtain the owner ruling above. Run the A5G2c verifier and one `fess`
+   audit on the round-3 source. The Integrator then commits A5G2c as the
+   Runtime commit followed by the manager and discovery commit, which the
+   specification requires to build separately. The orchestrator decides
+   whether the held documentation diff lands with those commits or waits
+   for the journey under the refocus note. If the ruling is delayed, the
+   orchestrator decides whether A5S2 runs first on the worktree as it
+   stands.
+2. Run A5S2 with the scope of the refocus note: one diagnosis round on the
+   S1 503 and the closed release with a fresh N8 root, a proof of the cause,
+   a fix at its owner with a regression test, and a stop. Widen `acat-dxos`
+   and record the S1-c candidate. The ledger title of A5S2 also names the
+   manager-path baselines. This section proposes that the integrated gate of
+   A13 re-establish them, and the orchestrator assigns that scope.
+3. Restore the parked A6 diff (`refs/wip/a6-r3-20260924-final`) without its
+   draft handoff, and build the uninterrupted PTY journey at N1 and then N8
+   in the existing `manager/test/service_http.py` harness (A6 to A11): exact
+   Unicode submission, approval of the five selectors, observed progress,
+   snapshot display, the Bool `false` answer, the offered retry, native
+   completion, and a `Client.downloadVerified` exclusive save with digest
+   and byte checks, with a broken-step negative control. Add no new helper
+   or evidence tooling.
+4. Run the mutants and the integrated code gate on the final source (A12 and
+   A13). Only after the journey passes, document the first TUI service
+   workflow and reconcile the manual (A14).
+5. After Phase A is accepted, land actor-flow increment 1 (`acat-e6cp`,
+   `acat-5m60`) before Phase B resumes WM-025 to WM-027.
+
+Run the `fess` audit at the end of every subtask, keep each subtask to one
+audit round, preserve the first failure of any check with its fixture root,
+and label every result with its evidence ceiling. The evidence of this
+closeout is under `Z/HANDOFF/impl-r1`, in the files that begin with `H30-`,
+under `Z/HANDOFF/impl-r2`, in the files that begin with `H31-`, and under
+`Z/HANDOFF/impl-r3`, in the files that begin with `H32-`. The verifier
+records are under `Z/HANDOFF/verify-r1`, in the files that begin with
+`W28-`, under `Z/HANDOFF/verify-r2/w0928`, and under
+`Z/HANDOFF/verify-r3`, in the files that begin with `W30-` to `W39-`.
+Copies of the
+round-2 report and of the round-2 handoff diff, taken before the round-3
+edits, are at `Z/HANDOFF/impl-r3/H32-preserved-report-2026-09-28-rev2.md`
+and `Z/HANDOFF/impl-r3/H32-handoff-r2.diff`.
+
 ## Second resume workflow stopping point of 2026-09-27
 
 The resume workflow that started from checkpoint `wm023-20260923` ran a
