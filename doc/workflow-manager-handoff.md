@@ -2,6 +2,366 @@
 
 <!-- handoff-id: wm023-20260923; status: paused-unaccepted-wip; accepted: WM-001..WM-022,G0,G1; resume-branch: workflow-manager-checkpoint-20260923; fess: every-subtask -->
 
+## Resume workflow stopping point of 2026-09-29
+
+The resume workflow that started from checkpoint `wm023-20260923` ran again
+after the Integrator committed the 2026-09-28 closeout as `212be27b`. Its
+first recorded command started at 2026-09-28T20:30:32Z, and the last command
+of its last roadmap subtask, A5S2, ended at 2026-09-29T13:58:47Z
+(`Z/HANDOFF/impl-r1/H33-facts.log`). The run completed A5G2d, which applied
+the operator ruling of 2026-09-28 on routing discovery and carried the A5G2c
+work to two commits. It then ran A5S2, the S1 diagnosis round of the refocus
+note, which escalated after one implementer round for the owner decision
+that the subsection "Stop reason and owner decision" states. Accepted state
+is unchanged at WM-001–WM-022 and G0/G1, which is 22 of 44 packages and two
+of six gates. WM-023 (`acat-wm-023-d20b`) is still in progress. Phase A of
+the remaining-scope report is not met, because the run did not reach its
+exit check, and the run made no change for Phases B to G. This section and
+`~/Documents/Obsidian/agent-cat-workflow-manager-remaining-2026-09-29.md`
+describe the current state. Where they differ from the sections below, they
+supersede them, and the older sections remain as chronology.
+
+### Objective, worktrees and environment
+
+The governing goal of 2026-09-23 remains the current objective, with its
+actor-flow amendment of 2026-09-26 and the operator decision of 2026-09-28
+on routing discovery without TLS. Its verbatim text is in
+`/Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/GOAL.md`.
+It replaces Pi goal `mu629ta5-11s8ax`, revision 914, and it prevails over
+older records where they conflict. Its task first-frontend-broker-workflow
+is Phase A of the report, remaining-frontends is Phases C, D and E, and
+operational-hardening-roadmap-closure is Phases B, F and G. The completed
+tasks wm016-closure-plan, wm016-functional-closure,
+wm016-integrated-validation, wm016-acceptance and broker-api-default stay
+complete. The former Pi ledger under `.pi/goals` is not restored, and the
+workflow orchestrator tracks the goal.
+
+The worktree `/Users/johnw/src/agent-cat/.worktrees/tui` was recreated on
+2026-09-23 after an unexplained removal, and it holds the work branch
+`workflow-manager-checkpoint-20260923`. The former work worktree
+`/Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/broker-source`
+is still detached at `b95ce6d1` with no local change. The canonical branch
+`tui` stays at `6b7c90b79b47c85d07162bb11d038349dbac9131`
+(`Z/HANDOFF/impl-r1/H33-start-binding.log`).
+
+No procedure runs `nix develop` in any form. The operator generates the
+direnv environment in the worktree with `de`. Every build, test and project
+tool runs through `direnv exec .` from the worktree, with
+`/Users/johnw/Products/k.M0a5ItPm/environment.sh` sourced inside that shell,
+and `de` runs again when `flake.nix` or `flake.lock` changes or when direnv
+reports a stale or blocked environment. Git and `obr` run in a plain shell.
+At the stop the environment reported GHC 9.10.3, Cabal 3.16.1.0 and
+`crypton-x509-validation` 1.9.1, and `nix` resolved to
+`/nix/var/nix/profiles/default/bin/nix`
+(`Z/HANDOFF/impl-r1/H33-doc-check-before.log`).
+
+### Commits and subtask results
+
+The Integrator committed A5G2d as two commits. The branch head is
+`b31a56f388a8eec4e896a66daa4d2e3c44dd1e05`, whose parent is `bab6b09a`,
+whose parent is `212be27b`. As read from the remote-tracking refs without a
+fetch, `origin/workflow-manager-checkpoint-20260923` is still `b95ce6d1` and
+`origin/tui` is `6b7c90b7`, so nothing from this workflow is published. The
+subtask tables of the sections below stay current for A0 to A5, A12W,
+A5S1D, A5R, A5G1 and the escalated A5G2, A5G2b and A5G2c.
+
+| Subtask | Commit | Result and evidence ceiling |
+| --- | --- | --- |
+| A5G2d | `bab6b09a`, `b31a56f3` | Done after two implementer rounds, two verifier rounds and two `fess` audits. The round-1 audit raised two blocking findings, and the round-2 audit (`fess/A-A5G2d-r2.md`) is not blocking. Evidence under `A/A5G2d`. |
+| A5S2 | none | Escalated after one implementer round, with its work uncommitted. No verifier ran and no `fess` audit exists (`Z/HANDOFF/impl-r1/H33-facts.log`). Evidence under `A/A5S2/impl-r1`. |
+| A6–A14 | none | Not started. |
+
+These are subtask results. None of them accepts a package or a gate.
+
+### A5G2d: routing discovery without TLS
+
+`bab6b09a` ("Spawn Runtime process groups through posix_spawn") holds the
+Runtime part of the A5G2c change: `runtime/cbits/process_spawn.c`,
+`runtime/test/ProcessGroupTests.hs` and the matching changes to
+`ProcessGroup.hs`, `runtime/test/Main.hs`, `runtime/ci/capture.sh`,
+`test/capture_build_evidence.py` and `agentic.cabal`. The Integrator built
+that tree alone with all targets and tests under `-Werror`, and
+`runtime-contract-test` at N1 and N8, `engine-api-test` and
+`runtime/ci/capture.sh` passed (`A/A5G2d/integrate-r1/C1-build-test`,
+package build and deterministic native fixtures). `b31a56f3` ("Refuse TLS
+in routing discovery and pool help queries") holds the discovery change,
+the help pool in `manager/src/Agentic/Manager/Profile.hs`, the gate
+fixtures and an export of `doc/PLAN.org`. Without `doc/PLAN.org`, the
+tracked delta of the two commits is identical to the tree that the
+round-2 verifier bound (`A/A5G2d/verify-r2/V00-diff.patch`), and the two new
+Runtime files have the digests of the A5G2c round-3 source
+(`Z/HANDOFF/impl-r1/H33-commit-match.log`).
+
+Routing catalogue discovery now builds only a plain `http-client` manager
+with `defaultManagerSettings`. An https catalogue endpoint receives the
+classified discovery failure `tls-not-supported` before any header is built
+or any connection is opened, and discovery never retries it over plain HTTP.
+The plain-HTTP rule in `cli/src/Agentic/RoutingConfig/V2.hs` is unchanged.
+`http-client-tls` moved from the shared stanza to the library stanza, where
+only `manager/src/Agentic/Manager/Client.hs` imports it. The manager's HTTPS
+transport and its client are unchanged. `manager/test/ProfileCheck.hs` now
+checks that help queries in flight after a decided failure are cancelled
+and reaped. These statements supersede two older statements: the statement
+of the subsection "Uncommitted A5G2c work" of the 2026-09-28 section that
+discovery constructs the standard TLS manager and that no recorded check
+shows cleanup after a cancellation, and the same TLS statement in the
+subsection "Uncommitted A5G2 work" of the first 2026-09-27 section
+(`acat-nay0`). Under the operator ruling, A5G2d removed or replaced nine
+probe checks of TLS and authenticated discovery, which section 3 of
+`fess/A-A5G2d-r2.md` lists.
+`acat-routing-discovery-tls-3m8u` records their restoration as later work.
+
+The round-2 verifier ran on the round-2 source (`A/A5G2d/verify-r2`). The
+Werror build of all targets with tests passed, and so did the final build
+(`V02`, `V03`, package build). The routing probe, `routing-config.sh`, the
+Runtime contract suite, `profiles.sh`, `vertical.sh`, `dependencies.sh` and
+`tui/ci/tui.sh` passed (`V04` to `V09`, `V11`, deterministic native
+fixtures, with `tui.sh` a PTY fixture). `cli/ci/policies.sh` printed 8509
+`PASS` lines and no `FAIL` line (`V13`). The 257-row catalogue check passed
+at both descriptor limits, in 6.44 and 5.61 seconds of wall time (`V12`).
+Every guard-breaking copy failed as intended, among them the pre-fix
+discovery, an eager TLS manager, an https downgrade, a removed refusal, the
+spawn flags, the nonblocking step, the process-library spawn, sequential
+help and the round-2 help pool, and the copy was restored byte for byte
+(`W01` to `W13`, `W99`). In implementer round 1 the Client-facade check
+passed at N1 and failed at N8 with `503 storage-unavailable` on
+`GET /v1/workflows` (`A/A5G2d/impl-r1/G21-client-check`, root
+`/Users/johnw/Products/k.M0a5ItPm/tmp/a5g2d-client.riA5itgK`). It was not
+rerun to a pass, and `acat-nwrj` holds it.
+
+The documentation edits stay held under the refocus note. The held diff is
+now `A/A5G2d/impl-r2/held-doc-edits.diff`. It covers the four files of the
+A5G2c held diff and adds `doc/agent-cat.texi`, `doc/model-routing-v2.md`
+and `doc/routing-v2-verification.md`. It applies cleanly to HEAD
+(`Z/HANDOFF/impl-r1/H33-start-binding.log`), and `make -C doc check` passed
+on a copy with it applied (`A/A5G2d/verify-r2/V14`). It still lacks the two
+corrections to `doc/tui-design.md` that `acat-nay0` names. Until it lands,
+those seven files describe TLS discovery and the former spawn path.
+
+### Uncommitted A5S2 work
+
+A5S2 followed the refocus note: one diagnosis round on the S1 503 and the
+closed release with a fresh N8 root, a fix with a regression test, and a
+stop. On the HEAD source, the mixed protected-HTTP workflow at N8 failed
+with `('mutation refused or uncertain', 'enqueue', 503,
+'storage-unavailable')` at the fresh root
+`/Users/johnw/Products/k.M0a5ItPm/tmp/a5s2-diag.olmh651n/N8`. Its server
+record shows a reader admission refused with `ConfigurationBusy`, the
+enqueue receipt response refused before it started, and then a service
+preparation refused with `StorageUnavailable` and released as
+`WorkerClosed` (`A/A5S2/impl-r1/S03-diag-mixed-N8`, deterministic native
+fixture).
+
+The implementer states this cause of the receipt-side 503, which is S1-a.
+The HTTP owner composes the enqueue receipt with `withAuthorizedResponse`,
+whose reader admission takes the configuration guard fail-fast. The
+committed enqueue wakes the admission poll, and that poll holds the
+configuration guard through its whole selection. The new `receipt-order`
+check in `manager/test/AdmissionCheck.hs` orders the two threads with a
+barrier. It failed on the HEAD source at N1 and N8 (`R08`, `R09`), passed
+with the fix (`G02`, `G03`), and failed again with the fix reverted (`N02`,
+`N03`), all deterministic native fixtures. No verifier or audit has checked
+this cause.
+
+The fix is in `manager/src/Agentic/Manager/Admission.hs`. While an enqueue
+caller of the same request composes its receipt response, the admission
+notification of the accepted enqueue is owed, and the last such caller
+delivers it when its response ends, also when the response fails or the
+caller is cancelled. `enqueueRequest` takes the response as a continuation,
+`Application.hs` and `Service.hs` pass it, and the other callers in
+`AdmissionCheck.hs` and `cli/test/ManagerApprovalProbe.hs` pass `pure`. No
+Store, Configuration, Authorization, Commands or Transport module changed
+(`A/A5S2/impl-r1/I01-diff-inspection.log`). The Werror build of all targets
+passed (`B02`, `B03`, package build).
+
+With the fix, the mixed workflow passed at N1 and failed at N8 (`M01`,
+`M08`), a failure that the implementer attributes to an event stream that
+ended when its next batch met Store contention. `tui-approval` passed at N1 and N8 (`T01`, `T08`, actual UI interaction up
+to approval and detach). The implementer then declared a sample of 40
+starts before it ran (`S10-stability-declaration.md`), at root
+`/Users/johnw/Products/k.M0a5ItPm/tmp/a5s2-sample.0hDUg0zF`. It allowed no
+S1 signature. Of the 40 starts, 27 passed (`S13-sample-classification.log`,
+`Z/HANDOFF/impl-r1/H33-facts.log`):
+
+- Mixed workflow, 11 of 20 failed. Nine failed because
+  `GET /v1/runs/<id>/control` returned `404 unavailable-resource`. One
+  enqueue at N8 was refused with `503 storage-unavailable` before any
+  commit, and the request stayed a draft that was not queued (`S202`,
+  `F10`). One failed with a read timeout at N8 (`S205`).
+- `tui-approval`, 2 of 20 failed, both at N1 (`S206`, `S209`), with "TUI
+  preparation deadline after at most one operator-confirmed exact resend"
+  after a serving-time release of the preparation.
+- No enqueue receipt returned 503 after a committed enqueue.
+
+The zero-S1 acceptance is not met, because the declared signatures include
+the pre-commit enqueue 503 and the serving-time release.
+
+The worktree holds five modified files, no untracked file and nothing
+staged: `cli/test/ManagerApprovalProbe.hs`,
+`manager/src/Agentic/Manager/Admission.hs`,
+`manager/src/Agentic/Manager/Application.hs`,
+`manager/src/Agentic/Manager/Service.hs` and
+`manager/test/AdmissionCheck.hs`. In a plain shell with the operator Git
+configuration, the SHA-256 of `git diff HEAD` is
+`b5dcc5bebc476c589c529e1f05c55ba4c7e553af4b10740a53ac525396752a35`, and the
+SHA-256 of `git diff` without `HEAD` is
+`0d810296349285805fc018020b23ba52b415f540f3533b3d1b636d4ffd97f1a3`, the
+value that the A5S2 records bind (`A/A5S2/impl-r1/Z99-final-binding.log`).
+The two values differ only because the operator setting
+`diff.mnemonicprefix` gives the two commands different path prefixes. With
+`-c diff.mnemonicPrefix=false`, `git diff HEAD` hashes to
+`01a06ff0ea4acb7c27fbe8591ae1aadd3cc16ebb0e9e3bef83e7fe02bb06ed37`
+(`Z/HANDOFF/impl-r1/H33-start-binding.log`).
+
+### Stop reason and owner decision
+
+The implementer reports that the fix removes the receipt-side 503 but not
+the S1 family, which comes from fail-fast contention under the settled Store
+policy. The fix moves the contention onto admission coordinator work, which
+has no contention budget. In the two `tui-approval` failures, the admission
+poll and the preparation construction met Store contention from the next
+read of the client. In the pre-commit enqueue 503,
+`Commands.configuredCatalogues` refused the command under configuration or
+Store contention and recorded nothing. The owner chooses one of four
+decisions:
+
+- (A) Allow admission poll selection and preparation construction a
+  bounded contention retry for a step that was proven not entered or was
+  rolled back, like the existing five-second `StoreBusy` retry of the
+  ingestion head. No admitted operation would repeat. This extends
+  fail-fast only for coordinator work.
+- (B) Change protected-read and command admission from `FailFast` to
+  `WaitWithinBudget` inside the unchanged five-second operation allowance.
+  This relaxes fail-fast ordinary admission.
+- (C) Make the configuration guard shared among readers and exclusive only
+  for reload and close. This changes the contract of the configuration
+  lock.
+- (D) Keep the policy, accept the pre-commit 503 and the serving-time
+  release under contention as honest outcomes, and change the acceptance
+  so that the fixtures use the operator-confirmed exact resend and
+  re-request the review.
+
+Options (B) and (C) change settled Store policy, and option (D) changes the
+acceptance of the refocus note. Two product defects are independent of the
+decision and can be fixed at their owners. `GET /v1/runs/<id>/control`
+returns 404 before the first projection, because `borrowedProjection` in
+`manager/src/Agentic/Manager/State.hs` throws `ResourceUnavailable` while
+the snapshot route returns a null runtime (nine of 20 mixed starts). An
+event stream ends when its immediate next batch meets Store contention
+(`A/A5S2/impl-r1/M08-mixed-N8`, `S205-mixed-N8`). The TUI reads the run control resource, so the first defect
+lies on the path of the journey. No tracker item holds either defect.
+
+### Open findings and authorizations
+
+- A5S2, owner decision, as above. After the decision, A5S2 still needs a
+  verifier run and one `fess` audit on its source before the Integrator
+  commits it. The governing goal requires an audit at the end of every
+  subtask, and A5S2 has none.
+- `acat-dxos`, P1, stays open. The fresh N8 root records a service
+  preparation refused with `StorageUnavailable` and released as
+  `WorkerClosed`, and the implementer attributes the closed release to
+  admission work that meets Store contention. That attribution has no
+  verifier or audit.
+- `acat-nwrj`, P1. The A5S2 root shows the same reader-admission
+  `ConfigurationBusy` record beside the enqueue 503. The evidence does not
+  establish whether the `GET /v1/workflows` 503 of A5G2d has the same
+  cause.
+- The round-2 audit of A5G2d left low findings that the Integrator filed:
+  `acat-nay0` (P3, documentation phrases and the handoff TLS claim, whose
+  handoff part this section applies), `acat-wluh` (P3, a check label that
+  can name an unrelated failure), `acat-s3dz` (P3, no process trace in the
+  https refusal check), `acat-ersl` (P3, the scope of the no-absolute-path
+  ruling and of the rule never to signal a stored PID) and
+  `acat-routing-discovery-tls-3m8u` (P2). Its finding L7, on evidence files
+  without the full convention, has no tracker item.
+- `acat-drafts-processfailure-j1h0`, P2, stays open. With A5G2c committed,
+  the `drafts` leg passed inside `cli/ci/policies.sh` (`A/A5G2d/verify-r2/V13`).
+  The issue asks for `drafts.sh` and `policies.sh` at N1 and N8, and the
+  Integrator decides whether that condition is met.
+- `manager/ci/supervision.sh` failed on the A5G2c round-2 source
+  (`A/A5G2c/verify-r2/G06`, `G06b`). A5G2d did not run it, and no tracker
+  item holds it.
+- Refocus note. A5S2 kept to one diagnosis round and stopped at the
+  escalation. The journey has not started. This section is a handoff edit
+  made before the journey passes, which the closeout specification requires.
+- The other open findings of the sections below are unchanged, including
+  `acat-response-ingestion-budget-zaoi` and `acat-tls-name-forms-6gbo`
+  (P1), `acat-ftw9` (P2), the omission of `Agentic.Cli.Command.TuiService`
+  from the manual, and the closeout items `acat-o2ud`, `acat-xj7c`,
+  `acat-6h6z`, `acat-uv2h`, `acat-871r`, `acat-rxkl` and `acat-iyvu`.
+- The tracker holds 105 open and 5 in-progress issues, six more open issues
+  than at the previous stop (`Z/HANDOFF/impl-r1/H33-tracker.log`).
+- The audits of this closeout replace the 2026-09-28 closeout audits
+  `fess/Z-HANDOFF-r1.md` to `fess/Z-HANDOFF-r3.md`. Byte-identical copies
+  are at `Z/HANDOFF/impl-r1/H33-preserved-fess-Z-HANDOFF-r1-20260928.md`,
+  `...-r2-20260928.md` and `...-r3-20260928.md`
+  (`Z/HANDOFF/impl-r1/H33-preserve.log`).
+
+The workflow record lists no pending authorization request. Publication of
+the rewritten branch still waits for the force-push approval that the
+2026-09-26 section describes, and no such approval is recorded.
+
+### Resume procedure
+
+The first commands run in a plain shell with the operator Git configuration.
+The toolchain check runs through `direnv exec .` with the private
+environment:
+
+```bash
+cd /Users/johnw/src/agent-cat/.worktrees/tui
+git status --short --branch
+git log -1 --format='%H %P'
+git rev-parse tui
+git diff HEAD -- . ':!doc/workflow-manager-handoff.md' ':!doc/PLAN.org' |
+  shasum -a 256
+direnv exec . bash -c 'source /Users/johnw/Products/k.M0a5ItPm/environment.sh &&
+  cd /Users/johnw/src/agent-cat/.worktrees/tui &&
+  ghc --numeric-version && cabal --numeric-version &&
+  ghc-pkg field crypton-x509-validation version'
+```
+
+Two states are expected. Before the Integrator commits this section, HEAD is
+`b31a56f388a8eec4e896a66daa4d2e3c44dd1e05`, and the worktree holds the five
+modified files of the A5S2 change and this handoff change. After the
+Integrator commits this section, with `doc/PLAN.org` at most, HEAD is that
+commit, its parent is `b31a56f388a8eec4e896a66daa4d2e3c44dd1e05`, and the
+worktree holds only the five files of the A5S2 change. In both states `tui`
+is `6b7c90b79b47c85d07162bb11d038349dbac9131`, and the digest command
+prints `b5dcc5bebc476c589c529e1f05c55ba4c7e553af4b10740a53ac525396752a35`.
+Any other result means that the branch or the worktree changed after this
+section was written, and the reader establishes that change before
+continuing. If direnv reports a stale or blocked environment, run `de` in
+the worktree and repeat the check. Rebuild with the build command of the
+first 2026-09-27 section below, and build `runtime-contract-test` with
+`--enable-tests`, before any binary runs.
+
+The next work proceeds in this order:
+
+1. Obtain the owner decision on the S1 family. Complete A5S2 under it with
+   a verifier run and one `fess` audit, and have the Integrator commit it.
+   The orchestrator decides whether the two independent defects, the control
+   404 and the event-stream end, are fixed inside A5S2 or as the next
+   subtask before A6.
+2. Restore the parked A6 diff (`refs/wip/a6-r3-20260924-final`) without its
+   draft handoff, and build the uninterrupted PTY journey at N1 and then N8
+   in the existing `manager/test/service_http.py` harness (A6 to A11): exact
+   Unicode submission, approval of the five selectors, observed progress,
+   snapshot display, the Bool `false` answer, the offered retry, native
+   completion, and a `Client.downloadVerified` exclusive save with digest
+   and byte checks, with a broken-step negative control. Add no new helper
+   or evidence tooling.
+3. Run the mutants and the integrated code gate on the final source (A12 and
+   A13). Only after the journey passes, apply the held documentation diff
+   with the `acat-nay0` corrections, document the first TUI service
+   workflow and reconcile the manual (A14).
+4. After Phase A is accepted, land actor-flow increment 1 (`acat-e6cp`,
+   `acat-5m60`) before Phase B resumes WM-025 to WM-027.
+
+Run the `fess` audit at the end of every subtask, keep each subtask to one
+audit round, preserve the first failure of any check with its fixture root,
+and label every result with its evidence ceiling. The evidence of this
+closeout is under `Z/HANDOFF/impl-r1`, in the files that begin with `H33-`.
+
 ## Resume workflow stopping point of 2026-09-28
 
 The resume workflow that started from checkpoint `wm023-20260923` ran again
