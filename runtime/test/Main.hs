@@ -8,6 +8,7 @@ import Agentic.Runtime
 import BrokerTests (brokerTests)
 import CaptureTests (captureTests)
 import FrontendProtocolTests (frontendProtocolTests, frontendCodecCheck)
+import ProcessGroupTests (processGroupTests, spawnCostCheck, spawnCostProbe)
 import SnapshotCheckpointTests (snapshotCheckpointTests)
 import RootRoleTests (rootRoleTests)
 import Control.Concurrent (forkIO, killThread, myThreadId, threadDelay, yield)
@@ -56,6 +57,9 @@ main = getArgs >>= \case
     request <- BS.hGet stdin (fromInteger maxArtifactBytes + 1)
     let response = decodeSnapshotCheckpoint request >>= encodeSnapshotCheckpoint
     either (\failure -> hPutStrLn stderr (T.unpack failure) >> exitWith (ExitFailure 3)) BS.putStr response
+  ["--process-group-test"] -> processGroupTests
+  ["--process-group-spawn-cost-test"] -> spawnCostCheck
+  ["--process-group-spawn-cost", limit, count] -> spawnCostProbe limit count
   ["--broker-test"] -> brokerTests >> boundedControlFrameProbe >> controlScopeCancellationProbe >> durableMirrorFailureProbe
   _ -> contractTests
 
@@ -73,6 +77,7 @@ contractTests = do
   durableMirrorFailureProbe
   boundedControlFrameProbe
   controlScopeCancellationProbe
+  processGroupTests
   expect "descriptor v2 round trip" (decodeWorkflowDescriptor (encodeWorkflowDescriptor descriptorV2) == Right descriptorV2)
   expect "descriptor input order" (map workflowInputName (workflowInputs descriptorV2) == ["subject", "notes"])
   expectLeft "descriptor unknown field" (decodeWorkflowDescriptor (encoded (insertField "future" (Bool True) descriptorV2)))

@@ -16,8 +16,8 @@ from policy_refusal_evidence import run, save
 
 FLAGS = '-Wall -Werror -O1 -threaded -rtsopts -optc-Wall -optc-Wextra -optc-Werror -iruntime/src -iruntime/test -iplan/src -idsl/src -icost/src -iengine/api/src'.split()
 INPUTS = {
-    'capture-tests': ['runtime/test/CaptureTests.hs', 'runtime/cbits/private_directory.c', 'runtime/cbits/private_sync.c', 'runtime/cbits/process_group.c', '-main-is', 'CaptureTests.captureTests'],
-    'root-role-tests': ['runtime/test/RootRoleTests.hs', 'runtime/cbits/private_directory.c', 'runtime/cbits/private_sync.c', 'runtime/cbits/process_group.c', '-main-is', 'RootRoleTests.rootRoleTests'],
+    'capture-tests': ['runtime/test/CaptureTests.hs', 'runtime/cbits/private_directory.c', 'runtime/cbits/private_sync.c', 'runtime/cbits/process_group.c', 'runtime/cbits/process_spawn.c', '-main-is', 'CaptureTests.captureTests'],
+    'root-role-tests': ['runtime/test/RootRoleTests.hs', 'runtime/cbits/private_directory.c', 'runtime/cbits/private_sync.c', 'runtime/cbits/process_group.c', 'runtime/cbits/process_spawn.c', '-main-is', 'RootRoleTests.rootRoleTests'],
     'capture-fault-tests': ['runtime/test/CaptureFaultTests.hs', 'runtime/cbits/private_directory.c', 'runtime/test/capture_sync_fault.c'],
 }
 NAMES = list(INPUTS)

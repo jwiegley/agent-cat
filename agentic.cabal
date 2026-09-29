@@ -147,6 +147,7 @@ library
   build-depends:   direct-sqlite, deepseq, transformers, network, wai, warp, warp-tls, tls,
                    crypton-connection, crypton-x509, crypton-x509-store
   c-sources:       runtime/cbits/process_group.c
+                   runtime/cbits/process_spawn.c
                    runtime/cbits/private_directory.c
                    runtime/cbits/private_sync.c
                    manager/cbits/coordination.c
@@ -459,6 +460,7 @@ test-suite runtime-contract-test
     BucketEvidence
     CaptureTests
     FrontendProtocolTests
+    ProcessGroupTests
     SnapshotCheckpointTests
     RootRoleTests
   ghc-options:      -threaded

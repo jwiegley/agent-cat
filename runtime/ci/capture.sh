@@ -10,10 +10,10 @@ export TMPDIR="$work/tmp"
 unset GHCRTS
 flags=(-Wall -Werror -O1 -threaded -rtsopts -optc-Wall -optc-Wextra -optc-Werror -iruntime/src -iruntime/test -iplan/src -idsl/src -icost/src -iengine/api/src)
 ghc --make "${flags[@]}" -outputdir "$work/normal" \
-  runtime/test/CaptureTests.hs runtime/cbits/private_directory.c runtime/cbits/private_sync.c runtime/cbits/process_group.c \
+  runtime/test/CaptureTests.hs runtime/cbits/private_directory.c runtime/cbits/private_sync.c runtime/cbits/process_group.c runtime/cbits/process_spawn.c \
   -main-is CaptureTests.captureTests -o "$work/capture-tests"
 ghc --make "${flags[@]}" -outputdir "$work/normal" \
-  runtime/test/RootRoleTests.hs runtime/cbits/private_directory.c runtime/cbits/private_sync.c runtime/cbits/process_group.c \
+  runtime/test/RootRoleTests.hs runtime/cbits/private_directory.c runtime/cbits/private_sync.c runtime/cbits/process_group.c runtime/cbits/process_spawn.c \
   -main-is RootRoleTests.rootRoleTests -o "$work/root-role-tests"
 ghc --make "${flags[@]}" -outputdir "$work/fault" \
   runtime/test/CaptureFaultTests.hs runtime/cbits/private_directory.c runtime/test/capture_sync_fault.c \
