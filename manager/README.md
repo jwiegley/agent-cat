@@ -132,13 +132,26 @@ previous snapshot and revisions intact.
 
 `probeProfile` accepts only an installed ID and its exact revision. It refuses
 unknown, removed, stale, client-bound, and quarantined selections before any
-subprocess. The registry lock covers both queries and their readiness update.
-Each query uses the installed executable, ordered prefix, working directory,
-and explicit environment. The commands are `frontend --capabilities` and
-`list --json --descriptor-version 3`. Their streams are drained concurrently
-and bounded before the shared Runtime codecs decode them. Required operations
-and versions are checked, and catalogue runner versions must agree with the
-reported server. Missing support makes the profile unavailable.
+subprocess. The registry lock covers every discovery query and the readiness
+update. Each query uses the installed executable, ordered prefix, working
+directory, and explicit environment. The commands are `frontend --capabilities`,
+then `list --json --descriptor-version 3`, then one `help NAME` for each
+catalogue row. Their streams are drained concurrently and bounded before the
+shared Runtime codecs decode them. Required operations and versions are
+checked, and catalogue runner versions must agree with the reported server.
+Missing support makes the profile unavailable. A pool of four workers runs the
+help queries, and each worker starts the next row when its previous query ends.
+All of them share one deadline equal to the configured query time. At that
+deadline, each help query in flight completes its own process cleanup before
+discovery reports a query timeout. Each help reply is checked as valid UTF-8 of
+at most 262144 characters when it arrives, and a rejected reply stops the pool
+from starting later rows. Replies are accepted in catalogue order against the
+discovery byte ceiling. Replies that wait behind an earlier row count against
+the same ceiling, so the pool starts no row once their sum crosses it. The
+first failure in catalogue order is the reported failure. When acceptance
+reaches that failure, discovery cancels the help queries in flight, lets each
+complete its own process cleanup, and reports the failure without waiting for
+the deadline.
 
 `publicProfiles` emits the frozen public Profile shape without invocation,
 environment, target arguments, or raw diagnostics. Failures are fixed categories

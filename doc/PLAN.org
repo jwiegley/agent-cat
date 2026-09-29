@@ -2388,6 +2388,48 @@ Required work: implementer stages keep the complete .command, .start, .end, .exi
 ]
 #+end_src
 
+* TODO [#D] Resolve the non-blocking fess findings of subtask A13A14
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-a13a14-fess-followup-xznh
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-29 Tue 14:18]
+:MODIFIED: [2026-09-29 Tue 14:18]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess audit fess/fast-A13A14-r1.md (2026-09-29) on subtask A13A14. All four are low documentation findings.
+
+1. doc/routing-v2-verification.md near 127: the expected probe output still lists "catalogue URL bytes, query bytes, and query item count are bounded". No source file contains that text. Replace the line with the real check name from the routing probes, or remove it.
+
+2. doc/workflow-manager-handoff.md near 53: the handoff says that q detaches. The manual (doc/agent-cat.texi near 3332) and the code say that C-c always detaches and that q detaches only when no answer editor has the keys. Reword the line to match the manual.
+
+3. doc/workflow-manager-handoff.md near 76 and 126: line 76 says that commands ran under timeouts of at most 30 minutes, and line 126 records the operator rule that every command finishes within 15 minutes. State the real run times (ALLBUILD about 1 minute, tui/ci/tui.sh about 9 minutes), or state that the stage timeouts were limits.
+
+4. doc/tui-design.md near 593, 608, 624 and 629: the changed rows keep semicolons from older sentences. check-prose.py covers only the manual. Split those sentences when the rows are next edited.
+
+Acceptance: the four corrections are made and make -C doc check passes.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-a13a14-fess-followup-xznh",
+    "depends_on_id": "acat-wm-034-3vqz",
+    "type": "discovered-from",
+    "created_at": "2026-09-29T21:18:37.897635Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
 * TODO [#D] Resolve the non-blocking fess findings of subtask A5S2b
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -5548,7 +5590,7 @@ Source: fess audit /Users/johnw/Products/agent-cat-workflow-manager/implementati
 :LABELS:   ["workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-24 Thu 09:19]
-:MODIFIED: [2026-09-29 Tue 13:46]
+:MODIFIED: [2026-09-29 Tue 14:18]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -5592,6 +5634,13 @@ Acceptance: the A6 journey asserts the composite install lines on the associated
     "author": "johnw",
     "text": "Subtask A10A11 (2026-09-29): the broken-step control tui-journey-broken-answer now runs and fails with the exact message 'JOURNEY-ASSERT typed answer is not JSON false', and the journey asserts the displayed runtime against the snapshot GET and logs the head order. The journey does not assert the literal lines 'Observation: current' and 'Runtime: Running' on the associated screen, so this issue stays open. Evidence: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A10A11/fast-impl-r1.",
     "created_at": "2026-09-29T20:46:09Z"
+  },
+  {
+    "id": 350,
+    "issue_id": "acat-i9aj",
+    "author": "johnw",
+    "text": "Subtask A13A14 (2026-09-29) is documentation only and changes no journey assertion. The final gate reran tui-journey at N1 and N8 and the broken-answer control. The literal lines 'Observation: current' and 'Runtime: Running' are still not asserted, so this issue stays open. Evidence: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A13A14/fast-impl-r1.",
+    "created_at": "2026-09-29T21:18:49Z"
   }
 ]
 #+end_src
@@ -7123,15 +7172,17 @@ Tested host: macOS26.6.2 arm64, Emacs30.2, GHC9.10.3. Remaining acceptance is BL
 ]
 #+end_src
 
-* TODO [#D] Correct residual routing-TLS phrases and supersede the handoff TLS claim
+* DONE [#D] Correct residual routing-TLS phrases and supersede the handoff TLS claim
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-nay0
 :LABELS:   ["workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-29 Tue 06:02]
-:MODIFIED: [2026-09-29 Tue 06:02]
+:MODIFIED: [2026-09-29 Tue 14:18]
 :CREATED_BY: johnw
+:FINISHED: [2026-09-29 Tue 14:18]
+:CLOSE_REASON: Held routing documentation applied with the two tui-design.md corrections, handoff superseded by the 2026-09-29 dated section, make -C doc check passed (A13A14).
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
@@ -7153,6 +7204,20 @@ Acceptance: when the documentation hold is lifted, apply the held diff with the 
     "created_by": "johnw",
     "metadata": "{}",
     "thread_id": ""
+  }
+]
+#+end_src
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 351,
+    "issue_id": "acat-nay0",
+    "author": "johnw",
+    "text": "Subtask A13A14 (2026-09-29) applied the held diff A/A5G2d/impl-r2/held-doc-edits.diff, corrected doc/tui-design.md lines 608 and 629 so that routing uses HTTP and cryptography only, and added the dated handoff section 'Phase A TUI service journey of 2026-09-29', which states that discovery supports no TLS and refuses https as tls-not-supported. make -C doc check passed. Evidence: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A13A14/fast-impl-r1.",
+    "created_at": "2026-09-29T21:18:50Z"
   }
 ]
 #+end_src
@@ -15506,7 +15571,7 @@ to an unapproved local launch.
 :LABELS:   ["p7","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-29 Tue 13:46]
+:MODIFIED: [2026-09-29 Tue 14:18]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-034
 :SOURCE_REPO: agent-cat
@@ -15606,6 +15671,13 @@ Local-mode behavior remains intact without a duplicated service runtime model.
     "author": "johnw",
     "text": "Subtask A10A11 (2026-09-29): in service mode, s after verified retrieval opens the existing save dialog and saves the retained verified bytes through saveExact. A refusal (existing entry, symlink, invalid path) shows a fixed message with the path through safeDisplay and leaves the destination untouched. Local-mode saving keeps its behavior. tui-journey is now the Phase A gate in one uninterrupted TUI session: each verified fact has its own JOURNEY-ASSERT message, the harness POST guard is active after credential issuance, exactly one command identity exists for approve, answer and retry, and read-only GETs treat a 429 page-set refusal as a bounded new read. Checks: Werror build, tui-model-test N1 and N8, tui-journey N1 and N8, tui-journey-broken-answer control (exact typed-answer message), tui-consent-control, tui-approval N1 and N8, tui/ci/tui.sh. Follow-up: acat-a10a11-fess-followup-33k1. Evidence: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A10A11/fast-impl-r1.",
     "created_at": "2026-09-29T20:46:09Z"
+  },
+  {
+    "id": 349,
+    "issue_id": "acat-wm-034-3vqz",
+    "author": "johnw",
+    "text": "Subtask A13A14 (2026-09-29) documents the Phase A TUI service journey in doc/agent-cat.texi, tui/README.md and a new dated top section of doc/workflow-manager-handoff.md, and lists the unsupported TUI service features. The final Phase A gate passed on the final tree: make -C doc check and check-haskell, the Werror ALLBUILD, manager/ci/contract.sh, tui-model-test at N1 and N8, the source-boundary check, tui-journey at N1 and N8, the broken-answer and consent controls with their literal messages, and tui/ci/tui.sh. This milestone closes no package or gate, so WM-034 stays open. Evidence: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A13A14/fast-impl-r1.",
+    "created_at": "2026-09-29T21:18:49Z"
   }
 ]
 #+end_src

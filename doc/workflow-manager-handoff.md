@@ -2,6 +2,161 @@
 
 <!-- handoff-id: wm023-20260923; status: paused-unaccepted-wip; accepted: WM-001..WM-022,G0,G1; resume-branch: workflow-manager-checkpoint-20260923; fess: every-subtask -->
 
+## Phase A TUI service journey of 2026-09-29
+
+The resume workflow continued after the stopping point below under the
+operator direction of 2026-09-29 for fast validation. It committed four
+subtasks after `43585dd3`, and subtask A13A14 adds this documentation. The
+TUI now completes one uninterrupted service journey through a running
+manager. This section describes the current state. Where any section below
+differs, this section supersedes it, and the sections below remain as
+chronology.
+
+| Subtask | Commit | Result |
+| --- | --- | --- |
+| A5S2b | `d02b6253` | Bounded-wait Store admission, the run-control route before the first projection, and an event stream that stays open under a short Store holder. Evidence under `A/A5S2b/fast-impl-r1`. |
+| A6A7 | `dad4a490` | Live service progress in the TUI, and the answer JSON `false` to the pending Bool question. Evidence under `A/A6A7/fast-impl-r1`. |
+| A8A9 | `2751ffab` | The offered recovery retry, terminal recognition and verified retrieval. Evidence under `A/A8A9/fast-impl-r1`. |
+| A10A11 | `fe7a2f20` | Exclusive saving of the verified bytes from the TUI, and `tui-journey` as the milestone gate. Evidence under `A/A10A11/fast-impl-r1`. |
+| A13A14 | this change | The held routing documentation, the manual and TUI documentation of the journey, this section, and the final gate. Evidence under `A/A13A14/fast-impl-r1`. |
+
+Nothing from this workflow is published, and the canonical branch `tui`
+stays at `6b7c90b79b47c85d07162bb11d038349dbac9131`.
+
+### What the TUI performs
+
+`agentic-run --tui --service CLIENT_PROFILE` performs this journey through
+the protected HTTPS manager and the public `Agentic.Manager.Client` facade:
+
+- It browses the manager catalogue, creates one request, and submits
+  literal inputs, including Unicode text with exact request bytes.
+- It shows the exact manager review. Only `y` in the summary view approves,
+  and every approval key press has one numbered visible outcome.
+- It follows the run in the live monitor. One single-flight observation
+  lane reads the request, the review, the receipt of a retained command, and
+  the run snapshot, controls and pending decision, and it repeats that read
+  on a one-second timer. A declared refusal keeps the last complete
+  observation and marks it stale.
+- It answers the pending question through the code-directed encoding of the
+  person view, so the input `false` for a `flag` question is sent as the
+  JSON value `false`. It supports the codes `text`, `verdict`, `flag` and
+  `receipt`.
+- It sends the recovery retry that the run controls offer, once, with the
+  entity tag of the displayed control observation as its precondition.
+- It recognizes the terminal state only from the snapshot runtime status.
+- It downloads the verified result once through `Client.downloadVerified`,
+  shows its size and SHA-256 digest, and saves the unchanged bytes at a new
+  absolute path with mode 0600 through the exclusive save function.
+- It sends every command once. An uncertain send is repeated only after the
+  explicit confirmation of an exact resend. An internal fault stops every
+  further mutation and automatic refresh.
+- `q` detaches without cancelling manager-owned work.
+
+The manual entry for `--service` in `doc/agent-cat.texi` and the section
+"Service mode" of `tui/README.md` state the complete behavior and list the
+unsupported features. The TUI offers no cancellation, steering, redirect,
+failover or abandon, no structured answer editor, no captured or other
+non-literal inputs, no withdrawal or discarding of a request, one run at a
+time, no history, lineage or export, and no event-driven refresh. It does
+not reconnect after a manager restart or a credential revocation, switch
+endpoints, observe earlier runs after a TUI restart, bootstrap an Overview,
+or have an accepted layout at 40x12 or 80x24.
+
+Routing catalogue discovery supports no TLS, and the routing documentation
+now states it. Subtask A13A14 applied the held diff
+`A/A5G2d/impl-r2/held-doc-edits.diff` with the two `doc/tui-design.md`
+corrections of `acat-nay0`. This supersedes the statements below that the
+documentation edits stay held and that seven files describe TLS discovery.
+
+### Checks and evidence
+
+Under the operator direction of 2026-09-29, validation uses incremental
+Werror builds of the needed targets, targeted checks of the changed layers,
+and `tui-journey` at N1 and then N8. Each command runs under a timeout of
+at most 30 minutes. The final gate ran on the final tree in this order, and
+each check has a `.log` and an `.exit` file under `A/A13A14/fast-impl-r1`:
+
+1. `make -C doc check` passed (`01-doc-check`).
+2. `make -C doc check-haskell` passed (`02-doc-check-haskell`). Its first
+   two runs failed, first because the manual did not name the constructor
+   `TuiService` and then because the member ledger was stale. The fix names
+   the constructor and regenerates `doc/haskell-member-coverage.texi`
+   (`02a-update-inventory`). The failed logs are under `failed-r0`.
+3. The incremental Werror build of all targets with `-ftui-tests` passed
+   (`03-allbuild`).
+4. `bash manager/ci/contract.sh` passed (`04-contract`).
+5. `tui-model-test` passed at N1 and N8 (`05-model-N1`, `06-model-N8`).
+6. The source-boundary check passed (`07-source-boundaries`).
+7. `tui-journey` passed at N1 and then N8 (`08-journey-pair`, fixture root
+   `/Users/johnw/Products/k.M0a5ItPm/tmp/fast-final-journey.CGeIm2cm`).
+8. The control `tui-journey-broken-answer` failed with
+   "JOURNEY-ASSERT typed answer is not JSON false" (`09-journey-control`,
+   root `/Users/johnw/Products/k.M0a5ItPm/tmp/fast-final-journey-control.rEj6tbgN`).
+9. The control `tui-consent-control` failed with "detail-view key approved a
+   review" (`10-consent-control`, root
+   `/Users/johnw/Products/k.M0a5ItPm/tmp/fast-final-consent-control.xik5EAi7`).
+10. `bash tui/ci/tui.sh` passed last (`11-tui-ci`).
+
+`tui-journey` is actual keyboard interaction through a PTY with the
+protected HTTPS manager and deterministic native frontend processes. Its
+runner is the deterministic `routing-fixed-point-probe` fixture, and no
+paid provider takes part. The two controls show that the journey fails when
+the typed answer is not JSON `false` and when the detail-view key approves a
+review. These checks were not run: `cli/ci/policies.sh`, the approval and
+controls mutation audits, `manager/ci/supervision.sh`, stability samples of
+more than a few starts, mutant suites and `-fforce-recomp` builds.
+
+### Accepted state
+
+Accepted state is unchanged at WM-001 to WM-022 and G0 and G1, which is 22
+of 44 packages and two of six gates. This milestone closes no package and no
+gate. WM-023 (`acat-wm-023-d20b`) is still in progress. The journey is the
+Phase A exit evidence, and Phase A waits only for the short end-of-phase
+review that the operator direction of 2026-09-29 describes.
+
+### Operator decisions
+
+- 2026-09-28, routing discovery without TLS. Catalogue discovery builds no
+  TLS manager. An https catalogue endpoint fails as `tls-not-supported`, and
+  discovery never downgrades it to plain HTTP. The manager's HTTPS transport
+  and client do not change. `acat-routing-discovery-tls-3m8u` records the
+  restoration of TLS as later work.
+- 2026-09-29, fast validation and a working system first. The working TUI
+  journey comes first. Each subtask has one implementer, one short `fess`
+  audit and one Integrator commit. Every command finishes within 15 minutes,
+  and the long suites above are not routine validation.
+- 2026-09-29, bounded wait for Store admission. Commands, protected reads,
+  event-stream batches and the admission coordinator steps wait for the
+  Store gate and the configuration guard within the unchanged five-second
+  allowance. A genuine timeout still returns `storage-unavailable`.
+
+The verbatim decisions are in `GOAL.md` of the resume directory.
+
+### Open findings
+
+- `acat-response-ingestion-budget-zaoi`, P1, protected-response ingestion
+  contention.
+- `acat-tls-name-forms-6gbo`, P1, residual unsupported Name Constraints
+  validation in the TLS stack.
+- `acat-dxos` and `acat-nwrj`, P1, stay open for the Integrator to decide
+  whether bounded-wait admission resolves them.
+- The manual now names the constructor `TuiService` of
+  `Agentic.Cli.Command`, which resolves the omission that the sections below
+  list. `acat-nay0` is resolved by the documentation of this change.
+- The other open findings of the sections below are unchanged.
+
+### Next action
+
+1. Run the end-of-phase review of Phase A, a short two-lens reading of the
+   integrated path with at most one fix round.
+2. Land actor-flow increment 1 (`acat-e6cp`, `acat-5m60`).
+3. Start Phase B.
+
+To resume, run the toolchain check of the resume procedure below in the
+worktree, confirm that HEAD is the A13A14 commit and that the worktree is
+clean, and rebuild with the build command of the first 2026-09-27 section
+before any binary runs.
+
 ## Resume workflow stopping point of 2026-09-29
 
 The resume workflow that started from checkpoint `wm023-20260923` ran again
@@ -15,11 +170,11 @@ note, which escalated after one implementer round for the owner decision
 that the subsection "Stop reason and owner decision" states. Accepted state
 is unchanged at WM-001–WM-022 and G0/G1, which is 22 of 44 packages and two
 of six gates. WM-023 (`acat-wm-023-d20b`) is still in progress. Phase A of
-the remaining-scope report is not met, because the run did not reach its
+the remaining-scope report was not met at this stopping point, because the run did not reach its
 exit check, and the run made no change for Phases B to G. This section and
 `~/Documents/Obsidian/agent-cat-workflow-manager-remaining-2026-09-29.md`
-describe the current state. Where they differ from the sections below, they
-supersede them, and the older sections remain as chronology.
+described the state at this stopping point. The section "Phase A TUI service
+journey of 2026-09-29" above supersedes them.
 
 After this stopping point, subtask A5S2b applied the operator decision of
 2026-09-29. Commands, protected reads, event-stream batches and the
@@ -80,7 +235,7 @@ A5S1D, A5R, A5G1 and the escalated A5G2, A5G2b and A5G2c.
 | --- | --- | --- |
 | A5G2d | `bab6b09a`, `b31a56f3` | Done after two implementer rounds, two verifier rounds and two `fess` audits. The round-1 audit raised two blocking findings, and the round-2 audit (`fess/A-A5G2d-r2.md`) is not blocking. Evidence under `A/A5G2d`. |
 | A5S2 | none | Escalated after one implementer round, with its work uncommitted. No verifier ran and no `fess` audit exists (`Z/HANDOFF/impl-r1/H33-facts.log`). Evidence under `A/A5S2/impl-r1`. |
-| A6–A14 | none | Not started. |
+| A6–A14 | none | Not started at this stopping point. The section above records their later results. |
 
 These are subtask results. None of them accepts a package or a gate.
 
@@ -140,14 +295,14 @@ passed at N1 and failed at N8 with `503 storage-unavailable` on
 `/Users/johnw/Products/k.M0a5ItPm/tmp/a5g2d-client.riA5itgK`). It was not
 rerun to a pass, and `acat-nwrj` holds it.
 
-The documentation edits stay held under the refocus note. The held diff is
-now `A/A5G2d/impl-r2/held-doc-edits.diff`. It covers the four files of the
+The documentation edits stayed held under the refocus note until subtask
+A13A14 applied them. The held diff was `A/A5G2d/impl-r2/held-doc-edits.diff`. It covers the four files of the
 A5G2c held diff and adds `doc/agent-cat.texi`, `doc/model-routing-v2.md`
 and `doc/routing-v2-verification.md`. It applies cleanly to HEAD
 (`Z/HANDOFF/impl-r1/H33-start-binding.log`), and `make -C doc check` passed
-on a copy with it applied (`A/A5G2d/verify-r2/V14`). It still lacks the two
-corrections to `doc/tui-design.md` that `acat-nay0` names. Until it lands,
-those seven files describe TLS discovery and the former spawn path.
+on a copy with it applied (`A/A5G2d/verify-r2/V14`). It lacked the two
+corrections to `doc/tui-design.md` that `acat-nay0` names, and A13A14 added
+them when it applied the diff.
 
 ### Uncommitted A5S2 work
 
@@ -205,7 +360,7 @@ S1 signature. Of the 40 starts, 27 passed (`S13-sample-classification.log`,
   after a serving-time release of the preparation.
 - No enqueue receipt returned 503 after a committed enqueue.
 
-The zero-S1 acceptance is not met, because the declared signatures include
+The zero-S1 acceptance was not met, because the declared signatures include
 the pre-commit enqueue 503 and the serving-time release.
 
 The worktree holds five modified files, no untracked file and nothing
@@ -292,8 +447,9 @@ when its next batch meets a short Store holder.
   (`A/A5G2c/verify-r2/G06`, `G06b`). A5G2d did not run it, and no tracker
   item holds it.
 - Refocus note. A5S2 kept to one diagnosis round and stopped at the
-  escalation. The journey has not started. This section is a handoff edit
-  made before the journey passes, which the closeout specification requires.
+  escalation. The journey had not started at this stopping point. This
+  section was a handoff edit made before the journey passed, which the
+  closeout specification required.
 - The other open findings of the sections below are unchanged, including
   `acat-response-ingestion-budget-zaoi` and `acat-tls-name-forms-6gbo`
   (P1), `acat-ftw9` (P2), the omission of `Agentic.Cli.Command.TuiService`
@@ -386,11 +542,11 @@ two verifier rounds and two `fess` audits, as the subsection "Stop reason
 and owner decision" states. Accepted state is
 unchanged at WM-001–WM-022 and G0/G1, which is 22 of 44 packages and two of
 six gates. WM-023 (`acat-wm-023-d20b`) is still in progress. Phase A of the
-remaining-scope report is not met, because the run did not reach its exit
+remaining-scope report was not met at this stopping point, because the run did not reach its exit
 check, and the run made no change for Phases B to G. This section and
-`~/dl/agent-cat-workflow-manager-remaining-2026-09-28.md` describe the
-current state. Where they differ from the sections below, they supersede
-them, and the older sections remain as chronology. `~/dl` resolves to
+`~/dl/agent-cat-workflow-manager-remaining-2026-09-28.md` described the
+state at this stopping point. Where they differ from the sections below, they
+supersede them, and the older sections remain as chronology. `~/dl` resolves to
 `~/Downloads`.
 
 ### Objective, worktrees and environment
@@ -442,7 +598,7 @@ A5G2c.
 | Subtask | Commit | Result and evidence ceiling |
 | --- | --- | --- |
 | A5G2c | none | Escalated after three implementer rounds, two verifier rounds and two `fess` audits, with its work uncommitted. The round-3 source, which is the current worktree, has implementer evidence only, with no verifier run and no audit. The evidence is under `A/A5G2c`, and the audits are `fess/A-A5G2c-r1.md` and `fess/A-A5G2c-r2.md`. |
-| A5S2, A6–A14 | none | Not started. |
+| A5S2, A6–A14 | none | Not started at this stopping point. |
 
 These are subtask results. None of them accepts a package or a gate.
 
@@ -780,10 +936,10 @@ A5G2b, which applied the operator decision of 2026-09-27 on
 as the subsection "Stop reason and owner decision" states. Accepted state is
 unchanged at WM-001–WM-022 and G0/G1, which is 22 of 44 packages and two of
 six gates. WM-023 (`acat-wm-023-d20b`) is still in progress. Phase A of the
-remaining-scope report is not met, because the run did not reach its exit
+remaining-scope report was not met at this stopping point, because the run did not reach its exit
 check, and the run made no change for Phases B to G. This section and
 revision 3 of `~/dl/agent-cat-workflow-manager-remaining-2026-09-27.md`
-describe the current state. Where they differ from the sections below, they
+described the state at this stopping point. Where they differ from the sections below, they
 supersede them, and the older sections remain as chronology. Revision 3
 replaces revision 2 of the same file, which the first 2026-09-27 section
 cites. A byte-identical copy of revision 2 is at
@@ -837,7 +993,7 @@ subtask A5G2 of the first 2026-09-27 section continues as A5G2b.
 | Subtask | Commit | Result and evidence ceiling |
 | --- | --- | --- |
 | A5G2b | none | Escalated after one implementer round, with its work uncommitted, no verifier run and no `fess` audit. The evidence is under `A/A5G2b/impl-r1`. |
-| A5S2, A6–A14 | none | Not started. |
+| A5S2, A6–A14 | none | Not started at this stopping point. |
 
 These are subtask results. None of them accepts a package or a gate.
 
@@ -1056,11 +1212,11 @@ on 2026-09-27 at about 14:55Z. Subtask A5G2 needs an owner decision that the
 requirements do not settle, as the subsection "Open findings and decisions"
 states. Accepted state is unchanged at WM-001–WM-022 and G0/G1, which is 22
 of 44 packages and two of six gates. WM-023 (`acat-wm-023-d20b`) is still in
-progress. Phase A of the remaining-scope report is not met, because the run
+progress. Phase A of the remaining-scope report was not met at this stopping point, because the run
 did not reach its exit check. The run made no implementation change for
 Phases B to G. This section and the report
-`~/dl/agent-cat-workflow-manager-remaining-2026-09-27.md` describe the current
-state. Where they differ from the sections below, they supersede them. The
+`~/dl/agent-cat-workflow-manager-remaining-2026-09-27.md` described the state
+at this stopping point. Where they differ from the sections below, they supersede them. The
 older sections remain as chronology.
 
 `~/dl` resolves to `~/Downloads`, where the 2026-09-26 report also lies. On
@@ -1172,7 +1328,7 @@ refs without a fetch,
 | A5R | `84ea887b` | Resolves the rebase audit findings M3, M4 and M5. `runtime/test/BrokerTests.hs` adds epoch-delivery and shell-log-delivery checks, and `test/frontend_session_probe.py` prepares a row with in-process tools. The broker tests and the runtime and engine-api suites passed at N1 and N8 (model tests), and the probe passed at N1 and N8 (deterministic native fixture). Five mutants each failed. `tui/ci/tui.sh` passed with the recomputed expectations (deterministic PTY fixture) after a first verifier failure under a load average of 88 to 97, whose root is kept. The round-2 audit `fess/A-A5R-r2.md` is not blocking. |
 | A5G1 | none | Diagnosis only, and no tracked file changed. The record is `A/A5G1/impl-r2/A5G1-diagnosis.md`. The `drafts` and `artifacts` fixture runners lack a `help` case for `Profile.catalogueHelp`, and the `workers` evidence script refuses the `help` argv, all since `b0ae240c`. At `2b31a965` the worker `PATH` of `approval` and `vertical` lacks `security`, which `crypton-x509-system` 1.9.0 runs to read the system certificate store, and the record leaves the same cause at the tip unproven. The `controls` audit anchor no longer matches the re-indented `Machine.hs`. All legs ran at N1. The round-2 audit `fess/A-A5G1-r2.md` is not blocking. |
 | A5G2 | none | Escalated after one round with its work uncommitted, as the next subsection states. It has no verifier run and no fess audit. |
-| A5S2, A6–A14 | none | Not started. |
+| A5S2, A6–A14 | none | Not started at this stopping point. |
 
 These are subtask results. None of them accepts a package or a gate.
 
@@ -1377,14 +1533,14 @@ The resume workflow that started from checkpoint `wm023-20260923` stopped on
 three rounds, and its uncommitted work remains in the worktree for inspection.
 Accepted state is unchanged at WM-001–WM-022 and G0/G1, which is 22 of 44
 packages and two of six gates. WM-023 (`acat-wm-023-d20b`) is still in
-progress. Phase A of the remaining-scope report is not met. The run made no
+progress. Phase A of the remaining-scope report was not met at this stopping point. The run made no
 implementation change for Phases B to G. The evidence directory also holds
 the proposal `resume-20260923/proposals/manager-broker-design.md`, dated
 2026-09-26 at about 02:55Z, for the operator amendment of 2026-09-25. It is a
 proposal for operator decision on source baseline `290e0232`, and it changes
 no code. This section and the report
-`~/dl/agent-cat-workflow-manager-remaining-2026-09-26.md` describe the current
-state. Where they differ from the halt section below, they supersede it. The
+`~/dl/agent-cat-workflow-manager-remaining-2026-09-26.md` described the state
+at this stopping point. Where they differ from the halt section below, they supersede it. The
 older sections remain as chronology.
 
 Since 2026-09-25, `~/dl` resolves to `~/Downloads` through a home-manager
@@ -1531,7 +1687,7 @@ audit is kept at `Z/HANDOFF/impl-r3/H3-preserved-fess-Z-HANDOFF-r3-20260924.md`.
 | A6 | none | Failed on 2026-09-24 after three rounds. The verifier's `tui-journey` run at N8 hit the S1 class before any step that A6 changed. The round-3 diff is parked, with the unaccepted draft handoff, at `refs/wip/a6-r3-20260924-final` (`3ed13d96`). The current plan lists A6 as not started. |
 | A5S1 | none | Two audited rounds, both blocking. Round 3 escalated for an owner decision on `Approval.hs:96` and is parked at `refs/wip/a5s1-r3-20260925-final` (`090477d2`). A5S1C superseded it. |
 | A5S1C | none | Failed after three rounds, as the next subsection states. |
-| A5R, A5G1, A5G2, A5S2, A7–A14 | none | Not started. |
+| A5R, A5G1, A5G2, A5S2, A7–A14 | none | Not started at this stopping point. |
 
 These are subtask results. None of them accepts a package or a gate. The
 refocus note asked for confirmation that the `wby2` consent test includes a
@@ -1812,7 +1968,7 @@ The following sections retain the development chronology. This halt section and
 the portable checkpoint supersede their earlier current-state descriptions,
 without altering historical evidence or completed task states.
 
-## Current delivery direction
+## Delivery direction of 2026-09-22
 
 WM-022 and G1 are accepted on 2026-09-22 under the local-only validation
 amendment below. The vertical slice was integrated at `ea0fc12c`, and current
@@ -1830,7 +1986,7 @@ as a substitute for the next product milestone. The completed
 the references for their respective scopes, subject to the user's corrections
 below.
 
-## Current TLS update and isolated progress
+## TLS update and isolated progress of 2026-09-23
 
 The user authorized the targeted Nix dependency update on 2026-09-23.
 `crypton-x509` and `crypton-x509-validation` are now pinned to `1.9.1`, with
@@ -1844,7 +2000,7 @@ The canonical change is limited to Nix overrides, that patch, its source-archive
 entry, the `memory`-to-`ram` dependency change and the existing TLS probe fixture.
 Reviewer `63fdf53f-c03b-463a-9c3d-bbdfdb66a43f` approved bounded integration with a
 packaging note. Parent added the missing archive entry and confirmed its exact
-bytes in the source distribution. Service/client application code remains isolated
+bytes in the source distribution. Service/client application code was then isolated
 in `implementation.9tGzKH/service-tui.purvEwEv/broker-source`.
 
 After actual relinking, all 18 public-client cases passed at N1 and N8.
@@ -1893,7 +2049,7 @@ nor read manager filesystem paths, and local mode remains intact. The acceptance
 run uses actual keyboard/PTY interaction, protected HTTP and deterministic real
 frontend processes, not mocked manager success.
 
-Backend, client and acceptance work are being reconciled as one delivery path.
+Backend, client and acceptance work were then reconciled as one delivery path.
 The confirmed delivery order does not require completed Emacs work before this
 first TUI milestone. Emacs remains unfinished rather than implicitly accepted.
 Other frontend work and broader hardening follow the first integrated run.
@@ -1947,7 +2103,7 @@ This does not accept WM-023, a protected manager service or the TUI journey.
 The original eight-file service/client work remains preserved in
 `service-tui.purvEwEv/source` and `pre-broker-work-in-progress.patch`, with 986
 insertions and 74 deletions. Its continuation is in `broker-source` on the
-integrated broker base. The current isolated service executes real protected
+integrated broker base. The isolated service then executed real protected
 HTTP traffic, with explicit native-version domain corrections and both polling
 and SSE. Neither source has been overlaid onto canonical without review.
 

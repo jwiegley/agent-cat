@@ -85,6 +85,8 @@ Allowing project configuration to pair a user secret with a project-provided bas
 
 The model identifiers below are illustrative policy names supplied in the request. Their presence in this document does not assert that any provider currently offers them.
 
+The catalogues in this example use HTTPS. Configuration accepts them, but discovery supports no TLS at present (section 8.2). Each refresh of these catalogues therefore reports `tls-not-supported`, an `exact` selector resolves as `static-unverified`, and a `prefix` selector finds no inventory.
+
 ### 5.1 User file
 
 ```yaml
@@ -278,7 +280,7 @@ A `deck:` engine must omit `environment`: the selected Agent Deck session was cr
 - `openai`: an object with `object: "list"` and a `data` array containing unique model objects with `id`, optional numeric `created`, and optional `owned_by`; and
 - `anthropic`: cursor-paginated objects with `data`, `has_more`, `first_id`, and `last_id`, whose models carry `id`, optional `created_at`, display name, limits, and capability metadata.
 
-`url` is complete, not a base to which hidden path rules are applied. HTTPS is required whenever `auth` is present. Plain HTTP is accepted only without authentication and only for a valid literal IPv4 `127/8` or IPv6 `::1` address. User-info, fragments, malformed percent encoding, and credential-shaped query keys are refused. Query keys are decoded before validation, and redirects are disabled.
+`url` is complete, not a base to which hidden path rules are applied. HTTPS is required whenever `auth` is present. Plain HTTP is accepted only without authentication and only for a valid literal IPv4 `127/8` or IPv6 `::1` address. User-info, fragments, malformed percent encoding, and credential-shaped query keys are refused. Query keys are decoded before validation, and redirects are disabled. Discovery refreshes only plain-HTTP catalogues at present, and an HTTPS catalogue fails discovery as `tls-not-supported` (section 8.2).
 
 `auth` supplies one header from a secret reference. `scheme: bearer` prefixes the value with `Bearer `, while absence of `scheme` sends the raw value required by Anthropic's `x-api-key`. Literal values are forbidden for credential-shaped headers. The complete explicit header set, including resolved authentication and the generated request identifier, is limited to 64 entries and 61,440 aggregate UTF-8 bytes. Each value is at most 8,192 bytes and contains no control characters. The auth header cannot duplicate a literal header.
 
@@ -358,11 +360,12 @@ Routing configuration attaches only to routing-only execution and inspection.
 
 ### 8.2 HTTP client
 
-`Agentic.RoutingDiscovery` uses `http-client` and `http-client-tls`; it never invokes `curl`. Authorization therefore never enters process argv, executable availability is not an undeclared contract, and body/redirect behavior remains bounded Haskell code.
+`Agentic.RoutingDiscovery` uses `http-client` with a plain manager that has no TLS support. It never invokes `curl` or any other process. Authorization therefore never enters process argv, executable availability is not an undeclared contract, and body/redirect behavior remains bounded Haskell code.
+
+Discovery supports no TLS at present. It refuses an HTTPS endpoint with the failure `tls-not-supported` before it builds any header or opens any connection, and it never retries that endpoint over plain HTTP. An explicit refresh then fails with an error that names the persona, the engine and the endpoint fingerprint. A normal refresh uses a usable stale-if-error cache or returns no inventory, and it reports the failure as a warning. Configuration refuses authenticated plain HTTP and accepts unauthenticated plain HTTP only for literal loopback addresses, so discovery refreshes no authenticated catalogue at present.
 
 The client:
 
-- verify TLS through the standard manager and refuse authenticated plain HTTP; unauthenticated HTTP is restricted to loopback addresses;
 - disable cross-origin redirects;
 - apply connection and response timeouts;
 - stream and stop at `max-bytes` before decoding;
@@ -672,7 +675,7 @@ The production property probe permutes inventory order while preserving the same
 
 ### 13.3 HTTP/cache tests
 
-Use local deterministic servers. Cover timeouts, status errors, TLS/plain URL policy, redirect refusal, oversized and chunked bodies, malformed JSON, unknown fields, duplicate ids, item/page bounds, Anthropic pagination loops, OpenAI-compatible missing metadata, cache fingerprint separation, atomic replacement, torn/corrupt cache, stale windows, and explicit refresh semantics.
+Use local deterministic servers. Cover timeouts, status errors, the refusal of HTTPS endpoints without a connection, the plain-HTTP URL policy, redirect refusal, oversized and chunked bodies, malformed JSON, unknown fields, duplicate ids, item/page bounds, Anthropic pagination loops, OpenAI-compatible missing metadata, cache fingerprint separation, atomic replacement, torn/corrupt cache, stale windows, and explicit refresh semantics.
 
 No test calls a vendor endpoint.
 

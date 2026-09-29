@@ -57,6 +57,9 @@ checked by the documentation gates.
 @c MEMBER Agentic.Cli.Command.member:Tui support
 @hsindex Agentic.Cli.Command.Tui
 @item @code{Agentic.Cli.Command} @tab @code{Tui} @tab @code{Agentic.Cli.Command}
+@c MEMBER Agentic.Cli.Command.member:TuiService support
+@hsindex Agentic.Cli.Command.TuiService
+@item @code{Agentic.Cli.Command} @tab @code{TuiService} @tab @code{Agentic.Cli.Command}
 @c MEMBER Agentic.Cli.Command.member:Usage support
 @hsindex Agentic.Cli.Command.Usage
 @item @code{Agentic.Cli.Command} @tab @code{Usage} @tab @code{Agentic.Cli.Command}

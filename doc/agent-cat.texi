@@ -2463,7 +2463,8 @@ in @file{runtime/BROKER.md}.
 
 @c COVER API Agentic.Cli.Command support
 @item Command
-Parsed command with constructors @code{Tui}, @code{Usage}, @code{Help}, @code{List},
+Parsed command with constructors @code{Tui}, @code{TuiService}, @code{Usage},
+@code{Help}, @code{List},
 @code{Plan}, @code{Cost}, @code{Run}, @code{RoutingInspection},
 @code{MigrateRouting}, @code{Machine}, @code{LineageCheck}, and
 @code{MachineLineage}.  This type is exported for policy tests and front ends
@@ -3292,12 +3293,45 @@ endpoint, a @code{credentialFile}, and a @code{caFile}.  These files belong to
 the client.  They are not manager registry or store paths.  Certificate and
 hostname verification remain enabled.
 
-Service mode browses the manager's profiles, workflows, and help.  It creates
-requests, submits literal inputs, and displays the exact manager review before
-explicit approval.  The client retains the original pending command and permits
-an uncertain send to be repeated only after explicit confirmation.  Receipt
-status is separate from request association and runtime outcome.  Exiting the
-frontend closes its transport without cancelling manager-owned work.
+Service mode performs one workflow journey through a running manager.  It
+browses the manager's profiles, workflows, and help, creates one request,
+submits literal inputs, and displays the exact manager review before explicit
+approval.  After approval it follows the run in the live monitor, answers the
+questions that the manager routes to the person, invokes an offered recovery
+retry, recognizes the terminal state, retrieves the verified result, and saves
+its bytes.  Receipt status is separate from request association and runtime
+outcome.
+
+Every manager command is sent once.  The client retains the original pending
+command and its receipt location, and it never rebuilds or retargets them.
+When the effect of a send is uncertain, the frontend states that it made no
+automatic resend.  If the manager offers an exact resend, @kbd{x} opens a
+confirmation, @kbd{y} sends the retained command again unchanged, and @kbd{n}
+or @key{ESC} closes the confirmation without a send.  The frontend never repeats
+an uncertain send without that confirmation.
+
+All reads of the manager pass through one single-flight observation lane.  No
+read starts while another read is in flight.  The frontend reads the selected
+request, its review, the receipt of a retained command, and the run snapshot,
+run controls, and pending decision in one composite read, and it installs a
+complete read in one step.  It repeats that read on a one-second timer, and
+@kbd{g} requests it at once.  When the manager refuses a read with a declared
+failure, the frontend keeps the last complete observation, marks it stale with
+the refusal code, and continues to display it.  If no complete observation
+exists, the status line states that none is installed.  Observations are
+display and precondition data only, and they never confer ownership.
+
+Every key that asks for a mutation has exactly one visible outcome, which is a
+start, a refusal, or a deferral.  A refusal or a deferral appears as a numbered
+key outcome that states the reason, and it remains until the next key press or
+until the view changes.  A key never cancels a read of a page set, because an
+abandoned page set holds a manager slot until it expires.  The key is deferred
+instead, and a deferred key is never replayed.  A key that arrives during a
+read of single resources cancels that read, and its mutation starts.
+
+Exiting the frontend with @kbd{C-c}, or with @kbd{q} while no answer editor has
+the keys, closes its transport without cancelling manager-owned work.  The run
+continues in the manager.
 
 On the exact review, only @kbd{y} in the summary view approves.  @key{RET}
 never approves, @kbd{y} never approves in the detail view that @kbd{d} opens,
@@ -3328,11 +3362,12 @@ observed.  A send that the fault interrupted keeps its original pending command
 and any earlier receipt location, and its outcome stays uncertain.
 
 After association, the frontend shows the run in the live monitor from the
-manager's run snapshot.  The monitor shows the published runtime status, or
-states that the runtime is not yet observed, and it shows the approval receipt
-status and any stale observation on separate lines.  Elapsed time remains
-unknown, and the monitor offers no local cancel, steering, redirect, or result
-action.
+manager's run snapshot, which the observation lane supplies.  The monitor shows
+the published runtime status, or states that the runtime is not yet observed,
+and it shows the approval receipt status and any stale observation on separate
+lines.  It shows the occurrences and their published output as the snapshot
+reports them.  Elapsed time remains unknown, and the monitor offers no local
+cancel, steering, redirect, or result action.
 
 The run is terminal only when the snapshot runtime status is succeeded,
 failed, cancelled, or orphaned.  A null, starting, running, or cancelling
@@ -3340,8 +3375,9 @@ runtime is never terminal.  For a succeeded run whose verification is verified
 and whose result reference names the verified artifact, the frontend reads the
 source-result metadata from the run outputs.  That metadata must name the run,
 the source-result kind, and the size, digest, and code of the result reference.
-The frontend then downloads the artifact through the same manager client, which
-checks the size and the SHA-256 digest against that metadata.  The frontend
+The frontend then downloads the artifact through
+@code{Agentic.Manager.Client.downloadVerified}, which checks the size and the
+SHA-256 digest against that metadata.  The frontend
 keeps the verified bytes unchanged in memory, up to 64 MiB, and shows the
 terminal status, the verified size, the digest, and a bounded preview.  The
 manager records the verification of a result reference when the run outputs
@@ -3365,10 +3401,15 @@ The frontend also shows the decision head that the manager presents in the
 same observation.  A head is shown only when the run controls are owned and
 name the decision as the pending head at position zero.  A question head shows
 the manager prompt in an answer editor below the service lines.  Text keys
-edit the answer, @kbd{C-d} sends it, and @kbd{C-c} detaches.  The editor input
-is converted by the question code, so the input @samp{false} for a flag
-question is sent as the JSON value @code{false}.  An input that the code
-cannot convert is refused before any send.  The answer is sent once to the
+edit the answer, @kbd{C-d} sends it, and @kbd{C-c} detaches.  The editor
+supports the simple question codes @code{text}, @code{verdict}, @code{flag},
+and @code{receipt}, and it converts the input with the same code-directed
+encoding as the local person view.  A @code{flag} answer accepts @samp{yes},
+@samp{no}, @samp{true}, @samp{false}, @samp{y}, or @samp{n}, so the input
+@samp{false} is sent as the JSON value @code{false}.  A @code{text} answer is
+sent as a JSON string, a @code{verdict} answer is parsed as JSON, and a
+@code{receipt} answer must be empty and is sent as @code{null}.  An input that
+the code cannot convert is refused before any send.  The answer is sent once to the
 decision with the entity tag of the displayed decision observation as its
 precondition.  It completes only when the command receipt reports an observed
 @code{answer-accepted} effect for the answered occurrence of the run.  A
@@ -3387,8 +3428,24 @@ here, and @kbd{f} and @kbd{a} show a refusal.  Without a retry offer, the
 choices are read-only.  Every @kbd{C-d} or @kbd{r} that sends nothing shows a
 numbered key outcome that states the reason.  When an observation read in flight defers a mutation key,
 automatic refresh pauses while that outcome is shown, so the next press of the
-key finds no read in flight.  Service mode remains an unaccepted
-implementation.
+key finds no read in flight.
+
+A declared client failure keeps its declared meaning, and the internal-fault
+rules above apply to every step of the journey.
+
+Service mode does not support these features.  The frontend offers no
+cancellation, steering, redirect, failover, or abandon of a run.  It has no
+structured answer editor, so a question with the @code{structured} code or with
+a code that is not a name shows its prompt and accepts no answer.  Captured inputs and
+other non-literal inputs cannot be supplied.  A request cannot be withdrawn or
+discarded.  The frontend follows one run at a time, and it offers no run
+history, lineage, or export.  It re-reads on a timer and does not consume the
+manager event stream.  It does not reconnect after a manager restart or a
+credential revocation, and it cannot switch to another endpoint.  After a
+restart of the frontend, it cannot observe runs that an earlier session
+started.  It has no Overview bootstrap, and it has no accepted layout at 40
+columns by 12 rows or at 80 columns by 24 rows.  Service mode is not an
+accepted milestone, and it closes no workflow-manager package or gate.
 @end table
 
 In local mode, the application enters its Brick screen before runner discovery
@@ -4721,11 +4778,19 @@ bindings.  This is a routing context, not credential isolation from files,
 profiles, or the operating system.
 
 The bounded Haskell HTTP client fetches OpenAI and Anthropic catalogue responses,
-and it never invokes @command{curl}.  It verifies authenticated TLS, limits a URL
-to 8192 UTF-8 bytes and its query to 4096 bytes and 64 items, and rechecks those
-bounds after it adds pagination parameters.  The complete explicit header set,
-including resolved authentication and the generated request identifier, shares
-the count, value, and aggregate-byte bounds.  Response bytes, pages, entries,
+and it never invokes @command{curl} or any other process.  It supports no TLS at
+present, so it refreshes only plain-HTTP catalogues.  Configuration accepts plain
+HTTP only without authentication and only for literal loopback addresses.  The
+client refuses an HTTPS catalogue with the failure @code{tls-not-supported}
+before it builds a header or opens a connection, and it never retries that
+catalogue over plain HTTP.  An explicit refresh then fails with an error that
+names the persona, the engine, and the endpoint fingerprint.  A normal refresh
+uses a usable stale-if-error cache or returns no inventory, and it reports the
+failure as a warning.  The client limits a URL to 8192 UTF-8 bytes and its query
+to 4096 bytes and 64 items, and it rechecks those bounds after it adds pagination
+parameters.  The complete explicit header set, including the generated request
+identifier, shares the count, value, and aggregate-byte bounds.  Response bytes,
+pages, entries,
 model identifiers, and time are also bounded.  Redirects are
 disabled.  Atomic files with
 mode 0600 are stored below

@@ -25,7 +25,9 @@ Without `AGENT_CAT_STATE_DIR`, each runner uses
 `~/.local/state`), so frontends share state only by explicit configuration. The
 supported platforms are macOS and Linux. Helper queries have a 30-second and 4-MiB
 bound. The Linux Nix override corrects large-limit descriptor closure in GHC's bundled
-`process` library without changing inherited limits or disabling `close_fds`. Helpers
+`process` library without changing inherited limits or disabling `close_fds`. On macOS,
+the Runtime spawns through `posix_spawn` with `POSIX_SPAWN_CLOEXEC_DEFAULT`, so a spawn
+does not close descriptors up to the limit. Helpers
 and machine children share one owner that retains the leader through group signalling
 and final reap. Machine callbacks remain gated until Brick adopts that owner. Startup
 cancellation and protocol failure retain ownership through synchronous termination and
@@ -103,3 +105,60 @@ private reasoning updates are ignored. The renderer uses safe plain text, lightw
 Markdown heading/quotation/fence cues, status classes, and diff classes. It has no
 tree-sitter or native grammar dependency. The complete requirement-to-test matrix is
 in [`../doc/tui-release-evidence.md`](../doc/tui-release-evidence.md).
+
+## Service mode
+
+`agentic-run --tui --service CLIENT_PROFILE` connects the same frontend to a
+running workflow manager through the public `Agentic.Manager.Client` facade.
+It performs one workflow journey. It browses the manager catalogue, creates one
+request with literal inputs, and shows the exact manager review. Only `y` in the
+summary view approves that review. The frontend then follows the run in the
+live monitor, answers the questions that the manager routes to the person,
+invokes an offered recovery retry with `r`, recognizes the terminal state,
+retrieves the verified result, and saves it with `s`.
+
+`Agentic.Tui.ServiceLane` owns the read ticket, the one command lane, the
+internal-fault flag and the resend confirmation. Every read of the manager
+passes through that single-flight lane. One composite read covers the selected
+request, its review, the receipt of a retained command, and the run snapshot,
+run controls and pending decision, and a complete read is installed in one
+step. The frontend repeats the read on a one-second timer, and `g` requests it
+at once. A declared refusal keeps the last complete observation and marks it
+stale with the refusal code. Every mutation key has one visible outcome: a
+start, a refusal or a deferral. A refusal or a deferral is a numbered key
+outcome that remains until the next key or view change. A key never cancels a
+page-set read and is deferred instead, and a deferred key is never replayed.
+
+Every command is sent once. The lane retains the original pending command and
+receipt location. An uncertain send is never repeated automatically. When the
+manager offers an exact resend, `x` opens a confirmation and `y` sends the
+retained command unchanged. Any failure that the client does not declare is an
+internal fault. The frontend then shows fixed text without exception detail,
+stops automatic refresh and every further mutation, and keeps only read-only
+actions and detachment. `Ctrl-C`, or `q` while no answer editor has the keys,
+exits without cancelling manager-owned work.
+
+A question head accepts the simple codes `text`, `verdict`, `flag` and
+`receipt`. `Agentic.Tui.Person.personAnswerValue` converts the editor input by
+the question code, as in the local person view, so `false` for a `flag` question
+is sent as the JSON value `false`. The answer carries the entity tag of the
+displayed decision as its precondition. A recovery head sends only the retry
+that the run controls offer, with the entity tag of the displayed control
+observation. `f` and `a` refuse failover and abandon.
+
+A run is terminal only when the snapshot runtime status is succeeded, failed,
+cancelled or orphaned. For a succeeded run with a verified result reference,
+the frontend reads the run outputs and downloads the artifact once through
+`Agentic.Manager.Client.downloadVerified`, which checks the size and SHA-256
+digest. It retains up to 64 MiB of unchanged bytes. `Agentic.Tui.Save.saveExact`
+publishes those bytes at a new absolute path with mode 0600 and refuses an
+existing entry, a symbolic link, or an invalid path.
+
+Service mode does not support cancellation, steering, redirect, failover or
+abandon, the structured answer editor, captured and other non-literal inputs,
+withdrawal or discarding of a request, more than one concurrent run, run history,
+lineage, export, event-driven refresh, reconnection after a manager restart or a
+credential revocation, endpoint switching, observation of earlier runs after a
+frontend restart, Overview bootstrap, or acceptance at 40x12 and 80x24. The
+[manual](../doc/agent-cat.texi) entry for `--service` states the complete key
+behavior. Service mode is not an accepted milestone.

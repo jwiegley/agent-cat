@@ -58,7 +58,7 @@ index, and event identifiers are preserved in the `acat-xo2` comments exported t
 | 5 Schema and field semantics | step 1 | strict `FromJSON` instances, libyaml warning retention, URL/header/duration validators | block/flow duplicate, unknown field, bounds, literal-secret and reference tests; v2 example |
 | 6 Persona selection | steps 1 and 4 / `routing-resolution` | `selectRoutingPersona`, `rrPersonaOverride`, `loadCommandRouting` | command/environment/project/default precedence and no-`run.*` source scan |
 | 7 Child environment | steps 4 and 5 / `routing-secrets-environment` | `SecretValue`, `resolveEngineContexts`, opaque `ChildEnvironment`, `connectAcp` | spawned-child sentinel, pre-store missing-secret, argv and store/log scans; v1 ACP gate |
-| 8 Discovery and cache | steps 3 and 4 / `routing-discovery-cache` | `discoverRoutingInventories`, `fetchPage`, dialect decoders, engine/endpoint fingerprints, cache reader/writer | local HTTP and trusted TLS, auth, synthesized-request limits, pagination, cache mode/corruption/permission/separation tests |
+| 8 Discovery and cache | steps 3 and 4 / `routing-discovery-cache` | `discoverRoutingInventories`, `fetchPage`, dialect decoders, engine/endpoint fingerprints, cache reader/writer | local HTTP, HTTPS refusal without a connection or a credential, synthesized-request limits, pagination, cache mode/corruption/permission/separation tests |
 | 9 Resolution algorithm | steps 2, 4, 6 | `expandRoutingConfigV2`, `freezeRoutingConfigV2`, `finalizeTargetForProgram` | fixed-point, frozen inventory, chain axes, pre-store timing, ACP/deck preflight |
 | 9.1 Overrides | step 4 | `rrRealizeOverrides`, `--realize`, managed-axis raw-route refusal | alias eligibility, duplicate/unknown axis, unconfigured/v1 raw-route tests |
 | 10 Provenance and inspection | steps 2, 6, 7 / `routing-cli-persistence` | `ResolvedRealization`, `resolvedRealizationPolicy`, `targetPolicy`, stable lineage projection, `RoutingInspect` | sanitized JSON/human assertions, digest recomputation, fresh-to-aged-cache compatibility, engine/environment/persona-source mismatch |
@@ -88,9 +88,11 @@ index, and event identifiers are preserved in the `acat-xo2` comments exported t
   non-sensitive literals. Selected ACP children receive a redacted exact map
   after every declared source and destination is scrubbed. Agent Deck receives no
   synthetic environment behavior.
-- Discovery uses `http-client` and TLS, not `curl`. It has URL/query/header/body,
-  timeout/page/item/id limits, refuses redirects, normalizes OpenAI and Anthropic
-  responses, and ignores provider array order.
+- Discovery uses a plain `http-client` manager, not `curl`, and it supports no
+  TLS at present. It refuses an HTTPS catalogue as `tls-not-supported` before it
+  opens a connection, and it never downgrades that catalogue to plain HTTP. It has
+  URL/query/header/body, timeout/page/item/id limits, refuses redirects,
+  normalizes OpenAI and Anthropic responses, and ignores provider array order.
 - Cache paths use the selected persona and a SHA-256 fingerprint of the complete
   non-secret engine definition, including environment structure and cache policy.
   A separate endpoint fingerprint remains in model-selection provenance. Cache
@@ -127,13 +129,15 @@ ok   cache identity includes the complete non-secret engine definition
 ok   Anthropic pagination cannot exceed final query-item bound
 ok   Anthropic pagination cannot exceed final query-byte bound
 ok   Anthropic pagination cannot exceed final URL bound
-ok   resolved authentication headers are bounded before request
-ok   literal, auth, and generated headers share the final count bound
-ok   literal and resolved authentication headers share the final byte bound
+ok   literal and generated headers share the final count bound
+ok   literal and generated headers share the final byte bound
 ok   chunked response streaming stops at the body bound
-ok   standard TLS manager rejects an untrusted local certificate
-ok   trusted local TLS sends bearer auth and selects OpenAI inventory
-ok   trusted local TLS sends raw x-api-key auth across Anthropic pagination
+ok   explicit refresh of an https catalogue fails as tls-not-supported with no connection
+ok   normal refresh of an https catalogue without a cache returns no inventory and the tls-not-supported warning
+ok   normal refresh of an https catalogue keeps a usable stale cache with the tls-not-supported warning
+ok   an https catalogue is never downgraded to plain HTTP on the same port
+ok   a loopback plain-HTTP catalogue still refreshes in the bare environment
+ok   an engine without a catalogue constructs no TLS manager and reads no system certificate store
 routing discovery probe: all checks passed
 routing config: all checks passed
 ```
@@ -144,21 +148,24 @@ sharing with per-router provider provenance, managed-route refusal, model-alias 
 provenance, environment scrubbing, URL/query/header/time/body bounds, migration
 input, and unchanged version-1 loading.
 
-The discovery probe uses only local servers and an ephemeral test certificate. It
-covers:
+The discovery probe uses only local servers and an ephemeral test certificate for
+its TLS server. It covers:
 
 - OpenAI and cursor-paginated Anthropic normalization;
 - provider-order permutation and timestamp/id tie-breaking;
 - URL, query, header, timeout, body, page, item, and identifier limits;
 - both content-length and chunked oversized responses;
 - redirect, malformed JSON, status, timeout, duplicate-id, and pagination errors;
-- rejection by the standard TLS manager of an untrusted certificate;
-- successful TLS with a generated local CA and hostname verification;
-- bearer `Authorization` and raw `x-api-key` requests without recording headers;
 - fresh, fresh-cache, stale-if-error, offline, and forced-refresh behavior;
 - corrupt, oversized, broadly-permissioned, and symlink-directed caches;
 - cache separation by persona and by the complete engine fingerprint; and
 - absence of endpoint and credential text from cache records.
+
+It also shows that discovery refuses every HTTPS endpoint as `tls-not-supported`
+through the explicit-refresh, normal and stale-if-error paths. The TLS server
+records no connection, no credential header is sent, no request is downgraded to
+plain HTTP, and PATH names only an empty directory. A loopback plain-HTTP
+catalogue still refreshes under the same PATH.
 
 The routing shell gate additionally proves missing-secret failure before an
 agent-cat run store or adapter, version-2 ACP and Agent Deck preflight, catalogue

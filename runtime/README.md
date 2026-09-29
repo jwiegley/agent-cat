@@ -302,6 +302,39 @@ credential-shaped fields and exact selected credential values before the machine
 event sink; never project private reasoning or manufacture updates
 for an engine that supplied none.
 
+## Process-group spawn
+
+`createProcessGroup` starts each command as the leader of a new session and
+process group. The child receives only the standard descriptors that its stream
+modes name. On macOS, the process library can close inherited descriptors only
+through a fork whose child closes every descriptor up to the soft
+`RLIMIT_NOFILE`, and at a limit of 1048576 that costs about 100 ms for each
+spawn. The Runtime therefore spawns through `agentic_spawn_session` in
+`runtime/cbits/process_spawn.c`, which calls `posix_spawn` with
+`POSIX_SPAWN_CLOEXEC_DEFAULT` and `POSIX_SPAWN_SETSID`. The cost of a spawn does
+not depend on the descriptor limit. The argv, working directory, environment,
+executable resolution, standard stream modes and pipe handles are those of the
+process-library fork path, and each parent pipe end is nonblocking, as that
+path leaves it. An exec failure raises an `IOException` with the
+error type, errno, file name and description of that path, and its location text
+names the failed step of the helper, such as `createProcess: posix_spawn`. A
+closed standard descriptor that a stream inherits stays closed in the child,
+even when a pipe end has taken its number in the parent. In one such case, with
+descriptors 0 and 1 closed, no standard input, an inherited standard output and
+a piped standard error, process-1.6.26.1 raises `close(parent_end)` with
+`EBADF`, and the helper spawns the child with descriptor 1 closed. The helper
+sets the working directory with `posix_spawn_file_actions_addchdir_np`. The
+macOS 26 SDK deprecates that call in favour of
+`posix_spawn_file_actions_addchdir`, and the `-optc-Werror` of
+`runtime/ci/capture.sh` turns the deprecation warning into an error when the
+build uses those headers. The helper never calls
+`posix_spawnp`, because on macOS that call, with a working directory and a
+relative PATH entry, reports an error and still leaves a child that no caller
+owns. Other platforms keep the process-library spawn. The runtime contract test
+checks the descriptor set, nonblocking parent pipe ends, closed standard
+descriptors, session leadership, resolution rules, exec errors and a bound on
+the spawn cost at a soft `RLIMIT_NOFILE` of 1048576.
+
 ## Process-group termination grace
 
 `terminateProcessGroup` registers one narrowly owned shutdown task while masked.
