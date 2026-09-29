@@ -159,10 +159,10 @@ elif mode in {"control-preparation", "control-preparation-mutant"}:
     replace("manager/src/Agentic/Manager/State.hs", "          policy <- either (const(throwIO Command.StorageUnavailable)) pure selected\n",
             '          policy <- either (const(throwIO Command.StorageUnavailable)) pure selected\n          Audit.afterCurrentReview ("control-preparation:"<>associationRun association)\n')
     replace("manager/src/Agentic/Manager/Admission.hs", "import Agentic.Manager.Authorization\n", "import qualified Agentic.Manager.Test.AcceptanceAudit as Audit\nimport Agentic.Manager.Authorization\n")
-    replace("manager/src/Agentic/Manager/Admission.hs", 'proof request version prepare = operation controller $\n  withMVar',
-            'proof request version prepare = operation controller $ do\n  Audit.recordControlWait ("control-preparation:"<>run)\n  withMVar')
+    replace("manager/src/Agentic/Manager/Admission.hs", 'acceptControlCommand original@(AcceptedStart controller entry _ _) proof request version prepare = runOperation controller $\n  withMVar',
+            'acceptControlCommand original@(AcceptedStart controller entry _ run) proof request version prepare = runOperation controller $ do\n  Audit.recordControlWait ("control-preparation:"<>run)\n  withMVar')
     if mode == "control-preparation-mutant":
-        replace("manager/src/Agentic/Manager/Admission.hs", 'withMVar (entryControlGate entry) $ \\_ -> do', 'entryControlGate entry `seq` do')
+        replace("manager/src/Agentic/Manager/Admission.hs", 'withMVar (entryControlGate entry) $ \\_ -> acceptControlNow', 'entryControlGate entry `seq` acceptControlNow')
     target, arguments = "manager-approval-check", ["controls-preparation"]
     marker = "FAIL same-run preparation holds original queued caller"
 elif mode == "control-reload-race":
@@ -192,8 +192,8 @@ elif mode in {"control-unsupported", "control-unsupported-mutant"}:
                     "source": "runtime/test/ControlDeliveryAudit.hs", "diff": helper.read_text()})
     replace("agentic.cabal", "    Agentic.Exec\n", "    ControlDeliveryAudit\n    Agentic.Exec\n")
     replace("runtime/src/Agentic/Runtime/Machine.hs", "import Agentic.Runtime.Control\n", "import qualified ControlDeliveryAudit as Audit\nimport Agentic.Runtime.Control\n")
-    replace("runtime/src/Agentic/Runtime/Machine.hs", "                Just delivery -> do\n",
-            "                Just delivery -> do\n                  case delivery of ActSteer {} -> Audit.beforeControlDelivery (controlIdText (controlId control)); _ -> pure ()\n")
+    replace("runtime/src/Agentic/Runtime/Machine.hs", "        Just delivery -> do\n",
+            "        Just delivery -> do\n          case delivery of ActSteer {} -> Audit.beforeControlDelivery (controlIdText (controlId control)); _ -> pure ()\n")
     replace("runtime/src/Agentic/Exec.hs", "import Agentic.Runtime.Control\n", "import qualified ControlDeliveryAudit as Audit\nimport Agentic.Runtime.Control\n")
     replace("runtime/src/Agentic/Exec.hs", "        (unregisterControlAttempt controls attempt)",
             "        (unregisterControlAttempt controls attempt >> Audit.afterAttemptRetired (T.pack (show attempt)))")

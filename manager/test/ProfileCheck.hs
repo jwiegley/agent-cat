@@ -7,19 +7,19 @@ import Agentic.Runtime
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (AsyncCancelled (..), async, asyncThreadId, cancel, wait, waitCatch, withAsync)
 import Control.Exception (IOException, fromException, try)
-import Control.Monad (forM_, unless, void)
+import Control.Monad (forM_, unless, void, when)
 import Data.Aeson (Value (Object, String), eitherDecodeStrict', encode, object, toJSON, (.=))
 import qualified Data.Aeson.KeyMap as KM
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as BL
 import Data.Char (toUpper)
-import Data.Either (isLeft)
-import Data.List (sort)
+import Data.Either (isLeft, isRight)
+import Data.List (isPrefixOf, sort, sortOn)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Numeric (showHex)
 import GHC.Conc (BlockReason (BlockedOnMVar), ThreadStatus (ThreadBlocked), threadStatus)
-import System.Directory (createDirectory, doesFileExist, getCurrentDirectory)
+import System.Directory (createDirectory, doesFileExist, getCurrentDirectory, listDirectory, removePathForcibly)
 import System.Environment (getArgs, getEnvironment, getExecutablePath)
 import System.Exit (exitFailure)
 import System.FilePath ((</>))
@@ -62,6 +62,7 @@ fixture mode observations replies command = do
   environment <- getEnvironment
   pid <- getProcessID
   writeFile (observations <> ".pid") (show pid)
+  appendFile (observations <> ".pids") (show pid <> "\n")
   BL.appendFile observations (encode (object ["args" .= args, "cwd" .= working, "env" .= sort environment]) <> "\n")
   case mode of
     "timeout" -> threadDelay 5000000
@@ -74,6 +75,46 @@ fixture mode observations replies command = do
     "normal" -> reply command
     "help-malformed" -> case command of ["help",_] -> BS.hPut stdout (BS.singleton 255); _ -> reply command
     "help-overflow" -> case command of ["help",_] -> BS.hPut stdout (BS.replicate 70000 120); _ -> reply command
+    -- Each of the first four help queries waits until four have started and
+    -- then holds, so a fifth concurrent query would observe five live queries.
+    -- Later help queries reply at once.
+    "help-barrier" -> case command of
+      ["help",name] -> helpMarked name $ \started -> unless (started > 4) $ do
+        await "four help queries started" (((>= 4) . length . filter ("start." `isPrefixOf`)) <$> listDirectory markers)
+        threadDelay 300000
+      _ -> reply command
+    "help-slow" -> case command of
+      ["help",name] -> helpMarked name (const (threadDelay 3000000))
+      _ -> reply command
+    -- The first help query holds until the sixth has started, and every other
+    -- help query replies at once. Only a pool whose free slots take later rows
+    -- while the first query is live lets the sixth start.
+    "help-pool" -> case command of
+      ["help",name] -> helpMarked name $ \_ -> when (name == "concurrent_1") $
+        await "sixth help query started while the first is live" (doesFileExist (markers </> "start.concurrent_6"))
+      _ -> reply command
+    -- The first help query holds while the second replies with text that
+    -- discovery rejects and the third and fourth hold briefly, so the rejected
+    -- reply arrives while the first row is still live. Later help queries
+    -- reply at once.
+    "help-halt-invalid" -> helpHalt (BS.singleton 255)
+    "help-halt-long" -> helpHalt (BS.replicate 262145 120)
+    -- The first help query holds while every later one replies with 200000
+    -- characters of valid help, so the replies that wait behind the first row
+    -- cross a ceiling of 1048576 bytes after six rows.
+    "help-halt-bytes" -> case command of
+      ["help",name]
+        | name == "concurrent_1" -> helpMarked name (const (threadDelay 1500000))
+        | otherwise -> helpMarked name (const (BS.hPut stdout (BS.replicate 200000 120)))
+      _ -> reply command
+    -- The first help query replies at once with text that discovery rejects,
+    -- and the next three hold far beyond the group deadline.
+    "help-failure-hang" -> case command of
+      ["help",name]
+        | name == "concurrent_1" -> helpMarked name (const (BS.hPut stdout (BS.singleton 255)))
+        | name `elem` ["concurrent_2", "concurrent_3", "concurrent_4"] -> helpMarked name (const (threadDelay 20000000))
+        | otherwise -> helpMarked name (const (pure ()))
+      _ -> reply command
     "gated" -> do
       let phase = case command of
             ["frontend", "--capabilities"] -> "capabilities"
@@ -86,6 +127,25 @@ fixture mode observations replies command = do
       reply command
     _ -> error "unknown private fixture mode"
   where
+    markers = observations <> ".help.d"
+    helpHalt rejected = case command of
+      ["help",name]
+        | name == "concurrent_1" -> helpMarked name (const (threadDelay 1500000))
+        | name == "concurrent_2" -> helpMarked name (const (BS.hPut stdout rejected))
+        | name `elem` ["concurrent_3", "concurrent_4"] -> helpMarked name (const (threadDelay 500000))
+        | otherwise -> helpMarked name (const (pure ()))
+      _ -> reply command
+    -- Record this help query's start, the number of help queries live at that
+    -- moment, and its end, which precedes its reply and its exit.
+    helpMarked :: String -> (Int -> IO ()) -> IO ()
+    helpMarked name body = do
+      BS.writeFile (markers </> ("start." <> name)) BS.empty
+      entries <- listDirectory markers
+      let count marker = length (filter (marker `isPrefixOf`) entries)
+      appendFile (observations <> ".help.live") (show (count "start." - count "end.") <> "\n")
+      body (count "start.")
+      BS.writeFile (markers </> ("end." <> name)) BS.empty
+      reply command
     reply ["frontend", "--capabilities"] = BS.readFile (replies </> "capabilities.json") >>= BS.hPut stdout
     reply ["list", "--json", "--descriptor-version", "3"] = BS.readFile (replies </> "catalogue.json") >>= BS.hPut stdout
     reply ["help",_] = BS.hPut stdout "Declared workflow help.\n"
@@ -114,6 +174,23 @@ checks root source = do
       writeCaps caps = BL.writeFile (replies </> "capabilities.json") (encode caps)
       writeRows rows = BL.writeFile (replies </> "catalogue.json") (encode rows)
       readObservations = BS.readFile observations
+      expected mode command = object ["args" .= (prefix mode <> command), "cwd" .= workspace, "env" .= sort environment]
+      concurrentForm observed form rows =
+        take 2 observed == [form ["frontend", "--capabilities"], form ["list", "--json", "--descriptor-version", "3"]]
+          && sortOn encode (drop 2 observed) == sortOn encode [form ["help", T.unpack (workflowName row)] | row <- rows]
+      decodeObservations = mapM (right . (eitherDecodeStrict' :: BS.ByteString -> Either String Value)) . filter (not . BS.null) . BS.split 10
+      helpRows template count = [template {workflowName = "concurrent_" <> T.pack (show index)} | index <- [1 .. count :: Int]]
+      helpMarkers = observations <> ".help.d"
+      resetHelp = do
+        removePathForcibly helpMarkers
+        createDirectory helpMarkers
+        BS.writeFile (observations <> ".help.live") BS.empty
+        BS.writeFile (observations <> ".pids") BS.empty
+      helpMarked marker = length . filter (marker `isPrefixOf`) <$> listDirectory helpMarkers
+      assertAllReaped label = do
+        pids <- map read . lines <$> readFile (observations <> ".pids")
+        check (label <> ": launches recorded") (not (null pids))
+        forM_ pids $ \pid -> try @IOException (signalProcess nullSignal pid) >>= check label . isLeft
       rowOf registry p = reloadProfiles registry [p] >>= right >>= \rows -> case rows of
         [row] -> pure row
         _ -> error "expected one profile"
@@ -160,11 +237,12 @@ checks root source = do
   let context = selectionContext selected
   check "invocation separate from server" (selectionInvocation selected == FrontendInvocation 1 "configured-wrapper" (T.pack executable) (map T.pack (prefix "normal")))
   check "private target preserved without parsing" (operatorTargetArguments context == ["--scripted"])
-  observed <- readObservations >>= mapM (right . (eitherDecodeStrict' :: BS.ByteString -> Either String Value)) . filter (not . BS.null) . BS.split 10
-  let expected command = object ["args" .= (prefix "normal" <> command), "cwd" .= workspace, "env" .= sort environment]
+  observed <- readObservations >>= decodeObservations
+  -- The capability and catalogue queries run in order. The operator decision of
+  -- 2026-09-27 runs the help queries four at a time, so their launch order is
+  -- not defined, and each row must have exactly one help query.
   check "exact ordered prefix/cwd/explicit env on all discovery subprocesses"
-    (observed == [expected ["frontend", "--capabilities"], expected ["list", "--json", "--descriptor-version", "3"],
-                  expected ["help", T.unpack (workflowName descriptor)]])
+    (concurrentForm observed (expected "normal") [descriptor])
   views <- publicProfiles registry
   golden <- BS.readFile (source </> "test/fixtures/manager/v1/valid/profiles.json") >>= right . (eitherDecodeStrict' :: BS.ByteString -> Either String Value)
   let frozenProfile = case golden of
@@ -330,6 +408,86 @@ checks root source = do
   secondRegistry <- newRegistry limits >>= right
   second <- rowOf secondRegistry (definition "normal")
   check "registries use distinct revision namespaces" (publicRevision second /= publicRevision row)
+  writeRows (helpRows descriptor 9)
+  resetHelp
+  beforeHelp <- readObservations
+  -- The group deadline is the configured maximum here, so the barrier alone
+  -- decides whether the first four help queries overlap.
+  barrier <- newRegistry (QueryLimits 65536 30000000) >>= right
+  concurrent <- rowOf barrier (definition "help-barrier")
+  -- Discovery that starts fewer than four help queries at once leaves the
+  -- first query waiting at the barrier until its fixture fails the probe.
+  barrierResult <- probe barrier concurrent
+  check "the first four help queries run at the same time" (isRight barrierResult)
+  helped <- right barrierResult
+  check "every row of a catalogue longer than the pool has public help" (length (discoveryPublicWorkflows helped) == 9)
+  live <- map read . lines <$> readFile (observations <> ".help.live")
+  check "help queries run four at a time and never more" (length live == 9 && maximum live == (4 :: Int))
+  helpObserved <- readObservations >>= decodeObservations . BS.drop (BS.length beforeHelp)
+  check "concurrent form: ordered capability and catalogue queries, then one help query per row"
+    (concurrentForm helpObserved (expected "help-barrier") (helpRows descriptor 9))
+  assertAllReaped "every concurrent help query reaped by Runtime"
+  resetHelp
+  pooled <- newRegistry (QueryLimits 65536 30000000) >>= right
+  held <- rowOf pooled (definition "help-pool")
+  pool <- probe pooled held
+  check "a live help query does not hold back later rows: free slots take the next rows"
+    (either (const False) ((== 9) . length . discoveryPublicWorkflows) pool)
+  poolLive <- map read . lines <$> readFile (observations <> ".help.live")
+  check "the pool runs help queries four at a time and never more" (length poolLive == 9 && maximum poolLive <= (4 :: Int))
+  assertAllReaped "every pooled help query reaped by Runtime"
+  writeRows (helpRows descriptor 12)
+  resetHelp
+  -- Each help query takes three seconds against a five-second budget, so the
+  -- first four complete and the next four are in flight at the deadline.
+  deadlined <- newRegistry (QueryLimits 65536 5000000) >>= right
+  lagging <- rowOf deadlined (definition "help-slow")
+  probe deadlined lagging >>= expect "help group deadline reported as timeout" QueryTimeout
+  started <- helpMarked "start."
+  ended <- helpMarked "end."
+  check "help group deadline, not one query budget, ended discovery" (started > 4)
+  check "help queries were in flight at the group deadline" (ended < started)
+  assertAllReaped "every help query in flight at the group deadline reaped by Runtime"
+  assertPublic deadlined "unavailable" "supervision-unavailable"
+  -- A reply that fails its own checks stops later rows from starting at once,
+  -- although an earlier row is still live, and the earlier row still decides
+  -- which failure is reported.
+  forM_ [("help-halt-invalid", InvalidReply), ("help-halt-long", OutputOverflow)] $ \(mode, failure) -> do
+    resetHelp
+    halting <- newRegistry (QueryLimits 4194304 30000000) >>= right
+    halted <- rowOf halting (definition mode)
+    probe halting halted >>= expect ("help reply rejected behind a live row: " <> mode) failure
+    haltStarted <- helpMarked "start."
+    check ("no help query starts after a reply fails its own checks: " <> mode) (haltStarted == 4)
+    assertAllReaped ("every help query reaped after a rejected reply: " <> mode)
+  -- Replies that wait behind a live row count against the byte ceiling, so the
+  -- pool stops starting rows once they cross it.
+  writeRows (helpRows descriptor 30)
+  resetHelp
+  buffering <- newRegistry (QueryLimits 1048576 30000000) >>= right
+  buffered <- rowOf buffering (definition "help-halt-bytes")
+  probe buffering buffered >>= expect "waiting help replies cross the byte ceiling" OutputOverflow
+  bufferStarted <- helpMarked "start."
+  check "no help query starts once waiting replies cross the byte ceiling" (bufferStarted <= 10)
+  assertAllReaped "every help query reaped after the byte ceiling"
+  -- A failure that decides the result ends the group at once. Queries still in
+  -- flight are cancelled and cleaned up, and the failure is not replaced by
+  -- 'QueryTimeout' at the group deadline.
+  writeRows (helpRows descriptor 12)
+  resetHelp
+  failing <- newRegistry (QueryLimits 65536 5000000) >>= right
+  hanging <- rowOf failing (definition "help-failure-hang")
+  probe failing hanging >>= expect "a decided help failure is reported, not the group deadline" InvalidReply
+  hangStarted <- helpMarked "start."
+  hangEnded <- helpMarked "end."
+  -- A cancelled query can end before its fixture records its start, so at
+  -- most the four first rows are recorded.
+  check "no help query starts after the first row fails" (hangStarted <= 4)
+  check "help queries in flight after a decided failure were cancelled" (hangEnded == 1)
+  assertAllReaped "every help query cancelled after a decided failure reaped by Runtime"
+  writeRows [descriptor]
+  putStrLn "PASS help: four concurrent queries at most in one pool, concurrent argv form, group deadline cleanup and report"
+  putStrLn "PASS help: a rejected reply or waiting replies over the byte ceiling stop later rows, and a decided failure cancels queries in flight"
   getEnvironment >>= check "parent environment unchanged" . (== ambient)
   getCurrentDirectory >>= check "parent cwd unchanged" . (== working)
   putStrLn "PASS process: exact argv/cwd/env, concurrent drains, stdout/stderr overflow, timeout/wait timeout, exit/exec errors, cancellation, sole-reaper cleanup"

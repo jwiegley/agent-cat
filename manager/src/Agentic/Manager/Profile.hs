@@ -18,16 +18,18 @@ import Agentic.Runtime
     decodeFrontendCapabilities, decodeWorkflowDescriptors, maxFrontendQueryBytes, frontendOwnedEnvironment,
     ProcessGroup, createProcessGroup,
     terminateProcessGroup, closeGroupPipes, groupOutput, groupErrors, waitProcessGroup )
-import Control.Concurrent.Async (concurrently)
-import Control.Concurrent.MVar (MVar, modifyMVar, newMVar, withMVar)
-import Control.Exception (Exception, IOException, SomeException, finally, mask, throwIO, try)
-import Control.Monad (unless)
+import Control.Concurrent.Async (concurrently, race_, replicateConcurrently_)
+import Control.Concurrent.MVar (MVar, modifyMVar, newEmptyMVar, newMVar, readMVar, tryPutMVar, withMVar)
+import Control.Exception (Exception, IOException, SomeException, evaluate, finally, mask, throwIO, try)
+import Control.Monad (unless, void)
 import Crypto.Hash (Digest, SHA256, hash)
 import Crypto.Random (getRandomBytes)
 import Data.Aeson (Value, Result (Success, Error), ToJSON (toJSON), encode, fromJSON, object, (.=))
 import Data.ByteArray.Encoding (Base (Base16), convertToBase)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as BL
+import Data.Either (isLeft)
+import qualified Data.IntMap.Strict as IntMap
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Data.Text (Text)
@@ -323,25 +325,110 @@ discover limits p profileRevision = do
             pure (Discovery (capabilityServer caps) rows public revision
               [(identifier row, row) | row <- rows] (Selection p) profileRevision)
 
+-- | The number of help queries that run at the same time. The operator decision
+-- of 2026-09-27 fixed it at four, so that a catalogue of 257 rows completes
+-- inside the single group deadline.
+helpConcurrency :: Int
+helpConcurrency = 4
+
+-- | The shared state of the help pool. Rows start in catalogue order, and
+-- replies are accepted in the same order. A reply that arrives before every
+-- earlier row is accepted waits in 'poolReady', and the encoded size of its
+-- entry counts in 'poolWaiting'.
+data HelpPool = HelpPool
+  { poolNext :: !Int,
+    poolReady :: !(IntMap.IntMap (Either Diagnostic HelpEntry)),
+    poolWaiting :: !Int,
+    poolAccepted :: !Int,
+    poolTotal :: !Int,
+    poolValues :: ![(Text, Value)],
+    poolFailure :: !(Maybe Diagnostic),
+    poolHalted :: !Bool
+  }
+
+-- | One public catalogue entry: its workflow identity, its value, and the
+-- encoded size that it adds to the catalogue, separator included.
+data HelpEntry = HelpEntry !Text !Value !Int
+
 -- The complete public catalogue shares the discovery byte ceiling. The help
--- group has one deadline and each query retains its original process cleanup.
+-- group has one deadline. A pool of 'helpConcurrency' workers runs its queries,
+-- and each worker starts the next row as soon as its previous query has ended,
+-- so a slow query holds one slot and not the whole group. Each query retains its
+-- original process cleanup.
+--
+-- Each reply is checked for UTF-8 and for the 262144-character bound when it
+-- arrives, and a rejected reply stops the pool from starting any later row. The
+-- entries that wait behind an earlier row count against the byte ceiling
+-- together with the accepted entries, and the pool starts no row once that sum
+-- crosses the ceiling. Waiting entries therefore stay within the ceiling plus
+-- the replies of the queries in flight. Entries are accepted in catalogue
+-- order, so the first failure in that order is the one reported. When
+-- acceptance reaches a failure, the result is decided: every worker is
+-- cancelled, each query in flight completes its own cleanup, and the failure is
+-- returned. At the deadline, every worker is cancelled in the same way and the
+-- group reports 'QueryTimeout'.
 catalogueHelp :: QueryLimits -> OperatorProfile -> Text -> Text -> [WorkflowDescriptor]
   -> IO (Either Diagnostic [(Text, Value)])
 catalogueHelp limits profile profileRevision revision rows = do
-  result <- timeout (queryMicros limits) (collect 2 [] rows)
+  result <- timeout (queryMicros limits) $ do
+    pool <- newMVar (HelpPool 0 IntMap.empty 0 0 2 [] Nothing False)
+    decided <- newEmptyMVar
+    race_ (replicateConcurrently_ helpConcurrency (worker pool decided)) (readMVar decided)
+    finish <$> readMVar pool
   pure (maybe (Left QueryTimeout) id result)
   where
-    collect _ values [] = pure (Right (reverse values))
-    collect total values (row:rest) = do
-      reply <- query (limits {queryBytes = min (queryBytes limits) 1048576}) profile ["help", T.unpack (workflowName row)]
-      case reply >>= either (const (Left InvalidReply)) Right . TE.decodeUtf8' of
-        Left failure -> pure (Left failure)
-        Right help | T.length help > 262144 -> pure (Left OutputOverflow)
-        Right help -> do
-          let value = publicWorkflow (operatorId profile) profileRevision revision row help
-              next = total + fromIntegral (BL.length (encode value)) + 1
-          if next > queryBytes limits then pure (Left OutputOverflow)
-            else collect next ((workflowIdentity (operatorId profile) (workflowName row),value):values) rest
+    indexed = IntMap.fromList (zip [0 ..] rows)
+    count = IntMap.size indexed
+    worker pool decided = do
+      claimed <- modifyMVar pool $ \state ->
+        if poolHalted state || poolNext state >= count then pure (state, Nothing)
+          else pure (state {poolNext = poolNext state + 1}, Just (poolNext state))
+      case claimed of
+        Nothing -> pure ()
+        Just index -> do
+          let row = indexed IntMap.! index
+          reply <- help row >>= evaluate . entry row
+          state <- modifyMVar pool $ \current -> let next = arrive index reply current in next `seq` pure (next, next)
+          case poolFailure state of
+            Just _ -> void (tryPutMVar decided ())
+            Nothing -> worker pool decided
+    help row = query (limits {queryBytes = min (queryBytes limits) 1048576}) profile ["help", T.unpack (workflowName row)]
+    -- The checks that need no earlier row. Forcing the size forces the entry.
+    entry row reply = case reply >>= either (const (Left InvalidReply)) Right . TE.decodeUtf8' of
+      Left failure -> Left failure
+      Right text | T.length text > 262144 -> Left OutputOverflow
+      Right text ->
+        let value = publicWorkflow (operatorId profile) profileRevision revision row text
+            size = fromIntegral (BL.length (encode value)) + 1
+        in size `seq` Right (HelpEntry (workflowIdentity (operatorId profile) (workflowName row)) value size)
+    entrySize = either (const 0) (\(HelpEntry _ _ size) -> size)
+    arrive index reply state =
+      let settled = advance state
+            { poolReady = IntMap.insert index reply (poolReady state),
+              poolWaiting = poolWaiting state + entrySize reply,
+              poolHalted = poolHalted state || isLeft reply }
+      in settled {poolHalted = poolHalted settled || poolTotal settled + poolWaiting settled > queryBytes limits}
+    -- Accept every waiting entry that continues the accepted prefix.
+    advance state
+      | Just _ <- poolFailure state = state
+      | Just reply <- IntMap.lookup (poolAccepted state) (poolReady state) =
+          let rest = state
+                { poolReady = IntMap.delete (poolAccepted state) (poolReady state),
+                  poolWaiting = poolWaiting state - entrySize reply }
+          in case reply of
+            Left failure -> rest {poolFailure = Just failure, poolHalted = True}
+            Right (HelpEntry identity value size)
+              | poolTotal state + size > queryBytes limits -> rest {poolFailure = Just OutputOverflow, poolHalted = True}
+              | otherwise -> advance rest
+                  { poolAccepted = poolAccepted state + 1, poolTotal = poolTotal state + size,
+                    poolValues = (identity, value) : poolValues state }
+      | otherwise = state
+    -- Every claimed row has settled when the workers return without a decided
+    -- failure. A halted pool then has a failure: rows are claimed in order, so
+    -- every row before a rejected reply was claimed and has settled, and waiting
+    -- entries over the ceiling mean that acceptance crosses it at or before the
+    -- last of them.
+    finish state = maybe (Right (reverse (poolValues state))) Left (poolFailure state)
 
 -- | The public catalogue projection, without native invocation or control-FD fields.
 publicWorkflow :: Text -> Text -> Text -> WorkflowDescriptor -> Text -> Value

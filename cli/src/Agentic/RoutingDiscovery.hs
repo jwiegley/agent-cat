@@ -14,7 +14,6 @@ module Agentic.RoutingDiscovery
     ModelSelectionSource (..),
     ResolvedModelSelection (..),
     discoverRoutingInventories,
-    discoverRoutingInventoriesWithManager,
     engineCatalogueFingerprint,
     engineDefinitionFingerprint,
     sha256Fingerprint,
@@ -79,6 +78,7 @@ import Network.HTTP.Client
     Request (..),
     getUri,
     brRead,
+    defaultManagerSettings,
     newManager,
     parseRequest,
     responseBody,
@@ -87,7 +87,6 @@ import Network.HTTP.Client
     setQueryString,
     withResponse,
   )
-import Network.HTTP.Client.TLS (tlsManagerSettings)
 import Network.HTTP.Types.Header (Header)
 import Network.HTTP.Types.Status (statusCode)
 import Network.HTTP.Types.URI (Query, parseQuery, renderQuery)
@@ -155,19 +154,15 @@ data ResolvedModelSelection = ResolvedModelSelection
   }
   deriving (Eq, Show)
 
--- | Fetch/cache each required engine exactly once. No manager is created in
--- offline mode, so that mode has no path to the network implementation.
+-- | Fetch/cache each required engine exactly once. Discovery supports only
+-- plain HTTP, so it constructs a plain @http-client@ manager with no TLS
+-- support. No manager is created in offline mode, so that mode has no path to
+-- the network implementation.
 discoverRoutingInventories :: DiscoveryMode -> FilePath -> UTCTime -> SelectedRoutingV2 -> Map Text ResolvedEngineContext -> [Text] -> IO (Either Text (Map Text InventoryResult))
 discoverRoutingInventories mode cacheHome now selected contexts required = do
   manager <- case mode of
     DiscoveryOffline -> pure Nothing
-    _ -> Just <$> newManager tlsManagerSettings
-  discoverRoutingInventoriesWithManager manager mode cacheHome now selected contexts required
-
--- | Testable acquisition boundary. Production calls this only with the standard
--- TLS manager above; deterministic TLS fixtures supply a manager with a local CA.
-discoverRoutingInventoriesWithManager :: Maybe Manager -> DiscoveryMode -> FilePath -> UTCTime -> SelectedRoutingV2 -> Map Text ResolvedEngineContext -> [Text] -> IO (Either Text (Map Text InventoryResult))
-discoverRoutingInventoriesWithManager manager mode cacheHome now selected contexts required =
+    _ -> Just <$> newManager defaultManagerSettings
   go manager Map.empty (nub required)
   where
     config = selectedRoutingV2 selected
@@ -562,19 +557,26 @@ fetchPage manager fingerprint catalogue context cursor page = do
                   responseTimeout = responseTimeoutMicro (catalogueTimeoutMs catalogue * 1000),
                   checkResponse = \_ _ -> pure ()
                 }
-      case validateOutboundRequest request pagedQuery of
-        Left problem -> pure (Left problem)
-        Right ()
-          | isJust (catalogueAuth catalogue) && null authHeaders -> pure (Left "resolved-credential-unavailable")
-          | otherwise ->
-              withResponse request manager $ \response -> do
-                let code = statusCode (responseStatus response)
-                if code >= 300 && code < 400
-                  then pure (Left "redirect-refused")
-                  else
-                    if code /= 200
-                      then pure (Left ("http-status-" <> T.pack (show code)))
-                      else readBounded (catalogueMaxBytes catalogue) (responseBody response)
+      -- Discovery supports no TLS. An https endpoint fails here, before any
+      -- header is built or any connection is opened, and it is never
+      -- retried over plain HTTP. Configuration accepts authentication only
+      -- with https, so no request that reaches the network carries an
+      -- authentication header at present.
+      if secure base
+        then pure (Left "tls-not-supported")
+        else case validateOutboundRequest request pagedQuery of
+          Left problem -> pure (Left problem)
+          Right ()
+            | isJust (catalogueAuth catalogue) && null authHeaders -> pure (Left "resolved-credential-unavailable")
+            | otherwise ->
+                withResponse request manager $ \response -> do
+                  let code = statusCode (responseStatus response)
+                  if code >= 300 && code < 400
+                    then pure (Left "redirect-refused")
+                    else
+                      if code /= 200
+                        then pure (Left ("http-status-" <> T.pack (show code)))
+                        else readBounded (catalogueMaxBytes catalogue) (responseBody response)
 
 validateOutboundRequest :: Request -> Query -> Either Text ()
 validateOutboundRequest request query = do

@@ -3114,7 +3114,7 @@ Found by the connection-research attack pass (acat-lean-haskell-connection-lhi):
 :LABELS:   ["workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-24 Thu 09:19]
-:MODIFIED: [2026-09-26 Sat 22:45]
+:MODIFIED: [2026-09-29 Tue 06:14]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -3151,6 +3151,13 @@ Acceptance: the scheduled S1 diagnosis subtask examines this root together with 
     "author": "johnw",
     "text": "Subtasks A5S1C and A5S1D (committed together on branch workflow-manager-checkpoint-20260923) make the manager storage-unavailable classification honest. A new Agentic.Manager.Fault module and its private record distinguish command refusals, Store failures and unexpected exceptions on every converted site. Genuine Store busy and I/O failures keep the public 503 storage-unavailable response. Service.hs:125 (uncaught admission-poll failure) and Service.hs:162 (Service.drive) now each have a hook-free deterministic check, and controls K42 and K45 fail named checks at N1 and N8. Approval.hs:96 remains the only accepted gap (acat-approval-publish-loan-gap-isjw).\n\nEvidence and ceilings: Werror package build of all manager targets and tui-model-test (/Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A5S1D/verify-r2/V-build-werror.*); fault-classification 83 of 83 at N1 and N8, pure codec and model tests (V-fault-N1/N8); service-faults 26 of 26 at N1 and N8 and the admission gate at 658 PASS, deterministic native fixtures; 65 guard-breaking control runs on an overlay built without -Werror, mostly at N1 (V-controls-summary.log); gates configuration, commands, store, ingestion and admission green, and the six red gates unchanged against the A5S1C verify-r3 baselines (V-gate-comparison.log, unexpected-difference=0). Final fess audit /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/fess/A-A5S1D-r2.md is non-blocking. Its low findings are acat-20yy, acat-bagg, acat-qcpi, acat-3ker and acat-q8fk.\n\nWhat this does not establish: the source of the closed release and the cause of the S1 503 in the tui-approval N8 journey are still unproved, so this issue stays open. The values that are not UTF-8 enter only through an external SQLite writer in the fixtures. Other input classes at Service.hs:125 and Service.hs:162 are not exercised.\n",
     "created_at": "2026-09-27T05:45:11Z"
+  },
+  {
+    "id": 338,
+    "issue_id": "acat-dxos",
+    "author": "johnw",
+    "text": "A5G2d round 1 recorded a second storage-unavailable signature that bears on this diagnosis: the Client-facade check at N8 got 503 on GET /v1/workflows with 'store reader-admission class=internal ConfigurationBusy erased=store StoreBusy' in server-0.stderr (root /Users/johnw/Products/k.M0a5ItPm/tmp/a5g2d-client.riA5itgK, not rerun). It differs from the A1 S1 signature. Tracked as acat-nwrj for the S1 diagnosis round.",
+    "created_at": "2026-09-29T13:14:08Z"
   }
 ]
 #+end_src
@@ -3535,6 +3542,40 @@ Operator-authorized scope amendment 2026-09-12T06:03:20+00:00: user explicitly i
     "author": "johnw",
     "text": "Integrated the reviewed default data-broker implementation for the user-confirmed architecture amendment. The exact application delta is broker.V0Omy9B2/broker-corrected.patch,17files684insertions/156deletions. Canonical source bytes and Git executable modes were verified equal to the reviewed candidate at2026-09-23T01:16:03Z. No isolated PLAN or handoff was overlaid. The existing service/client work remains separately preserved.\n\nDataBroker, runPlanBrokered and cliMainWithBroker now mediate actual typed requests, engine starts/turns/updates/steering, controls, events/logs and persistence, including final result publication. The default implementation reuses original in-process receivers and capabilities. Runtime remains sole interpreter/decoder/policy/memo/scheduling owner. No additional interpreter, queue framework, reconstructed authority, opaque replay or RabbitMQ implementation was added. Native wire/storage formats and settled Store policies remain unchanged. runtime/BROKER.md states the operation and extension obligations.\n\nIndependent review bfb753ec-e0cf-4fb1-96a6-c6635d54d5b0 found architecture ALIGNED but blocked the original candidate on a cancellation/join hazard: Control.tryDelivery swallowed asynchronous steering cancellation. Parent corrected that existing owner with tryJust excluding SomeAsyncException, preserving synchronous failure acknowledgements. A deterministic red failed on swallowed cancellation. Corrected native N1/N8 checks require original receiver finalization and scope completion without the red-path rescue. The earlier synchronous-reader failure red/green remains preserved. Continued review e0d3c715-755c-48bb-80b2-21103d455dcf found no issues and supported only this corrected broker integration.\n\nLocal evidence includes Werror builds, actual ACP Hello World, injected reply consumption, verified final result publication, authored trace/exact bills, policy/concurrency, control/person-control, lineage/person-lineage, prepared frontend sessions and deterministic deck transport checks. Native N1 precedes N8. Deck covers a narrow N1 happy path and the complete existing ten-scenario gate at N8, not a whole N1 matrix. validation.md and correction.md retain commands, dates, exits, raw failures and scope limits. Canonical compiler-parsed boundaries passed01:17:45–01:17:47Z and documentation passed01:17:47–01:17:50Z. Existing isolated Haskell-documentation evidence remains at its recorded scope. No Linux, external host, paid provider, live configuration/credential mutation or new Lean/oracle build occurred.\n\nAccepted WM001–WM022/G0/G1 remain closed. This integration does not accept WM023, a protected manager service, the complete TUI journey or the overall goal. Next is the real broker-backed TUI/manager workflow, reusing service-tui.purvEwEv work where it fits. The unimplemented public-observation proposal's version-domain mismatch claim and missing SSE handler require source assessment before advertising public capabilities. Refocus completed2026-09-23T01:18:27Z, next deadline2026-09-23T02:18:27Z. RabbitMQ remains deferred.\n",
     "created_at": "2026-09-23T01:21:14Z"
+  }
+]
+#+end_src
+
+* TODO [#D] Decide the scope of the no-absolute-path and stored-PID rules
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-ersl
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-29 Tue 06:02]
+:MODIFIED: [2026-09-29 Tue 06:02]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+fess A-A5G2d-r2, low binding-rule-scope finding, for the orchestrator. The committed A5G2c Runtime spawn change holds absolute paths: '/bin/sh' for ShellCommand in runtime/src/Agentic/Runtime/ProcessGroup.hs, which mirrors the process library, and /bin/sleep, /bin/cat, /usr/bin/true and PATH=/usr/bin:/bin in the fixtures of runtime/test/ProcessGroupTests.hs. None of them is in routing discovery. manager/test/ProfileCheck.hs:193 and manager/test/DraftCheck.hs:755 send signal 0 to PIDs read from a file, following the accepted pattern of ProfileCheck.assertReaped (commit 4a312e0d). Signal 0 delivers nothing, so PID reuse can cause a false failure but never a false pass.
+
+Acceptance: the orchestrator records whether the operator's 2026-09-28 no-absolute-path ruling is scoped to routing discovery, and whether signal-0 liveness probes on stored PIDs are acceptable under the rule 'Never signal a stored PID'. If either answer is no, the affected code is changed with a regression check.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-ersl",
+    "depends_on_id": "acat-wm-022-j655",
+    "type": "discovered-from",
+    "created_at": "2026-09-29T13:02:25.651721Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
   }
 ]
 #+end_src
@@ -6799,6 +6840,40 @@ Tested host: macOS26.6.2 arm64, Emacs30.2, GHC9.10.3. Remaining acceptance is BL
 ]
 #+end_src
 
+* TODO [#D] Correct residual routing-TLS phrases and supersede the handoff TLS claim
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-nay0
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-29 Tue 06:02]
+:MODIFIED: [2026-09-29 Tue 06:02]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+fess A-A5G2d-r2, low documentation-drift finding. The held documentation diff A/A5G2d/impl-r2/held-doc-edits.diff (not applied, because the refocus note holds documentation edits until the PTY journey passes) leaves two phrases in doc/tui-design.md that tie TLS to routing: line 629 'HTTP/TLS and cryptographic dependencies serve bounded routing' and line 608 'routing HTTP/TLS/cryptographic dependencies'. Both contradict the edited line 593, which says http-client-tls serves the HTTPS manager client. doc/workflow-manager-handoff.md:141-149 (the newest dated section) still says that routing discovery constructs the standard TLS manager and that no check shows cleanup after a help cancellation, although manager/test/ProfileCheck.hs:487 now asserts that cleanup. The dated A5G2 record at line 819 says the same about the TLS manager.
+
+Acceptance: when the documentation hold is lifted, apply the held diff with the two tui-design.md corrections added, and add a dated handoff section that supersedes lines 141-149 and 819 with the current behavior: discovery supports no TLS and refuses https as tls-not-supported. make -C doc check passes.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-nay0",
+    "depends_on_id": "acat-wm-022-j655",
+    "type": "discovered-from",
+    "created_at": "2026-09-29T13:02:24.819945Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
 * DOING [#B] Redesign TUI launch, navigation, and responsive layout
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -7094,6 +7169,40 @@ The largest remaining generalization failure: four hand-built KleeneAlgebra inst
 :END:
 
 Inventory agent-functor workflow/TUI behavior, map Pi and agent-cat integration surfaces, and produce a source-cited feasibility report with a minimal MVP and phased roadmap.
+
+* TODO [#B] Diagnose the Client-facade N8 ConfigurationBusy 503 on GET /v1/workflows
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-nwrj
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-29 Tue 06:02]
+:MODIFIED: [2026-09-29 Tue 06:02]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+fess A-A5G2d-r2, medium verification-gap finding. During A5G2d round 1 (impl-r1/G21), the Client-facade check (CLIENT_CHECK through manager/test/service_http.py) failed once at N8: GET /v1/workflows returned 503 storage-unavailable, and server-0.stderr recorded 'store reader-admission class=internal ConfigurationBusy erased=store StoreBusy'. The root is kept at /Users/johnw/Products/k.M0a5ItPm/tmp/a5g2d-client.riA5itgK. The N1 stderr in the same root records two 503 lines on GET /v1/events, although N1 passed. The signature differs from the A1 S1 failure (an enqueue POST 503 with an empty server stderr). The failure was not rerun. No gate script runs CLIENT_CHECK.
+
+Acceptance: establish whether the facade's GET /v1/workflows overlaps a profile operation that holds the configuration guard (withStoreReader reaches withStoreConfiguration, Configuration.hs:145, Store.hs:686-695), whether the A5G2c help pool changes how long such operations hold the guard, and whether the N1 503 lines are expected. Fix a proved cause with a regression test. Nothing counts as cleared until then.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-nwrj",
+    "depends_on_id": "acat-dxos",
+    "type": "discovered-from",
+    "created_at": "2026-09-29T13:02:24.568034Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
 
 * DONE [#C] Surface reorientation: the author-facing language is recognized standard structure on the semantic quotient
 :PROPERTIES:
@@ -7944,6 +8053,44 @@ Service-liveness and halt fess reviews identify a source-proved ceiling: protect
 ]
 #+end_src
 
+* TODO [#C] Restore TLS for routing catalogue discovery without platform certificate code
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-routing-discovery-tls-3m8u
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-29 Tue 06:02]
+:MODIFIED: [2026-09-29 Tue 06:02]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Operator decision of 2026-09-28 (GOAL.md, section 'Operator decision of 2026-09-28: routing discovery without TLS'). Subtask A5G2d removed TLS support from worker-side routing catalogue discovery. cli/src/Agentic/RoutingDiscovery.hs now builds only a plain http-client manager, and an https catalogue endpoint gets the classified discovery failure tls-not-supported before any header is built or any connection is opened. The cause was that the standard TLS manager, through crypton-x509-system 1.9.0 on macOS, runs the bare name 'security' from the worker's narrow PATH, which made the approval and vertical gates fail.
+
+This issue records the restoration of TLS for routing catalogue discovery as later work. Constraint set by the operator: the restoration uses no absolute path, adds no environment or PATH change for fixtures or workers, and puts no knowledge of a platform certificate manager (for example the macOS 'security' tool or keychain) in agent-cat code.
+
+The restoration must also cover these paths, which are unreachable while TLS is refused (fess A-A5G2d-r2, low loose-ends finding): authHeaders and the resolved-credential-unavailable branch at cli/src/Agentic/RoutingDiscovery.hs:535-545 and :570, together with a live replacement for the removed probe check 'resolved authentication headers are bounded before request'. The probe checks removed by the operator decision were: 'HTTPS uses the verifying TLS manager and never downgrades to loopback HTTP', 'standard TLS manager rejects an untrusted local certificate', 'resolved authentication headers are bounded before request', 'trusted local TLS sends bearer auth and selects OpenAI inventory', 'authenticated cache stores fingerprints but no secret or endpoint', and 'trusted local TLS sends raw x-api-key auth across Anthropic pagination'.
+
+Acceptance: an https catalogue endpoint refreshes through a verifying TLS manager in the worker's bare environment (empty PATH) at N1 and N8, authenticated requests are bounded and never downgraded, the tls-not-supported refusal and its checks are replaced, and the operator constraints above hold by diff inspection.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-routing-discovery-tls-3m8u",
+    "depends_on_id": "acat-wm-022-j655",
+    "type": "discovered-from",
+    "created_at": "2026-09-29T13:02:24.203403Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
 * DONE [#B] Star repair: decouple star from commutativity so matrices can carry it
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -8081,6 +8228,40 @@ A3 fess finding (low). ServiceTests.hs near 563, the check 'survives an installe
     "depends_on_id": "acat-tui-consent-barrier-wby2",
     "type": "discovered-from",
     "created_at": "2026-09-24T13:41:02.135033Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
+* TODO [#D] Observe process creation in the https discovery refusal check
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-s3dz
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-29 Tue 06:02]
+:MODIFIED: [2026-09-29 Tue 06:02]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+fess A-A5G2d-r2, low verification-gap finding. cli/test/RoutingDiscoveryProbe.hs:622 runs the https refusal checks with a PATH that names one empty directory. The claim that the refusal runs no process rests on that PATH, on the absence of any process import in cli/src/Agentic/RoutingDiscovery.hs, and on the eager-TLS mutant control (verify-r2/W02). No process-creation trace was taken, so a spawn by absolute path would not be observed.
+
+Acceptance: either record the orchestrator's acceptance of the inferred claim, or add a check that observes process creation during the refusal (for example a descendant count of the probe process) and fails when a process is created by an absolute path.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-s3dz",
+    "depends_on_id": "acat-wm-022-j655",
+    "type": "discovered-from",
+    "created_at": "2026-09-29T13:02:25.388058Z",
     "created_by": "johnw",
     "metadata": "{}",
     "thread_id": ""
@@ -9732,6 +9913,40 @@ deep-review + validated (both medium). Parse.lean:447-451 reads the two idents w
     "author": "johnw",
     "text": "Closed with the stratum it concerned: the pre-re-derivation Term algebra was excised at 4aed549 under acat-q1i (owner-approved hybrid, 2026-08-20). This ticket's subject, its state at closure, and why it retires are recorded — with the machine-checked results it relates to transcribed exactly — in doc/research/term-algebra-results.md (the ticket graveyard section names this issue individually). The mathematics is preserved as a document and in git history at b98e25f; the six theory threads are recorded there as future directions should the program ever be revived.",
     "created_at": "2026-08-20T18:42:45Z"
+  }
+]
+#+end_src
+
+* TODO [#D] Make the ProfileCheck help-barrier label match its own failure
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-wluh
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-29 Tue 06:02]
+:MODIFIED: [2026-09-29 Tue 06:02]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+fess A-A5G2d-r2, low test-precision finding. manager/test/ProfileCheck.hs:420-422 checks the label 'the first four help queries run at the same time' with isRight on the whole probeProfile result, so any unrelated Left from probeProfile reports this label. The check is not vacuous: the sequential-help mutants (A5G2d impl-r2/N01, verify-r2/W09a and W09b) fail it, and line 425 separately asserts that the maximum live count is 4.
+
+Acceptance: the labelled check matches the expected barrier failure, or counts the barrier markers before it reports the label, so that an unrelated probe failure reports its own cause. The sequential-help mutant still fails the named check.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-wluh",
+    "depends_on_id": "acat-wm-022-j655",
+    "type": "discovered-from",
+    "created_at": "2026-09-29T13:02:25.089392Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
   }
 ]
 #+end_src
@@ -13334,7 +13549,7 @@ WM-008 completed handoff 2026-09-12T02:36:23+00:00: Enforce each configured quot
 :LABELS:   ["p4","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-22 Tue 10:00]
+:MODIFIED: [2026-09-29 Tue 06:14]
 :CREATED_BY: johnw
 :FINISHED: [2026-09-22 Tue 10:00]
 :CLOSE_REASON: Accepted from integrated real-worker N1/N8 lifecycle, exact semantic comparison and refusal evidence, with continued independent review53ee90a0. Required validation is local-only under the user amendment.
@@ -13511,6 +13726,13 @@ manager's correctness boundary.
     "author": "johnw",
     "text": "# WM022 and G1 acceptance\n\nParent accepts WM022 and G1 on 2026-09-22 under the user-confirmed local-only validation amendment. This is a behavioral acceptance decision, not an inference that removing Linux requirements establishes completion. The accepted baseline becomes WM001–WM022 and G0/G1, or22 of44 packages and2 of6 gates. WM023 remains partial and unaccepted, and G2–G5 remain open.\n\nThe six-file vertical implementation was integrated at ea0fc12cdd6244706de6934d1d721363dfd31a3b. Current application source is72c2abfbb24628d787edd863836218ce839f7710. Parent confirmed that the gate, comparator and routing fixture are unchanged, while the CLI vertical callbacks only gained ignored authorization-view parameters. Existing result comparisons and refusals remain intact.\n\nWM022 uses actual configured scripted, ACP and deck frontends and the original Runtime/manager owners. Its capture, direct/managed semantic comparison, exact bills, policies, typed lineage, approval, concurrency, ingestion, controls, history, artifact/export and shutdown checks retain meaningful refusals. Physical run/control identities have explicit injective correspondence, and the authored independent-lane relation preserves every event and lane order without semantic normalization. The fixture is not a second interpreter.\n\nThe original complete local vertical gate passed at N1 then N8 on2026-09-21,21:54:55Z–22:09:39Z. Current application evidence in sibling credentials.QHYL3FHM/response-vertical-first passed on2026-09-22,08:48:34Z–09:00:58Z, including the original history-corrections and control-write audits. Their results preserve original-child joins, successful returns and no primary/signalling/wait failures. Boundaries and both documentation checks passed on the same application bytes. Existing source-valid evidence is reused without another native matrix.\n\nContinued reviewer53ee90a0-49e3-48f4-a005-cb64521f9980 found no issues and separately marked WM022 and G1 SUPPORTED. Review-local-closure.md records source and raw-evidence citations. G1 combines the real-worker lifecycle demonstration with already accepted WM008–WM021/G0 storage, ownership, admission, approval, ingestion, restart and cleanup foundations at their established scope. It is not inferred from dependency closure alone.\n\nThe five earlier vertical gate failures and author timeout remain failures. Later results do not establish cleanup of earlier roots. Composed Store evidence remains composed. No total-service resource bound, physical-power-loss durability, arbitrary-descendant containment, cross-process ABA protection or untested-platform pass is claimed. No new Linux or remote execution occurred. WM023 live administration, page/cursor binding and SSE remain the next unfinished product requirements.\n",
     "created_at": "2026-09-22T17:00:00Z"
+  },
+  {
+    "id": 337,
+    "issue_id": "acat-wm-022-j655",
+    "author": "johnw",
+    "text": "Subtask A5G2d (branch workflow-manager-checkpoint-20260923, commit bab6b09a for the Runtime spawn change and the following commit for the rest) restores the approval and vertical gates. Worker-side routing discovery no longer builds the standard TLS manager, following the operator decision of 2026-09-28, and refuses an https catalogue as tls-not-supported without a connection or a process. Runtime process groups spawn through posix_spawn, and help queries run in a bounded pool of four. Evidence (deterministic native fixtures and package builds, A/A5G2d/verify-r2): the -Werror all-target build and FINALBUILD, RoutingDiscoveryProbe at N1 and N8, routing-config, the runtime suite at N1 and N8, profiles, vertical, dependencies, tui, and cli/ci/policies.sh, which runs store, drafts, workers, admission, approval, ingestion, controls and artifacts at N1 and N8. Catalogue discovery of 257 rows took 6.44 s at soft RLIMIT_NOFILE 1048576 and 5.61 s at 4096 against the unchanged 30 s deadline. Guard-breaking mutants W01-W13 each fail their named check. The runtime-only commit tree was built and tested separately (A/A5G2d/integrate-r1/C1-build-test). This issue stays closed. TLS restoration is acat-routing-discovery-tls-3m8u.",
+    "created_at": "2026-09-29T13:14:08Z"
   }
 ]
 #+end_src
@@ -13522,7 +13744,7 @@ manager's correctness boundary.
 :LABELS:   ["p5","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-27 Sun 12:44]
+:MODIFIED: [2026-09-28 Mon 12:00]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-023
 :SOURCE_REPO: agent-cat
@@ -13728,6 +13950,13 @@ callers. Worker environments contain no manager credential material.
     "author": "johnw",
     "text": "Second 2026-09-27 closeout (HANDOFF round 1): new top section 'Second resume workflow stopping point of 2026-09-27' in doc/workflow-manager-handoff.md and revision 3 of /Users/johnw/dl/agent-cat-workflow-manager-remaining-2026-09-27.md. The run stopped on the A5G2b owner-decision escalation (drafts QueryTimeout, options a-e). Accepted state unchanged: WM-001..WM-022, G0, G1. Phase A not met. A5G2/A5G2b code stays uncommitted (digest 53ee2ec4...). Evidence: make -C doc check exit 0 (documentation check only, /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/Z/HANDOFF/impl-r1/H29-doc-check.log, /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/Z/HANDOFF/verify-r1/V2-doc-check.log); accuracy by read-only cross-checks (/Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/Z/HANDOFF/impl-r1/H29-accuracy.log, /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/Z/HANDOFF/verify-r1/V3b-V11). fess Z-HANDOFF-r1 non-blocking; findings filed as acat-o2ud, acat-iyvu, acat-rxkl, acat-871r, acat-uv2h, acat-6h6z, acat-xj7c. This package issue stays open.",
     "created_at": "2026-09-27T19:44:23Z"
+  },
+  {
+    "id": 336,
+    "issue_id": "acat-wm-023-d20b",
+    "author": "johnw",
+    "text": "2026-09-28 workflow closeout (HANDOFF, documentation only). Added a dated section to doc/workflow-manager-handoff.md and wrote /Users/johnw/dl/agent-cat-workflow-manager-remaining-2026-09-28.md (revision 3 plus two integration wording fixes). The run stopped on the A5G2c escalation: owner ruling needed on fess finding M1 (fix placed in cli/src/Agentic/RoutingDiscovery.hs rather than the worker environment or fixture). A5G2c source stays uncommitted in the worktree (digest a52ada5a). Phase A is not met, and no WM package or gate is accepted by this run. Evidence: resume-20260923/Z/HANDOFF impl-r1 H30-*, impl-r2 H31-*, impl-r3 H32-*, verify-r3 W30-W39 (make -C doc check exit 0, W38), integrate-r3 I01-doc-check (exit 0). Ceiling: documentation check only, no build, gate or fixture.",
+    "created_at": "2026-09-28T19:00:02Z"
   }
 ]
 #+end_src

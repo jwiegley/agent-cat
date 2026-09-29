@@ -16,15 +16,37 @@ COUNT_FILE = Path(sys.argv[2])
 CONTROL_FILE = Path(sys.argv[3])
 CERT_FILE = Path(sys.argv[4]) if len(sys.argv) > 4 else None
 KEY_FILE = Path(sys.argv[5]) if len(sys.argv) > 5 else None
+CONNECTION_FILE = Path(sys.argv[6]) if len(sys.argv) > 6 else None
 COUNT = 0
+CONNECTIONS = 0
 
 
 def write_count() -> None:
     COUNT_FILE.write_text(f"{COUNT}\n", encoding="ascii")
 
 
+def write_connections() -> None:
+    if CONNECTION_FILE is not None:
+        CONNECTION_FILE.write_text(f"{CONNECTIONS}\n", encoding="ascii")
+
+
 class QuietThreadingHTTPServer(ThreadingHTTPServer):
     daemon_threads = True
+    tls_context: ssl.SSLContext | None = None
+
+    def get_request(self) -> tuple[object, object]:
+        """Count each accepted connection before any TLS handshake."""
+        global CONNECTIONS
+        connection, address = super().get_request()
+        CONNECTIONS += 1
+        write_connections()
+        if self.tls_context is None:
+            return connection, address
+        try:
+            return self.tls_context.wrap_socket(connection, server_side=True), address
+        except OSError:
+            connection.close()
+            raise
 
     def handle_error(self, _request: object, _client_address: object) -> None:
         pass
@@ -202,7 +224,8 @@ server = QuietThreadingHTTPServer(("127.0.0.1", 0), Handler)
 if CERT_FILE is not None and KEY_FILE is not None:
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     context.load_cert_chain(CERT_FILE, KEY_FILE)
-    server.socket = context.wrap_socket(server.socket, server_side=True)
-PORT_FILE.write_text(f"{server.server_address[1]}\n", encoding="ascii")
+    server.tls_context = context
 write_count()
+write_connections()
+PORT_FILE.write_text(f"{server.server_address[1]}\n", encoding="ascii")
 server.serve_forever()

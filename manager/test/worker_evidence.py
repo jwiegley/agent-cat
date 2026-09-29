@@ -7,6 +7,11 @@ import sys
 
 work = Path(sys.argv[1]).resolve()
 native = str(Path(sys.argv[2]).resolve())
+# Discovery asks for one help page per catalogue row, so each help argv must
+# name a row of the native catalogue.
+catalogue = subprocess.run([native, "list", "--json", "--descriptor-version", "3"],
+                           stdin=subprocess.DEVNULL, capture_output=True, timeout=30, check=True)
+workflow_names = {row["name"] for row in json.loads(catalogue.stdout)}
 records = []
 for path in work.glob("*.ndjson"):
     records.extend(json.loads(line) for line in path.read_text().splitlines())
@@ -23,8 +28,10 @@ for record in records:
         raise RuntimeError("explicit environment changed")
     if "WM012_AMBIENT_SECRET" in environment:
         raise RuntimeError("ambient manager binding leaked")
-    if record["args"] not in [["frontend"], ["frontend", "--capabilities"],
-                               ["list", "--json", "--descriptor-version", "3"]]:
+    arguments = record["args"]
+    help_query = len(arguments) == 2 and arguments[0] == "help" and arguments[1] in workflow_names
+    if arguments not in [["frontend"], ["frontend", "--capabilities"],
+                         ["list", "--json", "--descriptor-version", "3"]] and not help_query:
         raise RuntimeError("configured ordered prefix was not consumed exactly")
 print("PASS real wrapper argv/cwd/explicit environment and ambient exclusion")
 

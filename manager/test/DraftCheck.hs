@@ -21,12 +21,12 @@ import Control.Exception (IOException, bracket, fromException, try)
 import Control.Monad (forM_, unless, void)
 import Crypto.Hash (Digest, SHA256, hash)
 import Data.Aeson (FromJSON (parseJSON), eitherDecodeStrict', object, withObject, (.:), (.=))
-import Data.Either (isRight)
+import Data.Either (isLeft, isRight)
 import Data.ByteArray (convert)
 import qualified Data.ByteString as BS
 import Data.IORef (atomicModifyIORef', newIORef, modifyIORef', readIORef, writeIORef)
 import Data.Int (Int64)
-import Data.List (find)
+import Data.List (find, sort)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
@@ -38,6 +38,8 @@ import System.Exit (exitFailure)
 import System.FilePath ((</>))
 import System.IO (BufferMode (LineBuffering), IOMode (ReadMode), withBinaryFile, hSetBuffering, stdout)
 import System.Posix.Files (setFileMode)
+import System.Posix.Process (getProcessID)
+import System.Posix.Signals (nullSignal, signalProcess)
 import System.Timeout (timeout)
 
 main :: IO ()
@@ -53,6 +55,15 @@ main = do
       bytes<-BS.readFile replies
       if bytes=="WAIT" then BS.writeFile (replies<>".ready") BS.empty >> threadDelay 60000000
         else if bytes=="FAIL" then exitFailure else BS.putStr bytes
+    -- Discovery asks for one help page per catalogue row. A name outside the
+    -- current catalogue fails as the actual runner does. Each query records its
+    -- name and process ID so that the catalogue check can confirm cleanup.
+    ["runner", replies, "help", name] -> do
+      pid<-getProcessID
+      appendFile(replies<>".help")(name<>" "<>show pid<>"\n")
+      rows<-BS.readFile replies>>=right.decodeWorkflowDescriptors
+      unless(any((==T.pack name).workflowName)rows)exitFailure
+      putStrLn("Fixture help for "<>name<>".")
     ["review-lifetime",work,source] -> reopenChecks work source >> sameConfigurationReopenChecks work source
     ["review-catalogue",work,source] -> cataloguePageChecks work source
     ["review-migration",work] -> declarationMigrationChecks work
@@ -734,8 +745,16 @@ cataloguePageChecks work source=withFixture work source "catalogue-pages" 5 5 10
   let descriptors=[native {workflowName="page_workflow_"<>T.pack(show index)}|index<-[0..256::Int]]
   check "multi-page catalogue remains within existing query byte ceiling" (BS.length(encoded descriptors)<4194304)
   BS.writeFile replies(encoded descriptors)
+  BS.writeFile(replies<>".help")BS.empty
   current<-probeConfiguredProfile installed "profile_1" profile>>=right
   check "actual discovery retains workflows beyond one public page" (length(discoveryEntries current)==257)
+  launched<-map words.lines<$>readFile(replies<>".help")
+  check "discovery asks for help once for each of the 257 rows within the group deadline"
+    (sort[name|[name,_]<-launched]==sort(map(T.unpack.workflowName)descriptors) && length launched==257)
+  released<-mapM(\fields->case fields of
+    [_,pid]->isLeft<$>try @IOException(signalProcess nullSignal(read pid))
+    _->pure False)launched
+  check "every help query process is reaped when discovery returns" (and released)
   (ident,_)<-maybe(error "workflow beyond first page missing")pure(find((=="page_workflow_256").workflowName.snd)(discoveryEntries current))
   nonce<-key store "beyond-first-page"
   let body=encoded(object["workflowId" .= ident,"descriptorRevision" .= discoveryRevision current,"profileId" .= ("profile_1"::Text),"profileRevision" .= profile])

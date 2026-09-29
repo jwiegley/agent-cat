@@ -35,6 +35,7 @@ import System.Directory (createDirectory, removeFile)
 import Data.Time.Clock (getCurrentTime)
 import Data.Time.Format (formatTime, defaultTimeLocale)
 import System.Environment (getArgs, getExecutablePath)
+import System.Exit (exitFailure)
 import System.FilePath ((</>))
 import System.IO (hSetBuffering, stdout, BufferMode (LineBuffering))
 import System.Posix.Files (setFileMode)
@@ -50,6 +51,12 @@ main = do
   case args of
     ["runner",_,"frontend","--capabilities"] -> BS.putStr(encoded(frontendCapabilities(FrontendServer "fixture" "/fixture/runner" "0.1.0.0")))
     ["runner",reply,"list","--json","--descriptor-version","3"] -> BS.readFile reply >>= BS.putStr
+    -- Discovery asks for one help page per catalogue row. A name outside the
+    -- current catalogue fails as the actual runner does.
+    ["runner",reply,"help",name] -> do
+      rows <- BS.readFile reply >>= right . decodeWorkflowDescriptors
+      unless (any ((== T.pack name) . workflowName) rows) exitFailure
+      putStrLn ("Fixture help for " <> name <> ".")
     ["corrections",work,source] -> deadline (observationRace work source)
     ["--blocked-query","frontend","--capabilities"] -> putStrLn "query-ready" >> threadDelay maxBound
     [work,source] -> deadline $ do
