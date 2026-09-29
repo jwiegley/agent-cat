@@ -8,7 +8,7 @@
 -- replaces an existing entry, so an existing file, directory, symbolic link
 -- or dangling symbolic link stays as it is. The new file has mode 0600. A
 -- failure removes the private file, so it leaves no new file.
-module Agentic.Tui.Save (saveExact) where
+module Agentic.Tui.Save (SaveRefusal (..), saveExact, saveRefusalText) where
 
 import Control.Exception (IOException, onException, try)
 import Crypto.Random (getRandomBytes)
@@ -21,14 +21,26 @@ import System.IO (hClose)
 import System.Posix.Files (createLink, removeLink, setFdMode)
 import System.Posix.IO (OpenFileFlags (..), OpenMode (WriteOnly), closeFd, defaultFileFlags, fdToHandle, openFd)
 
--- | Write exactly these bytes to a new file at this absolute path. The
--- result is a fixed refusal for a path that is not one absolute single-line
--- file path, or the description of the input or output failure.
-saveExact :: FilePath -> BS.ByteString -> IO (Either Text ())
+-- | Why a save wrote nothing: the path is not one absolute single-line file
+-- path, or an input or output operation failed. An existing entry at the
+-- destination, a symbolic link included, is an input or output failure of
+-- the already-exists type.
+data SaveRefusal = InvalidDestination | SaveIOFailure !IOException
+  deriving (Eq, Show)
+
+-- | The text of a refusal: the fixed refusal of an invalid path, or the
+-- description of the input or output failure.
+saveRefusalText :: SaveRefusal -> Text
+saveRefusalText refusal = case refusal of
+  InvalidDestination -> "the destination must be one absolute single-line file path"
+  SaveIOFailure failure -> T.pack (show failure)
+
+-- | Write exactly these bytes to a new file at this absolute path.
+saveExact :: FilePath -> BS.ByteString -> IO (Either SaveRefusal ())
 saveExact path bytes
   | not (isAbsolute path) || hasTrailingPathSeparator path || null (takeFileName path)
       || any (`elem` ['\NUL', '\n', '\r']) path =
-      pure (Left "the destination must be one absolute single-line file path")
+      pure (Left InvalidDestination)
   | otherwise = do
       suffix <- getRandomBytes 12 :: IO BS.ByteString
       let private = takeDirectory path </> ("." <> takeFileName path <> "." <> concatMap hex (BS.unpack suffix) <> ".partial")
@@ -42,7 +54,7 @@ saveExact path bytes
         publish `onException` removeLink private
         removeLink private
       pure $ case outcome of
-        Left (failure :: IOException) -> Left (T.pack (show failure))
+        Left (failure :: IOException) -> Left (SaveIOFailure failure)
         Right () -> Right ()
   where
     hex byte = let digits = showHex byte "" in if length digits == 1 then '0' : digits else digits

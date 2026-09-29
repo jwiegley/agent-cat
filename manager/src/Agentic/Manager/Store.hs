@@ -661,15 +661,26 @@ withStoreRetentionRoot :: CoordinationStore -> FilePath -> Text -> (PrivateRoot 
 withStoreRetentionRoot store@(CoordinationStore installed _ _ _ _ _ _ _ _ _ _ _ _) path profile action =
   withStoreFiles store $ \_ -> withConfiguredRetentionRoot installed path profile action
 
+-- | One ordinary file operation. It waits for the file slot within a fresh
+-- five-second allowance, and a slot that stays held for the whole allowance
+-- is 'StoreBusy'.
 withStoreFiles :: CoordinationStore -> (PrivateRoot -> IO a) -> IO a
-withStoreFiles store action = tryWithStoreFiles store action >>= maybe (throwIO StoreBusy) pure
+withStoreFiles store action = acquireStoreFiles WaitWithinBudget store action >>= maybe (throwIO StoreBusy) pure
 
--- | Nothing proves that the file guard was not acquired. Failures from acquisition
--- or the entered callback propagate unchanged and never become a deferred action.
+-- | One fail-fast file operation for coordinator work. Nothing proves that the
+-- file guard was not acquired. Failures from acquisition or the entered
+-- callback propagate unchanged and never become a deferred action.
 tryWithStoreFiles :: CoordinationStore -> (PrivateRoot -> IO a) -> IO (Maybe a)
-tryWithStoreFiles store@(CoordinationStore _ root _ _ _ closed _ lease (files,_,_) _ _ _ _) action = mask $ \restore -> do
+tryWithStoreFiles = acquireStoreFiles FailFast
+
+-- | Take the file slot under the admission policy. Nothing proves that the
+-- slot was not taken, so the action did not run.
+acquireStoreFiles :: StoreAdmission -> CoordinationStore -> (PrivateRoot -> IO a) -> IO (Maybe a)
+acquireStoreFiles policy store@(CoordinationStore _ root _ _ _ closed _ lease (files,_,_) _ _ _ _) action = mask $ \restore -> do
   readIORef closed >>= \done -> when done (throwIO StoreClosed)
-  acquired <- tryTakeMVar files
+  acquired <- case policy of
+    FailFast -> tryTakeMVar files
+    WaitWithinBudget -> Admission.newDeadline >>= \end -> Admission.takeWithin end files
   case acquired of
     Nothing -> pure Nothing
     Just () -> (Just <$> bracket acquire release (\(retained, _) -> restore (action retained))) `finally` putMVar files ()
@@ -685,16 +696,33 @@ tryWithStoreFiles store@(CoordinationStore _ root _ _ _ closed _ lease (files,_,
 -- that stayed held for the whole allowance is 'StoreBusy' and every other
 -- diagnostic is 'StoreUnavailable'. The distinct configuration cause is
 -- recorded privately before that refusal.
+--
+-- When every reader place is taken, the reader waits for a place within a
+-- fresh five-second allowance. It waits outside the configuration guard and
+-- the Store gate, so the readers that hold places keep their access. A full
+-- reader capacity for the whole allowance is 'StoreLimit'.
 withStoreReader :: CoordinationStore -> IO a -> IO a
 withStoreReader store@(CoordinationStore _ _ _ _ _ _ _ _ (_,readers,_) _ _ _ _) action = mask $ \restore -> do
-  result <- withStoreConfiguration store $ \limits _ -> admitted store $ atomically $ do
-    count <- readTVar readers
-    when (count>=limitGlobalDatabaseReaders limits) (throwSTM StoreLimit)
-    writeTVar readers (count+1)
-  case result of
-    Left diagnostic -> refuseErased "store reader-admission" (loanFault diagnostic)
-      (if diagnostic == SupervisionUnavailable then StoreBusy else StoreUnavailable)
-    Right () -> pure ()
+  end <- Admission.newDeadline
+  let admit = do
+        result <- withStoreConfiguration store $ \limits _ -> admitted store $ atomically $ do
+          count <- readTVar readers
+          if count>=limitGlobalDatabaseReaders limits
+            then pure (Just count)
+            else writeTVar readers (count+1) >> pure Nothing
+        case result of
+          Left diagnostic -> refuseErased "store reader-admission" (loanFault diagnostic)
+            (if diagnostic == SupervisionUnavailable then StoreBusy else StoreUnavailable)
+          Right Nothing -> pure ()
+          Right (Just seen) -> do
+            left <- try @Admission.AdmissionFailure (Admission.remainingMicros end)
+            case left of
+              Left _ -> throwIO StoreLimit
+              Right micros -> do
+                expired <- registerDelay micros
+                atomically $ (readTVar readers >>= \count -> check (count < seen)) `orElse` (readTVar expired >>= check)
+                admit
+  admit
   restore action `finally` atomically(modifyTVar' readers (subtract 1))
 
 -- | Refuse with a declared Store failure after one private record of the

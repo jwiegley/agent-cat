@@ -40,7 +40,10 @@ allowance is an upper bound, not a promise of parallel readers. An escaped
 store handle refuses after its callback scope. The scoped owner waits for
 in-flight database and file operations and their joined cleanup before
 closing SQLite and releasing the lease. File operations
-use one separate fail-fast slot and retain a private root plus lease duplicate.
+use one separate slot and retain a private root plus lease duplicate. An
+ordinary file operation waits for the slot within a fresh five-second
+allowance, and a slot that stays held for the whole allowance is `StoreBusy`.
+A coordinator probe takes the slot fail-fast and proves that it did not enter.
 Their lock order is file slot, configuration, then database.
 
 ## Database and schema
@@ -409,7 +412,10 @@ reassigned, and retired clients cannot be revived. These constraints preserve re
 and credential identity independently of content collection.
 
 `withStoreReader` reserves materialization capacity against the current installed
-`globalDatabaseReaders` limit before invoking a callback. Reloaded limits apply to
+`globalDatabaseReaders` limit before invoking a callback. When every place is taken, it
+waits for a place within a fresh five-second allowance, outside the
+configuration guard and the Store gate, and a capacity that stays full for the
+whole allowance is `StoreLimit`. Reloaded limits apply to
 new readers even while older readers finish. Acquisition releases configuration and
 SQL ownership before the callback, and completion or an exception returns capacity.
 State uses this scope for complete prefix replay and ingestion. Its profile projection

@@ -2306,6 +2306,54 @@ A3 fess finding (low, optional). Approval.hs imports Graphics.Vty and decodes te
 
 Agent-deck 1.15 falsely reports delivery=typed for fast Pi/DeepSeek turns after Pi accepted the prompt, and terminal-derived Pi output carries no timestamp. Teach agent-deck to recognize Pi's empty composer as submission and read Pi's structured JSONL response with its timestamp. Treat empty legacy timestamps as absent in Agentic.AgentDeck. Reproduced and verified with agent-workflows hello-world session run.
 
+* TODO [#D] Resolve the non-blocking fess findings of subtask A10A11
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-a10a11-fess-followup-33k1
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-29 Tue 13:46]
+:MODIFIED: [2026-09-29 Tue 13:46]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess audit fess/fast-A10A11-r1.md (2026-09-29) on subtask A10A11.
+
+1. (medium) Accepted with the Integrator's confirmation: withStoreFiles now waits for the file slot, and withStoreReader waits for reader capacity, each within a fresh five-second allowance (manager/src/Agentic/Manager/Store.hs near 664-726). The operator decision of 2026-09-29 names only the Store gate and the configuration guard. The operator should confirm the extension. The Integrator updated manager/ARTIFACTS.md and manager/DRAFTS.md to describe the bounded wait in the same commit.
+
+2. (medium) The check "existing file entry remains fail-fast" (manager/test/ArtifactCheck.hs near 508-512) nests withStoreFiles on one thread. It now waits five seconds on a slot that its own thread holds before StoreBusy, so its name is false. The draft and reader-quota contention checks (manager/test/DraftCheck.hs near 493, manager/test/StoreCheck.hs near 116-130, manager/test/ArtifactCheck.hs near 464-477 and 670-671) also pass only after a five-second wait. Rename or adjust these checks, then run manager-store-check, manager-artifact-check and manager-draft-check once each under timeout 900. None of them ran after the Store.hs change.
+
+3. (medium) Each lock starts a fresh five-second deadline: the file slot, the reader, the configuration guard and the gate (Store.hs near 683 and 705, Configuration.hs near 145 and 189). Drafts adds timed 5000000 inside withStoreFiles (Drafts.hs near 72, 189, 302, 593). One request can wait well past five seconds, while the harness HTTP timeout is 7 s. Carry one deadline through the file slot, the configuration guard and the gate, or document and justify the stacked allowance.
+
+4. (low) With the waiting file slot, a nested withStoreFiles call on the same thread stalls for five seconds before StoreBusy instead of failing at once. No such nesting was found on the journey paths, but not every caller was audited.
+
+5. (low) The render tests set presentationServiceSavable = True directly (tui/test/ServiceTests.hs near 1134-1136). The serviceSavable gating and the run binding of stateServiceSaved (tui/src/Agentic/Tui/App.hs near 424-428 and 1053) are covered only by the journey. Add a model test that derives the savable flag and the saved line from the app state.
+
+6. (low) The model check "a successful save names the verified size and the path" builds its expected text with the same formula as serviceSavedLine. Compare against a literal string.
+
+7. (low) The snapshot check maps "no" to False (manager/test/service_http.py near 833-836), so it restates answer == "no". The identity property comes only from the run-store answers.json check (near 1003-1008), which reads runner-private state. The broken-answer control fails at the first check, so the failing branch of the run-store check is never exercised. Record this limit, or add a control that reaches the run-store check.
+
+8. (low) The implementer's final BUILD ran after the control scenarios and the approval pair, and the tested binaries came from an earlier unlogged build. BUILD reported "Up to date" and the source mtimes are earlier than the binaries, so the tested binaries match the source. Run the listed order and log every build that produces a tested binary.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-a10a11-fess-followup-33k1",
+    "depends_on_id": "acat-wm-034-3vqz",
+    "type": "discovered-from",
+    "created_at": "2026-09-29T20:46:12.916869Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
 * TODO [#E] Keep complete evidence sets for implementer scans and mutants
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -5500,7 +5548,7 @@ Source: fess audit /Users/johnw/Products/agent-cat-workflow-manager/implementati
 :LABELS:   ["workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-24 Thu 09:19]
-:MODIFIED: [2026-09-29 Tue 12:34]
+:MODIFIED: [2026-09-29 Tue 13:46]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -5537,6 +5585,13 @@ Acceptance: the A6 journey asserts the composite install lines on the associated
     "author": "johnw",
     "text": "Subtask A6A7 extends tui-journey to reach the live monitor and a decision head (question, then recovery) at N1 and N8, and it answers the question through the TUI. The broken-step control (tui-journey-broken-answer) was not run in this subtask, so this issue stays open. Evidence: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A6A7/fast-impl-r1.",
     "created_at": "2026-09-29T19:34:31Z"
+  },
+  {
+    "id": 348,
+    "issue_id": "acat-i9aj",
+    "author": "johnw",
+    "text": "Subtask A10A11 (2026-09-29): the broken-step control tui-journey-broken-answer now runs and fails with the exact message 'JOURNEY-ASSERT typed answer is not JSON false', and the journey asserts the displayed runtime against the snapshot GET and logs the head order. The journey does not assert the literal lines 'Observation: current' and 'Runtime: Running' on the associated screen, so this issue stays open. Evidence: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A10A11/fast-impl-r1.",
+    "created_at": "2026-09-29T20:46:09Z"
   }
 ]
 #+end_src
@@ -15451,7 +15506,7 @@ to an unapproved local launch.
 :LABELS:   ["p7","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-29 Tue 13:08]
+:MODIFIED: [2026-09-29 Tue 13:46]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-034
 :SOURCE_REPO: agent-cat
@@ -15544,6 +15599,13 @@ Local-mode behavior remains intact without a duplicated service runtime model.
     "author": "johnw",
     "text": "Subtask A8A9 (2026-09-29): service mode now offers retry at a pending recovery head, taken only from Service.retryOffer on the installed control and decision views, prepared on the exact control observation (If-Match control ETag), and completed only on a matching effect-observed retried or recovery-chosen receipt. Failover and abandon are refused as unsupported in this milestone. The TUI recognizes terminal runtime status, and for a succeeded run with Verified verification it retrieves the source-result through Client.downloadVerified and shows the status, verified size, digest and a bounded preview. A compiled saveExact function publishes bytes exclusively with mode 0600. Checks: Werror build, tui-model-test N1 and N8, tui-journey N1 and N8 (question, recovery with retry, terminal success, verified size and digest), source-boundaries. Follow-up: acat-a8a9-fess-followup-6d1e.",
     "created_at": "2026-09-29T20:08:35Z"
+  },
+  {
+    "id": 347,
+    "issue_id": "acat-wm-034-3vqz",
+    "author": "johnw",
+    "text": "Subtask A10A11 (2026-09-29): in service mode, s after verified retrieval opens the existing save dialog and saves the retained verified bytes through saveExact. A refusal (existing entry, symlink, invalid path) shows a fixed message with the path through safeDisplay and leaves the destination untouched. Local-mode saving keeps its behavior. tui-journey is now the Phase A gate in one uninterrupted TUI session: each verified fact has its own JOURNEY-ASSERT message, the harness POST guard is active after credential issuance, exactly one command identity exists for approve, answer and retry, and read-only GETs treat a 429 page-set refusal as a bounded new read. Checks: Werror build, tui-model-test N1 and N8, tui-journey N1 and N8, tui-journey-broken-answer control (exact typed-answer message), tui-consent-control, tui-approval N1 and N8, tui/ci/tui.sh. Follow-up: acat-a10a11-fess-followup-33k1. Evidence: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A10A11/fast-impl-r1.",
+    "created_at": "2026-09-29T20:46:09Z"
   }
 ]
 #+end_src

@@ -51,7 +51,7 @@ import Agentic.Tui.Presentation
 import Agentic.Tui.Process
 import Agentic.Tui.RunModel
 import Agentic.Tui.Root
-import Agentic.Tui.Save (saveExact)
+import Agentic.Tui.Save (saveExact, saveRefusalText)
 import Agentic.Tui.Types
 import Brick
 import Brick.BChan (BChan, newBChan, writeBChan, writeBChanNonBlocking)
@@ -216,7 +216,10 @@ data AppState = AppState
     stateServiceFaultExit :: !(IORef Bool),
     -- | The retrieval of the verified result of the named run: a refusal
     -- code or the exact verified bytes. It is retrieved once for each run.
-    stateServiceResult :: !(Maybe (Text, Either Text Service.VerifiedResult))
+    stateServiceResult :: !(Maybe (Text, Either Text Service.VerifiedResult)),
+    -- | The result line of the latest successful save of the verified bytes
+    -- of the named run.
+    stateServiceSaved :: !(Maybe (Text, Text))
   }
 
 runApp :: TuiConfig -> PrivateRoot -> IO ()
@@ -319,7 +322,8 @@ runAppWith backend = mask $ \restore -> do
             stateServiceOutcomeSerial = 0,
             stateServiceUncertainExit = uncertainExit,
             stateServiceFaultExit = faultExit,
-            stateServiceResult = Nothing
+            stateServiceResult = Nothing,
+            stateServiceSaved = Nothing
           }
       stopAll [] = pure ()
       stopAll (worker : rest) = cancel worker `finally` stopAll rest
@@ -407,6 +411,21 @@ serviceHead :: AppState -> Maybe Service.DecisionHead
 serviceHead state = case (stateBackend state, modelScreen (stateModel state)) of
   (ServiceBackend {}, LiveScreen _) -> serviceRunRead state >>= Service.decisionHead
   _ -> Nothing
+
+-- | The retained verified result bytes of the installed run.
+serviceVerifiedResult :: AppState -> Maybe (Text, Service.VerifiedResult)
+serviceVerifiedResult state = do
+  run <- runIdText . Service.runIdentity <$> serviceRun state
+  (ident, retrieval) <- stateServiceResult state
+  result <- either (const Nothing) Just retrieval
+  if ident == run then Just (run, result) else Nothing
+
+-- | Whether s opens the save dialog: the live monitor shows no decision head
+-- and no run details, and the verified result bytes of its run are retained.
+serviceSavable :: AppState -> Bool
+serviceSavable state = case modelScreen (stateModel state) of
+  LiveScreen _ -> not (stateRunDetails state) && serviceHead state == Nothing && isJust (serviceVerifiedResult state)
+  _ -> False
 
 -- | Whether the command lane holds an answer to this decision. A retained
 -- answer stays bound to its original decision when the head changes.
@@ -799,6 +818,9 @@ handleServiceEventCore client event = do
                 Right (mutation,observed) -> serviceMutationKey "answer" (beginServiceMutation client mutation (Just observed))
         _ -> serviceKeyOutcome False "answer did not start: the decision is not observed."
       _ -> handlePersonEditorInput event
+    -- The save dialog of the verified result takes the text entry keys, so q
+    -- edits the path here, and Ctrl-C detaches.
+    VtyEvent key | activeLayer state == SaveLayer -> handleSaveResultKey event key
     VtyEvent key | InputScreen index <- modelScreen (stateModel state) -> case key of
       Vty.EvKey (Vty.KChar 'd') [Vty.MCtrl] ->
         case (serviceRequest state,modelWorkflow (stateModel state)) of
@@ -883,6 +905,7 @@ handleServiceEventCore client event = do
           Vty.KChar 'j' | liveMonitor state -> moveOccurrence 1
           Vty.KChar 'k' | liveMonitor state -> moveOccurrence (-1)
           Vty.KChar 'G' | liveMonitor state -> followOutputTail
+          Vty.KChar 's' | serviceSavable state -> openSaveResult
           Vty.KChar 'e' | serviceMutable state, ServiceRequestScreen request <- modelScreen (stateModel state), Manager.draftPhase request == "draft" ->
             case modelWorkflow (stateModel state) of
               Just descriptor | not (null (workflowInputs descriptor)) ->
@@ -1027,7 +1050,9 @@ toPresentation state =
         Just run -> Service.resultLines run (case stateServiceResult state of
           Just (ident, retrieval) | ident == runIdText (Service.runIdentity run) -> Just retrieval
           _ -> Nothing)
+          <> [line | Just (ident, line) <- [stateServiceSaved state], ident == runIdText (Service.runIdentity run)]
         Nothing -> [],
+      presentationServiceSavable = serviceSavable state,
       presentationServiceRequestLines = maybe [] (serviceRequestLines . snd) (serviceRequest state),
       presentationServiceApprovalOffered = case modelScreen (stateModel state) of
         ServiceReviewScreen displayed tag ->
@@ -1622,6 +1647,28 @@ saveFinalResult :: EventM Name AppState ()
 saveFinalResult = do
   state <- get
   let pathText = T.intercalate "\n" (Edit.getEditContents (stateSaveEditor state))
+  case stateBackend state of
+    ServiceBackend {} -> saveServiceResult pathText
+    LocalBackend {} -> saveLocalResult pathText
+
+-- | Publish the retained verified result bytes of the installed run exactly
+-- through 'saveExact'. A refusal keeps the dialog open with its fixed
+-- message, and the destination stays as it was.
+saveServiceResult :: Text -> EventM Name AppState ()
+saveServiceResult pathText = do
+  state <- get
+  case serviceVerifiedResult state of
+    Nothing -> put state {stateSaveError = Just "the verified result is not available"}
+    Just (run, result) -> do
+      outcome <- liftIO (saveExact (T.unpack pathText) (Service.verifiedBytes result))
+      case outcome of
+        Left refusal -> put state {stateSaveError = Just (serviceSaveRefusal pathText refusal)}
+        Right () -> put state {stateSaveResult = False, stateSaveError = Nothing,
+          stateServiceSaved = Just (run, serviceSavedLine pathText (BS.length (Service.verifiedBytes result)))}
+
+saveLocalResult :: Text -> EventM Name AppState ()
+saveLocalResult pathText = do
+  state <- get
   case stateFinalResult state of
     Just (Right value) -> do
       result <- liftIO (try @SomeException (saveResultFile (T.unpack pathText) value))
@@ -1641,7 +1688,7 @@ saveFinalResult = do
 -- through 'saveExact'.
 saveResultFile :: FilePath -> Value -> IO ()
 saveResultFile path value =
-  saveExact path (BL.toStrict (encode value <> "\n")) >>= either (ioError . userError . T.unpack) pure
+  saveExact path (BL.toStrict (encode value <> "\n")) >>= either (ioError . userError . T.unpack . saveRefusalText) pure
 
 cycleRoutingPersona :: EventM Name AppState ()
 cycleRoutingPersona = withLocalBackend $ \config _ -> do

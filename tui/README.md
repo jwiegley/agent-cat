@@ -85,7 +85,9 @@ single FIFO ordered by protocol sequence, so a later decision cannot replace an
 earlier blocked producer. Filter, input, person, steering, and save editors retain
 separate drafts when a mandatory layer preempts another editor. `r` shows a verified
 result on demand. `s` copies it to a new mode-0600 file through an explicit path
-prompt. Save errors are scrollable with `PgUp` and `PgDn`. Steering uses a bounded
+prompt. In service mode, `s` saves the retained verified result bytes of the
+run in the same way, and a refusal shows a fixed message with the path. Save
+errors are scrollable with `PgUp` and `PgDn`. Steering uses a bounded
 editor beneath the run view so that the output remains visible during composition.
 
 The color map uses terminal-default backgrounds and semantic foreground colors.

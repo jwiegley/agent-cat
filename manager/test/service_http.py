@@ -10,25 +10,33 @@ import re
 import secrets
 import socket
 import ssl
+import stat
 import subprocess
 import sys
 import time
 
 source, work, runner = map(Path, sys.argv[1:4])
 native = sys.argv[4]
-tui_approval = len(sys.argv) == 6 and sys.argv[5] in ("tui-approval", "tui-consent-control", "tui-journey")
-# The journey continues the approval steps through the live monitor and the
-# decision heads that the manager presents. It answers the question head with
-# typed false and retries the recovery head, in the order that the manager
-# presents them. It then waits for terminal success and the verified result on
-# the screen, and detaches.
-journey = len(sys.argv) == 6 and sys.argv[5] == "tui-journey"
+JOURNEYS = ("tui-journey", "tui-journey-broken-answer")
+tui_approval = len(sys.argv) == 6 and sys.argv[5] in ("tui-approval", "tui-consent-control") + JOURNEYS
+# The journey is the gate of the Phase A service journey in one uninterrupted
+# TUI session. It continues the approval steps through the live monitor and
+# the decision heads that the manager presents. It answers the question head
+# with typed false and retries the recovery head, in the order that the
+# manager presents them. It then waits for terminal success and the verified
+# result on the screen, saves the verified bytes through the TUI, and
+# detaches. Each verified fact has its own literal JOURNEY-ASSERT message.
+# Deadline messages start with JOURNEY-DEADLINE, so they never match one.
+journey = len(sys.argv) == 6 and sys.argv[5] in JOURNEYS
+# The broken-answer control types true at the question. It must fail with the
+# typed-answer message.
+JOURNEY_ANSWER = b"true" if len(sys.argv) == 6 and sys.argv[5] == "tui-journey-broken-answer" else b"false"
 # The consent control presses y in the summary, where the approval really
 # starts, at the step that expects the detail-view refusal. It must fail with
 # the detail-view consent message. It shows only that this assertion detects
 # an approval. It does not break an approval guard.
 consent_control = len(sys.argv) == 6 and sys.argv[5] == "tui-consent-control"
-mixed = len(sys.argv) == 6 and sys.argv[5] in ("mixed", "mixed-confirm", "tui-approval", "tui-consent-control", "tui-journey")
+mixed = len(sys.argv) == 6 and sys.argv[5] in ("mixed", "mixed-confirm", "tui-approval", "tui-consent-control") + JOURNEYS
 confirm_uncertain = mixed and sys.argv[5] == "mixed-confirm"
 assert len(sys.argv) == 5 or mixed
 assert not tui_approval or os.environ.get("TUI_CHECK")
@@ -113,23 +121,26 @@ context.minimum_version = context.maximum_version = ssl.TLSVersion.TLSv1_3
 
 
 # True while a TUI session is open. During the session every mutation belongs
-# to the TUI, and the harness only reads.
-posts_forbidden = False
+# to the TUI, and the harness only reads. The journey sets it for the whole
+# run after fixture setup and credential issuance.
+posts_forbidden = journey
+if journey:
+    print("JOURNEY POST GUARD active: any harness POST through exchange after fixture setup and credential issuance fails", flush=True)
 
 
 @contextlib.contextmanager
 def harness_reads_only():
     """Forbid harness POSTs until the TUI session inside this block has ended."""
     global posts_forbidden
-    posts_forbidden = True
+    previous, posts_forbidden = posts_forbidden, True
     try:
         yield
     finally:
-        posts_forbidden = False
+        posts_forbidden = previous
 
 
 def exchange(path, headers=None, method="GET", payload=None):
-    assert not (posts_forbidden and method == "POST"), "harness POST during a TUI session"
+    assert not (posts_forbidden and method == "POST"), "harness POST while the POST guard is active"
     connection = http.client.HTTPSConnection("127.0.0.1", port, context=context, timeout=7)
     try:
         connection.request(method, path, body=payload, headers=headers or {})
@@ -154,12 +165,17 @@ def request(path, headers=None, method="GET", payload=None):
 
 def fetch(path, headers=None, method="GET", payload=None):
     deadline = time.monotonic() + 5
+    # A JSON read may meet the declared page-set refusal while the TUI holds
+    # the page-set capacity. A stream registration keeps its own 429 handling.
+    page_set_read = (headers or {}).get("Accept") != "text/event-stream"
     while True:
         status, value, raw, received = exchange(path, headers, method, payload)
-        if method != "GET" or status != 503 or time.monotonic() >= deadline:
+        if (method != "GET" or time.monotonic() >= deadline
+                or not (status == 503 or (status == 429 and page_set_read and value["code"] == "storage-quota"))):
             return status, value, raw, received
-        assert value["code"] == "storage-unavailable"
-        # Fresh read observations may contend with original coordinator work.
+        assert status == 429 or value["code"] == "storage-unavailable"
+        # Fresh read observations may contend with original coordinator work
+        # or with the page sets of the TUI. Each retry is a new bounded read.
         # No POST enters this loop.
         time.sleep(0.05)
 
@@ -463,6 +479,12 @@ for iteration in range(2):
                     if os.environ.get("TUI_CHECK") is not None:
                         from tui_probe import TuiSession
                         client_state = work / "unused-client-state"
+                        if journey:
+                            # The event cursor before the session bounds the read-only command evidence.
+                            status, start_overview, raw = request("/v1/snapshot", authorized)
+                            assert status == 200 and start_overview["items"] == [], "the journey does not start from an empty manager"
+                            validate("OverviewSnapshot", start_overview, raw)
+                            journey_cursor = start_overview["cursor"]
                         command = [os.environ["TUI_CHECK"], "--tui", "--service", str(client_profile),
                                    "+RTS", "-N" + native, "-RTS"]
                         with harness_reads_only(), TuiSession(runner, client_state, command=command, explicit_state=False) as session:
@@ -523,8 +545,8 @@ for iteration in range(2):
                                     assert [item["name"] for item in preparation["review"]["inputs"]] == list(declared)
                                     for item in preparation["review"]["inputs"]:
                                         expected = literal.encode() + (b"\n" if declared[item["name"]] == "prompt" else b"")
-                                        assert item["source"] == "literal" and item["bytes"] == str(len(expected)), "review input byte count"
-                                        assert item["sha256"] == hashlib.sha256(expected).hexdigest(), "review input digest"
+                                        assert item["source"] == "literal" and item["bytes"] == str(len(expected)), "JOURNEY-ASSERT request bytes differ from the typed literal"
+                                        assert item["sha256"] == hashlib.sha256(expected).hexdigest(), "JOURNEY-ASSERT request bytes differ from the typed literal"
                                     print("PASS actual TUI request carries the exact Unicode literal and the native prompt bytes", flush=True)
                                 last_key = 0
 
@@ -564,9 +586,12 @@ for iteration in range(2):
                                 for _ in range(5):
                                     visible = session.wait_screen("y APPROVE EXACT REVIEW")
                                     compact = "".join(char for char in visible if not char.isspace() and not "\u2500" <= char <= "\u257f")
-                                    for selector in ("reviewDigest", "requestRevision", "profileRevision", "descriptorRevision", "processGeneration"):
-                                        assert selector + preparation[selector] in compact, ("clipped selector", selector)
+                                    selectors = ("reviewDigest", "requestRevision", "profileRevision", "descriptorRevision", "processGeneration")
+                                    for selector in selectors:
+                                        assert selector + preparation[selector] in compact, ("JOURNEY-ASSERT a displayed review selector is clipped", selector)
                                     (work / "tui-approval.screen.txt").write_text(visible)
+                                    if journey:
+                                        print("PASS actual TUI shows the five review selectors unclipped:", ", ".join(selectors), flush=True)
                                     approval_start, (last_key, line) = key_notice(session, b"y", last_key, "explicit TUI approval showed no notice")
                                     print("KEY OUTCOME:", line, flush=True)
                                     if notice_is(line, last_key, APPROVAL_STARTED):
@@ -624,7 +649,7 @@ for iteration in range(2):
                                                     return frame_kind(visible), visible
                                             if time.monotonic() >= deadline or session.process.poll() is not None:
                                                 (work / ("tui-" + name + "-missing.screen.txt")).write_text(visible)
-                                                raise AssertionError(failure)
+                                                raise AssertionError("JOURNEY-DEADLINE " + failure)
 
                                     # The numbered outcome of a key that started nothing, on the status line.
                                     KEY_LINE = re.compile(r"Key (\d+): (.*)")
@@ -667,9 +692,9 @@ for iteration in range(2):
                                     assert status == 200, ("snapshot read", status)
                                     validate("RunSnapshot", observed_run, raw)
                                     (work / "tui-live-snapshot.json").write_bytes(raw)
-                                    assert observed_run["runId"] == run and observed_run["runtime"] is not None, "displayed runtime absent from the snapshot"
+                                    assert observed_run["runId"] == run and observed_run["runtime"] is not None, "JOURNEY-ASSERT displayed runtime disagrees with the snapshot"
                                     assert agrees(shown, observed_run["runtime"]["status"]), (
-                                        "displayed runtime disagrees with the snapshot", shown, observed_run["runtime"]["status"])
+                                        "JOURNEY-ASSERT displayed runtime disagrees with the snapshot", shown, observed_run["runtime"]["status"])
                                     assert observed_run["workflow"] is None or observed_run["workflow"] in visible
                                     assert observed_run["targetLabel"] is None or " target " + observed_run["targetLabel"] in visible
                                     print("PASS actual TUI shows runtime", shown, "from the snapshot in a whole", kind, "frame; the snapshot GET shows",
@@ -762,7 +787,9 @@ for iteration in range(2):
                                                 else:
                                                     raise AssertionError("exact resend deferred ten times")
                                                 resent = True
-                                            assert time.monotonic() < deadline and session.process.poll() is None, "the " + operation + " decision stayed pending"
+                                            if time.monotonic() >= deadline or session.process.poll() is not None:
+                                                (work / ("tui-" + operation + "-pending.screen.txt")).write_text(session.screen.text())
+                                                raise AssertionError("JOURNEY-DEADLINE the " + operation + " decision stayed pending")
                                             session.pump(0.2)
 
                                     order = []
@@ -785,7 +812,8 @@ for iteration in range(2):
                                             assert decision["question"]["code"] == "flag"
                                             assert (decision["question"]["prompt"].splitlines() or [""])[0][:30] in visible, "question prompt not displayed"
                                             before, _ = run_read(base + "/snapshot", "RunSnapshot")
-                                            session.send(b"false")
+                                            question_occurrence = occurrence
+                                            session.send(JOURNEY_ANSWER)
                                             press(b"\x04", "answer", ANSWER_STARTED, ("live", "recovery"), "answer")
                                             answer_deadline = time.monotonic() + 45
                                             resolution = await_resolution(head, "answer", answer_deadline)
@@ -801,13 +829,17 @@ for iteration in range(2):
                                             (work / "tui-answered-snapshot.json").write_text(json.dumps(after, default=str))
                                             # The snapshot publishes a flag answer as its rendered text, "no" for
                                             # false and "yes" for true. Runtime decodes the typed value without
-                                            # coercion, so this answer came from the JSON false that the TUI sent.
-                                            assert item["code"] == "flag" and item["answer"] == "no", ("occurrence answer is not the rendered false", item["answer"])
+                                            # coercion. The value is compared by identity, so neither the string
+                                            # "false" nor null passes. The run store check after terminal success
+                                            # compares the recorded JSON value the same way.
+                                            typed = {"no": False, "yes": True}.get(item["answer"], item["answer"])
+                                            assert item["code"] == "flag" and typed is False, "JOURNEY-ASSERT typed answer is not JSON false"
                                             delivered = next(ack for ack in acks if ack["state"] == "delivered")
-                                            answer_receipt, _ = run_read("/v1/commands/" + delivered["commandId"], "CommandReceipt")
-                                            assert answer_receipt["operation"] == "answer" and answer_receipt["resource"] == "/v1/decisions/" + head, "answer receipt binding"
-                                            assert answer_receipt["state"] == "effect-observed" and answer_receipt["effect"]["kind"] == "answer-accepted", "answer effect"
-                                            assert answer_receipt["effect"]["address"] == {"occurrenceId": occurrence}, "answer effect address"
+                                            answer_command = delivered["commandId"]
+                                            answer_receipt, _ = run_read("/v1/commands/" + answer_command, "CommandReceipt")
+                                            assert answer_receipt["operation"] == "answer" and answer_receipt["resource"] == "/v1/decisions/" + head, "JOURNEY-ASSERT answer effect is not correlated with the question"
+                                            assert answer_receipt["state"] == "effect-observed" and answer_receipt["effect"]["kind"] == "answer-accepted", "JOURNEY-ASSERT answer effect is not correlated with the question"
+                                            assert answer_receipt["effect"]["address"] == {"occurrenceId": occurrence}, "JOURNEY-ASSERT answer effect is not correlated with the question"
                                             now, _ = run_read(base + "/control", "RunControl")
                                             assert now["decisionHeadId"] != head, "the answered decision is still the head"
                                             print("PASS actual TUI answered the question head with typed false: the decision is no longer pending (" + resolution + ")",
@@ -886,16 +918,17 @@ for iteration in range(2):
                                             assert time.monotonic() < retry_deadline, ("retried occurrence has no chosen retry, acknowledgement or later attempt", chosen, acks, latest)
                                             session.pump(0.2)
                                         (work / "tui-retried-snapshot.json").write_text(json.dumps(after, default=str))
-                                        assert chosen["choice"] == "retry", ("recovery choice is not retry", chosen)
+                                        assert chosen["choice"] == "retry", ("JOURNEY-ASSERT retry effect is not correlated with the recovery", chosen)
+                                        retry_command = chosen["commandId"]
                                         while True:
                                             retry_receipt, _ = run_read("/v1/commands/" + chosen["commandId"], "CommandReceipt")
                                             if retry_receipt["state"] != "dispatch-attempted" and retry_receipt["state"] != "accepted":
                                                 break
                                             assert time.monotonic() < retry_deadline, ("retry receipt stayed", retry_receipt["state"])
                                             session.pump(0.2)
-                                        assert retry_receipt["operation"] == "retry" and retry_receipt["resource"] == base + "/control", "retry receipt binding"
-                                        assert retry_receipt["state"] == "effect-observed" and retry_receipt["effect"]["kind"] == "retried", ("retry effect", retry_receipt["state"])
-                                        assert retry_receipt["effect"]["address"]["occurrenceId"] == occurrence, "retry effect address"
+                                        assert retry_receipt["operation"] == "retry" and retry_receipt["resource"] == base + "/control", "JOURNEY-ASSERT retry effect is not correlated with the recovery"
+                                        assert retry_receipt["state"] == "effect-observed" and retry_receipt["effect"]["kind"] == "retried", ("JOURNEY-ASSERT retry effect is not correlated with the recovery", retry_receipt["state"])
+                                        assert retry_receipt["effect"]["address"]["occurrenceId"] == occurrence, "JOURNEY-ASSERT retry effect is not correlated with the recovery"
                                         now, _ = run_read(base + "/control", "RunControl")
                                         assert now["decisionHeadId"] != head, "the retried recovery is still the head"
                                         print("PASS actual TUI retried the recovery head with r: the decision is no longer pending (" + resolution + "), the snapshot",
@@ -915,16 +948,16 @@ for iteration in range(2):
                                     while True:
                                         final, _ = run_read(base + "/snapshot", "RunSnapshot")
                                         status = final["runtime"]["status"] if final["runtime"] is not None else None
-                                        assert status not in ("failed", "cancelled", "orphaned"), ("run did not succeed", status, final["failure"])
+                                        assert status not in ("failed", "cancelled", "orphaned"), ("JOURNEY-ASSERT terminal evidence is not success", status, final["failure"])
                                         if status == "succeeded":
                                             break
-                                        assert time.monotonic() < terminal_deadline and session.process.poll() is None, ("terminal success deadline", status)
+                                        assert time.monotonic() < terminal_deadline and session.process.poll() is None, ("JOURNEY-DEADLINE terminal success", status)
                                         session.pump(0.2)
                                     result_deadline = time.monotonic() + 45
                                     while not ("Terminal: succeeded" in session.screen.text() and "Result SHA-256: " in session.screen.text()):
                                         if time.monotonic() >= result_deadline or session.process.poll() is not None:
                                             (work / "tui-result-missing.screen.txt").write_text(session.screen.text())
-                                            raise AssertionError("TUI did not show terminal success and a verified result")
+                                            raise AssertionError("JOURNEY-DEADLINE TUI terminal success and verified result")
                                         session.pump(0.2)
                                     session.settle()
                                     shown_result = session.screen.text()
@@ -932,12 +965,125 @@ for iteration in range(2):
                                     outputs, _ = run_read(base + "/outputs", "OutputPage")
                                     result = next(item for item in outputs["items"] if item["kind"] == "result")
                                     artifact = result["artifact"]
-                                    assert result["verification"]["state"] == "verified" and artifact["kind"] == "source-result" and artifact["runId"] == run
+                                    assert result["verification"]["state"] == "verified" and artifact["kind"] == "source-result" and artifact["runId"] == run, (
+                                        "JOURNEY-ASSERT terminal evidence is not success")
                                     verified_run, _ = run_read(base + "/snapshot", "RunSnapshot")
-                                    assert verified_run["verification"] == {"state": "verified", "artifactId": artifact["id"]}, ("snapshot verification", verified_run["verification"])
+                                    assert verified_run["verification"] == {"state": "verified", "artifactId": artifact["id"]}, (
+                                        "JOURNEY-ASSERT terminal evidence is not success", verified_run["verification"])
+                                    assert "Terminal: succeeded" in shown_result, "JOURNEY-ASSERT terminal evidence is not success"
                                     expected = ("Terminal: succeeded", "Result: verified " + str(int(artifact["bytes"])) + " bytes", "Result SHA-256: " + artifact["sha256"])
-                                    assert all(row in shown_result for row in expected), ("TUI result rows disagree with the source-result artifact", expected)
+                                    assert all(row in shown_result for row in expected[1:]), ("JOURNEY-ASSERT result size or digest differs from the verified artifact", expected)
                                     print("PASS actual TUI shows terminal success from the snapshot and the verified result:", expected[1], "and", expected[2], flush=True)
+
+                                    # The run store records each answer as its typed JSON value. This
+                                    # read-only check compares the recorded answer of the question
+                                    # occurrence with JSON false by identity.
+                                    answer_files = sorted(work.glob("manager/runs/runs/*/runtime/answers.json"))
+                                    assert len(answer_files) == 1, ("journey run store answers", answer_files)
+                                    recorded = [entry for entry in json.loads(answer_files[0].read_bytes())["answers"] if entry["occurrenceId"] == question_occurrence]
+                                    assert len(recorded) == 1 and recorded[0]["answer"] is False, "JOURNEY-ASSERT typed answer is not JSON false"
+                                    print("PASS the run store records the answer of occurrence", question_occurrence, "as JSON false by identity (read-only)", flush=True)
+
+                                    # Segment 4: save the verified bytes through the TUI. A save onto an
+                                    # existing entry is refused and leaves it unchanged. A save to a fresh
+                                    # absolute path writes the verified bytes with mode 0600.
+                                    def squeeze(text):
+                                        """The text without white space and box drawing, so wrapped rows join."""
+                                        return "".join(char for char in text if not char.isspace() and not "\u2500" <= char <= "\u257f")
+
+                                    def save_through_tui(path, outcome, name):
+                                        """Open the save dialog with s, type the path, press Ctrl-D and wait for the outcome text."""
+                                        session.wait_screen("s SAVE RESULT", timeout=15)
+                                        session.send(b"s")
+                                        session.wait_screen("Save verified result", timeout=15)
+                                        session.send(str(path).encode())
+                                        session.send(b"\x04")
+                                        save_deadline = time.monotonic() + 15
+                                        while squeeze(outcome) not in squeeze(session.screen.text()):
+                                            if time.monotonic() >= save_deadline or session.process.poll() is not None:
+                                                (work / ("tui-" + name + "-missing.screen.txt")).write_text(session.screen.text())
+                                                raise AssertionError("JOURNEY-DEADLINE TUI " + name + " outcome")
+                                            session.pump()
+                                        (work / ("tui-" + name + ".screen.txt")).write_text(session.screen.text())
+
+                                    def independent_download(location, size):
+                                        """One read-only GET of the artifact bytes. A declared refusal permits a new bounded read."""
+                                        download_deadline = time.monotonic() + 5
+                                        while True:
+                                            connection = http.client.HTTPSConnection("127.0.0.1", port, context=context, timeout=7)
+                                            try:
+                                                connection.request("GET", location, headers=authorized | {"Accept": "application/octet-stream"})
+                                                response = connection.getresponse()
+                                                body = response.read(max(size, 1048576) + 1)
+                                                if response.status == 200:
+                                                    assert len(body) == size and response.getheader("Content-Type") == "application/octet-stream", "independent download shape"
+                                                    return body
+                                                problem = frozen.parse_json(body)
+                                                assert response.status in (429, 503) and time.monotonic() < download_deadline, (
+                                                    "JOURNEY-DEADLINE independent download", response.status, problem.get("code"))
+                                            finally:
+                                                connection.close()
+                                            time.sleep(0.05)
+
+                                    size = int(artifact["bytes"])
+                                    existing_path = work / "journey-existing-result.bin"
+                                    existing_path.write_bytes(b"keep\n")
+                                    existing_before = os.lstat(existing_path)
+                                    save_through_tui(existing_path, "ERROR: Save refused: an entry already exists at the destination. Nothing was written. Path: "
+                                                     + str(existing_path), "save-refused")
+                                    existing_after = os.lstat(existing_path)
+                                    metadata = lambda status: (status.st_ino, status.st_mode, status.st_size, status.st_mtime_ns)
+                                    assert existing_path.read_bytes() == b"keep\n" and metadata(existing_after) == metadata(existing_before), (
+                                        "JOURNEY-ASSERT a refused save changed the existing destination")
+                                    print("PASS actual TUI refused the save onto an existing file with the fixed message and its path, and left its bytes and metadata unchanged", flush=True)
+                                    session.send(b"\x1b")
+                                    wait_frame(("live",), 15, "Esc did not close the save dialog", "save-close")
+                                    saved_path = work / "journey-saved-result.bin"
+                                    assert not os.path.lexists(saved_path), "the fresh save path exists before the save"
+                                    save_through_tui(saved_path, "Saved the verified " + str(size) + " bytes to " + str(saved_path), "save")
+                                    saved = saved_path.read_bytes()
+                                    saved_status = os.lstat(saved_path)
+                                    assert stat.S_ISREG(saved_status.st_mode) and stat.S_IMODE(saved_status.st_mode) == 0o600, (
+                                        "JOURNEY-ASSERT the saved file is not a regular file with mode 0600", oct(saved_status.st_mode))
+                                    assert len(saved) == size and hashlib.sha256(saved).hexdigest() == artifact["sha256"], (
+                                        "JOURNEY-ASSERT saved bytes differ from the output size or digest")
+                                    downloaded = independent_download(artifact["download"], size)
+                                    (work / "journey-independent-download.bin").write_bytes(downloaded)
+                                    assert saved == downloaded, "JOURNEY-ASSERT saved bytes differ from the verified download"
+                                    print("PASS actual TUI saved the verified", size, "bytes to a fresh absolute path with mode 0600; they equal an independent",
+                                          "read-only GET download and the outputs size and SHA-256", artifact["sha256"], flush=True)
+
+                                    # Single-command evidence: the command.changed events since the cursor
+                                    # read before the session name every command of the journey. Each
+                                    # receipt names its operation. Approve, answer and retry each have
+                                    # exactly one command identity.
+                                    command_resources = []
+                                    event_cursor = journey_cursor
+                                    for _ in range(256):
+                                        status, batch, raw, _ = fetch("/v1/events?after=" + event_cursor, authorized | {"Accept": "application/json"})
+                                        assert status == 200, ("journey event read", status, batch.get("code"))
+                                        validate("EventBatch", batch, raw)
+                                        for event in batch["events"]:
+                                            if event["event"] == "command.changed" and event["data"]["resource"] not in command_resources:
+                                                command_resources.append(event["data"]["resource"])
+                                        event_cursor = batch["cursor"]
+                                        if not batch["hasMore"]:
+                                            break
+                                    else:
+                                        raise AssertionError("JOURNEY-DEADLINE event pages")
+                                    identities = {}
+                                    for resource in command_resources:
+                                        receipt, _ = run_read(resource, "CommandReceipt")
+                                        identities.setdefault(receipt["operation"], []).append(resource.rsplit("/", 1)[1])
+                                    (work / "journey-commands.json").write_text(json.dumps(identities, indent=1))
+                                    for operation in ("approve", "answer", "retry"):
+                                        assert len(identities.get(operation, [])) == 1, (
+                                            "JOURNEY-ASSERT an operation has other than one command identity", operation, identities.get(operation))
+                                    assert identities["answer"] == [answer_command] and identities["retry"] == [retry_command], (
+                                        "JOURNEY-ASSERT an operation has other than one command identity", identities)
+                                    print("PASS single command identity per operation from read-only events and receipts: approve", identities["approve"][0],
+                                          "answer", answer_command, "retry", retry_command, "; operations",
+                                          {operation: len(values) for operation, values in sorted(identities.items())}, flush=True)
                             session.send(b"q")
                             assert session.wait_exit() == 0, "service TUI did not exit successfully"
                             session.assert_restored()
@@ -956,8 +1102,9 @@ for iteration in range(2):
                                 (work / "tui-detached-snapshot.json").write_bytes(raw)
                                 print("PASS tui-journey: Unicode submission with exact request bytes, explicit approval, live runtime progress from the snapshot, "
                                       "the question and recovery heads each once in the recorded order with the typed false answer and the TUI retry, terminal "
-                                      "success from the snapshot, the verified result size and digest on screen, q detach with terminal restoration and no local "
-                                      "runner state", flush=True)
+                                      "success from the snapshot, the verified result size and digest on screen, the refused and the fresh TUI save of the "
+                                      "verified bytes, one command identity per operation, q detach with terminal restoration and no local runner state, and "
+                                      "no harness POST under the active guard", flush=True)
                                 break
                             status, control, raw = request("/v1/runs/" + associated["runId"] + "/control", authorized)
                             assert status == 200

@@ -79,10 +79,12 @@ preparations remain intact.
 
 ## Upload admission and publication
 
-There is one fail-fast file/materialization slot per actual Store lifetime. Its
-operation retains a Runtime private subroot and an atomic duplicate of the actual
-service lease. Lock order is file slot, configuration, then database. No database
-transaction remains open while awaiting upload chunks or performing file IO.
+There is one file/materialization slot per actual Store lifetime. An ordinary
+operation waits for the slot within a fresh five-second allowance, and a slot
+that stays held for the whole allowance is `StoreBusy`. Its operation retains a
+Runtime private subroot and an atomic duplicate of the actual service lease.
+Lock order is file slot, configuration, then database. No database transaction
+remains open while awaiting upload chunks or performing file IO.
 Store close rejects new operations and joins existing file work before releasing
 ownership. The slot is not a publication or command success receipt.
 

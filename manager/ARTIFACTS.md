@@ -57,7 +57,9 @@ its existing transaction, projection and ingestion bounds.
 
 ## File and memory ownership
 
-Each Store has one fail-fast file loan. The loan spans capture, verification,
+Each Store has one file loan. An ordinary operation waits for the loan within
+a fresh five-second allowance, and a loan that stays held for the whole
+allowance is `StoreBusy`. The loan spans capture, verification,
 authorization checks before delivery and the actual response callback. Concurrent content reads
 cannot accumulate independent response buffers outside that loan. Each source or
 export capture is limited to 64 MiB before a response. A source download retains

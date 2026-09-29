@@ -10,14 +10,16 @@ import Agentic.Runtime (DescriptorCapabilities (..), WorkflowDescriptor (..), Wo
 import Agentic.Tui.Person (PersonPrompt (..))
 import Agentic.Tui.Model
 import qualified Agentic.Tui.Approval as A
-import Agentic.Tui.Presentation (ActiveLayer (..), Presentation (..), emptyPresentation, serviceRequestLines, serviceReviewAllowed, serviceReviewRows, wrapDisplayLines)
+import Agentic.Tui.Presentation (ActiveLayer (..), Presentation (..), emptyPresentation, serviceRequestLines, serviceReviewAllowed, serviceReviewRows,
+  serviceSaveRefusal, serviceSavedLine, wrapDisplayLines)
 import Agentic.Tui.RunModel (emptyRunView, reconcileRunView)
-import Agentic.Tui.Save (saveExact)
+import Agentic.Tui.Save (SaveRefusal (..), saveExact)
 import qualified Agentic.Tui.Service as S
 import qualified Agentic.Tui.ServiceLane as L
 import Control.Concurrent (forkIO, newEmptyMVar, putMVar, takeMVar, threadDelay, throwTo)
 import Control.Exception (AsyncException (ThreadKilled), ErrorCall (ErrorCall), SomeException, finally, fromException, throwIO, try)
 import Data.Bits ((.&.))
+import Data.Char (isSpace)
 import qualified Data.Set as Set
 import GHC.Clock (getMonotonicTimeNSec)
 import System.Directory (createDirectory, doesPathExist, getTemporaryDirectory, listDirectory, removePathForcibly)
@@ -38,6 +40,7 @@ import qualified Data.Vector as V
 import qualified Data.Map.Strict as Map
 import qualified Graphics.Vty as Vty
 import System.Exit (die)
+import System.IO.Error (alreadyExistsErrorType, mkIOError)
 import System.Timeout (timeout)
 
 -- | The argument renders one presentation at a fixed terminal size.
@@ -1127,6 +1130,33 @@ resultTests render profile = do
   check "the live monitor at (140,36) shows the terminal status, the verified size and the digest"
     (all (`T.isInfixOf` frame) ["Runtime: Succeeded", "Terminal: succeeded", "Result: verified 81 bytes",
       "Result SHA-256: 9294065bba4452375bfdc9a35d8126ce26a9d6f8fb720a22cccb3cb706651fcd"])
+  -- The service save dialog, its fixed refusal and the saved result line.
+  let savable = (emptyPresentation model)
+        { presentationService = True, presentationNoColor = True, presentationRunView = reconcileRunView native emptyRunView,
+          presentationServiceRun = Just verified, presentationServiceObservation = S.observationLines Nothing True (Just verified),
+          presentationServiceResultLines = successLines, presentationServiceSavable = True }
+      existingPath = "/tmp/caf\233/existing.bin"
+      existing = mkIOError alreadyExistsErrorType "createLink" Nothing (Just (T.unpack existingPath))
+      offeredFrame = render (140,36) savable
+      dialogFrame = render (140,36) savable {presentationLayer = SaveLayer}
+      refusedFrame = render (140,36) savable {presentationLayer = SaveLayer, presentationSaveError = Just (serviceSaveRefusal existingPath (SaveIOFailure existing))}
+      invalidFrame = render (140,36) savable {presentationLayer = SaveLayer, presentationSaveError = Just (serviceSaveRefusal "relative.bin" InvalidDestination)}
+      savedFrame = render (140,36) savable {presentationServiceResultLines = successLines <> [serviceSavedLine "/tmp/saved.bin" 81]}
+      -- A wrapped row continues after the dialog border and its padding.
+      compact = T.filter (\c -> not (isSpace c) && not ('\x2500' <= c && c <= '\x257f'))
+  putStrLn "RENDER service save refusal at (140,36):" >> putStr (T.unpack refusedFrame)
+  checks
+    [ ("a live monitor with retained verified bytes offers s SAVE RESULT, and one without them does not",
+        "s SAVE RESULT" `T.isInfixOf` offeredFrame && not ("s SAVE RESULT" `T.isInfixOf` frame)),
+      ("the service save dialog describes the verified result bytes and its keys",
+        all ((`T.isInfixOf` compact dialogFrame) . compact) ["Save verified result", "Copy the verified result bytes to a new absolute path. Existing entries are refused.", "Ctrl-D SAVE"]),
+      ("the service save dialog shows the fixed refusal of an existing entry with its path",
+        compact "ERROR: Save refused: an entry already exists at the destination. Nothing was written. Path: /tmp/caf\233/existing.bin" `T.isInfixOf` compact refusedFrame),
+      ("the service save dialog shows the fixed refusal of an invalid path",
+        compact "ERROR: Save refused: the destination must be one absolute single-line file path. Path: relative.bin" `T.isInfixOf` compact invalidFrame),
+      ("a successful service save shows the saved size and path in the result lines",
+        "Saved the verified 81 bytes to /tmp/saved.bin" `T.isInfixOf` savedFrame)
+    ]
 
 -- | Exclusive publication of exact bytes.
 saveTests :: IO ()
@@ -1174,6 +1204,23 @@ saveTests = do
           failed refusedDangling && isSymbolicLink danglingStatus && not missingCreated),
         ("the save function refuses a relative path and a missing directory", failed refusedRelative && failed refusedParent),
         ("a refused save leaves no new file", Set.fromList entries == Set.fromList ["result.bin", "existing.bin", "link.bin", "dangling.bin"])
+      ]
+    let message path = either (Just . serviceSaveRefusal (T.pack path)) (const Nothing)
+        existsText path = "Save refused: an entry already exists at the destination. Nothing was written. Path: " <> T.pack path
+    checks
+      [ ("an existing file, a symlink and a dangling symlink get the fixed existing-entry message with the path",
+          message existing refusedExisting == Just (existsText existing) && message link refusedLink == Just (existsText link)
+            && message dangling refusedDangling == Just (existsText dangling)),
+        ("a relative path gets the fixed invalid-path message",
+          message "relative.bin" refusedRelative == Just "Save refused: the destination must be one absolute single-line file path. Path: relative.bin"),
+        ("another input or output failure names only its failure type",
+          message (directory </> "absent" </> "result.bin") refusedParent
+            == Just ("Save failed: nothing was written (does not exist). Path: " <> T.pack (directory </> "absent" </> "result.bin"))),
+        ("a refusal shows control characters and line breaks of the path as replacement characters",
+          serviceSaveRefusal "/tmp/a\ESC[31m\nb" InvalidDestination
+            == "Save refused: the destination must be one absolute single-line file path. Path: /tmp/a\xfffd[31m\xfffd\&b"),
+        ("a successful save names the verified size and the path", serviceSavedLine (T.pack target) (BS.length bytes)
+            == "Saved the verified " <> T.pack (show (BS.length bytes)) <> " bytes to " <> T.pack target)
       ]) `finally` removePathForcibly directory
 
 -- | A comparable summary of a lane whose pending commands and locations are

@@ -16,6 +16,8 @@ module Agentic.Tui.Presentation
     serviceReviewAllowed,
     serviceReviewRows,
     serviceRequestLines,
+    serviceSaveRefusal,
+    serviceSavedLine,
     wrapDisplayLines,
   )
 where
@@ -47,6 +49,7 @@ import Agentic.Tui.Highlight
 import Agentic.Tui.Model
 import Agentic.Tui.Person
 import Agentic.Tui.RunModel
+import Agentic.Tui.Save (SaveRefusal (..))
 import Agentic.Tui.Types
 import qualified Agentic.Tui.Service as Service
 import Agentic.Tui.ServiceLane (KeyOutcome, internalFaultStatus, keyOutcomeLine)
@@ -65,6 +68,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
 import qualified Graphics.Vty as Vty
+import System.IO.Error (ioeGetErrorType, isAlreadyExistsError)
 
 -- | Brick identities are distinct for every independently scrolling surface.
 data Name
@@ -143,6 +147,9 @@ data Presentation = Presentation
     -- | The terminal status and verified result lines of the installed run,
     -- as 'Agentic.Tui.Service.resultLines' produces them.
     presentationServiceResultLines :: ![Text],
+    -- | Whether s opens the save dialog for the retained verified result
+    -- bytes of the installed run.
+    presentationServiceSavable :: !Bool,
     -- | The outcome of the latest mutation key that started nothing. The
     -- status line shows it until the next key press or view change.
     presentationServiceKeyOutcome :: !(Maybe KeyOutcome),
@@ -194,6 +201,7 @@ emptyPresentation model =
       presentationServiceRun = Nothing,
       presentationServiceRetry = False,
       presentationServiceResultLines = [],
+      presentationServiceSavable = False,
       presentationServiceKeyOutcome = Nothing,
       presentationConfig = Nothing,
       presentationPersonPrompt = Nothing,
@@ -804,12 +812,32 @@ saveResultView :: Presentation -> Int -> Int -> Widget Name
 saveResultView presentation width mainHeight =
   dialog width mainHeight " Save verified result " $
     vBox
-      [ maybe (displayTextWrap "Copy the verified final JSON result to a new absolute path. Existing files are refused.") (const emptyWidget) (presentationSaveError presentation),
+      [ maybe (displayTextWrap intro) (const emptyWidget) (presentationSaveError presentation),
         vLimit 3 (borderWithLabel (displayText " Path • ") (Edit.renderEditor (displayText . T.unlines) True (presentationEditor presentation))),
         case presentationSaveError presentation of
           Nothing -> displayText "Ctrl-D saves. Esc cancels."
           Just failure -> viewport FailureViewport Vertical (withAttr (attrName "error") (displayTextWrap ("ERROR: " <> failure)))
       ]
+  where
+    intro
+      | presentationService presentation = "Copy the verified result bytes to a new absolute path. Existing entries are refused."
+      | otherwise = "Copy the verified final JSON result to a new absolute path. Existing files are refused."
+
+-- | The fixed message of a refused service save, with the path. The path is
+-- shown on one line through 'safeDisplay'.
+serviceSaveRefusal :: Text -> SaveRefusal -> Text
+serviceSaveRefusal path refusal = case refusal of
+  InvalidDestination -> "Save refused: the destination must be one absolute single-line file path. Path: " <> shownPath path
+  SaveIOFailure failure
+    | isAlreadyExistsError failure -> "Save refused: an entry already exists at the destination. Nothing was written. Path: " <> shownPath path
+    | otherwise -> "Save failed: nothing was written (" <> T.pack (show (ioeGetErrorType failure)) <> "). Path: " <> shownPath path
+
+-- | The result line after a service save of this many verified bytes.
+serviceSavedLine :: Text -> Int -> Text
+serviceSavedLine path size = "Saved the verified " <> shown size <> " bytes to " <> shownPath path
+
+shownPath :: Text -> Text
+shownPath = T.replace "\n" "\xfffd" . safeDisplay
 
 cancelView :: Int -> Int -> Widget Name
 cancelView width mainHeight =
@@ -922,6 +950,7 @@ keyHelpLines presentation = case modelScreen model of
     | presentationService presentation ->
         ["d full run details and error", "Tab focus pane", "Up/Down move or scroll", "j/k select occurrence", "G follow output",
          "g refreshes observations"] <> ["r retries the recovery that the manager offers" | presentationServiceRetry presentation]
+          <> ["s saves the verified result bytes to a new file" | presentationServiceSavable presentation]
           <> ["q detaches; the manager run continues", "? or Esc close this help"]
   LiveScreen _ ->
     ["d full run details and error", "Tab focus pane", "Up/Down move or scroll", "j/k select occurrence", "G follow output"]
@@ -1105,8 +1134,8 @@ footerItems presentation width height = case presentationLayer presentation of
       ConfirmScreen _ -> confirmItems False
       ProcessLoading _ -> ["Esc CANCEL STARTUP"]
       LaunchingScreen _ -> ["Esc DETACH", "c CANCEL RUN", "? KEYS"]
-      LiveScreen _ | presentationService presentation, compact -> ["q DETACH", "Tab PANE", "d DETAILS", "? KEYS"]
-                   | presentationService presentation -> ["q DETACH", "g REFRESH", "d DETAILS", compactNavigation, "? KEYS"]
+      LiveScreen _ | presentationService presentation, compact -> ["q DETACH", "Tab PANE", "d DETAILS", "? KEYS"] <> saveItem
+                   | presentationService presentation -> ["q DETACH"] <> saveItem <> ["g REFRESH", "d DETAILS", compactNavigation, "? KEYS"]
       LiveScreen _ | compact ->
         ["Esc " <> if presentationRunning presentation then "DETACH" else "RUNS", "Tab PANE", "d DETAILS", "? KEYS"]
           <> ["c CANCEL" | presentationRunning presentation]
@@ -1117,6 +1146,7 @@ footerItems presentation width height = case presentationLayer presentation of
           <> filter (not . T.null) [liveResultHint presentation, compactControlHint presentation]
           <> ["d DETAILS", compactNavigation, "? KEYS"]
       FailureScreen _ -> ["Esc BACK", "Up/Down SCROLL", "PgUp/PgDn", "Home/End", "? KEYS"]
+    saveItem = ["s SAVE RESULT" | presentationServiceSavable presentation]
     browserPaneHint = case presentationPaneFocus presentation of
       PrimaryPane -> "Right DETAILS"
       SecondaryPane -> "Left LIST"

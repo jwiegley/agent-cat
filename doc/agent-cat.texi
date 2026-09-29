@@ -3350,7 +3350,16 @@ the run outputs, reads the snapshot again, and downloads only when that
 snapshot publishes the verified state for the same result reference.  It
 retrieves the result of each run once, and a refused retrieval shows its
 refusal code.  Any other terminal status or verification state downloads
-nothing.  Service mode never reads a local result artifact.
+nothing.  Service mode never reads a local result artifact.  After the
+retrieval, and while no decision head and no run details are shown, @kbd{s}
+opens the save dialog.  @kbd{C-d} publishes the retained verified bytes
+unchanged at the typed absolute path through the exclusive save function, and
+the new file has mode 0600.  A path that is not one absolute single-line file
+path, an existing entry at the destination, including a symbolic link, and any
+other input or output failure are refused.  The dialog then stays open with a
+fixed message and the path, and the destination is left as it was.  A
+successful save closes the dialog and adds a result line with the saved size
+and the path.
 
 The frontend also shows the decision head that the manager presents in the
 same observation.  A head is shown only when the run controls are owned and
