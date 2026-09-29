@@ -137,6 +137,12 @@ data Presentation = Presentation
     -- the published workflow and target label from it, also when the runtime
     -- is absent.
     presentationServiceRun :: !(Maybe Service.RunObservation),
+    -- | Whether the installed control observation offers a retry for the
+    -- recovery at the head, as 'Agentic.Tui.Service.retryOffer' decides.
+    presentationServiceRetry :: !Bool,
+    -- | The terminal status and verified result lines of the installed run,
+    -- as 'Agentic.Tui.Service.resultLines' produces them.
+    presentationServiceResultLines :: ![Text],
     -- | The outcome of the latest mutation key that started nothing. The
     -- status line shows it until the next key press or view change.
     presentationServiceKeyOutcome :: !(Maybe KeyOutcome),
@@ -186,6 +192,8 @@ emptyPresentation model =
       presentationServiceObservation = [],
       presentationServiceRequestLines = [],
       presentationServiceRun = Nothing,
+      presentationServiceRetry = False,
+      presentationServiceResultLines = [],
       presentationServiceKeyOutcome = Nothing,
       presentationConfig = Nothing,
       presentationPersonPrompt = Nothing,
@@ -376,6 +384,7 @@ serviceLiveLines presentation =
   presentationServiceRequestLines presentation
     <> presentationServiceObservation presentation
     <> ["Approval receipt: " <> fromMaybe "none" (presentationServiceApproval presentation)]
+    <> presentationServiceResultLines presentation
 
 -- | The lines that name a request, its phase and its run. The run has its own
 -- line, so a long request id never splits the run id across screen rows.
@@ -844,8 +853,12 @@ recoveryView presentation width mainHeight = case presentationRecovery presentat
         contentWidth = confirmationInnerWidth width
         contentHeight = sum (map (length . wrapDisplayLines contentWidth) [request, message])
         choices = snapshotRecoveryChoices recovery
-        -- Service mode shows the published choices read-only, without keys.
+        -- Service mode offers r only when the control observation offers a
+        -- retry. Other published choices are shown as unsupported here.
+        unsupported = [recoveryChoice option | option <- choices, recoveryChoice option /= "retry"]
         actions
+          | presentationService presentation, presentationServiceRetry presentation =
+              T.intercalate "   " (["r RETRY"] <> ["Unsupported here: " <> T.intercalate ", " unsupported | not (null unsupported)])
           | presentationService presentation = "Choices (read-only here): " <> T.intercalate ", " (map recoveryChoice choices)
           | otherwise = T.intercalate "   " [recoveryKeyText (recoveryChoice option) <> " " <> recoveryChoice option | option <- choices]
      in dialog width (min mainHeight (contentHeight + 4)) " Recovery required " $
@@ -908,7 +921,8 @@ keyHelpLines presentation = case modelScreen model of
   LiveScreen _
     | presentationService presentation ->
         ["d full run details and error", "Tab focus pane", "Up/Down move or scroll", "j/k select occurrence", "G follow output",
-         "g refreshes observations", "q detaches; the manager run continues", "? or Esc close this help"]
+         "g refreshes observations"] <> ["r retries the recovery that the manager offers" | presentationServiceRetry presentation]
+          <> ["q detaches; the manager run continues", "? or Esc close this help"]
   LiveScreen _ ->
     ["d full run details and error", "Tab focus pane", "Up/Down move or scroll", "j/k select occurrence", "G follow output"]
       <> [hint | hint <- [liveResultHint presentation, controlHintLine presentation, if presentationRunning presentation then "c cancel owned run" else ""], not (T.null hint)]
@@ -1037,6 +1051,7 @@ footerItems presentation width height = case presentationLayer presentation of
     | presentationPersonSubmitted presentation -> ["Esc CANCEL RUN", "WAITING FOR DELIVERY"]
     | otherwise -> ["Esc CANCEL RUN", "Ctrl-D SUBMIT", "Enter newline", "PgUp/PgDn prompt"]
   RecoveryLayer
+    | presentationService presentation, presentationServiceRetry presentation -> ["r RETRY", "d DETAILS", "g REFRESH", "? KEYS", "q DETACH"]
     | presentationService presentation -> ["READ-ONLY RECOVERY", "d DETAILS", "g REFRESH", "? KEYS", "q DETACH"]
     | otherwise -> recoveryItems presentation <> ["c CANCEL RUN", "PgUp/PgDn scroll"]
   SteerLayer -> ["Esc CLOSE", "Ctrl-D SEND", "Enter newline"]

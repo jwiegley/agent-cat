@@ -2426,6 +2426,42 @@ Non-blocking findings of fess audit fess/fast-A6A7-r1.md (2026-09-29) on subtask
 
 alexey pass, high. Check.lean:422-423 is the only place the approve/object/declined -> arm assignment exists. checkBlock_level_le discharges all three arms with the same bound and checkBlock_bounded is permutation-invariant; the flagship uses ifFlag, not caseVerdict, so none of the nine kernel proofs touch it. A transposition of arms miscompiles every case-using program and passes every test and theorem. Fix: extend srcCaseVerdict in test/DslSmoke.lean to run the plan under three worlds (approve / object ['no'] / declined) and assert a distinct arm-identifying act fires in each. Also from deep-review (medium): the lexer/macro/override region has zero test coverage — no define test, no scanString failure test, no --define override test; each is a two-line addition to the existing rejects harness (test/DslSmoke.lean:240-297).
 
+* TODO [#D] Resolve the non-blocking fess findings of subtask A8A9
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-a8a9-fess-followup-6d1e
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-29 Tue 13:08]
+:MODIFIED: [2026-09-29 Tue 13:08]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess audit fess/fast-A8A9-r1.md (2026-09-29) on subtask A8A9.
+
+1. (medium) A result retrieval that returns no verified result is stored as the permanent refusal "no verified result" (tui/src/Agentic/Tui/App.hs near 770, guard near 480). The run is never retrieved again, even after its snapshot becomes Verified. Store no result, or a retryable pending marker, for that outcome, and keep a permanent record only for declared refusals.
+
+2. (medium) Accepted adaptation to record: the manager records result verification lazily, when the run outputs are read. For a succeeded run whose snapshot shows referenced, retrieveResult reads the outputs, re-reads the snapshot, and downloads only when that fresh snapshot shows Verified for the same result reference (tui/src/Agentic/Tui/Service.hs near 600-677). No bytes are downloaded without Verified. Record the lazy verification as a contract fact in the manager documentation, or change the manager to verify eagerly.
+
+3. (low) The shared press helper in manager/test/service_http.py (near 709-712) now accepts "did not start: a command is in progress" as a reason to press again, also for the answer key. Accept it only for the retry press, or document why the answer press needs it.
+
+4. (low) saveExact (tui/src/Agentic/Tui/Save.hs near 42-43) returns Left when createLink succeeds and the removal of the private file then fails, although the destination is published. It also needs hard-link support in the destination file system. Treat a failed removal after publication as success with a leftover temporary file, and document the hard-link requirement.
+
+5. (low) Local-mode saveResultFile moved from an O_EXCL|O_NOFOLLOW open to saveExact (tui/src/Agentic/Tui/App.hs near 1640-1644). The Integrator accepted this as consolidation. Confirm that local-mode behavior and its documentation stay correct.
+
+6. (low) The retry attempt in the receipt address comes from the highest attempt that the TUI snapshot publishes (tui/src/Agentic/Tui/Service.hs near 1051), while the manager builds the address from its own snapshot (manager/src/Agentic/Manager/State.hs near 661). A mismatch leaves the retry uncertain but never completes it falsely. Add a journey assertion that the TUI shows "retry effect observed".
+
+7. (low) A check label in tui/test/ServiceTests.hs (near 1092) says that an unavailable verification downloads nothing, but the check asserts only the referenced case. Rename the check or add the assertion.
+
+8. (low) App.hs imports the new project module Agentic.Tui.Save. The rule says that new code imports only Agentic.Runtime and Agentic.Manager.Client among project modules. Save.hs imports no project module and source-boundaries passed. Confirm that intra-TUI imports of new modules are within the intent of the rule.
+
+Additional limitations from the implementer: the recovery-first path of the journey was not exercised; no negative-control journey was run for retry or result retrieval; service mode has no key that saves the retained verified bytes to a file.
+
+Acceptance: each item is fixed with a check, or recorded as not needed with a reason.
+
 * DONE [#E] conv_comm converse: needs a Nontrivial fence and delta_injective
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -15415,7 +15451,7 @@ to an unapproved local launch.
 :LABELS:   ["p7","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-29 Tue 12:34]
+:MODIFIED: [2026-09-29 Tue 13:08]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-034
 :SOURCE_REPO: agent-cat
@@ -15501,6 +15537,13 @@ Local-mode behavior remains intact without a duplicated service runtime model.
     "author": "johnw",
     "text": "Subtask A6A7 shows the associated run through LiveScreen from the installed RunObservation in service mode, with local-only hints and keys hidden and manager strings passed through safeDisplay. It adds a service-owned decision head (question or read-only recovery) derived only from the installed observation, and an Answer mutation on the exact decision observation whose value comes from answerValue, so input false for a flag question is sent as JSON false. The answer completes only on a matching effect-observed answer-accepted receipt. The Werror build, tui-model-test at N1 and N8 (454 checks), tui-journey at N1 and N8 (question then recovery), and bash tui/ci/tui.sh passed. Follow-up findings: acat-a6a7-fess-followup-1exm. Evidence: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A6A7/fast-impl-r1. This package stays in progress.",
     "created_at": "2026-09-29T19:34:30Z"
+  },
+  {
+    "id": 346,
+    "issue_id": "acat-wm-034-3vqz",
+    "author": "johnw",
+    "text": "Subtask A8A9 (2026-09-29): service mode now offers retry at a pending recovery head, taken only from Service.retryOffer on the installed control and decision views, prepared on the exact control observation (If-Match control ETag), and completed only on a matching effect-observed retried or recovery-chosen receipt. Failover and abandon are refused as unsupported in this milestone. The TUI recognizes terminal runtime status, and for a succeeded run with Verified verification it retrieves the source-result through Client.downloadVerified and shows the status, verified size, digest and a bounded preview. A compiled saveExact function publishes bytes exclusively with mode 0600. Checks: Werror build, tui-model-test N1 and N8, tui-journey N1 and N8 (question, recovery with retry, terminal success, verified size and digest), source-boundaries. Follow-up: acat-a8a9-fess-followup-6d1e.",
+    "created_at": "2026-09-29T20:08:35Z"
   }
 ]
 #+end_src

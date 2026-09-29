@@ -3334,6 +3334,24 @@ status and any stale observation on separate lines.  Elapsed time remains
 unknown, and the monitor offers no local cancel, steering, redirect, or result
 action.
 
+The run is terminal only when the snapshot runtime status is succeeded,
+failed, cancelled, or orphaned.  A null, starting, running, or cancelling
+runtime is never terminal.  For a succeeded run whose verification is verified
+and whose result reference names the verified artifact, the frontend reads the
+source-result metadata from the run outputs.  That metadata must name the run,
+the source-result kind, and the size, digest, and code of the result reference.
+The frontend then downloads the artifact through the same manager client, which
+checks the size and the SHA-256 digest against that metadata.  The frontend
+keeps the verified bytes unchanged in memory, up to 64 MiB, and shows the
+terminal status, the verified size, the digest, and a bounded preview.  The
+manager records the verification of a result reference when the run outputs
+are read.  When the snapshot publishes a referenced result, the frontend reads
+the run outputs, reads the snapshot again, and downloads only when that
+snapshot publishes the verified state for the same result reference.  It
+retrieves the result of each run once, and a refused retrieval shows its
+refusal code.  Any other terminal status or verification state downloads
+nothing.  Service mode never reads a local result artifact.
+
 The frontend also shows the decision head that the manager presents in the
 same observation.  A head is shown only when the run controls are owned and
 name the decision as the pending head at position zero.  A question head shows
@@ -3348,12 +3366,19 @@ precondition.  It completes only when the command receipt reports an observed
 refused or unresolved receipt leaves the answer uncertain, and only an
 explicitly confirmed exact resend may repeat it.  A retained answer stays bound
 to its original decision when the head changes.  A recovery head shows the
-published message and choices read-only, and @kbd{d} opens the run details over
-it.  Every @kbd{C-d} that sends nothing shows a numbered key outcome that
-states the reason.  When an observation read in flight defers a mutation key,
+published message and choices, and @kbd{d} opens the run details over it.  When
+the run controls offer a retry for the head, @kbd{r} sends that retry once to
+the run controls, with the entity tag of the displayed control observation as
+its precondition.  A @code{retry} offer sends the @code{retry} operation, and a
+@code{choose-recovery} offer that carries the retry choice sends that choice.
+The retry completes only when the command receipt reports the observed effect
+of the offer kind, @code{retried} or @code{recovery-chosen}, for the recovering
+occurrence and attempt of the run.  Failover and abandon are not supported
+here, and @kbd{f} and @kbd{a} show a refusal.  Without a retry offer, the
+choices are read-only.  Every @kbd{C-d} or @kbd{r} that sends nothing shows a
+numbered key outcome that states the reason.  When an observation read in flight defers a mutation key,
 automatic refresh pauses while that outcome is shown, so the next press of the
-key finds no read in flight.  Recovery controls and verified result retrieval
-are not yet connected to this UI.  Service mode remains an unaccepted
+key finds no read in flight.  Service mode remains an unaccepted
 implementation.
 @end table
 
@@ -3442,8 +3467,11 @@ mandatory decision preempts another editor.  In a person-answer editor, printabl
 characters including @kbd{c}, @kbd{q}, and @kbd{?} are answer text, @kbd{C-d}
 submits, and @kbd{ESC} opens cancellation confirmation.  After result
 verification, @kbd{r} shows the bounded result pane on demand.  @kbd{s} opens an
-explicit absolute-path prompt which copies the JSON value to a new mode-0600 file.
-An existing path is never overwritten.  @kbd{PGUP} and @kbd{PGDN} scroll save errors.
+explicit absolute-path prompt which copies the JSON value and a final line feed
+to a new mode-0600 file.  The frontend writes the bytes to a private file in
+the destination directory and publishes it with a hard link, so an existing
+entry, including a symbolic link or a dangling symbolic link, is never replaced
+and a failed save leaves no new file.  @kbd{PGUP} and @kbd{PGDN} scroll save errors.
 
 The monitor renders answer output separately from bounded public message, tool,
 todo, context-usage, and explicit reasoning-summary updates.  ACP thought chunks

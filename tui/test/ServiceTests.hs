@@ -6,16 +6,23 @@ module ServiceTests (serviceTests) where
 import qualified Agentic.Manager.Client as C
 import Agentic.Runtime (DescriptorCapabilities (..), WorkflowDescriptor (..), WorkflowInputDescriptor (..), WorkflowInputSource (..),
   OccurrenceId (..), AttemptId (..), RunSnapshot (..), OccurrenceSnapshot (..), AttemptSnapshot (..), ControlAckSnapshot (..),
-  PersonAnswering (..), RecoverySnapshot (..), mkRunId)
+  PersonAnswering (..), RecoverySnapshot (..), RecoveryOption (..), RunStatus (..), mkRunId)
 import Agentic.Tui.Person (PersonPrompt (..))
 import Agentic.Tui.Model
 import qualified Agentic.Tui.Approval as A
 import Agentic.Tui.Presentation (ActiveLayer (..), Presentation (..), emptyPresentation, serviceRequestLines, serviceReviewAllowed, serviceReviewRows, wrapDisplayLines)
 import Agentic.Tui.RunModel (emptyRunView, reconcileRunView)
+import Agentic.Tui.Save (saveExact)
 import qualified Agentic.Tui.Service as S
 import qualified Agentic.Tui.ServiceLane as L
 import Control.Concurrent (forkIO, newEmptyMVar, putMVar, takeMVar, threadDelay, throwTo)
-import Control.Exception (AsyncException (ThreadKilled), ErrorCall (ErrorCall), SomeException, fromException, throwIO, try)
+import Control.Exception (AsyncException (ThreadKilled), ErrorCall (ErrorCall), SomeException, finally, fromException, throwIO, try)
+import Data.Bits ((.&.))
+import qualified Data.Set as Set
+import GHC.Clock (getMonotonicTimeNSec)
+import System.Directory (createDirectory, doesPathExist, getTemporaryDirectory, listDirectory, removePathForcibly)
+import System.FilePath ((</>))
+import System.Posix.Files (createSymbolicLink, fileMode, getFileStatus, getSymbolicLinkStatus, isSymbolicLink, readSymbolicLink)
 import Control.Monad (unless)
 import Crypto.Hash (Digest, SHA256, hash)
 import Data.Time.Clock (UTCTime, addUTCTime)
@@ -150,6 +157,8 @@ serviceTests render = do
   compositeTests render profile row request0 preparation snapshot absentRuntime (metadata,items) control decision
   decisionTests render profile request0 receiptValue (metadata,items) (decisionValue,decision) control
   liveTests render profile request0 (metadata,items)
+  resultTests render profile
+  saveTests
   laneTests render row profile
   where
     profileValue = object ["version" .= (1 :: Int), "id" .= ("profile_main" :: T.Text),
@@ -931,6 +940,241 @@ decisionTests render profile request0 receiptValue (metadata,items) (decisionVal
       ("control sequences in a recovery message render as U+FFFD at (140,36)", sanitized `T.isInfixOf` hostileRecovery),
       ("no decision head frame contains a raw control character", all (T.null . raw) [question, submitted, recoveryFrame, hostileQuestion, hostileRecovery])
     ]
+  retryTests render headPresentation (metadata,items) receiptValue (controlObs,control) (decisionObs,recoveryValue) snapshot runRead
+
+-- | The retry of the recovery at the head: only 'S.retryOffer' selects the
+-- offer, the body matches the offer kind, and only the matching effect
+-- completes it.
+retryTests :: ((Int,Int) -> Presentation -> T.Text) -> (ActiveLayer -> Presentation) -> (Value,[Value]) -> Value
+  -> ((T.Text,T.Text),S.ControlView) -> ((T.Text,T.Text),Value) -> S.RunObservation -> S.RunRead (T.Text,T.Text) -> IO ()
+retryTests render headPresentation (metadata,items) receiptValue (controlObs,control) (decisionObs,recoveryValue) snapshot questionRead = do
+  otherRunId <- either (die . show) pure (mkRunId "run_other")
+  let recoveryObject = object ["gap" .= ("adapter gap" :: T.Text), "message" .= ("Retry the adapter?" :: T.Text),
+        "retries" .= ([] :: [T.Text]), "choices" .= [object ["choice" .= ("retry" :: T.Text), "target" .= Null]], "chosen" .= Null]
+      failedAttempt = case [attempt | item <- items, lookupKey "occurrenceId" item == Just (String "18446744073709551615"),
+          Just (Array attempts) <- [lookupKey "attempts" item], attempt <- V.toList attempts] of
+        attempt : _ -> put "state" (String "failed") (put "address" (object ["occurrenceId" .= ("0" :: T.Text), "attemptId" .= ("2" :: T.Text)]) attempt)
+        [] -> Null
+      recovering = [if lookupKey "occurrenceId" item == Just (String "0")
+        then put "attempts" (toJSON [failedAttempt]) (put "personPending" (Bool False) (put "recovery" recoveryObject item)) else item | item <- items]
+      retryOfferValue = S.ControlOffer "retry" (OccurrenceId 0) Nothing (Just "generation_3") [] [] []
+      chooseOffer choices = S.ControlOffer "choose-recovery" (OccurrenceId 0) Nothing (Just "generation_3") [] choices []
+  recoverySnapshot <- either (die . show) pure (S.decodeSnapshot metadata recovering)
+  decision <- either (die . show) pure (S.decodeDecision recoveryValue)
+  let owned = control {S.controlOffers = [retryOfferValue]}
+      retryRead = S.RunRead recoverySnapshot (controlObs,owned) (Just (decisionObs,decision))
+      withOffers offers = retryRead {S.runReadControl = (controlObs,owned {S.controlOffers = offers})}
+      withControl changed = retryRead {S.runReadControl = (controlObs,changed)}
+      withDecision changed = retryRead {S.runReadDecision = Just (decisionObs,changed)}
+      retry read' = S.retryMutation "profile_main" read'
+      refused result = case result of Left _ -> True; Right _ -> False
+      encodedBody mutation = case mutation of
+        S.Retry _ view offer _ -> TE.decodeUtf8 (BL.toStrict (encode (S.retryBody view offer)))
+        _ -> ""
+  (mutation,observed) <- either (die . ("FAIL the fixture retry was refused: " <>) . T.unpack) pure (retry retryRead)
+  (chosen,_) <- either (die . ("FAIL the fixture choose-recovery retry was refused: " <>) . T.unpack) pure
+    (retry (withOffers [chooseOffer [RecoveryOption "abandon" Nothing, RecoveryOption "retry" Nothing]]))
+  checks
+    [ ("a retry offer for the owned pending recovery head is the retry mutation with the control observation as its precondition",
+        mutation == S.Retry owned decision retryOfferValue (Just 2) && observed == controlObs),
+      ("the retry is sent to the run controls with the decision profile",
+        S.mutationOperation mutation == "retry" && S.mutationURI mutation == "/v1/runs/run_21/control" && S.mutationProfile mutation == "profile_main"),
+      ("a retry offer sends the closed retry body", encodedBody mutation == "{\"generation\":\"generation_3\",\"occurrenceId\":\"0\",\"operation\":\"retry\"}"),
+      ("a choose-recovery offer that carries retry sends the retry choice",
+        S.mutationOperation chosen == "choose-recovery"
+          && encodedBody chosen == "{\"choice\":\"retry\",\"generation\":\"generation_3\",\"occurrenceId\":\"0\",\"operation\":\"choose-recovery\"}"),
+      ("a retry offer is preferred to a choose-recovery offer",
+        case retry (withOffers [chooseOffer [RecoveryOption "retry" Nothing], retryOfferValue]) of
+          Right (S.Retry _ _ offer _, _) -> offer == retryOfferValue
+          _ -> False),
+      ("no retry is offered for another generation", refused (retry (withOffers [retryOfferValue {S.offerGeneration = Just "generation_9"}]))
+          && refused (retry (withDecision decision {S.decisionGeneration = "generation_9"}))),
+      ("no retry is offered for another occurrence", refused (retry (withOffers [retryOfferValue {S.offerOccurrence = OccurrenceId 1}]))),
+      ("no retry is offered for controls that are not owned", refused (retry (withControl owned {S.controlSupervision = "observer"}))
+          && refused (retry (withControl owned {S.controlSupervision = "lost"}))),
+      ("no retry is offered for a decision that is not the head", refused (retry (withControl owned {S.controlHead = Just "decision_4"}))
+          && refused (retry (withDecision decision {S.decisionPosition = 1})) && refused (retry (withDecision decision {S.decisionState = "submitting"}))
+          && refused (retry retryRead {S.runReadDecision = Nothing})),
+      ("no retry is offered without a retry offer", refused (retry (withOffers []))
+          && refused (retry (withOffers [chooseOffer [RecoveryOption "abandon" Nothing]]))
+          && refused (retry (withOffers [retryOfferValue {S.offerOperation = "answer"}]))),
+      ("no retry is offered for a recovery whose choices lack retry",
+        refused (retry (withDecision decision {S.decisionContent = S.RecoveryContent "adapter gap" "Retry the adapter?" [RecoveryOption "abandon" Nothing]}))),
+      ("no retry is offered for a question head", refused (retry questionRead {S.runReadControl = (controlObs,control {S.controlOffers = [retryOfferValue]})})),
+      ("no retry is offered for another run or profile", refused (retry retryRead {S.runReadSnapshot = recoverySnapshot {S.runIdentity = otherRunId}})
+          && refused (S.retryMutation "profile_other" retryRead)),
+      ("no retry is offered when the snapshot publishes no recovery", refused (retry retryRead {S.runReadSnapshot = snapshot})),
+      ("a retry completes on the retried effect and a choose-recovery retry on the recovery-chosen effect",
+        [S.retryEffect offer | S.Retry _ _ offer _ <- [mutation, chosen]] == ["retried", "recovery-chosen"])
+    ]
+  let effect kind place resource = object ["kind" .= (kind :: T.Text), "runtimeSequence" .= ("12" :: T.Text),
+        "address" .= place, "resource" .= (resource :: T.Text)]
+      address occurrence attempt = object (["occurrenceId" .= (occurrence :: T.Text)] <> ["attemptId" .= (value :: T.Text) | Just value <- [attempt]])
+      retryReceipt operation value = put "operation" (String operation) (put "requiredScopes" (toJSON ["control" :: T.Text])
+        (put "resource" (String "/v1/runs/run_21/control") (put "links" (object ["self" .= ("/v1/commands/cmd_11" :: T.Text),
+          "resource" .= ("/v1/runs/run_21/control" :: T.Text)]) (put "state" (String "effect-observed") (put "effect" value
+            (put "dispatchAttemptedAt" (String "2026-09-03T00:00:01Z") receiptValue))))))
+      decoded operation value = either (die . ("FAIL retry receipt fixture: " <>) . show) pure (C.decodeObservation (retryReceipt operation value))
+  matching <- decoded "retry" (effect "retried" (address "0" (Just "2")) "/v1/runs/run_21/control")
+  otherAttempt <- decoded "retry" (effect "retried" (address "0" (Just "1")) "/v1/runs/run_21/control")
+  noAttempt <- decoded "retry" (effect "retried" (address "0" Nothing) "/v1/runs/run_21/control")
+  otherOccurrence <- decoded "retry" (effect "retried" (address "1" (Just "2")) "/v1/runs/run_21/control")
+  otherResource <- decoded "retry" (effect "retried" (address "0" (Just "2")) "/v1/runs/run_other/control")
+  chosenReceipt <- decoded "choose-recovery" (effect "recovery-chosen" (address "0" (Just "2")) "/v1/runs/run_21/control")
+  checks
+    [ ("a retried effect for the recovering occurrence and attempt of the run matches the retry",
+        S.receiptMatches mutation matching && S.receiptEffectKind matching == Just "retried"),
+      ("a retry effect for another attempt or without the attempt does not complete the retry",
+        not (S.receiptMatches mutation otherAttempt) && not (S.receiptMatches mutation noAttempt)),
+      ("a retry effect for another occurrence or run does not complete the retry",
+        not (S.receiptMatches mutation otherOccurrence) && not (S.receiptMatches mutation otherResource)),
+      ("a choose-recovery receipt matches only the choose-recovery retry",
+        S.receiptMatches chosen chosenReceipt && not (S.receiptMatches mutation chosenReceipt) && not (S.receiptMatches chosen matching))
+    ]
+  native <- maybe (die "FAIL missing recovery runtime") pure (S.runSnapshot recoverySnapshot)
+  (occurrence,recovery) <- case S.decisionHead retryRead of
+    Just (S.RecoveryHead _ occurrence recovery) -> pure (occurrence,recovery)
+    _ -> die "FAIL the retry fixture has no recovery head"
+  let base = (headPresentation RecoveryLayer) {presentationRecovery = Just (occurrence,recovery), presentationServiceRun = Just recoverySnapshot,
+        presentationModel = (presentationModel (headPresentation RecoveryLayer)) {modelSnapshot = Just native}}
+      offered = render (140,36) base {presentationServiceRetry = True}
+      mixedChoices = render (140,36) base {presentationServiceRetry = True,
+        presentationRecovery = Just (occurrence,recovery {snapshotRecoveryChoices = [RecoveryOption "retry" Nothing, RecoveryOption "abandon" Nothing]})}
+  putStrLn "RENDER service recovery head with a retry offer at (140,36):" >> putStr (T.unpack offered)
+  checks
+    [ ("a recovery head with a retry offer shows r RETRY and no read-only marker",
+        all (`T.isInfixOf` offered) ["Recovery required", "Retry the adapter?", "r RETRY", "q DETACH"]
+          && not (any (`T.isInfixOf` offered) ["READ-ONLY RECOVERY", "Choices (read-only here)", "Unsupported here"])),
+      ("published choices other than retry are shown as unsupported", "Unsupported here: abandon" `T.isInfixOf` mixedChoices)
+    ]
+
+-- | Terminal recognition and verified result selection from the validated
+-- snapshot and output page set.
+resultTests :: ((Int,Int) -> Presentation -> T.Text) -> S.Profile -> IO ()
+resultTests render profile = do
+  snapshotValue <- BS.readFile "test/fixtures/manager/v1/valid/snapshot-result-metadata.json" >>= either die pure . eitherDecodeStrict'
+  (metadata,items) <- case snapshotValue of
+    Object fields | Just (Array values) <- KM.lookup "items" fields -> pure (Object (KM.delete "page" (KM.delete "items" fields)),V.toList values)
+    _ -> die "invalid result snapshot fixture shape"
+  outputsValue <- BS.readFile "test/fixtures/manager/v1/valid/outputs.json" >>= either die pure . eitherDecodeStrict'
+  (outputMetadata,outputItems) <- case outputsValue of
+    Object fields | Just (Array values) <- KM.lookup "items" fields -> pure (Object (KM.delete "page" (KM.delete "items" fields)),V.toList values)
+    _ -> die "invalid outputs fixture shape"
+  let verifiedMetadata = put "verification" (object ["state" .= ("verified" :: T.Text), "artifactId" .= ("artifact_1" :: T.Text)]) metadata
+      runtime status = put "runtime" (object ["status" .= (status :: T.Text), "lastSequence" .= ("7" :: T.Text), "protocolVersion" .= (2 :: Int)])
+      decoded value = either (die . show) pure (S.decodeSnapshot value items)
+      alterArtifact change = [if lookupKey "kind" item == Just (String "result") then alter "artifact" change item else item | item <- outputItems]
+      refusedOutputs run changed = case S.decodeOutputs run outputMetadata changed of Left C.InvalidResponse -> True; _ -> False
+  unavailable <- decoded metadata
+  verified <- decoded verifiedMetadata
+  failed <- decoded (runtime "failed" verifiedMetadata)
+  cancelled <- decoded (runtime "cancelled" verifiedMetadata)
+  orphaned <- decoded (runtime "orphaned" verifiedMetadata)
+  running <- decoded (runtime "running" verifiedMetadata)
+  cancelling <- decoded (runtime "cancelling" verifiedMetadata)
+  absent <- decoded (put "runtime" Null verifiedMetadata)
+  referencedOther <- decoded (alter "result" (put "artifactId" (String "artifact_2")) verifiedMetadata)
+  referenced <- decoded (put "verification" (object ["state" .= ("referenced" :: T.Text), "artifactId" .= ("artifact_1" :: T.Text)]) metadata)
+  referencedFailed <- decoded (runtime "failed" (put "verification" (object ["state" .= ("referenced" :: T.Text), "artifactId" .= ("artifact_1" :: T.Text)]) metadata))
+  artifact <- case S.decodeOutputs verified outputMetadata outputItems of
+    Right (Just value) -> pure value
+    other -> die ("FAIL the verified fixture artifact was refused: " <> show other)
+  let bytes = BS.replicate 80 65 <> "\n"
+      result = S.VerifiedResult artifact bytes
+      successLines = S.resultLines verified (Just (Right result))
+  checks
+    [ ("only a succeeded runtime with a verified matching result reference is retrieved",
+        S.resultWanted verified && not (any S.resultWanted [unavailable, failed, cancelled, orphaned, running, cancelling, absent, referencedOther, referenced])),
+      ("only a succeeded runtime with a referenced matching result reference asks the manager to verify it",
+        S.resultReferenced referenced && not (any S.resultReferenced [verified, unavailable, referencedFailed, referencedOther])),
+      ("the output artifact that the manager verified for a referenced snapshot is bound to the same reference",
+        S.decodeOutputs referenced outputMetadata outputItems == Right (Just artifact) && refusedOutputs referenced (alterArtifact (put "bytes" (String "82")))),
+      ("a referenced result waits for the retrieval, and an unavailable one downloads nothing",
+        S.resultLines referenced Nothing == ["Terminal: succeeded", "Result: retrieving the verified bytes"]),
+      ("succeeded, failed, cancelled and orphaned are terminal",
+        map S.runTerminal [verified, failed, cancelled, orphaned] == map Just [RunSucceeded, RunFailedStatus, RunCancelledStatus, RunOrphaned]),
+      ("a null, running or cancelling runtime is never terminal and shows no result lines",
+        all ((== Nothing) . S.runTerminal) [running, cancelling, absent] && all (null . (`S.resultLines` Nothing)) [running, cancelling, absent]),
+      ("failed, cancelled and orphaned runs show their terminal status without a download",
+        [S.resultLines run Nothing | run <- [failed, cancelled, orphaned]] ==
+          [["Terminal: " <> name, "Result: no download for a run that did not succeed"] | name <- ["failed", "cancelled", "orphaned"]]),
+      ("unavailable verification yields no download", S.resultLines unavailable Nothing == ["Terminal: succeeded", "Result: no download; verification is unavailable (missing)"]),
+      ("the verified output artifact is bound to the run result reference",
+        S.artifactId artifact == "artifact_1" && S.artifactRun artifact == "run_21" && S.artifactKind artifact == "source-result"
+          && S.artifactBytes artifact == 81 && S.artifactDigest artifact == "9294065bba4452375bfdc9a35d8126ce26a9d6f8fb720a22cccb3cb706651fcd"
+          && S.artifactDownload artifact == "/v1/artifacts/artifact_1"),
+      ("mismatched artifact metadata is refused",
+        all (refusedOutputs verified) [alterArtifact (put "sha256" (String (T.replicate 64 "0"))), alterArtifact (put "bytes" (String "82")),
+          alterArtifact (put "runId" (String "run_other")), alterArtifact (put "kind" (String "export")), alterArtifact (put "id" (String "artifact_2")),
+          alterArtifact (put "code" (String "text"))]),
+      ("a verified output artifact for an unverified run snapshot is refused", refusedOutputs unavailable outputItems),
+      ("a retrieved result shows the terminal status, the verified size, the digest and a bounded preview",
+        successLines == ["Terminal: succeeded", "Result: verified 81 bytes",
+          "Result SHA-256: 9294065bba4452375bfdc9a35d8126ce26a9d6f8fb720a22cccb3cb706651fcd", "Result preview: " <> T.replicate 80 "A" <> " "]),
+      ("a pending or refused retrieval is shown as such",
+        S.resultLines verified Nothing == ["Terminal: succeeded", "Result: retrieving the verified bytes"]
+          && S.resultLines verified (Just (Left "503 storage-unavailable")) == ["Terminal: succeeded", "Result: retrieval refused (503 storage-unavailable)"]),
+      ("a long preview is bounded to 120 characters",
+        T.length (last (S.resultLines verified (Just (Right result {S.verifiedBytes = BS.replicate 100000 66})))) == T.length "Result preview: " + 120)
+    ]
+  native <- maybe (die "FAIL missing result runtime") pure (S.runSnapshot verified)
+  let model = (initialServiceModel [profile]) {modelScreen = LiveScreen (S.runIdentity verified), modelSnapshot = Just native}
+      frame = render (140,36) (emptyPresentation model)
+        { presentationService = True, presentationNoColor = True, presentationRunView = reconcileRunView native emptyRunView,
+          presentationServiceRun = Just verified, presentationServiceResultLines = successLines,
+          presentationServiceObservation = S.observationLines Nothing True (Just verified) }
+  putStrLn "RENDER service terminal result at (140,36):" >> putStr (T.unpack frame)
+  check "the live monitor at (140,36) shows the terminal status, the verified size and the digest"
+    (all (`T.isInfixOf` frame) ["Runtime: Succeeded", "Terminal: succeeded", "Result: verified 81 bytes",
+      "Result SHA-256: 9294065bba4452375bfdc9a35d8126ce26a9d6f8fb720a22cccb3cb706651fcd"])
+
+-- | Exclusive publication of exact bytes.
+saveTests :: IO ()
+saveTests = do
+  base <- getTemporaryDirectory
+  suffix <- show <$> getMonotonicTimeNSec
+  let directory = base </> ("tui-save-" <> suffix)
+      bytes = "exact \NUL bytes without a final newline" :: BS.ByteString
+      target = directory </> "result.bin"
+      existing = directory </> "existing.bin"
+      link = directory </> "link.bin"
+      dangling = directory </> "dangling.bin"
+      missing = directory </> "missing.bin"
+  createDirectory directory
+  (do
+    saved <- saveExact target bytes
+    written <- BS.readFile target
+    status <- getFileStatus target
+    BS.writeFile existing "keep"
+    refusedExisting <- saveExact existing bytes
+    keptExisting <- BS.readFile existing
+    createSymbolicLink existing link
+    refusedLink <- saveExact link bytes
+    linkStatus <- getSymbolicLinkStatus link
+    linkTarget <- readSymbolicLink link
+    keptThroughLink <- BS.readFile existing
+    createSymbolicLink missing dangling
+    refusedDangling <- saveExact dangling bytes
+    danglingStatus <- getSymbolicLinkStatus dangling
+    missingCreated <- doesPathExist missing
+    refusedAgain <- saveExact target "other"
+    keptTarget <- BS.readFile target
+    refusedRelative <- saveExact "relative.bin" bytes
+    refusedParent <- saveExact (directory </> "absent" </> "result.bin") bytes
+    entries <- listDirectory directory
+    let failed result = case result of Left _ -> True; Right () -> False
+    checks
+      [ ("the save function writes exactly the given bytes without a trailing newline", saved == Right () && written == bytes),
+        ("the saved file has mode 0600", fileMode status .&. 0o777 == 0o600),
+        ("the save function refuses an existing file without modifying it", failed refusedExisting && keptExisting == "keep"
+            && failed refusedAgain && keptTarget == bytes),
+        ("the save function refuses a symlink without modifying it or its target",
+          failed refusedLink && isSymbolicLink linkStatus && linkTarget == existing && keptThroughLink == "keep"),
+        ("the save function refuses a dangling symlink without creating its target",
+          failed refusedDangling && isSymbolicLink danglingStatus && not missingCreated),
+        ("the save function refuses a relative path and a missing directory", failed refusedRelative && failed refusedParent),
+        ("a refused save leaves no new file", Set.fromList entries == Set.fromList ["result.bin", "existing.bin", "link.bin", "dangling.bin"])
+      ]) `finally` removePathForcibly directory
 
 -- | A comparable summary of a lane whose pending commands and locations are
 -- text markers.

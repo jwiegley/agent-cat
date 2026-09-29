@@ -13,6 +13,8 @@ module Agentic.Tui.Service
     observeSnapshot, observeControl, observeDecision, observeResult, decodeSnapshot, decodeControl, decodeDecision,
     decisionPrompt, answerValue, answerOffered, retryOffer, headMatches,
     DecisionHead (..), decisionHead, answerMutation, answerBody,
+    retryMutation, retryBody, retryEffect,
+    runTerminal, resultWanted, resultReferenced, decodeOutputs, VerifiedResult (..), retrieveResult, resultLines,
     observedBinding, RunRead (..), RequestRead (..), Selection (..), ReadVerdict (..), readVerdict, runReadValid,
     readRequestId, readRequestRun, runtimeStatus, observationLines,
     approvalStatus, receiptSettlement
@@ -44,7 +46,9 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Vector as V
 import Data.Word (Word32, Word64)
-import Data.Maybe (listToMaybe)
+import Data.Maybe (isJust, listToMaybe)
+import qualified Data.Text.Encoding as TE
+import Data.Text.Encoding.Error (lenientDecode)
 
 -- | One configured execution profile's public identity and readiness.
 data Profile = Profile
@@ -100,6 +104,11 @@ data Mutation
     -- | The typed answer to the question that this decision observation
     -- names. The command stays bound to this decision when the head changes.
   | Answer !DecisionView !Value
+    -- | The retry that this control offer names for the recovery decision at
+    -- the head. The control observation is the precondition. The attempt is
+    -- the latest attempt that the snapshot publishes for the occurrence, and
+    -- the manager names it in the effect address.
+  | Retry !ControlView !DecisionView !ControlOffer !(Maybe Word32)
   deriving (Eq, Show)
 
 mutationOperation :: Mutation -> Text
@@ -109,6 +118,7 @@ mutationOperation mutation = case mutation of
   Enqueue _ -> "enqueue"
   Approve {} -> "approve"
   Answer {} -> "answer"
+  Retry _ _ offer _ -> offerOperation offer
 
 mutationURI :: Mutation -> Text
 mutationURI mutation = case mutation of
@@ -117,6 +127,7 @@ mutationURI mutation = case mutation of
   Enqueue request -> requestURI request
   Approve _ preparation -> "/v1/preparations/" <> C.preparationId preparation
   Answer decision _ -> "/v1/decisions/" <> decisionId decision
+  Retry control _ _ _ -> "/v1/runs/" <> controlRun control <> "/control"
 
 mutationProfile :: Mutation -> Text
 mutationProfile mutation = case mutation of
@@ -125,6 +136,7 @@ mutationProfile mutation = case mutation of
   Enqueue request -> C.draftProfile request
   Approve _ preparation -> C.preparationProfile preparation
   Answer decision _ -> decisionProfile decision
+  Retry _ decision _ _ -> decisionProfile decision
 
 requestURI :: C.DraftView -> Text
 requestURI request = "/v1/requests/" <> C.draftId request
@@ -159,10 +171,18 @@ prepareMutation client now mutation observed
         Just current | owned current (mutationURI mutation) (decisionRevision decision),
           decodeDecision (C.observedValue current) == Right decision -> C.prepareObserved client current (answerBody decision value)
         _ -> pure (Left C.InvalidResponse)
+      -- The retry precondition is the exact control observation that
+      -- offered the retry, with its entity tag as If-Match.
+      Retry control decision offer _ -> case observed of
+        Just current | owned current (mutationURI mutation) (controlRevision control),
+          decodeControl (C.observedValue current) == Right control,
+          retryOffer control decision == Just offer -> C.prepareObserved client current (retryBody decision offer)
+        _ -> pure (Left C.InvalidResponse)
   where
     needed = case mutation of
       Approve {} -> ["observe","submit","control"]
       Answer {} -> ["observe","control"]
+      Retry {} -> ["observe","control"]
       _ -> ["observe","submit"]
     permitted = case C.clientCapabilities client of
       Object fields -> case (KM.lookup "scopes" fields, KM.lookup "profileIds" fields) of
@@ -285,7 +305,9 @@ approvalSelectors preparation =
 
 -- | Whether a receipt is the receipt of this mutation. An effect of an input
 -- change or an enqueue names the request. An effect of an answer names the
--- run controls and the occurrence of the answered decision.
+-- run controls and the occurrence of the answered decision. An effect of a
+-- retry names the run controls, the recovering occurrence and the attempt
+-- that the retry follows.
 receiptMatches :: Mutation -> C.CommandReceipt -> Bool
 receiptMatches mutation receipt = C.operationName (C.receiptOperation receipt) == mutationOperation mutation
   && C.receiptProfile receipt == mutationProfile mutation && C.receiptResource receipt == mutationURI mutation
@@ -294,6 +316,11 @@ receiptMatches mutation receipt = C.operationName (C.receiptOperation receipt) =
        (Answer decision _, Just (Object fields)) ->
          KM.lookup "resource" fields == Just (String ("/v1/runs/" <> decisionRun decision <> "/control"))
            && KM.lookup "address" fields == Just (object ["occurrenceId" .= occurrenceText (decisionOccurrence decision)])
+       (Retry _ decision _ attempt, Just (Object fields)) ->
+         KM.lookup "resource" fields == Just (String (mutationURI mutation))
+           && KM.lookup "address" fields == Just (object (["occurrenceId" .= occurrenceText (decisionOccurrence decision)]
+                <> ["attemptId" .= T.pack (show number) | Just number <- [attempt]]))
+       (Retry {}, Just _) -> False
        (_, Just (Object fields)) | mutationOperation mutation `elem` ["set-input","enqueue"] ->
          KM.lookup "resource" fields == Just (String (mutationURI mutation))
        (_, Just _) -> mutationOperation mutation `notElem` ["set-input","enqueue","answer"]
@@ -548,25 +575,147 @@ observeResult client snapshot = case C.reference client ("/v1/runs/" <> runIdTex
   Left failure -> pure (Left failure)
   Right location -> do
     received <- C.getPageSet client location
-    pure $ do
-      pages <- received
-      decode (withObject "output metadata" (\fields -> do
-        closed ["version","runId"] fields
-        versionOne fields
-        ident <- at identifier fields "runId"
-        unless (ident == runIdText (runIdentity snapshot)) (fail "output run")
-        entries <- traverse parseOutput (C.pageSetItems pages)
-        let artifacts = [artifact | Just artifact <- entries]
-        unless (length artifacts <= 1) (fail "ambiguous result")
-        case (artifacts,runResult snapshot,runVerification snapshot) of
-          ([artifact],Just reference,Verified expected) -> do
-            unless (artifactRun artifact == ident && artifactKind artifact == "source-result"
-              && artifactId artifact == expected && resultArtifact reference == expected
-              && fromIntegral (artifactBytes artifact) == resultBytes reference
-              && artifactDigest artifact == resultDigest reference && artifactCode artifact == resultCode reference) (fail "result binding")
-            pure (Just artifact)
-          ([],_,_) -> pure Nothing
-          _ -> fail "result verification")) (C.pageSetMetadata pages)
+    pure (received >>= \pages -> decodeOutputs snapshot (C.pageSetMetadata pages) (C.pageSetItems pages))
+
+-- | The source-result artifact of one complete output page set, bound to the
+-- run snapshot. A listed artifact is one that the output page set reports as
+-- verified. The snapshot must reference or verify the same artifact, and the
+-- run, kind, id, size, digest and code of the listed artifact must agree with
+-- the snapshot result reference. Any other listed artifact refuses the page
+-- set.
+decodeOutputs :: RunObservation -> Value -> [Value] -> Either C.ClientFailure (Maybe Artifact)
+decodeOutputs snapshot metadata items = decode (withObject "output metadata" (\fields -> do
+  closed ["version","runId"] fields
+  versionOne fields
+  ident <- at identifier fields "runId"
+  unless (ident == runIdText (runIdentity snapshot)) (fail "output run")
+  entries <- traverse parseOutput items
+  let artifacts = [artifact | Just artifact <- entries]
+  unless (length artifacts <= 1) (fail "ambiguous result")
+  case (artifacts,runResult snapshot,runVerification snapshot) of
+    ([artifact],Just reference,verification) | Just expected <- boundArtifact verification -> do
+      unless (artifactRun artifact == ident && artifactKind artifact == "source-result"
+        && artifactId artifact == expected && resultArtifact reference == expected
+        && fromIntegral (artifactBytes artifact) == resultBytes reference
+        && artifactDigest artifact == resultDigest reference && artifactCode artifact == resultCode reference) (fail "result binding")
+      pure (Just artifact)
+    ([],_,_) -> pure Nothing
+    _ -> fail "result verification")) metadata
+  where
+    boundArtifact verification = case verification of
+      Verified expected -> Just expected
+      Referenced expected -> Just expected
+      _ -> Nothing
+
+-- | The terminal runtime status that the validated snapshot publishes. A
+-- null runtime and a running, starting or cancelling runtime are not
+-- terminal.
+runTerminal :: RunObservation -> Maybe RunStatus
+runTerminal run = case runtimeStatus run of
+  Just status | terminal status -> Just status
+  _ -> Nothing
+  where
+    terminal status = case status of
+      RunSucceeded -> True
+      RunFailedStatus -> True
+      RunCancelledStatus -> True
+      RunOrphaned -> True
+      RunStarting -> False
+      RunRunning -> False
+      RunCancelling -> False
+
+-- | Whether the result bytes of this run are retrieved: the runtime status
+-- is succeeded, the verification is verified, and the result reference names
+-- the verified artifact. No other state causes a download.
+resultWanted :: RunObservation -> Bool
+resultWanted run = case (runtimeStatus run, runVerification run, runResult run) of
+  (Just RunSucceeded, Verified ident, Just reference) -> resultArtifact reference == ident
+  _ -> False
+
+-- | Whether the snapshot of a succeeded run references a result whose
+-- verification the manager has not yet recorded. The manager checks the
+-- referenced bytes and records their verification when the run outputs are
+-- read.
+resultReferenced :: RunObservation -> Bool
+resultReferenced run = case (runtimeStatus run, runVerification run, runResult run) of
+  (Just RunSucceeded, Referenced ident, Just reference) -> resultArtifact reference == ident
+  _ -> False
+
+-- | The exact bytes of a verified source result and the artifact metadata
+-- that they were verified against. The bytes are retained unchanged.
+data VerifiedResult = VerifiedResult { verifiedArtifact :: !Artifact, verifiedBytes :: !BS.ByteString }
+  deriving (Eq, Show)
+
+-- | Retrieve the verified source result of a run through the same client.
+-- Only a snapshot that 'resultWanted' selects causes a download. The
+-- artifact metadata comes from 'observeResult', and 'C.downloadVerified'
+-- checks the size (at most 64 MiB) and the digest of that metadata. A
+-- selected run whose outputs list no verified artifact is refused.
+--
+-- For a snapshot that 'resultReferenced' selects, the outputs read makes the
+-- manager check the referenced bytes and record their verification. The
+-- snapshot is then read again, and the download takes place only when that
+-- snapshot publishes the verified state for the same result reference. Any
+-- other run downloads nothing.
+retrieveResult :: C.Client -> RunObservation -> IO (Either C.ClientFailure (Maybe VerifiedResult))
+retrieveResult client run
+  | resultWanted run = do
+      listed <- observeResult client run
+      case listed of
+        Left failure -> pure (Left failure)
+        Right Nothing -> pure (Left C.InvalidResponse)
+        Right (Just artifact) -> download artifact
+  | resultReferenced run = do
+      listed <- observeResult client run
+      case listed of
+        Left failure -> pure (Left failure)
+        Right Nothing -> pure (Right Nothing)
+        Right (Just artifact) -> do
+          current <- observeSnapshot client (runIdText (runIdentity run))
+          case current of
+            Left failure -> pure (Left failure)
+            Right fresh | resultWanted fresh && runResult fresh == runResult run -> download artifact
+                        | otherwise -> pure (Right Nothing)
+  | otherwise = pure (Right Nothing)
+  where
+    download artifact = case C.reference client (artifactDownload artifact) of
+      Left failure -> pure (Left failure)
+      Right location -> fmap (Just . VerifiedResult artifact)
+        <$> C.downloadVerified client location (artifactBytes artifact) (artifactDigest artifact)
+
+-- | Display lines for a terminal run, given the retrieval of its result: no
+-- retrieval yet, a refusal code, or the verified bytes. A run that is not
+-- terminal has no lines. The preview is bounded and is decoded leniently for
+-- display only.
+resultLines :: RunObservation -> Maybe (Either Text VerifiedResult) -> [Text]
+resultLines run retrieval = case runTerminal run of
+  Nothing -> []
+  Just status -> ("Terminal: " <> statusName status) : case (status, retrieval) of
+    (RunSucceeded, Just (Right result)) ->
+      [ "Result: verified " <> T.pack (show (BS.length (verifiedBytes result))) <> " bytes",
+        "Result SHA-256: " <> artifactDigest (verifiedArtifact result),
+        "Result preview: " <> preview (verifiedBytes result) ]
+    (RunSucceeded, _) | not (resultWanted run || resultReferenced run) ->
+      ["Result: no download; verification is " <> verificationName (runVerification run)]
+    (RunSucceeded, Nothing) -> ["Result: retrieving the verified bytes"]
+    (RunSucceeded, Just (Left code)) -> ["Result: retrieval refused (" <> code <> ")"]
+    _ -> ["Result: no download for a run that did not succeed"]
+  where
+    statusName status = case status of
+      RunSucceeded -> "succeeded"
+      RunFailedStatus -> "failed"
+      RunCancelledStatus -> "cancelled"
+      RunOrphaned -> "orphaned"
+      RunStarting -> "starting"
+      RunRunning -> "running"
+      RunCancelling -> "cancelling"
+    verificationName verification = case verification of
+      Absent -> "absent"
+      Referenced _ -> "referenced"
+      Verified _ -> "verified"
+      Unavailable _ reason -> "unavailable (" <> reason <> ")"
+    preview bytes = T.map (\character -> if character == '\n' then ' ' else character)
+      (T.take 120 (TE.decodeUtf8With lenientDecode (BS.take 480 bytes)))
 
 decodeControl :: Value -> Either C.ClientFailure ControlView
 decodeControl = decode parseControl
@@ -880,6 +1029,39 @@ answerMutation profile (RunRead snapshot (_, control) decision) input = do
     (Left "the occurrence is not waiting for an answer")
   value <- answerValue view input
   Right (Answer view value, observed)
+
+-- | The retry mutation for the recovery at the head, given the request
+-- profile and one composite read of the run components, with the control
+-- observation that becomes its precondition. Only 'retryOffer' selects the
+-- offer, so the controls must be owned and name the decision as the pending
+-- head at position 0, and the offer must match its occurrence and
+-- generation. The decision and the controls must belong to the run of the
+-- snapshot and to the profile, and the snapshot must publish the recovery of
+-- the occurrence.
+retryMutation :: Text -> RunRead observed -> Either Text (Mutation, observed)
+retryMutation profile (RunRead snapshot (observed, control) decision) = do
+  (_, view) <- maybe (Left "no decision is at the head of the queue") Right decision
+  offer <- maybe (Left "the manager offers no retry for this decision") Right (retryOffer control view)
+  unless (decisionRun view == runIdText (runIdentity snapshot) && controlRun control == decisionRun view)
+    (Left "the decision belongs to another run")
+  unless (decisionProfile view == profile) (Left "the decision belongs to another profile")
+  occurrence <- maybe (Left "the snapshot publishes no recovery for this decision") Right
+    (runSnapshot snapshot >>= Map.lookup (decisionOccurrence view) . snapshotOccurrences)
+  unless (isJust (snapshotOccurrenceRecovery occurrence)) (Left "the snapshot publishes no recovery for this decision")
+  let attempt = attemptNumber . fst <$> Map.lookupMax (snapshotOccurrenceAttempts occurrence)
+  Right (Retry control view offer attempt, observed)
+
+-- | The closed retry body for the offer kind: a retry offer sends the retry
+-- operation, and a choose-recovery offer sends the retry choice.
+retryBody :: DecisionView -> ControlOffer -> Value
+retryBody decision offer = object $
+  [ "operation" .= offerOperation offer, "occurrenceId" .= occurrenceText (decisionOccurrence decision),
+    "generation" .= decisionGeneration decision ]
+  <> ["choice" .= ("retry" :: Text) | offerOperation offer == "choose-recovery"]
+
+-- | The effect kind that completes a retry of this offer kind.
+retryEffect :: ControlOffer -> Text
+retryEffect offer = if offerOperation offer == "retry" then "retried" else "recovery-chosen"
 
 -- | The closed answer body for one decision.
 answerBody :: DecisionView -> Value -> Value
