@@ -2340,6 +2340,47 @@ Required work: implementer stages keep the complete .command, .start, .end, .exi
 ]
 #+end_src
 
+* TODO [#D] Resolve the non-blocking fess findings of subtask A5S2b
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-a5s2b-fess-followup-s9rl
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-29 Tue 11:50]
+:MODIFIED: [2026-09-29 Tue 11:50]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess audit fess/fast-A5S2b-r1.md (2026-09-29) on subtask A5S2b. The Integrator already corrected the documented bound in manager/COMMANDS.md and manager/STORAGE.md (finding 1, documentation part), the broken wrap in manager/STORAGE.md, and the stale defect paragraph in doc/workflow-manager-handoff.md.
+
+1. (medium) withAuthorizationReadObservation (manager/src/Agentic/Manager/Store.hs) checks its outer five-second deadline only between attempts. Each attempt's acknowledgement and action reads take fresh allowances, so the worst case exceeds five seconds. Fix: pass the outer deadline into the acknowledgement so the whole observation shares one allowance, or keep the documented bound.
+2. (medium) withAuthorizationObservation has no production caller now. The non-replay check, the concurrent-commit refusal check and the authorization-commit-gap audit cover only that function. No check covers a revocation during a read under the new retry. Fix: add a revocation-during-read check for withAuthorizationReadObservation that expects Unauthenticated or refusal, remove or document withAuthorizationObservation, and run the authorization-commit-gap audit once.
+3. (low) Checks in manager/test/CommandCheck.hs, cli/test/ManagerApprovalProbe.hs and StoreAdmissionCheck.hs assert a literal True after blocked, which proves only that a thread is blocked on some MVar. Fix: tie blocked to the named gate or guard, or reword the labels.
+4. (low) CommandCheck.hs:577 "a concurrent admission cancelled while it waits never runs" is close to vacuous. Fix: assert that the command count and request revision are unchanged after cancellation.
+5. (low) FailFast and the *WithAdmission policy parameters are dead in production (Store/Admission.hs, Store.hs, Commands.hs, Admission.hs). Fix: remove them.
+6. (low) Events.hs:161 liveness check acknowledges a newer generation through pure (). An event that commits during the check waits for the next commit or the one-second wakeup. Informational.
+
+Acceptance: each item is fixed with a check, or recorded as not needed with a reason.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-a5s2b-fess-followup-s9rl",
+    "depends_on_id": "acat-wm-023-d20b",
+    "type": "discovered-from",
+    "created_at": "2026-09-29T18:50:34.836564Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
 * DONE [#B] DSL: caseVerdict arm mapping is unproved and untested — permuting arms passes the whole package
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -2889,6 +2930,38 @@ Required work: the orchestrator confirms that the expected version refers to cab
 :END:
 
 Discovered during acat-9kn: CSemiring's mul_comm blocks both the monoid semiring (MSemiring is a genuine semiring with non-commutative conv, currently exhibited by equations instead of instantiated) and the matrix star (acat-ruz needs star over a non-commutative carrier). One base class (semiring, no mul_comm) with CSemiring extending it lets total be a homomorphism of structures and lets Mat/MSemiring join the hierarchy. Touches acat-ruz, acat-ubt, acat-47y.
+
+* TODO [#E] Decide whether closeout accuracy scripts are allowed
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-closeout-accuracy-tooling-4ov0
+:LABELS:   []
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-29 Tue 07:24]
+:MODIFIED: [2026-09-29 Tue 07:24]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+The refocus note says to add no new evidence tooling. The 2026-09-29 closeout used ad hoc accuracy scripts (Z/HANDOFF/impl-r1/H33-accuracy.sh and H33-accuracy-r2.sh, 103 checks) that live only in the private evidence directory, as earlier closeouts did. The implementer limitation also undercounts /tmp use (the prose scan wrote /private/tmp/claude-501/h33-section.md, since removed). The orchestrator must decide whether such closeout scripts are permitted and whether stages must use the scratchpad or evidence directory instead of /tmp. Source: fess Z-HANDOFF-r1 low findings (refocus-tension, verification-gap).
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-closeout-accuracy-tooling-4ov0",
+    "depends_on_id": "acat-wm-023-d20b",
+    "type": "discovered-from",
+    "created_at": "2026-09-29T14:24:05.098344Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
 
 * DONE [#B] Place request intent in the executable Plan representation
 :PROPERTIES:
@@ -4934,6 +5007,70 @@ Owner request: the artifact §VII example as REAL compiling Lean — Op signatur
 :END:
 
 Add Example.Structured under haskell/example/Example, register it with agentic-run, and derive its schema, witness, and SchemaEl conversion mechanically from the Haskell record with Template Haskell.
+
+* TODO [#E] Handoff 2026-09-29: state the A5S2 final-binding time
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-handoff-20260929-end-time-wnbi
+:LABELS:   []
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-29 Tue 07:24]
+:MODIFIED: [2026-09-29 Tue 07:24]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+doc/workflow-manager-handoff.md line 10 and the 2026-09-29 remaining-scope report line 5 say the last A5S2 command ended at 2026-09-29T13:58:47Z. That is the latest .end file, but A/A5S2/impl-r1/Z99-final-binding.log records 13:59:28Z (both in Z/HANDOFF/impl-r1/H33-facts.log). Say 'last recorded .end' or mention the final-binding record. Source: fess Z-HANDOFF-r1 low finding.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-handoff-20260929-end-time-wnbi",
+    "depends_on_id": "acat-wm-023-d20b",
+    "type": "discovered-from",
+    "created_at": "2026-09-29T14:24:04.622056Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
+* TODO [#E] Handoff 2026-09-29: rewrap two long prose lines
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-handoff-20260929-rewrap-pfz2
+:LABELS:   []
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-29 Tue 07:24]
+:MODIFIED: [2026-09-29 Tue 07:24]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+doc/workflow-manager-handoff.md lines 179 (122 characters) and 251 (109 characters) in the section 'Resume workflow stopping point of 2026-09-29' were not rewrapped. The rest of the section wraps near 78 columns. Source: fess Z-HANDOFF-r1 low finding.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-handoff-20260929-rewrap-pfz2",
+    "depends_on_id": "acat-wm-023-d20b",
+    "type": "discovered-from",
+    "created_at": "2026-09-29T14:24:04.863676Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
 
 * DONE [#C] Give the harden style-guide question an honest addressee
 :PROPERTIES:
@@ -7177,7 +7314,7 @@ Inventory agent-functor workflow/TUI behavior, map Pi and agent-cat integration 
 :LABELS:   ["workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-29 Tue 06:02]
-:MODIFIED: [2026-09-29 Tue 06:02]
+:MODIFIED: [2026-09-29 Tue 11:50]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -7200,6 +7337,20 @@ Acceptance: establish whether the facade's GET /v1/workflows overlaps a profile 
     "created_by": "johnw",
     "metadata": "{}",
     "thread_id": ""
+  }
+]
+#+end_src
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 341,
+    "issue_id": "acat-nwrj",
+    "author": "johnw",
+    "text": "Subtask A5S2b makes store reads wait for the configuration guard within the five-second allowance instead of refusing at once with ConfigurationBusy. This removes the immediate-refusal path that produced the recorded 503 on GET /v1/workflows. The Client-facade check (CLIENT_CHECK) was not rerun, so this issue stays open until that check passes at N8. Evidence: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A5S2b/fast-impl-r1.",
+    "created_at": "2026-09-29T18:50:20Z"
   }
 ]
 #+end_src
@@ -8014,7 +8165,7 @@ grind-tests opening with an unpinned question.
 :LABELS:   []
 :ISSUE_TYPE: bug
 :CREATED:  [2026-09-23 Wed 16:24]
-:MODIFIED: [2026-09-26 Sat 22:45]
+:MODIFIED: [2026-09-29 Tue 11:50]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -8049,6 +8200,13 @@ Service-liveness and halt fess reviews identify a source-proved ceiling: protect
     "author": "johnw",
     "text": "Subtasks A5S1C and A5S1D touch the classification of Store failures on the response and ingestion paths only. They change no wait, bound, budget or Store policy (policy scan /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A5S1D/verify-r2/V-policy-scan.log). The Service.drive fixture (Service.hs:162) checks that a failed runtime ingestion records the Store class and that an undecodable run association records the unexpected class, at N1 and N8 (deterministic native fixture, /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A5S1D/verify-r2/V-service-faults-N1.* and -N8.*). The contention between a held protected response and accepted ingestion that this issue describes was not reproduced or corrected, so this issue stays open.\n",
     "created_at": "2026-09-27T05:45:12Z"
+  },
+  {
+    "id": 342,
+    "issue_id": "acat-response-ingestion-budget-zaoi",
+    "author": "johnw",
+    "text": "Subtask A5S2b changes Store admission to a bounded wait within the unchanged five-second allowance (operator decision of 2026-09-29). It did not reproduce or correct the held-response and ingestion composition that this issue describes, so this issue stays open. Evidence: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A5S2b/fast-impl-r1.",
+    "created_at": "2026-09-29T18:50:20Z"
   }
 ]
 #+end_src
@@ -13744,7 +13902,7 @@ manager's correctness boundary.
 :LABELS:   ["p5","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-28 Mon 12:00]
+:MODIFIED: [2026-09-29 Tue 11:50]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-023
 :SOURCE_REPO: agent-cat
@@ -13957,6 +14115,20 @@ callers. Worker environments contain no manager credential material.
     "author": "johnw",
     "text": "2026-09-28 workflow closeout (HANDOFF, documentation only). Added a dated section to doc/workflow-manager-handoff.md and wrote /Users/johnw/dl/agent-cat-workflow-manager-remaining-2026-09-28.md (revision 3 plus two integration wording fixes). The run stopped on the A5G2c escalation: owner ruling needed on fess finding M1 (fix placed in cli/src/Agentic/RoutingDiscovery.hs rather than the worker environment or fixture). A5G2c source stays uncommitted in the worktree (digest a52ada5a). Phase A is not met, and no WM package or gate is accepted by this run. Evidence: resume-20260923/Z/HANDOFF impl-r1 H30-*, impl-r2 H31-*, impl-r3 H32-*, verify-r3 W30-W39 (make -C doc check exit 0, W38), integrate-r3 I01-doc-check (exit 0). Ceiling: documentation check only, no build, gate or fixture.",
     "created_at": "2026-09-28T19:00:02Z"
+  },
+  {
+    "id": 339,
+    "issue_id": "acat-wm-023-d20b",
+    "author": "johnw",
+    "text": "Closeout HANDOFF of 2026-09-29 (documentation only). doc/workflow-manager-handoff.md gains the section 'Resume workflow stopping point of 2026-09-29', and the remaining-scope report is at /Users/johnw/Documents/Obsidian/agent-cat-workflow-manager-remaining-2026-09-29.md (untracked in the Obsidian repository). The run stopped at A5S2, which escalated for an owner decision on the S1 fail-fast contention family (options A to D). The A5S2 source (5 files) stays uncommitted, with no verifier run and no fess audit. Evidence: make -C doc check exit 0 (/Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/Z/HANDOFF/impl-r1/H33-doc-check.*, /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/Z/HANDOFF/verify-r1/X29-01-doc-check.*), verifier pass (/Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/Z/HANDOFF/verify-r1), fess Z-HANDOFF-r1 not blocking. Ceiling: documentation gate only. No build or fixture ran. Accepted state is unchanged at WM-001..WM-022, G0, G1. WM-023 stays in progress.",
+    "created_at": "2026-09-29T14:24:04Z"
+  },
+  {
+    "id": 340,
+    "issue_id": "acat-wm-023-d20b",
+    "author": "johnw",
+    "text": "Subtask A5S2b implements the operator decision of 2026-09-29 on bounded-wait Store admission. Commands, protected reads, event-stream batches with their authorization revalidation, and admission coordinator steps now wait for the Store gate and the configuration guard within the unchanged five-second allowance through WaitWithinBudget. A genuine timeout still returns storage-unavailable. A protected read that meets a concurrent commit runs again under the newer authorization generation (withAuthorizationReadObservation). GET /v1/runs/<id>/control now answers before the first projection consistently with the snapshot route, and an SSE stream stays open when its next batch meets a short holder. The Werror build, the contention checks G01 to G08 at N8, mixed-HTTP and tui-approval at N1 and N8, and a smoke sample of 3 mixed starts at N8 and 3 tui-approval starts at N1 passed. Evidence: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A5S2b/fast-impl-r1. This package stays in progress.",
+    "created_at": "2026-09-29T18:50:19Z"
   }
 ]
 #+end_src

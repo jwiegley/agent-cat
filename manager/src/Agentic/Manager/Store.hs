@@ -9,7 +9,7 @@ module Agentic.Manager.Store
   ( CoordinationStore, StoreIdentity (..), StoreFailure (..), Checkpoint (..),
     withCoordinationStore, storeIdentity, checkpointStore, withStoreConfiguration, withStoreCatalogues, withStoreRetentionRoot, validateStoreHistoryBindings, revalidateStoreRetentionRoot, storeInvocations, withStoreFiles, withStoreReader, withStoreAdmission, withStoreWorker, StoreWorker, createStoreWorkerGroup, storeWorkerCleanupConfirmed, requestStoreWorkersStop, awaitStoreWorkersStop, retryStoreCleanup, probeStoreCapabilities,
     withStoreAdministration, tryWithStoreCatalogues, tryWithStoreFiles,
-    AuthorizationWatch, withStoreAuthorizationWatch, withStoreConfigurationWatch, withStoreCataloguesWatch, withStoreCatalogueContextWatch, withStoreCataloguesBorrowed, authorizationWatchCurrent, withAuthorizationObservation, awaitAuthorizationChange,
+    AuthorizationWatch, withStoreAuthorizationWatch, withStoreConfigurationWatch, withStoreCataloguesWatch, withStoreCatalogueContextWatch, withStoreCataloguesBorrowed, authorizationWatchCurrent, withAuthorizationObservation, withAuthorizationReadObservation, awaitAuthorizationChange,
     CommitDeadline, withCommitDeadline, withPreparedCommitDeadline, enforceCommitDeadline, enforceAdmissionFence, Transaction, execute, query, refuseTransaction, runTransaction, runRead, StoreAdmission (..), runTransactionWithAdmission, runReadWithAdmission, transactionGeneration,
     Invalidation (..), EventReadFailure (..), RetainedEvents (..), readRetainedEvents, readRetainedEventsWith, retainEvents, backupCoordinationStore, restoreCoordinationStore, reservationOccupancy
   ) where
@@ -93,8 +93,8 @@ data Checkpoint = Checkpoint
   { checkpointBusy :: !Bool, checkpointLogPages :: !Int64, checkpointedPages :: !Int64
   } deriving (Eq, Show)
 
--- | One connection and admission cell. Ordinary calls fail fast, terminal-owner
--- persistence can spend its existing operation allowance waiting for the cell.
+-- | One connection and admission cell. Every Store action can spend its
+-- existing five-second operation allowance waiting for the cell.
 data CoordinationStore = CoordinationStore !InstalledConfiguration !PrivateRoot !SQL.Database !StoreIdentity
   !(MVar ()) !(IORef Bool) !(IORef Bool) !Fd !(MVar (), TVar Int, TVar (Maybe Word64)) !(TVar WorkerRegistry) !(MVar ()) !(IORef Bool) !(TVar (Bool, Maybe (TMVar (), MVar ())))
 
@@ -681,9 +681,10 @@ tryWithStoreFiles store@(CoordinationStore _ root _ _ _ closed _ lease (files,_,
 
 -- | A bounded materialization lifetime at the existing file/read owner. Acquisition
 -- uses current configuration, but neither configuration nor SQL is held by a reader.
--- An unsuccessful configuration loan keeps its declared Store refusal: a held
--- guard is 'StoreBusy' and every other diagnostic is 'StoreUnavailable'. The
--- distinct configuration cause is recorded privately before that refusal.
+-- An unsuccessful configuration loan keeps its declared Store refusal: a guard
+-- that stayed held for the whole allowance is 'StoreBusy' and every other
+-- diagnostic is 'StoreUnavailable'. The distinct configuration cause is
+-- recorded privately before that refusal.
 withStoreReader :: CoordinationStore -> IO a -> IO a
 withStoreReader store@(CoordinationStore _ _ _ _ _ _ _ _ (_,readers,_) _ _ _ _) action = mask $ \restore -> do
   result <- withStoreConfiguration store $ \limits _ -> admitted store $ atomically $ do
@@ -738,7 +739,7 @@ withStoreCataloguesBorrowed :: AuthorizationWatch
   -> (CoordinationStore -> AuthorizationWatch -> ConfigurationLimits -> [PublicProfile] -> [(Text, Discovery)] -> IO a)
   -> IO (Either Diagnostic a)
 withStoreCataloguesBorrowed original@(AuthorizationWatch store _ _ _) action = do
-  alive <- withAuthorizationObservation original (pure ())
+  alive <- withAuthorizationReadObservation original (pure ())
   unless (alive == Just ()) (throwIO StoreClosed)
   withStoreCatalogues store $ \limits profiles catalogues ->
     withAuthorizationWatch store $ \watch -> action store watch limits profiles catalogues
@@ -760,25 +761,52 @@ authorizationWatchCurrent (AuthorizationWatch _ cell revision active) = atomical
 -- A notification is not revocation. Closed scopes stay invalid, and a concurrent
 -- commit refuses this observation rather than replaying its action. That
 -- refusal keeps the declared 'StoreBusy' value, and its distinct cause is
--- recorded privately after the gate is released. Final acknowledgement uses
--- the original fail-fast Store gate, closing the interval between SQL COMMIT
--- and its notification without re-entering the observation.
+-- recorded privately after the gate is released. Final acknowledgement waits
+-- for the Store gate within its allowance, so it follows the whole interval
+-- between SQL COMMIT and its notification without re-entering the observation.
 withAuthorizationObservation :: NFData a => AuthorizationWatch -> IO a -> IO (Maybe a)
-withAuthorizationObservation (AuthorizationWatch store cell revision active) action = do
-  initial <- atomically $ do
-    live <- readTVar active
-    if live then readTVar cell else pure Nothing
+withAuthorizationObservation watch action = do
+  initial <- authorizationGeneration watch
   case initial of
     Nothing -> pure Nothing
-    Just expected -> do
-      value <- action >>= evaluate . force
-      acknowledged <- admitted store $ atomically $ do
-        live <- readTVar active
-        current <- readTVar cell
-        if not live || current == Nothing then pure (Right Nothing)
-        else if current /= Just expected then pure (Left ())
-        else writeTVar revision expected >> pure (Right (Just value))
-      either (const (refuseErased "store authorization-observation" AuthorizationChanged StoreBusy)) pure acknowledged
+    Just expected -> observeAuthorizationAt watch expected action
+      >>= either (const (refuseErased "store authorization-observation" AuthorizationChanged StoreBusy)) pure
+
+-- | Observe current authorization with a read that is safe to repeat, such as a
+-- read of authorization facts or a public materialization. A concurrent commit
+-- is ordinary contention for such a read, so it starts a fresh read under the
+-- newer generation while one five-second allowance lasts. Each read runs once
+-- for its own generation, and no earlier value is acknowledged. When commits
+-- keep arriving for the whole allowance, the observation keeps the declared
+-- 'StoreBusy' refusal and its private record. An action that changes state
+-- uses 'withAuthorizationObservation', which never runs its action again.
+withAuthorizationReadObservation :: NFData a => AuthorizationWatch -> IO a -> IO (Maybe a)
+withAuthorizationReadObservation watch action = do
+  end <- Admission.newDeadline
+  let attempt expected = observeAuthorizationAt watch expected action >>= \outcome -> case outcome of
+        Right value -> pure value
+        Left newer -> try @Admission.AdmissionFailure (Admission.remainingMicros end) >>= either
+          (const (refuseErased "store authorization-observation" AuthorizationChanged StoreBusy))
+          (const (attempt newer))
+  authorizationGeneration watch >>= maybe (pure Nothing) attempt
+
+authorizationGeneration :: AuthorizationWatch -> IO (Maybe Word64)
+authorizationGeneration (AuthorizationWatch _ cell _ active) = atomically $ do
+  live <- readTVar active
+  if live then readTVar cell else pure Nothing
+
+-- | One action under one expected generation. Left carries the newer
+-- generation that a concurrent commit published. A closed scope is Nothing.
+observeAuthorizationAt :: NFData a => AuthorizationWatch -> Word64 -> IO a -> IO (Either Word64 (Maybe a))
+observeAuthorizationAt (AuthorizationWatch store cell revision active) expected action = do
+  value <- action >>= evaluate . force
+  admitted store $ atomically $ do
+    live <- readTVar active
+    current <- readTVar cell
+    case current of
+      Just newer | live && newer /= expected -> pure (Left newer)
+      Just _ | live -> writeTVar revision expected >> pure (Right (Just value))
+      _ -> pure (Right Nothing)
 
 -- | At most one second before trusted-time revalidation, even without a commit.
 -- No callbacks, file/configuration locks, or worker cancellation participate.
@@ -901,7 +929,7 @@ checkpointStore store@(CoordinationStore _ _ db _ _ _ _ _ _ _ _ _ _) = admitted 
     _ -> throwIO StoreIntegrity
 
 admitted :: CoordinationStore -> IO a -> IO a
-admitted store action = admittedWith FailFast store (const action)
+admitted store action = admittedWith WaitWithinBudget store (const action)
 
 admittedWith :: StoreAdmission -> CoordinationStore -> (Maybe Admission.Deadline -> IO a) -> IO a
 admittedWith policy (CoordinationStore _ root _ _ gate closed poisoned _ _ workers _ _ _) action = do
@@ -1023,7 +1051,7 @@ runTransactionWithAdmission :: NFData a => StoreAdmission -> CoordinationStore -
 runTransactionWithAdmission policy store transaction = runWithAdmission policy store True transaction
 
 run :: NFData a => CoordinationStore -> Bool -> Transaction (a, [Invalidation]) -> IO a
-run = runWithAdmission FailFast
+run = runWithAdmission WaitWithinBudget
 
 runWithAdmission :: NFData a => StoreAdmission -> CoordinationStore -> Bool -> Transaction (a, [Invalidation]) -> IO a
 runWithAdmission policy store@(CoordinationStore _ _ db identity _ _ poisoned _ _ _ _ _ _) writable (Transaction action) = admittedWith policy store $ \end -> do

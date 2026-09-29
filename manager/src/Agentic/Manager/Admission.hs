@@ -797,7 +797,7 @@ submitRetainedGuarded controller proof requestId kind request deadlineGuard cont
         Right original -> pure $ case resolved of Right(Just accepted)->Right accepted;_->original
 
 publishRetained :: Admission -> Text -> Text -> Submission -> IO ()
-publishRetained = publishRetainedWithAdmission FailFast
+publishRetained = publishRetainedWithAdmission WaitWithinBudget
 
 publishRetainedWithAdmission :: StoreAdmission -> Admission -> Text -> Text -> Submission -> IO ()
 publishRetainedWithAdmission admission controller requestId kind accepted =
@@ -871,7 +871,7 @@ invalidateLivePreparation (LivePreparation controller entry) reason = operation 
     ensureController controller
     started<-dbRead controller(startCommitted entry)
     when started(throwIO StateConflict)
-    revision<-markServiceCleanupWithReason FailFast controller entry "closed" (Just reason)
+    revision<-markServiceCleanupWithReason WaitWithinBudget controller entry "closed" (Just reason)
     atomically $ do
       writeTVar(entryFinal entry)(Just(Finalization Nothing "closed" revision))
       void(tryPutTMVar(entryStop entry)(StopService "closed"))

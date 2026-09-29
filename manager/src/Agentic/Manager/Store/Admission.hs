@@ -1,7 +1,7 @@
 -- | Admission to one Store operation, with no SQL activity while waiting.
 module Agentic.Manager.Store.Admission
   ( StoreAdmission (..), AdmissionFailure (..), Deadline,
-    withGate, remainingMicros, remainingAt ) where
+    withGate, newDeadline, takeWithin, remainingMicros, remainingAt ) where
 
 import Control.Concurrent.MVar (MVar, takeMVar, tryTakeMVar, putMVar)
 import Control.Exception (Exception, mask, finally, throwIO)
@@ -23,6 +23,16 @@ remainingAt start now
   | now < start = 0
   | otherwise = fromInteger (max 0 (5000000 - (toInteger now - toInteger start + 999) `div` 1000))
 
+-- | The start of one fresh allowance at the current monotonic time.
+newDeadline :: IO Deadline
+newDeadline = Deadline <$> getMonotonicTimeNSec
+
+-- | Take a lock before the allowance ends. Nothing proves that the lock was
+-- not taken. The caller masks asynchronous exceptions, so a taken value
+-- cannot be lost between the take and the caller's release handler.
+takeWithin :: Deadline -> MVar a -> IO (Maybe a)
+takeWithin end lock = remainingMicros end >>= \left -> timeout left (takeMVar lock)
+
 remainingMicros :: Deadline -> IO Int
 remainingMicros (Deadline start) = do
   now <- getMonotonicTimeNSec
@@ -35,10 +45,10 @@ withGate :: StoreAdmission -> MVar () -> IO () -> (Maybe Deadline -> IO a) -> IO
 withGate policy gate check action = mask $ \restore -> do
   deadline <- case policy of
     FailFast -> pure Nothing
-    WaitWithinBudget -> Just . Deadline <$> getMonotonicTimeNSec
+    WaitWithinBudget -> Just <$> newDeadline
   token <- case deadline of
     Nothing -> tryTakeMVar gate
-    Just end -> remainingMicros end >>= \left -> timeout left (takeMVar gate)
+    Just end -> takeWithin end gate
   case token of
     Nothing -> throwIO (case policy of FailFast -> AdmissionBusy; WaitWithinBudget -> AdmissionExpired)
     Just () -> (check >> mapM_ (void . remainingMicros) deadline >> restore (action deadline))

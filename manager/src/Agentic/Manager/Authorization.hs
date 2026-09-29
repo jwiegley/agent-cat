@@ -118,10 +118,12 @@ withView watch observe action = withViewResult watch ((\facts -> (facts, ())) <$
 
 -- A public materialization and its authorization facts come from the same
 -- observation. Neither part can be resampled independently after acknowledgement.
+-- Both are reads, so a concurrent commit starts a fresh read of both within
+-- the observation allowance.
 withViewResult :: NFData a => AuthorizationWatch -> IO (ViewFacts, a)
   -> (AuthorizedView -> a -> IO b) -> IO b
 withViewResult watch observe action = do
-  observed <- withAuthorizationObservation watch observe
+  observed <- withAuthorizationReadObservation watch observe
   (facts, value) <- maybe (throwIO Unauthenticated) pure observed
   action (AuthorizedView watch (fst <$> observe) facts) value
 
@@ -196,9 +198,11 @@ catalogueAuthorization proof profiles = do
   (facts, grants) <- catalogueFacts proof [Observe] profiles
   pure (cursorRevision facts, grants)
 
+-- | The bound facts must still hold at the current generation. The facts read
+-- is repeated after a concurrent commit within the observation allowance.
 revalidateAuthorizedView :: AuthorizedView -> IO (Either CommandFailure ())
 revalidateAuthorizedView (AuthorizedView watch observe bound) = authorizationIO "authorization revalidation" $ do
-  observed <- withAuthorizationObservation watch $ do
+  observed <- withAuthorizationReadObservation watch $ do
     facts <- observe
     unless (facts == bound) (throwIO Unauthenticated)
   unless (observed == Just ()) (throwIO Unauthenticated)

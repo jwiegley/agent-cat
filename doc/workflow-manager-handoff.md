@@ -21,6 +21,17 @@ exit check, and the run made no change for Phases B to G. This section and
 describe the current state. Where they differ from the sections below, they
 supersede them, and the older sections remain as chronology.
 
+After this stopping point, subtask A5S2b applied the operator decision of
+2026-09-29. Commands, protected reads, event-stream batches and the
+admission coordinator steps now wait for the Store gate and the
+configuration guard within the unchanged five-second allowance. A genuine
+timeout still returns `storage-unavailable`. A protected read that
+overlaps a commit runs again under the newer authorization generation
+within that allowance. The mixed workflow and `tui-approval` passed at N1
+and N8, and a smoke sample of six starts passed
+(`A/A5S2b/fast-impl-r1`). The commit of A5S2b states the remaining
+limitations.
+
 ### Objective, worktrees and environment
 
 The governing goal of 2026-09-23 remains the current objective, with its
@@ -176,8 +187,9 @@ passed (`B02`, `B03`, package build).
 
 With the fix, the mixed workflow passed at N1 and failed at N8 (`M01`,
 `M08`), a failure that the implementer attributes to an event stream that
-ended when its next batch met Store contention. `tui-approval` passed at N1 and N8 (`T01`, `T08`, actual UI interaction up
-to approval and detach). The implementer then declared a sample of 40
+ended when its next batch met Store contention. `tui-approval` passed at
+N1 and N8 (`T01`, `T08`, actual UI interaction up to approval and
+detach). The implementer then declared a sample of 40
 starts before it ran (`S10-stability-declaration.md`), at root
 `/Users/johnw/Products/k.M0a5ItPm/tmp/a5s2-sample.0hDUg0zF`. It allowed no
 S1 signature. Of the 40 starts, 27 passed (`S13-sample-classification.log`,
@@ -242,14 +254,12 @@ decisions:
   re-request the review.
 
 Options (B) and (C) change settled Store policy, and option (D) changes the
-acceptance of the refocus note. Two product defects are independent of the
-decision and can be fixed at their owners. `GET /v1/runs/<id>/control`
-returns 404 before the first projection, because `borrowedProjection` in
-`manager/src/Agentic/Manager/State.hs` throws `ResourceUnavailable` while
-the snapshot route returns a null runtime (nine of 20 mixed starts). An
-event stream ends when its immediate next batch meets Store contention
-(`A/A5S2/impl-r1/M08-mixed-N8`, `S205-mixed-N8`). The TUI reads the run control resource, so the first defect
-lies on the path of the journey. No tracker item holds either defect.
+acceptance of the refocus note. The operator decided on 2026-09-29 for
+bounded-wait Store admission, and subtask A5S2b implemented that decision.
+A5S2b also fixed the two product defects that this record found.
+`GET /v1/runs/<id>/control` now answers before the first projection
+consistently with the snapshot route, and an event stream now stays open
+when its next batch meets a short Store holder.
 
 ### Open findings and authorizations
 

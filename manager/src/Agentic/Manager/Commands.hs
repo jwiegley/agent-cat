@@ -331,7 +331,7 @@ submitAttempt deadline attempt@(CommandAttempt store proof request _ retained _ 
 -- Reconcile only this known invocation after a lost return. Current credentials do not
 -- revoke its accepted cleanup, while Store lifetime and authority epoch still fence it.
 reconcileCommandAttempt :: CommandAttempt -> IO (Either CommandFailure (Maybe Submission))
-reconcileCommandAttempt = reconcileCommandAttemptWithAdmission FailFast
+reconcileCommandAttempt = reconcileCommandAttemptWithAdmission WaitWithinBudget
 
 reconcileCommandAttemptWithAdmission :: StoreAdmission -> CommandAttempt -> IO (Either CommandFailure (Maybe Submission))
 reconcileCommandAttemptWithAdmission admission (CommandAttempt store _ request candidate retained generation phase) = do
@@ -442,7 +442,7 @@ commandProjection proof profiles ident = do
     _ -> throwE Forbidden
 
 reserveDispatch :: DispatchTicket -> IO (Either CommandFailure ())
-reserveDispatch = reserveDispatchWithAdmission FailFast
+reserveDispatch = reserveDispatchWithAdmission WaitWithinBudget
 
 reserveDispatchWithAdmission :: StoreAdmission -> DispatchTicket -> IO (Either CommandFailure ())
 reserveDispatchWithAdmission admission ticket@(DispatchTicket store ident generation _ state) = mask $ \restore -> do
@@ -460,13 +460,13 @@ reserveDispatchWithAdmission admission ticket@(DispatchTicket store ident genera
 
 -- Consuming the ticket is irreversible even if storage or the callback becomes uncertain.
 attemptDispatch :: DispatchTicket -> IO a -> IO (Either CommandFailure a)
-attemptDispatch = attemptDispatchWithAdmission FailFast
+attemptDispatch = attemptDispatchWithAdmission WaitWithinBudget
 
 attemptDispatchWithAdmission :: StoreAdmission -> DispatchTicket -> IO a -> IO (Either CommandFailure a)
 attemptDispatchWithAdmission admission ticket action = attemptTicket admission ticket (const action)
 
 attemptControlDispatch :: DispatchTicket -> (BS.ByteString -> IO a) -> IO (Either CommandFailure a)
-attemptControlDispatch ticket action = attemptTicket FailFast ticket (maybe (throwIO OwnershipUnavailable) action)
+attemptControlDispatch ticket action = attemptTicket WaitWithinBudget ticket (maybe (throwIO OwnershipUnavailable) action)
 
 -- The successful claim transfers the original bytes to this invocation and clears
 -- the retained cell atomically. A losing invocation cannot touch the winner's bytes.
@@ -536,7 +536,7 @@ recordEffect ticket effect = recordEffectWith ticket effect (pure [])
 
 -- | Owning resource completion and command effect commit together after physical proof.
 recordEffectWith :: DispatchTicket -> Effect -> Transaction [Invalidation] -> IO (Either CommandFailure CommandReceipt)
-recordEffectWith = recordEffectWithAdmission FailFast
+recordEffectWith = recordEffectWithAdmission WaitWithinBudget
 
 recordEffectWithAdmission :: StoreAdmission -> DispatchTicket -> Effect -> Transaction [Invalidation] -> IO (Either CommandFailure CommandReceipt)
 recordEffectWithAdmission admission ticket@(DispatchTicket _ ident _ refs _) effect finalTransition = observeWithAdmission admission ticket finalTransition $ \current -> do
@@ -582,7 +582,7 @@ validateEffectBinding operation ident refs effect = do
   require (maybe False (`elem` (references <> exportReferences)) (field "resource" value)) StateConflict
 
 recordUnresolved :: DispatchTicket -> IO (Either CommandFailure CommandReceipt)
-recordUnresolved = recordUnresolvedWithAdmission FailFast
+recordUnresolved = recordUnresolvedWithAdmission WaitWithinBudget
 
 recordUnresolvedWithAdmission :: StoreAdmission -> DispatchTicket -> IO (Either CommandFailure CommandReceipt)
 recordUnresolvedWithAdmission admission ticket = observeWithAdmission admission ticket (pure []) $ \current -> do
@@ -602,7 +602,7 @@ observe :: DispatchTicket -> (CommandReceipt -> CommandTx CommandReceipt) -> IO 
 observe ticket = observeWith ticket (pure [])
 
 observeWith :: DispatchTicket -> Transaction [Invalidation] -> (CommandReceipt -> CommandTx CommandReceipt) -> IO (Either CommandFailure CommandReceipt)
-observeWith = observeWithAdmission FailFast
+observeWith = observeWithAdmission WaitWithinBudget
 
 observeWithAdmission :: StoreAdmission -> DispatchTicket -> Transaction [Invalidation] -> (CommandReceipt -> CommandTx CommandReceipt) -> IO (Either CommandFailure CommandReceipt)
 observeWithAdmission admission ticket@(DispatchTicket store ident _ _ _) finalTransition update = do
@@ -794,7 +794,7 @@ configuredCatalogues store proof action = do
     Right (Right value) -> value
 
 transaction :: NFData a => CoordinationStore -> CommandTx (a, [Invalidation]) -> IO (Either CommandFailure a)
-transaction = transactionWithAdmission FailFast
+transaction = transactionWithAdmission WaitWithinBudget
 
 transactionWithAdmission :: NFData a => StoreAdmission -> CoordinationStore -> CommandTx (a, [Invalidation]) -> IO (Either CommandFailure a)
 transactionWithAdmission admission store action = do

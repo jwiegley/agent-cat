@@ -378,13 +378,16 @@ withClosedControlSurface store proof association respond =
     revalidateAuthorizedView view >>= either throwIO pure
     respond view value
 
+-- | Before the first projection the run has no validated runtime state, as
+-- the snapshot route reports with a null runtime. The surface then offers no
+-- control and names no decision head.
 controlSurfaceBorrowed :: CoordinationStore -> CredentialProof -> RunAssociation -> Bool -> IO Value
 controlSurfaceBorrowed store proof association live = do
   (revision,supervision) <- runRead store $ do
     authorizeObservation proof association
     rows <- query "SELECT control_revision,supervision FROM runs WHERE id=?" [text(associationRun association)]
     case rows of [[SQL.SQLText revision,SQL.SQLText supervision]] -> pure(revision,supervision); _ -> refuseTransaction StoreIntegrity
-  snapshot <- borrowedProjection store association
+  snapshot <- maybe (initialRunSnapshot (associationNative association)) checkpointSnapshot <$> restoreProjection store association
   heads <- runRead store $ do
     authorizeObservation proof association
     rows <- query "SELECT control_revision,supervision FROM runs WHERE id=?" [text(associationRun association)]

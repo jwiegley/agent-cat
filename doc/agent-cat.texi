@@ -4044,7 +4044,9 @@ against the stored token verifier and rechecks current client, credential, and
 profile authority inside the transaction.  Opaque possession proofs and live
 dispatch tickets cannot be constructed from stored identifiers.  Configuration
 checks hold the owning installation boundary, with configuration-before-store
-lock ordering and explicit busy refusal instead of a waiting mutation queue.
+lock ordering.  Each Store action waits for the configuration guard and the
+store gate within its five-second allowance, and no durable mutation queue
+exists.
 
 An idempotency key binds the registered client, method, canonical resource URI,
 authority epoch, exact body digest and length, media type, and precondition.

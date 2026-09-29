@@ -14,11 +14,12 @@ module Agentic.Manager.Configuration
 import Agentic.Manager.Lease (acquireLease, duplicateLease)
 import Agentic.Manager.Profile
 import Agentic.Manager.Root (validateRootSeparation)
+import Agentic.Manager.Store.Admission (newDeadline, takeWithin)
 import Agentic.Runtime
   ( PrivateRoot, ProcessGroup, FrontendCapabilities, FrontendInvocation (..), StateRootRole (ManagerStateRoot), assertPrivateRoot,
     privateRootPath, openPrivateRoot, openPrivateSubroot, closePrivateRoot, withPrivateDirectoryAt, readStateRootRoleAt,
     establishManagerRootRole, readPrivateConfigurationFile )
-import Control.Concurrent.MVar (MVar, modifyMVarMasked, newMVar, withMVar, tryTakeMVar, putMVar)
+import Control.Concurrent.MVar (MVar, modifyMVarMasked, newMVar, withMVar, putMVar)
 import Control.Exception (IOException, bracket, bracketOnError, finally, mask, mask_, throwIO, try)
 import Control.Monad (unless, when)
 import Data.Aeson (FromJSON (parseJSON), ToJSON (toJSON), Value, withObject, withText, (.:))
@@ -138,9 +139,10 @@ releaseConfigurationStorage (InstalledConfiguration _ slot) =
 -- | A loan of the local administration namespace under its own exclusive lease.
 -- The original manager lease remains retained, but configuration is not held
 -- while serving. This creates neither another Store slot nor a database reader.
+-- The guard is waited for within one five-second allowance.
 withConfigurationAdministration :: InstalledConfiguration -> (PrivateRoot -> IO a) -> IO (Either Diagnostic a)
 withConfigurationAdministration (InstalledConfiguration lock _) action = mask $ \restore -> do
-  available <- tryTakeMVar lock
+  available <- newDeadline >>= \end -> takeWithin end lock
   acquired <- case available of
     Nothing -> pure (Left SupervisionUnavailable)
     Just current -> (case current of
@@ -160,7 +162,8 @@ withConfigurationAdministration (InstalledConfiguration lock _) action = mask $ 
           retained <- duplicateLease original
           pure (root, lease, retained)
 
--- | Internal fail-fast configuration boundary. Lock order is configuration, then store.
+-- | Internal configuration boundary. The guard is waited for within one
+-- five-second allowance. Lock order is configuration, then store.
 withConfigurationSnapshot :: InstalledConfiguration -> (ConfigurationLimits -> [PublicProfile] -> IO a) -> IO (Either Diagnostic a)
 withConfigurationSnapshot installed action = withConfigurationCatalogues installed $ \limits profiles _ -> action limits profiles
 
@@ -175,13 +178,15 @@ withConfigurationCatalogueContext :: InstalledConfiguration
 withConfigurationCatalogueContext installed action =
   maybe (Left SupervisionUnavailable) id <$> tryConfigurationCatalogueContext installed action
 
--- | Nothing proves that the original guard was not acquired and the callback
--- was never entered. Failures after acquisition remain distinct inside Just.
+-- | The guard is waited for within one five-second allowance. Nothing proves
+-- that the original guard was not acquired within that allowance and the
+-- callback was never entered. Failures after acquisition remain distinct
+-- inside Just.
 tryConfigurationCatalogueContext :: InstalledConfiguration
   -> (ConfigurationLimits -> [PublicProfile] -> [(Text, Discovery)] -> [(Text, FrontendInvocation)] -> IO a)
   -> IO (Maybe (Either Diagnostic a))
 tryConfigurationCatalogueContext (InstalledConfiguration lock _) action = mask $ \restore -> do
-  available <- tryTakeMVar lock
+  available <- newDeadline >>= \end -> takeWithin end lock
   case available of
     Nothing -> pure Nothing
     Just current -> (Just <$> (case current of

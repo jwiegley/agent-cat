@@ -25,8 +25,8 @@ import System.IO.Error (ioeGetErrorType)
 -- command refusals. Each constructor names one cause and carries no text.
 data ManagerFault
   = ConfigurationBusy
-    -- ^ A configuration loan found the original configuration guard held by
-    -- another owner. It is a fail-fast refusal and never a wait.
+    -- ^ A configuration loan did not acquire the original configuration
+    -- guard within its five-second allowance, because another owner held it.
   | ConfigurationRefused !Diagnostic
     -- ^ An entered configuration loan ended with this fixed diagnostic.
   | AuthorizationChanged
@@ -52,8 +52,8 @@ data ManagerFault
 instance Exception ManagerFault
 
 -- | The internal cause of one unsuccessful configuration loan. A loan that
--- could not acquire the original configuration guard reports
--- 'SupervisionUnavailable'. Every other diagnostic remains distinct.
+-- could not acquire the original configuration guard within its allowance
+-- reports 'SupervisionUnavailable'. Every other diagnostic remains distinct.
 loanFault :: Diagnostic -> ManagerFault
 loanFault SupervisionUnavailable = ConfigurationBusy
 loanFault diagnostic = ConfigurationRefused diagnostic

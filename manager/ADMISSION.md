@@ -134,13 +134,17 @@ claims. The final request transition and command effect commit together, while t
 original accepted receipt stays unchanged. Expiry returns to draft with an expired
 observation reason and never silently enqueues or starts work.
 
-Original terminal-owner persistence uses bounded Store admission rather than
-immediate busy refusal. Selection, retained command reconciliation and its
+Every Store action of the controller uses bounded Store admission. This covers
+selection, preparation construction, retained command reconciliation and its
 publication, expiry checks, service cleanup transitions, ticket-backed cleanup
-coordination and final publication opt in explicitly. Each Store action waits
-within its own existing five-second allowance and executes once after admission.
-Ordinary enqueue, approval, edit, withdrawal and control acceptance remain
-fail-fast. Native outcomes, revision and generation fences are unchanged.
+coordination, final publication, and enqueue, approval, edit, withdrawal and
+control acceptance. Each Store action waits for the configuration guard and the
+Store gate within its own existing five-second allowance and executes once after
+admission. An admission poll whose configuration wait ends without the guard is
+proven not entered. It reports a deferral, writes nothing, and the scheduler
+polls again. A poll that entered its selection is never repeated. A committed
+selection reports its preparation once, and a failed one reports its refusal.
+Native outcomes, revision and generation fences are unchanged.
 
 The controller may hold its Admission mutex while waiting for Store admission.
 Production Store transaction bodies have no IO lift and do not acquire that

@@ -4,13 +4,13 @@
 module Main (main) where
 
 import qualified Agentic.Manager.Test.StoreAdmissionCheck as StoreAdmissionCheck
+import Agentic.Manager.Test.Contention (withHeldStore, withHeldConfiguration)
 import qualified "agentic" Agentic.Manager as Public
 import Agentic.Manager.Configuration
-import Agentic.Manager.Profile (Diagnostic)
+import Agentic.Manager.Profile (Diagnostic (SupervisionUnavailable))
 import Agentic.Manager.Schema (schemaVersion, schemaStatements, commandMigration, draftMigration, admissionMigration, approvalMigration, ingestionMigration, controlMigration, artifactMigration, historyMigration, restartMigration)
 import Agentic.Manager.Store
 import Control.Concurrent (threadDelay, throwTo)
-import Control.Concurrent.MVar (newEmptyMVar, putMVar, takeMVar, readMVar, tryPutMVar)
 import Control.Concurrent.Async (AsyncCancelled (..), async, asyncThreadId, wait, cancel, poll, waitCatch, withAsync)
 import Control.Exception
   (AsyncException (UserInterrupt), bracket, finally, fromException, onException, throwIO, try)
@@ -23,6 +23,7 @@ import qualified Data.Aeson.KeyMap as KM
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as BL
 import Data.Either (isLeft)
+import Data.Maybe (isNothing)
 import Data.IORef (newIORef, readIORef, writeIORef, modifyIORef')
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -50,6 +51,8 @@ main = do
     ["quotas",work] -> quotaChecks work
     ["restart",work] -> restartChecks work
     ["terminal-admission",work] -> terminalAdmissionChecks work
+    ["ordinary-admission",work] -> ordinaryAdmissionChecks work
+    ["ordinary-expiry",work] -> ordinaryExpiryChecks work
     ["hold", path] -> withInstalled path $ \installed -> withCoordinationStore installed $ \_ ->
       putStrLn "ready" >> threadDelay 60000000
     ["refuse", path] -> do
@@ -630,19 +633,23 @@ expensive = query "WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n
 cancellationChecks :: CoordinationStore -> IO ()
 cancellationChecks store = do
   child <- async (mutate store (client "cancelled" >> expensive) [event])
-  threadDelay 100000
-  await $ do
-    finished <- poll child
-    case finished of
-      Just result -> error ("SQLite fixture ended before synchronization: " <> show result)
-      Nothing -> pure ()
-    outcome <- try @StoreFailure (storeIdentity store)
-    pure (case outcome of Left StoreBusy -> True; _ -> False)
-  threadDelay 100000
+  -- The child owns the gate once a later reader stays blocked behind it.
+  let behind = do
+        finished <- poll child
+        case finished of
+          Just result -> error ("SQLite fixture ended before synchronization: " <> show result)
+          Nothing -> pure ()
+        waiter <- async (try @StoreFailure (runRead store (pure ())))
+        waiting <- timeout 200000 (StoreAdmissionCheck.blocked waiter)
+        case waiting of
+          Just () -> pure waiter
+          Nothing -> void (waitCatch waiter) >> behind
+  waiter <- timeout 5000000 behind >>= maybe (error "SQLite fixture did not own the Store gate") pure
   poll child >>= check "SQLite operation still in flight before cancellation" . maybe True (const False)
-  expect "overlapping caller refused without waiting queue" StoreBusy (runRead store (pure ()))
+  poll waiter >>= check "an overlapping caller waits for the gate instead of being refused" . maybe True (const False)
   cancel child
   outcome <- waitCatch child
+  wait waiter >>= check "the waiting caller runs after the cancelled owner releases the gate" . (== Right ())
   check "SQLite cancellation preserves original AsyncCancelled" (case outcome of
     Left failure -> case fromException failure of Just AsyncCancelled -> True; Nothing -> False
     Right _ -> False)
@@ -791,6 +798,64 @@ ingestionMigrationChecks work = do
     rowsEqual store "SELECT authority_epoch,stream_id FROM service_metadata" [[SQL.SQLText "old_epoch",SQL.SQLText "old_stream"]] >>= check "ingestion migration preserves durable authority and stream"
     count store "start_intents" >>= check "ingestion migration reconstructs no accepted start" . (==0)
 
+-- Ordinary Store actions and configuration loans wait for their lock within
+-- the five-second allowance of each action. Each holder keeps its lock until
+-- the check has proved the waiter blocked, so no outcome depends on timing.
+ordinaryAdmissionChecks :: FilePath -> IO ()
+ordinaryAdmissionChecks work = do
+  (path,_) <- fixture work "ordinary-admission"
+  withInstalled path $ \installed -> withCoordinationStore installed $ \store -> do
+    withHeldStore store $ \release -> withAsync (try @StoreFailure (count store "clients")) $ \waiter -> do
+      StoreAdmissionCheck.blocked waiter
+      release
+      wait waiter >>= check "an ordinary read waits behind a short Store holder and then runs" . (== Right 0)
+    withHeldStore store $ \release -> withAsync (try @StoreFailure (mutate store (client "waiting_writer") [event])) $ \waiter -> do
+      StoreAdmissionCheck.blocked waiter
+      release
+      wait waiter >>= check "an ordinary transaction waits behind a short Store holder and then commits" . (== Right ())
+    count store "clients" >>= check "the waiting transaction committed exactly once" . (== 1)
+    withHeldStore store $ \release -> withAsync (try @StoreFailure (storeIdentity store)) $ \waiter -> do
+      StoreAdmissionCheck.blocked waiter
+      release
+      wait waiter >>= check "an admitted Store action waits behind a short Store holder" . either (const False) (const True)
+    withStoreAuthorizationWatch store $ \watch -> do
+      mutate store (execute "UPDATE clients SET revision='revision_2' WHERE id='waiting_writer'" []) [event]
+      withHeldStore store $ \release -> withAsync (try @StoreFailure (withAuthorizationObservation watch (pure ()))) $ \waiter -> do
+        StoreAdmissionCheck.blocked waiter
+        release
+        wait waiter >>= check "an authorization acknowledgement waits behind a short holder that commits nothing" . (== Right (Just ()))
+    entered <- newIORef (0::Int)
+    withHeldConfiguration store $ \release -> withAsync (withStoreCatalogues store (\_ _ _ -> modifyIORef' entered (+1))) $ \waiter -> do
+      StoreAdmissionCheck.blocked waiter
+      readIORef entered >>= check "a configuration waiter does not enter while the guard is held" . (== 0)
+      release
+      wait waiter >>= check "a configuration loan waits behind a short holder and then enters" . either (const False) (const True)
+    readIORef entered >>= check "the waiting configuration loan entered exactly once" . (== 1)
+    withHeldConfiguration store $ \release -> withAsync (try @StoreFailure (withStoreReader store (pure ()))) $ \waiter -> do
+      StoreAdmissionCheck.blocked waiter
+      release
+      wait waiter >>= check "reader admission waits behind a short configuration holder" . (== Right ())
+
+-- A configuration holder past the allowance proves the waiter not entered
+-- and keeps each declared refusal. The Store gate itself cannot be held past
+-- a waiter's allowance by one holder, because each holder is bounded by its
+-- own earlier allowance and the gate admits waiters in order.
+ordinaryExpiryChecks :: FilePath -> IO ()
+ordinaryExpiryChecks work = do
+  (path,_) <- fixture work "ordinary-expiry"
+  withInstalled path $ \installed -> withCoordinationStore installed $ \store -> do
+    entered <- newIORef (0::Int)
+    withHeldConfiguration store $ \_ -> do
+      started <- getMonotonicTimeNSec
+      deferred <- tryWithStoreCatalogues store (\_ _ _ -> modifyIORef' entered (+1))
+      finished <- getMonotonicTimeNSec
+      check "a configuration waiter behind a holder past the allowance is proven not entered" (isNothing deferred)
+      check "that waiter waited the whole five-second allowance" (finished - started >= 5000000000)
+      refused <- withStoreCatalogues store (\_ _ _ -> modifyIORef' entered (+1))
+      check "a configuration loan past the allowance keeps the declared diagnostic" (either (== SupervisionUnavailable) (const False) refused)
+      expect "reader admission past the allowance keeps the declared Store refusal" StoreBusy (withStoreReader store (pure ()))
+    readIORef entered >>= check "an expired configuration waiter never enters" . (== 0)
+
 -- Focused Store checks. Execution requires a separately authorized fresh fixture.
 terminalAdmissionChecks :: FilePath -> IO ()
 terminalAdmissionChecks work = do
@@ -800,8 +865,7 @@ terminalAdmissionChecks work = do
     let markedClock = modifyIORef' entered (+1) >> pure 0
         marked = withCommitDeadline store markedClock 1 $ \guard ->
           runTransactionWithAdmission WaitWithinBudget store (enforceCommitDeadline guard >> pure((),[]))
-    withHeld store $ \release -> do
-      expect "ordinary Store callers still refuse the held gate" StoreBusy (runRead store (pure ()))
+    withHeldStore store $ \release -> do
       withAsync marked $ \waiter -> do
         StoreAdmissionCheck.blocked waiter
         readIORef entered >>= check "waiting Store action has not reached its commit check" . (==0)
@@ -809,7 +873,7 @@ terminalAdmissionChecks work = do
         wait waiter
     readIORef entered >>= check "released terminal Store action executes once" . (==1)
     writeIORef entered 0
-    withHeld store $ \release -> withAsync marked $ \waiter -> do
+    withHeldStore store $ \release -> withAsync marked $ \waiter -> do
       StoreAdmissionCheck.blocked waiter
       throwTo (asyncThreadId waiter) UserInterrupt
       result <- waitCatch waiter
@@ -817,7 +881,7 @@ terminalAdmissionChecks work = do
         (case result of Left failure -> fromException failure==Just UserInterrupt; _->False)
       release
     readIORef entered >>= check "interrupted Store action never runs after release" . (==0)
-    withHeld store $ \release -> do
+    withHeldStore store $ \release -> do
       let delayed = withCommitDeadline store (modifyIORef' entered (+1) >> threadDelay 3000000 >> pure 0) 1 $ \guard ->
             runTransactionWithAdmission WaitWithinBudget store (enforceCommitDeadline guard >> pure((),[]))
       withAsync (try @StoreFailure delayed) $ \waiter -> do
@@ -845,17 +909,3 @@ terminalAdmissionChecks work = do
     retryStoreCleanup store
     expect "closed Store refuses terminal action" StoreClosed marked
     readIORef entered >>= check "closed Store never enters later body" . (==1)
-  where
-    withHeld store action = do
-      held <- newEmptyMVar
-      resume <- newEmptyMVar
-      let clock = putMVar held () >> readMVar resume >> pure 0
-          release = void(tryPutMVar resume ())
-      withCommitDeadline store clock 1 $ \guard ->
-        bracket (async(runTransaction store (enforceCommitDeadline guard >> pure((),[]))))
-          (\holder -> release >> cancel holder) $ \holder -> do
-            timeout 1000000(takeMVar held) >>= maybe(error "Store holder not admitted")pure
-            value <- action release
-            release
-            wait holder
-            pure value

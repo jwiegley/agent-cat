@@ -17,15 +17,16 @@ import Agentic.Manager.Protocol.Json (representableEditorSchema)
 import Agentic.Manager.Schema (schemaVersion, schemaStatements)
 import Agentic.Manager.Store
 import qualified Agentic.Manager.Test.AcceptanceAudit as Audit
+import Agentic.Manager.Test.Contention (blocked, withHeldStore, withHeldConfiguration)
 import qualified Agentic.Runtime as Runtime
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.STM (atomically)
-import Control.Concurrent.Async (AsyncCancelled (..), async, cancel, concurrently, poll, wait, waitCatch)
-import Control.Concurrent.MVar (newEmptyMVar, putMVar, takeMVar, tryPutMVar)
+import Control.Concurrent.Async (AsyncCancelled (..), async, cancel, concurrently, poll, wait, waitCatch, withAsync)
+import Control.Concurrent.MVar (newEmptyMVar, putMVar, readMVar, takeMVar, tryPutMVar)
 import System.Timeout (timeout)
 import Control.DeepSeq (NFData)
 import Control.Exception (AsyncException (UserInterrupt), bracket, fromException, throwIO, try)
-import Control.Monad (forM_, unless, void)
+import Control.Monad (forM_, unless, void, when)
 import Crypto.Hash (Digest, SHA256, hash)
 import Data.Aeson (FromJSON (parseJSON), Value (..), eitherDecodeStrict', object, toJSON, withObject, (.:), (.=))
 import qualified Data.Aeson.Key as Key
@@ -39,6 +40,7 @@ import Data.IORef (writeIORef, modifyIORef', newIORef, readIORef)
 import Data.Int (Int64)
 import Data.Maybe (isNothing)
 import Data.Text (Text)
+import GHC.Clock (getMonotonicTimeNSec)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
 import qualified Database.SQLite3 as SQL
@@ -58,6 +60,7 @@ main = do
   case args of
     ["quota-pressure",work] -> preflightRetentionChecks work >> capacityChecks work >> rateChecks work
     ["deadline-crossing",work] -> commandDeadlineChecks work
+    ["ordinary-admission",work] -> ordinaryAdmissionChecks work
     ["authorization-commit-gap",work] -> credentialCommitGapChecks work
     ["hold-credentials",path] -> withInstalled path $ \installed -> withCoordinationStore installed $ \_ ->
       putStrLn "ready" >> threadDelay 60000000
@@ -74,6 +77,7 @@ main = do
       retainedAttemptChecks work
       controlBindingChecks work
       commandDeadlineChecks work
+      ordinaryAdmissionChecks work
       localEffectChecks work
       bindingBounds work
       dispatchChecks work
@@ -566,7 +570,11 @@ rollbackChecks work = withFixture work "rollback" (64 * commandCapacity) 20 $ \p
   reload <- async (reloadConfiguration installed configuration)
   threadDelay 100000
   poll reload >>= check "configuration reload cannot interleave with acceptance" . isNothing
-  expect "concurrent admission refuses without a waiting queue" StorageUnavailable (submitCommand store proof req (edit profile (commandResource req) "r1"))
+  withAsync (submitCommand store proof req (edit profile (commandResource req) "r1")) $ \concurrent -> do
+    blocked concurrent
+    check "a concurrent admission waits for the held configuration guard instead of refusing" True
+    cancel concurrent
+    waitCatch concurrent >>= check "a concurrent admission cancelled while it waits never runs" . either (const True) (const False)
   cancel pending
   outcome <- waitCatch pending
   check "command cancellation preserves AsyncCancelled" (case outcome of
@@ -846,6 +854,85 @@ retainedAttemptChecks work=withFixture work "retained-attempt" (64*commandCapaci
   absent<-reconcileCommandAttempt failed>>=right
   check "completed failed candidate proves absence without constructing authority" (case absent of Nothing->True;_->False)
 
+-- Command acceptance waits for the Store gate and the configuration guard
+-- within the five-second allowance of each Store action. A holder past the
+-- allowance keeps the declared storage-unavailable refusal, and the refused
+-- command leaves no receipt and no mutation.
+ordinaryAdmissionChecks :: FilePath -> IO ()
+ordinaryAdmissionChecks work = withFixture work "ordinary-admission" (64*commandCapacity) 10 $ \_ _ _ store profile proof -> do
+  let accept nonce expected next = do
+        req <- request store SetInput nonce
+        let bound = req {commandPrecondition = Just ("\"" <> expected <> "\"")}
+        pure (submitCommand store proof bound (edit profile (commandResource bound) next))
+  underStore <- accept "short_store" "r0" "after_store"
+  withHeldStore store $ \release -> withAsync underStore $ \waiter -> do
+    blocked waiter
+    release
+    accepted <- wait waiter >>= right
+    check "a command acceptance waits behind a short Store holder and then commits" (not (submissionReplayed accepted))
+  scalarText store "SELECT revision FROM requests WHERE id='request_1'" >>= check "the waiting command changed its resource once" . (== "after_store")
+  underConfiguration <- accept "short_configuration" "after_store" "after_configuration"
+  withHeldConfiguration store $ \release -> withAsync underConfiguration $ \waiter -> do
+    blocked waiter
+    release
+    accepted <- wait waiter >>= right
+    check "a command acceptance waits behind a short configuration holder and then commits" (not (submissionReplayed accepted))
+  scalarText store "SELECT revision FROM requests WHERE id='request_1'" >>= check "the command behind the configuration holder changed its resource once" . (== "after_configuration")
+  -- The acceptance transaction itself meets the gate. The command first waits
+  -- behind holder A at its Store identity read. Holder B then queues behind the
+  -- command. The gate admits waiters in order, so when A releases, the command
+  -- reads its identity and B holds the gate while the command reaches its
+  -- acceptance transaction.
+  underTransaction <- accept "held_transaction" "after_configuration" "after_transaction"
+  heldB <- newEmptyMVar
+  resumeB <- newEmptyMVar
+  withCommitDeadline store (putMVar heldB () >> readMVar resumeB >> pure 0) 1 $ \guardB ->
+    withHeldStore store $ \releaseA -> withAsync underTransaction $ \waiter -> do
+      blocked waiter
+      withAsync (runTransaction store (enforceCommitDeadline guardB >> pure ((), []))) $ \holderB -> do
+        blocked holderB
+        releaseA
+        takeMVar heldB
+        blocked waiter
+        check "a command acceptance transaction waits behind a held Store gate" True
+        putMVar resumeB ()
+        wait holderB
+        accepted <- wait waiter >>= right
+        check "the waiting acceptance transaction then commits" (not (submissionReplayed accepted))
+  scalarText store "SELECT revision FROM requests WHERE id='request_1'" >>= check "the command behind the held acceptance transaction changed its resource once" . (== "after_transaction")
+  commands <- scalarInt store "SELECT count(*) FROM commands"
+  check "each waiting command left exactly one receipt" (commands == 3)
+  pastAllowance <- accept "long_configuration" "after_transaction" "never"
+  withHeldConfiguration store $ \_ -> do
+    started <- getMonotonicTimeNSec
+    refused <- pastAllowance
+    finished <- getMonotonicTimeNSec
+    check "a command behind a configuration holder past the allowance is refused as storage-unavailable"
+      (case refused of Left StorageUnavailable -> True; _ -> False)
+    check "that command waited the whole five-second allowance" (finished - started >= 5000000000)
+  scalarInt store "SELECT count(*) FROM commands" >>= check "the refused command left no receipt" . (== commands)
+  scalarText store "SELECT revision FROM requests WHERE id='request_1'" >>= check "the refused command left its resource unchanged" . (== "after_transaction")
+  -- A protected read meets one concurrent commit between its read and its
+  -- acknowledgement. The commit runs inside the first read only to place it
+  -- there. The second read is a fresh read under the newer generation.
+  withStoreAuthorizationWatch store $ \watch -> do
+    attempts <- newIORef (0 :: Int)
+    observed <- withAuthorizationReadObservation watch $ do
+      modifyIORef' attempts (+1)
+      count <- readIORef attempts
+      when (count == 1) (mutate store (execute "UPDATE clients SET revision='read_observation_commit' WHERE id='client_1'" []))
+      runRead store (currentClient proof)
+    check "a protected read that meets a concurrent commit is read again and acknowledged" (observed == Just (Right "client_1"))
+    readIORef attempts >>= check "that protected read ran once for each generation" . (== 2)
+    authorizationWatchCurrent watch >>= check "the fresh read acknowledged the newer generation"
+    -- Every read meets a new commit, so the allowance ends before any read is stable.
+    started <- getMonotonicTimeNSec
+    refused <- try @StoreFailure $ withAuthorizationReadObservation watch
+      (mutate store (execute "UPDATE clients SET revision='read_observation_churn' WHERE id='client_1'" []))
+    finished <- getMonotonicTimeNSec
+    check "a protected read that meets commits for the whole allowance keeps the declared refusal" (refused == Left StoreBusy)
+    check "that protected read spent its whole five-second allowance" (finished - started >= 5000000000)
+
 commandDeadlineChecks :: FilePath -> IO ()
 commandDeadlineChecks work=withFixture work "command-deadline" (64*commandCapacity) 10 $ \_ root _ store profile proof->do
   clock<-newIORef 0
@@ -860,11 +947,14 @@ commandDeadlineChecks work=withFixture work "command-deadline" (64*commandCapaci
         readIORef clock
       atFinalRead action crossing = bracket (async action) cancel $ \pending->do
         rendezvous(takeMVar entered)
-        active<-try @StoreFailure(storeIdentity store)
-        check "deadline rendezvous occurs while actual acceptance transaction owns Store" (case active of Left StoreBusy->True;_->False)
-        void crossing
-        putMVar release()
-        wait pending
+        withAsync (try @StoreFailure(storeIdentity store)) $ \probe->do
+          blocked probe
+          check "deadline rendezvous occurs while actual acceptance transaction owns Store" True
+          void crossing
+          putMVar release()
+          outcome<-wait pending
+          void(wait probe)
+          pure outcome
   req<-request store SetInput "deadline"
   withCommitDeadline store finalClock 10 $ \guard->do
     attempt<-newCommandAttempt store proof req
@@ -1055,16 +1145,23 @@ credentialCommitGapChecks work = withFixture work "credential-commit-gap" (64*co
     Audit.withReviewAudit "authorization-commit" $ \audit -> do
       entered <- newEmptyMVar
       calls <- newIORef (0 :: Int)
+      reviewed <- newEmptyMVar
       bracket (async (takeMVar entered >> adminOK store (Admin.RevokeCredential "credential_a")))
         (\writer -> Audit.releaseReviewed audit >> cancel writer >> void (waitCatch writer)) $ \writer -> do
-          observed <- try @StoreFailure $ withAuthorizationObservation watch $ do
-            modifyIORef' calls (+1)
-            facts <- runRead store (currentClient proof)
-            check "observation reads authority before concurrent revocation" (facts == Right "client_1")
-            putMVar entered ()
-            void (Audit.waitReviewed audit)
-            pure facts
-          Audit.releaseReviewed audit
+          let observation = try @StoreFailure $ withAuthorizationObservation watch $ do
+                modifyIORef' calls (+1)
+                facts <- runRead store (currentClient proof)
+                check "observation reads authority before concurrent revocation" (facts == Right "client_1")
+                putMVar entered ()
+                void (Audit.waitReviewed audit)
+                putMVar reviewed ()
+                pure facts
+          observed <- withAsync observation $ \observer -> do
+            takeMVar reviewed
+            blocked observer
+            check "the acknowledgement waits while the writer is between COMMIT and notification" True
+            Audit.releaseReviewed audit
+            wait observer
           void (wait writer)
           check "authorization acknowledgement refuses committed but unnotified state"
             (case observed of Left StoreBusy -> True; _ -> False)

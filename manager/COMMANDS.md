@@ -131,9 +131,17 @@ without callbacks or file/configuration lock acquisition. The coalesced signal
 wakes observers but does not itself revoke authorization. Revalidation checks
 current facts once across a stable Store generation before acknowledging the
 signal, so an ordinary request mutation does not invalidate unchanged authority.
-Final acknowledgement uses original fail-fast Store admission, serializing it
-with SQL COMMIT and notification. A concurrent commit refuses the observation
-without replay. The observation action runs outside that final admission.
+Final acknowledgement waits for the Store gate within its allowance, so it
+follows the whole interval between SQL COMMIT and its notification. The
+observation action runs outside that final admission. For a view, its
+materialization, a revalidation and an event stream liveness check, the action
+is a read. A concurrent commit is then ordinary contention: the read runs again
+under the newer generation. A new attempt starts only while one five-second
+allowance lasts, the Store actions of each attempt keep their own allowances,
+and each read runs once for its own generation. A read that meets a new commit for the whole
+allowance keeps the `StoreBusy` refusal, which is public `storage-unavailable`.
+Any other observation action runs once, and a concurrent commit refuses it
+without replay.
 Closed scopes stay invalid, and worker stop cells remain separate from revocation.
 A one-second wakeup bounds quiet expiry checks, which revalidate trusted SQLite
 time rather than treating the timer or view token as authority.

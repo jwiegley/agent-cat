@@ -192,9 +192,11 @@ probe holds it across both native queries. Successful reload changes all profile
 revisions and the limits snapshot together. Even unchanged definitions receive
 fresh revisions. Invalid candidates preserve installed revisions and limits.
 The private profile registry is not exposed by InstalledConfiguration. A hidden
-fail-fast snapshot callback holds this same lock through command acceptance,
-with configuration-before-store lock ordering. It prevents reload or close from
-interleaving with a command while adding no waiting mutation queue.
+snapshot callback waits for this same lock within a five-second allowance and
+holds it through command acceptance, with configuration-before-store lock
+ordering. It prevents reload or close from interleaving with a command and adds
+no durable mutation queue. A callback that does not acquire the lock within the
+allowance is proven not entered and reports `SupervisionUnavailable`.
 
 The parent coordinator must serialize approval commitment with configuration
 reload, invalidate old unapproved selections, and retain the captured context of

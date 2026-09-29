@@ -158,7 +158,7 @@ withStream (StreamReaders readers) store proof supplied action = do
           maybe (refuseStorageUnavailable "events write" (InternalFault ResponseWriteTimeout)) pure result
         pure (next,more,if populated || due then Just now else lastWrite)
       unless more $ do
-        alive <- withAuthorizationObservation watch (pure ())
+        alive <- withAuthorizationReadObservation watch (pure ())
         unless (alive == Just ()) (throwIO StoreClosed)
         awaitAuthorizationChange watch
       loop watch initial next written send heartbeat

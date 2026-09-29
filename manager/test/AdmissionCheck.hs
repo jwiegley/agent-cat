@@ -5,6 +5,8 @@ module Main (main) where
 
 import qualified Agentic.Manager.Test.AcceptanceAudit as Audit
 import Agentic.Manager.Test.PrivateLog (withPrivateStderr, recordCount)
+import Agentic.Manager.Test.Contention (withHeldStore, withHeldConfiguration)
+import qualified Agentic.Manager.Test.Contention as Contention
 import Control.Concurrent (throwTo)
 import Control.Exception (AsyncException (UserInterrupt))
 import Agentic.Manager.Admission
@@ -22,7 +24,7 @@ import Agentic.Manager.Store
 import qualified Agentic.Manager.Worker as Worker
 import Agentic.Runtime (WorkflowDescriptor (..), FrontendPrepared (..), RunId (..), createProcessGroup, terminateProcessGroup, closeGroupPipes, groupOutput, groupErrors, waitProcessGroup)
 import Control.Concurrent (threadDelay)
-import Control.Concurrent.Async (AsyncCancelled (..), async, asyncThreadId, cancel, waitCatch, wait, poll)
+import Control.Concurrent.Async (AsyncCancelled (..), async, asyncThreadId, cancel, waitCatch, wait, poll, withAsync)
 import Control.Concurrent.MVar (newEmptyMVar, putMVar, takeMVar, readMVar, tryReadMVar, tryPutMVar)
 import Control.Concurrent.STM (atomically, newTVarIO, readTVar, writeTVar, check)
 import Control.DeepSeq (NFData)
@@ -68,6 +70,8 @@ main = do
     ["active-retry",work,native] -> activeRetryChecks work native
     ["completion-failure",work,native] -> completionFailureChild work native
     ["service-faults",work,native,source,python] -> serviceFaultChecks work native source python
+    ["ordinary-admission",work,native] -> ordinaryAdmissionChecks work native
+    ["ordinary-coordinator",work,native] -> ordinaryCoordinatorChecks work native
     [work,native,source,python] -> do
       policyChecks
       activeRetryChecks work native
@@ -86,6 +90,8 @@ main = do
       completionFailureChecks work native
       preparingChecks work native source python
       serviceFaultChecks work native source python
+      ordinaryAdmissionChecks work native
+      ordinaryCoordinatorChecks work native
       loanCancellationChecks work native
       commitDeadlineChecks work native
       storeClosureChecks work native
@@ -278,10 +284,13 @@ restartUnavailableChecks work native = forM_ ["removed","quarantined","failed-di
         entered <- newEmptyMVar
         release <- newEmptyMVar
         withCommitDeadline owner (putMVar entered () >> readMVar release >> pure 0) 1 $ \guard ->
-          bracket (async(runTransaction owner(enforceCommitDeadline guard >> pure((),[])))) (\task -> putMVar release () >> await(wait task)) $ \_ -> do
+          bracket (async(runTransaction owner(enforceCommitDeadline guard >> pure((),[])))) (\task -> void(tryPutMVar release ()) >> await(wait task)) $ \_ -> do
             await(takeMVar entered)
-            busy <- try @StoreFailure(reconcileDrafts owner)
-            assertion "restart reconciliation preserves fail-fast StoreBusy" (case busy of Left StoreBusy -> True; _ -> False)
+            withAsync (try @StoreFailure(reconcileDrafts owner)) $ \waiting -> do
+              Contention.blocked waiting
+              void(tryPutMVar release ())
+              reconciled <- await(wait waiting)
+              assertion "restart reconciliation waits for a held Store gate and then completes" (either (const False) (const True) reconciled)
       before <- number owner "SELECT count(*) FROM invalidations"
       withAdmission owner $ \controller -> do
         retained owner >>= assertion (mode<>" leaves historical A revisions and queue association inert") . (==original)
@@ -344,8 +353,9 @@ shutdownChecks work = do
     (withCommitDeadline owner holderClock 1 $ \guard -> do
       holder <- async(runTransaction owner(enforceCommitDeadline guard >> pure((),[])))
       await(takeMVar held)
-      busy <- try @StoreFailure(runRead owner(pure()))
-      assertion "ordinary SQL remains fail-fast while safety is requested" (busy==Left StoreBusy)
+      waitingSQL <- async(try @StoreFailure(runRead owner(pure())))
+      Contention.blocked waitingSQL
+      assertion "ordinary SQL waits for the held gate while safety is requested" True
       shutdownTask <- async(shutdownAdmission controller CancelNow)
       forM_ ready $ \(_,stopped,_) -> await(takeMVar stopped)
       stillJoining <- poll shutdownTask
@@ -360,6 +370,7 @@ shutdownChecks work = do
       releaseAll
       await(wait joined)
       await(wait holder)
+      void(await(waitCatch waitingSQL))
       result <- await(wait shutdownTask)
       assertion "SQL saturation cannot block emergency original-owner cleanup" (result==ShutdownResult False(Right()))
       forM_ ready $ \(task,_,_) -> do
@@ -486,10 +497,12 @@ shutdownNativeChecks work native = do
       (withCommitDeadline owner (putMVar entered () >> readMVar release >> pure 0) 1 $ \guard -> do
         holder <- async(runTransaction owner(enforceCommitDeadline guard >> pure((),[])))
         await(takeMVar entered)
-        busy <- try @StoreFailure(runTransaction owner(pure((),[])))
-        assertion "transient Busy does not request native safety" (busy==Left StoreBusy)
-        observeLivePreparation live >>= assertion "native preparation stays live under Busy" . maybe False ((==Worker.WorkerPrepared) . Worker.observedWorkerPhase)
-        putMVar release ()
+        withAsync (try @StoreFailure(runTransaction owner(pure((),[])))) $ \waiting -> do
+          Contention.blocked waiting
+          assertion "a transaction waiting for the gate does not request native safety" True
+          observeLivePreparation live >>= assertion "native preparation stays live while a transaction waits" . maybe False ((==Worker.WorkerPrepared) . Worker.observedWorkerPhase)
+          putMVar release ()
+          await(wait waiting) >>= assertion "the waiting transaction runs after the holder releases the gate" . (==Right ())
         await(wait holder)) `finally` void(tryPutMVar release ())
       rollbackResult <- try @StoreFailure $ mutate owner(execute "INSERT INTO clients VALUES ('client_1','duplicate','fixture',0)" [])
       assertion "confirmed constraint rollback retains original refusal" (rollbackResult==Left StoreUnavailable)
@@ -655,7 +668,7 @@ lifecycleChecks work native=withFixture work native "lifecycle" 2 [("a",[]),("b"
     forM_ [preparedA,preparedC] $ \review->doesDirectoryExist(root </> "runs" </> "runs" </> T.unpack(runIdText(preparedRunId(reviewNative review)))) >>=assertion "review has no started native run directory" . not
     (contendedLoan,loanRecord)<-withPrivateStderr(work </> "lifecycle-configured-stderr.log")
       (withStoreConfiguration owner(\_ _->withReviewAcceptance first(\_ _->error "contended review acceptance entered")))
-    assertion "held configuration refuses review acceptance with the declared refusal" (contendedLoan==Right(Left StorageUnavailable :: Either CommandFailure ()))
+    assertion "configuration held past the allowance refuses review acceptance with the declared refusal" (contendedLoan==Right(Left StorageUnavailable :: Either CommandFailure ()))
     assertion "review acceptance records configuration contention"
       (recordCount loanRecord "admission configured class=internal ConfigurationBusy erased=command StorageUnavailable"==1)
     withReviewAcceptance first (\review _->pure(reviewReservation review)) >>=right >>=assertion "guarded handoff loans original association" . (==reservationIdentity first)
@@ -680,7 +693,7 @@ lifecycleChecks work native=withFixture work native "lifecycle" 2 [("a",[]),("b"
     withdrawKey<-key owner "live_withdraw"
     (contendedWithdraw,withdrawRecord)<-withPrivateStderr(work </> "lifecycle-profile-revision-stderr.log")
       (withStoreConfiguration owner(\_ _->withdrawRequest controller(proofs!!2)(draftId c)withdrawKey(etag currentC)(body "withdraw")))
-    assertion "held configuration refuses withdrawal with the declared refusal" (fmap(fmap(const()))contendedWithdraw==Right(Left StorageUnavailable))
+    assertion "configuration held past the allowance refuses withdrawal with the declared refusal" (fmap(fmap(const()))contendedWithdraw==Right(Left StorageUnavailable))
     assertion "withdrawal records configuration contention"
       (recordCount withdrawRecord "admission profile-revision class=internal ConfigurationBusy erased=command StorageUnavailable"==1)
     withdrawal<-withdrawRequest controller(proofs!!2)(draftId c)withdrawKey(etag currentC)(body "withdraw")>>=right
@@ -1016,16 +1029,13 @@ serviceFaultChecks work native source python=do
       (recordCount recorded("admission preparation "<>reservation<>" class=worker WorkerPreparedFraming erased=command StorageUnavailable")==1)
     assertion "the service records the preparation that ended with the declared refusal"
       (recordCount recorded("service preparation "<>reservation<>" class=command StorageUnavailable")==1)
-    -- A later poll of the same service may meet a Store operation of the
-    -- starting preparation and refuse fail-fast. That refusal writes its own
-    -- two classified lines and nothing else.
-    let pollCollision line=any(`T.isSuffixOf` line)
-          [" admission operation class=store StoreBusy erased=command StorageUnavailable"," service admission-poll class=command StorageUnavailable"]
-        preparationLine line=any(`T.isSuffixOf` line)
+    -- A later poll of the same service waits for any Store operation of the
+    -- starting preparation, so it writes no private line.
+    let preparationLine line=any(`T.isSuffixOf` line)
           [" admission preparation "<>reservation<>" class=worker WorkerPreparedFraming erased=command StorageUnavailable",
            " service preparation "<>reservation<>" class=command StorageUnavailable"]
-    assertion "every private line is one of the two preparation records or a classified admission-poll refusal"
-      (all(\line->"manager-fault " `T.isPrefixOf` line && (preparationLine line || pollCollision line))(T.lines(TE.decodeUtf8 recorded)))
+    assertion "every private line is one of the two preparation records"
+      (all(\line->"manager-fault " `T.isPrefixOf` line && preparationLine line)(T.lines(TE.decodeUtf8 recorded)))
   -- A separate SQLite connection holds the Store write lock before the
   -- service starts, and the queue is empty. Service startup only reads, which
   -- write-ahead logging permits beside the held lock. The first admission poll
@@ -1098,8 +1108,6 @@ serviceFaultChecks work native source python=do
         reservation<-scalarText owner "SELECT id FROM reservations"
         ingestions<-number owner "SELECT count(*) FROM ingestions"
         pure(reservation,receipt,ingestions,recorded)
-      pollCollision line=any(`T.isSuffixOf` line)
-        [" admission operation class=store StoreBusy erased=command StorageUnavailable"," service admission-poll class=command StorageUnavailable"]
   (reservation,receipt,ingestions,ingestionRecorded)<-approvedIngestion "service-ingestion"
     "CREATE TRIGGER fail_ingestion BEFORE INSERT ON ingestions BEGIN SELECT RAISE(ABORT,'controlled ingestion failure'); END" Nothing
   assertion "the service accepts the approval of its own reviewed preparation" (receiptOperation receipt==Approve)
@@ -1109,8 +1117,8 @@ serviceFaultChecks work native source python=do
   assertion "the service does not record a failed runtime ingestion as the declared refusal"
     (recordCount ingestionRecorded("service preparation "<>reservation<>" class=command StorageUnavailable")==0)
   let ingestionLine line=(" service preparation "<>reservation<>" class=store StoreUnavailable") `T.isSuffixOf` line
-  assertion "every private line is the ingestion record or a classified admission-poll refusal"
-    (all(\line->"manager-fault " `T.isPrefixOf` line && (ingestionLine line || pollCollision line))(T.lines(TE.decodeUtf8 ingestionRecorded)))
+  assertion "every private line is the ingestion record"
+    (all(\line->"manager-fault " `T.isPrefixOf` line && ingestionLine line)(T.lines(TE.decodeUtf8 ingestionRecorded)))
   -- A fourth service approves one preparation whose run row receives a
   -- profile identifier that is not UTF-8. The Store never writes such a
   -- value, so a trigger installed by a separate SQLite connection rewrites the
@@ -1134,8 +1142,8 @@ serviceFaultChecks work native source python=do
     (recordCount decodingRecorded("service preparation "<>undecodable<>" class=unexpected UnicodeException")
       ==length(filter(T.isInfixOf("service preparation "<>undecodable<>" class="))(T.lines(TE.decodeUtf8 decodingRecorded))))
   let decodingLine line=(" service preparation "<>undecodable<>" class=unexpected UnicodeException") `T.isSuffixOf` line
-  assertion "every private line is the undecodable association record or a classified admission-poll refusal"
-    (all(\line->"manager-fault " `T.isPrefixOf` line && (decodingLine line || pollCollision line))(T.lines(TE.decodeUtf8 decodingRecorded)))
+  assertion "every private line is the undecodable association record"
+    (all(\line->"manager-fault " `T.isPrefixOf` line && decodingLine line)(T.lines(TE.decodeUtf8 decodingRecorded)))
   assertion "the private record of an undecodable run association holds no exception message"
     (not(any(`T.isInfixOf` TE.decodeUtf8 decodingRecorded)["UTF-8","columnText","Invalid"]))
   -- A fifth service meets a queued request whose workflow identifier holds
@@ -1186,6 +1194,57 @@ serviceFaultChecks work native source python=do
     queued<-number owner "SELECT count(*) FROM requests WHERE phase='queued'"
     reservations<-number owner "SELECT count(*) FROM reservations"
     assertion "the uncaught poll failure admits nothing" (queued==1 && reservations==0)
+
+-- The enqueue receipt response and the admission coordinator wait for the
+-- configuration guard and the Store gate within the allowance of each Store
+-- action. A poll that was not entered waits and then selects once, a poll
+-- whose guard wait expires is proven not entered, and a committed selection
+-- is reported once and never repeated.
+ordinaryAdmissionChecks :: FilePath -> FilePath -> IO ()
+ordinaryAdmissionChecks work native=withFixture work native "ordinary-admission" 1 [("a",[])] $ \fixture@(Fixture _ _ owner _ proofs)->withAdmission owner $ \controller->do
+  first<-newDraft fixture 0 "a" "ordinary_first"
+  (_,receipt)<-enqueue controller fixture 0 first "ordinary_first"
+  let composed=try @StoreFailure $ withAuthorizedResponse owner(proofs!!0)(receiptProfile receipt)
+        (requiredScopes(receiptOperation receipt))(\view->revalidateAuthorizedView view>>=right)
+  answered<-withHeldConfiguration owner $ \release->withAsync composed $ \waiter->do
+    Contention.blocked waiter
+    release
+    wait waiter
+  assertion "an enqueue receipt response waits behind a held configuration guard and then succeeds" (answered==Right())
+
+ordinaryCoordinatorChecks :: FilePath -> FilePath -> IO ()
+ordinaryCoordinatorChecks work native=withFixture work native "ordinary-coordinator" 1 [("a",[])] $ \fixture@(Fixture _ _ owner _ _)->withAdmission owner $ \controller->do
+  first<-newDraft fixture 0 "a" "ordinary_first"
+  void(enqueue controller fixture 0 first "ordinary_first")
+  admitted<-withHeldConfiguration owner $ \release->Contention.newMarker>>= \marker->withAsync(pollAdmission controller) $ \waiter->do
+    Contention.blockedSince marker
+    release
+    wait waiter
+  live<-case admitted of
+    Right(AdmissionReady value)->pure value
+    _->error "FAIL a poll that was not entered waits for the configuration guard and then admits"
+  assertion "a poll that was not entered waits for the configuration guard and then admits" True
+  assertion "the waiting poll admitted the queued request" (preparationRequestIdentity live==draftId first)
+  number owner "SELECT count(*) FROM reservations" >>=assertion "the committed selection reserved exactly once" . (==1)
+  void(await(awaitReview live)>>=right)
+  second<-newDraft fixture 0 "a" "ordinary_second"
+  void(enqueue controller fixture 0 second "ordinary_second")
+  selected<-withHeldStore owner $ \release->Contention.newMarker>>= \marker->withAsync(pollAdmission controller) $ \waiter->do
+    Contention.blockedSince marker
+    release
+    wait waiter
+  assertion "a poll behind a short Store holder waits and then completes its selection" (case selected of Right AdmissionIdle->True;_->False)
+  number owner "SELECT count(*) FROM reservations" >>=assertion "a committed selection is never repeated by a later poll" . (==1)
+  eventsBefore<-number owner "SELECT count(*) FROM invalidations"
+  deferred<-withHeldConfiguration owner $ \_->pollAdmission controller
+  assertion "a poll whose configuration wait expires is proven not entered" (case deferred of Right AdmissionDeferred->True;_->False)
+  number owner "SELECT count(*) FROM invalidations" >>=assertion "the unentered poll wrote nothing" . (==eventsBefore)
+  number owner "SELECT count(*) FROM reservations" >>=assertion "the unentered poll reserved nothing beyond the committed selection" . (==1)
+  third<-withHeldConfiguration owner $ \release->Contention.newMarker>>= \marker->withAsync(pollAdmission controller) $ \waiter->do
+    Contention.blockedSince marker
+    release
+    wait waiter
+  assertion "after an unentered poll, the next poll waits and then runs its selection once" (case third of Right AdmissionIdle->True;_->False)
 
 loanCancellationChecks :: FilePath -> FilePath -> IO ()
 loanCancellationChecks work native=withFixture work native "loan-cancellation" 1 [("a",[])] $ \fixture@(Fixture _ _ owner _ _)->do
@@ -1288,11 +1347,14 @@ commitDeadlineChecks work native=withFixture work native "commit-deadline" 1 [("
       atomically(writeTVar armed True)
       program guard "deadline_refused") cancel $ \pending->do
         await(takeMVar entered)
-        active<-try @StoreFailure(storeIdentity owner)
-        assertion "live deadline crosses while owning transaction is active" (case active of Left StoreBusy->True;_->False)
-        atomically(writeTVar time(reviewDeadlineNanos review))
-        putMVar release()
-        wait pending
+        withAsync (try @StoreFailure(storeIdentity owner)) $ \probe->do
+          Contention.blocked probe
+          assertion "live deadline crosses while owning transaction is active" True
+          atomically(writeTVar time(reviewDeadlineNanos review))
+          putMVar release()
+          outcome<-wait pending
+          void(wait probe)
+          pure outcome
     assertion "expiry after protected entry refuses final guarded acceptance" (refused==Left StorageUnavailable)
     await(awaitAdmissionCleanup live)>>=right
     scalarText owner "SELECT revision FROM clients WHERE id='client_1'" >>=assertion "final in-transaction expiry rolls back bounded source-owned writes" . (=="deadline_valid")

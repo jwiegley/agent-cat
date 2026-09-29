@@ -505,6 +505,7 @@ executable manager-store-check
   hs-source-dirs:  manager/test manager/src
   main-is:         StoreCheck.hs
   other-modules:
+    Agentic.Manager.Test.Contention
     Agentic.Manager.Test.StoreAdmissionCheck
     Agentic.Manager.Configuration
     Agentic.Manager.Fault.Record
@@ -527,6 +528,8 @@ executable manager-command-check
   main-is:         CommandCheck.hs
   c-sources:       manager/test/draft_sync_fault.c
   other-modules:
+    Agentic.Manager.Test.Contention
+    Agentic.Manager.Test.StoreAdmissionCheck
     Agentic.Manager.Test.AcceptanceAudit
     Agentic.Manager.Credentials
     Agentic.Manager.LocalAdmin
@@ -613,6 +616,8 @@ executable manager-admission-check
   main-is:         AdmissionCheck.hs
   c-sources:       manager/test/admission_cleanup_fault.c
   other-modules:
+    Agentic.Manager.Test.Contention
+    Agentic.Manager.Test.StoreAdmissionCheck
     Agentic.Manager.Test.AcceptanceAudit
     Agentic.Manager.Test.PrivateLog
     Agentic.Manager.Service
@@ -656,6 +661,8 @@ common manager-lifecycle-checks
     VerticalCheck
     Agentic.Manager.History
     Agentic.Manager.Artifacts
+    Agentic.Manager.Test.Contention
+    Agentic.Manager.Test.StoreAdmissionCheck
     Agentic.Manager.Test.AcceptanceAudit
     Agentic.Manager.Approval
     Agentic.Manager.State
@@ -697,6 +704,8 @@ executable manager-artifact-check
   hs-source-dirs:  manager/src manager/test
   main-is:         ArtifactCheck.hs
   other-modules:
+    Agentic.Manager.Test.Contention
+    Agentic.Manager.Test.StoreAdmissionCheck
     Agentic.Manager.Test.PrivateLog
     Agentic.Manager.Transport
     Agentic.Manager.Pages

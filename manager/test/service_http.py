@@ -218,8 +218,9 @@ def run_mixed(created, workflow, capabilities, authorized):
             if status != 503:
                 break
             assert value["code"] == "storage-unavailable" and time.monotonic() < deadline, ("read unavailable", path)
-            # These are new read observations under the fail-fast admission policy,
-            # never a repeated mutation or an inferred successful effect.
+            # A 503 here means that a Store action waited out its whole allowance.
+            # Each retry is a new read observation, never a repeated mutation or
+            # an inferred successful effect.
             time.sleep(0.05)
         assert status == 200, (path, status, value.get("code"))
         validate(schema, value, raw)

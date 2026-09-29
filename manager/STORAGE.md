@@ -25,14 +25,21 @@ The slot is released after storage cleanup, including callback exceptions and
 cancellation. A stored PID, generation, root identity, or native run identity
 cannot construct either lease or worker authority.
 
-One connection serves reads and writes. Ordinary admission is fail-fast, with one
-active operation. Original terminal-owner persistence explicitly selects
-`WaitWithinBudget` through `runReadWithAdmission` or `runTransactionWithAdmission`.
-Waiting and execution share that Store action's existing five-second allowance.
-The configured positive reader allowance is an upper bound, not a promise of
-parallel readers. An escaped store handle refuses
-after its callback scope. The scoped owner waits for in-flight database and file operations and their
-joined cleanup before closing SQLite and releasing the lease. File operations
+One connection serves reads and writes, with one active operation. Every Store
+action, including each command, protected read, event stream batch and admission
+coordinator step, waits for the Store gate through `WaitWithinBudget`. Waiting
+and execution share that Store action's existing five-second allowance. A
+waiter that is not admitted within the allowance is refused with
+`StoreDeadline` and never runs. An admitted action executes once. A protected
+read whose authorization observation meets a concurrent commit reads again under
+the newer generation, as `COMMANDS.md` describes. A new attempt starts only
+while one five-second allowance lasts, and the Store actions of each attempt
+keep their own allowances. The gate admits waiters in order, and each holder
+is bounded by its own earlier allowance. The configured positive reader
+allowance is an upper bound, not a promise of parallel readers. An escaped
+store handle refuses after its callback scope. The scoped owner waits for
+in-flight database and file operations and their joined cleanup before
+closing SQLite and releasing the lease. File operations
 use one separate fail-fast slot and retain a private root plus lease duplicate.
 Their lock order is file slot, configuration, then database.
 
@@ -295,7 +302,8 @@ evidence.
 `manager/ci/store.sh` builds the real Cabal executable and runs separate N1 and N8
 checks against SQLite and native service leases. The tests include the installed
 public facade, relational constraints, migration rollback, commit failure,
-strict bounds, cancellation, busy refusal, and pinned-reader checkpoint progress.
+strict bounds, cancellation, bounded admission waits, and pinned-reader checkpoint
+progress.
 Configuration and discovery regression gates remain separate. These checks do
 not certify G1, worker containment, a deployed service, or the withdrawn SQLite
 directory-replacement obligation.
@@ -408,8 +416,9 @@ State uses this scope for complete prefix replay and ingestion. Its profile proj
 scope acquires reader capacity before entering the current configuration guard,
 validates profile and client authority before replay, and retains both reader capacity
 and configuration through the response callback. File responses retain
-the existing single Store file slot, while SQL still has its stricter single
-fail-fast admission slot. Neither reader pressure nor retention consumes the separate
+the existing single Store file slot, while SQL still has its single admission
+slot, which waits within each action's allowance. Neither reader pressure nor
+retention consumes the separate
 original-worker stop cells or the cancellation ledger reserve.
 
 The existing owners continue to enforce per-client and global drafts, per-request

@@ -22,12 +22,13 @@ import Agentic.Manager.Store
 import Agentic.Manager.State
 import IngestionCheck (ingestionChecks, concurrentIngestionChecks)
 import qualified Agentic.Manager.Test.AcceptanceAudit as Audit
+import qualified Agentic.Manager.Test.Contention as Contention
 import Agentic.Manager.Worker (WorkerObservation (..),WorkerPhase (..), WorkerFailure (..), workerEventBytes, workerEventEnvelope)
 import qualified Agentic.Runtime as Runtime
 import Agentic.Runtime (workflowName, FrontendPrepared (..), RunId (..), FrontendPreparedInput (..))
 import Control.Concurrent (threadDelay,throwTo,getNumCapabilities)
-import Control.Concurrent.Async (asyncThreadId,async,wait,waitCatch,cancel,poll)
-import Control.Concurrent.MVar (newEmptyMVar,putMVar,takeMVar,readMVar,tryPutMVar)
+import Control.Concurrent.Async (asyncThreadId,async,wait,waitCatch,cancel,poll,withAsync)
+import Control.Concurrent.MVar (newEmptyMVar,putMVar,takeMVar,tryPutMVar)
 import Control.Concurrent.STM hiding (check)
 import qualified Control.Concurrent.STM as STM
 import Control.DeepSeq (NFData)
@@ -913,16 +914,19 @@ workerLossChecks work native source python=do
         atomically(writeTVar armed True)
         putMVar release()
         await(takeMVar entered)
-        active<-try @StoreFailure(storeIdentity store)
-        check "worker loss rendezvous is inside active acceptance" (case active of Left StoreBusy->True;_->False)
-        BS.writeFile (evidence<>".exit") BS.empty
-        let lost=observeLivePreparation live >>= \status->case status of
-              Just observation | observedWorkerPhase observation `elem` [WorkerExited,WorkerReleased] ->pure()
-              _->threadDelay 1000>>lost
-        await lost
-        doesFileExist(evidence<>".joined") >>=check "controlled wrapper joined its original native child"
-        putMVar release()
-        wait pending
+        withAsync(try @StoreFailure(storeIdentity store)) $ \probe->do
+          Contention.blocked probe
+          check "worker loss rendezvous is inside active acceptance" True
+          BS.writeFile (evidence<>".exit") BS.empty
+          let lost=observeLivePreparation live >>= \status->case status of
+                Just observation | observedWorkerPhase observation `elem` [WorkerExited,WorkerReleased] ->pure()
+                _->threadDelay 1000>>lost
+          await lost
+          doesFileExist(evidence<>".joined") >>=check "controlled wrapper joined its original native child"
+          putMVar release()
+          outcome<-wait pending
+          void(waitCatch probe)
+          pure outcome
       check "detected original worker loss rejects final acceptance" (case result of Left StorageUnavailable->True;_->False)
       await(awaitAdmissionCleanup live)>>=right
       number store "SELECT count(*) FROM start_intents" >>=check "worker loss rolls back real start intent" . (==0)
@@ -1094,11 +1098,14 @@ deadlineChecks work native=withReady work native "deadline" ["--scripted"] [] $ 
       atomically(writeTVar armed True)
       putMVar release()
       await(takeMVar entered)
-      busy<-try @StoreFailure(storeIdentity store)
-      check "real Approve deadline crosses inside active transaction" (case busy of Left StoreBusy->True;_->False)
-      atomically(writeTVar time(reviewDeadlineNanos context))
-      putMVar release()
-      wait pending
+      withAsync(try @StoreFailure(storeIdentity store)) $ \probe->do
+        Contention.blocked probe
+        check "real Approve deadline crosses inside active transaction" True
+        atomically(writeTVar time(reviewDeadlineNanos context))
+        putMVar release()
+        outcome<-wait pending
+        void(waitCatch probe)
+        pure outcome
     check "expired final approval guard refuses publication" (case result of Left StorageUnavailable->True;_->False)
     await(awaitAdmissionCleanup live)>>=right
     number store "SELECT count(*) FROM start_intents" >>=check "expired approval leaves no start intent" . (==0)
@@ -1590,25 +1597,13 @@ nativeIngestionChecks work native = checkReopenedIngestion work $ withReadyRunne
       SQL.exec db "BEGIN IMMEDIATE"
       expectUncommitted "busy durable writer" (ingestAcceptedStart owned)
       SQL.exec db "ROLLBACK"
-    let occupy = do
-          result <- try @StoreFailure $ runRead store $ do
-            _ <- query "WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<1000000000000) SELECT sum(x) FROM n" []
-            pure ()
-          case result of
-            Left StoreBusy -> threadDelay 1000 >> occupy
-            _ -> either throwIO pure result
-    bracket (async occupy) cancel $ \writer -> do
-      let waitBusy = try @StoreFailure (storeIdentity store) >>= \result -> case result of
-            Left StoreBusy -> pure ()
-            _ -> do
-              ended <- poll writer
-              case ended of
-                Just outcome -> either throwIO (const (error "fixture writer completed before busy rendezvous")) outcome
-                Nothing -> threadDelay 1000 >> waitBusy
-      await waitBusy
-      busy <- try @StoreFailure (ingestAcceptedStart owned)
-      check "overlapping Store transaction refuses ingestion as StoreBusy" (busy==Left StoreBusy)
-    number store "SELECT count(*) FROM ingestions" >>= check "busy Store admission cannot acknowledge queued input" . (==0)
+    Contention.withHeldStore store $ \_ -> withAsync (try @StoreFailure (ingestAcceptedStart owned)) $ \ingesting -> do
+      Contention.blocked ingesting
+      waiting <- observeAcceptedStart owned
+      check "an ingestion waiting for Store admission has not acknowledged queued input" (observedQueuedFrames waiting==observedQueuedFrames stopped)
+      cancel ingesting
+      void (waitCatch ingesting)
+    number store "SELECT count(*) FROM ingestions" >>= check "an ingestion cancelled while waiting for Store admission acknowledges nothing" . (==0)
     entered <- newEmptyMVar
     hold <- newEmptyMVar @()
     retained <- newIORef Nothing
@@ -1762,35 +1757,26 @@ receiptObservationChecks work native = withReady work native "receipt-observatio
   publicCalls <- newIORef (0::Int)
   typedCalls <- newIORef (0::Int)
   completedReads <- newIORef (0::Int)
-  held <- newEmptyMVar
-  resume <- newEmptyMVar
-  let clock = putMVar held () >> readMVar resume >> pure 0
-      release = void(tryPutMVar resume ())
-  -- Same held-Store rendezvous as StoreCheck.terminalAdmissionChecks.
-  withCommitDeadline store clock 1 $ \guard ->
-    bracket (async(runTransaction store (enforceCommitDeadline guard >> pure((),[]))))
-      (\holder -> release >> cancel holder) $ \holder -> do
-        timeout 1000000(takeMVar held) >>= maybe(error "Store holder not admitted")pure
-        modifyIORef' publicCalls (+1)
-        refused <- readControlReceipt store proof command
-        calls <- readIORef publicCalls
-        check "public receipt under held Store returns opaque refusal once" (refused==Left StorageUnavailable && calls==1)
-        let typedRead = do
-              modifyIORef' typedCalls (+1)
-              result <- try @StoreFailure (runRead store (controlEffectRecorded command))
-              case result of
-                Left StoreBusy -> do
-                  completed <- readIORef completedReads
-                  check "typed receipt observation refuses before query completion" (completed==0)
-                  release
-                  wait holder
-                  throwIO StoreBusy
-                Left failure -> throwIO failure
-                Right value -> modifyIORef' completedReads (+1) >> pure value
-        recorded <- observeControl typedRead
-        attempts <- readIORef typedCalls
-        completed <- readIORef completedReads
-        check "released typed observation executes one admitted read without replay" (recorded && attempts==2 && completed==1)
+  Contention.withHeldStore store $ \release ->
+    withAsync (modifyIORef' publicCalls (+1) >> readControlReceipt store proof command) $ \public -> do
+      Contention.blocked public
+      release
+      waited <- wait public
+      calls <- readIORef publicCalls
+      check "public receipt under a held Store waits and then returns once" (either (const False) ((==command) . receiptId) waited && calls==1)
+  let typedRead = do
+        modifyIORef' typedCalls (+1)
+        value <- runRead store (controlEffectRecorded command)
+        modifyIORef' completedReads (+1)
+        pure value
+  Contention.withHeldStore store $ \release -> withAsync (observeControl typedRead) $ \typed -> do
+    Contention.blocked typed
+    readIORef completedReads >>= check "typed receipt observation waits before its query runs" . (==0)
+    release
+    recorded <- wait typed
+    attempts <- readIORef typedCalls
+    completed <- readIORef completedReads
+    check "released typed observation executes one admitted read without replay" (recorded && attempts==1 && completed==1)
   receipt <- readControlReceipt store proof command >>= right
   check "released public receipt retains original command" (receiptId receipt==command && receiptEffect receipt/=Nothing)
   absent <- try @StoreFailure (runRead store (controlEffectRecorded "missing_receipt"))

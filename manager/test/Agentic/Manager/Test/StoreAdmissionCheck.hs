@@ -14,8 +14,10 @@ import System.Timeout (timeout)
 
 check :: String -> Bool -> IO ()
 check label ok = unless ok(error("FAIL "<>label)) >> putStrLn("PASS "<>label)
+-- | Wait until the task's thread is blocked on an MVar. An idle event stream
+-- reaches its next batch within one second, so the bound is four seconds.
 blocked :: Async a -> IO ()
-blocked task = timeout 1000000 loop >>= maybe(error "waiter did not block")pure
+blocked task = timeout 4000000 loop >>= maybe(error "waiter did not block")pure
   where
     loop = do
       state <- threadStatus(asyncThreadId task)

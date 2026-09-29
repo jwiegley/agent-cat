@@ -6,6 +6,8 @@ import Agentic.Manager.Artifacts
 import Agentic.Manager.Approval (readPreparation, withPreparation)
 import qualified Agentic.Manager.Drafts as Drafts
 import Agentic.Manager.Test.PrivateLog (withPrivateStderr, recordCount)
+import Agentic.Manager.Test.Contention (withHeldStore, withHeldConfiguration)
+import qualified Agentic.Manager.Test.Contention as Contention
 import Agentic.Manager.Fault
 import Agentic.Manager.Fault.Record (faultLine)
 import qualified Agentic.Manager.Overview as Overview
@@ -22,7 +24,7 @@ import Agentic.Manager.Authorization
 import qualified Agentic.Manager.Commands as Commands
 import Agentic.Manager.Configuration
 import Control.Concurrent (threadDelay)
-import Control.Concurrent.STM (atomically)
+import Control.Concurrent.STM (atomically, newTVarIO, readTVar, modifyTVar', retry)
 import Control.Exception (ErrorCall (..), SomeException, toException)
 import qualified Data.ByteString.Builder as Builder
 import qualified Data.Text.Encoding as TE
@@ -38,7 +40,8 @@ import qualified Agentic.Manager.Events as Events
 import Agentic.Manager.Schema (schemaVersion, schemaStatements, commandMigration, draftMigration, admissionMigration, approvalMigration, ingestionMigration, controlMigration)
 import Agentic.Manager.Store
 import Agentic.Runtime hiding (Checkpoint)
-import Control.Concurrent.Async (AsyncCancelled (..), async, cancel, concurrently, wait, waitCatch, withAsync)
+import Control.Concurrent.Async (AsyncCancelled (..), Concurrently (..), async, asyncThreadId, cancel, concurrently, poll, wait, waitCatch, withAsync)
+import GHC.Conc (ThreadStatus (..), BlockReason (..), threadStatus)
 import Control.Concurrent.MVar (newEmptyMVar, putMVar, takeMVar)
 import Control.DeepSeq (NFData, force)
 import Control.Exception (IOException, bracket, evaluate, fromException, throwIO, try)
@@ -74,6 +77,8 @@ main = do
     ["admission-contention",work] -> admissionContentionChecks work
     ["response-order",work] -> responseOrderChecks work
     ["fault-classification",work] -> faultClassificationChecks work
+    ["ordinary-admission",work] -> ordinaryAdmissionChecks work
+    ["ordinary-stream",work] -> ordinaryStreamChecks work
     [work,source] -> do
       createDirectory(work </> "composition")
       compositionChecks(work </> "composition")
@@ -89,8 +94,12 @@ main = do
       responseOrderChecks(work </> "response-order")
       createDirectory(work </> "fault-classification")
       faultClassificationChecks(work </> "fault-classification")
+      createDirectory(work </> "ordinary-admission")
+      ordinaryAdmissionChecks(work </> "ordinary-admission")
+      createDirectory(work </> "ordinary-stream")
+      ordinaryStreamChecks(work </> "ordinary-stream")
       artifactChecks work source
-    _ -> error "usage: manager-artifact-check [retention|composition|observation|events|admission-contention|response-order|fault-classification] PRIVATE_DIRECTORY [PACKAGE_DIRECTORY]"
+    _ -> error "usage: manager-artifact-check [retention|composition|observation|events|admission-contention|response-order|fault-classification|ordinary-admission|ordinary-stream] PRIVATE_DIRECTORY [PACKAGE_DIRECTORY]"
 
 -- Each converted cause site keeps its own class or records its own erased
 -- cause, genuine Store failures keep the storage-unavailable problem, and the
@@ -162,32 +171,49 @@ faultClassificationChecks work = do
   escaped <- withInstalled config $ \installed -> withCoordinationStore installed $ \store -> do
     seed store
     proof <- authenticateCredential store bearer >>= right
-    contended <- withHeldGate store (faultOf (authenticateCredential store bearer >>= right))
-    check "authentication preserves typed Store contention" (fmap (const ()) contended == Left (StoreRefusal StoreBusy))
+    -- A separate SQLite connection hides a table that authentication reads, so
+    -- the checks below meet a genuine Store failure. Contention for the Store
+    -- gate waits instead of failing.
+    let hiddenAdministration statement = withRaw (work </> "sites" </> "manager") (\db -> SQL.exec db statement)
+        hideAdministration = hiddenAdministration "ALTER TABLE credential_administration RENAME TO credential_administration_hidden"
+        restoreAdministration = hiddenAdministration "ALTER TABLE credential_administration_hidden RENAME TO credential_administration"
+        withHiddenAdministration action = bracket hideAdministration (const restoreAdministration) (const action)
+    contended <- withHeldStore store $ \release -> withAsync (faultOf (authenticateCredential store bearer >>= right)) $ \waiter -> do
+      Contention.blocked waiter
+      release
+      wait waiter
+    check "authentication waits for a held Store gate and then succeeds" (either (const False) (const True) contended)
     streams <- Events.newStreamReaders
     start <- Events.withBoundary store proof (\_ cursor _ -> pure cursor) (\_ _ cursor -> pure cursor)
     (sites, siteRecord) <- withPrivateStderr (work </> "sites-stderr.log") $ do
-      reader <- withStoreConfiguration store $ \_ _ -> faultOf (withStoreReader store (pure ()))
+      -- One holder keeps the configuration guard past the allowance of four
+      -- waiters, which wait together and expire together.
+      (reader, borrowed, viewFacts, preparationRead) <- withStoreAuthorizationWatch store $ \watch ->
+        fmap (either (error . show) id) $ withAuthorizedView store proof "profile_1" [Command.Observe] $ \view ->
+          withHeldConfiguration store $ \_ -> runConcurrently $ (,,,)
+            <$> Concurrently (faultOf (withStoreReader store (pure ())))
+            <*> Concurrently (faultOf (withBorrowedAuthorizedCatalogues watch proof [Command.Observe] (\_ _ _ _ -> pure ())))
+            <*> Concurrently (revalidateAuthorizedView view)
+            <*> Concurrently (fmap (const ()) <$> readPreparation store proof "preparation_1")
       observed <- withStoreAuthorizationWatch store $ \watch ->
         faultOf (withAuthorizationObservation watch (mutate store (execute "UPDATE clients SET retired=0 WHERE id='client_1'" [])))
       callback <- withStoreConfiguration store (\_ _ -> ioError (userError marker) :: IO ())
       responseLoan <- faultOf (withAuthorizedResponse store proof "profile_1" [Command.Observe] (\_ -> throwIO ProcessFailure :: IO ()))
       catalogue <- faultOf (withAuthorizedCatalogueContext store proof [Command.Observe] (\_ _ _ _ _ -> throwIO ProcessFailure :: IO ()))
-      borrowed <- withStoreAuthorizationWatch store $ \watch -> withStoreConfiguration store $ \_ _ ->
-        faultOf (withBorrowedAuthorizedCatalogues watch proof [Command.Observe] (\_ _ _ _ -> pure ()))
       available <- withStoreAuthorizationWatch store $ \watch ->
         faultOf (withBorrowedAuthorizedCatalogues watch proof [Command.Observe] (\_ _ _ _ -> pure ()))
-      viewFacts <- withAuthorizedView store proof "profile_1" [Command.Observe] $ \view ->
-        withStoreConfiguration store (\_ _ -> revalidateAuthorizedView view)
-      preparationRead <- withStoreConfiguration store $ \_ _ -> fmap (const ()) <$> readPreparation store proof "preparation_1"
       operation <- Admission.withAdmission store $ \controller ->
-        withHeldGate store (fmap (const ()) <$> Admission.pollAdmission controller)
+        withRaw (work </> "sites" </> "manager") $ \db -> do
+          SQL.exec db "BEGIN IMMEDIATE"
+          outcome <- fmap (const ()) <$> Admission.pollAdmission controller
+          SQL.exec db "ROLLBACK"
+          pure outcome
       streamed <- faultOf (Events.withStream streams store proof start $ \pump -> pump (\_ _ -> pure ()) (\_ -> threadDelay 7000000))
       pure (reader, observed, callback, responseLoan, catalogue, borrowed, available, viewFacts, preparationRead, operation, streamed)
     let (reader, observed, callback, responseLoan, catalogue, borrowed, available, viewFacts, preparationRead, operation, streamed) = sites
         erased context cause value = recordCount siteRecord (context <> " class=" <> cause <> " erased=" <> value) == 1
         declared = "command StorageUnavailable"
-    check "reader admission keeps configuration contention as Store contention" (reader == Right (Left (StoreRefusal StoreBusy)))
+    check "reader admission keeps configuration contention as Store contention" (reader == Left (StoreRefusal StoreBusy))
     check "reader admission records configuration contention"
       (erased "store reader-admission" "internal ConfigurationBusy" "store StoreBusy")
     check "a concurrent commit keeps the declared observation refusal" (fmap (const ()) observed == Left (StoreRefusal StoreBusy))
@@ -203,19 +229,19 @@ faultClassificationChecks work = do
     check "a catalogue loan keeps the declared refusal" (catalogue == storageUnavailable)
     check "a catalogue loan records its own configuration cause"
       (erased "authorization catalogue-context" "internal ConfigurationRefused ProcessFailure" declared)
-    check "a borrowed catalogue loan keeps the declared refusal" (borrowed == Right storageUnavailable)
+    check "a borrowed catalogue loan keeps the declared refusal" (borrowed == storageUnavailable)
     check "a borrowed catalogue loan records configuration contention"
       (erased "authorization borrowed-catalogues" "internal ConfigurationBusy" declared)
     check "the borrowed catalogue loan succeeds when the guard is free" (available == Right ())
-    check "view revalidation keeps its declared refusal" (viewFacts == Right (Right (Left Command.StorageUnavailable)))
+    check "view revalidation keeps its declared refusal" (viewFacts == Left Command.StorageUnavailable)
     check "view revalidation records configuration contention"
       (erased "authorization view-facts" "internal ConfigurationBusy" declared)
-    check "a preparation read keeps its declared refusal" (preparationRead == Right (Left Command.StorageUnavailable))
+    check "a preparation read keeps its declared refusal" (preparationRead == Left Command.StorageUnavailable)
     check "a preparation read records configuration contention"
       (erased "approval preparation-read" "internal ConfigurationBusy" declared)
     check "an admission operation keeps its declared refusal" (operation == Left Command.StorageUnavailable)
     check "an admission operation records its Store cause"
-      (erased "admission operation" "store StoreBusy" declared)
+      (erased "admission operation" "store StoreUnavailable" declared)
     check "a stalled event write keeps the declared refusal" (streamed == storageUnavailable)
     check "a stalled event write is recorded as a write timeout"
       (erased "events write" "internal ResponseWriteTimeout" declared)
@@ -296,19 +322,19 @@ faultClassificationChecks work = do
     check "the private record holds no exception text" (not (markerBytes `BS.isInfixOf` recorded))
     check "the private record holds only the six fault lines" (all ("manager-fault " `T.isPrefixOf`) recordLines && length recordLines == 6)
     (contendedServe, contendedRecord) <- withPrivateStderr (work </> "transport-contention-stderr.log") $
-      withHeldGate store (serve (toException (ErrorCall marker)))
-    check "transport refuses real Store contention with the public storage-unavailable problem" (answer contendedServe == publicStorageUnavailable)
-    check "transport records real Store contention during authentication"
-      (recordCount contendedRecord "response GET /v1/profiles unstarted public=503 storage-unavailable class=store StoreBusy" == 1)
-    check "the application does not run under real Store contention during authentication"
+      withHiddenAdministration (serve (toException (ErrorCall marker)))
+    check "transport refuses a real Store failure with the public storage-unavailable problem" (answer contendedServe == publicStorageUnavailable)
+    check "transport records a real Store failure during authentication"
+      (recordCount contendedRecord "response GET /v1/profiles unstarted public=503 storage-unavailable class=store StoreUnavailable" == 1)
+    check "the application does not run after a real Store failure during authentication"
       (length (T.lines (TE.decodeUtf8 contendedRecord)) == 1)
     ((viewStore, revalidatedStore, preparationStore, overviewDeadline), storeRecord) <- withPrivateStderr (work </> "store-erasure-stderr.log") $ do
-      viewStore <- withHeldGate store (withAuthorizedView store proof "profile_1" [Command.Observe] (\_ -> pure ()))
-      revalidatedStore <- withAuthorizedView store proof "profile_1" [Command.Observe] (\view -> withHeldGate store (revalidateAuthorizedView view))
-      preparationStore <- withHeldGate store (fmap (const ()) <$> readPreparation store proof "preparation_ok")
+      viewStore <- withHiddenAdministration (withAuthorizedView store proof "profile_1" [Command.Observe] (\_ -> pure ()))
+      revalidatedStore <- withAuthorizedView store proof "profile_1" [Command.Observe] (\view -> withHiddenAdministration (revalidateAuthorizedView view))
+      preparationStore <- withHiddenAdministration (fmap (const ()) <$> readPreparation store proof "preparation_ok")
       overviewDeadline <- faultOf (Overview.withOverviewSourceWithin 0 store proof Nothing (\_ _ materialize -> fmap (const ()) materialize))
       pure (viewStore, revalidatedStore, preparationStore, overviewDeadline)
-    let storeErased context = recordCount storeRecord (context <> " class=store StoreBusy erased=command StorageUnavailable") == 1
+    let storeErased context = recordCount storeRecord (context <> " class=store StoreUnavailable erased=command StorageUnavailable") == 1
     check "an authorized view keeps the declared refusal for a Store failure" (viewStore == Left Command.StorageUnavailable)
     check "an authorized view records its Store cause" (storeErased "authorization view")
     check "view revalidation keeps the declared refusal for a Store failure" (revalidatedStore == Right (Left Command.StorageUnavailable))
@@ -348,27 +374,72 @@ faultClassificationChecks work = do
     pure outcome
   check "authentication preserves a typed credential-query Store failure" (fmap (const ()) failedQuery == Left (StoreRefusal StoreUnavailable))
 
+-- The control route answers before the first projection as the snapshot route
+-- does. An open event stream whose next batch meets a short holder of the
+-- configuration guard or the Store gate waits and continues, and a holder past
+-- the allowance ends the stream with the declared storage-unavailable refusal.
+ordinaryAdmissionChecks :: FilePath -> IO ()
+ordinaryAdmissionChecks work = do
+  (config,_) <- fixture work
+  withInstalled config $ \installed -> withCoordinationStore installed $ \store -> do
+    seed store
+    proof <- authenticateCredential store bearer >>= right
+    (association,_,_) <- sourceRun store
+    runtime <- Observation.withRunSnapshot store proof (associationRun association) $ \_ projection ->
+      pure (lookup "runtime" (Observation.publicSnapshotFields projection))
+    check "the snapshot route reports no runtime before the first projection" (runtime == Just Null)
+    control <- try @Command.CommandFailure (readClosedControlSurface store proof association)
+    check "the control route answers before the first projection" (either (const False) (const True) control)
+    let surface = either (const Null) id control
+    check "the control route before the first projection offers nothing and names no decision head"
+      (field "offers" surface == Array mempty && field "decisionHeadId" surface == Null && field "cancelAllowed" surface == Bool False)
+    check "the control route before the first projection keeps its run, supervision and revision"
+      (field "runId" surface == String (associationRun association) && field "supervision" surface == String "observer"
+        && field "revision" surface == String "closed_revision")
+
+ordinaryStreamChecks :: FilePath -> IO ()
+ordinaryStreamChecks work = do
+  (config,_) <- fixture work
+  withInstalled config $ \installed -> withCoordinationStore installed $ \store -> do
+    seed store
+    proof <- authenticateCredential store bearer >>= right
+    streams <- Events.newStreamReaders
+    start <- Events.withBoundary store proof (\_ cursor _ -> pure cursor) (\_ _ cursor -> pure cursor)
+    delivered <- newTVarIO (0::Int)
+    let send _ batch = case field "events" batch of
+          Array values -> atomically (modifyTVar' delivered (+ length values))
+          _ -> error "event batch without events"
+        publish revision = runTransaction store (pure ((), [Invalidation "service.changed" "/v1/capabilities" revision]))
+        deliveredAtLeast wanted = timeout 10000000 (atomically (readTVar delivered >>= \count -> unless (count >= wanted) retry))
+        -- A stream that waits for a change is blocked in STM. Each event is
+        -- published only then, so no publication meets the stream's own batch.
+        idle stream = timeout 4000000 (waitIdle stream) >>= maybe (poll stream >>= \state -> error ("FAIL the stream did not become idle: " <> show state)) pure
+        waitIdle stream = threadStatus (asyncThreadId stream) >>= \state -> case state of
+          ThreadBlocked BlockedOnSTM -> pure ()
+          _ -> threadDelay 1000 >> waitIdle stream
+    withAsync (try @SomeException (Events.withStream streams store proof start (\pump -> pump send (\_ -> pure ())))) $ \stream -> do
+      idle stream
+      publish "stream_first"
+      deliveredAtLeast 1 >>= check "an open stream delivers its first event" . (== Just ())
+      withHeldConfiguration store $ \release -> do
+        Contention.blocked stream
+        release
+      idle stream
+      publish "stream_after_configuration"
+      deliveredAtLeast 2 >>= check "a stream whose next batch meets a short configuration holder waits and continues" . (== Just ())
+      withHeldStore store $ \release -> do
+        Contention.blocked stream
+        release
+      idle stream
+      publish "stream_after_store"
+      deliveredAtLeast 3 >>= check "a stream whose next batch meets a short Store holder waits and continues" . (== Just ())
+      withHeldConfiguration store $ \_ -> do
+        ended <- timeout 12000000 (wait stream)
+        check "a stream whose next batch meets a configuration holder past the allowance ends with storage-unavailable"
+          (fmap (either (Left . classifyFault) Right) ended == Just (Left (CommandRefusal Command.StorageUnavailable)))
+
 faultOf :: IO a -> IO (Either FaultClass a)
 faultOf action = either (Left . classifyFault) Right <$> try @SomeException action
-
--- The occupier is itself a fail-fast caller, so it retries only its own
--- refused admission until it owns the gate. The probe then observes the held
--- gate before the action under test runs.
-withHeldGate :: CoordinationStore -> IO a -> IO a
-withHeldGate store action = withAsync occupy $ \_ -> do
-  timeout 4000000 held >>= maybe (error "Store gate fixture was not held") pure
-  action
-  where
-    held = do
-      outcome <- try @StoreFailure (runRead store (pure ()))
-      case outcome of
-        Left StoreBusy -> pure ()
-        _ -> threadDelay 1000 >> held
-    occupy = do
-      outcome <- try @StoreFailure (runRead store (query "WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<1000000000000) SELECT sum(x) FROM n" [] >> pure ()))
-      case outcome of
-        Left StoreBusy -> occupy
-        _ -> pure ()
 
 hexDigest :: BS.ByteString -> Text
 hexDigest bytes = T.pack (show (hash bytes :: Digest SHA256))
