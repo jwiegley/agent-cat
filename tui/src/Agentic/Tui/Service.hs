@@ -12,6 +12,7 @@ module Agentic.Tui.Service
     ControlView (..), ControlOffer (..), DecisionView (..), DecisionContent (..),
     observeSnapshot, observeControl, observeDecision, observeResult, decodeSnapshot, decodeControl, decodeDecision,
     decisionPrompt, answerValue, answerOffered, retryOffer, headMatches,
+    DecisionHead (..), decisionHead, answerMutation, answerBody,
     observedBinding, RunRead (..), RequestRead (..), Selection (..), ReadVerdict (..), readVerdict, runReadValid,
     readRequestId, readRequestRun, runtimeStatus, observationLines,
     approvalStatus, receiptSettlement
@@ -25,7 +26,7 @@ import Agentic.Runtime
     AttemptSnapshot (..), AttemptState (..), AttemptId (..), OccurrenceId (..),
     DispatchSnapshot (..), RecoverySnapshot (..), RecoveryChosen (..), RecoveryOption (..),
     SteerSnapshot (..), ControlAckSnapshot (..), PublicToolUpdate (..), PublicTodoItem (..),
-    PublicUsage (..), FailureClass (..), PersonAnswering (..), mkRunId )
+    PublicUsage (..), FailureClass (..), PersonAnswering (..), RunId (runIdText), mkRunId )
 import Agentic.Tui.Person (PersonPrompt (..), personAnswerValue)
 import Agentic.Tui.RunModel (runStatusLabel)
 import Control.Monad (unless)
@@ -96,6 +97,9 @@ data Mutation
   | SaveLiteral !C.DraftView !Text !Text !Int
   | Enqueue !C.DraftView
   | Approve !C.DraftView !C.Preparation
+    -- | The typed answer to the question that this decision observation
+    -- names. The command stays bound to this decision when the head changes.
+  | Answer !DecisionView !Value
   deriving (Eq, Show)
 
 mutationOperation :: Mutation -> Text
@@ -104,6 +108,7 @@ mutationOperation mutation = case mutation of
   SaveLiteral {} -> "set-input"
   Enqueue _ -> "enqueue"
   Approve {} -> "approve"
+  Answer {} -> "answer"
 
 mutationURI :: Mutation -> Text
 mutationURI mutation = case mutation of
@@ -111,6 +116,7 @@ mutationURI mutation = case mutation of
   SaveLiteral request _ _ _ -> requestURI request
   Enqueue request -> requestURI request
   Approve _ preparation -> "/v1/preparations/" <> C.preparationId preparation
+  Answer decision _ -> "/v1/decisions/" <> decisionId decision
 
 mutationProfile :: Mutation -> Text
 mutationProfile mutation = case mutation of
@@ -118,6 +124,7 @@ mutationProfile mutation = case mutation of
   SaveLiteral request _ _ _ -> C.draftProfile request
   Enqueue request -> C.draftProfile request
   Approve _ preparation -> C.preparationProfile preparation
+  Answer decision _ -> decisionProfile decision
 
 requestURI :: C.DraftView -> Text
 requestURI request = "/v1/requests/" <> C.draftId request
@@ -146,8 +153,17 @@ prepareMutation client now mutation observed
           C.draftPreparation request == Just (C.preparationId preparation),
           reviewLive now preparation -> C.prepareObserved client current (approvalBody preparation)
         _ -> pure (Left C.InvalidResponse)
+      -- The answer precondition is the exact decision observation that the
+      -- answer was built from, with its entity tag as If-Match.
+      Answer decision value -> case observed of
+        Just current | owned current (mutationURI mutation) (decisionRevision decision),
+          decodeDecision (C.observedValue current) == Right decision -> C.prepareObserved client current (answerBody decision value)
+        _ -> pure (Left C.InvalidResponse)
   where
-    needed = case mutation of Approve {} -> ["observe","submit","control"]; _ -> ["observe","submit"]
+    needed = case mutation of
+      Approve {} -> ["observe","submit","control"]
+      Answer {} -> ["observe","control"]
+      _ -> ["observe","submit"]
     permitted = case C.clientCapabilities client of
       Object fields -> case (KM.lookup "scopes" fields, KM.lookup "profileIds" fields) of
         (Just (Array scopes),Just (Array profiles)) -> all ((`V.elem` scopes) . String) needed
@@ -267,13 +283,20 @@ approvalSelectors preparation =
     "descriptorRevision " <> C.preparationDescriptorRevision preparation,
     "processGeneration  " <> C.preparationGeneration preparation ]
 
+-- | Whether a receipt is the receipt of this mutation. An effect of an input
+-- change or an enqueue names the request. An effect of an answer names the
+-- run controls and the occurrence of the answered decision.
 receiptMatches :: Mutation -> C.CommandReceipt -> Bool
 receiptMatches mutation receipt = C.operationName (C.receiptOperation receipt) == mutationOperation mutation
   && C.receiptProfile receipt == mutationProfile mutation && C.receiptResource receipt == mutationURI mutation
-  && (mutationOperation mutation `notElem` ["set-input","enqueue"] || case C.effectValue <$> C.receiptEffect receipt of
-       Nothing -> True
-       Just (Object fields) -> KM.lookup "resource" fields == Just (String (mutationURI mutation))
-       _ -> False)
+  && case (mutation, C.effectValue <$> C.receiptEffect receipt) of
+       (_, Nothing) -> True
+       (Answer decision _, Just (Object fields)) ->
+         KM.lookup "resource" fields == Just (String ("/v1/runs/" <> decisionRun decision <> "/control"))
+           && KM.lookup "address" fields == Just (object ["occurrenceId" .= occurrenceText (decisionOccurrence decision)])
+       (_, Just (Object fields)) | mutationOperation mutation `elem` ["set-input","enqueue"] ->
+         KM.lookup "resource" fields == Just (String (mutationURI mutation))
+       (_, Just _) -> mutationOperation mutation `notElem` ["set-input","enqueue","answer"]
 
 receiptEffectKind :: C.CommandReceipt -> Maybe Text
 receiptEffectKind receipt = case C.effectValue <$> C.receiptEffect receipt of
@@ -442,9 +465,12 @@ uniqueBy key values = do
   pure values
 
 -- | One complete public snapshot and its display-only Runtime projection.
--- Private references and a last native envelope are not reconstructed.
+-- Private references and a last native envelope are not reconstructed. The
+-- run identity is the validated public run id, and the published workflow and
+-- target label are kept, also when the runtime is absent.
 data RunObservation = RunObservation
-  { runIdentity :: !Text, runSequence :: !(Maybe Word64), runProtocol :: !(Maybe Int),
+  { runIdentity :: !RunId, runWorkflow :: !(Maybe Text), runTarget :: !(Maybe Text),
+    runSequence :: !(Maybe Word64), runProtocol :: !(Maybe Int),
     runSnapshot :: !(Maybe RunSnapshot), runResult :: !(Maybe ResultReference),
     runVerification :: !Verification, runSupervision :: !Text, runIntegrity :: !Text,
     runDecisionIds :: !(Map.Map OccurrenceId (Maybe Text)),
@@ -491,7 +517,7 @@ observeSnapshot client ident = case C.reference client ("/v1/runs/" <> ident <> 
     pure $ do
       pages <- received
       result <- decodeSnapshot (C.pageSetMetadata pages) (C.pageSetItems pages)
-      unless (runIdentity result == ident) (Left C.InvalidResponse)
+      unless (runIdText (runIdentity result) == ident) (Left C.InvalidResponse)
       Right result
 
 observeControl :: C.Client -> Text -> IO (Either C.ClientFailure (C.Observed,ControlView))
@@ -518,7 +544,7 @@ observeDecision client profile run ident = case C.reference client ("/v1/decisio
       Right (observed,value)
 
 observeResult :: C.Client -> RunObservation -> IO (Either C.ClientFailure (Maybe Artifact))
-observeResult client snapshot = case C.reference client ("/v1/runs/" <> runIdentity snapshot <> "/outputs") of
+observeResult client snapshot = case C.reference client ("/v1/runs/" <> runIdText (runIdentity snapshot) <> "/outputs") of
   Left failure -> pure (Left failure)
   Right location -> do
     received <- C.getPageSet client location
@@ -528,7 +554,7 @@ observeResult client snapshot = case C.reference client ("/v1/runs/" <> runIdent
         closed ["version","runId"] fields
         versionOne fields
         ident <- at identifier fields "runId"
-        unless (ident == runIdentity snapshot) (fail "output run")
+        unless (ident == runIdText (runIdentity snapshot)) (fail "output run")
         entries <- traverse parseOutput (C.pageSetItems pages)
         let artifacts = [artifact | Just artifact <- entries]
         unless (length artifacts <= 1) (fail "ambiguous result")
@@ -579,7 +605,7 @@ decodeSnapshot metadata items = decode (withObject "run snapshot" $ \fields -> d
   let projection (status,_,_) = RunSnapshot run status Nothing workflow target answering
         (Map.fromList [(snapshotOccurrenceId item,item) | item <- occurrences]) order recorded
         (Map.fromList [(snapshotControlId item,item) | item <- acknowledgements]) fresh memo Nothing failure failureClass
-  pure (RunObservation ident ((\(_,sequenceNumber,_) -> sequenceNumber) <$> runtime)
+  pure (RunObservation run workflow target ((\(_,sequenceNumber,_) -> sequenceNumber) <$> runtime)
     ((\(_,_,protocol) -> protocol) <$> runtime) (projection <$> runtime) result verification supervision integrity
     (Map.fromList [(snapshotOccurrenceId item,decision) | (item,decision) <- parsed]) metadata items)) metadata
 
@@ -811,6 +837,59 @@ retryOffer control decision = case decisionContent decision of
   _ -> Nothing
   where orMaybe (Just value) _ = Just value; orMaybe Nothing value = value
 
+-- | The head of the installed decision queue as the manager presents it.
+-- A question carries its prompt. A recovery carries the snapshot occurrence
+-- and its published recovery. The head is display data, not an owner.
+data DecisionHead
+  = QuestionHead !DecisionView !PersonPrompt
+  | RecoveryHead !DecisionView !OccurrenceSnapshot !RecoverySnapshot
+  deriving (Eq, Show)
+
+-- | The decision head of one composite read of the run components, derived
+-- only from that read. The controls must be owned and name the decision as
+-- the pending head at position 0 of the same run. A recovery head also needs
+-- the recovery that the snapshot publishes for the decision occurrence. No
+-- other case has a head.
+decisionHead :: RunRead observed -> Maybe DecisionHead
+decisionHead (RunRead snapshot (_, control) decision) = do
+  (_, view) <- decision
+  unless (headMatches control view && decisionRun view == runIdText (runIdentity snapshot)) Nothing
+  case decisionContent view of
+    QuestionContent {} -> QuestionHead view <$> decisionPrompt view
+    RecoveryContent {} -> do
+      runtime <- runSnapshot snapshot
+      occurrence <- Map.lookup (decisionOccurrence view) (snapshotOccurrences runtime)
+      RecoveryHead view occurrence <$> snapshotOccurrenceRecovery occurrence
+
+-- | The answer mutation for the editor input, given the request profile and
+-- one composite read of the run components, with the decision observation
+-- that becomes its precondition. The manager must offer an answer for the
+-- owned pending head, the decision and the controls must belong to the run
+-- of the snapshot and to the profile, and the snapshot occurrence must wait
+-- for a person answer. The input is converted by the question code, so a
+-- flag input "false" becomes JSON false and an unparsable input is refused
+-- before any send.
+answerMutation :: Text -> RunRead observed -> Text -> Either Text (Mutation, observed)
+answerMutation profile (RunRead snapshot (_, control) decision) input = do
+  (observed, view) <- maybe (Left "no decision is at the head of the queue") Right decision
+  unless (answerOffered control view) (Left "the manager offers no answer for this decision")
+  unless (decisionRun view == runIdText (runIdentity snapshot) && controlRun control == decisionRun view)
+    (Left "the decision belongs to another run")
+  unless (decisionProfile view == profile) (Left "the decision belongs to another profile")
+  unless (maybe False snapshotOccurrencePersonPending (runSnapshot snapshot >>= Map.lookup (decisionOccurrence view) . snapshotOccurrences))
+    (Left "the occurrence is not waiting for an answer")
+  value <- answerValue view input
+  Right (Answer view value, observed)
+
+-- | The closed answer body for one decision.
+answerBody :: DecisionView -> Value -> Value
+answerBody decision value = object
+  [ "operation" .= ("answer" :: Text), "occurrenceId" .= occurrenceText (decisionOccurrence decision),
+    "generation" .= decisionGeneration decision, "value" .= value ]
+
+occurrenceText :: OccurrenceId -> Text
+occurrenceText = T.pack . show . occurrenceNumber
+
 decisionPrompt :: DecisionView -> Maybe PersonPrompt
 decisionPrompt decision = case decisionContent decision of
   QuestionContent code prompt -> Just (PersonPrompt (decisionOccurrence decision)
@@ -898,7 +977,7 @@ readVerdict binding selection composite
 -- the profile, and its observation carries the entity tag of its revision.
 runReadValid :: (observed -> (Text, Text)) -> Text -> Text -> RunRead observed -> Bool
 runReadValid binding profile run (RunRead snapshot (controlObserved, control) decision) =
-  runIdentity snapshot == run && controlRun control == run
+  runIdText (runIdentity snapshot) == run && controlRun control == run
     && bound binding controlObserved ("/v1/runs/" <> run <> "/control") (controlRevision control)
     && case (controlHead control, decision) of
       (Nothing, Nothing) -> True
@@ -913,14 +992,15 @@ runtimeStatus = fmap snapshotRunStatus . runSnapshot
 
 -- | Display lines for the installed observation, given the refusal code of
 -- the latest read when that read was refused, whether a complete read is
--- installed, and the installed run snapshot.
+-- installed, and the installed run snapshot. A null runtime is shown as not
+-- yet observed, without a status.
 observationLines :: Maybe Text -> Bool -> Maybe RunObservation -> [Text]
 observationLines stale installed run = case (stale, installed) of
   (Nothing, False) -> []
   (Nothing, True) -> "Observation: current" : runtime
   (Just code, True) -> ("Observation: stale (" <> code <> "); the last complete observation is retained") : runtime
   (Just code, False) -> ["Observation: refused (" <> code <> "); no complete observation is installed"]
-  where runtime = maybe [] (\observed -> ["Runtime: " <> maybe "not reported" runStatusLabel (runtimeStatus observed)]) run
+  where runtime = maybe [] (\observed -> ["Runtime: " <> maybe "not yet observed" runStatusLabel (runtimeStatus observed)]) run
 
 -- | The displayed approval receipt status after one request read, given the
 -- retained approval, the receipt read of this read with the mutation whose

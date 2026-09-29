@@ -3327,9 +3327,34 @@ any command whose intent the manager accepted but whose effect it has not yet
 observed.  A send that the fault interrupted keeps its original pending command
 and any earlier receipt location, and its outcome stays uncertain.
 
-The current service frontend ends at approval and association.  Live run views,
-decision answers, recovery controls, and verified result retrieval are not yet
-connected to this UI.  Service mode remains an unaccepted implementation.
+After association, the frontend shows the run in the live monitor from the
+manager's run snapshot.  The monitor shows the published runtime status, or
+states that the runtime is not yet observed, and it shows the approval receipt
+status and any stale observation on separate lines.  Elapsed time remains
+unknown, and the monitor offers no local cancel, steering, redirect, or result
+action.
+
+The frontend also shows the decision head that the manager presents in the
+same observation.  A head is shown only when the run controls are owned and
+name the decision as the pending head at position zero.  A question head shows
+the manager prompt in an answer editor below the service lines.  Text keys
+edit the answer, @kbd{C-d} sends it, and @kbd{C-c} detaches.  The editor input
+is converted by the question code, so the input @samp{false} for a flag
+question is sent as the JSON value @code{false}.  An input that the code
+cannot convert is refused before any send.  The answer is sent once to the
+decision with the entity tag of the displayed decision observation as its
+precondition.  It completes only when the command receipt reports an observed
+@code{answer-accepted} effect for the answered occurrence of the run.  A
+refused or unresolved receipt leaves the answer uncertain, and only an
+explicitly confirmed exact resend may repeat it.  A retained answer stays bound
+to its original decision when the head changes.  A recovery head shows the
+published message and choices read-only, and @kbd{d} opens the run details over
+it.  Every @kbd{C-d} that sends nothing shows a numbered key outcome that
+states the reason.  When an observation read in flight defers a mutation key,
+automatic refresh pauses while that outcome is shown, so the next press of the
+key finds no read in flight.  Recovery controls and verified result retrieval
+are not yet connected to this UI.  Service mode remains an unaccepted
+implementation.
 @end table
 
 In local mode, the application enters its Brick screen before runner discovery

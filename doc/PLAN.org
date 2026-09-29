@@ -2381,6 +2381,33 @@ Acceptance: each item is fixed with a check, or recorded as not needed with a re
 ]
 #+end_src
 
+* TODO [#D] Resolve the non-blocking fess findings of subtask A6A7
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-a6a7-fess-followup-1exm
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-29 Tue 12:34]
+:MODIFIED: [2026-09-29 Tue 12:34]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess audit fess/fast-A6A7-r1.md (2026-09-29) on subtask A6A7.
+
+1. (medium) Automatic refresh pauses while a deferral outcome is shown (tui/src/Agentic/Tui/ServiceLane.hs refreshPaused, tui/src/Agentic/Tui/App.hs near 747). The outcome ends only on a key press or a view change, and a view change needs a read, which the pause prevents. After one deferred key the live monitor can stop updating for an indefinite time while it still shows "Observation: current". Bound the pause (resume after the in-flight read completes or after a short timeout) or show that refresh is paused, and add a model test.
+2. (medium) tui-journey passed only on its eleventh attempt. Earlier attempts failed with "the TUI answer stayed unresolved after one operator-confirmed exact resend". The answer POST and protected GETs were sometimes refused with 503 storage-unavailable (admission operation class=store StoreBusy) within 1 to 4 seconds, which is inside the A5S2b five-second bounded wait. Diagnose the early StoreBusy refusal on the answer route.
+3. (medium) Process breach: the implementer ran "git checkout HEAD -- manager/src/Agentic/Manager/State.hs manager/CONTROLS.md" to undo its own experimental edits. Both files match HEAD, so no work was lost. No code change is needed.
+4. (medium) The harness asserts the rendered snapshot answer "no" and not JSON false. JSON false is proven only by the model test on answerBody. Record the rendered-answer contract as a specification clarification, or read a projection that carries the typed value.
+5. (low) While an answer to the head is in the lane, Ctrl-D is dropped without a numbered key outcome (tui/src/Agentic/Tui/App.hs near 759). This contradicts the code comment and doc/agent-cat.texi. Give Ctrl-D a numbered outcome or correct the text.
+6. (low) statePersonEditor is cleared only when an answer completes. Text typed for one question stays when another decision becomes the head. Clear it when the question head changes.
+7. (low) The recovery-first branch of tui-journey has never run. Only question then recovery was observed at N1 and N8.
+8. (low) On the service recovery layer, PgUp and PgDn scroll the hidden output pane and not the recovery dialog. Route them to RecoveryViewport.
+9. (low) No test covers the Answer branch of prepareMutation (exact decision observation as If-Match, refusal of a mismatched ETag or value).
+10. (low) doc/workflow-manager-handoff.md is not updated for A6A7.
+
 * DONE [#B] DSL: caseVerdict arm mapping is unproved and untested — permuting arms passes the whole package
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -3880,7 +3907,7 @@ Design question from acat-444: sumT is symmetric in muS (matAdd_comm) but leftmo
 :LABELS:   ["workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-24 Thu 09:19]
-:MODIFIED: [2026-09-24 Thu 09:19]
+:MODIFIED: [2026-09-29 Tue 12:34]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -3903,6 +3930,20 @@ Acceptance: before A7 starts, a recorded specification decision states either th
     "created_by": "johnw",
     "metadata": "{}",
     "thread_id": ""
+  }
+]
+#+end_src
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 344,
+    "issue_id": "acat-ftw9",
+    "author": "johnw",
+    "text": "Subtask A6A7 records a decision: automatic refresh pauses while a deferral outcome is shown (option 1), through Lane.refreshPaused, and KeyOutcome records whether a key was deferred. A model test covers the rule. The journey showed Ctrl-D deferred ten times in a row before the pause, but it recorded no duty-cycle measurement. The fess audit found that the pause is unbounded and can hide a stale monitor (acat-a6a7-fess-followup-1exm, finding 1). This issue stays open until the pause is bounded and the measurement exists. Evidence: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A6A7/fast-impl-r1.",
+    "created_at": "2026-09-29T19:34:31Z"
   }
 ]
 #+end_src
@@ -5423,7 +5464,7 @@ Source: fess audit /Users/johnw/Products/agent-cat-workflow-manager/implementati
 :LABELS:   ["workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-24 Thu 09:19]
-:MODIFIED: [2026-09-24 Thu 09:19]
+:MODIFIED: [2026-09-29 Tue 12:34]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -5446,6 +5487,20 @@ Acceptance: the A6 journey asserts the composite install lines on the associated
     "created_by": "johnw",
     "metadata": "{}",
     "thread_id": ""
+  }
+]
+#+end_src
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 345,
+    "issue_id": "acat-i9aj",
+    "author": "johnw",
+    "text": "Subtask A6A7 extends tui-journey to reach the live monitor and a decision head (question, then recovery) at N1 and N8, and it answers the question through the TUI. The broken-step control (tui-journey-broken-answer) was not run in this subtask, so this issue stays open. Evidence: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A6A7/fast-impl-r1.",
+    "created_at": "2026-09-29T19:34:31Z"
   }
 ]
 #+end_src
@@ -15360,7 +15415,7 @@ to an unapproved local launch.
 :LABELS:   ["p7","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-24 Thu 09:19]
+:MODIFIED: [2026-09-29 Tue 12:34]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-034
 :SOURCE_REPO: agent-cat
@@ -15439,6 +15494,13 @@ Local-mode behavior remains intact without a duplicated service runtime model.
     "author": "johnw",
     "text": "Phase A subtask A5 (resume-20260923) advances this package. It does not complete it. The TUI service read lane now issues one composite read through the original single-flight lane: request, receipt, preparation, snapshot, control and the head decision. The composite installs in one event only when the ticket, request id and run id match the current selection and every component validates. A declared refusal (503, 429, 410) keeps the last complete observation and marks it stale without changing mutation state. An unreadable receipt leaves the approval outcome unresolved and offers no resend. A compiled mutation-key admission predicate gives every key exactly one visible outcome.\n\nEvidence and ceilings: Werror package build passed (package build). tui-model-test passed at N1 and N8, 387 checks (pure model test), and 27 verifier guard-breaking overlays each fail a named check. tui-approval passed at N1 then N8 twice, and the PTY consent control failed as required at N1 and N8 (actual UI interaction, deterministic native fixture). tui/ci/tui.sh passed. Evidence: resume-20260923/A/A5/impl-r2 and A/A5/verify-r2 in the private evidence directory. Fess: fess/A-A5-r2.md, not blocking.\n\nLimits: no PTY run exercises a refused request read, the stale display, a key outcome or a decision-head install (acat-lzlp, acat-i9aj). The round-1 N8 failure is unexplained (acat-dxos). Deferral starvation risk for post-association keys is open (acat-ftw9).\n",
     "created_at": "2026-09-24T16:19:58Z"
+  },
+  {
+    "id": 343,
+    "issue_id": "acat-wm-034-3vqz",
+    "author": "johnw",
+    "text": "Subtask A6A7 shows the associated run through LiveScreen from the installed RunObservation in service mode, with local-only hints and keys hidden and manager strings passed through safeDisplay. It adds a service-owned decision head (question or read-only recovery) derived only from the installed observation, and an Answer mutation on the exact decision observation whose value comes from answerValue, so input false for a flag question is sent as JSON false. The answer completes only on a matching effect-observed answer-accepted receipt. The Werror build, tui-model-test at N1 and N8 (454 checks), tui-journey at N1 and N8 (question then recovery), and bash tui/ci/tui.sh passed. Follow-up findings: acat-a6a7-fess-followup-1exm. Evidence: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A6A7/fast-impl-r1. This package stays in progress.",
+    "created_at": "2026-09-29T19:34:30Z"
   }
 ]
 #+end_src

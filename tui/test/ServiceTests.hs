@@ -6,10 +6,12 @@ module ServiceTests (serviceTests) where
 import qualified Agentic.Manager.Client as C
 import Agentic.Runtime (DescriptorCapabilities (..), WorkflowDescriptor (..), WorkflowInputDescriptor (..), WorkflowInputSource (..),
   OccurrenceId (..), AttemptId (..), RunSnapshot (..), OccurrenceSnapshot (..), AttemptSnapshot (..), ControlAckSnapshot (..),
-  PersonAnswering (..))
+  PersonAnswering (..), RecoverySnapshot (..), mkRunId)
+import Agentic.Tui.Person (PersonPrompt (..))
 import Agentic.Tui.Model
 import qualified Agentic.Tui.Approval as A
-import Agentic.Tui.Presentation (ActiveLayer (..), Presentation (..), emptyPresentation, serviceReviewAllowed, serviceReviewRows, wrapDisplayLines)
+import Agentic.Tui.Presentation (ActiveLayer (..), Presentation (..), emptyPresentation, serviceRequestLines, serviceReviewAllowed, serviceReviewRows, wrapDisplayLines)
+import Agentic.Tui.RunModel (emptyRunView, reconcileRunView)
 import qualified Agentic.Tui.Service as S
 import qualified Agentic.Tui.ServiceLane as L
 import Control.Concurrent (forkIO, newEmptyMVar, putMVar, takeMVar, threadDelay, throwTo)
@@ -19,7 +21,8 @@ import Crypto.Hash (Digest, SHA256, hash)
 import Data.Time.Clock (UTCTime, addUTCTime)
 import Data.Time.Format.ISO8601 (iso8601ParseM)
 import qualified Data.Text.Encoding as TE
-import Data.Aeson (Value (..), eitherDecodeStrict', object, (.=))
+import Data.Aeson (Value (..), eitherDecodeStrict', encode, object, toJSON, (.=))
+import qualified Data.ByteString.Lazy as BL
 import qualified Data.Aeson.Key as Key
 import qualified Data.Aeson.KeyMap as KM
 import qualified Data.ByteString as BS
@@ -145,6 +148,8 @@ serviceTests render = do
   check "required nullable question scope does not disappear"
     (case S.decodeDecision (alter "question" (alter "scope" (remove "mode")) decisionValue) of Left C.InvalidResponse -> True; _ -> False)
   compositeTests render profile row request0 preparation snapshot absentRuntime (metadata,items) control decision
+  decisionTests render profile request0 receiptValue (metadata,items) (decisionValue,decision) control
+  liveTests render profile request0 (metadata,items)
   laneTests render row profile
   where
     profileValue = object ["version" .= (1 :: Int), "id" .= ("profile_main" :: T.Text),
@@ -318,6 +323,7 @@ laneTests render row profile = do
 compositeTests :: ((Int,Int) -> Presentation -> T.Text) -> S.Profile -> S.Workflow -> C.DraftView -> C.Preparation
   -> S.RunObservation -> S.RunObservation -> (Value,[Value]) -> S.ControlView -> S.DecisionView -> IO ()
 compositeTests render profile row request0 preparation snapshot absentRuntime (metadata,items) control decision = do
+  otherRunId <- either (die . show) pure (mkRunId "run_other")
   let binding = id :: (T.Text,T.Text) -> (T.Text,T.Text)
       requestObs = ("/v1/requests/req_8", "\"request_rev_1\"") :: (T.Text,T.Text)
       controlObs = ("/v1/runs/run_21/control", "\"controlrev_2\"") :: (T.Text,T.Text)
@@ -333,7 +339,7 @@ compositeTests render profile row request0 preparation snapshot absentRuntime (m
       withRun changed = composite {S.readRun = Just changed}
   check "a complete bound composite for the selected request and run is current" (verdict composite == S.ReadCurrent)
   checks [ (label, verdict bad == S.ReadInvalid) | (label,bad) <-
-    [ ("a snapshot for another run is invalid", withRun runRead {S.runReadSnapshot = snapshot {S.runIdentity = "run_other"}}),
+    [ ("a snapshot for another run is invalid", withRun runRead {S.runReadSnapshot = snapshot {S.runIdentity = otherRunId}}),
       ("controls for another run are invalid", withRun runRead {S.runReadControl = (controlObs,control {S.controlRun = "run_other"})}),
       ("controls with another entity tag are invalid", withRun runRead {S.runReadControl = (("/v1/runs/run_21/control","\"controlrev_9\""),control)}),
       ("controls observed at another URI are invalid", withRun runRead {S.runReadControl = (("/v1/runs/run_other/control","\"controlrev_2\""),control)}),
@@ -418,7 +424,7 @@ compositeTests render profile row request0 preparation snapshot absentRuntime (m
   let absentLines = S.observationLines Nothing True (Just absentRuntime)
   checks
     [ ("a null runtime yields no status", S.runtimeStatus absentRuntime == Nothing),
-      ("a null runtime is shown as not reported, not as a status", absentLines == ["Observation: current", "Runtime: not reported"]),
+      ("a null runtime is shown as not yet observed, not as a status", absentLines == ["Observation: current", "Runtime: not yet observed"]),
       ("a published runtime status is shown", S.observationLines Nothing True (Just snapshot) == ["Observation: current", "Runtime: Running"]),
       ("a stale mark names its refusal code and the retained observation",
         S.observationLines (Just "503 storage-unavailable") True Nothing == ["Observation: stale (503 storage-unavailable); the last complete observation is retained"]),
@@ -543,7 +549,7 @@ compositeTests render profile row request0 preparation snapshot absentRuntime (m
   -- The visible outcome of a mutation key that starts nothing lasts until the
   -- next key press or until the view changes. Reads, installs and ticks that
   -- keep the view do not remove it.
-  let outcome serial = Just (L.KeyOutcome serial "enqueue deferred during a page-set read. Press the key again.")
+  let outcome serial = Just (L.KeyOutcome serial "enqueue deferred during a page-set read. Press the key again." True)
       screenA = "request screen" :: String
       screenB = "command screen" :: String
       pressed = L.retainKeyOutcome True screenA screenA Nothing (outcome 1)
@@ -552,7 +558,7 @@ compositeTests render profile row request0 preparation snapshot absentRuntime (m
       nextKey = L.retainKeyOutcome True screenA screenA afterInstall afterInstall
       repeated = L.retainKeyOutcome True screenA screenA afterInstall (outcome 2)
       moved = L.retainKeyOutcome False screenA screenB afterInstall afterInstall
-      operations = ["create", "set-input", "enqueue"]
+      operations = ["create", "set-input", "enqueue", "answer"]
       outcomeTexts = [text | operation <- operations, Just text <- map (L.admissionText operation) [minBound .. maxBound]]
         <> map L.keyHelpText operations <> map L.unobservedText operations <> [L.resendDeferredText, L.resendUnofferedText]
   checks
@@ -562,16 +568,25 @@ compositeTests render profile row request0 preparation snapshot absentRuntime (m
       ("a repeated press that is refused again shows its own numbered outcome", repeated == outcome 2),
       ("an event that changes the view ends the key outcome", moved == Nothing),
       ("every key outcome line fits an 80-column status line with a three-digit key number",
-        all (\text -> T.length (L.keyOutcomeLine (L.KeyOutcome 999 text)) <= 80) outcomeTexts && length outcomeTexts == 17)
+        all (\text -> T.length (L.keyOutcomeLine (L.KeyOutcome 999 text False)) <= 80) outcomeTexts && length outcomeTexts == 22),
+      -- Automatic refresh pauses exactly while a deferral is shown, so the
+      -- page-set read in flight ends and the repeated key starts.
+      ("automatic refresh pauses while a deferral is shown, through reads and installs that keep the view",
+        L.refreshPaused pressed && L.refreshPaused afterRead && L.refreshPaused afterInstall),
+      ("automatic refresh resumes after the next key press or a view change ends the deferral",
+        not (L.refreshPaused nextKey) && not (L.refreshPaused moved)),
+      ("a key outcome that is not a deferral does not pause refresh",
+        not (L.refreshPaused (Just (L.KeyOutcome 3 "enqueue did not start: a command is in progress or unresolved." False)))
+          && not (L.refreshPaused Nothing))
     ]
   let busyText = maybe "" id (L.admissionText "enqueue" L.KeyBusy)
       loadingModel = (initialServiceModel [profile]) {modelScreen = ServiceRequestScreen associated, modelStatus = "loading manager catalogue"}
       outcomePresentation = (emptyPresentation loadingModel) {presentationService = True, presentationNoColor = True,
-        presentationServiceKeyOutcome = Just (L.KeyOutcome 3 busyText)}
+        presentationServiceKeyOutcome = Just (L.KeyOutcome 3 busyText False)}
   mapM_ (\size -> do
       let frame = render size outcomePresentation
       check ("the status line at " <> show size <> " shows the key outcome while a read replaces the status text")
-        (L.keyOutcomeLine (L.KeyOutcome 3 busyText) `T.isInfixOf` frame && not ("loading manager catalogue" `T.isInfixOf` frame)))
+        (L.keyOutcomeLine (L.KeyOutcome 3 busyText False) `T.isInfixOf` frame && not ("loading manager catalogue" `T.isInfixOf` frame)))
     [(100,30),(80,24)]
   -- A refused request read keeps the request screen and states the refusal.
   -- App applies 'refuseRequestRead' to a refused request read and
@@ -605,6 +620,317 @@ compositeTests render profile row request0 preparation snapshot absentRuntime (m
     [(100,30),(80,24)]
   putStrLn "RENDER stale request observation at (80,24):" >> putStr (T.unpack (render (80,24) stalePresentation))
   putStrLn "RENDER refused request observation at (80,24):" >> putStr (T.unpack (render (80,24) refusedPresentation))
+
+-- | The install decision for a composite read with run components, and
+-- fixed-size renders of the live monitor in service mode. Each rendered model
+-- comes from 'serviceRunObserved' on an idle lane: the live screen of the run,
+-- with the published runtime as the displayed snapshot, or no snapshot when
+-- the runtime is absent.
+liveTests :: ((Int,Int) -> Presentation -> T.Text) -> S.Profile -> C.DraftView -> (Value,[Value]) -> IO ()
+liveTests render profile request0 (metadata,items) = do
+  let maximumId = "18446744073709551615" :: T.Text
+      acknowledgement = object ["commandId" .= ("cmd_4" :: T.Text), "state" .= ("delivered" :: T.Text), "message" .= ("answered" :: T.Text),
+        "command" .= ("answer" :: T.Text), "occurrenceId" .= ("0" :: T.Text), "attemptId" .= Null]
+      enriched = put "authoredOrder" (Array (V.fromList [String maximumId, String "0"])) (put "traceRecorded" (Bool True)
+        (put "controlAcks" (Array (V.fromList [acknowledgement])) (put "billFresh" (String "7") (put "billMemo" (String "5") metadata))))
+      routed = [if lookupKey "occurrenceId" item == Just (String maximumId)
+                  then put "dispatch" (object ["targets" .= (["alpha", "beta"] :: [T.Text]), "open" .= True, "redirect" .= Null]) item
+                  else item | item <- items]
+      withOutput text = [alter "attempts" (\attempts -> case attempts of
+                            Array values -> Array (V.map (put "output" (String text)) values)
+                            other -> other) item | item <- routed]
+  observation <- either (die . show) pure (S.decodeSnapshot enriched routed)
+  native <- maybe (die "FAIL missing runtime") pure (S.runSnapshot observation)
+  absent <- either (die . show) pure (S.decodeSnapshot (put "runtime" Null enriched) routed)
+  let run = snapshotRunId native
+      associated = request0 {C.draftPhase = "associated", C.draftRun = Just "run_21"}
+      serviceModel = initialServiceModel [profile]
+      requestModel = serviceModel {modelScreen = ServiceRequestScreen associated}
+      runOf observed = Just (S.runIdentity observed, S.runSnapshot observed)
+      installed observed = maybe (die "FAIL an idle read with a run did not install the live monitor") pure
+        (serviceRunObserved True (runOf observed) requestModel)
+  liveModel <- installed observation
+  absentModel <- installed absent
+  -- The decision that App.applyServiceObservation takes for every installed
+  -- composite read before it chooses a request or review screen.
+  let decided idle observed screen = serviceRunObserved idle observed (serviceModel {modelScreen = screen})
+  checks
+    [ ("an idle read with a run and a published runtime shows the run in the live monitor with that runtime as the snapshot",
+        (modelScreen <$> decided True (runOf observation) (ServiceRequestScreen associated)) == Just (LiveScreen run)
+          && (modelSnapshot =<< decided True (runOf observation) (ServiceRequestScreen associated)) == Just native),
+      ("an idle read with a run and an absent runtime shows the run in the live monitor without a snapshot",
+        (modelScreen <$> decided True (runOf absent) (ServiceRequestScreen associated)) == Just (LiveScreen run)
+          && fmap modelSnapshot (decided True (runOf absent) (ServiceRequestScreen associated)) == Just Nothing
+          && S.runIdentity absent == run),
+      ("a later idle read on the live monitor replaces the displayed snapshot with the new runtime",
+        fmap modelSnapshot (serviceRunObserved True (runOf absent) liveModel) == Just Nothing
+          && fmap modelSnapshot (serviceRunObserved True (runOf observation) absentModel) == Just (Just native)),
+      ("a busy command lane keeps the screen when a read carries a run",
+        decided False (runOf observation) (ServiceRequestScreen associated) == Nothing
+          && serviceRunObserved False (runOf absent) liveModel == Nothing),
+      ("the input screen keeps its screen when a read carries a run", decided True (runOf observation) (InputScreen 0) == Nothing),
+      ("a read without run components leaves the screen to the request and review decision",
+        decided True Nothing (ServiceRequestScreen associated) == Nothing && decided True Nothing (ServiceCommandScreen "notice") == Nothing)
+    ]
+  let livePresentation model observed stale layer = (emptyPresentation model)
+        { presentationService = True, presentationNoColor = True, presentationLayer = layer,
+          presentationServiceRequestLines = serviceRequestLines associated,
+          presentationRunView = maybe emptyRunView (`reconcileRunView` emptyRunView) (modelSnapshot model),
+          presentationServiceApproval = Just "dispatch-attempted",
+          presentationServiceRun = Just observed,
+          presentationServiceObservation = S.observationLines stale True (Just observed) }
+      frame = render (140,36) (livePresentation liveModel observation Nothing ScreenLayer)
+      details = render (140,36) (livePresentation liveModel observation Nothing RunDetailsLayer)
+      staleFrame = render (140,36) (livePresentation liveModel observation (Just "503 storage-unavailable") ScreenLayer)
+      absentFrame = render (140,36) (livePresentation absentModel absent Nothing ScreenLayer)
+      localOnly = ["steer", "Steer", "route", "Routes", "CANCEL", "cancel", "LINEAGE", "lineage", "Esc RUNS", "Esc DETACH", "Esc detaches",
+        "RESULT AVAILABLE", "r result", "s save", "restart", "resume", "fork", "persona none", "target pending"]
+      runtimeLabels = ["Starting", "Running", "Cancelling", "Succeeded", "Failed", "Cancelled", "Owner unavailable"]
+  checks
+    [ ("the maximum public occurrence id keeps its exact one-based number in the rows and the output title at (140,36)",
+        all (`T.isInfixOf` frame) ["> 18446744073709551616", "Output · Request 18446744073709551616"]
+          && not ("Request 0 " `T.isInfixOf` frame) && not ("> 0  Running" `T.isInfixOf` frame)),
+      ("the service live monitor at (140,36) names the request, its phase and its run",
+        all (`T.isInfixOf` frame) ["Request: req_8", "Phase: associated", "Run: run_21"]),
+      ("the service live monitor at (140,36) shows the retained Unicode output, the exact bills and elapsed unknown",
+        all (`T.isInfixOf` frame) ["雪😀", "bill 7 fresh / 5 memo", "elapsed unknown"]),
+      ("the service live monitor at (140,36) shows the observation, the published runtime and the approval receipt on separate lines",
+        all (`T.isInfixOf` frame) ["Observation: current", "Runtime: Running", "Approval receipt: dispatch-attempted"]
+          && not ("Runtime: Running" `T.isInfixOf` T.concat (filter ("Approval receipt" `T.isInfixOf`) (T.lines frame)))),
+      ("the service live monitor at (140,36) shows no local cancel, steer, redirect, lineage or local result text",
+        not (any (`T.isInfixOf` frame) localOnly)),
+      ("the service live monitor at (140,36) offers detach and details",
+        all (`T.isInfixOf` frame) ["q DETACH", "d DETAILS"]),
+      ("the service run details at (140,36) list the control acknowledgements and no local persona or realization",
+        "control cmd_4: delivered — answered" `T.isInfixOf` details
+          && not (any (`T.isInfixOf` details) ["persona: none", "realization: pending"])),
+      ("a stale service observation at (140,36) shows its stale marker and refusal code beside the retained runtime",
+        all (`T.isInfixOf` staleFrame) ["Observation: stale (503 storage-unavailable)", "Runtime: Running", "Approval receipt: dispatch-attempted"]),
+      ("an absent runtime at (140,36) is shown as not yet observed, with no runtime status and no local text",
+        "Runtime: not yet observed" `T.isInfixOf` absentFrame && "Approval receipt: dispatch-attempted" `T.isInfixOf` absentFrame
+          && not (any (`T.isInfixOf` absentFrame) (runtimeLabels <> localOnly <> ["Waiting for run.started", "c cancels"])))
+    ]
+  -- Manager ids are long. A request line that also carried the run wrapped
+  -- between "Run:" and the run id at 140 columns in the actual journey.
+  let longRequest = "request_" <> T.replicate 48 "a"
+      longRun = "run_" <> T.replicate 48 "b"
+      longLines = serviceRequestLines (request0 {C.draftId = longRequest, C.draftPhase = "associated", C.draftRun = Just longRun})
+      longFrame size = render size ((livePresentation liveModel observation Nothing ScreenLayer) {presentationServiceRequestLines = longLines})
+  checks
+    [ ("with manager-length ids the run id stays whole on one row at " <> show size,
+        ("Run: " <> longRun) `T.isInfixOf` longFrame size && ("Request: " <> longRequest) `T.isInfixOf` longFrame size)
+    | size <- [(140,36),(80,24)] ]
+  -- The header names the published workflow and target whether or not the
+  -- runtime is present. Only a null target label reads as not reported.
+  noTarget <- either (die . show) pure (S.decodeSnapshot (put "targetLabel" Null (put "runtime" Null enriched)) routed)
+  noTargetModel <- installed noTarget
+  let noTargetFrame = render (140,36) (livePresentation noTargetModel noTarget Nothing ScreenLayer)
+      failedModel = liveModel {modelSnapshot = Just native {snapshotRunFailure = Just (T.unwords (replicate 80 "failure"))}}
+      failedFrame size = render size (livePresentation failedModel observation Nothing ScreenLayer)
+      helpFrame = render (140,36) (livePresentation liveModel observation Nothing KeyHelpLayer)
+  putStrLn "RENDER service live monitor with a long run failure at (80,20):" >> putStr (T.unpack (failedFrame (80,20)))
+  checks
+    [ ("an absent runtime at (140,36) still shows the published workflow and target in the header",
+        all (`T.isInfixOf` absentFrame) ["review | runtime not yet observed", " target scripted"]
+          && not ("target not reported" `T.isInfixOf` absentFrame)),
+      ("a null target label with an absent runtime at (140,36) reads as not reported",
+        " target not reported" `T.isInfixOf` noTargetFrame),
+      ("a long run failure at (80,24) keeps the service lines, both panes, the selected output and the pointer to the details",
+        all (`T.isInfixOf` failedFrame (80,24)) ["Run: run_21", "Runtime: Running", "Approval receipt: dispatch-attempted", "Run running",
+          "... d DETAILS for the complete error", "Requests", "Output · Request 18446744073709551616", "> 184467440737095", "雪😀", "q DETACH"]),
+      -- The failure banner counts the service lines above the panes, so the
+      -- panes keep their first rows on a short screen.
+      ("a long run failure at (80,20) keeps the service lines, the first rows of both panes and the pointer to the details",
+        all (`T.isInfixOf` failedFrame (80,20)) ["Runtime: Running", "Approval receipt: dispatch-attempted", "Run running",
+          "... d DETAILS for the complete error", "Output · Request", "> 184467440737095", "\x2502 model reviewer", "q DETACH"]),
+      ("the service live key help at (140,36) lists the read-only keys and q detach, and no local action",
+        all (`T.isInfixOf` helpFrame) ["d full run details and error", "g refreshes observations", "q detaches; the manager run continues"]
+          && not (any (`T.isInfixOf` helpFrame) ["c cancel", "steer", "route", "result", "save"]))
+    ]
+  putStrLn "RENDER service live monitor at (140,36):" >> putStr (T.unpack frame)
+  putStrLn "RENDER service live monitor with an absent runtime at (140,36):" >> putStr (T.unpack absentFrame)
+  -- Terminal control sequences in manager-supplied run output, in a refusal
+  -- code and in the status line reach the frame only as U+FFFD.
+  let payload = "A\ESC[2JB\ESC]52;c;SGVsbG8=\a\&C\NUL\&D\x9b\&E" :: T.Text
+      sanitized = "A\xfffd[2JB\xfffd]52;c;SGVsbG8=\xfffd\&C\xfffd\&D\xfffd\&E" :: T.Text
+      hostileCode = "503 " <> payload
+  hostile <- either (die . show) pure (S.decodeSnapshot enriched (withOutput payload))
+  hostileNative <- maybe (die "FAIL missing hostile runtime") pure (S.runSnapshot hostile)
+  let hostileModel = serviceModel {modelScreen = LiveScreen run, modelSnapshot = Just hostileNative,
+        modelStatus = L.staleStatus hostileCode True}
+      hostileFrame size layer = render size (livePresentation hostileModel hostile (Just hostileCode) layer)
+      hostileSummary = hostileFrame (140,36) ScreenLayer
+      hostileDetails = hostileFrame (140,36) RunDetailsLayer
+      hostileSmall = hostileFrame (80,24) ScreenLayer
+      hostileFrames = [hostileSummary, hostileDetails, hostileSmall, hostileFrame (80,24) RunDetailsLayer]
+      raw = T.filter (\character -> character /= '\n' && (character < ' ' || (character >= '\DEL' && character <= '\x9f')))
+  checks
+    [ ("control sequences in run output render as U+FFFD at (140,36)", sanitized `T.isInfixOf` hostileSummary),
+      ("control sequences in a refusal code render as U+FFFD in the stale marker at (140,36)",
+        ("Observation: stale (503 " <> sanitized) `T.isInfixOf` hostileSummary),
+      ("control sequences in the status line render as U+FFFD at (140,36)",
+        ("observation stale: 503 " <> sanitized) `T.isInfixOf` hostileSummary),
+      ("control sequences in run output render as U+FFFD in the run details at (140,36)", sanitized `T.isInfixOf` hostileDetails),
+      ("no frame at (140,36) or (80,24), summary or details, contains a raw control character", all (T.null . raw) hostileFrames)
+    ]
+  putStrLn "RENDER hostile manager text in the service live monitor at (80,24):" >> putStr (T.unpack hostileSmall)
+  -- Terminal control sequences in the published workflow, target and
+  -- addressee, in the request id, phase and run, and in command-screen text
+  -- reach the frame only as U+FFFD.
+  let labelled = put "workflow" (String payload) (put "targetLabel" (String payload) enriched)
+      addressed = [put "addressee" (String payload) item | item <- routed]
+  hostileLabels <- either (die . show) pure (S.decodeSnapshot labelled addressed)
+  hostileLabelsAbsent <- either (die . show) pure (S.decodeSnapshot (put "runtime" Null labelled) addressed)
+  labelPresentModel <- installed hostileLabels
+  labelAbsentModel <- installed hostileLabelsAbsent
+  let hostileRequest = serviceRequestLines (request0 {C.draftId = payload, C.draftPhase = payload, C.draftRun = Just payload})
+      labelFrame model observed = render (140,36) ((livePresentation model observed Nothing ScreenLayer) {presentationServiceRequestLines = hostileRequest})
+      labelPresent = labelFrame labelPresentModel hostileLabels
+      labelAbsent = labelFrame labelAbsentModel hostileLabelsAbsent
+      commandFrame size = render size ((emptyPresentation (serviceModel {modelScreen = ServiceCommandScreen ("Observation refused: " <> payload)}))
+        {presentationService = True, presentationNoColor = True})
+  checks
+    [ ("control sequences in the workflow, target and addressee render as U+FFFD with a runtime at (140,36)",
+        all (`T.isInfixOf` labelPresent) [sanitized <> " | Running", " target " <> sanitized, "\x2502 " <> sanitized]),
+      ("control sequences in the workflow and target render as U+FFFD with an absent runtime at (140,36)",
+        all (`T.isInfixOf` labelAbsent) [sanitized <> " | runtime not yet observed", " target " <> sanitized]),
+      ("control sequences in the request id, phase and run render as U+FFFD at (140,36)",
+        all (`T.isInfixOf` labelPresent) ["Request: " <> sanitized <> "   Phase: " <> sanitized, "Run: " <> sanitized]),
+      ("control sequences in command-screen text render as U+FFFD at (140,36)",
+        ("Observation refused: " <> sanitized) `T.isInfixOf` commandFrame (140,36)),
+      ("no label, request or command-screen frame contains a raw control character",
+        all (T.null . raw) [labelPresent, labelAbsent, commandFrame (140,36), commandFrame (80,24)])
+    ]
+
+-- | The service decision head, the answer mutation and the rendering of
+-- the head in service mode. The fixture run run_21 has a pending flag
+-- question at occurrence 0, which decision_3 names as the owned head.
+decisionTests :: ((Int,Int) -> Presentation -> T.Text) -> S.Profile -> C.DraftView -> Value -> (Value,[Value])
+  -> (Value,S.DecisionView) -> S.ControlView -> IO ()
+decisionTests render profile request0 receiptValue (metadata,items) (decisionValue,decision) control = do
+  snapshot <- either (die . show) pure (S.decodeSnapshot metadata items)
+  otherRunId <- either (die . show) pure (mkRunId "run_other")
+  let controlObs = ("/v1/runs/run_21/control", "\"controlrev_2\"") :: (T.Text,T.Text)
+      decisionObs = ("/v1/decisions/decision_3", "\"decisionrev_1\"") :: (T.Text,T.Text)
+      runRead = S.RunRead snapshot (controlObs,control) (Just (decisionObs,decision))
+      withDecision changed = runRead {S.runReadDecision = Just (decisionObs,changed)}
+      withControl changed = runRead {S.runReadControl = (controlObs,changed)}
+      answer read' input = S.answerMutation "profile_main" read' input
+      refused result = case result of Left _ -> True; Right _ -> False
+      notPending = [put "personPending" (Bool False) item | item <- items]
+  idle <- either (die . show) pure (S.decodeSnapshot metadata notPending)
+  checks
+    [ ("an owned pending head question is the decision head with its prompt",
+        case S.decisionHead runRead of
+          Just (S.QuestionHead view prompt) -> view == decision && S.decisionPrompt decision == Just prompt
+          _ -> False),
+      ("a head that the controls do not own is not shown", S.decisionHead (withControl control {S.controlSupervision = "lost"}) == Nothing),
+      ("a decision that the controls do not name is not shown", S.decisionHead (withControl control {S.controlHead = Just "decision_4"}) == Nothing),
+      ("a decision after position 0 is not shown", S.decisionHead (withDecision decision {S.decisionPosition = 1}) == Nothing),
+      ("a decision that is no longer pending is not shown", S.decisionHead (withDecision decision {S.decisionState = "resolved"}) == Nothing),
+      ("a decision for another run than the snapshot is not shown",
+        S.decisionHead runRead {S.runReadSnapshot = snapshot {S.runIdentity = otherRunId}} == Nothing),
+      ("a read without a decision has no head", S.decisionHead runRead {S.runReadDecision = Nothing} == Nothing)
+    ]
+  (mutation,observed) <- either (die . ("FAIL the fixture answer was refused: " <>) . T.unpack) pure (answer runRead "false")
+  let encoded = TE.decodeUtf8 (BL.toStrict (encode (S.answerBody decision (Bool False))))
+  checks
+    [ ("the answer \"false\" to a flag question is the typed JSON false for the displayed decision",
+        mutation == S.Answer decision (Bool False) && observed == decisionObs),
+      ("the answer is sent to the decision URI with the decision profile",
+        S.mutationOperation mutation == "answer" && S.mutationURI mutation == "/v1/decisions/decision_3" && S.mutationProfile mutation == "profile_main"),
+      ("the encoded answer body carries \"value\":false and never a string",
+        "\"value\":false" `T.isInfixOf` encoded && not ("\"value\":\"false\"" `T.isInfixOf` encoded)
+          && all (`T.isInfixOf` encoded) ["\"operation\":\"answer\"", "\"occurrenceId\":\"0\"", "\"generation\":\"generation_3\""]),
+      ("an unparsable flag input is refused before any send", refused (answer runRead "maybe") && refused (answer runRead "")),
+      ("no answer is offered for another generation", refused (answer (withDecision decision {S.decisionGeneration = "generation_9"}) "false")),
+      ("no answer is offered for a decision after position 0", refused (answer (withDecision decision {S.decisionPosition = 1}) "false")),
+      ("no answer is offered for controls that are not owned", refused (answer (withControl control {S.controlSupervision = "observer"}) "false")),
+      ("no answer is offered for another run", refused (answer runRead {S.runReadSnapshot = snapshot {S.runIdentity = otherRunId}} "false")
+          && refused (answer (withDecision decision {S.decisionRun = "run_other"}) "false")),
+      ("no answer is offered for another profile", refused (S.answerMutation "profile_other" runRead "false")),
+      ("no answer is offered for a decision that is not the head", refused (answer (withControl control {S.controlHead = Just "decision_4"}) "false")
+          && refused (answer runRead {S.runReadDecision = Nothing} "false")),
+      ("no answer is offered when the occurrence no longer waits for an answer", refused (answer runRead {S.runReadSnapshot = idle} "false")),
+      ("no answer is offered without the manager answer offer", refused (answer (withControl control {S.controlOffers = []}) "false"))
+    ]
+  -- Only an answer receipt for the decision, with an effect whose address is
+  -- the answered occurrence of the run controls, completes the answer.
+  let effect occurrence resource = object ["kind" .= ("answer-accepted" :: T.Text), "runtimeSequence" .= ("12" :: T.Text),
+        "address" .= object ["occurrenceId" .= (occurrence :: T.Text)], "resource" .= (resource :: T.Text)]
+      answerReceipt value = put "operation" (String "answer") (put "requiredScopes" (toJSON ["control" :: T.Text])
+        (put "resource" (String "/v1/decisions/decision_3") (put "links" (object ["self" .= ("/v1/commands/cmd_11" :: T.Text),
+          "resource" .= ("/v1/decisions/decision_3" :: T.Text)]) (put "state" (String "effect-observed") (put "effect" value
+            (put "dispatchAttemptedAt" (String "2026-09-03T00:00:01Z") receiptValue))))))
+      decodedReceipt value = either (die . ("FAIL answer receipt fixture: " <>) . show) pure (C.decodeObservation (answerReceipt value))
+  matching <- decodedReceipt (effect "0" "/v1/runs/run_21/control")
+  otherOccurrence <- decodedReceipt (effect "1" "/v1/runs/run_21/control")
+  otherResource <- decodedReceipt (effect "0" "/v1/runs/run_other/control")
+  checks
+    [ ("an answer-accepted effect for the answered occurrence of the run matches the answer",
+        S.receiptMatches mutation matching && S.receiptEffectKind matching == Just "answer-accepted"),
+      ("an answer effect for another occurrence does not complete the answer", not (S.receiptMatches mutation otherOccurrence)),
+      ("an answer effect for another run does not complete the answer", not (S.receiptMatches mutation otherResource)),
+      ("an answer receipt does not complete another decision", not (S.receiptMatches (S.Answer decision {S.decisionId = "decision_4"} (Bool False)) matching))
+    ]
+  -- The recovery head carries the recovery that the snapshot publishes.
+  let recoveryObject = object ["gap" .= ("adapter gap" :: T.Text), "message" .= ("Retry the adapter?" :: T.Text),
+        "retries" .= ([] :: [T.Text]), "choices" .= [object ["choice" .= ("retry" :: T.Text), "target" .= Null]], "chosen" .= Null]
+      recovering = [if lookupKey "occurrenceId" item == Just (String "0") then put "personPending" (Bool False) (put "recovery" recoveryObject item) else item | item <- items]
+      recoveryValue = put "kind" (String "recovery") (put "gap" (String "adapter gap") (put "message" (String "Retry the adapter?")
+        (put "choices" (toJSON [object ["choice" .= ("retry" :: T.Text), "target" .= Null]]) (remove "question" decisionValue))))
+  recoverySnapshot <- either (die . show) pure (S.decodeSnapshot metadata recovering)
+  recoveryDecision <- either (die . show) pure (S.decodeDecision recoveryValue)
+  let recoveryRead = S.RunRead recoverySnapshot (controlObs,control {S.controlOffers = []}) (Just (decisionObs,recoveryDecision))
+  recoveryHead <- case S.decisionHead recoveryRead of
+    Just (S.RecoveryHead view occurrence recovery) | view == recoveryDecision -> pure (occurrence,recovery)
+    _ -> die "FAIL an owned pending head recovery with a published snapshot recovery is not the decision head"
+  checks
+    [ ("a recovery head without the snapshot recovery is not shown",
+        S.decisionHead recoveryRead {S.runReadSnapshot = snapshot} == Nothing),
+      ("a recovery head offers no answer", refused (answer recoveryRead "false"))
+    ]
+  -- The head renders in service mode below the service lines, without local
+  -- keys, and manager text reaches the frame only through safeDisplay.
+  native <- maybe (die "FAIL missing runtime") pure (S.runSnapshot snapshot)
+  prompt <- maybe (die "FAIL missing prompt") pure (S.decisionPrompt decision)
+  let associated = request0 {C.draftPhase = "associated", C.draftRun = Just "run_21"}
+      model = (initialServiceModel [profile]) {modelScreen = LiveScreen (S.runIdentity snapshot), modelSnapshot = Just native}
+      headPresentation layer = (emptyPresentation model)
+        { presentationService = True, presentationNoColor = True, presentationLayer = layer,
+          presentationServiceRequestLines = serviceRequestLines associated,
+          presentationRunView = reconcileRunView native emptyRunView,
+          presentationServiceApproval = Just "dispatch-attempted",
+          presentationServiceRun = Just snapshot,
+          presentationServiceObservation = S.observationLines Nothing True (Just snapshot) }
+      question = render (140,36) (headPresentation PersonLayer) {presentationPersonPrompt = Just prompt}
+      submitted = render (140,36) (headPresentation PersonLayer) {presentationPersonPrompt = Just prompt, presentationPersonSubmitted = True}
+      recoveryFrame = render (140,36) (headPresentation RecoveryLayer) {presentationRecovery = Just recoveryHead}
+      localOnly = ["Esc CANCEL RUN", "c CANCEL RUN", "CANCEL", "Esc detaches", "r retry", "PgUp/PgDn scroll", "accepted locally"]
+      payload = "A\ESC[2JB\ESC]52;c;SGVsbG8=\a\&C\NUL\&D\x9b\&E" :: T.Text
+      sanitized = "A\xfffd[2JB\xfffd]52;c;SGVsbG8=\xfffd\&C\xfffd\&D\xfffd\&E" :: T.Text
+      hostileQuestion = render (140,36) (headPresentation PersonLayer) {presentationPersonPrompt = Just prompt {personPromptText = payload}}
+      hostileRecovery = render (140,36) (headPresentation RecoveryLayer)
+        {presentationRecovery = Just (fst recoveryHead, (snd recoveryHead) {snapshotRecoveryMessage = payload})}
+      raw = T.filter (\character -> character /= '\n' && (character < ' ' || (character >= '\DEL' && character <= '\x9f')))
+  putStrLn "RENDER service question head at (140,36):" >> putStr (T.unpack question)
+  putStrLn "RENDER service recovery head at (140,36):" >> putStr (T.unpack recoveryFrame)
+  checks
+    [ ("the service question head at (140,36) shows the manager prompt below the runtime and the approval receipt",
+        all (`T.isInfixOf` question) ["Your answer", "Proceed with 雪😀?", "Runtime: Running", "Approval receipt: dispatch-attempted",
+          "Run: run_21", "Waiting for your answer"]),
+      ("the service question head at (140,36) offers Ctrl-D and Ctrl-C and no local cancel or detach key",
+        all (`T.isInfixOf` question) ["Ctrl-D SEND ANSWER", "Ctrl-C DETACH"] && not (any (`T.isInfixOf` question) localOnly)),
+      ("a sent service answer at (140,36) waits for the manager effect and shows no editor",
+        all (`T.isInfixOf` submitted) ["WAITING FOR THE MANAGER EFFECT", "waiting for its observed effect"]
+          && not ("Ctrl-D SEND ANSWER" `T.isInfixOf` submitted)),
+      ("the service recovery head at (140,36) shows the published message and choices read-only",
+        all (`T.isInfixOf` recoveryFrame) ["Recovery required", "Retry the adapter?", "Choices (read-only here): retry", "READ-ONLY RECOVERY",
+          "Runtime: Running", "q DETACH", "d DETAILS"] && not (any (`T.isInfixOf` recoveryFrame) localOnly)),
+      ("control sequences in a decision prompt render as U+FFFD at (140,36)", sanitized `T.isInfixOf` hostileQuestion),
+      ("control sequences in a recovery message render as U+FFFD at (140,36)", sanitized `T.isInfixOf` hostileRecovery),
+      ("no decision head frame contains a raw control character", all (T.null . raw) [question, submitted, recoveryFrame, hostileQuestion, hostileRecovery])
+    ]
 
 -- | A comparable summary of a lane whose pending commands and locations are
 -- text markers.

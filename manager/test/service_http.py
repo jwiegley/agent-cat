@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Exercise the foreground HTTPS boundary with private local credentials and TLS."""
 from pathlib import Path
+import contextlib
 import hashlib
 import http.client
 import json
@@ -15,13 +16,18 @@ import time
 
 source, work, runner = map(Path, sys.argv[1:4])
 native = sys.argv[4]
-tui_approval = len(sys.argv) == 6 and sys.argv[5] in ("tui-approval", "tui-consent-control")
+tui_approval = len(sys.argv) == 6 and sys.argv[5] in ("tui-approval", "tui-consent-control", "tui-journey")
+# The journey continues the approval steps through the live monitor and the
+# decision heads that the manager presents. It answers a question head with
+# typed false and shows a recovery head read-only, then detaches, so it is
+# partial actual UI interaction and not the evidence of a complete TUI workflow.
+journey = len(sys.argv) == 6 and sys.argv[5] == "tui-journey"
 # The consent control presses y in the summary, where the approval really
 # starts, at the step that expects the detail-view refusal. It must fail with
 # the detail-view consent message. It shows only that this assertion detects
 # an approval. It does not break an approval guard.
 consent_control = len(sys.argv) == 6 and sys.argv[5] == "tui-consent-control"
-mixed = len(sys.argv) == 6 and sys.argv[5] in ("mixed", "mixed-confirm", "tui-approval", "tui-consent-control")
+mixed = len(sys.argv) == 6 and sys.argv[5] in ("mixed", "mixed-confirm", "tui-approval", "tui-consent-control", "tui-journey")
 confirm_uncertain = mixed and sys.argv[5] == "mixed-confirm"
 assert len(sys.argv) == 5 or mixed
 assert not tui_approval or os.environ.get("TUI_CHECK")
@@ -105,7 +111,24 @@ context = ssl.create_default_context(cafile=str(cert))
 context.minimum_version = context.maximum_version = ssl.TLSVersion.TLSv1_3
 
 
+# True while a TUI session is open. During the session every mutation belongs
+# to the TUI, and the harness only reads.
+posts_forbidden = False
+
+
+@contextlib.contextmanager
+def harness_reads_only():
+    """Forbid harness POSTs until the TUI session inside this block has ended."""
+    global posts_forbidden
+    posts_forbidden = True
+    try:
+        yield
+    finally:
+        posts_forbidden = False
+
+
 def exchange(path, headers=None, method="GET", payload=None):
+    assert not (posts_forbidden and method == "POST"), "harness POST during a TUI session"
     connection = http.client.HTTPSConnection("127.0.0.1", port, context=context, timeout=7)
     try:
         connection.request(method, path, body=payload, headers=headers or {})
@@ -162,6 +185,22 @@ NOT_SENT = "Approval was not sent: the preflight check refused it before any sen
 APPROVAL_DEFERRED = ("Approval did not start: a manager command is in progress or unresolved.",
                      "Approval did not start: the displayed review is stale.")
 OUTPUT_LIMIT = 16 * 1024 * 1024
+# The live monitor shows the published runtime status on its own line. Each
+# label names exactly one published status. The rank orders the statuses along
+# the run lifecycle, so a later observation may only move forward from a
+# non-terminal status.
+RUNTIME_LINE = re.compile(r"Runtime: (Starting|Running|Cancelling|Succeeded|Failed|Cancelled|Owner unavailable)(?![A-Za-z])")
+LABEL_STATUS = {"Starting": "starting", "Running": "running", "Cancelling": "cancelling", "Succeeded": "succeeded",
+                "Failed": "failed", "Cancelled": "cancelled", "Owner unavailable": "orphaned"}
+STATUS_RANK = {"starting": 0, "running": 1, "cancelling": 2, "succeeded": 3, "failed": 3, "cancelled": 3, "orphaned": 3}
+# Rows that only the request screen shows. A live-monitor frame contains none.
+REQUEST_SCREEN_ROWS = ("Manager request", "Admission:", "Position:", "Blocking reasons:", "Retained operator literals:")
+
+
+def agrees(shown, published):
+    """Whether a displayed runtime label agrees with a later published status."""
+    displayed = LABEL_STATUS[shown]
+    return published == displayed or STATUS_RANK[displayed] < min(3, STATUS_RANK[published])
 
 
 def notice_is(line, number, text):
@@ -425,7 +464,7 @@ for iteration in range(2):
                         client_state = work / "unused-client-state"
                         command = [os.environ["TUI_CHECK"], "--tui", "--service", str(client_profile),
                                    "+RTS", "-N" + native, "-RTS"]
-                        with TuiSession(runner, client_state, command=command, explicit_state=False) as session:
+                        with harness_reads_only(), TuiSession(runner, client_state, command=command, explicit_state=False) as session:
                             session.wait_screen("Manager profiles")
                             session.wait_screen("profile_1")
                             session.send(b"\r")
@@ -475,6 +514,17 @@ for iteration in range(2):
                                 validate("Preparation", preparation)
                                 preparation_tag = received.get("etag")
                                 assert preparation_tag is not None and preparation["state"] == "live"
+                                if journey:
+                                    # The exact review hashes the native input bytes: the
+                                    # logical literal plus the declared LF of prompt transport.
+                                    journey_workflow = catalogue["items"][index]
+                                    declared = {item["name"]: item["source"] for item in journey_workflow["inputs"]}
+                                    assert [item["name"] for item in preparation["review"]["inputs"]] == list(declared)
+                                    for item in preparation["review"]["inputs"]:
+                                        expected = literal.encode() + (b"\n" if declared[item["name"]] == "prompt" else b"")
+                                        assert item["source"] == "literal" and item["bytes"] == str(len(expected)), "review input byte count"
+                                        assert item["sha256"] == hashlib.sha256(expected).hexdigest(), "review input digest"
+                                    print("PASS actual TUI request carries the exact Unicode literal and the native prompt bytes", flush=True)
                                 last_key = 0
 
                                 def refused(key, text, failure, name):
@@ -536,10 +586,278 @@ for iteration in range(2):
                                 validate("Request", associated)
                                 (work / "tui-associated-request.json").write_bytes(raw)
                                 assert process.poll() is None, "manager exited during frontend approval"
+                                if journey:
+                                    run = associated["runId"]
+                                    base = "/v1/runs/" + run
+
+                                    def frame_kind(visible):
+                                        """The kind of one whole service frame of the run, or None.
+
+                                        Every kind needs the header, the service lines with the runtime, and no
+                                        row left from the request screen. The live monitor adds both panes and
+                                        its footer. A question head adds the answer dialog, and a recovery head
+                                        adds the read-only recovery dialog.
+                                        """
+                                        if (RUNTIME_LINE.search(visible) is None or "elapsed unknown" not in visible or "Run: " + run not in visible
+                                                or any(row in visible for row in REQUEST_SCREEN_ROWS) or "RUN DETAILS" in visible):
+                                            return None
+                                        if "Requests" in visible and "Output · " in visible and "q DETACH" in visible and "d DETAILS" in visible:
+                                            return "live"
+                                        if "Your answer" in visible and ("Ctrl-D SEND ANSWER" in visible or "WAITING FOR THE MANAGER EFFECT" in visible):
+                                            return "question"
+                                        if "Recovery required" in visible and "READ-ONLY RECOVERY" in visible and "Choices (read-only here): " in visible:
+                                            return "recovery"
+                                        return None
+
+                                    def wait_frame(kinds, timeout, failure, name):
+                                        """Wait with an explicit deadline for a settled whole frame of one of the kinds."""
+                                        deadline = time.monotonic() + timeout
+                                        while True:
+                                            session.pump()
+                                            visible = session.screen.text()
+                                            if frame_kind(visible) in kinds:
+                                                session.settle()
+                                                visible = session.screen.text()
+                                                if frame_kind(visible) in kinds:
+                                                    return frame_kind(visible), visible
+                                            if time.monotonic() >= deadline or session.process.poll() is not None:
+                                                (work / ("tui-" + name + "-missing.screen.txt")).write_text(visible)
+                                                raise AssertionError(failure)
+
+                                    # The numbered outcome of a key that started nothing, on the status line.
+                                    KEY_LINE = re.compile(r"Key (\d+): (.*)")
+                                    # Texts that the TUI shows once an answer attempt has started.
+                                    ANSWER_STARTED = ("preparing explicit answer", "sending one answer attempt", "manager intent accepted",
+                                                      "WAITING FOR THE MANAGER EFFECT", "Outcome unresolved")
+
+                                    def key_outcome(visible):
+                                        """The highest key outcome number on the screen and its text, or (0, "")."""
+                                        found = [(int(match.group(1)), match.group(2).strip()) for match in KEY_LINE.finditer(visible)]
+                                        return max(found) if found else (0, "")
+
+                                    def run_read(path, schema):
+                                        status, value, raw, headers = fetch(path, authorized)
+                                        assert status == 200, (path, status, value.get("code"))
+                                        validate(schema, value, raw)
+                                        return value, headers.get("etag")
+
+                                    # Segment 1: live runtime progress. The manager may present a decision head
+                                    # from the first frame, so a question or recovery frame with the service
+                                    # lines also shows the progress.
+                                    kind, visible = wait_frame(("live", "question", "recovery"), 45,
+                                                               "live monitor showed no whole frame with runtime progress from the snapshot", "live")
+                                    live_offset = len(session.output)
+                                    (work / "tui-live.screen.txt").write_text(visible)
+                                    rows = visible.splitlines()
+                                    runtime_rows = [row for row in rows if RUNTIME_LINE.search(row)]
+                                    receipt_rows = [row for row in rows if "Approval receipt: " in row]
+                                    # The runtime and the approval receipt are distinct rows of one frame.
+                                    assert len(runtime_rows) == 1 and len(receipt_rows) == 1, ("runtime or receipt row count", runtime_rows, receipt_rows)
+                                    assert "Approval receipt" not in runtime_rows[0] and RUNTIME_LINE.search(receipt_rows[0]) is None, (
+                                        "approval receipt state shown as runtime progress", runtime_rows, receipt_rows)
+                                    # Each tick starts one run read, and the status line names that read.
+                                    session.wait_for(b"reading manager request and run", after=live_offset, timeout=10)
+                                    assert len(session.output) < OUTPUT_LIMIT and b"loading manager catalogue" not in bytes(session.output[live_offset:]), (
+                                        "run refresh shown as a catalogue load")
+                                    shown = RUNTIME_LINE.search(runtime_rows[0]).group(1)
+                                    receipt = receipt_rows[0].split("Approval receipt: ", 1)[1].strip()
+                                    status, observed_run, raw, _ = fetch(base + "/snapshot", authorized)
+                                    assert status == 200, ("snapshot read", status)
+                                    validate("RunSnapshot", observed_run, raw)
+                                    (work / "tui-live-snapshot.json").write_bytes(raw)
+                                    assert observed_run["runId"] == run and observed_run["runtime"] is not None, "displayed runtime absent from the snapshot"
+                                    assert agrees(shown, observed_run["runtime"]["status"]), (
+                                        "displayed runtime disagrees with the snapshot", shown, observed_run["runtime"]["status"])
+                                    assert observed_run["workflow"] is None or observed_run["workflow"] in visible
+                                    assert observed_run["targetLabel"] is None or " target " + observed_run["targetLabel"] in visible
+                                    print("PASS actual TUI shows runtime", shown, "from the snapshot in a whole", kind, "frame; the snapshot GET shows",
+                                          observed_run["runtime"]["status"], "and the approval receipt row stays", repr(receipt), flush=True)
+
+                                    # Segment 2: the decision heads. The manager presents the question and the
+                                    # recovery in an order that is not fixed. At a question head the TUI types
+                                    # false and presses Ctrl-D. At a recovery head the display is read-only.
+                                    # The harness only reads. It never POSTs a journey step.
+                                    order = []
+                                    deadline = time.monotonic() + 90
+                                    while True:
+                                        kind, visible = wait_frame(("question", "recovery"), max(1.0, deadline - time.monotonic()),
+                                                                   "no decision head appeared in the TUI before the deadline", "head")
+                                        control, _ = run_read(base + "/control", "RunControl")
+                                        head = control["decisionHeadId"]
+                                        assert head is not None and control["supervision"] == "owned", ("displayed head not named by owned controls", control)
+                                        decision, _ = run_read("/v1/decisions/" + head, "Decision")
+                                        assert decision["state"] == "pending" and decision["position"] == 0 and decision["kind"] == kind, (
+                                            "displayed head disagrees with the manager head", kind, decision["kind"], decision["state"])
+                                        order.append(kind)
+                                        (work / ("tui-head-" + kind + ".screen.txt")).write_text(visible)
+                                        print("HEAD", len(order), kind, head, flush=True)
+                                        if kind == "question":
+                                            assert decision["question"]["code"] == "flag"
+                                            assert (decision["question"]["prompt"].splitlines() or [""])[0][:30] in visible, "question prompt not displayed"
+                                            occurrence = decision["address"]["occurrenceId"]
+                                            before, _ = run_read(base + "/snapshot", "RunSnapshot")
+                                            session.send(b"false")
+                                            # A visible deferral during a page-set read or a stale observation
+                                            # permits another explicit Ctrl-D. Any other refusal fails.
+                                            # Every Ctrl-D has one visible outcome: a start, or a numbered key
+                                            # outcome on the status line. A deferral during a page-set read or a
+                                            # stale observation permits another explicit Ctrl-D. Any other
+                                            # refusal fails.
+                                            last_outcome = key_outcome(session.screen.text())[0]
+                                            for _ in range(10):
+                                                session.send(b"\x04")
+                                                started, refusal = None, ""
+                                                press_deadline = time.monotonic() + 15
+                                                while started is None and time.monotonic() < press_deadline and session.process.poll() is None:
+                                                    session.pump()
+                                                    visible = session.screen.text()
+                                                    number, refusal = key_outcome(visible)
+                                                    if number > last_outcome:
+                                                        last_outcome, started = number, False
+                                                    elif any(marker in visible for marker in ANSWER_STARTED) or frame_kind(visible) in ("live", "recovery"):
+                                                        started = True
+                                                if started:
+                                                    break
+                                                (work / "tui-answer-refused.screen.txt").write_text(session.screen.text())
+                                                assert started is False, "Ctrl-D showed no outcome before the deadline"
+                                                print("KEY OUTCOME:", refusal, flush=True)
+                                                assert refusal.startswith(("answer deferred", "answer did not start: the decision observation")), ("TUI did not start the answer", refusal)
+                                                # Refresh pauses while a deferral is shown, so the read in flight
+                                                # ends before the next explicit press. After a stale refusal the
+                                                # next current read installs first.
+                                                session.pump(1.5)
+                                            else:
+                                                raise AssertionError("TUI answer deferred ten times")
+                                            # A declared refusal of the send leaves the original attempt
+                                            # unresolved, and the TUI offers only an exact resend. The
+                                            # harness confirms at most one, as an operator would.
+                                            answer_deadline = time.monotonic() + 45
+                                            answer_resent = False
+                                            while True:
+                                                # A resolved decision may leave the observable queue, so a read-only
+                                                # GET answers either its resolved state or unavailable-resource.
+                                                status, current, raw, _ = fetch("/v1/decisions/" + head, authorized)
+                                                if status == 404:
+                                                    assert current["code"] == "unavailable-resource", ("answered decision read", current["code"])
+                                                    resolution = "unavailable-resource"
+                                                    break
+                                                assert status == 200, ("answered decision read", status, current.get("code"))
+                                                validate("Decision", current, raw)
+                                                if current["state"] == "resolved":
+                                                    resolution = "resolved"
+                                                    break
+                                                assert current["state"] in ("pending", "submitting"), ("answered decision state", current["state"])
+                                                if "x EXACT RESEND" in session.screen.text() and "Resend the retained answer attempt?" not in session.screen.text():
+                                                    (work / "tui-answer-unresolved.screen.txt").write_text(session.screen.text())
+                                                    assert not answer_resent, "the TUI answer stayed unresolved after one operator-confirmed exact resend"
+                                                    print("OPERATOR CONFIRM exact retained answer attempt", flush=True)
+                                                    session.send(b"x")
+                                                    session.wait_screen("Resend the retained answer attempt?")
+                                                    # The confirmation stays open while a page-set read defers the
+                                                    # y, and refresh pauses, so a later y finds no read in flight.
+                                                    for _ in range(10):
+                                                        before_y = key_outcome(session.screen.text())[0]
+                                                        session.send(b"y")
+                                                        confirm_deadline = time.monotonic() + 15
+                                                        while time.monotonic() < confirm_deadline and session.process.poll() is None:
+                                                            session.pump()
+                                                            visible = session.screen.text()
+                                                            if "Resend the retained answer attempt?" not in visible or key_outcome(visible)[0] > before_y:
+                                                                break
+                                                        visible = session.screen.text()
+                                                        if "Resend the retained answer attempt?" not in visible:
+                                                            break
+                                                        assert key_outcome(visible)[1].startswith("exact resend deferred"), ("exact resend refused", key_outcome(visible))
+                                                        session.pump(1.5)
+                                                    else:
+                                                        raise AssertionError("exact resend deferred ten times")
+                                                    answer_resent = True
+                                                assert time.monotonic() < answer_deadline and session.process.poll() is None, "the answered decision stayed pending"
+                                                session.pump(0.2)
+                                            while True:
+                                                after, _ = run_read(base + "/snapshot", "RunSnapshot")
+                                                item = next(value for value in after["items"] if value["occurrenceId"] == occurrence)
+                                                acks = [ack for ack in after["controlAcks"] if ack["command"] == "answer" and ack["occurrenceId"] == occurrence
+                                                        and ack not in before["controlAcks"]]
+                                                if item["answer"] is not None and any(ack["state"] == "delivered" for ack in acks):
+                                                    break
+                                                assert time.monotonic() < answer_deadline, ("answered occurrence not completed", item["state"], acks)
+                                                session.pump(0.2)
+                                            (work / "tui-answered-snapshot.json").write_text(json.dumps(after, default=str))
+                                            # The snapshot publishes a flag answer as its rendered text, "no" for
+                                            # false and "yes" for true. Runtime decodes the typed value without
+                                            # coercion, so this answer came from the JSON false that the TUI sent.
+                                            assert item["code"] == "flag" and item["answer"] == "no", ("occurrence answer is not the rendered false", item["answer"])
+                                            delivered = next(ack for ack in acks if ack["state"] == "delivered")
+                                            answer_receipt, _ = run_read("/v1/commands/" + delivered["commandId"], "CommandReceipt")
+                                            assert answer_receipt["operation"] == "answer" and answer_receipt["resource"] == "/v1/decisions/" + head, "answer receipt binding"
+                                            assert answer_receipt["state"] == "effect-observed" and answer_receipt["effect"]["kind"] == "answer-accepted", "answer effect"
+                                            assert answer_receipt["effect"]["address"] == {"occurrenceId": occurrence}, "answer effect address"
+                                            now, _ = run_read(base + "/control", "RunControl")
+                                            assert now["decisionHeadId"] != head, "the answered decision is still the head"
+                                            print("PASS actual TUI answered the question head with typed false: the decision is no longer pending (" + resolution + ")",
+                                                  "and no longer the head, the control acknowledgement",
+                                                  "has command answer, the receipt is effect-observed answer-accepted for the occurrence, and the occurrence publishes the rendered false answer no", flush=True)
+                                            # The TUI leaves the answered question before the next head is read.
+                                            wait_frame(("live", "recovery"), 45, "TUI kept the answered question head", "after-answer")
+                                            continue
+                                        # A recovery head is read-only here. The local cancel, save, result,
+                                        # redirect and recovery keys have no binding. The TUI handles keys in
+                                        # order, so the key help that ? opens marks the end of their handling.
+                                        assert (decision["message"].splitlines() or [""])[0][:30] in visible, "recovery message not displayed"
+                                        assert "Choices (read-only here): " + decision["choices"][0]["choice"] in visible, "recovery choices not displayed"
+                                        assert not any(text in visible for text in ("c CANCEL RUN", "PgUp/PgDn scroll", "Esc CANCEL RUN")), "local recovery keys offered"
+                                        before, _ = run_read(base + "/snapshot", "RunSnapshot")
+                                        session.send(b"csr1fa")
+                                        session.send(b"?")
+                                        session.wait_screen("Keyboard shortcuts")
+                                        session.send(b"\x1b")
+                                        wait_frame(("recovery",), 15, "Esc did not return to the recovery head", "recovery-return")
+                                        still, _ = run_read(base + "/control", "RunControl")
+                                        assert still["supervision"] == "owned" and still["cancelAllowed"] and still["decisionHeadId"] == head, "a local key changed the manager run control"
+                                        pending, _ = run_read("/v1/decisions/" + head, "Decision")
+                                        assert pending["state"] == "pending" and pending["revision"] == decision["revision"], "a local key changed the recovery decision"
+                                        after_keys, _ = run_read(base + "/snapshot", "RunSnapshot")
+                                        assert after_keys["runtime"]["status"] not in ("cancelling", "cancelled"), "a local key cancelled the manager run"
+                                        assert after_keys["controlAcks"] == before["controlAcks"], "a local key sent a manager control"
+                                        print("PASS actual TUI recovery head is read-only: the local c, s, r, 1, f and a keys change no control, decision or acknowledgement", flush=True)
+                                        # The run details open over the recovery head. On a short terminal they
+                                        # are longer than their viewport, so End hides their first row and Home
+                                        # shows it again.
+                                        session.send(b"d")
+                                        (work / "tui-live-details.screen.txt").write_text(session.wait_screen("RUN DETAILS"))
+                                        first_row = "run " + run
+                                        session.resize(18, 140)
+                                        short = session.wait_screen("RUN DETAILS")
+                                        assert first_row in short and "Home/End" in "\n".join(session.screen.lines()[-2:]), (
+                                            "short run details lost their first row or their Home/End hint", short)
+                                        session.send(b"\x1b[F")
+                                        end_deadline = time.monotonic() + 10
+                                        while first_row in session.screen.text():
+                                            if time.monotonic() >= end_deadline or session.process.poll() is not None:
+                                                (work / "tui-details-end-missing.screen.txt").write_text(session.screen.text())
+                                                raise AssertionError("End did not scroll the service run details")
+                                            session.pump()
+                                        session.settle()
+                                        scrolled = session.screen.text()
+                                        assert "RUN DETAILS" in scrolled and first_row not in scrolled, ("End did not keep the details at their end", scrolled)
+                                        (work / "tui-details-end.screen.txt").write_text(scrolled)
+                                        session.send(b"\x1b[H")
+                                        (work / "tui-details-home.screen.txt").write_text(session.wait_screen(first_row, timeout=10))
+                                        session.resize(36, 140)
+                                        session.wait_screen("RUN DETAILS")
+                                        session.send(b"\x1b")
+                                        wait_frame(("recovery",), 15, "Esc did not close the run details over the recovery head", "details-close")
+                                        print("PASS actual TUI service run details open over the recovery head, scroll to their end with End and back to their first row",
+                                              "with Home on an 18-row terminal, and Esc returns to the recovery head", flush=True)
+                                        break
+                                    (work / "head-order.txt").write_text(" ".join(order) + "\n")
+                                    print("HEAD ORDER:", " then ".join(order) + ("; the question stays behind the read-only recovery, so the answer segment did not run"
+                                          if order[0] == "recovery" else ""), flush=True)
                             session.send(b"q")
                             assert session.wait_exit() == 0, "service TUI did not exit successfully"
                             session.assert_restored()
-                        with TuiSession(runner, client_state, command=command, explicit_state=False) as session:
+                        with harness_reads_only(), TuiSession(runner, client_state, command=command, explicit_state=False) as session:
                             session.wait_screen("Manager profiles")
                             session.process.terminate()
                             session.wait_exit()
@@ -552,6 +870,11 @@ for iteration in range(2):
                             assert control["supervision"] == "owned" and control["cancelAllowed"], "frontend detach stopped the original manager run"
                             (work / "tui-detached-control.json").write_bytes(raw)
                             print("PASS actual TUI Unicode submission, full five-selector display, explicit approval and detach preserving the original owned run", flush=True)
+                            if journey:
+                                print("PASS tui-journey progress and answer segments (partial actual UI interaction, not exit-criterion-1 evidence): exact request bytes, "
+                                      "approval, live runtime progress from the snapshot in a whole frame, the decision heads in the recorded order with the typed false "
+                                      "answer or the read-only recovery, ignored local keys, q detach with terminal restoration, no local runner state, and owned "
+                                      "supervision with cancelAllowed", flush=True)
                             break
                         print("PASS actual service TUI catalogue/help, local-action refusal, original quit/signal joins and terminal restoration (read-only)", flush=True)
                 status, before, raw = request("/v1/snapshot", authorized)

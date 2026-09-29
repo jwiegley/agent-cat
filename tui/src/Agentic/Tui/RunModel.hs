@@ -143,7 +143,7 @@ occurrenceRows snapshot = map snd . occurrenceRowsWithSelection snapshot
 
 occurrenceRowsWithSelection :: RunSnapshot -> RunView -> [(Bool, Text)]
 occurrenceRowsWithSelection snapshot view =
-  [ (selected, marker selected <> T.pack (show (occurrenceNumber occurrenceId + 1)) <> "  " <> occurrenceStateLabel (snapshotOccurrenceState occurrence) <> "\n  " <> snapshotOccurrenceAddressee occurrence)
+  [ (selected, marker selected <> T.pack (show (toInteger (occurrenceNumber occurrenceId) + 1)) <> "  " <> occurrenceStateLabel (snapshotOccurrenceState occurrence) <> "\n  " <> snapshotOccurrenceAddressee occurrence)
     | occurrenceId <- occurrenceOrder snapshot,
       Just occurrence <- [Map.lookup occurrenceId (snapshotOccurrences snapshot)],
       let selected = Just occurrenceId == runViewOccurrence view

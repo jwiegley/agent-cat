@@ -15,6 +15,7 @@ module Agentic.Tui.Presentation
     launchReviewAllowed,
     serviceReviewAllowed,
     serviceReviewRows,
+    serviceRequestLines,
     wrapDisplayLines,
   )
 where
@@ -129,6 +130,13 @@ data Presentation = Presentation
     -- | The lines that describe the installed request observation, its stale
     -- mark and the published runtime status.
     presentationServiceObservation :: ![Text],
+    -- | The lines that name the installed request, its phase and its run.
+    -- The live monitor shows them in service mode.
+    presentationServiceRequestLines :: ![Text],
+    -- | The installed run observation in service mode. The live monitor takes
+    -- the published workflow and target label from it, also when the runtime
+    -- is absent.
+    presentationServiceRun :: !(Maybe Service.RunObservation),
     -- | The outcome of the latest mutation key that started nothing. The
     -- status line shows it until the next key press or view change.
     presentationServiceKeyOutcome :: !(Maybe KeyOutcome),
@@ -176,6 +184,8 @@ emptyPresentation model =
       presentationServiceNotice = Nothing,
       presentationServiceFault = False,
       presentationServiceObservation = [],
+      presentationServiceRequestLines = [],
+      presentationServiceRun = Nothing,
       presentationServiceKeyOutcome = Nothing,
       presentationConfig = Nothing,
       presentationPersonPrompt = Nothing,
@@ -223,13 +233,24 @@ layout presentation width height
       1 -> [bar width (hBox [withAttr (attrName "title") (displayText "agent-cat"), displayText " / ", headerContext presentation])]
       _ | LiveScreen _ <- modelScreen (presentationModel presentation) ->
             [ bar width (padLeft (Pad 1) (headerContext presentation)),
-              bar width (muted (displayText (oneLine width (" persona " <> fromMaybe "none" (presentationRunPersona presentation) <> " · target " <> fromMaybe "pending" (presentationRunRealization presentation)))))
+              bar width (muted (displayText (oneLine width (liveSubtitle presentation))))
             ]
         | otherwise -> [bar width (withAttr (attrName "title") (displayText (" agent-cat  /  " <> screenTitle (modelScreen (presentationModel presentation))))), bar width (padLeft (Pad 1) (headerContext presentation))]
     mainWidget = hLimit width (vLimit mainRows (padBottom Max (layerView presentation width height mainRows)))
     statusWidgets = [bar width (statusView presentation width) | statusRows == 1]
     footerWidgets = map (bar width . (\line -> if T.all isSpace line then muted hBorder else shortcutLine line)) footerLines
     footerLines = packedFooter width footerRows (footerItems presentation width height)
+
+-- | The second header row of the live monitor. The manager publishes a
+-- target label but no persona or realization, so service mode shows only the
+-- target label of the installed run observation. The label does not depend on
+-- the runtime, and only a null label reads as not reported.
+liveSubtitle :: Presentation -> Text
+liveSubtitle presentation
+  | presentationService presentation =
+      " target " <> fromMaybe "not reported" (presentationServiceRun presentation >>= Service.runTarget)
+  | otherwise =
+      " persona " <> fromMaybe "none" (presentationRunPersona presentation) <> " · target " <> fromMaybe "pending" (presentationRunRealization presentation)
 
 shellHeaderRows :: Int -> Int -> Int
 shellHeaderRows width height
@@ -302,15 +323,24 @@ layerView presentation width _ mainHeight
 layerView presentation width totalHeight mainHeight = case presentationLayer presentation of
   KeyHelpLayer -> keyHelpView presentation width mainHeight
   CancelLayer -> cancelView width mainHeight
-  PersonLayer -> personView presentation width mainHeight
-  RecoveryLayer -> recoveryView presentation width mainHeight
+  PersonLayer -> headView personView
+  RecoveryLayer -> headView recoveryView
   SteerLayer -> steerView presentation width mainHeight
   SaveLayer -> saveResultView presentation width mainHeight
   FilterLayer -> workflowFilterView presentation width mainHeight
   ConfirmDetailsLayer -> confirmDetailsView presentation width mainHeight
   ConfirmLayer -> confirmSummaryView presentation width totalHeight mainHeight
-  RunDetailsLayer -> pane "RUN DETAILS [focus]" (viewport FailureViewport Vertical (displayTextWrap (boundedDisplay (maybe "Run unavailable." (runDetailsText presentation) (modelSnapshot (presentationModel presentation))))))
+  RunDetailsLayer -> pane "RUN DETAILS [focus]" (viewport FailureViewport Vertical (displayTextWrap (boundedDisplay (maybe (if presentationService presentation then "Runtime not yet observed." else "Run unavailable.") (runDetailsText presentation) (modelSnapshot (presentationModel presentation))))))
   ScreenLayer -> screenView presentation width totalHeight mainHeight
+  where
+    -- In service mode the service lines stay above the decision head, so the
+    -- runtime and the approval receipt remain visible beside the question.
+    headView view
+      | presentationService presentation =
+          let lines' = serviceLiveLines presentation
+              rows = sum (map (length . wrapDisplayLines width) lines')
+           in vBox (map displayTextWrap lines' <> [view presentation width (max 1 (mainHeight - rows))])
+      | otherwise = view presentation width mainHeight
 
 screenView :: Presentation -> Int -> Int -> Int -> Widget Name
 screenView presentation width totalHeight mainHeight = case modelScreen model of
@@ -329,10 +359,30 @@ screenView presentation width totalHeight mainHeight = case modelScreen model of
   ConfirmScreen _ -> confirmSummaryView presentation width totalHeight mainHeight
   ProcessLoading _ -> loadingView presentation "Preparing the private run and starting the machine..." "Esc cancels safely"
   LaunchingScreen _ -> loadingView presentation "Waiting for the validated run.started event..." "Esc detaches; c cancels"
-  LiveScreen _ -> maybe (loadingView presentation "Waiting for run.started..." "Esc detaches; c cancels") (liveView presentation width totalHeight) (modelSnapshot model)
+  LiveScreen _
+    | presentationService presentation ->
+        vBox (map displayTextWrap (serviceLiveLines presentation) <> [maybe (loadingView presentation "Runtime not yet observed. The manager has published no runtime status for this run." "q detaches; the manager run continues")
+          (liveView presentation width totalHeight) (modelSnapshot model)])
+    | otherwise -> maybe (loadingView presentation "Waiting for run.started..." "Esc detaches; c cancels") (liveView presentation width totalHeight) (modelSnapshot model)
   FailureScreen failure -> viewport FailureViewport Vertical (withAttr (attrName "error") (displayTextWrap ("ERROR: " <> failure)))
   where
     model = presentationModel presentation
+
+-- | The lines above the live monitor in service mode: the request and its
+-- run, the installed observation with its stale mark and published runtime,
+-- and the approval receipt status, which stays separate from the runtime.
+serviceLiveLines :: Presentation -> [Text]
+serviceLiveLines presentation =
+  presentationServiceRequestLines presentation
+    <> presentationServiceObservation presentation
+    <> ["Approval receipt: " <> fromMaybe "none" (presentationServiceApproval presentation)]
+
+-- | The lines that name a request, its phase and its run. The run has its own
+-- line, so a long request id never splits the run id across screen rows.
+serviceRequestLines :: Manager.DraftView -> [Text]
+serviceRequestLines request =
+  [ "Request: " <> Manager.draftId request <> "   Phase: " <> Manager.draftPhase request,
+    "Run: " <> fromMaybe "none" (Manager.draftRun request) ]
 
 serviceRequestView :: Presentation -> Manager.DraftView -> Widget Name
 serviceRequestView presentation request = pane "Manager request" $ viewport FailureViewport Vertical $ vBox $ map displayTextWrap $
@@ -769,10 +819,12 @@ personView presentation width mainHeight = case presentationPersonPrompt present
   Just prompt ->
     dialog width mainHeight " Your answer " $
       vBox
-        [ muted (displayText ("Request " <> shown (occurrenceNumber (personPromptOccurrence prompt) + 1) <> " · " <> personPromptCode prompt)),
+        [ muted (displayText ("Request " <> shown (toInteger (occurrenceNumber (personPromptOccurrence prompt)) + 1) <> " · " <> personPromptCode prompt)),
           vLimit promptHeight (viewport PersonViewport Vertical (displayTextWrap (boundedDisplay (personPromptText prompt)))),
           if presentationPersonSubmitted presentation
-            then withAttr (attrName "selected") (displayText "Answer accepted locally; waiting for delivered acknowledgement...")
+            then withAttr (attrName "selected") (displayText (if presentationService presentation
+              then "Answer sent to the manager; waiting for its observed effect..."
+              else "Answer accepted locally; waiting for delivered acknowledgement..."))
             else vLimit (max 3 (min 8 (mainHeight - promptHeight - 4))) (borderWithLabel (displayText " Answer • ") (Edit.renderEditor (displayText . T.unlines) True (presentationEditor presentation))),
           maybe emptyWidget (withAttr (attrName "error") . displayTextWrap . ("ERROR: " <>)) (presentationPersonError presentation)
         ]
@@ -785,13 +837,17 @@ recoveryView presentation width mainHeight = case presentationRecovery presentat
   Just (occurrence, recovery) ->
     let request =
           "Request "
-            <> shown (occurrenceNumber (snapshotOccurrenceId occurrence) + 1)
+            <> shown (toInteger (occurrenceNumber (snapshotOccurrenceId occurrence)) + 1)
             <> " · "
             <> snapshotOccurrenceAddressee occurrence
         message = snapshotRecoveryMessage recovery
         contentWidth = confirmationInnerWidth width
         contentHeight = sum (map (length . wrapDisplayLines contentWidth) [request, message])
-        actions = T.intercalate "   " [recoveryKeyText (recoveryChoice option) <> " " <> recoveryChoice option | option <- snapshotRecoveryChoices recovery]
+        choices = snapshotRecoveryChoices recovery
+        -- Service mode shows the published choices read-only, without keys.
+        actions
+          | presentationService presentation = "Choices (read-only here): " <> T.intercalate ", " (map recoveryChoice choices)
+          | otherwise = T.intercalate "   " [recoveryKeyText (recoveryChoice option) <> " " <> recoveryChoice option | option <- choices]
      in dialog width (min mainHeight (contentHeight + 4)) " Recovery required " $
           vBox
             [ viewport RecoveryViewport Vertical $ vBox
@@ -849,6 +905,10 @@ keyHelpLines presentation = case modelScreen model of
     | otherwise -> ["Enter or y launch", "n return to target", "d exact details", "? or Esc close this help"]
   ProcessLoading _ -> ["Esc cancel startup safely", "? or Esc close this help"]
   LaunchingScreen _ -> ["Esc detach", "c cancel owned run", "? or Esc close this help"]
+  LiveScreen _
+    | presentationService presentation ->
+        ["d full run details and error", "Tab focus pane", "Up/Down move or scroll", "j/k select occurrence", "G follow output",
+         "g refreshes observations", "q detaches; the manager run continues", "? or Esc close this help"]
   LiveScreen _ ->
     ["d full run details and error", "Tab focus pane", "Up/Down move or scroll", "j/k select occurrence", "G follow output"]
       <> [hint | hint <- [liveResultHint presentation, controlHintLine presentation, if presentationRunning presentation then "c cancel owned run" else ""], not (T.null hint)]
@@ -874,11 +934,16 @@ liveView presentation width totalHeight snapshot = vBox (failureBanner <> banner
     body
       | Map.null (snapshotOccurrences snapshot) && not (null failureBanner) = [displayText "No workflow requests started."]
       | otherwise = [panes]
+    -- In service mode the service lines stand above the live monitor, so the
+    -- banner limit counts their screen rows.
+    serviceRows
+      | presentationService presentation = sum (map (length . wrapDisplayLines width) (serviceLiveLines presentation))
+      | otherwise = 0
     failureBanner = case snapshotRunFailure snapshot of
       Nothing -> []
       Just failure ->
         let rows = wrapDisplayLines width (T.takeWhile (/= '\n') (T.strip failure))
-            limit = max 1 (min 6 (shellMainRows width totalHeight - if Map.null (snapshotOccurrences snapshot) then 4 else 6))
+            limit = max 1 (min 6 (shellMainRows width totalHeight - serviceRows - if Map.null (snapshotOccurrences snapshot) then 4 else 6))
          in [ withAttr (attrName "error") (displayText ("Run " <> T.toLower (runStatusLabel (snapshotRunStatus snapshot)))),
               vBox (map displayText (take limit rows))
             ]
@@ -895,7 +960,7 @@ liveView presentation width totalHeight snapshot = vBox (failureBanner <> banner
           [ muted (displayTextWrap (snapshotOccurrenceAddressee occurrence)),
             maybe emptyWidget (\(_, attempt) -> muted (displayTextWrap (occurrenceStateLabel (snapshotOccurrenceState occurrence) <> " on " <> snapshotAttemptTarget attempt))) (Map.lookupMax (snapshotOccurrenceAttempts occurrence)),
             case snapshotOccurrenceDispatch occurrence of
-              Just dispatch | dispatchOpen dispatch -> shortcutLine ("Routes   " <> T.intercalate "   " [shown index <> " " <> target | (index, target) <- zip [1 :: Int ..9] (dispatchTargets dispatch)])
+              Just dispatch | dispatchOpen dispatch, not (presentationService presentation) -> shortcutLine ("Routes   " <> T.intercalate "   " [shown index <> " " <> target | (index, target) <- zip [1 :: Int ..9] (dispatchTargets dispatch)])
               _ -> emptyWidget,
             displayText ""
           ]
@@ -911,13 +976,13 @@ liveView presentation width totalHeight snapshot = vBox (failureBanner <> banner
       | presentationShowResult presentation = readingWidgets (finalResultLines presentation)
       | otherwise = readingWidgets (selectedOutputLines snapshot (presentationRunView presentation))
     banner = case snapshotResult snapshot of
-      Nothing -> []
-      Just _ -> [withAttr (attrName "selected") (displayText (resultBanner presentation))]
+      Just _ | not (presentationService presentation) -> [withAttr (attrName "selected") (displayText (resultBanner presentation))]
+      _ -> []
 
 outputTitle :: Presentation -> RunSnapshot -> Text
 outputTitle presentation snapshot
   | presentationShowResult presentation = "Result"
-  | otherwise = "Output" <> maybe "" (\occurrence -> " · Request " <> shown (occurrenceNumber (snapshotOccurrenceId occurrence) + 1)) (selectedOccurrence snapshot (presentationRunView presentation)) <> if presentationOutputFollow presentation then " · Follow" else " · Paused"
+  | otherwise = "Output" <> maybe "" (\occurrence -> " · Request " <> shown (toInteger (occurrenceNumber (snapshotOccurrenceId occurrence)) + 1)) (selectedOccurrence snapshot (presentationRunView presentation)) <> if presentationOutputFollow presentation then " · Follow" else " · Paused"
 
 resultBanner :: Presentation -> Text
 resultBanner presentation
@@ -936,7 +1001,9 @@ finalResultLines presentation = case presentationFinalResult presentation of
 
 liveContext :: Presentation -> Text
 liveContext presentation = case modelSnapshot model of
-  Nothing -> "waiting for run.started"
+  Nothing | presentationService presentation ->
+              maybe "" (<> " | ") (presentationServiceRun presentation >>= Service.runWorkflow) <> "runtime not yet observed"
+          | otherwise -> "waiting for run.started"
   Just snapshot ->
     fromMaybe "starting" (snapshotWorkflow snapshot)
       <> " | "
@@ -949,7 +1016,8 @@ liveContext presentation = case modelSnapshot model of
 runDetailsText :: Presentation -> RunSnapshot -> Text
 runDetailsText presentation snapshot = T.unlines
   ( snapshotLines snapshot
-      <> ["", "persona: " <> fromMaybe "none" (presentationRunPersona presentation), "realization: " <> fromMaybe "pending" (presentationRunRealization presentation)]
+      <> (if presentationService presentation then []
+            else ["", "persona: " <> fromMaybe "none" (presentationRunPersona presentation), "realization: " <> fromMaybe "pending" (presentationRunRealization presentation)])
       <> concat ["" : selectedOccurrenceLines snapshot (RunView (Just occurrence)) | occurrence <- Map.keys (snapshotOccurrences snapshot)]
   )
 
@@ -963,10 +1031,14 @@ footerItems presentation width height = case presentationLayer presentation of
   KeyHelpLayer -> ["Esc CLOSE", "Up/Down SCROLL", "PgUp/PgDn", "Home/End"]
   CancelLayer -> ["n/Esc KEEP RUNNING", "y CANCEL RUN"]
   PersonLayer
+    | presentationService presentation, presentationPersonSubmitted presentation -> ["WAITING FOR THE MANAGER EFFECT", "Ctrl-C DETACH"]
+    | presentationService presentation -> ["Ctrl-D SEND ANSWER", "Enter newline", "PgUp/PgDn prompt", "Ctrl-C DETACH"]
     | Nothing <- presentationPersonPrompt presentation -> ["Esc CANCEL RUN", "LOADING VERIFIED QUESTION"]
     | presentationPersonSubmitted presentation -> ["Esc CANCEL RUN", "WAITING FOR DELIVERY"]
     | otherwise -> ["Esc CANCEL RUN", "Ctrl-D SUBMIT", "Enter newline", "PgUp/PgDn prompt"]
-  RecoveryLayer -> recoveryItems presentation <> ["c CANCEL RUN", "PgUp/PgDn scroll"]
+  RecoveryLayer
+    | presentationService presentation -> ["READ-ONLY RECOVERY", "d DETAILS", "g REFRESH", "? KEYS", "q DETACH"]
+    | otherwise -> recoveryItems presentation <> ["c CANCEL RUN", "PgUp/PgDn scroll"]
   SteerLayer -> ["Esc CLOSE", "Ctrl-D SEND", "Enter newline"]
   SaveLayer -> ["Esc CANCEL", "Ctrl-D SAVE"] <> ["PgUp/PgDn ERROR" | Just _ <- [presentationSaveError presentation]]
   FilterLayer -> ["Enter APPLY", "Esc CANCEL"]
@@ -1018,6 +1090,8 @@ footerItems presentation width height = case presentationLayer presentation of
       ConfirmScreen _ -> confirmItems False
       ProcessLoading _ -> ["Esc CANCEL STARTUP"]
       LaunchingScreen _ -> ["Esc DETACH", "c CANCEL RUN", "? KEYS"]
+      LiveScreen _ | presentationService presentation, compact -> ["q DETACH", "Tab PANE", "d DETAILS", "? KEYS"]
+                   | presentationService presentation -> ["q DETACH", "g REFRESH", "d DETAILS", compactNavigation, "? KEYS"]
       LiveScreen _ | compact ->
         ["Esc " <> if presentationRunning presentation then "DETACH" else "RUNS", "Tab PANE", "d DETAILS", "? KEYS"]
           <> ["c CANCEL" | presentationRunning presentation]

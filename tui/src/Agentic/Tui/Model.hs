@@ -10,6 +10,7 @@ module Agentic.Tui.Model
     selectedServiceProfile,
     refuseRequestRead,
     refuseCatalogueRead,
+    serviceRunObserved,
     selectedWorkflow,
     visibleWorkflows,
     setWorkflowFilter,
@@ -151,6 +152,21 @@ refuseRequestRead code retained model = model {modelStatus = Lane.staleStatus co
 refuseCatalogueRead :: Text -> TuiModel -> TuiModel
 refuseCatalogueRead problem model =
   model {modelScreen = ServiceCommandScreen ("Observation refused: " <> problem), modelStatus = "previous command outcomes are unchanged"}
+
+-- | The model after the installation of a complete composite read of the
+-- selected request, given whether the command lane is idle and the run with
+-- its published runtime when the read carries run components. On an idle lane
+-- outside the input screen, such a read shows the run in the live monitor, and
+-- a published runtime becomes the displayed snapshot. An absent runtime leaves
+-- no snapshot, so no runtime status is shown and none is invented. A busy
+-- lane, the input screen and a read without run components give 'Nothing',
+-- and the caller keeps or chooses the screen.
+serviceRunObserved :: Bool -> Maybe (RunId, Maybe RunSnapshot) -> TuiModel -> Maybe TuiModel
+serviceRunObserved idle run model = case (idle, modelScreen model, run) of
+  (True, InputScreen _, _) -> Nothing
+  (True, _, Just (ident, snapshot)) ->
+    Just model {modelScreen = LiveScreen ident, modelSnapshot = snapshot, modelStatus = "manager run observed"}
+  _ -> Nothing
 
 selectedWorkflow :: TuiModel -> Maybe WorkflowDescriptor
 selectedWorkflow model = atMay (visibleWorkflows model) (modelWorkflowIndex model)

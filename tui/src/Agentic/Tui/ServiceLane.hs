@@ -31,7 +31,9 @@
 -- instead, and a deferred key is never replayed. A key during a
 -- single-resource read ends and cancels that read and starts. A refusal or a
 -- deferral is a numbered 'KeyOutcome', and 'retainKeyOutcome' keeps it on
--- the status line until the next key press or until the view changes.
+-- the status line until the next key press or until the view changes. While
+-- a deferral is shown, automatic refresh pauses ('refreshPaused'), so the
+-- page-set read in flight ends and the repeated key finds no read in flight.
 module Agentic.Tui.ServiceLane
   ( CallOutcome (..),
     serviceCall,
@@ -67,6 +69,7 @@ module Agentic.Tui.ServiceLane
     KeyOutcome (..),
     keyOutcomeLine,
     retainKeyOutcome,
+    refreshPaused,
     PrepareStep (..),
     prepareStep,
     SendStep (..),
@@ -405,13 +408,21 @@ unobservedText :: Text -> Text
 unobservedText operation = operation <> " did not start: the request validator is not yet observed."
 
 -- | The visible outcome of one mutation-key press that started nothing: the
--- sequence number of the press among such presses of the session, and its
--- fixed text.
+-- sequence number of the press among such presses of the session, its fixed
+-- text, and whether a page-set read in flight deferred the key.
 data KeyOutcome = KeyOutcome
   { outcomeKey :: !Int,
-    outcomeText :: !Text
+    outcomeText :: !Text,
+    outcomeDeferred :: !Bool
   }
   deriving (Eq, Show)
+
+-- | Whether automatic refresh pauses after one service event, given the key
+-- outcome that remains. Refresh pauses exactly while a deferral is shown. The
+-- next key press or a view change ends the outcome, and refresh resumes. An
+-- explicit refresh key still reads.
+refreshPaused :: Maybe KeyOutcome -> Bool
+refreshPaused = maybe False outcomeDeferred
 
 -- | The status line of a key outcome.
 keyOutcomeLine :: KeyOutcome -> Text
