@@ -68,9 +68,12 @@ module Agentic.World
     verdictJson,
     answerJson,
     answerFromJson,
+    answerFromJsonExact,
     answerJsonSchema,
     answerSchemaForObservationCode,
     questionJson,
+    requestJson,
+    requestFromJson,
     scopeJson,
     eventJson,
     eventJsonWithIntent,
@@ -87,6 +90,7 @@ import Agentic.Plan
     ExecEvent (ExecEvent),
     ExecTrace,
     Plan (PAsk, PAskC, PCase, PDyn, PRet),
+    Intent (Consult, Effect, Observe),
     Q (..),
     Request (..),
     intentName,
@@ -113,11 +117,12 @@ import Agentic.DSL
     withCtor,
     (.::),
   )
+import Control.Monad (unless)
 import Data.Aeson (FromJSON (..), ToJSON (..), Value, object, withObject, (.:?), (.=))
 import qualified Data.Aeson as A
 import qualified Data.Aeson.Key as K
 import qualified Data.Aeson.KeyMap as KM
-import Data.Aeson.Types (Pair, Parser)
+import Data.Aeson.Types (Pair, Parser, parseEither)
 import Data.List (find, nub)
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
@@ -549,6 +554,19 @@ answerFromJson SVerdict (A.Object value) = case KM.lookup "tag" value of
 answerFromJson (SStructured schema) value = decodeExact schema value
 answerFromJson _ _ = Nothing
 
+-- | The exact answer decoder of a carried value. It applies 'answerFromJson'
+-- and then requires 'answerJson' of the result to equal the input, so it
+-- refuses every form that 'answerJson' does not write: verdict extras,
+-- objections on approve or declined, an object verdict with no objections, and
+-- a structured rational that is not in lowest terms. 'answerFromJson' keeps its
+-- lenient verdict reading for person answers.
+answerFromJsonExact :: SCode c -> Value -> Either Text (El c)
+answerFromJsonExact code value = case answerFromJson code value of
+  Nothing -> Left ("answer: the value is not a " <> codeName (fromSCode code) <> " answer")
+  Just answer
+    | answerJson code answer == value -> Right answer
+    | otherwise -> Left ("answer: the value is not the exact form of its " <> codeName (fromSCode code) <> " answer")
+
 -- | JSON Schema for person and control answers interpreted by 'answerFromJson'.
 -- Structured numbers are exact rational objects, not model-response decimals.
 -- Verdict extras are accepted, including ignored objections on approve/declined.
@@ -613,6 +631,76 @@ questionJson c q =
       "draw" .= qDraw q
     ]
 
+-- | The request as data: the fields of 'questionJson' and its @intent@.
+requestJson :: SCode c -> Request c -> Value
+requestJson c r = object (requestFields c r)
+
+requestFields :: SCode c -> Request c -> [Pair]
+requestFields c (Request q intent) =
+  [ "code" .= codeJson (fromSCode c),
+    "intent" .= intentName intent,
+    "addressee" .= qAddressee q,
+    "scope" .= scopeJson (qScope q),
+    "prompt" .= qPrompt q,
+    "draw" .= qDraw q
+  ]
+
+requestFieldNames :: [Text]
+requestFieldNames = ["code", "intent", "addressee", "scope", "prompt", "draw"]
+
+-- | The strict decoder of 'requestJson' at a known code. It refuses a value
+-- that is not an object, an unknown or a missing field, a code that differs
+-- from the given one, an effect intent at a code other than receipt, and any
+-- value whose re-encoding differs from the input, such as an addressee or a
+-- scope with an extra field. Duplicate keys are a property of the bytes, so the
+-- byte decoder of the carrier refuses them before this decoder runs.
+requestFromJson :: SCode c -> Value -> Either Text (Request c)
+requestFromJson code value = do
+  fields <- case value of
+    A.Object fields -> Right fields
+    _ -> Left "request: expected a JSON object"
+  let names = map K.toText (KM.keys fields)
+      unknown = filter (`notElem` requestFieldNames) names
+      missing = filter (`notElem` names) requestFieldNames
+      field name = maybe (Left ("request: missing field " <> name)) Right (KM.lookup (K.fromText name) fields)
+      parsed :: (FromJSON a) => Text -> Either Text a
+      parsed name = field name >>= either (\why -> Left ("request " <> name <> ": " <> T.pack why)) Right . parseEither parseJSON
+  unless (null unknown) $ Left ("request: unknown fields " <> T.intercalate ", " unknown)
+  unless (null missing) $ Left ("request: missing fields " <> T.intercalate ", " missing)
+  codeValue <- field "code"
+  unless (codeValue == codeJson (fromSCode code)) $
+    Left ("request: the code differs from the expected " <> codeName (fromSCode code) <> " code")
+  intent <- field "intent" >>= intentFromJson code
+  addressee <- parsed "addressee"
+  scope <- field "scope" >>= scopeFromJson
+  prompt <- parsed "prompt"
+  draw <- parsed "draw"
+  let request = Request (Q addressee scope prompt draw) intent
+  unless (requestJson code request == value) $
+    Left "request: the value is not the exact form of its request"
+  pure request
+
+intentFromJson :: SCode c -> Value -> Either Text (Intent c)
+intentFromJson code = \case
+  A.String "consult" -> Right Consult
+  A.String "observe" -> Right Observe
+  A.String "effect" -> case code of
+    SAck -> Right Effect
+    _ -> Left "request intent: effect requires the receipt code"
+  _ -> Left "request intent: expected consult, observe or effect"
+
+scopeFromJson :: Value -> Either Text QScope
+scopeFromJson = \case
+  A.Object fields
+    | KM.size fields == 2 -> QScope <$> axis fields "model" <*> axis fields "mode"
+  _ -> Left "request scope: expected an object with exactly the keys model and mode"
+  where
+    axis fields name = case KM.lookup (K.fromText name) fields of
+      Just A.Null -> Right Nothing
+      Just (A.String text) -> Right (Just text)
+      Just _ -> Left ("request scope " <> name <> ": expected text or null")
+      Nothing -> Left ("request scope: missing key " <> name)
+
 -- | @Conformance.lean:172@ — the two scope axes, __both keys always present__,
 -- @null@ where the axis is silent. The second key is @mode@; nothing in this
 -- language ever sets it, and it exists because the scope monoid has two axes.
@@ -646,9 +734,7 @@ eventJson (Event c q a) = object (eventFields c q a)
 -- answer-source attribution remain execution metadata outside this wire version.
 eventJsonWithIntent :: ExecEvent -> Value
 eventJsonWithIntent (ExecEvent c r _ a) =
-  object $
-    ["code" .= codeJson (fromSCode c), "intent" .= intentName (reqIntent r)]
-      ++ drop 1 (eventFields c (reqQuestion r) a)
+  object (requestFields c r ++ ["answer" .= answerJson c a])
 
 
 -- | Frozen semantic v2 observation.

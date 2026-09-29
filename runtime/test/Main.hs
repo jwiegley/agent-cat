@@ -7,6 +7,7 @@ module Main (main) where
 import Agentic.Runtime
 import BrokerTests (brokerTests)
 import CaptureTests (captureTests)
+import FlowCodecTests (flowCodecTests)
 import FrontendProtocolTests (frontendProtocolTests, frontendCodecCheck)
 import ProcessGroupTests (processGroupTests, spawnCostCheck, spawnCostProbe)
 import SnapshotCheckpointTests (snapshotCheckpointTests)
@@ -65,6 +66,7 @@ main = getArgs >>= \case
 
 contractTests :: IO ()
 contractTests = do
+  flowCodecTests
   brokerTests
   frontendProtocolTests
   snapshotCheckpointTests "."

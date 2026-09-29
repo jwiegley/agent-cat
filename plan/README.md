@@ -15,6 +15,14 @@ runtime and the conformance programs use, and it adds world interpretation and
 the exact value codecs. The modules `Agentic.Plan.Value`, `Agentic.World`, and
 `Agentic.Schema.Conformance` are hidden implementation modules.
 
+`requestJson` writes a request as the fields of `questionJson` and its
+`intent`. `requestFromJson` decodes that form at a known code. It refuses an
+unknown or a missing field, a code that differs from the given code, an effect
+intent at a code other than receipt, and a value whose re-encoding differs from
+the input. `answerFromJsonExact` accepts an answer only when `answerJson` of the
+decoded value equals the input. `answerFromJson` stays lenient: it accepts the
+verdict extras that person answers can carry.
+
 ## Dependencies
 
 `dsl` is the only local dependency. The directories `cost`, `runtime`, `cli`,

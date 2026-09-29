@@ -3496,7 +3496,7 @@ Owner directive 2026-08-12: use the standard libraries as much as possible; do n
 :LABELS:   ["actor-flow","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-26 Sat 23:41]
-:MODIFIED: [2026-09-29 Tue 16:27]
+:MODIFIED: [2026-09-29 Tue 16:42]
 :CREATED_BY: johnw
 :SOURCE_REPO: .
 :ORIGINAL_SIZE: 0
@@ -3521,6 +3521,13 @@ Actor-flow increment 1, delta 1a (at most 8 engineering days, after the operator
     "author": "johnw",
     "text": "Subtask F1 of delta 1a: golden broker-hello events, versioned engine codecs, EnginePermission and the ACP permission report, and the amendment record doc/research/actor-flow-amendment.md. Evidence scope: the golden test/fixtures/flow/hello-events.ndjson was captured twice before any edit, at 6e63a8b1 with a clean tree, under env -u AGENT_CAT_PERSONA and an empty XDG_CONFIG_HOME. The two captures differ only in the top-level timestamp, which is the only normalized field. F1-build, F1-engine-api (round trips and negative controls for the four version-1 codecs), F1-progress-probe (two-argument form with the golden comparison), F1-golden-control (a copy with one changed byte fails), F1-journey (Phase A tui-journey at N8) and bash engine/acp/ci/acp.sh (22 scenarios, including the new permission-report scenario, with unchanged diagnostics) each passed under timeout 900. Fess: not blocking. Its findings are filed as acat-thc9. The rest of delta 1a (the Flow record, the run writer, flowBroker, the reader and the flow verb) has not landed, so this issue stays open.\n",
     "created_at": "2026-09-29T23:27:28Z"
+  },
+  {
+    "id": 355,
+    "issue_id": "acat-e6cp",
+    "author": "johnw",
+    "text": "Subtask F2 of delta 1a: strict Request and exact El codecs beside questionJson in plan/src/Agentic/World.hs. requestJson and requestFromJson encode and strictly decode every Request field (code, intent, addressee, scope, prompt, draw). answerFromJsonExact applies answerFromJson and requires answerJson of the result to equal the input. answerFromJson stays lenient. The names are exported through Agentic.Planning, because a re-export from Agentic.Plan would make a module cycle. Evidence scope: F2-build (-Werror, agentic-run, runtime-contract-test, routing-fixed-point-probe), F2-runtime-contract at N8 (new FlowCodecTests with round trips for text, the three verdict forms, flag false and true, receipt as JSON null and a structured schema with exact decimals and Unicode, plus the negative controls), F2-journey (Phase A tui-journey at N8) and bash cli/ci/examples.sh each passed under timeout 900. The fess auditor reran F2-build and F2-runtime-contract with exit 0. Fess: not blocking. Its one medium and five low findings are filed as acat-h9oi. bisim/ci/tier0.sh was not run, because the operator direction forbids bisim checks. The rest of delta 1a (the Flow record, the run writer, flowBroker, the reader and the flow verb) has not landed, so this issue stays open.\n",
+    "created_at": "2026-09-29T23:42:45Z"
   }
 ]
 #+end_src
@@ -5218,6 +5225,29 @@ Owner request: the artifact §VII example as REAL compiling Lean — Op signatur
 :END:
 
 Add Example.Structured under haskell/example/Example, register it with agentic-run, and derive its schema, witness, and SchemaEl conversion mechanically from the Haskell record with Template Haskell.
+
+* TODO [#D] Follow-ups from F2 strict Request and exact El codecs
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-h9oi
+:LABELS:   ["actor-flow","workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-29 Tue 16:42]
+:MODIFIED: [2026-09-29 Tue 16:42]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Follow-up to subtask F2 of actor-flow increment 1 (strict Request and exact El codecs beside questionJson in plan/src/Agentic/World.hs). The fess review of F2 found nothing blocking. It recorded these findings, which this issue tracks.
+
+1. (medium) plan/src/Agentic/World.hs:672 requestFromJson decodes draw with FromJSON Integer. The value {"draw": -1} decodes, re-encodes to the same Value and passes the exact check. The model has draw : Nat (model/Agentic/Core/Dsl/Syntax.lean:175), and the other decoders refuse a negative draw (dsl/src/Agentic/Raw.hs:308 natField, tui/src/Agentic/Tui/Service.hs:945 natural). Decode draw with a natural-number check and add a negative-draw control to runtime/test/FlowCodecTests.hs.
+2. (low) runtime/test/FlowCodecTests.hs:127 refused asserts only isLeft. The final re-encoding check at World.hs:674 also refuses unknown fields and a differing code, so the tests still pass if the unknown-field check (World.hs:664) or the code check (World.hs:666) is removed. Assert on the refusal text for the unknown-field, differing-code and effect-intent controls.
+3. (low) runtime/test/FlowCodecTests.hs:19 is the only runtime file that imports the dsl module Agentic.Schema directly. runtime/AGENTS.md says "Depend only on planning modules". Import the schema builders through a planning module, or record why the test needs the dsl module.
+4. (low) The task named Agentic.Plan as the export facade, but the names are exported through Agentic.Planning, because Agentic.World imports Agentic.Plan (World.hs:87) and a re-export would make a module cycle. No code change is required. This item records the deviation.
+5. (low) plan/src/Agentic/World.hs:657 The codecs work on a decoded Value, so they cannot check the byte-level canonical form: duplicate keys, or a draw of 1.0 or 1e0 that equals 1 as a Scientific. The Flow line decoder (F3 or later) must refuse duplicate keys and non-canonical numbers and enforce the 1 MiB bound.
+6. (low) plan/src/Agentic/World.hs:737 eventJsonWithIntent now uses requestFields. The field list and order are the same (code, intent, addressee, scope, prompt, draw, answer), so the bytes do not change. No action is required.
 
 * TODO [#E] Handoff 2026-09-29: state the A5S2 final-binding time
 :PROPERTIES:
