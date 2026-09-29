@@ -28,7 +28,7 @@ The broker delivers their data without assuming any of those authorities.
 | `brokerRequest` | Deliver the typed addressed request to the runtime-supplied answering receiver and return its typed answer. |
 | `brokerStart` | Connect the selected opaque engine to the supplied attempt context for one logical question. |
 | `brokerTurn` | Deliver one turn to its original conversation and return the engine response that runtime decodes. |
-| `brokerUpdate` | Deliver an intermediate engine update to its original attempt receiver before runtime public-progress validation. |
+| `brokerUpdate` | Deliver an intermediate engine update to its original attempt receiver before runtime public-progress validation. An `EnginePermission` update produces no public progress. |
 | `brokerSteer` | Deliver steering through the original engine capability and return its actual acknowledgement. |
 | `brokerControl` | Deliver a validated control to the original runtime receiver. Its Boolean result determines whether that input loop continues. |
 | `brokerEvent` | Deliver the runtime event to its original event sink. |
@@ -102,5 +102,7 @@ The runtime broker checks exercise consumed replies, authored traces, exact bill
 steering, event/log delivery, shell tool log delivery, persistence, unchanged
 epoch delivery for reusable answers and uncertainty without effect replay.
 The ACP progress probe also runs Hello World and an injected-reply fixture through
-real local ACP processes, checking consumed answers and durable events. These
+real local ACP processes, checking consumed answers and durable events. It
+compares the Hello World `events.ndjson`, with each timestamp replaced, with the
+golden file `test/fixtures/flow/hello-events.ndjson`. These
 checks do not establish completion of the manager service or a frontend journey.

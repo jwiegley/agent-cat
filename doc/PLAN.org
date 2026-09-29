@@ -3496,7 +3496,7 @@ Owner directive 2026-08-12: use the standard libraries as much as possible; do n
 :LABELS:   ["actor-flow","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-26 Sat 23:41]
-:MODIFIED: [2026-09-29 Tue 16:10]
+:MODIFIED: [2026-09-29 Tue 16:27]
 :CREATED_BY: johnw
 :SOURCE_REPO: .
 :ORIGINAL_SIZE: 0
@@ -3514,6 +3514,13 @@ Actor-flow increment 1, delta 1a (at most 8 engineering days, after the operator
     "author": "johnw",
     "text": "Subtask F0 (prerequisite for delta 1a): revalidated the manager store, artifact and draft checks after the file-slot and reader wait of fe7a2f20, which the operator kept on 2026-09-29. Evidence scope: bash manager/ci/store.sh, bash manager/ci/artifacts.sh and bash manager/ci/drafts.sh each passed once at N1 and N8 under timeout 900 (exit 0), without the admission_audit.py steps that the operator direction forbids. Fixes: independent artifact refusals behind one holder now run together (refusedTogether), so the artifact check fits its 120-second limit (about 97 s at N1). The draft file-slot holder waits up to 10 s for its release. Checks that assumed fail-fast file or reader admission now have true names and assert the whole five-second wait plus a positive waiter that enters once. manager/STORAGE.md and Store.hs comments no longer say fail-fast. Fess: not blocking. Low findings filed as acat-c13k. Delta 1a itself has not started, so this issue stays open.\n",
     "created_at": "2026-09-29T23:10:51Z"
+  },
+  {
+    "id": 354,
+    "issue_id": "acat-e6cp",
+    "author": "johnw",
+    "text": "Subtask F1 of delta 1a: golden broker-hello events, versioned engine codecs, EnginePermission and the ACP permission report, and the amendment record doc/research/actor-flow-amendment.md. Evidence scope: the golden test/fixtures/flow/hello-events.ndjson was captured twice before any edit, at 6e63a8b1 with a clean tree, under env -u AGENT_CAT_PERSONA and an empty XDG_CONFIG_HOME. The two captures differ only in the top-level timestamp, which is the only normalized field. F1-build, F1-engine-api (round trips and negative controls for the four version-1 codecs), F1-progress-probe (two-argument form with the golden comparison), F1-golden-control (a copy with one changed byte fails), F1-journey (Phase A tui-journey at N8) and bash engine/acp/ci/acp.sh (22 scenarios, including the new permission-report scenario, with unchanged diagnostics) each passed under timeout 900. Fess: not blocking. Its findings are filed as acat-thc9. The rest of delta 1a (the Flow record, the run writer, flowBroker, the reader and the flow verb) has not landed, so this issue stays open.\n",
+    "created_at": "2026-09-29T23:27:28Z"
   }
 ]
 #+end_src
@@ -8871,6 +8878,30 @@ The x86_64-linux Nix shell on andoria-08 supplies soft and hard RLIMIT_NOFILE=10
   }
 ]
 #+end_src
+
+* TODO [#D] Follow-ups from F1 engine codecs and permission report
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-thc9
+:LABELS:   ["actor-flow","workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-29 Tue 16:27]
+:MODIFIED: [2026-09-29 Tue 16:27]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Follow-up to subtask F1 of actor-flow increment 1 (golden events, versioned engine codecs, EnginePermission and the ACP report, amendment record). The fess review of F1 found nothing blocking. It recorded these findings, which this issue tracks.
+
+1. (medium) engine/api/README.md:43 says that "The line decoder that produces the JSON value refuses duplicate keys." No such decoder exists before F3, and aeson keeps the last duplicate key by default. State that the codecs do not detect duplicate keys and that the caller must refuse them, or remove the sentence until the F3 line decoder lands.
+2. (medium) doc/research/actor-flow-amendment.md paraphrases D2, D3 and D4 more weakly than the design record (proposals/actor-flow-architecture-v2.md:259-262). D2 omits that the runtime refuses the reply. D3 omits the decode-to-the-acted-on-value condition and the manager refusal of the command. D4 omits the code storage-unavailable. The record says "events.ndjson keeps its bytes" without the design exception "except timestamps". Copy D1 to D6 and the timestamp exception exactly from the design record.
+3. (low) runtime/src/Agentic/Exec.hs:506,512: no test exercises the EnginePermission branches that produce no public progress. Add a runtime check that an EnginePermission update produces no attempt.progress event, for example through a stub run with --write-on-ask.
+4. (low) engine/api/test/Main.hs codecChecks tests only round trips and refusals. No literal expected encoding pins the field names or the draw-as-string wire form that the F3 run log depends on. Add one literal expected encoding for each codec, or require F3 to add one.
+5. (low) engine/api/src/Agentic/Engine.hs versionedFields compares Scientific values, so it accepts the JSON numbers 1.0 and 1e0 as version 1. Require an exact integer 1, or document the rule.
+6. (low) engine/acp/ci/acp.sh scenario 22 runs engine/acp/test/PermissionReport.hs through runghc with the hardcoded package id agentic-0.1.0.0-inplace, and -Werror never compiles it. Consider a cabal test-suite, or derive the package id when the script runs.
+7. (low) test/fixtures/flow/hello-events.ndjson was captured at 6e63a8b1, not at 4496dbe4. The commits between them change only manager checks, documentation and comment lines in manager/src/Agentic/Manager/Store.hs, so agentic-run behavior is unchanged. No action is required. This item records the deviation.
 
 * DONE [#D] Generalize the peak semantic anchor beyond peak = 0
 :PROPERTIES:

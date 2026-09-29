@@ -32,6 +32,7 @@ extra-source-files:
   test/fixtures/manager/v1/valid/*.utf8
   test/fixtures/manager/v1/invalid/*.json
   test/fixtures/manager/v1/sse/*.sse
+  test/fixtures/flow/*.ndjson
   test/manager_contract_probe.py
   test/source-boundaries.hs
   test/source_roots_probe.py
@@ -49,6 +50,7 @@ extra-source-files:
   engine/acp/test/effect_hang_adapter.py
   engine/acp/test/retry_adapter.py
   engine/acp/test/steer_adapter.py
+  engine/acp/test/PermissionReport.hs
   test/frontend_contract_probe.py
   test/answer_schema_probe.py
   test/answer_schema_evidence.py
@@ -443,8 +445,10 @@ test-suite engine-api-test
   hs-source-dirs:   engine/api/test
   main-is:          Main.hs
   build-depends:
+    , aeson
     , agentic
     , base
+    , text
 
 test-suite runtime-contract-test
   import:           settings

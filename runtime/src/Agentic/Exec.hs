@@ -503,11 +503,13 @@ engineContextFor redactions (Just context) =
 emitEngineUpdate :: [Text] -> AttemptContext -> AttemptId -> EngineUpdate -> IO ()
 emitEngineUpdate redactions context attempt update = case update of
   EngineAnswerChunk text -> emitAttemptOutput context attempt text
+  EnginePermission _ -> pure ()
   _ -> mapM_ (attemptEvents context . AttemptProgress attempt) (publicProgressOf redactions update)
 
 publicProgressOf :: [Text] -> EngineUpdate -> Maybe PublicProgress
 publicProgressOf redactions update = case update of
   EngineAnswerChunk _ -> Nothing
+  EnginePermission _ -> Nothing
   EnginePublicMessage text -> ProgressMessage <$> publicText redactions 4096 text
   EnginePublicReasoningSummary text -> ProgressReasoningSummary <$> publicText redactions 4096 text
   EngineToolProgress tool -> do

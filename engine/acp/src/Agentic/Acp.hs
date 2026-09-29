@@ -360,13 +360,16 @@ import Agentic.Engine
     EngineError (..),
     EngineFailureKind (TransportFailure),
     EngineIntent (..),
+    EnginePermissionAnswer (..),
+    EnginePermissionReport (..),
     EngineRequest (..),
     EngineResult (..),
-    EngineSteering (..),
+    EngineSteering,
     ModelConfig (..),
     TurnLane,
     answerKindName,
     newTurnLaneIO,
+    steeringName,
     thinkingName,
   )
 
@@ -1263,7 +1266,10 @@ recordSteerAck acp params = case (field "steerId" params >>= textOf, field "acce
 --
 -- @session\/request_permission@ is granted only when it matches an active
 -- prompt's @sessionId@ and intent policy; stale or out-of-turn requests are
--- cancelled, and every decision is announced. Everything else — every @fs\/*@ and @terminal\/*@
+-- cancelled, and every decision is announced. A decision on a request that
+-- matches the active prompt is also reported to that prompt's update sink as
+-- 'EnginePermission', after the agent has its answer. A stale or out-of-turn
+-- request has no turn to report through and reports nothing. Everything else — every @fs\/*@ and @terminal\/*@
 -- method — is answered @-32601@, honestly, because the handshake advertised no
 -- such capability and a conforming agent should not have asked.
 answerAgentRequest :: Acp -> Value -> Text -> Value -> IO ()
@@ -1286,6 +1292,18 @@ answerAgentRequest acp i method params
       -- denying one is why a turn cost what it cost.
       stderrLog (renderPermissionDecision decision)
       writeJson acp (rpcResult i (permissionResponse choice))
+      case activePrompt of
+        Nothing -> pure ()
+        Just (question, _) -> do
+          sink <- readIORef (acpUpdateSink acp)
+          sink
+            ( EnginePermission
+                EnginePermissionReport
+                  { enginePermissionQuestion = question,
+                    enginePermissionTool = decisionTool decision,
+                    enginePermissionAnswer = maybe EnginePermissionRefused EnginePermissionGranted choice
+                  }
+            )
   | otherwise =
       writeJson acp . rpcErrorFrame i methodNotFound $
         method <> ": this client advertised no such capability"
@@ -1570,7 +1588,7 @@ steerTurn acp timing text =
         ( notify
             acp
             "session/steer"
-            (object ["sessionId" .= sid, "steerId" .= steerId, "timing" .= steeringTimingText timing, "text" .= text])
+            (object ["sessionId" .= sid, "steerId" .= steerId, "timing" .= steeringName timing, "text" .= text])
             >> timeout (2 * 1000 * 1000) (takeMVar gate)
         )
           `finally` modifyMVar_ (acpSteerAcks acp) (pure . Map.delete steerId)
@@ -1578,10 +1596,6 @@ steerTurn acp timing text =
         Just True -> Right ()
         Just False -> Left "active turn rejected steering"
         Nothing -> Left "active turn did not acknowledge steering"
-
-steeringTimingText :: EngineSteering -> Text
-steeringTimingText InterruptNow = "interrupt-now"
-steeringTimingText NextBoundary = "next-boundary"
 
 -- ---------------------------------------------------------------------------
 -- The engine

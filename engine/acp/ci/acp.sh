@@ -642,9 +642,28 @@ else
   bad "ACP exception display failed"
 fi
 
+# ---------------------------------------------------------------------------
+# 22. In-turn permission decisions reach the attempt's update sink.
+#
+# `engine/acp/test/PermissionReport.hs` drives the stub through the engine
+# interface. The two requests that match the active prompt, one granted during
+# an effect and one refused during a consultation, reach the sink as
+# `EnginePermission`. A foreign-session request and a delayed out-of-turn
+# request are refused as before and report nothing.
+# ---------------------------------------------------------------------------
+scenario=permission-report
+mkdir -p "$work/permission-report"
+if "$shell" test/cabal.sh exec -- bash -c \
+  'runghc --ghc-arg=-package-id --ghc-arg=agentic-0.1.0.0-inplace "$1" "$2"' \
+  _ engine/acp/test/PermissionReport.hs "$work/permission-report"; then
+  note "permission-report: in-turn decisions reached the update sink; stale and out-of-turn requests reported nothing"
+else
+  bad "ACP permission reports did not reach the update sink exactly"
+fi
+
 scenario=summary
 if [ "$failures" = 0 ]; then
-  echo "ci/acp: 21 scenarios passed, 0 failed"
+  echo "ci/acp: 22 scenarios passed, 0 failed"
 else
   echo "ci/acp: $failures scenario assertion(s) failed" >&2
 fi

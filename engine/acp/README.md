@@ -26,6 +26,9 @@ summaries. Unknown update kinds remain absent rather than acquiring synthetic da
 Permission follows the intent of a request. `permissionByIntent` grants a tool
 request only for an effect-annotated occurrence, and it cancels the request for
 consultations and observations. Every decision is announced on standard error.
+A decision on a request that matches the active prompt is also reported to the
+attempt's update sink as `EnginePermission`, after the agent receives its
+answer. A stale or out-of-turn request is refused and reports nothing.
 The commands and pins for Claude, Codex, and Droid belong to the three child
 directories.
 
