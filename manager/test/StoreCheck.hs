@@ -12,6 +12,7 @@ import Agentic.Manager.Schema (schemaVersion, schemaStatements, commandMigration
 import Agentic.Manager.Store
 import Control.Concurrent (threadDelay, throwTo)
 import Control.Concurrent.Async (AsyncCancelled (..), async, asyncThreadId, wait, cancel, poll, waitCatch, withAsync)
+import Control.Concurrent.MVar (newEmptyMVar, putMVar, takeMVar)
 import Control.Exception
   (AsyncException (UserInterrupt), bracket, finally, fromException, onException, throwIO, try)
 import Control.Monad (forM_, replicateM_, unless, void, when)
@@ -29,6 +30,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Database.SQLite3 as SQL
 import GHC.Clock (getMonotonicTimeNSec)
+import GHC.Conc (BlockReason (BlockedOnSTM))
 import System.Directory (createDirectory, doesFileExist, removeFile)
 import System.Environment (getArgs, getExecutablePath)
 import System.Exit (ExitCode (ExitSuccess))
@@ -116,7 +118,10 @@ quotaChecks work = do
     withStoreReader store $ do
       withStoreReader store $ do
         entered <- newIORef False
-        expect "reader quota refuses before materialization" StoreLimit (withStoreReader store (writeIORef entered True))
+        started <- getMonotonicTimeNSec
+        expect "a full reader capacity refuses before materialization" StoreLimit (withStoreReader store (writeIORef entered True))
+        finished <- getMonotonicTimeNSec
+        check "that reader waited the whole five-second allowance for a place" (finished - started >= 5000000000)
         readIORef entered >>= check "refused reader allocates no callback state" . not
         mutate store (client "client_1" >> relationalRows) [event]
         document <- BS.readFile path >>= right . eitherDecodeStrict'
@@ -129,6 +134,18 @@ quotaChecks work = do
         check "reader pressure does not retain configuration or SQL locks" True
       expect "old reader allowance cannot bypass current lowered coordinator cap" StoreLimit (withStoreReader store (pure()))
     withStoreReader store (check "reader capacity is returned" True)
+    held <- newEmptyMVar
+    resume <- newEmptyMVar
+    withAsync (withStoreReader store (putMVar held () >> takeMVar resume)) $ \holder -> do
+      takeMVar held
+      entries <- newIORef (0::Int)
+      withAsync (withStoreReader store (modifyIORef' entries (+1))) $ \waiter -> do
+        StoreAdmissionCheck.blockedOn BlockedOnSTM waiter
+        readIORef entries >>= check "a reader waiter does not enter while the lowered capacity is full" . (==0)
+        putMVar resume ()
+        wait holder
+        wait waiter
+      readIORef entries >>= check "a reader waits for a returned place and then enters once" . (==1)
     identity <- storeIdentity store
     let stream=storeStreamId identity
     wrong <- readRetainedEvents store "other_stream" 0

@@ -644,8 +644,6 @@ tryWithStoreCatalogues :: CoordinationStore
 tryWithStoreCatalogues (CoordinationStore installed _ _ _ _ _ _ _ _ _ _ _ _) action =
   tryConfigurationCatalogueContext installed $ \limits profiles catalogues _ -> action limits profiles catalogues
 
--- | One fail-fast file operation, joined by store close. Lock order: file, configuration, database.
--- The retained root and duplicated lease cannot escape this callback's lifetime.
 storeInvocations :: CoordinationStore -> IO (Either Diagnostic [(Text,FrontendInvocation)])
 storeInvocations (CoordinationStore installed _ _ _ _ _ _ _ _ _ _ _ _) = configuredInvocations installed
 
@@ -661,14 +659,16 @@ withStoreRetentionRoot :: CoordinationStore -> FilePath -> Text -> (PrivateRoot 
 withStoreRetentionRoot store@(CoordinationStore installed _ _ _ _ _ _ _ _ _ _ _ _) path profile action =
   withStoreFiles store $ \_ -> withConfiguredRetentionRoot installed path profile action
 
--- | One ordinary file operation. It waits for the file slot within a fresh
--- five-second allowance, and a slot that stays held for the whole allowance
--- is 'StoreBusy'.
+-- | One ordinary file operation, joined by store close. It waits for the file
+-- slot within a fresh five-second allowance, and a slot that stays held for
+-- the whole allowance is 'StoreBusy'. Lock order: file, configuration,
+-- database. The retained root and duplicated lease cannot escape this
+-- callback's lifetime.
 withStoreFiles :: CoordinationStore -> (PrivateRoot -> IO a) -> IO a
 withStoreFiles store action = acquireStoreFiles WaitWithinBudget store action >>= maybe (throwIO StoreBusy) pure
 
--- | One fail-fast file operation for coordinator work. Nothing proves that the
--- file guard was not acquired. Failures from acquisition or the entered
+-- | One file operation for coordinator work that does not wait for the slot.
+-- Nothing proves that the file guard was not acquired. Failures from acquisition or the entered
 -- callback propagate unchanged and never become a deferred action.
 tryWithStoreFiles :: CoordinationStore -> (PrivateRoot -> IO a) -> IO (Maybe a)
 tryWithStoreFiles = acquireStoreFiles FailFast

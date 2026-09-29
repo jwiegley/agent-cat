@@ -1,6 +1,6 @@
 {-# LANGUAGE TypeApplications #-}
 -- No Store or SQL instance. These checks exercise the production admission primitive.
-module Agentic.Manager.Test.StoreAdmissionCheck (dataChecks, blocked) where
+module Agentic.Manager.Test.StoreAdmissionCheck (dataChecks, blocked, blockedOn) where
 
 import Agentic.Manager.Store.Admission
 import Control.Concurrent (threadDelay, throwTo)
@@ -17,11 +17,17 @@ check label ok = unless ok(error("FAIL "<>label)) >> putStrLn("PASS "<>label)
 -- | Wait until the task's thread is blocked on an MVar. An idle event stream
 -- reaches its next batch within one second, so the bound is four seconds.
 blocked :: Async a -> IO ()
-blocked task = timeout 4000000 loop >>= maybe(error "waiter did not block")pure
+blocked = blockedOn BlockedOnMVar
+
+-- | Wait until the task's thread is blocked for the given reason, within the
+-- same four-second bound. A reader that waits for a returned place blocks in
+-- STM, not on an MVar.
+blockedOn :: BlockReason -> Async a -> IO ()
+blockedOn reason task = timeout 4000000 loop >>= maybe(error "waiter did not block")pure
   where
     loop = do
       state <- threadStatus(asyncThreadId task)
-      case state of ThreadBlocked BlockedOnMVar -> pure (); _ -> threadDelay 1000 >> loop
+      if state == ThreadBlocked reason then pure () else threadDelay 1000 >> loop
 
 dataChecks :: IO ()
 dataChecks = do

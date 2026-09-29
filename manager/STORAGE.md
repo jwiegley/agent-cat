@@ -43,7 +43,8 @@ closing SQLite and releasing the lease. File operations
 use one separate slot and retain a private root plus lease duplicate. An
 ordinary file operation waits for the slot within a fresh five-second
 allowance, and a slot that stays held for the whole allowance is `StoreBusy`.
-A coordinator probe takes the slot fail-fast and proves that it did not enter.
+A coordinator probe does not wait. When the slot is held, it returns at once
+and proves that its callback did not enter.
 Their lock order is file slot, configuration, then database.
 
 ## Database and schema
@@ -469,8 +470,10 @@ tickets. There is no background scheduler or remote prune endpoint. Logical quot
 not bound arbitrary operator-created files, SQLite journal overhead or total process
 heap usage, and uncertainty may retain charges until new work must refuse.
 
-The Store quotas mode covers current-limit reader admission, actual default event-byte
-saturation, exact accounting, retained batches, domain/history separation and atomic
-floor rollback. Existing draft and command gate entries include receipt/collection
-and preflight-pressure checks. Existing native ingestion and control entries check
-terminal evidence separately from physical cleanup and unresolved cancellation.
+The Store quotas mode covers current-limit reader admission, a reader that
+waits for a returned place, a full capacity that refuses after the whole
+allowance, actual default event-byte saturation, exact accounting, retained
+batches, domain/history separation and atomic floor rollback. Existing draft
+and command gate entries include receipt/collection and preflight-pressure
+checks. Existing native ingestion and control entries check terminal evidence
+separately from physical cleanup and unresolved cancellation.

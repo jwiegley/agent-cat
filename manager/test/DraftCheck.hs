@@ -32,6 +32,7 @@ import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
 import qualified Database.SQLite3 as SQL
 import Foreign.C.Types (CInt (..))
+import GHC.Clock (getMonotonicTimeNSec)
 import System.Directory (createDirectory, doesFileExist, listDirectory, removeFile)
 import System.Environment (getArgs, getExecutablePath)
 import System.Exit (exitFailure)
@@ -103,6 +104,10 @@ expect :: String -> CommandFailure -> IO (Either CommandFailure a) -> IO ()
 expect label expected action=action>>= \result->check label(case result of Left actual->actual==expected;Right _->False)
 await :: IO a -> IO a
 await action=timeout 5000000 action >>= maybe(error "fixture rendezvous timeout")pure
+-- | A file holder waits for its release while a waiter spends its whole
+-- five-second allowance on the file slot, so the holder's bound is ten seconds.
+awaitRelease :: IO a -> IO a
+awaitRelease action=timeout 10000000 action >>= maybe(error "fixture holder release timeout")pure
 
 bearer, secondBearer :: BS.ByteString
 bearer=BS.replicate 32 97
@@ -226,7 +231,7 @@ retentionChecks work source = withFixture work source "retention" 10 20 67108864
   release <- newEmptyMVar
   withAsync (withStoreFiles store $ \_ -> do
     putMVar ready ()
-    await(takeMVar release)
+    awaitRelease(takeMVar release)
     mutate store(execute "UPDATE request_inputs SET source='capture',capture_id=? WHERE request_id=? AND name='first'" [txt ident,txt(draftId view)])) $ \binder -> do
       await(takeMVar ready)
       expect "original binding owner excludes collection" StorageUnavailable (collectCaptures store "")
@@ -490,7 +495,10 @@ quotaChecks work source=do
     worker<-async(uploadCapture store proof(draftId view)k 0 (putMVar started()>>takeMVar release>>pure BS.empty))
     await(takeMVar started)
     k2<-key store "concurrent"
-    expect "concurrent admission at last slot is fail-fast" StorageUnavailable(uploadCapture store proof(draftId view)k2 0 (pure BS.empty))
+    waitStarted<-getMonotonicTimeNSec
+    expect "concurrent admission at last slot refuses while the upload holds the file slot" StorageUnavailable(uploadCapture store proof(draftId view)k2 0 (pure BS.empty))
+    waitFinished<-getMonotonicTimeNSec
+    check "that admission waited the whole five-second allowance for the file slot" (waitFinished-waitStarted>=5000000000)
     putMVar release()
     result<-wait worker>>=right
     number store "SELECT (SELECT count(*) FROM captures)+(SELECT count(*) FROM capture_uploads)" >>=check "successful conversion counts one slot only" . (==256)

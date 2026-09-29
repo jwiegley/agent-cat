@@ -40,7 +40,8 @@ import qualified Agentic.Manager.Events as Events
 import Agentic.Manager.Schema (schemaVersion, schemaStatements, commandMigration, draftMigration, admissionMigration, approvalMigration, ingestionMigration, controlMigration)
 import Agentic.Manager.Store
 import Agentic.Runtime hiding (Checkpoint)
-import Control.Concurrent.Async (AsyncCancelled (..), Concurrently (..), async, asyncThreadId, cancel, concurrently, poll, wait, waitCatch, withAsync)
+import Control.Concurrent.Async (AsyncCancelled (..), Concurrently (..), async, asyncThreadId, cancel, concurrently, mapConcurrently, poll, wait, waitCatch, withAsync)
+import GHC.Clock (getMonotonicTimeNSec)
 import GHC.Conc (ThreadStatus (..), BlockReason (..), threadStatus)
 import Control.Concurrent.MVar (newEmptyMVar, putMVar, takeMVar)
 import Control.DeepSeq (NFData, force)
@@ -52,7 +53,7 @@ import qualified Data.Aeson.Key as Key
 import qualified Data.Aeson.KeyMap as KM
 import Data.ByteArray (convert)
 import Data.Foldable (toList)
-import Data.IORef (newIORef, readIORef, writeIORef)
+import Data.IORef (modifyIORef', newIORef, readIORef, writeIORef)
 import qualified Data.ByteString as BS
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -438,6 +439,14 @@ ordinaryStreamChecks work = do
         check "a stream whose next batch meets a configuration holder past the allowance ends with storage-unavailable"
           (fmap (either (Left . classifyFault) Right) ended == Just (Left (CommandRefusal Command.StorageUnavailable)))
 
+-- | Run independent refusals at the same time, so their five-second waits
+-- overlap, and then check each outcome in order. Each refusal still waits its
+-- own whole allowance, because every holder stays held until all return.
+refusedTogether :: StoreFailure -> [(String, IO ())] -> IO ()
+refusedTogether expected cases = do
+  outcomes <- mapConcurrently (\(_, operation) -> try @StoreFailure operation) cases
+  forM_ (zip cases outcomes) $ \((label, _), outcome) -> check label (outcome == Left expected)
+
 faultOf :: IO a -> IO (Either FaultClass a)
 faultOf action = either (Left . classifyFault) Right <$> try @SomeException action
 
@@ -455,27 +464,28 @@ responseOrderChecks work = do
     proof <- authenticateCredential store bearer >>= right
     Service.withService store $ \service -> do
       entered <- newIORef False
-      let refused label operation = do
-            outcome <- try @StoreFailure (void operation)
-            check label (outcome == Left StoreBusy)
-          association = RunAssociation "run_missing" "profile_1" "root_missing" (RunId "native_missing")
+      let association = RunAssociation "run_missing" "profile_1" "root_missing" (RunId "native_missing")
       -- Exhaust readers as well as files. A configuration-first response would
       -- report StoreLimit, rather than refusing at the original file guard.
       withStoreReader store $ withStoreReader store $ withStoreFiles store $ \_ -> do
-        refused "overview acquires files before reader/configuration"
-          (Service.withOverviewSource service proof (\_ _ _ -> writeIORef entered True))
-        refused "run response acquires files before reader/configuration"
-          (Service.withRun service proof "run_missing" (\_ _ -> writeIORef entered True))
-        refused "decision response acquires files before reader/configuration"
-          (withDecision store proof association "decision_missing" (\_ _ -> writeIORef entered True))
+        refusedTogether StoreBusy
+          [("overview acquires files before reader/configuration",
+             void (Service.withOverviewSource service proof (\_ _ _ -> writeIORef entered True))),
+           ("run response acquires files before reader/configuration",
+             void (Service.withRun service proof "run_missing" (\_ _ -> writeIORef entered True))),
+           ("decision response acquires files before reader/configuration",
+             void (withDecision store proof association "decision_missing" (\_ _ -> writeIORef entered True)))]
         readIORef entered >>= check "refused responses never enter their callbacks" . not
         withStoreConfiguration store (\_ _ -> pure ()) >>= check "refused responses leave configuration available" . (==Right ())
       escaped <- newIORef Nothing
       Service.withOverviewSource service proof $ \view _ materialize -> do
         (_,_,items) <- materialize
         check "complete empty overview uses its original materialization scope" (null items)
-        refused "overview file loan spans the response callback" (withStoreFiles store (\_ -> pure ()))
-        withStoreConfiguration store (\_ _ -> pure ()) >>= check "overview configuration spans response callback" . (==Left SupervisionUnavailable)
+        (files, configuration) <- concurrently
+          (try @StoreFailure (withStoreFiles store (\_ -> pure ())))
+          (withStoreConfiguration store (\_ _ -> pure ()))
+        check "overview file loan spans the response callback" (files == Left StoreBusy)
+        check "overview configuration spans response callback" (configuration == Left SupervisionUnavailable)
         revalidateAuthorizedView view >>= check "overview view revalidates under its original loans" . (==Right ())
         writeIORef escaped (Just materialize)
       readIORef escaped >>= maybe (error "missing overview materializer") (\materialize -> do
@@ -508,9 +518,24 @@ admissionContentionChecks work = do
       withStoreFiles store $ \_ -> do
         deferred <- tryWithStoreFiles store (\_ -> writeIORef entered True)
         check "file contention proves the callback did not enter" (deferred == Nothing)
-        legacy <- try @StoreFailure (withStoreFiles store (\_ -> writeIORef entered True))
-        check "existing file entry remains fail-fast" (legacy == Left StoreBusy)
-      readIORef entered >>= check "deferred file operation performs no work" . not
+        started <- getMonotonicTimeNSec
+        waited <- try @StoreFailure (withStoreFiles store (\_ -> writeIORef entered True))
+        finished <- getMonotonicTimeNSec
+        check "an ordinary file operation behind a held slot is StoreBusy" (waited == Left StoreBusy)
+        check "that file operation waited the whole five-second allowance" (finished - started >= 5000000000)
+      readIORef entered >>= check "deferred and expired file operations perform no work" . not
+      held <- newEmptyMVar
+      resume <- newEmptyMVar
+      entries <- newIORef (0::Int)
+      withAsync (withStoreFiles store (\_ -> putMVar held () >> takeMVar resume)) $ \holder -> do
+        takeMVar held
+        withAsync (withStoreFiles store (\_ -> modifyIORef' entries (+1))) $ \waiter -> do
+          Contention.blocked waiter
+          readIORef entries >>= check "a file waiter does not enter while the slot is held" . (== 0)
+          putMVar resume ()
+          wait holder
+          wait waiter
+      readIORef entries >>= check "an ordinary file operation waits behind a short file holder and then enters once" . (== 1)
       failed <- try @StoreFailure (tryWithStoreFiles store (\_ -> throwIO StoreBusy :: IO ()))
       check "entered file failure is never classified as deferred" (failed == Left StoreBusy)
       idle <- Admission.pollAdmission controller
@@ -643,11 +668,11 @@ compositionChecks work = do
           (field "state" (field "verification" (last items)) == String "verified")
     withStoreReader store $ do
       verified
-      withStoreReader store $ do
-        refused "output quota refuses before response" (outputs (\_ _ -> writeIORef entered True))
-        refused "standalone restoration shares reader quota" (restoreRunProjection store association)
-        refused "historical terminal observation shares reader quota" (observeRetainedTerminal store association)
-        refused "ingestion shares reader quota" (ingest store association reference)
+      withStoreReader store $ refusedTogether StoreLimit
+        [("output quota refuses before response", void (outputs (\_ _ -> writeIORef entered True))),
+         ("standalone restoration shares reader quota", void (restoreRunProjection store association)),
+         ("historical terminal observation shares reader quota", void (observeRetainedTerminal store association)),
+         ("ingestion shares reader quota", void (ingest store association reference))]
       readIORef entered >>= check "quota refusal never enters output callback" . not
       document <- BS.readFile config >>= right . eitherDecodeStrict'
       case document of
@@ -661,13 +686,14 @@ compositionChecks work = do
     outputs $ \view _ -> do
       writeIORef escaped (Just view)
       revalidateAuthorizedView view >>= check "output view revalidates with sole reader capacity" . (==Right ())
-      locked <- withStoreConfiguration store (\_ _ -> pure ())
+      (locked, (outcome, files)) <- concurrently
+        (withStoreConfiguration store (\_ _ -> pure ()))
+        (concurrently
+          (try @StoreFailure (withStoreReader store (writeIORef entered True)))
+          (try @StoreFailure (withStoreFiles store (\_ -> pure ()))))
       check "profile configuration remains held through response" (locked == Left SupervisionUnavailable)
-      withAsync (try @StoreFailure (withStoreReader store (writeIORef entered True))) $ \other -> do
-        outcome <- wait other
-        check "competing reader admission preserves typed configuration contention" (outcome == Left StoreBusy)
+      check "competing reader admission preserves typed configuration contention" (outcome == Left StoreBusy)
       readIORef entered >>= check "configuration contention refuses before reader work" . not
-      files <- try @StoreFailure (withStoreFiles store (\_ -> pure ()))
       check "original file owner remains held through response" (files == Left StoreBusy)
     retained <- readIORef escaped >>= maybe (error "missing response view") pure
     revalidateAuthorizedView retained >>= check "response view cannot escape retained scopes" . (==Left Command.Unauthenticated)
