@@ -5,10 +5,12 @@
 ## Phase A TUI service journey of 2026-09-29
 
 The resume workflow continued after the stopping point below under the
-operator direction of 2026-09-29 for fast validation. It committed four
-subtasks after `43585dd3`, and subtask A13A14 adds this documentation. The
-TUI now completes one uninterrupted service journey through a running
-manager. This section describes the current state. Where any section below
+operator direction of 2026-09-29 for fast validation. It committed five
+subtasks after `43585dd3`, ran the end-of-phase review of Phase A, and
+stopped without a stop condition after its last stage. The TUI now
+completes one uninterrupted service journey through a running manager. The
+work branch head is `b944407eb1142cbfa69a8ef76edc6e76e0cef739`. This
+section describes the current state. Where any section below
 differs, this section supersedes it, and the sections below remain as
 chronology.
 
@@ -18,7 +20,7 @@ chronology.
 | A6A7 | `dad4a490` | Live service progress in the TUI, and the answer JSON `false` to the pending Bool question. Evidence under `A/A6A7/fast-impl-r1`. |
 | A8A9 | `2751ffab` | The offered recovery retry, terminal recognition and verified retrieval. Evidence under `A/A8A9/fast-impl-r1`. |
 | A10A11 | `fe7a2f20` | Exclusive saving of the verified bytes from the TUI, and `tui-journey` as the milestone gate. Evidence under `A/A10A11/fast-impl-r1`. |
-| A13A14 | this change | The held routing documentation, the manual and TUI documentation of the journey, this section, and the final gate. Evidence under `A/A13A14/fast-impl-r1`. |
+| A13A14 | `b944407e` | The held routing documentation, the manual and TUI documentation of the journey, this section, and the final gate. Evidence under `A/A13A14/fast-impl-r1`. |
 
 Nothing from this workflow is published, and the canonical branch `tui`
 stays at `6b7c90b79b47c85d07162bb11d038349dbac9131`.
@@ -50,7 +52,8 @@ the protected HTTPS manager and the public `Agentic.Manager.Client` facade:
 - It sends every command once. An uncertain send is repeated only after the
   explicit confirmation of an exact resend. An internal fault stops every
   further mutation and automatic refresh.
-- `q` detaches without cancelling manager-owned work.
+- `C-c` always detaches, and `q` detaches when no answer editor has the
+  keys. Detaching does not cancel manager-owned work.
 
 The manual entry for `--service` in `doc/agent-cat.texi` and the section
 "Service mode" of `tui/README.md` state the complete behavior and list the
@@ -72,8 +75,10 @@ documentation edits stay held and that seven files describe TLS discovery.
 
 Under the operator direction of 2026-09-29, validation uses incremental
 Werror builds of the needed targets, targeted checks of the changed layers,
-and `tui-journey` at N1 and then N8. Each command runs under a timeout of
-at most 30 minutes. The final gate ran on the final tree in this order, and
+and `tui-journey` at N1 and then N8. The stage timeouts were limits of 15
+to 30 minutes for each command. The incremental all-target build took
+about one minute, and `bash tui/ci/tui.sh` took about nine minutes. The
+final gate ran on the final tree in this order, and
 each check has a `.log` and an `.exit` file under `A/A13A14/fast-impl-r1`:
 
 1. `make -C doc check` passed (`01-doc-check`).
@@ -100,19 +105,50 @@ each check has a `.log` and an `.exit` file under `A/A13A14/fast-impl-r1`:
 `tui-journey` is actual keyboard interaction through a PTY with the
 protected HTTPS manager and deterministic native frontend processes. Its
 runner is the deterministic `routing-fixed-point-probe` fixture, and no
-paid provider takes part. The two controls show that the journey fails when
-the typed answer is not JSON `false` and when the detail-view key approves a
-review. These checks were not run: `cli/ci/policies.sh`, the approval and
-controls mutation audits, `manager/ci/supervision.sh`, stability samples of
-more than a few starts, mutant suites and `-fforce-recomp` builds.
+paid provider takes part.
+
+The two controls change the harness, not the TUI. `tui-consent-control`
+sends `y` in the summary view at the step that expects the detail-view
+refusal, so it shows that the journey assertion detects an unexpected
+approval. It does not break the TUI detail-view guard. The guard itself is
+covered by the model tests and by mutants M1 and M2 of subtask A4, which
+Phase A did not run again. `tui-journey-broken-answer` types `true`, and the
+check that maps the rendered answer "no" to JSON `false` detects it. The
+harness branch that compares the answer in `answers.json` with JSON `false`
+by identity has no failing control.
+
+`tui-journey` passed in subtask A6A7 only on its eleventh attempt and in
+subtask A10A11 only on its third attempt. The commit messages of those
+subtasks record the failed attempts. The final gate and the end-of-phase
+review each passed the journey at N1 and then N8. No stability sample of
+the journey exists.
+
+These checks were not run on the final source: `cli/ci/policies.sh`, the
+approval and controls mutation audits, `manager/ci/supervision.sh`,
+stability samples of more than a few starts, mutant suites,
+`-fforce-recomp` builds, and `manager-store-check`,
+`manager-artifact-check` and `manager-draft-check`. The final gate only
+compiled the last three suites, and none of them ran after the Store change
+of commit `fe7a2f20`.
 
 ### Accepted state
 
 Accepted state is unchanged at WM-001 to WM-022 and G0 and G1, which is 22
 of 44 packages and two of six gates. This milestone closes no package and no
 gate. WM-023 (`acat-wm-023-d20b`) is still in progress. The journey is the
-Phase A exit evidence, and Phase A waits only for the short end-of-phase
-review that the operator direction of 2026-09-29 describes.
+Phase A exit evidence.
+
+The end-of-phase review of Phase A ran as two lenses over `43585dd3..b944407e`
+on a clean worktree, and both returned "approve with notes". The journey
+lens rebuilt `agentic-run` and `routing-fixed-point-probe` with
+`-ftui-tests` and passed `tui-journey` at N1 and then N8 (evidence under
+`A/phaseA-review-journey`, fixture root
+`/Users/johnw/Products/k.M0a5ItPm/tmp/review-journey.HSLddj9N`). The exit
+lens found that the Phase A exit criteria, as the operator direction of
+2026-09-29 amends them, are met. No fix round ran. The review findings are
+listed under "Open findings". Phase A is ready for the operator's acceptance,
+and the file-slot extension below still needs the operator's
+confirmation.
 
 ### Operator decisions
 
@@ -129,6 +165,14 @@ review that the operator direction of 2026-09-29 describes.
   event-stream batches and the admission coordinator steps wait for the
   Store gate and the configuration guard within the unchanged five-second
   allowance. A genuine timeout still returns `storage-unavailable`.
+- Awaiting confirmation: commit `fe7a2f20` also makes the Store file slot
+  and the reader capacity wait, and the Integrator accepted this pending the
+  operator's confirmation. The decision above names only the Store gate and
+  the configuration guard. Each lock starts its own five-second allowance,
+  and Drafts adds another timed wait inside the file slot. One request can
+  therefore wait more than five seconds in total, and it can reach the
+  15-second response timeout of the TUI client. The client then reports an
+  uncertain outcome, which the explicit resend handles.
 
 The verbatim decisions are in `GOAL.md` of the resume directory.
 
@@ -140,21 +184,67 @@ The verbatim decisions are in `GOAL.md` of the resume directory.
   validation in the TLS stack.
 - `acat-dxos` and `acat-nwrj`, P1, stay open for the Integrator to decide
   whether bounded-wait admission resolves them.
+- Review finding, medium, not filed: a failed result retrieval stays failed
+  for the rest of the session (`tui/src/Agentic/Tui/App.hs` near 500 and
+  786). A declared refusal such as a transient `storage-quota` or
+  `storage-unavailable`, or a read that finds no verified artifact yet, is
+  kept as the result of the run, and neither automatic refresh nor `g`
+  retrieves it again. The operator then cannot save the bytes of that run
+  from the TUI, and the journey can fail when the final snapshot polls of the
+  harness overlap the first retrieval. Item 1 of
+  `acat-a8a9-fess-followup-6d1e` covers the "no verified result" part.
+- Review finding, medium, not filed: the stacked five-second allowances
+  that "Operator decisions" describes. Items 1 and 3 of
+  `acat-a10a11-fess-followup-33k1` (P3) cover it. `manager/STORAGE.md`
+  says that waiting and execution share one five-second allowance and then
+  adds fresh allowances for the slot, so it does not state whether the waits
+  add up.
+- Review finding, low, not filed: `saveExact` in `tui/src/Agentic/Tui/Save.hs`
+  returns a refusal when the link succeeds and the removal of the private
+  file fails, although the bytes are published. It does not synchronize the
+  file or its directory to disk. Item 4 of `acat-a8a9-fess-followup-6d1e`
+  covers the first part.
+- The check "existing file entry remains fail-fast" in
+  `manager/test/ArtifactCheck.hs` now waits five seconds on a slot that its
+  own thread holds, so its name is false (item 2 of
+  `acat-a10a11-fess-followup-33k1`).
+- Automatic refresh pauses while a deferral outcome is shown, with no bound
+  (`acat-ftw9`, item 1 of `acat-a6a7-fess-followup-1exm`).
+- `acat-i9aj`, P2, the PTY journey does not assert the composite install and
+  the decision head.
+- This run filed the non-blocking audit findings of each subtask as
+  `acat-a5s2b-fess-followup-s9rl`, `acat-a6a7-fess-followup-1exm`,
+  `acat-a8a9-fess-followup-6d1e`, `acat-a10a11-fess-followup-33k1` and
+  `acat-a13a14-fess-followup-xznh`, all P3. This section applies items 2
+  and 3 of `xznh`.
+- The commit message of `d02b6253` names the contention checks G01 to G08,
+  but G05 has no evidence file. G08 reran the G05 command after the fix.
 - The manual now names the constructor `TuiService` of
   `Agentic.Cli.Command`, which resolves the omission that the sections below
-  list. `acat-nay0` is resolved by the documentation of this change.
+  list. `acat-nay0` is resolved by the documentation of commit `b944407e`.
+  The control 404 before the first projection and the event stream that
+  ended under contention, which the section below lists, are fixed by
+  commit `d02b6253`.
 - The other open findings of the sections below are unchanged.
 
 ### Next action
 
-1. Run the end-of-phase review of Phase A, a short two-lens reading of the
-   integrated path with at most one fix round.
-2. Land actor-flow increment 1 (`acat-e6cp`, `acat-5m60`).
-3. Start Phase B.
+1. The operator accepts Phase A and confirms or rejects the file-slot and
+   reader-capacity extension of the bounded wait. The Integrator files the
+   unfiled review findings above.
+2. Fix the retrieval that stays failed, so that a declared refusal or a
+   missing verified artifact allows a later bounded retrieval. Carry one
+   deadline through the file slot, the configuration guard and the gate,
+   or document the stacked total below the client timeout. Correct the
+   fail-fast check names, and run `manager-store-check`,
+   `manager-artifact-check` and `manager-draft-check` once each under
+   `timeout 900`.
+3. Land actor-flow increment 1 (`acat-e6cp`, `acat-5m60`).
+4. Start Phase B.
 
 To resume, run the toolchain check of the resume procedure below in the
-worktree, confirm that HEAD is the A13A14 commit and that the worktree is
-clean, and rebuild with the build command of the first 2026-09-27 section
+worktree, confirm that HEAD is `b944407e` or a later commit of the
+closeout of this run and that the worktree is clean, and rebuild with the build command of the first 2026-09-27 section
 before any binary runs.
 
 ## Resume workflow stopping point of 2026-09-29
