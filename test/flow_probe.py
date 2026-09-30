@@ -17,11 +17,12 @@ fail-over shows two question records for one occurrence.
 
 Carriage. Every attempt.started event lies inside an open question of its
 occurrence, and inside an open turn when that question goes to a model. Every
-acknowledgement of a control that the runtime received after activation
-follows a control record with its identifier. A control delivered before
-activation has only its acknowledgement. In a broker-test run, the counts of
-the inner broker equal the records of the run log. The checker fails on a copy
-of a log without one turn record. The static check lists every source line
+acknowledgement of a control follows a control record with its identifier,
+including the acknowledgement of a control that the runtime received before
+activation. In a broker-test run, the counts of the inner broker equal the
+records of the run log. The "agentic-run flow" verb verifies the log of the run
+with an early control and reports no unacknowledged control. The checker fails
+on a copy of a log without one turn record. The static check lists every source line
 that names inProcessBroker under runtime/src and cli/src and fails on a line
 outside the allowlist, and it fails when a synthetic extra line is added.
 
@@ -206,8 +207,9 @@ def controlled_machine(root: Path, binary: Path, run_id: str, workflow: str, tar
     try:
         for control in early:
             send(control)
-        # The reader acknowledges the early controls into the deferred sink
-        # while the run still waits for its standard input.
+        # The control loop holds the early controls while the run still waits
+        # for its standard input, and the run carries them when its run log
+        # opens.
         time.sleep(0.5)
         assert process.stdin is not None and process.stdout is not None and process.stderr is not None
         process.stdin.write(stdin)
@@ -256,10 +258,10 @@ def event_of(run: Run, record: dict) -> dict:
     return run.journal[record["body"]["event"]]["event"]
 
 
-def carriage_problems(records: list[dict], journal: list[dict], early: set[str] = frozenset()) -> list[str]:
+def carriage_problems(records: list[dict], journal: list[dict]) -> list[str]:
     """The structural bypass check. It returns every attempt.started event that
     no open ask of its occurrence encloses, and every acknowledgement of a
-    control received after activation that no earlier control record names."""
+    control that no earlier control record names."""
     problems = []
     open_asks: dict[int, dict] = {}
     controls: set[str] = set()
@@ -282,17 +284,13 @@ def carriage_problems(records: list[dict], journal: list[dict], early: set[str] 
                 problems.append(f"event {position}: attempt.started of occurrence {occurrence} has no enclosing question")
             elif "model" in questions[-1]["to"]["to"] and not any(ask["schema"] == "turn" for ask in mine):
                 problems.append(f"event {position}: attempt.started of occurrence {occurrence} has no enclosing turn")
-        elif event["type"] == "control.ack" and event["controlId"] != "invalid":
-            if event["controlId"] in early:
-                if event["controlId"] in controls:
-                    problems.append(f"event {position}: control {event['controlId']} delivered before activation has a control record")
-            elif event["controlId"] not in controls:
-                problems.append(f"event {position}: acknowledgement of {event['controlId']} has no control record")
+        elif event["type"] == "control.ack" and event["controlId"] != "invalid" and event["controlId"] not in controls:
+            problems.append(f"event {position}: acknowledgement of {event['controlId']} has no earlier control record")
     return problems
 
 
-def check_carriage(run: Run, early: set[str] = frozenset()) -> None:
-    problems = carriage_problems(run.records, run.journal, early)
+def check_carriage(run: Run) -> None:
+    problems = carriage_problems(run.records, run.journal)
     assert not problems, f"{run.run_id}: {problems}"
     numbered = [record["body"]["event"] for record in run.carried("event")]
     assert numbered == list(range(len(run.journal))), f"{run.run_id}: event records {numbered}"
@@ -304,10 +302,10 @@ def check_carriage(run: Run, early: set[str] = frozenset()) -> None:
             assert identifiers == ask["about"], f"{run.run_id}: reply {index} about {record['about']}, ask {ask['about']}"
 
 
-def check_counts(run: Run, early: int = 0) -> None:
+def check_counts(run: Run) -> None:
     counts = run.counts()
     carried = {
-        "control": len(run.carried("control")) + early,
+        "control": len(run.carried("control")),
         "request": len(run.carried("question")),
         "start": len(run.carried("engine-start")),
         "steer": len(run.carried("steer")),
@@ -398,7 +396,7 @@ def attribution(root: Path, frontend: Path, fixed: Path) -> None:
     print("attribution: an answer that names another target and holds approval phrases adds no start and no control record")
 
 
-def local_person(root: Path, fixed: Path) -> None:
+def local_person(root: Path, frontend: Path, fixed: Path) -> None:
     replies = {"0": ("person-first", True), "1": ("person-second", False)}
 
     def respond(event: dict) -> list[dict]:
@@ -414,17 +412,29 @@ def local_person(root: Path, fixed: Path) -> None:
         root, fixed, "flow-person", "person-controlled",
         ["--scripted", "--person-answering", "local-control"], "person body", respond,
         prefix=("--broker-test",), early=[early])
-    check_carriage(run, early={"early-retry"})
-    check_counts(run, early=1)
+    check_carriage(run)
+    check_counts(run)
     assert any(event["type"] == "control.ack" and event["controlId"] == "early-retry" for event in run.events)
     commands = [record["about"]["command"] for record in run.carried("control")]
-    assert commands == ["person-first", "person-second"], commands
+    assert commands == ["early-retry", "person-first", "person-second"], commands
+    # The early control is appended before the run.started event and before
+    # the event record of its acknowledgement.
+    early_position = run.records.index(run.carried("control")[0])
+    events = [(position, event_of(run, record)) for position, record in enumerate(run.records) if record["schema"] == "event"]
+    started = next(position for position, event in events if event["type"] == "run.started")
+    acknowledged = next(position for position, event in events
+                        if event["type"] == "control.ack" and event["controlId"] == "early-retry")
+    assert early_position < started < acknowledged, (early_position, started, acknowledged)
+    _, summary = flow_verb(frontend, run.store, 0)
+    assert summary["verified"] and not summary["problems"], summary
+    assert not summary["states"]["unacknowledged"], summary
     assert all(record["from"] == local(run.run_id) for record in run.carried("control"))
     for (question, reply), (occurrence, (control, answer)) in zip(answers(run), sorted(replies.items())):
         assert question["about"]["occurrence"] == int(occurrence), question
         check_sender(run, question, reply, local(run.run_id))
         assert reply["about"]["command"] == control and reply["body"]["inline"] is answer, reply
-    print("attribution: local person answers come from the intake and name their controls; an early control has only its acknowledgement")
+    print("attribution: local person answers come from the intake and name their controls; "
+          "an early control has its control record before its acknowledgement, and the flow verb verifies the log")
 
 
 def retry_forms(root: Path, fixed: Path) -> None:
@@ -625,7 +635,7 @@ def main() -> None:
     root = Path(tempfile.mkdtemp(prefix="agent-cat-flow-"))
     print(f"fixture root {root} (removed only after every check passes)")
     attribution(root, frontend, fixed)
-    local_person(root, fixed)
+    local_person(root, frontend, fixed)
     retry_forms(root, fixed)
     uncertainty(root, frontend)
     unanswered_at_stop(root, frontend, fixed)

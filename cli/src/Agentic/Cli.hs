@@ -272,9 +272,13 @@ import qualified Agentic.Cli.Frontend as Frontend
 import qualified Agentic.Manager as Manager
 import qualified Agentic.Manager.Flow as Flow
 import Control.Concurrent (myThreadId, threadDelay, throwTo)
+import Control.Concurrent.MVar (MVar, newMVar, putMVar, takeMVar, withMVar)
 import Control.Exception
   ( AsyncException (UserInterrupt),
     bracket,
+    finally,
+    mask,
+    mask_,
     Handler (..),
     IOException,
     SomeAsyncException,
@@ -401,6 +405,7 @@ import Agentic.Runtime
     stderrLog,
   )
 import Agentic.Runtime (DataBroker (..), inProcessBroker, ControlRuntime, newControlRuntimeFor)
+import Agentic.Runtime (Control (controlCommand), ControlCommand (CancelRun))
 import Agentic.Runtime (Actor (Manager, Principal), Authority (LocalAccount), FlowScope, Start (..), StartInput (..), flowBroker, flowScopedBroker, strictFlowCodec, withRunLog)
 import Agentic.Runtime (FlowEntry (..), FlowLiveness (..), FlowReport (..), FlowRoute, Position (..), Record (recBody), Body (EventNumber), flowEntryValue, flowRouteMatches, flowSummaryValue, flowUncertain, flowVerified, parseFlowRoute, readFlow, runLogName)
 import Agentic.Runtime
@@ -1358,17 +1363,107 @@ withFinalTarget reg name target program action = do
   either (die reg 1 . ("routing configuration: " <>)) action finalized
 
 -- | Existing preflight controls or a private input for an already prepared run.
--- Preflight controls carry the cell of the broker that delivers each control.
+-- Preflight controls carry the 'Preflight' that holds them until the run log
+-- opens.
 data MachineControl
-  = MachineControl ControlRuntime DeferredEventSink EventSink (IORef DataBroker)
+  = MachineControl ControlRuntime DeferredEventSink EventSink Preflight
   | MachineControlInput Handle BS.ByteString
+
+-- | The carriage of the controls that the control loop reads before the run
+-- log exists.
+--
+-- The loop holds each such control, except a cancellation, in arrival order.
+-- 'withPreflightCarriage' takes the lock before the run opens its run store,
+-- and its carrying action delivers each held control through the broker of the
+-- run, which appends the @control@ record before delivery. A cancellation, an
+-- invalid frame or the end of the control input before then first releases the
+-- held controls through the broker of the command, because the run then ends
+-- before it has a run log.
+data Preflight = Preflight
+  { preflightCommand :: !DataBroker,
+    -- | Held by the loop while it holds or releases a control, and by the run
+    -- from before its run store opens until it carries the held controls.
+    preflightLock :: !(MVar ()),
+    preflightState :: !(IORef PreflightState)
+  }
+
+data PreflightState
+  = -- | The held controls with their receivers, newest first.
+    PreflightHolding [(Control -> IO Bool, Control)]
+  | -- | The broker that delivers each control from now on.
+    PreflightCarrying DataBroker
+
+newPreflight :: DataBroker -> IO Preflight
+newPreflight broker = Preflight broker <$> newMVar () <*> newIORef (PreflightHolding [])
+
+-- | Deliver or hold one control that the control loop read. A held control
+-- continues the loop, as the receiver of every control but a cancellation
+-- does.
+preflightControl :: Preflight -> (Control -> IO Bool) -> Control -> IO Bool
+preflightControl preflight receive control =
+  readIORef (preflightState preflight) >>= \case
+    PreflightCarrying current -> brokerControl current receive control
+    PreflightHolding _ -> do
+      decided <- withMVar (preflightLock preflight) $ \() ->
+        readIORef (preflightState preflight) >>= \case
+          PreflightCarrying current -> pure (Left current)
+          PreflightHolding held
+            | controlCommand control == CancelRun -> do
+                releaseHeld preflight held
+                Right <$> brokerControl (preflightCommand preflight) receive control
+            | otherwise -> do
+                writeIORef (preflightState preflight) (PreflightHolding ((receive, control) : held))
+                pure (Right True)
+      either (\current -> brokerControl current receive control) pure decided
+
+-- | Release the held controls through the broker of the command, when the run
+-- ends before its run log opens. A release while the run opens its run store
+-- waits for the run to carry them instead.
+preflightRelease :: Preflight -> IO ()
+preflightRelease preflight =
+  readIORef (preflightState preflight) >>= \case
+    PreflightHolding (_ : _) ->
+      withMVar (preflightLock preflight) $ \() ->
+        readIORef (preflightState preflight) >>= \case
+          PreflightHolding held -> releaseHeld preflight held
+          PreflightCarrying _ -> pure ()
+    _ -> pure ()
+
+-- | Deliver the held controls through the broker of the command in arrival
+-- order. The caller holds the lock. The state is emptied first, so that an
+-- event of a receiver does not release again.
+releaseHeld :: Preflight -> [(Control -> IO Bool, Control)] -> IO ()
+releaseHeld preflight held = do
+  writeIORef (preflightState preflight) (PreflightHolding [])
+  mapM_ (\(receive, control) -> void (brokerControl (preflightCommand preflight) receive control)) (reverse held)
+
+-- | Hold the delivery of preflight controls from before the run opens its run
+-- store, and hand the body the carrying action. The carrying action appends and
+-- delivers each held control in arrival order through the broker of the run,
+-- makes that broker deliver every later control, and releases the lock. The
+-- lock is released as well when the body leaves without carrying.
+withPreflightCarriage :: Preflight -> ((DataBroker -> IO ()) -> IO a) -> IO a
+withPreflightCarriage preflight body = mask $ \restore -> do
+  takeMVar (preflightLock preflight)
+  carried <- newIORef False
+  let carry runBroker = do
+        readIORef (preflightState preflight) >>= \case
+          PreflightHolding held -> do
+            writeIORef (preflightState preflight) (PreflightHolding [])
+            mapM_ (\(receive, control) -> void (brokerControl runBroker receive control)) (reverse held)
+          PreflightCarrying _ -> pure ()
+        mask_ $ do
+          writeIORef (preflightState preflight) (PreflightCarrying runBroker)
+          putMVar (preflightLock preflight) ()
+          writeIORef carried True
+  restore (body carry) `finally` (readIORef carried >>= \done -> unless done (putMVar (preflightLock preflight) ()))
 
 -- | Start controls before stdin or route-dependent program construction.
 --
--- The control loop delivers each control through the broker in the cell. The
--- cell holds the broker of the command until 'runMachineWith' fills it with
--- the broker of the run at activation, so a control delivered before
--- activation reaches the run log only as its acknowledgement event.
+-- The control loop delivers each control through the 'Preflight' of the run.
+-- A control that arrives before the run log opens is held, and the run appends
+-- and delivers it through the broker of the run before activation publishes
+-- the start and forwards the queued acknowledgement events.
 withMachineControls :: DataBroker -> MachineOptions -> RunId -> Text -> Target -> (Maybe MachineControl -> IO ()) -> IO ()
 withMachineControls broker options runId name initialTarget action = do
   handle <- machineControlHandle
@@ -1377,14 +1472,21 @@ withMachineControls broker options runId name initialTarget action = do
     Just controlHandle -> do
       runtime <- newControlRuntimeFor (machineProtocolVersion options)
       deferred <- newDeferredEventSink
-      cell <- newIORef broker
+      preflight <- newPreflight broker
       let sink = deferredEventSink deferred
-          delivering = broker {brokerControl = \receive control -> readIORef cell >>= \current -> brokerControl current receive control}
-      outcome <- try (withBufferedControlInputBrokered delivering (machineProtocolVersion options) controlHandle BS.empty sink runtime (action (Just (MachineControl runtime deferred sink cell))))
+          -- An event of the loop itself, such as the acknowledgement of an
+          -- invalid frame, follows the release of the held controls.
+          delivering =
+            broker
+              { brokerControl = preflightControl preflight,
+                brokerEvent = \target event -> preflightRelease preflight >> brokerEvent broker target event
+              }
+      outcome <- try (withBufferedControlInputBrokered delivering (machineProtocolVersion options) controlHandle BS.empty sink runtime (action (Just (MachineControl runtime deferred sink preflight))))
       case outcome of
         Right () -> pure ()
         Left (err :: SomeException)
           | Just (MachineCancelled why) <- fromException err -> do
+              preflightRelease preflight
               active <- eventSinkActive deferred
               unless active $ do
                 actual <- stdoutEventSinkFor (machineProtocolVersion options) runId
@@ -2934,17 +3036,22 @@ runMachineWith broker options control lineage parent inherited reg runId name ta
   let version = machineProtocolVersion options
       storeFormat = if version == protocolVersion then storeVersion else latestStoreVersion
   case store of
-    Nothing -> stdoutEventSinkFor version runId >>= runWith broker (const broker) effectiveTarget nullPersistenceHooks
+    Nothing -> withPreflight $ \carry -> stdoutEventSinkFor version runId >>= runWith carry broker (const broker) effectiveTarget nullPersistenceHooks
     Just directory -> do
       intake <- intakeActor (machineIntake options) owner
-      withRunStoreSeededVersioned storeFormat version directory (manifest effectiveTarget owner) inherited $ \runStore ->
-        withRunLog runStore intake (start effectiveTarget) $ \runLog -> do
-          persistence <- persistenceFor runId runStore (printedValue prog) (length inherited)
-          -- Every operation of the run is carried through its run log.
-          let flow = runFlowFor runLog version intake (start effectiveTarget) (inProcessNames reg name)
-          handlesEventSinkLogged (Just runLog) version [storeEventHandle runStore, stdout] runId
-            >>= runWith (flowBroker strictFlowCodec flow broker) (flowScopedBroker strictFlowCodec flow broker) effectiveTarget persistence
+      -- Preflight controls wait while the run store and the run log open.
+      withPreflight $ \carry ->
+        withRunStoreSeededVersioned storeFormat version directory (manifest effectiveTarget owner) inherited $ \runStore ->
+          withRunLog runStore intake (start effectiveTarget) $ \runLog -> do
+            persistence <- persistenceFor runId runStore (printedValue prog) (length inherited)
+            -- Every operation of the run is carried through its run log.
+            let flow = runFlowFor runLog version intake (start effectiveTarget) (inProcessNames reg name)
+            handlesEventSinkLogged (Just runLog) version [storeEventHandle runStore, stdout] runId
+              >>= runWith carry (flowBroker strictFlowCodec flow broker) (flowScopedBroker strictFlowCodec flow broker) effectiveTarget persistence
   where
+    withPreflight body = case control of
+      Just (MachineControl _ _ _ preflight) -> withPreflightCarriage preflight body
+      _ -> body (const (pure ()))
     start effectiveTarget =
       Start
         { startRun = runId,
@@ -2975,18 +3082,23 @@ runMachineWith broker options control lineage parent inherited reg runId name ta
         lineage
         owner
         manifestAnswering
-    runWith runBroker scoped effectiveTarget persistence actualSink = do
+    runWith carry runBroker scoped effectiveTarget persistence actualSink = do
       let started = machineStarted options name effectiveTarget
       case control of
         Nothing -> brokerEvent runBroker actualSink started >> executeRun Nothing actualSink id
-        Just (MachineControl controls deferred sink cell) ->
-          -- Controls from activation on are delivered through the broker of
-          -- the run, and the cell returns to the broker of the command when
-          -- the run ends.
-          bracket (atomicModifyIORef' cell (\previous -> (runBroker, previous))) (writeIORef cell) $ \_ -> do
-            activated <- activateEventSinkBrokered runBroker deferred actualSink started
-            unless activated (ioError (userError "machine event sink was activated twice"))
-            executeRun (Just controls) sink id
+        Just (MachineControl controls deferred sink preflight) ->
+          -- The held controls are appended and delivered through the broker
+          -- of the run before activation forwards their acknowledgements.
+          -- Every later control uses the broker of the run until the run
+          -- ends, and then the broker of the command. A cancellation that
+          -- waited for the lock arrives after the carrying, and the mask
+          -- defers it until the handler of the run is in place.
+          (`finally` writeIORef (preflightState preflight) (PreflightCarrying (preflightCommand preflight))) $
+            mask $ \restore -> do
+              carry runBroker
+              activated <- activateEventSinkBrokered runBroker deferred actualSink started
+              unless activated (ioError (userError "machine event sink was activated twice"))
+              executeRun (Just controls) sink restore
         Just (MachineControlInput handle buffered) -> do
           controls <- newControlRuntimeFor (machineProtocolVersion options)
           -- Prepared runs establish durable history before consuming queued controls.

@@ -46,7 +46,10 @@ subtask is under `F/<subtask>/impl-r1` or `impl-r2` in the resume directory.
 - `flowBroker` appends each record before delivery, and the receiver acts on
   the value that it decodes from the appended bytes. `DataBroker` keeps its
   nine operations. A failed run-log append fails the run through the
-  observer-failure path.
+  observer-failure path. A control that arrives before the run log exists is
+  held, and the run appends and delivers it through `flowBroker` after its run
+  log opens and before activation forwards the acknowledgement, as the section
+  "Carriage" of `runtime/BROKER.md` states.
 - A serving manager writes one manager log for each Store stream identity,
   `flow/<stream>.ndjson` in its private root, outside SQLite. It records each
   command after the Store admits it and before the commit, synchronized to

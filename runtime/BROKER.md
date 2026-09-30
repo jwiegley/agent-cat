@@ -310,14 +310,28 @@ attempt context through `brokerLog` of `inProcessBroker`, and `brokerLog`
 appends nothing.
 
 Preflight controls start before the program and the run store exist. The
-control loop of `withMachineControls` delivers each control through the broker
-in a cell. The cell holds the broker of the command until `runMachineWith`
-fills it with the broker of the run, before `activateEventSinkBrokered`
-publishes the start and forwards the queued events. The cell returns to the
-broker of the command when the run ends. A control delivered before activation
-therefore appears in the run log only as its acknowledgement event, and every
-control delivered after activation has its `control` record. A prepared
-frontend run reads its controls with the broker of the run from the start.
+control loop of `withMachineControls` gives each control to the `Preflight` of
+the command. Until the run log exists, the `Preflight` holds each control in
+arrival order and continues the loop. `runMachineWith` takes the lock of the
+`Preflight` before it opens the run store. After the run log opens, it appends
+and delivers each held control through the broker of the run, and the receiver
+acts on the value decoded from the appended `control` record. Then
+`activateEventSinkBrokered` publishes the start and forwards the queued
+acknowledgement events. Each held control therefore has its `control` record
+before the `event` record of its acknowledgement. From then until the run ends,
+the loop delivers each control through the broker of the run. After the run
+ends, it delivers each control through the broker of the command. A control
+that arrives while the run store opens waits for the lock and then has its
+`control` record.
+
+A cancellation, an invalid frame and the end of the control input each end the
+run. When one of them arrives before `runMachineWith` takes the lock, the
+`Preflight` first delivers the held controls in arrival order through the
+broker of the command, and then the cancellation or the acknowledgement of the
+invalid frame follows. The run then ends before it opens a run store, and it
+has no run log. The events on standard output are the same as when each control
+is delivered on arrival. A prepared frontend run reads its controls with the
+broker of the run from the start.
 
 `RunFlow` holds the run log writer, the runtime protocol of the run, the native
 run identifier, the intake actor, the answerer function, the failure classifier

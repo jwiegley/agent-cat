@@ -347,7 +347,7 @@ Discovered in acat-47y: migrating PMod to [CMonoid M] makes instPModSelf demand 
 :LABELS:   ["actor-flow","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-29 Tue 23:11]
-:MODIFIED: [2026-09-30 Wed 00:03]
+:MODIFIED: [2026-09-30 Wed 00:24]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -384,6 +384,13 @@ Low:
     "author": "johnw",
     "text": "Phase B subtask B1 repairs medium items 1, 2 and 3. (1) A cancel whose appended record decodes to another value is committed and dispatched, and the manager log names its command record and receipt in a gap notice; the flow-lossy case of manager-command-check flow shows it, and an ordinary command stays refused with storage-unavailable. (2) manager/STORAGE.md section 'Growth, open refusals and recovery' and the handoff state the limit, the open refusals with fixed words oversized, undecodable and io-failure recorded once at open, the recovery procedure and the measured append latency (median 5.511 ms, max 7.523 ms over 60 commands); retention follows in acat-3mgw under WM-042. (3) STORAGE.md and the Flow.hs header no longer claim that no local path enters a body. Evidence: B/B1/impl-r1 (build, manager-command-check flow, main mode with command_contract.py at N8, journey at N8, make -C doc check, all exit 0). Items 4 to 14 remain open. Low fess findings: acat-76le.",
     "created_at": "2026-09-30T07:03:10Z"
+  },
+  {
+    "id": 373,
+    "issue_id": "acat-1dfc",
+    "author": "johnw",
+    "text": "Phase B subtask B2 repairs medium item 4. A control that arrives before the run log of a store-backed run exists is now held in arrival order (a cancellation first releases the held controls through the broker of the command and is then delivered at once). After withRunLog opens and before activateEventSinkBrokered, the run appends and delivers each held control through flowBroker, so the receiver acts on the value decoded from the appended record. The log order is start record, control records, run.started, then the acknowledgement events. Option 1 was not possible because the start record needs the program digest and the standard-input digests. DataBroker keeps nine fields, and Broker.hs, Machine.hs and openapi.yaml are unchanged. runtime/BROKER.md section Carriage states the new behavior with no append-after-delivery exception. test/flow_probe.py now requires a control record before every acknowledged control, including the early control, and runs agentic-run flow on the store. Evidence: B/B2/impl-r1 (the extended probe failed on the unchanged binary, 00; then build, runtime-contract-test at N8, flow_probe.py, progress_probe.py golden comparison, control_probe.py and person_control_probe.py at N8 unchanged, the ad hoc held-then-terminal script, the Phase A journey at N8, make -C doc check and the nine-field DataBroker listing, all exit 0). Items 5 to 14 remain open. Fess findings: acat-r4vj.\n",
+    "created_at": "2026-09-30T07:24:40Z"
   }
 ]
 #+end_src
@@ -9026,6 +9033,32 @@ Prior session context: three round-17 lexer edits were made and reverted (record
   }
 ]
 #+end_src
+
+* TODO [#D] Resolve the findings of the B2 fess review
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-r4vj
+:LABELS:   ["actor-flow","workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-30 Wed 00:24]
+:MODIFIED: [2026-09-30 Wed 00:24]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of the fess review of Phase B subtask B2 (report fess/b1-B2-r1.md in the private resume directory). Two medium, four low.
+
+Medium:
+1. cli/src/Agentic/Cli.hs:3043-3050 and 1403-1418: a cancellation that arrives while runMachineWith holds the preflight lock (the run store is opening) now waits until the store and run log are open, which can include Store admission waits of up to five seconds, and then goes through the run's own cancel path. The exit status stays 130 and runtime/BROKER.md states this, but no test covers the window. Add a probe case that sends a cancellation while the run store opens (injected delay or held Store admission) and assert the exit status, the control record, the acknowledgement and run.cancelled.
+2. cli/src/Agentic/Cli.hs:3097-3101: runWith now runs carry, activateEventSinkBrokered and executeRun under mask and passes restore as supervise. An interrupt during the carry appends waits until they finish, and the RunCancelled and RunFailed handlers of executeRun run masked. Add a test that interrupts during carry and activation and checks the terminal event and exit status, or state the masked span in runtime/BROKER.md.
+
+Low:
+3. runtime/BROKER.md:327-334 and cli/src/Agentic/Cli.hs:1489: the end of control input during store open bypasses the preflight lock and can interrupt the open. State this in BROKER.md, or make EOF wait for the lock as cancellations and invalid frames do.
+4. test/flow_probe.py:415-437: the committed tests cover one early control only. A held control followed by a cancellation, an invalid frame or EOF, and several held controls in arrival order, are checked only by the ad hoc script B/B2/impl-r1/held_then_terminal.py. Add these cases to flow_probe.py or a new probe, leaving control_probe.py unchanged.
+5. doc/workflow-manager-handoff.md:231-232: finding 4 of the end-of-increment review still describes the old flowBroker bypass. Mark it resolved when the review record is next revised.
+6. test/flow_probe.py:25: a re-wrapped docstring line is longer than the lines around it. Re-wrap the paragraph.
 
 * DONE [#D] Give the remaining tool "cat" questions honest addressees
 :PROPERTIES:
