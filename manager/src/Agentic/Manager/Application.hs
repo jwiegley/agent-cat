@@ -56,7 +56,9 @@ methods path = case path of
   ["v1", "profiles"] -> ["GET"]
   ["v1", "workflows"] -> ["GET"]
   ["v1", "events"] -> ["GET"]
-  ["v1", "requests"] -> ["POST"]
+  ["v1", "requests"] -> ["GET", "POST"]
+  ["v1", "runs"] -> ["GET"]
+  ["v1", "decisions"] -> ["GET"]
   ["v1", kind, ident]
     | C.validId ident && kind `elem` ["requests", "preparations", "decisions"] -> ["GET", "POST"]
     | C.validId ident && kind `elem` ["commands", "artifacts", "workflows", "runs"] -> ["GET"]
@@ -70,10 +72,11 @@ dispatch service pages streams proof request respond = do
   when (Wai.requestMethod request == "GET") $ case Wai.requestBodyLength request of
     Wai.KnownLength 0 -> pure ()
     _ -> throwIO C.InvalidRequest
-  (selectedProfile, token) <- if workflowList then workflowParameters request else do
-    pageToken <- if paged then pageParameter request else
-      if eventRequest then pure Nothing else noQuery request >> pure Nothing
-    pure (Nothing,pageToken)
+  (selector, token) <- if workflowList then selectorParameters "profileId" True request
+    else if decisionList then selectorParameters "runId" False request else do
+      pageToken <- if paged then pageParameter request else
+        if eventRequest then pure Nothing else noQuery request >> pure Nothing
+      pure (Nothing,pageToken)
   case (Wai.requestMethod request, Wai.pathInfo request) of
     ("GET", ["v1", "capabilities"]) ->
       Auth.withAuthorizedCatalogues store proof [C.Observe] $ \view limits profiles _ -> do
@@ -100,8 +103,8 @@ dispatch service pages streams proof request respond = do
     ("GET", ["v1", "workflows"]) ->
       Auth.withAuthorizedCatalogues store proof [C.Observe] $ \view limits profiles catalogues -> do
         let allowed = map (publicId . fst) profiles
-        forM_ selectedProfile $ \ident -> unless (ident `elem` allowed) (throwIO C.Forbidden)
-        let chosen = maybe allowed pure selectedProfile
+        forM_ selector $ \ident -> unless (ident `elem` allowed) (throwIO C.Forbidden)
+        let chosen = maybe allowed pure selector
             available = [catalogue | (ident,catalogue) <- catalogues, ident `elem` chosen]
         unless (length chosen == length available) (throwIO C.StorageUnavailable)
         page view limits token $ do
@@ -127,6 +130,9 @@ dispatch service pages streams proof request respond = do
                   batch _ _ = throwIO C.StorageUnavailable
               pump batch (\view -> send view ": heartbeat\n\n")
         _ -> throwIO C.UnsupportedOperation
+    ("GET", ["v1", "requests"]) -> collection token Service.Requests
+    ("GET", ["v1", "runs"]) -> collection token Service.Runs
+    ("GET", ["v1", "decisions"]) -> collection token (Service.Decisions selector)
     ("POST", ["v1", "requests"]) -> do
       (key, condition, bytes) <- jsonMutation request
       unless (condition == Nothing) (throwIO C.InvalidPrecondition)
@@ -200,11 +206,14 @@ dispatch service pages streams proof request respond = do
     store = Service.serviceStore service
     eventRequest = Wai.pathInfo request == ["v1", "events"]
     workflowList = Wai.pathInfo request == ["v1", "workflows"]
+    decisionList = Wai.requestMethod request == "GET" && Wai.pathInfo request == ["v1", "decisions"]
     paged = Wai.requestMethod request == "GET" && case Wai.pathInfo request of
-      ["v1", kind] -> kind `elem` ["profiles", "snapshot"]
+      ["v1", kind] -> kind `elem` ["profiles", "snapshot", "requests", "runs"]
       ["v1", "runs", _, leaf] -> leaf `elem` ["snapshot", "outputs"]
       _ -> False
     page view limits token produce = servePage pages store proof request view limits token produce respond
+    collection token members = Service.withCollectionSource service proof members $ \view limits materialize ->
+      page view limits token materialize
     receipt value = Auth.withAuthorizedResponse store proof (C.receiptProfile value)
       (C.requiredScopes (C.receiptOperation value)) $ \view ->
         json view HTTP.status202 [("Location", TE.encodeUtf8 ("/v1/commands/" <> C.receiptId value))]
@@ -228,8 +237,11 @@ servePage pages store proof request view limits token produce respond = do
       [("Content-Type", "application/json"), ("ETag", representationTag request bytes)]
       view bytes respond
 
-workflowParameters :: Wai.Request -> IO (Maybe Text, Maybe Text)
-workflowParameters request = do
+-- | The selector and page token of a selected collection, each at most once
+-- and in canonical form. The workflow catalogue requires its profile
+-- selector, and the decision collection takes an optional run selector.
+selectorParameters :: BS.ByteString -> Bool -> Wai.Request -> IO (Maybe Text, Maybe Text)
+selectorParameters selector required request = do
   let parameters = Wai.queryString request
       keys = map fst parameters
       value name bound = case lookup name parameters of
@@ -237,9 +249,12 @@ workflowParameters request = do
         Just (Just bytes) | not (BS.null bytes) && BS.length bytes <= bound && BS.all urlSafe bytes ->
           pure (Just (TE.decodeUtf8 bytes))
         _ -> throwIO C.InvalidRequest
-  unless ("profileId" `elem` keys && all (`elem` ["profileId","pageToken"]) keys && length (nub keys) == length keys
+  unless ((not required || selector `elem` keys) && all (`elem` [selector,"pageToken"]) keys
+    && length (nub keys) == length keys
     && Wai.rawQueryString request == HTTP.renderQuery True parameters) (throwIO C.InvalidRequest)
-  (,) <$> value "profileId" 128 <*> value "pageToken" 512
+  chosen <- value selector 128
+  forM_ chosen $ \ident -> unless (C.validId ident) (throwIO C.InvalidRequest)
+  (,) chosen <$> value "pageToken" 512
 
 versions :: Value
 versions = object

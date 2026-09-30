@@ -5,7 +5,8 @@
 module Agentic.Manager.Service
   ( Service, withService, serviceStore, serviceFault,
     enqueue, editInput, withdraw, approve, controlRun, controlDecision, readControl, withControl,
-    withSnapshot, withSnapshotSource, withOverviewSource, withRun, withOutputs, withOutputsSource, download
+    withSnapshot, withSnapshotSource, withOverviewSource, Overview.Collection (..), withCollectionSource,
+    withRun, withOutputs, withOutputsSource, download
   ) where
 
 import qualified Agentic.Manager.Admission as A
@@ -278,6 +279,13 @@ withControl service proof ident respond = do
 withOverviewSource :: Service -> CredentialProof
   -> (AuthorizedView -> ConfigurationLimits -> IO (Text,[Pair],[Value]) -> IO a) -> IO a
 withOverviewSource service proof = Overview.withOverviewSource (serviceStore service) proof (Just (admission service))
+
+-- | One frozen request, run or decision collection with this service's
+-- original Admission, so that managed supervision reads as the detail
+-- resources read it.
+withCollectionSource :: Service -> CredentialProof -> Overview.Collection
+  -> (AuthorizedView -> ConfigurationLimits -> IO (Text,[Pair],[Value]) -> IO a) -> IO a
+withCollectionSource service proof = Overview.withCollectionSource (serviceStore service) proof (Just (admission service))
 
 withRun :: Service -> CredentialProof -> Text -> (AuthorizedView -> Value -> IO a) -> IO a
 withRun service proof ident respond = withStoreFileLoan (serviceStore service) $ \files root ->

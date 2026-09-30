@@ -3260,6 +3260,45 @@ Acceptance: either a deterministic hook-free fixture that makes control K19 fail
 ]
 #+end_src
 
+* TODO [#D] Resolve B11 fess findings in the WM-025 read collections
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-b11-fess-g9wh
+:LABELS:   []
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-30 Wed 03:49]
+:MODIFIED: [2026-09-30 Wed 03:49]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking review findings from subtask B11 of acat-wm-025-3utw (fess report resume-20260923/fess/b1-B11-r1.md).
+
+1. Medium. manager/src/Agentic/Manager/Overview.hs near line 113: GET /v1/runs lists managed runs only, through History.managedRunInView. It lists no legacy history entries. History.withHistory takes the file slot itself (History.hs lines 65-70), which would reverse the lock order under a held configuration guard, and bindLegacyHistory has no production caller. Record an owner decision on how the service binds legacy retention roots to profiles, then list legacy entries under the same loan order.
+2. Low. manager/src/Agentic/Manager/History.hs line 64: the comment "WM025 owns consistent HTTP page sets over this bounded library observation" is now false. State that the Overview owner serves the HTTP run collection and that withHistory stays a bounded library observation.
+3. Low. manager/src/Agentic/Manager/Overview.hs line 73: the withCollectionSource comment says a bad run selector refuses with forbidden. The wire code is insufficient-scope (C.Forbidden). Correct the comment.
+4. Low. manager/src/Agentic/Manager/Application.hs line 255: selectorParameters now applies C.validId to the profileId of /v1/workflows, so a profile id that passes urlSafe but fails tokenChar gets 400 instead of 403. Add a service_http.py assertion or limit validId to the runId selector.
+5. Low. manager/src/Agentic/Manager/Overview.hs line 112: /v1/requests uses its own query, not the Overview request enumeration, and so also lists withdrawn, refused and completed requests. This agrees with plan WM-025 ("every admitted request") and is documented. The operator confirms the broader membership or the collection reuses the Overview filter.
+6. Low. manager/test/service_http.py line 2322: every collection response in the tests is a single page. Continuation, expiry and scope change of the new collections have no test, and other-profile absence is checked by id only for requests. Add a check that forces more than one page and an other-profile run.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-b11-fess-g9wh",
+    "depends_on_id": "acat-wm-025-3utw",
+    "type": "discovered-from",
+    "created_at": "2026-09-30T10:49:40.926529Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
 * TODO [#C] Resolve F10 fess findings in the command and receipt records
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -15584,7 +15623,7 @@ leak private errors. There is no plaintext bearer development exception.
 :LABELS:   ["p5","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-26 Sat 23:41]
+:MODIFIED: [2026-09-30 Wed 03:49]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-025
 :SOURCE_REPO: agent-cat
@@ -15716,6 +15755,20 @@ through the actual HTTP response path.
     "created_by": "johnw",
     "metadata": "{}",
     "thread_id": ""
+  }
+]
+#+end_src
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 384,
+    "issue_id": "acat-wm-025-3utw",
+    "author": "johnw",
+    "text": "B11 routes the frozen read collections GET /v1/requests, /v1/runs and /v1/decisions through servePage and Pages.withPage, using the Overview source under the file slot, configuration guard and reader charge order. Items render through the detail owners. Evidence (resume-20260923/B/B11/impl-r1): Werror build, service_http.py base and mixed modes at N8 (schema-valid pages, other-profile absence, no private path or native run id in bodies), manager-history-check at N8, manager/ci/contract.sh, the Phase A journey at N8 and make -C doc check all passed. Limitation: /v1/runs lists managed runs only, not legacy history entries. Review findings are filed as acat-b11-fess-g9wh. The package stays open for its other queries and closeout review.",
+    "created_at": "2026-09-30T10:49:45Z"
   }
 ]
 #+end_src

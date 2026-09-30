@@ -125,6 +125,12 @@ configuration = {
     "https": {"host": "127.0.0.1", "port": port, "certificateFile": str(cert), "keyFile": str(key),
               "allowedHosts": [f"127.0.0.1:{port}"], "allowedOrigins": ["https://example.invalid"],
               "allowedPeers": ["127.0.0.1"]}}
+# The base and mixed modes also read the frozen request, run and decision
+# collections. A second profile, visible only to a second credential, holds
+# a request that the collections of the first credential must not show.
+collections = len(sys.argv) == 5 or sys.argv[5] in ("mixed", "mixed-confirm")
+if collections:
+    configuration["profiles"].append(dict(configuration["profiles"][0], id="profile_2", workspaceLabel="HTTPS other fixture"))
 if mixed:
     adapters = work / "adapters"
     adapters.mkdir(mode=0o700)
@@ -161,6 +167,11 @@ issued = administration({"version": 1, "operation": "issue-credential", "label":
                          "scopes": ["observe", "submit"] + (["control", "export"] if mixed else []), "profileIds": ["profile_1"],
                          "expiresAt": "2999-01-01T00:00:00Z", "outputFile": str(work / "credential")})
 bearer = (work / "credential").read_bytes().decode("ascii")
+if collections:
+    administration({"version": 1, "operation": "issue-credential", "label": "HTTPS other profile",
+                    "scopes": ["observe", "submit"], "profileIds": ["profile_2"],
+                    "expiresAt": "2999-01-01T00:00:00Z", "outputFile": str(work / "credential-other")})
+    other_authorized = {"Authorization": "Bearer " + (work / "credential-other").read_bytes().decode("ascii")}
 configuration["administrationRoot"] = str(work / "admin")
 config.write_text(json.dumps(configuration))
 context = ssl.create_default_context(cafile=str(cert))
@@ -379,13 +390,13 @@ def mixed_client(capabilities, authorized, attempts=None):
         assert value["state"] == "effect-observed", ("mutation not effected", body["operation"], value["state"])
         return receipt["links"]["self"]
 
-    return observed, wait_for, mutate
+    return observed, wait_for, mutate, authorized
 
 
 def approve_mixed(created, workflow, client):
     """Supply the literal input, enqueue, check the exact review and approve
     it. Returns the approval receipt URI and the associated run."""
-    observed, wait_for, mutate = client
+    observed, wait_for, mutate, _ = client
     text = MIXED_TEXT
     request_uri = created["links"]["self"]
     for declaration in workflow["inputs"]:
@@ -425,7 +436,7 @@ def drive_mixed(run, client, stop_at_question=False, overview=True):
     With overview, each head is also found in the overview snapshot, which
     must then fit one page. Returns the question head, or None, and the
     counts of answers and retries that this call sent."""
-    observed, _, mutate = client
+    observed, _, mutate, client_authorized = client
     base = "/v1/runs/" + run
     answered = recovered = 0
     deadline = time.monotonic() + 50
@@ -445,6 +456,11 @@ def drive_mixed(run, client, stop_at_question=False, overview=True):
             continue
         decision, decision_tag, _ = observed("/v1/decisions/" + head, "Decision")
         assert decision["position"] == 0 and decision["state"] == "pending" and decision["runId"] == run
+        if collections:
+            check_collections("head-" + decision["kind"], client_authorized, "profile_1", runs=[run], decisions=[head], queue=run)
+            status, problem, _ = request("/v1/decisions?runId=" + run, other_authorized)
+            assert status == 403 and problem["code"] == "insufficient-scope", ("other profile run queue", status, problem.get("code"))
+            print("PASS decision collection lists the pending", decision["kind"], "head of the mixed run in both the head and the run queue views", flush=True)
         if overview:
             overview_value, _, raw = observed("/v1/snapshot", "OverviewSnapshot")
             assert any(item["kind"] == "run" and item["run"]["id"] == run for item in overview_value["items"])
@@ -495,7 +511,7 @@ def verified_download(run, client, authorized):
 
 def run_mixed(created, workflow, capabilities, authorized):
     client = mixed_client(capabilities, authorized)
-    observed, wait_for, _ = client
+    observed, wait_for, _, _ = client
     request_uri = created["links"]["self"]
     approval, run = approve_mixed(created, workflow, client)
     _, answered, recovered = drive_mixed(run, client)
@@ -509,6 +525,69 @@ def run_mixed(created, workflow, capabilities, authorized):
     assert released["phase"] == "associated"
     (work / "released-request.json").write_bytes(raw)
     print("PASS actual HTTP mixed workflow: Unicode, exact approval, typed false, retry, terminal observation and verified bytes; approval delivery remains distinct", flush=True)
+    return run
+
+
+def other_profile_request():
+    """Create one draft in the second profile with the second credential."""
+    status, current, _ = request("/v1/capabilities", other_authorized)
+    assert status == 200 and current["profileIds"] == ["profile_2"], ("other capabilities", status)
+    status, catalogue, _ = request("/v1/workflows?profileId=profile_2", other_authorized)
+    assert status == 200 and catalogue["items"], ("other catalogue", status)
+    chosen = catalogue["items"][0]
+    body = {"workflowId": chosen["id"], "descriptorRevision": chosen["revision"],
+            "profileId": chosen["profileId"], "profileRevision": chosen["profileRevision"]}
+    key = current["authorityEpoch"] + "." + secrets.token_urlsafe(16)
+    status, value, raw = request("/v1/requests", other_authorized | {"Content-Type": "application/json", "Idempotency-Key": key},
+                                 method="POST", payload=json.dumps(body, separators=(",", ":")).encode())
+    assert status == 201, ("other request", status, value.get("code"))
+    validate("Request", value, raw)
+    assert value["profileId"] == "profile_2"
+    return value
+
+
+def private_markers():
+    """Bytes that no collection body may contain: the fixture root, which holds
+    the manager root, every run store and every root identity, the native run
+    identifiers, and raw invocation fields."""
+    markers = [str(work).encode(), json.dumps(str(work))[1:-1].encode(), b"mixed-adapter", b"--scripted",
+               b"targetArguments", b"--engine"]
+    stores = work / "manager" / "runs" / "runs"
+    if stores.is_dir():
+        markers += [entry.name.encode() for entry in stores.iterdir()]
+    return markers
+
+
+def check_collections(name, authorized, profile, requests=(), runs=(), decisions=(), queue=None, absent=()):
+    """Read the request, run and decision collections, and the FIFO queue of
+    the queue run when one is named. Each body must be one schema-valid page
+    of the given profile, must contain the expected identifiers and none of
+    the absent ones, and must contain no private marker. The queue must start
+    with its expected head."""
+    reads = [("requests", "/v1/requests", "RequestPage"), ("runs", "/v1/runs", "RunPage"),
+             ("decisions", "/v1/decisions", "DecisionPage")]
+    if queue is not None:
+        reads.append(("queue", "/v1/decisions?runId=" + queue, "DecisionPage"))
+    found = {}
+    markers = private_markers()
+    for label, path, schema in reads:
+        status, value, raw, received = fetch(path, authorized)
+        assert status == 200, ("collection read", path, status, value.get("code"))
+        validate(schema, value, raw)
+        assert value["page"]["next"] is None and value["page"]["totalItems"] == len(value["items"]), ("collection page", path)
+        assert received.get("etag", "").startswith('"'), ("collection ETag", path)
+        assert all(item["profileId"] == profile for item in value["items"]), ("collection profile", path)
+        leaked = [marker for marker in markers if marker in raw]
+        assert not leaked, ("collection body holds private bytes", path, leaked)
+        (work / f"collection-{name}-{label}.json").write_bytes(raw)
+        found[label] = [item["id"] for item in value["items"]]
+    for label, expected in (("requests", requests), ("runs", runs), ("decisions", decisions)):
+        assert set(expected) <= set(found[label]), ("collection member missing", label, expected, found[label])
+    if queue is not None:
+        assert found["queue"][:len(decisions)] == list(decisions), ("run queue head", found["queue"])
+    hidden = [ident for values in found.values() for ident in values if ident in absent]
+    assert not hidden, ("collection shows another profile", hidden)
+    return found
 
 
 def command_receipts(cursor, authorized):
@@ -2239,8 +2318,21 @@ for iteration in range(2):
                 assert overview["items"] == [{"kind": "request", "request": created}]
                 assert overview["cursor"] != before["cursor"] and overview["page"]["next"] is None
                 (work / "overview-after.json").write_bytes(raw)
+                if collections:
+                    other_created = other_profile_request()
+                    check_collections("created", authorized, "profile_1", requests=[created["id"]], absent=[other_created["id"]])
+                    check_collections("other", other_authorized, "profile_2", requests=[other_created["id"]], absent=[created["id"]])
+                    for path in ("/v1/requests?runId=x", "/v1/runs?pageToken=", "/v1/decisions?profileId=profile_1",
+                                 "/v1/decisions?runId=run_1&runId=run_1", "/v1/decisions?runId=a%2Fb"):
+                        status, problem, _ = request(path, authorized)
+                        assert status == 400 and problem["code"] == "malformed-request", ("collection query refusal", path, status)
+                    print("PASS request, run and decision collections are schema-valid single pages of the credential's own profile, "
+                          "hide the other profile's request and hold no private path or native identifier; malformed queries refuse", flush=True)
                 if mixed:
-                    run_mixed(created, workflow, capabilities, authorized)
+                    mixed_run = run_mixed(created, workflow, capabilities, authorized)
+                    if collections:
+                        check_collections("terminal", authorized, "profile_1", requests=[created["id"]], runs=[mixed_run], absent=[other_created["id"]])
+                        print("PASS collections list the mixed request and its terminal run after completion", flush=True)
                 cursor = before["cursor"]
                 status, batch, raw = request("/v1/events?after=" + cursor, authorized | {"Accept": "application/json"})
                 assert status == 200 and batch["events"]

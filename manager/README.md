@@ -18,7 +18,8 @@ entries and 1 MiB of public JSON within 30 seconds. Each Runtime journal read
 is bounded at 64 MiB, and the catalogue fold releases each full snapshot before
 reading the next. Overflow or an unassociated manager-root entry refuses the
 whole observation rather than returning a prefix. HTTP page sets remain outside
-this library. A request association normally commits before native start creates
+this library, and the served run collection uses the Overview owner that the
+next section describes. A request association normally commits before native start creates
 its directory.
 
 Local retention bindings validate an already configured root and profile. Their
@@ -55,6 +56,31 @@ The existing compiled audit modes `history-observation` and `history-corrections
 exercise response-entry and native lineage barriers. The latter belongs to
 `manager/ci/approval.sh` and compares the manager path with the direct native
 frontend at N1 and N8. Client compatibility remains separate evidence.
+
+## Overview and read collections
+
+`Agentic.Manager.Overview` materializes the `/v1/snapshot` overview and the
+frozen `/v1/requests`, `/v1/runs` and `/v1/decisions` collections. Each source
+takes the file slot, then the configuration guard and one reader charge, in
+the Store lock order. It reads the member identifiers of the authorized
+profiles and the retained event cursor in one transaction, renders each member
+through its detail owner, and reads the cursor again. A changed cursor refuses
+the page with `StoreBusy` instead of combining two commit boundaries. The
+materialization has an allowance of five seconds and a limit of 64 MiB, and
+`Pages` divides the result into page sets. `Transport.respondBytes` returns
+every loan before the first network write.
+
+Requests render through `Drafts.readDraftAt`, managed runs through
+`History.managedRunInView`, and decisions through `State.decisionInView`, so
+each collection item equals its detail representation. The request collection
+lists every request of the authorized profiles, including withdrawn, refused
+and associated requests. The run collection lists every managed run of those
+profiles. The decision collection lists the pending run heads that
+`State.decisionHeadIds` selects in manager observation order, or, with a run
+selector, the pending queue that `State.decisionQueueIds` selects for that
+run. The service does not use
+`History.withHistory` and binds no legacy retention root, so the run
+collection does not list legacy entries.
 
 ## Non-network lifecycle harness
 

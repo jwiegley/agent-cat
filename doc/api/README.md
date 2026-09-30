@@ -191,30 +191,46 @@ profile access and current authority. GET methods require `observe`, except
 that command receipt access additionally requires current access to the
 operation represented by that receipt.
 
-| Resource | Methods | Mutation scopes and guard |
-|---|---|---|
-| `/capabilities` | GET | No mutation. Versions, limits, transports, and authority are view-filtered. |
-| `/profiles` | GET | No mutation. Only public labels, revisions, readiness, and permitted profiles appear. |
-| `/workflows` | GET | No mutation. `profileId` selects an authorized, bounded catalogue. |
-| `/workflows/{id}` | GET | No mutation. Catalogue information is not an exact input-dependent plan. |
-| `/requests` | GET, POST | `submit` creates a draft bound to current profile and descriptor revisions without workflow execution. |
-| `/requests/{id}` | GET, POST | `submit` permits `set-input`, `remove-input`, `enqueue`, and `withdraw` before start intent. Editing invalidates previous admission or review. |
-| `/captures` | POST | `submit` for the selected request and profile. Raw bounded UTF-8 only, with no source URL or pathname. |
-| `/preparations/{id}` | GET, POST | `submit` and `control` for `approve` or `discard`. Approval also requires the review digest and exact live worker association. |
-| `/runs` | GET | No mutation. Runtime, supervision, integrity, and verification remain distinct. |
-| `/runs/{id}` | GET | No mutation. Includes lineage and links, not execution authority. |
-| `/runs/{id}/snapshot` | GET | No mutation. Provides one consistent versioned runtime-derived view. |
-| `/runs/{id}/control` | GET, POST | `control`, live manager ownership, current control revision, and exact addressed occurrence and attempt where required. |
-| `/decisions` | GET | No mutation. Pending run heads are ordered by manager observation, with each run's queue retained. |
-| `/decisions/{id}` | GET, POST | `control` for `answer` or `choose-recovery`, with exact generation and the shared per-run FIFO reservation. |
-| `/commands/{id}` | GET | No mutation. A known command identifier does not bypass current operation or profile authorization. |
-| `/runs/{id}/outputs` | GET | No mutation. Intermediate output and diagnostics are separate from verified final content. |
-| `/artifacts/{id}` | GET | No mutation. The server resolves and verifies its retained internal reference before sending content. |
-| `/runs/{id}/exports` | GET, POST | `observe` and `export`, current collection ETag, verified source, and a permitted single-component name. |
-| `/exports/{id}` | GET | No mutation. Returns receipt metadata and an authorized download link without a server path. |
-| `/runs/{id}/lineage-requests` | GET, POST | `observe` and `submit`, current collection ETag, eligible parent, compatible trusted invocation, and no conflicting ownership or quarantine. |
-| `/snapshot` | GET | No mutation. Provides a consistent authorized overview and replay cursor. |
-| `/events` | GET | No mutation. SSE and bounded JSON use the same durable cursor and retention rules. |
+The Served column lists the methods that the foreground service of
+`RUNNER --manager serve` routes. For `/preparations/{id}` it serves the
+`approve` operation, and it refuses `discard` with `unsupported-operation`.
+A path that the service does not route receives 404 `unavailable-resource`,
+and an unrouted method on a routed path receives 405. The `/requests`, `/runs`
+and `/decisions` collections are page sets over one durable commit boundary,
+and each item is the representation of its detail resource. `/requests` lists
+every request of the authorized profiles, and `/runs` lists every managed run
+of those profiles, both in identifier order. `/decisions` without `runId`
+lists the pending run heads in manager observation order. With `runId`, it
+lists the pending queue of that run in its opening order. A `runId` that
+names no run, or a run of a profile that the credential cannot observe,
+receives 403 `insufficient-scope`.
+The service does not bind configured legacy retention roots, so `/runs` does
+not list their entries.
+
+| Resource | Methods | Served | Mutation scopes and guard |
+|---|---|---|---|
+| `/capabilities` | GET | GET | No mutation. Versions, limits, transports, and authority are view-filtered. |
+| `/profiles` | GET | GET | No mutation. Only public labels, revisions, readiness, and permitted profiles appear. |
+| `/workflows` | GET | GET | No mutation. `profileId` selects an authorized, bounded catalogue. |
+| `/workflows/{id}` | GET | GET | No mutation. Catalogue information is not an exact input-dependent plan. |
+| `/requests` | GET, POST | GET, POST | `submit` creates a draft bound to current profile and descriptor revisions without workflow execution. |
+| `/requests/{id}` | GET, POST | GET, POST | `submit` permits `set-input`, `remove-input`, `enqueue`, and `withdraw` before start intent. Editing invalidates previous admission or review. |
+| `/captures` | POST | None | `submit` for the selected request and profile. Raw bounded UTF-8 only, with no source URL or pathname. |
+| `/preparations/{id}` | GET, POST | GET, POST `approve` | `submit` and `control` for `approve` or `discard`. Approval also requires the review digest and exact live worker association. |
+| `/runs` | GET | GET | No mutation. Runtime, supervision, integrity, and verification remain distinct. |
+| `/runs/{id}` | GET | GET | No mutation. Includes lineage and links, not execution authority. |
+| `/runs/{id}/snapshot` | GET | GET | No mutation. Provides one consistent versioned runtime-derived view. |
+| `/runs/{id}/control` | GET, POST | GET, POST | `control`, live manager ownership, current control revision, and exact addressed occurrence and attempt where required. |
+| `/decisions` | GET | GET | No mutation. Pending run heads are ordered by manager observation, with each run's queue retained. |
+| `/decisions/{id}` | GET, POST | GET, POST | `control` for `answer` or `choose-recovery`, with exact generation and the shared per-run FIFO reservation. |
+| `/commands/{id}` | GET | GET | No mutation. A known command identifier does not bypass current operation or profile authorization. |
+| `/runs/{id}/outputs` | GET | GET | No mutation. Intermediate output and diagnostics are separate from verified final content. |
+| `/artifacts/{id}` | GET | GET | No mutation. The server resolves and verifies its retained internal reference before sending content. |
+| `/runs/{id}/exports` | GET, POST | None | `observe` and `export`, current collection ETag, verified source, and a permitted single-component name. |
+| `/exports/{id}` | GET | None | No mutation. Returns receipt metadata and an authorized download link without a server path. |
+| `/runs/{id}/lineage-requests` | GET, POST | None | `observe` and `submit`, current collection ETag, eligible parent, compatible trusted invocation, and no conflicting ownership or quarantine. |
+| `/snapshot` | GET | GET | No mutation. Provides a consistent authorized overview and replay cursor. |
+| `/events` | GET | GET | No mutation. SSE and bounded JSON use the same durable cursor and retention rules. |
 
 OPTIONS preflight is the sole unauthenticated HTTP operation. After the
 [transport checks](#transport-boundary), it checks only an exact allowlisted

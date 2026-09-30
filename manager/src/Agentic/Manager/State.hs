@@ -5,6 +5,7 @@ module Agentic.Manager.State
   ( RunAssociation (..), ingestAcceptedStart, ingestRuntimeEnvelope, restoreRunProjection, observeRetainedTerminal,
     submitRunControl, submitDecisionControl, dispatchRunControl, dispatchDecisionControl, replayControl,
     resolveRun, resolveDecision, readControlSurface, readClosedControlSurface, readDecision, readDecisionHeads,
+    decisionHeadIds, decisionQueueIds,
     withControlSurface, withClosedControlSurface, withDecision, decisionInView,
     authorizeObservation, requireProjection, withProfileProjection, withProfileProjectionSource,
     ProjectionCut, captureProjectionCut, restoreProjectionCut, publicRecoveryOptionValue
@@ -33,6 +34,7 @@ import Data.Maybe (isJust)
 import Data.Scientific (floatingOrInteger)
 import Data.Text (Text)
 import qualified Data.Text as T
+import qualified Data.Text.Encoding as TE
 import qualified Database.SQLite3 as SQL
 
 -- | Trusted observation address, not an execution or signalling capability.
@@ -432,6 +434,25 @@ pendingDecisions association = do
     [SQL.SQLText i,SQL.SQLText o,SQL.SQLText g,SQL.SQLText r,SQL.SQLText k,SQL.SQLText s] -> pure(i,o,g,r,k,s)
     _ -> refuseTransaction StoreIntegrity) rows
 
+-- | The pending FIFO queue of one run, in per-run opening order.
+decisionQueueIds :: RunAssociation -> Transaction [Text]
+decisionQueueIds association = map (\(ident,_,_,_,_,_) -> ident) <$> pendingDecisions association
+
+-- A pending decision that no earlier pending decision of its run precedes.
+pendingHeadCondition :: Text
+pendingHeadCondition = "d.state IN ('pending','submitting') AND NOT EXISTS(SELECT 1 FROM decisions earlier WHERE earlier.run_id=d.run_id AND earlier.state IN ('pending','submitting') AND (length(earlier.observed_sequence)<length(d.observed_sequence) OR (length(earlier.observed_sequence)=length(d.observed_sequence) AND earlier.observed_sequence<d.observed_sequence)))"
+
+-- | The pending run heads of the given public profiles, ordered by manager
+-- opening observation, never by native sequences across runs.
+decisionHeadIds :: [Text] -> Transaction [Text]
+decisionHeadIds profiles = do
+  rows <- query ("SELECT d.id FROM decisions d JOIN runs r ON r.id=d.run_id WHERE " <> pendingHeadCondition
+    <> " AND r.profile_id IN (SELECT value FROM json_each(?)) ORDER BY length(d.observed_order),d.observed_order,d.id")
+    [text (TE.decodeUtf8 (encoded profiles))]
+  mapM (\row -> case row of
+    [SQL.SQLText ident] | Command.validId ident -> pure ident
+    _ -> refuseTransaction StoreIntegrity) rows
+
 -- | Public recovery options have a required nullable target, unlike native JSON.
 publicRecoveryOptionValue :: RecoveryOption -> Value
 publicRecoveryOptionValue choice = object ["choice" .= recoveryChoice choice,"target" .= recoveryTarget choice]
@@ -537,7 +558,7 @@ readDecisionHeads :: CoordinationStore -> CredentialProof -> IO [Value]
 readDecisionHeads store proof = do
   rows <- runRead store $ do
     _ <- currentClient proof >>= either refuseTransaction pure
-    found <- query "SELECT d.id,r.id,r.profile_id,r.root_identity,r.native_run_id,d.observed_order FROM decisions d JOIN runs r ON r.id=d.run_id WHERE d.state IN ('pending','submitting') AND EXISTS(SELECT 1 FROM credential_scopes s WHERE s.credential_id=? AND s.profile_id=r.profile_id AND s.scope='observe') AND NOT EXISTS(SELECT 1 FROM decisions earlier WHERE earlier.run_id=d.run_id AND earlier.state IN ('pending','submitting') AND (length(earlier.observed_sequence)<length(d.observed_sequence) OR (length(earlier.observed_sequence)=length(d.observed_sequence) AND earlier.observed_sequence<d.observed_sequence))) ORDER BY length(d.observed_order),d.observed_order"
+    found <- query ("SELECT d.id,r.id,r.profile_id,r.root_identity,r.native_run_id,d.observed_order FROM decisions d JOIN runs r ON r.id=d.run_id WHERE " <> pendingHeadCondition <> " AND EXISTS(SELECT 1 FROM credential_scopes s WHERE s.credential_id=? AND s.profile_id=r.profile_id AND s.scope='observe') ORDER BY length(d.observed_order),d.observed_order")
       [text(credentialRateKey proof)]
     forM found $ \row -> case row of
       [SQL.SQLText ident,SQL.SQLText run,SQL.SQLText profile,SQL.SQLText root,SQL.SQLText native,SQL.SQLText _] -> pure(ident,run,profile,root,native)
