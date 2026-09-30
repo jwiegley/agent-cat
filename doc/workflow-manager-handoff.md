@@ -392,9 +392,15 @@ subtask is under `F/<subtask>/impl-r1` or `impl-r2` in the resume directory.
 The manager log grows across lifetimes. The writer seals the active file into
 segments under `flow/sealed/<stream>/` at the segment size
 S = max(65536, (L - R) div 16), with global positions that continue across
-segments, but nothing removes a segment yet. At L minus R every ordinary command and review
-publication is refused with `storage-quota`. At a 64 MiB ceiling that is
-about 2929 simple journeys of 22193 bytes each. A log above the configured
+segments. The Store pruner removes the oldest sealed segments while their
+records are older than 604800 seconds or the log holds more than
+(L - R) div 2 bytes, and it stops at the first segment that names live work:
+a request that is not terminal, a run that is not observed terminal, the
+parent run of a live request or an ask without a reply. The newest sealed
+segment and the active file stay. When live work holds the floor, the log can
+still reach L minus R, and then every ordinary command and review
+publication is refused with `storage-quota`. At a 64 MiB ceiling, L minus R
+holds about 2929 simple journeys of 22193 bytes each. A log above the configured
 `globalMutationLedgerBytes`, or one with an undecodable complete line, makes
 every append of the lifetime fail, so ordinary commands are refused with
 `storage-unavailable`. The manager records the reason once at open with the

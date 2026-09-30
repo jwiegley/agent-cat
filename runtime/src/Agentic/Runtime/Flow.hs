@@ -90,7 +90,11 @@ module Agentic.Runtime.Flow
     FlowOpenRefusal (..),
     FlowLimitReached (..),
     FlowSegments (..),
+    FlowSegment (..),
     flowSegmentName,
+    flowWriterSegments,
+    flowWriterSeals,
+    pruneFlowSegment,
     flowClaimDirectory,
     openFlowWriter,
     openFlowLog,
@@ -176,7 +180,7 @@ import Agentic.Engine
 import Agentic.Planning (El, Request, SCode, SomeCode (..), answerFromJsonExact, answerJson, requestCodeFromJson, requestFromJson, requestJson)
 import Agentic.Runtime.Broker (DataBroker (..))
 import Agentic.Runtime.Control (Control (controlId), ControlId (controlIdText), controlVersionFor, decodeControlFor, encodeControlFor)
-import Agentic.Runtime.PrivateRoot (PrivateRoot, closePrivateRoot, ensurePrivateDirectoryAt, listPrivateDirectoryAt, movePrivateAt, openPrivateFileAt, openPrivateLogAt, openPrivateRoot, privateFileIdentityAt, privateFileSizeAt, readPrivateFileAt, readPrivatePrefixAt, syncPrivateDirectoryAt, syncPrivateHandle, writePrivateExclusiveAt)
+import Agentic.Runtime.PrivateRoot (PrivateRoot, closePrivateRoot, ensurePrivateDirectoryAt, listPrivateDirectoryAt, movePrivateAt, openPrivateFileAt, openPrivateLogAt, openPrivateRoot, privateFileIdentityAt, privateFileSizeAt, readPrivateFileAt, readPrivatePrefixAt, removePrivateFileAt, syncPrivateDirectoryAt, syncPrivateHandle, writePrivateExclusiveAt)
 import Agentic.Runtime.Protocol
   ( Envelope (..),
     FailureClass,
@@ -192,8 +196,9 @@ import Agentic.Runtime.Protocol
     supportedProtocolVersions,
   )
 import Agentic.Runtime.Store (EffectPhase (..), EffectRecord (..), LineageOperation, RunStore, StoreError, readEffectRecords, readEventLog, storePrivateRoot)
-import Control.Concurrent.MVar (MVar, modifyMVar, modifyMVar_, newMVar)
-import Control.Exception (Exception, IOException, SomeAsyncException, SomeException, bracket, displayException, finally, fromException, onException, throwIO, try)
+import Control.Concurrent.MVar (MVar, modifyMVar, modifyMVar_, newMVar, withMVar)
+import Control.Concurrent.STM (STM, TVar, atomically, modifyTVar', newTVarIO, readTVar)
+import Control.Exception (Exception, IOException, SomeAsyncException, SomeException, bracket, displayException, finally, fromException, onException, throwIO, try, uninterruptibleMask_)
 import Control.Monad (foldM, forM, forM_, unless, when)
 import Crypto.Hash (Digest, SHA256, hash)
 import Data.Aeson (FromJSON, Key, ToJSON (toJSON), Value (..), encode, object, (.=))
@@ -822,7 +827,9 @@ data FlowWriter = FlowWriter
     -- | Whether and where the writer seals its active file into segments.
     writerSegments :: !(Maybe FlowSegments),
     writerState :: !(MVar WriterState),
-    writerBroken :: !(IORef Bool)
+    writerBroken :: !(IORef Bool),
+    -- | The number of seals of this writer.
+    writerSeals :: !(TVar Word64)
   }
 
 data WriterState = WriterState
@@ -832,14 +839,16 @@ data WriterState = WriterState
     stateIdentity :: !(Maybe (DeviceID, FileID)),
     -- | The position of the first retained record.
     stateFloor :: !Word64,
-    -- | The position of the first record of the active file.
-    stateBase :: !Word64,
     -- | The reply-check index of every retained record from the floor: its
     -- schema and whether a reply names it.
     stateIndex :: !(Seq (Schema, Bool)),
-    -- | The bytes of the active file.
-    stateActiveBytes :: !Integer,
-    stateClaims :: !(Set Text),
+    -- | The retained sealed segments, oldest first.
+    stateSealed :: !(Seq FlowSegment),
+    -- | The active file, as a segment that has not been sealed.
+    stateActive :: !FlowSegment,
+    -- | Each distinct claim-check file that a retained record names, with its
+    -- size in bytes.
+    stateClaims :: !(Map Text Integer),
     -- | The bytes of the log, sealed segments included, and of its distinct
     -- claim-check files.
     stateBytes :: !Integer,
@@ -856,6 +865,63 @@ data FlowSegments = FlowSegments
     flowSegmentBytes :: !Integer
   }
   deriving (Eq, Show)
+
+-- | What a writer knows about the records of one file of a segmented log: a
+-- sealed segment or the active file. A pruner decides from it whether live
+-- work still needs the file.
+data FlowSegment = FlowSegment
+  { -- | The position of the first record of the file.
+    segmentFirst :: !Word64,
+    segmentRecords :: !Word64,
+    -- | The bytes of the file.
+    segmentBytes :: !Integer,
+    -- | The latest 'recAt' of its records.
+    segmentNewest :: !(Maybe UTCTime),
+    -- | The request identifiers that its records name.
+    segmentRequests :: !(Set Text),
+    -- | The manager run identifiers that its records name.
+    segmentRuns :: !(Set Text),
+    -- | The command identifiers that its records name.
+    segmentCommands :: !(Set Text),
+    -- | The claim-check files that its records name.
+    segmentClaims :: !(Set Text),
+    -- | Whether an ask of the file has no reply in the retained log.
+    segmentUnanswered :: !Bool
+  }
+  deriving (Eq, Show)
+
+-- | The segment of a file that holds no record yet.
+emptySegment :: Word64 -> FlowSegment
+emptySegment first = FlowSegment first 0 0 Nothing Set.empty Set.empty Set.empty Set.empty False
+
+-- | Add one record, whose line takes the given bytes, to a segment.
+addToSegment :: Integer -> Record -> FlowSegment -> FlowSegment
+addToSegment bytes record segment =
+  segment
+    { segmentRecords = segmentRecords segment + 1,
+      segmentBytes = segmentBytes segment + bytes,
+      segmentNewest = Just (maybe (recAt record) (max (recAt record)) (segmentNewest segment)),
+      segmentRequests = naming aboutRequest (segmentRequests segment),
+      segmentRuns = naming aboutManagerRun (segmentRuns segment),
+      segmentCommands = naming aboutCommand (segmentCommands segment),
+      segmentClaims = case recBody record of
+        ClaimCheck digest _ -> Set.insert digest (segmentClaims segment)
+        _ -> segmentClaims segment
+    }
+  where
+    naming identifier = maybe id Set.insert (identifier (recAbout record))
+
+-- | The segment of the records of a file whose first record has the position
+-- and whose size is the given number of bytes.
+segmentOf :: Word64 -> Integer -> [Record] -> FlowSegment
+segmentOf first size records = (foldl (flip (addToSegment 0)) (emptySegment first) records) {segmentBytes = size}
+
+-- | Whether an ask of the segment has no reply in the reply-check index of a
+-- log whose retained records start at the floor.
+unansweredIn :: Word64 -> Seq (Schema, Bool) -> FlowSegment -> Bool
+unansweredIn floor' index segment =
+  any (\(schema, answered) -> schemaRole schema == AskSchema && not answered) $
+    Seq.take (fromIntegral (segmentRecords segment)) (Seq.drop (fromIntegral (segmentFirst segment - floor')) index)
 
 -- | The file name of the sealed segment whose first record has the position:
 -- the position as a zero-padded 20-digit decimal, then @.ndjson@.
@@ -925,7 +991,7 @@ flowClaimDirectory = "flow-claims"
 openFlowWriter :: FlowCodec -> PrivateRoot -> FilePath -> IO FlowWriter
 openFlowWriter codec root name = do
   handle <- openPrivateFileAt root [name]
-  FlowWriter codec root [name] [flowClaimDirectory] Nothing <$> newMVar (WriterState handle Nothing 0 0 Seq.empty 0 Set.empty 0 True) <*> newIORef False
+  FlowWriter codec root [name] [flowClaimDirectory] Nothing <$> newMVar (WriterState handle Nothing 0 Seq.empty Seq.empty (emptySegment 0) Map.empty 0 True) <*> newIORef False <*> newTVarIO 0
 
 -- | Open the log at the path in the root for appending, and create it when it
 -- is absent. The claim-check files of the log live in the given directory.
@@ -948,8 +1014,11 @@ openFlowWriter codec root name = do
 -- writer truncates it. Before each append the writer checks that the path
 -- still names the file that it opened. A mismatch, or a check that fails
 -- with an I/O error, breaks the writer: it refuses every later append and
--- never reopens the path. The result carries the number of torn bytes that
--- the writer removed.
+-- never reopens the path. With segments, the writer then removes each file of
+-- the claim directory that no record of the log names, because an append that
+-- wrote its claim check and failed, or a prune that stopped after its segment
+-- was removed, leaves it behind. The result carries the number of torn bytes
+-- that the writer removed.
 openFlowLog :: FlowCodec -> PrivateRoot -> [FilePath] -> [FilePath] -> Maybe FlowSegments -> Integer -> IO (FlowWriter, Integer)
 openFlowLog codec root path claims segments limit = do
   sealed <- case segments of
@@ -978,8 +1047,14 @@ openFlowLog codec root path claims segments limit = do
         claimed = Map.fromList [(digest, size') | Record {recBody = ClaimCheck digest size'} <- retained]
         bytes = sum sizes + toInteger complete + sum (Map.elems claimed)
         index = foldl (indexRecord floor') Seq.empty retained
-        state = WriterState handle (Just identity) floor' base index (toInteger complete) (Map.keysSet claimed) bytes True
-    writer <- FlowWriter codec root path claims segments <$> newMVar state <*> newIORef False
+        sealed' = Seq.fromList [segmentOf start bytes' found | ((start, found), bytes') <- zip sealedRecords sizes]
+        state = WriterState handle (Just identity) floor' index sealed' (segmentOf base (toInteger complete) records) claimed bytes True
+    forM_ segments $ \_ -> do
+      present <- listPrivateDirectoryAt root claims maxSealedSegments
+      let orphaned = [name | name <- present, Map.notMember (T.pack name) claimed]
+      forM_ orphaned $ \name -> removePrivateFileAt root (claims <> [name])
+      unless (null orphaned) (syncPrivateDirectoryAt root claims)
+    writer <- FlowWriter codec root path claims segments <$> newMVar state <*> newIORef False <*> newTVarIO 0
     pure (writer, torn)
   where
     decodeComplete bytes = do
@@ -1068,7 +1143,7 @@ appendViaWith mode codec writer schema role replyTo from to about content = do
       refuse ("the " <> schemaName schema <> " record exceeds " <> T.pack (show maxFrameBytes) <> " bytes")
     carried <- either (refuse . ("the codec does not decode its own line: " <>)) pure (flowDecodeLine codec line)
     let newClaim = case claim of
-          Just (digest, bytes) | Set.notMember digest (stateClaims current) -> Just (digest, bytes)
+          Just (digest, bytes) | Map.notMember digest (stateClaims current) -> Just (digest, bytes)
           _ -> Nothing
         lineCost = toInteger (BS.length line + 1)
         cost = lineCost + maybe 0 (toInteger . BS.length . snd) newClaim
@@ -1078,16 +1153,16 @@ appendViaWith mode codec writer schema role replyTo from to about content = do
     -- Only the line write follows the seal, and its failure breaks the writer.
     active <- case writerSegments writer of
       Just segments
-        | stateActiveBytes current > 0 && stateActiveBytes current + lineCost > flowSegmentBytes segments -> sealActive writer segments current
+        | segmentBytes (stateActive current) > 0 && segmentBytes (stateActive current) + lineCost > flowSegmentBytes segments -> sealActive writer segments current
       _ -> pure current
     let handle = stateHandle active
     (BS.hPut handle (line <> "\n") >> (if flowSync mode then syncPrivateHandle handle else hFlush handle))
       `onException` writeIORef (writerBroken writer) True
-    let claims = maybe (stateClaims active) (\(digest, _) -> Set.insert digest (stateClaims active)) newClaim
+    let claims = maybe (stateClaims active) (\(digest, bytes) -> Map.insert digest (toInteger (BS.length bytes)) (stateClaims active)) newClaim
     pure
       ( active
           { stateIndex = indexRecord (stateFloor active) (stateIndex active) carried,
-            stateActiveBytes = stateActiveBytes active + lineCost,
+            stateActive = addToSegment lineCost carried (stateActive active),
             stateClaims = claims,
             stateBytes = stateBytes active + cost
           },
@@ -1110,11 +1185,11 @@ appendViaWith mode codec writer schema role replyTo from to about content = do
 -- segment directory, synchronize both directories and create a new active
 -- file whose first record has the position after the last sealed record. A
 -- failure before the rename leaves the writer as it was. A failure after the
--- rename breaks the writer.
+-- rename breaks the writer. A seal adds one to the seal count of the writer.
 sealActive :: FlowWriter -> FlowSegments -> WriterState -> IO WriterState
 sealActive writer segments current = do
   let root = writerRoot writer
-      start = stateBase current
+      start = segmentFirst (stateActive current)
       next = stateFloor current + fromIntegral (Seq.length (stateIndex current))
       directory = flowSegmentDirectory segments
   syncPrivateHandle (stateHandle current)
@@ -1125,7 +1200,66 @@ sealActive writer segments current = do
     syncPrivateDirectoryAt root (take (length (writerPath writer) - 1) (writerPath writer))
     hClose (stateHandle current)
     (handle, identity) <- openPrivateLogAt root (writerPath writer)
-    pure current {stateHandle = handle, stateIdentity = Just identity, stateBase = next, stateActiveBytes = 0}
+    atomically (modifyTVar' (writerSeals writer) (+ 1))
+    pure current {stateHandle = handle, stateIdentity = Just identity, stateSealed = stateSealed current |> stateActive current, stateActive = emptySegment next}
+
+-- | The sealed segments of the log, oldest first, each with whether an ask in
+-- it has no reply in the retained log. A writer without segments has none.
+flowWriterSegments :: FlowWriter -> IO [FlowSegment]
+flowWriterSegments writer = withMVar (writerState writer) $ \current ->
+  pure [segment {segmentUnanswered = unansweredIn (stateFloor current) (stateIndex current) segment} | segment <- toList (stateSealed current)]
+
+-- | The number of seals of the writer, which a pruner watches.
+flowWriterSeals :: FlowWriter -> STM Word64
+flowWriterSeals = readTVar . writerSeals
+
+-- | Remove the oldest sealed segment of the log when it starts at the given
+-- position, it is not the newest sealed segment and every ask in it has a
+-- reply in the retained log. The result states whether the writer removed it.
+--
+-- Under the writer lock, the writer unlinks the segment file, and the floor
+-- becomes the start of the next sealed segment, below which the writer refuses
+-- a reply. It then synchronizes the segment directory, removes each
+-- claim-check file that the segment names and no retained record names, and
+-- synchronizes the claim directory. The bytes of the log drop by the segment
+-- and by those claim checks. When a step after the unlink fails, the segment
+-- stays removed, the claim checks stay counted, the next open removes them,
+-- and the failure propagates. The step runs with asynchronous exceptions
+-- masked, so a cancellation cannot divide it.
+pruneFlowSegment :: FlowWriter -> Word64 -> IO Bool
+pruneFlowSegment writer start = case writerSegments writer of
+  Nothing -> pure False
+  Just segments -> do
+    outcome <- uninterruptibleMask_ $ modifyMVar (writerState writer) $ \current ->
+      case Seq.viewl (stateSealed current) of
+        oldest Seq.:< rest
+          | stateOpen current,
+            segmentFirst oldest == start,
+            next Seq.:< _ <- Seq.viewl rest,
+            not (unansweredIn (stateFloor current) (stateIndex current) oldest) -> do
+              let root = writerRoot writer
+                  directory = flowSegmentDirectory segments
+                  retained = foldMap segmentClaims rest <> segmentClaims (stateActive current)
+                  orphaned = Set.toList (Set.difference (segmentClaims oldest) retained)
+                  removed =
+                    current
+                      { stateFloor = segmentFirst next,
+                        stateIndex = Seq.drop (fromIntegral (segmentRecords oldest)) (stateIndex current),
+                        stateSealed = rest,
+                        stateBytes = stateBytes current - segmentBytes oldest
+                      }
+              removePrivateFileAt root (directory <> [flowSegmentName (Position start)])
+              cleaned <- try @IOException $ do
+                syncPrivateDirectoryAt root directory
+                forM_ orphaned $ \digest -> removePrivateFileAt root (claimPath (writerClaims writer) digest)
+                unless (null orphaned) (syncPrivateDirectoryAt root (writerClaims writer))
+              pure $ case cleaned of
+                Left failure -> (removed, Left failure)
+                Right () ->
+                  let claimBytes = sum [Map.findWithDefault 0 digest (stateClaims current) | digest <- orphaned]
+                   in (removed {stateClaims = foldr Map.delete (stateClaims current) orphaned, stateBytes = stateBytes removed - claimBytes}, Right True)
+        _ -> pure (current, Right False)
+    either throwIO pure outcome
 
 refuse :: Text -> IO a
 refuse = throwIO . FlowError
@@ -1533,7 +1667,7 @@ readFlowLogAt kind root segments path claims = do
     Left failure | isDoesNotExistError failure && not (null sealed) -> pure ([], Nothing)
     Left failure -> throwIO failure
     Right found -> pure found
-  pure (Position floor', scanEntries kind Map.empty False (sealedEntries <> entries), torn)
+  pure (Position floor', scanEntries kind floor' Map.empty False (sealedEntries <> entries), torn)
   where
     readSegment (done, expected, remaining) (start, file) = do
       unless (start == expected) $
@@ -1591,7 +1725,7 @@ analyseFlow liveness entries0 torn events effects =
   where
     eventLines = either (const Map.empty) (Map.fromList . map (\envelope -> (sequenceOf envelope, envelope))) events
     sequenceOf envelope = let SeqNo number = envelopeSequence envelope in number
-    entries = scanEntries RunLog eventLines (either (const False) (const True) events) entries0
+    entries = scanEntries RunLog 0 eventLines (either (const False) (const True) events) entries0
 
     records = [(entryPosition entry, record) | entry <- entries, Just record <- [entryRecord entry]]
     asks = [position | (position, record) <- records, schemaRole (recSchema record) == AskSchema]
@@ -1635,8 +1769,11 @@ analyseFlow liveness entries0 torn events effects =
 
 -- | Verify each entry of a log of the given kind in log order: its schema, its
 -- body, its reply position and its event.
-scanEntries :: FlowLog -> Map Word64 Envelope -> Bool -> [FlowEntry] -> [FlowEntry]
-scanEntries kind eventLines eventsRead = go Map.empty Map.empty Set.empty Set.empty
+-- | Verify the schema, the reply position and the body of each entry of a log
+-- whose retained records start at the floor. A reply that names a position
+-- below the floor names a record that a prune removed, and it is not checked.
+scanEntries :: FlowLog -> Word64 -> Map Word64 Envelope -> Bool -> [FlowEntry] -> [FlowEntry]
+scanEntries kind floor' eventLines eventsRead = go Map.empty Map.empty Set.empty Set.empty
   where
     go _ _ _ _ [] = []
     go schemas codes answered seen (entry : rest) = case entryRecord entry of
@@ -1654,6 +1791,7 @@ scanEntries kind eventLines eventsRead = go Map.empty Map.empty Set.empty Set.em
               Nothing -> ([], answered)
               Just (Position asked)
                 | asked >= index -> (["the reply names position " <> T.pack (show asked) <> ", which is not earlier in this log"], answered)
+                | asked < floor' -> ([], answered)
                 | otherwise -> case Map.lookup asked schemas of
                     Nothing -> (["the reply names position " <> T.pack (show asked) <> ", which holds no record"], answered)
                     Just askedSchema

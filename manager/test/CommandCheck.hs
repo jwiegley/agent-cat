@@ -47,7 +47,8 @@ import qualified Data.Map.Strict as Map
 import Data.Maybe (isNothing)
 import Data.Word (Word64)
 import Data.Text (Text)
-import Data.Time.Clock (getCurrentTime)
+import Data.Time.Clock (UTCTime, getCurrentTime)
+import Data.Time.Clock.POSIX (posixSecondsToUTCTime, utcTimeToPOSIXSeconds)
 import GHC.Clock (getMonotonicTimeNSec)
 import Numeric (showFFloat)
 import qualified Data.Text as T
@@ -56,7 +57,7 @@ import qualified Database.SQLite3 as SQL
 import qualified Database.SQLite3.Direct as Direct
 import Foreign.Ptr (Ptr)
 import Foreign.C.Types (CInt (..))
-import System.Directory (createDirectory, doesDirectoryExist, doesFileExist, listDirectory, renameDirectory, renameFile)
+import System.Directory (createDirectory, createDirectoryIfMissing, doesDirectoryExist, doesFileExist, listDirectory, renameDirectory, renameFile)
 import System.Environment (getArgs)
 import System.FilePath ((</>), takeDirectory)
 import System.IO (BufferMode (LineBuffering), hSetBuffering, stdout)
@@ -1319,7 +1320,8 @@ flowChecks work = do
   flowNoticeChecks work
   flowAdministrationChecks work
   flowReaderChecks work
-  putStrLn "PASS manager log codecs, writer, gap entries, path identity, ceiling, sealed segments, Store lifetimes, command admission, open refusals and recovery, append latency, command notices, administration and the reader"
+  flowPruneChecks work
+  putStrLn "PASS manager log codecs, writer, gap entries, path identity, ceiling, sealed segments, Store lifetimes, command admission, open refusals and recovery, append latency, command notices, administration, the reader and pruning"
 
 -- An administration lifetime writes no manager log. A serving lifetime writes
 -- a lifetime notice that lists the current credentials and, only when its
@@ -2126,6 +2128,219 @@ flowSegmentChecks root private = do
       _ -> Nothing
     isReceipt (ReceiptValue _) = True
     isReceipt _ = False
+
+-- | The ceiling of the pruning checks. L = 16 * C + 512 KiB leaves L - R =
+-- 512 KiB, a segment size of 65536 bytes and a byte trigger above 262144
+-- bytes.
+pruneTotal :: Int64
+pruneTotal = 16 * commandCapacity + 524288
+
+-- | Append a shutdown notice with the given generation and identifiers.
+pruneTell :: ManagerFlow -> FlowRecordClass -> Runtime.About -> Text -> IO (Either ManagerFlowFailure (Runtime.Position, Runtime.Record))
+pruneTell flow recordClass about generation =
+  appendManagerTell flow pruneTotal recordClass Runtime.FlowNotice Runtime.Manager (Runtime.To Runtime.Manager) about (noticeFlowBody (ShutdownNotice generation))
+
+-- | The start positions of the sealed segments of a stream on disk.
+sealedStartsOf :: FilePath -> Text -> IO [Word64]
+sealedStartsOf root stream = do
+  let directory = foldl (</>) root (managerFlowSealed stream)
+  exists <- doesDirectoryExist directory
+  names <- if exists then sort <$> listDirectory directory else pure []
+  pure [read (take 20 name) | name <- names]
+
+-- | Every entry of a manager log has its position from the floor and no
+-- problem.
+pruneReportIntact :: ManagerLogReport -> Bool
+pruneReportIntact report =
+  let Runtime.Position floor' = managerLogFloor report
+      positions = map (Runtime.positionIndex . Runtime.entryPosition) (managerLogEntries report)
+   in positions == take (length positions) [floor' ..] && all (null . Runtime.entryProblems) (managerLogEntries report)
+
+-- | The Store pruner removes the oldest sealed segments of the manager log
+-- while a trigger holds and no live work needs them.
+flowPruneChecks :: FilePath -> IO ()
+flowPruneChecks work = do
+  flowBytePruneChecks work
+  flowAgePruneChecks work
+  flowProtectedPruneChecks work
+  flowReservePruneChecks work
+
+-- | A steady stream of appends with no live work keeps the log at most
+-- (L - R) div 2 plus one segment, and positions and the floor survive the
+-- prune and a reopen.
+flowBytePruneChecks :: FilePath -> IO ()
+flowBytePruneChecks work = do
+  let half = toInteger (pruneTotal - mutationLedgerReserve pruneTotal) `div` 2
+      bound = half + managerFlowSegmentBytes pruneTotal
+      name = "flow-prune-bytes"
+  ((observed, positions, claim, roundNanos), root, stream) <- withServedFixture work name pruneTotal Runtime.strictFlowCodec Nothing (\_ _ -> pure ()) $ \store _ _ -> do
+    flow <- maybe (error "FAIL the serving lifetime has no manager log") pure (storeManagerFlow store)
+    (_, claimRecord) <- pruneTell flow Following Runtime.noAbout (T.replicate 70000 "c") >>= right
+    claim <- case Runtime.recBody claimRecord of
+      Runtime.ClaimCheck digest _ -> pure digest
+      _ -> error "FAIL the large notice has no claim check"
+    let settle deadline = do
+          bytes <- managerFlowBytes flow >>= maybe (error "FAIL the manager log is not open") pure
+          if bytes <= bound
+            then pure bytes
+            else do
+              now <- getMonotonicTimeNSec
+              when (now > deadline) (error ("FAIL the pruner left " <> show bytes <> " bytes above " <> show bound))
+              threadDelay 1000 >> settle deadline
+    stream' <- forM [1 .. 6000 :: Int] $ \n -> do
+      (position, _) <- pruneTell flow Following Runtime.noAbout ("generation_" <> T.pack (show n) <> T.replicate 200 "p") >>= right
+      started <- getMonotonicTimeNSec
+      bytes <- settle (started + 5000000000)
+      pure (Runtime.positionIndex position, bytes)
+    started <- getMonotonicTimeNSec
+    pruneManagerLog store
+    ended <- getMonotonicTimeNSec
+    pure (map snd stream', map fst stream', claim, ended - started)
+  starts <- sealedStartsOf root stream
+  claimed <- doesFileExist (foldl (</>) root (managerFlowClaims stream) </> T.unpack claim)
+  check "manager log pruning keeps a steady stream of appends at most (L - R) div 2 plus one segment"
+    (all (<= bound) observed && length positions == 6000 && and (zipWith (\earlier later -> later == earlier + 1) positions (drop 1 positions)))
+  check "manager log pruning removes the claim checks that no retained record names" (not claimed)
+  floor' <- case starts of
+    first : _ : _ | first > 0 -> pure first
+    _ -> error ("FAIL manager log pruning keeps at least the newest sealed segment and moves the floor, found " <> show starts)
+  check "manager log pruning keeps at least the newest sealed segment and moves the floor" True
+  putStrLn ("REPORT manager log prune round after the stream: " <> showFFloat (Just 3) (fromIntegral roundNanos / 1000000 :: Double) " ms")
+  check "a manager log prune round finishes inside the five-second allowance" (roundNanos < 5000000000)
+  report <- readManagerLog (foldl (</>) root (managerFlowPath stream))
+  check "the manager log reader reports the floor after pruning, with global positions and no problem"
+    (managerLogFloor report == Runtime.Position floor' && pruneReportIntact report)
+  -- A later lifetime keeps the floor, continues the positions and refuses a
+  -- reply below the floor.
+  (reopened, refused) <- withInstalled (work </> (name <> ".json")) $ \installed -> withServingStore installed $ \store -> do
+    flow <- maybe (error "FAIL the serving lifetime has no manager log") pure (storeManagerFlow store)
+    (position, _) <- pruneTell flow Following Runtime.noAbout "generation_reopened" >>= right
+    below <- appendManagerReply flow pruneTotal Following Runtime.FlowReceipt (Runtime.Position 0) Runtime.Manager (Runtime.To Runtime.Manager) Runtime.noAbout (receiptFlowBody (firstFlow flowReceipts))
+    pure (Runtime.positionIndex position, below)
+  after <- readManagerLog (foldl (</>) root (managerFlowPath stream))
+  check "manager log positions and the floor survive the prune and a reopen, and the writer refuses a reply below the floor"
+    ( managerLogFloor after >= managerLogFloor report && pruneReportIntact after
+        && reopened > last positions && isLeftEither refused
+    )
+
+-- | One record line with an old time, as an earlier lifetime wrote it.
+oldLine :: UTCTime -> Runtime.Schema -> Runtime.About -> Value -> BS.ByteString
+oldLine at schema about body = Runtime.encodeFlowLine (Runtime.Record schema Runtime.Manager (Runtime.To Runtime.Manager) about Nothing (Runtime.Inline body) at) <> "\n"
+
+-- | A time more than 604800 seconds ago, in whole seconds.
+eightDaysAgo :: IO UTCTime
+eightDaysAgo = do
+  now <- getCurrentTime
+  pure (posixSecondsToUTCTime (fromInteger (floor (utcTimeToPOSIXSeconds now) - 8 * 86400)))
+
+-- | Write sealed segments and an active file of old records, each segment a
+-- list of lines, starting at position 0, and create the private directories.
+writeOldLog :: FilePath -> Text -> [[BS.ByteString]] -> [BS.ByteString] -> IO ()
+writeOldLog root stream segments active = do
+  let flowDirectory = root </> "flow"
+      sealed = foldl (</>) root (managerFlowSealed stream)
+      private directory = createDirectoryIfMissing True directory >> setFileMode directory 0o700
+      privateFile path bytes = BS.writeFile path bytes >> setFileMode path 0o600
+  mapM_ private [flowDirectory, flowDirectory </> "sealed", sealed, flowDirectory </> "claims", foldl (</>) root (managerFlowClaims stream)]
+  let starts = scanl (+) 0 (map length segments)
+  forM_ (zip starts segments) $ \(start, lines') ->
+    privateFile (sealed </> Runtime.flowSegmentName (Runtime.Position (fromIntegral start))) (BS.concat lines')
+  privateFile (foldl (</>) root (managerFlowPath stream)) (BS.concat active)
+
+-- | Age pruning at open removes the unprotected sealed segments whose records
+-- are older than 604800 seconds, keeps the newest sealed segment and the
+-- active file, and removes an orphan claim check.
+flowAgePruneChecks :: FilePath -> IO ()
+flowAgePruneChecks work = do
+  (path, root) <- fixture work "flow-prune-age" (64 * commandCapacity) 20
+  stream <- withInstalled path $ \installed -> withCoordinationStore installed (fmap storeStreamId . storeIdentity)
+  old <- eightDaysAgo
+  let notice n = oldLine old Runtime.FlowNotice Runtime.noAbout (noticeFlowBody (ShutdownNotice ("generation_old_" <> T.pack (show (n :: Int)))))
+      orphan = foldl (</>) root (managerFlowClaims stream) </> replicate 64 'a'
+  writeOldLog root stream [map notice [0, 1, 2], map notice [3, 4], map notice [5, 6]] [notice 7]
+  BS.writeFile orphan "orphan" >> setFileMode orphan 0o600
+  withInstalled path $ \installed -> withServingStore installed (const (pure ()))
+  starts <- sealedStartsOf root stream
+  orphaned <- doesFileExist orphan
+  report <- readManagerLog (foldl (</>) root (managerFlowPath stream))
+  let positions = map (Runtime.positionIndex . Runtime.entryPosition) (managerLogEntries report)
+  check "age pruning at open removes the old unprotected sealed segments and keeps the newest sealed segment and the active file"
+    (starts == [5] && managerLogFloor report == Runtime.Position 5 && positions == [5 .. 9] && pruneReportIntact report)
+  check "the open removes a claim check that no record names" (not orphaned)
+
+-- | A sealed segment that names a request that is not terminal, a run that is
+-- not observed terminal, the parent run of a live request or an unanswered
+-- ask is kept, and it keeps every later segment.
+flowProtectedPruneChecks :: FilePath -> IO ()
+flowProtectedPruneChecks work = do
+  (path, root) <- fixture work "flow-prune-protected" (64 * commandCapacity) 20
+  let administer statement = withInstalled path $ \installed -> withCoordinationStore installed $ \store -> mutate store (execute statement [])
+      serve action = withInstalled path $ \installed -> withServingStore installed action
+      starts = sealedStartsOf root =<< streamOf
+      streamOf = withInstalled path $ \installed -> withCoordinationStore installed (fmap storeStreamId . storeIdentity)
+  stream <- withInstalled path $ \installed -> withCoordinationStore installed $ \store -> do
+    mutate store seed
+    mutate store (execute "INSERT INTO runs (id,revision,control_revision,request_id,profile_id,root_identity,native_run_id,supervision,result_state,terminal_observed) VALUES ('run_2','run_revision','control_revision',NULL,'profile_1','root_2','native_2','observer','absent',1)" [])
+    mutate store (execute "INSERT INTO requests (id,revision,client_id,workflow_id,descriptor_revision,profile_id,profile_revision,phase,admission,blocking_reasons,validation_errors,parent_run_id,lineage_operation) VALUES ('request_2','r0','client_1','workflow_1','descriptor_1','profile_1','profile_revision','draft','not-queued',X'5b5d',X'5b5d','run_2','restart')" [])
+    storeStreamId <$> storeIdentity store
+  old <- eightDaysAgo
+  let notice about = oldLine old Runtime.FlowNotice about (noticeFlowBody (ShutdownNotice "generation_old"))
+      ask = oldLine old Runtime.FlowCommand Runtime.noAbout (commandFlowBody (firstFlow flowCommands))
+  writeOldLog root stream
+    [ [notice Runtime.noAbout],
+      [notice Runtime.noAbout {Runtime.aboutRequest = Just "request_1"}],
+      [notice Runtime.noAbout {Runtime.aboutManagerRun = Just "run_1"}],
+      [notice Runtime.noAbout {Runtime.aboutManagerRun = Just "run_2"}],
+      [ask],
+      [notice Runtime.noAbout]
+    ]
+    [notice Runtime.noAbout]
+  serve (const (pure ()))
+  starts >>= check "a segment that names a request that is not terminal is kept and keeps every later segment" . (== [1, 2, 3, 4, 5])
+  administer "UPDATE requests SET phase='withdrawn' WHERE id='request_1'"
+  serve (const (pure ()))
+  starts >>= check "a segment that names a run that is not observed terminal is kept" . (== [2, 3, 4, 5])
+  administer "UPDATE runs SET terminal_observed=1 WHERE id='run_1'"
+  serve (const (pure ()))
+  starts >>= check "a segment that names the parent run of a live request is kept" . (== [3, 4, 5])
+  administer "UPDATE requests SET phase='withdrawn' WHERE id='request_2'"
+  -- The ask gets its reply in this lifetime, after the round at open.
+  serve $ \store -> do
+    flow <- maybe (error "FAIL the serving lifetime has no manager log") pure (storeManagerFlow store)
+    let receipt = firstFlow flowReceipts
+    void (appendManagerReply flow (64 * commandCapacity) Following Runtime.FlowReceipt (Runtime.Position 4) Runtime.Manager (Runtime.To Runtime.Manager) Runtime.noAbout {Runtime.aboutCommand = Just (receiptId receipt)} (receiptFlowBody receipt) >>= right)
+  starts >>= check "a segment with an ask that has no reply is kept" . (== [4, 5])
+  serve (const (pure ()))
+  starts >>= check "a segment whose ask has its reply is removed, and the newest sealed segment is kept" . (== [5])
+  report <- readManagerLog (foldl (</>) root (managerFlowPath stream))
+  check "the reader decodes a receipt whose command lies below the floor"
+    (managerLogFloor report == Runtime.Position 5 && pruneReportIntact report
+      && [receipt | ReceiptValue receipt <- Map.elems (managerLogValues report)] == take 1 flowReceipts)
+
+-- | A live request holds the floor, so the log reaches L - R. An ordinary
+-- command is then refused with storage-quota, and a cancel still uses the
+-- reserve.
+flowReservePruneChecks :: FilePath -> IO ()
+flowReservePruneChecks work = do
+  ((), root, stream) <- withServedFixture work "flow-prune-reserve" pruneTotal Runtime.strictFlowCodec Nothing (\_ _ -> pure ()) $ \store profile proof -> do
+    flow <- maybe (error "FAIL the serving lifetime has no manager log") pure (storeManagerFlow store)
+    _ <- pruneTell flow Following Runtime.noAbout {Runtime.aboutRequest = Just "request_1"} "generation_live" >>= right
+    let fill n = pruneTell flow Following Runtime.noAbout ("generation_" <> T.pack (show n) <> T.replicate 200 "f") >>= \outcome -> case outcome of
+          Right _ -> fill (n + 1 :: Int)
+          Left failure -> pure failure
+    failure <- fill 0
+    pruneManagerLog store
+    segments <- managerFlowSegments flow
+    check "a live request holds the floor while the log fills to L - R"
+      (failure == ManagerFlowQuota && length segments > 2 && map Runtime.segmentFirst (take 1 segments) == [0])
+    req <- request store SetInput "flow_prune_reserve"
+    expect "an ordinary command is refused with storage-quota when a live request holds the floor" StorageQuota $
+      submitCommand store proof req (edit profile (commandResource req) "r1")
+    cancelReq <- request store Cancel "flow_prune_reserve_cancel"
+    cancelled <- submitCommand store proof cancelReq (control profile) >>= right
+    check "a cancel keeps its reserve when a live request holds the floor" (receiptState (submissionReceipt cancelled) == Accepted)
+  starts <- sealedStartsOf root stream
+  check "the held floor stays at position 0" (take 1 starts == [0])
 
 firstFlow :: [a] -> a
 firstFlow values = case values of

@@ -389,11 +389,71 @@ first record of the new active file has the position after the last sealed
 record. A receipt, a credential receipt or a failure reply whose own append
 seals the segment of its command is accepted. When a crash falls between the
 rename and the creation of the new active file, the next open creates the
-active file at the position after the last sealed record. Nothing removes a
-sealed segment, so the retained floor is 0. A log that cannot be opened gives a
-writer whose every append fails. The section
+active file at the position after the last sealed record. The retained floor
+is the start of the oldest sealed segment that remains, or 0 before the first
+seal, and the writer refuses a reply that names a position below it. At open
+the writer removes each file of `flow/claims/<stream>/` that no record of the
+log names. A log that cannot be opened gives a writer whose every append
+fails. The section
 [Growth, open refusals and recovery](#growth-open-refusals-and-recovery)
 states the reasons and the recovery.
+
+### Pruning
+
+The Store of a serving lifetime owns the pruner of its manager log.
+`withServingStore` runs one pruning round after the open and before the
+serving action, and the pruner runs one more round after each seal of the
+writer, until the action ends. `pruneManagerLog` is one round. It takes the
+oldest sealed segment as its candidate, removes it when a trigger holds and
+nothing protects it, and continues with the next oldest segment. The round
+stops at the first segment that it keeps, so the retained floor is
+contiguous. The newest sealed segment and the active file are never
+candidates, so the positions and the floor survive every prune and every
+reopen.
+
+A trigger holds when one of these is true:
+
+- The newest record of the segment is more than 604800 seconds old, which is
+  the retention of the invalidation events.
+- The log and its claim checks hold more than (L - R) div 2 bytes.
+
+A segment is protected when one of these is true:
+
+- A request that it names is not terminal. A request is terminal when it is
+  withdrawn or refused, or when it is associated and no run of it has
+  `terminal_observed=0`, which is the predicate of the overview.
+- A run that it names has `terminal_observed=0`.
+- A run that it names is the parent run of a request that is not terminal.
+- An ask in it has no reply in the retained log.
+
+A command that a segment names counts as its request and its run. The writer
+keeps, for each sealed segment, the request, run and command identifiers and
+the claim checks that its records name, and the latest time of its records. It
+collects them as it appends and reads them once at open.
+
+Each candidate takes one Store admission in the lock order file slot,
+configuration, database, runs one read-only query over the identifiers of the
+segment and then takes the leaf writer lock. Under that lock the writer
+unlinks the segment file, moves the floor to the start of the next sealed
+segment, synchronizes the segment directory, removes each claim-check file
+that no retained record names and synchronizes the claim directory. The
+bytes of the log drop by the segment and by those claim checks. A failure
+after the unlink leaves the segment removed and its claim checks counted, and
+the next open removes those files. A round runs outside every admission
+transaction of a command, and each step stays within the five-second
+allowance of its admission.
+
+A round that does not obtain its admission within the allowance waits for
+the next seal. Any other failure of a round is recorded once in the private
+fault log as `manager-log prune` with `stopped` and the fixed name of the
+failure, and the pruner stops for the lifetime. The log then grows as it did
+without pruning. Only the log of the current stream is pruned. The logs of
+earlier streams, which remain after a restoration, are not.
+
+With no live work, a steady stream of appends keeps the log at most
+(L - R) div 2 plus one segment. A long-lived run, a pending review or a request that
+waits in the queue holds the floor, so the log can still reach L - R, and
+the refusals of the next section apply.
 
 The writer lock is a leaf lock. The manager takes no other lock while it holds
 it. Before each append the writer checks that the path still names the file
@@ -543,7 +603,9 @@ environment variable.
 ### Growth, open refusals and recovery
 
 The manager log grows across Store lifetimes. The writer seals the active file
-into segments at the segment size, but nothing removes a segment yet. When the log and its claim checks reach L
+into segments at the segment size, and the pruner of the section
+[Pruning](#pruning) removes the old sealed segments that no live work needs.
+When live work holds the floor and the log and its claim checks reach L
 minus R, every ordinary command and every review publication is refused with
 `storage-quota`. A cancel and the records of the manager itself can still use
 the reserve R. The F16 gate measured 22193 bytes of manager log for one simple

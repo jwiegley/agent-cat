@@ -7,7 +7,7 @@
 -- | A single leased SQLite writer with strict, bounded transaction results.
 module Agentic.Manager.Store
   ( CoordinationStore, StoreIdentity (..), StoreFailure (..), Checkpoint (..),
-    withCoordinationStore, withServingStore, withServingStoreWith, storeManagerFlow, storeIdentity, checkpointStore, withStoreConfiguration, withStoreCatalogues, withStoreRetentionRoot, withStoreRetentionRootLoan, withStoreArtifactResponse, validateStoreHistoryBindings, revalidateStoreRetentionRoot, storeInvocations, withStoreFiles, withStoreFileLoan, withStoreReader, withStoreAdmission, withStoreWorker, StoreWorker, createStoreWorkerGroup, storeWorkerCleanupConfirmed, requestStoreWorkersStop, awaitStoreWorkersStop, retryStoreCleanup, probeStoreCapabilities,
+    withCoordinationStore, withServingStore, withServingStoreWith, storeManagerFlow, pruneManagerLog, storeIdentity, checkpointStore, withStoreConfiguration, withStoreCatalogues, withStoreRetentionRoot, withStoreRetentionRootLoan, withStoreArtifactResponse, validateStoreHistoryBindings, revalidateStoreRetentionRoot, storeInvocations, withStoreFiles, withStoreFileLoan, withStoreReader, withStoreAdmission, withStoreWorker, StoreWorker, createStoreWorkerGroup, storeWorkerCleanupConfirmed, requestStoreWorkersStop, awaitStoreWorkersStop, retryStoreCleanup, probeStoreCapabilities,
     withStoreAdministration, tryWithStoreCatalogues, tryWithStoreFiles,
     AuthorizationWatch, withStoreAuthorizationWatch, withStoreConfigurationWatch, withStoreCataloguesWatch, withStoreCatalogueContextWatch, authorizationWatchCurrent, withAuthorizationObservation, withAuthorizationReadObservation, awaitAuthorizationChange,
     CommitDeadline, withCommitDeadline, withPreparedCommitDeadline, enforceCommitDeadline, enforceAdmissionFence, managerFlowRoom, appendCommandRecord, appendReviewRecord, noticeAfterCommit, PostCommit, noPostCommit, takePostCommit, appendPostCommit, Transaction, execute, query, refuseTransaction, runTransaction, runRead, StoreAdmission (..), runTransactionWithAdmission, runReadWithAdmission, transactionGeneration,
@@ -19,10 +19,10 @@ import qualified Agentic.Manager.Store.Admission as Admission
 import Agentic.Manager.Configuration
   (InstalledConfiguration, acquireConfigurationStorage, releaseConfigurationStorage, withConfigurationAdministration, withConfigurationSnapshot, withConfigurationCatalogues, tryConfigurationCatalogueContext, withConfigurationLoan, withConfiguredRetentionRootLoan, validateHistoryBindings, revalidateRetentionRoot, configuredInvocations, configuredLimits, probeConfiguredCapabilities)
 import Agentic.Manager.Flow
-  (ManagerFlow, ManagerFlowFault, ManagerFlowFailure (..), FlowRecordClass (Refusing), CredentialEntry (..), Notice, noticeFlowBody, managerFlowCeiling, Lifetime (..), Reconciliation (..), noReconciliation, openManagerFlow, managerFlowOpenFailure, managerFlowOpenWord, closeManagerFlow, managerFlowBytes, managerFlowAllowance, managerFlowContent, appendManagerAsk, appendManagerTell, appendManagerReply, appendLifetime, appendShutdown)
-import Agentic.Manager.Protocol.Command (failureCode)
+  (ManagerFlow, ManagerFlowFault, ManagerFlowFailure (..), FlowRecordClass (Refusing), CredentialEntry (..), Notice, noticeFlowBody, managerFlowCeiling, Lifetime (..), Reconciliation (..), noReconciliation, openManagerFlow, managerFlowOpenFailure, managerFlowOpenWord, closeManagerFlow, managerFlowBytes, managerFlowSegments, managerFlowSeals, pruneManagerFlowSegment, managerFlowAllowance, managerFlowContent, appendManagerAsk, appendManagerTell, appendManagerReply, appendLifetime, appendShutdown)
+import Agentic.Manager.Protocol.Command (failureCode, mutationLedgerReserve)
 import Agentic.Manager.Profile (ConfigurationLimits (..), PublicProfile, Diagnostic (SupervisionUnavailable), Discovery)
-import Agentic.Manager.Fault.Record (ManagerFault (AuthorizationChanged), loanFault, internalLabel, refusalLabel, recordErasure, recordFaultLine)
+import Agentic.Manager.Fault.Record (ManagerFault (AuthorizationChanged), loanFault, internalLabel, refusalLabel, ioExceptionName, recordErasure, recordFaultLine)
 import Agentic.Manager.Worker.State (WorkerLifecycle, acceptingPreparation)
 import Agentic.Manager.Lease (duplicateLease)
 import Agentic.Manager.Root (validateRootSeparation)
@@ -31,14 +31,14 @@ import Agentic.Runtime
   (PrivateRoot, assertPrivateRoot, closePrivateRoot, openPrivateSubroot, privateRootPath,
    openPrivateRoot, privateRootIdentity, readPrivateFileAt, ensurePrivateDirectoryAt, removePrivateFileAt,
    publishPrivateCaptureAt, CapturePublication (..), privateCaptureBytes, privateCaptureSha256,
-   withPrivateDirectoryAt, writePrivateExclusiveAt, strictFlowCodec, FlowCodec, Actor (Manager), Address (To, Approvers), About, Position, Record, Schema (FlowCommand, FlowFailure, FlowReview, FlowNotice), FailureKind (Refused), failureBody, WorkflowInputDescriptor (..), frontendLiteralBytes, FrontendCapabilities, FrontendInvocation, ProcessGroup, createProcessGroup, terminateProcessGroup, groupOutcome, processGroupLive)
+   withPrivateDirectoryAt, writePrivateExclusiveAt, strictFlowCodec, FlowCodec, Actor (Manager), Address (To, Approvers), About, Position, Record, Schema (FlowCommand, FlowFailure, FlowReview, FlowNotice), FlowSegment (..), FailureKind (Refused), failureBody, WorkflowInputDescriptor (..), frontendLiteralBytes, FrontendCapabilities, FrontendInvocation, ProcessGroup, createProcessGroup, terminateProcessGroup, groupOutcome, processGroupLive)
 import Control.Concurrent (rtsSupportsBoundThreads)
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (race, withAsync, asyncWithUnmask, cancel, wait)
 import Control.Concurrent.STM (STM, TMVar, TVar, atomically, newEmptyTMVarIO, newTVarIO, readTMVar, readTVar, readTVarIO, writeTVar, modifyTVar', throwSTM, isEmptyTMVar, tryPutTMVar, check, orElse, registerDelay)
 import Control.Concurrent.MVar (MVar, newMVar, newEmptyMVar, readMVar, tryReadMVar, withMVar, modifyMVarMasked, takeMVar, putMVar, tryTakeMVar)
 import Control.Exception
-  (AsyncException (UserInterrupt), Exception, SomeException, bracket, bracketOnError, finally, mask,
+  (AsyncException (UserInterrupt), Exception, SomeAsyncException, SomeException, bracket, bracketOnError, finally, mask,
    evaluate, uninterruptibleMask_, throwIO, try, onException, catch, fromException)
 import Control.Monad (unless, when, void, foldM, forM, forM_, forever)
 import Control.DeepSeq (NFData (..), force)
@@ -59,6 +59,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
+import Data.Time.Clock (diffUTCTime, getCurrentTime)
 import qualified Data.Text.Encoding as TE
 import qualified Database.SQLite3 as SQL
 import qualified Database.SQLite3.Direct as Direct
@@ -167,7 +168,9 @@ withCoordinationStore = withStoreMode AdministeringStore
 
 -- | The Store lifetime of a serving manager. It reconciles a restart and
 -- writes the manager log of its stream: a lifetime notice at open and, when
--- the lifetime ends in order, a shutdown notice.
+-- the lifetime ends in order, a shutdown notice. Its pruner removes the old
+-- sealed segments of that log that no live work needs, as
+-- 'withManagerLogPruner' states.
 withServingStore :: InstalledConfiguration -> (CoordinationStore -> IO a) -> IO a
 withServingStore = withServingStoreWith strictFlowCodec Nothing
 
@@ -189,7 +192,7 @@ withStoreMode mode installed action = mask $ \restore -> do
       release (root, lease) =
         (closePrivateRoot root `finally` closeFd lease) `finally` releaseConfigurationStorage installed
   store <- acquire
-  result <- try @SomeException (restore (action store))
+  result <- try @SomeException (restore (withManagerLogPruner store (action store)))
   cleanup <- try @SomeException (closeStoreWith (requestedEnd result) store)
   case result of
     Left failure -> throwIO failure
@@ -201,6 +204,112 @@ withStoreMode mode installed action = mask $ \restore -> do
     requestedEnd :: Either SomeException b -> Bool
     requestedEnd (Right _) = True
     requestedEnd (Left failure) = fromException failure == Just UserInterrupt
+
+-- | Run the action with the manager-log pruner of a serving lifetime. The
+-- pruner runs one round before the action, so at open before serving, and
+-- one more round after each seal of the writer, until the action ends. A
+-- round that did not obtain its Store admission within the allowance waits
+-- for the next seal. Any other failure of a round is recorded once in the
+-- private fault log and stops the pruner for the lifetime, so the log grows
+-- toward its ceiling as it does without pruning. A lifetime without a manager
+-- log has no pruner.
+withManagerLogPruner :: CoordinationStore -> IO a -> IO a
+withManagerLogPruner store action = case storeManagerFlow store of
+  Nothing -> action
+  Just manager -> do
+    seen <- atomically (managerFlowSeals manager)
+    running <- pruneRound
+    if running then withAsync (watch manager seen) (const action) else action
+  where
+    watch manager seen = do
+      next <- atomically $ do
+        current <- managerFlowSeals manager
+        check (current /= seen)
+        pure current
+      running <- pruneRound
+      when running (watch manager next)
+    pruneRound = do
+      outcome <- try @SomeException (pruneManagerLog store)
+      case outcome of
+        Right () -> pure True
+        Left failure
+          | Just (_ :: SomeAsyncException) <- fromException failure -> throwIO failure
+          | Just busy <- fromException failure, busy `elem` [StoreBusy, StoreDeadline] -> pure True
+          | otherwise -> do
+              recordFaultLine "manager-log prune" ("stopped " <> failureLabel failure)
+              pure False
+    failureLabel failure = case (fromException failure, fromException failure) of
+      (Just (storeFailure :: StoreFailure), _) -> refusalLabel "store" storeFailure
+      (_, Just (ioFailure :: IOException)) -> ioExceptionName ioFailure
+      _ -> "other"
+
+-- | Prune the manager log of a serving lifetime: remove its oldest sealed
+-- segments, one at a time, while a trigger holds and no live work needs the
+-- records of the segment. A lifetime without a manager log prunes nothing.
+--
+-- The newest sealed segment and the active file are never candidates. A
+-- trigger holds when the newest record of the oldest sealed segment is more
+-- than 604800 seconds old, the retention of the invalidation events, or when
+-- the log and its claim checks hold more than (L - R) div 2 bytes, where L is
+-- the configured @globalMutationLedgerBytes@ and R its 'mutationLedgerReserve'.
+-- Each candidate takes one Store admission in the lock order file slot,
+-- configuration, database and then the leaf writer lock, and runs one
+-- read-only query over the identifiers that the segment names. The segment is
+-- protected, and pruning stops, when a request that it names is not terminal,
+-- a run that it names has not been observed terminal, a run that it names is
+-- the parent run of a request that is not terminal, or an ask in it has no
+-- reply. A request is terminal when it is withdrawn or refused, or when it is
+-- associated and no run of it is unobserved, as the overview decides. A
+-- command that the segment names counts as its request and its run. So the
+-- retained floor stays contiguous: it is the start of the oldest remaining
+-- sealed segment.
+pruneManagerLog :: CoordinationStore -> IO ()
+pruneManagerLog store = forM_ (storeManagerFlow store) loop
+  where
+    loop manager = do
+      segments <- managerFlowSegments manager
+      case segments of
+        oldest : _ : _ -> do
+          pruned <- withStoreFiles store $ \_ -> do
+            result <- withStoreConfiguration store $ \limits _ -> runRead store (pruneCandidate manager limits oldest)
+            either (\diagnostic -> refuseErased "store manager-log prune" (loanFault diagnostic)
+              (if diagnostic == SupervisionUnavailable then StoreBusy else StoreUnavailable)) pure result
+          when pruned (loop manager)
+        _ -> pure ()
+
+-- | Decide one candidate under the held file slot, configuration and database,
+-- and remove it when a trigger holds and nothing protects it.
+pruneCandidate :: ManagerFlow -> ConfigurationLimits -> FlowSegment -> Transaction Bool
+pruneCandidate manager limits segment = do
+  triggered <- Transaction $ \_ -> do
+    now <- getCurrentTime
+    bytes <- managerFlowBytes manager
+    let total = fromIntegral (limitGlobalMutationLedgerBytes limits) :: Int64
+        half = toInteger (total - mutationLedgerReserve total) `div` 2
+        aged = maybe False (\newest -> diffUTCTime now newest > 604800) (segmentNewest segment)
+    pure (aged || maybe False (> half) bytes)
+  if not triggered || segmentUnanswered segment
+    then pure False
+    else do
+      protected <- segmentProtected segment
+      if protected then pure False else Transaction (\_ -> pruneManagerFlowSegment manager (segmentFirst segment))
+
+-- | Whether live work needs the records of a sealed segment, by one read-only
+-- query over the request, run and command identifiers that it names.
+segmentProtected :: FlowSegment -> Transaction Bool
+segmentProtected segment = do
+  rows <- query ("WITH named_requests(id) AS (SELECT value FROM json_each(?) UNION SELECT request_id FROM commands WHERE request_id IS NOT NULL AND id IN (SELECT value FROM json_each(?))), "
+    <> "named_runs(id) AS (SELECT value FROM json_each(?) UNION SELECT run_id FROM commands WHERE run_id IS NOT NULL AND id IN (SELECT value FROM json_each(?))), "
+    <> "live_requests(id) AS (SELECT r.id FROM requests r WHERE r.phase NOT IN ('withdrawn','refused') AND (r.phase!='associated' OR EXISTS(SELECT 1 FROM runs u WHERE u.request_id=r.id AND u.terminal_observed=0))) "
+    <> "SELECT EXISTS(SELECT 1 FROM named_requests n JOIN live_requests l ON l.id=n.id) "
+    <> "OR EXISTS(SELECT 1 FROM named_runs n JOIN runs u ON u.id=n.id WHERE u.terminal_observed=0) "
+    <> "OR EXISTS(SELECT 1 FROM named_runs n JOIN requests r ON r.parent_run_id=n.id JOIN live_requests l ON l.id=r.id)")
+    [names segmentRequests, names segmentCommands, names segmentRuns, names segmentCommands]
+  case rows of
+    [[SQL.SQLInteger found]] -> pure (found /= 0)
+    _ -> refuseTransaction StoreIntegrity
+  where
+    names field = SQL.SQLText (TE.decodeUtf8 (BL.toStrict (encode (Set.toList (field segment)))))
 
 openStore :: StoreMode -> InstalledConfiguration -> PrivateRoot -> Fd -> IO CoordinationStore
 openStore mode installed root lease = storageErrors $ do

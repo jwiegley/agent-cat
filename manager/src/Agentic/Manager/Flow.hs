@@ -35,6 +35,9 @@ module Agentic.Manager.Flow
     openManagerFlow,
     closeManagerFlow,
     managerFlowBytes,
+    managerFlowSegments,
+    managerFlowSeals,
+    pruneManagerFlowSegment,
     managerFlowCeiling,
     managerFlowAllowance,
     managerFlowContent,
@@ -135,6 +138,7 @@ import Agentic.Runtime
     FlowLimitReached (..),
     FlowOpenRefusal (..),
     FlowSegments (..),
+    FlowSegment (..),
     FlowLog (ManagerLog, RunLog),
     FlowWriter,
     Position (..),
@@ -157,6 +161,9 @@ import Agentic.Runtime
     flowSha256,
     flowTextField,
     flowWriterBytes,
+    flowWriterSeals,
+    flowWriterSegments,
+    pruneFlowSegment,
     isFlowSha256,
     maxFrameBytes,
     noAbout,
@@ -167,6 +174,7 @@ import Agentic.Runtime
     schemaName,
   )
 import Control.Concurrent.MVar (MVar, modifyMVar, newMVar, withMVar)
+import Control.Concurrent.STM (STM)
 import Control.Exception (SomeAsyncException, SomeException, bracket, displayException, fromException, throwIO, try)
 import Control.Monad (unless, when)
 import Data.Aeson (Value (..), object, toJSON, (.=))
@@ -177,6 +185,7 @@ import qualified Data.ByteString as BS
 import Data.Char (isAscii, isAlphaNum)
 import Data.Foldable (toList)
 import Data.Int (Int64)
+import Data.Word (Word64)
 import Data.List (nub)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
@@ -316,6 +325,24 @@ closeManagerFlow flow = withMVar (managerLock flow) $ \_ -> either (const (pure 
 -- files, or 'Nothing' when the log could not be opened.
 managerFlowBytes :: ManagerFlow -> IO (Maybe Integer)
 managerFlowBytes flow = withMVar (managerLock flow) $ \_ -> either (const (pure Nothing)) (fmap Just . flowWriterBytes) (managerWriter flow)
+
+-- | The sealed segments of the log, oldest first, or none when the log could
+-- not be opened. The writer lock is taken and released.
+managerFlowSegments :: ManagerFlow -> IO [FlowSegment]
+managerFlowSegments flow = withMVar (managerLock flow) $ \_ -> either (const (pure [])) flowWriterSegments (managerWriter flow)
+
+-- | The number of seals of the log in this lifetime, which the Store pruner
+-- watches. A log that could not be opened never seals.
+managerFlowSeals :: ManagerFlow -> STM Word64
+managerFlowSeals flow = either (const (pure 0)) flowWriterSeals (managerWriter flow)
+
+-- | Remove the oldest sealed segment of the log under the writer lock when it
+-- starts at the given position, it is not the newest sealed segment and every
+-- ask in it has a reply, as 'pruneFlowSegment' states. The caller holds the
+-- file slot, the configuration and the database, and it has checked that no
+-- live work needs the records of the segment.
+pruneManagerFlowSegment :: ManagerFlow -> Word64 -> IO Bool
+pruneManagerFlowSegment flow start = withMVar (managerLock flow) $ \_ -> either (const (pure False)) (`pruneFlowSegment` start) (managerWriter flow)
 
 -- | The configured @globalMutationLedgerBytes@ with which the log of the
 -- lifetime was opened. A caller that holds no configuration uses it as the
@@ -957,15 +984,15 @@ readManagerLog path =
     let name = takeFileName path
         stream = T.pack (dropExtension name)
     (floor', entries, torn) <- readFlowLogAt ManagerLog root (Just (drop 1 (managerFlowSealed stream))) [name] (drop 1 (managerFlowClaims stream))
-    let (decoded, values) = decodeManagerEntries entries
+    let (decoded, values) = decodeManagerEntries floor' entries
     pure (ManagerLogReport path decoded values torn floor')
 
-decodeManagerEntries :: [FlowEntry] -> ([FlowEntry], Map Position ManagerValue)
-decodeManagerEntries = go Map.empty []
+decodeManagerEntries :: Position -> [FlowEntry] -> ([FlowEntry], Map Position ManagerValue)
+decodeManagerEntries floor' = go Map.empty []
   where
     go values done [] = (reverse done, values)
     go values done (entry : rest) = case (entryRecord entry, entryContent entry) of
-      (Just record, Just value) -> case decodeManagerBody values record value of
+      (Just record, Just value) -> case decodeManagerBody floor' values record value of
         Right Nothing -> go values (entry : done) rest
         Right (Just decoded) -> go (Map.insert (entryPosition entry) decoded values) (entry : done) rest
         Left why ->
@@ -973,8 +1000,12 @@ decodeManagerEntries = go Map.empty []
            in go values (failed : done) rest
       _ -> go values (entry : done) rest
 
-decodeManagerBody :: Map Position ManagerValue -> Record -> Value -> Either Text (Maybe ManagerValue)
-decodeManagerBody values record value = case recSchema record of
+-- | Decode the body of a manager record. A receipt decodes with the receipt
+-- codec of the command that it answers. A receipt whose command lies below the
+-- floor, in a pruned segment, decodes as a command receipt of the command that
+-- it names or else as a local administration receipt.
+decodeManagerBody :: Position -> Map Position ManagerValue -> Record -> Value -> Either Text (Maybe ManagerValue)
+decodeManagerBody floor' values record value = case recSchema record of
   FlowCommand
     | administration -> Just . AdministrationValue <$> administrationFromFlowBody value
     | otherwise -> Just . CommandValue <$> commandFromFlowBody value
@@ -984,6 +1015,11 @@ decodeManagerBody values record value = case recSchema record of
       receipt <- receiptFromFlowBody value
       unless (Just (receiptId receipt) == aboutCommand (recAbout record)) (Left "the receipt names another command")
       pure (Just (ReceiptValue receipt))
+    Nothing
+      | Just asked <- recReplyTo record,
+        asked < floor' -> case receiptFromFlowBody value of
+          Right receipt | Just (receiptId receipt) == aboutCommand (recAbout record) -> Right (Just (ReceiptValue receipt))
+          _ -> Just . AdministrationReceiptValue <$> administrationReceiptFromFlowBody value
     _ -> Left "the receipt answers no command whose body decoded"
   FlowReview -> Just . ReviewValue <$> reviewFromFlowBody value
   FlowRelay -> Just . RelayValue <$> relayFromFlowBody value

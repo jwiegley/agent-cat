@@ -839,7 +839,7 @@ Source: fess audit /Users/johnw/Products/agent-cat-workflow-manager/implementati
 :LABELS:   ["actor-flow","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-30 Wed 00:02]
-:MODIFIED: [2026-09-30 Wed 00:02]
+:MODIFIED: [2026-09-30 Wed 11:16]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -853,6 +853,27 @@ Phase B subtask B1 documented the limit, the open refusals (fixed words oversize
 Remaining work for Phase G: add retention or pruning of the manager log (with its claim checks) that keeps lineage and never prunes remotely, and fold the recovery procedure into the WM-042 operator controls and recovery procedures.
 
 Source: acat-1dfc medium item 2; remaining-scope report 2026-09-29, section 4.
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 400,
+    "issue_id": "acat-3mgw",
+    "author": "johnw",
+    "text": "Phase B part 2 subtask C2 (first half of this issue): the manager log now seals the active file flow/<stream>.ndjson into flow/sealed/<stream>/<start>.ndjson at S = max 65536 ((L - R) div 16). Positions are global across segments, reopen rebuilds the base and the retained reply index, and recovery after a crash between the rename and the new active file is covered. readManagerLog reads all segments and reports managerLogFloor (always 0). Nothing is pruned yet, so the retention half of this issue stays open. Evidence: build, manager-command-check flow at -N8 (new segment cases), runtime-contract-test, test/flow_probe.py, doc/check-manual-members.py, the N8 journey and the tui-flow-approve-fault control all passed (logs in the private resume-20260923 evidence directory; fess report fess/b2-C2-r1.md, non-blocking).",
+    "created_at": "2026-09-30T17:47:14Z"
+  },
+  {
+    "id": 401,
+    "issue_id": "acat-3mgw",
+    "author": "johnw",
+    "text": "Phase B part 2 subtask C3 (second half of this issue): a pruner owned by the Store runs once at open and after each seal. It removes the oldest sealed segment one at a time, each under one short admission (file slot, configuration, database, then the writer leaf lock) and one read-only protection query. A segment is kept when it names a non-terminal request, a run with terminal_observed=0, the parent run of a non-terminal request, or an ask without a reply. The newest sealed segment and the active file are never removed. Pruning runs only while the newest record is older than 604800 seconds or the log with its claims exceeds (L - R) div 2, and stops at the first protected segment, so the floor is contiguous. Orphan claim files are removed at open and after each unlink, readManagerLog reports the floor, and checkReply refuses replies below it. Evidence: build, manager-command-check flow at -N8 (new byte, age, protection, claim, floor-reopen and cancel-reserve cases; a prune round of about 2 ms), manager-store-check main form at -N8, the N8 journey and the tui-flow-approve-fault control all passed (logs in the private resume-20260923 evidence directory; fess report fess/b2-C3-r1.md, non-blocking, findings filed as acat-q0iq). The pruning half is done. This issue stays open for folding the recovery procedure into the WM-042 operator controls.",
+    "created_at": "2026-09-30T18:16:25Z"
+  }
+]
+#+end_src
 
 * DONE [#D] Leastness at expectation: SqZero star has no order; IdemAdd (SqZero P M) derivable when M's accumulation is idempotent
 :PROPERTIES:
@@ -9281,6 +9302,30 @@ A2 fess finding (low). tui/src/Agentic/Tui/ServiceLane.hs lines 6-8 and 69-70 sa
 ]
 #+end_src
 
+* TODO [#D] Address fess findings of C3 manager-log pruning
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-q0iq
+:LABELS:   ["actor-flow","workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-30 Wed 11:16]
+:MODIFIED: [2026-09-30 Wed 11:16]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of the fess review of Phase B part 2 subtask C3 (manager-log pruning below a protected retained floor; report fess/b2-C3-r1.md in the private evidence directory).
+
+1. Medium, manager/src/Agentic/Manager/Store.hs withManagerLogPruner.pruneRound: any prune failure other than StoreBusy, StoreDeadline or an asynchronous exception is recorded once with recordFaultLine and stops the pruner for the rest of the lifetime. The manager keeps serving and the log grows toward L - R with no visible signal. STORAGE.md documents this, but no check covers it. Fix: report a stopped pruner as a diagnostic, or retry transient I/O failures on the next seal, and add a check for the stop path.
+2. Low, manager/test/CommandCheck.hs flowBytePruneChecks: the check "keeps at least the newest sealed segment and moves the floor" asserts a literal True (the pattern match before it does the real check), and "all (<= bound) observed" is always true because settle fails first. Fix: assert the real condition (at least two sealed starts and a first start above 0), and name the settle-based bound check for what it checks.
+3. Low, runtime/src/Agentic/Runtime/Flow.hs scanEntries: two Haddock comments in a row. Fix: delete the old two-line comment.
+4. Low, manager/src/Agentic/Manager/Store.hs segmentProtected: the rule that a named command stands for its request and run (the commands-table UNION) is not in the specification and no case exercises it. Fix: add a protected case whose segment names only a command whose request is live.
+5. Low, manager/src/Agentic/Manager/Store.hs segmentProtected: the live_requests CTE is computed over the whole requests table for each candidate. Correct and about 2 ms now, but the cost grows with the number of requests. Fix: restrict it to the named requests and to requests whose parent_run_id is a named run.
+
+Also recorded as limitations: the journey never reaches a seal, so it does not exercise pruning; the pruner uses the wall clock with no injected clock; logs of earlier streams after a restore are not pruned and no check covers that case.
+
 * DONE [#C] Kill the condemned stratum; re-point the surface at Plan; example verbatim-stable
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -9312,6 +9357,28 @@ After the Plan flagship lands: re-point Agentic/Surface.lean internals (W/ask/as
   }
 ]
 #+end_src
+
+* TODO [#D] Address fess findings of C2 manager-log segments
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-q2qm
+:LABELS:   ["actor-flow","workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-30 Wed 10:47]
+:MODIFIED: [2026-09-30 Wed 10:47]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of the fess review of Phase B part 2 subtask C2 (manager-log sealed segments; report fess/b2-C2-r1.md in the private evidence directory).
+
+1. Medium, runtime/src/Agentic/Runtime/Flow.hs sealedSegments and openFlowLog: any name in flow/sealed/<stream>/ that is not a 20-digit segment name (for example a macOS .DS_Store or an editor temporary file) makes openFlowLog raise FlowLogUndecodable, and the lifetime then refuses every ordinary command with storage-unavailable. Fix: ignore dot-files, or refuse only names that look like segment names but do not parse, and add a CommandCheck case with a stray dot-file.
+2. Low, manager/test/CommandCheck.hs flowSegmentChecks and Flow.hs sealActive: only the command receipt is tested as a reply whose own append triggers a seal. The credential receipt (Credentials.hs:100), the rollback failure reply (Store.hs:1350) and the failure paths of sealActive (failure before the rename leaves the writer unchanged, failure after it breaks the writer) are not tested. Fix: add a fault-injection case and optionally a credential-receipt seal case.
+3. Low, Flow.hs readFlowLogAt readSegment: when the cumulative maxFlowLogBytes bound runs out, the reader reports a truncated sealed segment as "does not end with a newline". Fix: report a size-bound error when the bound truncated the segment.
+4. Low, manager/test/service_http.py (flow/*.ndjson glob), cli/test/ManagerApprovalProbe.hs:720, manager/test/AdmissionCheck.hs:1708: these readers look only at the active file. This is correct today because the journey never seals at 16 MiB (S = 917504), but a run that seals would count fewer records. Fix: record the assumption, or read flow/sealed/<stream>/ in start order as well.
+5. Low, Flow.hs appendViaWith: if the line write fails after a successful seal, the handle of the new active file is left to its finalizer. Fix: close the new handle before the writer is marked broken.
 
 * TODO [#D] Rename the TUI fault-status wording check
 :PROPERTIES:

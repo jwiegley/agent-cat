@@ -154,14 +154,26 @@ synchronizes both directories, creates a new active file and takes its device
 and inode for the path check. A failure before the rename leaves the writer as
 it was, and a failure after the rename breaks it. The reply-check index covers
 the sealed records, so a reply whose append seals the segment of its ask is
-accepted. The retained floor is the start of the oldest sealed segment, and
-nothing removes a segment. At open, a sealed segment without a final newline, a
+accepted. The retained floor is the start of the oldest sealed segment, or
+the base position when no segment was sealed. The writer keeps a
+`FlowSegment` for each sealed segment and for the active file: its first
+position, its record count, its bytes, the latest time of its records, the
+request, manager run and command identifiers and the claim checks that its
+records name. `flowWriterSegments` returns the sealed segments with whether an
+ask in each has no reply, and `flowWriterSeals` counts the seals of the
+writer. `pruneFlowSegment` removes the oldest sealed segment when it starts at
+a given position, it is not the newest sealed segment and every ask in it has
+a reply. Under the writer lock it unlinks the segment, moves the floor to the
+start of the next sealed segment, removes each claim-check file that no
+retained record names and synchronizes both directories. The owner of the log
+decides whether live work still needs the segment. At open, a sealed segment without a final newline, a
 name in the segment directory that is not a segment name and a segment that
 does not start after the last record of the segment before it raise
 `FlowLogUndecodable`. An absent active file, as a crash between the rename and
 the creation of the next active file leaves it, is created at the base
-position. A writer without segments, which every run log uses, has base 0 and
-never seals. `appendAskWith`,
+position. At open, a writer with segments removes each file of its claim
+directory that no record of the log names. A writer without segments, which
+every run log uses, has base 0 and never seals. `appendAskWith`,
 `appendTellWith` and `appendReplyWith` take a `FlowAppend` that can
 synchronize the descriptor after the flush and can bound the bytes of the log
 and of its distinct claim-check files. An append above that bound fails with
@@ -258,8 +270,10 @@ nothing.
 files live in a given directory, as a log of a given kind, and verifies each
 complete line as `readFlow` does. Given a segment directory, it reads the
 sealed segments in start order and then the file at the path, gives each entry
-its global position and returns the retained floor with the entries. An
-absent file at the path then holds no record. A segment directory with a name
+its global position and returns the retained floor with the entries. A
+reply that names a position below the floor names a record that a prune
+removed, and the reader does not check it. An absent file at the path then
+holds no record. A segment directory with a name
 that is not a segment name, a sealed segment without a final newline or a
 segment that does not start after the segment before it makes the read fail
 with an I/O error. It refuses a record whose schema belongs to
@@ -278,7 +292,9 @@ global position, and the report carries the retained floor as
 each manager log. It then decodes each body with the manager codec of its
 schema. A command body with an `administration` field decodes as a credential
 operation, and a receipt decodes with the receipt codec of the command that it
-answers and must name the identifier of that command. A body that does not
+answers and must name the identifier of that command. A receipt whose command
+lies below the floor decodes as a command receipt when it names the command
+identifier of its record, and otherwise as a credential receipt. A body that does not
 decode is a failure of its entry.
 
 `joinFlows` joins manager logs with run logs by identifiers that both records
