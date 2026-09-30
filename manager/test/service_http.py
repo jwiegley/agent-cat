@@ -4,6 +4,7 @@ from pathlib import Path
 import contextlib
 import hashlib
 import http.client
+import io
 import json
 import os
 import re
@@ -71,7 +72,14 @@ LIFECYCLE = "credential-lifecycle"
 lifecycle = len(sys.argv) == 6 and sys.argv[5] == LIFECYCLE
 mixed = len(sys.argv) == 6 and sys.argv[5] in ("mixed", "mixed-confirm", "tui-approval", "tui-consent-control", APPROVE_FAULT, LIFECYCLE) + JOURNEYS
 confirm_uncertain = mixed and sys.argv[5] == "mixed-confirm"
-assert len(sys.argv) == 5 or mixed
+# The boundary mode checks WM-024 through the running protected manager with
+# raw socket and ssl connections: plaintext and TLS 1.2 refusal, request
+# framing, Host, path, header, body, CORS and slow-input refusals, and the
+# connection limit. Each negative prints its own PASS line. It runs one
+# manager lifetime and does not enter the restart loop.
+BOUNDARY = "boundary"
+boundary = len(sys.argv) == 6 and sys.argv[5] == BOUNDARY
+assert len(sys.argv) == 5 or mixed or boundary
 assert not tui_approval or os.environ.get("TUI_CHECK")
 assert native in ("1", "8")
 print(f"work={work}", flush=True)
@@ -1116,6 +1124,397 @@ def credential_lifecycle():
 
 if lifecycle:
     credential_lifecycle()
+    raise SystemExit(0)
+
+
+# The fixed bytes that warp-tls 3.4.14 writes for DenyInsecure "HTTPS required"
+# before it closes a plaintext connection. Its source string continues the
+# first three header lines with twelve spaces, a backslash and the letter r
+# before each line feed, so these bytes are not a well-formed HTTP response.
+PLAINTEXT_REFUSAL = (b"HTTP/1.1 426 Upgrade Required" + b" " * 12 + b"\\r\n"
+                     b"Upgrade: TLS/1.0, HTTP/1.1" + b" " * 12 + b"\\r\n"
+                     b"Connection: Upgrade" + b" " * 12 + b"\\r\n"
+                     b"Content-Type: text/plain\r\n\r\nHTTPS required")
+ALLOWED_ORIGIN = "https://example.invalid"
+# Header names that a response may carry besides CORS headers when it holds
+# no resource state: the protected headers and the Warp transport headers.
+TRANSPORT_HEADERS = {"cache-control", "x-content-type-options", "vary", "date", "server", "content-length",
+                     "transfer-encoding"}
+
+
+class Replay:
+    """Received response bytes presented to http.client as a socket."""
+    def __init__(self, data):
+        self.data = data
+
+    def makefile(self, mode):
+        return io.BytesIO(self.data)
+
+
+def boundary_checks():
+    """WM-024 through the real TLS 1.3 manager, one PASS line per negative."""
+    host = f"127.0.0.1:{port}"
+    authorization = "Bearer " + bearer
+    responses = []
+
+    def connect(timeout=10):
+        return context.wrap_socket(socket.create_connection(("127.0.0.1", port), timeout=timeout),
+                                   server_hostname="127.0.0.1")
+
+    def read_response(connection, method):
+        response = http.client.HTTPResponse(connection, method=method)
+        response.begin()
+        body = response.read(2097153)
+        headers = [(name.lower(), value) for name, value in response.getheaders()]
+        return response.status, headers, body
+
+    def check(status, headers, body):
+        """Every response carries the protected headers and exposes Location
+        only on 201 and 202. A refusal is a frozen-contract problem."""
+        names = [name for name, _ in headers]
+        received = dict(headers)
+        assert received.get("cache-control") == "no-store", ("Cache-Control", status, headers)
+        assert received.get("x-content-type-options") == "nosniff", ("nosniff", status, headers)
+        assert received.get("vary") == "Origin", ("Vary", status, headers)
+        assert names.count("vary") == 1 and names.count("cache-control") == 1, ("duplicate protected header", headers)
+        assert "location" not in received or status in (201, 202), ("Location outside 201 and 202", status, headers)
+        assert not 300 <= status < 400, ("redirect", status, headers)
+        responses.append(status)
+        if status >= 400:
+            value = frozen.parse_json(body)
+            validate("Problem", value, body)
+            return value["code"]
+        return None
+
+    def raw(data, method="GET", timeout=10):
+        """Send raw request bytes over one new TLS connection and read one response."""
+        with connect(timeout) as connection:
+            connection.sendall(data)
+            status, headers, body = read_response(connection, method)
+        return status, check(status, headers, body), dict(headers), body
+
+    def compose(method, target, fields, body=b""):
+        lines = [f"{method} {target} HTTP/1.1"] + [f"{name}: {value}" for name, value in fields]
+        return ("\r\n".join(lines) + "\r\n\r\n").encode() + body
+
+    def get(target, fields=None, method="GET"):
+        base = [("Host", host), ("Authorization", authorization)] if fields is None else fields
+        return raw(compose(method, target, base), method)
+
+    def refused(result, status, code, what):
+        assert result[0] == status and (code is None or result[1] == code), (what, result[0], result[1])
+
+    environment = dict(os.environ)
+    with (work / "server-0.stdout").open("wb") as output, (work / "server-0.stderr").open("wb") as errors:
+        process = subprocess.Popen([str(runner), "--manager", "serve", "--config", str(config),
+                                    "+RTS", "-N" + native, "-RTS"], stdout=output, stderr=errors, env=environment)
+        try:
+            wait_ready(process)
+            status, capabilities, _ = request("/v1/capabilities", {"Authorization": authorization})
+            assert status == 200
+            validate("Capabilities", capabilities)
+            limit = int(capabilities["limits"]["globalConnections"])
+            assert limit == configuration["limits"]["globalConnections"]
+            refused(get("/v1/capabilities"), 200, None, "authorized control request")
+
+            # Plaintext HTTP bytes receive only the fixed DenyInsecure refusal.
+            for data in (compose("GET", "/v1/capabilities", [("Host", host), ("Authorization", authorization)]),
+                         compose("GET", "/v1/unknown", [("Host", host)]),
+                         compose("POST", "/v1/requests", [("Host", host), ("Authorization", authorization),
+                                                          ("Content-Type", "application/json"), ("Content-Length", "2")], b"{}")):
+                with socket.create_connection(("127.0.0.1", port), timeout=10) as plain:
+                    plain.sendall(data)
+                    received = bytearray()
+                    while True:
+                        chunk = plain.recv(65536)
+                        if not chunk:
+                            break
+                        received.extend(chunk)
+                        assert len(received) <= 65536
+                assert bytes(received) == PLAINTEXT_REFUSAL, ("plaintext refusal", bytes(received))
+            print("PASS boundary plaintext: three plaintext HTTP requests, one with a valid bearer, each received only the fixed",
+                  "warp-tls DenyInsecure bytes (426 Upgrade Required, text/plain \"HTTPS required\") and a close, with no",
+                  "resource state, no authentication and no bearer path", flush=True)
+
+            legacy = ssl.create_default_context(cafile=str(cert))
+            legacy.minimum_version = legacy.maximum_version = ssl.TLSVersion.TLSv1_2
+            try:
+                with legacy.wrap_socket(socket.create_connection(("127.0.0.1", port), timeout=10),
+                                        server_hostname="127.0.0.1") as connection:
+                    raise AssertionError("a TLS 1.2-only client completed a handshake " + str(connection.version()))
+            except ssl.SSLError as failure:
+                reason = failure.reason
+            print("PASS boundary TLS 1.2: a TLS 1.2-only client was refused during the handshake:", reason, flush=True)
+
+            # Host.
+            refused(raw(b"GET /v1/capabilities HTTP/1.1\r\nAuthorization: " + authorization.encode() + b"\r\n\r\n"),
+                    400, "malformed-request", "missing Host")
+            refused(get("/v1/capabilities", [("Host", "untrusted.invalid"), ("Authorization", authorization)]),
+                    400, "malformed-request", "different Host")
+            refused(get("/v1/capabilities", [("Host", "127.0.0.1:1"), ("Authorization", authorization)]),
+                    400, "malformed-request", "Host with another port")
+            refused(get("/v1/capabilities", [("Host", "127.0.0.1"), ("Authorization", authorization)]),
+                    400, "malformed-request", "Host without its port")
+            for target in (f"https://{host}/v1/capabilities", f"http://{host}/v1/capabilities",
+                           "https://untrusted.invalid/v1/capabilities"):
+                refused(get(target), 400, "malformed-request", ("absolute-form target", target))
+            refused(get("*", method="OPTIONS"), 400, "malformed-request", "asterisk-form target")
+            print("PASS boundary Host: a missing Host, a different Host, another port, a Host without its port, three",
+                  "absolute-form request targets and an asterisk-form OPTIONS target each returned 400 malformed-request",
+                  "with a valid bearer", flush=True)
+
+            # Paths.
+            outcomes = {}
+            for target in ("/v1//capabilities", "//v1/capabilities", "/v1/./capabilities", "/v1/../v1/capabilities",
+                           "/v1/%2e/capabilities", "/v1/%2E%2E/v1/capabilities", "/v1/capabilities/", "/v1/",
+                           "/v1/capabilities/.", "/./v1/capabilities"):
+                result = get(target)
+                assert result[0] in (400, 404), ("path refusal", target, result[0], result[1])
+                outcomes[target] = f"{result[0]} {result[1]}"
+            print("PASS boundary paths: empty, dot and trailing segments gave 400 or 404 and never a 3xx:", outcomes, flush=True)
+
+            # Ambient authority carriers.
+            for extra in (("Cookie", "session=not-authority"), ("Forwarded", "for=127.0.0.1"),
+                          ("X-Forwarded-For", "127.0.0.1"), ("X-Forwarded-Host", host)):
+                refused(get("/v1/capabilities", [("Host", host), ("Authorization", authorization), extra]),
+                        400, "malformed-request", extra[0])
+            for name in ("token", "access_token", "authorization", "Access_Token"):
+                refused(get("/v1/capabilities?" + name + "=" + bearer, [("Host", host)]), 400, "malformed-request", name)
+                refused(get("/v1/capabilities?" + name + "=" + bearer), 400, "malformed-request", name)
+            print("PASS boundary ambient authority: Cookie, Forwarded, X-Forwarded-For, X-Forwarded-Host and query parameters",
+                  "token, access_token, authorization and Access_Token each returned 400 malformed-request, with and without",
+                  "a bearer header", flush=True)
+
+            # Duplicate framing headers.
+            refused(get("/v1/capabilities", [("Host", host), ("Authorization", authorization), ("Authorization", authorization)]),
+                    400, "malformed-request", "duplicate Authorization")
+            refused(get("/v1/capabilities", [("Host", host), ("Host", host), ("Authorization", authorization)]),
+                    400, "malformed-request", "duplicate Host")
+            refused(get("/v1/capabilities", [("Host", host), ("Authorization", authorization),
+                                             ("Content-Length", "0"), ("Content-Length", "0")]),
+                    400, "malformed-request", "duplicate Content-Length")
+            print("PASS boundary duplicates: duplicate Authorization, Host and Content-Length each returned 400 malformed-request", flush=True)
+
+            key = capabilities["authorityEpoch"] + "." + secrets.token_urlsafe(16)
+            mutation = [("Host", host), ("Authorization", authorization), ("Content-Type", "application/json"),
+                        ("Idempotency-Key", key)]
+            body = b'{"workflowId":"workflow_x"}'
+            refused(raw(compose("POST", "/v1/requests", mutation + [("Transfer-Encoding", "chunked"), ("Content-Length", str(len(body)))],
+                                f"{len(body):x}\r\n".encode() + body + b"\r\n0\r\n\r\n"), "POST"),
+                    400, "malformed-request", "Transfer-Encoding with Content-Length")
+            print("PASS boundary Transfer-Encoding: Transfer-Encoding with Content-Length returned 400 malformed-request", flush=True)
+            for coding in ("gzip", "identity"):
+                refused(raw(compose("POST", "/v1/requests", mutation + [("Content-Encoding", coding), ("Content-Length", str(len(body)))],
+                                    body), "POST"), 415, "content-coding-refused", ("Content-Encoding", coding))
+            refused(get("/v1/capabilities", [("Host", host), ("Authorization", authorization), ("Content-Encoding", "gzip")]),
+                    415, "content-coding-refused", "Content-Encoding on GET")
+            print("PASS boundary Content-Encoding: gzip and identity on POST and gzip on GET each returned 415 content-coding-refused", flush=True)
+
+            duplicate = b'{"workflowId":"workflow_a","workflowId":"workflow_b"}'
+            refused(raw(compose("POST", "/v1/requests", mutation + [("Content-Length", str(len(duplicate)))], duplicate), "POST"),
+                    400, "duplicate-field", "duplicate JSON field")
+            print("PASS boundary duplicate field: a JSON body with a repeated member returned 400 duplicate-field", flush=True)
+
+            # The strict decoder checks members in order, so a repeated member
+            # after the nested one is reached only when the nesting is admitted.
+            def nested(depth):
+                return b'{"extra":' + b"[" * (depth - 1) + b"]" * (depth - 1) + b',"extra":1}'
+            deep = raw(compose("POST", "/v1/requests", mutation + [("Content-Length", str(len(nested(65))))], nested(65)), "POST")
+            refused(deep, 400, "malformed-request", "JSON nesting of depth 65")
+            shallow = raw(compose("POST", "/v1/requests", mutation + [("Content-Length", str(len(nested(64))))], nested(64)), "POST")
+            refused(shallow, 400, "duplicate-field", "JSON nesting of depth 64")
+            print("PASS boundary nesting: JSON nesting of depth 65 returned 400 malformed-request, while the same body at depth",
+                  "64 passed the nesting check and reached its repeated member, which returned 400 duplicate-field", flush=True)
+
+            # A declared body above 2 MiB refuses before the body is read.
+            started = time.monotonic()
+            refused(raw(compose("POST", "/v1/requests", mutation + [("Content-Length", str(2097153))]), "POST", timeout=10),
+                    413, "size-limit", "declared body above 2 MiB")
+            elapsed = time.monotonic() - started
+            assert elapsed < 5, ("declared body refusal waited for the body", elapsed)
+            print(f"PASS boundary body limit: Content-Length 2097153 with no body bytes returned 413 size-limit after {elapsed:.2f} s,",
+                  "before any body byte was sent", flush=True)
+
+            # Header limits.
+            refused(get("/v1/capabilities", [("Host", host), ("Authorization", authorization), ("X-Pad", "a" * 16500)]),
+                    400, "malformed-request", "headers above 16 KiB")
+            fields = [("Host", host), ("Authorization", authorization)]
+            hundred = fields + [(f"X-Field-{index}", "v") for index in range(100 - len(fields))]
+            refused(get("/v1/capabilities", hundred), 200, None, "exactly 100 header fields")
+            over = hundred + [("X-Field-extra", "v")]
+            many = get("/v1/capabilities", over)
+            refused(many, 413, "size-limit", "101 header fields")
+            print("PASS boundary headers: a 16.5 KiB header block returned 400 malformed-request; exactly 100 header fields were",
+                  "served with 200, and 101 header fields returned 413 size-limit", flush=True)
+
+            # CORS preflight and origin refusals.
+            preflight = [("Host", host), ("Origin", ALLOWED_ORIGIN), ("Access-Control-Request-Method", "GET"),
+                         ("Access-Control-Request-Headers", "authorization, if-match")]
+            status, code, headers, body = get("/v1/capabilities", preflight, method="OPTIONS")
+            assert status == 204 and not body, ("allowed preflight", status, code)
+            assert headers.get("access-control-allow-origin") == ALLOWED_ORIGIN
+            assert headers.get("access-control-allow-methods") == "GET"
+            assert headers.get("access-control-allow-headers") == "authorization, if-match"
+            extra = [name for name in headers if not name.startswith("access-control-") and name not in TRANSPORT_HEADERS]
+            assert not extra and "etag" not in headers and "content-type" not in headers, ("preflight state", headers)
+            actual = get("/v1/capabilities", [("Host", host), ("Origin", ALLOWED_ORIGIN)])
+            refused(actual, 401, "unauthenticated", "actual request without a bearer")
+            assert actual[2].get("access-control-allow-origin") == ALLOWED_ORIGIN
+            print("PASS boundary preflight: an allowed origin, method and headers without a bearer returned 204 with only",
+                  sorted(headers), "and no body; the same actual request without a bearer returned 401 unauthenticated", flush=True)
+            for name, fields in (("forbidden origin", [("Host", host), ("Origin", "https://untrusted.invalid"),
+                                                       ("Access-Control-Request-Method", "GET")]),
+                                 ("null origin", [("Host", host), ("Origin", "null"), ("Access-Control-Request-Method", "GET")]),
+                                 ("forbidden method", [("Host", host), ("Origin", ALLOWED_ORIGIN),
+                                                       ("Access-Control-Request-Method", "POST")]),
+                                 ("forbidden header", [("Host", host), ("Origin", ALLOWED_ORIGIN),
+                                                       ("Access-Control-Request-Method", "GET"),
+                                                       ("Access-Control-Request-Headers", "authorization, x-custom")]),
+                                 ("absent origin", [("Host", host), ("Access-Control-Request-Method", "GET")])):
+                result = get("/v1/capabilities", fields, method="OPTIONS")
+                refused(result, 403, "origin-refused", ("preflight", name))
+                assert not [key for key in result[2] if key.startswith("access-control-allow-")] or name in (
+                    "forbidden method", "forbidden header"), ("refused preflight grants", name, result[2])
+            for origin in ("https://untrusted.invalid", "null", "https://example.invalid:443", "http://example.invalid"):
+                result = get("/v1/capabilities", [("Host", host), ("Authorization", authorization), ("Origin", origin)])
+                refused(result, 403, "origin-refused", ("actual request origin", origin))
+                assert not [key for key in result[2] if key.startswith("access-control-")], ("refused origin exposure", origin)
+            print("PASS boundary origin: a preflight with a forbidden origin, Origin null, a forbidden method, a forbidden header",
+                  "or no origin, and an authorized request from four origins outside the allowlist, each returned 403",
+                  "origin-refused", flush=True)
+            _, _, allowed, _ = get("/v1/capabilities", [("Host", host), ("Authorization", authorization), ("Origin", ALLOWED_ORIGIN)])
+            assert allowed.get("access-control-allow-origin") == ALLOWED_ORIGIN
+            assert allowed.get("access-control-expose-headers") == "ETag, Location, Retry-After"
+            _, _, native_headers, _ = get("/v1/capabilities")
+            assert not [key for key in native_headers if key.startswith("access-control-")], native_headers
+            # A created draft is the one 201 of this mode. Its Location is exposed
+            # to the allowed origin.
+            status, catalogue, _ = request("/v1/workflows?profileId=profile_1", {"Authorization": authorization})
+            assert status == 200
+            workflow = catalogue["items"][0]
+            create = json.dumps({"workflowId": workflow["id"], "descriptorRevision": workflow["revision"],
+                                 "profileId": workflow["profileId"], "profileRevision": workflow["profileRevision"]},
+                                separators=(",", ":")).encode()
+            key = capabilities["authorityEpoch"] + "." + secrets.token_urlsafe(16)
+            status, code, created, body = raw(compose("POST", "/v1/requests", [
+                ("Host", host), ("Authorization", authorization), ("Origin", ALLOWED_ORIGIN), ("Content-Type", "application/json"),
+                ("Idempotency-Key", key), ("Content-Length", str(len(create)))], create), "POST")
+            assert status == 201 and created.get("location") == frozen.parse_json(body)["links"]["self"], ("created draft", status, code)
+            assert created.get("access-control-expose-headers") == "ETag, Location, Retry-After"
+            assert created.get("access-control-allow-origin") == ALLOWED_ORIGIN
+            print("PASS boundary exposure: every response carried Cache-Control no-store, nosniff and Vary: Origin; ETag,",
+                  "Location and Retry-After were exposed only to the allowed origin, including the Location of a 201 draft,",
+                  f"and no response outside 201 and 202 carried Location ({len(responses)} responses checked)", flush=True)
+
+            # Slow input.
+            started = time.monotonic()
+            received = b""
+            with connect(40) as connection:
+                connection.sendall(b"GET /v1/capabilities HTTP/1.1\r\nHost: " + host.encode() + b"\r\n")
+                connection.settimeout(0.5)
+                closed = None
+                while closed is None and time.monotonic() - started < 40:
+                    try:
+                        connection.sendall(b"X")
+                    except (ConnectionError, ssl.SSLError, OSError):
+                        closed = time.monotonic() - started
+                        break
+                    try:
+                        chunk = connection.recv(65536)
+                        if not chunk:
+                            closed = time.monotonic() - started
+                        received += chunk
+                    except (TimeoutError, socket.timeout):
+                        pass
+                    except (ConnectionError, ssl.SSLError, OSError):
+                        closed = time.monotonic() - started
+            assert closed is not None and 14 <= closed <= 35, ("trickled headers", closed)
+            assert received == b"", ("trickled headers received a response", received[:200])
+            print(f"PASS boundary slow headers: headers trickled one byte every 0.5 s were closed after {closed:.1f} s with no",
+                  "response bytes", flush=True)
+            key = capabilities["authorityEpoch"] + "." + secrets.token_urlsafe(16)
+            slow_fields = [("Host", host), ("Authorization", authorization), ("Content-Type", "application/json"),
+                           ("Idempotency-Key", key), ("Content-Length", "200")]
+            started = time.monotonic()
+            with connect(40) as connection:
+                connection.sendall(compose("POST", "/v1/requests", slow_fields))
+                connection.settimeout(0.5)
+                answered = None
+                reply = bytearray()
+                ended = None
+                while answered is None and time.monotonic() - started < 40:
+                    try:
+                        connection.sendall(b" ")
+                    except (ConnectionError, ssl.SSLError, OSError) as failure:
+                        ended = (time.monotonic() - started, repr(failure))
+                        break
+                    # Application data only. The ssl module consumes the TLS 1.3
+                    # session tickets that make the raw socket readable at once.
+                    try:
+                        chunk = connection.recv(65536)
+                    except (TimeoutError, socket.timeout):
+                        continue
+                    answered = time.monotonic() - started
+                    reply.extend(chunk)
+                assert answered is not None and reply, ("trickled body received no response", answered, ended)
+                connection.settimeout(10)
+                while True:
+                    try:
+                        chunk = connection.recv(65536)
+                    except (ConnectionError, ssl.SSLError):
+                        break
+                    if not chunk:
+                        break
+                    reply.extend(chunk)
+                    assert len(reply) <= 1048576
+            status, headers, body = read_response(Replay(bytes(reply)), "POST")
+            code = check(status, headers, body)
+            assert status == 400 and code == "malformed-request" and 14 <= answered <= 20, ("trickled body", status, code, answered)
+            print(f"PASS boundary slow body: a JSON body trickled one byte every 0.5 s returned 400 malformed-request after",
+                  f"{answered:.1f} s", flush=True)
+
+            # Connection limit.
+            held = [connect() for _ in range(limit)]
+            waiting = context.wrap_socket(socket.create_connection(("127.0.0.1", port), timeout=10),
+                                          server_hostname="127.0.0.1", do_handshake_on_connect=False)
+            try:
+                waiting.settimeout(3)
+                try:
+                    waiting.do_handshake()
+                    raise AssertionError("a connection above the limit was served while the limit was held")
+                except (TimeoutError, socket.timeout):
+                    pass
+                held.pop().close()
+                waiting.settimeout(10)
+                released = time.monotonic()
+                waiting.do_handshake()
+                waiting.sendall(compose("GET", "/v1/capabilities", [("Host", host), ("Authorization", authorization)]))
+                status, headers, body = read_response(waiting, "GET")
+                check(status, headers, body)
+                assert status == 200, ("released connection", status)
+                served = time.monotonic() - released
+            finally:
+                waiting.close()
+                for connection in held:
+                    connection.close()
+            refused(get("/v1/capabilities"), 200, None, "authorized request after the connection limit")
+            print(f"PASS boundary connections: with {limit} idle TLS connections held, one more connection received no",
+                  f"handshake for 3 s; it completed and was served 200 {served:.2f} s after one held connection was released,",
+                  "and a new authorized request then returned 200", flush=True)
+        finally:
+            if process.poll() is None:
+                process.terminate()
+            process.wait(timeout=25)
+            (work / "server-0.exit").write_text(str(process.returncode) + "\n")
+    assert not (work / "admin/admin.sock").exists(), "joined original local administration leaves no socket"
+    for channel in ("stdout", "stderr"):
+        assert bearer.encode() not in (work / f"server-0.{channel}").read_bytes()
+    print("PASS boundary: every WM-024 negative held against the running TLS 1.3 manager, and the manager shut down",
+          "with its original joins", flush=True)
+
+
+if boundary:
+    boundary_checks()
     raise SystemExit(0)
 
 

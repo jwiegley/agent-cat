@@ -2426,6 +2426,27 @@ Shared dependency acat-j79f remains in progress with no frozen schemas. Parent o
 ]
 #+end_src
 
+* TODO [#D] B9 protected HTTP boundary audit follow-ups (WM-024)
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-8tzp
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-30 Wed 03:15]
+:MODIFIED: [2026-09-30 Wed 03:15]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking audit findings from B9 (WM-024 protected HTTP boundary, fess report resume-20260923/fess/b1-B9-r1.md).
+
+1. (medium, needs operator authorization) The plaintext refusal is malformed HTTP. A string-gap defect in warp-tls 3.4.14 DenyInsecure output writes twelve spaces, a backslash and the letter r before the line feed on three header lines. service_http.py PLAINTEXT_REFUSAL pins these bytes and doc/api/README.md states them. The security property holds: the refusal carries no resource state and no bearer path. Correcting the bytes needs a warp-tls dependency patch, which only the operator can authorize. If the patch lands, update PLAINTEXT_REFUSAL and the README paragraph.
+2. (low) service_http.py boundary TLS 1.2 check passes on any ssl.SSLError. It captures failure.reason but never asserts it, so a certificate or hostname failure would also pass. Assert that the reason contains PROTOCOL_VERSION or WRONG_VERSION.
+3. (low) doc/api/README.md refusal table gives 413 size-limit for header fields above 16384 bytes. Warp setMaxTotalHeaderLength 16384 refuses such a header block with 400 before the application runs, so the byte clause in Transport.hs cannot be reached. Remove the byte clause from the 413 row, or state that the HTTP server refuses such headers first with 400.
+4. (low) If a client sends no body byte at all, the 15-second Warp connection timeout and the 15-second JSON read bound end at the same moment, so the client gets either 400 malformed-request or a closed connection. The documentation states this, but no test covers it. Accept as documented, or make the body read bound shorter than the Warp timeout so the 400 always arrives first.
+
 * TODO [#D] Decide the TUI review notice row reservation
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -15389,7 +15410,7 @@ callers. Worker environments contain no manager credential material.
 :LABELS:   ["p5","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-09 Wed 22:34]
+:MODIFIED: [2026-09-30 Wed 03:15]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-024
 :SOURCE_REPO: agent-cat
@@ -15484,6 +15505,20 @@ leak private errors. There is no plaintext bearer development exception.
     "created_by": "johnw",
     "metadata": "{}",
     "thread_id": ""
+  }
+]
+#+end_src
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 382,
+    "issue_id": "acat-wm-024-28bb",
+    "author": "johnw",
+    "text": "B9 evidence (resume-20260923/B/B9/impl-r1, fess/b1-B9-r1.md). Transport.hs: Origin outside httpsAllowedOrigins, Origin null and a preflight with no origin or a forbidden origin, method or header now return 403 origin-refused; any Content-Encoding returns 415 content-coding-refused, as doc/api/README.md and openapi.yaml state. Warp.setNoParsePath True makes absolute-form and asterisk-form targets return 400 malformed-request (they were served 200). readJsonRequest calls Warp.pauseTimeout after each body read so a trickled JSON body returns 400 malformed-request under its own 15-second bound. problem carries Vary: Origin. service_http.py mode boundary passed at N8 with 19 PASS lines against the real TLS 1.3 manager: plaintext gets only the fixed warp-tls DenyInsecure refusal, TLS 1.2 refused, Host and target form 400, paths 400/404 with no 3xx, ambient authority 400, duplicate headers 400, TE with CL 400, Content-Encoding 415, duplicate-field, depth 65 400, declared 2 MiB+1 body 413 before any body byte, 16.5 KiB headers 400 malformed-request, 100 fields 200 and 101 fields 413 size-limit, preflight 204 with CORS only and 401 without a bearer, 403 origin-refused cases, protected headers on 57 responses and exposure only to an allowed origin, slow headers closed without response, trickled body 400, connection limit held and released. Also passed: Werror build of agentic-run and routing-fixed-point-probe, base mode at N8, manager/ci/contract.sh, JOURNEY-ONCE at N8, make -C doc check. Fess not blocking; findings filed as acat-8tzp (medium warp-tls plaintext bytes needs operator authorization). The package stays open for the closeout review.",
+    "created_at": "2026-09-30T10:15:10Z"
   }
 ]
 #+end_src

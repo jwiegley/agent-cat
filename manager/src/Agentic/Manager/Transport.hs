@@ -66,9 +66,12 @@ runHttps configuration limits application = do
       fork :: ((forall a. IO a -> IO a) -> IO ()) -> IO ()
       fork worker = void (forkIOWithUnmask (\restore -> worker restore `finally` signalQSem slots))
         `onException` signalQSem slots
+      -- No path parsing keeps an absolute-form target intact, so the exact
+      -- path check of 'authenticated' refuses it.
       settings = Warp.setAccept receive $ Warp.setFork fork $
         Warp.setMaxTotalHeaderLength 16384 $ Warp.setMaxBuilderResponseBufferSize 16384 $
         Warp.setMaximumBodyFlush (Just 0) $ Warp.setHTTP2Disabled $ Warp.setProxyProtocolNone $
+        Warp.setNoParsePath True $
         Warp.setTimeout 15 $ Warp.setGracefulShutdownTimeout (Just 15) $
         Warp.setOnException (\_ _ -> pure ()) $
         Warp.setOnExceptionResponse (\_ -> problem "/v1/capabilities" 400 "malformed-request") Warp.defaultSettings
@@ -144,10 +147,10 @@ authenticated configuration store methods application request respond = do
         (reject 400 "malformed-request")
       when (any (\(name,_) -> name == "Cookie" || name == "Forwarded" ||
         "x-forwarded-" `BS.isPrefixOf` CI.foldedCase name) headers) (reject 400 "malformed-request")
-      when (lookup "Content-Encoding" headers /= Nothing) (reject 415 "unsupported-media-type")
+      when (lookup "Content-Encoding" headers /= Nothing) (reject 415 "content-coding-refused")
       when (lookup "Transfer-Encoding" headers /= Nothing && lookup "Content-Length" headers /= Nothing)
         (reject 400 "malformed-request")
-      unless allowedOrigin (reject 403 "insufficient-scope")
+      unless allowedOrigin (reject 403 "origin-refused")
       let bodyLimit = if path == ["v1","captures"] then 67108864 else 2097152
       case Wai.requestBodyLength request of
         Wai.KnownLength size | size > bodyLimit -> reject 413 "size-limit"
@@ -164,10 +167,10 @@ authenticated configuration store methods application request respond = do
           else send (Wai.responseLBS HTTP.status405 [("Allow",BC.intercalate ", " ("OPTIONS":allowedMethods))] "")
     preflight send = do
       requested <- maybe (reject 400 "malformed-request") pure (lookup "Access-Control-Request-Method" headers)
-      unless (origin /= Nothing && requested `elem` allowedMethods) (reject 403 "insufficient-scope")
+      unless (origin /= Nothing && requested `elem` allowedMethods) (reject 403 "origin-refused")
       let permitted = ["authorization","content-type","if-match","idempotency-key","last-event-id"]
           requestedHeaders = maybe [] (map (BC.map toLower . trim) . BC.split ',') (lookup "Access-Control-Request-Headers" headers)
-      unless (all (`elem` permitted) requestedHeaders) (reject 403 "insufficient-scope")
+      unless (all (`elem` permitted) requestedHeaders) (reject 403 "origin-refused")
       send (Wai.responseLBS HTTP.status204
         [("Access-Control-Allow-Methods",requested),
          ("Access-Control-Allow-Headers",BC.intercalate ", " requestedHeaders)] "")
@@ -198,15 +201,20 @@ readJsonRequest request = do
     Right _ -> pure bytes
   where
     readBounded limit = go limit []
+    -- The first body read resumes the 15-second Warp connection timeout.
+    -- After each read, the timeout pauses again, so the 15-second read bound
+    -- above ends a trickled body with a 400 response rather than a close.
     go remaining chunks = do
       chunk <- Wai.getRequestBodyChunk request
+      Warp.pauseTimeout request
       if BS.null chunk then pure (BS.concat (reverse chunks)) else do
         when (BS.length chunk > remaining) (throwIO SizeLimit)
         go (remaining - BS.length chunk) (chunk:chunks)
 
 problem :: Text -> Int -> Text -> Wai.Response
 problem instanceURI status code = Wai.responseLBS (HTTP.mkStatus status "Request refused")
-  ([("Content-Type","application/problem+json"),("Cache-Control","no-store"),("X-Content-Type-Options","nosniff")]
+  ([("Content-Type","application/problem+json"),("Cache-Control","no-store"),("X-Content-Type-Options","nosniff"),
+    ("Vary","Origin")]
     <> if status == 401 then [("WWW-Authenticate","Bearer")] else [])
   (Builder.toLazyByteString (Builder.byteString (encoded (object
     ["type" .= ("urn:agent-cat:manager:problem:" <> code), "title" .= ("Request refused" :: Text),
