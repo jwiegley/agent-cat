@@ -86,9 +86,8 @@ admitted action. A lost reply remains uncertain.
 
 Live revocation uses the existing SQL operation and authorization notification
 while response configuration/file scopes remain held. It does not signal the
-original worker registrations. Foreground service startup, protected HTTP, page
-and cursor enforcement, and SSE remain unimplemented integration obligations.
-This channel does not establish full WM-023 acceptance.
+original worker registrations. The section "Credential lifecycle through the
+serving manager" states what an HTTPS client of a serving manager observes.
 
 Issuance creates a registered client and a credential using 32 cryptographically
 random bytes encoded as 64 lowercase hexadecimal ASCII bytes without a newline.
@@ -158,10 +157,50 @@ client changes, quiet expiry, and revocation therefore compose with the original
 file and configuration owners without a second reader charge or reentrant guard.
 Storage contention remains distinct from credential revocation.
 
-Transport, page, cursor, and SSE owners must check the supplied view before
-releasing protected data and observe invalidations during streaming. These
-primitives do not recall emitted bytes or claim implemented streaming closure
-or page enforcement.
+Transport, page, cursor, and SSE owners check the supplied view before they
+release protected data. An SSE response revalidates its view before each write
+and ends when the check fails. No owner recalls bytes that it has already sent.
+
+## Credential lifecycle through the serving manager
+
+A serving manager applies credential administration to live HTTPS traffic as
+follows. The `credential-lifecycle` mode of `manager/test/service_http.py`
+checks each statement through the administration socket and the real HTTPS
+listener, with a live mixed-controls run.
+
+- Rotation keeps the registered client, label, scopes, and profiles. During
+  the overlap the predecessor and the new credential both authenticate. From
+  the rotation cutoff, sixty seconds after the rotation or earlier when the
+  declared expiry of the predecessor comes first, the predecessor receives
+  401 `unauthenticated` on every route, including the event stream, receipt
+  reads, downloads, and POST, even though its declared expiry is still in the
+  future. `list-credentials` then reports it as
+  `revoked` with its declared expiry unchanged. The listing does not report the
+  cutoff time.
+- The idempotency ledger belongs to the registered client. When the new
+  credential repeats an exact earlier attempt of the predecessor, with the
+  same method, URI, key, body, media type, and precondition, the manager
+  returns the retained receipt and executes nothing again.
+- Revocation takes effect at the next authorization check. After a
+  revocation, the credential receives 401 for the continuation of a page set
+  that it has already started, for a command receipt, for a run outputs page,
+  for an artifact download, and for a new POST. Its open SSE response ends.
+  Revocation does not cancel accepted work. The worker of a live run stays
+  owned, and another credential with `control` on the profile can answer its
+  pending question and observe terminal success.
+- A page token binds the client and the authorization view. Another client
+  that presents the token receives 410 `view-expired`, and the page set stays
+  available to its own client.
+- Scopes limit each operation. A credential with only `observe` reads runs,
+  controls, and outputs, and receives 403 `insufficient-scope` for a POST and
+  for the receipt of a command whose operation needs another scope. No local
+  operation changes the scopes or profiles of an existing credential. The
+  administration command refuses `reload-profiles` with `state-conflict`
+  before it reaches any manager, offline or serving.
+- The manager does not write a bearer to its output, its manager log, a run
+  store, or the database. The database keeps only the SHA-256 verifier. A
+  worker receives only the explicit environment of its profile, not the
+  ambient environment of the manager process.
 
 ## Mutation transaction
 

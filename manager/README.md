@@ -208,8 +208,9 @@ worker authority. The local credential operations described in
 [COMMANDS.md](COMMANDS.md) use that original Store through trusted embedding,
 the exclusive offline stdin CLI, or its configured same-user local channel.
 `withLocalAdministration` scopes that channel around an existing Store owner's
-action. It creates no HTTP listener, and foreground service startup remains
-unimplemented.
+action. It creates no HTTP listener. `RUNNER --manager serve` starts the
+foreground HTTPS service and serves this channel for the lifetime of that
+service.
 
 `manager/ci/store.sh` runs the real library composition and native SQLite tests
 at one and eight runtime capabilities. Storage mechanisms do not establish the

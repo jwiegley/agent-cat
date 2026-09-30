@@ -60,7 +60,16 @@ JOURNEY_ANSWER = b"true" if len(sys.argv) == 6 and sys.argv[5] == "tui-journey-b
 # the detail-view consent message. It shows only that this assertion detects
 # an approval. It does not break an approval guard.
 consent_control = len(sys.argv) == 6 and sys.argv[5] == "tui-consent-control"
-mixed = len(sys.argv) == 6 and sys.argv[5] in ("mixed", "mixed-confirm", "tui-approval", "tui-consent-control", APPROVE_FAULT) + JOURNEYS
+# The credential-lifecycle mode checks WM-023 section 7 through the running
+# protected manager with the existing local administration operations only:
+# rotation overlap and cutoff, a receipt replay across rotation, revocation
+# during retained responses with the live run completed by a second
+# credential, the scope boundary, and the absence of bearer and marker bytes
+# from every fixture file. Each numbered step prints its own PASS line. It
+# runs one manager lifetime and does not enter the restart loop.
+LIFECYCLE = "credential-lifecycle"
+lifecycle = len(sys.argv) == 6 and sys.argv[5] == LIFECYCLE
+mixed = len(sys.argv) == 6 and sys.argv[5] in ("mixed", "mixed-confirm", "tui-approval", "tui-consent-control", APPROVE_FAULT, LIFECYCLE) + JOURNEYS
 confirm_uncertain = mixed and sys.argv[5] == "mixed-confirm"
 assert len(sys.argv) == 5 or mixed
 assert not tui_approval or os.environ.get("TUI_CHECK")
@@ -123,12 +132,18 @@ config.write_text(json.dumps(configuration))
 config.chmod(0o600)
 
 
-def administration(payload):
+def administration(payload, refused=None):
+    """One local administration exchange. It must succeed, or, when refused
+    names an error code, it must refuse with exactly that code."""
     completed = subprocess.run([str(runner), "--manager", "admin", "--config", str(config)],
                                input=json.dumps(payload).encode(), stdout=subprocess.PIPE,
                                stderr=subprocess.PIPE, timeout=20)
     value = frozen.parse_json(completed.stdout)
     validate("LocalAdminResponse", value)
+    if refused is not None:
+        assert not completed.stderr and completed.returncode == 1 and not value["ok"] and value["error"]["code"] == refused, (
+            "local administration did not refuse as expected", completed.returncode, value.get("error", {}).get("code"))
+        return value
     assert not completed.stderr and completed.returncode == 0 and value["ok"], (
         "local administration refused", completed.returncode, value.get("error", {}).get("code"))
     return value
@@ -291,10 +306,14 @@ def key_notice(session, key, after, failure):
     raise AssertionError(failure)
 
 
-def run_mixed(created, workflow, capabilities, authorized):
-    text = "Café λ — explicit false.\nSecond line."
-    request_uri = created["links"]["self"]
-    receipts = []
+MIXED_TEXT = "Café λ — explicit false.\nSecond line."
+
+
+def mixed_client(capabilities, authorized, attempts=None):
+    """The read and mutation steps of the mixed workflow, bound to one
+    credential. When attempts is a list, each mutation appends its operation,
+    URI, exact headers, exact payload and receipt URI, so a later step can
+    repeat the exact attempt."""
 
     def observed(path, schema):
         deadline = time.monotonic() + 5
@@ -341,7 +360,8 @@ def run_mixed(created, workflow, capabilities, authorized):
             status, receipt, _, _ = exchange(path, headers, method="POST", payload=payload)
         assert status == 202, ("mutation refused or uncertain", body["operation"], status, receipt.get("code"))
         validate("CommandReceipt", receipt)
-        receipts.append(receipt["links"]["self"])
+        if attempts is not None:
+            attempts.append((body["operation"], path, headers, payload, receipt["links"]["self"]))
         if body["operation"] == "approve":
             # Runtime association is independent evidence. The approval receipt
             # remains dispatch-attempted and is not reclassified as delivered.
@@ -349,7 +369,17 @@ def run_mixed(created, workflow, capabilities, authorized):
         value, _, _ = wait_for(receipt["links"]["self"], "CommandReceipt",
             lambda value: value["state"] in ("effect-observed", "refused", "unresolved"))
         assert value["state"] == "effect-observed", ("mutation not effected", body["operation"], value["state"])
+        return receipt["links"]["self"]
 
+    return observed, wait_for, mutate
+
+
+def approve_mixed(created, workflow, client):
+    """Supply the literal input, enqueue, check the exact review and approve
+    it. Returns the approval receipt URI and the associated run."""
+    observed, wait_for, mutate = client
+    text = MIXED_TEXT
+    request_uri = created["links"]["self"]
     for declaration in workflow["inputs"]:
         current, tag, _ = observed(request_uri, "Request")
         mutate(request_uri, {"operation": "set-input", "input": {"name": declaration["name"],
@@ -376,18 +406,29 @@ def run_mixed(created, workflow, capabilities, authorized):
     approval = mutate("/v1/preparations/" + preparation["id"],
            {"operation": "approve", **{key: preparation[key] for key in selectors}}, tag)
     current, _, _ = wait_for(request_uri, "Request", lambda value: value["runId"] is not None)
-    run = current["runId"]
+    return approval, current["runId"]
+
+
+def drive_mixed(run, client, stop_at_question=False, overview=True):
+    """Act on each decision head of the run through one credential. The
+    question receives typed false and the recovery receives retry. With
+    stop_at_question, return the pending question head without answering it,
+    so that the worker stays live. Otherwise return at terminal success.
+    With overview, each head is also found in the overview snapshot, which
+    must then fit one page. Returns the question head, or None, and the
+    counts of answers and retries that this call sent."""
+    observed, _, mutate = client
     base = "/v1/runs/" + run
-    answered = recovered = False
+    answered = recovered = 0
     deadline = time.monotonic() + 50
     while True:
         snapshot, _, raw = observed(base + "/snapshot", "RunSnapshot")
         assert snapshot["page"]["next"] is None
         runtime = snapshot["runtime"]
         if runtime is not None and runtime["status"] in ("succeeded", "failed", "cancelled"):
-            assert runtime["status"] == "succeeded" and answered and recovered
+            assert runtime["status"] == "succeeded" and not stop_at_question, ("mixed workflow terminal status", runtime["status"])
             (work / "terminal-snapshot.json").write_bytes(raw)
-            break
+            return None, answered, recovered
         assert time.monotonic() < deadline, "mixed workflow terminal deadline"
         control, control_tag, _ = observed(base + "/control", "RunControl")
         head = control["decisionHeadId"]
@@ -396,22 +437,32 @@ def run_mixed(created, workflow, capabilities, authorized):
             continue
         decision, decision_tag, _ = observed("/v1/decisions/" + head, "Decision")
         assert decision["position"] == 0 and decision["state"] == "pending" and decision["runId"] == run
-        overview, _, raw = observed("/v1/snapshot", "OverviewSnapshot")
-        assert any(item["kind"] == "run" and item["run"]["id"] == run for item in overview["items"])
-        assert any(item["kind"] == "decision" and item["decision"]["id"] == head for item in overview["items"])
-        (work / ("decision-" + decision["kind"] + ".json")).write_bytes(raw)
+        if overview:
+            overview_value, _, raw = observed("/v1/snapshot", "OverviewSnapshot")
+            assert any(item["kind"] == "run" and item["run"]["id"] == run for item in overview_value["items"])
+            assert any(item["kind"] == "decision" and item["decision"]["id"] == head for item in overview_value["items"])
+            (work / ("decision-" + decision["kind"] + ".json")).write_bytes(raw)
         body = {"occurrenceId": decision["address"]["occurrenceId"], "generation": decision["generation"]}
         if decision["kind"] == "question":
             assert decision["question"]["code"] == "flag"
+            if stop_at_question:
+                return head, answered, recovered
             body.update(operation="answer", value=False)
             mutate("/v1/decisions/" + head, body, decision_tag)
-            answered = True
+            answered += 1
         else:
             assert any(offer["operation"] == "retry" and offer["generation"] == decision["generation"]
                        and offer["address"] == decision["address"] for offer in control["offers"])
             body.update(operation="retry")
             mutate(base + "/control", body, control_tag)
-            recovered = True
+            recovered += 1
+
+
+def verified_download(run, client, authorized):
+    """Read the verified result of a terminal run and download its exact bytes.
+    Returns the artifact metadata."""
+    observed = client[0]
+    base = "/v1/runs/" + run
     value, _, raw = observed(base, "Run")
     (work / "terminal-run.json").write_bytes(raw)
     outputs, _, _ = observed(base + "/outputs", "OutputPage")
@@ -431,6 +482,17 @@ def run_mixed(created, workflow, capabilities, authorized):
         (work / "verified-result.json").write_bytes(actual)
     finally:
         connection.close()
+    return artifact
+
+
+def run_mixed(created, workflow, capabilities, authorized):
+    client = mixed_client(capabilities, authorized)
+    observed, wait_for, _ = client
+    request_uri = created["links"]["self"]
+    approval, run = approve_mixed(created, workflow, client)
+    _, answered, recovered = drive_mixed(run, client)
+    assert answered and recovered, ("mixed workflow decisions", answered, recovered)
+    verified_download(run, client, authorized)
     pending, _, raw = observed(approval, "CommandReceipt")
     assert pending["state"] == "dispatch-attempted" and pending["effect"] is None
     (work / "approval-still-pending.json").write_bytes(raw)
@@ -698,6 +760,363 @@ def approve_fault_after_shutdown(renamed_log, preparation_uri):
     assert not approvals and not relays, ("FLOW-FAULT-ASSERT a manager log holds an approve command or a relay", approvals, relays)
     print("PASS the manager recorded its 503 storage-unavailable response to the approval; the renamed manager log holds the review and",
           len(records), "records, and no approve command and no relay; no run store exists and the manager wrote no new log", flush=True)
+
+
+def wait_ready(process):
+    """Wait for HTTPS readiness of the original foreground manager process."""
+    deadline = time.monotonic() + 40
+    while True:
+        assert process.poll() is None, "foreground manager exited before HTTPS readiness"
+        try:
+            status, _, _ = request("/v1/profiles")
+            break
+        except ConnectionRefusedError:
+            assert time.monotonic() < deadline, "HTTPS readiness deadline"
+            time.sleep(0.05)
+    assert status == 401
+
+
+def descendants(root):
+    """The current descendant process IDs of root, from one process listing."""
+    listing = subprocess.run(["ps", "-Ao", "pid=,ppid="], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                             text=True, timeout=10, check=True).stdout
+    children = {}
+    for line in listing.splitlines():
+        pid, parent = map(int, line.split())
+        children.setdefault(parent, []).append(pid)
+    found, frontier = [], [root]
+    while frontier:
+        for child in children.get(frontier.pop(), []):
+            found.append(child)
+            frontier.append(child)
+    return found
+
+
+def process_environment(pid):
+    """The command and environment that ps shows for one same-user process,
+    or None when the process has exited."""
+    completed = subprocess.run(["ps", "eww", "-o", "command=", "-p", str(pid)], stdout=subprocess.PIPE,
+                               stderr=subprocess.PIPE, timeout=10)
+    return completed.stdout if completed.returncode == 0 and completed.stdout.strip() else None
+
+
+def open_stream(path, authorized):
+    """Open one SSE response and read its first complete block, which the
+    manager writes at once as an event batch or a heartbeat."""
+    deadline = time.monotonic() + 5
+    while True:
+        connection = http.client.HTTPSConnection("127.0.0.1", port, context=context, timeout=7)
+        connection.request("GET", path, headers=authorized | {"Accept": "text/event-stream"})
+        response = connection.getresponse()
+        if response.status == 200:
+            break
+        raw = response.read(1048577)
+        status = response.status
+        response.close()
+        connection.close()
+        refused = frozen.parse_json(raw)
+        validate("Problem", refused)
+        # A refused read registration owns no subscription. This is not a
+        # mutation replay or a cleanup inference.
+        assert status in (429, 503) and time.monotonic() < deadline, ("stream admission", status, refused["code"])
+        time.sleep(0.05)
+    assert response.getheader("Content-Type") == "text/event-stream"
+    block = bytearray()
+    while not block.endswith(b"\n\n"):
+        line = response.readline(16385)
+        assert line and len(block) + len(line) <= 16384, "first stream block"
+        block.extend(line)
+    return connection, response, bytes(block)
+
+
+def stream_ends(response, seconds):
+    """Whether the open stream reaches its end within the wall deadline.
+    Heartbeats and event blocks before the end are read and discarded."""
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        try:
+            line = response.readline(16385)
+        except http.client.IncompleteRead:
+            return True
+        except (ConnectionError, ssl.SSLError):
+            return True
+        if not line:
+            return True
+    return False
+
+
+def credential_lifecycle():
+    """WM-023 section 7 through the real HTTPS manager, numbered as in the
+    B8 requirement. Store-level rotation, cutoff and idempotency facts stay
+    with manager/test/CommandCheck.hs and credential_cli.py."""
+    marker = "acatambientmarker" + secrets.token_hex(16)
+    synthetic = "acatsyntheticbearer" + secrets.token_hex(24)
+    bearers = {"fixture": bearer}
+    outputs = [work / "credential"]
+
+    def issue(name, scopes):
+        output = work / ("credential-" + name)
+        value = administration({"version": 1, "operation": "issue-credential", "label": "Lifecycle " + name,
+                                "scopes": scopes, "profileIds": ["profile_1"],
+                                "expiresAt": "2999-01-01T00:00:00Z", "outputFile": str(output)})
+        outputs.append(output)
+        bearers[name] = output.read_bytes().decode("ascii")
+        return value["result"]["credential"], {"Authorization": "Bearer " + bearers[name]}
+
+    def listed():
+        values = administration({"version": 1, "operation": "list-credentials"})["result"]["credentials"]
+        return {item["credentialId"]: item for item in values}
+
+    def status_of(path, authorized, method="GET", payload=None, headers=None):
+        return request(path, authorized | (headers or {}), method=method, payload=payload)[:2]
+
+    environment = dict(os.environ, ACAT_LIFECYCLE_MARKER=marker)
+    with (work / "server-0.stdout").open("wb") as output, (work / "server-0.stderr").open("wb") as errors:
+        process = subprocess.Popen([str(runner), "--manager", "serve", "--config", str(config),
+                                    "+RTS", "-N" + native, "-RTS"], stdout=output, stderr=errors, env=environment)
+        try:
+            wait_ready(process)
+            for _ in range(3):
+                status, problem, _ = request("/v1/capabilities", {"Authorization": "Bearer " + synthetic})
+                assert status == 401 and problem["code"] == "unauthenticated", "a synthetic bearer marker must not authenticate"
+
+            # Step 1. Credentials A and B, and a live worker at the person question.
+            credential_a, a_auth = issue("a", ["observe", "submit", "control"])
+            credential_b, b_auth = issue("b", ["observe", "control"])
+            status, capabilities, raw = request("/v1/capabilities", a_auth)
+            assert status == 200 and capabilities["scopes"] == ["observe", "submit", "control"]
+            validate("Capabilities", capabilities, raw)
+            status, catalogue, raw = request("/v1/workflows?profileId=profile_1", a_auth)
+            assert status == 200
+            validate("WorkflowPage", catalogue, raw)
+            workflow = next(item for item in catalogue["items"] if item["name"] == "mixed-controls")
+            create = json.dumps({"workflowId": workflow["id"], "descriptorRevision": workflow["revision"],
+                                 "profileId": workflow["profileId"], "profileRevision": workflow["profileRevision"]},
+                                separators=(",", ":")).encode()
+
+            def create_request(authorized):
+                key = capabilities["authorityEpoch"] + "." + secrets.token_urlsafe(16)
+                status, created, raw = request("/v1/requests", authorized | {
+                    "Content-Type": "application/json", "Idempotency-Key": key}, method="POST", payload=create)
+                assert status == 201, ("request creation", status, created.get("code"))
+                validate("Request", created, raw)
+                return created
+
+            created = create_request(a_auth)
+            a_attempts = []
+            a_client = mixed_client(capabilities, a_auth, a_attempts)
+            approval, run = approve_mixed(created, workflow, a_client)
+            base = "/v1/runs/" + run
+            head, answered, recovered_by_a = drive_mixed(run, a_client, stop_at_question=True)
+            assert head is not None and answered == 0
+            control, _, _ = a_client[0](base + "/control", "RunControl")
+            assert control["supervision"] == "owned" and control["decisionHeadId"] == head
+            cursor = a_client[0]("/v1/snapshot", "OverviewSnapshot")[0]["cursor"]
+            status, value, _ = request(base + "/control", b_auth)
+            assert status == 200 and value["decisionHeadId"] == head, "credential B observes the live run"
+            # The worker environment is the explicit operator environment of the
+            # profile. The ambient marker of the manager process is the positive
+            # control that ps shows environments at all.
+            shown = process_environment(process.pid)
+            assert shown is not None and marker.encode() in shown, "ps does not show the manager environment"
+            inspected = [(pid, shown) for pid in descendants(process.pid)
+                         for shown in [process_environment(pid)] if shown is not None]
+            assert inspected, "the live run has no worker process to inspect"
+            assert not [pid for pid, shown in inspected if marker.encode() in shown], "a worker inherited the ambient manager environment"
+            workers = len(inspected)
+            print("PASS credential-lifecycle step 1: credentials A (observe, submit, control) and B (observe, control) issued through",
+                  "the administration socket; A created, enqueued and approved mixed-controls run", run,
+                  "and the worker waits live at person question", head, flush=True)
+
+            # Step 2. Rotation overlap, receipt replay across rotation, and the cutoff.
+            before = time.monotonic()
+            rotated = administration({"version": 1, "operation": "rotate-credential",
+                                      "credentialId": credential_a["credentialId"],
+                                      "expiresAt": "2999-01-01T00:00:00Z", "outputFile": str(work / "credential-a2")})
+            after = time.monotonic()
+            outputs.append(work / "credential-a2")
+            bearers["a2"] = (work / "credential-a2").read_bytes().decode("ascii")
+            a2_auth = {"Authorization": "Bearer " + bearers["a2"]}
+            credential_a2 = rotated["result"]["credential"]
+            assert rotated["result"]["previousCredentialId"] == credential_a["credentialId"]
+            metadata = listed()
+            old, new = metadata[credential_a["credentialId"]], metadata[credential_a2["credentialId"]]
+            assert old["state"] == "active" and old["expiresAt"] == "2999-01-01T00:00:00Z", ("predecessor during overlap", old)
+            assert new["state"] == "active" and new["clientId"] == old["clientId"] and new["scopes"] == old["scopes"]
+            for name, authorized in (("A", a_auth), ("A'", a2_auth)):
+                for path in ("/v1/capabilities", base + "/control", approval):
+                    status, value = status_of(path, authorized)
+                    assert status == 200, ("overlap authentication", name, path, status, value.get("code"))
+            _, enqueue_path, enqueue_headers, enqueue_payload, receipt_uri = next(item for item in a_attempts if item[0] == "enqueue")
+            status, replayed, _, _ = exchange(enqueue_path, enqueue_headers | a2_auth, method="POST", payload=enqueue_payload)
+            assert status == 202 and replayed["links"]["self"] == receipt_uri, ("rotated replay", status, replayed.get("code"))
+            validate("CommandReceipt", replayed)
+            status, original = status_of(receipt_uri, a2_auth)
+            assert status == 200 and original["id"] == replayed["id"] and original["operation"] == "enqueue"
+            # Four drafts with large literals make the overview of this client
+            # a page set of at least four pages for step 3.
+            drafts = []
+            for _ in range(4):
+                draft = create_request(a2_auth)
+                a2_client = mixed_client(capabilities, a2_auth)
+                current, tag, _ = a2_client[0](draft["links"]["self"], "Request")
+                a2_client[2](draft["links"]["self"], {"operation": "set-input", "input": {
+                    "name": workflow["inputs"][0]["name"], "source": "literal", "value": "x" * 600000}}, tag)
+                drafts.append(draft["id"])
+            last_accepted = None
+            while True:
+                status, value = status_of("/v1/capabilities", a_auth)
+                now = time.monotonic()
+                if status == 401:
+                    break
+                assert status == 200 and now < after + 65, ("predecessor during overlap", status, value.get("code"))
+                last_accepted = now
+                time.sleep(0.25)
+            assert last_accepted is not None and before + 59.5 <= now <= after + 63, (
+                "the predecessor cutoff is not sixty seconds after rotation", now - before, now - after)
+            assert value["code"] == "unauthenticated"
+            operation_id = receipt_uri.rsplit("/", 1)[1]
+            preparation = next(item for item in a_attempts if item[0] == "approve")[1]
+            refused_paths = ["/v1/capabilities", "/v1/profiles", "/v1/snapshot", "/v1/workflows?profileId=profile_1",
+                             "/v1/workflows/" + workflow["id"], created["links"]["self"], preparation, receipt_uri,
+                             base, base + "/control", base + "/snapshot", base + "/outputs", "/v1/decisions/" + head,
+                             "/v1/artifacts/artifact_" + "0" * 32, "/v1/events?after=" + cursor]
+            for path in refused_paths:
+                status, value = status_of(path, a_auth)
+                assert status == 401 and value["code"] == "unauthenticated", ("predecessor after cutoff", path, status)
+            status, value = status_of("/v1/events?after=" + cursor, a_auth, headers={"Accept": "text/event-stream"})
+            assert status == 401, ("predecessor stream after cutoff", status)
+            key = capabilities["authorityEpoch"] + "." + secrets.token_urlsafe(16)
+            status, value = status_of("/v1/requests", a_auth, method="POST", payload=create,
+                                      headers={"Content-Type": "application/json", "Idempotency-Key": key})
+            assert status == 401, ("predecessor POST after cutoff", status)
+            status, value = status_of(enqueue_path, a_auth, method="POST", payload=enqueue_payload, headers=enqueue_headers)
+            assert status == 401, ("predecessor replay after cutoff", status)
+            status, value = status_of("/v1/capabilities", a2_auth)
+            assert status == 200, "the rotated credential outlives the predecessor cutoff"
+            metadata = listed()
+            old, new = metadata[credential_a["credentialId"]], metadata[credential_a2["credentialId"]]
+            assert old["state"] == "revoked" and old["expiresAt"] == "2999-01-01T00:00:00Z", ("predecessor after cutoff", old)
+            assert new["state"] == "active"
+            print(f"PASS credential-lifecycle step 2: A' rotated from A; A and A' both authenticated during the overlap; A' replayed",
+                  f"the retained enqueue receipt {operation_id} through the Idempotency-Key of A; A was refused 401 on",
+                  f"{len(refused_paths) + 3} routes from {now - before:.2f} s after the rotation start while list-credentials",
+                  "reports A revoked with expiry 2999-01-01T00:00:00Z still in the future", flush=True)
+
+            # Step 3. Revocation of A' during a retained page set, an open
+            # stream, a known receipt and a known outputs page.
+            status, first, raw = request("/v1/snapshot", a2_auth)
+            assert status == 200, ("overview page", status, first.get("code"))
+            validate("OverviewSnapshot", first, raw)
+            assert first["page"]["index"] == 0 and first["page"]["next"] is not None
+            status, second, raw = request(first["page"]["next"], a2_auth)
+            assert status == 200 and second["page"]["setId"] == first["page"]["setId"], ("second page", status, second.get("code"))
+            validate("OverviewSnapshot", second, raw)
+            # A page token binds its client. Credential B presents the retained
+            # continuation of A' and receives view-expired, and A' then reads
+            # that page of its retained set.
+            status, value = status_of(second["page"]["next"], b_auth)
+            assert status == 410 and value["code"] == "view-expired", ("foreign page token", status, value.get("code"))
+            status, third, raw = request(second["page"]["next"], a2_auth)
+            assert status == 200 and third["page"]["setId"] == first["page"]["setId"], ("third page", status, third.get("code"))
+            validate("OverviewSnapshot", third, raw)
+            continuation = third["page"]["next"]
+            assert continuation is not None, "the overview page set has fewer than four pages"
+            connection, stream, block = open_stream("/v1/events?after=" + first["cursor"], a2_auth)
+            try:
+                for path in (receipt_uri, base + "/outputs"):
+                    status, value = status_of(path, a2_auth)
+                    assert status == 200, ("retained read before revocation", path, status, value.get("code"))
+                administration({"version": 1, "operation": "revoke-credential", "credentialId": credential_a2["credentialId"]})
+                ended = stream_ends(stream, 15)
+            finally:
+                stream.close()
+                connection.close()
+            assert ended, "the open stream of the revoked credential did not end"
+            for path in (continuation, receipt_uri, base + "/outputs"):
+                status, value = status_of(path, a2_auth)
+                assert status == 401 and value["code"] == "unauthenticated", ("revoked retained read", path, status)
+            key = capabilities["authorityEpoch"] + "." + secrets.token_urlsafe(16)
+            status, value = status_of("/v1/requests", a2_auth, method="POST", payload=create,
+                                      headers={"Content-Type": "application/json", "Idempotency-Key": key})
+            assert status == 401, ("revoked POST", status)
+            assert listed()[credential_a2["credentialId"]]["state"] == "revoked"
+            b_client = mixed_client(capabilities, b_auth)
+            control, _, _ = b_client[0](base + "/control", "RunControl")
+            assert control["supervision"] == "owned" and control["decisionHeadId"] == head, (
+                "the revocation stopped the live run", control["supervision"], control["decisionHeadId"])
+            # The overview now holds the large drafts, so B reads the run and its
+            # decisions directly.
+            _, answered_by_b, recovered_by_b = drive_mixed(run, b_client, overview=False)
+            assert answered_by_b == 1 and recovered_by_a + recovered_by_b >= 1
+            artifact = verified_download(run, b_client, b_auth)
+            for authorized in (a2_auth, a_auth):
+                status, value = status_of(artifact["download"], authorized, headers={"Accept": "application/octet-stream"})
+                assert status == 401 and value["code"] == "unauthenticated", ("revoked download", status)
+            print("PASS credential-lifecycle step 3: after revoking A', its page continuation, command receipt, outputs page,",
+                  "artifact download and new POST each returned 401 and its open stream ended; B then saw the run owned,",
+                  "answered the question, and the run reached terminal success with verified bytes", flush=True)
+
+            # Step 4. The scope boundary. The administration command refuses
+            # reload-profiles, and no local operation changes the scopes or
+            # profiles of a credential, so an observe-only credential shows it.
+            administration({"version": 1, "operation": "reload-profiles"}, refused="state-conflict")
+            credential_o, o_auth = issue("o", ["observe"])
+            for path in ("/v1/profiles", base, base + "/control", base + "/outputs"):
+                status, value = status_of(path, o_auth)
+                assert status == 200, ("observe-only read", path, status, value.get("code"))
+            # A receipt read requires observe and the scopes of its operation, so
+            # the receipt of the enqueue, a submit operation, stays hidden.
+            status, value = status_of(receipt_uri, o_auth)
+            assert status == 403 and value["code"] == "insufficient-scope", ("observe-only receipt read", status)
+            for name, authorized in (("observe-only", o_auth), ("B", b_auth)):
+                key = capabilities["authorityEpoch"] + "." + secrets.token_urlsafe(16)
+                status, value = status_of("/v1/requests", authorized, method="POST", payload=create,
+                                          headers={"Content-Type": "application/json", "Idempotency-Key": key})
+                assert status == 403 and value["code"] == "insufficient-scope", ("submit without scope", name, status)
+            print("PASS credential-lifecycle step 4: the administration command refused reload-profiles with state-conflict; an",
+                  "observe-only credential read the run with 200, and received 403 insufficient-scope for the enqueue receipt",
+                  "and for POST, as did B without submit; B presenting the retained page token of A' received 410 view-expired",
+                  "while A' then read that page", flush=True)
+            status, value = status_of("/v1/capabilities", {"Authorization": "Bearer " + synthetic})
+            assert status == 401
+        finally:
+            if process.poll() is None:
+                process.terminate()
+            process.wait(timeout=25)
+            (work / "server-0.exit").write_text(str(process.returncode) + "\n")
+    assert not (work / "admin/admin.sock").exists(), "joined original local administration leaves no socket"
+
+    # Step 5. No bearer and no marker bytes in any fixture file except the
+    # credential output files.
+    for path in outputs:
+        assert path.read_bytes().decode("ascii") in bearers.values(), "a credential output file does not hold its bearer"
+    needles = [("bearer " + name, value.encode()) for name, value in bearers.items()]
+    needles += [("ambient marker", marker.encode()), ("synthetic bearer marker", synthetic.encode())]
+    scanned = []
+    for path in sorted(work.rglob("*")):
+        if path in outputs or path.is_symlink() or not path.is_file():
+            continue
+        data = path.read_bytes()
+        found = [name for name, needle in needles if needle in data]
+        assert not found, ("secret bytes in a fixture file", str(path.relative_to(work)), found)
+        scanned.append(path.relative_to(work))
+    names = [str(path) for path in scanned]
+    required = {"server stdout": ["server-0.stdout"], "server stderr": ["server-0.stderr"],
+                "manager log": [name for name in names if name.startswith("manager/flow/") and name.endswith(".ndjson")],
+                "run flow log": [name for name in names if name.startswith("manager/runs/") and name.endswith("/flow.ndjson")],
+                "run events": [name for name in names if name.startswith("manager/runs/") and name.endswith("/events.ndjson")],
+                "database": [name for name in names if name.endswith("coordination.sqlite3")]}
+    missing = [kind for kind, found in required.items() if not found or not all(name in names for name in found)]
+    assert not missing, ("the scan did not cover", missing)
+    print(f"PASS credential-lifecycle step 5: {len(scanned)} fixture files, including server output, the manager log, the run",
+          f"flow and event logs and the database, hold none of {len(bearers)} bearers, the ambient marker or the synthetic",
+          f"bearer marker; {workers} live worker processes show no ambient marker", flush=True)
+
+
+if lifecycle:
+    credential_lifecycle()
+    raise SystemExit(0)
 
 
 # Each foreground process is the original Popen object. Restart is attempted only

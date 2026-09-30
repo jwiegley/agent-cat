@@ -4196,6 +4196,30 @@ Actor-flow increment 1, delta 1a (at most 8 engineering days, after the operator
 ]
 #+end_src
 
+* TODO [#D] B8 credential-lifecycle audit follow-ups (WM-023)
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-ec5s
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-30 Wed 02:53]
+:MODIFIED: [2026-09-30 Wed 02:53]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking audit findings from B8 (WM-023 credential-lifecycle, fess report resume-20260923/fess/b1-B8-r1.md). The medium finding (reload-profiles refusal attributed to the serving manager instead of the administration command) was corrected in the B8 commit. Remaining low findings:
+
+1. manager/COMMANDS.md states that rotation keeps the registered client, label, scopes and profiles, and that a replay executes nothing again. The credential-lifecycle mode asserts only clientId and scopes, and receipt identity on replay. Assert the label, the profiles and an unchanged operation count after the replay, or narrow the wording.
+2. service_http.py stream_ends treats any EOF, ConnectionError or SSLError as an ended stream. Add a negative control that shows the stream survives one read deadline or heartbeat before revocation, and optionally check that server stderr records the unauthenticated end.
+3. A scope change through reload-profiles is not exercised, because the administration command refuses reload-profiles. When reload-profiles or another scope-changing path exists, show that a retained page token returns 403 or 410 and the open stream ends on loss of profile access.
+4. list-credentials has no rotation cutoff field, so the cutoff is shown only by timing. Keep as a recorded limitation unless an additive field is authorized.
+5. A revocation that ends an SSE stream is logged as "manager-fault ... response GET /v1/events started public=401 unauthenticated class=command Unauthenticated". An expected authorization ending should not be classified as a manager fault (response logging owner).
+6. The workflow check text for the command check needs work="$base/N8", because credential_cli.py requires the work directory to be named N1 or N8.
+7. Untested: rotation changes the authorization revision, so the predecessor's open views probably end at rotation rather than at the cutoff. Test and document the actual behavior.
+
 * DONE [#B] Order every question after the effects that precede it
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -15120,7 +15144,7 @@ manager's correctness boundary.
 :LABELS:   ["p5","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-29 Tue 11:50]
+:MODIFIED: [2026-09-30 Wed 02:53]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-023
 :SOURCE_REPO: agent-cat
@@ -15347,6 +15371,13 @@ callers. Worker environments contain no manager credential material.
     "author": "johnw",
     "text": "Subtask A5S2b implements the operator decision of 2026-09-29 on bounded-wait Store admission. Commands, protected reads, event-stream batches with their authorization revalidation, and admission coordinator steps now wait for the Store gate and the configuration guard within the unchanged five-second allowance through WaitWithinBudget. A genuine timeout still returns storage-unavailable. A protected read that meets a concurrent commit runs again under the newer authorization generation (withAuthorizationReadObservation). GET /v1/runs/<id>/control now answers before the first projection consistently with the snapshot route, and an SSE stream stays open when its next batch meets a short holder. The Werror build, the contention checks G01 to G08 at N8, mixed-HTTP and tui-approval at N1 and N8, and a smoke sample of 3 mixed starts at N8 and 3 tui-approval starts at N1 passed. Evidence: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A5S2b/fast-impl-r1. This package stays in progress.",
     "created_at": "2026-09-29T18:50:19Z"
+  },
+  {
+    "id": 381,
+    "issue_id": "acat-wm-023-d20b",
+    "author": "johnw",
+    "text": "B8 (Phase B part 1): the section 7 verification of WM-023 now runs through the real HTTPS manager in manager/test/service_http.py mode credential-lifecycle, which passed at N8 with a PASS line for each of five steps. Rotation: A and A' both authenticate during the overlap, A' replays A's retained enqueue receipt through the same Idempotency-Key, and A is refused 401 on 18 routes after the 60-second cutoff (first 401 at 60.14 s) while its 2999 expiry is unchanged. Revocation of A': next page, retained receipt, outputs page, new POST and artifact download each return 401, the open SSE stream ends, and credential B answers the pending question and the run reaches terminal success. Scope: observe-only gets 200 on reads and 403 insufficient-scope on POST and on the enqueue receipt; a foreign page token gets 410 view-expired. Secret markers: no bearer and no ambient marker bytes occur in any scanned fixture file. Also passed: manager-command-check main mode with command_contract.py and credential_cli.py at N8, JOURNEY-ONCE at N8 (rerun by the audit on the final source). No production fault was found, so no production source changed. Limitations: no cutoff wire field (cutoff shown by timing), reload-profiles is refused by the administration command before any manager so a scope change through reload was not exercised. Evidence: resume-20260923/B/B8/impl-r1 and fess/b1-B8-r1.md. The package stays open for the closeout review.\n",
+    "created_at": "2026-09-30T09:53:20Z"
   }
 ]
 #+end_src

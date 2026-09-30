@@ -93,7 +93,9 @@ key is at most 128 ASCII bytes and its newly generated nonce contains at least
 for the separator and a minimum 22-character nonce. Its scope is the
 authenticated registered client, method,
 canonical URI, and key. The ledger binds exact body bytes, content type, and
-preconditions. Credential rotation retains the client identity and ledger.
+preconditions. Credential rotation retains the client identity and ledger, so
+a rotated credential that repeats an exact attempt of its predecessor receives
+the retained receipt.
 
 Authentication and current authorization precede receipt lookup. A key for a
 wrong authority epoch receives `authority-changed` before ledger lookup.
@@ -207,8 +209,11 @@ an invented workflow identity, manifest version, or runtime state.
 A page set is materialized at one database boundary, then served outside the
 read transaction. Opaque page tokens bind its client, authorization view,
 query, revision, and expiry. Clients assemble a complete page set before
-installing it. Expiry or revocation requires a fresh view. A first-page ETag
-is not interchangeable with another page's validator.
+installing it. Expiry or revocation requires a fresh view. A revoked or
+cut-off credential receives 401 for every later page, and another client that
+presents a page token receives 410 `view-expired`. A first-page ETag is not
+interchangeable with another page's validator. An open SSE response ends when
+its credential is revoked.
 
 SSE uses UTF-8 and dispatches only complete blocks ending in a blank line.
 The supported event names are `request.changed`, `preparation.changed`,
@@ -266,8 +271,8 @@ storage failures are not converted into successful receipts.
 `RUNNER` denotes the configured registry executable. The following forms define
 the command boundary. Offline administration and a configured same-user local
 channel implement credential listing, issuance, rotation and revocation. Other
-administration operations, service startup and client service selection remain
-unimplemented.
+administration operations, including `reload-profiles`, receive
+`state-conflict`.
 Existing `RUNNER --tui` and native frontend commands remain unchanged.
 
 ```text
