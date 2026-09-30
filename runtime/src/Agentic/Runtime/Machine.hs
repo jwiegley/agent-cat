@@ -87,6 +87,8 @@ deferredEventSink (DeferredEventSink state) event =
     Activated sink -> sink event >> pure current
 
 -- | Emit @run.started@ first, then queued controls, and forward future events.
+-- It delivers through 'inProcessBroker'. A run with a run store activates its
+-- sink with 'activateEventSinkBrokered' and the broker of the run.
 activateEventSink :: DeferredEventSink -> EventSink -> RuntimeEvent -> IO Bool
 activateEventSink = activateEventSinkBrokered inProcessBroker
 
@@ -279,6 +281,8 @@ withControlInputFor :: Int -> Handle -> EventSink -> ControlRuntime -> IO a -> I
 withControlInputFor version handle = withBufferedControlInputFor version handle BS.empty
 
 -- | Begin controls with bytes retained from the same transport before activation.
+-- It delivers through 'inProcessBroker'. A run with a run store reads its
+-- controls with 'withBufferedControlInputBrokered' and the broker of the run.
 withBufferedControlInputFor :: Int -> Handle -> BS.ByteString -> EventSink -> ControlRuntime -> IO a -> IO a
 withBufferedControlInputFor = withBufferedControlInputBrokered inProcessBroker
 

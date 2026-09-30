@@ -94,6 +94,7 @@ module Agentic.Exec
     announcingWorld,
     worldOfEngine,
     worldOfEngineWith,
+    worldOfEngineBrokered,
     engineRequest,
     renderRequest,
 
@@ -207,7 +208,7 @@ import Agentic.Plan
     withRequestPrompt,
   )
 import Agentic.Runtime.Broker (DataBroker (..), inProcessBroker, PersistenceHooks (..), nullPersistenceHooks)
-import Agentic.Runtime.Flow (Actor (Model, ToolActor), FlowScope, FlowWriter, RunFlow (..), Start (startPersonAnswering, startRun, startTarget), ToolKind (FixtureTool, ProgramCommand, RegistryTool), newFlowScope)
+import Agentic.Runtime.Flow (Actor (Model, ToolActor), FlowScope (flowScopeAnswerSource), FlowWriter, RunFlow (..), Start (startPersonAnswering, startRun, startTarget), ToolKind (FixtureTool, ProgramCommand, RegistryTool), newFlowScope)
 import Agentic.Runtime.Control
   ( AttemptSteerer,
     awaitRuntimeRedirect,
@@ -299,6 +300,7 @@ import Control.Exception
   )
 import Control.Monad (forM_, unless, void, when)
 import Data.Foldable (traverse_)
+import Data.IORef (writeIORef)
 import Data.IntSet (IntSet)
 import Data.Char (isAlphaNum)
 import qualified Data.IntSet as IntSet
@@ -328,7 +330,10 @@ data AttemptContext = AttemptContext
     attemptSteerer :: !(Maybe AttemptSteerer),
     attemptFailoverAvailable :: !(IO Bool),
     attemptStoreQuestion :: !(Text -> Value -> IO (Maybe QuestionRef)),
-    attemptBroker :: !DataBroker
+    attemptBroker :: !DataBroker,
+    -- | The flow scope of the occurrence, whose answer-source cell names the
+    -- control that supplied a local person answer.
+    attemptFlowScope :: !FlowScope
   }
 
 -- | @Oracle IO@ plus the stateful lane and an attempt-aware realization path.
@@ -380,16 +385,20 @@ personControlWorld inner = do
           >>= maybe
             (ioError (userError "local person answering requires a private protocol-v2 question store"))
             pure
-      (_, encoded) <-
+      (source, encoded) <-
         waitForRuntimePersonAnswer
           controls
           (attemptOccurrenceId context)
           (isJust . answerFromJson code)
           (attemptEvents context (OccurrencePersonAnswerPending (attemptOccurrenceId context) reference))
-      maybe
-        (ioError (userError "validated local person answer no longer matches its code/schema"))
-        pure
-        (answerFromJson code encoded)
+      answer <-
+        maybe
+          (ioError (userError "validated local person answer no longer matches its code/schema"))
+          pure
+          (answerFromJson code encoded)
+      -- The run log names the control that supplied this answer.
+      writeIORef (flowScopeAnswerSource (attemptFlowScope context)) (Just source)
+      pure answer
 
 -- | Pure annotated answering service over a bare world (`SemanticExec.lean:91`).
 -- @ω@, ignoring history because a world is a function of the bare question.
@@ -438,9 +447,17 @@ announcingWorld out inner =
 worldOfEngine :: (Engine engine) => engine -> WorldIO
 worldOfEngine = worldOfEngineWith defaultExecSettings
 
--- | Adapt the engine-neutral API to the typed runtime interpreter.
+-- | Adapt the engine-neutral API to the typed runtime interpreter, with
+-- 'inProcessBroker' for an ask without attempt context. No run with a run
+-- store uses it: the command-line interface uses 'worldOfEngineBrokered'.
 worldOfEngineWith :: (Engine engine) => ExecSettings -> engine -> WorldIO
-worldOfEngineWith settings engine =
+worldOfEngineWith = worldOfEngineBrokered inProcessBroker
+
+-- | Adapt the engine-neutral API to the typed runtime interpreter. An ask with
+-- attempt context uses the broker of its occurrence. An ask without attempt
+-- context uses the supplied broker, which is the broker of the run.
+worldOfEngineBrokered :: (Engine engine) => DataBroker -> ExecSettings -> engine -> WorldIO
+worldOfEngineBrokered runBroker settings engine =
   WorldIO
     { worldAskIO = engineAsk Nothing,
       worldAskAttemptIO = \context -> engineAsk (Just context),
@@ -449,11 +466,11 @@ worldOfEngineWith settings engine =
   where
     engineAsk :: Maybe AttemptContext -> SCode c -> Request c -> IO (El c)
     engineAsk context code request =
-      let broker = maybe inProcessBroker attemptBroker context
+      let broker = maybe runBroker attemptBroker context
           controlledSettings = maybe settings (`attemptExecSettings` settings) context
        in withTransportGaps controlledSettings engineGap code request $ do
             let neutral = engineRequest code request
-            conversation <- brokerStart broker engine (engineContextFor (enginePublicRedactionValues engine) context) neutral
+            conversation <- brokerStart broker engine (engineContextFor broker (enginePublicRedactionValues engine) context) neutral
             askDecodingWith controlledSettings code request
               (engineTurn broker controlledSettings code request neutral conversation)
 
@@ -493,10 +510,10 @@ renderRequest code request
     prompt = qPrompt (reqQuestion request)
     instruction = answerSpec code
 
-engineContextFor :: [Text] -> Maybe AttemptContext -> EngineContext
-engineContextFor _ Nothing =
-  EngineContext {runEngineAttempt = \_ _ action -> action (brokerUpdate inProcessBroker (const (pure ())))}
-engineContextFor redactions (Just context) =
+engineContextFor :: DataBroker -> [Text] -> Maybe AttemptContext -> EngineContext
+engineContextFor broker _ Nothing =
+  EngineContext {runEngineAttempt = \_ _ action -> action (brokerUpdate broker (const (pure ())))}
+engineContextFor _ redactions (Just context) =
   EngineContext
     { runEngineAttempt = \steerer target action ->
         let broker = attemptBroker context
@@ -744,16 +761,19 @@ runPlanWith = runPlanObserved nullEventSink
 -- realization facts but cannot supply an answer, choose a branch, or alter a
 -- semantic key.
 runPlanObserved :: EventSink -> Chains -> WorldIO -> Plan '[] a -> IO (a, ExecTrace)
-runPlanObserved = runPlanObservedWith Nothing nullPersistenceHooks
+runPlanObserved = runPlanObservedWith Nothing
 
 runPlanControlled :: ControlRuntime -> EventSink -> Chains -> WorldIO -> Plan '[] a -> IO (a, ExecTrace)
-runPlanControlled controls = runPlanObservedWith (Just controls) nullPersistenceHooks
+runPlanControlled controls = runPlanObservedWith (Just controls)
 
-runPlanPersisted :: Maybe ControlRuntime -> PersistenceHooks -> EventSink -> Chains -> WorldIO -> Plan '[] a -> IO (a, ExecTrace)
-runPlanPersisted = runPlanObservedWith
+-- | Persistence reaches a run store, so a persisted run names its broker.
+runPlanPersisted :: DataBroker -> Maybe ControlRuntime -> PersistenceHooks -> EventSink -> Chains -> WorldIO -> Plan '[] a -> IO (a, ExecTrace)
+runPlanPersisted = runPlanBrokered
 
-runPlanObservedWith :: Maybe ControlRuntime -> PersistenceHooks -> EventSink -> Chains -> WorldIO -> Plan '[] a -> IO (a, ExecTrace)
-runPlanObservedWith = runPlanBrokered inProcessBroker
+-- | The entry points above without persistence use 'inProcessBroker'. They take
+-- no run store, so no run with a run store reaches them.
+runPlanObservedWith :: Maybe ControlRuntime -> EventSink -> Chains -> WorldIO -> Plan '[] a -> IO (a, ExecTrace)
+runPlanObservedWith controls = runPlanBrokered inProcessBroker controls nullPersistenceHooks
 
 -- | Run the existing interpreter with injected data delivery. The supplied
 -- sinks and persistence hooks are original, unwrapped resource loans. Workflow
@@ -1024,7 +1044,8 @@ newAttemptContext scheduler occurrence epoch = do
         attemptFailoverAvailable = pure False,
         attemptStoreQuestion =
           persistenceStoreQuestion (schedulerPersistence scheduler) occurrence,
-        attemptBroker = schedulerScopedBroker scheduler scope
+        attemptBroker = schedulerScopedBroker scheduler scope,
+        attemptFlowScope = scope
       }
 
 withAttemptSteering :: AttemptContext -> AttemptSteerer -> AttemptContext

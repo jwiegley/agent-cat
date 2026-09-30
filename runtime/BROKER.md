@@ -5,7 +5,12 @@ relations and ordered data delivery. `inProcessBroker` implements identity
 delivery through the existing Haskell receivers. Runtime supplies the broker to
 `runPlanBrokered`, while `cliMainWithBroker` carries the same object through CLI
 execution, preflight controls, prepared frontend execution and final publication.
-`cliMain` and the existing runtime entry points select `inProcessBroker`.
+`cliMain` selects `inProcessBroker`. `runPlanPersisted` and
+`worldOfEngineBrokered` take a broker explicitly. The runtime entry points
+without persistence (`runPlanIO`, `runPlanWith`, `runPlanObserved` and
+`runPlanControlled`), `worldOfEngine`, `worldOfEngineWith`, `activateEventSink`
+and `withBufferedControlInputFor` select `inProcessBroker`. None of them takes a
+run store, and no run with a run store reaches them.
 
 ## Meaning and authority
 
@@ -157,9 +162,27 @@ the run log holds.
 `flowBroker :: FlowCodec -> RunFlow -> DataBroker -> DataBroker` wraps a broker
 and keeps its nine operations and their types. When the run has a run store,
 `runMachineWith` wraps the broker that it receives, so `cliMain` wraps
-`inProcessBroker` and the `--broker-test` runner of
-`cli/test/RoutingFixedPointProbe.hs` wraps its injected broker. A run without a
-run store uses the broker that it receives.
+`inProcessBroker` and the `--broker-test` runners of
+`cli/test/RoutingFixedPointProbe.hs` wrap their counting brokers. A run without
+a run store uses the broker that it receives.
+
+Every path of a store-backed run delivers through the broker of that run. The
+command-line interface builds each engine world with `worldOfEngineBrokered`
+and the broker of the run, so an engine ask without attempt context uses that
+broker. Under `flowBroker`, such an ask has no occurrence scope and is refused
+before delivery. `announcingWorld` delivers the narration of an ask without
+attempt context through `brokerLog` of `inProcessBroker`, and `brokerLog`
+appends nothing.
+
+Preflight controls start before the program and the run store exist. The
+control loop of `withMachineControls` delivers each control through the broker
+in a cell. The cell holds the broker of the command until `runMachineWith`
+fills it with the broker of the run, before `activateEventSinkBrokered`
+publishes the start and forwards the queued events. The cell returns to the
+broker of the command when the run ends. A control delivered before activation
+therefore appears in the run log only as its acknowledgement event, and every
+control delivered after activation has its `control` record. A prepared
+frontend run reads its controls with the broker of the run from the start.
 
 `RunFlow` holds the run log writer, the runtime protocol of the run, the native
 run identifier, the intake actor, the answerer function, the failure classifier
@@ -179,7 +202,7 @@ receives each reply.
 
 | Operation | Records |
 | --- | --- |
-| `brokerRequest` | `question` to the answerer, then `answer` from the answerer or `failure`. |
+| `brokerRequest` | `question` to the answerer, then `answer` from the answerer or `failure`. When a control supplied the answer, the `answer` comes from the intake and its identifiers name that control as the command. |
 | `brokerStart` | `engine-start` to the answerer of the question in flight, then `done` or `failure`. The conversation is not recorded. |
 | `brokerTurn` | `turn`, then `engine-result` or `failure`. |
 | `brokerSteer` | `steer`, then `done`, or `failure` of class `refused` when the engine returns a refusal. |
@@ -209,8 +232,11 @@ to the broker of one occurrence, and `runPlanBrokered` is `runPlanScoped` with
 the constant function. The runtime creates the scope of each occurrence before
 the occurrence dispatches anything. The scope holds the occurrence identifier,
 the epoch, an attempt field that the runtime leaves empty at present, a cell
-for the control that supplied the answer, which the runtime does not yet fill,
-and a cell for the answerer of the question in flight.
+for the control that supplied the answer, and a cell for the answerer of the
+question in flight. `brokerRequest` empties the answer cell before delivery. A
+local person answer writes the control identifier that
+`waitForRuntimePersonAnswer` returns into the answer cell before its receiver
+returns, and `brokerRequest` reads the cell when it appends the answer.
 `flowScopedBroker` wraps the broker with the scoped flow, so the records of an
 occurrence name its occurrence and epoch. Only `brokerRequest` sets the answerer
 cell, for the duration of its receiver, and `brokerStart`, `brokerTurn`,
@@ -250,5 +276,25 @@ real local ACP processes, checking consumed answers and durable events. It
 compares the Hello World `events.ndjson`, with each timestamp replaced, with the
 golden file `test/fixtures/flow/hello-events.ndjson`, and it checks that the
 Hello World and injected-reply run logs hold a question, an engine start, a
-turn, an engine result and an answer for each occurrence. These
-checks do not establish completion of the manager service or a frontend journey.
+turn, an engine result and an answer for each occurrence.
+
+The flow probe `test/flow_probe.py` reads the run logs of store-backed machine
+runs as JSON lines. It checks that a registry tool, a program command, a
+fixture, a model and a local person answer each name their sender, that an
+engine answer that names another target leaves the sender unchanged, that a
+person question in engine mode goes to the model, and that a model answer with
+approval phrases and control frames adds no `start` and no `control` record. It
+checks the three retry forms: two `engine-start` records under one question for
+a transport-gap retry, two `turn` records for a decoding re-ask and two
+`question` records for a fail-over. Its structural check requires every
+`attempt.started` event to lie inside an open question of its occurrence, and
+inside an open turn when the question goes to a model, and requires every
+acknowledgement of a control delivered after activation to follow a `control`
+record with its identifier. The check fails on a copy of a log without one turn
+record. In each broker-test run, the counts of the inner broker equal the
+records of the run log. A static check lists every source line under
+`runtime/src` and `cli/src` that names `inProcessBroker` and fails on a line
+outside its allowlist. With `--journey FIXTURE`, the probe checks that the
+control records and control-supplied answers of a frontend journey come from
+the manager and name a command identifier. These checks do not establish
+completion of the manager service or a frontend journey.

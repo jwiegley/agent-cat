@@ -385,7 +385,8 @@ import Agentic.Runtime
   ( PersistenceHooks (..),
     WorldIO,
     announcingWorld,
-    worldOfEngine,
+    worldOfEngineBrokered,
+    defaultExecSettings,
     concurrentWorld,
     personControlWorld,
     chainsOf,
@@ -460,7 +461,7 @@ import Agentic.Runtime
     storeVersion,
     nullEventSink,
   )
-import Data.IORef (atomicModifyIORef', newIORef, readIORef)
+import Data.IORef (IORef, atomicModifyIORef', newIORef, readIORef, writeIORef)
 import Agentic.Route (parseBackend)
 import Agentic.Route
   ( Backend (BackendAcp, BackendDeck),
@@ -1263,11 +1264,17 @@ withFinalTarget reg name target program action = do
   either (die reg 1 . ("routing configuration: " <>)) action finalized
 
 -- | Existing preflight controls or a private input for an already prepared run.
+-- Preflight controls carry the cell of the broker that delivers each control.
 data MachineControl
-  = MachineControl ControlRuntime DeferredEventSink EventSink
+  = MachineControl ControlRuntime DeferredEventSink EventSink (IORef DataBroker)
   | MachineControlInput Handle BS.ByteString
 
 -- | Start controls before stdin or route-dependent program construction.
+--
+-- The control loop delivers each control through the broker in the cell. The
+-- cell holds the broker of the command until 'runMachineWith' fills it with
+-- the broker of the run at activation, so a control delivered before
+-- activation reaches the run log only as its acknowledgement event.
 withMachineControls :: DataBroker -> MachineOptions -> RunId -> Text -> Target -> (Maybe MachineControl -> IO ()) -> IO ()
 withMachineControls broker options runId name initialTarget action = do
   handle <- machineControlHandle
@@ -1276,8 +1283,10 @@ withMachineControls broker options runId name initialTarget action = do
     Just controlHandle -> do
       runtime <- newControlRuntimeFor (machineProtocolVersion options)
       deferred <- newDeferredEventSink
+      cell <- newIORef broker
       let sink = deferredEventSink deferred
-      outcome <- try (withBufferedControlInputBrokered broker (machineProtocolVersion options) controlHandle BS.empty sink runtime (action (Just (MachineControl runtime deferred sink))))
+          delivering = broker {brokerControl = \receive control -> readIORef cell >>= \current -> brokerControl current receive control}
+      outcome <- try (withBufferedControlInputBrokered delivering (machineProtocolVersion options) controlHandle BS.empty sink runtime (action (Just (MachineControl runtime deferred sink cell))))
       case outcome of
         Right () -> pure ()
         Left (err :: SomeException)
@@ -2412,11 +2421,11 @@ runCmdControlled broker scoped personAnswering runtimeControls persistence obser
     -- the question that hit it and not a bottom in the middle of a fold.
     worldOf :: RunRoutes -> FilePath -> [(EngineRoute, Acp)] -> EngineRoute -> IO WorldIO
     worldOf rr dir live route = case engineRouteBackend route of
-      BackendDeck session -> worldOfEngine <$> engineOfDeck (deckConfigFor rr session)
+      BackendDeck session -> worldOfEngineBrokered broker defaultExecSettings <$> engineOfDeck (deckConfigFor rr session)
       BackendAcp adapter -> case lookup route live of
         Just acp ->
           pure
-            ( worldOfEngine
+            ( worldOfEngineBrokered broker defaultExecSettings
                 ( engineOfAcpConfigured
                     (fmap acpModelConfigOf . (`Map.lookup` rrRealizations rr))
                     (acpConfigForRoute rr dir route)
@@ -2876,10 +2885,14 @@ runMachineWith broker options control lineage parent inherited reg runId name ta
       let started = machineStarted options name effectiveTarget
       case control of
         Nothing -> brokerEvent runBroker actualSink started >> executeRun Nothing actualSink id
-        Just (MachineControl controls deferred sink) -> do
-          activated <- activateEventSinkBrokered runBroker deferred actualSink started
-          unless activated (ioError (userError "machine event sink was activated twice"))
-          executeRun (Just controls) sink id
+        Just (MachineControl controls deferred sink cell) ->
+          -- Controls from activation on are delivered through the broker of
+          -- the run, and the cell returns to the broker of the command when
+          -- the run ends.
+          bracket (atomicModifyIORef' cell (\previous -> (runBroker, previous))) (writeIORef cell) $ \_ -> do
+            activated <- activateEventSinkBrokered runBroker deferred actualSink started
+            unless activated (ioError (userError "machine event sink was activated twice"))
+            executeRun (Just controls) sink id
         Just (MachineControlInput handle buffered) -> do
           controls <- newControlRuntimeFor (machineProtocolVersion options)
           -- Prepared runs establish durable history before consuming queued controls.

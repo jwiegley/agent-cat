@@ -1008,7 +1008,7 @@ memoAcrossEffectProbe failures = do
           (askC1 SText (textQuestion "reading"))
       within :: Plan '[] (Text, Text)
       within = pairP (askC1 SText (textQuestion "reading")) (askC1 SText (textQuestion "reading"))
-  acrossOut <- try @SomeException (runPlanPersisted Nothing hooks nullEventSink noChains world across)
+  acrossOut <- try @SomeException (runPlanPersisted inProcessBroker Nothing hooks nullEventSink noChains world across)
   acrossAsked <- readTVarIO putToWorld
   epochs <- map fst <$> readTVarIO stored
   atomically (writeTVar putToWorld [])

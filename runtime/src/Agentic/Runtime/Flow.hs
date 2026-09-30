@@ -967,8 +967,10 @@ data FlowScope = FlowScope
   { flowScopeOccurrence :: !OccurrenceId,
     flowScopeEpoch :: !Word64,
     flowScopeAttempt :: !(Maybe Word32),
-    -- | The control that supplied the answer of the occurrence, when a control
-    -- supplied it. The runtime creates the cell empty and does not yet fill it.
+    -- | The control that supplied the answer of the question in flight, when a
+    -- control supplied it. 'flowBroker' empties the cell before it delivers a
+    -- request, and a local person answer fills it with the control that
+    -- supplied the answer before the receiver returns.
     flowScopeAnswerSource :: !(IORef (Maybe ControlId)),
     -- | The answerer of the question in flight, which receives the engine
     -- start, the turns and the steering of that question. Only 'flowBroker'
@@ -996,7 +998,9 @@ flowScopedBroker codec flow inner scope = flowBroker codec (scopeRunFlow scope f
 -- changed the value. A reply append that fails after the receiver returned
 -- makes the operation refuse that reply. A receiver that raises a synchronous
 -- exception has its failure appended, and the original exception propagates.
--- An asynchronous exception appends nothing.
+-- An asynchronous exception appends nothing. When a control supplied the
+-- answer of a request, the @answer@ record comes from the intake and names that
+-- control as its command.
 --
 -- @brokerEvent@ is carried by the event sink of the run, which appends each
 -- event record, and @brokerLog@ and @brokerPersistence@ append nothing.
@@ -1006,8 +1010,14 @@ flowBroker codec flow inner =
     { brokerRequest = \receive code request -> do
         let answerer = runFlowAnswerer flow request
         (asked, request') <- carryAsk FlowQuestion answerer (questionBody code request) (questionFromBody code)
+        mapM_ (\current -> writeIORef (flowScopeAnswerSource current) Nothing) scope
         answer <- failing asked answerer (withCandidate answerer (brokerRequest inner receive code request'))
-        carryReply FlowAnswer asked answerer (answerBody code answer) (answerFromBody code),
+        -- A control that supplied the answer makes the intake its sender.
+        source <- maybe (pure Nothing) (readIORef . flowScopeAnswerSource) scope
+        let (sender, answered) = case source of
+              Nothing -> (answerer, about)
+              Just control -> (runFlowIntake flow, about {aboutCommand = Just (controlIdText control)})
+        carryReplyAbout FlowAnswer asked sender answered (answerBody code answer) (answerFromBody code),
       brokerStart = \engine context request -> do
         model <- candidate FlowEngineStart
         (asked, request') <- carryAsk FlowEngineStart model (engineStartBody request) engineStartFromBody
@@ -1061,8 +1071,11 @@ flowBroker codec flow inner =
       (,) position <$> carried schema decode record
 
     carryReply :: Schema -> Position -> Actor -> Value -> (Value -> Either Text a) -> IO a
-    carryReply schema asked from body decode = do
-      (_, record) <- appendVia codec writer schema ReplySchema (Just asked) from (To workflow) about (ContentValue body)
+    carryReply schema asked from = carryReplyAbout schema asked from about
+
+    carryReplyAbout :: Schema -> Position -> Actor -> About -> Value -> (Value -> Either Text a) -> IO a
+    carryReplyAbout schema asked from identifiers body decode = do
+      (_, record) <- appendVia codec writer schema ReplySchema (Just asked) from (To workflow) identifiers (ContentValue body)
       carried schema decode record
 
     -- A synchronous failure of the receiver is the reply to its ask.

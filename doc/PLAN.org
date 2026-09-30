@@ -3544,7 +3544,7 @@ Owner directive 2026-08-12: use the standard libraries as much as possible; do n
 :LABELS:   ["actor-flow","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-26 Sat 23:41]
-:MODIFIED: [2026-09-29 Tue 17:48]
+:MODIFIED: [2026-09-29 Tue 18:09]
 :CREATED_BY: johnw
 :SOURCE_REPO: .
 :ORIGINAL_SIZE: 0
@@ -3597,6 +3597,13 @@ Actor-flow increment 1, delta 1a (at most 8 engineering days, after the operator
     "author": "johnw",
     "text": "Subtask F5 of delta 1a: flowBroker carriage on the scheduler path. flowBroker :: FlowCodec -> RunFlow -> DataBroker -> DataBroker is in Agentic.Runtime.Flow and is exported through Agentic.Runtime. DataBroker keeps its nine fields. runMachineWith wraps the broker it receives when the run has a store, so both inProcessBroker and the --broker-test broker are wrapped. The append points follow section 3.2 of the design record: question and answer or failure for request, engine-start and done or failure for start, turn and engine-result or failure for turn, steer and done or failure (class refused for a Left) for steer, control from the intake for control, and permission for EnginePermission only. Receivers act on the value decoded from the appended record, and the runtime acts on the decoded reply (D3). A failed reply append refuses the reply (D2). The scheduler derives a scoped attemptBroker for each occurrence with the occurrence, the epoch and an answer-source cell for F6. Evidence scope: F5-build (-Werror, agentic-run, runtime-contract-test, routing-fixed-point-probe), F5-runtime-contract at N8 (new CarriageTests: carriage, a lossy codec with a mirror negative control, D2, D3, receiver failure, asynchronous exception and two concurrent occurrences), F5-progress-probe with the golden comparison and new carriage checks of the broker-hello and broker-injected run logs, and F5-journey (Phase A tui-journey at N8) each passed once under timeout 900. The fess auditor reran F5-build and F5-runtime-contract with exit 0. Fess: not blocking. Its four medium and five low findings are filed as acat-actk. Open in delta 1a: the four direct inProcessBroker paths, the gate 10 bypass check, the reader and the flow verb, so this issue stays open.\n",
     "created_at": "2026-09-30T00:48:52Z"
+  },
+  {
+    "id": 359,
+    "issue_id": "acat-e6cp",
+    "author": "johnw",
+    "text": "Subtask F6 of delta 1a: bypass removal, pre-store control handoff and person-answer attribution. The CLI builds engine worlds with worldOfEngineBrokered over the run broker. runPlanPersisted takes a DataBroker explicitly, and runPlanObservedWith takes no run store. activateEventSink, withBufferedControlInputFor and worldOfEngineWith are confined wrappers, and test/flow_probe.py holds a static inProcessBroker allowlist. MachineControl has a broker cell, and runMachineWith fills it with the run flowBroker before activateEventSinkBrokered, so controls after activation get control records. A control delivered before activation appears only as its acknowledgement event, and runtime/BROKER.md states this. answerPerson writes the ControlId into the scope answer-source cell, and flowBroker then names the intake as sender and the command id in About. Evidence scope: F6-build (-Werror, agentic-run, runtime-contract-test, routing-fixed-point-probe), F6-runtime-contract at N8, F6-flow-probe (attribution, retry forms, structural bypass check with a negative control, allowlist with a synthetic negative), F6-control-probes (control_probe.py and person_control_probe.py at N8), F6-progress-probe and F6-journey (tui-journey at N8, with control and answer records that name Manager and the command ids) each passed once under timeout 900. The fess auditor reran F6-build and F6-flow-probe with exit 0. Fess: not blocking. Six low findings are filed as acat-hxm7. Open in delta 1a: the run-log reader and the flow verb, so this issue stays open.",
+    "created_at": "2026-09-30T01:09:29Z"
   }
 ]
 #+end_src
@@ -5677,6 +5684,29 @@ work is finished.
   }
 ]
 #+end_src
+
+* TODO [#C] Resolve F6 fess findings in bypass removal and attribution
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-hxm7
+:LABELS:   ["actor-flow","workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-29 Tue 18:09]
+:MODIFIED: [2026-09-29 Tue 18:09]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Follow-up from the F6 fess audit of bypass removal, pre-store control handoff and person-answer attribution (actor-flow delta 1a). None of these findings blocks. Source: fess audit /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/fess/flow-F6-r1.md.
+
+1. runtime/src/Agentic/Exec.hs (worldOfEngineBrokered, engineContextFor broker _ Nothing) and runtime/BROKER.md: no test exercises an engine ask without attempt context. BROKER.md says that flowBroker refuses such an ask before delivery, but only code reading supports this. Fix: add a runtime unit test that runs worldOfEngineBrokered over an unscoped flowBroker with worldAskIO and shows the refusal before the inner broker counts a brokerStart.
+2. test/flow_probe.py (early-control scenario): the scenario uses time.sleep(0.5) so that the control arrives before the cell swap. On a slow machine the control can arrive after activation, and the check fails spuriously. Fix: wait for a deterministic condition, such as the early control acknowledgement, before stdin closes.
+3. test/flow_probe.py (negative_control): the negative control removes a turn record only. Nothing shows that the control-record half of the structural check fails. Fix: add a second negative control that removes one control record from the person log and expects "has no control record".
+4. test/flow_probe.py (allowlist): the allowlist matches (file, stripped text), not (file, line). A second line with identical text in the same file passes, and lines inside block comments are counted. Fix: key the allowlist by occurrence count per (file, text) or by line number, and skip block comments.
+5. cli/test/RoutingFixedPointProbe.hs (ApprovalPhrase mode) and engine/api/src/Agentic/Engine.hs: the case of an engine that reports a different target is tested through narration text only, because EngineResult has no structured target field. No change now. Revisit when the engine result gains a reported-target field.
+6. test/flow_probe.py (retry forms) and section 3.2 of the design record: the design text says that a transport-gap retry appears as a new engine-start and turn. The injected gap gives two engine-start records and one turn record, and the retry goes through an operator retryOccurrence control. Fix: inject the gap after the first turn starts, or state the difference in runtime/BROKER.md.
 
 * DONE [#E] Report: qualify 'diagnosed the six red manager gates'    :documentation:
 :PROPERTIES:
