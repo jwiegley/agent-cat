@@ -227,6 +227,68 @@ records by a conjunction of `field=value` terms over the schema, the sender,
 the address and the identifiers. The reader writes nothing and delivers
 nothing.
 
+`readFlowLogAt` reads the log at a path of a private root whose claim-check
+files live in a given directory, as a log of a given kind, and verifies each
+complete line as `readFlow` does. It refuses a record whose schema belongs to
+the other log, and it joins no event. `flowAcknowledgements` pairs each
+`control` of a run log with its first later acknowledgement event, or with
+none, which is the join behind the unacknowledged state.
+
+## Manager-log reader
+
+`Agentic.Manager.Flow` reads the manager log. `readManagerLog` opens the flow
+directory of the log with `openPrivateRoot`, reads the log file with
+`readFlowLogAt` as a manager log and reads its claim checks from
+`claims/<stream>/`. It then decodes each body with the manager codec of its
+schema. A command body with an `administration` field decodes as a credential
+operation, and a receipt decodes with the receipt codec of the command that it
+answers and must name the identifier of that command. A body that does not
+decode is a failure of its entry.
+
+`joinFlows` joins manager logs with run logs by identifiers that both records
+carry. Positions never cross logs.
+
+- A `review` joins each later approve or discard command whose resource
+  names its preparation, and each later review ending of that preparation.
+- A start or control `relay` joins the record of the run log that the worker
+  received. A start relay joins the `start` of the run log whose start names
+  its native run. A control relay joins the `control` of that run log whose
+  command identifier is the command of the relay. A discard relay has no
+  counterpart in a run log.
+- A `control` of a run log joins its first later acknowledgement event by its
+  command identifier.
+- A `command` joins its reply and its later command notices by its command
+  identifier.
+- An `answer` of a run log that names a command joins the command of a manager
+  log with that identifier. A command of another operation, or two commands
+  with that identifier, fail the join.
+
+The join adds four states. A command without a reply is undecided. A start or
+control relay without its record in a run log that was read is an unresolved
+delivery. A review without a later command and without a review ending for its
+preparation is a pending review. A lifetime notice without a later shutdown
+notice of the same process generation before the next lifetime notice has lost
+its supervision. The Store ledger remains the authority on each command,
+review and request, and the summary states this.
+
+`joinFlows` verifies the consent of each start relay. The manager log must
+hold, in this order, the review of the preparation, the approve command of
+the relay's command from a credential with the selectors of that review, its
+receipt in any state other than `refused` or a gap notice that names that
+receipt, and the relay. The SHA-256 of the review bytes must equal the
+`reviewSha256` of the binding. The SHA-256 of the binding bytes must equal
+the binding digest, and the approve command must name that digest. The
+binding must name the native run of the relay. No invocation prefix argument
+and no target argument of the binding may carry a credential, under the
+predicate with which the frontend worker refuses one. A run log that was read
+must begin with a `start` that names the native run of the relay. A consent
+that fails any of these checks is a failure of the joined logs.
+
+`flowJoinVerified` holds when no manager log, run log, join or consent fails.
+`flowJoinUncertain` holds when a run log is uncertain or a lifetime has lost
+its supervision. `flowJoinSummaryValue` renders the joins, the consent checks
+and the states as the summary object of the `agentic-run flow` verb.
+
 ## Carriage
 
 `flowBroker :: FlowCodec -> RunFlow -> DataBroker -> DataBroker` wraps a broker

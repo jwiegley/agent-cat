@@ -131,11 +131,14 @@ module Agentic.Runtime.Flow
     FlowStates (..),
     FlowReport (..),
     readFlow,
+    readFlowLogAt,
+    flowAcknowledgements,
     flowVerified,
     flowUncertain,
     flowReportProblems,
     flowEntryValue,
     flowSummaryValue,
+    flowReportValue,
     FlowRoute,
     parseFlowRoute,
     flowRouteMatches,
@@ -1335,9 +1338,9 @@ data FlowReport = FlowReport
   }
   deriving (Eq, Show)
 
--- | The largest run log that a reader reads.
-maxRunLogBytes :: Integer
-maxRunLogBytes = 512 * 1024 * 1024
+-- | The largest log that a reader reads.
+maxFlowLogBytes :: Integer
+maxFlowLogBytes = 512 * 1024 * 1024
 
 -- | Read the run log of a run store directory, as the account that owns the
 -- directory.
@@ -1356,9 +1359,7 @@ maxRunLogBytes = 512 * 1024 * 1024
 readFlow :: FlowLiveness -> FilePath -> IO FlowReport
 readFlow liveness directory =
   bracket (openPrivateRoot "run store" directory) closePrivateRoot $ \root -> do
-    bytes <- readPrivatePrefixAt root [runLogName] maxRunLogBytes
-    let (complete, torn) = splitFlowLines bytes
-    entries <- traverse (readEntry root) (zip [0 ..] complete)
+    (entries, torn) <- readFlowLines root [runLogName] [flowClaimDirectory]
     events <- readable "events.ndjson" (fst <$> readEventLog directory)
     effects <- readable "effects.ndjson" (readEffectRecords directory)
     pure (analyseFlow liveness entries torn events effects)
@@ -1371,6 +1372,26 @@ readFlow liveness directory =
         Right (Left failure) -> Left (name <> " cannot be read: " <> T.pack (show failure))
         Right (Right value) -> Right value
 
+-- | Read the log at the path of a private root whose claim-check files live in
+-- the given directory, as a log of the given kind, and verify each complete
+-- line as 'readFlow' does: its frame bound, its strict decoding, its claim
+-- check, its schema, its reply position and the body of each schema of the run
+-- log. The result holds the entries and the size of a final line without its
+-- newline. The reader joins no event, so a caller reads a run log through
+-- 'readFlow'. The bodies of the schemas of the manager log are left to the
+-- manager's codecs.
+readFlowLogAt :: FlowLog -> PrivateRoot -> [FilePath] -> [FilePath] -> IO ([FlowEntry], Maybe Int)
+readFlowLogAt kind root path claims = do
+  (entries, torn) <- readFlowLines root path claims
+  pure (scanEntries kind Map.empty False entries, torn)
+
+readFlowLines :: PrivateRoot -> [FilePath] -> [FilePath] -> IO ([FlowEntry], Maybe Int)
+readFlowLines root path claims = do
+  bytes <- readPrivatePrefixAt root path maxFlowLogBytes
+  let (complete, torn) = splitFlowLines bytes
+  entries <- traverse (readEntry root claims) (zip [0 ..] complete)
+  pure (entries, torn)
+
 -- | The complete lines of a log, without their newlines, and the size of a
 -- final line without its newline.
 splitFlowLines :: BS.ByteString -> ([BS.ByteString], Maybe Int)
@@ -1382,15 +1403,15 @@ splitFlowLines = go []
           Nothing -> (reverse lines', Just (BS.length rest))
           Just index -> go (BS.take index rest : lines') (BS.drop (index + 1) rest)
 
-readEntry :: PrivateRoot -> (Word64, BS.ByteString) -> IO FlowEntry
-readEntry root (index, line) = case decodeFlowLine line of
+readEntry :: PrivateRoot -> [FilePath] -> (Word64, BS.ByteString) -> IO FlowEntry
+readEntry root claims (index, line) = case decodeFlowLine line of
   Left why -> pure (FlowEntry position Nothing Nothing Nothing ["the line does not decode: " <> why])
   Right record -> do
     content <- case recBody record of
       Inline value -> pure (Right (Just value))
       EventNumber _ -> pure (Right Nothing)
       body@(ClaimCheck _ _) ->
-        readFlowContent root body >>= \case
+        readFlowContentAt root claims body >>= \case
           Right (ContentValue value) -> pure (Right (Just value))
           Right (ContentEvent _) -> pure (Left "the claim check names an event")
           Left why -> pure (Left why)
@@ -1408,7 +1429,7 @@ analyseFlow liveness entries0 torn events effects =
   where
     eventLines = either (const Map.empty) (Map.fromList . map (\envelope -> (sequenceOf envelope, envelope))) events
     sequenceOf envelope = let SeqNo number = envelopeSequence envelope in number
-    entries = scanEntries eventLines (either (const False) (const True) events) entries0
+    entries = scanEntries RunLog eventLines (either (const False) (const True) events) entries0
 
     records = [(entryPosition entry, record) | entry <- entries, Just record <- [entryRecord entry]]
     asks = [position | (position, record) <- records, schemaRole (recSchema record) == AskSchema]
@@ -1417,14 +1438,12 @@ analyseFlow liveness entries0 torn events effects =
     joined = [(entryPosition entry, envelopeEvent envelope) | entry <- entries, Just envelope <- [entryEvent entry]]
     stop = listToMaybe [position | (position, event) <- joined, terminal event]
     later position = filter ((> position) . fst)
-    controls = [(position, controlKey entry record) | entry <- entries, Just record <- [entryRecord entry], recSchema record == FlowControl, let position = entryPosition entry]
-    acknowledged key position = or [acknowledges key event | (_, event) <- later position joined]
     states =
       FlowStates
         { statesInFlight = if liveness == FlowLive then open else [],
           statesUncertain = if liveness == FlowEnded && isNothing stop then open else [],
           statesUnansweredAtStop = if liveness == FlowEnded && isJust stop then open else [],
-          statesUnacknowledged = [position | (position, key) <- controls, maybe True (\name -> not (acknowledged name position)) key],
+          statesUnacknowledged = [position | (position, Nothing) <- controlAcknowledgements entries],
           statesPendingRecovery =
             [ position
               | (position, OccurrenceRecoveryPending occurrence _ _ _) <- joined,
@@ -1452,10 +1471,10 @@ analyseFlow liveness entries0 torn events effects =
                  [] -> liveness == FlowEnded
            ]
 
--- | Verify each entry in log order: its schema, its body, its reply position
--- and its event.
-scanEntries :: Map Word64 Envelope -> Bool -> [FlowEntry] -> [FlowEntry]
-scanEntries eventLines eventsRead = go Map.empty Map.empty Set.empty Set.empty
+-- | Verify each entry of a log of the given kind in log order: its schema, its
+-- body, its reply position and its event.
+scanEntries :: FlowLog -> Map Word64 Envelope -> Bool -> [FlowEntry] -> [FlowEntry]
+scanEntries kind eventLines eventsRead = go Map.empty Map.empty Set.empty Set.empty
   where
     go _ _ _ _ [] = []
     go schemas codes answered seen (entry : rest) = case entryRecord entry of
@@ -1464,7 +1483,7 @@ scanEntries eventLines eventsRead = go Map.empty Map.empty Set.empty Set.empty
         let Position index = entryPosition entry
             schema = recSchema record
             logProblems =
-              [ "the " <> schemaName schema <> " schema belongs to the manager log" | schemaLog schema == ManagerLog ]
+              [ "the " <> schemaName schema <> " schema belongs to the " <> logName (schemaLog schema) | schemaLog schema `notElem` [kind, BothLogs] ]
                 <> [ "a start record follows position 0" | schema == FlowStart, index /= 0 ]
             (code, bodyProblems) = case entryContent entry of
               Just value | schemaLog schema /= ManagerLog -> decodeEntryBody codes record value
@@ -1494,6 +1513,12 @@ scanEntries eventLines eventsRead = go Map.empty Map.empty Set.empty Set.empty
                 }
             codes' = maybe codes (\found -> Map.insert index found codes) code
          in entry' : go (Map.insert index schema schemas) codes' answered' seen' rest
+
+logName :: FlowLog -> Text
+logName = \case
+  RunLog -> "run log"
+  ManagerLog -> "manager log"
+  BothLogs -> "run log and the manager log"
 
 -- | Decode a body with the codec of its schema. A question yields its code,
 -- which decodes the answer that names it.
@@ -1527,6 +1552,24 @@ controlKey :: FlowEntry -> Record -> Maybe Text
 controlKey entry record = case entryContent entry >>= either (const Nothing) Just . controlFromBody of
   Just (_, control) -> Just (controlIdText (controlId control))
   Nothing -> aboutCommand (recAbout record)
+
+-- | Each control record of a run log with the position of the first later
+-- event record whose event acknowledges the identifier of the control, or
+-- 'Nothing' when the log holds none.
+flowAcknowledgements :: FlowReport -> [(Position, Maybe Position)]
+flowAcknowledgements = controlAcknowledgements . reportEntries
+
+controlAcknowledgements :: [FlowEntry] -> [(Position, Maybe Position)]
+controlAcknowledgements entries =
+  [ (position, listToMaybe [at | (at, event) <- joined, at > position, maybe False (`acknowledges` event) key])
+    | entry <- entries,
+      Just record <- [entryRecord entry],
+      recSchema record == FlowControl,
+      let position = entryPosition entry
+          key = controlKey entry record
+  ]
+  where
+    joined = [(entryPosition entry, envelopeEvent envelope) | entry <- entries, Just envelope <- [entryEvent entry]]
 
 acknowledges :: Text -> RuntimeEvent -> Bool
 acknowledges key = \case
@@ -1601,31 +1644,32 @@ flowEntryValue entry =
 -- | The summary object of the reader: the number of records, the verification
 -- result and its failures, the torn final line, the stop and the states.
 flowSummaryValue :: FlowReport -> Value
-flowSummaryValue report =
+flowSummaryValue report = object ["summary" .= flowReportValue report]
+
+-- | The fields of the summary object of one run log.
+flowReportValue :: FlowReport -> Value
+flowReportValue report =
   object
-    [ "summary"
+    [ "live" .= (reportLiveness report == FlowLive),
+      "records" .= length (reportEntries report),
+      "verified" .= flowVerified report,
+      "problems" .= flowReportProblems report,
+      "tornFinalLine" .= fmap (\size -> object ["bytes" .= size]) (reportTornBytes report),
+      "stop" .= fmap positionIndex (reportStop report),
+      "states"
         .= object
-          [ "live" .= (reportLiveness report == FlowLive),
-            "records" .= length (reportEntries report),
-            "verified" .= flowVerified report,
-            "problems" .= flowReportProblems report,
-            "tornFinalLine" .= fmap (\size -> object ["bytes" .= size]) (reportTornBytes report),
-            "stop" .= fmap positionIndex (reportStop report),
-            "states"
-              .= object
-                [ "inFlight" .= positions statesInFlight,
-                  "uncertain" .= positions statesUncertain,
-                  "unansweredAtStop" .= positions statesUnansweredAtStop,
-                  "unacknowledged" .= positions statesUnacknowledged,
-                  "pendingRecovery" .= positions statesPendingRecovery,
-                  "pendingPersonAnswer" .= positions statesPendingPersonAnswer,
-                  "potentiallyExecuted"
-                    .= [ object ["line" .= pendingEffectLine effect, "occurrence" .= occurrenceNumber (pendingEffectOccurrence effect)]
-                         | effect <- statesPotentiallyExecuted states
-                       ],
-                  "lostSupervision" .= statesLostSupervision states,
-                  "askAfterStop" .= positions statesAskAfterStop
-                ]
+          [ "inFlight" .= positions statesInFlight,
+            "uncertain" .= positions statesUncertain,
+            "unansweredAtStop" .= positions statesUnansweredAtStop,
+            "unacknowledged" .= positions statesUnacknowledged,
+            "pendingRecovery" .= positions statesPendingRecovery,
+            "pendingPersonAnswer" .= positions statesPendingPersonAnswer,
+            "potentiallyExecuted"
+              .= [ object ["line" .= pendingEffectLine effect, "occurrence" .= occurrenceNumber (pendingEffectOccurrence effect)]
+                   | effect <- statesPotentiallyExecuted states
+                 ],
+            "lostSupervision" .= statesLostSupervision states,
+            "askAfterStop" .= positions statesAskAfterStop
           ]
     ]
   where

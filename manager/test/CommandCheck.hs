@@ -20,6 +20,7 @@ import Agentic.Manager.Schema (schemaVersion, schemaStatements)
 import Agentic.Manager.Store
 import qualified Agentic.Manager.Test.AcceptanceAudit as Audit
 import Agentic.Manager.Test.Contention (blocked, withHeldStore, withHeldConfiguration)
+import Agentic.Manager.Test.FlowReader (flowReaderChecks)
 import qualified Agentic.Runtime as Runtime
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.STM (atomically)
@@ -1309,7 +1310,8 @@ flowChecks work = do
   flowCommandChecks work
   flowNoticeChecks work
   flowAdministrationChecks work
-  putStrLn "PASS manager log codecs, writer, gap entries, path identity, ceiling, Store lifetimes, command admission, command notices and administration"
+  flowReaderChecks work
+  putStrLn "PASS manager log codecs, writer, gap entries, path identity, ceiling, Store lifetimes, command admission, command notices, administration and the reader"
 
 -- An administration lifetime writes no manager log. A serving lifetime writes
 -- a lifetime notice that lists the current credentials and, only when its

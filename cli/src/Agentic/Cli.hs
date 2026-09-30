@@ -270,6 +270,7 @@ where
 
 import qualified Agentic.Cli.Frontend as Frontend
 import qualified Agentic.Manager as Manager
+import qualified Agentic.Manager.Flow as Flow
 import Control.Concurrent (myThreadId, threadDelay, throwTo)
 import Control.Exception
   ( AsyncException (UserInterrupt),
@@ -284,7 +285,7 @@ import Control.Exception
     throwIO,
     try,
   )
-import Control.Monad (filterM, foldM, unless, void, when)
+import Control.Monad (filterM, foldM, forM_, unless, void, when)
 import Data.Aeson (Value (..), eitherDecodeStrict', encode, object, toJSON, withObject, (.:), (.=))
 import qualified Data.Aeson.Key as K
 import qualified Data.Aeson.KeyMap as KM
@@ -312,11 +313,11 @@ import GHC.Clock (getMonotonicTimeNSec)
 import Numeric (showFFloat)
 import qualified Paths_agentic as Paths
 import Data.Version (showVersion)
-import System.Directory (createDirectoryIfMissing, doesFileExist, getCurrentDirectory, getHomeDirectory, getTemporaryDirectory, makeAbsolute)
+import System.Directory (createDirectoryIfMissing, doesDirectoryExist, doesFileExist, getCurrentDirectory, getHomeDirectory, getTemporaryDirectory, listDirectory, makeAbsolute)
 import Agentic.Cli.LocalAdmin (runLocalAdmin)
 import System.Environment (getArgs, getEnvironment, getExecutablePath, lookupEnv)
 import System.Exit (ExitCode (..), exitSuccess, exitWith)
-import System.FilePath (isAbsolute, takeDirectory, takeFileName, (</>))
+import System.FilePath (isAbsolute, takeDirectory, takeExtension, takeFileName, (</>))
 import System.IO
   ( BufferMode (LineBuffering),
     Handle,
@@ -764,10 +765,11 @@ data Command
     LineageCheck !MachineOptions !LineageOperation !FilePath ![ForkEdit] !Text !Target !Bool ![InputFlag]
   | -- | New immutable child run derived from a stored parent.
     MachineLineage !MachineOptions !LineageOperation !RunId !FilePath ![ForkEdit] !Text !Target !Bool ![InputFlag]
-  | -- | Read one run log: the run store or its @flow.ndjson@, whether to
-    -- follow it until its stop, the route of the records to print and the
-    -- first position to print.
-    ReadFlow !FilePath !Bool !(Maybe FlowRoute) !Word64
+  | -- | Read run logs and manager logs: each run store or its
+    -- @flow.ndjson@, each manager log or manager flow directory, whether to
+    -- follow one run log until its stop, the route of the records to print
+    -- and the first position to print.
+    ReadFlow ![FilePath] !Bool !(Maybe FlowRoute) !Word64
 -- | Who the output is for: an operator reading it, or a program parsing it.
 --
 -- It rides on the two verbs whose whole output is a statement about the
@@ -1090,52 +1092,97 @@ execute broker reg = \case
   LineageCheck options lineage parent edits name target pinned ins ->
     withRunExample reg pinned name target ins $ \effective _ program _ ->
       withFinalTarget reg name effective program (\finalTarget -> void (validateLineage options (inProcessNames reg name) lineage parent edits name finalTarget program))
-  ReadFlow path follow route from -> flowCmd reg path follow route from
+  ReadFlow paths follow route from -> flowCmd reg paths follow route from
   MachineLineage options lineage runId parent edits name target pinned ins -> do
     validateMachineEnvironment options
     withMachineControls broker options runId name target $ \control ->
       withRunExample reg pinned name target ins $ \effective _ program bindings ->
         withFinalTarget reg name effective program (\finalTarget -> runMachineLineageCmd broker options control reg lineage runId parent edits name finalTarget program bindings)
 
--- | @flow PATH@: print each record of a run log as one JSON object, then one
--- summary object. Exit 1 when a verification fails, 2 when every verification
--- passes but the ended log has no stop, and 0 otherwise. Without @--follow@
--- the log is read once as an ended log. With it the log is read as a live log
--- every 250 milliseconds, each record is printed once its line is complete and
--- an event record once its event line exists, and the reading ends at the
--- stop, which is then read once more as an ended log.
-flowCmd :: Registry -> FilePath -> Bool -> Maybe FlowRoute -> Word64 -> IO ()
-flowCmd reg path follow route from = do
-  absolute <- makeAbsolute path
-  let directory = if takeFileName absolute == runLogName then takeDirectory absolute else absolute
-      reading liveness =
-        (try (readFlow liveness directory) :: IO (Either IOException FlowReport))
-          >>= either (die reg 3 . T.pack . displayException) pure
-      shown entry =
-        positionIndex (entryPosition entry) >= from
-          && maybe True (\selected -> maybe False (flowRouteMatches selected) (entryRecord entry)) route
-      emit value = BL.putStr (encode value <> "\n") >> hFlush stdout
-      emitFrom next entries = do
-        let ready = takeWhile (not . awaiting) [entry | entry <- entries, positionIndex (entryPosition entry) >= next]
-        mapM_ (emit . flowEntryValue) (filter shown ready)
-        pure (next + fromIntegral (length ready))
-      -- An event record whose event line the store does not hold yet.
-      awaiting entry = case (entryRecord entry, entryEvent entry) of
-        (Just record, Nothing) | EventNumber _ <- recBody record -> True
-        _ -> False
-      finish next report = do
-        mapM_ (emit . flowEntryValue) (filter shown [entry | entry <- reportEntries report, positionIndex (entryPosition entry) >= next])
-        emit (flowSummaryValue report)
-        if not (flowVerified report)
-          then exitWith (ExitFailure 1)
-          else if flowUncertain report then exitWith (ExitFailure 2) else exitSuccess
-      poll next = do
-        report <- reading FlowLive
-        next' <- emitFrom next (reportEntries report)
-        case reportStop report of
-          Just _ -> reading FlowEnded >>= finish next'
-          Nothing -> threadDelay 250000 >> poll next'
-  if follow then poll 0 else reading FlowEnded >>= finish 0
+-- | @flow PATH...@: print each record of the logs as one JSON object, then one
+-- summary object.
+--
+-- One run log is read as before: exit 1 when a verification fails, 2 when
+-- every verification passes but the ended log has no stop, and 0 otherwise.
+-- Without @--follow@ the log is read once as an ended log. With it the log is
+-- read as a live log every 250 milliseconds, each record is printed once its
+-- line is complete and an event record once its event line exists, and the
+-- reading ends at the stop, which is then read once more as an ended log.
+--
+-- Any manager log, or more than one log, is read once as ended logs and
+-- joined: each record object also names its log, and the summary holds the
+-- joins, the consent of each start relay and the states of the manager log.
+-- The exit status is 1 when a verification or a consent fails, 2 when every
+-- verification passes but a run log or a lifetime has lost its supervision,
+-- and 0 otherwise.
+flowCmd :: Registry -> [FilePath] -> Bool -> Maybe FlowRoute -> Word64 -> IO ()
+flowCmd reg paths follow route from = do
+  operands <- concat <$> mapM operandsOf paths
+  case operands of
+    [RunOperand directory] -> runLog directory
+    _
+      | follow -> die reg 3 "flow --follow reads exactly one run log"
+      | otherwise -> joined operands
+  where
+    unreadable :: IO a -> IO a
+    unreadable action = try action >>= either (\failure -> die reg 3 (T.pack (displayException (failure :: IOException)))) pure
+    operandsOf path = unreadable $ do
+      absolute <- makeAbsolute path
+      directory <- doesDirectoryExist absolute
+      if not directory
+        then pure [if takeFileName absolute == runLogName then RunOperand (takeDirectory absolute) else ManagerOperand absolute]
+        else do
+          runStore <- doesFileExist (absolute </> runLogName)
+          if runStore
+            then pure [RunOperand absolute]
+            else do
+              names <- sort . filter ((== ".ndjson") . takeExtension) <$> listDirectory absolute
+              logs <- filterM doesFileExist (map (absolute </>) names)
+              when (null logs) (ioError (userError (path <> " names neither a run store nor a manager flow directory that holds a log")))
+              pure (map ManagerOperand logs)
+    shown entry =
+      positionIndex (entryPosition entry) >= from
+        && maybe True (\selected -> maybe False (flowRouteMatches selected) (entryRecord entry)) route
+    emit value = BL.putStr (encode value <> "\n") >> hFlush stdout
+    runLog directory = if follow then poll 0 else reading FlowEnded >>= finish 0
+      where
+        reading liveness = unreadable (readFlow liveness directory)
+        emitFrom next entries = do
+          let ready = takeWhile (not . awaiting) [entry | entry <- entries, positionIndex (entryPosition entry) >= next]
+          mapM_ (emit . flowEntryValue) (filter shown ready)
+          pure (next + fromIntegral (length ready))
+        -- An event record whose event line the store does not hold yet.
+        awaiting entry = case (entryRecord entry, entryEvent entry) of
+          (Just record, Nothing) | EventNumber _ <- recBody record -> True
+          _ -> False
+        finish next report = do
+          mapM_ (emit . flowEntryValue) (filter shown [entry | entry <- reportEntries report, positionIndex (entryPosition entry) >= next])
+          emit (flowSummaryValue report)
+          if not (flowVerified report)
+            then exitWith (ExitFailure 1)
+            else if flowUncertain report then exitWith (ExitFailure 2) else exitSuccess
+        poll next = do
+          report <- reading FlowLive
+          next' <- emitFrom next (reportEntries report)
+          case reportStop report of
+            Just _ -> reading FlowEnded >>= finish next'
+            Nothing -> threadDelay 250000 >> poll next'
+    joined operands = do
+      managers <- unreadable (sequence [Flow.readManagerLog path | ManagerOperand path <- operands])
+      runs <- unreadable (sequence [(,) directory <$> readFlow FlowEnded directory | RunOperand directory <- operands])
+      let logged path entry = case flowEntryValue entry of
+            Object fields -> Object (KM.insert "log" (toJSON path) fields)
+            other -> other
+      forM_ managers $ \manager -> mapM_ (emit . logged (Flow.managerLogPath manager)) (filter shown (Flow.managerLogEntries manager))
+      forM_ runs $ \(directory, report) -> mapM_ (emit . logged directory) (filter shown (reportEntries report))
+      let join = Flow.joinFlows credentialArgument managers runs
+      emit (Flow.flowJoinSummaryValue join)
+      if not (Flow.flowJoinVerified join)
+        then exitWith (ExitFailure 1)
+        else if Flow.flowJoinUncertain join then exitWith (ExitFailure 2) else exitSuccess
+
+-- | One log that @flow@ reads: a run store directory or a manager log file.
+data FlowOperand = RunOperand FilePath | ManagerOperand FilePath
 
 readFrontendRequest :: IO BS.ByteString
 readFrontendRequest = go (maxFrontendQueryBytes + 1) []
@@ -3639,8 +3686,11 @@ parseCommand reg = \case
     (options, targetArgs) <- machineOptions remaining
     (target, pinned, inputs) <- parseTarget reg targetArgs
     pure (LineageCheck options lineage (T.unpack parent) edits name target pinned inputs)
-  ["flow", "--help"] -> Left "flow takes PATH [--follow] [--route PREDICATE] [--from CURSOR]"
-  ("flow" : path : rest) -> flowOptions (T.unpack path) False Nothing Nothing rest
+  ["flow", "--help"] -> Left "flow takes PATH... [--follow] [--route PREDICATE] [--from CURSOR]"
+  ("flow" : path : rest) | not ("--" `T.isPrefixOf` path) ->
+    let (more, options) = break ("--" `T.isPrefixOf`) rest
+     in flowOptions (map T.unpack (path : more)) False Nothing Nothing options
+  ("flow" : _) -> Left "flow takes PATH... [--follow] [--route PREDICATE] [--from CURSOR]"
   ("machine-restart" : runIdText : parent : name : rest) -> lineageCommand RestartRun runIdText parent name rest
   ("machine-resume" : runIdText : parent : name : rest) -> lineageCommand ResumeRun runIdText parent name rest
   ("machine-fork" : runIdText : parent : name : rest) -> lineageCommand ForkRun runIdText parent name rest
@@ -3654,7 +3704,9 @@ parseCommand reg = \case
     verbs = ["plan", "cost", "run", "machine", "lineage-check", "machine-restart", "machine-resume", "machine-fork", "flow"]
 
     flowOptions path follow route from = \case
-      [] -> Right (ReadFlow path follow route (fromMaybe 0 from))
+      []
+        | follow && length path > 1 -> Left "flow --follow reads exactly one run log"
+        | otherwise -> Right (ReadFlow path follow route (fromMaybe 0 from))
       "--follow" : rest
         | follow -> Left "flow received --follow twice"
         | otherwise -> flowOptions path True route from rest
@@ -3666,7 +3718,7 @@ parseCommand reg = \case
         | otherwise -> case TR.decimal cursor of
             Right (position, "") -> flowOptions path follow route (Just position) rest
             _ -> Left ("flow --from takes a record position, not '" <> cursor <> "'")
-      option : _ -> Left ("flow takes PATH [--follow] [--route PREDICATE] [--from CURSOR], and does not take '" <> option <> "'")
+      option : _ -> Left ("flow takes PATH... [--follow] [--route PREDICATE] [--from CURSOR], and does not take '" <> option <> "'")
 
     routingOptions rendering persona mode = \case
       [] -> Right (RoutingInspection rendering persona mode)

@@ -408,6 +408,13 @@ and the [controls contract](CONTROLS.md#manager-log-relays) describe the
 `relay` records. The [admission contract](ADMISSION.md#manager-log-endings)
 describes the review endings and the request endings.
 
+`readManagerLog` reads one manager log file as the account that owns its flow
+directory, and `joinFlows` joins manager logs with run logs. The
+[broker contract](../runtime/BROKER.md#manager-log-reader) states what the
+reader verifies, and the `agentic-run flow` verb prints the result. The
+reader writes nothing, and the Store ledger remains the authority on
+commands, reviews and requests.
+
 ## Worker cleanup ownership
 
 Worker lifetimes use a separate bounded registration, not the file-operation

@@ -9,6 +9,7 @@ import Agentic.Runtime
 import qualified Agentic.Engine as E
 import qualified Agentic.Planning as P
 import BucketEvidence (withCaptureBucket)
+import Control.Exception (bracket)
 import Control.Monad (unless, void)
 import Data.Aeson (Value (Null, String), object, (.=))
 import qualified Data.ByteString as BS
@@ -168,6 +169,12 @@ completeLog directory = do
   BS.writeFile logFile logBytes
   restored <- readFlow FlowEnded directory
   check "the restored log verifies" (flowVerified restored)
+  -- Read as a manager log, every record of the run log has a schema of the
+  -- other log.
+  asManager <- bracket (openPrivateRoot "flow reader check" directory) closePrivateRoot $ \root ->
+    readFlowLogAt ManagerLog root [runLogName] [flowClaimDirectory]
+  check "a run log read as a manager log refuses each run-log schema"
+    (all (\entry -> any ("belongs to the run log" `T.isInfixOf`) (entryProblems entry)) (fst asManager))
 
 -- | A log that holds every state of section 3.6, read live and ended, and the
 -- same log with its stop and an ask that follows the stop. A reader in this
@@ -207,6 +214,11 @@ stateLog directory = do
   check "a route of schema and occurrence selects one question" (questions == [open])
   controls <- selected "from=manager,command=cancel-1"
   check "a route of sender and command selects one control" (controls == statesUnacknowledged pending)
+  case controls of
+    [cancel] ->
+      check ("each control joins its first acknowledgement event: " <> show (flowAcknowledgements stopped))
+        (flowAcknowledgements stopped == [(cancel, Nothing), (Position 3, Just (Position 4))])
+    _ -> fail "flow reader: the stopped log has no single cancel control"
   public <- selected "to=public,schema=event"
   check "a route of address selects the event records" (length public == 8)
   check "a route with an unknown field is refused" (either (const True) (const False) (parseFlowRoute "sender=manager"))

@@ -543,6 +543,7 @@ executable manager-command-check
   c-sources:       manager/test/draft_sync_fault.c
   other-modules:
     Agentic.Manager.Test.Contention
+    Agentic.Manager.Test.FlowReader
     Agentic.Manager.Test.StoreAdmissionCheck
     Agentic.Manager.Test.AcceptanceAudit
     Agentic.Manager.Credentials

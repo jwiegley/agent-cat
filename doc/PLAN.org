@@ -1487,7 +1487,7 @@ Two small residues of acat-192/acat-9kn: prune the deriving clauses if nothing w
 :LABELS:   ["actor-flow","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-26 Sat 23:41]
-:MODIFIED: [2026-09-29 Tue 21:38]
+:MODIFIED: [2026-09-29 Tue 22:01]
 :CREATED_BY: johnw
 :SOURCE_REPO: .
 :ORIGINAL_SIZE: 0
@@ -1549,6 +1549,13 @@ Actor-flow increment 1, delta 1b (at most 8 engineering days). Add the manager l
     "author": "johnw",
     "text": "Subtask F13 of delta 1b: command notices, review endings and request endings. The manager-log slot of an admission transaction now carries a queue of post-commit notices. noticeAfterCommit queues a flushed notice from Manager, runWithAdmission appends the queue in order after a successful COMMIT and outside the try block, and a rollback drops it. A failed notice append becomes a gap entry through appendManager. takePostCommit and appendPostCommit let the admission path append the taken notices in recordReceipt after the receipt, which keeps the order command, receipt, ending. Commands.hs queues a CommandChanged notice in attemptTicket, in observeWithAdmission whenever the receipt changes (acknowledgement, effect, unresolved, refusal), in recordObservation and in reconcileCommandAttemptWithAdmission. Admission.hs queues a ReviewEnded notice for each live preparation in invalidatePreparations, a RequestEnded withdrawn notice in withdrawRequest, and in finalizeKnown a RequestEnded notice when no start of the reservation was attempted, with cause refused, discarded, review-expired, invalidated, withdrawn or preparation-failed. invalidateLivePreparation reaches both endings through the service cleanup. manager/ADMISSION.md, COMMANDS.md and STORAGE.md describe the notices and endings. Evidence scope: F13-build (ALLBUILD, -Werror), F13-flow-unit (manager-command-check flow, new flowNoticeChecks: a dispatch attempt and an acknowledgement each append a command notice after the receipt, and a failed effect-observed notice gives a gap notice naming MissingRecord FlowNotice before the next command record), F13-flow-relay at N8 (draft withdraw: command, receipt, ending withdrawn; prepared withdraw: receipt, review ended, discard relay, ending discarded; refused approval: ending refused; an approve whose receipt append fails still relays its start and starts the run, with a gap notice naming the receipt) and F13-journey (tui-journey at N8, with command notices after the relays, checked by a private script) each passed under timeout. Fess: not blocking. Its four medium and five low findings are filed as acat-64v1. Limitations: /v1 discard is refused before admission, so the discard item was tested through the withdrawal of a prepared request, whose ending names discarded. The restart reconciliation at Store open and an edit that returns a queued request to draft append no per-item ending. Command notices can repeat a state. The new tests were not shown to fail against the previous code. N1, the Phase A controls and source-boundaries were not run.\n",
     "created_at": "2026-09-30T04:38:45Z"
+  },
+  {
+    "id": 368,
+    "issue_id": "acat-5m60",
+    "author": "johnw",
+    "text": "Subtask F14 of delta 1b: manager-log reader joins and consent verification. readManagerLog in Agentic.Manager.Flow reads a manager log from its flow directory as a private root, decodes each body with the manager codec of its schema, and refuses a record whose schema belongs to the other log. joinFlows joins a review to its approve and discard commands by preparation resource and to its review endings, a start relay to the run-log start by native run, a control relay to the run-log control by native run and command id, a run-log control to its acknowledgement event, a command to its receipt and later command notices, and a run-log answer to the manager answer command by command id. The added states are undecided command, unresolved delivery, pending review and lost lifetimes, and the summary carries an authority field that names the ledger. The consent check requires, for each start relay in order, the review, an approve command from a Credential with the same selectors, a receipt that is not refused or a gap notice naming it, and the relay. It also checks the review sha256 against the binding reviewSha256, the binding sha256 against the digest named by the approve command, the native run, the absence of credentials in the binding arguments, and the run-log start. agentic-run flow accepts several PATH operands and exits non-zero on any failed verification. runtime/BROKER.md, manager/STORAGE.md and the verb entry in doc/agent-cat.texi describe the change. Evidence scope: F14-build (-Werror), F14-runtime-contract at N8, F14-flow-unit (manager-command-check flow, the join and consent unit tests with eight consent-failure variants and a tamper case), F14-doc-check, F14-journey (tui-journey at N8, then agentic-run flow on the manager log and run store exits 0 with consent verified) and F14-consent-negative (one changed review byte makes the verb exit non-zero) each passed under timeout. Fess: not blocking. Its two medium and four low findings are filed as acat-ow77. Limitations: the verb does not find run stores on its own, --follow works only on a single run log, an unmatched run-log answer is not a failure, the new tests were not shown to fail first, and source-boundaries, ALLBUILD and the tui.sh gate were not run.\n",
+    "created_at": "2026-09-30T05:01:31Z"
   }
 ]
 #+end_src
@@ -8294,6 +8301,34 @@ From acat-ubt: convFold handles certain members only; the general List (MSemirin
   }
 ]
 #+end_src
+
+* TODO [#C] Resolve F14 fess findings in the manager-log reader and consent check
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-ow77
+:LABELS:   ["actor-flow","workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-29 Tue 22:01]
+:MODIFIED: [2026-09-29 Tue 22:01]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Follow-up from the F14 fess audit of the manager-log reader joins and consent verification (actor-flow delta 1b). None of these findings blocks. Source: fess audit /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/fess/flow-F14-r1.md.
+
+1. (medium) manager/src/Agentic/Manager/Flow.hs:1195 and runtime/BROKER.md:277: consent accepts an approve receipt in any state other than refused, including unresolved, dispatch-attempted, acknowledged and effect-observed. Design section 2 requires the accepted receipt. A log whose approve receipt is unresolved passes consent. Fix: require the accepted state, or document why a later state counts, and add a unit variant with an unresolved receipt that must fail.
+
+2. (medium) manager/src/Agentic/Manager/Flow.hs:1069-1093: the answer join matches any run-log answer with aboutCommand to a manager command with that id. It does not check that the answer is from Manager or that the command is from a Principal credential, although design gate 1 requires a join to the principal's command. An answer with no matching command yields a null command silently. Fix: verify the sender roles, fail the join on a mismatch, and report an unmatched answer as an explicit state.
+
+3. (low) doc/agent-cat.texi:3699-3700: the entry says a start relay joins the run-log start with its native run and command identifiers. The code joins a start relay by native run only, and the run-log start carries no command id. Fix: reword the entry to match runtime/BROKER.md.
+
+4. (low) manager/test/Agentic/Manager/Test/FlowReader.hs:165-166: the unit tests use their own substring credentialArgument, not the word-split predicate that the CLI passes (cli/src/Agentic/Cli.hs:3251). Fix: move the predicate to a module that both can import, or add a CLI-level consent credential case.
+
+5. (low) manager/src/Agentic/Manager/Flow.hs:1211: design section 2 requires an authorized approver (submit and control scope on the profile). The code accepts any Credential principal. Fix: check the approving credential against the scopes and profiles of the most recent lifetime notice or administration record.
+
+6. (low) manager/src/Agentic/Manager/Flow.hs:1240-1251: bindingArguments silently drops non-string array items and a missing or non-array invocation, prefixArgs or targetArguments. A malformed binding passes the credential check. Fix: report a malformed argument field as a consent problem.
 
 * TODO [#C] Adapter narration corrupts answers; usage data discarded; denial cost unmeasured
 :PROPERTIES:

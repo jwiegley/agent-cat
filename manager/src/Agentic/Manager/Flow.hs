@@ -76,23 +76,58 @@ module Agentic.Manager.Flow
     MissingRecord (..),
     noticeFlowBody,
     noticeFromFlowBody,
+
+    -- * Reader
+    ManagerValue (..),
+    ManagerLogReport (..),
+    readManagerLog,
+    LogPosition (..),
+    ReviewJoin (..),
+    RelayJoin (..),
+    ControlJoin (..),
+    CommandJoin (..),
+    AnswerJoin (..),
+    ConsentCheck (..),
+    LifetimeJoin (..),
+    FlowJoin (..),
+    joinFlows,
+    joinUndecided,
+    joinUnresolvedDelivery,
+    joinPendingReview,
+    joinLostLifetimes,
+    flowJoinProblems,
+    flowJoinVerified,
+    flowJoinUncertain,
+    flowJoinSummaryValue,
   )
 where
 
-import Agentic.Manager.Protocol.Command (CommandReceipt, CommandState, Operation, mutationLedgerReserve, operationName, parseOperation, parseState, stateName)
+import Agentic.Manager.Protocol.Command (CommandReceipt (..), CommandState (Refused), Operation (Answer, Approve, Discard), mutationLedgerReserve, operationName, parseOperation, parseState, stateName)
 import Agentic.Manager.Protocol.Preparation (ApprovalRequest (..))
 import Agentic.Runtime
-  ( About,
-    Actor (Manager),
+  ( About (..),
+    Actor (Manager, Principal),
+    Authority (Credential),
+    FlowEntry (..),
+    FlowReport (..),
+    Start (..),
+    closePrivateRoot,
+    flowAcknowledgements,
+    flowReportProblems,
+    flowReportValue,
+    flowUncertain,
+    openPrivateRoot,
+    readFlowLogAt,
+    startFromBody,
     Address (To),
     Content (ContentValue, ContentEvent),
     FlowAppend (..),
     FlowCodec,
     FlowError (..),
     FlowLimitReached (..),
-    FlowLog (RunLog),
+    FlowLog (ManagerLog, RunLog),
     FlowWriter,
-    Position,
+    Position (..),
     PrivateRoot,
     Record (..),
     RunId (..),
@@ -122,21 +157,26 @@ import Agentic.Runtime
     schemaName,
   )
 import Control.Concurrent.MVar (MVar, modifyMVar, newMVar, withMVar)
-import Control.Exception (SomeAsyncException, SomeException, displayException, fromException, throwIO, try)
+import Control.Exception (SomeAsyncException, SomeException, bracket, displayException, fromException, throwIO, try)
 import Control.Monad (unless, when)
 import Data.Aeson (Value (..), object, toJSON, (.=))
 import qualified Data.Aeson as Aeson
+import qualified Data.Aeson.KeyMap as KeyMap
 import Data.Aeson.Types (parseEither)
 import qualified Data.ByteString as BS
 import Data.Char (isAscii, isAlphaNum)
 import Data.Foldable (toList)
 import Data.Int (Int64)
 import Data.List (nub)
+import Data.Map.Strict (Map)
+import qualified Data.Map.Strict as Map
+import Data.Maybe (fromMaybe, isJust, isNothing, listToMaybe)
 import Data.Sequence (Seq, (|>))
 import qualified Data.Sequence as Seq
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
+import System.FilePath (dropExtension, takeDirectory, takeFileName)
 
 -- ---------------------------------------------------------------------------
 -- Writer
@@ -816,6 +856,509 @@ noticeFromFlowBody value = do
       number <- flowInteger what raw
       unless (number >= 0) (Left (what <> " is negative"))
       pure number
+
+-- ---------------------------------------------------------------------------
+-- Reader
+-- ---------------------------------------------------------------------------
+
+-- | The body of one manager record, decoded with the codec of its schema. A
+-- failure body is decoded by the runtime reader and carries no value here.
+data ManagerValue
+  = CommandValue !CommandBody
+  | AdministrationValue !AdministrationBody
+  | ReceiptValue !CommandReceipt
+  | AdministrationReceiptValue !Value
+  | ReviewValue !ReviewBody
+  | RelayValue !RelayBody
+  | NoticeValue !Notice
+  deriving (Eq, Show)
+
+-- | What a reader found in one manager log: its path, its entries as the
+-- runtime reader verified them with the failures of the manager body codecs
+-- added, the decoded body of each record whose body decodes, and the size of
+-- a final line without its newline.
+data ManagerLogReport = ManagerLogReport
+  { managerLogPath :: !FilePath,
+    managerLogEntries :: ![FlowEntry],
+    managerLogValues :: !(Map Position ManagerValue),
+    managerLogTorn :: !(Maybe Int)
+  }
+  deriving (Eq, Show)
+
+-- | Read one manager log file, as the account that owns its flow directory.
+--
+-- The flow directory of a manager private root holds the log
+-- @<stream>.ndjson@ of each stream and its claim-check files in
+-- @claims/<stream>/@. The reader verifies each line with 'readFlowLogAt' as a
+-- manager log, and then decodes each body with the codec of its schema. A
+-- receipt decodes with the receipt codec of the command that it answers.
+readManagerLog :: FilePath -> IO ManagerLogReport
+readManagerLog path =
+  bracket (openPrivateRoot "manager flow" (takeDirectory path)) closePrivateRoot $ \root -> do
+    let name = takeFileName path
+        stream = T.pack (dropExtension name)
+    (entries, torn) <- readFlowLogAt ManagerLog root [name] (drop 1 (managerFlowClaims stream))
+    let (decoded, values) = decodeManagerEntries entries
+    pure (ManagerLogReport path decoded values torn)
+
+decodeManagerEntries :: [FlowEntry] -> ([FlowEntry], Map Position ManagerValue)
+decodeManagerEntries = go Map.empty []
+  where
+    go values done [] = (reverse done, values)
+    go values done (entry : rest) = case (entryRecord entry, entryContent entry) of
+      (Just record, Just value) -> case decodeManagerBody values record value of
+        Right Nothing -> go values (entry : done) rest
+        Right (Just decoded) -> go (Map.insert (entryPosition entry) decoded values) (entry : done) rest
+        Left why ->
+          let failed = entry {entryProblems = entryProblems entry <> ["the " <> schemaName (recSchema record) <> " body does not decode: " <> why]}
+           in go values (failed : done) rest
+      _ -> go values (entry : done) rest
+
+decodeManagerBody :: Map Position ManagerValue -> Record -> Value -> Either Text (Maybe ManagerValue)
+decodeManagerBody values record value = case recSchema record of
+  FlowCommand
+    | administration -> Just . AdministrationValue <$> administrationFromFlowBody value
+    | otherwise -> Just . CommandValue <$> commandFromFlowBody value
+  FlowReceipt -> case recReplyTo record >>= (`Map.lookup` values) of
+    Just (AdministrationValue _) -> Just . AdministrationReceiptValue <$> administrationReceiptFromFlowBody value
+    Just (CommandValue _) -> do
+      receipt <- receiptFromFlowBody value
+      unless (Just (receiptId receipt) == aboutCommand (recAbout record)) (Left "the receipt names another command")
+      pure (Just (ReceiptValue receipt))
+    _ -> Left "the receipt answers no command whose body decoded"
+  FlowReview -> Just . ReviewValue <$> reviewFromFlowBody value
+  FlowRelay -> Just . RelayValue <$> relayFromFlowBody value
+  FlowNotice -> Just . NoticeValue <$> noticeFromFlowBody value
+  _ -> Right Nothing
+  where
+    administration = case value of
+      Object fields -> KeyMap.member "administration" fields
+      _ -> False
+
+-- | One position in one of the logs that a reader joins.
+data LogPosition = LogPosition
+  { logPositionLog :: !FilePath,
+    logPositionAt :: !Position
+  }
+  deriving (Eq, Show)
+
+-- | A review and, by its preparation identifier, the later approve and
+-- discard commands and review endings of its manager log.
+data ReviewJoin = ReviewJoin
+  { reviewJoinReview :: !LogPosition,
+    reviewJoinPreparation :: !Text,
+    reviewJoinCommands :: ![Position],
+    reviewJoinEndings :: ![Position]
+  }
+  deriving (Eq, Show)
+
+-- | A start or control relay and, by its native run and command identifiers,
+-- the @start@ or @control@ record of the run log that the worker received.
+data RelayJoin = RelayJoin
+  { relayJoinRelay :: !LogPosition,
+    relayJoinKind :: !RelayKind,
+    relayJoinNativeRun :: !RunId,
+    relayJoinDelivered :: !(Maybe LogPosition)
+  }
+  deriving (Eq, Show)
+
+-- | A control of a run log and, by its command identifier, its first later
+-- acknowledgement event record.
+data ControlJoin = ControlJoin
+  { controlJoinControl :: !LogPosition,
+    controlJoinAcknowledgement :: !(Maybe Position)
+  }
+  deriving (Eq, Show)
+
+-- | A command, its reply and, by its command identifier, its later command
+-- notices.
+data CommandJoin = CommandJoin
+  { commandJoinCommand :: !LogPosition,
+    commandJoinReply :: !(Maybe Position),
+    commandJoinNotices :: ![Position]
+  }
+  deriving (Eq, Show)
+
+-- | A person answer of a run log that names a command and, by that command
+-- identifier, the answer command of the principal in a manager log.
+data AnswerJoin = AnswerJoin
+  { answerJoinAnswer :: !LogPosition,
+    answerJoinCommandId :: !Text,
+    answerJoinCommand :: !(Maybe LogPosition)
+  }
+  deriving (Eq, Show)
+
+-- | The verification of the consent of one start relay (section 2 of the
+-- design): the review, the approve command, its accepted receipt or the gap
+-- notice that names that receipt, and the @start@ of the run log that names
+-- the native run of the relay. The consent is verified when the list of
+-- problems is empty.
+data ConsentCheck = ConsentCheck
+  { consentRelay :: !LogPosition,
+    consentNativeRun :: !RunId,
+    consentReview :: !(Maybe Position),
+    consentCommand :: !(Maybe Position),
+    consentReceipt :: !(Maybe Position),
+    consentGap :: !(Maybe Position),
+    consentRunStart :: !(Maybe LogPosition),
+    consentProblems :: ![Text]
+  }
+  deriving (Eq, Show)
+
+-- | A lifetime notice and the shutdown notice of the same process generation
+-- that ends it, when one follows before the next lifetime notice.
+data LifetimeJoin = LifetimeJoin
+  { lifetimeJoinStart :: !LogPosition,
+    lifetimeJoinShutdown :: !(Maybe Position)
+  }
+  deriving (Eq, Show)
+
+-- | The manager logs and run logs that one reading joins, and every join
+-- between them. The Store ledger remains the authority on commands, reviews
+-- and requests.
+data FlowJoin = FlowJoin
+  { joinManagerLogs :: ![ManagerLogReport],
+    joinRunLogs :: ![(FilePath, FlowReport)],
+    joinReviews :: ![ReviewJoin],
+    joinRelays :: ![RelayJoin],
+    joinControls :: ![ControlJoin],
+    joinCommands :: ![CommandJoin],
+    joinAnswers :: ![AnswerJoin],
+    joinConsent :: ![ConsentCheck],
+    joinLifetimes :: ![LifetimeJoin],
+    -- | Each join that fails a verification other than consent.
+    joinFailures :: ![Text]
+  }
+  deriving (Eq, Show)
+
+-- | Join manager logs with run logs. The predicate recognises an argument
+-- that carries a credential, as the frontend worker refuses one in its
+-- invocation.
+joinFlows :: (String -> Bool) -> [ManagerLogReport] -> [(FilePath, FlowReport)] -> FlowJoin
+joinFlows credentialArgument managers runs =
+  FlowJoin
+    { joinManagerLogs = managers,
+      joinRunLogs = runs,
+      joinReviews = concatMap reviewJoins managers,
+      joinRelays = relays,
+      joinControls = [ControlJoin (LogPosition path control) acknowledgement | (path, report) <- runs, (control, acknowledgement) <- flowAcknowledgements report],
+      joinCommands = concatMap commandJoins managers,
+      joinAnswers = answers,
+      joinConsent = concatMap (consentChecks credentialArgument runStarts) managers,
+      joinLifetimes = concatMap lifetimeJoins managers,
+      joinFailures = answerFailures
+    }
+  where
+    runStarts = [(run, path) | (path, report) <- runs, Just run <- [runLogStart report]]
+    relays =
+      [ RelayJoin (LogPosition (managerLogPath manager) position) (relayBodyKind relay) (relayBodyNativeRun relay) (delivered relay)
+        | manager <- managers,
+          (position, RelayValue relay) <- Map.toList (managerLogValues manager),
+          relayBodyKind relay /= RelayDiscard
+      ]
+    delivered relay =
+      listToMaybe
+        [ LogPosition path position
+          | (run, path) <- runStarts,
+            run == relayBodyNativeRun relay,
+            Just report <- [lookup path runs],
+            position <- case relayBodyKind relay of
+              RelayStart -> [Position 0]
+              _ -> [entryPosition entry | entry <- reportEntries report, Just record <- [entryRecord entry], recSchema record == FlowControl, aboutCommand (recAbout record) == relayBodyCommand relay]
+        ]
+    answers =
+      [ AnswerJoin (LogPosition path (entryPosition entry)) command (fst <$> listToMaybe (managerCommands command))
+        | (path, report) <- runs,
+          entry <- reportEntries report,
+          Just record <- [entryRecord entry],
+          recSchema record == FlowAnswer,
+          Just command <- [aboutCommand (recAbout record)]
+      ]
+    managerCommands command =
+      [ (LogPosition (managerLogPath manager) position, body)
+        | manager <- managers,
+          (position, CommandValue body) <- Map.toList (managerLogValues manager),
+          Just record <- [recordAt manager position],
+          aboutCommand (recAbout record) == Just command
+      ]
+    answerFailures =
+      [ T.pack (logPositionLog (answerJoinAnswer answer)) <> " position " <> showPosition (logPositionAt (answerJoinAnswer answer)) <> ": the answer names command " <> answerJoinCommandId answer <> ", which is a " <> operationName (commandBodyOperation body) <> " command"
+        | answer <- answers,
+          (_, body) <- take 1 (managerCommands (answerJoinCommandId answer)),
+          commandBodyOperation body /= Answer
+      ]
+        <> [ T.pack (logPositionLog (answerJoinAnswer answer)) <> " position " <> showPosition (logPositionAt (answerJoinAnswer answer)) <> ": the answer names command " <> answerJoinCommandId answer <> ", which the manager log records twice"
+             | answer <- answers,
+               length (managerCommands (answerJoinCommandId answer)) > 1
+           ]
+
+-- | The native run that the first record of a run log starts.
+runLogStart :: FlowReport -> Maybe RunId
+runLogStart report = case reportEntries report of
+  first : _
+    | Just record <- entryRecord first,
+      recSchema record == FlowStart,
+      Just value <- entryContent first,
+      Right start <- startFromBody value ->
+        Just (startRun start)
+  _ -> Nothing
+
+recordAt :: ManagerLogReport -> Position -> Maybe Record
+recordAt manager (Position index) = case drop (fromIntegral index) (managerLogEntries manager) of
+  entry : _ -> entryRecord entry
+  [] -> Nothing
+
+managerRecords :: ManagerLogReport -> [(Position, Record, Maybe ManagerValue)]
+managerRecords manager =
+  [ (entryPosition entry, record, Map.lookup (entryPosition entry) (managerLogValues manager))
+    | entry <- managerLogEntries manager,
+      Just record <- [entryRecord entry]
+  ]
+
+reviewJoins :: ManagerLogReport -> [ReviewJoin]
+reviewJoins manager =
+  [ ReviewJoin
+      (LogPosition (managerLogPath manager) position)
+      preparation
+      [ later
+        | (later, _, Just (CommandValue body)) <- records,
+          later > position,
+          commandBodyOperation body `elem` [Approve, Discard],
+          commandPreparation body == Just preparation
+      ]
+      [later | (later, _, Just (NoticeValue (ReviewEnded ended _))) <- records, later > position, ended == preparation]
+    | (position, _, Just (ReviewValue review)) <- records,
+      let preparation = reviewBodyPreparation review
+  ]
+  where
+    records = managerRecords manager
+
+-- | The preparation that an approve or discard command names by its resource.
+commandPreparation :: CommandBody -> Maybe Text
+commandPreparation = T.stripPrefix "/v1/preparations/" . commandBodyResource
+
+commandJoins :: ManagerLogReport -> [CommandJoin]
+commandJoins manager =
+  [ CommandJoin
+      (LogPosition (managerLogPath manager) position)
+      (listToMaybe [later | (later, reply, _) <- records, recReplyTo reply == Just position])
+      [ later
+        | Just command <- [aboutCommand (recAbout record)],
+          (later, notice, Just (NoticeValue (CommandChanged _ _))) <- records,
+          later > position,
+          aboutCommand (recAbout notice) == Just command
+      ]
+    | (position, record, _) <- records,
+      recSchema record == FlowCommand
+  ]
+  where
+    records = managerRecords manager
+
+lifetimeJoins :: ManagerLogReport -> [LifetimeJoin]
+lifetimeJoins manager =
+  [ LifetimeJoin (LogPosition (managerLogPath manager) position) $
+      case [(later, notice) | (later, _, Just (NoticeValue notice)) <- records, later > position, isLifetimeEnd notice] of
+        (later, ShutdownNotice generation) : _ | generation == lifetimeGeneration lifetime -> Just later
+        _ -> Nothing
+    | (position, _, Just (NoticeValue (LifetimeNotice lifetime))) <- records
+  ]
+  where
+    records = managerRecords manager
+    isLifetimeEnd = \case
+      LifetimeNotice _ -> True
+      ShutdownNotice _ -> True
+      _ -> False
+
+consentChecks :: (String -> Bool) -> [(RunId, FilePath)] -> ManagerLogReport -> [ConsentCheck]
+consentChecks credentialArgument runStarts manager =
+  [consentOf position relay | (position, _, Just (RelayValue relay)) <- records, relayBodyKind relay == RelayStart]
+  where
+    path = managerLogPath manager
+    records = managerRecords manager
+    consentOf relayAt relay =
+      let run = relayBodyNativeRun relay
+          command =
+            listToMaybe
+              (reverse [(at, record, body) | (at, record, Just (CommandValue body)) <- records, at < relayAt, aboutCommand (recAbout record) == relayBodyCommand relay, isJust (relayBodyCommand relay)])
+          commandAt = (\(at, _, _) -> at) <$> command
+          preparation = command >>= \(_, _, body) -> commandPreparation body
+          review =
+            listToMaybe
+              (reverse [(at, body) | Just commandPosition <- [commandAt], (at, _, Just (ReviewValue body)) <- records, at < commandPosition, Just (reviewBodyPreparation body) == preparation])
+          receipt =
+            listToMaybe
+              [ at
+                | Just commandPosition <- [commandAt],
+                  (at, record, Just (ReceiptValue body)) <- records,
+                  recReplyTo record == Just commandPosition,
+                  at < relayAt,
+                  receiptState body /= Refused
+              ]
+          gap =
+            listToMaybe
+              [ at
+                | Just commandPosition <- [commandAt],
+                  (at, _, Just (NoticeValue (GapNotice missing _))) <- records,
+                  at > commandPosition,
+                  at < relayAt,
+                  any (\entry -> missingSchema entry == FlowReceipt && aboutCommand (missingAbout entry) == relayBodyCommand relay) missing
+              ]
+          runStart = LogPosition <$> lookup run runStarts <*> pure (Position 0)
+          problems = case (command, review) of
+            (Nothing, _) -> ["no earlier command record names the command " <> fromMaybe "(none)" (relayBodyCommand relay) <> " of the start relay"]
+            (Just (_, record, body), found) ->
+              [ "the command of the start relay is a " <> operationName (commandBodyOperation body) <> " command" | commandBodyOperation body /= Approve ]
+                <> [ "the approve command is not from a credential" | not (fromCredential (recFrom record)) ]
+                <> case found of
+                  Nothing -> ["no earlier review record names the preparation " <> fromMaybe "(none)" preparation <> " of the approve command"]
+                  Just (_, reviewed) -> reviewProblems body reviewed
+                <> [ "neither an accepted receipt nor a gap notice that names the receipt lies between the approve command and the start relay" | isNothing receipt && isNothing gap ]
+                <> [ "no run log that was read begins with a start for native run " <> runIdText run | isNothing runStart ]
+          reviewProblems body reviewed =
+            let binding = either (const Nothing) Just (Aeson.eitherDecodeStrict' (reviewBodyBinding reviewed)) :: Maybe Value
+                bindingText key = case binding of
+                  Just (Object fields) | Just (String text) <- KeyMap.lookup key fields -> Just text
+                  _ -> Nothing
+                approval = commandBodyValue body >>= either (const Nothing) Just . parseEither Aeson.parseJSON :: Maybe ApprovalRequest
+                ApprovalRequest reviewDigest _ _ _ _ = reviewBodySelectors reviewed
+             in [ "the approve command names other selectors than the review" | approval /= Just (reviewBodySelectors reviewed) ]
+                  <> [ "the binding is not a JSON object" | not (maybe False isObject binding) ]
+                  <> [ "the SHA-256 of the review bytes differs from the reviewSha256 of the binding" | bindingText "reviewSha256" /= Just (flowSha256 (reviewBodyBytes reviewed)) ]
+                  <> [ "the SHA-256 of the binding bytes differs from the binding digest" | flowSha256 (reviewBodyBinding reviewed) /= reviewBodyBindingDigest reviewed ]
+                  <> [ "the approve command names another digest than the binding digest" | reviewDigest /= reviewBodyBindingDigest reviewed ]
+                  <> [ "the binding names another native run than the start relay" | bindingText "nativeRunId" /= Just (runIdText (relayBodyNativeRun relay)) ]
+                  <> [ "the binding carries a credential in its invocation or target arguments" | any credentialArgument (bindingArguments binding) ]
+       in ConsentCheck (LogPosition path relayAt) run (fst <$> review) commandAt receipt gap runStart problems
+    fromCredential = \case
+      Principal (Credential _ _) -> True
+      _ -> False
+    isObject = \case
+      Object _ -> True
+      _ -> False
+
+-- | The invocation prefix arguments and the target arguments of a binding.
+bindingArguments :: Maybe Value -> [String]
+bindingArguments = \case
+  Just (Object fields) ->
+    strings (KeyMap.lookup "targetArguments" fields)
+      <> case KeyMap.lookup "invocation" fields of
+        Just (Object invocation) -> strings (KeyMap.lookup "prefixArgs" invocation)
+        _ -> []
+  _ -> []
+  where
+    strings = \case
+      Just (Array items) -> [T.unpack text | String text <- toList items]
+      _ -> []
+
+-- | The undecided commands: each command without a reply. The ledger is the
+-- authority on its state.
+joinUndecided :: FlowJoin -> [LogPosition]
+joinUndecided join = [commandJoinCommand command | command <- joinCommands join, isNothing (commandJoinReply command)]
+
+-- | The unresolved deliveries: each start or control relay without the
+-- record of the run log that the worker received.
+joinUnresolvedDelivery :: FlowJoin -> [LogPosition]
+joinUnresolvedDelivery join = [relayJoinRelay relay | relay <- joinRelays join, isNothing (relayJoinDelivered relay)]
+
+-- | The pending reviews: each review without a later command and without a
+-- review ending with its preparation identifier.
+joinPendingReview :: FlowJoin -> [LogPosition]
+joinPendingReview join = [reviewJoinReview review | review <- joinReviews join, null (reviewJoinCommands review), null (reviewJoinEndings review)]
+
+-- | The lifetimes that end without their shutdown notice, which lost their
+-- supervision.
+joinLostLifetimes :: FlowJoin -> [LogPosition]
+joinLostLifetimes join = [lifetimeJoinStart lifetime | lifetime <- joinLifetimes join, isNothing (lifetimeJoinShutdown lifetime)]
+
+-- | Every failed verification of the joined logs, each under its log: the
+-- failures of each manager log and each run log, each consent that does not
+-- verify and each failed join.
+flowJoinProblems :: FlowJoin -> [Text]
+flowJoinProblems join =
+  concatMap managerProblems (joinManagerLogs join)
+    <> [T.pack path <> ": " <> problem | (path, report) <- joinRunLogs join, problem <- flowReportProblems report]
+    <> [ T.pack (logPositionLog (consentRelay consent)) <> " position " <> showPosition (logPositionAt (consentRelay consent)) <> ": the consent of the start relay does not verify: " <> problem
+         | consent <- joinConsent join,
+           problem <- consentProblems consent
+       ]
+    <> joinFailures join
+  where
+    managerProblems manager =
+      [ T.pack (managerLogPath manager) <> ": the manager log ends with a line of " <> T.pack (show size) <> " bytes without its newline, which the reader did not decode"
+        | Just size <- [managerLogTorn manager]
+      ]
+        <> [ T.pack (managerLogPath manager) <> " position " <> showPosition (entryPosition entry) <> ": " <> problem
+             | entry <- managerLogEntries manager,
+               problem <- entryProblems entry
+           ]
+
+flowJoinVerified :: FlowJoin -> Bool
+flowJoinVerified = null . flowJoinProblems
+
+-- | Whether the joined logs leave an outcome uncertain: a run log that has
+-- lost its supervision, or a lifetime without its shutdown notice.
+flowJoinUncertain :: FlowJoin -> Bool
+flowJoinUncertain join = any (flowUncertain . snd) (joinRunLogs join) || not (null (joinLostLifetimes join))
+
+-- | The summary object of a joined reading: the summary of each log, the
+-- verification result and its failures, the joins, the consent of each start
+-- relay and the states. It states that the Store ledger is the authority.
+flowJoinSummaryValue :: FlowJoin -> Value
+flowJoinSummaryValue join =
+  object
+    [ "summary"
+        .= object
+          [ "authority" .= ("The Store ledger is the authority on commands, reviews and requests. The manager log records what the manager decided." :: Text),
+            "logs"
+              .= ( [ object
+                       [ "log" .= managerLogPath manager,
+                         "kind" .= ("manager" :: Text),
+                         "records" .= length (managerLogEntries manager),
+                         "tornFinalLine" .= fmap (\size -> object ["bytes" .= size]) (managerLogTorn manager)
+                       ]
+                     | manager <- joinManagerLogs join
+                   ]
+                     <> [object ["log" .= path, "kind" .= ("run" :: Text), "report" .= flowReportValue report] | (path, report) <- joinRunLogs join]
+                 ),
+            "verified" .= flowJoinVerified join,
+            "problems" .= flowJoinProblems join,
+            "joins"
+              .= object
+                [ "reviews" .= [object ["review" .= at (reviewJoinReview review), "preparation" .= reviewJoinPreparation review, "commands" .= map positionIndex (reviewJoinCommands review), "endings" .= map positionIndex (reviewJoinEndings review)] | review <- joinReviews join],
+                  "relays" .= [object ["relay" .= at (relayJoinRelay relay), "kind" .= relayKindName (relayJoinKind relay), "nativeRun" .= runIdText (relayJoinNativeRun relay), "delivered" .= fmap at (relayJoinDelivered relay)] | relay <- joinRelays join],
+                  "controls" .= [object ["control" .= at (controlJoinControl control), "acknowledgement" .= fmap positionIndex (controlJoinAcknowledgement control)] | control <- joinControls join],
+                  "commands" .= [object ["command" .= at (commandJoinCommand command), "reply" .= fmap positionIndex (commandJoinReply command), "notices" .= map positionIndex (commandJoinNotices command)] | command <- joinCommands join],
+                  "answers" .= [object ["answer" .= at (answerJoinAnswer answer), "commandId" .= answerJoinCommandId answer, "command" .= fmap at (answerJoinCommand answer)] | answer <- joinAnswers join],
+                  "lifetimes" .= [object ["lifetime" .= at (lifetimeJoinStart lifetime), "shutdown" .= fmap positionIndex (lifetimeJoinShutdown lifetime)] | lifetime <- joinLifetimes join]
+                ],
+            "consent"
+              .= [ object
+                     [ "relay" .= at (consentRelay consent),
+                       "nativeRun" .= runIdText (consentNativeRun consent),
+                       "review" .= fmap positionIndex (consentReview consent),
+                       "command" .= fmap positionIndex (consentCommand consent),
+                       "receipt" .= fmap positionIndex (consentReceipt consent),
+                       "gap" .= fmap positionIndex (consentGap consent),
+                       "runStart" .= fmap at (consentRunStart consent),
+                       "verified" .= null (consentProblems consent),
+                       "problems" .= consentProblems consent
+                     ]
+                   | consent <- joinConsent join
+                 ],
+            "states"
+              .= object
+                [ "undecided" .= map at (joinUndecided join),
+                  "unresolvedDelivery" .= map at (joinUnresolvedDelivery join),
+                  "pendingReview" .= map at (joinPendingReview join),
+                  "lifetimeWithoutShutdown" .= map at (joinLostLifetimes join)
+                ]
+          ]
+    ]
+  where
+    at (LogPosition path position) = object ["log" .= path, "position" .= positionIndex position]
+
+showPosition :: Position -> Text
+showPosition = T.pack . show . positionIndex
 
 -- ---------------------------------------------------------------------------
 -- Helpers
