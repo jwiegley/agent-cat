@@ -7,9 +7,11 @@
 The operator accepted Phase A on 2026-09-29 and kept the file-slot and
 reader-capacity wait of commit `fe7a2f20`. The resume workflow then landed
 actor-flow increment 1 (`acat-e6cp`, then `acat-5m60`) under the operator
-direction for fast validation, as subtasks F0 to F16 after `4496dbe4`. This
-section describes the current state. Where any section below differs, this
-section supersedes it, and the sections below remain as chronology. The
+direction for fast validation, as subtasks F0 to F16 after `4496dbe4`. The
+run completed every subtask and did not stop early. Its last subtask commit
+is `d4ec7a6d`, and the closeout commit that follows it changes only this
+section. This section describes the current state. Where any section below
+differs, this section supersedes it, and the sections below remain as chronology. The
 contract is `doc/research/actor-flow-amendment.md`, `runtime/BROKER.md` and
 the section "Manager log" of `manager/STORAGE.md`. The evidence of each
 subtask is under `F/<subtask>/impl-r1` or `impl-r2` in the resume directory.
@@ -32,7 +34,7 @@ subtask is under `F/<subtask>/impl-r1` or `impl-r2` in the resume directory.
 | F13 | `17d4c08e` | Command notices, review endings and request endings. |
 | F14 | `617deabd` | The manager-log reader, its joins with run logs, and the consent check. |
 | F15 | `9da234ec` | The `FLOW-ASSERT` checks of `tui-journey` and the control `tui-flow-approve-fault`. |
-| F16 | Integrator commit after `9da234ec` | The gate of increment 1, a repair of `cli/test/PolicyProbe.hs`, the constructor `ReadFlow` in the manual, and this section. |
+| F16 | `d4ec7a6d` | The gate of increment 1, a repair of `cli/test/PolicyProbe.hs`, the constructor `ReadFlow` in the manual, and this section. |
 
 ### Delivered behavior
 
@@ -174,6 +176,59 @@ this order. Each check has a `.log` and an `.exit` file under
 - The part of gate 5 that shows the owner that an ext-pi launch declares. It
   depends on the ext-pi checks above.
 - The revalidation of `broker-api-default` (`678326b`) that gate 11 names.
+- The negative control of check 9 (a golden file with one changed byte) and
+  the consent control of the design record (the verb on a manager log with
+  one changed review byte) did not run again in the F16 gate. Their evidence
+  is `F/F1/impl-r1/F1-golden-control.log` and
+  `F/F14/impl-r1/F14-consent-negative.log`. The golden comparison and both
+  readers did not change after those runs.
+
+### End-of-increment review
+
+Two review lenses, conformance and safety, examined `4496dbe4..d4ec7a6d`.
+Each returned "approve with notes" and reported no critical or high
+finding. No fix round ran. The safety lens ran `tui-journey` at N1 and then N8 again after an
+incremental build with `-ftui-tests`, and both runs passed with every
+`FLOW-ASSERT` and a verified consent chain (fixture root
+`/Users/johnw/Products/k.M0a5ItPm/tmp/review-flow.JmUrFfcw`).
+
+Issue `acat-1dfc` holds these findings. The medium findings are:
+
+1. A cancel whose appended record decodes to a value other than the admitted
+   command is refused with `storage-unavailable`
+   (`manager/src/Agentic/Manager/Commands.hs`, `recordAdmittedCommand`). A
+   cancel is exempt only when its append fails. No check covers a cancel
+   with the lossy codec.
+2. The manager log `flow/<stream>.ndjson` grows across lifetimes and nothing
+   prunes it before Phase G. At `L` minus `R` every ordinary command and
+   review publication is refused with `storage-quota`. A log that is larger
+   than a lowered ceiling, or that holds a complete line that does not
+   decode, makes each append of the lifetime fail, and the service then
+   refuses ordinary commands with `storage-unavailable`. `manager/STORAGE.md`
+   does not state this limit or the recovery procedure.
+3. `manager/STORAGE.md` says that no local path enters a body. The review
+   body holds the exact binding bytes, which name the frontend invocation
+   path, the run-root identity and the target arguments. The sentence does
+   not state current behavior.
+4. A control delivered before activation of a store-backed run does not pass
+   through `flowBroker`. The run log shows only its acknowledgement event,
+   with no `control` record. `runtime/BROKER.md` states this limit, but it
+   differs from Delta 1a of the design record.
+5. The ext-pi checks and the ext-pi part of gate 5 have no result, as
+   "Checks not run" states.
+
+The low findings are these. A failed failure-reply append after a rollback
+leaves no gap entry. A review record that a later pre-commit step rolls back
+has no ending. Offline credential administration writes no manager-log
+record. An engine ask without a scope is refused by `flowBroker`, and no
+test shows that a store-backed path cannot reach it. A receipt or relay
+whose decoded value differs from the ledger is carried as the ledger value
+with no gap entry. The reader loads the whole log prefix before it checks
+the line bound, and `--follow` accepts only one run log. Run-log bodies and
+the output of the verb are not redacted, and `runtime/BROKER.md` does not
+say so. A failed append of an ACP permission report fails the turn after the
+grant was sent. The pending slot of a command record is set after the
+append, so a deadline in that window leaves the record uncertain.
 
 ### Open tracker items
 
@@ -188,13 +243,19 @@ this order. Each check has a `.log` and an `.exit` file under
 - `acat-en4g`, increment 2, service route subscription, lands inside WM-025
   and WM-026. `acat-c18n`, increment 3, live re-route and asks answered by
   people, lands between WM-027 and WM-028.
+- `acat-1dfc`, the findings of the end-of-increment review above.
 - The open findings of the Phase A section below are unchanged, including
   `acat-response-ingestion-budget-zaoi` and `acat-tls-name-forms-6gbo`.
 
 ### Next action
 
-1. Phase B resumes WM-025 to WM-027 under the fast-validation rules, with
-   increment 2 inside WM-025 and WM-026.
+1. Phase B starts at WM-023 under the fast-validation rules and continues
+   through WM-028 and G2. Its first subtask repairs the four medium review
+   findings of `acat-1dfc` in code or documentation: the cancel exemption
+   on a decode mismatch, the growth limit and recovery of the manager log,
+   the review-body sentence in `manager/STORAGE.md`, and the preflight
+   control record. Increment 2 (`acat-en4g`) lands inside WM-025 and
+   WM-026, and increment 3 (`acat-c18n`) lands between WM-027 and WM-028.
 
 Accepted state is unchanged at WM-001 to WM-022 and G0 and G1. Increment 1
 closes no package and no gate.
