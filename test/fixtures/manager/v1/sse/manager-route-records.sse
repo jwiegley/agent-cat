@@ -1,0 +1,8 @@
+id: route_5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e.4
+event: route.command
+data: {"about":{"command":"command_1","request":"request_1"},"at":"2026-09-30T12:00:00.123456Z","body":{"capture":null,"mediaType":"application/json","method":"POST","operation":"enqueue","precondition":"\"revision_1\"","profile":"profile_1","resource":"/v1/requests/request_1","value":{"action":"enqueue"}},"class":"actor","from":{"client":"client_1","credentialId":"credential_1","principal":"credential"},"id":"route_5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e.4","position":3,"replyTo":null,"schema":"command","to":{"to":"manager"}}
+
+id: route_5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e.7
+
+: heartbeat
+

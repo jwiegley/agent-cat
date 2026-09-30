@@ -1921,6 +1921,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/RouteBatch'
+            text/event-stream:
+              schema:
+                type: string
+                description: LF SSE blocks of at most sseBlockBytes each. A served
+                  record is one block with the lines id, event and data in that
+                  order. The id is the id of the record, the event is route.<schema>,
+                  and the data is the RouteRecord as compact JSON. A record whose
+                  block would exceed sseBlockBytes has its body replaced by {"omitted":"size","bytes":N},
+                  where N is the encoded size of the body. A block with an id line
+                  only carries the cursor of a batch that advanced over omitted records.
+                  A comment-only heartbeat follows every heartbeatSeconds without
+                  another block. A reconnect supplies the last complete id as Last-Event-ID.
         '400':
           $ref: '#/components/responses/Problem400'
         '401':
@@ -1971,6 +1983,7 @@ paths:
           type: string
           enum:
           - application/json
+          - text/event-stream
   /routes:
     get:
       operationId: get_routes
@@ -1997,6 +2010,15 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ManagerRouteBatch'
+            text/event-stream:
+              schema:
+                type: string
+                description: LF SSE blocks of at most sseBlockBytes each, with the
+                  framing of the run route stream. The data of a record block is
+                  the ManagerRouteRecord as compact JSON, and the event is route.<schema>.
+                  A block with an id line only carries the cursor of a batch that
+                  advanced over omitted records. A comment-only heartbeat follows
+                  every heartbeatSeconds without another block.
         '400':
           $ref: '#/components/responses/Problem400'
         '401':
@@ -2045,6 +2067,7 @@ paths:
           type: string
           enum:
           - application/json
+          - text/event-stream
 components:
   securitySchemes:
     bearerAuth:

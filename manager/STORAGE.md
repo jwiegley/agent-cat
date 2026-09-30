@@ -249,6 +249,30 @@ cursor, cursor advancement over records of another profile, reconnection
 after a partial block, the end of an open stream at an ordinary shutdown, and
 the stream alias and cursors across the restart.
 
+The route streams of `GET /v1/runs/{id}/routes` and `GET /v1/routes` follow
+the same rules. Each batch of a route stream is a new JSON batch read: it
+takes the file slot, the configuration guard and one reader charge in the
+lock order file slot, configuration, database, reads and filters one batch,
+and returns every loan with `releaseResponseLoans` before its first write.
+No block, heartbeat or wait holds a configuration guard, SQL transaction,
+reader charge or file slot. A route stream holds one subscription of its
+client in the same count as the event streams, through `withStreamReader` of
+`Agentic.Manager.Events`. A wakeup only requests a durable read. The writer of
+the manager log keeps an append count in memory, which it increments after
+each synchronized append and which `managerFlowAppends` exposes through
+`storeManagerFlow`. A stream of the manager route reads the count before each
+batch and, when it has nothing more to read, waits for a change of the count,
+for `closeStreams` or for its heartbeat deadline. A stream of the run route
+waits one second, or until `closeStreams` or its heartbeat deadline when
+either comes first. After `closeStreams` a route stream ends before its next
+batch read. The `routes` mode of `manager/test/service_http.py` checks the
+route streams through the running protected manager: the same records as the
+JSON batches on both routes, attachment at a JSON cursor, reconnection after a
+partial block, cursor blocks for an observe-only credential, a manager-log
+record that reaches an open stream before the next heartbeat, the shared
+reader quota, the end of open route streams at an ordinary shutdown, and
+route cursors across the restart.
+
 Operations require the threaded RTS. Cancellation repeatedly interrupts the
 original SQLite operation until its thread joins. A single interrupt can precede
 statement execution and have no effect. The interrupter also joins before rollback,
@@ -596,8 +620,8 @@ stream. It starts in the sealed segment or the active file that holds the
 position, continues across segments within the window limits, and reports the
 retained floor. It never takes the writer lock. The protected resource
 `GET /v1/routes` serves windows of the manager log of the current stream in
-this way, under a Store file loan that it returns before its first network
-write. The [protocol document](../doc/api/README.md) states which records each
+this way, as JSON batches and as a route stream, under a Store file loan that
+each batch returns before its first network write. The [protocol document](../doc/api/README.md) states which records each
 credential receives.
 
 In the mode `routes`, the service fixture checks `GET /v1/routes` after one

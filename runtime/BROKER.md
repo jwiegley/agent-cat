@@ -311,9 +311,12 @@ local reader: its position, the fields of its record, and an inline body as
 as `event` with its sequence number. It carries no verified claim value and
 no joined event line. The manager serves windows of a run log in this form
 through `GET /v1/runs/{id}/routes`, and windows of the manager log of the
-current stream through `GET /v1/routes`, as the
-[protocol document](../doc/api/README.md) states. The broker does not take
-part in those reads.
+current stream through `GET /v1/routes`, as JSON batches and as server-sent
+events, as the [protocol document](../doc/api/README.md) states. The broker
+does not take part in those reads. A route stream reads the log again after a
+wakeup, and the wakeup carries no record: the stream of the manager log wakes
+on the in-memory append count of the manager writer, and the stream of a run
+log reads again after one second.
 
 A `FlowWindow` holds the entries with their positions, the position after the
 last returned record in `windowNext`, whether the file holds a complete record

@@ -67,7 +67,7 @@ limits apply before unbounded allocation and are not character counts.
 | Queue | 100 queued requests. Drafts have a separately enforced, advertised positive bound. |
 | Execution reservations | One by default, with a maximum of 16. Review and cleanup consume reservations. |
 | Prepared review | Ten-minute expiry. Expiry does not release an uncleaned worker's reservation. |
-| SSE readers | Two per client, with at most 1048576 pending transport bytes per reader. |
+| SSE readers | Two per client across `/events`, `/runs/{id}/routes` and `/routes`, with at most 1048576 pending transport bytes per reader. |
 | Replay | Seven days or 268435456 bytes, whichever limit is reached first. |
 | Client liveness | Heartbeat every 15 seconds, reconnect after 45 seconds without bytes, jittered backoff capped at 30 seconds. |
 
@@ -235,9 +235,10 @@ of each record decides whether the credential receives it. A credential with
 `observe` receives public records, which are the `event` records. A
 credential that also holds `control` on the profile receives the actor
 records as well. The restricted records, `engine-result` and `failure`, are
-never served. Only `Accept: application/json` is served, and any other
-`Accept` value receives 409 `unsupported-operation`. A route read writes
-nothing to the coordination database.
+never served. `Accept: application/json` gives one batch, and
+`Accept: text/event-stream` gives a route stream. Any other `Accept` value
+receives 409 `unsupported-operation`. A route read writes nothing to the
+coordination database.
 `/routes` serves the manager log of the current stream: its sealed segments
 and its active file, as the [storage contract](../../manager/STORAGE.md#manager-log)
 describes them. It requires `observe` on at least one configured profile, as
@@ -253,9 +254,10 @@ rolled back. Every other manager-log record is an actor record, and a
 credential receives it only when it holds `observe` and `control` on the
 profile of the record. The manager log has no public record, so a credential
 with `observe` alone receives filtered gaps only. The `failure` records are
-restricted and are never served. Only `Accept: application/json` is served,
-and any other `Accept` value receives 409 `unsupported-operation`. A read of
-`/routes` writes nothing to the coordination database.
+restricted and are never served. `Accept: application/json` gives one batch,
+and `Accept: text/event-stream` gives a route stream. Any other `Accept` value
+receives 409 `unsupported-operation`. A read of `/routes` writes nothing to the
+coordination database.
 
 | Resource | Methods | Served | Mutation scopes and guard |
 |---|---|---|---|
@@ -281,8 +283,8 @@ and any other `Accept` value receives 409 `unsupported-operation`. A read of
 | `/runs/{id}/lineage-requests` | GET, POST | GET | `observe` and `submit`, current collection ETag, eligible parent, compatible trusted invocation, and no conflicting ownership or quarantine. |
 | `/snapshot` | GET | GET | No mutation. Provides a consistent authorized overview and replay cursor. |
 | `/events` | GET | GET | No mutation. SSE and bounded JSON use the same durable cursor and retention rules. |
-| `/runs/{id}/routes` | GET | GET | No mutation. Serves bounded JSON batches of the run log of the run by route class. `observe` gives public records, and `observe` with `control` also gives actor records. |
-| `/routes` | GET | GET | No mutation. Serves bounded JSON batches of the manager log of the current stream. `observe` and `control` on the profile of a record give that record. A record without a profile is never served. |
+| `/runs/{id}/routes` | GET | GET | No mutation. Serves bounded JSON batches or a route stream of the run log of the run by route class. `observe` gives public records, and `observe` with `control` also gives actor records. |
+| `/routes` | GET | GET | No mutation. Serves bounded JSON batches or a route stream of the manager log of the current stream. `observe` and `control` on the profile of a record give that record. A record without a profile is never served. |
 
 OPTIONS preflight is the sole unauthenticated HTTP operation. After the
 [transport checks](#transport-boundary), it checks only an exact allowlisted
@@ -474,6 +476,32 @@ position lies below the retained floor, or after the last complete record,
 receives 410 `cursor-expired`. The manager reads each batch without the
 writer lock of the manager log, and it resolves the profiles of the records
 of each window in one read transaction.
+
+A route stream serves the batches of a route as server-sent events. It takes
+the same cursor, from `after` or from `Last-Event-ID` and never from both, and
+the same `route` parameter. A refusal of its first batch is an ordinary
+problem response. Each served record is one block with the lines `id`,
+`event` and `data` in that order: the identifier of the record, the event name
+`route.<schema>`, and the record of the JSON batch as compact JSON. A block
+holds at most `sseBlockBytes` bytes. A record whose block would be larger is
+served with its body replaced by `{"omitted":"size","bytes":N}`, where N is
+the encoded size of the body. A batch that serves no record and advances its
+cursor over omitted records writes one block with an `id` line only, which
+carries the cursor of the batch and emits no event. A comment-only heartbeat
+follows every `heartbeatSeconds` without another block. A client that loses
+the connection reconnects with `Last-Event-ID` set to the identifier of its
+last complete block, and the stream then serves every later record without
+repeating a complete block. Each batch of a stream is bound, read and
+filtered as a JSON batch is, and authorization is checked again before each
+block and each heartbeat. A stream of the run route reads again one second
+after a batch that reached the end of the log. A stream of the manager route
+reads again when the manager appends a record to the log, so a new record
+reaches an open stream before the next heartbeat. A route stream counts toward
+the two readers of its client, together with the streams of `/events`, and a
+third stream receives 429 `storage-quota` as `/events` does. At an ordinary
+shutdown an open route stream ends after its current block or heartbeat. An
+ordinary restart keeps the `streamId`, so the route aliases and every cursor
+taken before the restart stay valid.
 
 Refreshes are serialized per resource. An invalidation received during a
 refresh sets a dirty flag, and the resource is fetched again afterward. A

@@ -1,5 +1,6 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE TypeApplications #-}
 
 -- | The route resources: authorized windows of the run log of one managed
@@ -16,12 +17,20 @@
 -- public run identifier, or the manager log. A served record at position @p@
 -- has the identifier @ALIAS.(p+1)@, and a cursor names the next position to
 -- read.
-module Agentic.Manager.Routes (routeAlias, managerRouteAlias, withRouteBatch, withManagerRouteBatch) where
+--
+-- A route stream serves the same batches as server-sent events. Each served
+-- record is one block, and the stream reads its next batch after a wakeup.
+-- The wakeup only requests a durable read: it carries no record and no
+-- position.
+module Agentic.Manager.Routes
+  ( routeAlias, managerRouteAlias, withRouteBatch, withManagerRouteBatch,
+    RoutePump, withRouteStream, withManagerRouteStream ) where
 
 import Agentic.Manager.Artifacts (withRunRoot)
 import Agentic.Manager.Authorization
-import Agentic.Manager.Events (bindingGrants, captureBinding, durableStream, parseCursor, publicStreamId)
-import Agentic.Manager.Flow (ManagerWindow (..), readManagerWindow)
+import Agentic.Manager.Events (StreamReaders, bindingGrants, captureBinding, durableStream, parseCursor, publicStreamId, streamsClosing, withStreamReader)
+import Agentic.Manager.Fault (FaultClass (InternalFault), ManagerFault (ResponseWriteTimeout), refuseStorageUnavailable)
+import Agentic.Manager.Flow (ManagerWindow (..), managerFlowAppends, readManagerWindow)
 import Agentic.Manager.Protocol.Command
 import Agentic.Manager.State (RunAssociation (..), resolveRunIn)
 import Agentic.Manager.Store
@@ -29,9 +38,10 @@ import Agentic.Runtime
   ( About (..), FlowRoute, FlowWindow (..), FlowWindowEntry (..), FlowWindowRefusal (..), Position (..),
     PrivateRoot, Record (..), RouteClass (..), Schema (FlowCommand, FlowNotice, FlowReceipt, FlowRelay, FlowReview),
     flowRouteMatches, flowWindowEntryFields, flowWindowLimits, readFlowWindow, runIdText, runLogName, schemaRouteClass )
+import Control.Concurrent.STM (STM, atomically, newTVarIO, readTVar, registerDelay, retry, throwSTM, writeTVar)
 import Control.DeepSeq (NFData (rnf))
 import Control.Exception (IOException, throwIO, try)
-import Control.Monad (forM, unless)
+import Control.Monad (forM, forM_, unless, when)
 import Crypto.Hash (Digest, SHA256, hash)
 import Data.Aeson (Value (..), object, (.=))
 import qualified Data.Aeson.KeyMap as KM
@@ -44,7 +54,9 @@ import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
 import Data.Word (Word64)
 import qualified Database.SQLite3 as SQL
+import GHC.Clock (getMonotonicTimeNSec)
 import System.IO.Error (isDoesNotExistError)
+import System.Timeout (timeout)
 
 -- | The cursor alias of the run route of one run for the public stream
 -- identity of a credential. It is an equality fingerprint, never a
@@ -299,3 +311,134 @@ routeBatch alias route source start = scan 1 (Position (fromMaybe 0 start))
     batch floor' records next more = object
       [ "version" .= (1 :: Int), "cursor" .= cursorAt (positionIndex next), "oldestCursor" .= cursorAt (positionIndex floor'),
         "records" .= records, "hasMore" .= more ]
+
+-- ---------------------------------------------------------------------------
+-- Route streams
+-- ---------------------------------------------------------------------------
+
+-- | The single-use pump of a route stream. The response callback passes the
+-- action that writes and flushes one complete block, and the pump runs until
+-- an ordinary shutdown or a failure ends the stream.
+type RoutePump = (BS.ByteString -> IO ()) -> IO ()
+
+-- | Serve the run route of the run as server-sent events.
+--
+-- The stream holds one subscription of the client of the credential, shared
+-- with the event stream, for its whole response. It reads its first batch
+-- before response entry, so a refusal of that batch is an ordinary problem
+-- response. Each later batch is a new 'withRouteBatch'. A stream with nothing
+-- more to read reads again after one second, or at its heartbeat deadline
+-- when that comes first.
+withRouteStream :: StreamReaders -> CoordinationStore -> CredentialProof -> Text -> Maybe Text -> Maybe FlowRoute
+  -> (RoutePump -> IO a) -> IO a
+withRouteStream streams store proof ident supplied route =
+  routeStream streams store proof (\cursor -> withRouteBatch store proof ident cursor route)
+    (pure (pure False)) (Just 1000000) supplied
+
+-- | Serve the manager route as server-sent events.
+--
+-- The stream behaves as 'withRouteStream', except that a stream with nothing
+-- more to read waits for a change of the append count of the manager log of
+-- the Store, or for its heartbeat deadline. The count is read before each
+-- batch, so an append during the batch read wakes the stream at once.
+withManagerRouteStream :: StreamReaders -> CoordinationStore -> CredentialProof -> Maybe Text -> Maybe FlowRoute
+  -> (RoutePump -> IO a) -> IO a
+withManagerRouteStream streams store proof supplied route =
+  routeStream streams store proof (\cursor -> withManagerRouteBatch store proof cursor route) appended Nothing supplied
+  where
+    appended = case storeManagerFlow store of
+      Nothing -> pure (pure False)
+      Just flow -> do
+        seen <- atomically (managerFlowAppends flow)
+        pure ((/= seen) <$> managerFlowAppends flow)
+
+-- | One route batch lent to a callback, from a cursor or from the start.
+type RouteReader = forall b. Maybe Text -> (AuthorizedView -> Value -> IO b) -> IO b
+
+-- | The largest complete block of a route stream, the @sseBlockBytes@ limit.
+routeBlockBytes :: Int
+routeBlockBytes = 16384
+
+-- | The heartbeat interval of a route stream, the @heartbeatSeconds@ limit, in
+-- nanoseconds.
+routeHeartbeatNanos :: Word64
+routeHeartbeatNanos = 15000000000
+
+-- Validate before response entry, then lend one single-use pump. Each batch
+-- reads under the loans of its reader and returns them with
+-- 'releaseResponseLoans' before its first write, so no write and no wait
+-- holds a configuration guard, SQL transaction, reader charge or file slot.
+-- The view is revalidated immediately before each block and heartbeat, and
+-- each write completes within five seconds. The blocks of a batch are its
+-- served records. A batch that serves no record and advances its cursor over
+-- filtered gaps writes one block with the identifier of its cursor only. A
+-- batch that writes nothing at the heartbeat deadline writes a heartbeat.
+-- After 'closeStreams' the loop ends before its next batch read.
+routeStream :: StreamReaders -> CoordinationStore -> CredentialProof -> RouteReader -> IO (STM Bool) -> Maybe Int
+  -> Maybe Text -> (RoutePump -> IO a) -> IO a
+routeStream streams store proof reader wake poll supplied action =
+  withStreamReader streams store proof $ do
+    initial <- reader supplied $ \view _ -> authorizedViewRevision view
+    used <- newTVarIO False
+    action $ \write -> do
+      atomically $ do
+        started <- readTVar used
+        when started (throwSTM StateConflict)
+        writeTVar used True
+      loop initial write supplied Nothing
+  where
+    loop initial write cursor lastWrite = do
+      closed <- atomically (streamsClosing streams)
+      unless closed $ do
+        changed <- wake
+        (next, more, written) <- reader cursor $ \view value -> do
+          current <- authorizedViewRevision view
+          releaseResponseLoans view
+          unless (current == initial) (throwIO ViewExpired)
+          (next, more, records) <- batchFields value
+          now <- getMonotonicTimeNSec
+          let due = maybe True (\previous -> now - previous >= routeHeartbeatNanos) lastWrite
+          blocks <- if not (null records) then mapM recordBlock records
+            else if Just next /= cursor then pure ["id: " <> TE.encodeUtf8 next <> "\n\n"]
+            else if due then pure [": heartbeat\n\n"] else pure []
+          forM_ blocks $ \bytes -> do
+            revalidateAuthorizedView view >>= either throwIO pure
+            result <- timeout 5000000 (write bytes)
+            maybe (refuseStorageUnavailable "route write" (InternalFault ResponseWriteTimeout)) pure result
+          pure (next, more, if null blocks then lastWrite else Just now)
+        unless more $ do
+          now <- getMonotonicTimeNSec
+          let remaining = maybe 0 (\previous -> routeHeartbeatNanos - min routeHeartbeatNanos (now - previous)) written
+              micros = fromIntegral (min (remaining `div` 1000) (fromIntegral (maxBound :: Int)))
+          awaitRoute changed (maybe micros (min micros) poll)
+        loop initial write (Just next) written
+    awaitRoute changed micros = unless (micros <= 0) $ do
+      expired <- registerDelay micros
+      atomically $ do
+        closed <- streamsClosing streams
+        fresh <- changed
+        done <- readTVar expired
+        unless (closed || fresh || done) retry
+
+-- The cursor, the more flag and the served records of a route batch.
+batchFields :: Value -> IO (Text, Bool, [Value])
+batchFields (Object fields)
+  | Just (String next) <- KM.lookup "cursor" fields, Just (Bool more) <- KM.lookup "hasMore" fields,
+    Just (Array records) <- KM.lookup "records" fields = pure (next, more, foldr (:) [] records)
+batchFields _ = throwIO StoreIntegrity
+
+-- | The block of one served record: its identifier, the event name
+-- @route.<schema>@ and the record as compact JSON. A block above
+-- 'routeBlockBytes' is written with the body of the record replaced by
+-- @{"omitted":"size","bytes":N}@, where N is the encoded size of the body.
+recordBlock :: Value -> IO BS.ByteString
+recordBlock (Object fields)
+  | Just (String ident) <- KM.lookup "id" fields, Just (String schema) <- KM.lookup "schema" fields = do
+      let block value = "id: " <> TE.encodeUtf8 ident <> "\nevent: route." <> TE.encodeUtf8 schema
+            <> "\ndata: " <> encoded value <> "\n\n"
+          whole = block (Object fields)
+          omitted body = object ["omitted" .= ("size" :: Text), "bytes" .= BS.length (encoded body)]
+      if BS.length whole <= routeBlockBytes then pure whole else case KM.lookup "body" fields of
+        Just body | reduced <- block (Object (KM.insert "body" (omitted body) fields)), BS.length reduced <= routeBlockBytes -> pure reduced
+        _ -> throwIO ViewTooLarge
+recordBlock _ = throwIO StoreIntegrity

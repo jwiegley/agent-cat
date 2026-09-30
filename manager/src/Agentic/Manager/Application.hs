@@ -140,12 +140,14 @@ dispatch service pages streams proof request respond = do
       case lookup "Accept" (Wai.requestHeaders request) of
         Just "application/json" -> Routes.withRouteBatch store proof ident after route $ \view value ->
           json view HTTP.status200 [] value respond
+        Just "text/event-stream" -> Routes.withRouteStream streams store proof ident after route routeStream
         _ -> throwIO C.UnsupportedOperation
     ("GET", ["v1", "routes"]) -> do
       (after, route) <- routeParameters request
       case lookup "Accept" (Wai.requestHeaders request) of
         Just "application/json" -> Routes.withManagerRouteBatch store proof after route $ \view value ->
           json view HTTP.status200 [] value respond
+        Just "text/event-stream" -> Routes.withManagerRouteStream streams store proof after route routeStream
         _ -> throwIO C.UnsupportedOperation
     ("GET", ["v1", "requests"]) -> collection token Service.Requests
     ("GET", ["v1", "runs"]) -> collection token Service.Runs
@@ -251,6 +253,10 @@ dispatch service pages streams proof request respond = do
     page view limits token produce = servePage pages store proof request view limits token (Pages.wholeSet produce) respond
     collection token members = Service.withCollectionSource service proof members $ \view limits producer ->
       servePage pages store proof request view limits token producer respond
+    -- The route stream writes each complete block and flushes it at once.
+    routeStream pump = respond $ Wai.responseStream HTTP.status200
+      [("Content-Type", "text/event-stream"), ("X-Accel-Buffering", "no")] $ \write flush ->
+        pump (\bytes -> write (Builder.byteString bytes) >> flush)
     receipt value = Auth.withAuthorizedResponse store proof (C.receiptProfile value)
       (C.requiredScopes (C.receiptOperation value)) $ \view ->
         json view HTTP.status202 [("Location", TE.encodeUtf8 ("/v1/commands/" <> C.receiptId value))]

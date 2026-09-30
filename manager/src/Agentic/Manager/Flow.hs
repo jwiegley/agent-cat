@@ -38,6 +38,7 @@ module Agentic.Manager.Flow
     managerFlowBytes,
     managerFlowSegments,
     managerFlowSeals,
+    managerFlowAppends,
     pruneManagerFlowSegment,
     managerFlowCeiling,
     managerFlowAllowance,
@@ -182,7 +183,7 @@ import Agentic.Runtime
     schemaName,
   )
 import Control.Concurrent.MVar (MVar, modifyMVar, newMVar, withMVar)
-import Control.Concurrent.STM (STM)
+import Control.Concurrent.STM (STM, TVar, atomically, modifyTVar', newTVarIO, readTVar)
 import Control.Exception (IOException, SomeAsyncException, SomeException, bracket, displayException, fromException, throwIO, try)
 import Control.Monad (forM_, unless, when)
 import Data.Aeson (Value (..), object, toJSON, (.=))
@@ -218,7 +219,9 @@ data ManagerFlow = ManagerFlow
     managerFault :: !(Maybe ManagerFlowFault),
     managerRoot :: !PrivateRoot,
     managerStream :: !Text,
-    managerCeiling :: !Int64
+    managerCeiling :: !Int64,
+    -- | The number of records that this writer appended in the lifetime.
+    managerAppends :: !(TVar Word64)
   }
 
 -- | The missing records that no gap notice names yet: at most
@@ -319,7 +322,8 @@ openManagerFlow codec fault root stream total = do
     let segments = FlowSegments (managerFlowSealed stream) (managerFlowSegmentBytes total)
     fst <$> openFlowLog codec root (managerFlowPath stream) (managerFlowClaims stream) (Just segments) (toInteger total)
   lock <- newMVar (Gaps Seq.empty 0)
-  pure (ManagerFlow lock (either (Left . openFailure) Right opened) fault root stream total)
+  appends <- newTVarIO 0
+  pure (ManagerFlow lock (either (Left . openFailure) Right opened) fault root stream total appends)
   where
     openFailure failure = case fromException failure of
       Just FlowLogOversized -> ManagerFlowOversized
@@ -344,6 +348,14 @@ managerFlowSegments flow = withMVar (managerLock flow) $ \_ -> either (const (pu
 -- watches. A log that could not be opened never seals.
 managerFlowSeals :: ManagerFlow -> STM Word64
 managerFlowSeals flow = either (const (pure 0)) flowWriterSeals (managerWriter flow)
+
+-- | The number of records that the writer appended in this lifetime. Each
+-- successful append, a gap notice included, increments it after the record is
+-- written and synchronized. A route stream of the manager log waits on a
+-- change of it. The count is a wakeup only: the stream then reads the log
+-- again, and the count never names a position or a record.
+managerFlowAppends :: ManagerFlow -> STM Word64
+managerFlowAppends = readTVar . managerAppends
 
 -- | Remove the oldest sealed segment of the log under the writer lock when it
 -- starts at the given position, it is not the newest sealed segment and every
@@ -410,10 +422,12 @@ appendManager flow total recordClass schema appendRecord about = modifyMVar (man
       else do
         let notice = GapNotice (toList entries) uncounted
         noticed <- attempt Reserved FlowNotice noAbout (\writer mode -> appendTellWith writer mode FlowNotice Manager (To Manager) noAbout (ContentValue (noticeFlowBody notice)))
+        either (const (pure ())) (const counted) noticed
         pure (either Left (const (Right (Gaps Seq.empty 0))) noticed)
   outcome <- case pending of
     Left failure -> pure (Left failure)
     Right _ -> attempt recordClass schema about appendRecord
+  either (const (pure ())) (const counted) outcome
   let remaining = either (const gaps) id pending
   pure $ case outcome of
     Right appended -> (remaining, Right appended)
@@ -421,6 +435,7 @@ appendManager flow total recordClass schema appendRecord about = modifyMVar (man
       | recordClass == Refusing -> (remaining, Left failure)
       | otherwise -> (addGap (MissingRecord schema about) remaining, Left failure)
   where
+    counted = atomically (modifyTVar' (managerAppends flow) (+ 1))
     attempt :: FlowRecordClass -> Schema -> About -> (FlowWriter -> FlowAppend -> IO (Position, Record)) -> IO (Either ManagerFlowFailure (Position, Record))
     attempt current target identifiers action
       | schemaLog target == RunLog = pure (Left (ManagerFlowUnavailable ("the " <> schemaName target <> " schema belongs to the run log")))

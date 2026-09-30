@@ -2513,5 +2513,158 @@
       "receipt": "export-unicode",
       "metadataPointer": ""
     }
+  ],
+  "routeSse": [
+    {
+      "name": "route-records",
+      "file": "sse/route-records.sse",
+      "schema": "RouteRecord",
+      "valid": true,
+      "entries": [
+        {
+          "id": "route_3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f.1",
+          "event": "route.start",
+          "data": {
+            "id": "route_3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f.1",
+            "class": "actor",
+            "position": 0,
+            "schema": "start",
+            "from": {
+              "principal": "credential",
+              "client": "client_1",
+              "credentialId": "credential_1"
+            },
+            "to": {
+              "to": {
+                "workflow": "run_20260930_native"
+              }
+            },
+            "about": {
+              "nativeRun": "run_20260930_native"
+            },
+            "replyTo": null,
+            "at": "2026-09-30T12:00:00.123456Z",
+            "body": {
+              "workflow": "mixed-controls"
+            }
+          }
+        },
+        {
+          "id": "route_3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f.2",
+          "event": "route.event",
+          "data": {
+            "id": "route_3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f.2",
+            "class": "public",
+            "position": 1,
+            "schema": "event",
+            "from": {
+              "workflow": "run_20260930_native"
+            },
+            "to": "public",
+            "about": {
+              "nativeRun": "run_20260930_native"
+            },
+            "replyTo": null,
+            "at": "2026-09-30T12:00:00.123456Z",
+            "event": {
+              "sequence": 1
+            }
+          }
+        },
+        {
+          "id": "route_3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f.9"
+        },
+        {
+          "id": "route_3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f.10",
+          "event": "route.start",
+          "data": {
+            "id": "route_3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f.10",
+            "class": "actor",
+            "position": 9,
+            "schema": "start",
+            "from": {
+              "principal": "credential",
+              "client": "client_1",
+              "credentialId": "credential_1"
+            },
+            "to": {
+              "to": {
+                "workflow": "run_20260930_native"
+              }
+            },
+            "about": {
+              "nativeRun": "run_20260930_native"
+            },
+            "replyTo": null,
+            "at": "2026-09-30T12:00:00.123456Z",
+            "body": {
+              "omitted": "size",
+              "bytes": 70000
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "manager-route-records",
+      "file": "sse/manager-route-records.sse",
+      "schema": "ManagerRouteRecord",
+      "valid": true,
+      "entries": [
+        {
+          "id": "route_5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e.4",
+          "event": "route.command",
+          "data": {
+            "id": "route_5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e.4",
+            "class": "actor",
+            "position": 3,
+            "schema": "command",
+            "from": {
+              "principal": "credential",
+              "client": "client_1",
+              "credentialId": "credential_1"
+            },
+            "to": {
+              "to": "manager"
+            },
+            "about": {
+              "request": "request_1",
+              "command": "command_1"
+            },
+            "replyTo": null,
+            "at": "2026-09-30T12:00:00.123456Z",
+            "body": {
+              "operation": "enqueue",
+              "profile": "profile_1",
+              "method": "POST",
+              "resource": "/v1/requests/request_1",
+              "mediaType": "application/json",
+              "precondition": "\"revision_1\"",
+              "value": {
+                "action": "enqueue"
+              },
+              "capture": null
+            }
+          }
+        },
+        {
+          "id": "route_5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e.7"
+        }
+      ]
+    },
+    {
+      "name": "route-restricted",
+      "file": "sse/route-restricted.sse",
+      "schema": "RouteRecord",
+      "valid": false,
+      "entries": []
+    },
+    {
+      "name": "route-event-mismatch",
+      "file": "sse/route-event-mismatch.sse",
+      "schema": "RouteRecord",
+      "valid": false,
+      "entries": []
+    }
   ]
 }

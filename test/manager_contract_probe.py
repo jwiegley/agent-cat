@@ -221,6 +221,47 @@ def parse_sse(raw):
     return events
 
 
+def parse_route_sse(raw):
+    """The completed blocks of a route stream, in order. A record block has
+    exactly the lines id, event and data. Its event is route.<schema>, its data
+    is the compact record, and the record id equals the block id. It yields
+    {"id", "event", "data"}. A cursor block has one id line only and yields
+    {"id"}. A comment-only heartbeat yields nothing, and a final incomplete
+    block is ignored."""
+    text = raw.decode("utf-8", errors="strict")
+    require("\r" not in text, "server SSE fixtures use LF framing")
+    entries = []
+    blocks = text.split("\n\n")
+    require(len(blocks[-1].encode("utf-8")) <= 16384, "incomplete SSE block exceeds byte bound")
+    for block in blocks[:-1]:
+        require(len(block.encode("utf-8")) + 2 <= 16384, "SSE block exceeds byte bound")
+        fields = {}
+        order = []
+        for line in block.split("\n"):
+            if not line or line.startswith(":"):
+                continue
+            name, separator, value = line.partition(":")
+            require(separator and name in {"id", "event", "data"} and name not in fields,
+                    "noncanonical route SSE field")
+            order.append(name)
+            fields[name] = value.removeprefix(" ")
+        if not order:
+            continue
+        require(fields["id"] and "\0" not in fields["id"], "invalid route SSE identity")
+        if order == ["id"]:
+            entries.append({"id": fields["id"]})
+            continue
+        require(order == ["id", "event", "data"], "noncanonical route SSE field order or cardinality")
+        outside_strings = re.sub(r'"(?:[^"\\]|\\.)*"', '""', fields["data"])
+        require(not any(c in " \t\r\n" for c in outside_strings), "SSE data is not compact JSON")
+        payload = parse_json(fields["data"].encode("utf-8"))
+        require(isinstance(payload, dict) and payload.get("id") == fields["id"]
+                and isinstance(payload.get("schema"), str) and fields["event"] == "route." + payload["schema"],
+                "route SSE identity differs from its record")
+        entries.append({"id": fields["id"], "event": fields["event"], "data": payload})
+    return entries
+
+
 def validate_contract(openapi_path, fixture_root):
     document = yaml.load(openapi_path.read_text(), Loader=UniqueYamlLoader)
     require(document.get("openapi") == "3.1.1", "contract must declare OpenAPI 3.1.1")
@@ -315,6 +356,20 @@ def validate_contract(openapi_path, fixture_root):
         require(actual == case["valid"], f"SSE fixture {case['name']}: validity differs")
         if actual:
             require(events == case["events"], f"SSE fixture {case['name']}: completed events differ")
+    for case in manifest.get("routeSse", []):
+        path = fixture_path(fixture_root, case["file"])
+        visited.add(path)
+        require(case["schema"] in {"RouteRecord", "ManagerRouteRecord"}, "invalid route SSE fixture schema")
+        try:
+            entries = parse_route_sse(path.read_bytes())
+        except (ValueError, UnicodeError, RecursionError):
+            entries = []
+            actual = False
+        else:
+            actual = all(valid(schemas[case["schema"]], entry["data"]) for entry in entries if "data" in entry)
+        require(actual == case["valid"], f"route SSE fixture {case['name']}: validity differs")
+        if actual:
+            require(entries == case["entries"], f"route SSE fixture {case['name']}: completed blocks differ")
     for download in manifest.get("downloads", []):
         path = fixture_path(fixture_root, download["file"])
         visited.add(path)
@@ -333,7 +388,8 @@ def validate_contract(openapi_path, fixture_root):
                         if p.is_file() and p.name != "manifest.json"},
             "fixture directory contains unvalidated payloads")
     print(f"manager contract: {len(schemas)} schemas, {len(recorded)} operations, "
-          f"{len(cases)} payload cases, {len(manifest['sse'])} SSE cases and "
+          f"{len(cases)} payload cases, {len(manifest['sse'])} SSE cases, "
+          f"{len(manifest.get('routeSse', []))} route SSE cases and "
           f"{len(manifest.get('downloads', []))} byte-bound downloads passed; no service execution claimed")
 
 

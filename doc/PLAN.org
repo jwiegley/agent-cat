@@ -3926,6 +3926,36 @@ Non-blocking findings of the fess audit of Phase B part 2 subtask C10 (the manag
 
 5. (low) manager/src/Agentic/Manager/Routes.hs recordOwner, FlowNotice branch. A command-changed, review-ended or request-ended notice whose body is stored as a claim check has no owner and becomes a filtered gap. It cannot happen at the current notice sizes. Fix: none now. Revisit if these notices can grow past the inline limit.
 
+* TODO [#D] Resolve C11 fess findings on route SSE
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-c11-route-sse-fess-findings-g2u0
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-30 Wed 14:25]
+:MODIFIED: [2026-09-30 Wed 14:25]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of the fess audit of Phase B part 2 subtask C11 (route SSE for GET /v1/runs/{id}/routes and GET /v1/routes). Source: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/fess/b2-C11-r1.md.
+
+1. (medium) manager/src/Agentic/Manager/Routes.hs recordBlock (about lines 433-444) and manager/test/service_http.py routes case 14. The {"omitted":"size","bytes":N} body substitution has no runtime evidence. Only the static fixture sse/route-records.sse covers the framing. Fix: add a routes-mode run-log record with a body above 16 KiB and assert that its SSE block carries the omission notice while the JSON record carries the full body.
+
+2. (low) manager/src/Agentic/Manager/Routes.hs recordBlock (about lines 442-443), doc/api/README.md (about lines 486-489), doc/api/openapi.yaml (about lines 1927-1933). recordBlock throws ViewTooLarge when a record has no body, or when the reduced block is still over 16384 bytes. That ends the stream, and every reconnect with Last-Event-ID stops at the same record. The documentation says an oversized record is always served with its body replaced. Fix: document the refusal, or serve a minimal id and event block for such a record.
+
+3. (low) manager/test/service_http.py routes case 19 (about lines 3071-3080). The case catches http.client.IncompleteRead and treats it as a normal end, so a connection cut without the chunked terminator would pass. The audit rerun passed without the tolerance. Fix: remove the try/except IncompleteRead around readline.
+
+4. (low) manager/test/service_http.py routes case 17 (about line 3021). The assertion arrived - attached < 15 sits almost at the outcome without the append counter. Fix: assert arrived - posted against a small bound, for example 5 s.
+
+5. (low) manager/test/service_http.py cases 15 and 17, manager/src/Agentic/Manager/Routes.hs (about lines 399-401). The heartbeat sent after 15 s without a block is never observed. Fix: hold one idle route stream for more than 15 s and assert a second heartbeat.
+
+6. (low) manager/STORAGE.md (about lines 623-624). One line of about 140 characters is not wrapped. Fix: rewrap the paragraph.
+
+Deferred, not a finding: the optional run-route wakeup after an ingestion of the run was not added. The one-second re-read delivers new run-log records.
+
 * TODO [#D] Follow-ups from F0 file-slot wait revalidation
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -4771,7 +4801,7 @@ Deliberately not a constructor; castGrade covers =. The <= case is a structural 
 :LABELS:   ["actor-flow","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-26 Sat 23:41]
-:MODIFIED: [2026-09-30 Wed 13:58]
+:MODIFIED: [2026-09-30 Wed 14:25]
 :CREATED_BY: johnw
 :SOURCE_REPO: .
 :ORIGINAL_SIZE: 0
@@ -4840,6 +4870,13 @@ Actor-flow increment 2, service subscription (4 to 6 engineering days, inside WM
     "author": "johnw",
     "text": "Phase B part 2 subtask C10 serves the manager-log route GET /v1/routes as JSON batches over the manager log of the current Store stream (manager Agentic.Manager.Routes, one shared RouteSource batch loop with the C9 run route, whose alias and behavior are unchanged). The log is read with the C8 readManagerWindow over the sealed segments and the active file under a Store file loan released before the first write, never under the manager-log writer lock. Each record's profile comes from its About through batched read-only lookups (commands.profile_id, requests.profile_id, runs.profile_id). A record is served only when its profile resolves and the credential holds observe and control on it; everything else is a filtered gap, and restricted records are never served. The alias is route_ sha256(1, publicStreamId, manager), so rotation and pruning keep cursors valid and a restore gives 410 view-expired. oldestCursor is the C3 floor, and a position below it is 410 cursor-expired. openapi adds the /routes path and ManagerRouteBatch, ManagerRouteRecord and ManagerRouteCursor only. Evidence: resume-20260923/B2/C10/impl-r1 (Werror build, service_http.py routes at N8, make -C doc check, additive openapi comparison against 5e8bbf9f and HEAD, check-manual-members, Phase A journey at N8, all exit 0); fess b2-C10-r1 non-blocking, follow-ups acat-c10-manager-route-fess-findings-tp4d. Deferred under the functionality-first direction: cursor binding to the authorization revision, per-credential projection, revocation during a stream and hostile-input negatives. SSE for both route resources (C11) remains. Package stays open.",
     "created_at": "2026-09-30T20:58:37Z"
+  },
+  {
+    "id": 417,
+    "issue_id": "acat-en4g",
+    "author": "johnw",
+    "text": "Phase B part 2 subtask C11 (increment 2, route SSE): GET /v1/runs/{id}/routes and GET /v1/routes now also serve Accept: text/event-stream, with id/event/data blocks of at most 16384 bytes, id-only cursor blocks over filtered gaps, 15 s heartbeats, append-counter wakeups for the manager route and a 1 s re-read for the run route. Route streams share the per-client reader quota of /v1/events and end on closeStreams. Checks passed: Werror build with -ftui-tests, service_http.py routes and events-lifecycle at N8, make -C doc check, the additive openapi comparison against 5e8bbf9f, and the Phase A journey at N8. Evidence: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/B2/C11/impl-r1. Fess non-blocking findings are in acat-c11-route-sse-fess-findings-g2u0.",
+    "created_at": "2026-09-30T21:25:40Z"
   }
 ]
 #+end_src
@@ -16151,7 +16188,7 @@ leak private errors. There is no plaintext bearer development exception.
 :LABELS:   ["p5","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-30 Wed 13:58]
+:MODIFIED: [2026-09-30 Wed 14:25]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-025
 :SOURCE_REPO: agent-cat
@@ -16360,6 +16397,13 @@ through the actual HTTP response path.
     "author": "johnw",
     "text": "C10 adds GET /v1/routes (manager-log route resource in JSON, cursor paging across sealed segments, floor cursor, profile-scoped observe-with-control serving) under increment 2 (acat-en4g). Evidence: resume-20260923/B2/C10/impl-r1; fess b2-C10-r1 non-blocking (acat-c10-manager-route-fess-findings-tp4d). Not closed.",
     "created_at": "2026-09-30T20:58:38Z"
+  },
+  {
+    "id": 418,
+    "issue_id": "acat-wm-025-3utw",
+    "author": "johnw",
+    "text": "Phase B part 2 subtask C11 (increment 2, route SSE): GET /v1/runs/{id}/routes and GET /v1/routes now also serve Accept: text/event-stream, with id/event/data blocks of at most 16384 bytes, id-only cursor blocks over filtered gaps, 15 s heartbeats, append-counter wakeups for the manager route and a 1 s re-read for the run route. Route streams share the per-client reader quota of /v1/events and end on closeStreams. Checks passed: Werror build with -ftui-tests, service_http.py routes and events-lifecycle at N8, make -C doc check, the additive openapi comparison against 5e8bbf9f, and the Phase A journey at N8. Evidence: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/B2/C11/impl-r1. Fess non-blocking findings are in acat-c11-route-sse-fess-findings-g2u0.",
+    "created_at": "2026-09-30T21:25:40Z"
   }
 ]
 #+end_src

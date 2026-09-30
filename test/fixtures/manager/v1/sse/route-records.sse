@@ -1,0 +1,17 @@
+: heartbeat
+
+id: route_3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f.1
+event: route.start
+data: {"about":{"nativeRun":"run_20260930_native"},"at":"2026-09-30T12:00:00.123456Z","body":{"workflow":"mixed-controls"},"class":"actor","from":{"client":"client_1","credentialId":"credential_1","principal":"credential"},"id":"route_3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f.1","position":0,"replyTo":null,"schema":"start","to":{"to":{"workflow":"run_20260930_native"}}}
+
+id: route_3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f.2
+event: route.event
+data: {"about":{"nativeRun":"run_20260930_native"},"at":"2026-09-30T12:00:00.123456Z","class":"public","event":{"sequence":1},"from":{"workflow":"run_20260930_native"},"id":"route_3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f.2","position":1,"replyTo":null,"schema":"event","to":"public"}
+
+id: route_3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f.9
+
+id: route_3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f.10
+event: route.start
+data: {"about":{"nativeRun":"run_20260930_native"},"at":"2026-09-30T12:00:00.123456Z","body":{"bytes":70000,"omitted":"size"},"class":"actor","from":{"client":"client_1","credentialId":"credential_1","principal":"credential"},"id":"route_3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f.10","position":9,"replyTo":null,"schema":"start","to":{"to":{"workflow":"run_20260930_native"}}}
+
+id: route_3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f.1

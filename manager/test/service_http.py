@@ -104,8 +104,12 @@ events_mode = len(sys.argv) == 6 and sys.argv[5] == EVENTS
 # restricted record, the route predicate, paging through after, the 410
 # cursors and an unchanged database across route reads. For the manager log
 # it also checks the records of the profile of each credential against the
-# flow verb, and cursors across a seal and a prune. Each numbered case prints
-# its own PASS line. It runs three manager lifetimes.
+# flow verb, and cursors across a seal and a prune. Cases 14 to 20 read both
+# routes as server-sent events: the same records as JSON, attachment at a JSON
+# cursor, reconnection after a partial block, cursor blocks, a live manager-log
+# record before the next heartbeat, the shared reader quota, the end of open
+# streams at an ordinary shutdown, and cursors across a restart. Each numbered
+# case prints its own PASS line. It runs five manager lifetimes.
 ROUTES = "routes"
 routes_mode = len(sys.argv) == 6 and sys.argv[5] == ROUTES
 assert len(sys.argv) == 5 or mixed or boundary or pages_mode or events_mode
@@ -2544,6 +2548,80 @@ def route_checks():
         sealed_dir.mkdir(mode=0o700, exist_ok=True)
         active.rename(sealed_dir / ("%020d.ndjson" % start))
 
+    def route_block(response):
+        """One complete block of an open route stream."""
+        found = bytearray()
+        while not found.endswith(b"\n\n"):
+            line = response.readline(16385)
+            assert line and len(found) + len(line) <= 16384, "complete route stream block"
+            found.extend(line)
+        return bytes(found)
+
+    def route_open(path, credential, cursor=None, seconds=30):
+        """Open one route stream and read its first complete block, which the
+        manager writes at once. A registration refused with 429 storage-quota
+        is tried again: a stream whose client closed its connection keeps its
+        subscription until its next write fails, at the latest at its next
+        heartbeat."""
+        deadline = time.monotonic() + seconds
+        headers = credential | {"Accept": "text/event-stream"} | ({"Last-Event-ID": cursor} if cursor else {})
+        while True:
+            connection = http.client.HTTPSConnection("127.0.0.1", port, context=context, timeout=20)
+            connection.request("GET", path, headers=headers)
+            response = connection.getresponse()
+            if response.status == 200:
+                break
+            raw = response.read(1048577)
+            status = response.status
+            response.close()
+            connection.close()
+            refused = frozen.parse_json(raw)
+            validate("Problem", refused)
+            assert status == 429 and refused["code"] == "storage-quota" and time.monotonic() < deadline, (
+                "route stream admission", path, status, refused["code"])
+            time.sleep(0.25)
+        assert response.getheader("Content-Type") == "text/event-stream"
+        return connection, response, route_block(response)
+
+    def route_read(response, first, until):
+        """The blocks and completed entries of an open route stream, from its
+        first block until an entry whose id names at least the position."""
+        blocks, entries = [first], frozen.parse_route_sse(first)
+        while not entries or number(entries[-1]["id"]) < until:
+            blocks.append(route_block(response))
+            entries += frozen.parse_route_sse(blocks[-1])
+        return blocks, entries
+
+    def same_record(streamed, polled):
+        """Whether a streamed record is the polled record, or the polled
+        record with its body replaced by the size notice of an oversized block."""
+        if streamed == polled:
+            return True
+        body = streamed.get("body")
+        rest = {key: value for key, value in streamed.items() if key != "body"}
+        return ("body" in polled and isinstance(body, dict) and body.get("omitted") == "size"
+                and isinstance(body.get("bytes"), int) and body["bytes"] > 0
+                and rest == {key: value for key, value in polled.items() if key != "body"})
+
+    def records_of(entries, schema):
+        found = [entry["data"] for entry in entries if "data" in entry]
+        for entry in entries:
+            if "data" in entry:
+                assert entry["event"] == "route." + entry["data"]["schema"], ("route event name", entry["event"])
+                validate(schema, entry["data"])
+        return found
+
+    def issue(label):
+        output = work / ("credential-" + label)
+        administration({"version": 1, "operation": "issue-credential", "label": "Routes " + label,
+                        "scopes": ["observe", "control"], "profileIds": ["profile_1"],
+                        "expiresAt": "2999-01-01T00:00:00Z", "outputFile": str(output)})
+        return {"Authorization": "Bearer " + output.read_bytes().decode("ascii")}
+
+    def closing(connection, response):
+        response.close()
+        connection.close()
+
     @contextlib.contextmanager
     def serving(index):
         with (work / f"server-{index}.stdout").open("wb") as output, (work / f"server-{index}.stderr").open("wb") as errors:
@@ -2670,10 +2748,10 @@ def route_checks():
             future = alias(served_end) + "." + str(number(served_end) + 1)
             status, problem, _ = batch(run, authorized, future)
             assert status == 410 and problem["code"] == "cursor-expired", ("future cursor", status, problem.get("code"))
-            status, problem, _ = request(f"/v1/runs/{run}/routes", authorized | {"Accept": "text/event-stream"})
-            assert status == 409 and problem["code"] == "unsupported-operation", ("route SSE", status, problem.get("code"))
+            status, problem, _ = request(f"/v1/runs/{run}/routes", authorized | {"Accept": "text/plain"})
+            assert status == 409 and problem["code"] == "unsupported-operation", ("route Accept", status, problem.get("code"))
             print("PASS routes case 5: a wrong alias and the alias of another credential returned 410 view-expired, a",
-                  "future cursor returned 410 cursor-expired, and text/event-stream returned 409", flush=True)
+                  "future cursor returned 410 cursor-expired, and Accept text/plain returned 409", flush=True)
 
             # Case 6. Route reads write nothing to the database.
             after = database_rows()
@@ -2727,8 +2805,8 @@ def route_checks():
             assert status == 410 and problem["code"] == "view-expired", ("run-route alias on the manager route", status, problem.get("code"))
             status, problem, _ = manager_batch(authorized, alias(managed_end) + "." + str(number(hidden_end) + 100000))
             assert status == 410 and problem["code"] == "cursor-expired", ("manager future cursor", status, problem.get("code"))
-            status, problem, _ = request("/v1/routes", authorized | {"Accept": "text/event-stream"})
-            assert status == 409 and problem["code"] == "unsupported-operation", ("manager route SSE", status, problem.get("code"))
+            status, problem, _ = request("/v1/routes", authorized | {"Accept": "text/plain"})
+            assert status == 409 and problem["code"] == "unsupported-operation", ("manager route Accept", status, problem.get("code"))
             status, problem, _ = manager_batch(authorized, managed[0]["id"], extra={"Last-Event-ID": managed[0]["id"]})
             assert status == 400 and problem["code"] == "malformed-request", ("manager after with Last-Event-ID", status)
             after = database_rows()
@@ -2736,7 +2814,7 @@ def route_checks():
             assert not changed, ("manager route reads changed the database", changed)
             print(f"PASS routes case 10: schema=command selected the {len(expected)} commands, resuming after each of the",
                   f"{len(managed)} record ids returned the following records, a wrong alias and a run-route cursor returned",
-                  "410 view-expired, a future cursor returned 410 cursor-expired, text/event-stream returned 409, and the",
+                  "410 view-expired, a future cursor returned 410 cursor-expired, Accept text/plain returned 409, and the",
                   "database is unchanged", flush=True)
         finally:
             if process.poll() is None:
@@ -2823,6 +2901,222 @@ def route_checks():
     print(f"PASS routes case 13: after a prune the oldest cursor names the floor {first_count}, cursors at 0 and",
           f"{first_count - 1} returned 410 cursor-expired, the cursor at the floor and the create command id resumed, and",
           f"the {len(kept)} records above the floor equal the flow-verb entries; the second sealed segment holds {second_count} records", flush=True)
+    # Cases 14 to 20 read both routes as server-sent events.
+    run_path = f"/v1/runs/{run}/routes"
+    with serving(3) as process:
+        status, capabilities, _ = request("/v1/capabilities", authorized)
+        assert status == 200
+        stream_before = capabilities["streamId"]
+
+        # Case 14. SSE on the run route delivers the records of the JSON
+        # batches, each as one block named route.<schema>, and the route
+        # predicate selects the same records as in JSON.
+        polled, polled_end, _ = walk(run, authorized)
+        assert polled == served and polled_end == served_end, "the run log changed after the run"
+        connection, response, first = route_open(run_path, authorized)
+        try:
+            blocks, entries = route_read(response, first, number(served[-1]["id"]))
+        finally:
+            closing(connection, response)
+        (work / "routes-run.sse").write_bytes(b"".join(blocks))
+        streamed = records_of(entries, "RouteRecord")
+        assert len(streamed) == len(served) and all(same_record(a, b) for a, b in zip(streamed, served)), (
+            "SSE and JSON records of the run route differ", len(streamed), len(served))
+        oversized = sum(1 for a, b in zip(streamed, served) if a != b)
+        connection, response, first = route_open(run_path + "?route=" + urllib.parse.quote("schema=question", safe=""), authorized)
+        try:
+            _, entries = route_read(response, first, number(questions[-1]["id"]))
+        finally:
+            closing(connection, response)
+        assert [record for record in records_of(entries, "RouteRecord")] == questions, "SSE route predicate"
+        print(f"PASS routes case 14: SSE on the run route delivered the {len(streamed)} records of the JSON batches in",
+              f"order, one block each with the event route.<schema> ({oversized} with an omitted body), and",
+              f"schema=question selected the same {len(questions)} records", flush=True)
+
+        # Case 15. Attaching at a JSON cursor delivers the later records
+        # exactly once, through Last-Event-ID and through after, and an
+        # attachment at the end cursor starts with a heartbeat.
+        middle = len(served) // 2
+        for label, path, cursor in (("Last-Event-ID", run_path, served[middle]["id"]),
+                                    ("after", run_path + "?after=" + served[middle]["id"], None)):
+            connection, response, first = route_open(path, authorized, cursor)
+            try:
+                _, entries = route_read(response, first, number(served[-1]["id"]))
+            finally:
+                closing(connection, response)
+            later = records_of(entries, "RouteRecord")
+            assert len(later) == len(served) - middle - 1 and all(same_record(a, b) for a, b in zip(later, served[middle + 1:])), (
+                "attachment at a JSON cursor", label)
+        connection, response, first = route_open(run_path, authorized, served_end)
+        closing(connection, response)
+        assert first == b": heartbeat\n\n", ("attachment at the end cursor", first)
+        print(f"PASS routes case 15: attaching at the JSON cursor of record {middle} through Last-Event-ID and through",
+              f"after delivered the {len(served) - middle - 1} later records exactly once, and the end cursor started",
+              "with a heartbeat", flush=True)
+
+        # Case 16. A stream dropped inside its third block is resumed with the
+        # id of its last complete block, and no complete block is repeated.
+        # A request with after and Last-Event-ID returns 400 on both routes.
+        assert len(served) >= 3
+        connection, response, first = route_open(run_path, authorized)
+        try:
+            complete = records_of(frozen.parse_route_sse(first) + frozen.parse_route_sse(route_block(response)), "RouteRecord")
+            assert complete == served[:2], "the first two blocks of the dropped stream"
+            partial = response.readline(16385)
+            assert partial == ("id: " + served[2]["id"] + "\n").encode(), ("partial block start", partial)
+        finally:
+            closing(connection, response)
+        connection, response, first = route_open(run_path, authorized, served[1]["id"])
+        try:
+            _, entries = route_read(response, first, number(served[-1]["id"]))
+        finally:
+            closing(connection, response)
+        resumed = records_of(entries, "RouteRecord")
+        assert len(resumed) == len(served) - 2 and all(same_record(a, b) for a, b in zip(resumed, served[2:])), (
+            "the reconnection repeated or lost a block")
+        for path, cursor in ((run_path, served[0]["id"]), ("/v1/routes", managed[0]["id"])):
+            status, problem, _ = request(path + "?after=" + cursor, authorized | {"Accept": "text/event-stream", "Last-Event-ID": cursor})
+            assert status == 400 and problem["code"] == "malformed-request", ("after with Last-Event-ID on SSE", path, status)
+        print(f"PASS routes case 16: after a drop inside block {number(served[2]['id'])}, Last-Event-ID",
+              f"{number(served[1]['id'])} delivered that record complete and the {len(resumed) - 1} later records, with",
+              "no complete block repeated, and after with Last-Event-ID returned 400 on both routes", flush=True)
+
+        # Case 17. SSE on the manager route delivers the records of the JSON
+        # batches. An observe-only credential receives cursor blocks only. A
+        # record appended while a stream is open reaches it before the next
+        # heartbeat.
+        managed_now, managed_now_end, floor = manager_walk(authorized)
+        assert managed_now and floor == first_count
+        connection, response, first = route_open("/v1/routes", authorized)
+        try:
+            _, entries = route_read(response, first, number(managed_now[-1]["id"]))
+        finally:
+            closing(connection, response)
+        streamed_managed = records_of(entries, "ManagerRouteRecord")
+        assert len(streamed_managed) == len(managed_now) and all(same_record(a, b) for a, b in zip(streamed_managed, managed_now)), (
+            "SSE and JSON records of the manager route differ")
+        _, observer_end, _ = manager_walk(observer)
+        connection, response, first = route_open("/v1/routes", observer)
+        try:
+            _, entries = route_read(response, first, number(observer_end))
+        finally:
+            closing(connection, response)
+        assert entries and all(set(entry) == {"id"} for entry in entries), ("the observe-only manager stream", entries[:2])
+        assert entries[-1]["id"] == observer_end, ("the cursor block of the observe-only stream", entries[-1], observer_end)
+        live_credential = issue("live")
+        # A cursor alias belongs to the credential, so the live stream
+        # attaches at the end cursor of its own credential.
+        _, live_start, _ = manager_walk(live_credential)
+        connection, response, first = route_open("/v1/routes", live_credential, live_start)
+        try:
+            attached = time.monotonic()
+            assert first == b": heartbeat\n\n", ("the live manager stream starts with a heartbeat", first)
+            status, catalogue, _ = request("/v1/workflows?profileId=profile_1", authorized)
+            workflow = next(item for item in catalogue["items"] if item["name"] == "mixed-controls")
+            body = {"workflowId": workflow["id"], "descriptorRevision": workflow["revision"],
+                    "profileId": workflow["profileId"], "profileRevision": workflow["profileRevision"]}
+            key = capabilities["authorityEpoch"] + "." + secrets.token_urlsafe(16)
+            status, draft, _ = request("/v1/requests", authorized | {"Content-Type": "application/json", "Idempotency-Key": key},
+                                       method="POST", payload=json.dumps(body, separators=(",", ":")).encode())
+            assert status == 201, ("live draft creation", status, draft.get("code"))
+            posted = time.monotonic()
+            live = frozen.parse_route_sse(route_block(response))
+            arrived = time.monotonic()
+        finally:
+            closing(connection, response)
+        live_records = records_of(live, "ManagerRouteRecord")
+        assert live_records and live_records[0]["schema"] == "command" and live_records[0]["body"]["operation"] == "create", (
+            "the first block after the heartbeat is the live create command", live)
+        assert arrived - attached < 15, ("the live record came after the heartbeat interval", arrived - attached)
+        live_command = live_records[0]
+        polled_live, _, _ = manager_walk(live_credential, after=live_start)
+        assert polled_live[:1] == [live_command], "the live record differs from its JSON batch"
+        print(f"PASS routes case 17: SSE on the manager route delivered the {len(streamed_managed)} records of the JSON",
+              f"batches, the observe-only stream carried cursor blocks only up to {number(observer_end)}, and the create",
+              f"command at {live_command['position']} reached an open stream {arrived - posted:.2f} s after its POST",
+              f"and {arrived - attached:.2f} s after the attaching heartbeat", flush=True)
+
+        # Case 18. Route streams share the per-client reader quota of
+        # /v1/events: with an event stream and a run-route stream open, a
+        # manager-route stream and a third event stream of the same client
+        # are refused as /v1/events refuses them.
+        quota = issue("quota")
+        status, snapshot, _ = request("/v1/snapshot", quota)
+        assert status == 200
+        _, quota_end, _ = walk(run, quota)
+        held = [open_stream("/v1/events", quota | {"Last-Event-ID": snapshot["cursor"]})[:2],
+                route_open(run_path, quota, quota_end)[:2]]
+        try:
+            status, refused_route, _ = request("/v1/routes", quota | {"Accept": "text/event-stream"})
+            status_events, refused_events, _ = request("/v1/events", quota | {"Accept": "text/event-stream", "Last-Event-ID": snapshot["cursor"]})
+        finally:
+            for pair in held:
+                closing(*pair)
+        assert (status, refused_route["code"]) == (status_events, refused_events["code"]) == (429, "storage-quota"), (
+            "the reader quota", status, refused_route.get("code"), status_events, refused_events.get("code"))
+        print("PASS routes case 18: with one event stream and one run-route stream open, a manager-route stream and a",
+              "third event stream of the same client both returned 429 storage-quota", flush=True)
+
+        # Case 19. An ordinary shutdown ends open route streams at a block
+        # boundary with a complete response.
+        ending_credential = issue("shutdown")
+        _, ending_run, _ = walk(run, ending_credential)
+        _, ending_manager, _ = manager_walk(ending_credential)
+        held = [route_open(run_path, ending_credential, ending_run), route_open("/v1/routes", ending_credential, ending_manager)]
+        restart_cursor = live_command["id"]
+        try:
+            process.terminate()
+            ending = time.monotonic()
+            for connection, response, _ in held:
+                tail = bytearray()
+                while True:
+                    try:
+                        line = response.readline(16385)
+                    except http.client.IncompleteRead:
+                        line = b""
+                    if not line:
+                        break
+                    tail.extend(line)
+                    assert time.monotonic() < ending + 10, "a route stream did not end at the shutdown"
+                assert tail.endswith(b"\n\n") or not tail, "a route stream ended inside a block"
+                frozen.parse_route_sse(bytes(tail))
+            ended = time.monotonic() - ending
+        finally:
+            for connection, response, _ in held:
+                closing(connection, response)
+        process.wait(timeout=25)
+        exited = time.monotonic() - ending
+    print(f"PASS routes case 19: an ordinary shutdown ended an open run-route stream and an open manager-route stream",
+          f"completely after {ended:.1f} s, and the manager exited after {exited:.1f} s", flush=True)
+
+    # Case 20. After an ordinary restart the stream alias is unchanged, and
+    # cursors taken before the restart resume both route streams.
+    with serving(4):
+        status, capabilities, _ = request("/v1/capabilities", authorized)
+        assert status == 200 and capabilities["streamId"] == stream_before, "the restart changed the stream alias"
+        connection, response, first = route_open(run_path, authorized, served[middle]["id"])
+        try:
+            _, entries = route_read(response, first, number(served[-1]["id"]))
+        finally:
+            closing(connection, response)
+        later = records_of(entries, "RouteRecord")
+        assert len(later) == len(served) - middle - 1 and all(same_record(a, b) for a, b in zip(later, served[middle + 1:])), (
+            "run-route resume after the restart")
+        following, _, _ = manager_walk(live_credential, after=restart_cursor)
+        assert following, "no manager record after the live command"
+        connection, response, first = route_open("/v1/routes", live_credential, restart_cursor)
+        try:
+            _, entries = route_read(response, first, number(following[-1]["id"]))
+        finally:
+            closing(connection, response)
+        resumed_managed = records_of(entries, "ManagerRouteRecord")
+        assert len(resumed_managed) == len(following) and all(same_record(a, b) for a, b in zip(resumed_managed, following)), (
+            "manager-route resume after the restart")
+        assert resumed_managed[0]["schema"] == "receipt" and resumed_managed[0]["replyTo"] == live_command["position"], (
+            "the first record after the live command is its receipt", resumed_managed[0]["schema"])
+    print(f"PASS routes case 20: after an ordinary restart the streamId is unchanged, the run-route cursor of record",
+          f"{middle} resumed with {len(later)} records, and the manager-route cursor of the live command resumed with",
+          f"its receipt and {len(resumed_managed) - 1} later records", flush=True)
     print("PASS routes: every run-route and manager-route case held against the running TLS 1.3 manager", flush=True)
 
 

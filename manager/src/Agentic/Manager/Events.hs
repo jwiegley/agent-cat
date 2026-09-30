@@ -3,14 +3,14 @@
 -- | Authorized projections of the existing durable invalidation stream.
 module Agentic.Manager.Events
   ( CursorBinding, captureBinding, bindingEpoch, bindingGrants, durableStream, publicStreamId, cursorAt, parseCursor, withBatch, withBoundary,
-    StreamReaders, newStreamReaders, closeStreams, StreamPump, withStream ) where
+    StreamReaders, newStreamReaders, closeStreams, streamsClosing, withStreamReader, StreamPump, withStream ) where
 
 import Agentic.Manager.Authorization
 import Agentic.Manager.Fault (FaultClass (InternalFault), ManagerFault (ResponseWriteTimeout), refuseStorageUnavailable)
 import Agentic.Manager.Profile (ConfigurationLimits, PublicProfile)
 import Agentic.Manager.Protocol.Command
 import Agentic.Manager.Store
-import Control.Concurrent.STM (TVar, atomically, newTVarIO, readTVar, readTVarIO, writeTVar, modifyTVar', throwSTM)
+import Control.Concurrent.STM (STM, TVar, atomically, newTVarIO, readTVar, readTVarIO, writeTVar, modifyTVar', throwSTM)
 import Control.DeepSeq (NFData)
 import Control.Exception (bracket_, throwIO)
 import Control.Monad (forM, unless, when, void)
@@ -108,7 +108,8 @@ readBatch store proof supplied view profiles = do
 
 -- | Active per-client subscriptions of one application lifetime and its
 -- closing flag. This count is separate from the Store reader capacity. A
--- stream holds no reader charge between its batch reads.
+-- stream holds no reader charge between its batch reads. The event stream and
+-- the two route streams of "Agentic.Manager.Routes" share this count.
 data StreamReaders = StreamReaders !(TVar (Map.Map Text Int)) !(TVar Bool)
 
 newStreamReaders :: IO StreamReaders
@@ -117,10 +118,31 @@ newStreamReaders = StreamReaders <$> newTVarIO Map.empty <*> newTVarIO False
 -- | Begin an ordinary shutdown of the streams of this application lifetime.
 -- A new registration then refuses with storage-unavailable. An open stream
 -- ends its response after its current block or heartbeat, at the latest after
--- its next authorization wakeup, so the listener can join its connection
--- workers. The client resumes after restart with its last complete event ID.
+-- its next wakeup, so the listener can join its connection workers. The
+-- client resumes after restart with its last complete event ID.
 closeStreams :: StreamReaders -> IO ()
 closeStreams (StreamReaders _ closing) = atomically (writeTVar closing True)
+
+-- | Whether 'closeStreams' has begun the ordinary shutdown of the streams.
+streamsClosing :: StreamReaders -> STM Bool
+streamsClosing (StreamReaders _ closing) = readTVar closing
+
+-- | Hold one subscription of the client of the credential for the action. A
+-- client holds at most two subscriptions, @sseReadersPerClient@, across the
+-- event stream and the route streams. A third refuses with storage-quota, and
+-- a registration after 'closeStreams' refuses with storage-unavailable.
+withStreamReader :: StreamReaders -> CoordinationStore -> CredentialProof -> IO a -> IO a
+withStreamReader (StreamReaders readers closing) store proof action = do
+  client <- runRead store (currentClient proof) >>= either throwIO pure
+  let acquire = atomically $ do
+        closed <- readTVar closing
+        when closed (throwSTM StorageUnavailable)
+        counts <- readTVar readers
+        let count = Map.findWithDefault 0 client counts
+        when (count >= 2) (throwSTM StorageQuota)
+        writeTVar readers (Map.insert client (count + 1) counts)
+      release = atomically $ modifyTVar' readers (Map.update (\count -> if count == 1 then Nothing else Just (count - 1)) client)
+  bracket_ acquire release action
 
 type StreamPump = (AuthorizedView -> Value -> IO ()) -> (AuthorizedView -> IO ()) -> IO ()
 
@@ -137,17 +159,8 @@ type StreamPump = (AuthorizedView -> Value -> IO ()) -> (AuthorizedView -> IO ()
 -- the loop ends before its next batch read, and the response completes.
 withStream :: StreamReaders -> CoordinationStore -> CredentialProof -> Text
   -> (StreamPump -> IO a) -> IO a
-withStream (StreamReaders readers closing) store proof supplied action = do
-  client <- runRead store (currentClient proof) >>= either throwIO pure
-  let acquire = atomically $ do
-        closed <- readTVar closing
-        when closed (throwSTM StorageUnavailable)
-        counts <- readTVar readers
-        let count = Map.findWithDefault 0 client counts
-        when (count >= 2) (throwSTM StorageQuota)
-        writeTVar readers (Map.insert client (count + 1) counts)
-      release = atomically $ modifyTVar' readers (Map.update (\count -> if count == 1 then Nothing else Just (count - 1)) client)
-  bracket_ acquire release $ do
+withStream streams@(StreamReaders _ closing) store proof supplied action =
+  withStreamReader streams store proof $ do
     initial <- withAuthorizedCatalogues store proof [Observe] $ \view _ profiles _ -> do
       void (readBatch store proof supplied view (map fst profiles))
       authorizedViewRevision view
