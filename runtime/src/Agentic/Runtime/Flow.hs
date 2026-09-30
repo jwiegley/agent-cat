@@ -92,6 +92,12 @@ module Agentic.Runtime.Flow
     appendTell,
     appendReply,
     readFlowContent,
+
+    -- * Run log
+    runLogName,
+    runAbout,
+    withRunLog,
+    appendEventRecord,
   )
 where
 
@@ -124,7 +130,7 @@ import Agentic.Runtime.Protocol
     maxFrameBytes,
     supportedProtocolVersions,
   )
-import Agentic.Runtime.Store (LineageOperation)
+import Agentic.Runtime.Store (LineageOperation, RunStore, storePrivateRoot)
 import Control.Concurrent.MVar (MVar, modifyMVar, modifyMVar_, newMVar)
 import Control.Exception (Exception, IOException, bracket, onException, throwIO, try)
 import Control.Monad (unless, when)
@@ -873,6 +879,34 @@ readFlowContent root = \case
                 unless (BL.toStrict (encode value) == bytes) $
                   Left ("claim check " <> digest <> " is not the exact encoding of its value")
                 pure (ContentValue value)
+
+-- ---------------------------------------------------------------------------
+-- Run log
+-- ---------------------------------------------------------------------------
+
+-- | The file of the run log in a run store.
+runLogName :: FilePath
+runLogName = "flow.ndjson"
+
+-- | The identifiers of a record that concerns only its native run.
+runAbout :: RunId -> About
+runAbout run = noAbout {aboutNativeRun = Just run}
+
+-- | Create the run log of a run store with its strict codec, append the
+-- @start@ record from the intake to the workflow of the run, and run the
+-- action with the writer. The log is closed when the action ends.
+withRunLog :: RunStore -> Actor -> Start -> (FlowWriter -> IO a) -> IO a
+withRunLog store intake start action =
+  withFlowWriter strictFlowCodec (storePrivateRoot store) runLogName $ \writer -> do
+    let run = startRun start
+    _ <- appendTell writer FlowStart intake (To (Workflow run)) (runAbout run) (ContentValue (startBody start))
+    action writer
+
+-- | Append the @event@ record that names line @n@ of @events.ndjson@, from the
+-- workflow of the run to the public audience.
+appendEventRecord :: FlowWriter -> RunId -> SeqNo -> IO ()
+appendEventRecord writer run number =
+  () <$ appendTell writer FlowEvent (Workflow run) Public (runAbout run) (eventContent number)
 
 -- ---------------------------------------------------------------------------
 -- Strict JSON values

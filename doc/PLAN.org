@@ -268,6 +268,28 @@ A4 fess verification gap. The positive approval loop in manager/test/service_htt
 ]
 #+end_src
 
+* TODO [#C] Resolve F4 fess findings in the run writer
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-14ht
+:LABELS:   ["actor-flow","workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-29 Tue 17:22]
+:MODIFIED: [2026-09-29 Tue 17:22]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Follow-up from the F4 fess audit of the run writer at runMachineWith (actor-flow delta 1a). None of these findings blocks. Source: fess audit /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/fess/flow-F4-r1.md.
+
+1. (medium) cli/src/Agentic/Cli.hs near lines 718-719 and 2846: the start body's policyDigest is the SHA-256 of the whole targetPolicy object. For routed v2 targets that object already has its own "policyDigest" field (sha256Fingerprint of the policy without that field, runtime/src/Agentic/Runtime/Catalogue.hs near line 455), which the frontend manifest and catalogue carry. The same name holds two values that never match, so a join of the run log to the manifest by policyDigest fails. policySha256 also duplicates the sha256Fingerprint helper. Fix: rename the start field (for example policySha256), derive it from the existing digest, or state the difference in runtime/BROKER.md.
+2. (medium) cli/src/Agentic/Cli.hs near lines 2845 and 2851-2855: the start programSha256 hashes the program after facts, but the frontend preparationProgramHash hashes the static program. The start input digests hash the decoded text after the trailing newline is stripped, not the captured bytes that the frontend hashes. These join keys (design record line 51) can disagree between the manager log and the run log. Fix: hash the same program value and the same input bytes as the frontend, or document that the digests are not comparable.
+3. (low) runtime/src/Agentic/Runtime/Machine.hs near lines 153-157 and runtime/BROKER.md near lines 148-153: the record is appended before the durable write. If the durable write then fails, the run log keeps an event record for n with no line in events.ndjson. The comment and BROKER.md describe only the failed-append direction, and the planned reader verb joins records to lines. Fix: state in BROKER.md and the Haddock comment that a failed durable write can leave one trailing event record with no line.
+4. (low) runtime/test/FlowTests.hs near lines 365-368: the failure is injected as a codec self-decode refusal, which fails before any byte is written. The I/O failure branch of append (hPut or hFlush, then writerBroken) is not exercised through the sink. Fix: add a case in which the run-log handle fails on write.
+5. (low, verification) The new runLogSinkChecks test was not shown failing against the code without the append, and cli/ci/policies.sh (named by runtime/AGENTS.md) was not run under the operator direction of 2026-09-29.
+
 * DONE [#B] Evict decidability from the semantic layer
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -3496,7 +3518,7 @@ Owner directive 2026-08-12: use the standard libraries as much as possible; do n
 :LABELS:   ["actor-flow","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-26 Sat 23:41]
-:MODIFIED: [2026-09-29 Tue 17:07]
+:MODIFIED: [2026-09-29 Tue 17:22]
 :CREATED_BY: johnw
 :SOURCE_REPO: .
 :ORIGINAL_SIZE: 0
@@ -3535,6 +3557,13 @@ Actor-flow increment 1, delta 1a (at most 8 engineering days, after the operator
     "author": "johnw",
     "text": "Subtask F3 of delta 1a: Agentic.Runtime.Flow with the record, the seventeen schemas, the strict bounded line codec, the twelve run-log body codecs and the flow writer, re-exported from Agentic.Runtime. No run writes a flow log yet. Evidence scope: F3-build (agentic-run, runtime-contract-test and routing-fixed-point-probe with -ftui-tests and -Werror), runtime-contract-test at N8 with the new FlowTests, source-boundaries, and the Phase A tui-journey at N8 each passed once under timeout 900 (exit 0). The length-check negative control was shown failing first (exit 1). Agentic.Manager.Protocol.Json and decodeStrictValue are unchanged. ALLBUILD was not run. Fess: not blocking. Two medium and five low findings filed as acat-mkh7. Delta 1a is not complete, so this issue stays open.",
     "created_at": "2026-09-30T00:07:26Z"
+  },
+  {
+    "id": 357,
+    "issue_id": "acat-e6cp",
+    "author": "johnw",
+    "text": "Subtask F4 of delta 1a: the run writer at runMachineWith. When AGENT_CAT_RUN_STORE is set, runMachineWith opens flow.ndjson in the run store through the F3 writer. Line 0 is start from the intake actor. The intake is an explicit MachineOptions field: frontendCmd sets Manager, and every other caller sets Principal (LocalAccount realUid owner) with AGENT_CAT_RUN_OWNER as the declared owner. Under the events.ndjson lock, each public event appends an event record that names n, then writes line n of events.ndjson, then the mirrors. A failed append fails the run through the observer-failure path (D1). programSha256 is shared with the frontend. A run without a store writes no log. runtime/BROKER.md has a Run log section. Evidence scope: F4-build (-Werror, agentic-run, runtime-contract-test, routing-fixed-point-probe), runtime-contract-test at N8 with the new runLogSinkChecks, test/progress_probe.py with the golden comparison and the flow.ndjson checks, test/lineage_probe.py (a child start names the parent and the lineage operation), make -C doc check, and the Phase A tui-journey at N8 whose run store flow.ndjson begins with start from Manager each passed once under timeout 900. The fess auditor reran the build and runtime-contract-test with exit 0. Fess: not blocking. Two medium and three low findings are filed as acat-14ht. flowBroker, the four inProcessBroker paths, the reader and the flow verb have not landed, so this issue stays open.\n",
+    "created_at": "2026-09-30T00:22:37Z"
   }
 ]
 #+end_src

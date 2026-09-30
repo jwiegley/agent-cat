@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """Verify protocol-v2 public progress without changing answer or billing semantics.
 
+Each store-backed run must also write the run log flow.ndjson: line 0 is the
+start record from the local account with the owner that AGENT_CAT_RUN_OWNER
+declares, and the event records name the sequence numbers of events.ndjson in
+order.
+
 With a broker runner, the probe also compares the store-backed broker-hello
 events.ndjson, with each timestamp replaced, against the golden file
 test/fixtures/flow/hello-events.ndjson or the file that --golden names.
@@ -28,6 +33,7 @@ def machine(
     scratch.mkdir(parents=True)
     environment = os.environ.copy()
     environment["AGENT_CAT_RUN_STORE"] = str(store)
+    environment["AGENT_CAT_RUN_OWNER"] = owner_for(run_id)
     command = [str(runner), *prefix, "machine", run_id, workflow, *target]
     if "--engine" in target:
         command.extend(["--timeout", "60000", "--scratch", str(scratch)])
@@ -45,7 +51,38 @@ def machine(
         raise AssertionError(f"machine protocol {protocol} failed ({result.returncode}): {result.stderr.decode('utf8', 'replace')}")
     events = [json.loads(line) for line in result.stdout.splitlines()]
     assert events and all(event["protocolVersion"] == protocol for event in events)
+    assert_run_log(store, run_id, protocol)
     return events, store
+
+
+def owner_for(run_id: str) -> str:
+    return f"local:progress-probe:{run_id}"
+
+
+SHA256 = re.compile(r"[0-9a-f]{64}")
+
+
+def assert_run_log(store: Path, run_id: str, protocol: int) -> dict:
+    """Check the run log of a store-backed run and return its start body."""
+    records = [json.loads(line) for line in (store / "flow.ndjson").read_bytes().splitlines()]
+    events = [json.loads(line) for line in (store / "events.ndjson").read_bytes().splitlines()]
+    assert records, f"{run_id}: flow.ndjson is empty"
+    start = records[0]
+    assert start["schema"] == "start", f"{run_id}: flow.ndjson line 0 is {start['schema']}"
+    assert start["from"] == {"principal": "local", "uid": os.getuid(), "owner": owner_for(run_id)}, start["from"]
+    assert start["to"] == {"to": {"workflow": run_id}} and start["about"] == {"nativeRun": run_id}, start
+    body = start["body"]["inline"]
+    assert body["run"] == run_id and body["lineage"] == "root" and body["parent"] is None, body
+    assert SHA256.fullmatch(body["programSha256"]) and SHA256.fullmatch(body["policyDigest"]), body
+    assert body["personAnswering"] == (None if protocol == 1 else "engine"), body
+    assert [record["schema"] for record in records].count("start") == 1
+    numbered = [record["body"]["event"] for record in records if record["schema"] == "event"]
+    assert numbered == list(range(len(events))), f"{run_id}: event records {numbered} for {len(events)} events"
+    assert [int(event["sequence"]) for event in events] == numbered
+    for record in records[1:]:
+        if record["schema"] == "event":
+            assert record["from"] == {"workflow": run_id} and record["to"] == "public", record
+    return body
 
 
 DEFAULT_GOLDEN = Path(__file__).resolve().parent / "fixtures" / "flow" / "hello-events.ndjson"
@@ -130,6 +167,9 @@ def main() -> None:
             assert len(occurrences) == 1 and occurrences[0][2] == "broker-delivered response"
             assert trace == [occurrences[0][0]] and bills == ("1", "1")
             assert brokered[-1]["event"]["type"] == "run.completed"
+            inputs = assert_run_log(broker_store, "broker-injected", 2)["inputs"]
+            request = b"broker request"
+            assert inputs == [{"name": "input", "bytes": len(request), "sha256": hashlib.sha256(request).hexdigest()}], inputs
             persisted_broker = [json.loads(line) for line in (broker_store / "events.ndjson").read_text().splitlines()]
             assert [event["event"] for event in persisted_broker] == [event["event"] for event in brokered]
             reference = brokered[-1]["event"]["result"]

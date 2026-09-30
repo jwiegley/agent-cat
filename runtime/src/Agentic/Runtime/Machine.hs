@@ -15,6 +15,7 @@ module Agentic.Runtime.Machine
     handleEventSinkFor,
     handlesEventSink,
     handlesEventSinkFor,
+    handlesEventSinkLogged,
     stdoutEventSink,
     stdoutEventSinkFor,
     withControlInput,
@@ -41,6 +42,7 @@ import Agentic.Runtime.Control
     decodeControlFor,
     deliverRuntimeActionDeferred,
   )
+import Agentic.Runtime.Flow (FlowWriter, appendEventRecord)
 import Agentic.Runtime.Protocol
   ( Envelope (Envelope),
     EventSink,
@@ -122,7 +124,15 @@ handlesEventSink :: [Handle] -> RunId -> IO EventSink
 handlesEventSink = handlesEventSinkFor protocolVersion
 
 handlesEventSinkFor :: Int -> [Handle] -> RunId -> IO EventSink
-handlesEventSinkFor version handles runId = do
+handlesEventSinkFor = handlesEventSinkLogged Nothing
+
+-- | Write each envelope to every handle in order, after its record in the run
+-- log when the run has one. Under the one writer lock, event @n@ appends the
+-- @event@ record that names @n@, then writes line @n@ to the durable handle and
+-- then to the mirrors. A failed append, like a failed durable write, fails this
+-- and every later call, so no line reaches a handle without its record.
+handlesEventSinkLogged :: Maybe FlowWriter -> Int -> [Handle] -> RunId -> IO EventSink
+handlesEventSinkLogged runLog version handles runId = do
   next <- newMVar (Right 0 :: Either SomeException Word64)
   pure $ \event -> case event of
     AttemptProgress {} | version < correlatedProtocolVersion -> pure ()
@@ -139,11 +149,13 @@ handlesEventSinkFor version handles runId = do
           bytes <-
             either (throwIO . userError . T.unpack) pure $
               encodeEnvelopeFor version (Envelope version runId (SeqNo sequence') now event)
-          written <- try @SomeException $ case handles of
-            [] -> pure Nothing
-            durable : mirrors -> do
-              writeEnvelope bytes durable
-              firstMirrorFailure bytes mirrors
+          written <- try @SomeException $ do
+            mapM_ (\writer -> appendEventRecord writer runId (SeqNo sequence')) runLog
+            case handles of
+              [] -> pure Nothing
+              durable : mirrors -> do
+                writeEnvelope bytes durable
+                firstMirrorFailure bytes mirrors
           case written of
             Left exception -> pure (Left exception, Left exception)
             Right failure -> pure (Right (sequence' + 1), Right failure)

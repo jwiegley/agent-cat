@@ -22,6 +22,7 @@ module Agentic.Runtime.Store
     withRunStoreVersioned,
     withRunStoreSeededVersioned,
     storeEventHandle,
+    storePrivateRoot,
     appendStoredEvent,
     readEventLog,
     readRunStore,
@@ -242,6 +243,11 @@ withRunStoreSeededVersioned storeFormat protocol directory manifest inheritedAns
 
 storeEventHandle :: RunStore -> Handle
 storeEventHandle = runStoreEvents
+
+-- | The private root of the run store directory, for the run log beside its
+-- files.
+storePrivateRoot :: RunStore -> Private.PrivateRoot
+storePrivateRoot = runStoreRoot
 
 appendStoredEvent :: RunStore -> Envelope -> IO SequenceDecision
 appendStoredEvent store envelope =

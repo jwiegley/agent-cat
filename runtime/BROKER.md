@@ -84,7 +84,8 @@ receiver failure to its runtime and cancels and joins its original reader on exi
 ## Flow records
 
 `Agentic.Runtime.Flow`, exported by `Agentic.Runtime`, defines the record of the
-actor flow and its writer. No run or manager writes a flow log at present, and
+actor flow and its writer. A machine run with a run store writes a run log, as
+the next section states. No manager writes a flow log at present, and
 `inProcessBroker` delivers data as the sections above state.
 
 A `Record` names one of seventeen schemas, a sender, an address, the
@@ -119,6 +120,37 @@ writer keeps only the schema of each position, and it refuses a reply whose
 position does not name an earlier ask that the reply may answer.
 `readFlowContent` verifies the size, digest and exact encoding of a claim check
 before it returns the body.
+
+## Run log
+
+When `AGENT_CAT_RUN_STORE` names a run store, `runMachineWith` creates the run
+log `flow.ndjson` in that store with `withRunLog` and the strict codec. A run
+without a run store writes no run log.
+
+The first record is `start`, from the intake of the run to the workflow of the
+run. The composition root chooses the intake as an explicit option. The
+frontend worker that the manager starts uses `Manager`. Every other machine
+command uses `Principal (LocalAccount uid owner)`, where `uid` is the real user
+identifier of the process and `owner` is the value of `AGENT_CAT_RUN_OWNER`,
+recorded as declared and not authenticated. The body names the native run
+identifier, the SHA-256 of the compact encoding of the printed program, the
+SHA-256 of the compact encoding of the target policy, the person-answering mode
+under protocol 2 or later, the target label, the lineage operation, the parent
+run and each input by name, UTF-8 size and SHA-256. The frontend preparation
+computes its program hash with the same function.
+
+The event sink `handlesEventSinkLogged` holds the run log and writes the events
+of the run. Under its one writer lock, event `n` appends the `event` record that
+names `n`, from the workflow of the run to the public audience, then writes line
+`n` of `events.ndjson` and then the stdout mirror. Events that deferred
+activation forwards pass through the same sink, so the run log records them
+too. The writer flushes each line and does not synchronize it.
+
+A failed run-log append fails the run through the existing observer-failure
+path. The sink throws the original exception, writes no line for that event and
+fails every later event, as it does after a failed durable write. The run stops
+with that exception, and `events.ndjson` holds exactly the lines whose records
+the run log holds.
 
 ## Failure and extension
 

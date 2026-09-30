@@ -337,7 +337,8 @@ import System.Posix.IO
     fdToHandle,
     openFd,
   )
-import System.Posix.Types (Fd (..))
+import System.Posix.Types (CUid (..), Fd (..))
+import System.Posix.User (getRealUserID)
 import qualified System.Posix.Signals as Signals
 import Text.Read (readMaybe)
 
@@ -396,13 +397,14 @@ import Agentic.Runtime
     stderrLog,
   )
 import Agentic.Runtime (DataBroker (..), inProcessBroker, ControlRuntime, newControlRuntimeFor)
+import Agentic.Runtime (Actor (Manager, Principal), Authority (LocalAccount), Start (..), StartInput (..), withRunLog)
 import Agentic.Runtime
   ( DeferredEventSink,
     MachineCancelled (..),
     activateEventSinkBrokered,
     deferredEventSink,
     eventSinkActive,
-    handlesEventSinkFor,
+    handlesEventSinkLogged,
     newDeferredEventSink,
     stdoutEventSinkFor,
     withBufferedControlInputBrokered,
@@ -681,12 +683,40 @@ instance Show PrivateForkAnswer where
 
 data MachineOptions = MachineOptions
   { machineProtocolVersion :: !Int,
-    machinePersonAnswering :: !PersonAnswering
+    machinePersonAnswering :: !PersonAnswering,
+    -- | The actor that sends the @start@ record of the run log.
+    machineIntake :: !MachineIntake
   }
   deriving (Eq, Show)
 
+-- | The intake of a machine run, which the composition root chooses.
+data MachineIntake
+  = -- | The manager, which starts the frontend worker.
+    ManagerIntake
+  | -- | The local account that runs the command: its real user identifier and
+    -- the owner that @AGENT_CAT_RUN_OWNER@ declares.
+    LocalIntake
+  deriving (Eq, Show)
+
 defaultMachineOptions :: MachineOptions
-defaultMachineOptions = MachineOptions protocolVersion PersonAnswerEngine
+defaultMachineOptions = MachineOptions protocolVersion PersonAnswerEngine LocalIntake
+
+-- | The actor of an intake.
+intakeActor :: MachineIntake -> Maybe Text -> IO Actor
+intakeActor ManagerIntake _ = pure Manager
+intakeActor LocalIntake owner = do
+  CUid uid <- getRealUserID
+  pure (Principal (LocalAccount uid owner))
+
+-- | The lowercase hexadecimal SHA-256 of the compact encoding of a program's
+-- printed form. The frontend preparation and the @start@ record of the run log
+-- both use it.
+programSha256 :: ProgramOf r -> Text
+programSha256 = Frontend.frontendDigest . BL.toStrict . encode . printedValue
+
+-- | The lowercase hexadecimal SHA-256 of the compact encoding of a policy.
+policySha256 :: Value -> Text
+policySha256 = Frontend.frontendDigest . BL.toStrict . encode
 
 data Command
   = -- | Explicit full-screen terminal frontend.
@@ -1113,7 +1143,7 @@ frontendCmd broker reg = Frontend.runFrontendSession (regBinary reg) runnerVersi
                   Nothing -> "routing"
                   Just (BackendAcp _) -> "acp"
                   Just (BackendDeck _) -> "deck"
-              options = MachineOptions runtimeVersion answering
+              options = MachineOptions runtimeVersion answering ManagerIntake
               lineage = maybe RootRun Frontend.parentOperation parent
               checkParent = traverse
                 (\selected -> validateLineage options (inProcessNames reg name) (Frontend.parentOperation selected)
@@ -1123,7 +1153,7 @@ frontendCmd broker reg = Frontend.runFrontendSession (regBinary reg) runnerVersi
           inherited <- checkParent
           pure Frontend.FrontendPreparation
             { Frontend.preparationPlan = object (planFields facts <> ["program" .= printedValue program]),
-              Frontend.preparationProgramHash = Frontend.frontendDigest (BL.toStrict (encode (printedValue static))),
+              Frontend.preparationProgramHash = programSha256 static,
               Frontend.preparationPolicy = policy,
               Frontend.preparationArguments = frozenArguments,
               Frontend.preparationTargetKind = targetKind,
@@ -2801,12 +2831,32 @@ runMachineWith broker options control lineage parent inherited reg runId name ta
       storeFormat = if version == protocolVersion then storeVersion else latestStoreVersion
   case store of
     Nothing -> stdoutEventSinkFor version runId >>= runWith effectiveTarget nullPersistenceHooks
-    Just directory ->
-      withRunStoreSeededVersioned storeFormat version directory (manifest effectiveTarget owner) inherited $ \runStore -> do
-        persistence <- persistenceFor runId runStore (printedValue prog) (length inherited)
-        handlesEventSinkFor version [storeEventHandle runStore, stdout] runId
-          >>= runWith effectiveTarget persistence
+    Just directory -> do
+      intake <- intakeActor (machineIntake options) owner
+      withRunStoreSeededVersioned storeFormat version directory (manifest effectiveTarget owner) inherited $ \runStore ->
+        withRunLog runStore intake (start effectiveTarget) $ \runLog -> do
+          persistence <- persistenceFor runId runStore (printedValue prog) (length inherited)
+          handlesEventSinkLogged (Just runLog) version [storeEventHandle runStore, stdout] runId
+            >>= runWith effectiveTarget persistence
   where
+    start effectiveTarget =
+      Start
+        { startRun = runId,
+          startProgramSha256 = programSha256 prog,
+          startPolicyDigest = policySha256 (targetPolicy effectiveTarget),
+          startPersonAnswering = manifestAnswering,
+          startTarget = targetLabel effectiveTarget,
+          startLineage = lineage,
+          startParent = parent,
+          startInputs =
+            [ StartInput name' (toInteger (BS.length bytes)) (Frontend.frontendDigest bytes)
+            | Given name' (Just text) _ <- gs,
+              let bytes = encodeUtf8 text
+            ]
+        }
+    manifestAnswering
+      | machineProtocolVersion options == protocolVersion = Nothing
+      | otherwise = Just (machinePersonAnswering options)
     manifest effectiveTarget owner =
       RunManifest
         runId
@@ -2818,10 +2868,7 @@ runMachineWith broker options control lineage parent inherited reg runId name ta
         parent
         lineage
         owner
-        ( if machineProtocolVersion options == protocolVersion
-            then Nothing
-            else Just (machinePersonAnswering options)
-        )
+        manifestAnswering
     runWith effectiveTarget persistence actualSink = do
       let started = machineStarted options name effectiveTarget
       case control of

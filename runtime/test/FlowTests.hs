@@ -10,12 +10,14 @@
 -- the writer, through the "Agentic.Runtime" facade.
 module FlowTests (flowTests) where
 
+import Agentic.Plan (Q (Q), askC1, consultRequest, scopeUnit)
+import Agentic.Planning (Addressee (AddrModel))
 import Agentic.Runtime
 import qualified Agentic.Engine as E
 import qualified Agentic.Planning as P
 import qualified Agentic.Schema as S
 import BucketEvidence (withCaptureBucket)
-import Control.Exception (evaluate, try)
+import Control.Exception (SomeException, evaluate, fromException, try)
 import Control.Monad (forM, forM_, unless, zipWithM_)
 import Data.Aeson (Value (Array, Bool, Null, Number, String), encode, object, (.=))
 import qualified Data.Aeson as Aeson
@@ -32,6 +34,7 @@ import Data.Time.Clock (UTCTime (UTCTime), picosecondsToDiffTime)
 import Data.Time.Calendar (fromGregorian)
 import System.Directory (getTemporaryDirectory)
 import System.FilePath ((</>))
+import System.IO (IOMode (WriteMode), hClose, openBinaryFile)
 import System.Mem (getAllocationCounter)
 
 type Ledger =
@@ -95,6 +98,7 @@ flowTests = do
   bodyRoundTrips
   lineRefusals
   writerChecks
+  runLogSinkChecks
   putStrLn "flow checks passed: seventeen schemas, every actor and address, exact run-log bodies, claim checks and refused lines"
 
 envelopeRoundTrips :: IO ()
@@ -345,6 +349,61 @@ writerChecks = do
       refused "a missing claim check" missing
       exclusive <- try @IOError (openFlowWriter strictFlowCodec root "flow.ndjson")
       check "a second writer cannot open the same log" (isLeft exclusive)
+
+-- | The event sink of a run with a run log appends the record of each event
+-- before its line, and a failed append fails the run through the observer
+-- failure path: the run ends with the original exception, the events file
+-- holds exactly the lines whose records were appended, and every later call of
+-- the sink fails.
+runLogSinkChecks :: IO ()
+runLogSinkChecks = do
+  temporary <- getTemporaryDirectory
+  withCaptureBucket "agentic-run-log-" temporary $ \bucket -> do
+    let run = RunId "run-log"
+        plan = askC1 P.SText (consultRequest (Q (AddrModel "run-log") scopeUnit "hello" 0))
+        world = concurrentWorld (\c _ -> pure (S.defaultEl c))
+        failingAt cut =
+          strictFlowCodec
+            { flowDecodeLine = \line -> decodeFlowLine line >>= \record ->
+                if recBody record == EventNumber (SeqNo cut) then Left "injected run-log failure" else Right record
+            }
+        attempt name codec = do
+          let path = bucket </> name
+          withPrivateRoot "run log test root" path $ \root -> do
+            events <- openBinaryFile (path </> "events.ndjson") WriteMode
+            (outcome, later) <- withFlowWriter codec root runLogName $ \writer -> do
+              sink <- handlesEventSinkLogged (Just writer) 2 [events] run
+              outcome <- try @SomeException (runPlanObserved sink noChains world plan)
+              later <- try @SomeException (sink (RunFailed FailureRuntime "after the run"))
+              pure (outcome, later)
+            hClose events
+            eventLines <- BC.lines <$> BS.readFile (path </> "events.ndjson")
+            flowLines <- BC.lines <$> BS.readFile (path </> runLogName)
+            records <- forM flowLines (either (fail . T.unpack) pure . decodeFlowLine)
+            pure (outcome, later, eventLines, records)
+        eventRecord index record =
+          recSchema record == FlowEvent
+            && recFrom record == Workflow run
+            && recTo record == Public
+            && recBody record == EventNumber (SeqNo index)
+    (baseline, _, baselineLines, baselineRecords) <- attempt "baseline" strictFlowCodec
+    check "the run without a failing append completes" (either (const False) (const True) baseline)
+    -- The last line is the event that the sink writes after the run.
+    let total = length baselineLines
+        runEvents = total - 1
+    check "the run emits several events" (runEvents >= 3)
+    check "each line of the events file has the event record of its sequence number, in order"
+      (length baselineRecords == total && and (zipWith eventRecord [0 ..] baselineRecords))
+    forM_ [0 .. fromIntegral runEvents - 1] $ \cut -> do
+      (outcome, later, eventLines, records) <- attempt ("cut-" <> show cut) (failingAt cut)
+      let injected result = case result of
+            Left failure | Just (FlowError why) <- fromException failure -> "injected run-log failure" `T.isInfixOf` why
+            _ -> False
+      check ("a failed append at event " <> show cut <> " fails the run with the original exception") (injected outcome)
+      check ("a failed append at event " <> show cut <> " fails every later event") (injected later)
+      check ("no line follows the failed append at event " <> show cut) (length eventLines == fromIntegral cut)
+      check ("the run log holds the records of the written lines before event " <> show cut)
+        (length records == fromIntegral cut && and (zipWith eventRecord [0 ..] records))
 
 check :: String -> Bool -> IO ()
 check label ok = unless ok (fail ("flow: " <> label))

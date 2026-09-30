@@ -33,6 +33,15 @@ def digest_tree(path):
     }
 
 
+def assert_child_start(child, run_id):
+    """Line 0 of a child's run log is its start, which names the parent and the lineage operation."""
+    with open(os.path.join(child, "flow.ndjson"), "rb") as handle:
+        start = json.loads(handle.readline())
+    assert start["schema"] == "start", start
+    body = start["body"]["inline"]
+    assert body["run"] == run_id and body["parent"] == "parent" and body["lineage"] == run_id, body
+
+
 def assert_completed_lineage(root):
     parent = os.path.join(root, "parent")
     result = run(["machine", "parent", "structured", "--scripted"], parent)
@@ -47,6 +56,7 @@ def assert_completed_lineage(root):
         assert len([event for event in observed if event["type"] == "occurrence.reused"]) == reused
         manifest = json.load(open(os.path.join(child, "manifest.json")))["run"]
         assert manifest["parentRunId"] == "parent" and manifest["lineage"] == operation
+        assert_child_start(child, operation)
         assert digest_tree(parent) == immutable
     replacement = os.path.join(root, "replacement.json")
     with open(replacement, "w") as handle:
