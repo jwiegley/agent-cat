@@ -21,6 +21,7 @@ the tests, the root `README.md`, and the Texinfo manual in
 | [workflow-manager-implementation-plan.md](workflow-manager-implementation-plan.md) | The implementation plan for the approved manager design, with dependency-ordered work packages, source boundaries, acceptance scenarios, migration stages, and release gates. |
 | [workflow-manager-storage-amendment.md](workflow-manager-storage-amendment.md) | The operator's 2026-09-12 withdrawal of the unrun SQLite directory-replacement confinement experiment and guarantee, with the retained storage requirements and acceptance limits. |
 | [actor-flow-amendment.md](actor-flow-amendment.md) | The operator's 2026-09-26 amendment that narrows the exclusion of a message broker to permit the in-process run and manager logs, with the six behavioral differences and the placement of increments 1 to 3. |
+| [actor-flow-route-threat-model.md](actor-flow-route-threat-model.md) | The 2026-09-30 threat model and contract that begin actor-flow increment 2: the additive `/v1` route resources, their cursor, projection, route-class authorization and bounded reader, and the open decisions that wait for the operator's review. |
 | `pal-subsumption/` | The plan, the routing design, the confer workflow design, and the parity matrix for workflow-native parity with the PAL MCP server, together with a live routing log. |
 | `pal-vs-agent-cat.md` | The analysis on which the PAL-parity track rests. |
 | `ai-config-workflows/pal-note.md` | The coordinator note for the architecture phase of that track. |

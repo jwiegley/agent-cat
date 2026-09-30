@@ -1442,6 +1442,32 @@ Owner 2026-08-12, verbatim: 'I need theorems in the mathematical space of ⟦har
 ]
 #+end_src
 
+* TODO [#C] Fix the B4 route threat model fess findings
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-55qg
+:LABELS:   ["actor-flow","workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-30 Wed 00:45]
+:MODIFIED: [2026-09-30 Wed 00:45]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings from fess b1-B4-r1
+(/Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/fess/b1-B4-r1.md)
+on subtask B4, the route threat model doc/research/actor-flow-route-threat-model.md. Fix them in the record before the operator reviews it, or in the increment 2 implementation.
+
+1. (medium) flowRouteMatches reuse. The record evaluates the route predicate on the projection (workflow:<public run id>, local), yet says flowRouteMatches is reused unchanged. flowRouteMatches has type FlowRoute -> Record -> Bool and names actors with actorName (runtime/src/Agentic/Runtime/Flow.hs:1716-1745), which gives native names. State that a projection matcher reuses the parseFlowRoute grammar, or that flowRouteMatches is generalized, and remove "unchanged" in section 9.
+2. (medium) eventParameter divergence. The route resource allows no cursor (read from the floor) and adds a route key. eventParameter refuses both (manager/src/Agentic/Manager/Application.hs:342-345). State both divergences, and say that a new parameter function keeps only the both-supplied refusal and the 149-byte cursor character rules.
+3. (low) The alias of an absent run log (no device or inode) is not defined, nor what happens to earlier cursors when the file is created.
+4. (low) "The fields that it hashes are never served" is false: publicStreamId is the served /v1/events cursor prefix and run:<public run id> is public. Say that only the private inputs are never served.
+5. (low) "A JSON batch always serves at least one record when one remains" conflicts with the 64-record or one-window stop. Say that a batch can be empty with hasMore true.
+6. (low) The predicate field managerRun matches about.run (the public run identifier) only by implication. State the mapping.
+7. (low, verification) make -C doc check does not read doc/research. Keep the prose check script in evidence, and confirm the SSE id-only block behavior against Client.hs and the TUI SSE parser during implementation.
+
 * DONE [#B] Coarsen WEq: key-renaming invariance, so the Workflow quotient is a category
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -4122,7 +4148,7 @@ Deliberately not a constructor; castGrade covers =. The <= case is a structural 
 :LABELS:   ["actor-flow","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-26 Sat 23:41]
-:MODIFIED: [2026-09-26 Sat 23:41]
+:MODIFIED: [2026-09-30 Wed 00:45]
 :CREATED_BY: johnw
 :SOURCE_REPO: .
 :ORIGINAL_SIZE: 0
@@ -4142,6 +4168,20 @@ Actor-flow increment 2, service subscription (4 to 6 engineering days, inside WM
     "created_by": "johnw",
     "metadata": "{}",
     "thread_id": ""
+  }
+]
+#+end_src
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 376,
+    "issue_id": "acat-en4g",
+    "author": "johnw",
+    "text": "Subtask B4 (Phase B part 1): wrote the threat model and route resource contract doc/research/actor-flow-route-threat-model.md (dated 2026-09-30, against 452272bf) and its doc/research/README.md index row. It decides the two additive paths GET /v1/routes and GET /v1/runs/{id}/routes, the cursor alias and every 410 rule, the per-schema projection and visibility tables, route-class authorization, and a bounded positioned reader, with no Capabilities key and no SQLite write. make -C doc check passed (it does not read doc/research). Evidence: resume-20260923/B/B4/impl-r1. Fess b1-B4-r1 non-blocking, findings filed as acat-55qg. All route serving waits for the operator's review of the record. Not closed.",
+    "created_at": "2026-09-30T07:45:05Z"
   }
 ]
 #+end_src
