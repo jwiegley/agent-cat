@@ -1480,15 +1480,17 @@ Two small residues of acat-192/acat-9kn: prune the deriving clauses if nothing w
 ]
 #+end_src
 
-* TODO [#B] Actor flow increment 1b: manager log with users and consent in the flow
+* DONE [#B] Actor flow increment 1b: manager log with users and consent in the flow
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-5m60
 :LABELS:   ["actor-flow","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-26 Sat 23:41]
-:MODIFIED: [2026-09-29 Tue 22:17]
+:MODIFIED: [2026-09-29 Tue 22:59]
 :CREATED_BY: johnw
+:FINISHED: [2026-09-29 Tue 22:59]
+:CLOSE_REASON: Increment 1 gate passed (F16)
 :SOURCE_REPO: .
 :ORIGINAL_SIZE: 0
 :END:
@@ -1563,6 +1565,13 @@ Actor-flow increment 1, delta 1b (at most 8 engineering days). Add the manager l
     "author": "johnw",
     "text": "Subtask F15 of delta 1b: journey flow assertions and the approve-fault control. In manager/test/service_http.py, the mode tui-journey now runs agentic-run flow on the manager flow directory and the journey run store after the TUI session and after the manager process exits. The verb must exit 0 with verified true and no problems. Each fact then has its own FLOW-ASSERT message: the journey credential and client send every command and receive every receipt, the enqueue command and its receipt, one review joined to the preparation, the approve command with its five selectors joined to the review, one start relay delivered as run-log start 0, the person question, the answer command with JSON false, a relayed control with its acknowledgement for the answer and retry commands, the run-log answer that names the manager and the answer command, the terminal record with no ask after it, one verified consent entry, and a shutdown notice for each lifetime. The fixture prints the manager log size and the run-log storage ratio, which must be at most 2.5. The new control mode tui-flow-approve-fault renames the manager log just before the TUI presses y. The manager refuses the approval with 503 storage-unavailable, the request stays in review, no approve receipt is accepted, the renamed log holds no approve command and no relay, and no run store exists. It fails with \"FLOW-FAULT the approve append failed and the manager refused the approval with storage-unavailable\". The journey steps are unchanged, and the change adds no production hook and no environment variable. manager/STORAGE.md and doc/workflow-manager-handoff.md describe the checks. Evidence scope: F15-build (-Werror), F15-journey (JOURNEY-ONCE at N8, rerun by the auditor on the final file: 26 manager records, 22186 bytes, ratio 1.408), F15-approve-fault (non-zero with its literal message) and F15-phase-a-controls (tui-journey-broken-answer and tui-consent-control at N1, each failed with its message) each passed under timeout. Fess: not blocking. Its low findings are filed as acat-j11d, and the STORAGE.md sentence about the shutdown notice and the handoff were corrected on landing. Limitations: the N1 journey with the flow assertions did not run, the fault control reads the ledger through HTTP and not from coordination.sqlite3, it depends on the format of the private fault line, append latency is not measured, and source-boundaries, ALLBUILD, the tui.sh gate and the doc check were not run.\n",
     "created_at": "2026-09-30T05:17:27Z"
+  },
+  {
+    "id": 370,
+    "issue_id": "acat-5m60",
+    "author": "johnw",
+    "text": "Subtask F16: the increment 1 gate and the handoff current state. The gate ran once, in order, on the tree of 9da234ec with two repairs: cli/test/PolicyProbe.hs now renders the list of ReadFlow paths (F14 changed ReadFlow to take a list, which broke the -ftui-tests build of policy-probe), and doc/agent-cat.texi names the constructor ReadFlow in the Command entry (make -C doc check-haskell). doc/workflow-manager-handoff.md has a new current-state section, Actor-flow increment 1 of 2026-09-29.\n\nEvidence scope (F/F16/impl-r1, each with .log and .exit): make -C doc check, ALLBUILD with -Werror and -ftui-tests, openapi.yaml and Broker.hs unchanged since 4496dbe4 with DataBroker at exactly nine fields, manager/ci/contract.sh, tui-model-test at N1 and N8, source-boundaries, runtime-contract-test at N8, engine-api-test, the progress, lineage, control, person-control and flow probes, the manager command (flow and main), approval flow-review, admission flow-relay and main modes, worker, store, ingestion, draft and artifact checks at N8, the tui-journey pair at N1 then N8 with every FLOW-ASSERT and a verified consent chain (review 7, approve 8, receipt 9, start relay 10, run start 0; 26 manager records, 22193 bytes; run-log ratio 1.407 and 1.408), the three controls with their literal failures (broken-answer, consent, approve-fault), and last, without -ftui-tests, check-haskell, acp.sh (23 scenarios), routing-config.sh, examples.sh, deck.sh and tui.sh. Each passed.\n\nNot run: the ext-pi checks (the Pi fork has no dist directories), and, under the operator direction of 2026-09-29, policies.sh, approval.sh, controls.sh, admission_audit.py, bisim, Lean, mutants, stability samples, -fforce-recomp and N1 runs of checks other than the journey. Design gate 6, the gate 5 ext-pi owner check, the gate 11 broker-api-default revalidation and the gate 9 append latency have no evidence. Fess: not blocking. Its two medium findings on the handoff were corrected on landing, and all findings are filed as acat-62j0. Increment 1 is accepted as a whole with this subtask. Accepted WM state is unchanged.",
+    "created_at": "2026-09-30T05:59:17Z"
   }
 ]
 #+end_src
@@ -1626,6 +1635,32 @@ Follow-up from the F9 fess audit of the manager log writer, the manager codecs a
 4. (low) runtime/src/Agentic/Runtime/Flow.hs:300 and :310: the open-time limit check compares only the log file size with the ceiling, but stateBytes also counts claim bytes. A log whose log plus claim bytes pass the ceiling still opens and then fails every append with a quota refusal. Fix: compare log bytes plus the distinct claim bytes at open, or document the difference.
 
 5. (low) cli/test/PolicyProbe.hs:555: the ReadFlow case repairs an F7 leftover that ALLBUILD needs under -Werror. It is out of F9 scope. Disposition: recorded in the F9 commit message; no further change needed unless the operator wants the repair split.
+
+* TODO [#C] Resolve F16 fess findings in the increment 1 gate
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-62j0
+:LABELS:   ["actor-flow","workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-29 Tue 22:59]
+:MODIFIED: [2026-09-29 Tue 22:59]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Follow-up from the F16 fess audit of the increment 1 gate and the handoff current state (actor-flow increment 1). None of these findings blocks. Source: fess audit /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/fess/flow-F16-r1.md.
+
+1. (medium, corrected on landing) doc/workflow-manager-handoff.md: item 7 of the gate list said that runtime-contract-test holds the gate 10 bypass tests. The structural bypass check is carriage_problems in test/flow_probe.py. The handoff now names it under item 12.
+
+2. (medium) Design gates without evidence: gate 6 (a /v1 fail-over and a redirect from TUI local mode, each shown in the run log; test/control_probe.py checks these from events only, and the flow_probe fail-over uses the controlled machine mode), the gate 5 check that an ext-pi launch shows the owner that ext-pi declared, and the gate 11 revalidation of broker-api-default (678326b). The handoff now lists them under "Checks not run". Fix: add the run-log assertions for gate 6, run the gate 5 owner check and the broker-api-default revalidation, and add a mapping from design gates 1-11 to evidence.
+
+3. (low) The ext-pi regression of gate 11 has no passing evidence. The Pi fork at ~/src/fork/pi has no dist directories. Fix: rerun npm run check, npm test and npm run test:integration once the fork is built.
+
+4. (low) The append latency of each synchronized manager append (gate 9) is not measured. Also tracked in acat-j11d item 5. Fix: measure and report it in the journey.
+
+5. (low) cli/test/PolicyProbe.hs:555: the ReadFlow rendering repair compiles, but no expectation asserts a "flow ..." rendering, and policy-probe did not run because policies.sh is forbidden. Fix: add a policy-probe expectation for "agentic-run flow A B" when policies.sh is next allowed.
 
 * TODO [#C] Resolve F13 fess findings in the command notices and endings
 :PROPERTIES:

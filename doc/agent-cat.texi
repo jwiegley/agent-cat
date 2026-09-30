@@ -2466,8 +2466,8 @@ in @file{runtime/BROKER.md}.
 Parsed command with constructors @code{Tui}, @code{TuiService}, @code{Usage},
 @code{Help}, @code{List},
 @code{Plan}, @code{Cost}, @code{Run}, @code{RoutingInspection},
-@code{MigrateRouting}, @code{Machine}, @code{LineageCheck}, and
-@code{MachineLineage}.  This type is exported for policy tests and front ends
+@code{MigrateRouting}, @code{Machine}, @code{LineageCheck},
+@code{MachineLineage}, and @code{ReadFlow}.  This type is exported for policy tests and front ends
 that need to inspect a parse.
 
 @c COVER API Agentic.Cli.parseCommand support

@@ -2,6 +2,203 @@
 
 <!-- handoff-id: wm023-20260923; status: paused-unaccepted-wip; accepted: WM-001..WM-022,G0,G1; resume-branch: workflow-manager-checkpoint-20260923; fess: every-subtask -->
 
+## Actor-flow increment 1 of 2026-09-29
+
+The operator accepted Phase A on 2026-09-29 and kept the file-slot and
+reader-capacity wait of commit `fe7a2f20`. The resume workflow then landed
+actor-flow increment 1 (`acat-e6cp`, then `acat-5m60`) under the operator
+direction for fast validation, as subtasks F0 to F16 after `4496dbe4`. This
+section describes the current state. Where any section below differs, this
+section supersedes it, and the sections below remain as chronology. The
+contract is `doc/research/actor-flow-amendment.md`, `runtime/BROKER.md` and
+the section "Manager log" of `manager/STORAGE.md`. The evidence of each
+subtask is under `F/<subtask>/impl-r1` or `impl-r2` in the resume directory.
+
+| Subtask | Commit | Result |
+| --- | --- | --- |
+| F0 | `6e63a8b1` | The store, artifact and draft checks pass after the file-slot wait, and no check name claims fail-fast admission. |
+| F1 | `b5da8c1c` | The golden `hello-events.ndjson`, the version-1 engine codecs, `EnginePermission` with its ACP report, and the amendment record. |
+| F2 | `050f7f46` | The strict `Request` codec and the exact `El` codec beside `questionJson`. |
+| F3 | `e05aeab4` | `Agentic.Runtime.Flow`: the record, the seventeen schemas, the strict line codec, the body codecs and the writer. |
+| F4 | `7fa6b6dd` | The run log `flow.ndjson` at `runMachineWith`, with the `start` record and one `event` record for each line of `events.ndjson`. |
+| F5 | `6abc9262` | `flowBroker` carries the scheduler operations through the run log, and the receiver acts on the decoded value. |
+| F6 | `e573b68e` | The direct `inProcessBroker` paths use the run broker, and person answers name their sender. |
+| F7 | `02624d0e` | The run-log reader and the verb `agentic-run flow`. |
+| F8 | `585b7e63` | The reference trace, the storage ratio, the ACP permission scenario and the uncertainty of a killed run. |
+| F9 | `23309b63` | The manager-log writer with its lifetime and shutdown notices. |
+| F10 | `99af03b1` | Command, receipt and failure records in the admission transaction. |
+| F11 | `782cea77` | Review records and local administration records. |
+| F12 | `25d648af` | Start, discard and control relays. |
+| F13 | `17d4c08e` | Command notices, review endings and request endings. |
+| F14 | `617deabd` | The manager-log reader, its joins with run logs, and the consent check. |
+| F15 | `9da234ec` | The `FLOW-ASSERT` checks of `tui-journey` and the control `tui-flow-approve-fault`. |
+| F16 | Integrator commit after `9da234ec` | The gate of increment 1, a repair of `cli/test/PolicyProbe.hs`, the constructor `ReadFlow` in the manual, and this section. |
+
+### Delivered behavior
+
+- A machine run with a run store writes the run log `flow.ndjson` in that
+  store. The first record is `start`. Each line of `events.ndjson` has one
+  `event` record, written before the line, and `events.ndjson` keeps its
+  bytes. Questions, engine starts, turns, engine results, answers, controls,
+  steering and permission reports are records of the run log.
+- `flowBroker` appends each record before delivery, and the receiver acts on
+  the value that it decodes from the appended bytes. `DataBroker` keeps its
+  nine operations. A failed run-log append fails the run through the
+  observer-failure path.
+- A serving manager writes one manager log for each Store stream identity,
+  `flow/<stream>.ndjson` in its private root, outside SQLite. It records each
+  command after the Store admits it and before the commit, synchronized to
+  disk, and each receipt, review, start, discard and control relay, command
+  notice, review ending, request ending, lifetime, shutdown and local
+  administration change. A command whose record cannot be written is refused
+  with `storage-unavailable`, except a cancel, which proceeds and is named in
+  a later gap notice. At its ceiling the log refuses an ordinary command with
+  `storage-quota` and keeps the cancel reserve.
+- `agentic-run flow PATH... [--follow] [--route PREDICATE] [--from CURSOR]`
+  reads run logs and manager logs as the owning account. It verifies claim
+  checks, joins each `event` record to its line of `events.ndjson`, joins the
+  manager log to the run logs, reports the states of section 3.6 of the design
+  record, and verifies the consent chain of each start relay. It exits 1 on a
+  failed verification and 2 when the flow is uncertain.
+- Increment 1 makes no `/v1` change. `doc/api/openapi.yaml` is unchanged since
+  `4496dbe4`. It adds no service subscription, no live re-route and no
+  enforcement at any writer.
+
+### Gate of increment 1
+
+Subtask F16 ran the gate once on the tree of `9da234ec` with its repair, in
+this order. Each check has a `.log` and an `.exit` file under
+`F/F16/impl-r1`, and failed first runs are under `F/F16/impl-r1/failed-r0`.
+
+1. `make -C doc check` passed (`01-doc-check`).
+2. The incremental Werror build of all targets with `-ftui-tests` passed
+   (`02-allbuild`). Its first run failed, because `cli/test/PolicyProbe.hs`
+   still matched the single path of `ReadFlow` that F14 had changed to a
+   list of paths. The repair renders the list of operands.
+3. `doc/api/openapi.yaml` and `runtime/src/Agentic/Runtime/Broker.hs` are
+   unchanged since `4496dbe4`, and `DataBroker` has exactly nine fields
+   (`03-api-broker`). The first run of this check counted one field because
+   of a defect in the counting expression of the check.
+4. `bash manager/ci/contract.sh` passed (`04-contract`).
+5. `tui-model-test` passed at N1 and N8 (`05-model-N1`, `06-model-N8`).
+6. The source-boundary check passed (`07-source-boundaries`).
+7. `runtime-contract-test` passed at N8 (`08-runtime-contract`). It holds
+   the codec round trips, the carriage tests and the reader tests.
+8. `engine-api-test` passed (`09-engine-api`).
+9. `test/progress_probe.py` passed with the golden comparison and the
+   reference trace of section 3.5 (`10-progress-probe`). The storage ratios
+   were 0.959 to 1.577.
+10. `test/lineage_probe.py` passed at N8 (`11-lineage-probe`).
+11. `test/control_probe.py` and `test/person_control_probe.py` passed at N8
+    (`12-control-probes`).
+12. `test/flow_probe.py` passed (`13-flow-probe`): attribution, the three
+    retry forms, carriage, and the uncertainty of a killed run. Its carriage
+    check is the structural bypass check of gate 10.
+13. `manager-command-check flow` passed at N8 (`14-command-flow`).
+14. `manager-command-check` with `command_contract.py` and
+    `credential_cli.py` passed at N8 (`15-command-check-N8`).
+15. `manager-approval-check flow-review` passed at N8
+    (`16-approval-flow-review`).
+16. `manager-admission-check flow-relay` passed at N8
+    (`17-admission-flow-relay`).
+17. `manager-admission-check` passed its restart, shutdown and main modes at
+    N8 (`18-admission-check-N8`).
+18. `manager-worker-check` with `worker_evidence.py` passed at N8
+    (`19-worker-check-N8`).
+19. `manager-store-check` passed its quota, restart, main, admission-data and
+    terminal-admission modes at N8 (`20-store-check-N8`).
+20. `manager-approval-check ingestion` passed at N8 (`21-ingestion-N8`).
+21. `manager-draft-check` with `draft_contract.py` passed at N8
+    (`22-drafts-N8`).
+22. `manager-artifact-check`, `manager-history-check` and
+    `artifact_contract.py` passed at N8 (`23-artifacts-N8`).
+23. `tui-journey` passed at N1 and then N8 with every `FLOW-ASSERT` and a
+    verified consent chain (`24-journey-pair`, fixture root
+    `/Users/johnw/Products/k.M0a5ItPm/tmp/af-f16-journey.1DVlMYC1`). In both
+    runs the chain was review 7, approve 8, receipt 9, start relay 10 and run
+    start 0. Each manager log held 26 records in 22193 bytes, and the run-log
+    storage ratio was 1.407 and 1.408.
+24. The control `tui-journey-broken-answer` failed with "JOURNEY-ASSERT typed
+    answer is not JSON false" (`25-journey-control`).
+25. The control `tui-consent-control` failed with "detail-view key approved a
+    review" (`26-consent-control`).
+26. The control `tui-flow-approve-fault` failed with "FLOW-FAULT the approve
+    append failed and the manager refused the approval with
+    storage-unavailable" (`27-approve-fault`).
+27. The ext-pi checks did not run to a result (`28-ext-pi`,
+    `28b-ext-pi-vitest-integration`), as the next list states.
+28. `make -C doc check-haskell` passed (`29-doc-check-haskell`). Its first
+    run failed with "manual does not mention compiler-exported child:
+    Agentic.Cli.Command.ReadFlow". The repair names the constructor
+    `ReadFlow` in the manual entry of `Command`.
+29. `bash engine/acp/ci/acp.sh` passed its 23 scenarios, including the
+    permission record (`30-acp`).
+30. `bash cli/ci/routing-config.sh` passed (`31-routing-config`).
+31. `bash cli/ci/examples.sh` passed its 10 programs (`32-examples`).
+32. `bash engine/agent-deck/ci/deck.sh` passed its 10 scenarios (`33-deck`).
+33. `bash tui/ci/tui.sh` passed last (`34-tui-ci`). It covers TUI local
+    mode.
+34. `make -C doc check` passed again after the manual repair
+    (`35-doc-check-final`).
+
+### Checks not run
+
+- `cli/ci/policies.sh`, `manager/ci/approval.sh`, `manager/ci/controls.sh`,
+  the `admission_audit.py` mutation audits, mutant suites, stability samples
+  of more than a few starts and `-fforce-recomp` builds. The operator
+  direction of 2026-09-29 removes them from routine validation. The gate ran
+  the check binaries of the admission, command, store, ingestion, draft and
+  artifact scripts directly at N8, without their audit steps.
+- `bisim/ci/tier0.sh` and every Lean or oracle check. The operator direction
+  forbids them for this run.
+- The N1 runs of the runtime and manager checks that gate 11 of the design
+  record names. The operator direction drops repeated N1 and N8 runs of
+  checks other than the journey, so each ran once at N8.
+- `manager/ci/supervision.sh` and `manager/ci/vertical.sh`. Gate 11 does not
+  name them, and Phase A did not run them.
+- `engine/acp/ci/route-live.sh`, which needs a paid provider.
+- The ext-pi checks `npm run check`, `npm test` and
+  `npm run test:integration`. The Pi fork at `~/src/fork/pi` that
+  `ext-pi/node_modules` links has no built `dist` directories, so TypeScript,
+  vitest and the integration runner cannot resolve `@earendil-works/pi-tui`,
+  `@earendil-works/pi-coding-agent` and `@earendil-works/pi-client`. A build
+  of the fork changes files outside the worktree, which this run may not do.
+  Increment 1 changes nothing under `ext-pi` and adds only exports to
+  `Agentic.Runtime.Protocol` and `Agentic.Runtime.Frontend.Protocol`.
+- The added latency of each synchronized manager append (gate 9) is not
+  measured. The growth of the manager log is measured above.
+- Gate 6 of the design record, a `/v1` fail-over and a redirect from TUI
+  local mode, each shown in the run log. `test/control_probe.py` checks these
+  from events only, and the fail-over of `test/flow_probe.py` uses the
+  controlled machine mode.
+- The part of gate 5 that shows the owner that an ext-pi launch declares. It
+  depends on the ext-pi checks above.
+- The revalidation of `broker-api-default` (`678326b`) that gate 11 names.
+
+### Open tracker items
+
+- `acat-5m60` and `acat-e6cp` are closed.
+- The F16 fess findings, including the gate 6, gate 5 and gate 11 checks
+  that did not run, are tracked in `acat-62j0`.
+- The fess findings of each subtask stay open: `acat-c13k` (F0), `acat-thc9`
+  (F1), `acat-h9oi` (F2), `acat-mkh7` (F3), `acat-14ht` (F4), `acat-actk`
+  (F5), `acat-hxm7` (F6), `acat-amd8` (F7), `acat-iugd` (F8), `acat-5wa8`
+  (F9), `acat-b1yt` (F10), `acat-o7ax` (F11), `acat-4pn3` (F12), `acat-64v1`
+  (F13), `acat-ow77` (F14) and `acat-j11d` (F15).
+- `acat-en4g`, increment 2, service route subscription, lands inside WM-025
+  and WM-026. `acat-c18n`, increment 3, live re-route and asks answered by
+  people, lands between WM-027 and WM-028.
+- The open findings of the Phase A section below are unchanged, including
+  `acat-response-ingestion-budget-zaoi` and `acat-tls-name-forms-6gbo`.
+
+### Next action
+
+1. Phase B resumes WM-025 to WM-027 under the fast-validation rules, with
+   increment 2 inside WM-025 and WM-026.
+
+Accepted state is unchanged at WM-001 to WM-022 and G0 and G1. Increment 1
+closes no package and no gate.
+
 ## Phase A TUI service journey of 2026-09-29
 
 The resume workflow continued after the stopping point below under the
@@ -9,10 +206,10 @@ operator direction of 2026-09-29 for fast validation. It committed five
 subtasks after `43585dd3`, ran the end-of-phase review of Phase A, and
 stopped without a stop condition after its last stage. The TUI now
 completes one uninterrupted service journey through a running manager. The
-work branch head is `b944407eb1142cbfa69a8ef76edc6e76e0cef739`. This
-section describes the current state. Where any section below
-differs, this section supersedes it, and the sections below remain as
-chronology.
+work branch head was `b944407eb1142cbfa69a8ef76edc6e76e0cef739`. The
+section "Actor-flow increment 1 of 2026-09-29" above supersedes this
+section where they differ. Where any section below differs, this section
+supersedes it, and the sections below remain as chronology.
 
 | Subtask | Commit | Result |
 | --- | --- | --- |
