@@ -1487,7 +1487,7 @@ Two small residues of acat-192/acat-9kn: prune the deriving clauses if nothing w
 :LABELS:   ["actor-flow","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-26 Sat 23:41]
-:MODIFIED: [2026-09-29 Tue 22:01]
+:MODIFIED: [2026-09-29 Tue 22:17]
 :CREATED_BY: johnw
 :SOURCE_REPO: .
 :ORIGINAL_SIZE: 0
@@ -1556,6 +1556,13 @@ Actor-flow increment 1, delta 1b (at most 8 engineering days). Add the manager l
     "author": "johnw",
     "text": "Subtask F14 of delta 1b: manager-log reader joins and consent verification. readManagerLog in Agentic.Manager.Flow reads a manager log from its flow directory as a private root, decodes each body with the manager codec of its schema, and refuses a record whose schema belongs to the other log. joinFlows joins a review to its approve and discard commands by preparation resource and to its review endings, a start relay to the run-log start by native run, a control relay to the run-log control by native run and command id, a run-log control to its acknowledgement event, a command to its receipt and later command notices, and a run-log answer to the manager answer command by command id. The added states are undecided command, unresolved delivery, pending review and lost lifetimes, and the summary carries an authority field that names the ledger. The consent check requires, for each start relay in order, the review, an approve command from a Credential with the same selectors, a receipt that is not refused or a gap notice naming it, and the relay. It also checks the review sha256 against the binding reviewSha256, the binding sha256 against the digest named by the approve command, the native run, the absence of credentials in the binding arguments, and the run-log start. agentic-run flow accepts several PATH operands and exits non-zero on any failed verification. runtime/BROKER.md, manager/STORAGE.md and the verb entry in doc/agent-cat.texi describe the change. Evidence scope: F14-build (-Werror), F14-runtime-contract at N8, F14-flow-unit (manager-command-check flow, the join and consent unit tests with eight consent-failure variants and a tamper case), F14-doc-check, F14-journey (tui-journey at N8, then agentic-run flow on the manager log and run store exits 0 with consent verified) and F14-consent-negative (one changed review byte makes the verb exit non-zero) each passed under timeout. Fess: not blocking. Its two medium and four low findings are filed as acat-ow77. Limitations: the verb does not find run stores on its own, --follow works only on a single run log, an unmatched run-log answer is not a failure, the new tests were not shown to fail first, and source-boundaries, ALLBUILD and the tui.sh gate were not run.\n",
     "created_at": "2026-09-30T05:01:31Z"
+  },
+  {
+    "id": 369,
+    "issue_id": "acat-5m60",
+    "author": "johnw",
+    "text": "Subtask F15 of delta 1b: journey flow assertions and the approve-fault control. In manager/test/service_http.py, the mode tui-journey now runs agentic-run flow on the manager flow directory and the journey run store after the TUI session and after the manager process exits. The verb must exit 0 with verified true and no problems. Each fact then has its own FLOW-ASSERT message: the journey credential and client send every command and receive every receipt, the enqueue command and its receipt, one review joined to the preparation, the approve command with its five selectors joined to the review, one start relay delivered as run-log start 0, the person question, the answer command with JSON false, a relayed control with its acknowledgement for the answer and retry commands, the run-log answer that names the manager and the answer command, the terminal record with no ask after it, one verified consent entry, and a shutdown notice for each lifetime. The fixture prints the manager log size and the run-log storage ratio, which must be at most 2.5. The new control mode tui-flow-approve-fault renames the manager log just before the TUI presses y. The manager refuses the approval with 503 storage-unavailable, the request stays in review, no approve receipt is accepted, the renamed log holds no approve command and no relay, and no run store exists. It fails with \"FLOW-FAULT the approve append failed and the manager refused the approval with storage-unavailable\". The journey steps are unchanged, and the change adds no production hook and no environment variable. manager/STORAGE.md and doc/workflow-manager-handoff.md describe the checks. Evidence scope: F15-build (-Werror), F15-journey (JOURNEY-ONCE at N8, rerun by the auditor on the final file: 26 manager records, 22186 bytes, ratio 1.408), F15-approve-fault (non-zero with its literal message) and F15-phase-a-controls (tui-journey-broken-answer and tui-consent-control at N1, each failed with its message) each passed under timeout. Fess: not blocking. Its low findings are filed as acat-j11d, and the STORAGE.md sentence about the shutdown notice and the handoff were corrected on landing. Limitations: the N1 journey with the flow assertions did not run, the fault control reads the ledger through HTTP and not from coordination.sqlite3, it depends on the format of the private fault line, append latency is not measured, and source-boundaries, ALLBUILD, the tui.sh gate and the doc check were not run.\n",
+    "created_at": "2026-09-30T05:17:27Z"
   }
 ]
 #+end_src
@@ -6370,6 +6377,34 @@ Source: fess audit /Users/johnw/Products/agent-cat-workflow-manager/implementati
 :END:
 
 Probe P7: importing Agentic installs (1:Bool)=false, (0:Prop)=False, NatCast Prop package-globally — and Bool is the gateT type, so the collision surface is real. Race := Bool newtype; pin Prop behind a synonym or scoped instance. Fold Keys.Width + Race + Frag.join into ONE synonym over [SemilatticeSup a][OrderBot a] (confirmed absent from Mathlib; upstreamable).
+
+* TODO [#C] Resolve F15 fess findings in the journey flow assertions
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-j11d
+:LABELS:   ["actor-flow","workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-29 Tue 22:17]
+:MODIFIED: [2026-09-29 Tue 22:17]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Follow-up from the F15 fess audit of the journey flow assertions and the approve-fault control (actor-flow delta 1b). None of these findings blocks. Source: fess audit /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/fess/flow-F15-r1.md.
+
+1. (low) manager/test/service_http.py:606-610: the loop that joins each run-log control to a command of the principal asserts only facts that earlier code established, so it can never fail. Fix: remove it, or check that each run-log control's about.command matches exactly one principal command in the manager log, found independently of the relay selection.
+
+2. (low) manager/test/service_http.py:674-676: the fault control's ledger check all(state == 'refused') ran over an empty list (0 approve receipts), and coordination.sqlite3 was never queried. Fix: assert the expected count explicitly, or read the command table after shutdown and assert that no approve command row exists.
+
+3. (low) manager/test/service_http.py:693: approve_fault_after_shutdown discards the exit status and the problems from read_flow on the renamed log. Fix: assert that the problems name only the missing shutdown notice.
+
+4. (low) manager/test/service_http.py:909: the fault control breaks out of the loop before the check that client_state does not exist. Fix: assert it before the break.
+
+5. (low) Append latency of each synchronized append (gate 9, actor-flow-architecture-v2.md:302) is not measured or reported. Only the manager log size and the run-log ratio are printed. Fix: measure and print the append latency in the journey.
+
+The STORAGE.md sentence that claimed the manager log ends with the shutdown notice, and the handoff description of tui-journey, were corrected when F15 landed.
 
 * DONE [#C] Verdict.render/objections defined three times across strata — close the library gap in Question.lean
 :PROPERTIES:

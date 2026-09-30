@@ -415,6 +415,36 @@ reader verifies, and the `agentic-run flow` verb prints the result. The
 reader writes nothing, and the Store ledger remains the authority on
 commands, reviews and requests.
 
+The service fixture `manager/test/service_http.py` checks the manager log of
+the TUI service journey. In the mode `tui-journey`, after the TUI session and
+after the manager process exits, it runs `agentic-run flow` on the flow
+directory and on the run store of the journey. The verb must verify both logs
+and the consent of the start relay. The fixture then asserts each fact with
+its own `FLOW-ASSERT` message: the journey credential and client send every
+command, and the manager log holds the enqueue command and its receipt, the
+review, the approve command with its five review selectors and the start
+relay. The run log holds the person question. The manager log holds the
+answer command with the JSON value `false`, the retry command, and one
+relayed control for each of the two commands. Each relayed control arrives as
+a run-log control from the manager with its acknowledgement event. The run-log
+answer names the manager and the answer command, and the reader joins it to
+that command. The run log has its terminal record, and no ask follows it. Each
+lifetime in the manager log has its shutdown notice. The fixture prints the size of the
+manager log and the storage ratio of the run log, which must be at most 2.5.
+
+The control mode `tui-flow-approve-fault` follows the journey until the
+approval. Just before the TUI sends `y`, the fixture renames the manager log
+into another private directory, so the identity check of the writer fails the
+append of the approve command. The manager must refuse the approval with
+`storage-unavailable`, and the TUI must show that refusal. The control then
+checks that the manager recorded that response in its private fault record,
+that the request stays in review, that the ledger holds no accepted
+approval, that the renamed log holds no approve command and no relay, that
+the writer creates no new log, and that no run store exists. It fails with the
+message "FLOW-FAULT the approve append failed and the manager refused the
+approval with storage-unavailable". The control adds no production hook and no
+environment variable.
+
 ## Worker cleanup ownership
 
 Worker lifetimes use a separate bounded registration, not the file-operation

@@ -18,7 +18,8 @@ import time
 source, work, runner = map(Path, sys.argv[1:4])
 native = sys.argv[4]
 JOURNEYS = ("tui-journey", "tui-journey-broken-answer")
-tui_approval = len(sys.argv) == 6 and sys.argv[5] in ("tui-approval", "tui-consent-control") + JOURNEYS
+APPROVE_FAULT = "tui-flow-approve-fault"
+tui_approval = len(sys.argv) == 6 and sys.argv[5] in ("tui-approval", "tui-consent-control", APPROVE_FAULT) + JOURNEYS
 # The journey is the gate of the Phase A service journey in one uninterrupted
 # TUI session. It continues the approval steps through the live monitor and
 # the decision heads that the manager presents. It answers the question head
@@ -27,7 +28,30 @@ tui_approval = len(sys.argv) == 6 and sys.argv[5] in ("tui-approval", "tui-conse
 # result on the screen, saves the verified bytes through the TUI, and
 # detaches. Each verified fact has its own literal JOURNEY-ASSERT message.
 # Deadline messages start with JOURNEY-DEADLINE, so they never match one.
+#
+# After the TUI session and the wait for the manager process, so that the
+# manager log holds its shutdown notice, the journey reads the manager log and
+# the run store of the journey with the flow verb of the TUI_CHECK binary. The
+# verb must verify both logs and the consent of the start relay. Each fact of
+# the manager log and the run log has its own literal FLOW-ASSERT message:
+# the command senders, the enqueue command and its receipt, the review, the
+# approve command with its selectors, the start relay, the person question,
+# the answer command with JSON false, each relayed control and its
+# acknowledgement, the retry command and its control, the terminal record,
+# the joins of the run-log control and answer records to the commands of the
+# principal, and no ask after the terminal record. The journey then prints
+# the manager log size and the run-log storage ratio.
 journey = len(sys.argv) == 6 and sys.argv[5] in JOURNEYS
+# The approve-fault control follows the journey until the approval. Just
+# before the TUI presses y, the harness renames the manager log away, so the
+# identity check of the manager writer fails the append of the approve command.
+# The manager must refuse the approval with storage-unavailable, and the TUI
+# must show that refusal. The control checks that the request stays in review,
+# that the ledger has no accepted approval, and that no manager log holds an
+# approve command or a start relay and no run store exists. It then fails with
+# the literal APPROVE_FAULT_REFUSED message. It adds no production hook.
+approve_fault = len(sys.argv) == 6 and sys.argv[5] == APPROVE_FAULT
+APPROVE_FAULT_REFUSED = "FLOW-FAULT the approve append failed and the manager refused the approval with storage-unavailable"
 # The broken-answer control types true at the question. It must fail with the
 # typed-answer message.
 JOURNEY_ANSWER = b"true" if len(sys.argv) == 6 and sys.argv[5] == "tui-journey-broken-answer" else b"false"
@@ -36,7 +60,7 @@ JOURNEY_ANSWER = b"true" if len(sys.argv) == 6 and sys.argv[5] == "tui-journey-b
 # the detail-view consent message. It shows only that this assertion detects
 # an approval. It does not break an approval guard.
 consent_control = len(sys.argv) == 6 and sys.argv[5] == "tui-consent-control"
-mixed = len(sys.argv) == 6 and sys.argv[5] in ("mixed", "mixed-confirm", "tui-approval", "tui-consent-control") + JOURNEYS
+mixed = len(sys.argv) == 6 and sys.argv[5] in ("mixed", "mixed-confirm", "tui-approval", "tui-consent-control", APPROVE_FAULT) + JOURNEYS
 confirm_uncertain = mixed and sys.argv[5] == "mixed-confirm"
 assert len(sys.argv) == 5 or mixed
 assert not tui_approval or os.environ.get("TUI_CHECK")
@@ -230,6 +254,11 @@ def notice_is(line, number, text):
     return full.startswith(line) and len(line) >= min(len(full), len(f"Approval key {number}: ") + 30)
 
 
+def squeeze(text):
+    """The text without white space and box drawing, so wrapped rows join."""
+    return "".join(char for char in text if not char.isspace() and not "─" <= char <= "╿")
+
+
 def notices(session, start):
     """The notice rows in the PTY output after the byte offset start, in order."""
     # TuiSession keeps the whole output until it reaches this limit.
@@ -412,6 +441,265 @@ def run_mixed(created, workflow, capabilities, authorized):
     print("PASS actual HTTP mixed workflow: Unicode, exact approval, typed false, retry, terminal observation and verified bytes; approval delivery remains distinct", flush=True)
 
 
+def command_receipts(cursor, authorized):
+    """The resource and receipt of each command that a command.changed event
+    after the cursor names, in event order, from read-only reads."""
+    resources = []
+    for _ in range(256):
+        status, batch, raw, _ = fetch("/v1/events?after=" + cursor, authorized | {"Accept": "application/json"})
+        assert status == 200, ("event read", status, batch.get("code"))
+        validate("EventBatch", batch, raw)
+        for event in batch["events"]:
+            if event["event"] == "command.changed" and event["data"]["resource"] not in resources:
+                resources.append(event["data"]["resource"])
+        cursor = batch["cursor"]
+        if not batch["hasMore"]:
+            break
+    else:
+        raise AssertionError("JOURNEY-DEADLINE event pages")
+    receipts = []
+    for resource in resources:
+        status, receipt, raw, _ = fetch(resource, authorized)
+        assert status == 200, (resource, status, receipt.get("code"))
+        validate("CommandReceipt", receipt, raw)
+        receipts.append((resource, receipt))
+    return receipts
+
+
+def read_flow(name, paths):
+    """Run the flow verb of the TUI_CHECK binary on the paths and return its
+    exit status, its records and its summary. The output is kept in work."""
+    completed = subprocess.run([os.environ["TUI_CHECK"], "flow"] + [str(path) for path in paths],
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60)
+    (work / (name + ".ndjson")).write_bytes(completed.stdout)
+    (work / (name + ".stderr")).write_bytes(completed.stderr)
+    lines = [json.loads(line) for line in completed.stdout.splitlines()]
+    assert lines and "summary" in lines[-1], ("the flow verb printed no summary", completed.returncode, completed.stderr[-2000:])
+    return completed.returncode, lines[:-1], lines[-1]["summary"]
+
+
+def journey_flow_assertions(credential, submitted, preparation, approve_command, answer_command, answer_resource,
+                            retry_command, run, question_occurrence):
+    """Read the journey manager log and run store with the flow verb, after the
+    manager process has exited, and assert each fact of section 6.1 gate 1 of
+    the actor-flow design with its own FLOW-ASSERT message."""
+    flow_dir = work / "manager" / "flow"
+    logs = sorted(flow_dir.glob("*.ndjson"))
+    stores = sorted(work.glob("manager/runs/runs/*/runtime"))
+    assert len(logs) == 1 and len(stores) == 1, ("FLOW-ASSERT the journey has other than one manager log and one run store", logs, stores)
+    manager_path, store = str(logs[0]), stores[0]
+    status, records, summary = read_flow("journey-flow", [flow_dir, store])
+    assert status == 0 and summary["verified"] and not summary["problems"], (
+        "FLOW-ASSERT the flow verb did not verify the journey logs", status, summary["problems"])
+    manager = [record for record in records if record["log"] == manager_path]
+    runlog = [record for record in records if record["log"] == str(store)]
+    assert len(manager) + len(runlog) == len(records), "FLOW-ASSERT the flow verb printed a record of another log"
+    at = lambda log, position: {"log": log, "position": position}
+    run_log = next(item for item in summary["logs"] if item["kind"] == "run")
+    report = run_log["report"]
+    native = store.parent.name
+
+    # The senders are the journey credential and client.
+    principal = {"principal": "credential", "credentialId": credential["credentialId"], "client": credential["clientId"]}
+    commands = [record for record in manager if record["schema"] == "command"]
+    receipts = [record for record in manager if record["schema"] == "receipt"]
+    assert commands and all(record["from"] == principal for record in commands), (
+        "FLOW-ASSERT a manager-log command sender is not the journey credential and client", [record["from"] for record in commands])
+    assert all(record["to"] == {"to": principal} for record in receipts), (
+        "FLOW-ASSERT a manager-log receipt is not addressed to the journey credential and client")
+
+    def command(operation, failure):
+        found = [record for record in commands if record["body"]["operation"] == operation]
+        assert len(found) == 1, (failure, operation, len(found))
+        found = found[0]
+        replies = [record for record in receipts if record["replyTo"] == found["position"]]
+        assert len(replies) == 1, (failure, "receipt", len(replies))
+        reply = replies[0]
+        assert reply["body"]["operation"] == operation and reply["body"]["state"] != "refused", (failure, "receipt", reply["body"]["state"])
+        assert reply["body"]["id"] == found["about"]["command"] == reply["about"]["command"], (failure, "receipt identity")
+        return found, reply
+
+    enqueue, enqueue_receipt = command("enqueue", "FLOW-ASSERT the manager log has no enqueue command with its receipt")
+    assert enqueue["body"]["resource"] == submitted["links"]["self"] and enqueue["about"]["request"] == submitted["id"], (
+        "FLOW-ASSERT the manager log has no enqueue command with its receipt", enqueue["body"]["resource"])
+    print("FLOW enqueue command", enqueue["about"]["command"], "at position", enqueue["position"], "with its", enqueue_receipt["body"]["state"],
+          "receipt at position", enqueue_receipt["position"], flush=True)
+
+    reviews = [record for record in manager if record["schema"] == "review"]
+    assert len(reviews) == 1, ("FLOW-ASSERT the manager log has other than one review", len(reviews))
+    review = reviews[0]
+    assert review["from"] == "manager" and review["to"] == {"approvers": configuration["profiles"][0]["id"]}, (
+        "FLOW-ASSERT the review is not from the manager to the approvers of the profile", review["from"], review["to"])
+    assert review["about"].get("request") == submitted["id"], ("FLOW-ASSERT the review names another request", review["about"])
+    joined = [item for item in summary["joins"]["reviews"] if item["review"] == at(manager_path, review["position"])]
+    assert len(joined) == 1 and joined[0]["preparation"] == preparation["id"], ("FLOW-ASSERT the review is not joined to the preparation", joined)
+    print("FLOW review at position", review["position"], "for preparation", preparation["id"], flush=True)
+
+    approve, approve_receipt = command("approve", "FLOW-ASSERT the manager log has no approve command with its receipt")
+    selectors = ("reviewDigest", "requestRevision", "profileRevision", "descriptorRevision", "processGeneration")
+    body = approve["body"]["body"]["json"]
+    assert approve["about"]["command"] == approve_command and approve["body"]["resource"] == "/v1/preparations/" + preparation["id"], (
+        "FLOW-ASSERT the approve command is not the journey approval", approve["about"], approve["body"]["resource"])
+    assert all(body.get(selector) == preparation[selector] for selector in selectors), (
+        "FLOW-ASSERT the approve command does not carry the five review selectors", body)
+    assert joined[0]["commands"] == [approve["position"]], ("FLOW-ASSERT the review is not joined to the approve command", joined[0]["commands"])
+    print("FLOW approve command", approve_command, "at position", approve["position"], "carries", ", ".join(selectors), flush=True)
+
+    relays = [record for record in manager if record["schema"] == "relay"]
+    starts = [record for record in relays if record["body"]["kind"] == "start"]
+    assert len(starts) == 1 and starts[0]["about"]["command"] == approve_command and starts[0]["body"]["nativeRun"] == native, (
+        "FLOW-ASSERT the manager log has no start relay of the approval", [record["about"] for record in starts])
+    start = starts[0]
+    delivered = [item["delivered"] for item in summary["joins"]["relays"] if item["relay"] == at(manager_path, start["position"])]
+    first = next(record for record in runlog if record["position"] == 0)
+    assert delivered == [at(str(store), 0)] and first["schema"] == "start" and first["from"] == "manager", (
+        "FLOW-ASSERT the start relay is not joined to the run-log start", delivered, first["schema"])
+    print("FLOW start relay at position", start["position"], "delivered as run-log start 0 of", native, flush=True)
+
+    questions = [record for record in runlog if record["schema"] == "question" and record["to"] == {"to": "manager"}]
+    assert len(questions) == 1 and str(questions[0]["about"]["occurrence"]) == str(question_occurrence), (
+        "FLOW-ASSERT the run log has no person question of the answered occurrence", [record["about"] for record in questions])
+    question = questions[0]
+    assert question["body"]["code"] == "flag", ("FLOW-ASSERT the run log has no person question of the answered occurrence", question["body"]["code"])
+    print("FLOW person question at run-log position", question["position"], "for occurrence", question_occurrence, flush=True)
+
+    answer, _ = command("answer", "FLOW-ASSERT the manager log has no answer command carrying JSON false")
+    value = answer["body"]["body"]["json"].get("value", None)
+    assert answer["about"]["command"] == answer_command and answer["body"]["resource"] == answer_resource and value is False, (
+        "FLOW-ASSERT the manager log has no answer command carrying JSON false", answer["about"], value)
+    print("FLOW answer command", answer_command, "at position", answer["position"], "carries JSON false", flush=True)
+
+    retry, _ = command("retry", "FLOW-ASSERT the manager log has no retry command with its receipt")
+    assert retry["about"]["command"] == retry_command and retry["body"]["resource"] == "/v1/runs/" + run + "/control", (
+        "FLOW-ASSERT the manager log has no retry command with its receipt", retry["about"], retry["body"]["resource"])
+
+    # Each command reaches the run as one relayed control, received as a
+    # run-log control from the manager, with its acknowledgement event.
+    controls = {}
+    for identity, failure in ((answer_command, "FLOW-ASSERT the answer control is not relayed and acknowledged"),
+                              (retry_command, "FLOW-ASSERT the retry command has no relayed and acknowledged control")):
+        relayed = [record for record in relays if record["body"]["kind"] == "control" and record["about"]["command"] == identity]
+        assert len(relayed) == 1 and relayed[0]["body"]["nativeRun"] == native, (failure, "relay", len(relayed))
+        delivered = [item["delivered"] for item in summary["joins"]["relays"] if item["relay"] == at(manager_path, relayed[0]["position"])]
+        assert len(delivered) == 1 and delivered[0] is not None and delivered[0]["log"] == str(store), (failure, "delivery", delivered)
+        control = next(record for record in runlog if record["position"] == delivered[0]["position"])
+        assert control["schema"] == "control" and control["from"] == "manager" and control["about"]["command"] == identity, (
+            failure, "run-log control", control["schema"], control["from"], control["about"])
+        acknowledged = [item["acknowledgement"] for item in summary["joins"]["controls"] if item["control"] == at(str(store), control["position"])]
+        assert len(acknowledged) == 1 and acknowledged[0] is not None, (failure, "acknowledgement", acknowledged)
+        controls[identity] = control
+        print("FLOW relay at position", relayed[0]["position"], "delivered as run-log control", control["position"],
+              "from the manager with command", identity, "and acknowledgement event", acknowledged[0], flush=True)
+
+    # The run-log control and answer records name the manager and the command,
+    # and the reader joins them to the commands of the principal.
+    run_controls = [record for record in runlog if record["schema"] == "control"]
+    assert sorted(record["about"].get("command") for record in run_controls) == sorted([answer_command, retry_command]) and all(
+        record["from"] == "manager" for record in run_controls), (
+        "FLOW-ASSERT a run-log control does not name the manager and a journey command", [(record["from"], record["about"]) for record in run_controls])
+    answers = [record for record in runlog if record["schema"] == "answer" and record["replyTo"] == question["position"]]
+    assert len(answers) == 1 and answers[0]["from"] == "manager" and answers[0]["about"].get("command") == answer_command and answers[0]["body"] is False, (
+        "FLOW-ASSERT the run-log answer does not name the manager and the answer command", [(record["from"], record["about"], record["body"]) for record in answers])
+    joined_answers = [item for item in summary["joins"]["answers"] if item["answer"] == at(str(store), answers[0]["position"])]
+    assert joined_answers == [{"answer": at(str(store), answers[0]["position"]), "command": at(manager_path, answer["position"]), "commandId": answer_command}], (
+        "FLOW-ASSERT the run-log answer is not joined to the answer command of the principal", joined_answers)
+    for identity, control in controls.items():
+        relay = next(record for record in relays if record["body"]["kind"] == "control" and record["about"]["command"] == identity)
+        issued_command = next(record for record in commands if record["about"]["command"] == identity)
+        assert issued_command["from"] == principal and relay["about"]["command"] == control["about"]["command"], (
+            "FLOW-ASSERT a run-log control is not joined to a command of the principal", identity)
+    print("FLOW run-log answer at position", answers[0]["position"], "names the manager and", answer_command,
+          "and joins to manager position", answer["position"], flush=True)
+
+    # The terminal record, and no ask after it.
+    stop = report["stop"]
+    assert stop is not None and not report["live"] and any(record["position"] == stop for record in runlog), (
+        "FLOW-ASSERT the run log has no terminal record", stop, report["live"])
+    asks = ("question", "engine-start", "turn", "steer", "command")
+    late = [record["position"] for record in runlog if record["position"] > stop and record["schema"] in asks]
+    assert not late and not report["states"]["askAfterStop"], ("FLOW-ASSERT an ask follows the terminal record", late, report["states"]["askAfterStop"])
+    print("FLOW terminal record at run-log position", stop, "of", report["records"], "records, and no ask follows it", flush=True)
+
+    # Consent verification of the start relay.
+    consent = summary["consent"]
+    assert len(consent) == 1 and consent[0]["verified"] and not consent[0]["problems"], ("FLOW-ASSERT consent verification failed", consent)
+    assert (consent[0]["review"], consent[0]["command"], consent[0]["relay"], consent[0]["runStart"]) == (
+        review["position"], approve["position"], at(manager_path, start["position"]), at(str(store), 0)), (
+        "FLOW-ASSERT consent verification failed", consent[0])
+    print("FLOW consent verified: review", review["position"], "approve", approve["position"], "receipt", consent[0]["receipt"],
+          "start relay", start["position"], "run start 0", flush=True)
+
+    # The manager log ends its lifetime with the shutdown notice.
+    lifetimes = summary["joins"]["lifetimes"]
+    assert lifetimes and all(item["shutdown"] is not None for item in lifetimes), ("FLOW-ASSERT the manager log has no shutdown notice", lifetimes)
+
+    # Gate 9 report: the manager log size and the run-log storage ratio.
+    manager_bytes = sum(path.stat().st_size for path in flow_dir.rglob("*") if path.is_file())
+    claims = store / "flow-claims"
+    logged = (store / "flow.ndjson").stat().st_size + sum(
+        path.stat().st_size for path in (claims.rglob("*") if claims.is_dir() else ()) if path.is_file())
+    public = sum((store / name).stat().st_size for name in ("events.ndjson", "answers.json", "effects.ndjson") if (store / name).exists())
+    ratio = logged / public
+    print(f"FLOW manager log size: {len(manager)} records, {manager_bytes} bytes", flush=True)
+    print(f"FLOW run-log storage ratio: run log {logged} bytes, public files {public} bytes, ratio {ratio:.3f}", flush=True)
+    assert ratio <= 2.5, ("FLOW-ASSERT the run log takes more than 2.5 times the public files", ratio)
+    print("PASS flow: the verb verifies the journey manager log and run store, every FLOW-ASSERT holds and consent is verified", flush=True)
+
+
+def approve_fault_in_session(session, submitted, preparation, preparation_uri, preparation_tag, renamed_log, cursor, authorized):
+    """Check, with read-only observations, that the manager refused the
+    approval after the manager log was renamed away."""
+    assert renamed_log is not None, "the approve-fault control did not rename the manager log"
+    refusal = squeeze('Refused 503 "storage-unavailable"')
+    deadline = time.monotonic() + 45
+    while refusal not in squeeze(session.screen.text()):
+        assert "Phase: associated" not in session.screen.text(), "FLOW-FAULT-ASSERT the approval associated a run although the approve append failed"
+        if time.monotonic() >= deadline or session.process.poll() is not None:
+            (work / "tui-approve-fault-missing.screen.txt").write_text(session.screen.text())
+            raise AssertionError("FLOW-FAULT-DEADLINE the TUI showed no storage-unavailable refusal of the approval")
+        session.pump()
+    session.settle()
+    (work / "tui-approve-fault.screen.txt").write_text(session.screen.text())
+    print("PASS actual TUI shows the approval send refused with 503 storage-unavailable", flush=True)
+    status, current, raw, _ = fetch(submitted["links"]["self"], authorized)
+    assert status == 200, ("request read", status, current.get("code"))
+    validate("Request", current, raw)
+    assert current["runId"] is None and current["phase"] == "review" and current["preparationId"] == preparation["id"], (
+        "FLOW-FAULT-ASSERT the refused approval changed the request", current["phase"], current["runId"])
+    status, still, raw, received = fetch(preparation_uri, authorized)
+    assert status == 200, ("preparation read", status, still.get("code"))
+    validate("Preparation", still, raw)
+    assert still["state"] == "live" and still["revision"] == preparation["revision"] and received.get("etag") == preparation_tag, (
+        "FLOW-FAULT-ASSERT the refused approval changed the preparation", still["state"])
+    approvals = [receipt for _, receipt in command_receipts(cursor, authorized) if receipt["operation"] == "approve"]
+    assert all(receipt["state"] == "refused" for receipt in approvals), (
+        "FLOW-FAULT-ASSERT the ledger holds an accepted approval", [receipt["state"] for receipt in approvals])
+    print("PASS the request stays in review, the preparation stays live and unchanged, and the ledger holds no accepted approval",
+          "(approve receipts:", len(approvals), ")", flush=True)
+
+
+def approve_fault_after_shutdown(renamed_log, preparation_uri):
+    """After the manager process has exited, check that the manager recorded
+    its storage-unavailable response to the approval, that no manager log
+    holds an approve command or a start relay, and that no run store exists."""
+    faults = (work / "server-0.stderr").read_text(errors="replace").splitlines()
+    assert any("response POST " + preparation_uri + " " in line and "public=503 storage-unavailable" in line for line in faults), (
+        "FLOW-FAULT-ASSERT the manager recorded no storage-unavailable response to the approval")
+    flow_dir = work / "manager" / "flow"
+    left = sorted(flow_dir.glob("*.ndjson"))
+    assert not left, ("FLOW-FAULT-ASSERT the manager wrote a new log at the renamed path", left)
+    stores = sorted(work.glob("manager/runs/runs/*"))
+    assert not stores, ("FLOW-FAULT-ASSERT a run store exists after the refused approval", stores)
+    _, records, _ = read_flow("approve-fault-flow", [renamed_log])
+    schemas = [record["schema"] for record in records]
+    assert "review" in schemas, ("FLOW-FAULT-ASSERT the renamed manager log holds no review", schemas)
+    approvals = [record["position"] for record in records if record["schema"] == "command" and record["body"]["operation"] == "approve"]
+    relays = [record["position"] for record in records if record["schema"] == "relay"]
+    assert not approvals and not relays, ("FLOW-FAULT-ASSERT a manager log holds an approve command or a relay", approvals, relays)
+    print("PASS the manager recorded its 503 storage-unavailable response to the approval; the renamed manager log holds the review and",
+          len(records), "records, and no approve command and no relay; no run store exists and the manager wrote no new log", flush=True)
+
+
 # Each foreground process is the original Popen object. Restart is attempted only
 # after its own wait, and must reacquire the same Store and administration leases.
 for iteration in range(2):
@@ -479,7 +767,7 @@ for iteration in range(2):
                     if os.environ.get("TUI_CHECK") is not None:
                         from tui_probe import TuiSession
                         client_state = work / "unused-client-state"
-                        if journey:
+                        if journey or approve_fault:
                             # The event cursor before the session bounds the read-only command evidence.
                             status, start_overview, raw = request("/v1/snapshot", authorized)
                             assert status == 200 and start_overview["items"] == [], "the journey does not start from an empty manager"
@@ -583,15 +871,25 @@ for iteration in range(2):
                                     session.wait_screen("Exact manager review")
                                 refused(b"y", DETAIL_REFUSED, "detail-view key approved a review", "detail-y")
                                 session.send(b"d")
+                                renamed_log = None
                                 for _ in range(5):
                                     visible = session.wait_screen("y APPROVE EXACT REVIEW")
-                                    compact = "".join(char for char in visible if not char.isspace() and not "\u2500" <= char <= "\u257f")
+                                    compact = squeeze(visible)
                                     selectors = ("reviewDigest", "requestRevision", "profileRevision", "descriptorRevision", "processGeneration")
                                     for selector in selectors:
                                         assert selector + preparation[selector] in compact, ("JOURNEY-ASSERT a displayed review selector is clipped", selector)
                                     (work / "tui-approval.screen.txt").write_text(visible)
                                     if journey:
                                         print("PASS actual TUI shows the five review selectors unclipped:", ", ".join(selectors), flush=True)
+                                    if approve_fault and renamed_log is None:
+                                        # The fault: the manager log path no longer names the file
+                                        # that the manager writer opened.
+                                        logs = sorted((work / "manager" / "flow").glob("*.ndjson"))
+                                        assert len(logs) == 1, ("the manager has other than one manager log before the approval", logs)
+                                        (work / "approve-fault-flow").mkdir(mode=0o700)
+                                        renamed_log = work / "approve-fault-flow" / logs[0].name
+                                        os.rename(logs[0], renamed_log)
+                                        print("FAULT renamed the manager log", logs[0].name, "away before the approval key", flush=True)
                                     approval_start, (last_key, line) = key_notice(session, b"y", last_key, "explicit TUI approval showed no notice")
                                     print("KEY OUTCOME:", line, flush=True)
                                     if notice_is(line, last_key, APPROVAL_STARTED):
@@ -600,6 +898,15 @@ for iteration in range(2):
                                     assert any(notice_is(line, last_key, text) for text in APPROVAL_DEFERRED), ("explicit TUI approval refused", line)
                                 else:
                                     raise AssertionError("explicit TUI approval deferred five times")
+                                if approve_fault:
+                                    approve_fault_in_session(session, submitted, preparation, preparation_uri, preparation_tag,
+                                                             renamed_log, journey_cursor, authorized)
+                                    session.send(b"q")
+                                    assert session.wait_exit() == 0, "service TUI did not exit successfully after the refused approval"
+                                    session.assert_restored()
+                                    # The manager process is joined in the finally block below, and the
+                                    # control ends after its shutdown checks.
+                                    break
                                 deadline = time.monotonic() + 45
                                 while "Phase: associated" not in session.screen.text():
                                     assert not any(number == last_key and notice_is(row, number, NOT_SENT)
@@ -987,10 +1294,6 @@ for iteration in range(2):
                                     # Segment 4: save the verified bytes through the TUI. A save onto an
                                     # existing entry is refused and leaves it unchanged. A save to a fresh
                                     # absolute path writes the verified bytes with mode 0600.
-                                    def squeeze(text):
-                                        """The text without white space and box drawing, so wrapped rows join."""
-                                        return "".join(char for char in text if not char.isspace() and not "\u2500" <= char <= "\u257f")
-
                                     def save_through_tui(path, outcome, name):
                                         """Open the save dialog with s, type the path, press Ctrl-D and wait for the outcome text."""
                                         session.wait_screen("s SAVE RESULT", timeout=15)
@@ -1057,23 +1360,8 @@ for iteration in range(2):
                                     # read before the session name every command of the journey. Each
                                     # receipt names its operation. Approve, answer and retry each have
                                     # exactly one command identity.
-                                    command_resources = []
-                                    event_cursor = journey_cursor
-                                    for _ in range(256):
-                                        status, batch, raw, _ = fetch("/v1/events?after=" + event_cursor, authorized | {"Accept": "application/json"})
-                                        assert status == 200, ("journey event read", status, batch.get("code"))
-                                        validate("EventBatch", batch, raw)
-                                        for event in batch["events"]:
-                                            if event["event"] == "command.changed" and event["data"]["resource"] not in command_resources:
-                                                command_resources.append(event["data"]["resource"])
-                                        event_cursor = batch["cursor"]
-                                        if not batch["hasMore"]:
-                                            break
-                                    else:
-                                        raise AssertionError("JOURNEY-DEADLINE event pages")
                                     identities = {}
-                                    for resource in command_resources:
-                                        receipt, _ = run_read(resource, "CommandReceipt")
+                                    for resource, receipt in command_receipts(journey_cursor, authorized):
                                         identities.setdefault(receipt["operation"], []).append(resource.rsplit("/", 1)[1])
                                     (work / "journey-commands.json").write_text(json.dumps(identities, indent=1))
                                     for operation in ("approve", "answer", "retry"):
@@ -1206,6 +1494,12 @@ if tui_approval:
     assert not (work / "admin/admin.sock").exists(), "joined original local administration leaves no socket"
     for channel in ("stdout", "stderr"):
         assert bearer.encode() not in (work / f"server-0.{channel}").read_bytes()
-    print("PASS original protected manager shutdown after TUI approval fixture")
+    print("PASS original protected manager shutdown after TUI approval fixture", flush=True)
+    if journey:
+        journey_flow_assertions(issued["result"]["credential"], submitted, preparation, identities["approve"][0], answer_command,
+                                answer_receipt["resource"], retry_command, associated["runId"], question_occurrence)
+    if approve_fault:
+        approve_fault_after_shutdown(renamed_log, preparation_uri)
+        raise AssertionError(APPROVE_FAULT_REFUSED)
 else:
     print("PASS actual TLS1.3 foreground capabilities/profiles, matching polling/SSE, reader quota, live stream revocation, original joins and same-root restart")

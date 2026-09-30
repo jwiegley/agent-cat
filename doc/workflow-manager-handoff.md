@@ -107,6 +107,13 @@ protected HTTPS manager and deterministic native frontend processes. Its
 runner is the deterministic `routing-fixed-point-probe` fixture, and no
 paid provider takes part.
 
+After the session, `tui-journey` runs `agentic-run flow` on the manager log
+and the run store, and asserts each step of the consent chain and every user
+command with a `FLOW-ASSERT` message. The control `tui-flow-approve-fault`
+renames the manager log before the approval, and it requires the manager to
+refuse the approval with `storage-unavailable` and to start no run.
+`manager/STORAGE.md` describes both.
+
 The two controls change the harness, not the TUI. `tui-consent-control`
 sends `y` in the summary view at the step that expects the detail-view
 refusal, so it shows that the journey assertion detects an unexpected
