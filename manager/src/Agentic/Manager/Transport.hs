@@ -49,8 +49,10 @@ instance Exception HttpFailure
 
 -- | Retain the original listener and a finite number of connection workers.
 -- TLS is mandatory, including loopback. Peer addresses are numeric and explicit.
-runHttps :: HttpsConfiguration -> ConfigurationLimits -> Wai.Application -> IO ()
-runHttps configuration limits application = do
+-- When the listener stops, it closes its socket, runs the closing action of
+-- the application and then joins every connection worker.
+runHttps :: HttpsConfiguration -> ConfigurationLimits -> IO () -> Wai.Application -> IO ()
+runHttps configuration limits closing application = do
   certificate <- readPrivateConfigurationFile (httpsCertificateFile configuration) 1048576
   key <- readPrivateConfigurationFile (httpsKeyFile configuration) 1048576
   addresses <- numeric (httpsHost configuration) (httpsPort configuration)
@@ -82,7 +84,7 @@ runHttps configuration limits application = do
     Socket.bind listener (Socket.addrAddress address)
     Socket.listen listener (min 128 capacity)
     TLS.runTLSSocket tls settings listener application)
-    `finally` replicateM_ capacity (waitQSem slots)
+    `finally` (closing >> replicateM_ capacity (waitQSem slots))
   where
     numeric :: Text -> Int -> IO [Socket.AddrInfo]
     numeric host port = Socket.getAddrInfo

@@ -3369,6 +3369,28 @@ Non-blocking fess findings from B13 (WM-025 page-set negatives, service_http.py 
 5. (low) doc/api/README.md says a set counts against the limits until it retires or expires. Pages.hs keeps a retired or expired set charged while a page send of it is in progress. Add that detail.
 6. (low) manager/README.md gained a paragraph on page sets outside the named scope. The Integrator kept it as owner documentation. It matches Pages.hs.
 
+* TODO [#D] Resolve B14 fess findings in the /v1/events lifecycle checks
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-b14-fess-gehi
+:LABELS:   []
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-30 Wed 04:47]
+:MODIFIED: [2026-09-30 Wed 04:47]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking fess findings from B14 (WM-026 /v1/events lifecycle, service_http.py events-lifecycle mode and the SSE shutdown fix). Fess report: resume-20260923/fess/b1-B14-r1.md (private evidence directory).
+
+1. (medium) withStream in manager/src/Agentic/Manager/Events.hs changed (a closing flag is checked at registration and before each loop iteration). The B7 checks cited as case 5 evidence, manager-artifact-check ordinary-stream and stream-ingestion, were not rerun after the change. Run both once at N8 against the current binary and keep their logs.
+2. (low) The case 2 PASS line in manager/test/service_http.py prints the visible IDs [7, 8] as "numeric gaps" and len(polled)-len(seen) as the invisible count. Print len(polled) as the invisible count and the missing positions of range(start+1, high+1) minus the visible numbers as the gaps. The assertions are correct.
+3. (low) Case 4 opens SSE at the pre-restart cursor and checks only status 200 and one complete first block. Read the streamed events up to the replay high cursor and assert that they equal the polled events.
+4. (low) doc/api/README.md says a new SSE request during an ordinary shutdown receives 503 storage-unavailable. No check exercises that path (Events.hs registration refusal). Add a check with a kept-alive connection after SIGTERM, or narrow the sentence.
+5. (low) manager/STORAGE.md says the subscription of a stream whose client closed the connection is released at the latest at its next heartbeat. A first write to a closed TCP peer can succeed into the send buffer, so release can take two heartbeats. Verify with a timed check, or say that the subscription is released when a write fails.
+
 * TODO [#C] Resolve F10 fess findings in the command and receipt records
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -15864,7 +15886,7 @@ through the actual HTTP response path.
 :LABELS:   ["p5","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-26 Sat 23:41]
+:MODIFIED: [2026-09-30 Wed 04:47]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-026
 :SOURCE_REPO: agent-cat
@@ -15987,6 +16009,20 @@ and enforce advertised bounds. G2 is complete with mutations still unavailable.
     "created_by": "johnw",
     "metadata": "{}",
     "thread_id": ""
+  }
+]
+#+end_src
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 388,
+    "issue_id": "acat-wm-026-qo1e",
+    "author": "johnw",
+    "text": "B14 (/v1/events lifecycle): service_http.py events-lifecycle passed at N8 with PASS lines for snapshot attachment (SSE and polling, exactly once, in order, no gap), filtered cursor advancement over invisible records for a profile_2 credential, reconnect after a partial block with Last-Event-ID (400 for both after and Last-Event-ID), and restart stability of the streamId and cursors. A shutdown hang with an open SSE stream was found and fixed (Events.closeStreams, run by Transport.runHttps after the listener closes). ArtifactCheck eventChecks now maps a restored stream identity to 410 for an old cursor. manager-store-check main and restart, manager-artifact-check events, the Phase A journey at N8 and make -C doc check passed. Subscriber quota and revocation rely on base mode and B7 evidence. Stage dir: resume-20260923/B/B14/impl-r1. Fess findings: acat-b14-fess-gehi. Package stays open for closeout.",
+    "created_at": "2026-09-30T11:47:39Z"
   }
 ]
 #+end_src

@@ -806,7 +806,7 @@ eventChecks work = do
     escaped <- Events.withBatch store proof (string (field "cursor" second)) (\view _ -> pure view)
     revalidateAuthorizedView escaped >>= check "event view ends with the original response loan" . (==Left Command.Unauthenticated)
     pure (string (field "cursor" second), revision)
-  withInstalled config $ \installed -> withCoordinationStore installed $ \store -> do
+  durable <- withInstalled config $ \installed -> withCoordinationStore installed $ \store -> do
     proof <- authenticateCredential store bearer >>= right
     ((current,_),revision) <- boundary store proof
     check "ordinary restart preserves the public event stream alias" (alias current == alias previous)
@@ -833,6 +833,35 @@ eventChecks work = do
     retained <- batch store proof floorCursor
     check "exact floor preserves the fresh invalidation after the expired prefix"
       (field "cursor" retained == String high && case field "events" retained of Array values -> length values == 1; _ -> False)
+    storeStreamId <$> storeIdentity store
+  -- Offline restoration rotates the durable stream and revokes every restored
+  -- credential. A cursor taken before it requires a new snapshot, and the
+  -- HTTP boundary maps that refusal to 410 view-expired.
+  let backup = work </> "backup"
+      restoredBearer = BS.replicate 32 98
+  createDirectory backup
+  setFileMode backup 0o700
+  withInstalled config $ \installed -> do
+    backupCoordinationStore installed backup
+    restoreCoordinationStore installed backup
+    withCoordinationStore installed $ \store -> do
+      rotated <- storeStreamId <$> storeIdentity store
+      check "offline restoration rotates the durable event stream" (rotated /= durable)
+      stale <- readRetainedEvents store durable 0
+      check "a restored store refuses the old durable stream as a wrong stream" (stale == Left WrongEventStream)
+      revoked <- authenticateCredential store bearer
+      check "offline restoration revokes the restored credential" (either (const True) (const False) revoked)
+      mutate store $ do
+        execute "INSERT INTO credentials VALUES ('credential_2','client_1',?,'2999-01-01T00:00:00Z',0)" [SQL.SQLBlob (convert (hash restoredBearer::Digest SHA256))]
+        forM_ ["observe","export"] $ \scope -> execute "INSERT INTO credential_scopes VALUES ('credential_2','profile_1',?)" [SQL.SQLText scope]
+      proof <- authenticateCredential store restoredBearer >>= right
+      old <- try @Command.CommandFailure (void (batch store proof previous))
+      check "an event cursor from before restoration refuses as 410 view-expired"
+        (old == Left Command.ViewExpired && faultProblem (CommandRefusal Command.ViewExpired) == (410,"view-expired"))
+      ((current,_),_) <- boundary store proof
+      check "a new snapshot after restoration binds the rotated stream alias" (alias current /= alias previous)
+      resumed <- batch store proof current
+      check "the rotated stream serves a cursor from a new snapshot" (field "hasMore" resumed == Bool False)
 
 observationChecks :: FilePath -> IO ()
 observationChecks work = do

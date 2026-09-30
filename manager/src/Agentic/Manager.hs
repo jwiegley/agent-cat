@@ -34,8 +34,8 @@ serveManager configuration = do
       void (probeConfiguredProfile installed (publicId profile) (publicRevision profile))
     withServingStore installed $ \store ->
       Service.withService store $ \service -> do
-        application <- Application.newApplication https service
-        let listen = Transport.runHttps https limits application
+        (application, closing) <- Application.newApplication https service
+        let listen = Transport.runHttps https limits closing application
         case configurationAdministrationRoot configuration of
           Nothing -> listen
           Just _ -> withLocalAdministration store listen

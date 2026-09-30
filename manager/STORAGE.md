@@ -231,7 +231,18 @@ seconds, and a revocation ends the stream before its next block. Streams that
 stall in a write, up to the Store reader capacity, therefore leave the
 reader places and the configuration guard free for ingestion. The limit of two
 subscriptions for each client is a separate count and not a Store reader
-charge.
+charge. A stream whose client closed the connection keeps its subscription
+until its next write fails, which is at the latest its next heartbeat. When
+the listener stops, it closes its socket and runs `closeStreams` before it
+joins its connection workers. A new stream then refuses with
+storage-unavailable. An open stream ends its response after its current
+write and before its next batch read. A waiting stream observes the flag at
+its next authorization wakeup, which comes within one second. The
+`events-lifecycle` mode of `manager/test/service_http.py` checks these facts
+through the running protected manager: SSE and polling attached at a snapshot
+cursor, cursor advancement over records of another profile, reconnection
+after a partial block, the end of an open stream at an ordinary shutdown, and
+the stream alias and cursors across the restart.
 
 Operations require the threaded RTS. Cancellation repeatedly interrupts the
 original SQLite operation until its thread joins. A single interrupt can precede

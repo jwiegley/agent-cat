@@ -87,7 +87,15 @@ boundary = len(sys.argv) == 6 and sys.argv[5] == BOUNDARY
 # lifetime and does not enter the restart loop.
 PAGES = "pages"
 pages_mode = len(sys.argv) == 6 and sys.argv[5] == PAGES
-assert len(sys.argv) == 5 or mixed or boundary or pages_mode
+# The events-lifecycle mode checks the WM-026 verification of /v1/events
+# through the running protected manager: snapshot attachment of SSE and
+# polling, cursor advancement of a credential of another profile over
+# invisible records, reconnection after a partial SSE block, and the stream
+# alias and cursor across an ordinary restart. Each numbered case prints its
+# own PASS line. It runs two manager lifetimes of the scripted base fixture.
+EVENTS = "events-lifecycle"
+events_mode = len(sys.argv) == 6 and sys.argv[5] == EVENTS
+assert len(sys.argv) == 5 or mixed or boundary or pages_mode or events_mode
 assert not tui_approval or os.environ.get("TUI_CHECK")
 assert native in ("1", "8")
 print(f"work={work}", flush=True)
@@ -136,7 +144,7 @@ configuration = {
 # The base and mixed modes also read the frozen request, run and decision
 # collections. A second profile, visible only to a second credential, holds
 # a request that the collections of the first credential must not show.
-collections = len(sys.argv) == 5 or sys.argv[5] in ("mixed", "mixed-confirm", PAGES)
+collections = len(sys.argv) == 5 or sys.argv[5] in ("mixed", "mixed-confirm", PAGES, EVENTS)
 if collections:
     configuration["profiles"].append(dict(configuration["profiles"][0], id="profile_2", workspaceLabel="HTTPS other fixture"))
 # The pages mode raises the global page-set bound above the per-client bound,
@@ -1937,6 +1945,269 @@ def page_checks():
 
 if pages_mode:
     page_checks()
+    raise SystemExit(0)
+
+
+def event_checks():
+    """WM-026 event verification through the real HTTPS manager, numbered as
+    in the B14 requirement. Each case prints one PASS line. Subscriber quota
+    and revocation of open streams are shown by the base mode and by the
+    manager-artifact-check stream-ingestion and ordinary-stream modes, so this
+    mode does not repeat them."""
+    authorized = {"Authorization": "Bearer " + bearer}
+    json_accept = {"Accept": "application/json"}
+
+    def number(cursor):
+        alias, _, position = cursor.rpartition(".")
+        assert alias and position.isdigit(), ("cursor form", cursor)
+        return int(position)
+
+    def alias(cursor):
+        return cursor.rpartition(".")[0]
+
+    def poll(cursor, credential):
+        """Every JSON batch from the cursor until hasMore is false. Returns
+        the events in order and the final cursor."""
+        events = []
+        while True:
+            status, batch, raw = request("/v1/events?after=" + cursor, credential | json_accept)
+            assert status == 200, ("poll", status, batch.get("code"))
+            validate("EventBatch", batch, raw)
+            assert alias(batch["cursor"]) == alias(cursor) and number(batch["cursor"]) >= number(cursor), ("poll cursor", cursor, batch["cursor"])
+            events += batch["events"]
+            cursor = batch["cursor"]
+            if not batch["hasMore"]:
+                return events, cursor
+
+    def block(response):
+        """One complete SSE block, heartbeat or event."""
+        found = bytearray()
+        while not found.endswith(b"\n\n"):
+            line = response.readline(16385)
+            assert line and len(found) + len(line) <= 16384, "complete stream block"
+            found.extend(line)
+        return bytes(found)
+
+    def streamed(response, first, last):
+        """The events of the complete blocks of an open stream, from its first
+        block until the event with the given number. Heartbeats carry no event."""
+        blocks, events = [first], frozen.parse_sse(first)
+        while not events or number(events[-1]["id"]) < last:
+            blocks.append(block(response))
+            events += frozen.parse_sse(blocks[-1])
+        return blocks, events
+
+    def attach(credential, cursor):
+        return open_stream("/v1/events", credential | {"Last-Event-ID": cursor})
+
+    def create_request(credential, capabilities, workflow):
+        key = capabilities["authorityEpoch"] + "." + secrets.token_urlsafe(16)
+        body = {"workflowId": workflow["id"], "descriptorRevision": workflow["revision"],
+                "profileId": workflow["profileId"], "profileRevision": workflow["profileRevision"]}
+        status, created, raw = request("/v1/requests", credential | {"Content-Type": "application/json", "Idempotency-Key": key},
+                                       method="POST", payload=json.dumps(body, separators=(",", ":")).encode())
+        assert status == 201, ("request creation", status, created.get("code"))
+        validate("Request", created, raw)
+        return created
+
+    def resources(events):
+        return [event["data"]["resource"] for event in events]
+
+    def serve(iteration):
+        output = (work / f"server-{iteration}.stdout").open("wb")
+        errors = (work / f"server-{iteration}.stderr").open("wb")
+        process = subprocess.Popen([str(runner), "--manager", "serve", "--config", str(config),
+                                    "+RTS", "-N" + native, "-RTS"], stdout=output, stderr=errors)
+        return process, output, errors
+
+    def stop(iteration, process, output, errors):
+        try:
+            if process.poll() is None:
+                process.terminate()
+            process.wait(timeout=25)
+            (work / f"server-{iteration}.exit").write_text(str(process.returncode) + "\n")
+        finally:
+            output.close()
+            errors.close()
+
+    process, output, errors = serve(0)
+    try:
+        wait_ready(process)
+        status, capabilities, _ = request("/v1/capabilities", authorized)
+        assert status == 200
+        status, other_capabilities, _ = request("/v1/capabilities", other_authorized)
+        assert status == 200
+        status, catalogue, _ = request("/v1/workflows?profileId=profile_1", authorized)
+        assert status == 200 and catalogue["items"]
+        workflow = catalogue["items"][0]
+        status, other_catalogue, _ = request("/v1/workflows?profileId=profile_2", other_authorized)
+        assert status == 200 and other_catalogue["items"]
+        other_workflow = other_catalogue["items"][0]
+
+        # Case 1. Both credentials take a snapshot and its cursor before any
+        # mutation. The mutations then commit, and SSE and polling attach at
+        # the snapshot cursor of the first credential.
+        status, snapshot, raw = request("/v1/snapshot", authorized)
+        assert status == 200 and snapshot["items"] == [] and snapshot["page"]["next"] is None
+        validate("OverviewSnapshot", snapshot, raw)
+        status, other_snapshot, raw = request("/v1/snapshot", other_authorized)
+        assert status == 200 and other_snapshot["items"] == []
+        validate("OverviewSnapshot", other_snapshot, raw)
+        start, other_start = snapshot["cursor"], other_snapshot["cursor"]
+        assert alias(start) == capabilities["streamId"] and alias(other_start) == other_capabilities["streamId"]
+        assert number(start) == number(other_start), ("both snapshots share one durable position", start, other_start)
+        mine, theirs = [], []
+        mine.append(create_request(authorized, capabilities, workflow)["id"])
+        mine.append(create_request(authorized, capabilities, workflow)["id"])
+        theirs.append(create_request(other_authorized, other_capabilities, other_workflow)["id"])
+        mine.append(create_request(authorized, capabilities, workflow)["id"])
+        polled, high = poll(start, authorized)
+        (work / "events-polled.json").write_text(json.dumps(polled, indent=1, default=str))
+        numbers = [number(event["id"]) for event in polled]
+        assert numbers and numbers[0] == number(start) + 1, ("gap between the snapshot and the first event", start, numbers[:1])
+        assert numbers == sorted(set(numbers)) and numbers[-1] == number(high), ("polled order", numbers, high)
+        assert all(event["data"]["resource"].rsplit("/", 1)[-1] not in theirs for event in polled), "the first credential saw the other profile"
+        for ident in mine:
+            assert "/v1/requests/" + ident in resources(polled), ("mutation without an invalidation", ident)
+        connection, response, first = attach(authorized, start)
+        try:
+            blocks, sse = streamed(response, first, number(high))
+            assert sse == polled, ("SSE and polling differ", resources(sse), resources(polled))
+            # One later mutation reaches the open stream once, after every
+            # earlier event, and polling from the old end sees exactly it.
+            mine.append(create_request(authorized, capabilities, workflow)["id"])
+            live, latest = poll(high, authorized)
+            assert live and all(number(event["id"]) > number(high) for event in live), ("live poll", live)
+            more, streamed_live = streamed(response, block(response), number(latest))
+            assert streamed_live == live, ("live SSE and polling differ", resources(streamed_live), resources(live))
+            assert "/v1/requests/" + mine[-1] in resources(live)
+            blocks += more
+            (work / "events-attached.sse").write_bytes(b"".join(blocks))
+        finally:
+            response.close()
+            connection.close()
+        polled += live
+        high = latest
+        print(f"PASS events case 1: SSE and polling attached at snapshot cursor {number(start)} delivered the same",
+              f"{len(polled)} events in order, each once, from {number(start) + 1} with no gap after the snapshot, and one",
+              "live mutation reached the open stream once after them", flush=True)
+
+        # Case 2. The credential of the other profile polls the same range.
+        # Its cursor advances over every invisible record to the same durable
+        # position, and it receives none of the invisible resources.
+        seen, other_high = poll(other_start, other_authorized)
+        (work / "events-other.json").write_text(json.dumps(seen, indent=1, default=str))
+        other_numbers = [number(event["id"]) for event in seen]
+        assert number(other_high) == number(high) and alias(other_high) == alias(other_start), ("filtered advance", other_high, high)
+        assert other_numbers == sorted(set(other_numbers)), ("filtered order", other_numbers)
+        leaked = [event for event in seen if any(event["data"]["resource"].endswith("/" + ident) for ident in mine)]
+        assert not leaked, ("the other credential received invisible resources", leaked[:2])
+        assert "/v1/requests/" + theirs[0] in resources(seen), "the other credential missed its own request"
+        assert other_numbers[0] > number(other_start) + 1, ("no numeric gap before the first visible event", other_numbers)
+        # Together the two filtered projections cover every durable position
+        # of the range, so each gap of one is a record of the other.
+        covered = set(number(event["id"]) for event in polled) | set(other_numbers)
+        assert covered == set(range(number(start) + 1, number(high) + 1)), ("uncovered positions", sorted(covered))
+        print(f"PASS events case 2: the other-profile credential advanced from {number(other_start)} to {number(other_high)}",
+              f"over {len(polled) - len(seen)} invisible records, accepted numeric gaps {other_numbers}, and received",
+              f"none of the {len(mine)} invisible requests", flush=True)
+
+        # Case 3. A stream is dropped in the middle of a block. Reconnection
+        # at the last complete identifier delivers the partial block again,
+        # complete, and repeats no complete block.
+        assert len(polled) >= 3
+        connection, response, first = attach(authorized, start)
+        try:
+            complete = frozen.parse_sse(first)
+            assert complete == polled[:1], "first reconnect-case block"
+            complete += frozen.parse_sse(block(response))
+            assert complete == polled[:2], "second reconnect-case block"
+            partial = response.readline(16385)
+            assert partial == ("id: " + polled[2]["id"] + "\n").encode(), ("partial block start", partial)
+        finally:
+            response.close()
+            connection.close()
+        connection, response, first = attach(authorized, complete[-1]["id"])
+        try:
+            _, resumed = streamed(response, first, number(high))
+        finally:
+            response.close()
+            connection.close()
+        assert resumed == polled[2:], ("reconnection repeated or lost a block", resources(resumed)[:3])
+        for accept in ("text/event-stream", "application/json"):
+            status, problem, _ = request("/v1/events?after=" + start, authorized | {"Accept": accept, "Last-Event-ID": start})
+            assert status == 400 and problem["code"] == "malformed-request", ("both cursor channels", accept, status, problem.get("code"))
+        print(f"PASS events case 3: after a drop inside block {number(polled[2]['id'])}, Last-Event-ID {number(complete[-1]['id'])}",
+              f"delivered that block complete and the {len(resumed) - 1} later blocks, with no complete block repeated;",
+              "after with Last-Event-ID returns 400 malformed-request for SSE and polling", flush=True)
+        before_restart = (capabilities["streamId"], other_capabilities["streamId"], high, other_high)
+        # An ordinary shutdown ends an attached stream at a block boundary
+        # with a complete response, and the manager then exits. The stream
+        # belongs to the other client, because the two streams that this
+        # client closed in case 3 keep its subscriptions until their next
+        # write fails.
+        connection, response, first = attach(other_authorized, other_high)
+        try:
+            assert frozen.parse_sse(first) == [], "the held stream starts with a heartbeat"
+            process.terminate()
+            ending = time.monotonic()
+            tail = bytearray()
+            while True:
+                line = response.readline(16385)
+                if not line:
+                    break
+                tail.extend(line)
+                assert len(tail) <= 16384 and time.monotonic() < ending + 10, "the held stream did not end"
+            assert tail.endswith(b"\n\n") or not tail, "the held stream ended inside a block"
+            assert frozen.parse_sse(bytes(tail)) == [], "the held stream carried an event after the shutdown"
+            ended = time.monotonic() - ending
+        finally:
+            response.close()
+            connection.close()
+        process.wait(timeout=25)
+        exited = time.monotonic() - ending
+    finally:
+        stop(0, process, output, errors)
+    print(f"PASS events shutdown: an ordinary shutdown ended the attached stream completely after {ended:.1f} s,",
+          f"and the manager exited after {exited:.1f} s", flush=True)
+
+    # Case 4. An ordinary restart keeps the public stream alias and every
+    # cursor taken before it.
+    process, output, errors = serve(1)
+    try:
+        wait_ready(process)
+        status, capabilities, _ = request("/v1/capabilities", authorized)
+        assert status == 200
+        status, other_capabilities, _ = request("/v1/capabilities", other_authorized)
+        assert status == 200
+        assert (capabilities["streamId"], other_capabilities["streamId"]) == before_restart[:2], ("restart changed a stream alias", before_restart[:2])
+        replayed, replay_high = poll(start, authorized)
+        assert replayed[:len(polled)] == polled and alias(replay_high) == alias(start), "restart changed the retained replay"
+        after, after_high = poll(before_restart[2], authorized)
+        assert after == replayed[len(polled):] and after_high == replay_high
+        other_after, other_after_high = poll(before_restart[3], other_authorized)
+        assert number(other_after_high) == number(replay_high)
+        connection, response, first = attach(authorized, before_restart[2])
+        response.close()
+        connection.close()
+        status, snapshot, _ = request("/v1/snapshot", authorized)
+        assert status == 200 and alias(snapshot["cursor"]) == capabilities["streamId"] and number(snapshot["cursor"]) == number(replay_high)
+        print(f"PASS events case 4: after an ordinary restart the streamIds are unchanged, the snapshot cursor {number(start)}",
+              f"replays the same {len(polled)} events, and the pre-restart cursors {number(before_restart[2])} and",
+              f"{number(before_restart[3])} resume by polling and SSE with {len(after)} later events", flush=True)
+    finally:
+        stop(1, process, output, errors)
+    assert not (work / "admin/admin.sock").exists(), "joined original local administration leaves no socket"
+    for iteration in (0, 1):
+        for channel in ("stdout", "stderr"):
+            assert bearer.encode() not in (work / f"server-{iteration}.{channel}").read_bytes()
+    print("NOTE events case 5: the subscriber quota and revocation of open streams are shown by the base mode of this",
+          "harness and by the B7 stream checks, and are not repeated here", flush=True)
+    print("PASS events-lifecycle: every WM-026 event case held against the running TLS 1.3 manager", flush=True)
+
+
+if events_mode:
+    event_checks()
     raise SystemExit(0)
 
 

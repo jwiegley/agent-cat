@@ -3,14 +3,14 @@
 -- | Authorized projections of the existing durable invalidation stream.
 module Agentic.Manager.Events
   ( CursorBinding, captureBinding, bindingEpoch, durableStream, publicStreamId, cursorAt, withBatch, withBoundary,
-    StreamReaders, newStreamReaders, StreamPump, withStream ) where
+    StreamReaders, newStreamReaders, closeStreams, StreamPump, withStream ) where
 
 import Agentic.Manager.Authorization
 import Agentic.Manager.Fault (FaultClass (InternalFault), ManagerFault (ResponseWriteTimeout), refuseStorageUnavailable)
 import Agentic.Manager.Profile (ConfigurationLimits, PublicProfile)
 import Agentic.Manager.Protocol.Command
 import Agentic.Manager.Store
-import Control.Concurrent.STM (TVar, atomically, newTVarIO, readTVar, writeTVar, modifyTVar', throwSTM)
+import Control.Concurrent.STM (TVar, atomically, newTVarIO, readTVar, readTVarIO, writeTVar, modifyTVar', throwSTM)
 import Control.DeepSeq (NFData)
 import Control.Exception (bracket_, throwIO)
 import Control.Monad (forM, unless, when, void)
@@ -106,13 +106,21 @@ readBatch store proof supplied view profiles = do
     revalidateAuthorizedView view >>= either throwIO pure
     pure result
 
--- | Active per-client subscriptions of one application lifetime. This count
--- is separate from the Store reader capacity. A stream holds no reader charge
--- between its batch reads.
-newtype StreamReaders = StreamReaders (TVar (Map.Map Text Int))
+-- | Active per-client subscriptions of one application lifetime and its
+-- closing flag. This count is separate from the Store reader capacity. A
+-- stream holds no reader charge between its batch reads.
+data StreamReaders = StreamReaders !(TVar (Map.Map Text Int)) !(TVar Bool)
 
 newStreamReaders :: IO StreamReaders
-newStreamReaders = StreamReaders <$> newTVarIO Map.empty
+newStreamReaders = StreamReaders <$> newTVarIO Map.empty <*> newTVarIO False
+
+-- | Begin an ordinary shutdown of the streams of this application lifetime.
+-- A new registration then refuses with storage-unavailable. An open stream
+-- ends its response after its current block or heartbeat, at the latest after
+-- its next authorization wakeup, so the listener can join its connection
+-- workers. The client resumes after restart with its last complete event ID.
+closeStreams :: StreamReaders -> IO ()
+closeStreams (StreamReaders _ closing) = atomically (writeTVar closing True)
 
 type StreamPump = (AuthorizedView -> Value -> IO ()) -> (AuthorizedView -> IO ()) -> IO ()
 
@@ -125,12 +133,15 @@ type StreamPump = (AuthorizedView -> Value -> IO ()) -> (AuthorizedView -> IO ()
 -- configuration guard, reader charge, file slot or SQL transaction. Each write
 -- completes within five seconds. A stream that has nothing more to read waits
 -- on the watch of its last batch view, which is an authorization token only,
--- so waiting holds no Store loan and no worker pipe.
+-- so waiting holds no Store loan and no worker pipe. After 'closeStreams',
+-- the loop ends before its next batch read, and the response completes.
 withStream :: StreamReaders -> CoordinationStore -> CredentialProof -> Text
   -> (StreamPump -> IO a) -> IO a
-withStream (StreamReaders readers) store proof supplied action = do
+withStream (StreamReaders readers closing) store proof supplied action = do
   client <- runRead store (currentClient proof) >>= either throwIO pure
   let acquire = atomically $ do
+        closed <- readTVar closing
+        when closed (throwSTM StorageUnavailable)
         counts <- readTVar readers
         let count = Map.findWithDefault 0 client counts
         when (count >= 2) (throwSTM StorageQuota)
@@ -148,7 +159,7 @@ withStream (StreamReaders readers) store proof supplied action = do
         writeTVar used True
       loop initial supplied Nothing send heartbeat
   where
-    loop initial cursor lastWrite send heartbeat = do
+    loop initial cursor lastWrite send heartbeat = readTVarIO closing >>= \closed -> unless closed $ do
       (next, written) <- withAuthorizedCatalogues store proof [Observe] $ \view _ profiles _ -> do
         current <- authorizedViewRevision view
         unless (current == initial) (throwIO ViewExpired)

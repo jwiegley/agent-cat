@@ -339,13 +339,37 @@ an ID. Partial blocks are discarded when the connection closes.
 
 A client starts with `/snapshot`, then supplies its cursor in `Last-Event-ID`
 to `/events`. `Accept: application/json` selects bounded polling through the
-same endpoint and cursor. Every batch atomically checks the retained floor
-and reads events, including batches on an open stream. Wrong-stream,
-view-invalid, expired, and future cursors require a new snapshot. Clients do
-not interpret numeric gaps in an authorization-filtered stream as corruption.
-Overview and JSON event responses publish a view-bound `oldestCursor`, the
-oldest valid resume boundary. Clients use it as supplied and never derive it
-by decrementing an event identifier.
+same endpoint and cursor. A client can also supply the cursor as the single
+query parameter `after`. A request that supplies both `after` and
+`Last-Event-ID` receives 400 `malformed-request`, even when the two values are
+equal. The snapshot cursor is the durable position at which the snapshot was
+captured, so the first event after it has the next durable position and no
+change falls between the snapshot and the events. SSE and polling from one
+cursor deliver the same events in the same order, and each event once.
+
+Every batch atomically checks the retained floor and reads events, including
+batches on an open stream. The cursor of a batch advances over every record
+that the batch scanned, including records that the credential cannot see.
+Event identifiers of an authorization-filtered stream therefore have numeric
+gaps, and clients do not interpret these gaps as corruption. A cursor of
+another stream or of a changed authorization view receives 410
+`view-expired`. A cursor below the retained floor or ahead of the stream
+receives 410 `cursor-expired`. Both require a new snapshot. Overview and JSON
+event responses publish a view-bound `oldestCursor`, the oldest valid resume
+boundary. Clients use it as supplied and never derive it by decrementing an
+event identifier.
+
+A client that loses an SSE connection reconnects with `Last-Event-ID` set to
+the identifier of its last complete block. The manager then delivers every
+later event, starting with a block that arrived only in part, and it does not
+repeat a complete block. An ordinary restart keeps the `streamId` of
+`/capabilities` and every cursor taken before the restart. At an ordinary
+shutdown, an open SSE response ends after its current block or heartbeat, and
+a new SSE request receives 503 `storage-unavailable`. The client reconnects
+after the restart with its last complete event identifier. Offline backup
+restoration rotates the stream and revokes every restored credential. A
+cursor taken before the restoration then receives 410 `view-expired`, even
+with a new credential, and the client takes a new snapshot.
 
 Refreshes are serialized per resource. An invalidation received during a
 refresh sets a dirty flag, and the resource is fetched again afterward. A

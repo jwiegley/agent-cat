@@ -40,12 +40,16 @@ import Data.Word (Word8)
 import qualified Network.HTTP.Types as HTTP
 import qualified Network.Wai as Wai
 
-newApplication :: HttpsConfiguration -> Service.Service -> IO Wai.Application
+-- | The protected application and the action that begins its ordinary
+-- shutdown. The listener runs that action after it stops accepting
+-- connections and before it joins its connection workers, so that open event
+-- streams end their responses.
+newApplication :: HttpsConfiguration -> Service.Service -> IO (Wai.Application, IO ())
 newApplication https service = do
   pages <- Pages.newPageSets
   streams <- Events.newStreamReaders
-  pure $ Transport.authenticated https (Service.serviceStore service)
-    methods (dispatch service pages streams)
+  pure (Transport.authenticated https (Service.serviceStore service)
+    methods (dispatch service pages streams), Events.closeStreams streams)
 
 -- Only implemented methods are exposed to preflight. Owners check resource
 -- existence after Transport authenticates the request.
