@@ -379,14 +379,16 @@ applyEvent snapshot = \case
         lifecycle "runtime snapshot dispatch exceeds 64 targets"
       pure occurrenceSnapshot {snapshotOccurrenceDispatch = Just (DispatchSnapshot targets True Nothing)}
   OccurrenceRedirected occurrence control target ->
-    modifyOccurrence snapshot occurrence $ \occurrenceSnapshot -> case snapshotOccurrenceDispatch occurrenceSnapshot of
-      Just dispatch
-        | dispatchOpen dispatch && target `elem` dispatchTargets dispatch ->
-            pure
-              occurrenceSnapshot
-                { snapshotOccurrenceDispatch = Just dispatch {dispatchOpen = False, dispatchRedirect = Just (control, target)}
-                }
-      _ -> lifecycle ("redirect target " <> target <> " was not reserved in an open dispatch")
+    modifyOccurrence snapshot occurrence $ \occurrenceSnapshot ->
+      let running = any ((== AttemptRunning) . snapshotAttemptState) (Map.elems (snapshotOccurrenceAttempts occurrenceSnapshot))
+          redirected dispatch = pure occurrenceSnapshot {snapshotOccurrenceDispatch = Just dispatch {dispatchOpen = False, dispatchRedirect = Just (control, target)}}
+       in case snapshotOccurrenceDispatch occurrenceSnapshot of
+            Just dispatch
+              | dispatchOpen dispatch && target `elem` dispatchTargets dispatch -> redirected dispatch
+              -- A redirect of an in-flight attempt, after the dispatch closed.
+              | not (dispatchOpen dispatch) && running && target `elem` dispatchTargets dispatch -> redirected dispatch
+            Nothing | running -> redirected (DispatchSnapshot [target] False Nothing)
+            _ -> lifecycle ("redirect target " <> target <> " was not reserved in an open dispatch or for an in-flight attempt")
   OccurrencePersonAnswerPending occurrence reference ->
     modifyOccurrence snapshot occurrence $ \occurrenceSnapshot -> do
       unless

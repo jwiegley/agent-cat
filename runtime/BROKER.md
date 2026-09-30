@@ -518,6 +518,25 @@ nothing, so its ask stays without a reply.
 - **D3.** A record whose bytes do not decode fails the operation before
   delivery. Otherwise the receiver acts on the decoding, even when the codec
   changed the value.
+- **D6.** A redirect of an attempt in flight is a runtime control, and the
+  broker only carries it. The runtime accepts `redirectOccurrence` for an
+  occurrence whose attempt is in flight when its question is not an effect and
+  the target is a live candidate that remains after the current candidate in
+  its approved fail-over chain. It rejects a redirect of an effect with the
+  message "no live re-route of an effect", and it rejects every other target.
+  Each rejection is `rejected-stale`, and the run continues. An accepted
+  redirect stops the attempt through its owner, as a run cancel stops it, so
+  the engine operations inside the attempt append nothing. The event
+  `occurrence.redirected` names the target, and the stopped attempt then ends
+  with `attempt.failed`. `brokerRequest` then fails synchronously with a message
+  that names the control, so the question has a `failure` reply. The runtime
+  memoizes nothing from the stopped attempt and ignores its late result. The
+  stopped candidate counts against the chain, and the runtime asks the chosen
+  candidate in a new `question` with a new attempt. The run log therefore holds
+  the `control`, its acknowledgement events, the `failure` of the first
+  question and the new `question` to the chosen target. A run without a live
+  redirect writes the same `events.ndjson` as before. The case `live-redirect`
+  of `test/control_probe.py` checks the redirect and its two refusals.
 
 `runPlanScoped` takes the broker of the run and a function from a `FlowScope`
 to the broker of one occurrence, and `runPlanBrokered` is `runPlanScoped` with

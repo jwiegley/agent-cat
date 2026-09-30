@@ -122,6 +122,19 @@ run log holds a `question` to that target. The effect `redirected` correlates
 with `occurrence.redirected` in `events.ndjson`. When the window ends without a
 redirect, the Runtime asks the candidates in their authored order.
 
+After the window, the Runtime also accepts a redirect of the attempt in flight
+when the question is not an effect and the target is a live candidate that
+remains after the current candidate in its approved chain. It stops the attempt
+as a run cancel stops it, and the stopped attempt ends with `attempt.failed`
+after `occurrence.redirected`. The run log holds a `failure` reply for the
+question that names the control, and a new `question` with a new attempt to the
+chosen target. The stopped candidate counts against the chain. The Runtime
+rejects a redirect of an effect in flight and a redirect to any other target,
+and the run continues. The manager offers `redirect` only while the dispatch
+window is open. A redirect of an attempt in flight therefore reaches the
+Runtime only through the machine control descriptor that `AGENT_CAT_CONTROL_FD`
+names.
+
 `RunCancelled` has no causal ControlId in the existing protocol. The manager keeps
 its terminal observation and any correlated cancellation acknowledgement, but does
 not manufacture a cancelled command effect from temporal proximity, EOF, text or

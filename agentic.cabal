@@ -48,6 +48,7 @@ extra-source-files:
   test/frontend_session_probe.py
   engine/acp/test/stub_adapter.py
   engine/acp/test/effect_hang_adapter.py
+  engine/acp/test/hold_adapter.py
   engine/acp/test/retry_adapter.py
   engine/acp/test/steer_adapter.py
   engine/acp/test/PermissionReport.hs

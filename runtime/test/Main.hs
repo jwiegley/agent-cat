@@ -200,6 +200,7 @@ contractTests = do
   expect "protocol-v2 completion retains result reference" (snapshotResult personSnapshot == Just resultRef)
   personControlTests
   steerRedirectOrderingTests
+  liveRedirectTests
   catalogueContractTests
   storeContractTests
   putStrLn "runtime contracts: descriptor, protocol, controls, snapshot, store, and shared fixtures passed"
@@ -310,6 +311,44 @@ steerRedirectOrderingTests = do
   releaseRedirect
   target <- takeMVar redirected
   expect "dispatch receives the delivered redirect target" (target == Just "deck:other")
+
+-- | A redirect of an in-flight attempt moves only a question that is not an
+-- effect, only to a live candidate of its chain, and its gate is taken by the
+-- close of the attempt even when the delivery won the race.
+liveRedirectTests :: IO ()
+liveRedirectTests = do
+  runtime <- newControlRuntime
+  let occurrence = OccurrenceId 2
+      attempt = AttemptId occurrence 0
+      redirect name target = Control (ControlId name) (Just occurrence) Nothing (RedirectOccurrence target)
+  registerControlAttempt runtime attempt Nothing
+  noGate <- openAttemptRoute runtime attempt LiveEffect
+  expect "an effect attempt has no redirect gate" (null noGate)
+  (effectAck, effectAction) <- decideRuntimeControl runtime (redirect "live-effect" "deck:other")
+  expect "a live redirect of an effect is rejected" $
+    acknowledgementState effectAck == RejectedStale
+      && acknowledgementMessage effectAck == "no live re-route of an effect"
+      && effectAction == Nothing
+  _ <- closeAttemptRoute runtime attempt
+  gate <- openAttemptRoute runtime attempt (LiveCandidates ["deck:other"])
+  expect "a live attempt that is not an effect has a redirect gate" (not (null gate))
+  (outsideAck, outsideAction) <- decideRuntimeControl runtime (redirect "live-outside" "deck:elsewhere")
+  expect "a live redirect outside the chain is rejected" $
+    acknowledgementState outsideAck == RejectedStale && outsideAction == Nothing
+  (acceptedAck, acceptedAction) <- decideRuntimeControl runtime (redirect "live-accepted" "deck:other")
+  expect "a live redirect to a remaining candidate is accepted" $
+    acknowledgementState acceptedAck == Accepted && acceptedAction == Just (ActReroute occurrence "deck:other")
+  (delivered, release) <- case acceptedAction of
+    Just action -> deliverRuntimeActionDeferred runtime (redirect "live-accepted" "deck:other") action
+    Nothing -> throwIO (userError "failed: accepted live redirect had no delivery action")
+  expect "a live redirect reaches delivered state" (acknowledgementState delivered == Delivered)
+  taken <- closeAttemptRoute runtime attempt
+  expect "closing the attempt takes the delivered redirect" $
+    fmap (\(control, target, _) -> (control, target)) taken == Just (ControlId "live-accepted", "deck:other")
+  release
+  (lateAck, _) <- decideRuntimeControl runtime (redirect "live-late" "deck:other")
+  expect "a live redirect after the close is rejected" (acknowledgementState lateAck == RejectedStale)
+  unregisterControlAttempt runtime attempt
 
 catalogueContractTests :: IO ()
 catalogueContractTests = do

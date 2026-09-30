@@ -34,6 +34,17 @@ snapshotCheckpointTests root = do
       env 2 5 (RunFailed FailureRuntime "answer refused")
     ])
   checkPrefixes "multibyte output and bounded progress histories" longHistory
+  checkPrefixes "live redirect of an in-flight attempt" liveRedirectHistory
+  liveState <- require "live redirect" (sharedFold liveRedirectHistory)
+  expect "a live redirect records its control and target" $
+    snapshotOccurrenceDispatch (snapshotOccurrences liveState Map.! occurrence)
+      == Just (DispatchSnapshot ["model@primary", "model@spare"] False (Just ("live-1", "model@spare")))
+  rejectHistory "redirect after the attempt ended" (take 4 liveRedirectHistory <>
+    [ env 1 4 (AttemptCompleted attempt "model@primary"),
+      env 1 5 (OccurrenceRedirected occurrence "live-1" "model@spare")
+    ])
+  rejectHistory "live redirect to a target outside the dispatch" (take 4 liveRedirectHistory <>
+    [env 1 4 (OccurrenceRedirected occurrence "live-1" "model@elsewhere")])
   checkLongState
   checkRefusals
   checkBounds
@@ -215,6 +226,25 @@ active = zipWith (env 1) [0 ..]
   [ RunStarted "review" "scripted",
     OccurrenceStarted occurrence "text" "consult" "model reviewer" "prompt",
     AttemptStarted attempt "scripted"
+  ]
+
+-- | A redirect of an in-flight attempt: the stopped attempt fails after the
+-- redirect, and a new attempt answers.
+liveRedirectHistory :: [Envelope]
+liveRedirectHistory = zipWith (env 1) [0 ..]
+  [ RunStarted "review" "routed",
+    OccurrenceStarted occurrence "text" "consult" "model reviewer" "prompt",
+    OccurrenceDispatchPending occurrence ["model@primary", "model@spare"],
+    AttemptStarted attempt "model@primary",
+    ControlAcknowledged "live-1" "accepted" "redirect accepted for the in-flight attempt",
+    OccurrenceRedirected occurrence "live-1" "model@spare",
+    ControlAcknowledged "live-1" "delivered" "redirect delivered to the in-flight attempt",
+    AttemptFailed attempt FailureCancelled "redirected by control live-1 to model@spare",
+    AttemptStarted (AttemptId occurrence 1) "model@spare",
+    AttemptCompleted (AttemptId occurrence 1) "model@spare",
+    OccurrenceCompleted occurrence "asked:model@spare" "answer",
+    TraceOrdered [occurrence],
+    RunCompleted 1 1
   ]
 
 run :: RunId

@@ -4209,6 +4209,34 @@ timeout bounds the steer lock hold only for ACP. Nothing bounds the steer call o
 EngineSteerer, and the attempt end now waits on it. Fix: document the bound as specific to ACP, or
 put a timeout around the steer call inside the lock.
 
+* TODO [#D] Resolve C18 fess findings in the live re-route
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-c18-reroute-fess-findings-irrf
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-30 Wed 16:25]
+:MODIFIED: [2026-09-30 Wed 16:25]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of the fess audit of Phase B part 2 subtask C18 (increment 3, live re-route of an in-flight non-effect attempt in the runtime, difference D6). Report: fess/b2-C18-r1.md in the private evidence directory.
+
+1. (medium) runtime/src/Agentic/Exec.hs (about lines 1127-1138), engine/acp/src/Agentic/Acp.hs (about lines 1570-1576). A live redirect stops the attempt with an asynchronous exception, but nothing calls cancelTurn, so the adapter keeps its prompt open until the engine shuts down. After a live redirect the run continues, so a real model keeps working on the stale turn, and a later question to the same engine in the same run could collide with it (late session/update chunks or a second session/prompt). No test covers this. Fix: send the engine turn cancel (cancelTurn or an engine-level equivalent) when AttemptRerouted stops an attempt, and add a probe step where a later question in the same run reuses the stopped engine.
+
+2. (low) runtime/src/Agentic/Exec.hs (about line 1407). A re-route counts against the fail-over budget only because the stopped candidate leaves the chain walk (preferTarget target rest). No counter exists and the candidate is not marked spent. Design section 3.4 speaks of a bounded number. Fix: record the interpretation in the design record or runtime/BROKER.md, or add an explicit re-route count.
+
+3. (low) runtime/src/Agentic/Exec.hs (about lines 1127-1160), design record section 3.4. The design says a late result of a stopped attempt is recorded as the reply to its turn. The implementation appends nothing from inside the stopped attempt, as the computed task text required. Fix: record the divergence as deferred, or reconcile the design record.
+
+4. (low) runtime/src/Agentic/Runtime/Snapshot.hs (about line 390). The branch `Nothing | running -> redirected (DispatchSnapshot [target] False Nothing)` accepts any target without validation, and no test reaches it. Fix: add a snapshot history with no dispatch-pending event, or remove the branch if the runtime cannot reach it.
+
+5. (low) cli/test/PolicyProbe.hs (about line 1595), runtime/BROKER.md (D6, last sentence). The PolicyProbe label "an active attempt cannot be redirected" is now true only when no live route is registered. BROKER.md names only the case live-redirect, while the refusals are the separate cases live-redirect-effect and live-redirect-outside. Fix: reword the label and name all three probe cases.
+
+Also deferred from the implementer limitations: the manager does not offer or admit a live redirect through /v1 yet (manager/src/Agentic/Manager/State.hs about line 707 still requires an open dispatch window).
+
 * TODO [#B] Actor flow increment 3: live re-route and asks answered by people
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -4216,7 +4244,7 @@ put a timeout around the steer call inside the lock.
 :LABELS:   ["actor-flow","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-26 Sat 23:41]
-:MODIFIED: [2026-09-26 Sat 23:41]
+:MODIFIED: [2026-09-30 Wed 16:25]
 :CREATED_BY: johnw
 :SOURCE_REPO: .
 :ORIGINAL_SIZE: 0
@@ -4245,6 +4273,20 @@ Actor-flow increment 3, live re-route and asks answered by people (6 to 9 engine
     "created_by": "johnw",
     "metadata": "{}",
     "thread_id": ""
+  }
+]
+#+end_src
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 427,
+    "issue_id": "acat-c18n",
+    "author": "johnw",
+    "text": "Subtask C18 (Phase B part 2) implements difference D6 in the runtime: a redirect of an in-flight attempt whose question is not an effect, to a live candidate that remains in its approved fail-over chain, stops the attempt through its owner, makes flowBroker append a failure for the current question naming the control, memoizes nothing from the stopped attempt, and asks the chosen candidate in a new question with a new attempt. A live redirect of an effect or to a target outside the chain is rejected with RejectedStale and the run continues. test/control_probe.py gains the cases live-redirect, live-redirect-effect and live-redirect-outside. Checks passed: Werror build, control_probe, person_control_probe, flow_probe, progress_probe (golden unchanged), runtime-contract-test, the ACP suite, DataBroker nine fields, make -C doc check and the Phase A journey at N8. The /v1 path for a live redirect and the asks answered by people remain open. Evidence: B2/C18/impl-r1 in the private resume-20260923 evidence directory. Fess findings: acat-c18-reroute-fess-findings-irrf.",
+    "created_at": "2026-09-30T23:25:50Z"
   }
 ]
 #+end_src

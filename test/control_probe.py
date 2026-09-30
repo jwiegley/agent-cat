@@ -308,6 +308,152 @@ def routed_control_probe(choice):
         shutil.rmtree(root, ignore_errors=True)
 
 
+def live_redirect_probe(case):
+    """Redirect an in-flight attempt: accepted for a question that is not an
+    effect and a target in its chain, refused otherwise."""
+    root = tempfile.mkdtemp(prefix=f"agentic-{case}-")
+    control_read, control_write = os.pipe()
+    hold = os.path.join(ADAPTER_DIR, "hold_adapter.py")
+    stub = os.path.join(ADAPTER_DIR, "stub_adapter.py")
+    spare = os.path.join(root, "spare-adapter")
+    with open(spare, "w", encoding="utf-8") as wrapper:
+        wrapper.write(f"#!{sys.executable}\nimport os\n"
+                      f"os.execv({sys.executable!r}, [{sys.executable!r}, {stub!r}])\n")
+    os.chmod(spare, 0o700)
+    workflow = "controlled-effect" if case == "live-redirect-effect" else "controlled"
+    # The redirected attempt holds its turn until it is stopped. A refused
+    # redirect leaves the attempt to answer after three seconds.
+    seconds = "3600" if case == "live-redirect" else "3"
+    process = None
+    controls = None
+    try:
+        env = clean_env()
+        env.update({
+            "AGENT_CAT_CONTROL_FD": str(control_read),
+            "AGENT_CAT_RUN_STORE": os.path.join(root, "run"),
+        })
+        process = subprocess.Popen(
+            [
+                CONTROL_BINARY, "machine", f"{case}-run", workflow,
+                "--engine", "acp", "--adapter", sys.executable,
+                "--adapter-arg", hold, "--adapter-arg", seconds,
+                "--route", f"spare=acp:{spare}", "--timeout", "10000",
+            ],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, bufsize=1, pass_fds=(control_read,), env=env,
+        )
+        os.close(control_read)
+        controls = os.fdopen(control_write, "w", encoding="utf-8")
+        assert process.stdin is not None and process.stdout is not None and process.stderr is not None
+        process.stdin.write("CONTROL-STDIN\n")
+        process.stdin.close()
+        lines = event_lines(process.stdout)
+        events = []
+        targets = None
+        sent = False
+        deadline = time.monotonic() + 60
+
+        def send(control):
+            controls.write(json.dumps(control, separators=(",", ":")) + "\n")
+            controls.flush()
+
+        while True:
+            try:
+                line = lines.get(timeout=1)
+            except queue.Empty:
+                if process.poll() is not None:
+                    break
+                if time.monotonic() >= deadline:
+                    raise AssertionError(f"{case} machine timed out after events: {events!r}")
+                continue
+            if not line:
+                break
+            event = json.loads(line)["event"]
+            events.append(event)
+            if event["type"] == "occurrence.dispatch-pending":
+                # Close the dispatch window at once on the first candidate, so
+                # the attempt starts without the 30-second wait.
+                targets = event["targets"]
+                send({
+                    "controlId": "live-window",
+                    "expectedOccurrenceId": event["occurrenceId"],
+                    "expectedAttemptId": None,
+                    "command": {"type": "redirectOccurrence", "target": targets[0]},
+                })
+            elif event["type"] == "attempt.started" and not sent:
+                assert targets is not None and len(targets) == 2, events
+                time.sleep(0.2)
+                target = "model controlled@elsewhere" if case == "live-redirect-outside" else targets[-1]
+                send({
+                    "controlId": "live-redirect",
+                    "expectedOccurrenceId": event["occurrenceId"],
+                    "expectedAttemptId": None,
+                    "command": {"type": "redirectOccurrence", "target": target},
+                })
+                sent = True
+        code = process.wait(timeout=10)
+        stderr = process.stderr.read()
+        assert code == 0 and sent, (case, code, stderr, events)
+        assert any(event["type"] == "run.completed" for event in events), events
+        acks = [event["state"] for event in events if event["type"] == "control.ack" and event["controlId"] == "live-redirect"]
+        attempts = [event for event in events if event["type"].startswith("attempt.") and event["type"] in ("attempt.started", "attempt.completed", "attempt.failed")]
+        completed = next(event for event in events if event["type"] == "occurrence.completed")
+        if case == "live-redirect":
+            assert acks == ["accepted", "delivered"], (acks, events)
+            kinds = [event["type"] for event in events]
+            redirected = [index for index, event in enumerate(events)
+                          if event["type"] == "occurrence.redirected" and event["controlId"] == "live-redirect"]
+            assert len(redirected) == 1 and events[redirected[0]]["target"] == targets[-1], events
+            first_end = next(index for index, event in enumerate(events)
+                             if event["type"] in ("attempt.completed", "attempt.failed"))
+            assert redirected[0] < first_end and kinds[first_end] == "attempt.failed", events
+            assert [event["type"] for event in attempts] == ["attempt.started", "attempt.failed", "attempt.started", "attempt.completed"], attempts
+            assert "live-redirect" in attempts[1]["message"], attempts
+            assert completed["source"] == f"asked:{targets[-1]}", events
+            flow_records = live_redirect_flow(root)
+            controls_seen = [record["about"].get("command") for record in flow_records if record["schema"] == "control"]
+            assert controls_seen == ["live-window", "live-redirect"], controls_seen
+            questions = [(position, record) for position, record in enumerate(flow_records) if record["schema"] == "question"]
+            assert [record["to"]["to"]["model"] for _, record in questions] == [targets[0], targets[-1]], questions
+            failures = [record for record in flow_records
+                        if record["schema"] == "failure" and record.get("replyTo") == questions[0][1]["position"]]
+            assert len(failures) == 1 and "live-redirect" in json.dumps(failures[0]), failures
+            acknowledged = [record for record in flow_records if record["schema"] == "event"
+                            and record["event"]["line"]["event"]["type"] == "control.ack"
+                            and record["event"]["line"]["event"]["controlId"] == "live-redirect"]
+            assert len(acknowledged) == 2, flow_records
+            assert questions[0][0] < flow_records.index(failures[0]) < questions[1][0], flow_records
+        else:
+            reason = "no live re-route of an effect" if case == "live-redirect-effect" else "not a live candidate"
+            messages = [event["message"] for event in events if event["type"] == "control.ack" and event["controlId"] == "live-redirect"]
+            assert acks == ["rejected-stale"] and reason in messages[0], (messages, events)
+            assert not any(event["type"] == "occurrence.redirected" and event["controlId"] == "live-redirect" for event in events), events
+            assert [event["type"] for event in attempts] == ["attempt.started", "attempt.completed"], attempts
+            assert completed["source"] == f"asked:{targets[0]}", events
+    finally:
+        if controls is not None:
+            controls.close()
+        else:
+            os.close(control_write)
+        if process is not None and process.poll() is None:
+            process.kill()
+            process.wait()
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def live_redirect_flow(root):
+    """The records that "agentic-run flow" prints for the run log under root."""
+    logs = [os.path.join(directory, "flow.ndjson") for directory, _, files in os.walk(root) if "flow.ndjson" in files]
+    assert len(logs) == 1, logs
+    result = subprocess.run([BINARY, "flow", os.path.dirname(logs[0])], capture_output=True, text=True, timeout=120)
+    assert result.returncode == 0, result.stderr
+    lines = [json.loads(line) for line in result.stdout.splitlines()]
+    assert lines and "summary" in lines[-1], lines[-1:]
+    summary = lines[-1]["summary"]
+    assert summary["verified"] and not summary["problems"], summary
+    return lines[:-1]
+
+
 def oversize_probe():
     root = tempfile.mkdtemp(prefix="agentic-oversize-")
     try:
@@ -334,6 +480,9 @@ def main():
     blocked_stdin_control_probe()
     routed_control_probe("redirect")
     routed_control_probe("failover")
+    live_redirect_probe("live-redirect")
+    live_redirect_probe("live-redirect-effect")
+    live_redirect_probe("live-redirect-outside")
     steer = run_probe(
         "steer",
         "steer_adapter.py",
@@ -382,7 +531,7 @@ def main():
     assert any(event["type"] == "occurrence.failed" for event in abandon)
     assert any(event["type"] == "control.ack" and event["controlId"] == "abandon-probe" and event["state"] == "delivered" for event in abandon)
     oversize_probe()
-    print("control probe: stdin, EOF, cancel, steer, retry/failover/abandon, redirect, and frame refusal passed")
+    print("control probe: stdin, EOF, cancel, steer, retry/failover/abandon, redirect, live redirect, and frame refusal passed")
 
 
 if __name__ == "__main__":

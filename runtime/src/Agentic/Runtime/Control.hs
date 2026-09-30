@@ -12,6 +12,7 @@ module Agentic.Runtime.Control
     ControlCapabilities (..),
     ControlSnapshot (..),
     ControlAction (..),
+    LiveRoute (..),
     ControlRuntime,
     AttemptSteerer,
     newControlRuntime,
@@ -23,6 +24,8 @@ module Agentic.Runtime.Control
     waitForRuntimePersonAnswer,
     registerRuntimeRedirects,
     awaitRuntimeRedirect,
+    openAttemptRoute,
+    closeAttemptRoute,
     controlRuntimeSnapshot,
     registeredAttemptSteerability,
     runtimeOccurrenceReplayable,
@@ -147,8 +150,23 @@ data ControlSnapshot = ControlSnapshot
     recoverableOccurrences :: ![OccurrenceId],
     answerablePersonOccurrences :: ![OccurrenceId],
     recoveryOptions :: !(Map OccurrenceId [RecoveryControl]),
-    reservedRedirects :: !(Map OccurrenceId [Text])
+    reservedRedirects :: !(Map OccurrenceId [Text]),
+    -- | The route of each occurrence whose attempt is in flight: an effect,
+    -- which no redirect moves, or the targets of the live candidates that
+    -- remain in its approved fail-over chain.
+    liveRoutes :: !(Map OccurrenceId LiveRoute)
   }
+  deriving (Eq, Show)
+
+-- | What a redirect of an in-flight attempt may do.
+data LiveRoute
+  = -- | The attempt asks an effect, which may already execute. No redirect
+    -- moves it.
+    LiveEffect
+  | -- | The attempt asks a question that is not an effect. A redirect may move
+    -- it to one of these targets, the live candidates that remain after it in
+    -- its approved fail-over chain.
+    LiveCandidates ![Text]
   deriving (Eq, Show)
 
 data ControlAction
@@ -156,6 +174,8 @@ data ControlAction
   | ActSteer !AttemptId !SteeringTiming !Text
   | ActRecover !OccurrenceId !RecoveryControl
   | ActRedirect !OccurrenceId !Text
+  | -- | Redirect the in-flight attempt of an occurrence to a live candidate.
+    ActReroute !OccurrenceId !Text
   | ActAnswerPerson !OccurrenceId !Value
   deriving (Eq, Show)
 
@@ -180,6 +200,12 @@ data LiveControlState = LiveControlState
     -- fills after it emits its events. The occurrence waits for that cell
     -- before it dispatches, so @occurrence.redirected@ precedes the attempt.
     liveRedirects :: !(Map OccurrenceId (MVar (Text, MVar ()))),
+    -- | The redirect gate of the in-flight attempt of an occurrence that is not
+    -- an effect. A delivered redirect carries its control, its target and a
+    -- cell that the delivery fills after it emits its events. The attempt
+    -- waits for that cell before it emits its end, so @occurrence.redirected@
+    -- precedes the end of the stopped attempt.
+    liveReroutes :: !(Map OccurrenceId (AttemptId, MVar (ControlId, Text, MVar ()))),
     livePersonAnswers :: !(Map OccurrenceId PersonAnswerGate),
     liveNonReplayable :: !(Map OccurrenceId ()),
     liveAcks :: !(Map ControlId ControlAck)
@@ -194,7 +220,7 @@ newControlRuntimeFor :: Int -> IO ControlRuntime
 newControlRuntimeFor version
   | version `notElem` supportedProtocolVersions = ioError (userError "unsupported control observation version")
   | otherwise = ControlRuntime <$> newMVar
-      (LiveControlState (version == latestProtocolVersion) emptyControlSnapshot Map.empty Map.empty Map.empty Map.empty Map.empty Map.empty Map.empty)
+      (LiveControlState (version == latestProtocolVersion) emptyControlSnapshot Map.empty Map.empty Map.empty Map.empty Map.empty Map.empty Map.empty Map.empty)
 
 registerControlAttempt :: ControlRuntime -> AttemptId -> Maybe AttemptSteerer -> IO ()
 registerControlAttempt (ControlRuntime state) attempt steerer = do
@@ -340,6 +366,43 @@ awaitRuntimeRedirect (ControlRuntime state) occurrence = do
         Nothing -> pure Nothing
         Just (target, emitted) -> Just target <$ takeMVar emitted
 
+-- | Open the route of an in-flight attempt. The runtime calls it after it
+-- registers the attempt and before the attempt asks. For a question that is not
+-- an effect the result is the gate that a delivered redirect fills. An effect
+-- has no gate.
+openAttemptRoute :: ControlRuntime -> AttemptId -> LiveRoute -> IO (Maybe (MVar (ControlId, Text, MVar ())))
+openAttemptRoute (ControlRuntime state) attempt route = do
+  gate <- newEmptyMVar
+  modifyMVar_ state $ \live ->
+    pure
+      live
+        { liveSnapshot =
+            (liveSnapshot live) {liveRoutes = Map.insert occurrence route (liveRoutes (liveSnapshot live))},
+          liveReroutes = case route of
+            LiveEffect -> liveReroutes live
+            LiveCandidates _ -> Map.insert occurrence (attempt, gate) (liveReroutes live)
+        }
+  pure $ case route of
+    LiveEffect -> Nothing
+    LiveCandidates _ -> Just gate
+  where
+    occurrence = attemptOccurrence attempt
+
+-- | Close the route of an attempt before the attempt emits its end. Closing it
+-- under the state lock also takes a redirect that was delivered before the
+-- close, so a delivered redirect always stops its attempt, and a redirect after
+-- the close finds no gate.
+closeAttemptRoute :: ControlRuntime -> AttemptId -> IO (Maybe (ControlId, Text, MVar ()))
+closeAttemptRoute (ControlRuntime state) attempt =
+  modifyMVar state $ \live -> case Map.lookup occurrence (liveReroutes live) of
+    Just (owner, gate) | owner == attempt -> do
+      delivered <- tryTakeMVar gate
+      pure (forget live {liveReroutes = Map.delete occurrence (liveReroutes live)}, delivered)
+    _ -> pure (forget live, Nothing)
+  where
+    occurrence = attemptOccurrence attempt
+    forget live = live {liveSnapshot = (liveSnapshot live) {liveRoutes = Map.delete occurrence (liveRoutes (liveSnapshot live))}}
+
 runtimeOccurrenceReplayable :: ControlRuntime -> OccurrenceId -> IO Bool
 runtimeOccurrenceReplayable (ControlRuntime state) occurrence =
   Map.notMember occurrence . liveNonReplayable <$> readMVar state
@@ -363,7 +426,11 @@ decideRuntimeControl (ControlRuntime state) control =
             case (expectedOccurrence control, recoverableOccurrences (liveSnapshot live)) of
               (Just occurrence, first : _) -> occurrence == first && Map.member occurrence (liveRetries live)
               _ -> False
-          redirectable = maybe False (`Map.member` liveRedirects live) (expectedOccurrence control)
+          redirectable =
+            maybe
+              False
+              (\occurrence -> Map.member occurrence (liveRedirects live) || Map.member occurrence (liveReroutes live))
+              (expectedOccurrence control)
           answerable =
             case (expectedOccurrence control, answerablePersonOccurrences (liveSnapshot live)) of
               (Just occurrence, first : _) -> occurrence == first && Map.member occurrence (livePersonAnswers live)
@@ -409,6 +476,15 @@ deliverRuntimeActionDeferred runtime@(ControlRuntime state) control action = do
       pure $ case delivered of
         Nothing -> (ControlAck cid RejectedStale "occurrence is no longer waiting for redirect", pure ())
         Just True -> (ControlAck cid Delivered "redirect delivered before attempt dispatch", putMVar emitted ())
+        Just False -> (ControlAck cid ControlFailed "redirect was already delivered", pure ())
+    ActReroute occurrence target -> do
+      emitted <- newEmptyMVar
+      delivered <- modifyMVar state $ \live -> case Map.lookup occurrence (liveReroutes live) of
+        Nothing -> pure (live, Nothing)
+        Just (_, gate) -> (,) live . Just <$> tryPutMVar gate (cid, target, emitted)
+      pure $ case delivered of
+        Nothing -> (ControlAck cid RejectedStale "the attempt of the occurrence is no longer in flight", pure ())
+        Just True -> (ControlAck cid Delivered "redirect delivered to the in-flight attempt", putMVar emitted ())
         Just False -> (ControlAck cid ControlFailed "redirect was already delivered", pure ())
     ActAnswerPerson occurrence answer -> do
       pending <- Map.lookup occurrence . livePersonAnswers <$> readMVar state
@@ -462,7 +538,7 @@ joinMaybe (Just value) = value
 joinMaybe Nothing = Nothing
 
 emptyControlSnapshot :: ControlSnapshot
-emptyControlSnapshot = ControlSnapshot False False [] [] [] Map.empty Map.empty
+emptyControlSnapshot = ControlSnapshot False False [] [] [] Map.empty Map.empty Map.empty
 -- | Pure stale/capability/scheduler-boundary policy.  Delivery is performed by
 -- the runtime after this decision and receives a later acknowledgement.
 decideControl :: ControlCapabilities -> ControlSnapshot -> Control -> (ControlSnapshot, ControlAck, Maybe ControlAction)
@@ -480,7 +556,15 @@ decideControl capabilities snapshot control = case controlCommand control of
   ChooseRecovery recovery -> recover recovery
   RedirectOccurrence target -> withOccurrence $ \occurrence ->
     if any ((== occurrence) . attemptOccurrence) (activeAttempts snapshot)
-      then reject "redirect is allowed only before an attempt is dispatched"
+      then case Map.lookup occurrence (liveRoutes snapshot) of
+        Just LiveEffect -> reject "no live re-route of an effect"
+        Just (LiveCandidates targets)
+          | target `notElem` targets ->
+              reject "redirect target is not a live candidate that remains in the approved fail-over chain"
+          | canRedirect capabilities ->
+              accept snapshot "redirect accepted for the in-flight attempt" (Just (ActReroute occurrence target))
+          | otherwise -> unsupported "runtime does not support redirect"
+        Nothing -> reject "redirect is allowed only before dispatch or for an in-flight attempt that can be redirected"
       else
         if target `notElem` Map.findWithDefault [] occurrence (reservedRedirects snapshot)
           then reject "redirect target was not reserved by the scheduler"

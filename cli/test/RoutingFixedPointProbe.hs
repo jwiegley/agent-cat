@@ -121,6 +121,7 @@ registry =
           ("cyclic", row cyclicExample),
           ("controlled", row controlledExample),
           ("controlled-single", row controlledSingleExample),
+          ("controlled-effect", row controlledEffectExample),
           ("person-controlled", row personControlledExample),
           ("typed-person", row (Needs $ taking (input "input" :> noInputs) typedPersonProgram)),
           ("lineage-typed", row (Needs $ taking (input "input" :> noInputs) lineageTypedProgram)),
@@ -218,6 +219,15 @@ controlledSingleProgram :: Text -> Program
 controlledSingleProgram body = workflow W.do
   _approved <- confirm (model "controlled" `servedBy` "primary") [wf|Apply this patch? {body}|]
   stop
+
+-- | An effect with a fail-over chain. No redirect moves its attempt in flight.
+controlledEffectExample :: Example
+controlledEffectExample =
+  Needs $ taking (stdinInput :> noInputs) controlledEffectProgram
+
+controlledEffectProgram :: Text -> Program
+controlledEffectProgram body = workflow W.do
+  ask_ (model "controlled" `servedBy` "primary" `fallingBackTo` "spare") [wf|Apply this patch? {body}|]
 
 personControlledExample :: Example
 personControlledExample =

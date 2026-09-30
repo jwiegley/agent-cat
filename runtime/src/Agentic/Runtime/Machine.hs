@@ -332,6 +332,9 @@ withBufferedControlInputBrokered broker version handle initial originalSink runt
             ActRedirect occurrence target
               | acknowledgementState delivered == Delivered ->
                   sink (OccurrenceRedirected occurrence (controlIdText (controlId control)) target)
+            ActReroute occurrence target
+              | acknowledgementState delivered == Delivered ->
+                  sink (OccurrenceRedirected occurrence (controlIdText (controlId control)) target)
             _ -> pure ()
           sink (ackEventFor version control delivered)
           afterAcknowledgement

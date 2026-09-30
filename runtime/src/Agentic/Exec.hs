@@ -212,8 +212,12 @@ import Agentic.Runtime.Flow (Actor (Model, ToolActor), FlowScope (flowScopeAnswe
 import Agentic.Runtime.Control
   ( AttemptSteerer,
     awaitRuntimeRedirect,
+    closeAttemptRoute,
     closeAttemptSteering,
+    ControlId,
     ControlRuntime,
+    LiveRoute (LiveCandidates, LiveEffect),
+    openAttemptRoute,
     RecoveryControl (RecoveryAbandon, RecoveryFailOver, RecoveryRetry),
     SteeringTiming (InterruptNow, NextBoundary),
     controlRuntimeSnapshot,
@@ -264,7 +268,8 @@ import Agentic.Planning
     answerJson,
     questionJson,
   )
-import Control.Concurrent (ThreadId, forkFinally, killThread)
+import Control.Concurrent (ThreadId, forkFinally, forkIOWithUnmask, killThread, myThreadId, throwTo)
+import Control.Concurrent.MVar (readMVar, takeMVar)
 import Data.Aeson (Value)
 import Control.Concurrent.STM
   ( STM,
@@ -290,6 +295,7 @@ import Control.Exception
     asyncExceptionToException,
     bracket_,
     catch,
+    finally,
     AsyncException (ThreadKilled),
     SomeAsyncException,
     SomeException,
@@ -298,8 +304,9 @@ import Control.Exception
     onException,
     throwIO,
     try,
+    uninterruptibleMask_,
   )
-import Control.Monad (forM_, unless, void, when)
+import Control.Monad (filterM, forM_, unless, void, when)
 import Data.Foldable (traverse_)
 import Data.IORef (writeIORef)
 import Data.IntSet (IntSet)
@@ -334,7 +341,10 @@ data AttemptContext = AttemptContext
     attemptBroker :: !DataBroker,
     -- | The flow scope of the occurrence, whose answer-source cell names the
     -- control that supplied a local person answer.
-    attemptFlowScope :: !FlowScope
+    attemptFlowScope :: !FlowScope,
+    -- | What a redirect of the attempt in flight may do. The chain walk sets it
+    -- for each candidate that it dispatches.
+    attemptLiveRoute :: !(Maybe LiveRoute)
   }
 
 -- | @Oracle IO@ plus the stateful lane and an attempt-aware realization path.
@@ -1046,7 +1056,8 @@ newAttemptContext scheduler occurrence epoch = do
         attemptStoreQuestion =
           persistenceStoreQuestion (schedulerPersistence scheduler) occurrence,
         attemptBroker = schedulerScopedBroker scheduler scope,
-        attemptFlowScope = scope
+        attemptFlowScope = scope,
+        attemptLiveRoute = Nothing
       }
 
 withAttemptSteering :: AttemptContext -> AttemptSteerer -> AttemptContext
@@ -1107,27 +1118,82 @@ attemptLog context = brokerLog (attemptBroker context)
 withPhysicalAttempt :: AttemptContext -> Text -> (AttemptId -> IO a) -> IO a
 withPhysicalAttempt context target action = mask $ \restore -> do
   attempt <- nextAttemptId context
-  let run = do
+  let run route = do
         attemptEvents context (AttemptStarted attempt target)
         forM_ (attemptControlRuntime context) $ \controls -> do
           support <- registeredAttemptSteerability controls attempt
           forM_ support (attemptEvents context . AttemptControlAvailability attempt)
-        outcome <- try (restore (action attempt))
+        outcome <- case route of
+          Nothing -> try (restore (action attempt))
+          Just (_, gate) -> do
+            -- A delivered redirect stops the attempt through its owner, as a
+            -- run cancel stops it, so the engine turn runs its cleanup.
+            owner <- myThreadId
+            watcher <- forkIOWithUnmask $ \unmask -> unmask $ do
+              (control, redirectTarget, _) <- readMVar gate
+              throwTo owner (AttemptRerouted control redirectTarget)
+            result <- try (restore (action attempt))
+            uninterruptibleMask_ (killThread watcher)
+            pure result
+        redirected <- maybe (pure Nothing) (\(controls, _) -> closeAttemptRoute controls attempt) route
         -- A steer delivery in progress emits its events before this end.
         forM_ (attemptControlRuntime context) (`closeAttemptSteering` attempt)
-        case outcome of
-          Right answer -> attemptEvents context (AttemptCompleted attempt target) >> pure answer
-          Left (e :: SomeException) -> do
-            unless (observerFailed e) $
-              attemptEvents context (AttemptFailed attempt (failureClassOf e) (failureMessage e))
-            throwIO e
+        case (outcome, redirected) of
+          (Left e, _)
+            | cancelledOtherwise e -> failed e
+          (_, Just (control, redirectTarget, emitted)) -> do
+            -- The delivery emits @occurrence.redirected@ before this end.
+            takeMVar emitted
+            failed (toException (AttemptRerouted control redirectTarget))
+          (Right answer, Nothing) -> attemptEvents context (AttemptCompleted attempt target) >> pure answer
+          (Left e, Nothing) -> failed e
+      failed :: SomeException -> IO b
+      failed e = do
+        unless (observerFailed e) $
+          attemptEvents context (AttemptFailed attempt (failureClassOf e) (failureMessage e))
+        throwIO e
+      -- An asynchronous exception other than a redirect of this attempt, such
+      -- as a run cancel, keeps its own meaning.
+      cancelledOtherwise e =
+        isJust (fromException e :: Maybe SomeAsyncException)
+          && not (isJust (fromException e :: Maybe AttemptRerouted))
   case attemptControlRuntime context of
-    Nothing -> run
+    Nothing -> run Nothing
     Just controls ->
       bracket_
         (registerControlAttempt controls attempt (attemptSteerer context))
         (unregisterControlAttempt controls attempt)
-        run
+        ( case attemptLiveRoute context of
+            Nothing -> run Nothing
+            Just route -> do
+              gate <- openAttemptRoute controls attempt route
+              run ((,) controls <$> gate) `finally` closeAttemptRoute controls attempt
+        )
+
+-- | The stop of an attempt by a delivered redirect. It reaches the attempt as
+-- an asynchronous exception, so the engine turn stops as a run cancel stops it,
+-- and every broker operation inside the attempt appends nothing.
+data AttemptRerouted = AttemptRerouted !ControlId !Text
+
+instance Show AttemptRerouted where
+  show (AttemptRerouted control target) = T.unpack (redirectedMessage control target)
+
+instance Exception AttemptRerouted where
+  toException = asyncExceptionToException
+  fromException = asyncExceptionFromException
+
+-- | The failure of a question whose attempt a redirect stopped. It is
+-- synchronous, so the broker of the occurrence appends it as the failure of the
+-- question, and the chain walk asks the chosen candidate next.
+data LiveRedirected = LiveRedirected !ControlId !Text
+
+instance Show LiveRedirected where
+  show (LiveRedirected control target) = T.unpack (redirectedMessage control target)
+
+instance Exception LiveRedirected
+
+redirectedMessage :: ControlId -> Text -> Text
+redirectedMessage control target = "redirected by control " <> controlIdText control <> " to " <> target
 
 emitAttemptOutput :: AttemptContext -> AttemptId -> Text -> IO ()
 emitAttemptOutput context attempt chunk = attemptEvents context (AttemptOutput attempt chunk)
@@ -1307,7 +1373,17 @@ askOrMemo scheduler w ch context epoch c q = do
       if not available
         then chainLog ch (spentSkip qi) >> go dispatch rest
         else do
-          let controlledContext = context {attemptFailoverAvailable = isJust <$> nextLive scheduler rest}
+          route <-
+            if intentIsEffect (reqIntent q)
+              then pure LiveEffect
+              else do
+                live <- atomically (filterM (candidateAvailable scheduler) rest)
+                pure (LiveCandidates (filter (/= requestTarget qi) (nub (map requestTarget live))))
+          let controlledContext =
+                context
+                  { attemptFailoverAvailable = isJust <$> nextLive scheduler rest,
+                    attemptLiveRoute = Just route
+                  }
           outcome <- try (dispatch controlledContext qi) ::
             IO (Either SomeException (El c, AnswerSource c))
           case outcome of
@@ -1320,6 +1396,15 @@ askOrMemo scheduler w ch context epoch c q = do
             Right result -> pure result
             Left e
               | Just (_ :: SomeAsyncException) <- fromException e -> throwIO e
+              -- A redirect of the attempt in flight: the stopped candidate
+              -- counts against the chain, and the chosen one is asked next in a
+              -- new question.
+              | Just (LiveRedirected control target) <- fromException e -> do
+                  chainLog ch $
+                    fromMaybe (addresseeWord (qAddressee (reqQuestion qi))) (modelOf qi)
+                      <> ": "
+                      <> redirectedMessage control target
+                  go dispatch (preferTarget target rest)
               | otherwise -> case fromException e of
                   Nothing -> throwIO e
                   Just tge -> do
@@ -1336,7 +1421,7 @@ askOrMemo scheduler w ch context epoch c q = do
                       Nothing -> throwIO (tgeFinal tge)
 
     dispatchReusable attempt dispatched = do
-      answer <- dispatchAttempt w attempt c dispatched
+      answer <- brokerRequest (attemptBroker attempt) (redirectable attempt) c dispatched
       pure (answer, AnswerAsked (reqQuestion dispatched))
 
     dispatchEffect attempt dispatched = do
@@ -1349,6 +1434,12 @@ askOrMemo scheduler w ch context epoch c q = do
         question
         (answerJson c answer)
       pure (answer, AnswerAsked (reqQuestion dispatched))
+
+    -- A redirect that stopped the attempt fails the question synchronously, so
+    -- the broker appends a failure for it that names the control.
+    redirectable attempt code request =
+      worldAskAttemptIO w attempt code request
+        `catch` \(AttemptRerouted control target) -> throwIO (LiveRedirected control target)
 
     spentSkip qi =
       fromMaybe (addresseeWord (qAddressee (reqQuestion qi))) (modelOf qi)
