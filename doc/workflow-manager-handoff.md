@@ -245,13 +245,14 @@ follow-up item, `acat-phase-b1-review-followups-dk1v`.
   refuses with 429 `storage-quota`. A total deadline of 300 seconds aborts
   a response at its next write and returns its place. The `pages` mode of
   `manager/test/service_http.py` has a two-client download case.
-- Medium, not filed. `GET /v1/requests` and `GET /v1/runs` select every
-  request and run of the authorized profiles with no row bound. The query
-  builds one `json_group_array` over all rows, and the service materializes
-  each member before it pages. Only the 5-second timeout and the 64 MiB
-  aggregate bound limit this work. The disposition is a bounded id query
-  that refuses with `view-too-large` before materialization, or keyset
-  pages, with the bound stated in `doc/api/README.md`.
+- Medium, resolved by Phase B part 2 subtask C6. `GET /v1/requests` and
+  `GET /v1/runs` now read their members in keyset windows of at most 1024
+  identifiers. A page set holds only the pages of its current window, and
+  the page after the last page of a window builds the next window and
+  renews the set. `page.totalItems` is a count taken at set creation. The
+  overview lists and the decision collection refuse with `view-too-large`
+  above 1024 live items. `doc/api/README.md` states the windows. The open
+  C6 audit findings are in `acat-c6-keyset-windows-fess-findings-7ufp`.
 - Medium, not filed. The service binds no legacy retention root, so
   `/v1/runs` lists no legacy history entry. Only the native
   `manager-history-check` shows the history read path. WM-025 stays open

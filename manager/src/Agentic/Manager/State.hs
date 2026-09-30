@@ -428,27 +428,36 @@ controlSurfaceBorrowed store proof association live = do
 type DecisionRow = (Text,Text,Text,Text,Text,Text)
 pendingDecisions :: RunAssociation -> Transaction [DecisionRow]
 pendingDecisions association = do
-  rows <- query "SELECT id,occurrence_id,generation,revision,kind,state FROM decisions WHERE run_id=? AND state IN ('pending','submitting') ORDER BY length(observed_sequence),observed_sequence"
-    [text(associationRun association)]
+  rows <- query ("SELECT id,occurrence_id,generation,revision,kind,state " <> pendingQueue) [text(associationRun association)]
   mapM (\row -> case row of
     [SQL.SQLText i,SQL.SQLText o,SQL.SQLText g,SQL.SQLText r,SQL.SQLText k,SQL.SQLText s] -> pure(i,o,g,r,k,s)
     _ -> refuseTransaction StoreIntegrity) rows
 
--- | The pending FIFO queue of one run, in per-run opening order.
-decisionQueueIds :: RunAssociation -> Transaction [Text]
-decisionQueueIds association = map (\(ident,_,_,_,_,_) -> ident) <$> pendingDecisions association
+-- The pending decisions of one run, in per-run opening order.
+pendingQueue :: Text
+pendingQueue = "FROM decisions WHERE run_id=? AND state IN ('pending','submitting') ORDER BY length(observed_sequence),observed_sequence"
+
+-- | At most the given number of the first identifiers of the pending FIFO
+-- queue of one run, in per-run opening order.
+decisionQueueIds :: Int -> RunAssociation -> Transaction [Text]
+decisionQueueIds bound association = do
+  rows <- query ("SELECT id " <> pendingQueue <> " LIMIT ?") [text (associationRun association), SQL.SQLInteger (fromIntegral bound)]
+  mapM (\row -> case row of
+    [SQL.SQLText ident] | Command.validId ident -> pure ident
+    _ -> refuseTransaction StoreIntegrity) rows
 
 -- A pending decision that no earlier pending decision of its run precedes.
 pendingHeadCondition :: Text
 pendingHeadCondition = "d.state IN ('pending','submitting') AND NOT EXISTS(SELECT 1 FROM decisions earlier WHERE earlier.run_id=d.run_id AND earlier.state IN ('pending','submitting') AND (length(earlier.observed_sequence)<length(d.observed_sequence) OR (length(earlier.observed_sequence)=length(d.observed_sequence) AND earlier.observed_sequence<d.observed_sequence)))"
 
--- | The pending run heads of the given public profiles, ordered by manager
--- opening observation, never by native sequences across runs.
-decisionHeadIds :: [Text] -> Transaction [Text]
-decisionHeadIds profiles = do
+-- | At most the given number of the first pending run heads of the given
+-- public profiles, ordered by manager opening observation, never by native
+-- sequences across runs.
+decisionHeadIds :: Int -> [Text] -> Transaction [Text]
+decisionHeadIds bound profiles = do
   rows <- query ("SELECT d.id FROM decisions d JOIN runs r ON r.id=d.run_id WHERE " <> pendingHeadCondition
-    <> " AND r.profile_id IN (SELECT value FROM json_each(?)) ORDER BY length(d.observed_order),d.observed_order,d.id")
-    [text (TE.decodeUtf8 (encoded profiles))]
+    <> " AND r.profile_id IN (SELECT value FROM json_each(?)) ORDER BY length(d.observed_order),d.observed_order,d.id LIMIT ?")
+    [text (TE.decodeUtf8 (encoded profiles)), SQL.SQLInteger (fromIntegral bound)]
   mapM (\row -> case row of
     [SQL.SQLText ident] | Command.validId ident -> pure ident
     _ -> refuseTransaction StoreIntegrity) rows

@@ -70,6 +70,15 @@ materialization has an allowance of five seconds and a limit of 64 MiB, and
 `Pages` divides the result into page sets. `Transport.respondBytes` returns
 every loan before the first network write.
 
+Each identifier query has a bound of `Overview.windowSize`, 1024
+identifiers. The overview lists and the decision collection hold only live
+items, and a list larger than the bound refuses with `ViewTooLarge` before
+any member renders. The request and run collections select keyset windows:
+each window reads at most 1025 identifiers in identifier order, after the last
+identifier of the previous window, and keeps 1024 of them. The first window
+also counts the members at its boundary. Each window has its own boundary,
+allowance and limit.
+
 Requests render through `Drafts.readDraftAt`, managed runs through
 `History.managedRunInView`, and decisions through `State.decisionInView`, so
 each collection item equals its detail representation. The request collection
@@ -84,7 +93,16 @@ collection does not list legacy entries.
 
 `Pages.withPage` reserves a set for the client, authorization view, path and
 query before the owner materializes it, and keeps the encoded pages until the
-last page has been sent, a send fails, or the sixty-second lifetime ends. The
+last page has been sent, a send fails, or the sixty-second lifetime ends. Its
+`Producer` supplies the first window with the set revision and total, and each
+following window after a last identifier. `Pages.wholeSet` is the producer of
+a set of one window. A set holds the pages of its current window only. The
+token of the page after the last page of a window builds the next window,
+replaces the held pages and renews the lifetime, and a token of any other
+index outside the current window refuses with `ViewExpired`. The
+`collections` mode of `manager-artifact-check` pages request and run
+collections of 2W + 1 members through three windows of a small test size W,
+and checks the stale index and a collection of at most one window. The
 `pages` mode of `manager/test/service_http.py` checks these facts through the
 running protected manager: every page of multi-page sets and their ETags, token
 binding and expiry, the per-client quota, a mutation between two pages,

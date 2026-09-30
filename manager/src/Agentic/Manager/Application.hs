@@ -28,7 +28,6 @@ import Crypto.Hash (Digest, SHA256, hash)
 import Data.Aeson (Value (..), object, toJSON, (.=))
 import qualified Data.Aeson.Key as Key
 import qualified Data.Aeson.KeyMap as KM
-import Data.Aeson.Types (Pair)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BC
 import qualified Data.ByteString.Builder as Builder
@@ -231,9 +230,9 @@ dispatch service pages streams proof request respond = do
       ["v1", kind] -> kind `elem` ["profiles", "snapshot", "requests", "runs"]
       ["v1", "runs", _, leaf] -> leaf `elem` runPages
       _ -> False
-    page view limits token produce = servePage pages store proof request view limits token produce respond
-    collection token members = Service.withCollectionSource service proof members $ \view limits materialize ->
-      page view limits token materialize
+    page view limits token produce = servePage pages store proof request view limits token (Pages.wholeSet produce) respond
+    collection token members = Service.withCollectionSource service proof members $ \view limits producer ->
+      servePage pages store proof request view limits token producer respond
     receipt value = Auth.withAuthorizedResponse store proof (C.receiptProfile value)
       (C.requiredScopes (C.receiptOperation value)) $ \view ->
         json view HTTP.status202 [("Location", TE.encodeUtf8 ("/v1/commands/" <> C.receiptId value))]
@@ -249,7 +248,7 @@ runPages = ["snapshot", "outputs", "exports", "lineage-requests"]
 -- is sent.
 servePage :: Pages.PageSets -> Store.CoordinationStore -> Auth.CredentialProof
   -> Wai.Request -> Auth.AuthorizedView -> ConfigurationLimits -> Maybe Text
-  -> IO (Text, [Pair], [Value])
+  -> Pages.Producer
   -> (Wai.Response -> IO Wai.ResponseReceived) -> IO Wai.ResponseReceived
 servePage pages store proof request view limits token produce respond = do
   client <- Store.runRead store (Auth.currentClient proof) >>= need

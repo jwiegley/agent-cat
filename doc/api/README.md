@@ -61,7 +61,8 @@ limits apply before unbounded allocation and are not character counts.
 | Verified artifact content | 67108864 bytes, with at most two downloads in progress for each manager. A third download waits up to five seconds for a download to end and then refuses with `storage-quota`. A download that lasts longer than 300 seconds stops at its next write, and the client receives a truncated body. |
 | Complete SSE block | 16384 bytes. |
 | JSON page | 1048576 bytes. |
-| Materialized page set | 67108864 bytes, two active sets per client, expiring after 60 seconds. |
+| Materialized page set | 67108864 bytes, two active sets per client, expiring after 60 seconds. For `/requests` and `/runs`, the byte bound applies to each window of 1024 members. |
+| Live collection | 1024 items in each list of `/snapshot` and in `/decisions`. A larger list receives 413 `view-too-large`. |
 | Queue | 100 queued requests. Drafts have a separately enforced, advertised positive bound. |
 | Execution reservations | One by default, with a maximum of 16. Review and cleanup consume reservations. |
 | Prepared review | Ten-minute expiry. Expiry does not release an uncleaned worker's reservation. |
@@ -195,9 +196,10 @@ The Served column lists the methods that the foreground service of
 `RUNNER --manager serve` routes. For `/preparations/{id}` it serves the
 `approve` operation, and it refuses `discard` with `unsupported-operation`.
 A path that the service does not route receives 404 `unavailable-resource`,
-and an unrouted method on a routed path receives 405. The `/requests`, `/runs`
-and `/decisions` collections are page sets over one durable commit boundary,
-and each item is the representation of its detail resource. `/requests` lists
+and an unrouted method on a routed path receives 405. The `/decisions`
+collection is a page set over one durable commit boundary. The `/requests`
+and `/runs` collections are windowed page sets, as "Pages and live delivery"
+states. Each item is the representation of its detail resource. `/requests` lists
 every request of the authorized profiles, and `/runs` lists every managed run
 of those profiles, both in identifier order. `/decisions` without `runId`
 lists the pending run heads in manager observation order. With `runId`, it
@@ -308,6 +310,24 @@ materialization. The set holds one revision, and a mutation that commits
 after that boundary does not change a later page of the set. A fresh set shows
 the mutation. Clients assemble a complete page set before installing it.
 
+The `/requests` and `/runs` collections are windowed page sets. A window
+holds at most 1024 members in identifier order, and each window is
+materialized at its own database boundary. The service holds the pages of one
+window at a time. The last page of a window that more members follow carries
+`next` with the next index of the same set, in the same token syntax.
+Following that token checks the client, authorization view, path and query as
+for every continuation, then materializes the next window, replaces the held
+pages and renews the set lifetime to 60 seconds from that request. Every page
+of the set keeps the `revision` and `expiresAt` of the first page, and
+`totalItems` counts the members at the boundary of the first window. A token
+whose index belongs neither to the current window nor to the first page of
+the next window receives 410 `view-expired`, as a token of an expired set
+does. A client that follows every page receives each member that existed at
+the first boundary exactly once. A member that is created later with an
+identifier larger than the last identifier already served can also appear,
+so such a set can hold more items than its `totalItems`. A collection of at
+most one window is an ordinary page set of one boundary.
+
 Opaque page tokens bind the client, authorization view, path, and query of the
 first-page request. The service compares each continuation with the newly
 authorized request, so token possession grants no authority. A token that
@@ -318,7 +338,8 @@ predecessor and the successor. Such a refusal does not retire the set for its
 owner. A revoked or cut-off credential receives 401 for every later page.
 
 A set expires 60 seconds after its reservation. Reads do not extend the
-lifetime, and a later token receives 410 `view-expired`. A set retires when
+lifetime, except that the first page of each later window of a windowed set
+renews it, and a later token receives 410 `view-expired`. A set retires when
 its last page has been sent, or when the client closes the connection during a
 page response. An open set counts against the limit of two sets for each
 client and against the global page-set limit until it retires or expires. A

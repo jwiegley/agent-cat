@@ -4010,6 +4010,28 @@ Non-blocking findings of the fess audit of Phase B part 2 subtask C5 (concurrent
 
 Other C5 limitations: the new native checks were not shown failing against the old code. A deadline abort sends a cut-off body to the client and adds no new fault label.
 
+* TODO [#D] Resolve C6 fess findings on keyset collection windows
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-c6-keyset-windows-fess-findings-7ufp
+:LABELS:   []
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-30 Wed 12:20]
+:MODIFIED: [2026-09-30 Wed 12:20]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of the fess audit of Phase B part 2 subtask C6 (keyset windows for the request and run collections). Source: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/fess/b2-C6-r1.md.
+
+1. (medium, needs operator decision) The four overview lists now refuse view-too-large above 1024 live items (manager/src/Agentic/Manager/Overview.hs:134-139,154). The subtask assumed that the queue and execution limits already bound these lists, but drafts are not bound that way: limitDrafts and limitGlobalDrafts accept values up to 2147483647 (manager/src/Agentic/Manager/Profile.hs:93-96). A manager with more than 1024 drafts now gets 413 on /v1/snapshot. Fix: document that the bound applies to drafts, cap the draft limits at 1024, or page the overview.
+2. (medium) doc/api/README.md:307-311 still says that a page set is materialized at one database boundary and holds one revision. For windowed /v1/requests and /v1/runs sets, each window has its own boundary. This contradicts the windowed-set paragraph at :313-329. Fix: restrict the one-boundary statement to sets of one window, or add the exception.
+3. (medium) A renewed windowed set keeps serving the first page's expiresAt, which is past after 60 seconds (manager/src/Agentic/Manager/Pages.hs:152-162). Agentic.Manager.Client.getPageSet (Client.hs:311-318) rejects a page with now >= expiresAt and a set whose items grow past totalItems, which the documentation now allows. No current caller pages these collections. Fix: define expiresAt for a windowed set in doc/api/README.md and make getPageSet accept renewed and growing windowed sets, or document that the client does not support them.
+4. (low) No test covers the expiry renewal at a new window (Pages.hs:162), the branch where a concurrent follower installed the window first (Pages.hs:165-167), the 1024-item refusal of the decision collection and the overview lists, or a multi-window set over HTTP. Fix: add in-process cases for a follow after the original deadline, for two followers of the same token, and for a decision collection above a small W.
+5. (low, no change needed) withCollectionSourceWindow is exported from a production module for tests only (Overview.hs:8-9,96-100). Optionally move it to an internal module.
+
 * TODO [#E] Record that the Cabal 3.16.1.0 expectation means cabal-install
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -9204,7 +9226,7 @@ HIGH (deep/alexey): SqZero has no CompleteCSemiring and no PMod P M beyond the d
 :LABELS:   ["workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-30 Wed 05:40]
-:MODIFIED: [2026-09-30 Wed 12:00]
+:MODIFIED: [2026-09-30 Wed 12:20]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -9231,6 +9253,13 @@ Findings of the Phase B part 1 end-of-part review (packages and safety lenses ov
     "author": "johnw",
     "text": "Phase B part 2 subtask C5 resolves item 1. The download quota is now two places per Store (artifactResponsePlaces). A download that finds both places charged waits up to five seconds in STM, before the file slot and with no lock held, then refuses with 429 storage-quota. A total deadline of 300 seconds (artifactResponseDeadline) aborts a response at its next write boundary and returns its place. The pages mode of manager/test/service_http.py has a two-client download case. Evidence: build of manager-artifact-check, agentic-run and routing-fixed-point-probe with -ftui-tests; manager-artifact-check response-order and response-ingestion at -N8; service_http.py pages at N8 with the new two-client case 9; make -C doc check; the Phase A journey at N8 (logs in the private resume-20260923 evidence directory; fess report fess/b2-C5-r1.md, non-blocking, findings filed as acat-c5-download-places-fess-findings-zmog). Items 2 to 7 remain open, so this issue stays open.",
     "created_at": "2026-09-30T19:00:56Z"
+  },
+  {
+    "id": 407,
+    "issue_id": "acat-phase-b1-review-followups-dk1v",
+    "author": "johnw",
+    "text": "Phase B part 2 subtask C6 resolves the row-bound finding (item 2): GET /v1/requests and /v1/runs now read members in keyset windows of at most 1024 identifiers, a page set holds only its current window, and the overview lists and decision collection refuse view-too-large above 1024 live items. Evidence: build of manager-artifact-check, agentic-run and routing-fixed-point-probe with -ftui-tests; manager-artifact-check collections at -N8 (21 of 21 pass, rerun by fess on the final build); service_http.py pages at N8; make -C doc check; the Phase A journey at N8 (logs in the private resume-20260923 evidence directory; fess report fess/b2-C6-r1.md, non-blocking, findings filed as acat-c6-keyset-windows-fess-findings-7ufp). The issue stays open for its other items.",
+    "created_at": "2026-09-30T19:20:38Z"
   }
 ]
 #+end_src
@@ -15988,7 +16017,7 @@ leak private errors. There is no plaintext bearer development exception.
 :LABELS:   ["p5","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-30 Wed 05:40]
+:MODIFIED: [2026-09-30 Wed 12:20]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-025
 :SOURCE_REPO: agent-cat
@@ -16162,6 +16191,13 @@ through the actual HTTP response path.
     "author": "johnw",
     "text": "Phase B part 1 status: partial. Frozen collections, export and lineage, page sets landed (B11-B13, evidence resume-20260923/B/B11 to B13). Route items wait for B15-B17 (operator review of doc/research/actor-flow-route-threat-model.md); legacy history is not served (acat-phase-b1-review-followups-dk1v).",
     "created_at": "2026-09-30T12:40:31Z"
+  },
+  {
+    "id": 408,
+    "issue_id": "acat-wm-025-3utw",
+    "author": "johnw",
+    "text": "Phase B part 2 subtask C6 bounds the request and run collections with keyset windows of 1024 identifiers and frozen-syntax tokens. Evidence: build of manager-artifact-check, agentic-run and routing-fixed-point-probe with -ftui-tests; manager-artifact-check collections at -N8 (21 of 21 pass, rerun by fess on the final build); service_http.py pages at N8; make -C doc check; the Phase A journey at N8 (logs in the private resume-20260923 evidence directory; fess report fess/b2-C6-r1.md, non-blocking, findings filed as acat-c6-keyset-windows-fess-findings-7ufp). WM-025 stays open.",
+    "created_at": "2026-09-30T19:20:38Z"
   }
 ]
 #+end_src

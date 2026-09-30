@@ -11,7 +11,8 @@ import qualified Agentic.Manager.Test.Contention as Contention
 import Agentic.Manager.Fault
 import Agentic.Manager.Fault.Record (faultLine)
 import qualified Agentic.Manager.Overview as Overview
-import Agentic.Manager.Pages (newPageSets, reservePageSet)
+import Agentic.Manager.Pages (newPageSets, reservePageSet, wholeSet, withPage)
+import Agentic.Manager.Protocol.Draft (DraftView (..), Readiness (..))
 import qualified Agentic.Manager.Protocol.Preparation as P
 import qualified Agentic.Manager.Transport as Transport
 import Agentic.Manager.Worker.State (WorkerFailure (WorkerUnexpectedExit))
@@ -79,6 +80,7 @@ main = do
     ["events",work] -> eventChecks work
     ["admission-contention",work] -> admissionContentionChecks work
     ["response-order",work] -> responseOrderChecks work
+    ["collections",work] -> collectionChecks work
     ["fault-classification",work] -> faultClassificationChecks work
     ["ordinary-admission",work] -> ordinaryAdmissionChecks work
     ["ordinary-stream",work] -> ordinaryStreamChecks work
@@ -97,6 +99,8 @@ main = do
       admissionContentionChecks(work </> "admission-contention")
       createDirectory(work </> "response-order")
       responseOrderChecks(work </> "response-order")
+      createDirectory(work </> "collections")
+      collectionChecks(work </> "collections")
       createDirectory(work </> "fault-classification")
       faultClassificationChecks(work </> "fault-classification")
       createDirectory(work </> "ordinary-admission")
@@ -108,7 +112,7 @@ main = do
       createDirectory(work </> "stream-ingestion")
       streamIngestionChecks(work </> "stream-ingestion")
       artifactChecks work source
-    _ -> error "usage: manager-artifact-check [retention|composition|observation|events|admission-contention|response-order|fault-classification|ordinary-admission|ordinary-stream|response-ingestion|stream-ingestion] PRIVATE_DIRECTORY [PACKAGE_DIRECTORY]"
+    _ -> error "usage: manager-artifact-check [retention|composition|observation|events|admission-contention|response-order|collections|fault-classification|ordinary-admission|ordinary-stream|response-ingestion|stream-ingestion] PRIVATE_DIRECTORY [PACKAGE_DIRECTORY]"
 
 -- Each converted cause site keeps its own class or records its own erased
 -- cause, genuine Store failures keep the storage-unavailable problem, and the
@@ -540,7 +544,7 @@ responseIngestionChecks work = do
           target = Wai.defaultRequest {Wai.rawPathInfo = "/v1/runs/run_21/outputs"}
           page = faultOf $ withRunOutputsSource store proof association $ \view limits materialize -> void $
             Application.servePage pages store proof target view limits Nothing
-              (materialize >> pure ("content_page", [], items)) (stalled writes)
+              (wholeSet (materialize >> pure ("content_page", [], items))) (stalled writes)
       withAsync page $ \response -> do
         reached [writes] >>= check "the held page response reaches its first write" . (== Just ())
         files <- try @StoreFailure (withStoreFiles store (\_ -> pure ()))
@@ -748,6 +752,89 @@ responseOrderChecks work = do
       readIORef escaped >>= maybe (error "missing overview materializer") (\materialize -> do
         result <- try @Command.CommandFailure (void materialize)
         check "overview materializer cannot outlive its original loans" (result == Left Command.Unauthenticated))
+
+-- The request and run collections page through keyset windows of a small
+-- test size. Every member is served once in identifier order under the
+-- total of the first window, a token outside the current and next windows is
+-- expired without retiring its set, and a collection of at most one window
+-- is one ordinary page set.
+collectionChecks :: FilePath -> IO ()
+collectionChecks work = do
+  (config,_) <- fixture work
+  withInstalled config $ \installed -> withCoordinationStore installed $ \store -> do
+    seed store
+    proof <- authenticateCredential store bearer >>= right
+    runsIdentity <- withStoreFiles store $ \root -> do
+      ensurePrivateDirectoryAt root ["runs","runs"]
+      bracket (openPrivateSubroot root ["runs"]) closePrivateRoot (pure . T.pack . privateRootIdentity)
+    let window = 4
+        members prefix = [prefix <> T.pack (show n) | n <- [10 .. 10 + 2 * window]]
+        requests = members "request_"
+        runs = members "run_"
+    forM_ requests $ \ident -> mutate store $ do
+      execute "INSERT INTO requests(id,revision,client_id,workflow_id,descriptor_revision,profile_id,profile_revision,phase,admission,blocking_reasons,validation_errors) VALUES (?,'revision_1','client_1','workflow_1','descriptor_1','profile_1','profile_revision_1','draft','not-queued',?,?)"
+        [SQL.SQLText ident,SQL.SQLBlob "[]",SQL.SQLBlob "[]"]
+      execute "INSERT INTO commands(id,revision,profile_id,operation,client_id,authority_epoch,method,resource_uri,idempotency_key,retired,request_id,accepted_at,state,reserved_bytes) VALUES (?,'r','profile_1','create','client_1','authority_1','POST','/v1/requests',?,1,?,'2026-09-30T00:00:00Z','acknowledged',0)"
+        [SQL.SQLText ("command_" <> ident),SQL.SQLText ("key_" <> ident),SQL.SQLText ident]
+      execute "INSERT INTO request_origins VALUES (?,?,?)"
+        [SQL.SQLText ident,SQL.SQLText ("command_" <> ident),SQL.SQLBlob (Command.encoded
+          (DraftView ident "revision_1" "workflow_1" "descriptor_1" "profile_1" "profile_revision_1" "draft"
+            (Readiness [] [] [] []) "not-queued" Nothing [] Nothing Nothing Nothing Nothing))]
+    forM_ runs $ \ident -> mutate store $
+      execute "INSERT INTO runs(id,revision,control_revision,profile_id,root_identity,native_run_id,supervision,result_state) VALUES (?,'revision','revision','profile_1',?,?,'observer','absent')"
+        [SQL.SQLText ident,SQL.SQLText runsIdentity,SQL.SQLText ("native-" <> ident)]
+    pages <- newPageSets
+    let path collection = case collection of Overview.Requests -> "/v1/requests"; _ -> "/v1/runs"
+        fetch size collection token = Overview.withCollectionSourceWindow size store proof Nothing collection $ \view limits producer -> do
+          binding <- authorizedViewRevision view
+          withPage pages "client_1" binding (path collection) (limitGlobalPageSets limits) token producer
+            (\_ bytes -> either error pure (eitherDecodeStrict' bytes :: Either String Value))
+        pageField key value = field key (field "page" value)
+        nextToken value = case pageField "next" value of
+          String link -> Just (T.drop 1 (snd (T.breakOn "=" link)))
+          _ -> Nothing
+        identities value = case field "items" value of
+          Array values -> map (string . field "id") (toList values)
+          _ -> error "expected page items"
+        walk size collection = go Nothing []
+          where
+            go token visited = do
+              value <- fetch size collection token
+              maybe (pure (reverse (value : visited))) (\next -> go (Just next) (value : visited)) (nextToken value)
+        expired token = faultOf (fetch 2 Overview.Requests (Just token))
+        stamp value = map (`pageField` value) ["setId","revision","expiresAt"]
+        consistent visited = length (distinctStamps (map stamp visited)) == 1
+        distinctStamps = foldr (\value kept -> if value `elem` kept then kept else value : kept) []
+    forM_ [(Overview.Requests,requests,"request"),(Overview.Runs,runs,"run")] $ \(collection,expected,label) -> do
+      visited <- walk window collection
+      check (label <> " collection of 2W + 1 members pages through three windows") (length visited == 3)
+      check (label <> " windows return every member once in identifier order") (concatMap identities visited == expected)
+      check (label <> " pages carry the total of the first window") (all ((== Number 9) . pageField "totalItems") visited)
+      check (label <> " pages carry consecutive indices") (map (pageField "index") visited == map Number [0,1,2])
+      check (label <> " windows keep one set identity, revision and expiry") (consistent visited)
+      single <- walk (2 * window + 1) collection
+      check (label <> " collection of exactly W members is one page")
+        (case single of [only] -> pageField "next" only == Null && pageField "index" only == Number 0; _ -> False)
+      check (label <> " single window keeps every member and its total")
+        (concatMap identities single == expected && map (pageField "totalItems") single == [Number 9])
+      larger <- walk 1024 collection
+      check (label <> " collection below W is one page") (length larger == 1 && concatMap identities larger == expected)
+    -- Window size two gives five windows of the nine requests.
+    first <- fetch 2 Overview.Requests Nothing
+    let setId = case pageField "setId" first of String value -> value; _ -> error "expected set identity"
+        token index = setId <> "-" <> T.pack (show (index :: Int))
+    second <- fetch 2 Overview.Requests (Just (token 1))
+    third <- fetch 2 Overview.Requests (Just (token 2))
+    expired (token 1) >>= check "an index of a replaced window is view-expired" . (== Left (CommandRefusal Command.ViewExpired))
+    expired (token 4) >>= check "an index beyond the next window is view-expired" . (== Left (CommandRefusal Command.ViewExpired))
+    repeated <- fetch 2 Overview.Requests (Just (token 2))
+    check "a page of the current window is served again" (identities repeated == identities third)
+    fourth <- fetch 2 Overview.Requests (Just (token 3))
+    fifth <- fetch 2 Overview.Requests (Just (token 4))
+    check "an expired index does not retire the set"
+      (concatMap identities [first,second,third,fourth,fifth] == requests && pageField "next" fifth == Null)
+    retired <- faultOf (fetch 2 Overview.Requests (Just (token 4)))
+    check "the last page retires a windowed set" (retired == Left (CommandRefusal Command.ViewExpired))
 
 admissionContentionChecks :: FilePath -> IO ()
 admissionContentionChecks work = do

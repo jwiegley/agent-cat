@@ -17,6 +17,7 @@ import Agentic.Manager.Authorization (CredentialProof, AuthorizedView, attachRes
 import Agentic.Manager.Fault (FaultClass (CommandRefusal), classifyFault, recordFault)
 import qualified Agentic.Manager.History as History
 import qualified Agentic.Manager.Overview as Overview
+import Agentic.Manager.Pages (Producer)
 import Agentic.Manager.Commands (submissionReceipt)
 import Data.Aeson.Types (Pair)
 import Agentic.Manager.Profile (ConfigurationLimits)
@@ -285,7 +286,7 @@ withOverviewSource service proof = Overview.withOverviewSource (serviceStore ser
 -- original Admission, so that managed supervision reads as the detail
 -- resources read it.
 withCollectionSource :: Service -> CredentialProof -> Overview.Collection
-  -> (AuthorizedView -> ConfigurationLimits -> IO (Text,[Pair],[Value]) -> IO a) -> IO a
+  -> (AuthorizedView -> ConfigurationLimits -> Producer -> IO a) -> IO a
 withCollectionSource service proof = Overview.withCollectionSource (serviceStore service) proof (Just (admission service))
 
 withRun :: Service -> CredentialProof -> Text -> (AuthorizedView -> Value -> IO a) -> IO a
