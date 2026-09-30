@@ -274,6 +274,115 @@ These are not HTTP, client transport, hardware durability or full failure-matrix
 evidence.
 OS containment is excluded from this project and is not a pending capability.
 
+## Manager log
+
+The Store lifetime of a serving manager writes the manager log of its stream
+identity through `Agentic.Manager.Flow`. `serveManager` opens that lifetime
+with `withServingStore`. The log is the private file `flow/<stream>.ndjson` in
+the manager root, and its claim-check files are the private files
+`flow/claims/<stream>/<sha256>`. Each stream has its own claim directory, so
+the claim checks of a log count toward the ceiling of that log only. The
+record, the strict line codec and the writer are those of
+`Agentic.Runtime.Flow`, which the [broker contract](../runtime/BROKER.md)
+describes. A lifetime that `withCoordinationStore` opens, such as a local
+administration command that runs while no manager serves, reconciles a restart
+but writes no manager log. The credential list of the next serving lifetime
+shows the credentials that such a command changed. The reconciliation counts of
+a serving lifetime name only the rows that its own reconciliation changed, so
+the rows that an administration lifetime reconciled first do not appear in any
+manager log. Offline backup and restoration
+write no manager log. A restoration rotates the stream identity, so the next
+serving lifetime writes a new file.
+
+`openManagerFlow` opens the log for appending and creates it when it is absent.
+It reads the existing log, which must be at most the configured
+`globalMutationLedgerBytes`, and decodes every complete line with the strict
+codec. The positions of a new lifetime continue those of the earlier
+lifetimes, so a reply can name an ask that an earlier lifetime appended. A final
+line without its newline denotes no record, because its append never
+completed, and the writer truncates it. A log that cannot be opened gives a
+writer whose every append fails.
+
+The writer lock is a leaf lock. The manager takes no other lock while it holds
+it. Before each append the writer checks that the path still names the file
+that it opened, by device and inode. A mismatch, or a check that fails with an
+I/O error, breaks the writer: it refuses every later append of the lifetime and
+never reopens the path. The writer synchronizes each
+`command`, `review` and `relay` record: it flushes the line and then
+synchronizes the descriptor through `agentic_sync_private_descriptor`. It
+flushes every other record.
+
+The ceiling of the log is the configured `globalMutationLedgerBytes`, and the
+claim-check files count toward it. The log keeps the reserve of the command
+ledger, R = min(L, 16 * C), which `mutationLedgerReserve` computes. Each record
+has one of three classes. A `Refusing` record belongs to an ordinary command
+that needs the record before a commit or a dispatch, and a failed append
+refuses that operation. A `Following` record belongs to an ordinary command
+after a commit. Records of these two classes stay within L minus R. A
+`Reserved` record belongs to a cancel or to the manager itself, and it may use
+the whole ceiling. An append that would pass its limit fails with a quota
+failure, and the writer stays usable.
+
+A failed append of a `Following` or `Reserved` record becomes a gap entry that
+names the missing record by schema and identifiers. The writer keeps at most
+256 named entries and counts the others. Before the next record that it can
+append, it appends one gap notice that names those entries and the count. When
+the gap notice cannot be appended, the writer does not attempt the record, and
+that record fails as well. Gap notices are lost while every append fails, and
+the entries that no notice names leave no trace when the lifetime ends. A
+failed `Refusing` append leaves no gap entry. A test mode can construct the
+writer with a fault that fails the appends that it selects. Production never
+passes a fault.
+
+The five manager bodies have strict codecs. Each decoder refuses an unknown or
+a missing field and any value that its encoder does not write.
+
+- A `command` body is the admitted request without its idempotency key: the
+  operation, the profile, the method, the resource, the media type, the
+  precondition, the JSON request body as its strictly decoded value, and a
+  capture by identifier, SHA-256 and size. The capture bytes are not copied.
+- A `receipt` body is the frozen `CommandReceipt` JSON.
+- A `review` body is the preparation identifier, the public review bytes and
+  their SHA-256, the private binding bytes and their digest, the expiry and the
+  five approval selectors. The decoder verifies both digests against their
+  bytes.
+- A `relay` body is the kind, start or control, the manager run identifier, the
+  native run identifier, the command identifier and the exact frame bytes,
+  which are UTF-8 and at most `maxFrameBytes`.
+- A `notice` body is a command change with its state and refusal, a review
+  ending with its preparation and reason, a request ending with its request and
+  cause, a lifetime notice, a shutdown notice or a gap notice. The causes of a
+  request ending are `withdrawn`, `discarded`, `refused`, `invalidated`,
+  `review-expired` and `preparation-failed`.
+
+No bearer token, credential verifier, idempotency key, page token or local path
+enters a body.
+
+A serving lifetime reads the configured `globalMutationLedgerBytes` before it
+opens the database, and a configuration that cannot give its limits fails the
+open. The lifetime notice follows the restart reconciliation at Store open. It
+names the process generation, the number of rows that the reconciliation
+changed in each category, and at most 1000 credentials with their client,
+identifier, status, scopes and profiles, together with the number of
+credentials that the list omits. A credential list that cannot be read, for
+example because a row is malformed, fails the open.
+
+The Store ends an orderly close with a shutdown notice that names the process
+generation. A close is orderly when the Store is not poisoned and the action of
+the lifetime returned or the operator stopped it. The command line delivers the
+termination and keyboard signals of `--manager serve` to the owner thread
+as `UserInterrupt`, which is how a serving manager stops. A lifetime whose
+action failed in any other way, a poisoned Store, a
+close that cannot prove worker cleanup and a later retry of that close write no
+shutdown notice, so the log of such a lifetime ends without its stop. The
+notice follows the release of every worker, and the close takes the file slot,
+then the configuration and then the leaf writer lock. When the configuration
+cannot give its limits at that point, the close completes without the notice
+and then reports the configuration failure. Both notices are reserved records
+from the manager to the manager, and a failed append of either becomes a gap
+entry. The command, receipt, review and relay append points are not connected,
+so the manager log records no `/v1` command at present.
+
 ## Worker cleanup ownership
 
 Worker lifetimes use a separate bounded registration, not the file-operation

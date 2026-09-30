@@ -7,7 +7,8 @@ module Agentic.Manager.Protocol.Command
   ( Operation (..), operationName, parseOperation, Scope (..), scopeName, requiredScopes,
     CommandState (..), stateName, parseState, CommandFailure (..), failureCode, failureStatus,
     CommandReceipt (..), Acknowledgement, acknowledgementValue, Effect, effectValue,
-    validId, validResource, validRevision, validTimestamp, encoded, decodeReceipt
+    validId, validResource, validRevision, validTimestamp, encoded, decodeReceipt,
+    commandCapacity, mutationLedgerReserve
   ) where
 
 import Agentic.Manager.Protocol.Json (decodeStrictValue)
@@ -23,6 +24,7 @@ import Data.Aeson.Types (Object, Parser, parseEither)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as BL
 import Data.Char (isAlphaNum, isAscii)
+import Data.Int (Int64)
 import Data.Maybe (isJust)
 import Data.Time (UTCTime, ZonedTime)
 import Data.Time.Format.ISO8601 (iso8601ParseM)
@@ -60,6 +62,16 @@ requiredScopes op
   | op `elem` [Cancel, Steer, Retry, ChooseRecovery, Redirect, Answer] = [Control]
   | op == Export = [Observe, ExportScope]
   | otherwise = [Observe, Submit]
+
+-- | The ledger bytes that admission reserves for each new command.
+commandCapacity :: Int64
+commandCapacity = 131072
+
+-- | The part of a ledger ceiling of the given bytes that only whole-run cancel
+-- and the manager's own records may use: sixteen command capacities, or the
+-- whole ceiling when it is smaller.
+mutationLedgerReserve :: Int64 -> Int64
+mutationLedgerReserve total = min total (16 * commandCapacity)
 
 -- | Durable observations. Accepted intent is not attempted or acknowledged delivery.
 data CommandState = Accepted | DispatchAttempted | Acknowledged | EffectObserved | Refused | Unresolved

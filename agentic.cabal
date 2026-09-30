@@ -218,6 +218,7 @@ library
     Agentic.Manager.Root
     Agentic.Manager.Lease
     Agentic.Manager.Schema
+    Agentic.Manager.Flow
     Agentic.Manager.Store
     Agentic.Manager.Store.Admission
     Agentic.Manager.Worker.State
@@ -527,6 +528,8 @@ executable manager-store-check
     Agentic.Manager.Root
     Agentic.Manager.Lease
     Agentic.Manager.Schema
+    Agentic.Manager.Protocol.Preparation
+    Agentic.Manager.Flow
     Agentic.Manager.Store
     Agentic.Manager.Store.Admission
     Agentic.Manager.Worker.State
@@ -558,6 +561,8 @@ executable manager-command-check
     Agentic.Manager.Root
     Agentic.Manager.Lease
     Agentic.Manager.Schema
+    Agentic.Manager.Protocol.Preparation
+    Agentic.Manager.Flow
     Agentic.Manager.Store
     Agentic.Manager.Store.Admission
     Agentic.Manager.Worker.State
@@ -586,6 +591,7 @@ executable manager-draft-check
     Agentic.Manager.Root
     Agentic.Manager.Lease
     Agentic.Manager.Schema
+    Agentic.Manager.Flow
     Agentic.Manager.Store
     Agentic.Manager.Store.Admission
     Agentic.Manager.Worker.State
@@ -615,6 +621,7 @@ executable manager-worker-check
     Agentic.Manager.Root
     Agentic.Manager.Lease
     Agentic.Manager.Schema
+    Agentic.Manager.Flow
     Agentic.Manager.Store
     Agentic.Manager.Store.Admission
     Agentic.Manager.Worker.State
@@ -658,6 +665,7 @@ executable manager-admission-check
     Agentic.Manager.Root
     Agentic.Manager.Lease
     Agentic.Manager.Schema
+    Agentic.Manager.Flow
     Agentic.Manager.Store
     Agentic.Manager.Store.Admission
     Agentic.Manager.Worker.State
@@ -696,6 +704,7 @@ common manager-lifecycle-checks
     Agentic.Manager.Root
     Agentic.Manager.Lease
     Agentic.Manager.Schema
+    Agentic.Manager.Flow
     Agentic.Manager.Store
     Agentic.Manager.Store.Admission
     Agentic.Manager.Worker.State
@@ -749,6 +758,7 @@ executable manager-artifact-check
     Agentic.Manager.Root
     Agentic.Manager.Lease
     Agentic.Manager.Schema
+    Agentic.Manager.Flow
     Agentic.Manager.Store
     Agentic.Manager.Store.Admission
     Agentic.Manager.Worker.State
@@ -783,6 +793,7 @@ executable manager-history-check
     Agentic.Manager.Root
     Agentic.Manager.Lease
     Agentic.Manager.Schema
+    Agentic.Manager.Flow
     Agentic.Manager.Store
     Agentic.Manager.Store.Admission
     Agentic.Manager.Worker.State

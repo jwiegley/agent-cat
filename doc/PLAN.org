@@ -1459,7 +1459,7 @@ Two small residues of acat-192/acat-9kn: prune the deriving clauses if nothing w
 :LABELS:   ["actor-flow","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-26 Sat 23:41]
-:MODIFIED: [2026-09-26 Sat 23:41]
+:MODIFIED: [2026-09-29 Tue 20:02]
 :CREATED_BY: johnw
 :SOURCE_REPO: .
 :ORIGINAL_SIZE: 0
@@ -1479,6 +1479,20 @@ Actor-flow increment 1, delta 1b (at most 8 engineering days). Add the manager l
     "created_by": "johnw",
     "metadata": "{}",
     "thread_id": ""
+  }
+]
+#+end_src
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 363,
+    "issue_id": "acat-5m60",
+    "author": "johnw",
+    "text": "Subtask F9 of delta 1b: the manager log writer, the manager codecs, and the lifetime and shutdown notices. The new module manager/src/Agentic/Manager/Flow.hs imports the record, the line codec and the writer only through Agentic.Runtime. It is listed in the library and in every stanza that compiles Commands, Approval or Admission. One writer per Store stream identity writes <manager private root>/flow/<streamId>.ndjson, with claims under flow/claims/<streamId>/, through ensurePrivateDirectoryAt and openPrivateFileAt. The writer lock is a leaf lock. Each append flushes and synchronizes the descriptor. Before each append the writer compares device and inode. After one mismatch, or an I/O error during that check, it refuses every later append and never reopens the path. Records that it cannot append become gap entries (at most 256 named plus a count), emitted as one gap notice before the next record that it can append. The ceiling equals limitGlobalMutationLedgerBytes with the checkCapacity reserve. Strict codecs cover the command, receipt, review, relay and notice bodies. No bearer token, verifier, idempotency key, page token or local path enters a body. The new withServingStore, which serveManager uses, is the only way to open the log. It writes a lifetime notice after reconcileRestart with the process generation, the reconciliation summary and the credential list. It writes a shutdown notice when the owner returns or ends with UserInterrupt and the Store is not poisoned. withCoordinationStore (administration and checks) and backup or restore write no manager log. manager/STORAGE.md documents the log, and runtime/BROKER.md refers to it. The command, receipt, review and relay append points are not connected yet.\n\nEvidence scope: F9-build (ALLBUILD with -Werror and -ftui-tests), F9-flow-unit (manager-command-check flow at N8: the five bodies round-trip with Unicode, JSON false and null, exact decimals and bodies on both sides of 64 KiB; an unknown field and a duplicate key are refused; gap entries stop at 256 and count the rest; a renamed log fails every later append; the ceiling arithmetic holds with and without the reserve), F9-source-boundaries (rerun by the fess auditor on the final tree, exit 0) and F9-journey (tui-journey at N8: the manager log begins with a lifetime notice that lists the one Store credential and ends with a shutdown notice of the same generation) each passed once. N1 and the Phase A controls were not run. The commit also adds the ReadFlow case to cli/test/PolicyProbe.hs, an F7 incomplete-pattern repair that ALLBUILD needs under -Werror. Fess round 2: not blocking. Its one medium and four low findings are filed as a follow-up issue. This issue stays open until increment 1 is accepted as a whole.\n",
+    "created_at": "2026-09-30T03:02:37Z"
   }
 ]
 #+end_src
@@ -1516,6 +1530,32 @@ At +RTS -N8, two simultaneous identical deep asks once shared only a single cand
   }
 ]
 #+end_src
+
+* TODO [#C] Resolve F9 fess findings in the manager log writer
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-5wa8
+:LABELS:   ["actor-flow","workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-29 Tue 20:02]
+:MODIFIED: [2026-09-29 Tue 20:02]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Follow-up from the F9 fess audit of the manager log writer, the manager codecs and the lifetime and shutdown notices (actor-flow delta 1b). None of these findings blocks. Source: fess audit /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/fess/flow-F9-r2.md.
+
+1. (medium) manager/src/Agentic/Manager/Flow.hs:195-202 and manager/src/Agentic/Manager/Store.hs:333-334, 467-468: the operator gets no diagnostic when the manager log cannot be opened (for example a log larger than the ceiling, or an owner or permission refusal from PrivateRoot). openManagerFlow keeps the reason only as a Left value, and the results of appendLifetime and appendShutdown are discarded. When the append points are connected, every ordinary command would be refused with storage-unavailable and no visible cause. Fix: report the open failure and each lifetime and shutdown append result on the manager diagnostic channel, or fail the serving open when the log cannot be opened.
+
+2. (low) manager/src/Agentic/Manager/Store.hs:462-470: in closeStoreWith, an exception from configuredLimits or closeManagerFlow (hClose) escapes after takeMVar files and before takeMVar gate and SQL.close. The database then stays open and retired stays False. Fix: wrap the manager-log block in try and rethrow after the database close.
+
+3. (low) manager/src/Agentic/Manager/Store.hs:228 against manager/src/Agentic/Manager/Credentials.hs:170: the status, scope and profile SQL of readCredentialList copies metadataSQL. Fix: move the SQL text to a module that both Store and Credentials import.
+
+4. (low) runtime/src/Agentic/Runtime/Flow.hs:300 and :310: the open-time limit check compares only the log file size with the ceiling, but stateBytes also counts claim bytes. A log whose log plus claim bytes pass the ceiling still opens and then fails every append with a quota refusal. Fix: compare log bytes plus the distinct claim bytes at open, or document the difference.
+
+5. (low) cli/test/PolicyProbe.hs:555: the ReadFlow case repairs an F7 leftover that ALLBUILD needs under -Werror. It is out of F9 scope. Disposition: recorded in the F9 commit message; no further change needed unless the operator wants the repair split.
 
 * DONE [#E] Handoff: name only the audit rounds the 2026-09-27 closeout wrote    :documentation:
 :PROPERTIES:

@@ -6,7 +6,7 @@ module Agentic.Manager
     loadConfiguration, installConfiguration, reloadConfiguration, closeConfiguration,
     configurationSnapshot, selectConfiguredProfile, probeConfiguredProfile,
     CoordinationStore, StoreIdentity (..), StoreFailure (..), Checkpoint (..),
-    withCoordinationStore, storeIdentity, checkpointStore, backupCoordinationStore, restoreCoordinationStore,
+    withCoordinationStore, withServingStore, storeIdentity, checkpointStore, backupCoordinationStore, restoreCoordinationStore,
     LocalAdminRequest, decodeLocalAdminRequest, administerCredentials, withLocalAdministration, serveManager,
   ) where
 
@@ -32,7 +32,7 @@ serveManager configuration = do
     (limits, profiles) <- configurationSnapshot installed >>= either throwIO pure
     forM_ profiles $ \profile ->
       void (probeConfiguredProfile installed (publicId profile) (publicRevision profile))
-    withCoordinationStore installed $ \store ->
+    withServingStore installed $ \store ->
       Service.withService store $ \service -> do
         application <- Application.newApplication https service
         let listen = Transport.runHttps https limits application

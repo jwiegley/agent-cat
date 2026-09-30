@@ -26,6 +26,9 @@ module Agentic.Runtime.PrivateRoot
     ensurePrivateDirectoryAt,
     createPrivateDirectoryAt,
     openPrivateFileAt,
+    openPrivateLogAt,
+    privateFileIdentityAt,
+    syncPrivateHandle,
     readPrivateFileAt,
     readPrivatePrefixAt,
     writePrivateExclusiveAt,
@@ -66,8 +69,10 @@ import System.FilePath (dropTrailingPathSeparator, isAbsolute, isPathSeparator, 
 import System.IO (Handle, hClose, hFlush)
 import System.IO.Error (isAlreadyExistsError, isDoesNotExistError)
 import qualified System.Posix.Directory as PosixDirectory
-import System.Posix.Files (FileStatus, deviceID, fileID, fileMode, fileOwner, getFdStatus, getSymbolicLinkStatus, isDirectory, isSymbolicLink, ownerModes)
-import System.Posix.IO (OpenFileFlags (cloexec, creat, directory, exclusive, nofollow, nonBlock), OpenMode (ReadOnly, WriteOnly), closeFd, defaultFileFlags, fdToHandle, openFd, openFdAt)
+import GHC.IO.FD (FD (fdFD))
+import GHC.IO.Handle.FD (handleToFd)
+import System.Posix.Files (FileStatus, deviceID, fileID, fileMode, fileOwner, getFdStatus, getSymbolicLinkStatus, isDirectory, isRegularFile, isSymbolicLink, linkCount, ownerModes)
+import System.Posix.IO (OpenFileFlags (append, cloexec, creat, directory, exclusive, nofollow, nonBlock), OpenMode (ReadOnly, ReadWrite, WriteOnly), closeFd, defaultFileFlags, fdToHandle, openFd, openFdAt)
 import System.Posix.Process (getProcessID)
 import System.Posix.Types (CMode (..), DeviceID, Fd (..), FileID, UserID)
 import System.Posix.User (getEffectiveUserID)
@@ -227,6 +232,46 @@ createPrivateDirectoryAt = descend False
 openPrivateFileAt :: PrivateRoot -> [FilePath] -> IO Handle
 openPrivateFileAt root components = withParent root components $ \parent file ->
   bracketOnError (openFdAt (Just parent) file WriteOnly fileFlags) closeFd fdToHandle
+
+-- | Open an append-only private log for reading and appending, creating it
+-- when it is absent. The file must be a regular file of the effective user
+-- with private permissions and one link. The result carries the device and
+-- inode of the opened file, which 'privateFileIdentityAt' compares with the
+-- file that the path names later.
+openPrivateLogAt :: PrivateRoot -> [FilePath] -> IO (Handle, (DeviceID, FileID))
+openPrivateLogAt root components = withParent root components $ \parent file ->
+  bracketOnError (openFdAt (Just parent) file ReadWrite logFlags) closeFd $ \descriptor -> do
+    status <- getFdStatus descriptor
+    unless (isRegularFile status && linkCount status == 1) $
+      ioError (userError "private log is not a regular file with one link")
+    unless (fileOwner status == privateRootOwner root && fileMode status .&. 0o077 == 0) $
+      ioError (userError "private log is not private to the effective user")
+    handle <- fdToHandle descriptor
+    pure (handle, (deviceID status, fileID status))
+  where
+    logFlags = defaultFileFlags {creat = Just 0o600, append = True, nofollow = True, cloexec = True}
+
+-- | The device and inode of the file that the path names now, without
+-- following a final symbolic link, or 'Nothing' when the path names nothing.
+privateFileIdentityAt :: PrivateRoot -> [FilePath] -> IO (Maybe (DeviceID, FileID))
+privateFileIdentityAt root components = do
+  opened <- try @IOException $ withParent root components $ \parent file ->
+    bracket (openFdAt (Just parent) file ReadOnly defaultFileFlags {nofollow = True, cloexec = True, nonBlock = True}) closeFd $ \descriptor -> do
+      status <- getFdStatus descriptor
+      pure (deviceID status, fileID status)
+  case opened of
+    Right identity -> pure (Just identity)
+    Left failure
+      | isDoesNotExistError failure -> pure Nothing
+      | otherwise -> throwIO failure
+
+-- | Flush a private file handle and synchronize its descriptor through
+-- @agentic_sync_private_descriptor@.
+syncPrivateHandle :: Handle -> IO ()
+syncPrivateHandle handle = do
+  hFlush handle
+  descriptor <- handleToFd handle
+  syncDescriptor (Fd (fdFD descriptor))
 
 readPrivateFileAt :: PrivateRoot -> [FilePath] -> Integer -> IO BS.ByteString
 readPrivateFileAt root components limit =

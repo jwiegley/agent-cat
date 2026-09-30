@@ -11,6 +11,8 @@ import qualified Agentic.Manager.Protocol.LocalAdmin as Admin
 import Agentic.Manager.Authorization
 import Agentic.Manager.Commands
 import Agentic.Manager.Configuration
+import Agentic.Manager.Flow
+import Agentic.Manager.Protocol.Preparation (ApprovalRequest (..))
 import Agentic.Manager.Profile (Diagnostic, publicRevision)
 import Agentic.Manager.Protocol.Command
 import Agentic.Manager.Protocol.Json (representableEditorSchema)
@@ -25,7 +27,7 @@ import Control.Concurrent.Async (AsyncCancelled (..), async, cancel, concurrentl
 import Control.Concurrent.MVar (newEmptyMVar, putMVar, readMVar, takeMVar, tryPutMVar)
 import System.Timeout (timeout)
 import Control.DeepSeq (NFData)
-import Control.Exception (AsyncException (UserInterrupt), bracket, fromException, throwIO, try)
+import Control.Exception (AsyncException (UserInterrupt), IOException, bracket, fromException, throwIO, try)
 import Control.Monad (forM_, unless, void, when)
 import Crypto.Hash (Digest, SHA256, hash)
 import Data.Aeson (FromJSON (parseJSON), Value (..), eitherDecodeStrict', object, toJSON, withObject, (.:), (.=))
@@ -40,6 +42,7 @@ import Data.IORef (writeIORef, modifyIORef', newIORef, readIORef)
 import Data.Int (Int64)
 import Data.Maybe (isNothing)
 import Data.Text (Text)
+import Data.Time.Clock (getCurrentTime)
 import GHC.Clock (getMonotonicTimeNSec)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
@@ -47,7 +50,7 @@ import qualified Database.SQLite3 as SQL
 import qualified Database.SQLite3.Direct as Direct
 import Foreign.Ptr (Ptr)
 import Foreign.C.Types (CInt (..))
-import System.Directory (createDirectory, doesFileExist)
+import System.Directory (createDirectory, doesFileExist, renameFile)
 import System.Environment (getArgs)
 import System.FilePath ((</>), takeDirectory)
 import System.IO (BufferMode (LineBuffering), hSetBuffering, stdout)
@@ -60,6 +63,7 @@ main = do
   case args of
     ["quota-pressure",work] -> preflightRetentionChecks work >> capacityChecks work >> rateChecks work
     ["deadline-crossing",work] -> commandDeadlineChecks work
+    ["flow",work] -> flowChecks work
     ["ordinary-admission",work] -> ordinaryAdmissionChecks work
     ["authorization-commit-gap",work] -> credentialCommitGapChecks work
     ["hold-credentials",path] -> withInstalled path $ \installed -> withCoordinationStore installed $ \_ ->
@@ -1281,3 +1285,295 @@ credentialBoundsChecks work = do
       first:_ -> void (adminOK store (Admin.IssueCredential "beyond list" [] [first] "2999-01-01T00:00:00Z" (work </> "beyond-list.credential")))
       [] -> error "missing credential-bound profile"
     adminRefused "257 retained records refuse whole list without lifetime issuance cap" Admin.SizeLimit store Admin.ListCredentials
+
+-- ---------------------------------------------------------------------------
+-- The manager log
+-- ---------------------------------------------------------------------------
+
+-- | The manager body codecs, the manager writer, its gap entries, its path
+-- identity check and its ceiling.
+flowChecks :: FilePath -> IO ()
+flowChecks work = do
+  let root = work </> "flow-root"
+  createDirectory root
+  setFileMode root 0o700
+  bracket (Runtime.openPrivateRoot "manager flow check" root) Runtime.closePrivateRoot $ \private -> do
+    flowCodecChecks
+    flowWriterChecks root private
+    flowGapChecks root private
+    flowRenameChecks root private
+    flowCeilingChecks root private
+  flowStoreChecks work
+  putStrLn "PASS manager log codecs, writer, gap entries, path identity, ceiling and Store lifetimes"
+
+-- An administration lifetime writes no manager log. A serving lifetime writes
+-- a lifetime notice that lists the current credentials and, only when its
+-- action returns or the operator stops it, a shutdown notice.
+flowStoreChecks :: FilePath -> IO ()
+flowStoreChecks work = do
+  (path, root) <- fixture work "flow-store" (64 * commandCapacity) 10
+  stream <- withInstalled path $ \installed -> withCoordinationStore installed $ \store ->
+    mutate store seed >> (storeStreamId <$> storeIdentity store)
+  let logPath = foldl (</>) root (managerFlowPath stream)
+  administered <- doesFileExist logPath
+  check "an administration Store lifetime writes no manager log" (not administered)
+  served <- withInstalled path $ \installed -> withServingStore installed (fmap storeProcessGeneration . storeIdentity)
+  generation <- newIORef ""
+  failed <- try @IOException $ withInstalled path $ \installed -> withServingStore installed $ \store -> do
+    storeIdentity store >>= writeIORef generation . storeProcessGeneration
+    ioError (userError "the lifetime action fails")
+  interrupted <- readIORef generation
+  check "a failed serving lifetime action propagates" (isLeftEither failed)
+  stoppedByOperator <- try @AsyncException $ withInstalled path $ \installed -> withServingStore installed $ \store -> do
+    storeIdentity store >>= writeIORef generation . storeProcessGeneration
+    throwIO UserInterrupt :: IO ()
+  signalled <- readIORef generation
+  check "an operator stop of a serving lifetime propagates" (stoppedByOperator == Left UserInterrupt)
+  records <- bracket (Runtime.openPrivateRoot "manager flow store check" root) Runtime.closePrivateRoot $ \private ->
+    flowLines private root stream
+  notices <- mapM (right . noticeFromFlowBody . snd) records
+  case notices of
+    [LifetimeNotice first, ShutdownNotice stopped, LifetimeNotice second, LifetimeNotice third, ShutdownNotice signalledStop] ->
+      check "a serving lifetime begins with its credentials and ends with a shutdown notice only when its action returns or the operator stops it" $
+        lifetimeGeneration first == served && stopped == served && lifetimeGeneration second == interrupted
+          && lifetimeGeneration third == signalled && signalledStop == signalled
+          && map credentialEntryId (lifetimeCredentials first) == ["credential_a", "credential_b", "credential_rotated"]
+          && all (\entry -> credentialEntryProfiles entry == ["profile_1"]) (lifetimeCredentials first)
+          && lifetimeReconciliation first /= noReconciliation
+          && lifetimeReconciliation second == noReconciliation
+          && all (\(record, _) -> Runtime.recFrom record == Runtime.Manager) records
+    _ -> error ("FAIL manager log Store lifetimes expected the notices of three lifetimes, found " <> show notices)
+
+-- A Unicode text, a JSON false and null, exact decimals and a body above 64 KiB.
+flowCommands :: [CommandBody]
+flowCommands =
+  [ CommandBody Answer "profile_1" "POST" "/v1/runs/run_1/control" "application/json" (Just "\"revision_1\"")
+      (Just (object ["answer" .= False, "note" .= Null, "text" .= ("r\233sum\233 \10003 \26085\26412" :: Text),
+                     "amount" .= Number (read "0.1000000000000000055511151231257827"), "decimal" .= Number (read "12345678901234567890.000000000000000001")]))
+      Nothing
+  , CommandBody Enqueue "profile_1" "POST" "/v1/drafts/draft_1/enqueue" "application/json" Nothing
+      (Just (object ["values" .= [Null, Bool False, Number (read "1.10"), Number (read "-0.0")], "large" .= T.replicate 70000 "\955"]))
+      Nothing
+  , CommandBody Capture "profile_1" "PUT" "/v1/drafts/draft_1/captures/input" "application/octet-stream" Nothing Nothing
+      (Just (CaptureReference "capture_1" (T.replicate 64 "a") 1048576))
+  , CommandBody Cancel "profile_1" "POST" "/v1/runs/run_1/control" "application/json" (Just "\"revision_2\"") (Just Null) Nothing
+  ]
+
+flowReceipts :: [CommandReceipt]
+flowReceipts =
+  [ CommandReceipt "command_1" "profile_1" Answer "/v1/runs/run_1/control" Accepted "2026-09-29T00:00:00Z" Nothing Nothing Nothing Nothing
+  , CommandReceipt "command_2" "profile_1" Enqueue "/v1/drafts/draft_1/enqueue" Refused "2026-09-29T00:00:00.5Z" Nothing Nothing Nothing (Just "storage-unavailable")
+  ]
+
+flowReview :: Int -> ReviewBody
+flowReview size =
+  let bytes = TE.encodeUtf8 ("{\"review\":\"" <> T.replicate size "\233" <> "\",\"ok\":false,\"none\":null}")
+      binding = TE.encodeUtf8 "{\"domain\":\"agent-cat/exact-preparation/v1\",\"nonce\":\"binding_1\",\"amount\":1.10}"
+      digest = flowTestSha256 binding
+  in ReviewBody "preparation_1" bytes (flowTestSha256 bytes) binding digest "2026-09-29T01:00:00Z"
+       (ApprovalRequest digest "request_revision_1" "profile_revision_1" "descriptor_1" "generation_1")
+
+flowRelays :: [RelayBody]
+flowRelays =
+  [ RelayBody RelayStart "run_1" (Runtime.RunId "native_1") "command_3" (TE.encodeUtf8 "{\"type\":\"start\",\"inputs\":{\"text\":\"\10003\"},\"ok\":false}")
+  , RelayBody RelayControl "run_1" (Runtime.RunId "native_1") "command_4" (TE.encodeUtf8 ("{\"type\":\"control\",\"pad\":\"" <> T.replicate 70000 "x" <> "\"}"))
+  ]
+
+flowNotices :: [Notice]
+flowNotices =
+  [ CommandChanged Acknowledged Nothing
+  , CommandChanged Refused (Just "storage-unavailable")
+  , ReviewEnded "preparation_1" "expired"
+  , RequestEnded "request_1" RequestWithdrawn
+  , LifetimeNotice (Lifetime "generation_1" (Reconciliation 1 2 3 4 5 6 7)
+      [CredentialEntry "client_1" "credential_1" "active" ["observe", "submit"] ["profile_1"]] 0)
+  , ShutdownNotice "generation_1"
+  , GapNotice [MissingRecord Runtime.FlowReceipt Runtime.noAbout {Runtime.aboutCommand = Just ("command_" <> T.pack (show n))} | n <- [1 .. 256 :: Int]] 9
+  ]
+
+flowTestSha256 :: BS.ByteString -> Text
+flowTestSha256 bytes = T.pack (show (hash bytes :: Digest SHA256))
+
+flowCodecChecks :: IO ()
+flowCodecChecks = do
+  check "manager log command bodies round-trip with Unicode, false, null and exact decimals"
+    (all (\command -> commandFromFlowBody (commandFlowBody command) == Right command) flowCommands)
+  check "manager log receipt bodies round-trip" (all (\receipt -> receiptFromFlowBody (receiptFlowBody receipt) == Right receipt) flowReceipts)
+  reviews <- mapM (\size -> right (reviewFlowBody (flowReview size))) [16, 40000]
+  check "manager log review bodies round-trip on both sides of 64 KiB"
+    (map reviewFromFlowBody reviews == map (Right . flowReview) [16, 40000])
+  relays <- mapM (right . relayFlowBody) flowRelays
+  check "manager log relay bodies round-trip with exact frame bytes" (map relayFromFlowBody relays == map Right flowRelays)
+  check "manager log notice bodies round-trip" (all (\notice -> noticeFromFlowBody (noticeFlowBody notice) == Right notice) flowNotices)
+  let withField (Object fields) = Object (KM.insert "extra" (Bool False) fields)
+      withField other = other
+  check "manager log body codecs refuse an unknown field" $
+    all isLeftEither
+      [ () <$ commandFromFlowBody (withField (commandFlowBody (firstFlow flowCommands)))
+      , () <$ receiptFromFlowBody (withField (receiptFlowBody (firstFlow flowReceipts)))
+      , () <$ reviewFromFlowBody (withField (firstFlow reviews))
+      , () <$ relayFromFlowBody (withField (firstFlow relays))
+      , () <$ noticeFromFlowBody (withField (noticeFlowBody (firstFlow flowNotices)))
+      ]
+  let tampered = case firstFlow reviews of
+        Object fields -> Object (KM.insert "reviewSha256" (String (T.replicate 64 "0")) fields)
+        other -> other
+  check "manager log review body refuses a digest that does not match its bytes" (isLeftEither (reviewFromFlowBody tampered))
+  now <- getCurrentTime
+  let record = Runtime.Record Runtime.FlowCommand (Runtime.Principal (Runtime.Credential "client_1" "credential_1")) (Runtime.To Runtime.Manager)
+        Runtime.noAbout {Runtime.aboutCommand = Just "command_1"} Nothing (Runtime.Inline (commandFlowBody (firstFlow flowCommands))) now
+      line = Runtime.encodeFlowLine record
+      duplicate = BS.intercalate "\"method\":\"POST\",\"method\":\"POST\"" (splitOn "\"method\":\"POST\"" line)
+      nested = BS.intercalate "\"answer\":false,\"answer\":false" (splitOn "\"answer\":false" line)
+  check "manager log line round-trips a command record" (Runtime.decodeFlowLine line == Right record)
+  check "manager log line codec refuses a duplicate key in a command body"
+    (duplicate /= line && nested /= line && isLeftEither (Runtime.decodeFlowLine duplicate) && isLeftEither (Runtime.decodeFlowLine nested))
+  where
+    splitOn separator bytes =
+      let (before, after) = BS.breakSubstring separator bytes
+      in if BS.null after then [before] else before : splitOn separator (BS.drop (BS.length separator) after)
+
+isLeftEither :: Either a b -> Bool
+isLeftEither = either (const True) (const False)
+
+-- | Every record of a manager log with its resolved body.
+flowLines :: Runtime.PrivateRoot -> FilePath -> Text -> IO [(Runtime.Record, Value)]
+flowLines private root stream = do
+  bytes <- BS.readFile (foldl (</>) root (managerFlowPath stream))
+  check ("manager log " <> T.unpack stream <> " ends with a complete line") (BS.null bytes || BS.last bytes == 10)
+  mapM decodeLine (filter (not . BS.null) (BS.split 10 bytes))
+  where
+    decodeLine line = do
+      record <- right (Runtime.decodeFlowLine line)
+      content <- Runtime.readFlowContentAt private (managerFlowClaims stream) (Runtime.recBody record) >>= right
+      case content of
+        Runtime.ContentValue value -> pure (record, value)
+        Runtime.ContentEvent _ -> error "FAIL manager log holds an event body"
+
+flowTotal :: Int64
+flowTotal = 64 * 1024 * 1024
+
+flowWriterChecks :: FilePath -> Runtime.PrivateRoot -> IO ()
+flowWriterChecks root private = do
+  let stream = "stream_writer"
+      principal = Runtime.Principal (Runtime.Credential "client_1" "credential_1")
+      commandAbout n = Runtime.noAbout {Runtime.aboutCommand = Just ("command_" <> T.pack (show (n :: Int)))}
+  flow <- openManagerFlow Runtime.strictFlowCodec Nothing private stream flowTotal
+  asks <- mapM (\(n, command) -> right =<< appendManagerAsk flow flowTotal Refusing Runtime.FlowCommand principal (Runtime.To Runtime.Manager) (commandAbout n) (commandFlowBody command)) (zip [1 ..] flowCommands)
+  mapM_ (\((position, _), receipt) -> right =<< appendManagerReply flow flowTotal Following Runtime.FlowReceipt position Runtime.Manager (Runtime.To principal) (commandAbout 1) (receiptFlowBody receipt)) (zip asks flowReceipts)
+  mapM_ (\size -> right (reviewFlowBody (flowReview size)) >>= \body -> right =<< appendManagerTell flow flowTotal Following Runtime.FlowReview Runtime.Manager (Runtime.Approvers "profile_1") Runtime.noAbout body) [16, 40000]
+  mapM_ (\relay -> right (relayFlowBody relay) >>= \body -> right =<< appendManagerTell flow flowTotal Following Runtime.FlowRelay Runtime.Manager (Runtime.To (Runtime.Workflow (relayBodyNativeRun relay))) Runtime.noAbout body) flowRelays
+  mapM_ (\notice -> right =<< appendManagerTell flow flowTotal Reserved Runtime.FlowNotice Runtime.Manager (Runtime.To Runtime.Manager) Runtime.noAbout (noticeFlowBody notice)) flowNotices
+  refused <- appendManagerTell flow flowTotal Reserved Runtime.FlowQuestion Runtime.Manager (Runtime.To Runtime.Manager) Runtime.noAbout Null
+  check "manager log writer refuses a run-log schema" (isLeftEither refused)
+  closeManagerFlow flow
+  records <- flowLines private root stream
+  let bodies schema = [value | (record, value) <- records, Runtime.recSchema record == schema]
+  claims <- length . filter (\(record, _) -> case Runtime.recBody record of Runtime.ClaimCheck _ _ -> True; _ -> False) <$> pure records
+  check "manager log writer carries the five manager bodies exactly, with claim checks above 64 KiB" $
+    map commandFromFlowBody (bodies Runtime.FlowCommand) == map Right flowCommands
+      && map receiptFromFlowBody (bodies Runtime.FlowReceipt) == map Right flowReceipts
+      && map reviewFromFlowBody (bodies Runtime.FlowReview) == map (Right . flowReview) [16, 40000]
+      && map relayFromFlowBody (bodies Runtime.FlowRelay) == map Right flowRelays
+      && map noticeFromFlowBody (bodies Runtime.FlowNotice) == map Right flowNotices
+      && claims >= 3
+      && [Runtime.recReplyTo record | (record, _) <- records, Runtime.recSchema record == Runtime.FlowReceipt] == map (Just . fst) (take 2 asks)
+  -- A later lifetime continues the positions and truncates a torn final line.
+  BS.appendFile (foldl (</>) root (managerFlowPath stream)) "{\"schema\":\"notice\",\"from\""
+  again <- openManagerFlow Runtime.strictFlowCodec Nothing private stream flowTotal
+  reply <- appendManagerReply again flowTotal Following Runtime.FlowReceipt (fst (last asks)) Runtime.Manager (Runtime.To principal) (commandAbout 4) (receiptFlowBody (firstFlow flowReceipts))
+  closeManagerFlow again
+  after <- flowLines private root stream
+  check "manager log reopens after a torn final line and answers an ask of an earlier lifetime"
+    (either (const False) (const True) reply && length after == length records + 1)
+
+flowGapChecks :: FilePath -> Runtime.PrivateRoot -> IO ()
+flowGapChecks root private = do
+  failing <- newIORef True
+  let stream = "stream_gaps"
+      about n = Runtime.noAbout {Runtime.aboutCommand = Just ("command_" <> T.pack (show (n :: Int)))}
+      notice = noticeFlowBody (CommandChanged Acknowledged Nothing)
+  flow <- openManagerFlow Runtime.strictFlowCodec (Just (ManagerFlowFault (\_ _ -> readIORef failing))) private stream flowTotal
+  failed <- mapM (\n -> appendManagerTell flow flowTotal Following Runtime.FlowNotice Runtime.Manager (Runtime.To Runtime.Manager) (about n) notice) [1 .. 300]
+  refused <- mapM (\n -> appendManagerAsk flow flowTotal Refusing Runtime.FlowCommand Runtime.Manager (Runtime.To Runtime.Manager) (about n) (commandFlowBody (firstFlow flowCommands))) [301 .. 305]
+  check "manager log appends fail while the test fault selects them" (all isLeftEither failed && all isLeftEither refused)
+  writeIORef failing False
+  appended <- appendManagerTell flow flowTotal Following Runtime.FlowNotice Runtime.Manager (Runtime.To Runtime.Manager) (about 306) notice
+  closeManagerFlow flow
+  records <- flowLines private root stream
+  case records of
+    [(gapRecord, gap), (last', _)] -> do
+      decoded <- right (noticeFromFlowBody gap)
+      check "manager log names 256 missing records, counts the rest and emits one gap notice before the next record"
+        (decoded == GapNotice [MissingRecord Runtime.FlowNotice (about n) | n <- [1 .. 256]] 44
+          && Runtime.recFrom gapRecord == Runtime.Manager
+          && Runtime.recAbout last' == about 306 && either (const False) (const True) appended)
+    _ -> error ("FAIL manager log gap check expected two records, found " <> show (length records))
+
+flowRenameChecks :: FilePath -> Runtime.PrivateRoot -> IO ()
+flowRenameChecks root private = do
+  let stream = "stream_rename"
+      path = foldl (</>) root (managerFlowPath stream)
+      moved = root </> "flow" </> "moved.ndjson"
+  flow <- openManagerFlow Runtime.strictFlowCodec Nothing private stream flowTotal
+  let appendOnce = appendManagerTell flow flowTotal Reserved Runtime.FlowNotice Runtime.Manager (Runtime.To Runtime.Manager) Runtime.noAbout (noticeFlowBody (ShutdownNotice "generation_1"))
+  first <- appendOnce
+  renameFile path moved
+  renamed <- appendOnce
+  recreated <- doesFileExist path
+  renameFile moved path
+  restored <- appendOnce
+  closeManagerFlow flow
+  records <- flowLines private root stream
+  check "manager log refuses the append after a rename and every later append, and never reopens the path"
+    (either (const False) (const True) first && isLeftEither renamed && not recreated && isLeftEither restored && length records == 1)
+
+flowCeilingChecks :: FilePath -> Runtime.PrivateRoot -> IO ()
+flowCeilingChecks root private = do
+  let capacity = 131072
+      large = 16 * capacity + 3000
+  check "manager log ceiling arithmetic holds with and without the reserve" $
+    managerFlowAllowance 1000 Refusing == 0 && managerFlowAllowance 1000 Following == 0 && managerFlowAllowance 1000 Reserved == 1000
+      && managerFlowAllowance large Refusing == 3000 && managerFlowAllowance large Reserved == toInteger large
+  let notice = noticeFlowBody (ShutdownNotice "generation_1")
+      tell flow total recordClass = appendManagerTell flow total recordClass Runtime.FlowNotice Runtime.Manager (Runtime.To Runtime.Manager) Runtime.noAbout notice
+      untilQuota flow total recordClass = do
+        outcome <- tell flow total recordClass
+        case outcome of
+          Right _ -> untilQuota flow total recordClass
+          Left failure -> pure failure
+  -- A small ceiling is all reserve.
+  small <- openManagerFlow Runtime.strictFlowCodec Nothing private "stream_ceiling_small" 4096
+  ordinary <- tell small 4096 Refusing
+  reserved <- untilQuota small 4096 Reserved
+  smallBytes <- managerFlowBytes small
+  check "manager log with a ceiling below the reserve refuses ordinary records and fills the reserve with manager records"
+    (ordinary == Left ManagerFlowQuota && reserved == ManagerFlowQuota && maybe False (\bytes -> bytes <= 4096 && bytes > 4096 - 400) smallBytes)
+  -- The spent reserve turns a manager record into a gap entry, which a later
+  -- append under a larger ceiling names first. The last attempt of the fill
+  -- and the next attempt are the two missing records.
+  spent <- tell small 4096 Reserved
+  named <- tell small 8192 Reserved
+  closeManagerFlow small
+  smallRecords <- flowLines private root "stream_ceiling_small"
+  gapNamed <- case reverse smallRecords of
+    _ : (_, gap) : _ -> pure (noticeFromFlowBody gap)
+    _ -> error "FAIL manager log small ceiling holds fewer than two records"
+  check "manager log records beyond the spent reserve become gap entries"
+    (spent == Left ManagerFlowQuota && either (const False) (const True) named
+      && gapNamed == Right (GapNotice (replicate 2 (MissingRecord Runtime.FlowNotice Runtime.noAbout)) 0))
+  -- A large ceiling leaves ordinary capacity below the reserve.
+  big <- openManagerFlow Runtime.strictFlowCodec Nothing private "stream_ceiling_large" large
+  ordinaryQuota <- untilQuota big large Refusing
+  ordinaryBytes <- managerFlowBytes big
+  extra <- tell big large Reserved
+  reservedBytes <- managerFlowBytes big
+  closeManagerFlow big
+  check "manager log ordinary records stop below the reserve, and manager records use it"
+    (ordinaryQuota == ManagerFlowQuota && maybe False (<= 3000) ordinaryBytes && either (const False) (const True) extra
+      && maybe False (> 3000) reservedBytes)
+
+firstFlow :: [a] -> a
+firstFlow values = case values of
+  value : _ -> value
+  [] -> error "FAIL a manager log fixture list is empty"

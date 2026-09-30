@@ -552,6 +552,7 @@ parsedAs args = case parseCommand collidingRegistry args of
   Right (Machine _ _ n _ _ _) -> "machine " <> T.unpack n
   Right (LineageCheck _ _ _ _ n _ _ _) -> "lineage-check " <> T.unpack n
   Right (MachineLineage _ _ _ _ _ n _ _ _) -> "machine-lineage " <> T.unpack n
+  Right (ReadFlow path _ _ _) -> "flow " <> path
   Left t
     | "and not a verb" `T.isInfixOf` t -> "bare-row"
     | "no verb '" `T.isInfixOf` t -> "no-verb"

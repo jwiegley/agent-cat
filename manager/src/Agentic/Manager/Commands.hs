@@ -171,8 +171,7 @@ data TicketState = TicketState !TicketPhase !(Maybe BS.ByteString)
 dispatchCommandId :: DispatchTicket -> Text
 dispatchCommandId (DispatchTicket _ ident _ _ _) = ident
 
-commandCapacity, tombstoneCapacity :: Int64
-commandCapacity = 131072
+tombstoneCapacity :: Int64
 tombstoneCapacity = 16384
 
 type CommandTx = ExceptT CommandFailure Transaction
@@ -863,7 +862,7 @@ checkCapacity limits operation = do
   rows <- sql "SELECT bytes FROM command_ledger_usage WHERE singleton=1" []
   used <- case rows of [[SQL.SQLInteger value]] -> pure value; _ -> throwE StorageUnavailable
   let total = fromIntegral (limitGlobalMutationLedgerBytes limits)
-      reserve = min total (16 * commandCapacity)
+      reserve = mutationLedgerReserve total
       ceilingBytes = if operation == Cancel then total else total - reserve
   require (used <= ceilingBytes - commandCapacity) StorageQuota
 

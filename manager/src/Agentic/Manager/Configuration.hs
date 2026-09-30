@@ -8,7 +8,7 @@ module Agentic.Manager.Configuration
     configurationSnapshot, selectConfiguredProfile, probeConfiguredProfile,
     configurationAdministrationRoot, withConfigurationAdministration,
     HttpsConfiguration (..), configurationHttps,
-    acquireConfigurationStorage, releaseConfigurationStorage, withConfigurationSnapshot, withConfigurationCatalogues, withConfigurationCatalogueContext, tryConfigurationCatalogueContext, probeConfiguredCapabilities, withConfiguredRetentionRoot, validateHistoryBindings, revalidateRetentionRoot, configuredInvocations
+    acquireConfigurationStorage, releaseConfigurationStorage, withConfigurationSnapshot, withConfigurationCatalogues, withConfigurationCatalogueContext, tryConfigurationCatalogueContext, probeConfiguredCapabilities, withConfiguredRetentionRoot, validateHistoryBindings, revalidateRetentionRoot, configuredInvocations, configuredLimits
   ) where
 
 import Agentic.Manager.Lease (acquireLease, duplicateLease)
@@ -198,6 +198,10 @@ tryConfigurationCatalogueContext (InstalledConfiguration lock _) action = mask $
           catalogues <- currentCatalogues registry
           invocations <- profileInvocations registry
           restore (action limits profiles catalogues invocations))) `finally` putMVar lock current
+
+-- | The limits of the active configuration.
+configuredLimits :: InstalledConfiguration -> IO (Either Diagnostic ConfigurationLimits)
+configuredLimits installed = withActive installed $ \(ActiveConfiguration _ _ _ limits _ _ _ _) -> pure limits
 
 configuredInvocations :: InstalledConfiguration -> IO (Either Diagnostic [(Text,FrontendInvocation)])
 configuredInvocations installed = withActive installed $ \active@(ActiveConfiguration _ _ _ _ registry _ _ _) ->

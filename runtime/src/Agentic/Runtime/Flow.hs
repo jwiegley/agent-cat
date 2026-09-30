@@ -87,14 +87,36 @@ module Agentic.Runtime.Flow
     -- * Writer
     FlowWriter,
     FlowError (..),
+    FlowLimitReached (..),
     flowClaimDirectory,
     openFlowWriter,
+    openFlowLog,
     closeFlowWriter,
     withFlowWriter,
+    flowWriterBytes,
     appendAsk,
     appendTell,
     appendReply,
+    FlowAppend (..),
+    flowFlushed,
+    appendAskWith,
+    appendTellWith,
+    appendReplyWith,
     readFlowContent,
+    readFlowContentAt,
+
+    -- * Strict body helpers
+    aboutValue,
+    aboutFromValue,
+    flowObject,
+    flowExactKeys,
+    flowField,
+    flowTextField,
+    flowOptionalText,
+    flowInteger,
+    flowBounded,
+    isFlowSha256,
+    flowSha256,
 
     -- * Run log
     runLogName,
@@ -148,7 +170,7 @@ import Agentic.Engine
 import Agentic.Planning (El, Request, SCode, SomeCode (..), answerFromJsonExact, answerJson, requestCodeFromJson, requestFromJson, requestJson)
 import Agentic.Runtime.Broker (DataBroker (..))
 import Agentic.Runtime.Control (Control (controlId), ControlId (controlIdText), controlVersionFor, decodeControlFor, encodeControlFor)
-import Agentic.Runtime.PrivateRoot (PrivateRoot, closePrivateRoot, ensurePrivateDirectoryAt, openPrivateFileAt, openPrivateRoot, readPrivateFileAt, readPrivatePrefixAt, writePrivateExclusiveAt)
+import Agentic.Runtime.PrivateRoot (PrivateRoot, closePrivateRoot, ensurePrivateDirectoryAt, openPrivateFileAt, openPrivateLogAt, openPrivateRoot, privateFileIdentityAt, readPrivateFileAt, readPrivatePrefixAt, syncPrivateHandle, writePrivateExclusiveAt)
 import Agentic.Runtime.Protocol
   ( Envelope (..),
     FailureClass,
@@ -166,7 +188,7 @@ import Agentic.Runtime.Protocol
 import Agentic.Runtime.Store (EffectPhase (..), EffectRecord (..), LineageOperation, RunStore, StoreError, readEffectRecords, readEventLog, storePrivateRoot)
 import Control.Concurrent.MVar (MVar, modifyMVar, modifyMVar_, newMVar)
 import Control.Exception (Exception, IOException, SomeAsyncException, SomeException, bracket, displayException, finally, fromException, onException, throwIO, try)
-import Control.Monad (unless, when)
+import Control.Monad (forM_, unless, when)
 import Crypto.Hash (Digest, SHA256, hash)
 import Data.Aeson (FromJSON, Key, ToJSON (toJSON), Value (..), encode, object, (.=))
 import qualified Data.Aeson as Aeson
@@ -194,7 +216,8 @@ import qualified Data.Text as T
 import Data.Time.Clock (UTCTime, getCurrentTime)
 import Data.Int (Int64)
 import Data.Word (Word32, Word64)
-import System.IO (Handle, hClose, hFlush)
+import System.IO (Handle, hClose, hFileSize, hFlush, hSetFileSize)
+import System.Posix.Types (DeviceID, FileID)
 import System.IO.Error (isAlreadyExistsError)
 
 -- ---------------------------------------------------------------------------
@@ -785,6 +808,13 @@ permissionFromBody = decodeEnginePermissionReport
 data FlowWriter = FlowWriter
   { writerCodec :: !FlowCodec,
     writerRoot :: !PrivateRoot,
+    -- | The path of the log in the root.
+    writerPath :: ![FilePath],
+    -- | The directory in the root that holds the claim-check files of the log.
+    writerClaims :: ![FilePath],
+    -- | The device and inode of the open log, when the writer checks before
+    -- each append that its path still names that file.
+    writerIdentity :: !(Maybe (DeviceID, FileID)),
     writerState :: !(MVar WriterState),
     writerBroken :: !(IORef Bool)
   }
@@ -794,6 +824,8 @@ data WriterState = WriterState
     -- | The schema of each appended position, and nothing else.
     stateSchemas :: !(Seq Schema),
     stateClaims :: !(Set Text),
+    -- | The bytes of the log and of its distinct claim-check files.
+    stateBytes :: !Integer,
     stateOpen :: !Bool
   }
 
@@ -801,6 +833,26 @@ newtype FlowError = FlowError Text
   deriving (Eq, Show)
 
 instance Exception FlowError
+
+-- | An append that would take the log and its claim checks above the limit
+-- that the append named. The writer stays usable.
+data FlowLimitReached = FlowLimitReached
+  deriving (Eq, Show)
+
+instance Exception FlowLimitReached
+
+-- | How one append is made durable and bounded. A synchronized append
+-- flushes the log and then synchronizes its descriptor. A limit bounds the
+-- bytes of the log and of its distinct claim-check files after the append.
+data FlowAppend = FlowAppend
+  { flowSync :: !Bool,
+    flowLimit :: !(Maybe Integer)
+  }
+  deriving (Eq, Show)
+
+-- | A flushed append without a limit, which every run-log append uses.
+flowFlushed :: FlowAppend
+flowFlushed = FlowAppend False Nothing
 
 -- | The directory, beside the log, that holds its claim-check files.
 flowClaimDirectory :: FilePath
@@ -810,7 +862,43 @@ flowClaimDirectory = "flow-claims"
 openFlowWriter :: FlowCodec -> PrivateRoot -> FilePath -> IO FlowWriter
 openFlowWriter codec root name = do
   handle <- openPrivateFileAt root [name]
-  FlowWriter codec root <$> newMVar (WriterState handle Seq.empty Set.empty True) <*> newIORef False
+  FlowWriter codec root [name] [flowClaimDirectory] Nothing <$> newMVar (WriterState handle Seq.empty Set.empty 0 True) <*> newIORef False
+
+-- | Open the log at the path in the root for appending, and create it when it
+-- is absent. The claim-check files of the log live in the given directory.
+--
+-- The writer reads the existing log, which must be at most the given number
+-- of bytes, and decodes every complete line with the codec. It continues the
+-- positions and the claim checks of those records. A final line without its
+-- newline denotes no record, because its append never completed, and the
+-- writer truncates it. Before each append the writer checks that the path
+-- still names the file that it opened. A mismatch, or a check that fails
+-- with an I/O error, breaks the writer: it refuses every later append and
+-- never reopens the path. The result carries the number of
+-- torn bytes that the writer removed.
+openFlowLog :: FlowCodec -> PrivateRoot -> [FilePath] -> [FilePath] -> Integer -> IO (FlowWriter, Integer)
+openFlowLog codec root path claims limit = do
+  (handle, identity) <- openPrivateLogAt root path
+  flip onException (hClose handle) $ do
+    size <- hFileSize handle
+    when (size > limit) (refuse ("the log exceeds " <> T.pack (show limit) <> " bytes"))
+    contents <- BS.hGet handle (fromIntegral size)
+    unless (toInteger (BS.length contents) == size) (refuse "the log changed while it was read")
+    let complete = BS.length contents - BS.length (BS.takeWhileEnd (/= 10) contents)
+        torn = toInteger (BS.length contents - complete)
+        lines' = filter (not . BS.null) (BS.split 10 (BS.take complete contents))
+    unless (length lines' == BS.count 10 (BS.take complete contents)) (refuse "the log holds an empty line")
+    records <- either (\why -> refuse ("the log holds a line that does not decode: " <> why)) pure (traverse (flowDecodeLine codec) lines')
+    when (torn > 0) (hSetFileSize handle (toInteger complete))
+    let claimed = Map.fromList [(digest, size') | Record {recBody = ClaimCheck digest size'} <- records]
+        bytes = toInteger complete + sum (Map.elems claimed)
+        state = WriterState handle (Seq.fromList (map recSchema records)) (Map.keysSet claimed) bytes True
+    writer <- FlowWriter codec root path claims (Just identity) <$> newMVar state <*> newIORef False
+    pure (writer, torn)
+
+-- | The bytes of the log and of its distinct claim-check files.
+flowWriterBytes :: FlowWriter -> IO Integer
+flowWriterBytes writer = modifyMVar (writerState writer) (\current -> pure (current, stateBytes current))
 
 closeFlowWriter :: FlowWriter -> IO ()
 closeFlowWriter writer = modifyMVar_ (writerState writer) $ \current -> do
@@ -837,15 +925,37 @@ appendReply writer schema position = append writer schema ReplySchema (Just posi
 append :: FlowWriter -> Schema -> SchemaRole -> Maybe Position -> Actor -> Address -> About -> Content -> IO (Position, Record)
 append writer = appendVia (writerCodec writer) writer
 
--- | Append one record through the given codec, under the writer lock.
+-- | 'appendAsk' with the given durability and limit.
+appendAskWith :: FlowWriter -> FlowAppend -> Schema -> Actor -> Address -> About -> Content -> IO (Position, Record)
+appendAskWith writer mode schema = appendViaWith mode (writerCodec writer) writer schema AskSchema Nothing
+
+-- | 'appendTell' with the given durability and limit.
+appendTellWith :: FlowWriter -> FlowAppend -> Schema -> Actor -> Address -> About -> Content -> IO (Position, Record)
+appendTellWith writer mode schema = appendViaWith mode (writerCodec writer) writer schema TellSchema Nothing
+
+-- | 'appendReply' with the given durability and limit.
+appendReplyWith :: FlowWriter -> FlowAppend -> Schema -> Position -> Actor -> Address -> About -> Content -> IO (Position, Record)
+appendReplyWith writer mode schema position = appendViaWith mode (writerCodec writer) writer schema ReplySchema (Just position)
+
+-- | Append one flushed record through the given codec, under the writer lock.
 appendVia :: FlowCodec -> FlowWriter -> Schema -> SchemaRole -> Maybe Position -> Actor -> Address -> About -> Content -> IO (Position, Record)
-appendVia codec writer schema role replyTo from to about content = do
+appendVia = appendViaWith flowFlushed
+
+-- | Append one record through the given codec, under the writer lock, with
+-- the given durability and limit.
+appendViaWith :: FlowAppend -> FlowCodec -> FlowWriter -> Schema -> SchemaRole -> Maybe Position -> Actor -> Address -> About -> Content -> IO (Position, Record)
+appendViaWith mode codec writer schema role replyTo from to about content = do
   unless (schemaRole schema == role) $
     refuse ("the " <> schemaName schema <> " schema is not a " <> roleName role)
   modifyMVar (writerState writer) $ \current -> do
     broken <- readIORef (writerBroken writer)
     when broken (refuse "an earlier append to this log failed")
     unless (stateOpen current) (refuse "the log is closed")
+    forM_ (writerIdentity writer) $ \identity -> do
+      observed <- try @IOException (privateFileIdentityAt (writerRoot writer) (writerPath writer))
+      unless (observed == Right (Just identity)) $ do
+        writeIORef (writerBroken writer) True
+        refuse "the log path no longer names the open log"
     let schemas = stateSchemas current
         position = Position (fromIntegral (Seq.length schemas))
     mapM_ (checkReply schemas) replyTo
@@ -856,14 +966,18 @@ appendVia codec writer schema role replyTo from to about content = do
     when (BS.length line > maxFrameBytes) $
       refuse ("the " <> schemaName schema <> " record exceeds " <> T.pack (show maxFrameBytes) <> " bytes")
     carried <- either (refuse . ("the codec does not decode its own line: " <>)) pure (flowDecodeLine codec line)
-    claims <- case claim of
-      Just (digest, bytes) | Set.notMember digest (stateClaims current) -> do
-        writeClaim (writerRoot writer) digest bytes
-        pure (Set.insert digest (stateClaims current))
-      _ -> pure (stateClaims current)
-    (BS.hPut (stateHandle current) (line <> "\n") >> hFlush (stateHandle current))
+    let newClaim = case claim of
+          Just (digest, bytes) | Set.notMember digest (stateClaims current) -> Just (digest, bytes)
+          _ -> Nothing
+        cost = toInteger (BS.length line + 1) + maybe 0 (toInteger . BS.length . snd) newClaim
+    forM_ (flowLimit mode) $ \limit ->
+      when (stateBytes current + cost > limit) (throwIO FlowLimitReached)
+    forM_ newClaim $ \(digest, bytes) -> writeClaim (writerRoot writer) (writerClaims writer) digest bytes
+    let handle = stateHandle current
+    (BS.hPut handle (line <> "\n") >> (if flowSync mode then syncPrivateHandle handle else hFlush handle))
       `onException` writeIORef (writerBroken writer) True
-    pure (current {stateSchemas = schemas |> schema, stateClaims = claims}, (position, carried))
+    let claims = maybe (stateClaims current) (\(digest, _) -> Set.insert digest (stateClaims current)) newClaim
+    pure (current {stateSchemas = schemas |> schema, stateClaims = claims, stateBytes = stateBytes current + cost}, (position, carried))
   where
     checkReply schemas (Position index) =
       case Seq.lookup (fromIntegral index) schemas of
@@ -895,31 +1009,37 @@ bodyFor schema content = case content of
 
 -- | Write a claim check as its exclusive private file. A file of this name that
 -- an earlier writer left is accepted only when its bytes have this digest.
-writeClaim :: PrivateRoot -> Text -> BS.ByteString -> IO ()
-writeClaim root digest bytes = do
-  ensurePrivateDirectoryAt root [flowClaimDirectory]
-  written <- try @IOException (writePrivateExclusiveAt root (claimPath digest) bytes)
+writeClaim :: PrivateRoot -> [FilePath] -> Text -> BS.ByteString -> IO ()
+writeClaim root directory digest bytes = do
+  ensurePrivateDirectoryAt root directory
+  written <- try @IOException (writePrivateExclusiveAt root (claimPath directory digest) bytes)
   case written of
     Right () -> pure ()
     Left failure
       | isAlreadyExistsError failure -> do
-          existing <- readPrivateFileAt root (claimPath digest) (toInteger (BS.length bytes))
+          existing <- readPrivateFileAt root (claimPath directory digest) (toInteger (BS.length bytes))
           unless (existing == bytes) (refuse ("claim check " <> digest <> " exists with other bytes"))
       | otherwise -> throwIO failure
 
-claimPath :: Text -> [FilePath]
-claimPath digest = [flowClaimDirectory, T.unpack digest]
+claimPath :: [FilePath] -> Text -> [FilePath]
+claimPath directory digest = directory <> [T.unpack digest]
 
--- | The content of a body. A claim check is read from its private file beside
--- the log, and its size, digest and exact encoding are verified before use.
+-- | The content of a body of a run log. A claim check is read from its private
+-- file beside the log, and its size, digest and exact encoding are verified
+-- before use.
 readFlowContent :: PrivateRoot -> Body -> IO (Either Text Content)
-readFlowContent root = \case
+readFlowContent root = readFlowContentAt root [flowClaimDirectory]
+
+-- | The content of a body whose claim-check files live in the given directory
+-- of the root.
+readFlowContentAt :: PrivateRoot -> [FilePath] -> Body -> IO (Either Text Content)
+readFlowContentAt root directory = \case
   Inline value -> pure (Right (ContentValue value))
   EventNumber number -> pure (Right (ContentEvent number))
   ClaimCheck digest size
     | not (isSha256 digest) -> pure (Left "claim check digest is not a lowercase SHA-256")
     | otherwise -> do
-        read' <- try @IOException (readPrivateFileAt root (claimPath digest) size)
+        read' <- try @IOException (readPrivateFileAt root (claimPath directory digest) size)
         pure $ case read' of
           Left failure -> Left ("claim check " <> digest <> " cannot be read: " <> T.pack (show failure))
           Right bytes
@@ -1118,7 +1238,7 @@ flowBroker codec flow inner =
     carried schema decode record = do
       content <- case recBody record of
         Inline value -> pure value
-        body@(ClaimCheck _ _) -> readFlowContent (writerRoot writer) body >>= \case
+        body@(ClaimCheck _ _) -> readFlowContentAt (writerRoot writer) (writerClaims writer) body >>= \case
           Right (ContentValue value) -> pure value
           Right (ContentEvent _) -> refuse ("the " <> schemaName schema <> " claim check names an event")
           Left why -> refuse why
@@ -1683,3 +1803,33 @@ isSha256 digest = T.length digest == 64 && T.all (\c -> isDigit c || (isHexDigit
 
 sha256Text :: BS.ByteString -> Text
 sha256Text bytes = T.pack (show (hash bytes :: Digest SHA256))
+
+-- | The strict helpers of the body codecs, for the codecs of other logs.
+flowObject :: Text -> Value -> Either Text Fields
+flowObject = objectOf
+
+flowExactKeys :: Text -> [Key] -> Fields -> Either Text ()
+flowExactKeys = exactKeys
+
+flowField :: Text -> Fields -> Key -> Either Text Value
+flowField = field
+
+flowTextField :: Text -> Fields -> Key -> Either Text Text
+flowTextField = textField
+
+flowOptionalText :: Text -> Value -> Either Text (Maybe Text)
+flowOptionalText = optionalText
+
+-- | An integer within the range of 'Int64'.
+flowInteger :: Text -> Value -> Either Text Integer
+flowInteger = integral
+
+flowBounded :: (Integral a, Bounded a) => Text -> Value -> Either Text a
+flowBounded = boundedNumber
+
+isFlowSha256 :: Text -> Bool
+isFlowSha256 = isSha256
+
+-- | The lowercase hexadecimal SHA-256 of the bytes.
+flowSha256 :: BS.ByteString -> Text
+flowSha256 = sha256Text

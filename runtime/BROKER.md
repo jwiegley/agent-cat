@@ -91,7 +91,9 @@ receiver failure to its runtime and cancels and joins its original reader on exi
 `Agentic.Runtime.Flow`, exported by `Agentic.Runtime`, defines the record of the
 actor flow, its writer and `flowBroker`. A machine run with a run store writes
 a run log and carries its broker operations through that log, as the next two
-sections state. No manager writes a flow log at present.
+sections state. A serving manager writes one log for each Store stream identity with
+the same record, line codec and writer, as the manager log section of
+[the storage contract](../manager/STORAGE.md) states.
 
 A `Record` names one of seventeen schemas, a sender, an address, the
 identifiers that it concerns, the position of its ask when it is a reply, a body
@@ -124,7 +126,19 @@ later append. `appendAsk`, `appendTell` and `appendReply` return the
 writer keeps only the schema of each position, and it refuses a reply whose
 position does not name an earlier ask that the reply may answer.
 `readFlowContent` verifies the size, digest and exact encoding of a claim check
-before it returns the body.
+before it returns the body. `readFlowContentAt` does the same for a log whose
+claim-check files live in another directory.
+
+`openFlowLog` opens a log for appending and creates it when it is absent. It
+decodes every complete line of the existing log with its codec and continues
+the positions and claim checks of those records. It truncates a final line
+without its newline, because that line denotes no record. Before each append
+it checks that the path still names the file that it opened, by device and
+inode, and after one mismatch it refuses every later append. `appendAskWith`,
+`appendTellWith` and `appendReplyWith` take a `FlowAppend` that can
+synchronize the descriptor after the flush and can bound the bytes of the log
+and of its distinct claim-check files. An append above that bound fails with
+`FlowLimitReached`, and the writer stays usable.
 
 ## Run log
 
