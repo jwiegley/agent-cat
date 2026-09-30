@@ -112,7 +112,16 @@ events_mode = len(sys.argv) == 6 and sys.argv[5] == EVENTS
 # case prints its own PASS line. It runs five manager lifetimes.
 ROUTES = "routes"
 routes_mode = len(sys.argv) == 6 and sys.argv[5] == ROUTES
-assert len(sys.argv) == 5 or mixed or boundary or pages_mode or events_mode
+# The mutations-captures mode checks POST /v1/captures through the running
+# protected manager with the scripted captured-input workflow: a capture whose
+# receipt size and digest equal the uploaded bytes, a same-key replay with the
+# same receipt, a 403 refusal for a credential without submit, and the capture
+# as the request input through enqueue, the exact review, approval and a
+# succeeded run whose program received the captured bytes. Each numbered case
+# prints its own PASS line. It runs one manager lifetime.
+CAPTURES = "mutations-captures"
+captures_mode = len(sys.argv) == 6 and sys.argv[5] == CAPTURES
+assert len(sys.argv) == 5 or mixed or boundary or pages_mode or events_mode or captures_mode
 assert not tui_approval or os.environ.get("TUI_CHECK")
 assert native in ("1", "8")
 print(f"work={work}", flush=True)
@@ -213,7 +222,8 @@ def administration(payload, refused=None):
 
 
 issued = administration({"version": 1, "operation": "issue-credential", "label": "HTTPS fixture",
-                         "scopes": ["observe", "submit"] + (["control", "export"] if mixed else []), "profileIds": ["profile_1"],
+                         "scopes": ["observe", "submit"] + (["control", "export"] if mixed else ["control"] if captures_mode else []),
+                         "profileIds": ["profile_1"],
                          "expiresAt": "2999-01-01T00:00:00Z", "outputFile": str(work / "credential")})
 bearer = (work / "credential").read_bytes().decode("ascii")
 if collections:
@@ -221,6 +231,12 @@ if collections:
                     "scopes": ["observe", "submit"], "profileIds": ["profile_2"],
                     "expiresAt": "2999-01-01T00:00:00Z", "outputFile": str(work / "credential-other")})
     other_authorized = {"Authorization": "Bearer " + (work / "credential-other").read_bytes().decode("ascii")}
+# The captures mode also issues a credential of the first profile with
+# observe only, which a capture upload must refuse.
+if captures_mode:
+    administration({"version": 1, "operation": "issue-credential", "label": "HTTPS observe only",
+                    "scopes": ["observe"], "profileIds": ["profile_1"],
+                    "expiresAt": "2999-01-01T00:00:00Z", "outputFile": str(work / "credential-observe")})
 configuration["administrationRoot"] = str(work / "admin")
 config.write_text(json.dumps(configuration))
 context = ssl.create_default_context(cafile=str(cert))
@@ -3118,6 +3134,131 @@ def route_checks():
           f"{middle} resumed with {len(later)} records, and the manager-route cursor of the live command resumed with",
           f"its receipt and {len(resumed_managed) - 1} later records", flush=True)
     print("PASS routes: every run-route and manager-route case held against the running TLS 1.3 manager", flush=True)
+
+
+def capture_checks():
+    """POST /v1/captures through the real HTTPS manager. Each numbered case
+    prints one PASS line."""
+    authorized = {"Authorization": "Bearer " + bearer}
+    observer = {"Authorization": "Bearer " + (work / "credential-observe").read_bytes().decode("ascii")}
+    # Raw UTF-8 with a BOM, CRLF, a trailing LF and multibyte code points,
+    # longer than one 65536-byte upload chunk.
+    line = "\ufeffCapture λ — café 雪\r\n".encode()
+    content = line * (200000 // len(line)) + b"last line\n"
+
+    def upload(credential, request_id, key, body):
+        """One capture POST. Returns the status, the decoded body, the raw body and the headers."""
+        connection = http.client.HTTPSConnection("127.0.0.1", port, context=context, timeout=15)
+        try:
+            connection.request("POST", "/v1/captures?requestId=" + request_id, body=body,
+                               headers=credential | {"Content-Type": "application/octet-stream", "Idempotency-Key": key})
+            response = connection.getresponse()
+            raw = response.read(1048577)
+            assert len(raw) <= 1048576
+            assert response.getheader("Cache-Control") == "no-store"
+            assert response.getheader("X-Content-Type-Options") == "nosniff"
+            value = frozen.parse_json(raw)
+            if response.status >= 400:
+                validate("Problem", value, raw)
+            return response.status, value, raw, dict((name.lower(), text) for name, text in response.getheaders())
+        finally:
+            connection.close()
+
+    with (work / "server-0.stdout").open("wb") as output, (work / "server-0.stderr").open("wb") as errors:
+        process = subprocess.Popen([str(runner), "--manager", "serve", "--config", str(config),
+                                    "+RTS", "-N" + native, "-RTS"], stdout=output, stderr=errors)
+        try:
+            wait_ready(process)
+            status, capabilities, _ = request("/v1/capabilities", authorized)
+            assert status == 200
+            validate("Capabilities", capabilities)
+            assert capabilities["limits"]["captureBytes"] == 67108864
+            status, catalogue, _ = request("/v1/workflows?profileId=profile_1", authorized)
+            assert status == 200
+            workflow = next(item for item in catalogue["items"] if item["name"] == "captured-input")
+            assert [item["name"] for item in workflow["inputs"]] == ["input"]
+            create = {"workflowId": workflow["id"], "descriptorRevision": workflow["revision"],
+                      "profileId": workflow["profileId"], "profileRevision": workflow["profileRevision"]}
+            key = capabilities["authorityEpoch"] + "." + secrets.token_urlsafe(16)
+            status, created, raw = request("/v1/requests", authorized | {"Content-Type": "application/json", "Idempotency-Key": key},
+                                           method="POST", payload=json.dumps(create, separators=(",", ":")).encode())
+            assert status == 201, ("request creation", status, created.get("code"))
+            validate("Request", created, raw)
+
+            # Case 1. The capture receipt names the exact uploaded bytes.
+            capture_key = capabilities["authorityEpoch"] + "." + secrets.token_urlsafe(16)
+            status, receipt, raw, headers = upload(authorized, created["id"], capture_key, content)
+            assert status == 202, ("capture upload", status, receipt.get("code"))
+            validate("CaptureReceipt", receipt, raw)
+            (work / "capture-receipt.json").write_bytes(raw)
+            assert receipt["requestId"] == created["id"] and receipt["profileId"] == "profile_1"
+            assert receipt["bytes"] == str(len(content)) and receipt["sha256"] == hashlib.sha256(content).hexdigest(), (
+                "capture receipt differs from the uploaded bytes", receipt["bytes"], receipt["sha256"])
+            location = headers.get("location", "")
+            assert location.startswith("/v1/commands/"), ("capture Location", location)
+            status, command, raw = request(location, authorized)
+            assert status == 200, ("capture command", status, command.get("code"))
+            validate("CommandReceipt", command, raw)
+            assert command["operation"] == "capture" and command["links"]["self"] == location, (command["operation"], command["links"])
+            print("PASS captures case 1: POST /v1/captures returned 202 with a CaptureReceipt of", receipt["bytes"],
+                  "bytes and SHA-256", receipt["sha256"], "equal to the uploaded bytes, and Location names its capture command", flush=True)
+
+            # Case 2. A same-key replay returns the same receipt and command.
+            status, replay, raw, replay_headers = upload(authorized, created["id"], capture_key, content)
+            assert status == 202, ("capture replay", status, replay.get("code"))
+            validate("CaptureReceipt", replay, raw)
+            assert replay == receipt and replay_headers.get("location") == location, ("capture replay differs", replay, replay_headers.get("location"))
+            print("PASS captures case 2: a same-key capture replay returned the same receipt", receipt["id"], "and the same command", flush=True)
+
+            # Case 3. A credential without the submit scope is refused.
+            other_key = capabilities["authorityEpoch"] + "." + secrets.token_urlsafe(16)
+            status, problem, _, _ = upload(observer, created["id"], other_key, b"observe only\n")
+            assert status == 403 and problem["code"] == "insufficient-scope", ("observe-only capture", status, problem.get("code"))
+            print("PASS captures case 3: a credential with observe only received 403 insufficient-scope", flush=True)
+
+            # Case 4. The capture is the request input through the exact review.
+            observed, wait_for, mutate, _ = mixed_client(capabilities, authorized)
+            request_uri = created["links"]["self"]
+            current, tag, _ = observed(request_uri, "Request")
+            mutate(request_uri, {"operation": "set-input", "input": {"name": "input", "source": "capture", "captureId": receipt["id"]}}, tag)
+            current, tag, raw = observed(request_uri, "Request")
+            (work / "capture-request.json").write_bytes(raw)
+            assert not current["readiness"]["missing"] and not current["readiness"]["errors"], current["readiness"]
+            assert current["readiness"]["supplied"] == [{"name": "input", "source": "capture", "captureId": receipt["id"]}], current["readiness"]["supplied"]
+            mutate(request_uri, {"operation": "enqueue"}, tag)
+            current, _, _ = wait_for(request_uri, "Request", lambda value: value["preparationId"] is not None)
+            preparation, tag, raw = observed("/v1/preparations/" + current["preparationId"], "Preparation")
+            (work / "capture-review.json").write_bytes(raw)
+            assert preparation["state"] == "live"
+            assert preparation["review"]["inputs"] == [{"name": "input", "source": "capture", "bytes": receipt["bytes"], "sha256": receipt["sha256"]}], (
+                "exact review of the capture", preparation["review"]["inputs"])
+            print("PASS captures case 4: set-input bound the capture, and the exact review names the input as capture with the receipt size and digest", flush=True)
+
+            # Case 5. Approval starts the run, and the program receives the capture.
+            selectors = ("reviewDigest", "requestRevision", "profileRevision", "descriptorRevision", "processGeneration")
+            mutate("/v1/preparations/" + preparation["id"], {"operation": "approve", **{name: preparation[name] for name in selectors}}, tag)
+            current, _, _ = wait_for(request_uri, "Request", lambda value: value["runId"] is not None)
+            run = current["runId"]
+            snapshot, _, raw = wait_for("/v1/runs/" + run + "/snapshot", "RunSnapshot",
+                lambda value: value["runtime"] is not None and value["runtime"]["status"] in ("succeeded", "failed", "cancelled"))
+            (work / "capture-terminal-snapshot.json").write_bytes(raw)
+            assert snapshot["runtime"]["status"] == "succeeded", ("capture run terminal status", snapshot["runtime"]["status"])
+            answer_files = sorted(work.glob("manager/runs/runs/*/runtime/answers.json"))
+            assert len(answer_files) == 1, ("capture run store answers", answer_files)
+            prompts = [entry["question"].get("prompt") for entry in json.loads(answer_files[0].read_bytes())["answers"]]
+            assert "fixed-point source: " + hashlib.sha256(content).hexdigest() in prompts, ("the program did not receive the captured bytes", prompts)
+            print("PASS captures case 5: approval started run", run, "which succeeded, and its program received the SHA-256 of the captured bytes", flush=True)
+        finally:
+            if process.poll() is None:
+                process.terminate()
+            process.wait(timeout=25)
+            (work / "server-0.exit").write_text(str(process.returncode) + "\n")
+    print("PASS mutations-captures: every capture case held against the running TLS 1.3 manager", flush=True)
+
+
+if captures_mode:
+    capture_checks()
+    raise SystemExit(0)
 
 
 if routes_mode:

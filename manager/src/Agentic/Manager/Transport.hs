@@ -5,7 +5,7 @@
 -- | A bounded authenticated HTTPS boundary around the existing coordinator.
 module Agentic.Manager.Transport
   ( AuthenticatedApplication, runHttps, authenticated, readJsonRequest,
-    respondBytes, problem, HttpFailure (..)
+    octetStreamSource, respondBytes, problem, HttpFailure (..)
   ) where
 
 import Agentic.Manager.Authorization (AuthorizedView, CredentialProof, authenticateCredential, releaseResponseLoans, revalidateAuthorizedView)
@@ -212,6 +212,26 @@ readJsonRequest request = do
       if BS.null chunk then pure (BS.concat (reverse chunks)) else do
         when (BS.length chunk > remaining) (throwIO SizeLimit)
         go (remaining - BS.length chunk) (chunk:chunks)
+
+-- | The chunk source of a raw @application/octet-stream@ request body. Each
+-- call returns the next chunk of at most 65536 bytes, and the empty string at
+-- the end of the body. The source neither holds nor counts the body, so the
+-- consumer applies its own byte limit and deadline. As in 'readJsonRequest',
+-- the Warp connection timeout pauses after each read. Any other media type
+-- refuses with 415 before the first body read.
+octetStreamSource :: Wai.Request -> IO (IO BS.ByteString)
+octetStreamSource request = do
+  unless (lookup "Content-Type" (Wai.requestHeaders request) == Just "application/octet-stream")
+    (throwIO UnsupportedMediaType)
+  held <- newIORef BS.empty
+  pure $ do
+    pending <- readIORef held
+    chunk <- if BS.null pending
+      then Wai.getRequestBodyChunk request <* Warp.pauseTimeout request
+      else pure pending
+    let (next, rest) = BS.splitAt 65536 chunk
+    writeIORef held rest
+    pure next
 
 problem :: Text -> Int -> Text -> Wai.Response
 problem instanceURI status code = Wai.responseLBS (HTTP.mkStatus status "Request refused")

@@ -4,6 +4,9 @@
 readiness and frontend-frame operations. It coordinates the existing Commands,
 Configuration and Runtime implementations. It does not interpret workflows,
 create workers, perform approval, provision credentials or expose an HTTP server.
+The foreground service routes the draft and capture mutations of `/v1` to
+these operations. The [service HTTP section](#service-http-routes) describes
+the routes.
 
 ## Catalogue and request authority
 
@@ -120,6 +123,27 @@ publication records its original byte count and digest on the upload before fina
 capture acceptance. An unconfirmed publication does not acquire this provenance.
 Final acceptance rechecks the current global capture allowance rather than relying
 only on the allowance sampled before streaming.
+
+## Service HTTP routes
+
+`POST /v1/requests` calls `createDraft`, and `POST /v1/captures?requestId=ID`
+calls `uploadCaptureCommand`. The capture route takes the body as
+`application/octet-stream` and passes the `Idempotency-Key` and a chunk source
+of at most 65536 bytes for each chunk to the operation. Another media type
+receives 415, a query other than one canonical `requestId` receives 400, and an
+`If-Match` header receives 400 `invalid-precondition`. The reserved ceiling is the declared
+`Content-Length`, or 67108864 bytes when the body has no declared length. The
+route adds no state of its own. Admission, publication, the command ledger and
+the replay of an exact retry are those of the operation.
+
+`uploadCaptureCommand` returns the identifier of the capture command together
+with the capture receipt, and `uploadCapture` returns the receipt alone. The
+service answers 202 with the CaptureReceipt as the body and
+`Location: /v1/commands/ID` for that command. An exact retry of the key
+returns the same receipt and the same `Location`. A credential without
+`submit` on the profile of the request receives 403 `insufficient-scope`
+before the service reads a body byte. A later `set-input` with source
+`capture` binds the capture as a request input.
 
 ## Conservative collection
 

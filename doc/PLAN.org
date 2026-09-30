@@ -3956,6 +3956,30 @@ Non-blocking findings of the fess audit of Phase B part 2 subtask C11 (route SSE
 
 Deferred, not a finding: the optional run-route wakeup after an ingestion of the run was not added. The one-second re-read delivers new run-log records.
 
+* TODO [#D] Resolve C12 fess findings on POST /v1/captures
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-c12-captures-fess-findings-reg4
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-30 Wed 14:37]
+:MODIFIED: [2026-09-30 Wed 14:37]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of the fess audit of Phase B part 2 subtask C12 (POST /v1/captures). Source: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/fess/b2-C12-r1.md.
+
+1. (low) manager/src/Agentic/Manager/Application.hs (about lines 170-172). A chunked capture body with no Content-Length reserves the full 67108864-byte ceiling. On a request or store that already holds captures, the owner's quota check can then refuse a small chunked upload with storage-quota. No test covers the chunked path. Fix: reserve the smaller of the ceiling and the remaining allowance, or document the limitation in manager/DRAFTS.md, and add a mutations-captures case that uploads a chunked body.
+
+2. (low) manager/src/Agentic/Manager/Transport.hs (about line 222). octetStreamSource requires Content-Type to equal application/octet-stream exactly, so a media type with a parameter (for example "; charset=binary") receives 415. No test covers the 415 path. Fix: decide whether media-type parameters are allowed, compare only the parsed media type if they are, and add a 415 case to mutations-captures.
+
+3. (low) manager/src/Agentic/Manager/Application.hs (about line 172). The handler repeats the capture limit as the literal 67108864 instead of referring to Drafts.holdingLimit or the advertised captureBytes limit. Fix: use a shared named constant.
+
+4. (low) manager/DRAFTS.md (about line 134). One line in the Service HTTP routes paragraph exceeds the wrap width of the surrounding text. Fix: rewrap the paragraph.
+
 * TODO [#D] Follow-ups from F0 file-slot wait revalidation
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -16577,7 +16601,7 @@ and enforce advertised bounds. G2 is complete with mutations still unavailable.
 :LABELS:   ["p5","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-30 Wed 04:08]
+:MODIFIED: [2026-09-30 Wed 14:37]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-027
 :SOURCE_REPO: agent-cat
@@ -16768,6 +16792,13 @@ Network mutation remains behind G3 until the required evidence is complete.
     "author": "johnw",
     "text": "From B12 (WM-025): the export and lineage collection GETs now send a representation ETag, while Commands.checkPrecondition expects the quoted run revision as the POST If-Match. The contract says the POSTs accept the collection GET ETag. Before routing POST /v1/runs/{id}/exports and the lineage POSTs, WM-027 must choose one validator. See acat-b12-fess-fw1z item 3.",
     "created_at": "2026-09-30T11:08:55Z"
+  },
+  {
+    "id": 419,
+    "issue_id": "acat-wm-027-gcu6",
+    "author": "johnw",
+    "text": "Phase B part 2 subtask C12 routes POST /v1/captures?requestId=<id> (openapi post_captures) to the existing Drafts capture owner with no HTTP-specific state machine. The handler requires Idempotency-Key, refuses If-Match, streams the application/octet-stream body through Transport.octetStreamSource (415 for another media type, chunks of at most 65536 bytes) into Drafts.uploadCaptureCommand, and answers 202 with the CaptureReceipt, Cache-Control no-store and Location /v1/commands/<capture command id>. uploadCapture keeps its signature as fmap snd of uploadCaptureCommand. Checks passed: Werror build of agentic-run, routing-fixed-point-probe and manager-draft-check with -ftui-tests; service_http.py mutations-captures at N8 (exact sha256 and byte count of a 199994-byte multi-chunk capture, same-key replay returns the identical receipt and Location, observe-only credential gets 403 insufficient-scope, set-input with source capture, exact review, approved run whose program received the capture SHA-256); make -C doc check; the Phase A journey at N8. Evidence: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/B2/C12. Fess b2-C12-r1 non-blocking, four low findings in acat-c12-captures-fess-findings-reg4. Deferred under the functionality-first direction: hostile-input negatives for the capture route. Package stays open.",
+    "created_at": "2026-09-30T21:37:31Z"
   }
 ]
 #+end_src

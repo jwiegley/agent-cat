@@ -6,7 +6,7 @@
 
 -- | Durable input representations and verified captures, never workflow execution.
 module Agentic.Manager.Drafts
-  ( reconcileDrafts, createDraft, createLineageDraft, LineageRequests (..), withLineageRequests, withLineageRequestsSource, checkLineageParent, changeDraftInput, changeDraftInputGuarded, InputTransition (..), RequestState, requestView, requestOwner, requestState, currentVersion, editable, checkDraftCapacity, uploadCapture, collectCaptures, readDraft, readDraftAt, withDraft, assembleDraft, DraftAssembly, assemblyRequest, assemblyRevision, assemblyProfile, assemblyProfileRevision, assemblySetup, assemblyFrame, assemblyInputSummaries, assemblySelection, assemblyParentBinding, validateAssemblyParent, assembleDraftSnapshot, assembleAcceptedDraft, structuralReadiness, verifyFrontendFiles, verifyFrontendFilesAt, timed ) where
+  ( reconcileDrafts, createDraft, createLineageDraft, LineageRequests (..), withLineageRequests, withLineageRequestsSource, checkLineageParent, changeDraftInput, changeDraftInputGuarded, InputTransition (..), RequestState, requestView, requestOwner, requestState, currentVersion, editable, checkDraftCapacity, uploadCapture, uploadCaptureCommand, collectCaptures, readDraft, readDraftAt, withDraft, assembleDraft, DraftAssembly, assemblyRequest, assemblyRevision, assemblyProfile, assemblyProfileRevision, assemblySetup, assemblyFrame, assemblyInputSummaries, assemblySelection, assemblyParentBinding, validateAssemblyParent, assembleDraftSnapshot, assembleAcceptedDraft, structuralReadiness, verifyFrontendFiles, verifyFrontendFilesAt, timed ) where
 
 import Agentic.Manager.Authorization
 import Agentic.Manager.Commands
@@ -444,8 +444,16 @@ changeFresh root store proof original@(RequestState view _ _) request change tra
   ensureRevision store proof original [Submit]
   submit request builder >>= requireEither
 
+-- | The capture receipt of 'uploadCaptureCommand' without its command identifier.
 uploadCapture :: CoordinationStore -> CredentialProof -> Text -> Text -> Int64 -> IO BS.ByteString -> IO (Either CommandFailure CaptureReceipt)
-uploadCapture store proof ident key ceilingBytes source = draftIO $ withStoreFiles store $ \root -> do
+uploadCapture store proof ident key ceilingBytes source = fmap snd <$> uploadCaptureCommand store proof ident key ceilingBytes source
+
+-- | Store the streamed raw UTF-8 body as one immutable capture of the draft
+-- request, within the reserved ceiling. The result is the identifier of the
+-- durable capture command and the capture receipt. An exact retry of the key
+-- returns the original command and receipt.
+uploadCaptureCommand :: CoordinationStore -> CredentialProof -> Text -> Text -> Int64 -> IO BS.ByteString -> IO (Either CommandFailure (Text, CaptureReceipt))
+uploadCaptureCommand store proof ident key ceilingBytes source = draftIO $ withStoreFiles store $ \root -> do
   unless (ceilingBytes>=0 && ceilingBytes<=holdingLimit) (throwIO SizeLimit)
   RequestState view _ _ <- runRead store (requestState proof ident [Submit])
   unless (draftParent view == Nothing) (throwIO InvalidInput)
@@ -493,7 +501,7 @@ uploadCapture store proof ident key ceilingBytes source = draftIO $ withStoreFil
           Left failure -> void(try @SomeException(markOrphan store capId)) >> throwIO failure
           Right receipt -> pure receipt
 
-finishCapture :: CoordinationStore -> CredentialProof -> CommandRequest -> DraftView -> Text -> Maybe PrivateCapture -> BodyBinding -> IO CaptureReceipt
+finishCapture :: CoordinationStore -> CredentialProof -> CommandRequest -> DraftView -> Text -> Maybe PrivateCapture -> BodyBinding -> IO (Text, CaptureReceipt)
 finishCapture store proof request view capId publication binding = do
   let ident=draftId view
       builder commandId limits catalogues = do
@@ -520,10 +528,11 @@ finishCapture store proof request view capId publication binding = do
   submission <- submitStreamedCommand store proof request binding builder >>= requireEither
   runRead store $ do
     _ <- authorizeProfile proof (draftProfile view) [Submit] >>= requireTransaction
+    let command=receiptId(submissionReceipt submission)
     rows <- query "SELECT c.id FROM command_captures l JOIN captures c ON c.id=l.capture_id WHERE l.command_id=? AND c.request_id=?"
-      [text(receiptId(submissionReceipt submission)),text ident]
+      [text command,text ident]
     case rows of
-      [[SQL.SQLText actual]] -> do CaptureState receipt _ _ <- captureState ident actual; pure receipt
+      [[SQL.SQLText actual]] -> do CaptureState receipt _ _ <- captureState ident actual; pure (command,receipt)
       _ -> refuseTransaction ResourceUnavailable
 
 -- | Examine at most sixteen recorded identities under the original file owner.

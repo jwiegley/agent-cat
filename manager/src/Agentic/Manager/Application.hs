@@ -62,6 +62,7 @@ methods path = case path of
   ["v1", "events"] -> ["GET"]
   ["v1", "routes"] -> ["GET"]
   ["v1", "requests"] -> ["GET", "POST"]
+  ["v1", "captures"] -> ["POST"]
   ["v1", "runs"] -> ["GET"]
   ["v1", "decisions"] -> ["GET"]
   ["v1", kind, ident]
@@ -80,7 +81,7 @@ dispatch service pages streams proof request respond = do
   (selector, token) <- if workflowList then selectorParameters "profileId" True request
     else if decisionList then selectorParameters "runId" False request else do
       pageToken <- if paged then pageParameter request else
-        if eventRequest || routeRequest then pure Nothing else noQuery request >> pure Nothing
+        if eventRequest || routeRequest || captureRequest then pure Nothing else noQuery request >> pure Nothing
       pure (Nothing,pageToken)
   case (Wai.requestMethod request, Wai.pathInfo request) of
     ("GET", ["v1", "capabilities"]) ->
@@ -159,6 +160,20 @@ dispatch service pages streams proof request respond = do
       Auth.withAuthorizedResponse store proof (D.draftProfile draft) [C.Submit] $ \view ->
         json view HTTP.status201 [("Location", TE.encodeUtf8 ("/v1/requests/" <> D.draftId draft))]
           (toJSON draft) respond
+    ("POST", ["v1", "captures"]) -> do
+      ident <- captureParameter request
+      (key, condition) <- mutationHeaders request
+      unless (condition == Nothing) (throwIO C.InvalidPrecondition)
+      source <- Transport.octetStreamSource request
+      -- The reservation is the declared length, or the capture limit when
+      -- the body has no declared length.
+      let reserved = case Wai.requestBodyLength request of
+            Wai.KnownLength size -> fromIntegral size
+            Wai.ChunkedBody -> 67108864
+      (command, capture) <- Drafts.uploadCaptureCommand store proof ident key reserved source >>= need
+      Auth.withAuthorizedResponse store proof (D.captureProfile capture) (C.requiredScopes C.Capture) $ \view ->
+        json view HTTP.status202 [("Location", TE.encodeUtf8 ("/v1/commands/" <> command))]
+          (toJSON capture) respond
     ("GET", ["v1", "requests", ident]) ->
       Drafts.withDraft store proof ident $ \view draft -> do
         tag <- strong (D.draftRevision draft)
@@ -240,6 +255,7 @@ dispatch service pages streams proof request respond = do
   where
     store = Service.serviceStore service
     eventRequest = Wai.pathInfo request == ["v1", "events"]
+    captureRequest = Wai.pathInfo request == ["v1", "captures"]
     routeRequest = case Wai.pathInfo request of
       ["v1", "runs", _, "routes"] -> True
       ["v1", "routes"] -> True
@@ -377,10 +393,16 @@ valueRevision _ = throwIO C.StorageUnavailable
 
 jsonMutation :: Wai.Request -> IO (Text, Maybe Text, BS.ByteString)
 jsonMutation request = do
-  key <- header "Idempotency-Key" >>= maybe (throwIO C.InvalidRequest) pure
-  condition <- header "If-Match"
+  (key, condition) <- mutationHeaders request
   bytes <- Transport.readJsonRequest request
   pure (key, condition, bytes)
+
+-- | The required idempotency key and the optional precondition of a POST.
+mutationHeaders :: Wai.Request -> IO (Text, Maybe Text)
+mutationHeaders request = do
+  key <- header "Idempotency-Key" >>= maybe (throwIO C.InvalidRequest) pure
+  condition <- header "If-Match"
+  pure (key, condition)
   where
     header name = traverse (either (const (throwIO C.InvalidRequest)) pure . TE.decodeUtf8')
       (lookup name (Wai.requestHeaders request))
@@ -390,6 +412,18 @@ bodyOperation bytes = case decodeStrictValue bytes of
   Right (Object fields) -> case KM.lookup "operation" fields of
     Just (String operation) -> pure operation
     _ -> throwIO C.InvalidRequest
+  _ -> throwIO C.InvalidRequest
+
+-- | The single @requestId@ query parameter of a capture upload, in canonical
+-- form.
+captureParameter :: Wai.Request -> IO Text
+captureParameter request = case Wai.queryString request of
+  [("requestId", Just bytes)]
+    | not (BS.null bytes) && BS.length bytes <= 128 && BS.all urlSafe bytes
+      && Wai.rawQueryString request == "?requestId=" <> bytes -> do
+        let ident = TE.decodeUtf8 bytes
+        unless (C.validId ident) (throwIO C.InvalidRequest)
+        pure ident
   _ -> throwIO C.InvalidRequest
 
 noQuery :: Wai.Request -> IO ()

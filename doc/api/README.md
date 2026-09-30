@@ -173,12 +173,16 @@ A matching completed idempotent retry is recognized before evaluating a new
 transition. Receipt lookup never permits an ordinary competing mutation to
 ignore its precondition.
 
-Draft creation and capture creation have no existing-resource ETag. A capture
-is bound to its request, selected profile, and authenticated client. It does
-not supply an input until a subsequent checked `set-input` operation binds
-its opaque identifier. Export and lineage collections have GET methods so
-their POSTs use same-URI validators. An ETag from a snapshot, parent run,
-different query, or later page is not substituted for that collection's ETag.
+Draft creation and capture creation have no existing-resource ETag. A
+capture is bound to its request, selected profile, and authenticated client.
+It does not supply an input until a subsequent checked `set-input` operation
+binds its opaque identifier. The service answers a capture with 202, the
+CaptureReceipt as the body, and a `Location` of `/v1/commands/{id}` for the
+capture command, because a capture has no resource URI of its own. An exact
+retry of the capture key returns the same receipt and the same `Location`.
+Export and lineage collections have GET methods so their POSTs use same-URI
+validators. An ETag from a snapshot, parent run, different query, or later
+page is not substituted for that collection's ETag.
 
 A 201 response creates a draft. A 202 response records accepted coordination
 intent. Neither response asserts runtime delivery, terminal success,
@@ -267,7 +271,7 @@ coordination database.
 | `/workflows/{id}` | GET | GET | No mutation. Catalogue information is not an exact input-dependent plan. |
 | `/requests` | GET, POST | GET, POST | `submit` creates a draft bound to current profile and descriptor revisions without workflow execution. |
 | `/requests/{id}` | GET, POST | GET, POST | `submit` permits `set-input`, `remove-input`, `enqueue`, and `withdraw` before start intent. Editing invalidates previous admission or review. |
-| `/captures` | POST | None | `submit` for the selected request and profile. Raw bounded UTF-8 only, with no source URL or pathname. |
+| `/captures` | POST | POST | `submit` for the selected request and profile. Raw bounded UTF-8 only, with no source URL or pathname. The 202 response carries the CaptureReceipt and `Location` names the capture command. |
 | `/preparations/{id}` | GET, POST | GET, POST `approve` | `submit` and `control` for `approve` or `discard`. Approval also requires the review digest and exact live worker association. |
 | `/runs` | GET | GET | No mutation. Runtime, supervision, integrity, and verification remain distinct. |
 | `/runs/{id}` | GET | GET | No mutation. Includes lineage and links, not execution authority. |
