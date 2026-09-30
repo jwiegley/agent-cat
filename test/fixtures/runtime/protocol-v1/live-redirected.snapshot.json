@@ -1,0 +1,74 @@
+{
+  "runId": "run-1",
+  "status": "succeeded",
+  "lastSequence": "17",
+  "workflow": "controlled",
+  "target": "routed",
+  "occurrences": [
+    {
+      "id": "0",
+      "state": "completed",
+      "code": "flag",
+      "intent": "consult",
+      "addressee": "model controlled@primary",
+      "prompt": "Apply this patch? CONTROL-STDIN",
+      "answer": "yes",
+      "dispatch": {
+        "targets": [
+          "model controlled@primary",
+          "model controlled@spare"
+        ],
+        "open": false,
+        "redirect": {
+          "controlId": "live-redirect",
+          "target": "model controlled@spare"
+        }
+      },
+      "recovery": null,
+      "reuseKind": null,
+      "source": "asked:model controlled@spare",
+      "failureClass": null,
+      "replayable": true,
+      "attempts": [
+        {
+          "id": "0:0",
+          "target": "model controlled",
+          "state": "failed",
+          "output": "",
+          "steers": [],
+          "failure": "redirected by control live-redirect to model controlled@spare\n",
+          "failureClass": "cancelled"
+        },
+        {
+          "id": "0:1",
+          "target": "model controlled",
+          "state": "completed",
+          "output": "yes",
+          "steers": [],
+          "failure": null,
+          "failureClass": null
+        }
+      ]
+    }
+  ],
+  "authoredOrder": [
+    "0"
+  ],
+  "traceRecorded": true,
+  "controlAcks": [
+    {
+      "controlId": "live-redirect",
+      "state": "delivered",
+      "message": "redirect delivered to the in-flight attempt"
+    },
+    {
+      "controlId": "live-window",
+      "state": "delivered",
+      "message": "redirect delivered before attempt dispatch"
+    }
+  ],
+  "billFresh": "1",
+  "billMemo": "1",
+  "failure": null,
+  "failureClass": null
+}

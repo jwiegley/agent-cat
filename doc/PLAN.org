@@ -4244,7 +4244,7 @@ Also deferred from the implementer limitations: the manager does not offer or ad
 :LABELS:   ["actor-flow","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-26 Sat 23:41]
-:MODIFIED: [2026-09-30 Wed 16:25]
+:MODIFIED: [2026-09-30 Wed 16:34]
 :CREATED_BY: johnw
 :SOURCE_REPO: .
 :ORIGINAL_SIZE: 0
@@ -4287,9 +4287,39 @@ Actor-flow increment 3, live re-route and asks answered by people (6 to 9 engine
     "author": "johnw",
     "text": "Subtask C18 (Phase B part 2) implements difference D6 in the runtime: a redirect of an in-flight attempt whose question is not an effect, to a live candidate that remains in its approved fail-over chain, stops the attempt through its owner, makes flowBroker append a failure for the current question naming the control, memoizes nothing from the stopped attempt, and asks the chosen candidate in a new question with a new attempt. A live redirect of an effect or to a target outside the chain is rejected with RejectedStale and the run continues. test/control_probe.py gains the cases live-redirect, live-redirect-effect and live-redirect-outside. Checks passed: Werror build, control_probe, person_control_probe, flow_probe, progress_probe (golden unchanged), runtime-contract-test, the ACP suite, DataBroker nine fields, make -C doc check and the Phase A journey at N8. The /v1 path for a live redirect and the asks answered by people remain open. Evidence: B2/C18/impl-r1 in the private resume-20260923 evidence directory. Fess findings: acat-c18-reroute-fess-findings-irrf.",
     "created_at": "2026-09-30T23:25:50Z"
+  },
+  {
+    "id": 428,
+    "issue_id": "acat-c18n",
+    "author": "johnw",
+    "text": "Subtask C19 (Phase B part 2) updates the ext-pi consumers of the public event protocol for the live re-route event order of C18. ext-pi/src/reducer.ts accepts occurrence.redirected while an attempt runs, with no dispatch or with a closed dispatch that names the target, and records the stopped attempt, mirroring the Haskell Snapshot fold. ext-pi/src/monitor.ts shows the target and the stopped attempt. OwnedRun.redirect keeps its local refusal with an accurate message. The new shared fixture test/fixtures/runtime/protocol-v1/live-redirected.ndjson comes from a captured C18 control_probe live-redirect run and is folded by both runtime-contract-test and the ext-pi vitest suite. Checks passed: Werror build of agentic-run with -ftui-tests, npm run check, npm test and npm run test:integration against the built Pi fork, and runtime-contract-test. Evidence: B2/C19/impl-r1 in the private resume-20260923 evidence directory. Fess findings: acat-c19-extpi-reroute-fess-findings-25ht.",
+    "created_at": "2026-09-30T23:34:31Z"
   }
 ]
 #+end_src
+
+* TODO [#D] Resolve C19 fess findings in ext-pi live re-route
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-c19-extpi-reroute-fess-findings-25ht
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-30 Wed 16:34]
+:MODIFIED: [2026-09-30 Wed 16:34]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of the fess audit of Phase B part 2 subtask C19 (increment 3, ext-pi accepts the live re-route event order). Report: fess/b2-C19-r1.md in the private evidence directory.
+
+1. (low) runtime/test/SnapshotCheckpointTests.hs (about line 55), cli/test/FrontendObservationTests.hs (about line 42), manager/test/IngestionCheck.hs (about line 34). The new shared fixture live-redirected is registered only in runtime/test/Main.hs and ext-pi/test/reducer.test.ts. The checkpoint, frontend-observation and ingestion fixture lists do not fold the new event order. Fix: add "live-redirected" to the protocol-v1 fixture lists in those three test files.
+2. (low) ext-pi/src/monitor.ts (about line 85). Whitespace collapse now applies to every attempt failure message, not only the live re-route message, and only the redirect case has a test. Fix: add a general monitor test for a multi-line failure message, or limit the collapse to trailing whitespace.
+3. (low) ext-pi/src/supervisor.ts (about line 243). The changed local refusal text has no test. It can run only when the dispatch is open and an attempt is running. Fix: add a supervisor test that reaches the refusal, or record that the message is untested.
+4. (low) ext-pi/src/monitor.ts (about line 75). The "unknown" fallback for a missing stopped attempt cannot run in normal operation, because the reducer sets stoppedAttempt only from an existing running attempt. Fix: leave it, or drop the fallback and read the state directly.
+
+Also deferred from the implementer limitations: ext-pi does not originate a live redirect. OwnedRun.redirect keeps its refusal for a running attempt, and /wf-redirect works only in the dispatch window.
 
 * TODO [#D] Resolve C4 fess findings on the pruned flow reader
 :PROPERTIES:

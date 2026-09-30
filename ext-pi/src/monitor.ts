@@ -69,7 +69,11 @@ export class MonitorModel {
     if (occurrence.failureClass) lines.push(fit(`    failure class: ${occurrence.failureClass}`, width));
     if (occurrence.dispatch) {
       lines.push(fit(`    dispatch ${occurrence.dispatch.open ? "pending" : "closed"}: ${occurrence.dispatch.targets.join(", ")}`, width));
-      if (occurrence.dispatch.redirect) lines.push(fit(`      redirected by ${occurrence.dispatch.redirect.controlId} → ${occurrence.dispatch.redirect.target}`, width));
+      const redirect = occurrence.dispatch.redirect;
+      if (redirect?.stoppedAttempt) {
+        const stopped = occurrence.attempts.get(redirect.stoppedAttempt);
+        lines.push(fit(`      redirected in flight by ${redirect.controlId} → ${redirect.target}, stopped attempt ${redirect.stoppedAttempt}: ${stopped?.state ?? "unknown"}`, width));
+      } else if (redirect) lines.push(fit(`      redirected by ${redirect.controlId} → ${redirect.target}`, width));
     }
     if (occurrence.recovery) {
       appendWrapped(lines, `    recovery (${occurrence.recovery.gap}): `, occurrence.recovery.message, width);
@@ -78,7 +82,7 @@ export class MonitorModel {
       if (occurrence.recovery.chosen) lines.push(fit(`      chosen: ${occurrence.recovery.chosen.choice}${occurrence.recovery.chosen.target ? `:${occurrence.recovery.chosen.target}` : ""} (${occurrence.recovery.chosen.controlId})`, width));
     }
     for (const attempt of occurrence.attempts.values()) {
-      lines.push(fit(`    attempt ${attempt.id}: ${attempt.state} target=${attempt.target ?? "?"}${attempt.failure ? ` failure=${attempt.failureClass ?? "unknown"}:${attempt.failure}` : ""}`, width));
+      lines.push(fit(`    attempt ${attempt.id}: ${attempt.state} target=${attempt.target ?? "?"}${attempt.failure ? ` failure=${attempt.failureClass ?? "unknown"}:${attempt.failure.replace(/\s+/g, " ").trim()}` : ""}`, width));
       appendWrapped(lines, "      output: ", attempt.output || undefined, width);
       for (const message of attempt.messages) appendWrapped(lines, "      message: ", message, width);
       for (const tool of attempt.tools.values()) {

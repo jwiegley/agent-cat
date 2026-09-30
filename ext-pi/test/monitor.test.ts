@@ -1,6 +1,8 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { formatMonitor, MonitorModel, occurrenceIds } from "../src/monitor.ts";
-import type { OccurrenceSnapshot, RunSnapshot } from "../src/types.ts";
+import { initialSnapshot, reduceEvent } from "../src/reducer.ts";
+import type { OccurrenceSnapshot, RunSnapshot, RuntimeEvent } from "../src/types.ts";
 
 function occurrence(id: string, prompt = `prompt ${id}`): OccurrenceSnapshot {
   return {
@@ -39,6 +41,15 @@ function snapshot(): RunSnapshot {
 }
 
 describe("monitor model", () => {
+  it("shows the target and the stopped attempt of a live re-route", () => {
+    const events = readFileSync(new URL("../../test/fixtures/runtime/protocol-v1/live-redirected.ndjson", import.meta.url), "utf8")
+      .trim().split("\n").map((line) => JSON.parse(line) as RuntimeEvent);
+    const rendered = new MonitorModel(events.reduce(reduceEvent, initialSnapshot("run-1"))).render(160, 40);
+    expect(rendered).toContain("      redirected in flight by live-redirect → model controlled@spare, stopped attempt 0:0: failed");
+    expect(rendered).toContain("    attempt 0:0: failed target=model controlled failure=cancelled:redirected by control live-redirect to model controlled@spare");
+    expect(rendered).toContain("    attempt 0:1: completed target=model controlled");
+  });
+
   it("uses authored order and preserves focus across navigation and resize", () => {
     const state = snapshot();
     expect(occurrenceIds(state)).toEqual(["1", "0"]);

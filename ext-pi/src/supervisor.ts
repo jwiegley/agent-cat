@@ -240,7 +240,7 @@ export class OwnedRun {
     const occurrence = this.#snapshot.occurrences.get(occurrenceId);
     if (!occurrence?.dispatch?.open) throw new Error(`occurrence ${occurrenceId} is not waiting for redirect`);
     if (!occurrence.dispatch.targets.includes(target)) throw new Error(`target ${target} was not reserved`);
-    if ([...occurrence.attempts.values()].some((attempt) => attempt.state === "running")) throw new Error("cannot redirect an active attempt");
+    if ([...occurrence.attempts.values()].some((attempt) => attempt.state === "running")) throw new Error("the extension redirects only in the dispatch window, not an active attempt");
     const controlId = `redirect-${randomUUID()}`;
     return this.#sendControlAwait(controlId, {
       controlId,

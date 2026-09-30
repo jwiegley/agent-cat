@@ -1,0 +1,18 @@
+{"protocolVersion":1,"runId":"run-1","sequence":"0","timestamp":"2026-09-30T23:27:15.542289Z","event":{"type":"run.started","target":"routed","workflow":"controlled"}}
+{"protocolVersion":1,"runId":"run-1","sequence":"1","timestamp":"2026-09-30T23:27:15.683738Z","event":{"type":"occurrence.started","addressee":"model controlled@primary","code":"flag","intent":"consult","occurrenceId":"0","prompt":"Apply this patch? CONTROL-STDIN"}}
+{"protocolVersion":1,"runId":"run-1","sequence":"2","timestamp":"2026-09-30T23:27:15.683904Z","event":{"type":"occurrence.dispatch-pending","occurrenceId":"0","targets":["model controlled@primary","model controlled@spare"]}}
+{"protocolVersion":1,"runId":"run-1","sequence":"3","timestamp":"2026-09-30T23:27:15.684205Z","event":{"type":"control.ack","controlId":"live-window","message":"redirect accepted","state":"accepted"}}
+{"protocolVersion":1,"runId":"run-1","sequence":"4","timestamp":"2026-09-30T23:27:15.684261Z","event":{"type":"occurrence.redirected","controlId":"live-window","occurrenceId":"0","target":"model controlled@primary"}}
+{"protocolVersion":1,"runId":"run-1","sequence":"5","timestamp":"2026-09-30T23:27:15.684298Z","event":{"type":"control.ack","controlId":"live-window","message":"redirect delivered before attempt dispatch","state":"delivered"}}
+{"protocolVersion":1,"runId":"run-1","sequence":"6","timestamp":"2026-09-30T23:27:15.684749Z","event":{"type":"attempt.started","attempt":"0","occurrenceId":"0","target":"model controlled"}}
+{"protocolVersion":1,"runId":"run-1","sequence":"7","timestamp":"2026-09-30T23:27:15.903605Z","event":{"type":"control.ack","controlId":"live-redirect","message":"redirect accepted for the in-flight attempt","state":"accepted"}}
+{"protocolVersion":1,"runId":"run-1","sequence":"8","timestamp":"2026-09-30T23:27:15.903683Z","event":{"type":"occurrence.redirected","controlId":"live-redirect","occurrenceId":"0","target":"model controlled@spare"}}
+{"protocolVersion":1,"runId":"run-1","sequence":"9","timestamp":"2026-09-30T23:27:15.903725Z","event":{"type":"control.ack","controlId":"live-redirect","message":"redirect delivered to the in-flight attempt","state":"delivered"}}
+{"protocolVersion":1,"runId":"run-1","sequence":"10","timestamp":"2026-09-30T23:27:15.903777Z","event":{"type":"attempt.failed","attempt":"0","failure":"cancelled","message":"redirected by control live-redirect to model controlled@spare\n","occurrenceId":"0"}}
+{"protocolVersion":1,"runId":"run-1","sequence":"11","timestamp":"2026-09-30T23:27:15.904315Z","event":{"type":"attempt.started","attempt":"1","occurrenceId":"0","target":"model controlled"}}
+{"protocolVersion":1,"runId":"run-1","sequence":"12","timestamp":"2026-09-30T23:27:15.910665Z","event":{"type":"attempt.output","attempt":"1","chunk":"y","occurrenceId":"0","stream":"transport-text"}}
+{"protocolVersion":1,"runId":"run-1","sequence":"13","timestamp":"2026-09-30T23:27:15.910768Z","event":{"type":"attempt.output","attempt":"1","chunk":"es","occurrenceId":"0","stream":"transport-text"}}
+{"protocolVersion":1,"runId":"run-1","sequence":"14","timestamp":"2026-09-30T23:27:15.910824Z","event":{"type":"attempt.completed","attempt":"1","occurrenceId":"0","source":"model controlled"}}
+{"protocolVersion":1,"runId":"run-1","sequence":"15","timestamp":"2026-09-30T23:27:15.911615Z","event":{"type":"occurrence.completed","answer":"yes","occurrenceId":"0","source":"asked:model controlled@spare"}}
+{"protocolVersion":1,"runId":"run-1","sequence":"16","timestamp":"2026-09-30T23:27:15.911678Z","event":{"type":"trace.ordered","occurrenceIds":["0"]}}
+{"protocolVersion":1,"runId":"run-1","sequence":"17","timestamp":"2026-09-30T23:27:15.953256Z","event":{"type":"run.completed","billFresh":"1","billMemo":"1"}}

@@ -75,7 +75,7 @@ export function snapshotValue(snapshot: RunSnapshot): unknown {
       dispatch: occurrence.dispatch ? {
         targets: [...occurrence.dispatch.targets],
         open: occurrence.dispatch.open,
-        redirect: occurrence.dispatch.redirect ?? null,
+        redirect: occurrence.dispatch.redirect ? { controlId: occurrence.dispatch.redirect.controlId, target: occurrence.dispatch.redirect.target } : null,
       } : null,
       recovery: occurrence.recovery ? {
         gap: occurrence.recovery.gap,
@@ -295,10 +295,21 @@ function apply(snapshot: RunSnapshot, event: RuntimeEvent["event"], protocolVers
     case "occurrence.redirected": {
       const occurrence = occurrenceOf(snapshot, event);
       const target = text(event.target, "target");
-      if (!occurrence.dispatch?.open || !occurrence.dispatch.targets.includes(target)) throw new Error(`redirect target ${target} was not reserved in an open dispatch`);
-      occurrence.dispatch.open = false;
-      occurrence.dispatch.redirect = { controlId: runtimeControlId(event), target };
-      return;
+      const controlId = runtimeControlId(event);
+      const running = [...occurrence.attempts.values()].find((attempt) => attempt.state === "running");
+      if (occurrence.dispatch?.open && occurrence.dispatch.targets.includes(target)) {
+        occurrence.dispatch.open = false;
+        occurrence.dispatch.redirect = { controlId, target };
+        return;
+      }
+      // A live re-route of an in-flight attempt, after the dispatch closed or
+      // without a dispatch. The stopped attempt then fails and a new attempt
+      // asks the target.
+      if (running && (!occurrence.dispatch || occurrence.dispatch.targets.includes(target))) {
+        occurrence.dispatch = { targets: occurrence.dispatch?.targets ?? [target], open: false, redirect: { controlId, target, stoppedAttempt: running.id } };
+        return;
+      }
+      throw new Error(`redirect target ${target} was not reserved in an open dispatch or for an in-flight attempt`);
     }
     case "occurrence.person-answer-pending": {
       if (protocolVersion !== 2) throw new Error("person answer event is unavailable in protocol version 1");

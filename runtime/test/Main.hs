@@ -160,7 +160,7 @@ contractTests = do
   fixtureExpected <- readValueFixture "test/fixtures/runtime/protocol-v1/success.snapshot.json"
   fixtureActual <- requireRight "shared success fixture" (foldSnapshot fixtureEvents)
   expect "shared success fixture snapshot" (runSnapshotValue fixtureActual == fixtureExpected)
-  mapM_ checkSharedV1Snapshot ["cancelled", "reused", "redirected", "recovery-failed", "failover-retried"]
+  mapM_ checkSharedV1Snapshot ["cancelled", "reused", "redirected", "live-redirected", "recovery-failed", "failover-retried"]
   checkSharedRefusal [1] "protocol-v1" "sequence-gap"
   checkSharedRefusal [1] "protocol-v1" "reuse-after-attempt"
   checkSharedRefusal [1, 2] "protocol-v2" "person-terminal-without-acceptance"

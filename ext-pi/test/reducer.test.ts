@@ -117,6 +117,39 @@ describe("runtime reducer", () => {
     expect(redirected.occurrences.get("0")?.dispatch).toEqual({ targets: ["model@a", "model@b"], open: false, redirect: { controlId: "redirect-1", target: "model@b" } });
   });
 
+  it("folds a live re-route of an in-flight attempt from a runtime run", () => {
+    // The events of the live-redirect case of test/control_probe.py.
+    const snapshot = reduceShared(sharedEvents(1, "live-redirected.ndjson"));
+    expect(snapshot.status).toBe("succeeded");
+    const occurrence = snapshot.occurrences.get("0");
+    expect(occurrence?.dispatch).toEqual({
+      targets: ["model controlled@primary", "model controlled@spare"],
+      open: false,
+      redirect: { controlId: "live-redirect", target: "model controlled@spare", stoppedAttempt: "0:0" },
+    });
+    expect(occurrence?.attempts.get("0:0")).toMatchObject({ state: "failed", failureClass: "cancelled", failure: "redirected by control live-redirect to model controlled@spare\n" });
+    expect(occurrence?.attempts.get("0:1")).toMatchObject({ state: "completed", output: "yes" });
+    expect(occurrence).toMatchObject({ state: "completed", source: "asked:model controlled@spare", answer: "yes" });
+    expect(snapshot.controlAcks.get("live-redirect")).toEqual({ controlId: "live-redirect", state: "delivered", message: "redirect delivered to the in-flight attempt" });
+  });
+
+  it("accepts a live re-route only while an attempt runs", () => {
+    const running = reduceEvent(initialSnapshot("run-1"), event(0, "run.started", { workflow: "x", target: "x" }));
+    const started = reduceEvent(running, event(1, "occurrence.started", { occurrenceId: "0", code: "text", intent: "consult", addressee: "model", prompt: "p" }));
+    expect(() => reduceEvent(started, event(2, "occurrence.redirected", { occurrenceId: "0", controlId: "r", target: "model@b" }))).toThrow("in-flight attempt");
+    const attempting = reduceEvent(started, event(2, "attempt.started", { occurrenceId: "0", attempt: "0", target: "model@a" }));
+    const redirected = reduceEvent(attempting, event(3, "occurrence.redirected", { occurrenceId: "0", controlId: "r", target: "model@b" }));
+    expect(redirected.occurrences.get("0")?.dispatch).toEqual({ targets: ["model@b"], open: false, redirect: { controlId: "r", target: "model@b", stoppedAttempt: "0:0" } });
+    const stopped = reduceEvent(redirected, event(4, "attempt.failed", { occurrenceId: "0", attempt: "0", failure: "cancelled", message: "redirected by control r to model@b" }));
+    expect(() => reduceEvent(stopped, event(5, "occurrence.redirected", { occurrenceId: "0", controlId: "r2", target: "model@b" }))).toThrow("in-flight attempt");
+    const retried = reduceEvent(stopped, event(5, "attempt.started", { occurrenceId: "0", attempt: "1", target: "model@b" }));
+    expect(retried.occurrences.get("0")?.attempts.get("0:1")?.state).toBe("running");
+
+    const dispatched = reduceEvent(started, event(2, "occurrence.dispatch-pending", { occurrenceId: "0", targets: ["model@a", "model@b"] }));
+    const inFlight = reduceEvent(dispatched, event(3, "attempt.started", { occurrenceId: "0", attempt: "0", target: "model@a" }));
+    expect(() => reduceEvent(inFlight, event(4, "occurrence.redirected", { occurrenceId: "0", controlId: "r", target: "model@x" }))).toThrow("not reserved");
+  });
+
   it("validates timestamps, lifecycle transitions, and authored references", () => {
     expect(() => reduceEvent(initialSnapshot("run-1"), { ...event(0, "run.started", { workflow: "x", target: "x" }), timestamp: "not-a-time" })).toThrow("timestamp");
     const started = reduceEvent(initialSnapshot("run-1"), event(0, "run.started", { workflow: "x", target: "x" }));
@@ -177,7 +210,7 @@ describe("runtime reducer", () => {
   it("agrees with shared protocol-v1 snapshot and refusal fixtures", () => {
     const expectedSnapshot = JSON.parse(sharedFixture(1, "success.snapshot.json")) as unknown;
     expect(snapshotValue(reduceShared(sharedEvents(1, "success.ndjson")))).toEqual(expectedSnapshot);
-    for (const name of ["cancelled", "reused", "redirected", "recovery-failed", "failover-retried"]) {
+    for (const name of ["cancelled", "reused", "redirected", "live-redirected", "recovery-failed", "failover-retried"]) {
       const expected = JSON.parse(sharedFixture(1, `${name}.snapshot.json`)) as unknown;
       expect(snapshotValue(reduceShared(sharedEvents(1, `${name}.ndjson`)))).toEqual(expected);
     }

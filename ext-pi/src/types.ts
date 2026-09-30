@@ -102,7 +102,8 @@ export type OccurrenceSnapshot = {
   addressee?: string;
   prompt?: string;
   answer?: string;
-  dispatch?: { targets: string[]; open: boolean; redirect?: { controlId: string; target: string } };
+  /** `redirect.stoppedAttempt` names the attempt that a live re-route stopped. It is absent for a redirect in the dispatch window. */
+  dispatch?: { targets: string[]; open: boolean; redirect?: { controlId: string; target: string; stoppedAttempt?: string } };
   recovery?: {
     gap: string;
     message: string;
