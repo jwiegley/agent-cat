@@ -4036,7 +4036,7 @@ Also noted by the implementer: store.sh and artifacts.sh ran without their admis
 :LABELS:   ["workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-30 Wed 15:04]
-:MODIFIED: [2026-09-30 Wed 15:04]
+:MODIFIED: [2026-09-30 Wed 15:19]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -4054,6 +4054,47 @@ Non-blocking findings of the fess audit of Phase B part 2 subtask C14 (POST /v1/
 4. (low) doc/api/README.md (about lines 185-190). The export validator is the run revision, which changes when supervision is released after the terminal status. A client that exports right after a run ends can get 412 once. Fix: consider a narrower export-collection revision in a later stage.
 
 5. (low) manager/src/Agentic/Manager/Application.hs (about lines 233-239). For exports, page.revision is now the run revision, so two different bodies (unresolved and then published) can share one first-page ETag. This does no harm while If-None-Match is not served. Fix: revisit if If-None-Match is served.
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 423,
+    "issue_id": "acat-c14-exports-fess-findings-kvuh",
+    "author": "johnw",
+    "text": "C15 addresses item 3: GET /v1/runs/{id}/lineage-requests now carries the parent run revision as its first-page ETag, so the lineage POST has a usable If-Match. Item 2 stays open: exports and lineage still share runs.revision as the validator, so either collection's first-page ETag satisfies the other POST. Evidence (private): B2/C15/impl-r1.",
+    "created_at": "2026-09-30T22:19:36Z"
+  }
+]
+#+end_src
+
+* TODO [#D] Resolve C15 fess findings in the lineage route
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-c15-lineage-fess-findings-fmdn
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-30 Wed 15:19]
+:MODIFIED: [2026-09-30 Wed 15:19]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of the fess audit of Phase B part 2 subtask C15 (POST /v1/runs/{id}/lineage-requests).
+Report: fess/b2-C15-r1.md in the private evidence directory.
+
+1. (medium) doc/api/README.md (about lines 446-448). The generic pages text says only the first page of an export collection carries the collection revision as its ETag. Lines 190-194 now say the first lineage-requests page also carries the parent run revision. Fix: name both /runs/{id}/exports and /runs/{id}/lineage-requests in the exception.
+
+2. (medium) manager/src/Agentic/Manager/Application.hs (about lines 247-256) and manager/src/Agentic/Manager/Drafts.hs (about line 278). page.revision and the first-page ETag of GET /v1/runs/{id}/lineage-requests are now runs.revision of the parent instead of a content hash of the eligibility fields and child views. A child draft change or an eligibility change no longer changes page.revision. The pages mode reads this collection and was not run. Fix: document the narrower meaning, or keep the parent revision only as the ETag and restore a content-derived page.revision, then run the pages mode once.
+
+3. (low) manager/src/Agentic/Manager/Service.hs (about lines 278-283) and manager/README.md (about lines 175-181). The text says the history owner refuses a legacy observation entry, but State.resolveRun refuses it first with 403 insufficient-scope. Fix: attribute the legacy refusal to State.resolveRun in both places.
+
+4. (low) Verification gaps: nothing exercises the TUI lineage lines in tui/src/Agentic/Tui/Presentation.hs (tui-model-test not run), the new ReviewLineage and ReviewEdit schemas in the contract fixture corpus (manager/ci/contract.sh not run), a fork drop edit in the review, or the documented legacy 403 on this route. Fix: add a review fixture with lineage to the contract corpus and run tui-model-test at the next TUI stage.
+
+5. (low) Scope: the TUI review lines for lineage (tui/src/Agentic/Tui/Presentation.hs about lines 473-475) were not requested by C15. The change is additive and small, and it is kept.
 
 * TODO [#B] Actor flow increment 3: live re-route and asks answered by people
 :PROPERTIES:
@@ -16653,7 +16694,7 @@ and enforce advertised bounds. G2 is complete with mutations still unavailable.
 :LABELS:   ["p5","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-30 Wed 15:04]
+:MODIFIED: [2026-09-30 Wed 15:19]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-027
 :SOURCE_REPO: agent-cat
@@ -16865,6 +16906,13 @@ Network mutation remains behind G3 until the required evidence is complete.
     "author": "johnw",
     "text": "Phase B part 2 subtask C14: POST /v1/runs/{id}/exports now dispatches to Service.submitExport, which resolves the run under requiredScopes Export and calls Artifacts.submitExport. The first page of GET /v1/runs/{id}/exports carries the run revision as a strong ETag so that a client has a usable If-Match. Evidence (private, B2/C14): Werror build of agentic-run and routing-fixed-point-probe, service_http.py mutations-exports at N8 (exported effect, published receipt, download bytes and SHA-256, same-key replay, 412 on a stale ETag), make -C doc check and the Phase A journey at N8 passed. Fess non-blocking; findings in acat-c14-exports-fess-findings-kvuh. Hostile-input negatives for the route are deferred under the functionality-first direction. The WM package stays open.",
     "created_at": "2026-09-30T22:04:49Z"
+  },
+  {
+    "id": 422,
+    "issue_id": "acat-wm-027-gcu6",
+    "author": "johnw",
+    "text": "C15 (Phase B part 2): POST /v1/runs/{id}/lineage-requests (restart, resume, fork) now reaches Service.submitLineage, which calls State.resolveRun under observe and submit and then History.createHistoryLineage (falling back to Drafts.createLineageDraft), and returns the frozen 202 receipt. Review gains an optional additive lineage field (parent run id, operation, edits). The GET collection first page carries the parent run revision as its ETag. Evidence (private): B2/C15/impl-r1 and fess/b2-C15-r1. Checks passed: Werror build of agentic-run and routing-fixed-point-probe with -ftui-tests, service_http.py mutations-lineage at N8 (restart child review names the parent and runs to completion, fork with an answer replacement reaches the review, same-key replay, stale If-Match 412), make -C doc check, Phase A journey at N8. Fess non-blocking, findings in acat-c15-lineage-fess-findings-fmdn.",
+    "created_at": "2026-09-30T22:19:36Z"
   }
 ]
 #+end_src

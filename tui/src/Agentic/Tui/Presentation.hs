@@ -470,6 +470,9 @@ serviceReviewView presentation preparation tag width _ mainHeight
         "Pins:", jsonTextValue (toJSON (Manager.reviewPins review)),
         "Warnings:", jsonTextValue (toJSON (Manager.reviewWarnings review)),
         "Result code:", jsonTextValue (Manager.reviewResultCode review) ]
+      <> maybe [] (\lineage ->
+        [ "Lineage: " <> Manager.reviewLineageOperation lineage <> " of run " <> Manager.reviewLineageParent lineage,
+          "Lineage edits:", jsonTextValue (toJSON (Manager.reviewLineageEdits lineage)) ]) (Manager.reviewLineage review)
 
 loadingView :: Presentation -> Text -> Text -> Widget Name
 loadingView presentation message action = padLeftRight 2 (vBox [displayText "", withAttr (attrName "title") (displayTextWrap (presentationSpinner presentation <> "  " <> message)), muted (displayText action)])

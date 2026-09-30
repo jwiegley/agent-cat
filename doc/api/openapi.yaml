@@ -3228,6 +3228,56 @@ components:
       - bytes
       - sha256
       additionalProperties: false
+    ReviewLineage:
+      type: object
+      properties:
+        parentRunId: *id001
+        operation:
+          type: string
+          enum:
+          - restart
+          - resume
+          - fork
+        edits:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReviewEdit'
+          maxItems: 2048
+      required:
+      - parentRunId
+      - operation
+      - edits
+      additionalProperties: false
+      description: Lineage of a restart, resume or fork preparation. parentRunId is
+        the manager identifier of the parent run. The operation and the edits come
+        from the same native prepared response as the rest of the review. A root
+        preparation has no lineage field.
+    ReviewEdit:
+      oneOf:
+      - type: object
+        properties:
+          operation:
+            const: drop
+            type: string
+          occurrenceId: *id010
+        required:
+        - operation
+        - occurrenceId
+        additionalProperties: false
+      - type: object
+        properties:
+          operation:
+            const: replace
+            type: string
+          occurrenceId: *id010
+          sha256: *id011
+        required:
+        - operation
+        - occurrenceId
+        - sha256
+        additionalProperties: false
+      description: One fork answer edit. A replacement carries the SHA-256 of its
+        answer, not the answer.
     PublicRealizationPolicy:
       type: object
       properties:
@@ -3460,6 +3510,8 @@ components:
             maxLength: 4096
           maxItems: 256
         resultCode: *id012
+        lineage:
+          $ref: '#/components/schemas/ReviewLineage'
       required:
       - programHash
       - personAnswering

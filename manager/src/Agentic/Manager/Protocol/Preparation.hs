@@ -5,7 +5,7 @@
 
 -- | Bounded public review facts and exact approval requests, without execution authority.
 module Agentic.Manager.Protocol.Preparation
-  ( ReviewInput (..), Review (..), Preparation (..), ApprovalRequest (..),
+  ( ReviewInput (..), ReviewEdit (..), ReviewLineage (..), Review (..), Preparation (..), ApprovalRequest (..),
     PublicPolicy, policyValue, projectPolicy, decodeApproval, decodeDiscard, validDigest, observationCodeNames ) where
 
 import Agentic.Manager.Protocol.Command (CommandFailure (..), validId, validTimestamp)
@@ -43,21 +43,61 @@ instance FromJSON ReviewInput where
     unless(bounded 1 1024(reviewInputName value) && reviewInputSource value `elem` ["literal","capture"] && decimal(reviewInputBytes value) && validDigest(reviewInputSha256 value))(fail "review input")
     pure value
 
--- | The exact bounded consent facts of one native preparation.
+-- | One typed answer edit of a fork, as the native prepared response states
+-- it. A replacement names the SHA-256 of its answer and never the answer.
+data ReviewEdit = ReviewDrop !Text | ReviewReplace !Text !Text
+  deriving (Eq,Show,Generic,NFData)
+instance ToJSON ReviewEdit where
+  toJSON (ReviewDrop occurrence)=object["operation" .= ("drop"::Text),"occurrenceId" .= occurrence]
+  toJSON (ReviewReplace occurrence digest)=object["operation" .= ("replace"::Text),"occurrenceId" .= occurrence,"sha256" .= digest]
+instance FromJSON ReviewEdit where
+  parseJSON=withObject "review edit" $ \o->do
+    operation<-o .: "operation"
+    edit<-case operation::Text of
+      "drop"->closed["operation","occurrenceId"]o >> ReviewDrop <$> o .: "occurrenceId"
+      "replace"->do
+        closed["operation","occurrenceId","sha256"]o
+        digest<-o .: "sha256"
+        unless(validDigest digest)(fail "review edit digest")
+        ReviewReplace <$> o .: "occurrenceId" <*> pure digest
+      _->fail "review edit operation"
+    let occurrence=case edit of ReviewDrop value->value;ReviewReplace value _->value
+    unless(decimal occurrence)(fail "review edit occurrence")
+    pure edit
+
+-- | The lineage of a restart, resume or fork preparation: the manager
+-- identifier of the parent run, the operation and the fork edits, all from
+-- the same native prepared response and the accepted parent of the request.
+data ReviewLineage = ReviewLineage {reviewLineageParent:: !Text,reviewLineageOperation:: !Text,reviewLineageEdits:: ![ReviewEdit]}
+  deriving (Eq,Show,Generic,NFData)
+instance ToJSON ReviewLineage where
+  toJSON value=object["parentRunId" .= reviewLineageParent value,"operation" .= reviewLineageOperation value,"edits" .= reviewLineageEdits value]
+instance FromJSON ReviewLineage where
+  parseJSON=withObject "review lineage" $ \o->do
+    closed["parentRunId","operation","edits"]o
+    value<-ReviewLineage <$> o .: "parentRunId" <*> o .: "operation" <*> o .: "edits"
+    unless(validId(reviewLineageParent value) && reviewLineageOperation value `elem` ["restart","resume","fork"]
+      && length(reviewLineageEdits value)<=2048 && (null(reviewLineageEdits value) || reviewLineageOperation value=="fork"))(fail "review lineage")
+    pure value
+
+-- | The exact bounded consent facts of one native preparation. A preparation
+-- of a lineage request also carries its lineage, and a root preparation has
+-- no lineage field.
 data Review = Review
   { reviewProgramHash:: !Text,reviewPerson:: !Text,reviewPolicy:: !PublicPolicy,
     reviewWorkflow:: !Text,reviewProfile:: !Text,reviewWorkspaceLabel:: !Text,reviewTargetLabel:: !Text,
     reviewInputs:: ![ReviewInput],reviewPlan:: !Text,reviewRunFacts:: ![Text],reviewPins:: ![Text],
-    reviewWarnings:: ![Text],reviewResultCode:: !Value }
+    reviewWarnings:: ![Text],reviewResultCode:: !Value,reviewLineage:: !(Maybe ReviewLineage) }
   deriving (Eq,Show,Generic,NFData)
 instance ToJSON Review where
-  toJSON r=object["programHash" .= reviewProgramHash r,"personAnswering" .= reviewPerson r,"policy" .= reviewPolicy r,
+  toJSON r=object $ ["programHash" .= reviewProgramHash r,"personAnswering" .= reviewPerson r,"policy" .= reviewPolicy r,
     "workflowId" .= reviewWorkflow r,"profileId" .= reviewProfile r,"workspaceLabel" .= reviewWorkspaceLabel r,"targetLabel" .= reviewTargetLabel r,
     "inputs" .= reviewInputs r,"plan" .= reviewPlan r,"runFacts" .= reviewRunFacts r,"pins" .= reviewPins r,"warnings" .= reviewWarnings r,"resultCode" .= reviewResultCode r]
+    <> maybe [] (\lineage->["lineage" .= lineage]) (reviewLineage r)
 instance FromJSON Review where
   parseJSON=withObject "review" $ \o->do
-    closed ["programHash","personAnswering","policy","workflowId","profileId","workspaceLabel","targetLabel","inputs","plan","runFacts","pins","warnings","resultCode"] o
-    r<-Review <$> o .: "programHash" <*> o .: "personAnswering" <*> o .: "policy" <*> o .: "workflowId" <*> o .: "profileId" <*> o .: "workspaceLabel" <*> o .: "targetLabel" <*> o .: "inputs" <*> o .: "plan" <*> o .: "runFacts" <*> o .: "pins" <*> o .: "warnings" <*> o .: "resultCode"
+    closed ["programHash","personAnswering","policy","workflowId","profileId","workspaceLabel","targetLabel","inputs","plan","runFacts","pins","warnings","resultCode","lineage"] o
+    r<-Review <$> o .: "programHash" <*> o .: "personAnswering" <*> o .: "policy" <*> o .: "workflowId" <*> o .: "profileId" <*> o .: "workspaceLabel" <*> o .: "targetLabel" <*> o .: "inputs" <*> o .: "plan" <*> o .: "runFacts" <*> o .: "pins" <*> o .: "warnings" <*> o .: "resultCode" <*> o .:! "lineage"
     unless(validDigest(reviewProgramHash r) && reviewPerson r `elem` ["engine","local-control"] && all validId[reviewWorkflow r,reviewProfile r]
       && all(bounded 0 4096)[reviewWorkspaceLabel r,reviewTargetLabel r] && bounded 0 524288(reviewPlan r)
       && length(reviewInputs r)<=256 && all (\xs->length xs<=256 && all(bounded 0 4096)xs)[reviewRunFacts r,reviewPins r,reviewWarnings r])(fail "review bounds")

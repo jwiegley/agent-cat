@@ -8,14 +8,14 @@ module Agentic.Manager.Client
     getResource, observeResource, observedReference, observedETag, observedValue, prepareObserved,
     pollEvents, prepareCommand, sendCommand, downloadVerified, decodeObservation,
     DraftView (..), Readiness (..), InputDeclaration (..), SuppliedInput (..), InputError (..),
-    Preparation (..), Review (..), ReviewInput (..), PublicPolicy, policyValue,
+    Preparation (..), Review (..), ReviewInput (..), ReviewLineage (..), ReviewEdit (..), PublicPolicy, policyValue,
     CommandReceipt (..), CommandState, Operation, stateName, operationName, effectValue
   ) where
 
 import Agentic.Manager.Protocol.Command
   (validId, validResource, encoded, CommandReceipt (..), CommandState, Operation, stateName, operationName, effectValue)
 import Agentic.Manager.Protocol.Draft (DraftView (..), Readiness (..), InputDeclaration (..), SuppliedInput (..), InputError (..))
-import Agentic.Manager.Protocol.Preparation (Preparation (..), Review (..), ReviewInput (..), PublicPolicy, policyValue)
+import Agentic.Manager.Protocol.Preparation (Preparation (..), Review (..), ReviewInput (..), ReviewLineage (..), ReviewEdit (..), PublicPolicy, policyValue)
 import Control.DeepSeq (NFData, deepseq)
 import Agentic.Manager.Protocol.Json (decodeStrictValue)
 import Control.Exception (Exception, IOException, bracket, bracketOnError, throwIO, try)

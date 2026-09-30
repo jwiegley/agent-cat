@@ -6,7 +6,7 @@
 
 -- | Durable input representations and verified captures, never workflow execution.
 module Agentic.Manager.Drafts
-  ( reconcileDrafts, createDraft, createLineageDraft, LineageRequests (..), withLineageRequests, withLineageRequestsSource, checkLineageParent, changeDraftInput, changeDraftInputGuarded, InputTransition (..), RequestState, requestView, requestOwner, requestState, currentVersion, editable, checkDraftCapacity, uploadCapture, uploadCaptureCommand, collectCaptures, readDraft, readDraftAt, withDraft, assembleDraft, DraftAssembly, assemblyRequest, assemblyRevision, assemblyProfile, assemblyProfileRevision, assemblySetup, assemblyFrame, assemblyInputSummaries, assemblySelection, assemblyParentBinding, validateAssemblyParent, assembleDraftSnapshot, assembleAcceptedDraft, structuralReadiness, verifyFrontendFiles, verifyFrontendFilesAt, timed ) where
+  ( reconcileDrafts, createDraft, createLineageDraft, LineageRequests (..), withLineageRequests, withLineageRequestsSource, checkLineageParent, changeDraftInput, changeDraftInputGuarded, InputTransition (..), RequestState, requestView, requestOwner, requestState, currentVersion, editable, checkDraftCapacity, uploadCapture, uploadCaptureCommand, collectCaptures, readDraft, readDraftAt, withDraft, assembleDraft, DraftAssembly, assemblyRequest, assemblyRevision, assemblyProfile, assemblyProfileRevision, assemblySetup, assemblyFrame, assemblyInputSummaries, assemblySelection, assemblyParentBinding, assemblyParentRun, validateAssemblyParent, assembleDraftSnapshot, assembleAcceptedDraft, structuralReadiness, verifyFrontendFiles, verifyFrontendFilesAt, timed ) where
 
 import Agentic.Manager.Authorization
 import Agentic.Manager.Commands
@@ -230,9 +230,10 @@ createLineageDraft store proof parent key precondition body = draftIO $ do
 -- 'lineageRefusal' gives the frozen reason when it lists none. The native
 -- preparation still checks the checkpoint and effect facts of each operation
 -- after approval. 'lineageChildren' holds every child request in identifier
--- order.
+-- order. 'lineageRevision' is the revision of the parent run, which is the
+-- collection revision and the precondition of 'createLineageDraft'.
 data LineageRequests = LineageRequests
-  { lineageEligible :: ![Text], lineageRefusal :: !(Maybe Text), lineageChildren :: ![DraftView] }
+  { lineageEligible :: ![Text], lineageRefusal :: !(Maybe Text), lineageChildren :: ![DraftView], lineageRevision :: !Text }
 
 -- | The complete bounded collection, read as 'withLineageRequestsSource'
 -- reads it.
@@ -274,7 +275,7 @@ withLineageRequestsSource store proof parent action = withStoreFileLoan store $ 
         current <- parentRevision
         unless (current == revision) (refuseTransaction StoreBusy)
       revalidateAuthorizedView view >>= requireEither
-      pure (LineageRequests (maybe ["restart","resume","fork"] (const []) refusal) (parentRefusalCode <$> refusal) views)
+      pure (LineageRequests (maybe ["restart","resume","fork"] (const []) refusal) (parentRefusalCode <$> refusal) views revision)
   where
     parentRevision = do
       versions <- query "SELECT revision FROM runs WHERE id=?" [text parent]
@@ -654,6 +655,11 @@ data DraftAssembly = DraftAssembly
 
 assemblyParentBinding :: DraftAssembly -> Maybe BS.ByteString
 assemblyParentBinding = fmap (encodeFrontendManifest . snd) . assemblyParent
+
+-- | The manager identifier of the accepted parent run and the native run
+-- identifier of its manifest, for a lineage request.
+assemblyParentRun :: DraftAssembly -> Maybe (Text, RunId)
+assemblyParentRun = fmap (fmap frontendRunId) . assemblyParent
 
 -- | Recheck the accepted parent, not a new parent selected by the native reply.
 validateAssemblyParent :: CoordinationStore -> DraftAssembly -> FrontendPrepared -> IO ()

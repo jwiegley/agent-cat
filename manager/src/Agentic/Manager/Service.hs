@@ -4,7 +4,7 @@
 -- | One live coordinator and bounded indexes of its original owned associations.
 module Agentic.Manager.Service
   ( Service, withService, serviceStore, serviceFault,
-    enqueue, editInput, withdraw, approve, discard, submitExport, controlRun, controlDecision, readControl, withControl,
+    enqueue, editInput, withdraw, approve, discard, submitExport, submitLineage, controlRun, controlDecision, readControl, withControl,
     withSnapshot, withSnapshotSource, withOverviewSource, Overview.Collection (..), withCollectionSource,
     withRun, withOutputs, withOutputsSource, withExportsSource, withExport, withLineageSource, download
   ) where
@@ -274,6 +274,17 @@ submitExport service proof ident key condition body = do
   let request = CommandRequest Export (State.associationProfile association) "POST"
         ("/v1/runs/" <> State.associationRun association <> "/exports") key "application/json" condition body
   fmap submissionReceipt <$> Artifacts.submitExport (serviceStore service) proof association request
+
+-- | Create a restart, resume or fork request of one parent run. The run
+-- resolves under the scopes of the lineage operations, and the history owner
+-- refuses a legacy observation entry. Otherwise the draft owner decodes the
+-- body strictly, checks the parent revision precondition and eligibility, and
+-- creates the child draft once. An exact retry returns the original receipt.
+submitLineage :: Service -> CredentialProof -> Text -> Text -> Maybe Text -> BS.ByteString
+  -> IO (Either CommandFailure CommandReceipt)
+submitLineage service proof ident key condition body = do
+  association <- State.resolveRun (serviceStore service) proof (requiredScopes Restart) ident
+  History.createHistoryLineage (serviceStore service) proof (State.associationRun association) key condition body
 
 controlRun :: Service -> CredentialProof -> Text -> Text -> Maybe Text -> BS.ByteString
   -> IO (Either CommandFailure CommandReceipt)

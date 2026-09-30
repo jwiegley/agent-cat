@@ -144,7 +144,19 @@ discard_mode = len(sys.argv) == 6 and sys.argv[5] == DISCARD
 # case prints its own PASS line. It runs one manager lifetime.
 EXPORTS = "mutations-exports"
 exports_mode = len(sys.argv) == 6 and sys.argv[5] == EXPORTS
-assert len(sys.argv) == 5 or mixed or boundary or pages_mode or events_mode or captures_mode or discard_mode or exports_mode
+# The mutations-lineage mode checks POST /v1/runs/{id}/lineage-requests
+# through the running protected manager after a succeeded run of the scripted
+# lineage-typed workflow: a restart request whose child request names the
+# parent in its detail, in /v1/requests, in the lineage collection and in the
+# lineage of its review, and whose approved child run answers its questions
+# and succeeds, a same-key replay with the same receipt and Location, a 412
+# refusal of the stale collection ETag, a resume request whose child review
+# names the parent, and a fork request with an answer replacement whose child
+# review names the parent and the replaced occurrence. Each numbered case
+# prints its own PASS line. It runs one manager lifetime.
+LINEAGE = "mutations-lineage"
+lineage_mode = len(sys.argv) == 6 and sys.argv[5] == LINEAGE
+assert len(sys.argv) == 5 or mixed or boundary or pages_mode or events_mode or captures_mode or discard_mode or exports_mode or lineage_mode
 assert not tui_approval or os.environ.get("TUI_CHECK")
 assert native in ("1", "8")
 print(f"work={work}", flush=True)
@@ -245,7 +257,7 @@ def administration(payload, refused=None):
 
 
 issued = administration({"version": 1, "operation": "issue-credential", "label": "HTTPS fixture",
-                         "scopes": ["observe", "submit"] + (["control", "export"] if mixed else ["control"] if captures_mode or discard_mode else ["control", "export"] if exports_mode else []),
+                         "scopes": ["observe", "submit"] + (["control", "export"] if mixed else ["control"] if captures_mode or discard_mode or lineage_mode else ["control", "export"] if exports_mode else []),
                          "profileIds": ["profile_1"],
                          "expiresAt": "2999-01-01T00:00:00Z", "outputFile": str(work / "credential")})
 bearer = (work / "credential").read_bytes().decode("ascii")
@@ -3593,8 +3605,209 @@ def export_checks():
     print("PASS mutations-exports: every export case held against the running TLS 1.3 manager", flush=True)
 
 
+def lineage_checks():
+    """POST /v1/runs/{id}/lineage-requests through the real HTTPS manager.
+    Each numbered case prints one PASS line."""
+    authorized = {"Authorization": "Bearer " + bearer}
+    # The typed answers of the three person questions of lineage-typed, by
+    # occurrence. Occurrence 0 is the scripted model question.
+    answers = {"1": False, "2": None, "3": {"ok": False, "notes": []}}
+
+    def lineage(run, key, tag, body):
+        """One lineage POST. Returns the status, the decoded body, the raw body and the headers."""
+        payload = json.dumps(body, separators=(",", ":")).encode()
+        headers = authorized | {"Content-Type": "application/json", "Idempotency-Key": key, "If-Match": tag}
+        status, value, raw, received = exchange("/v1/runs/" + run + "/lineage-requests", headers, method="POST", payload=payload)
+        validate("Problem" if status >= 400 else "CommandReceipt", value, raw)
+        return status, value, raw, received
+
+    def collection(run):
+        """The first page of the lineage collection of the run and its ETag."""
+        status, value, raw, received = fetch("/v1/runs/" + run + "/lineage-requests", authorized)
+        assert status == 200, ("lineage collection", status, value.get("code"))
+        validate("LineagePage", value, raw)
+        assert value["runId"] == run and value["page"]["next"] is None, ("lineage collection page", value["page"])
+        tag = received.get("etag")
+        assert tag == '"' + value["page"]["revision"] + '"', ("lineage collection ETag", tag, value["page"]["revision"])
+        return value, tag, raw
+
+    with (work / "server-0.stdout").open("wb") as output, (work / "server-0.stderr").open("wb") as errors:
+        process = subprocess.Popen([str(runner), "--manager", "serve", "--config", str(config),
+                                    "+RTS", "-N" + native, "-RTS"], stdout=output, stderr=errors)
+        try:
+            wait_ready(process)
+            status, capabilities, _ = request("/v1/capabilities", authorized)
+            assert status == 200
+            validate("Capabilities", capabilities)
+            new_key = lambda: capabilities["authorityEpoch"] + "." + secrets.token_urlsafe(16)
+            observed, wait_for, mutate, _ = mixed_client(capabilities, authorized)
+            selectors = ("reviewDigest", "requestRevision", "profileRevision", "descriptorRevision", "processGeneration")
+
+            def review(request_uri, name):
+                """Enqueue the draft and return its live preparation and ETag."""
+                current, tag, _ = observed(request_uri, "Request")
+                mutate(request_uri, {"operation": "enqueue"}, tag)
+                current, _, _ = wait_for(request_uri, "Request", lambda value: value["preparationId"] is not None)
+                preparation, tag, raw = observed("/v1/preparations/" + current["preparationId"], "Preparation")
+                (work / (name + "-review.json")).write_bytes(raw)
+                assert preparation["state"] == "live", (name, preparation["state"])
+                return preparation, tag
+
+            def run_to_success(request_uri, preparation, tag, name):
+                """Approve the preparation, answer every question of the run and
+                return the run after its terminal success and settled supervision."""
+                mutate("/v1/preparations/" + preparation["id"], {"operation": "approve", **{item: preparation[item] for item in selectors}}, tag)
+                current, _, _ = wait_for(request_uri, "Request", lambda value: value["runId"] is not None)
+                run = current["runId"]
+                base = "/v1/runs/" + run
+                deadline = time.monotonic() + 60
+                while True:
+                    snapshot, _, raw = observed(base + "/snapshot", "RunSnapshot")
+                    runtime = snapshot["runtime"]
+                    if runtime is not None and runtime["status"] in ("succeeded", "failed", "cancelled"):
+                        (work / (name + "-terminal.json")).write_bytes(raw)
+                        assert runtime["status"] == "succeeded", (name, runtime["status"])
+                        break
+                    assert time.monotonic() < deadline, (name, "terminal deadline")
+                    control, _, _ = observed(base + "/control", "RunControl")
+                    head = control["decisionHeadId"]
+                    if head is None:
+                        time.sleep(0.05)
+                        continue
+                    decision, decision_tag, _ = observed("/v1/decisions/" + head, "Decision")
+                    occurrence = decision["address"]["occurrenceId"]
+                    assert decision["kind"] == "question" and occurrence in answers, (name, decision["kind"], occurrence)
+                    mutate("/v1/decisions/" + head, {"operation": "answer", "occurrenceId": occurrence,
+                                                      "generation": decision["generation"], "value": answers[occurrence]}, decision_tag)
+                wait_for(request_uri, "Request", lambda value: value["admission"]["state"] == "released")
+                value, _, _ = wait_for(base, "Run", lambda value: value["supervision"] not in ("owned", "cleanup-pending"))
+                return value
+
+            def create_child(run, tag, body, name):
+                """One accepted lineage request. Returns the key, receipt, headers and child request."""
+                key = new_key()
+                status, receipt, raw, headers = lineage(run, key, tag, body)
+                assert status == 202, (name, status, receipt.get("code"))
+                (work / (name + "-receipt.json")).write_bytes(raw)
+                assert receipt["operation"] == body["operation"] and receipt["resource"] == "/v1/runs/" + run + "/lineage-requests", (
+                    name, receipt["operation"], receipt["resource"])
+                assert headers.get("location") == "/v1/commands/" + receipt["id"], (name, headers.get("location"))
+                command, _, raw = wait_for(receipt["links"]["self"], "CommandReceipt",
+                    lambda value: value["state"] in ("effect-observed", "refused", "unresolved"))
+                (work / (name + "-command.json")).write_bytes(raw)
+                assert command["state"] == "effect-observed" and command["effect"]["kind"] == "lineage-created", (
+                    name, command["state"], command.get("effect"), command.get("refusal"))
+                child, _, raw = observed(command["effect"]["resource"], "Request")
+                (work / (name + "-child.json")).write_bytes(raw)
+                assert child["parentRunId"] == run and child["lineage"] == body["operation"] and child["phase"] == "draft", (
+                    name, child["parentRunId"], child["lineage"], child["phase"])
+                return key, receipt, headers, child
+
+            status, catalogue, _ = request("/v1/workflows?profileId=profile_1", authorized)
+            assert status == 200
+            workflow = next(item for item in catalogue["items"] if item["name"] == "lineage-typed")
+            create = {"workflowId": workflow["id"], "descriptorRevision": workflow["revision"],
+                      "profileId": workflow["profileId"], "profileRevision": workflow["profileRevision"]}
+            status, created, raw = request("/v1/requests", authorized | {"Content-Type": "application/json", "Idempotency-Key": new_key()},
+                                           method="POST", payload=json.dumps(create, separators=(",", ":")).encode())
+            assert status == 201, ("request creation", status, created.get("code"))
+            validate("Request", created, raw)
+            request_uri = created["links"]["self"]
+            current, tag, _ = observed(request_uri, "Request")
+            mutate(request_uri, {"operation": "set-input", "input": {"name": "input", "source": "literal", "value": "Lineage fixture input."}}, tag)
+            preparation, tag = review(request_uri, "parent")
+            assert "lineage" not in preparation["review"], "a root review has a lineage"
+            parent = run_to_success(request_uri, preparation, tag, "parent")
+            run = parent["id"]
+            before, before_tag, raw = collection(run)
+            (work / "lineage-before.json").write_bytes(raw)
+            assert before["items"] == [] and before["eligible"] == ["restart", "resume", "fork"] and before["refusal"] is None, (
+                "lineage collection before the first request", before["items"], before["eligible"], before["refusal"])
+
+            # Case 1. A restart creates a child request that names the parent,
+            # and the approved child runs to success.
+            restart_key, receipt, headers, child = create_child(run, before_tag, {"operation": "restart"}, "restart")
+            after, after_tag, raw = collection(run)
+            (work / "lineage-after.json").write_bytes(raw)
+            assert [item["id"] for item in after["items"]] == [child["id"]] and after_tag != before_tag, (
+                "lineage collection after the restart", [item["id"] for item in after["items"]])
+            requests, _, raw = observed("/v1/requests", "RequestPage")
+            (work / "requests-after.json").write_bytes(raw)
+            listed = [item for item in requests["items"] if item["id"] == child["id"]]
+            assert len(listed) == 1 and listed[0]["parentRunId"] == run and listed[0]["lineage"] == "restart", ("/v1/requests child", listed)
+            child_uri = child["links"]["self"]
+            preparation, tag = review(child_uri, "restart")
+            assert preparation["review"].get("lineage") == {"parentRunId": run, "operation": "restart", "edits": []}, (
+                "restart review lineage", preparation["review"].get("lineage"))
+            restarted = run_to_success(child_uri, preparation, tag, "restart")
+            assert restarted["parentRunId"] == run and restarted["lineage"] == "restart" and restarted["id"] != run, (
+                "restarted run", restarted["parentRunId"], restarted["lineage"])
+            print("PASS lineage case 1: restart command", receipt["id"], "of run", run, "created request", child["id"],
+                  "that names the parent in its detail, /v1/requests, the lineage collection and its review lineage, and its approved run",
+                  restarted["id"], "answered three questions and succeeded", flush=True)
+
+            # Case 2. A same-key replay returns the same receipt.
+            status, replay, _, replay_headers = lineage(run, restart_key, before_tag, {"operation": "restart"})
+            assert status == 202 and replay["id"] == receipt["id"] and replay_headers.get("location") == headers.get("location"), (
+                "lineage replay", status, replay.get("id"), replay.get("code"))
+            again, again_tag, raw = collection(run)
+            (work / "lineage-replay.json").write_bytes(raw)
+            assert [item["id"] for item in again["items"]] == [child["id"]], ("the replay changed the lineage collection", again["items"])
+            print("PASS lineage case 2: a same-key restart replay returned the same receipt", receipt["id"],
+                  "and Location, and the collection kept one child", flush=True)
+
+            # Case 3. The stale collection ETag refuses.
+            status, problem, _, _ = lineage(run, new_key(), before_tag, {"operation": "restart"})
+            assert status == 412 and problem["code"] == "stale-revision", ("stale lineage request", status, problem.get("code"))
+            again, again_tag, _ = collection(run)
+            assert [item["id"] for item in again["items"]] == [child["id"]], "the stale lineage request changed the collection"
+            print("PASS lineage case 3: a restart with the collection ETag from before the first request received",
+                  "412 stale-revision, and the collection kept one child", flush=True)
+
+            # Case 4. A resume creates a child whose review names the parent.
+            _, resume_receipt, _, resumed = create_child(run, again_tag, {"operation": "resume"}, "resume")
+            preparation, tag = review(resumed["links"]["self"], "resume")
+            assert preparation["review"].get("lineage") == {"parentRunId": run, "operation": "resume", "edits": []}, (
+                "resume review lineage", preparation["review"].get("lineage"))
+            discard = json.dumps({"operation": "discard"}, separators=(",", ":")).encode()
+            status, discarded, _, _ = exchange("/v1/preparations/" + preparation["id"],
+                authorized | {"Content-Type": "application/json", "Idempotency-Key": new_key(), "If-Match": tag},
+                method="POST", payload=discard)
+            assert status == 202, ("resume discard", status, discarded.get("code"))
+            wait_for(resumed["links"]["self"], "Request", lambda value: value["phase"] == "draft" and value["admission"]["state"] == "released")
+            print("PASS lineage case 4: resume command", resume_receipt["id"], "created request", resumed["id"],
+                  "whose review names the parent", run, "with the operation resume", flush=True)
+
+            # Case 5. A fork with an answer replacement reaches the child review.
+            _, current_tag, _ = collection(run)
+            edits = [{"occurrenceId": "1", "operation": "replace", "answer": True}]
+            _, fork_receipt, _, forked = create_child(run, current_tag, {"operation": "fork", "edits": edits}, "fork")
+            preparation, _ = review(forked["links"]["self"], "fork")
+            shown = preparation["review"].get("lineage")
+            assert shown is not None and shown["parentRunId"] == run and shown["operation"] == "fork", ("fork review lineage", shown)
+            assert [(edit["operation"], edit["occurrenceId"]) for edit in shown["edits"]] == [("replace", "1")] and re.fullmatch(
+                "[0-9a-f]{64}", shown["edits"][0]["sha256"]), ("fork review edits", shown["edits"])
+            final, _, raw = collection(run)
+            (work / "lineage-final.json").write_bytes(raw)
+            assert [item["id"] for item in final["items"]] == sorted([child["id"], resumed["id"], forked["id"]]), (
+                "final lineage collection", [item["id"] for item in final["items"]])
+            print("PASS lineage case 5: fork command", fork_receipt["id"], "with a replacement of occurrence 1 created request",
+                  forked["id"], "whose review names the parent", run, "and the replaced occurrence", flush=True)
+        finally:
+            if process.poll() is None:
+                process.terminate()
+            process.wait(timeout=25)
+            (work / "server-0.exit").write_text(str(process.returncode) + "\n")
+    print("PASS mutations-lineage: every lineage case held against the running TLS 1.3 manager", flush=True)
+
+
 if exports_mode:
     export_checks()
+    raise SystemExit(0)
+
+
+if lineage_mode:
+    lineage_checks()
     raise SystemExit(0)
 
 

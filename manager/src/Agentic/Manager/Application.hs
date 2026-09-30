@@ -69,7 +69,8 @@ methods path = case path of
     | C.validId ident && kind `elem` ["requests", "preparations", "decisions"] -> ["GET", "POST"]
     | C.validId ident && kind `elem` ["commands", "artifacts", "workflows", "runs", "exports"] -> ["GET"]
   ["v1", "runs", ident, "control"] | C.validId ident -> ["GET", "POST"]
-  ["v1", "runs", ident, "exports"] | C.validId ident -> ["GET", "POST"]
+  ["v1", "runs", ident, leaf]
+    | C.validId ident && leaf `elem` ["exports", "lineage-requests"] -> ["GET", "POST"]
   ["v1", "runs", ident, leaf]
     | C.validId ident && leaf `elem` ("routes" : runPages) -> ["GET"]
   _ -> []
@@ -244,13 +245,18 @@ dispatch service pages streams proof request respond = do
       Service.withExport service proof ident $ \view value ->
         json view HTTP.status200 [("ETag", representationTag request (C.encoded value))] value respond
     ("GET", ["v1", "runs", ident, "lineage-requests"]) ->
+      -- The page-set revision is the parent run revision. The first page
+      -- carries it as its strong ETag, which is the If-Match of a lineage
+      -- request.
       Service.withLineageSource service proof ident $ \view limits materialize ->
-        page view limits token $ do
+        servePageTagged pages store proof request view limits token (Pages.wholeSet $ do
           lineage <- materialize
           let fields = ["runId" .= ident, "eligible" .= Drafts.lineageEligible lineage,
                 "refusal" .= Drafts.lineageRefusal lineage]
-              items = map toJSON (Drafts.lineageChildren lineage)
-          pure (contentRevision (toJSON (object fields, items)), fields, items)
+          pure (Drafts.lineageRevision lineage, fields, map toJSON (Drafts.lineageChildren lineage))) respond (collectionTag token)
+    ("POST", ["v1", "runs", ident, "lineage-requests"]) -> do
+      (key, condition, bytes) <- jsonMutation request
+      Service.submitLineage service proof ident key condition bytes >>= need >>= receipt
     ("GET", ["v1", "artifacts", ident]) ->
       Service.download service proof ident $ \view _ bytes ->
         Transport.respondBytes HTTP.status200

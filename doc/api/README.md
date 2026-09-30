@@ -187,7 +187,11 @@ page is not substituted for that collection's ETag. The first page of
 its `page.revision` holds the same value. The collection revision changes
 when an export of the run is accepted, and also when the supervision of the
 run or the verification of its result changes. A later page of the
-collection has a representation tag.
+collection has a representation tag. The first page of
+`/runs/{id}/lineage-requests` carries the revision of the parent run as its
+strong ETag, and its `page.revision` holds the same value. That revision
+changes when a lineage request of the run is accepted, and also when another
+fact of the run changes, for example its supervision.
 
 A 201 response creates a draft. A 202 response records accepted coordination
 intent. Neither response asserts runtime delivery, terminal success,
@@ -256,6 +260,27 @@ collection and as `/exports/{id}` with the state `published`, and its
 of the key returns the same receipt and the same `Location` without another
 publication. A stale `If-Match` receives 412 `stale-revision`, and a name that
 another export of the destination holds receives 409 `state-conflict`.
+A POST to `/runs/{id}/lineage-requests` with the body
+`{"operation": "restart"}`, `{"operation": "resume"}` or
+`{"operation": "fork", "edits": EDITS}` creates a child request of the run.
+Each fork edit is `{"occurrenceId": ID, "operation": "drop"}` or
+`{"occurrenceId": ID, "operation": "replace", "answer": VALUE}`. The request
+requires `observe` and `submit` on the profile of the run and the strong ETag
+of the first collection page as `If-Match`. The service answers 202 with the
+CommandReceipt of the `restart`, `resume` or `fork` command and
+`Location: /v1/commands/{id}`. The command records the effect
+`lineage-created` with the resource `/v1/requests/{id}` of the child. The
+child is an ordinary draft whose `parentRunId` names the run and whose
+`lineage` names the operation. It appears in `/requests` and in the lineage
+collection. Its inputs come from the parent, so an `enqueue` prepares it
+without `set-input`. The review of its preparation has a `lineage` field with
+`parentRunId`, `operation` and `edits`, where a replacement shows the
+`sha256` of its answer and not the answer. The review of a root request has no
+`lineage` field. An approval then starts the child run, whose `parentRunId`
+and `lineage` name the parent and the operation. An exact retry of the key
+returns the same receipt and the same `Location` without another child. A
+stale `If-Match` receives 412 `stale-revision`. A legacy entry receives 403
+`insufficient-scope`, as the other run resources refuse it.
 `/runs/{id}/routes` serves the run log `flow.ndjson` of the run store of a
 managed run. It requires `observe` on the profile of the run, and a run
 identifier that names no managed run, or a run of a profile that the
@@ -309,7 +334,7 @@ coordination database.
 | `/artifacts/{id}` | GET | GET | No mutation. The server resolves and verifies its retained internal reference before sending content. |
 | `/runs/{id}/exports` | GET, POST | GET, POST | `observe` and `export`, current collection ETag, verified source, and a permitted single-component name. |
 | `/exports/{id}` | GET | GET | No mutation. Returns receipt metadata and an authorized download link without a server path. |
-| `/runs/{id}/lineage-requests` | GET, POST | GET | `observe` and `submit`, current collection ETag, eligible parent, compatible trusted invocation, and no conflicting ownership or quarantine. |
+| `/runs/{id}/lineage-requests` | GET, POST | GET, POST | `observe` and `submit`, current collection ETag, eligible parent, compatible trusted invocation, and no conflicting ownership or quarantine. |
 | `/snapshot` | GET | GET | No mutation. Provides a consistent authorized overview and replay cursor. |
 | `/events` | GET | GET | No mutation. SSE and bounded JSON use the same durable cursor and retention rules. |
 | `/runs/{id}/routes` | GET | GET | No mutation. Serves bounded JSON batches or a route stream of the run log of the run by route class. `observe` gives public records, and `observe` with `control` also gives actor records. |
@@ -365,8 +390,9 @@ Restart, resume, and fork create new requests. The lineage body supplies only
 the selected operation and permitted typed fork edits. It cannot replace the
 parent's workflow, inputs, target, invocation, or filesystem root. A new
 preparation always requires a new exact approval. Its public review includes
-the program hash, person-answering mode, and allowlisted public policy from
-that same native prepared response, not a later configuration lookup.
+the program hash, person-answering mode, allowlisted public policy and
+lineage from that same native prepared response, not a later configuration
+lookup.
 
 An unreadable manifest remains a visible catalogue entry with an opaque handle,
 profile, safe failure category, and only known metadata. It does not require

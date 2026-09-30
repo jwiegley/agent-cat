@@ -40,8 +40,14 @@ policy does not reject legacy manifest formats on the manager-owned root.
 Restart, resume, and fork create distinct ordinary drafts through Commands and
 use the existing admission, preparation, approval, and Worker owners. The route
 accepts no workflow, input, target, root, or invocation override. Parent manifests
-and typed edits are immutable. The accepted parent binding remains private in
-assembly and review. Admission rechecks it after native preparation and before
+and typed edits are immutable. The accepted parent manifest binding remains
+private in assembly and review. The public review of a lineage preparation has
+a `lineage` field with the manager identifier of the parent run, the operation
+and the fork edits of the native prepared response, where a replacement shows
+the SHA-256 of its answer. `Approval.projectReview` refuses the review when
+the native response names another parent or operation than the lineage setup
+and the accepted parent manifest. A root review has no `lineage` field.
+Admission rechecks the binding after native preparation and before
 review publication or approval consumption, including the selected descriptor
 and inherited inputs. The native worker retains its post-approval revalidation.
 These point-in-time checks do not attest the exact bytes read under adversarial
@@ -162,6 +168,22 @@ quarantined profile give `quarantined`. Live or foreign ownership and a changed
 root give `ownership-unavailable`. A different invocation and a workflow absent
 from the catalogue give `incompatible-parent`. A refusal lists no eligible
 operation. Eligibility does not read inherited inputs, checkpoints or effects.
+The collection revision is the revision of the parent run, and the first page
+carries it as its strong ETag. `createLineageDraft` changes that revision when
+it creates a child.
+
+A POST to `/v1/runs/{id}/lineage-requests` goes to `Service.submitLineage`. It
+resolves the run through `State.resolveRun` under the scopes of the lineage
+operations, `observe` and `submit`, and calls `History.createHistoryLineage`
+with the key, the `If-Match` value and the exact body. That owner refuses a
+legacy observation entry and otherwise calls `Drafts.createLineageDraft`,
+which decodes the body strictly, checks the precondition against the parent
+revision, checks the parent, and creates the child draft once. An exact retry
+of the key returns the original receipt. The `mutations-lineage` mode of
+`manager/test/service_http.py` creates restart, resume and fork children of a
+succeeded parent through the running manager, checks the parent in each child
+request and review, runs the restarted child to success, and checks a
+same-key replay and a stale `If-Match`.
 
 ## Non-network lifecycle harness
 

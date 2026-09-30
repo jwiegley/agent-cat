@@ -7,7 +7,7 @@ module Agentic.Manager.Approval
     AcceptedStart, deliverAcceptedStart, stopAcceptedStart, observeAcceptedStart, acceptedStartRun, acceptedTimerRetired ) where
 
 import Agentic.Manager.Admission
-import Agentic.Manager.Drafts (checkLineageParent, assemblyParentBinding)
+import Agentic.Manager.Drafts (checkLineageParent, assemblyParentBinding, assemblyParentRun)
 import Agentic.Manager.Fault (configurationLoan, storeFailureRefusal)
 import Agentic.Manager.Admission.Policy (Resource (..), effectiveResources)
 import Agentic.Manager.Authorization
@@ -273,10 +273,26 @@ projectReview workflow context = do
   let protected=privateValues context
       content=stringLeaves program <> [workflowName exact,workflowBlurb exact,workflowLevel exact] <> map workflowInputName(workflowInputs exact) <> P.observationCodeNames(workflowResultCode exact) <> workflowRunFacts exact <> workflowPins exact <> policyLabels(P.policyValue policy)
   unless(all (safeText protected) content)(Left InvalidInput)
+  lineage<-reviewLineage context
   let person=case preparedPersonAnswering native of PersonAnswerEngine->"engine";PersonAnswerLocalControl->"local-control"
       public=P.Review (preparedProgramHash native)person policy workflow (operatorId selected) (operatorWorkspaceLabel selected) (operatorTargetLabel selected)
-        (reviewInputSummaries context) plan (workflowRunFacts exact) (workflowPins exact) [] (workflowResultCode exact)
+        (reviewInputSummaries context) plan (workflowRunFacts exact) (workflowPins exact) [] (workflowResultCode exact) lineage
   either(const(Left ViewTooLarge))Right(parseEither parseJSON(toJSON public))
+
+-- | The public lineage of a derived preparation. The native prepared
+-- response must name the parent and operation of the lineage setup, and that
+-- parent must be the native run of the accepted parent manifest. The review
+-- names the parent by its manager run identifier. A root preparation has no
+-- lineage.
+reviewLineage :: ReviewContext -> Either CommandFailure (Maybe P.ReviewLineage)
+reviewLineage context = case (reviewSetup context, preparedLineage (reviewNative context), assemblyParentRun (reviewAssembly context)) of
+  (RootSetup _, Nothing, Nothing) -> Right Nothing
+  (DerivedSetup _ parent operation _ _ _, Just native, Just (managerParent, acceptedParent))
+    | preparedParentRunId native == parent && parent == acceptedParent && preparedLineageOperation native == operation
+    , String name <- toJSON operation -> do
+        edits <- either (const (Left InvalidInput)) Right (parseEither parseJSON (toJSON (preparedLineageEdits native)))
+        Right (Just (P.ReviewLineage managerParent name edits))
+  _ -> Left InvalidInput
 
 privateValues :: ReviewContext -> [Text]
 privateValues context = filter (not.T.null) $

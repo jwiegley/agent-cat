@@ -256,7 +256,7 @@ faultClassificationChecks work = do
     generation <- storeProcessGeneration <$> storeIdentity store
     policy <- right (P.projectPolicy (object ["kind" .= ("scripted"::Text)]))
     let review = P.Review (T.replicate 64 "a") "local-control" policy "workflow_1" "profile_1" "fixture" "no execution"
-          [] "plan" [] [] [] (String "flag")
+          [] "plan" [] [] [] (String "flag") Nothing
         reviewBytes = Command.encoded review
         binding = Command.encoded (object ["reviewSha256" .= hexDigest reviewBytes])
         insertPreparation ident requestId reviewStored digestStored expires = mutate store $ do
