@@ -130,6 +130,15 @@ checkpoint restoration retains the new evidence. A later Accepted-to-Unsupported
 race remains legitimate and is resolved by the actual native acknowledgement.
 
 `manager/ci/controls.sh` owns the native N1/N8 checks and compiled mutation controls.
+The `controls` mode of `manager/test/service_http.py` sends the same controls
+through the running HTTPS manager with the ACP retry and steering fixtures. It
+checks that a cancel is acknowledged and ends the run cancelled, that a steer
+reaches the effect `steered` and a run-log `steer` record, that a retry through
+`/runs/{id}/control` and a `choose-recovery` abandon through `/decisions/{id}`
+reach their effects, and that an answer reaches `answer-accepted`. It also
+checks the `decision-not-head` and `unsupported-operation` refusals, the
+per-run FIFO order, and that two credentials that answer one head decision at
+the same time give one delivered answer and one `stale-revision` refusal.
 Fixture barriers delay original work or original control delivery, never invent
 successful Runtime envelopes. The steering fixture completes its original prompt
 through its normal event loop, including when no steer is delivered. Every fixture

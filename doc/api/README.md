@@ -386,6 +386,27 @@ are not coerced into display strings. Every route that answers a mandatory
 decision uses the same per-run FIFO transaction. There is no generic pause,
 remote shell, or arbitrary engine-prompt operation.
 
+`POST /runs/{id}/control` accepts `cancel`, `steer`, `redirect`, `retry`,
+`choose-recovery`, and `answer`. `POST /decisions/{id}` accepts `answer` and
+`choose-recovery` for that decision. The control view offers `steer` for a
+running attempt that registered steering support, `redirect` for an open
+dispatch, and `answer`, `retry`, or `choose-recovery` for the pending decision
+head of the run. `cancelAllowed` is true while the manager owns the live run
+and the run is running. The `If-Match` value is the control revision for
+`/runs/{id}/control` and the decision revision for `/decisions/{id}`.
+
+A control that the current runtime state does not offer receives 409
+`unsupported-operation`. An answer or recovery choice for a pending decision
+that is not the head of its run receives 409 `decision-not-head`, and the
+queue order does not change. When two clients send a control for the same
+head decision with the same revision, the first reservation changes that
+revision. The other client receives 412 `stale-revision`, and only one answer
+or choice reaches the run. A steer, a retry, a recovery choice, a redirect,
+and a delivered answer each record their correlated runtime effect in the
+command receipt. A cancel receipt records the runtime acknowledgement. The
+snapshot reports the cancelled run, and the receipt records no cancel effect,
+because the runtime cancellation event names no control.
+
 Restart, resume, and fork create new requests. The lineage body supplies only
 the selected operation and permitted typed fork edits. It cannot replace the
 parent's workflow, inputs, target, invocation, or filesystem root. A new

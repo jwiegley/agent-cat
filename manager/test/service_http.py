@@ -156,7 +156,24 @@ exports_mode = len(sys.argv) == 6 and sys.argv[5] == EXPORTS
 # prints its own PASS line. It runs one manager lifetime.
 LINEAGE = "mutations-lineage"
 lineage_mode = len(sys.argv) == 6 and sys.argv[5] == LINEAGE
-assert len(sys.argv) == 5 or mixed or boundary or pages_mode or events_mode or captures_mode or discard_mode or exports_mode or lineage_mode
+# The controls mode checks the single-candidate controls of WM-027 through
+# the running protected manager with the ACP control fixtures: a cancel of a
+# running run that is acknowledged and ends the run cancelled, a steer of a
+# steerable running attempt that reaches the effect steered and a run-log
+# steer record, two credentials that answer the same head decision at the
+# same time with one delivered answer and one stale-revision refusal, the
+# decision-not-head refusal of a non-head decision and the
+# unsupported-operation refusal of an unoffered steer while the per-run FIFO
+# order holds, a retry through the run control and a choose-recovery abandon
+# through the decision that each reach their effect. Each numbered case
+# prints its own PASS line. It runs one manager lifetime.
+CONTROLS = "controls"
+controls_mode = len(sys.argv) == 6 and sys.argv[5] == CONTROLS
+# The modes that configure the control fixture profiles in place of the
+# scripted profile: profile_1 runs the recovery-offering retry adapter and
+# profile_steer runs the steerable adapter. Other modes keep their profiles.
+control_profiles = controls_mode
+assert len(sys.argv) == 5 or mixed or boundary or pages_mode or events_mode or captures_mode or discard_mode or exports_mode or lineage_mode or controls_mode
 assert not tui_approval or os.environ.get("TUI_CHECK")
 assert native in ("1", "8")
 print(f"work={work}", flush=True)
@@ -234,6 +251,21 @@ if mixed:
         targetLabel="Deterministic ACP retry", targetArguments=["--engine", "acp", "--adapter", "mixed-adapter"],
         environment=[{"name": "PATH", "value": str(adapters)}]
         + ([{"name": "ACAT_PAGES_MARKER", "value": PAGES_ENVIRONMENT_MARKER}] if pages_mode else []))
+if control_profiles:
+    adapters = work / "adapters"
+    adapters.mkdir(mode=0o700)
+    for launcher_name, program_name in (("retry-adapter", "retry_adapter.py"), ("steer-adapter", "steer_adapter.py")):
+        launcher = adapters / launcher_name
+        program = source / "engine/acp/test" / program_name
+        launcher.write_text(f"#!{sys.executable} -B\nimport os\nos.execv({sys.executable!r},[{sys.executable!r},'-B',{str(program)!r}])\n")
+        launcher.chmod(0o700)
+    scripted = configuration["profiles"][0]
+    fixture_path = [{"name": "PATH", "value": str(adapters)}]
+    configuration["profiles"] = [
+        dict(scripted, targetLabel="Deterministic ACP retry",
+             targetArguments=["--engine", "acp", "--adapter", "retry-adapter"], environment=fixture_path),
+        dict(scripted, id="profile_steer", workspaceLabel="HTTPS steer fixture", targetLabel="Deterministic ACP steer",
+             targetArguments=["--engine", "acp", "--adapter", "steer-adapter"], environment=fixture_path)]
 config = work / "configuration.json"
 config.write_text(json.dumps(configuration))
 config.chmod(0o600)
@@ -257,8 +289,8 @@ def administration(payload, refused=None):
 
 
 issued = administration({"version": 1, "operation": "issue-credential", "label": "HTTPS fixture",
-                         "scopes": ["observe", "submit"] + (["control", "export"] if mixed else ["control"] if captures_mode or discard_mode or lineage_mode else ["control", "export"] if exports_mode else []),
-                         "profileIds": ["profile_1"],
+                         "scopes": ["observe", "submit"] + (["control", "export"] if mixed else ["control"] if captures_mode or discard_mode or lineage_mode or control_profiles else ["control", "export"] if exports_mode else []),
+                         "profileIds": ["profile_1"] + (["profile_steer"] if control_profiles else []),
                          "expiresAt": "2999-01-01T00:00:00Z", "outputFile": str(work / "credential")})
 bearer = (work / "credential").read_bytes().decode("ascii")
 if collections:
@@ -272,6 +304,14 @@ if captures_mode or discard_mode:
     administration({"version": 1, "operation": "issue-credential", "label": "HTTPS observe only",
                     "scopes": ["observe"], "profileIds": ["profile_1"],
                     "expiresAt": "2999-01-01T00:00:00Z", "outputFile": str(work / "credential-observe")})
+# The control modes also issue a peer credential of both fixture profiles.
+# It answers concurrently with the first credential, and it sends the
+# controls of the recovery runs, so that each credential stays within its
+# ordinary mutation rate.
+if control_profiles:
+    administration({"version": 1, "operation": "issue-credential", "label": "HTTPS control peer",
+                    "scopes": ["observe", "submit", "control"], "profileIds": ["profile_1", "profile_steer"],
+                    "expiresAt": "2999-01-01T00:00:00Z", "outputFile": str(work / "credential-peer")})
 configuration["administrationRoot"] = str(work / "admin")
 config.write_text(json.dumps(configuration))
 context = ssl.create_default_context(cafile=str(cert))
@@ -3799,6 +3839,274 @@ def lineage_checks():
             process.wait(timeout=25)
             (work / "server-0.exit").write_text(str(process.returncode) + "\n")
     print("PASS mutations-lineage: every lineage case held against the running TLS 1.3 manager", flush=True)
+
+
+def control_checks():
+    """Cancel, steer, retry, abandon and answer through POST
+    /v1/runs/{id}/control and POST /v1/decisions/{id} of the real HTTPS
+    manager. Each numbered case prints one PASS line."""
+    authorized = {"Authorization": "Bearer " + bearer}
+    peer = {"Authorization": "Bearer " + (work / "credential-peer").read_bytes().decode("ascii")}
+    terminal = ("succeeded", "failed", "cancelled")
+
+    def post(path, credential, capabilities, body, tag):
+        """One control POST. Returns the status and the decoded body."""
+        key = capabilities["authorityEpoch"] + "." + secrets.token_urlsafe(16)
+        payload = json.dumps(body, separators=(",", ":")).encode()
+        headers = credential | {"Content-Type": "application/json", "Idempotency-Key": key, "If-Match": tag}
+        status, value, raw, _ = exchange(path, headers, method="POST", payload=payload)
+        validate("Problem" if status >= 400 else "CommandReceipt", value, raw)
+        return status, value
+
+    def start(client, capabilities, profile):
+        """Create, enqueue and approve one mixed-controls request of the
+        profile. Returns the run."""
+        credential = client[3]
+        status, catalogue, _ = request("/v1/workflows?profileId=" + profile, credential)
+        assert status == 200, ("control catalogue", profile, status)
+        workflow = next(item for item in catalogue["items"] if item["name"] == "mixed-controls")
+        create = {"workflowId": workflow["id"], "descriptorRevision": workflow["revision"],
+                  "profileId": workflow["profileId"], "profileRevision": workflow["profileRevision"]}
+        key = capabilities["authorityEpoch"] + "." + secrets.token_urlsafe(16)
+        status, created, raw = request("/v1/requests", credential | {"Content-Type": "application/json", "Idempotency-Key": key},
+                                       method="POST", payload=json.dumps(create, separators=(",", ":")).encode())
+        assert status == 201, ("control request creation", profile, status, created.get("code"))
+        validate("Request", created, raw)
+        _, run = approve_mixed(created, workflow, client)
+        return run
+
+    def run_records(run, credential):
+        """Every run-log route record of the run that the credential receives."""
+        records, cursor = [], None
+        for _ in range(1024):
+            target = f"/v1/runs/{run}/routes" + ("" if cursor is None else "?after=" + cursor)
+            status, value, raw = request(target, credential | {"Accept": "application/json"})
+            assert status == 200, ("run route batch", run, status, value.get("code"))
+            validate("RouteBatch", value, raw)
+            records += value["records"]
+            cursor = value["cursor"]
+            if not value["hasMore"]:
+                return records
+        raise AssertionError(("run route pages did not end", run))
+
+    def ended(client, run, expected):
+        """Wait for the terminal runtime status of the run and require the expected one."""
+        snapshot, _, raw = client[1](f"/v1/runs/{run}/snapshot", "RunSnapshot",
+            lambda value: value["runtime"] is not None and value["runtime"]["status"] in terminal)
+        (work / f"control-{run}-terminal.json").write_bytes(raw)
+        assert snapshot["runtime"]["status"] == expected, ("control run terminal status", run, snapshot["runtime"]["status"], expected)
+
+    def effect(client, receipt_uri, kind):
+        """The effect-observed receipt of a control command with the effect kind."""
+        command, _, raw = client[0](receipt_uri, "CommandReceipt")
+        assert command["state"] == "effect-observed" and command["effect"]["kind"] == kind, (
+            "control effect", receipt_uri, command["state"], command["effect"])
+        return command
+
+    def queue(client, run):
+        """The identifiers of the pending FIFO queue of the run, in order."""
+        page, _, _ = client[0]("/v1/decisions?runId=" + run, "DecisionPage")
+        return [item["id"] for item in page["items"]]
+
+    def act(client, capabilities, run, head, choice):
+        """Act on the head decision of the run. A question receives typed
+        false through the decision. A recovery receives retry through the
+        run control, or choose-recovery with the choice through the
+        decision. Returns the receipt URI and the expected effect kind."""
+        observed, _, mutate, _ = client
+        decision, decision_tag, _ = observed("/v1/decisions/" + head, "Decision")
+        assert decision["position"] == 0 and decision["state"] == "pending" and decision["runId"] == run, (
+            "control head", head, decision["position"], decision["state"])
+        body = {"occurrenceId": decision["address"]["occurrenceId"], "generation": decision["generation"]}
+        if decision["kind"] == "question":
+            return mutate("/v1/decisions/" + head, dict(body, operation="answer", value=False), decision_tag), "answer-accepted"
+        control, control_tag, _ = observed(f"/v1/runs/{run}/control", "RunControl")
+        assert control["decisionHeadId"] == head, ("control head moved", control["decisionHeadId"], head)
+        if choice == "retry":
+            assert any(offer["operation"] == "retry" and offer["generation"] == decision["generation"]
+                       and offer["address"] == decision["address"] for offer in control["offers"]), ("retry not offered", control["offers"])
+            return mutate(f"/v1/runs/{run}/control", dict(body, operation="retry"), control_tag), "retried"
+        assert any(offer["operation"] == "choose-recovery" and offer["generation"] == decision["generation"]
+                   and any(item["choice"] == choice for item in offer["choices"]) for offer in control["offers"]), (
+            "recovery choice not offered", choice, control["offers"])
+        return mutate("/v1/decisions/" + head, dict(body, operation="choose-recovery", choice=choice), decision_tag), "recovery-chosen"
+
+    with (work / "server-0.stdout").open("wb") as output, (work / "server-0.stderr").open("wb") as errors:
+        process = subprocess.Popen([str(runner), "--manager", "serve", "--config", str(config),
+                                    "+RTS", "-N" + native, "-RTS"], stdout=output, stderr=errors)
+        try:
+            wait_ready(process)
+            clients = {}
+            for label, credential in (("first", authorized), ("peer", peer)):
+                status, capabilities, _ = request("/v1/capabilities", credential)
+                assert status == 200 and "control" in capabilities["scopes"], ("control capabilities", label, status)
+                validate("Capabilities", capabilities)
+                assert sorted(capabilities["profileIds"]) == ["profile_1", "profile_steer"], capabilities["profileIds"]
+                clients[label] = (mixed_client(capabilities, credential), capabilities)
+            first, first_capabilities = clients["first"]
+            second, second_capabilities = clients["peer"]
+
+            # Case 1. A cancel of a running run is acknowledged, and the run ends cancelled.
+            run = start(first, first_capabilities, "profile_steer")
+            base = "/v1/runs/" + run
+            control, tag, raw = first[1](base + "/control", "RunControl",
+                lambda value: any(offer["operation"] == "steer" for offer in value["offers"]))
+            (work / "control-cancel-before.json").write_bytes(raw)
+            assert control["cancelAllowed"] and control["supervision"] == "owned", ("cancel not allowed", control["cancelAllowed"])
+            status, receipt = post(base + "/control", authorized, first_capabilities, {"operation": "cancel"}, tag)
+            assert status == 202 and receipt["operation"] == "cancel" and receipt["resource"] == base + "/control", (
+                "cancel", status, receipt.get("code"))
+            command, _, raw = first[1](receipt["links"]["self"], "CommandReceipt",
+                lambda value: value["acknowledgement"] is not None or value["state"] in ("refused", "unresolved"))
+            (work / "control-cancel-command.json").write_bytes(raw)
+            assert command["state"] in ("acknowledged", "effect-observed") and command["acknowledgement"]["state"] in ("accepted", "delivered"), (
+                "cancel acknowledgement", command["state"], command["acknowledgement"])
+            ended(first, run, "cancelled")
+            records = run_records(run, authorized)
+            controls = [record for record in records if record["schema"] == "control" and record["about"].get("command") == receipt["id"]]
+            assert len(controls) == 1 and controls[0]["from"] == "manager", ("cancel run-log control", len(controls))
+            print("PASS controls case 1: cancel command", receipt["id"], "of running run", run, "was acknowledged",
+                  command["acknowledgement"]["state"], "and the run ended cancelled, with one run-log control from the manager", flush=True)
+
+            # Case 2. A steer of the steerable running attempt reaches the effect steered.
+            run = start(first, first_capabilities, "profile_steer")
+            base = "/v1/runs/" + run
+            control, tag, raw = first[1](base + "/control", "RunControl",
+                lambda value: any(offer["operation"] == "steer" for offer in value["offers"]))
+            (work / "control-steer-before.json").write_bytes(raw)
+            offer = next(offer for offer in control["offers"] if offer["operation"] == "steer")
+            assert "interrupt-now" in offer["timings"] and "attemptId" in offer["address"], offer
+            steer_uri = first[2](base + "/control", {"operation": "steer", "occurrenceId": offer["address"]["occurrenceId"],
+                                 "attemptId": offer["address"]["attemptId"], "timing": "interrupt-now",
+                                 "text": "Focus on the patch."}, tag)
+            steer = effect(first, steer_uri, "steered")
+            assert steer["effect"]["address"] == offer["address"], ("steer effect address", steer["effect"]["address"], offer["address"])
+            records = run_records(run, authorized)
+            steers = [record for record in records if record["schema"] == "steer"]
+            controls = [record for record in records if record["schema"] == "control" and record["about"].get("command") == steer["id"]]
+            assert steers and len(controls) == 1 and controls[0]["from"] == "manager", ("steer run-log records", len(steers), len(controls))
+            print("PASS controls case 2: steer command", steer["id"], "of attempt", offer["address"], "of run", run,
+                  "reached the effect steered, and the run log holds the relayed control and", len(steers), "steer record", flush=True)
+
+            # Case 3. Two credentials answer the same head decision at the same time.
+            control, _, _ = first[1](base + "/control", "RunControl", lambda value: value["decisionHeadId"] is not None)
+            head = control["decisionHeadId"]
+            decision, decision_tag, _ = first[0]("/v1/decisions/" + head, "Decision")
+            assert decision["kind"] == "question" and decision["state"] == "pending", ("concurrent head", decision["kind"], decision["state"])
+            body = {"operation": "answer", "occurrenceId": decision["address"]["occurrenceId"],
+                    "generation": decision["generation"], "value": False}
+            barrier = threading.Barrier(2)
+            outcomes = {}
+
+            def answer(label, credential, capabilities):
+                barrier.wait(timeout=10)
+                outcomes[label] = post("/v1/decisions/" + head, credential, capabilities, body, decision_tag)
+
+            threads = [threading.Thread(target=answer, args=(label, credential, capabilities))
+                       for label, credential, capabilities in (("first", authorized, first_capabilities), ("peer", peer, second_capabilities))]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join(timeout=30)
+            assert len(outcomes) == 2, ("concurrent answers did not return", sorted(outcomes))
+            accepted = [(label, value) for label, (status, value) in outcomes.items() if status == 202]
+            refused = [(label, status, value) for label, (status, value) in outcomes.items() if status != 202]
+            assert len(accepted) == 1 and len(refused) == 1, ("concurrent answers", {label: status for label, (status, _) in outcomes.items()})
+            winner, receipt = accepted[0]
+            loser, refused_status, problem = refused[0]
+            assert refused_status == 412 and problem["code"] == "stale-revision", ("concurrent answer refusal", refused_status, problem["code"])
+            client = first if winner == "first" else second
+            command, _, raw = client[1](receipt["links"]["self"], "CommandReceipt",
+                lambda value: value["state"] in ("effect-observed", "refused", "unresolved"))
+            (work / "control-answer-command.json").write_bytes(raw)
+            assert command["state"] == "effect-observed" and command["effect"]["kind"] == "answer-accepted", ("answer effect", command["state"])
+            assert command["acknowledgement"]["state"] == "delivered", ("answer acknowledgement", command["acknowledgement"])
+            ended(first, run, "succeeded")
+            records = run_records(run, authorized)
+            questions = [record for record in records if record["schema"] == "question" and record["to"] == {"to": "manager"}]
+            assert len(questions) == 1, ("person questions", len(questions))
+            answers = [record for record in records if record["schema"] == "answer" and record["replyTo"] == questions[0]["position"]]
+            assert len(answers) == 1 and answers[0]["about"].get("command") == receipt["id"] and answers[0]["body"] is False, (
+                "run-log answers of the question", [(record["about"], record["body"]) for record in answers])
+            print("PASS controls case 3: of two concurrent answers to head", head, "the", winner, "credential's command", receipt["id"],
+                  "was delivered and reached answer-accepted, the", loser, "credential received 412 stale-revision,",
+                  "and the run log holds one answer, and the run succeeded", flush=True)
+
+            # Case 4. A non-head answer and an unoffered steer refuse, the
+            # per-run FIFO order holds, and a retry through the run control
+            # reaches the effect retried.
+            run = start(second, second_capabilities, "profile_1")
+            base = "/v1/runs/" + run
+            pending = None
+            deadline = time.monotonic() + 40
+            while pending is None or len(pending) < 2:
+                assert time.monotonic() < deadline, ("two pending decisions deadline", pending)
+                time.sleep(0.05)
+                pending = queue(second, run)
+            head, later = pending
+            control, control_tag, raw = second[0](base + "/control", "RunControl")
+            (work / "control-fifo-before.json").write_bytes(raw)
+            assert control["decisionHeadId"] == head, ("run control head", control["decisionHeadId"], head)
+            assert not any(offer["operation"] == "steer" for offer in control["offers"]), ("unexpected steer offer", control["offers"])
+            decision, decision_tag, _ = second[0]("/v1/decisions/" + later, "Decision")
+            assert decision["position"] == 1 and decision["state"] == "pending", ("non-head decision", decision["position"], decision["state"])
+            body = {"occurrenceId": decision["address"]["occurrenceId"], "generation": decision["generation"]}
+            body.update({"operation": "answer", "value": False} if decision["kind"] == "question" else {"operation": "choose-recovery", "choice": "retry"})
+            status, problem = post("/v1/decisions/" + later, peer, second_capabilities, body, decision_tag)
+            assert status == 409 and problem["code"] == "decision-not-head", ("non-head answer", status, problem.get("code"))
+            recovery = decision if decision["kind"] == "recovery" else second[0]("/v1/decisions/" + head, "Decision")[0]
+            assert recovery["kind"] == "recovery", ("mixed-controls recovery decision", recovery["kind"])
+            status, problem = post(base + "/control", peer, second_capabilities,
+                                   {"operation": "steer", "occurrenceId": recovery["address"]["occurrenceId"], "attemptId": "0",
+                                    "timing": "interrupt-now", "text": "No steer is offered."}, control_tag)
+            assert status == 409 and problem["code"] == "unsupported-operation", ("unoffered steer", status, problem.get("code"))
+            assert queue(second, run) == [head, later], ("the refusals changed the run queue", queue(second, run))
+            order = []
+            for expected in (head, later):
+                control, _, _ = second[1](base + "/control", "RunControl", lambda value: value["decisionHeadId"] is not None)
+                assert control["decisionHeadId"] == expected, ("per-run FIFO order", control["decisionHeadId"], expected)
+                uri, kind = act(second, second_capabilities, run, expected, "retry")
+                order.append(effect(second, uri, kind))
+            ended(second, run, "succeeded")
+            retried = next(command for command in order if command["operation"] == "retry")
+            print("PASS controls case 4: non-head", later, "refused with 409 decision-not-head, an unoffered steer refused with",
+                  "409 unsupported-operation, the queue kept", head, "before", later, "and the heads were acted on in that order,",
+                  "retry command", retried["id"], "reached the effect retried, and run", run, "succeeded", flush=True)
+
+            # Case 5. A choose-recovery abandon through the decision reaches
+            # the effect recovery-chosen, and the run ends failed.
+            run = start(second, second_capabilities, "profile_1")
+            base = "/v1/runs/" + run
+            abandoned = None
+            deadline = time.monotonic() + 50
+            while True:
+                snapshot, _, _ = second[0](base + "/snapshot", "RunSnapshot")
+                if snapshot["runtime"] is not None and snapshot["runtime"]["status"] in terminal:
+                    break
+                assert time.monotonic() < deadline, "abandon run terminal deadline"
+                control, _, _ = second[0](base + "/control", "RunControl")
+                if control["decisionHeadId"] is None:
+                    time.sleep(0.05)
+                    continue
+                uri, kind = act(second, second_capabilities, run, control["decisionHeadId"], "abandon")
+                command = effect(second, uri, kind)
+                if command["operation"] == "choose-recovery":
+                    abandoned = command
+            assert abandoned is not None, "no recovery decision was abandoned"
+            ended(second, run, "failed")
+            print("PASS controls case 5: choose-recovery command", abandoned["id"], "chose abandon through the decision,",
+                  "reached the effect recovery-chosen, and run", run, "ended failed", flush=True)
+        finally:
+            if process.poll() is None:
+                process.terminate()
+            process.wait(timeout=25)
+            (work / "server-0.exit").write_text(str(process.returncode) + "\n")
+    print("PASS controls: every control case held against the running TLS 1.3 manager", flush=True)
+
+
+if controls_mode:
+    control_checks()
+    raise SystemExit(0)
 
 
 if exports_mode:

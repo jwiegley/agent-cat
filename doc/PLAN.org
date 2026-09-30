@@ -4096,6 +4096,64 @@ Report: fess/b2-C15-r1.md in the private evidence directory.
 
 5. (low) Scope: the TUI review lines for lineage (tui/src/Agentic/Tui/Presentation.hs about lines 473-475) were not requested by C15. The change is additive and small, and it is kept.
 
+* TODO [#D] Resolve C16 fess findings in the controls mode
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-c16-controls-fess-findings-7xop
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-30 Wed 15:32]
+:MODIFIED: [2026-09-30 Wed 15:32]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of the fess audit of Phase B part 2 subtask C16 (cancel, steer, retry,
+abandon and concurrent answers through /v1, service_http.py mode controls).
+Report: fess/b2-C16-r1.md in the private evidence directory.
+
+1. (medium) manager/test/service_http.py (about lines 3922 and 3932). The controls mode sends every
+answer and every choose-recovery through POST /v1/decisions/{id} only. The run-control branch of
+State.submitControl (decision = Nothing, State.hs about lines 693-695) is not exercised over HTTP
+for these two operations. Fix: in case 3 or 4, send one answer and one choose-recovery through
+POST /v1/runs/{id}/control with the control revision as If-Match, and assert their effects.
+
+2. (medium) manager/src/Agentic/Manager/Worker.hs (about line 173). The controls run left two
+lines "manager-fault ... class=worker WorkerUnexpectedExit erased=command StorageUnavailable" in
+server-0.stderr, at the ends of the cancelled run (case 1) and the failed run (case 5). Worker
+raises WorkerUnexpectedExit on any non-zero frontend exit, so every cancelled or failed run logs a
+manager fault. This behavior is older than C16. Fix: decide whether the frontend exit of a
+runtime-terminal cancelled or failed run is an expected worker end, fix or document the result,
+and add an assertion on server-0.stderr or on the request and preparation state to the controls
+mode.
+
+3. (low) manager/test/service_http.py (about line 3985). The steer check counts every steer record
+in the run log with no link to the steer command id or the offered address. Fix: match the record
+to the command id or to the attempt address.
+
+4. (low) manager/test/service_http.py (about line 4060). The unoffered steer uses a made-up
+attemptId "0", so the refusal does not isolate the "not offered" cause. Fix: use the address of
+the real recovery attempt, or add a case with an unoffered operation and a valid address.
+
+5. (low) doc/api/README.md (about lines 405-408) and manager/test/service_http.py (about line
+3962). The documentation says a cancel receipt records no cancel effect, but the test accepts
+effect-observed and reads the receipt before the run ends. Fix: re-read the receipt after the
+terminal snapshot and assert a null effect, or change the sentence.
+
+6. (low) manager/CONTROLS.md (about lines 133-141). The new service_http paragraph sits before the
+fixture-barrier sentences about the native fixtures, which now appear to describe the service_http
+mode. Fix: move the paragraph after the fixture-barrier text.
+
+7. (low) doc/api/README.md (about lines 389-393 and 404). The documentation describes the redirect
+offer and its effect, but no test sends a redirect through the manager. Fix: add a redirect case
+when a fixture with an open dispatch is available.
+
+8. (low) manager/test/service_http.py (about lines 3911-3932). The act helper repeats the
+head-decision driving logic of the mixed driver (about lines 597-621). Fix: factor out one shared
+driver if a third copy appears.
+
 * TODO [#B] Actor flow increment 3: live re-route and asks answered by people
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -16694,7 +16752,7 @@ and enforce advertised bounds. G2 is complete with mutations still unavailable.
 :LABELS:   ["p5","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-30 Wed 15:19]
+:MODIFIED: [2026-09-30 Wed 15:33]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-027
 :SOURCE_REPO: agent-cat
@@ -16913,6 +16971,13 @@ Network mutation remains behind G3 until the required evidence is complete.
     "author": "johnw",
     "text": "C15 (Phase B part 2): POST /v1/runs/{id}/lineage-requests (restart, resume, fork) now reaches Service.submitLineage, which calls State.resolveRun under observe and submit and then History.createHistoryLineage (falling back to Drafts.createLineageDraft), and returns the frozen 202 receipt. Review gains an optional additive lineage field (parent run id, operation, edits). The GET collection first page carries the parent run revision as its ETag. Evidence (private): B2/C15/impl-r1 and fess/b2-C15-r1. Checks passed: Werror build of agentic-run and routing-fixed-point-probe with -ftui-tests, service_http.py mutations-lineage at N8 (restart child review names the parent and runs to completion, fork with an answer replacement reaches the review, same-key replay, stale If-Match 412), make -C doc check, Phase A journey at N8. Fess non-blocking, findings in acat-c15-lineage-fess-findings-fmdn.",
     "created_at": "2026-09-30T22:19:36Z"
+  },
+  {
+    "id": 424,
+    "issue_id": "acat-wm-027-gcu6",
+    "author": "johnw",
+    "text": "Phase B part 2 C16: new service_http.py mode controls exercises cancel, steer, retry, choose-recovery abandon and answer through POST /v1/runs/{id}/control and POST /v1/decisions/{id} at N8. Each control reached its runtime effect with no production change. Concurrent answers to one head decision give one delivered answer and one 412 stale-revision. An unoffered steer refuses with unsupported-operation and a non-head answer with decision-not-head, and the FIFO order holds. Checks passed: Werror build with -ftui-tests, controls at N8, make -C doc check, Phase A journey at N8. Evidence: B2/C16 in the private evidence directory. Fess non-blocking, findings in acat-c16-controls-fess-findings-7xop.",
+    "created_at": "2026-09-30T22:33:03Z"
   }
 ]
 #+end_src
