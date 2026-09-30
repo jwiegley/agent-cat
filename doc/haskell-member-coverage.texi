@@ -48,6 +48,9 @@ checked by the documentation gates.
 @c MEMBER Agentic.Cli.Command.member:Plan support
 @hsindex Agentic.Cli.Command.Plan
 @item @code{Agentic.Cli.Command} @tab @code{Plan} @tab @code{Agentic.Cli.Command}
+@c MEMBER Agentic.Cli.Command.member:ReadFlow support
+@hsindex Agentic.Cli.Command.ReadFlow
+@item @code{Agentic.Cli.Command} @tab @code{ReadFlow} @tab @code{Agentic.Cli.Command}
 @c MEMBER Agentic.Cli.Command.member:RoutingInspection support
 @hsindex Agentic.Cli.Command.RoutingInspection
 @item @code{Agentic.Cli.Command} @tab @code{RoutingInspection} @tab @code{Agentic.Cli.Command}

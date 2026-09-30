@@ -74,6 +74,7 @@ module Agentic.World
     questionJson,
     requestJson,
     requestFromJson,
+    requestCodeFromJson,
     scopeJson,
     eventJson,
     eventJsonWithIntent,
@@ -679,6 +680,19 @@ requestFromJson code value = do
   unless (requestJson code request == value) $
     Left "request: the value is not the exact form of its request"
   pure request
+
+-- | The code that a value of 'requestJson' names in its @code@ field, which
+-- 'requestFromJson' then decodes the value at. The field holds the observation
+-- spelling that 'requestJson' writes, so the receipt code is @receipt@, and the
+-- authoring spelling @ack@ is refused.
+requestCodeFromJson :: Value -> Either Text SomeCode
+requestCodeFromJson = \case
+  A.Object fields -> case KM.lookup "code" fields of
+    Just (A.String "receipt") -> Right (fromSCode SAck)
+    Just (A.String "ack") -> Left "request code: expected receipt, not authoring ack"
+    Just code -> either (\why -> Left ("request code: " <> T.pack why)) Right (parseEither codeFromJson code)
+    Nothing -> Left "request: missing field code"
+  _ -> Left "request: expected a JSON object"
 
 intentFromJson :: SCode c -> Value -> Either Text (Intent c)
 intentFromJson code = \case

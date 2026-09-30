@@ -9,6 +9,7 @@ import BrokerTests (brokerTests)
 import CaptureTests (captureTests)
 import CarriageTests (carriageTests)
 import FlowCodecTests (flowCodecTests)
+import FlowReaderTests (flowReaderTests)
 import FlowTests (flowTests)
 import FrontendProtocolTests (frontendProtocolTests, frontendCodecCheck)
 import ProcessGroupTests (processGroupTests, spawnCostCheck, spawnCostProbe)
@@ -70,6 +71,7 @@ contractTests :: IO ()
 contractTests = do
   flowCodecTests
   flowTests
+  flowReaderTests
   carriageTests
   brokerTests
   frontendProtocolTests

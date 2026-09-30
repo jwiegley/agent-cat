@@ -102,6 +102,23 @@ module Agentic.Runtime.Flow
     withRunLog,
     appendEventRecord,
 
+    -- * Reader
+    FlowLiveness (..),
+    FlowEntry (..),
+    PendingEffect (..),
+    FlowStates (..),
+    FlowReport (..),
+    readFlow,
+    flowVerified,
+    flowReportProblems,
+    flowEntryValue,
+    flowSummaryValue,
+    FlowRoute,
+    parseFlowRoute,
+    flowRouteMatches,
+    actorName,
+    addressName,
+
     -- * Carriage
     RunFlow (..),
     FlowScope (..),
@@ -127,13 +144,15 @@ import Agentic.Engine
     encodeEngineResult,
     encodeEngineSteering,
   )
-import Agentic.Planning (El, Request, SCode, answerFromJsonExact, answerJson, requestFromJson, requestJson)
+import Agentic.Planning (El, Request, SCode, SomeCode (..), answerFromJsonExact, answerJson, requestCodeFromJson, requestFromJson, requestJson)
 import Agentic.Runtime.Broker (DataBroker (..))
 import Agentic.Runtime.Control (Control (controlId), ControlId (controlIdText), controlVersionFor, decodeControlFor, encodeControlFor)
-import Agentic.Runtime.PrivateRoot (PrivateRoot, ensurePrivateDirectoryAt, openPrivateFileAt, readPrivateFileAt, writePrivateExclusiveAt)
+import Agentic.Runtime.PrivateRoot (PrivateRoot, closePrivateRoot, ensurePrivateDirectoryAt, openPrivateFileAt, openPrivateRoot, readPrivateFileAt, readPrivatePrefixAt, writePrivateExclusiveAt)
 import Agentic.Runtime.Protocol
-  ( FailureClass,
+  ( Envelope (..),
+    FailureClass,
     OccurrenceId (..),
+    RuntimeEvent (..),
     PersonAnswering,
     RunId (..),
     SeqNo (..),
@@ -143,7 +162,7 @@ import Agentic.Runtime.Protocol
     maxFrameBytes,
     supportedProtocolVersions,
   )
-import Agentic.Runtime.Store (LineageOperation, RunStore, storePrivateRoot)
+import Agentic.Runtime.Store (EffectPhase (..), EffectRecord (..), LineageOperation, RunStore, StoreError, readEffectRecords, readEventLog, storePrivateRoot)
 import Control.Concurrent.MVar (MVar, modifyMVar, modifyMVar_, newMVar)
 import Control.Exception (Exception, IOException, SomeAsyncException, SomeException, bracket, displayException, finally, fromException, onException, throwIO, try)
 import Control.Monad (unless, when)
@@ -161,6 +180,9 @@ import Data.Char (isDigit, isHexDigit, isLower)
 import Data.Foldable (toList)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.List (nub)
+import Data.Map.Strict (Map)
+import qualified Data.Map.Strict as Map
+import Data.Maybe (isNothing, listToMaybe)
 import Data.Scientific (Scientific, toBoundedInteger)
 import Data.Sequence (Seq, (|>))
 import qualified Data.Sequence as Seq
@@ -1116,6 +1138,429 @@ flowBroker codec flow inner =
         previous <- readIORef (flowScopeCandidate current)
         writeIORef (flowScopeCandidate current) (Just answerer)
         action `finally` writeIORef (flowScopeCandidate current) previous
+
+-- ---------------------------------------------------------------------------
+-- Reader
+-- ---------------------------------------------------------------------------
+
+-- | Whether a reader treats a log as one that its writer may still extend, or
+-- as one that has ended. An ask without a reply is in flight in a live log and
+-- uncertain in an ended log, and only an ended log can lose its supervision.
+data FlowLiveness = FlowLive | FlowEnded
+  deriving (Eq, Show)
+
+-- | One complete line of a run log as the reader verified it.
+data FlowEntry = FlowEntry
+  { entryPosition :: !Position,
+    -- | The record, when the line decodes.
+    entryRecord :: !(Maybe Record),
+    -- | The body value: the inline value, or the value of a claim check whose
+    -- size, digest and exact encoding verify. An event record has none.
+    entryContent :: !(Maybe Value),
+    -- | The line of @events.ndjson@ that an event record names.
+    entryEvent :: !(Maybe Envelope),
+    -- | Each verification that this line fails.
+    entryProblems :: ![Text]
+  }
+  deriving (Eq, Show)
+
+-- | An effect start in @effects.ndjson@ without a later completion for the
+-- same occurrence and question: its 0-based line and its occurrence.
+data PendingEffect = PendingEffect
+  { pendingEffectLine :: !Int,
+    pendingEffectOccurrence :: !OccurrenceId
+  }
+  deriving (Eq, Show)
+
+-- | The states of section 3.6 of the run log, each computed from the records
+-- alone. Every list holds positions in log order.
+data FlowStates = FlowStates
+  { -- | Asks without a reply in a live log.
+    statesInFlight :: ![Position],
+    -- | Asks without a reply in an ended log.
+    statesUncertain :: ![Position],
+    -- | Controls without a later acknowledgement event for their identifier.
+    statesUnacknowledged :: ![Position],
+    -- | @OccurrenceRecoveryPending@ event records without a later
+    -- @OccurrenceRecoveryChosen@ event record for the occurrence.
+    statesPendingRecovery :: ![Position],
+    -- | @OccurrencePersonAnswerPending@ event records without a later @answer@
+    -- record for the occurrence.
+    statesPendingPersonAnswer :: ![Position],
+    statesPotentiallyExecuted :: ![PendingEffect],
+    -- | The log has ended without its stop.
+    statesLostSupervision :: !Bool,
+    -- | Asks after the stop.
+    statesAskAfterStop :: ![Position]
+  }
+  deriving (Eq, Show)
+
+-- | What a reader found in one run log.
+data FlowReport = FlowReport
+  { reportLiveness :: !FlowLiveness,
+    reportEntries :: ![FlowEntry],
+    -- | The size in bytes of a final line without its newline. The reader
+    -- does not decode it.
+    reportTornBytes :: !(Maybe Int),
+    -- | The position of the stop: the first event record whose event ends the
+    -- run.
+    reportStop :: !(Maybe Position),
+    reportStates :: !FlowStates,
+    -- | Each verification of the whole log that fails.
+    reportProblems :: ![Text]
+  }
+  deriving (Eq, Show)
+
+-- | The largest run log that a reader reads.
+maxRunLogBytes :: Integer
+maxRunLogBytes = 512 * 1024 * 1024
+
+-- | Read the run log of a run store directory, as the account that owns the
+-- directory.
+--
+-- The reader reads the prefix of @flow.ndjson@ that the file holds when it is
+-- opened, so a live writer never tears a complete line. It decodes each
+-- complete line with 'decodeFlowLine', which refuses a line above
+-- 'maxFrameBytes' before it decodes it, and it reports a final line without
+-- its newline by its size and does not decode it. It verifies the size, digest
+-- and exact encoding of each claim check before it uses the body, decodes each
+-- body with the codec of its schema, and verifies that each reply names an
+-- earlier ask of a schema that the reply may answer and that no other reply
+-- names. It joins each event record to the line of @events.ndjson@ with its
+-- sequence number, and it reads @effects.ndjson@ for effect starts without a
+-- completion.
+readFlow :: FlowLiveness -> FilePath -> IO FlowReport
+readFlow liveness directory =
+  bracket (openPrivateRoot "run store" directory) closePrivateRoot $ \root -> do
+    bytes <- readPrivatePrefixAt root [runLogName] maxRunLogBytes
+    let (complete, torn) = splitFlowLines bytes
+    entries <- traverse (readEntry root) (zip [0 ..] complete)
+    events <- readable "events.ndjson" (fst <$> readEventLog directory)
+    effects <- readable "effects.ndjson" (readEffectRecords directory)
+    pure (analyseFlow liveness entries torn events effects)
+  where
+    readable :: Text -> IO a -> IO (Either Text a)
+    readable name action = do
+      outcome <- try @IOException (try @StoreError action)
+      pure $ case outcome of
+        Left failure -> Left (name <> " cannot be read: " <> T.pack (displayException failure))
+        Right (Left failure) -> Left (name <> " cannot be read: " <> T.pack (show failure))
+        Right (Right value) -> Right value
+
+-- | The complete lines of a log, without their newlines, and the size of a
+-- final line without its newline.
+splitFlowLines :: BS.ByteString -> ([BS.ByteString], Maybe Int)
+splitFlowLines = go []
+  where
+    go lines' rest
+      | BS.null rest = (reverse lines', Nothing)
+      | otherwise = case BS.elemIndex 10 rest of
+          Nothing -> (reverse lines', Just (BS.length rest))
+          Just index -> go (BS.take index rest : lines') (BS.drop (index + 1) rest)
+
+readEntry :: PrivateRoot -> (Word64, BS.ByteString) -> IO FlowEntry
+readEntry root (index, line) = case decodeFlowLine line of
+  Left why -> pure (FlowEntry position Nothing Nothing Nothing ["the line does not decode: " <> why])
+  Right record -> do
+    content <- case recBody record of
+      Inline value -> pure (Right (Just value))
+      EventNumber _ -> pure (Right Nothing)
+      body@(ClaimCheck _ _) ->
+        readFlowContent root body >>= \case
+          Right (ContentValue value) -> pure (Right (Just value))
+          Right (ContentEvent _) -> pure (Left "the claim check names an event")
+          Left why -> pure (Left why)
+    pure $ case content of
+      Right value -> FlowEntry position (Just record) value Nothing []
+      Left why -> FlowEntry position (Just record) Nothing Nothing [why]
+  where
+    position = Position index
+
+-- | The verification and the states of a log from its entries, the events of
+-- its store and the effects of its store.
+analyseFlow :: FlowLiveness -> [FlowEntry] -> Maybe Int -> Either Text [Envelope] -> Either Text [EffectRecord] -> FlowReport
+analyseFlow liveness entries0 torn events effects =
+  FlowReport liveness entries torn stop states problems
+  where
+    eventLines = either (const Map.empty) (Map.fromList . map (\envelope -> (sequenceOf envelope, envelope))) events
+    sequenceOf envelope = let SeqNo number = envelopeSequence envelope in number
+    entries = scanEntries eventLines (either (const False) (const True) events) entries0
+
+    records = [(entryPosition entry, record) | entry <- entries, Just record <- [entryRecord entry]]
+    asks = [position | (position, record) <- records, schemaRole (recSchema record) == AskSchema]
+    answered = Set.fromList [index | (_, record) <- records, Just (Position index) <- [recReplyTo record]]
+    open = [position | position@(Position index) <- asks, Set.notMember index answered]
+    joined = [(entryPosition entry, envelopeEvent envelope) | entry <- entries, Just envelope <- [entryEvent entry]]
+    stop = listToMaybe [position | (position, event) <- joined, terminal event]
+    later position = filter ((> position) . fst)
+    controls = [(position, controlKey entry record) | entry <- entries, Just record <- [entryRecord entry], recSchema record == FlowControl, let position = entryPosition entry]
+    acknowledged key position = or [acknowledges key event | (_, event) <- later position joined]
+    states =
+      FlowStates
+        { statesInFlight = if liveness == FlowLive then open else [],
+          statesUncertain = if liveness == FlowEnded then open else [],
+          statesUnacknowledged = [position | (position, key) <- controls, maybe True (\name -> not (acknowledged name position)) key],
+          statesPendingRecovery =
+            [ position
+              | (position, OccurrenceRecoveryPending occurrence _ _ _) <- joined,
+                null [() | (_, OccurrenceRecoveryChosen chosen _ _ _) <- later position joined, chosen == occurrence]
+            ],
+          statesPendingPersonAnswer =
+            [ position
+              | (position, OccurrencePersonAnswerPending occurrence _) <- joined,
+                null [() | (_, record) <- later position records, recSchema record == FlowAnswer, aboutOccurrence (recAbout record) == Just occurrence]
+            ],
+          statesPotentiallyExecuted = either (const []) pendingEffects effects,
+          statesLostSupervision = liveness == FlowEnded && isNothing stop,
+          statesAskAfterStop = maybe [] (\at -> filter (> at) asks) stop
+        }
+    problems =
+      either pure (const []) events
+        <> either pure (const []) effects
+        <> [ "the run log ends with a line of " <> T.pack (show size) <> " bytes without its newline, which the reader did not decode"
+             | Just size <- [torn],
+               liveness == FlowEnded
+           ]
+        <> [ "the run log does not begin with a start record"
+             | case entries of
+                 first : _ -> fmap recSchema (entryRecord first) /= Just FlowStart
+                 [] -> liveness == FlowEnded
+           ]
+
+-- | Verify each entry in log order: its schema, its body, its reply position
+-- and its event.
+scanEntries :: Map Word64 Envelope -> Bool -> [FlowEntry] -> [FlowEntry]
+scanEntries eventLines eventsRead = go Map.empty Map.empty Set.empty Set.empty
+  where
+    go _ _ _ _ [] = []
+    go schemas codes answered seen (entry : rest) = case entryRecord entry of
+      Nothing -> entry : go schemas codes answered seen rest
+      Just record ->
+        let Position index = entryPosition entry
+            schema = recSchema record
+            logProblems =
+              [ "the " <> schemaName schema <> " schema belongs to the manager log" | schemaLog schema == ManagerLog ]
+                <> [ "a start record follows position 0" | schema == FlowStart, index /= 0 ]
+            (code, bodyProblems) = case entryContent entry of
+              Just value | schemaLog schema /= ManagerLog -> decodeEntryBody codes record value
+              _ -> (Nothing, [])
+            (replyProblems, answered') = case recReplyTo record of
+              Nothing -> ([], answered)
+              Just (Position asked)
+                | asked >= index -> (["the reply names position " <> T.pack (show asked) <> ", which is not earlier in this log"], answered)
+                | otherwise -> case Map.lookup asked schemas of
+                    Nothing -> (["the reply names position " <> T.pack (show asked) <> ", which holds no record"], answered)
+                    Just askedSchema
+                      | askedSchema `notElem` schemaAnswers schema ->
+                          (["a " <> schemaName schema <> " record cannot answer the " <> schemaName askedSchema <> " record at position " <> T.pack (show asked)], answered)
+                      | Set.member asked answered -> (["the ask at position " <> T.pack (show asked) <> " already has a reply"], answered)
+                      | otherwise -> ([], Set.insert asked answered)
+            (event, eventProblems, seen') = case recBody record of
+              EventNumber (SeqNo number)
+                | Set.member number seen -> (Nothing, ["event " <> T.pack (show number) <> " has an earlier event record"], seen)
+                | otherwise -> case Map.lookup number eventLines of
+                    Just envelope -> (Just envelope, [], Set.insert number seen)
+                    Nothing -> (Nothing, ["events.ndjson has no line for event " <> T.pack (show number) | eventsRead], Set.insert number seen)
+              _ -> (Nothing, [], seen)
+            entry' =
+              entry
+                { entryEvent = event,
+                  entryProblems = entryProblems entry <> logProblems <> bodyProblems <> replyProblems <> eventProblems
+                }
+            codes' = maybe codes (\found -> Map.insert index found codes) code
+         in entry' : go (Map.insert index schema schemas) codes' answered' seen' rest
+
+-- | Decode a body with the codec of its schema. A question yields its code,
+-- which decodes the answer that names it.
+decodeEntryBody :: Map Word64 SomeCode -> Record -> Value -> (Maybe SomeCode, [Text])
+decodeEntryBody codes record value = case recSchema record of
+  FlowStart -> plain (startFromBody value)
+  FlowControl -> plain (controlFromBody value)
+  FlowQuestion -> case requestCodeFromJson value of
+    Left why -> (Nothing, ["the question body does not decode: " <> why])
+    Right found@(SomeCode code) -> (Just found, problem (questionFromBody code value))
+  FlowAnswer -> case recReplyTo record >>= \(Position asked) -> Map.lookup asked codes of
+    Just (SomeCode code) -> plain (answerFromBody code value)
+    Nothing -> (Nothing, ["the answer names no question whose code decoded"])
+  FlowEngineStart -> plain (engineStartFromBody value)
+  FlowTurn -> plain (turnFromBody value)
+  FlowEngineResult -> plain (engineResultFromBody value)
+  FlowSteer -> plain (steerFromBody value)
+  FlowDone -> plain (doneFromBody value)
+  FlowFailure -> plain (failureFromBody value)
+  FlowPermission -> plain (permissionFromBody value)
+  _ -> (Nothing, [])
+  where
+    plain :: Either Text a -> (Maybe SomeCode, [Text])
+    plain result = (Nothing, problem result)
+    problem :: Either Text a -> [Text]
+    problem = either (\why -> ["the " <> schemaName (recSchema record) <> " body does not decode: " <> why]) (const [])
+
+-- | The identifier that a control record names: its decoded control's, or the
+-- command of its identifiers.
+controlKey :: FlowEntry -> Record -> Maybe Text
+controlKey entry record = case entryContent entry >>= either (const Nothing) Just . controlFromBody of
+  Just (_, control) -> Just (controlIdText (controlId control))
+  Nothing -> aboutCommand (recAbout record)
+
+acknowledges :: Text -> RuntimeEvent -> Bool
+acknowledges key = \case
+  ControlAcknowledged control _ _ -> control == key
+  ControlAcknowledgedV2 control _ _ _ _ _ -> control == key
+  _ -> False
+
+terminal :: RuntimeEvent -> Bool
+terminal = \case
+  RunCompleted {} -> True
+  RunCompletedV2 {} -> True
+  RunFailed {} -> True
+  RunCancelled {} -> True
+  _ -> False
+
+-- | Each effect start without a later completion for the same occurrence and
+-- question. A completion completes the earliest open start that it matches.
+pendingEffects :: [EffectRecord] -> [PendingEffect]
+pendingEffects = go [] . zip [0 ..]
+  where
+    -- The open starts, the earliest first.
+    go open [] = [PendingEffect line (effectOccurrence effect) | (line, effect) <- open]
+    go open ((line, effect) : rest) = case effectPhase effect of
+      EffectStarted -> go (open <> [(line, effect)]) rest
+      EffectCompleted ->
+        let matches (_, start) = effectOccurrence start == effectOccurrence effect && effectQuestion start == effectQuestion effect
+            (before, after) = break matches open
+         in go (before <> drop 1 after) rest
+
+-- | Whether every verification of the log passed.
+flowVerified :: FlowReport -> Bool
+flowVerified = null . flowReportProblems
+
+-- | Every failed verification, each line's under its position.
+flowReportProblems :: FlowReport -> [Text]
+flowReportProblems report =
+  reportProblems report
+    <> [ "position " <> T.pack (show (positionIndex (entryPosition entry))) <> ": " <> why
+         | entry <- reportEntries report,
+           why <- entryProblems entry
+       ]
+
+-- | One entry as the JSON object of the reader: its position, the fields of
+-- its record, the decoded body or the claim check with its verified value, the
+-- joined event and the failed verifications.
+flowEntryValue :: FlowEntry -> Value
+flowEntryValue entry =
+  object $
+    ["position" .= positionIndex (entryPosition entry)]
+      <> maybe [] fields (entryRecord entry)
+      <> ["problems" .= entryProblems entry]
+  where
+    fields record =
+      [ "schema" .= schemaName (recSchema record),
+        "from" .= actorValue (recFrom record),
+        "to" .= addressValue (recTo record),
+        "about" .= aboutValue (recAbout record),
+        "replyTo" .= fmap positionIndex (recReplyTo record),
+        "at" .= recAt record
+      ]
+        <> case recBody record of
+          Inline value -> ["body" .= value]
+          ClaimCheck digest size -> ["claim" .= object ["sha256" .= digest, "bytes" .= size], "body" .= entryContent entry]
+          EventNumber (SeqNo number) -> ["event" .= object ["sequence" .= number, "line" .= entryEvent entry]]
+
+-- | The summary object of the reader: the number of records, the verification
+-- result and its failures, the torn final line, the stop and the states.
+flowSummaryValue :: FlowReport -> Value
+flowSummaryValue report =
+  object
+    [ "summary"
+        .= object
+          [ "live" .= (reportLiveness report == FlowLive),
+            "records" .= length (reportEntries report),
+            "verified" .= flowVerified report,
+            "problems" .= flowReportProblems report,
+            "tornFinalLine" .= fmap (\size -> object ["bytes" .= size]) (reportTornBytes report),
+            "stop" .= fmap positionIndex (reportStop report),
+            "states"
+              .= object
+                [ "inFlight" .= positions statesInFlight,
+                  "uncertain" .= positions statesUncertain,
+                  "unacknowledged" .= positions statesUnacknowledged,
+                  "pendingRecovery" .= positions statesPendingRecovery,
+                  "pendingPersonAnswer" .= positions statesPendingPersonAnswer,
+                  "potentiallyExecuted"
+                    .= [ object ["line" .= pendingEffectLine effect, "occurrence" .= occurrenceNumber (pendingEffectOccurrence effect)]
+                         | effect <- statesPotentiallyExecuted states
+                       ],
+                  "lostSupervision" .= statesLostSupervision states,
+                  "askAfterStop" .= positions statesAskAfterStop
+                ]
+          ]
+    ]
+  where
+    states = reportStates report
+    positions select = map positionIndex (select states)
+
+-- | A route: a conjunction of terms, each of which requires one field of a
+-- record to equal a value. The fields are @schema@, @from@, @to@ and the
+-- identifiers @request@, @managerRun@, @nativeRun@, @occurrence@, @epoch@,
+-- @attempt@ and @command@. A sender or an address is compared by
+-- 'actorName' or 'addressName'.
+newtype FlowRoute = FlowRoute [(Text, Text)]
+  deriving (Eq, Show)
+
+-- | Parse a route: terms @field=value@ separated by commas.
+parseFlowRoute :: Text -> Either Text FlowRoute
+parseFlowRoute text
+  | T.null text = Left "a route needs at least one field=value term"
+  | otherwise = FlowRoute <$> traverse term (T.splitOn "," text)
+  where
+    term item = case T.breakOn "=" item of
+      (name, value)
+        | T.null value -> Left ("route term '" <> item <> "' is not field=value")
+        | name `notElem` routeFields -> Left ("route field '" <> name <> "' is not one of " <> T.intercalate ", " routeFields)
+        | otherwise -> Right (name, T.drop 1 value)
+
+routeFields :: [Text]
+routeFields = ["schema", "from", "to", "request", "managerRun", "nativeRun", "occurrence", "epoch", "attempt", "command"]
+
+flowRouteMatches :: FlowRoute -> Record -> Bool
+flowRouteMatches (FlowRoute terms) record = all matches terms
+  where
+    about = recAbout record
+    matches (name, value) = fieldText name == Just value
+    fieldText = \case
+      "schema" -> Just (schemaName (recSchema record))
+      "from" -> Just (actorName (recFrom record))
+      "to" -> Just (addressName (recTo record))
+      "request" -> aboutRequest about
+      "managerRun" -> aboutManagerRun about
+      "nativeRun" -> runIdText <$> aboutNativeRun about
+      "occurrence" -> T.pack . show . occurrenceNumber <$> aboutOccurrence about
+      "epoch" -> T.pack . show <$> aboutEpoch about
+      "attempt" -> T.pack . show <$> aboutAttempt about
+      "command" -> aboutCommand about
+      _ -> Nothing
+
+-- | The name of an actor in a route: @manager@, @local:UID@,
+-- @credential:CLIENT:CREDENTIAL@, @model:TARGET@, @tool:NAME@,
+-- @adapter:NAME@ or @workflow:RUN@.
+actorName :: Actor -> Text
+actorName = \case
+  Principal (Credential client credential) -> "credential:" <> client <> ":" <> credential
+  Principal (LocalAccount uid _) -> "local:" <> T.pack (show uid)
+  Model target -> "model:" <> target
+  ToolActor name _ -> "tool:" <> name
+  Adapter name -> "adapter:" <> name
+  Workflow run -> "workflow:" <> runIdText run
+  Manager -> "manager"
+
+-- | The name of an address in a route: the name of its actor, @approvers:PROFILE@
+-- or @public@.
+addressName :: Address -> Text
+addressName = \case
+  To actor -> actorName actor
+  Approvers profile -> "approvers:" <> profile
+  Public -> "public"
 
 -- ---------------------------------------------------------------------------
 -- Strict JSON values

@@ -270,7 +270,7 @@ where
 
 import qualified Agentic.Cli.Frontend as Frontend
 import qualified Agentic.Manager as Manager
-import Control.Concurrent (myThreadId, throwTo)
+import Control.Concurrent (myThreadId, threadDelay, throwTo)
 import Control.Exception
   ( AsyncException (UserInterrupt),
     bracket,
@@ -312,15 +312,16 @@ import GHC.Clock (getMonotonicTimeNSec)
 import Numeric (showFFloat)
 import qualified Paths_agentic as Paths
 import Data.Version (showVersion)
-import System.Directory (createDirectoryIfMissing, doesFileExist, getCurrentDirectory, getHomeDirectory, getTemporaryDirectory)
+import System.Directory (createDirectoryIfMissing, doesFileExist, getCurrentDirectory, getHomeDirectory, getTemporaryDirectory, makeAbsolute)
 import Agentic.Cli.LocalAdmin (runLocalAdmin)
 import System.Environment (getArgs, getEnvironment, getExecutablePath, lookupEnv)
 import System.Exit (ExitCode (..), exitSuccess, exitWith)
-import System.FilePath (isAbsolute, (</>))
+import System.FilePath (isAbsolute, takeDirectory, takeFileName, (</>))
 import System.IO
   ( BufferMode (LineBuffering),
     Handle,
     hClose,
+    hFlush,
     hIsTerminalDevice,
     hSetBuffering,
     hSetEncoding,
@@ -400,6 +401,7 @@ import Agentic.Runtime
   )
 import Agentic.Runtime (DataBroker (..), inProcessBroker, ControlRuntime, newControlRuntimeFor)
 import Agentic.Runtime (Actor (Manager, Principal), Authority (LocalAccount), FlowScope, Start (..), StartInput (..), flowBroker, flowScopedBroker, strictFlowCodec, withRunLog)
+import Agentic.Runtime (FlowEntry (..), FlowLiveness (..), FlowReport (..), FlowRoute, Position (..), Record (recBody), Body (EventNumber), flowEntryValue, flowRouteMatches, flowSummaryValue, flowVerified, parseFlowRoute, readFlow, runLogName)
 import Agentic.Runtime
   ( DeferredEventSink,
     MachineCancelled (..),
@@ -762,6 +764,10 @@ data Command
     LineageCheck !MachineOptions !LineageOperation !FilePath ![ForkEdit] !Text !Target !Bool ![InputFlag]
   | -- | New immutable child run derived from a stored parent.
     MachineLineage !MachineOptions !LineageOperation !RunId !FilePath ![ForkEdit] !Text !Target !Bool ![InputFlag]
+  | -- | Read one run log: the run store or its @flow.ndjson@, whether to
+    -- follow it until its stop, the route of the records to print and the
+    -- first position to print.
+    ReadFlow !FilePath !Bool !(Maybe FlowRoute) !Word64
 -- | Who the output is for: an operator reading it, or a program parsing it.
 --
 -- It rides on the two verbs whose whole output is a statement about the
@@ -1084,11 +1090,49 @@ execute broker reg = \case
   LineageCheck options lineage parent edits name target pinned ins ->
     withRunExample reg pinned name target ins $ \effective _ program _ ->
       withFinalTarget reg name effective program (\finalTarget -> void (validateLineage options (inProcessNames reg name) lineage parent edits name finalTarget program))
+  ReadFlow path follow route from -> flowCmd reg path follow route from
   MachineLineage options lineage runId parent edits name target pinned ins -> do
     validateMachineEnvironment options
     withMachineControls broker options runId name target $ \control ->
       withRunExample reg pinned name target ins $ \effective _ program bindings ->
         withFinalTarget reg name effective program (\finalTarget -> runMachineLineageCmd broker options control reg lineage runId parent edits name finalTarget program bindings)
+
+-- | @flow PATH@: print each record of a run log as one JSON object, then one
+-- summary object, and exit 0 only when every verification passes. Without
+-- @--follow@ the log is read once as an ended log. With it the log is read as a
+-- live log every 250 milliseconds, each record is printed once its line is
+-- complete and an event record once its event line exists, and the reading
+-- ends at the stop, which is then read once more as an ended log.
+flowCmd :: Registry -> FilePath -> Bool -> Maybe FlowRoute -> Word64 -> IO ()
+flowCmd reg path follow route from = do
+  absolute <- makeAbsolute path
+  let directory = if takeFileName absolute == runLogName then takeDirectory absolute else absolute
+      reading liveness =
+        (try (readFlow liveness directory) :: IO (Either IOException FlowReport))
+          >>= either (die reg 3 . T.pack . displayException) pure
+      shown entry =
+        positionIndex (entryPosition entry) >= from
+          && maybe True (\selected -> maybe False (flowRouteMatches selected) (entryRecord entry)) route
+      emit value = BL.putStr (encode value <> "\n") >> hFlush stdout
+      emitFrom next entries = do
+        let ready = takeWhile (not . awaiting) [entry | entry <- entries, positionIndex (entryPosition entry) >= next]
+        mapM_ (emit . flowEntryValue) (filter shown ready)
+        pure (next + fromIntegral (length ready))
+      -- An event record whose event line the store does not hold yet.
+      awaiting entry = case (entryRecord entry, entryEvent entry) of
+        (Just record, Nothing) | EventNumber _ <- recBody record -> True
+        _ -> False
+      finish next report = do
+        mapM_ (emit . flowEntryValue) (filter shown [entry | entry <- reportEntries report, positionIndex (entryPosition entry) >= next])
+        emit (flowSummaryValue report)
+        if flowVerified report then exitSuccess else exitWith (ExitFailure 1)
+      poll next = do
+        report <- reading FlowLive
+        next' <- emitFrom next (reportEntries report)
+        case reportStop report of
+          Just _ -> reading FlowEnded >>= finish next'
+          Nothing -> threadDelay 250000 >> poll next'
+  if follow then poll 0 else reading FlowEnded >>= finish 0
 
 readFrontendRequest :: IO BS.ByteString
 readFrontendRequest = go (maxFrontendQueryBytes + 1) []
@@ -3592,6 +3636,8 @@ parseCommand reg = \case
     (options, targetArgs) <- machineOptions remaining
     (target, pinned, inputs) <- parseTarget reg targetArgs
     pure (LineageCheck options lineage (T.unpack parent) edits name target pinned inputs)
+  ["flow", "--help"] -> Left "flow takes PATH [--follow] [--route PREDICATE] [--from CURSOR]"
+  ("flow" : path : rest) -> flowOptions (T.unpack path) False Nothing Nothing rest
   ("machine-restart" : runIdText : parent : name : rest) -> lineageCommand RestartRun runIdText parent name rest
   ("machine-resume" : runIdText : parent : name : rest) -> lineageCommand ResumeRun runIdText parent name rest
   ("machine-fork" : runIdText : parent : name : rest) -> lineageCommand ForkRun runIdText parent name rest
@@ -3602,7 +3648,22 @@ parseCommand reg = \case
     -- Still three. `help` is not among them because `help` alone is a request
     -- that has an answer — the usage — where `plan` alone is a verb missing its
     -- subject.
-    verbs = ["plan", "cost", "run", "machine", "lineage-check", "machine-restart", "machine-resume", "machine-fork"]
+    verbs = ["plan", "cost", "run", "machine", "lineage-check", "machine-restart", "machine-resume", "machine-fork", "flow"]
+
+    flowOptions path follow route from = \case
+      [] -> Right (ReadFlow path follow route (fromMaybe 0 from))
+      "--follow" : rest
+        | follow -> Left "flow received --follow twice"
+        | otherwise -> flowOptions path True route from rest
+      "--route" : predicate : rest
+        | isJust route -> Left "flow received --route twice"
+        | otherwise -> parseFlowRoute predicate >>= \parsed -> flowOptions path follow (Just parsed) from rest
+      "--from" : cursor : rest
+        | isJust from -> Left "flow received --from twice"
+        | otherwise -> case TR.decimal cursor of
+            Right (position, "") -> flowOptions path follow route (Just position) rest
+            _ -> Left ("flow --from takes a record position, not '" <> cursor <> "'")
+      option : _ -> Left ("flow takes PATH [--follow] [--route PREDICATE] [--from CURSOR], and does not take '" <> option <> "'")
 
     routingOptions rendering persona mode = \case
       [] -> Right (RoutingInspection rendering persona mode)
@@ -4088,6 +4149,7 @@ usage reg =
       "  " <> bin <> " machine-restart <run-id> <parent-store> <" <> noun <> "> <run options>",
       "  " <> bin <> " machine-resume  <run-id> <parent-store> <" <> noun <> "> <run options>",
       "  " <> bin <> " machine-fork    <run-id> <parent-store> <" <> noun <> "> <run options>",
+      "  " <> bin <> " flow <store> [--follow] [--route PREDICATE] [--from CURSOR]",
       runLead <> "[--routing] [--persona NAME]",
       under runLead <> "[--realize AXIS=MODEL-ALIAS]...",
       under runLead <> "[--offline | --refresh-models]",

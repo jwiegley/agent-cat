@@ -157,6 +157,56 @@ fails every later event, as it does after a failed durable write. The run stops
 with that exception, and `events.ndjson` holds exactly the lines whose records
 the run log holds.
 
+## Run-log reader
+
+`readFlow` reads the run log of a run store directory and returns a
+`FlowReport`. It opens the directory with `openPrivateRoot`, so only the account
+that owns the private store reads it. It reads the prefix of `flow.ndjson` that
+the opened file measures, so a live writer never tears a complete line. It
+splits the prefix into complete lines and decodes each line with
+`decodeFlowLine`, which refuses a line above `maxFrameBytes` before it decodes
+it. A final line without its newline is reported by its size and is not
+decoded. It is a failure of an ended log and the append in progress of a live
+log.
+
+For each record the reader verifies the size, digest and exact encoding of a
+claim check with `readFlowContent` before it uses the body. It decodes each
+body with the codec of its schema. The code of a question comes from its body
+through `requestCodeFromJson`, and the answer that names the question decodes
+at that code. It verifies that each reply names an earlier ask of a schema that
+the reply may answer and that no other reply names the same ask, that the first
+record is `start`, that no record has a schema of the manager log, and that no
+two event records name one event. It joins each event record to the line of
+`events.ndjson` with its sequence number through `readEventLog`, and it reads
+`effects.ndjson` through `readEffectRecords`. A store file that cannot be read
+is a failure of the report and does not raise.
+
+The caller states whether the log is live or ended. The report holds the stop,
+which is the first event record whose event ends the run, and the states of the
+log, each computed from the records alone:
+
+- an ask without a reply is in flight in a live log and uncertain in an ended
+  log. An `engine-start` with a `done` reply does not answer the question above
+  it, so a killed run leaves its question uncertain.
+- a `control` without a later acknowledgement event for its identifier is
+  unacknowledged.
+- an `OccurrenceRecoveryPending` event without a later
+  `OccurrenceRecoveryChosen` event for the occurrence is a pending recovery.
+- an `OccurrencePersonAnswerPending` event without a later `answer` record for
+  the occurrence is a pending person answer.
+- an effect start in `effects.ndjson` without a later completion for the same
+  occurrence and question is potentially executed.
+- an ended log without its stop has lost supervision.
+- an ask after the stop is reported, as a run that races a cancel can append
+  one.
+
+`flowVerified` holds when no verification failed, and the states do not affect
+it. `flowEntryValue` and `flowSummaryValue` render the report as the JSON
+objects of the `agentic-run flow` verb, and `parseFlowRoute` and
+`flowRouteMatches` select records by a conjunction of `field=value` terms over
+the schema, the sender, the address and the identifiers. The reader writes
+nothing and delivers nothing.
+
 ## Carriage
 
 `flowBroker :: FlowCodec -> RunFlow -> DataBroker -> DataBroker` wraps a broker

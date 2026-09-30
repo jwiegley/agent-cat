@@ -27,6 +27,7 @@ module Agentic.Runtime.PrivateRoot
     createPrivateDirectoryAt,
     openPrivateFileAt,
     readPrivateFileAt,
+    readPrivatePrefixAt,
     writePrivateExclusiveAt,
     writePrivateAtomicAt,
     publishPrivateFileAt,
@@ -43,7 +44,7 @@ module Agentic.Runtime.PrivateRoot
   )
 where
 
-import Agentic.Runtime.PrivateFile (listConfinedDirectoryAt, readConfinedFileAt)
+import Agentic.Runtime.PrivateFile (listConfinedDirectoryAt, readConfinedFileAt, readConfinedPrefixAt)
 import Control.Concurrent.MVar (MVar, modifyMVar, newMVar, withMVar)
 import Control.Exception (IOException, bracket, bracketOnError, finally, mask, mask_, onException, throwIO, try)
 import Control.Monad (unless, void, when)
@@ -230,6 +231,12 @@ openPrivateFileAt root components = withParent root components $ \parent file ->
 readPrivateFileAt :: PrivateRoot -> [FilePath] -> Integer -> IO BS.ByteString
 readPrivateFileAt root components limit =
   withParent root components $ \parent file -> fst <$> readConfinedFileAt parent [file] limit
+
+-- | The prefix of an append-only private file that its opened descriptor
+-- measures, as 'readConfinedPrefixAt' reads it.
+readPrivatePrefixAt :: PrivateRoot -> [FilePath] -> Integer -> IO BS.ByteString
+readPrivatePrefixAt root components limit =
+  withParent root components $ \parent file -> readConfinedPrefixAt parent [file] limit
 
 writePrivateExclusiveAt :: PrivateRoot -> [FilePath] -> BS.ByteString -> IO ()
 writePrivateExclusiveAt root components bytes =

@@ -7,6 +7,8 @@
 @clindex --drop-answer
 @clindex --engine
 @clindex --expect-routing-fingerprint
+@clindex --follow
+@clindex --from
 @clindex --help
 @clindex --input
 @clindex --input-arg
@@ -35,6 +37,7 @@
 @clindex --tui
 @clindex --verbose
 @clindex verb:cost
+@clindex verb:flow
 @clindex verb:frontend
 @clindex verb:frontend-export
 @clindex verb:frontend-io

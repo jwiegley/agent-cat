@@ -6,6 +6,7 @@ module Agentic.Runtime.PrivateFile
   ( readPrivateConfigurationFile,
     readConfinedFile,
     readConfinedFileAt,
+    readConfinedPrefixAt,
     withConfinedDirectory,
     withConfinedDirectoryAt,
     withConfinedDirectoryIfPresentAt,
@@ -62,13 +63,23 @@ readConfinedFileAt :: Fd -> [FilePath] -> Integer -> IO (BS.ByteString, FileStat
 readConfinedFileAt = readConfinedFileAtChecked (const (pure ()))
 
 readConfinedFileAtChecked :: (FileStatus -> IO ()) -> Fd -> [FilePath] -> Integer -> IO (BS.ByteString, FileStatus)
-readConfinedFileAtChecked check root components limit = case components of
+readConfinedFileAtChecked check = readConfinedWith (readOpened check)
+
+-- | The bytes of an append-only file up to the size that its opened descriptor
+-- reports. Bytes that a writer appends after that measurement are not read, so
+-- a live log yields a consistent prefix. A file that shrinks while it is read
+-- is refused.
+readConfinedPrefixAt :: Fd -> [FilePath] -> Integer -> IO BS.ByteString
+readConfinedPrefixAt root components limit = fst <$> readConfinedWith (readOpenedPrefix (const (pure ()))) root components limit
+
+readConfinedWith :: (Integer -> IO Fd -> IO (BS.ByteString, FileStatus)) -> Fd -> [FilePath] -> Integer -> IO (BS.ByteString, FileStatus)
+readConfinedWith readFile' root components limit = case components of
   [] -> throwIO (userError "confined file path is empty")
   _ -> go root components
   where
     go parent [file] = do
       validateComponent file
-      readOpened check limit (openFdAt (Just parent) file ReadOnly fileFlags)
+      readFile' limit (openFdAt (Just parent) file ReadOnly fileFlags)
     go parent (component : rest) = do
       validateComponent component
       bracket
@@ -128,10 +139,19 @@ listConfinedDirectoryAt parent limit = do
   bracket acquire close (\stream -> loop stream 0 [])
 
 readOpened :: (FileStatus -> IO ()) -> Integer -> IO Fd -> IO (BS.ByteString, FileStatus)
-readOpened check limit open =
+readOpened = readOpenedWith 1
+
+readOpenedPrefix :: (FileStatus -> IO ()) -> Integer -> IO Fd -> IO (BS.ByteString, FileStatus)
+readOpenedPrefix = readOpenedWith 0
+
+-- | Read the measured size plus the given number of extra bytes, and refuse a
+-- result that differs from the measured size. One extra byte detects a file
+-- that grew, and no extra byte reads the measured prefix.
+readOpenedWith :: Int -> (FileStatus -> IO ()) -> Integer -> IO Fd -> IO (BS.ByteString, FileStatus)
+readOpenedWith extra check limit open =
   bracket acquire (hClose . fst) $ \(handle, status) -> do
     let bytes = toInteger (fileSize status)
-    contents <- BS.hGet handle (fromInteger bytes + 1)
+    contents <- BS.hGet handle (fromInteger bytes + extra)
     unless (toInteger (BS.length contents) == bytes) $
       throwIO (userError "confined file changed while it was read")
     pure (contents, status)

@@ -28,6 +28,14 @@ outside the allowlist, and it fails when a synthetic extra line is added.
 With --journey FIXTURE, the probe instead checks every run log under the
 fixture directory of a tui-journey: each control record and each answer that a
 control supplied comes from the manager and names a command identifier.
+
+With --reader AGENTIC_RUN ROUTING_FIXED_POINT_PROBE FIXTURE, the probe runs
+"agentic-run flow" on every run store under the fixture directory of a
+tui-journey. Each exits 0 with a verified summary, a stop and no ask after the
+stop. A route and a start position select the records that the verb prints,
+and --follow on an ended log prints the same summary. The probe then makes a
+run whose question and turn bodies are claim checks. The verb exits 0 on its
+store and 1 on a copy of the store with one changed claim-check byte.
 """
 
 from __future__ import annotations
@@ -475,13 +483,66 @@ def journey(fixture: Path) -> None:
     print(f"journey: {len(logs)} run logs, {controls} control records and {answered} answers name the manager and a command")
 
 
+def flow_verb(frontend: Path, store: Path, expected: int, *options: str) -> tuple[list[dict], dict]:
+    """The records and the summary that "agentic-run flow" prints for a store."""
+    result = subprocess.run([str(frontend), "flow", str(store), *options], capture_output=True, check=False, timeout=120)
+    stderr = result.stderr.decode("utf8", "replace")
+    assert result.returncode == expected, f"flow {store} {options} exited {result.returncode}, not {expected}: {stderr}"
+    lines = [json.loads(line) for line in result.stdout.splitlines()]
+    assert lines and "summary" in lines[-1], lines[-1:]
+    return lines[:-1], lines[-1]["summary"]
+
+
+def reader(frontend: Path, fixed: Path, fixture: Path) -> None:
+    stores = sorted(path.parent for path in fixture.rglob("flow.ndjson"))
+    assert stores, f"no run log under {fixture}"
+    for store in stores:
+        records, summary = flow_verb(frontend, store, 0)
+        assert summary["verified"] and not summary["problems"], summary
+        assert summary["stop"] is not None and not summary["states"]["askAfterStop"], summary
+        assert not summary["states"]["lostSupervision"] and not summary["states"]["uncertain"], summary
+        assert [record["position"] for record in records] == list(range(summary["records"])), records
+        assert all(record["line"] is not None for record in (r["event"] for r in records if r["schema"] == "event")), records
+        answers, _ = flow_verb(frontend, store, 0, "--route", "schema=answer", "--from", "1")
+        assert answers and all(record["schema"] == "answer" and record["position"] >= 1 for record in answers), answers
+        assert answers == [record for record in records if record["schema"] == "answer"], answers
+        followed, follow_summary = flow_verb(frontend, store / "flow.ndjson", 0, "--follow")
+        assert followed == records and follow_summary == summary, follow_summary
+        print(f"reader: {store} verifies {summary['records']} records with stop {summary['stop']}, "
+              f"{len(answers)} answers by route, and the same summary under --follow")
+    root = Path(tempfile.mkdtemp(prefix="agent-cat-flow-reader-"))
+    print(f"fixture root {root} (removed only after every check passes)")
+    run = machine(root, fixed, "flow-claim", "prompt-source", [*STUB, "--input-arg", "input=" + "claim " * 12000])
+    claims = sorted((run.store / "flow-claims").iterdir())
+    assert claims, "the claim run wrote no claim check"
+    records, summary = flow_verb(frontend, run.store, 0)
+    claimed = [record for record in records if "claim" in record]
+    assert claimed and all(record["body"] is not None for record in claimed), claimed
+    copy = root / "flow-claim-copy" / "runtime"
+    shutil.copytree(run.store, copy)
+    target = copy / "flow-claims" / claims[0].name
+    data = bytearray(target.read_bytes())
+    index = len(data) // 2
+    data[index] = ord("y") if data[index] != ord("y") else ord("z")
+    target.write_bytes(bytes(data))
+    _, tampered = flow_verb(frontend, copy, 1)
+    assert not tampered["verified"] and any("recorded digest" in problem for problem in tampered["problems"]), tampered
+    print(f"reader: {len(claimed)} claim-check records verify, and one changed byte fails: {tampered['problems'][0]}")
+    shutil.rmtree(root)
+
+
 def main() -> None:
     arguments = sys.argv[1:]
     if arguments[:1] == ["--journey"] and len(arguments) == 2:
         journey(Path(arguments[1]))
         return
+    if arguments[:1] == ["--reader"] and len(arguments) == 4:
+        frontend, fixed = (Path(argument).resolve() for argument in arguments[1:3])
+        reader(frontend, fixed, Path(arguments[3]))
+        return
     if len(arguments) != 2:
-        raise SystemExit("usage: flow_probe.py AGENTIC_RUN ROUTING_FIXED_POINT_PROBE | flow_probe.py --journey FIXTURE")
+        raise SystemExit("usage: flow_probe.py AGENTIC_RUN ROUTING_FIXED_POINT_PROBE | flow_probe.py --journey FIXTURE"
+                         " | flow_probe.py --reader AGENTIC_RUN ROUTING_FIXED_POINT_PROBE FIXTURE")
     frontend, fixed = (Path(argument).resolve() for argument in arguments)
     check_allowlist()
     root = Path(tempfile.mkdtemp(prefix="agent-cat-flow-"))

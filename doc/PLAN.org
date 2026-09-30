@@ -2777,6 +2777,31 @@ The owner's full architecture note is preserved below for the design round.
 ]
 #+end_src
 
+* TODO [#C] Resolve F7 fess findings in the run-log reader and flow verb
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-amd8
+:LABELS:   ["actor-flow","workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-29 Tue 18:36]
+:MODIFIED: [2026-09-29 Tue 18:36]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Follow-up from the F7 fess audit of the run-log reader and the agentic-run flow verb (actor-flow delta 1a). None of these findings blocks. Source: fess audit /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/fess/flow-F7-r1.md.
+
+1. (medium) runtime/src/Agentic/Runtime/Flow.hs (statesUncertain), runtime/test/FlowReaderTests.hs, doc/agent-cat.texi and runtime/BROKER.md: statesUncertain holds every open ask of an ended log, including a log that has its stop. Design section 3.6 defines uncertain as "the log has ended without its stop, and an ask has no reply". Fix: set uncertain only when the stop is missing, or record an operator decision that widens the definition. Then update the test and both documents.
+2. (medium) runtime/src/Agentic/Runtime/Flow.hs (readFlow, decodeFlowLine): readFlow reads the whole flow.ndjson prefix into memory, up to an undocumented 512 MiB constant, and checks maxFrameBytes on each line only after that allocation. The design says the bound is checked before allocation. A log above the constant exits 3 as "cannot be opened". Fix: stream lines with readNdjsonFrame, or document the ceiling and its exit status in agent-cat.texi and BROKER.md.
+3. (medium) cli/src/Agentic/Cli.hs (flowCmd --follow) and test/flow_probe.py: the live --follow path was never run against a run that was still writing. Fix: add a probe that starts a stub run, follows it with --follow until the stop, and compares the output with the ended read.
+4. (low) test/flow_probe.py (reader): the acceptance item "non-zero on a copy with a changed claim-check byte" names the journey store, which has no claim checks. The check ran on a copy of a stub prompt-source store. Fix: accept the substitution, or add a claim-check-sized body to a journey fixture.
+5. (low) runtime/src/Agentic/Runtime/Flow.hs (answered set): the answered set counts every record with a recReplyTo, including replies that scanEntries refused, so a refused reply closes its ask in the summary states. Fix: build the answered set from accepted replies only.
+6. (low) cli/src/Agentic/Cli.hs (flowCmd --follow): each poll rereads and reverifies the whole log, every claim check, events.ndjson and effects.ndjson at 4 Hz. Fix: read and verify only the new suffix, or document the cost.
+7. (low) cli/src/Agentic/Cli.hs (flow parser and usage): "flow --follow" treats --follow as PATH and exits 3. The usage line prints "flow <store>", but the manual and --help say PATH. Fix: refuse a PATH that begins with "--", and make the usage wording match the manual.
+8. (low) doc/workflow-manager-handoff.md: the current-state section does not describe F7 or the completion of delta 1a. Fix: update it at the next handoff record.
+
 * TODO [#D] Accepted gap: no classification check at Approval.hs:96 (K19)
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -3537,15 +3562,17 @@ Owner directive 2026-08-12: use the standard libraries as much as possible; do n
 ]
 #+end_src
 
-* TODO [#B] Actor flow increment 1a: run log, flow broker, strict codecs and reader
+* DONE [#B] Actor flow increment 1a: run log, flow broker, strict codecs and reader
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-e6cp
 :LABELS:   ["actor-flow","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-26 Sat 23:41]
-:MODIFIED: [2026-09-29 Tue 18:09]
+:MODIFIED: [2026-09-29 Tue 18:36]
 :CREATED_BY: johnw
+:FINISHED: [2026-09-29 Tue 18:36]
+:CLOSE_REASON: Delta 1a landed: F1 to F7. Follow-ups acat-c13k, acat-thc9, acat-h9oi, acat-actk, acat-hxm7, acat-amd8.
 :SOURCE_REPO: .
 :ORIGINAL_SIZE: 0
 :END:
@@ -3604,6 +3631,13 @@ Actor-flow increment 1, delta 1a (at most 8 engineering days, after the operator
     "author": "johnw",
     "text": "Subtask F6 of delta 1a: bypass removal, pre-store control handoff and person-answer attribution. The CLI builds engine worlds with worldOfEngineBrokered over the run broker. runPlanPersisted takes a DataBroker explicitly, and runPlanObservedWith takes no run store. activateEventSink, withBufferedControlInputFor and worldOfEngineWith are confined wrappers, and test/flow_probe.py holds a static inProcessBroker allowlist. MachineControl has a broker cell, and runMachineWith fills it with the run flowBroker before activateEventSinkBrokered, so controls after activation get control records. A control delivered before activation appears only as its acknowledgement event, and runtime/BROKER.md states this. answerPerson writes the ControlId into the scope answer-source cell, and flowBroker then names the intake as sender and the command id in About. Evidence scope: F6-build (-Werror, agentic-run, runtime-contract-test, routing-fixed-point-probe), F6-runtime-contract at N8, F6-flow-probe (attribution, retry forms, structural bypass check with a negative control, allowlist with a synthetic negative), F6-control-probes (control_probe.py and person_control_probe.py at N8), F6-progress-probe and F6-journey (tui-journey at N8, with control and answer records that name Manager and the command ids) each passed once under timeout 900. The fess auditor reran F6-build and F6-flow-probe with exit 0. Fess: not blocking. Six low findings are filed as acat-hxm7. Open in delta 1a: the run-log reader and the flow verb, so this issue stays open.",
     "created_at": "2026-09-30T01:09:29Z"
+  },
+  {
+    "id": 360,
+    "issue_id": "acat-e6cp",
+    "author": "johnw",
+    "text": "Subtask F7 of delta 1a: the run-log reader and the agentic-run flow verb. readFlow in Agentic.Runtime.Flow reads the flow.ndjson prefix through openPrivateRoot, reports a torn final line by its size without decoding it, decodes each complete line strictly under maxFrameBytes, verifies each claim check (size, digest, exact encoding), each body against its schema codec, each reply position, the start record and the join of each event record to its events.ndjson line. It computes the section 3.6 run-log states: in flight, uncertain, unacknowledged control, pending recovery, pending person answer, potentially executed (from effects.ndjson), lost supervision and ask after the stop. The verb agentic-run flow PATH [--follow] [--route PREDICATE] [--from CURSOR] prints one JSON object per record and one summary object, and exits 0 only when everything verifies (1 on a failed check, 3 when the store cannot be opened). doc/agent-cat.texi, doc/runner-index.texi and runtime/BROKER.md describe it. Evidence scope: F7-build (-Werror, agentic-run, runtime-contract-test, routing-fixed-point-probe), F7-runtime-contract at N8 (new FlowReaderTests: torn line, one changed claim-check byte, bad reply position, and each state on a constructed log with its negative counterpart), F7-doc-check (make -C doc check and check-manual-cli.py on the built runner) and F7-journey (tui-journey at N8, then flow on its run store: 43 records, verified, no ask after the stop) each passed once under timeout 900. The changed-claim-check-byte refusal was shown on a copy of a stub prompt-source store, because the journey store has no claim checks. The fess auditor reran runtime-contract-test at N8 with exit 0. Fess: not blocking. Its three medium and five low findings are filed as acat-amd8. With F7, every item of delta 1a has landed (record and schemas, run writer, flowBroker, bypass removal, strict and versioned codecs, EnginePermission and its ACP report, amendment record, reader and verb), so this issue closes. Increment 1 as a whole stays open under acat-5m60.",
+    "created_at": "2026-09-30T01:36:18Z"
   }
 ]
 #+end_src

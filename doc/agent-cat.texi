@@ -3624,6 +3624,59 @@ Create a durable child run with an immutable parent link.  Restart inherits no
 answers.  Resume uses an exact compatible checkpoint.  Fork validates any
 explicit edits and then reuses the matching complete answers.
 
+@c COVER CLI verb:flow author
+@c COVER CLI --follow author
+@c COVER CLI --from author
+@item flow PATH [--follow] [--route PREDICATE] [--from CURSOR]
+Read the run log of one run store and verify it.  @code{PATH} names the run
+store directory or its @file{flow.ndjson}.  The command opens the store as the
+account that owns it and refuses a store that fails the private-root ownership
+and mode checks.  It writes one JSON object for each record on standard
+output, in log order.  Each object holds the @code{position}, @code{schema},
+@code{from}, @code{to}, @code{about}, @code{replyTo} and @code{at} fields of the
+record and a @code{problems} list.  An inline body appears as @code{body}.  A
+claim check appears as @code{claim} with its SHA-256 and size, and @code{body}
+then holds the value of the claim-check file after its size, digest and exact
+encoding verify.  An event record carries @code{event} with its sequence
+number and the joined line of @file{events.ndjson}.
+
+The command reads each complete line with the frame bound of the runtime
+protocol and decodes it with the strict line codec.  It reports a final line
+without its newline by its size and does not decode it.  It decodes each body
+with the codec of its schema.  It verifies that each reply names an earlier
+ask of a schema that the reply may answer, and that no other reply names the
+same ask.  It verifies that the first record is @code{start} and that each
+event record has its line in @file{events.ndjson}.
+
+After the records, the command writes one summary object with the number of
+records, the verification result and its failures, the torn final line, the
+position of the stop and the states of the log.  The stop is the first event
+record whose event ends the run.  The states are the asks without a reply, in
+flight in a live log and uncertain in an ended log, the controls without a
+later acknowledgement event, the recovery waits without a later choice, the
+person-answer waits without a later answer, the effect starts in
+@file{effects.ndjson} without a completion, lost supervision when an ended log
+has no stop, and each ask after the stop.  A killed run therefore leaves its
+question uncertain even when its engine start has a reply.  The command exits
+0 when every verification passes and 1 when one fails, and the states do not
+change the exit status.  A store that the command cannot open exits 3.
+
+@code{--route} prints only the records that match a conjunction of
+@code{field=value} terms separated by commas.  The fields are @code{schema},
+@code{from}, @code{to}, @code{request}, @code{managerRun}, @code{nativeRun},
+@code{occurrence}, @code{epoch}, @code{attempt} and @code{command}.  A sender
+or an address is written as @code{manager}, @code{public},
+@code{local:UID}, @code{credential:CLIENT:CREDENTIAL}, @code{model:TARGET},
+@code{tool:NAME}, @code{adapter:NAME}, @code{workflow:RUN} or
+@code{approvers:PROFILE}.  @code{--from} names the first position to print.
+The route and the start position select only the printed records, and the
+summary always covers the whole log.  Without @code{--follow} the command
+reads the log once as an ended log.  With @code{--follow} it reads the log as a
+live log every 250 milliseconds and prints each record once its line is
+complete, and each event record once its line of @file{events.ndjson} exists.
+It stops at the stop, reads the log once more as an ended log and writes the
+summary.  An interrupt ends the command without a summary.
+
 @end table
 
 @section Top-level routing modes
