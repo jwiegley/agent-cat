@@ -37,6 +37,7 @@ import Agentic.Runtime.Control
     ackEventFor,
     invalidAckEventFor,
     decideRuntimeControl,
+    controlVersionFor,
     decodeControlFor,
     deliverRuntimeActionDeferred,
   )
@@ -54,7 +55,6 @@ import Agentic.Runtime.Protocol
     RuntimeEvent (..),
     encodeEnvelopeFor,
     correlatedProtocolVersion,
-    latestProtocolVersion,
     maxFrameBytes,
     protocolVersion,
   )
@@ -293,7 +293,7 @@ withBufferedControlInputBrokered broker version handle initial originalSink runt
           throwTo owner (MachineCancelled (T.unpack why))
         Right Nothing -> throwTo owner (MachineCancelled "control input closed")
         Right (Just (line, rest)) ->
-          case decodeControlFor (if version == latestProtocolVersion then correlatedProtocolVersion else version) line of
+          case decodeControlFor (controlVersionFor version) line of
             Left why -> do
               sink (invalidAckEventFor version (ControlAck (ControlId "invalid") ControlFailed why))
               throwTo owner (MachineCancelled (T.unpack why))

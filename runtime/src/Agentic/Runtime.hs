@@ -8,6 +8,7 @@ module Agentic.Runtime
     module Agentic.Runtime.Catalogue,
     module Agentic.Runtime.Control,
     module Agentic.Runtime.Descriptor,
+    module Agentic.Runtime.Flow,
     module Agentic.Runtime.Facts,
     module Agentic.Runtime.Frontend,
     module Agentic.Runtime.Frontend.Protocol,
@@ -32,6 +33,7 @@ import Agentic.Runtime.Broker (DataBroker (..), inProcessBroker)
 import Agentic.Runtime.Catalogue
 import Agentic.Runtime.Control
 import Agentic.Runtime.Descriptor
+import Agentic.Runtime.Flow
 import Agentic.Runtime.Facts
 import Agentic.Runtime.Frontend
 import Agentic.Runtime.Frontend.Protocol

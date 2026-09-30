@@ -38,6 +38,8 @@ module Agentic.Runtime.Protocol
     decodeEnvelope,
     decodeEnvelopeFor,
     checkSequence,
+    failureText,
+    failureOfText,
   )
 where
 

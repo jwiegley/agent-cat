@@ -8,6 +8,7 @@ import Agentic.Runtime
 import BrokerTests (brokerTests)
 import CaptureTests (captureTests)
 import FlowCodecTests (flowCodecTests)
+import FlowTests (flowTests)
 import FrontendProtocolTests (frontendProtocolTests, frontendCodecCheck)
 import ProcessGroupTests (processGroupTests, spawnCostCheck, spawnCostProbe)
 import SnapshotCheckpointTests (snapshotCheckpointTests)
@@ -67,6 +68,7 @@ main = getArgs >>= \case
 contractTests :: IO ()
 contractTests = do
   flowCodecTests
+  flowTests
   brokerTests
   frontendProtocolTests
   snapshotCheckpointTests "."

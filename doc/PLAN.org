@@ -3496,7 +3496,7 @@ Owner directive 2026-08-12: use the standard libraries as much as possible; do n
 :LABELS:   ["actor-flow","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-26 Sat 23:41]
-:MODIFIED: [2026-09-29 Tue 16:42]
+:MODIFIED: [2026-09-29 Tue 17:07]
 :CREATED_BY: johnw
 :SOURCE_REPO: .
 :ORIGINAL_SIZE: 0
@@ -3528,6 +3528,13 @@ Actor-flow increment 1, delta 1a (at most 8 engineering days, after the operator
     "author": "johnw",
     "text": "Subtask F2 of delta 1a: strict Request and exact El codecs beside questionJson in plan/src/Agentic/World.hs. requestJson and requestFromJson encode and strictly decode every Request field (code, intent, addressee, scope, prompt, draw). answerFromJsonExact applies answerFromJson and requires answerJson of the result to equal the input. answerFromJson stays lenient. The names are exported through Agentic.Planning, because a re-export from Agentic.Plan would make a module cycle. Evidence scope: F2-build (-Werror, agentic-run, runtime-contract-test, routing-fixed-point-probe), F2-runtime-contract at N8 (new FlowCodecTests with round trips for text, the three verdict forms, flag false and true, receipt as JSON null and a structured schema with exact decimals and Unicode, plus the negative controls), F2-journey (Phase A tui-journey at N8) and bash cli/ci/examples.sh each passed under timeout 900. The fess auditor reran F2-build and F2-runtime-contract with exit 0. Fess: not blocking. Its one medium and five low findings are filed as acat-h9oi. bisim/ci/tier0.sh was not run, because the operator direction forbids bisim checks. The rest of delta 1a (the Flow record, the run writer, flowBroker, the reader and the flow verb) has not landed, so this issue stays open.\n",
     "created_at": "2026-09-29T23:42:45Z"
+  },
+  {
+    "id": 356,
+    "issue_id": "acat-e6cp",
+    "author": "johnw",
+    "text": "Subtask F3 of delta 1a: Agentic.Runtime.Flow with the record, the seventeen schemas, the strict bounded line codec, the twelve run-log body codecs and the flow writer, re-exported from Agentic.Runtime. No run writes a flow log yet. Evidence scope: F3-build (agentic-run, runtime-contract-test and routing-fixed-point-probe with -ftui-tests and -Werror), runtime-contract-test at N8 with the new FlowTests, source-boundaries, and the Phase A tui-journey at N8 each passed once under timeout 900 (exit 0). The length-check negative control was shown failing first (exit 1). Agentic.Manager.Protocol.Json and decodeStrictValue are unchanged. ALLBUILD was not run. Fess: not blocking. Two medium and five low findings filed as acat-mkh7. Delta 1a is not complete, so this issue stays open.",
+    "created_at": "2026-09-30T00:07:26Z"
   }
 ]
 #+end_src
@@ -7018,6 +7025,30 @@ A4 fess finding (low, test-strictness). key_notice in manager/test/service_http.
   }
 ]
 #+end_src
+
+* TODO [#C] Resolve F3 fess findings in Agentic.Runtime.Flow
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-mkh7
+:LABELS:   ["actor-flow","workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-29 Tue 17:07]
+:MODIFIED: [2026-09-29 Tue 17:07]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Follow-up from the F3 fess audit of Agentic.Runtime.Flow (actor-flow delta 1a). None of these findings blocks. Source: fess audit /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/fess/flow-F3-r1.md.
+
+1. (medium, documentation) The recFrom Haddock in runtime/src/Agentic/Runtime/Flow.hs (near line 166) says that the writer stamps the sender from its binding. The writer has no binding: appendAsk, appendTell and appendReply accept any Actor from the caller. The test "the sender is the writer's binding" in runtime/test/FlowTests.hs (near line 307) only checks that the argument comes back. Fix: reword the Haddock and the test label, or add the binding in F4 and state there that it arrives.
+2. (medium, correctness) Design section 1.1 says that the schema fixes the codec of the body. checkBodyForm only tells event bodies from other bodies, and bodyFor accepts any value for every schema except event. The writer test appends a start record whose body is the string "start", which startFromBody refuses. Fix: make F4 carriage pass only typed bodies, or check the body codec in the writer and in decodeFlowLine for every schema that has no SCode. Change the fixture to use a real startBody.
+3. (low) ChooseRecovery RecoveryRetry encodes as retryOccurrence and decodes as RetryOccurrence (Control.hs near lines 577-590), so the control body is not exact for that value. The tests leave the value out. Fix: add a test that states the collapse, or file the ambiguity in the control wire form.
+4. (low) Neither steerBody nor appendAsk refuses a steer record whose About has no occurrence (Flow.hs near line 688). Fix: refuse such an append, or record that F4 enforces it.
+5. (low) startInputBytes is an Integer, but its decoder accepts values only up to Int64 (Flow.hs near lines 970-971). A Start above 2^63 bytes encodes and appends, and then startFromBody refuses it. Fix: use Word64 or Int64, or refuse the value at encoding.
+6. (low) writeClaim reuses an existing claim file when its bytes are equal (Flow.hs near lines 841-853). Nobody checked whether writePrivateExclusiveAt is atomic. If it is not, a partial file from a failed write blocks that digest permanently. Fix: confirm atomicity, or delete a partial claim file on failure.
+7. (low, verification) ALLBUILD was not run for F3. Components outside agentic-run, runtime-contract-test and routing-fixed-point-probe were not compiled against the new Agentic.Runtime exports. Fix: run ALLBUILD once at integration of delta 1a.
 
 * TODO [#E] Handoff: correct the nix shim statement for gates that call nix develop    :documentation:
 :PROPERTIES:

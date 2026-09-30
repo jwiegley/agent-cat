@@ -248,6 +248,7 @@ library
     Agentic.Runtime.Catalogue
     Agentic.Runtime.Control
     Agentic.Runtime.Descriptor
+    Agentic.Runtime.Flow
     Agentic.Runtime.Frontend
     Agentic.Runtime.Frontend.Protocol
     Agentic.Runtime.Machine
@@ -460,6 +461,7 @@ test-suite runtime-contract-test
     BucketEvidence
     CaptureTests
     FlowCodecTests
+    FlowTests
     FrontendProtocolTests
     ProcessGroupTests
     SnapshotCheckpointTests

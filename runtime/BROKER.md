@@ -81,6 +81,45 @@ response, control or terminal event. Borrowed receivers cannot outlive their
 original resource scope. The machine control-input scope propagates synchronous
 receiver failure to its runtime and cancels and joins its original reader on exit.
 
+## Flow records
+
+`Agentic.Runtime.Flow`, exported by `Agentic.Runtime`, defines the record of the
+actor flow and its writer. No run or manager writes a flow log at present, and
+`inProcessBroker` delivers data as the sections above state.
+
+A `Record` names one of seventeen schemas, a sender, an address, the
+identifiers that it concerns, the position of its ask when it is a reply, a body
+and the time at which the writer appended it. The schema fixes the role of the
+record as an ask, a reply or a tell, and its route class. A reply may answer
+only the asks that its schema names. A body is inline when its compact encoding
+is at most 65536 bytes. A larger body is a claim check that names its SHA-256
+and its size, and the `event` schema names a line of `events.ndjson` by its
+sequence number.
+
+`decodeFlowLine` refuses a line above `maxFrameBytes` before it decodes any
+byte. It also refuses a duplicate key at any depth, an unknown or a missing
+field, and any bytes other than the encoder's rendering of the decoded record,
+so `decodeFlowLine (encodeFlowLine r)` returns `r`. The run-log body codecs use
+the existing strict codecs: `requestJson` and the exact `El` codec for
+questions and answers, the version-1 engine codecs for engine requests, results,
+steering and permission reports, and `encodeControlFor` and `decodeControlFor`
+at the protocol that a control body names. Each body decoder refuses any value
+that its encoder does not write.
+
+`openFlowWriter` creates the log as an exclusive private file in a
+`PrivateRoot`. One lock orders its appends. Under that lock the writer takes the
+time of the record, encodes the record with its `FlowCodec`, decodes the bytes
+with the same codec, writes a claim-check body as the exclusive private file
+`flow-claims/<sha256>` and then appends the line. A claim-check file that
+already exists is used only when its bytes are equal. The writer flushes each
+line and does not synchronize it. After a failed line write it refuses every
+later append. `appendAsk`, `appendTell` and `appendReply` return the
+0-based position of the record and the record decoded from its bytes. The
+writer keeps only the schema of each position, and it refuses a reply whose
+position does not name an earlier ask that the reply may answer.
+`readFlowContent` verifies the size, digest and exact encoding of a claim check
+before it returns the body.
+
 ## Failure and extension
 
 Success means that the original receiver operation returned successfully.

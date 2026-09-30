@@ -37,6 +37,7 @@ module Agentic.Runtime.Control
     timingText,
     encodeControl,
     encodeControlFor,
+    controlVersionFor,
     decodeControl,
     decodeControlFor,
   )
@@ -521,6 +522,13 @@ invalidAckEventFor version ack
 
 encodeControl :: Control -> ByteString
 encodeControl = BL.toStrict . encode
+
+-- | The control protocol that a run at this observation protocol reads.
+-- Observation protocol 3 keeps control protocol 2.
+controlVersionFor :: Int -> Int
+controlVersionFor version
+  | version == latestProtocolVersion = correlatedProtocolVersion
+  | otherwise = version
 
 encodeControlFor :: Int -> Control -> Either Text ByteString
 encodeControlFor version control
