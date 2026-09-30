@@ -13,7 +13,10 @@ increment 2, the P1 findings `acat-response-ingestion-budget-zaoi` and
 B1 to B14 landed. Subtasks B15 to B18 did not land, because each needs an
 operator review or authorization, as the section "Gated subtasks" states.
 Subtask B19 ran the part 1 gate on the tree of `ddf3ed93` and wrote this
-section. This section describes the current state. Where any section below
+section, and the Integrator committed it as `2f0848b1`. Two review lenses
+then read `9a641dd8..2f0848b1`, and the closeout stage of the run updated
+this section. The run ended with no stop condition. This section describes
+the current state at `2f0848b1`. Where any section below
 differs, this section supersedes it, and the sections below remain as
 chronology. The evidence of each subtask is under `B/<subtask>/impl-r1` or
 `impl-r2` in the resume directory.
@@ -38,7 +41,7 @@ chronology. The evidence of each subtask is under `B/<subtask>/impl-r1` or
 | B16 | not landed | Increment 2: route SSE, the manager-log route, wakeups and quota. It waits for the operator review of B4. |
 | B17 | not landed | Increment 2: actor-class serving for observe-with-control principals. It waits for the operator review of B4. |
 | B18 | not landed | Optional: a patch of `crypton-x509-validation` for IP Name Constraints. It waits for operator authorization. |
-| B19 | this section | The part 1 gate below and this section. |
+| B19 | `2f0848b1` | The part 1 gate below and the first form of this section. |
 
 ### Delivered behavior
 
@@ -207,14 +210,97 @@ message as intended.
   ruling on the redaction exception for the runtime `targetLabel`
   `acp:mixed-adapter` in run snapshots.
 
+### End-of-part review
+
+Two lenses read `9a641dd8..2f0848b1`, packages and safety. Both returned
+"approve with notes" with no critical or high finding, and no fix round ran.
+The safety lens ran an incremental Werror build of `agentic-run` and
+`routing-fixed-point-probe` with `-ftui-tests` and then `tui-journey` at N1
+and N8 on `2f0848b1`. Both journeys passed with every `FLOW-ASSERT` and the
+same consent chain as step 12 of the gate. The packages lens ran no check.
+The findings that the list below marks as not filed are now in one
+follow-up item, `acat-phase-b1-review-followups-dk1v`.
+
+- Medium, not filed. The download quota of one refuses a second concurrent
+  download at once with 429 `storage-quota`. Only the 5-second timeout of
+  each 16 KiB write bounds a download, so one slow client can hold a 64 MiB
+  download for hours and refuse every other download. Before B6 a second
+  download waited up to five seconds for the file slot, as the bounded-wait
+  decision of 2026-09-29 intends. The disposition is a wait for the quota
+  within the five-second allowance before the file slot, a total deadline
+  for one download, or an operator ruling on the immediate refusal, and a
+  two-client download case in WM-028.
+- Medium, not filed. `GET /v1/requests` and `GET /v1/runs` select every
+  request and run of the authorized profiles with no row bound. The query
+  builds one `json_group_array` over all rows, and the service materializes
+  each member before it pages. Only the 5-second timeout and the 64 MiB
+  aggregate bound limit this work. The disposition is a bounded id query
+  that refuses with `view-too-large` before materialization, or keyset
+  pages, with the bound stated in `doc/api/README.md`.
+- Medium, not filed. The service binds no legacy retention root, so
+  `/v1/runs` lists no legacy history entry. Only the native
+  `manager-history-check` shows the history read path. WM-025 stays open
+  until the service binds the retention roots read-only or an explicit
+  deferral is recorded.
+- Medium. The Name Constraints check has no scenario for `rfc822Name`, URI
+  or `directoryName` subtrees, distance fields, an undecodable extension or
+  subjectAltName, or a constrained `caFile` certificate off the path. This
+  is item 1 of `acat-3iof`, which stays at P2.
+- Medium, status. WM-025 is partial. Route-class authorization, cursor
+  binding to the authorization revision and 410 after a restore wait for
+  B15 to B17.
+- Low. The Name Constraints check reads the constraints of every
+  certificate in the `caFile`, so an unrelated constrained CA can refuse a
+  valid chain, and it checks an IPv6 host literal as a DNS name. Both fail
+  closed, and `doc/api/README.md` does not state them.
+- Low. The warp-tls plaintext refusal bytes are not well-formed HTTP, the
+  allowed-peer refusal from a non-loopback address is not exercised, and a
+  slow body with no body byte is not checked (`acat-8tzp`).
+- Low, not filed. The WM-023 scope change during retained responses is
+  shown only as an observe-only scope boundary, because no local operation
+  changes the scopes of a credential while the manager serves.
+- Low, not filed. An event stream holds no Store reader charge for its
+  lifetime, so only the subscription quota and `globalConnections` bound
+  the number of streams, and many streams contend for reader places during
+  their batch reads.
+- Low, not filed. When a run fails before it carries its held controls,
+  for a reason other than a cancel, the held controls get no
+  acknowledgement if the process exits first. The run never started, so
+  only the honesty of the acknowledgement is affected.
+- Low, not filed. Some assertions of the modes `boundary` and
+  `events-lifecycle` accept two refusal codes (400 or 404, and 429 or 503).
+
+### Package status
+
+| Package or item | Status | Evidence |
+| --- | --- | --- |
+| WM-023 (`acat-wm-023-d20b`) | Met, with the scope-change item shrunk | `B/B8/impl-r1`, gate steps 7 and 11 |
+| WM-024 (`acat-wm-024-28bb`) | Met, with the non-loopback peer and IP Name Constraints acceptance outside part 1 | `B/B9/impl-r1`, `B/B10/impl-r1`, gate steps 10 and 11 |
+| WM-025 (`acat-wm-025-3utw`) | Partial: the frozen resources are met, the route items wait for B15 to B17, and legacy history is not served | `B/B11` to `B/B13`, gate step 11 |
+| WM-026 (`acat-wm-026-qo1e`) | Met for `/v1/events`, and route SSE waits for B16 | `B/B14/impl-r1`, `B/B7/impl-r1`, gate steps 8, 9 and 11 |
+| Increment 2 (`acat-en4g`) | Gated by operator review | `doc/research/actor-flow-route-threat-model.md` |
+| `acat-response-ingestion-budget-zaoi` | Met and closed | `B/B5/impl-r2`, `B/B6/impl-r1`, `B/B7/impl-r1`, gate step 8 |
+| `acat-tls-name-forms-6gbo` | Met and closed by refusal | `B/B10/impl-r1`, gate step 10 |
+| Increment 1 review findings 1 to 4 | Met | `B/B1/impl-r1`, `B/B2/impl-r1`, gate steps 5 and 7 |
+| B18 | Gated by operator authorization | none |
+
+The Integrator closed WM-023 (`acat-wm-023-d20b`), because every review
+verdict for it is met. WM-024 and WM-026 stay open, because a subtask review
+for each said partial. WM-025 and `acat-en4g` stay open.
+
 ### Next action
 
 1. The operator reviews `doc/research/actor-flow-route-threat-model.md`
-   (B4). After acceptance, B15, B16 and B17 land and the route checks of
-   this gate run.
-2. The operator decides on B18.
+   (B4) and accepts or refuses public-class serving (B15 and B16) and
+   actor-class serving (B17) as separate decisions, recorded in the
+   governing goal. After acceptance, B15, B16 and B17 land, and the route
+   checks of this gate run.
+2. The operator decides on B18, and rules on the immediate refusal of a
+   second concurrent download.
 3. Phase B part 2 follows: WM-027, actor-flow increment 3 (`acat-c18n`),
-   WM-028 and G2.
+   WM-028 with the negative checks of increments 2 and 3 and the
+   cause-replacement sites, and G2 with its witness of protected
+   observation with mutations unavailable.
 
 Accepted state is unchanged at WM-001 to WM-022 and G0 and G1. Part 1 closes
 no gate.
