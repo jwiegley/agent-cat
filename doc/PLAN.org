@@ -683,6 +683,44 @@ Certify verdict: NOT yet certified; 25 declarations. V1: Mat.powSum/sumPow ARE M
 
 Mat vs Matrix (Fintype-bound HMul), MSemiring vs MonoidAlgebra (finite support), Env/Ext vs Option Kleisli — absences real, nowhere stated. After steps 1-7 the survivor registry is checkable by eye.
 
+* TODO [#C] Fix the tui-approval detach race and B3 fess findings
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-2ua3
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: bug
+:CREATED:  [2026-09-30 Wed 00:30]
+:MODIFIED: [2026-09-30 Wed 00:30]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings from fess b1-B3-r1 (/Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/fess/b1-B3-r1.md) on subtask B3.
+
+1. Harness race in the tui-approval driver (low, confirmed). The non-journey tui-approval path waits for "Phase: associated" and then sends q without checking which frame is visible (manager/test/service_http.py:911-916, 1375-1376). When the run reaches its question first, the "Your answer" dialog is open, q becomes answer text (the dialog detaches on Ctrl-C, tui/src/Agentic/Tui/Presentation.hs:1078), and the TUI correctly stays open until the harness times out with "TUI did not exit before the timeout". Reproduction root: /Users/johnw/Products/k.M0a5ItPm/tmp/b3-approval-1.ntD8m6dC. Fix: send Ctrl-C when the answer dialog footer is visible, or wait for the request screen footer "q DETACH" before sending q.
+
+2. acat-nwrj closure scope (medium). The B3 recommendation to close acat-nwrj relied on the N8 condition in the issue comment and did not reconcile the acceptance text. The Integrator kept acat-nwrj open for the unclassified N1 503 lines on GET /v1/events. This item is recorded on acat-nwrj and needs no separate work.
+
+3. ConfigurationBusy still reachable (low). A5S2b removed only the immediate ConfigurationBusy refusal at store reader admission. ConfigurationBusy can still be raised (manager/src/Agentic/Manager/Fault/Record.hs:58, loanFault SupervisionUnavailable), and manager/test/ArtifactCheck.hs:219 still expects the reader-admission ConfigurationBusy record. A closing note on acat-nwrj must say this.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-2ua3",
+    "depends_on_id": "acat-dxos",
+    "type": "discovered-from",
+    "created_at": "2026-09-30T07:30:57.886932Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
 * DONE [#C] Run the current Chord checks from the Pi integration launcher
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -3783,7 +3821,7 @@ Found by the connection-research attack pass (acat-lean-haskell-connection-lhi):
 :LABELS:   ["workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-24 Thu 09:19]
-:MODIFIED: [2026-09-29 Tue 06:14]
+:MODIFIED: [2026-09-30 Wed 00:30]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -3827,6 +3865,13 @@ Acceptance: the scheduled S1 diagnosis subtask examines this root together with 
     "author": "johnw",
     "text": "A5G2d round 1 recorded a second storage-unavailable signature that bears on this diagnosis: the Client-facade check at N8 got 503 on GET /v1/workflows with 'store reader-admission class=internal ConfigurationBusy erased=store StoreBusy' in server-0.stderr (root /Users/johnw/Products/k.M0a5ItPm/tmp/a5g2d-client.riA5itgK, not rerun). It differs from the A1 S1 signature. Tracked as acat-nwrj for the S1 diagnosis round.",
     "created_at": "2026-09-29T13:14:08Z"
+  },
+  {
+    "id": 375,
+    "issue_id": "acat-dxos",
+    "author": "johnw",
+    "text": "Subtask B3 (HEAD 27150239, no source change) ran tui-approval at N8 three times with fresh fixtures: run 1 FAIL, runs 2 and 3 PASS. No server stderr has a 503 line. The acat-dxos signature (preparation deadline after one exact resend following a closed release) did not recur. Run 1 failed for a different cause: the driver sent q while the TUI showed the 'Your answer' dialog, where q is answer text and Ctrl-C detaches (service_http.py:1375-1376, Presentation.hs:1078). No answer command was sent. Kept root /Users/johnw/Products/k.M0a5ItPm/tmp/b3-approval-1.ntD8m6dC. The issue stays open: 0 of 3 against an earlier rate of 1 in 4 proves nothing, and the source of the closed release is still unproved. Evidence: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/B/B3/impl-r1 (b3-approval-N8-*.log/.exit, b3-stderr-503.log, b3-disposition.txt).",
+    "created_at": "2026-09-30T07:30:45Z"
   }
 ]
 #+end_src
@@ -8162,7 +8207,7 @@ Inventory agent-functor workflow/TUI behavior, map Pi and agent-cat integration 
 :LABELS:   ["workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-29 Tue 06:02]
-:MODIFIED: [2026-09-29 Tue 11:50]
+:MODIFIED: [2026-09-30 Wed 00:30]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -8199,6 +8244,13 @@ Acceptance: establish whether the facade's GET /v1/workflows overlaps a profile 
     "author": "johnw",
     "text": "Subtask A5S2b makes store reads wait for the configuration guard within the five-second allowance instead of refusing at once with ConfigurationBusy. This removes the immediate-refusal path that produced the recorded 503 on GET /v1/workflows. The Client-facade check (CLIENT_CHECK) was not rerun, so this issue stays open until that check passes at N8. Evidence: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A5S2b/fast-impl-r1.",
     "created_at": "2026-09-29T18:50:20Z"
+  },
+  {
+    "id": 374,
+    "issue_id": "acat-nwrj",
+    "author": "johnw",
+    "text": "Subtask B3 (HEAD 27150239, no source change) ran the Client-facade check (CLIENT_CHECK) once at N8: PASS, exit 0, with no 503 line and no ConfigurationBusy line in any server stderr (root /Users/johnw/Products/k.M0a5ItPm/tmp/b3-client.pPpflDUX). The two stderr lines 'GET /v1/events public=401 class=command Unauthenticated' come from the stream revocation step that the check asserts. The recorded cause was the immediate ConfigurationBusy refusal at store reader admission. A5S2b replaced it with a bounded wait, and its regression check 'reader admission waits behind a short configuration holder' passed at N8 (A/A5S2b/fast-impl-r1/G01-store-wait-N8.log). Only the immediate-refusal path is removed: ConfigurationBusy can still be raised elsewhere (Fault/Record.hs:58). The issue stays open for one item of its acceptance: the check was not run at N1, so the N1 503 lines on GET /v1/events in the old root are not classified. Closing condition: one Client-facade run at N1 with every 503 line classified. Evidence: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/B/B3/impl-r1 (b3-client-N8.*, b3-stderr-503.log, b3-disposition.txt).",
+    "created_at": "2026-09-30T07:30:45Z"
   }
 ]
 #+end_src
