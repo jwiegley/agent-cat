@@ -206,6 +206,7 @@ library
     Agentic.Manager.Pages
     Agentic.Manager.Events
     Agentic.Manager.Application
+    Agentic.Manager.Routes
     Agentic.Manager.Protocol.LocalAdmin
     Agentic.Cli.Frontend
     Agentic.DSL.Json
@@ -728,6 +729,7 @@ executable manager-artifact-check
   main-is:         ArtifactCheck.hs
   other-modules:
     Agentic.Manager.Application
+    Agentic.Manager.Routes
     Agentic.Manager.Test.Contention
     Agentic.Manager.Test.StoreAdmissionCheck
     Agentic.Manager.Test.PrivateLog

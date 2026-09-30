@@ -71,7 +71,7 @@ consent_control = len(sys.argv) == 6 and sys.argv[5] == "tui-consent-control"
 # runs one manager lifetime and does not enter the restart loop.
 LIFECYCLE = "credential-lifecycle"
 lifecycle = len(sys.argv) == 6 and sys.argv[5] == LIFECYCLE
-mixed = len(sys.argv) == 6 and sys.argv[5] in ("mixed", "mixed-confirm", "tui-approval", "tui-consent-control", APPROVE_FAULT, LIFECYCLE, "pages") + JOURNEYS
+mixed = len(sys.argv) == 6 and sys.argv[5] in ("mixed", "mixed-confirm", "tui-approval", "tui-consent-control", APPROVE_FAULT, LIFECYCLE, "pages", "routes") + JOURNEYS
 confirm_uncertain = mixed and sys.argv[5] == "mixed-confirm"
 # The boundary mode checks WM-024 through the running protected manager with
 # raw socket and ssl connections: plaintext and TLS 1.2 refusal, request
@@ -98,6 +98,14 @@ pages_mode = len(sys.argv) == 6 and sys.argv[5] == PAGES
 # own PASS line. It runs two manager lifetimes of the scripted base fixture.
 EVENTS = "events-lifecycle"
 events_mode = len(sys.argv) == 6 and sys.argv[5] == EVENTS
+# The routes mode checks GET /v1/runs/{id}/routes through the running
+# protected manager after one mixed run: the public records for an
+# observe-only credential, the actor records for a control credential, no
+# restricted record, the route predicate, paging through after, the 410
+# cursors and an unchanged database across route reads. Each numbered case
+# prints its own PASS line. It runs one manager lifetime.
+ROUTES = "routes"
+routes_mode = len(sys.argv) == 6 and sys.argv[5] == ROUTES
 assert len(sys.argv) == 5 or mixed or boundary or pages_mode or events_mode
 assert not tui_approval or os.environ.get("TUI_CHECK")
 assert native in ("1", "8")
@@ -2359,6 +2367,195 @@ def event_checks():
     print("NOTE events case 5: the subscriber quota and revocation of open streams are shown by the base mode of this",
           "harness and by the B7 stream checks, and are not repeated here", flush=True)
     print("PASS events-lifecycle: every WM-026 event case held against the running TLS 1.3 manager", flush=True)
+
+def route_checks():
+    """GET /v1/runs/{id}/routes through the real HTTPS manager after one
+    mixed run. Each numbered case prints one PASS line."""
+    import sqlite3
+    import urllib.parse
+    authorized = {"Authorization": "Bearer " + bearer}
+    json_accept = {"Accept": "application/json"}
+    restricted = {"engine-result", "failure"}
+
+    def number(cursor):
+        alias, _, position = cursor.rpartition(".")
+        assert alias.startswith("route_") and position.isdigit(), ("route cursor form", cursor)
+        return int(position)
+
+    def alias(cursor):
+        return cursor.rpartition(".")[0]
+
+    def batch(run, credential, after=None, route=None, extra=None):
+        query = []
+        if after is not None:
+            query.append("after=" + after)
+        if route is not None:
+            query.append("route=" + urllib.parse.quote(route, safe=""))
+        target = f"/v1/runs/{run}/routes" + ("?" + "&".join(query) if query else "")
+        return request(target, credential | json_accept | (extra or {}))
+
+    def walk(run, credential, route=None):
+        """Every batch from the start until hasMore is false. Returns the
+        records in order, the final cursor and the number of batches."""
+        records, cursor, batches = [], None, 0
+        while True:
+            status, value, raw = batch(run, credential, cursor, route)
+            assert status == 200, ("route batch", status, value.get("code"))
+            validate("RouteBatch", value, raw)
+            assert len(raw) <= 1048576
+            if cursor is not None:
+                assert alias(value["cursor"]) == alias(cursor) and number(value["cursor"]) >= number(cursor), ("route cursor", cursor, value["cursor"])
+            assert value["oldestCursor"] == alias(value["cursor"]) + ".0", ("route floor", value["oldestCursor"])
+            for record in value["records"]:
+                assert record["id"] == alias(value["cursor"]) + "." + str(record["position"] + 1), ("record id", record["id"], record["position"])
+                assert record["position"] < number(value["cursor"]), ("record after the batch cursor", record["position"], value["cursor"])
+            records += value["records"]
+            cursor = value["cursor"]
+            batches += 1
+            if not value["hasMore"]:
+                return records, cursor, batches
+            assert batches < 1024, "route pages did not end"
+
+    def database_rows():
+        """Every row of every table of the coordination database, read through
+        a read-only connection."""
+        found = sorted((work / "manager").rglob("coordination.sqlite3"))
+        assert len(found) == 1, ("coordination database", found)
+        connection = sqlite3.connect(found[0].as_uri() + "?mode=ro", uri=True)
+        try:
+            tables = [row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")]
+            return {table: sorted(repr(row) for row in connection.execute(f'SELECT * FROM "{table}"')) for table in tables}
+        finally:
+            connection.close()
+
+    with (work / "server-0.stdout").open("wb") as output, (work / "server-0.stderr").open("wb") as errors:
+        process = subprocess.Popen([str(runner), "--manager", "serve", "--config", str(config),
+                                    "+RTS", "-N" + native, "-RTS"], stdout=output, stderr=errors)
+        try:
+            wait_ready(process)
+            status, capabilities, _ = request("/v1/capabilities", authorized)
+            assert status == 200
+            status, catalogue, _ = request("/v1/workflows?profileId=profile_1", authorized)
+            assert status == 200
+            workflow = next(item for item in catalogue["items"] if item["name"] == "mixed-controls")
+            key = capabilities["authorityEpoch"] + "." + secrets.token_urlsafe(16)
+            body = {"workflowId": workflow["id"], "descriptorRevision": workflow["revision"],
+                    "profileId": workflow["profileId"], "profileRevision": workflow["profileRevision"]}
+            status, created, raw = request("/v1/requests", authorized | {"Content-Type": "application/json", "Idempotency-Key": key},
+                                           method="POST", payload=json.dumps(body, separators=(",", ":")).encode())
+            assert status == 201, ("request creation", status, created.get("code"))
+            run = run_mixed(created, workflow, capabilities, authorized)
+            observer_file = work / "credential-observer"
+            administration({"version": 1, "operation": "issue-credential", "label": "Routes observer",
+                            "scopes": ["observe"], "profileIds": ["profile_1"],
+                            "expiresAt": "2999-01-01T00:00:00Z", "outputFile": str(observer_file)})
+            observer = {"Authorization": "Bearer " + observer_file.read_bytes().decode("ascii")}
+
+            # The local run store of the run: its event log and its run log.
+            stores = [entry for entry in (work / "manager" / "runs" / "runs").iterdir()]
+            assert len(stores) == 1, ("run stores", stores)
+            runtime = stores[0] / "runtime"
+            sequences = [int(json.loads(line)["sequence"]) for line in (runtime / "events.ndjson").read_bytes().splitlines()]
+            local = [frozen.parse_json(line) for line in (runtime / "flow.ndjson").read_bytes().splitlines()]
+            schemas = [line["schema"] for line in local]
+            assert sequences and restricted & set(schemas), ("the mixed run log has no event or no restricted record", schemas)
+            before = database_rows()
+
+            # Case 1. An observe-only credential receives exactly the event
+            # records, each naming a line of the event log in order.
+            public, public_end, _ = walk(run, observer)
+            (work / "routes-observer.json").write_text(json.dumps(public, indent=1, ensure_ascii=False, default=str))
+            assert all(record["class"] == "public" and record["schema"] == "event" for record in public), "observer received a non-public record"
+            assert [record["event"]["sequence"] for record in public] == sequences, ("event records differ from the event log", len(public), len(sequences))
+            assert [record["position"] for record in public] == [i for i, name in enumerate(schemas) if name == "event"]
+            assert number(public_end) == len(local), ("observer cursor end", public_end, len(local))
+            print(f"PASS routes case 1: the observe-only credential received the {len(public)} event records, which name",
+                  "the lines of the event log of the run in order", flush=True)
+
+            # Case 2. A control credential of the same profile also receives
+            # the actor records, and no credential receives a restricted one.
+            served, served_end, batches = walk(run, authorized)
+            (work / "routes-control.json").write_text(json.dumps(served, indent=1, ensure_ascii=False, default=str))
+            expected = [i for i, name in enumerate(schemas) if name not in restricted]
+            assert [record["position"] for record in served] == expected, "control credential records differ from the local run log"
+            for record in served:
+                line = local[int(record["position"])]
+                assert record["class"] == ("public" if record["schema"] == "event" else "actor")
+                for field in ("schema", "from", "to", "about", "at"):
+                    assert record[field] == line[field], ("record field differs from the run log", record["position"], field)
+                assert record["replyTo"] == line.get("replyTo"), ("record replyTo differs from the run log", record["position"])
+                content = line["body"]
+                if "inline" in content:
+                    assert record["body"] == content["inline"] and "claim" not in record, ("inline body", record["position"])
+                elif "claim" in content:
+                    assert record["claim"] == content["claim"] and "body" not in record, ("claim check", record["position"])
+                else:
+                    assert record["event"] == {"sequence": content["event"]}, ("event number", record["position"])
+            for name in ("start", "question", "answer", "control"):
+                assert name in {record["schema"] for record in served}, ("control credential missed a record schema", name)
+            assert not restricted & {record["schema"] for record in served + public}, "a restricted record was served"
+            assert number(served_end) == number(public_end) == len(local)
+            print(f"PASS routes case 2: the control credential received {len(served)} public and actor records in {batches}",
+                  f"batches, including start, question, answer and control, and no credential received one of the",
+                  f"{len(local) - len(expected)} restricted records", flush=True)
+
+            # Case 3. The route predicate filters.
+            questions, _, _ = walk(run, authorized, "schema=question")
+            assert questions and questions == [record for record in served if record["schema"] == "question"], "route schema=question"
+            workflow_events, _, _ = walk(run, observer, "schema=event,from=workflow:" + local[0]["about"]["nativeRun"])
+            assert workflow_events == public, "route schema=event,from=workflow"
+            hidden, _, _ = walk(run, observer, "schema=question")
+            assert hidden == [], "the route predicate exposed an actor record to the observer"
+            status, problem, _ = batch(run, authorized, route="unknown=1")
+            assert status == 400 and problem["code"] == "malformed-request", ("malformed route", status, problem.get("code"))
+            print(f"PASS routes case 3: schema=question selected the {len(questions)} question records, a sender term kept",
+                  "every event record, the observer received no question, and an unknown field refused", flush=True)
+
+            # Case 4. Paging through after returns every record once.
+            for index, record in enumerate(served):
+                status, value, raw = batch(run, authorized, record["id"])
+                assert status == 200, ("resume", status, value.get("code"))
+                validate("RouteBatch", value, raw)
+                following = served[index + 1:index + 1 + len(value["records"])]
+                assert value["records"] == following, ("resume from a record id", record["id"])
+            status, value, _ = batch(run, authorized, served_end)
+            assert status == 200 and value["records"] == [] and not value["hasMore"] and value["cursor"] == served_end
+            status, problem, _ = batch(run, authorized, served[0]["id"], extra={"Last-Event-ID": served[0]["id"]})
+            assert status == 400 and problem["code"] == "malformed-request", ("after with Last-Event-ID", status)
+            status, value, _ = request(f"/v1/runs/{run}/routes", authorized | json_accept | {"Last-Event-ID": served[0]["id"]})
+            assert status == 200 and value["records"][0] == served[1], "Last-Event-ID resume"
+            print(f"PASS routes case 4: resuming after each of the {len(served)} record ids returned the following records",
+                  "exactly once, the end cursor returned an empty final batch, and Last-Event-ID resumes", flush=True)
+
+            # Case 5. A wrong-alias or future cursor returns 410.
+            wrong = "route_" + "0" * 64 + ".1"
+            status, problem, _ = batch(run, authorized, wrong)
+            assert status == 410 and problem["code"] == "view-expired", ("wrong alias", status, problem.get("code"))
+            status, problem, _ = batch(run, authorized, public_end)
+            assert status == 410 and problem["code"] == "view-expired", ("another credential's alias", status, problem.get("code"))
+            future = alias(served_end) + "." + str(number(served_end) + 1)
+            status, problem, _ = batch(run, authorized, future)
+            assert status == 410 and problem["code"] == "cursor-expired", ("future cursor", status, problem.get("code"))
+            status, problem, _ = request(f"/v1/runs/{run}/routes", authorized | {"Accept": "text/event-stream"})
+            assert status == 409 and problem["code"] == "unsupported-operation", ("route SSE", status, problem.get("code"))
+            print("PASS routes case 5: a wrong alias and the alias of another credential returned 410 view-expired, a",
+                  "future cursor returned 410 cursor-expired, and text/event-stream returned 409", flush=True)
+
+            # Case 6. Route reads write nothing to the database.
+            after = database_rows()
+            changed = [table for table in sorted(set(before) | set(after)) if before.get(table) != after.get(table)]
+            assert not changed, ("route reads changed the database", changed)
+            print(f"PASS routes case 6: the {len(before)} tables of the database are unchanged across the route reads", flush=True)
+        finally:
+            if process.poll() is None:
+                process.terminate()
+            process.wait(timeout=25)
+    print("PASS routes: every run-route case held against the running TLS 1.3 manager", flush=True)
+
+
+if routes_mode:
+    route_checks()
+    raise SystemExit(0)
 
 
 if events_mode:

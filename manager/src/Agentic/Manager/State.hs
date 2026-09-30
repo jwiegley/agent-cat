@@ -4,7 +4,7 @@
 module Agentic.Manager.State
   ( RunAssociation (..), ingestAcceptedStart, ingestRuntimeEnvelope, restoreRunProjection, observeRetainedTerminal,
     submitRunControl, submitDecisionControl, dispatchRunControl, dispatchDecisionControl, replayControl,
-    resolveRun, resolveDecision, readControlSurface, readClosedControlSurface, readDecision, readDecisionHeads,
+    resolveRun, resolveRunIn, resolveDecision, readControlSurface, readClosedControlSurface, readDecision, readDecisionHeads,
     decisionHeadIds, decisionQueueIds,
     withControlSurface, withClosedControlSurface, withDecision, decisionInView,
     authorizeObservation, requireProjection, withProfileProjection, withProfileProjectionSource,
@@ -42,6 +42,9 @@ data RunAssociation = RunAssociation
   { associationRun :: !Text, associationProfile :: !Text,
     associationRoot :: !Text, associationNative :: !RunId
   } deriving (Eq, Show)
+
+instance NFData RunAssociation where
+  rnf (RunAssociation run profile root native) = rnf (run,profile,root,runIdText native)
 
 -- | The original Worker retains its head until this durable callback returns.
 -- Exceptions, including StoreBusy, retain the exact input for explicit retry.
@@ -593,16 +596,21 @@ dispatchDecisionControl accepted proof decision = submitControl True accepted pr
 resolveRun :: CoordinationStore -> CredentialProof -> [Command.Scope] -> Text -> IO RunAssociation
 resolveRun store proof scopes ident = do
   unless (Command.validId ident) (throwIO Command.InvalidRequest)
-  (profile,root,native) <- runRead store $ do
-    _ <- currentClient proof >>= either refuseTransaction pure
-    rows <- query "SELECT profile_id,root_identity,native_run_id FROM runs WHERE id=?" [text ident]
-    case rows of
-      [[SQL.SQLText profile,SQL.SQLText root,SQL.SQLText native]] -> do
-        _ <- authorizeProfile proof profile scopes >>= either refuseTransaction pure
-        pure (profile,root,native)
-      _ -> refuseTransaction Command.Forbidden
-  nativeId <- either (const (throwIO StoreIntegrity)) pure (mkRunId native)
-  pure (RunAssociation ident profile root nativeId)
+  runRead store (resolveRunIn proof scopes ident)
+
+-- | 'resolveRun' in the caller's read transaction, so that the caller can
+-- read other facts at the same boundary.
+resolveRunIn :: CredentialProof -> [Command.Scope] -> Text -> Transaction RunAssociation
+resolveRunIn proof scopes ident = do
+  unless (Command.validId ident) (refuseTransaction Command.InvalidRequest)
+  _ <- currentClient proof >>= either refuseTransaction pure
+  rows <- query "SELECT profile_id,root_identity,native_run_id FROM runs WHERE id=?" [text ident]
+  case rows of
+    [[SQL.SQLText profile,SQL.SQLText root,SQL.SQLText native]] -> do
+      _ <- authorizeProfile proof profile scopes >>= either refuseTransaction pure
+      nativeId <- either (const (refuseTransaction StoreIntegrity)) pure (mkRunId native)
+      pure (RunAssociation ident profile root nativeId)
+    _ -> refuseTransaction Command.Forbidden
 
 resolveDecision :: CoordinationStore -> CredentialProof -> [Command.Scope] -> Text -> IO RunAssociation
 resolveDecision store proof scopes ident = do

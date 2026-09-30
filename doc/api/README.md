@@ -61,6 +61,7 @@ limits apply before unbounded allocation and are not character counts.
 | Verified artifact content | 67108864 bytes, with at most two downloads in progress for each manager. A third download waits up to five seconds for a download to end and then refuses with `storage-quota`. A download that lasts longer than 300 seconds stops at its next write, and the client receives a truncated body. |
 | Complete SSE block | 16384 bytes. |
 | JSON page | 1048576 bytes. |
+| Run route batch | 1048576 encoded bytes. A batch reads windows of at most 64 records and scans at most 1024 records. |
 | Materialized page set | 67108864 bytes, two active sets per client, expiring after 60 seconds. For `/requests` and `/runs`, the byte bound applies to each window of 1024 members. |
 | Live collection | 1024 items in each list of `/snapshot` and in `/decisions`. A larger list receives 413 `view-too-large`. |
 | Queue | 100 queued requests. Drafts have a separately enforced, advertised positive bound. |
@@ -226,6 +227,17 @@ facts of each operation after approval. A run identifier that names no run,
 or a run of a profile that the credential cannot observe, receives 403
 `insufficient-scope`. An unknown export receives 404 `unavailable-resource`,
 and an export of such a profile receives 403 `insufficient-scope`.
+`/runs/{id}/routes` serves the run log `flow.ndjson` of the run store of a
+managed run. It requires `observe` on the profile of the run, and a run
+identifier that names no managed run, or a run of a profile that the
+credential cannot observe, receives 403 `insufficient-scope`. The route class
+of each record decides whether the credential receives it. A credential with
+`observe` receives public records, which are the `event` records. A
+credential that also holds `control` on the profile receives the actor
+records as well. The restricted records, `engine-result` and `failure`, are
+never served. Only `Accept: application/json` is served, and any other
+`Accept` value receives 409 `unsupported-operation`. A route read writes
+nothing to the coordination database.
 
 | Resource | Methods | Served | Mutation scopes and guard |
 |---|---|---|---|
@@ -251,6 +263,7 @@ and an export of such a profile receives 403 `insufficient-scope`.
 | `/runs/{id}/lineage-requests` | GET, POST | GET | `observe` and `submit`, current collection ETag, eligible parent, compatible trusted invocation, and no conflicting ownership or quarantine. |
 | `/snapshot` | GET | GET | No mutation. Provides a consistent authorized overview and replay cursor. |
 | `/events` | GET | GET | No mutation. SSE and bounded JSON use the same durable cursor and retention rules. |
+| `/runs/{id}/routes` | GET | GET | No mutation. Serves bounded JSON batches of the run log of the run by route class. `observe` gives public records, and `observe` with `control` also gives actor records. |
 
 OPTIONS preflight is the sole unauthenticated HTTP operation. After the
 [transport checks](#transport-boundary), it checks only an exact allowlisted
@@ -398,6 +411,34 @@ after the restart with its last complete event identifier. Offline backup
 restoration rotates the stream and revokes every restored credential. A
 cursor taken before the restoration then receives 410 `view-expired`, even
 with a new credential, and the client takes a new snapshot.
+
+A run route batch is `{"version":1,"cursor","oldestCursor","records","hasMore"}`.
+Each record is the JSON form of the local flow reader, as `agentic-run flow`
+prints it: `position`, `schema`, `from`, `to`, `about`, `replyTo`, `at` and
+the body, with the fields `id` and `class` added. An inline body is `body`, a
+claim check is `claim` with its digest and size and without its content, and
+an `event` record is `event` with the sequence number of its line of the run
+event log. A route cursor is an alias, a dot and the position of the next
+record to read. The alias is `route_` and the SHA-256 of the public stream
+identity of the credential and the public run identifier, so it changes when
+the `streamId` of the credential changes. The record at position p has the
+identifier with position p+1, so a client resumes after a record by supplying
+its identifier. A request without a cursor starts at the first record. The
+cursor comes from the query parameter `after` or from `Last-Event-ID`, and a
+request that supplies both receives 400 `malformed-request`. The query
+parameter `route` takes comma-separated `field=value` terms, as the
+`--route` option of `agentic-run flow` does, and a batch serves only the
+records that match every term. A route term with an unknown field receives
+400 `malformed-request`. The cursor of a batch advances over every record that
+the batch scanned, including the records that the route class or the route
+omits, so record identifiers have gaps. A batch serves at least one record
+when a served record follows within its scan bound of 1024 records. A batch
+whose scanned records are all omitted serves no record, advances its cursor
+and sets `hasMore`. A cursor with another alias receives 410 `view-expired`.
+A cursor whose position lies after the last complete record receives 410
+`cursor-expired`. The floor of a run log is position 0, so `oldestCursor`
+always names position 0. Authorization is checked on every batch and again
+before each write of the response.
 
 Refreshes are serialized per resource. An invalidation received during a
 refresh sets a dirty flag, and the resource is fetched again afterward. A

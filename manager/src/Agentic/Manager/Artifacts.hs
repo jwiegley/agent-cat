@@ -3,7 +3,7 @@
 
 -- | Authorized observations and exclusive exports of retained Runtime artifacts.
 module Agentic.Manager.Artifacts
-  ( withArtifactDownload, withArtifactDownloadWithin, withRunOutputs, withRunOutputsSource, withRunExports, withRunExportsSource, submitExport, readExport, withExport, reconcileExport
+  ( withArtifactDownload, withArtifactDownloadWithin, withRunOutputs, withRunOutputsSource, withRunExports, withRunExportsSource, submitExport, readExport, withExport, reconcileExport, withRunRoot
   ) where
 
 import Agentic.Manager.Authorization
@@ -72,6 +72,9 @@ binding store proof ident = runRead store $ do
       ArtifactBinding association ident <$> valueOf code <*> valueOf reference
     _ -> refuseTransaction Command.ResourceUnavailable
 
+-- | Open the run root of the manager root for the association, check that
+-- its identity is the recorded one, and check both roots again after the
+-- action.
 withRunRoot :: PrivateRoot -> RunAssociation -> (PrivateRoot -> IO a) -> IO a
 withRunRoot root association action = bracket (openPrivateSubroot root ["runs"]) closePrivateRoot $ \runs -> do
   unless (T.pack (privateRootIdentity runs) == associationRoot association) (throwIO StoreIntegrity)

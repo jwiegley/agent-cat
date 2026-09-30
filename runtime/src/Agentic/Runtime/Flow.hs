@@ -157,6 +157,7 @@ module Agentic.Runtime.Flow
     FlowWindowRefusal (..),
     readFlowWindow,
     flowWindowBody,
+    flowWindowEntryFields,
     flowSealedSegments,
     flowRouteMatches,
     actorName,
@@ -2107,17 +2108,39 @@ flowEntryValue entry =
       <> ["problems" .= entryProblems entry]
   where
     fields record =
-      [ "schema" .= schemaName (recSchema record),
-        "from" .= actorValue (recFrom record),
-        "to" .= addressValue (recTo record),
-        "about" .= aboutValue (recAbout record),
-        "replyTo" .= fmap positionIndex (recReplyTo record),
-        "at" .= recAt record
-      ]
+      recordFields record
         <> case recBody record of
           Inline value -> ["body" .= value]
           ClaimCheck digest size -> ["claim" .= object ["sha256" .= digest, "bytes" .= size], "body" .= entryContent entry]
           EventNumber (SeqNo number) -> ["event" .= object ["sequence" .= number, "line" .= entryEvent entry]]
+
+-- | One window entry as the fields of the JSON object of the reader: its
+-- position, the fields of its record and its body. An inline body is
+-- @body@, a claim check is @claim@ with its digest and size, and an event
+-- record is @event@ with its sequence number. The window never opens a
+-- claim-check file or the event log, so these fields carry no verified claim
+-- value and no joined event line.
+flowWindowEntryFields :: FlowWindowEntry -> [(Key, Value)]
+flowWindowEntryFields entry =
+  ["position" .= positionIndex (windowPosition entry)]
+    <> recordFields record
+    <> case recBody record of
+      Inline value -> ["body" .= value]
+      ClaimCheck digest size -> ["claim" .= object ["sha256" .= digest, "bytes" .= size]]
+      EventNumber (SeqNo number) -> ["event" .= object ["sequence" .= number]]
+  where
+    record = windowRecord entry
+
+-- The fields that every record carries in the JSON object of the reader.
+recordFields :: Record -> [(Key, Value)]
+recordFields record =
+  [ "schema" .= schemaName (recSchema record),
+    "from" .= actorValue (recFrom record),
+    "to" .= addressValue (recTo record),
+    "about" .= aboutValue (recAbout record),
+    "replyTo" .= fmap positionIndex (recReplyTo record),
+    "at" .= recAt record
+  ]
 
 -- | The summary object of the reader: the number of records, the verification
 -- result and its failures, the torn final line, the stop and the states.

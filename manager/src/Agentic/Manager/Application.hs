@@ -11,6 +11,7 @@ import qualified Agentic.Manager.Drafts as Drafts
 import qualified Agentic.Manager.Events as Events
 import qualified Agentic.Manager.Observation as Observation
 import qualified Agentic.Manager.Pages as Pages
+import qualified Agentic.Manager.Routes as Routes
 import Agentic.Manager.Profile (ConfigurationLimits (..), publicId, discoveryPublicWorkflows)
 import Agentic.Manager.Schema (schemaVersion)
 import qualified Agentic.Runtime as Runtime
@@ -67,7 +68,7 @@ methods path = case path of
     | C.validId ident && kind `elem` ["commands", "artifacts", "workflows", "runs", "exports"] -> ["GET"]
   ["v1", "runs", ident, "control"] | C.validId ident -> ["GET", "POST"]
   ["v1", "runs", ident, leaf]
-    | C.validId ident && leaf `elem` runPages -> ["GET"]
+    | C.validId ident && leaf `elem` ("routes" : runPages) -> ["GET"]
   _ -> []
 
 dispatch :: Service.Service -> Pages.PageSets -> Events.StreamReaders -> Transport.AuthenticatedApplication
@@ -78,7 +79,7 @@ dispatch service pages streams proof request respond = do
   (selector, token) <- if workflowList then selectorParameters "profileId" True request
     else if decisionList then selectorParameters "runId" False request else do
       pageToken <- if paged then pageParameter request else
-        if eventRequest then pure Nothing else noQuery request >> pure Nothing
+        if eventRequest || routeRequest then pure Nothing else noQuery request >> pure Nothing
       pure (Nothing,pageToken)
   case (Wai.requestMethod request, Wai.pathInfo request) of
     ("GET", ["v1", "capabilities"]) ->
@@ -132,6 +133,12 @@ dispatch service pages streams proof request respond = do
                     _ -> throwIO C.StorageUnavailable
                   batch _ _ = throwIO C.StorageUnavailable
               pump batch (\view -> send view ": heartbeat\n\n")
+        _ -> throwIO C.UnsupportedOperation
+    ("GET", ["v1", "runs", ident, "routes"]) -> do
+      (after, route) <- routeParameters request
+      case lookup "Accept" (Wai.requestHeaders request) of
+        Just "application/json" -> Routes.withRouteBatch store proof ident after route $ \view value ->
+          json view HTTP.status200 [] value respond
         _ -> throwIO C.UnsupportedOperation
     ("GET", ["v1", "requests"]) -> collection token Service.Requests
     ("GET", ["v1", "runs"]) -> collection token Service.Runs
@@ -224,6 +231,9 @@ dispatch service pages streams proof request respond = do
   where
     store = Service.serviceStore service
     eventRequest = Wai.pathInfo request == ["v1", "events"]
+    routeRequest = case Wai.pathInfo request of
+      ["v1", "runs", _, "routes"] -> True
+      _ -> False
     workflowList = Wai.pathInfo request == ["v1", "workflows"]
     decisionList = Wai.requestMethod request == "GET" && Wai.pathInfo request == ["v1", "decisions"]
     paged = Wai.requestMethod request == "GET" && case Wai.pathInfo request of
@@ -384,14 +394,40 @@ pageParameter request = case Wai.queryString request of
 -- The two cursor channels cannot be supplied together, even with equal values.
 eventParameter :: Wai.Request -> IO Text
 eventParameter request = case (Wai.queryString request, lookup "Last-Event-ID" (Wai.requestHeaders request)) of
-  ([("after", Just bytes)], Nothing) | Wai.rawQueryString request == "?after=" <> bytes -> decode bytes
-  ([], Just bytes) -> noQuery request >> decode bytes
+  ([("after", Just bytes)], Nothing) | Wai.rawQueryString request == "?after=" <> bytes -> cursorText bytes
+  ([], Just bytes) -> noQuery request >> cursorText bytes
   _ -> throwIO C.InvalidRequest
-  where
-    decode bytes = do
-      unless (BS.length bytes <= 149 && BS.all (\byte -> byte == 46 || urlSafe byte) bytes)
-        (throwIO C.InvalidRequest)
-      either (const (throwIO C.InvalidRequest)) pure (TE.decodeUtf8' bytes)
+
+-- | The optional cursor and route predicate of a run route. The cursor comes
+-- from the query parameter @after@ or the @Last-Event-ID@ header, with the
+-- character rules of an event cursor, and never from both. The predicate is
+-- the query parameter @route@, at most 1024 bytes of UTF-8 in the syntax of
+-- 'Runtime.parseFlowRoute'. Each parameter appears at most once, and no
+-- other parameter is accepted.
+routeParameters :: Wai.Request -> IO (Maybe Text, Maybe Runtime.FlowRoute)
+routeParameters request = do
+  let parameters = Wai.queryString request
+      keys = map fst parameters
+  unless (all (`elem` ["after", "route"]) keys && length (nub keys) == length keys) (throwIO C.InvalidRequest)
+  after <- case (lookup "after" parameters, lookup "Last-Event-ID" (Wai.requestHeaders request)) of
+    (Nothing, Nothing) -> pure Nothing
+    (Just (Just bytes), Nothing) -> Just <$> cursorText bytes
+    (Nothing, Just bytes) -> Just <$> cursorText bytes
+    _ -> throwIO C.InvalidRequest
+  route <- case lookup "route" parameters of
+    Nothing -> pure Nothing
+    Just (Just bytes) | not (BS.null bytes) && BS.length bytes <= 1024 -> do
+      text <- either (const (throwIO C.InvalidRequest)) pure (TE.decodeUtf8' bytes)
+      either (const (throwIO C.InvalidRequest)) (pure . Just) (Runtime.parseFlowRoute text)
+    _ -> throwIO C.InvalidRequest
+  pure (after, route)
+
+-- The character rules of a supplied cursor.
+cursorText :: BS.ByteString -> IO Text
+cursorText bytes = do
+  unless (not (BS.null bytes) && BS.length bytes <= 149 && BS.all (\byte -> byte == 46 || urlSafe byte) bytes)
+    (throwIO C.InvalidRequest)
+  either (const (throwIO C.InvalidRequest)) pure (TE.decodeUtf8' bytes)
 
 urlSafe :: Word8 -> Bool
 urlSafe byte = (byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122)

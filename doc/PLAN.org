@@ -4084,6 +4084,33 @@ Non-blocking findings of the fess audit of Phase B part 2 subtask C8 (positioned
 
 3. (low) manager/STORAGE.md:578. The storage reader paragraph describes readManagerLog but not readManagerWindow. Fix: add one sentence that names readManagerWindow and the floor it reports, or accept the link to BROKER.md.
 
+* TODO [#D] Resolve C9 fess findings on the run-log route
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-c9-run-route-fess-findings-uxfj
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-30 Wed 13:37]
+:MODIFIED: [2026-09-30 Wed 13:37]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of the fess audit of Phase B part 2 subtask C9 (the run-log route GET /v1/runs/{id}/routes in JSON). Source:
+/Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/fess/b2-C9-r1.md.
+
+1. (low) manager/src/Agentic/Manager/Routes.hs:141, doc/api/README.md:64, doc/api/openapi.yaml:5552. collect always accepts the first served record, and no final size check follows, unlike the ViewTooLarge guard of Events.hs readBatch. A run-log line can be as large as maxFrameBytes (1048576), and the served form adds id, class, position and the batch wrapper, so one batch can exceed the documented bound. Fix: refuse an oversized batch with view-too-large (openapi already lists 413 for the path), or document that one record at the maximum frame size can exceed the page bound.
+
+2. (low) manager/src/Agentic/Manager/Routes.hs:119-120. A missing flow.ndjson at position 0 gives an empty batch, and above 0 it gives cursor-expired. The same does-not-exist branch also covers a missing runs/<native> directory, where StoreIntegrity is more accurate. No check runs this branch. Fix: check that the run directory exists before the empty-log case, or narrow the branch to a missing log file. Add a test for a run with no run log.
+
+3. (low) manager/test/service_http.py route_checks, Routes.hs:96,128,141. The mixed run has 43 records, so every walk fits in one batch. The byte-budget cut, the 16-window gap scan and a walk across several batches have no test. Fix: add a fixture run with more than 64 records and a filter that leaves long gaps, or one very large inline record.
+
+4. (low) resume-20260923/B2/C9/impl-r1/02-routes-N8.log is a copy of routes-try4.log, not a run after the listed build. The try4 run tested the final sources, and the audit rerun passed. Fix: run each listed check in order and write its log directly.
+
+5. (low) manager/src/Agentic/Manager/Application.hs:407-421. routeParameters applies the character rules of an event cursor to the percent-decoded value, but not the raw canonical-query check of eventParameter, so percent-encoded cursor bytes are accepted. Fix: check the raw query bytes of after for parity with /v1/events, or record this as accepted.
+
 * TODO [#E] Record that the Cabal 3.16.1.0 expectation means cabal-install
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -4717,7 +4744,7 @@ Deliberately not a constructor; castGrade covers =. The <= case is a structural 
 :LABELS:   ["actor-flow","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-26 Sat 23:41]
-:MODIFIED: [2026-09-30 Wed 13:11]
+:MODIFIED: [2026-09-30 Wed 13:37]
 :CREATED_BY: johnw
 :SOURCE_REPO: .
 :ORIGINAL_SIZE: 0
@@ -4772,6 +4799,13 @@ Actor-flow increment 2, service subscription (4 to 6 engineering days, inside WM
     "author": "johnw",
     "text": "Phase B part 2 subtask C8: the bounded, positioned window reader for the route resource landed. runtime Flow.readFlowWindow reads only the prefix measured at open in 64 KiB pieces, skips lines before the requested position by counting newlines without decoding, decodes at most 64 records or 1 MiB with decodeFlowLine, never decodes a torn tail and never opens a claim-check file (flowWindowBody summarizes it as omitted/sha256/bytes). It reports windowNext and windowMore, and refuses a position below the base (BelowFloor) and past the end (Ahead) distinctly. manager Flow.readManagerWindow selects the sealed segment or the active file by position, continues across segments with the remaining limits and reports the floor. Evidence: Werror build of runtime-contract-test, manager-command-check, agentic-run and routing-fixed-point-probe with -ftui-tests; runtime-contract-test at -N8; manager-command-check flow at -N8; doc/check-manual-members.py; the Phase A journey at N8 (logs in resume-20260923/B2/C8/impl-r1; fess b2-C8-r1 non-blocking, findings filed as acat-c8-flow-window-fess-findings-ii69). Deferred under the functionality-first direction: the sparse offset index, per-request extension budget and file slot per read from threat-model section 7, and all hostile-input negatives. Not closed.",
     "created_at": "2026-09-30T20:11:38Z"
+  },
+  {
+    "id": 413,
+    "issue_id": "acat-en4g",
+    "author": "johnw",
+    "text": "Phase B part 2 subtask C9 serves the run-log route GET /v1/runs/{id}/routes as JSON batches (manager Agentic.Manager.Routes). Records of the run's flow.ndjson are read with the C8 window reader and filtered by route class: observe gives public records, observe with control adds actor records, restricted records are never served. Cursors are <alias>.<n> with alias route_ sha256(1, publicStreamId, run:<id>); a wrong alias is 410 view-expired, a future position 410 cursor-expired. The route parameter filters. No SQLite write. openapi adds one path and the RouteBatch and RouteRecord schemas only, Capabilities byte-identical. Evidence: resume-20260923/B2/C9/impl-r1 (Werror build, service_http.py routes at N8, make -C doc check, additive openapi comparison, check-manual-members, Phase A journey at N8, all exit 0); fess b2-C9-r1 non-blocking, follow-ups acat-c9-run-route-fess-findings-uxfj. Deferred under the functionality-first direction: cursor binding to the authorization revision, projection, revocation and the negative matrix. SSE (C11) and GET /v1/routes remain. Package stays open.",
+    "created_at": "2026-09-30T20:37:37Z"
   }
 ]
 #+end_src
@@ -16083,7 +16117,7 @@ leak private errors. There is no plaintext bearer development exception.
 :LABELS:   ["p5","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-30 Wed 13:11]
+:MODIFIED: [2026-09-30 Wed 13:37]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-025
 :SOURCE_REPO: agent-cat
@@ -16278,6 +16312,13 @@ through the actual HTTP response path.
     "author": "johnw",
     "text": "Phase B part 2 subtask C8 adds the positioned window reader for flow logs (runtime Flow.readFlowWindow, manager Flow.readManagerWindow across sealed segments with the floor), the storage primitive for the route resource of acat-en4g. Evidence: resume-20260923/B2/C8/impl-r1 (all five checks exit 0); fess b2-C8-r1 non-blocking, follow-ups acat-c8-flow-window-fess-findings-ii69. Package stays open.",
     "created_at": "2026-09-30T20:11:38Z"
+  },
+  {
+    "id": 414,
+    "issue_id": "acat-wm-025-3utw",
+    "author": "johnw",
+    "text": "C9 adds GET /v1/runs/{id}/routes (run-log route resource in JSON, cursor paging, route-class filter) under increment 2 (acat-en4g). Evidence: resume-20260923/B2/C9/impl-r1; fess b2-C9-r1 non-blocking (acat-c9-run-route-fess-findings-uxfj). Not closed.",
+    "created_at": "2026-09-30T20:37:37Z"
   }
 ]
 #+end_src

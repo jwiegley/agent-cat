@@ -305,6 +305,14 @@ newline is never decoded. The reader never opens a claim-check file.
 `flowWindowBody` gives the body of each entry: an inline value as it is, a
 claim check as `{"omitted":"claim","sha256":...,"bytes":...}` with the digest
 and the size that the record names, and nothing for an event record.
+`flowWindowEntryFields` gives the fields of one entry in the JSON form of the
+local reader: its position, the fields of its record, and an inline body as
+`body`, a claim check as `claim` with its digest and size, or an event record
+as `event` with its sequence number. It carries no verified claim value and
+no joined event line. The manager serves windows of a run log in this form
+through `GET /v1/runs/{id}/routes`, as the
+[protocol document](../doc/api/README.md) states. The broker does not take
+part in that read.
 
 A `FlowWindow` holds the entries with their positions, the position after the
 last returned record in `windowNext`, whether the file holds a complete record

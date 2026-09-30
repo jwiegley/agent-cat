@@ -1,0 +1,71 @@
+{
+  "version": 1,
+  "cursor": "route_3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f.4",
+  "oldestCursor": "route_3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f.0",
+  "records": [
+    {
+      "id": "route_3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f.1",
+      "class": "actor",
+      "position": 0,
+      "schema": "start",
+      "from": {
+        "principal": "credential",
+        "client": "client_1",
+        "credentialId": "credential_1"
+      },
+      "to": {
+        "to": {
+          "workflow": "run_20260930_native"
+        }
+      },
+      "about": {
+        "nativeRun": "run_20260930_native"
+      },
+      "replyTo": null,
+      "at": "2026-09-30T12:00:00.123456Z",
+      "body": {
+        "workflow": "mixed-controls"
+      }
+    },
+    {
+      "id": "route_3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f.2",
+      "class": "public",
+      "position": 1,
+      "schema": "event",
+      "from": {
+        "workflow": "run_20260930_native"
+      },
+      "to": "public",
+      "about": {
+        "nativeRun": "run_20260930_native"
+      },
+      "replyTo": null,
+      "at": "2026-09-30T12:00:00.123456Z",
+      "event": {
+        "sequence": 1
+      }
+    },
+    {
+      "id": "route_3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f.4",
+      "class": "actor",
+      "position": 3,
+      "schema": "question",
+      "from": {
+        "workflow": "run_20260930_native"
+      },
+      "to": {
+        "approvers": "profile_1"
+      },
+      "about": {
+        "nativeRun": "run_20260930_native"
+      },
+      "replyTo": null,
+      "at": "2026-09-30T12:00:00.123456Z",
+      "claim": {
+        "sha256": "abababababababababababababababababababababababababababababababab",
+        "bytes": 2048
+      }
+    }
+  ],
+  "hasMore": true
+}

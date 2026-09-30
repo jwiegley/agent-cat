@@ -2,7 +2,7 @@
 
 -- | Authorized projections of the existing durable invalidation stream.
 module Agentic.Manager.Events
-  ( CursorBinding, captureBinding, bindingEpoch, durableStream, publicStreamId, cursorAt, withBatch, withBoundary,
+  ( CursorBinding, captureBinding, bindingEpoch, durableStream, publicStreamId, cursorAt, parseCursor, withBatch, withBoundary,
     StreamReaders, newStreamReaders, closeStreams, StreamPump, withStream ) where
 
 import Agentic.Manager.Authorization
@@ -186,6 +186,8 @@ refuse failure = throwIO $ case failure of
   EventRetentionLost -> CursorExpired
   EventCursorAhead -> CursorExpired
 
+-- | The alias and position of a cursor in canonical form: an identifier, a
+-- dot and a canonical unsigned 64-bit decimal.
 parseCursor :: Text -> Either CommandFailure (Text, Word64)
 parseCursor value = do
   let (prefix, suffix) = T.breakOnEnd "." value

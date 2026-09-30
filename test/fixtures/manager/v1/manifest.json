@@ -2001,6 +2001,24 @@
       "file": "invalid/admin-restore-long-epoch.json",
       "schema": "LocalAdminResponse",
       "valid": false
+    },
+    {
+      "name": "route-batch",
+      "file": "valid/route-batch.json",
+      "schema": "RouteBatch",
+      "valid": true
+    },
+    {
+      "name": "route-batch-restricted",
+      "file": "invalid/route-batch-restricted.json",
+      "schema": "RouteBatch",
+      "valid": false
+    },
+    {
+      "name": "route-cursor-expired",
+      "file": "valid/route-cursor-expired.json",
+      "schema": "Problem",
+      "valid": true
     }
   ],
   "operations": [
@@ -2267,6 +2285,15 @@
       ],
       "success": "event-batch",
       "refusal": "cursor-expired"
+    },
+    {
+      "method": "get",
+      "path": "/runs/{id}/routes",
+      "scopes": [
+        "observe"
+      ],
+      "success": "route-batch",
+      "refusal": "route-cursor-expired"
     }
   ],
   "sse": [

@@ -1891,6 +1891,86 @@ paths:
       x-live-delivery: Every batch checks current credential and authorization view,
         retained floor and cursor within one transaction, even after stream opens.
         Disconnect slow/revoked readers with bounded pending buffers.
+  /runs/{id}/routes:
+    parameters:
+    - name: id
+      in: path
+      required: true
+      schema: *id001
+    get:
+      operationId: get_runs_by_id_routes
+      summary: GET /runs/{id}/routes
+      x-required-scopes:
+      - observe
+      x-profile-authorization: Current credential access to the profile of the run
+        on every batch. Observe on that profile gives public-class records, and observe
+        with control also gives actor-class records.
+      x-lifecycle-precondition: Current authority and profile authorization.
+      security:
+      - bearerAuth: []
+      responses:
+        '200':
+          description: One bounded batch of the run log of the run.
+          headers:
+            Cache-Control:
+              description: Protected data is not cacheable.
+              schema:
+                const: no-store
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RouteBatch'
+        '400':
+          $ref: '#/components/responses/Problem400'
+        '401':
+          $ref: '#/components/responses/Problem401'
+        '403':
+          $ref: '#/components/responses/Problem403'
+        '404':
+          $ref: '#/components/responses/Problem404'
+        '409':
+          $ref: '#/components/responses/Problem409'
+        '410':
+          $ref: '#/components/responses/Problem410'
+        '413':
+          $ref: '#/components/responses/Problem413'
+        '429':
+          $ref: '#/components/responses/Problem429'
+        '503':
+          $ref: '#/components/responses/Problem503'
+      parameters:
+      - name: after
+        in: query
+        required: false
+        schema:
+          $ref: '#/components/schemas/RouteCursor'
+        description: Cursor of a completed route batch or the id of a served record.
+          Missing starts at the first record of the run log. It cannot be supplied
+          together with Last-Event-ID.
+      - name: Last-Event-ID
+        in: header
+        required: false
+        schema:
+          $ref: '#/components/schemas/RouteCursor'
+        description: The same cursor as after, supplied as a header.
+      - name: route
+        in: query
+        required: false
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 1024
+        description: Comma-separated field=value terms that every served record must
+          match. The fields are schema, from, to, request, managerRun, nativeRun, occurrence,
+          epoch, attempt and command.
+      - name: Accept
+        in: header
+        required: true
+        schema:
+          type: string
+          enum:
+          - application/json
 components:
   securitySchemes:
     bearerAuth:
@@ -5356,6 +5436,123 @@ components:
         as oldestCursor. Advance cursor only after complete batch processing. Retention
         loss requires /snapshot, including on an already open stream. Maximum encoded
         batch 1048576 bytes.
+    RouteCursor:
+      $ref: '#/components/schemas/EventCursor'
+      description: Route alias plus the canonical UInt64Decimal position of the next
+        record to read. The alias binds the public stream identity of the credential
+        and the public run identifier. A cursor of another alias receives 410 view-expired,
+        and a position after the last complete record receives 410 cursor-expired.
+    RouteRecord:
+      type: object
+      properties:
+        id:
+          $ref: '#/components/schemas/RouteCursor'
+        class:
+          type: string
+          enum:
+          - public
+          - actor
+        position:
+          type: integer
+          minimum: 0
+        schema:
+          type: string
+          enum:
+          - start
+          - control
+          - question
+          - answer
+          - engine-start
+          - turn
+          - steer
+          - done
+          - event
+          - permission
+        from:
+          oneOf:
+          - const: manager
+            type: string
+          - type: object
+        to:
+          oneOf:
+          - const: public
+            type: string
+          - type: object
+        about:
+          type: object
+        replyTo:
+          type:
+          - integer
+          - 'null'
+          minimum: 0
+        at:
+          type: string
+        body: {}
+        claim:
+          type: object
+          properties:
+            sha256:
+              type: string
+              pattern: ^[0-9a-f]{64}$
+            bytes:
+              type: integer
+              minimum: 0
+          required:
+          - sha256
+          - bytes
+          additionalProperties: false
+        event:
+          type: object
+          properties:
+            sequence:
+              type: integer
+              minimum: 0
+          required:
+          - sequence
+          additionalProperties: false
+      required:
+      - id
+      - class
+      - position
+      - schema
+      - from
+      - to
+      - about
+      - replyTo
+      - at
+      additionalProperties: false
+      description: One run-log record in the JSON form of the local flow reader. The
+        id of the record at position p names position p+1. An inline body is body,
+        a claim check is claim without its content, and an event record is event
+        with the sequence number of its line of the run event log. Restricted records
+        (engine-result and failure) are never served.
+    RouteBatch:
+      type: object
+      properties:
+        version:
+          const: 1
+          type: integer
+        cursor:
+          $ref: '#/components/schemas/RouteCursor'
+        oldestCursor:
+          $ref: '#/components/schemas/RouteCursor'
+        records:
+          type: array
+          items:
+            $ref: '#/components/schemas/RouteRecord'
+        hasMore:
+          type: boolean
+      required:
+      - version
+      - cursor
+      - oldestCursor
+      - records
+      - hasMore
+      additionalProperties: false
+      description: One bounded batch of the run log, at most 1048576 encoded bytes.
+        The cursor advances over every scanned record, including records that the
+        class or the route predicate omits, so record ids have gaps. A batch serves
+        at least one record when a served record follows within its scan bound.
     OverviewItem:
       oneOf:
       - type: object
