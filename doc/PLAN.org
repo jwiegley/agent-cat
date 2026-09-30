@@ -3346,6 +3346,29 @@ manager/README.md or report incompatible-parent.
 8. Low (implementer limitation). Both collections keep the owner limits of 256 items and 1 MiB, so
 they are always single pages. Multi-page behavior has no test.
 
+* TODO [#D] Resolve B13 fess findings in the WM-025 page-set checks
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-b13-fess-en44
+:LABELS:   []
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-30 Wed 04:29]
+:MODIFIED: [2026-09-30 Wed 04:29]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking fess findings from B13 (WM-025 page-set negatives, service_http.py pages mode). Fess report: resume-20260923/fess/b1-B13-r1.md (private evidence directory).
+
+1. (medium) Operator ruling needed on redaction case 8. The check in manager/test/service_http.py removes the exact runtime targetLabel "acp:mixed-adapter" from /v1/runs/{id}/snapshot bodies before scanning for argv markers. If the adapter name counts as argv, redact it at the owner (Observation.hs RunSnapshot and Attempt targetLabel) and remove the exception. Otherwise record the ruling in the comment beside the exception.
+2. (low) The successor 410 check in case 2 cannot fail, because the view facts include the credential ID. Drop the successor assertion and the successor clause in doc/api/README.md, or replace them with a check that can fail.
+3. (low) No test builds a view larger than pageSetBytes (64 MiB). Add a fixture with a lower pageSetBytes limit that exercises the aggregate 413 refusal (Pages.hs setLimit check and the Overview append).
+4. (low) Only an interrupted first-page send is tested. Extend case 6 to reset the connection during a continuation page and check that the set is released (Pages.withPage onException in the continuation branch).
+5. (low) doc/api/README.md says a set counts against the limits until it retires or expires. Pages.hs keeps a retired or expired set charged while a page send of it is in progress. Add that detail.
+6. (low) manager/README.md gained a paragraph on page sets outside the named scope. The Integrator kept it as owner documentation. It matches Pages.hs.
+
 * TODO [#C] Resolve F10 fess findings in the command and receipt records
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -15670,7 +15693,7 @@ leak private errors. There is no plaintext bearer development exception.
 :LABELS:   ["p5","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-30 Wed 04:08]
+:MODIFIED: [2026-09-30 Wed 04:30]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-025
 :SOURCE_REPO: agent-cat
@@ -15823,6 +15846,13 @@ through the actual HTTP response path.
     "author": "johnw",
     "text": "B12 (Phase B part 1): GET /v1/runs/{id}/exports and GET /v1/runs/{id}/lineage-requests are routed through servePage and Pages.withPage with PageToken, and GET /v1/exports/{id} is a plain detail with a representation ETag. Exports use Artifacts.withRunExportsSource and withExport; lineage uses Drafts.withLineageRequestsSource with the frozen refusal codes (quarantined, ownership-unavailable, incompatible-parent). A missing or foreign run gets 403 insufficient-scope. Evidence (stage dir B/B12/impl-r1): Werror build of manager-history-check, agentic-run and routing-fixed-point-probe; service_http.py mixed mode at N8 (both collections schema-valid as empty pages, lineage lists all three operations, other-profile refusal, no private markers); manager-history-check at N8; manager/ci/contract.sh; Phase A journey at N8; make -C doc check; plus the artifact check and artifact contract. Limits: no 200 on /v1/exports/{id} over HTTP until WM-027 routes POST exports; incompatible-parent untested; single pages only. Follow-up findings: acat-b12-fess-fw1z. Package stays open for closeout.",
     "created_at": "2026-09-30T11:08:55Z"
+  },
+  {
+    "id": 387,
+    "issue_id": "acat-wm-025-3utw",
+    "author": "johnw",
+    "text": "B13: manager/test/service_http.py gains a pages mode that proves the report section 7 page verification through the running HTTPS manager at N8: multi-page snapshot and requests reads with exact-byte ETags and a complete union, token binding (other client, other path or query, view change, 60 s expiry) with 410 view-expired, 429 storage-quota for a third set of one client, retained-set isolation from a concurrent mutation, 401 on continuation after revocation, set release after an interrupted first-page send, 413 view-too-large for an oversized item, and redaction of private markers in 40 page bodies. No Haskell fault was found. doc/api/README.md states page reservation, retirement, expiry and binding. Checks passed: Werror build, pages at N8, Phase A journey at N8, make -C doc check (evidence B/B13/impl-r1). Non-blocking fess findings, including an operator ruling on the targetLabel redaction exception, are filed as acat-b13-fess-en44.",
+    "created_at": "2026-09-30T11:30:07Z"
   }
 ]
 #+end_src

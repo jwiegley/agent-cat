@@ -303,13 +303,32 @@ an invented workflow identity, manifest version, or runtime state.
 ## Pages and live delivery
 
 A page set is materialized at one database boundary, then served outside the
-read transaction. Opaque page tokens bind its client, authorization view,
-query, revision, and expiry. Clients assemble a complete page set before
-installing it. Expiry or revocation requires a fresh view. A revoked or
-cut-off credential receives 401 for every later page, and another client that
-presents a page token receives 410 `view-expired`. A first-page ETag is not
-interchangeable with another page's validator. An open SSE response ends when
-its credential is revoked.
+read transaction. The first-page request reserves the set before
+materialization. The set holds one revision, and a mutation that commits
+after that boundary does not change a later page of the set. A fresh set shows
+the mutation. Clients assemble a complete page set before installing it.
+
+Opaque page tokens bind the client, authorization view, path, and query of the
+first-page request. The service compares each continuation with the newly
+authorized request, so token possession grants no authority. A token that
+another client presents, that arrives on another path or with another query,
+or that follows a change of the authorization view receives 410
+`view-expired`. A credential rotation changes the view of both the
+predecessor and the successor. Such a refusal does not retire the set for its
+owner. A revoked or cut-off credential receives 401 for every later page.
+
+A set expires 60 seconds after its reservation. Reads do not extend the
+lifetime, and a later token receives 410 `view-expired`. A set retires when
+its last page has been sent, or when the client closes the connection during a
+page response. An open set counts against the limit of two sets for each
+client and against the global page-set limit until it retires or expires. A
+first page that exceeds either limit receives 429 `storage-quota`. A view with
+one item larger than the page bound, or a view larger than the page-set bound,
+receives 413 `view-too-large` and holds no capacity.
+
+The ETag of each page is a representation tag of the request target and the
+exact page bytes. A first-page ETag is not interchangeable with another page's
+validator. An open SSE response ends when its credential is revoked.
 
 SSE uses UTF-8 and dispatches only complete blocks ending in a blank line.
 The supported event names are `request.changed`, `preparation.changed`,

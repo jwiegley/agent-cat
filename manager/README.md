@@ -82,6 +82,15 @@ run. The service does not use
 `History.withHistory` and binds no legacy retention root, so the run
 collection does not list legacy entries.
 
+`Pages.withPage` reserves a set for the client, authorization view, path and
+query before the owner materializes it, and keeps the encoded pages until the
+last page has been sent, a send fails, or the sixty-second lifetime ends. The
+`pages` mode of `manager/test/service_http.py` checks these facts through the
+running protected manager: every page of multi-page sets and their ETags, token
+binding and expiry, the per-client quota, a mutation between two pages,
+revocation, a connection reset during a page, the 413 bound and the absence of
+private bytes from every page body.
+
 The export and lineage-request collections of one run use their owners.
 `Artifacts.withRunExportsSource` supplies the export receipts, as
 [ARTIFACTS.md](ARTIFACTS.md) describes. `Drafts.withLineageRequestsSource`

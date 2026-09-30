@@ -70,7 +70,7 @@ consent_control = len(sys.argv) == 6 and sys.argv[5] == "tui-consent-control"
 # runs one manager lifetime and does not enter the restart loop.
 LIFECYCLE = "credential-lifecycle"
 lifecycle = len(sys.argv) == 6 and sys.argv[5] == LIFECYCLE
-mixed = len(sys.argv) == 6 and sys.argv[5] in ("mixed", "mixed-confirm", "tui-approval", "tui-consent-control", APPROVE_FAULT, LIFECYCLE) + JOURNEYS
+mixed = len(sys.argv) == 6 and sys.argv[5] in ("mixed", "mixed-confirm", "tui-approval", "tui-consent-control", APPROVE_FAULT, LIFECYCLE, "pages") + JOURNEYS
 confirm_uncertain = mixed and sys.argv[5] == "mixed-confirm"
 # The boundary mode checks WM-024 through the running protected manager with
 # raw socket and ssl connections: plaintext and TLS 1.2 refusal, request
@@ -79,7 +79,15 @@ confirm_uncertain = mixed and sys.argv[5] == "mixed-confirm"
 # manager lifetime and does not enter the restart loop.
 BOUNDARY = "boundary"
 boundary = len(sys.argv) == 6 and sys.argv[5] == BOUNDARY
-assert len(sys.argv) == 5 or mixed or boundary
+# The pages mode checks the WM-025 page and read verification of report
+# section 7 through the running protected manager: multi-page sets and their
+# exact ETags, token binding and expiry, the per-client quota, a concurrent
+# mutation, revocation, an interrupted send, the aggregate bound and
+# redaction. Each numbered case prints its own PASS line. It runs one manager
+# lifetime and does not enter the restart loop.
+PAGES = "pages"
+pages_mode = len(sys.argv) == 6 and sys.argv[5] == PAGES
+assert len(sys.argv) == 5 or mixed or boundary or pages_mode
 assert not tui_approval or os.environ.get("TUI_CHECK")
 assert native in ("1", "8")
 print(f"work={work}", flush=True)
@@ -128,9 +136,15 @@ configuration = {
 # The base and mixed modes also read the frozen request, run and decision
 # collections. A second profile, visible only to a second credential, holds
 # a request that the collections of the first credential must not show.
-collections = len(sys.argv) == 5 or sys.argv[5] in ("mixed", "mixed-confirm")
+collections = len(sys.argv) == 5 or sys.argv[5] in ("mixed", "mixed-confirm", PAGES)
 if collections:
     configuration["profiles"].append(dict(configuration["profiles"][0], id="profile_2", workspaceLabel="HTTPS other fixture"))
+# The pages mode raises the global page-set bound above the per-client bound,
+# so that the per-client refusal is the one under test. The worker
+# environment of its profile holds a marker that no page body may show.
+PAGES_ENVIRONMENT_MARKER = "acatpagesenvironment" + secrets.token_hex(16)
+if pages_mode:
+    configuration["limits"]["globalPageSets"] = 8
 if mixed:
     adapters = work / "adapters"
     adapters.mkdir(mode=0o700)
@@ -140,7 +154,8 @@ if mixed:
     launcher.chmod(0o700)
     configuration["profiles"][0].update(
         targetLabel="Deterministic ACP retry", targetArguments=["--engine", "acp", "--adapter", "mixed-adapter"],
-        environment=[{"name": "PATH", "value": str(adapters)}])
+        environment=[{"name": "PATH", "value": str(adapters)}]
+        + ([{"name": "ACAT_PAGES_MARKER", "value": PAGES_ENVIRONMENT_MARKER}] if pages_mode else []))
 config = work / "configuration.json"
 config.write_text(json.dumps(configuration))
 config.chmod(0o600)
@@ -1626,6 +1641,302 @@ def boundary_checks():
 
 if boundary:
     boundary_checks()
+    raise SystemExit(0)
+
+
+def page_checks():
+    """WM-025 page and read verification through the real HTTPS manager,
+    numbered as in the B13 requirement. Each case prints one PASS line."""
+    authorized = {"Authorization": "Bearer " + bearer}
+    bodies = []
+    big = 900000
+
+    def representation_tag(target, raw):
+        return '"http_' + hashlib.sha256(target.encode() + b"\n" + raw).hexdigest() + '"'
+
+    def page(target, credential, schema):
+        """One page read. A 200 page must be schema-valid and carry the
+        representation tag of its exact bytes. A 503 is a new bounded read."""
+        deadline = time.monotonic() + 5
+        while True:
+            status, value, raw, received = exchange(target, credential)
+            if status != 503 or time.monotonic() >= deadline:
+                break
+            time.sleep(0.05)
+        if status == 200:
+            validate(schema, value, raw)
+            assert received.get("etag") == representation_tag(target, raw), ("page ETag", target, received.get("etag"))
+            bodies.append((target, raw))
+        return status, value
+
+    def refused(target, credential, status, code, what):
+        actual, value = page(target, credential, "Problem")
+        assert actual == status and value.get("code") == code, (what, target, actual, value.get("code"))
+
+    def opened(path, credential, schema):
+        status, value = page(path, credential, schema)
+        assert status == 200, ("first page", path, status, value.get("code"))
+        assert value["page"]["index"] == 0 and value["page"]["next"] is not None, ("multi-page set", path)
+        return value
+
+    def rest(pages, credential, schema, between=None):
+        """Read the remaining pages of an open set. The between callback runs
+        once after the first page. Every page has the set, revision, count and
+        index of its position."""
+        value = pages[-1]
+        while value["page"]["next"] is not None:
+            if between is not None:
+                between()
+                between = None
+            status, value = page(value["page"]["next"], credential, schema)
+            assert status == 200, ("continuation", status, value.get("code"))
+            for key in ("setId", "revision", "expiresAt", "totalItems"):
+                assert value["page"][key] == pages[0]["page"][key], ("page set field", key)
+            assert value["page"]["index"] == len(pages), ("page index", value["page"]["index"], len(pages))
+            pages.append(value)
+        return pages
+
+    def whole(path, credential, schema, between=None):
+        status, value = page(path, credential, schema)
+        assert status == 200, ("first page", path, status, value.get("code"))
+        assert value["page"]["index"] == 0
+        return rest([value], credential, schema, between)
+
+    def identities(pages):
+        found = []
+        for value in pages:
+            for item in value["items"]:
+                found.append((item["kind"], item[item["kind"]]["id"]) if "kind" in item and item["kind"] in item else item["id"])
+        return found
+
+    def union(pages):
+        found = identities(pages)
+        assert len(found) == len(set(found)), ("duplicate page items", len(found), len(set(found)))
+        assert len(found) == pages[0]["page"]["totalItems"], ("missing page items", len(found), pages[0]["page"]["totalItems"])
+        return set(found)
+
+    def issue(name, scopes):
+        output = work / ("credential-" + name)
+        value = administration({"version": 1, "operation": "issue-credential", "label": "Pages " + name,
+                                "scopes": scopes, "profileIds": ["profile_1"],
+                                "expiresAt": "2999-01-01T00:00:00Z", "outputFile": str(output)})
+        return value["result"]["credential"], {"Authorization": "Bearer " + output.read_bytes().decode("ascii")}
+
+    def interrupted(target, credential):
+        """Send one page request over a raw TLS connection with a small
+        receive buffer, read the start of the response and reset the
+        connection while the manager is still sending the page."""
+        raw_socket = socket.socket()
+        raw_socket.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4096)
+        raw_socket.settimeout(10)
+        raw_socket.connect(("127.0.0.1", port))
+        connection = context.wrap_socket(raw_socket, server_hostname="127.0.0.1")
+        try:
+            connection.sendall((f"GET {target} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n"
+                                f"Authorization: {credential['Authorization']}\r\n\r\n").encode())
+            start = connection.recv(64)
+            assert start.startswith(b"HTTP/1.1 200"), ("interrupted page status", start[:32])
+            connection.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, (1).to_bytes(4, sys.byteorder) + (0).to_bytes(4, sys.byteorder))
+        finally:
+            connection.close()
+
+    environment = dict(os.environ)
+    with (work / "server-0.stdout").open("wb") as output, (work / "server-0.stderr").open("wb") as errors:
+        process = subprocess.Popen([str(runner), "--manager", "serve", "--config", str(config),
+                                    "+RTS", "-N" + native, "-RTS"], stdout=output, stderr=errors, env=environment)
+        try:
+            wait_ready(process)
+            status, capabilities, raw = request("/v1/capabilities", authorized)
+            assert status == 200 and capabilities["limits"]["pageSetsPerClient"] == 2
+            assert capabilities["limits"]["globalPageSets"] == 8 and capabilities["limits"]["pageSetLifetimeSeconds"] == 60
+            status, catalogue, raw = request("/v1/workflows?profileId=profile_1", authorized)
+            assert status == 200
+            workflow = next(item for item in catalogue["items"] if item["name"] == "mixed-controls")
+            create = json.dumps({"workflowId": workflow["id"], "descriptorRevision": workflow["revision"],
+                                 "profileId": workflow["profileId"], "profileRevision": workflow["profileRevision"]},
+                                separators=(",", ":")).encode()
+
+            def create_request():
+                key = capabilities["authorityEpoch"] + "." + secrets.token_urlsafe(16)
+                status, created, raw = request("/v1/requests", authorized | {
+                    "Content-Type": "application/json", "Idempotency-Key": key}, method="POST", payload=create)
+                assert status == 201, ("request creation", status, created.get("code"))
+                validate("Request", created, raw)
+                return created
+
+            # A terminal run gives the pages a run store, native identifiers
+            # and a worker invocation for case 8.
+            run = run_mixed(create_request(), workflow, capabilities, authorized)
+            client = mixed_client(capabilities, authorized)
+            observed, _, mutate, _ = client
+            name = workflow["inputs"][0]["name"]
+
+            def set_input(draft, value):
+                _, tag, _ = observed(draft["links"]["self"], "Request")
+                mutate(draft["links"]["self"], {"operation": "set-input", "input": {
+                    "name": name, "source": "literal", "value": value}}, tag)
+
+            drafts = []
+            for letter in "abc":
+                draft = create_request()
+                set_input(draft, letter * big)
+                drafts.append(draft)
+            _, e_auth = issue("expiry", ["observe"])
+            credential_v, v_auth = issue("view", ["observe"])
+            credential_r, r_auth = issue("revoked", ["observe"])
+
+            # The set of the expiry credential opens now and is read again
+            # after its sixty-second lifetime.
+            expiry_start = time.monotonic()
+            expiring = opened("/v1/snapshot", e_auth, "OverviewSnapshot")
+            status, second = page(expiring["page"]["next"], e_auth, "OverviewSnapshot")
+            assert status == 200 and second["page"]["next"] is not None, ("expiry set continuation", status)
+            expiring_token = second["page"]["next"]
+
+            # Case 1. Every page of two multi-page sets.
+            snapshot_pages = whole("/v1/snapshot", authorized, "OverviewSnapshot")
+            request_pages = whole("/v1/requests", authorized, "RequestPage")
+            snapshot_union, request_union = union(snapshot_pages), union(request_pages)
+            assert len(snapshot_pages) >= 2 and len(request_pages) >= 2, (len(snapshot_pages), len(request_pages))
+            assert {draft["id"] for draft in drafts} <= request_union
+            assert {("request", draft["id"]) for draft in drafts} <= snapshot_union
+
+            # Case 2. Binding and expiry.
+            bound = opened("/v1/snapshot", authorized, "OverviewSnapshot")
+            continuation = bound["page"]["next"]
+            token = continuation.split("pageToken=", 1)[1]
+            refused(continuation, other_authorized, 410, "view-expired", "another client")
+            for target in ("/v1/requests?pageToken=" + token, f"/v1/runs/{run}/snapshot?pageToken=" + token,
+                           f"/v1/decisions?runId={run}&pageToken=" + token, "/v1/decisions?pageToken=" + token):
+                refused(target, authorized, 410, "view-expired", "another path or query")
+            rest([bound], authorized, "OverviewSnapshot")
+            viewed = opened("/v1/snapshot", v_auth, "OverviewSnapshot")
+            rotated = administration({"version": 1, "operation": "rotate-credential",
+                                      "credentialId": credential_v["credentialId"],
+                                      "expiresAt": "2999-01-01T00:00:00Z", "outputFile": str(work / "credential-view2")})
+            assert rotated["result"]["previousCredentialId"] == credential_v["credentialId"]
+            v2_auth = {"Authorization": "Bearer " + (work / "credential-view2").read_bytes().decode("ascii")}
+            status, _, _ = request("/v1/capabilities", v_auth)
+            assert status == 200, "the rotated predecessor still authenticates during the overlap"
+            refused(viewed["page"]["next"], v_auth, 410, "view-expired", "predecessor after the view change")
+            refused(viewed["page"]["next"], v2_auth, 410, "view-expired", "successor after the view change")
+            remaining = expiry_start + 62 - time.monotonic()
+            if remaining > 0:
+                time.sleep(remaining)
+            refused(expiring_token, e_auth, 410, "view-expired", "token after its lifetime")
+            print("PASS pages case 2: a continuation token returned 410 view-expired for another client, on four other",
+                  "paths or queries, after a credential rotation changed the view (for the predecessor and the successor)",
+                  "and 62 s after its set was reserved; the owner then read the refused set to its end", flush=True)
+
+            # Case 3. The per-client quota, and retirement at the last page.
+            held_snapshot = opened("/v1/snapshot", authorized, "OverviewSnapshot")
+            held_requests = opened("/v1/requests", authorized, "RequestPage")
+            status, value, _, _ = exchange("/v1/snapshot", authorized)
+            assert status == 429 and value["code"] == "storage-quota", ("third page set", status, value.get("code"))
+            validate("Problem", value)
+            rest([held_snapshot], authorized, "OverviewSnapshot")
+            print("PASS pages case 3: with two open sets of one client, a third first page returned 429 storage-quota",
+                  "while the global bound of 8 had room", flush=True)
+
+            # Case 6. An interrupted send releases its set. The client holds
+            # one set, so a released interrupted set leaves room for one more.
+            interrupted("/v1/snapshot", authorized)
+            deadline = time.monotonic() + 5
+            while True:
+                status, value = page("/v1/snapshot", authorized, "OverviewSnapshot")
+                if status == 200 or time.monotonic() >= deadline:
+                    break
+                assert status == 429 and value["code"] == "storage-quota", ("set after interruption", status, value.get("code"))
+                time.sleep(0.05)
+            assert status == 200 and value["page"]["next"] is not None, ("set after interruption", status, value.get("code"))
+            after_interruption = value
+            status, value, _, _ = exchange("/v1/snapshot", authorized)
+            assert status == 429 and value["code"] == "storage-quota", ("quota after interruption", status, value.get("code"))
+            rest([held_requests], authorized, "RequestPage")
+            rest([after_interruption], authorized, "OverviewSnapshot")
+            print("PASS pages case 6: a client reset its connection during a first page; the manager released that set,",
+                  "so the client with one open set was admitted one more and then refused a third with 429; the last",
+                  "pages of both sets then released them", flush=True)
+
+            # Case 4. A mutation between page 1 and page 2.
+            added = []
+            retained = whole("/v1/requests", authorized, "RequestPage", between=lambda: added.append(create_request()))
+            assert union(retained) == request_union, ("retained set items", union(retained) ^ request_union)
+            assert added[0]["id"] not in identities(retained[1:]), "the retained page 2 lists the new request"
+            fresh = whole("/v1/requests", authorized, "RequestPage")
+            assert union(fresh) == request_union | {added[0]["id"]} and fresh[0]["page"]["revision"] != retained[0]["page"]["revision"]
+            print("PASS pages case 4: a request created between page 1 and page 2 was absent from the", len(retained),
+                  "pages of the retained set, which kept its revision and items, and a fresh set listed it", flush=True)
+
+            # Case 5. Revocation.
+            revoked = opened("/v1/snapshot", r_auth, "OverviewSnapshot")
+            administration({"version": 1, "operation": "revoke-credential", "credentialId": credential_r["credentialId"]})
+            refused(revoked["page"]["next"], r_auth, 401, "unauthenticated", "revoked continuation")
+            print("PASS pages case 5: a revoked credential received 401 unauthenticated for the continuation of its open set", flush=True)
+
+            # Case 1, completed. The same identities in one page after the
+            # large literals are removed.
+            for draft in drafts:
+                _, tag, _ = observed(draft["links"]["self"], "Request")
+                mutate(draft["links"]["self"], {"operation": "remove-input", "name": name}, tag)
+            one_snapshot = whole("/v1/snapshot", authorized, "OverviewSnapshot")
+            one_requests = whole("/v1/requests", authorized, "RequestPage")
+            assert len(one_snapshot) == 1 and len(one_requests) == 1
+            assert union(one_snapshot) == snapshot_union | {("request", added[0]["id"])}, "snapshot union differs from one page"
+            assert union(one_requests) == request_union | {added[0]["id"]}, "request union differs from one page"
+            print(f"PASS pages case 1: /v1/snapshot spanned {len(snapshot_pages)} pages and /v1/requests {len(request_pages)};",
+                  "each page ETag equalled the representation tag of its exact bytes, and the union of each set had no",
+                  "duplicate and no missing item against a later one-page read of the same view with smaller items", flush=True)
+
+            # Case 7. One item larger than a page.
+            oversized = create_request()
+            set_input(oversized, "z" * 1100000)
+            for path in ("/v1/requests", "/v1/snapshot"):
+                refused(path, authorized, 413, "view-too-large", "oversized item")
+            for path in ("/v1/runs", f"/v1/runs/{run}/snapshot"):
+                status, value = page(path, authorized, "RunPage" if path == "/v1/runs" else "RunSnapshot")
+                assert status == 200, ("page after the refusals", path, status, value.get("code"))
+            print("PASS pages case 7: a request with one item larger than the page bound made /v1/requests and",
+                  "/v1/snapshot return 413 view-too-large, and the refused sets held no capacity", flush=True)
+
+            # Case 8. Redaction over every page body of this mode.
+            for path, schema in (("/v1/runs", "RunPage"), ("/v1/decisions", "DecisionPage"),
+                                 (f"/v1/decisions?runId={run}", "DecisionPage"), (f"/v1/runs/{run}/snapshot", "RunSnapshot"),
+                                 (f"/v1/runs/{run}/outputs", "OutputPage"), (f"/v1/runs/{run}/exports", "ExportPage"),
+                                 (f"/v1/runs/{run}/lineage-requests", "LineagePage"), ("/v1/profiles", "ProfilePage")):
+                status, value = page(path, authorized, schema)
+                assert status == 200, ("redaction read", path, status, value.get("code"))
+            markers = private_markers() + [PAGES_ENVIRONMENT_MARKER.encode()]
+            stores = work / "manager" / "runs" / "runs"
+            assert stores.is_dir() and any(stores.iterdir()), "the run has no run store to redact"
+            # The frozen run snapshot carries the runtime backend spelling of
+            # its target and attempts, "acp:<adapter>", as targetLabel. That
+            # public runtime label is the only permitted form of the adapter
+            # name, and only in run snapshot pages. No other argv element may
+            # appear in any page.
+            runtime_label = b'"targetLabel":"acp:mixed-adapter"'
+            labelled, leaked = 0, []
+            for target, raw in bodies:
+                if re.fullmatch(r"/v1/runs/[A-Za-z0-9_-]+/snapshot(\?pageToken=[A-Za-z0-9_-]+)?", target):
+                    labelled += raw.count(runtime_label)
+                    raw = raw.replace(runtime_label, b"")
+                leaked += [(target, marker) for marker in markers if marker in raw]
+            assert not leaked, ("page body holds private bytes", leaked[:4])
+            assert labelled, "no run snapshot page carried the runtime target label"
+            print(f"PASS pages case 8: {len(bodies)} page bodies hold none of {len(markers)} private markers: the fixture",
+                  "root with the manager root and run stores, native run identifiers, argv and the worker environment value;",
+                  f"the adapter name appears only in {labelled} runtime targetLabel values of run snapshot pages", flush=True)
+        finally:
+            if process.poll() is None:
+                process.terminate()
+            process.wait(timeout=25)
+            (work / "server-0.exit").write_text(str(process.returncode) + "\n")
+    assert not (work / "admin/admin.sock").exists(), "joined original local administration leaves no socket"
+    print("PASS pages: every WM-025 page case held against the running TLS 1.3 manager", flush=True)
+
+
+if pages_mode:
+    page_checks()
     raise SystemExit(0)
 
 
