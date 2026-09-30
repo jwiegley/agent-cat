@@ -1487,7 +1487,7 @@ Two small residues of acat-192/acat-9kn: prune the deriving clauses if nothing w
 :LABELS:   ["actor-flow","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-26 Sat 23:41]
-:MODIFIED: [2026-09-29 Tue 21:17]
+:MODIFIED: [2026-09-29 Tue 21:38]
 :CREATED_BY: johnw
 :SOURCE_REPO: .
 :ORIGINAL_SIZE: 0
@@ -1542,6 +1542,13 @@ Actor-flow increment 1, delta 1b (at most 8 engineering days). Add the manager l
     "author": "johnw",
     "text": "Subtask F12 of delta 1b: start, discard and control relays. The worker decision step is split into an encode step (encodeWorkerStart, encodeWorkerDiscard) that writes nothing and a send step under serializedWrite that rechecks the prepared phase and id, decodes the bytes, requires an exact re-encode and writes them. Commands.hs gains reservedPayload, a non-consuming accessor for a reserved DispatchTicket. deliverStartNow appends a synchronized start relay after reserveDispatch and dispatches the frame decoded from the relay; a failed append refuses with storage-unavailable, discards the payload and closes the entry through the existing stop path. discardAndClose records a discard relay (Following for a withdraw or edit, Reserved for a manager-initiated discard) and a failed append leaves a gap entry. deliverControlNow appends a control relay and attemptControlDispatch keeps the control_intents digest check on the original bytes, then writes the relayed control after a controlId and re-encode check; a failed cancel relay still dispatches the cancel with a gap entry. RelayKind gains RelayDiscard. manager-admission-check has the new mode flow-relay. manager/WORKERS.md, ADMISSION.md, CONTROLS.md and STORAGE.md describe the relays. Evidence scope: F12-build (ALLBUILD, -Werror), F12-flow-relay at N8, F12-worker-check at N8 with worker_evidence.py, F12-admission-check main mode at N8 and F12-journey (tui-journey at N8, with the start relay after the approve receipt and control relays for the answer and the retry, checked by a private script) each passed under timeout. The fess auditor reran F12-flow-relay with exit 0. Fess: not blocking. Its two medium and four low findings are filed as acat-4pn3. N1, the Phase A controls, source-boundaries and manager/ci/controls.sh were not run.",
     "created_at": "2026-09-30T04:17:08Z"
+  },
+  {
+    "id": 367,
+    "issue_id": "acat-5m60",
+    "author": "johnw",
+    "text": "Subtask F13 of delta 1b: command notices, review endings and request endings. The manager-log slot of an admission transaction now carries a queue of post-commit notices. noticeAfterCommit queues a flushed notice from Manager, runWithAdmission appends the queue in order after a successful COMMIT and outside the try block, and a rollback drops it. A failed notice append becomes a gap entry through appendManager. takePostCommit and appendPostCommit let the admission path append the taken notices in recordReceipt after the receipt, which keeps the order command, receipt, ending. Commands.hs queues a CommandChanged notice in attemptTicket, in observeWithAdmission whenever the receipt changes (acknowledgement, effect, unresolved, refusal), in recordObservation and in reconcileCommandAttemptWithAdmission. Admission.hs queues a ReviewEnded notice for each live preparation in invalidatePreparations, a RequestEnded withdrawn notice in withdrawRequest, and in finalizeKnown a RequestEnded notice when no start of the reservation was attempted, with cause refused, discarded, review-expired, invalidated, withdrawn or preparation-failed. invalidateLivePreparation reaches both endings through the service cleanup. manager/ADMISSION.md, COMMANDS.md and STORAGE.md describe the notices and endings. Evidence scope: F13-build (ALLBUILD, -Werror), F13-flow-unit (manager-command-check flow, new flowNoticeChecks: a dispatch attempt and an acknowledgement each append a command notice after the receipt, and a failed effect-observed notice gives a gap notice naming MissingRecord FlowNotice before the next command record), F13-flow-relay at N8 (draft withdraw: command, receipt, ending withdrawn; prepared withdraw: receipt, review ended, discard relay, ending discarded; refused approval: ending refused; an approve whose receipt append fails still relays its start and starts the run, with a gap notice naming the receipt) and F13-journey (tui-journey at N8, with command notices after the relays, checked by a private script) each passed under timeout. Fess: not blocking. Its four medium and five low findings are filed as acat-64v1. Limitations: /v1 discard is refused before admission, so the discard item was tested through the withdrawal of a prepared request, whose ending names discarded. The restart reconciliation at Store open and an edit that returns a queued request to draft append no per-item ending. Command notices can repeat a state. The new tests were not shown to fail against the previous code. N1, the Phase A controls and source-boundaries were not run.\n",
+    "created_at": "2026-09-30T04:38:45Z"
   }
 ]
 #+end_src
@@ -1605,6 +1612,40 @@ Follow-up from the F9 fess audit of the manager log writer, the manager codecs a
 4. (low) runtime/src/Agentic/Runtime/Flow.hs:300 and :310: the open-time limit check compares only the log file size with the ceiling, but stateBytes also counts claim bytes. A log whose log plus claim bytes pass the ceiling still opens and then fails every append with a quota refusal. Fix: compare log bytes plus the distinct claim bytes at open, or document the difference.
 
 5. (low) cli/test/PolicyProbe.hs:555: the ReadFlow case repairs an F7 leftover that ALLBUILD needs under -Werror. It is out of F9 scope. Disposition: recorded in the F9 commit message; no further change needed unless the operator wants the repair split.
+
+* TODO [#C] Resolve F13 fess findings in the command notices and endings
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-64v1
+:LABELS:   ["actor-flow","workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-29 Tue 21:38]
+:MODIFIED: [2026-09-29 Tue 21:38]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Follow-up from the F13 fess audit of the command notices, review endings and request endings (actor-flow delta 1b). None of these findings blocks. Source: fess audit /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/fess/flow-F13-r1.md.
+
+1. (medium) manager/src/Agentic/Manager/Store.hs:1292-1296 (runWithAdmission, post-COMMIT appendQueued) and the new STORAGE.md paragraph: the queued notices are appended after COMMIT under mask, not uninterruptibleMask. The append takes an MVar and does file I/O, and the synchronous path rethrows async exceptions. An async exception there (a cancel, a race loser or a timeout) makes runWithAdmission throw for a committed transaction. In attemptTicket the state then reads dispatch-attempted but the action never runs. The documentation says a failed notice cannot make the committed transaction uncertain, which is true only for synchronous failures. Fix: flush the queue under uninterruptibleMask_ with bounded writer I/O, or catch async exceptions during the flush, record gap entries and return the committed value. Otherwise correct the documented guarantee.
+
+2. (medium) manager/src/Agentic/Manager/Commands.hs:271 and :391, Admission.hs:797: notices taken with takePostCommit (for example RequestEnded withdrawn or ReviewEnded) are appended in recordReceipt, outside the transaction. If the thread is interrupted between COMMIT and appendPostCommit, they are lost with no gap entry. reconcileCommandAttemptWithAdmission restores only a command notice (Commands.hs:462). Fix: record a gap entry for taken notices that are never appended (a bracket or finally in recordReceipt), or have reconciliation re-derive the endings.
+
+3. (medium) manager/test/AdmissionCheck.hs:1587-1606, manager/test/CommandCheck.hs:1675: no behavioral test asserts a ReviewEnded record (address Approvers profile, reason, position). The causes review-expired, preparation-failed and invalidated, and the edit path, are not tested. Fix: add flow-relay assertions for the review-ended record of the prepared withdraw, and one scenario each for the expired and preparation-failed causes.
+
+4. (medium) manager/test/AdmissionCheck.hs:1587-1590, manager/src/Agentic/Manager/Admission.hs:711-725 and :1137, Application.hs:160: /v1 discard is refused as unsupported-operation before admission, so the discard acceptance item is met by withdrawing a prepared request. A user's withdraw command is then followed by request-ended cause=discarded, while the command's effect says withdrawn. The design lists withdrawn as the cause for a withdraw. Fix: get an operator decision on whether a prepared withdraw names withdrawn or discarded, then adjust the noticeRequestEnding priority and ADMISSION.md.
+
+5. (low) manager/ADMISSION.md (Manager log endings), Store open reconciliation: the restart reconciliation refuses requests and invalidates preparations but appends no per-item request or review ending. The lifetime notice counts them. An edit that returns a queued request to draft also appends no ending. Fix: append a per-item ending, or a gap notice that names each item, at Store open.
+
+6. (low) manager/src/Agentic/Manager/Admission.hs:693, AdmissionCheck.hs:1595: the request ending of a refused approval carries aboutCommand=Nothing and does not join the refused approve command. Fix: pass the refused approve's command id into noticeRequestEnding when the cause is refused.
+
+7. (low) manager/src/Agentic/Manager/Admission.hs:715: the refused-cause query counts refused approves over every preparation of the reservation, while the reasons query at :716 filters on process_generation. A refused approve from an earlier generation could mislabel a later ending. Fix: filter the refused query on p.process_generation=?, or confirm that reservations never span generations.
+
+8. (low) manager/src/Agentic/Manager/Commands.hs:731 and :462: a command notice goes out on any receipt change, even when the state stays the same, and reconciliation can repeat a logged state. The journey shows acknowledged twice. Fix: emit a notice only when receiptState or receiptRefusal changes, or document that notices may repeat a state.
+
+9. (low) manager/test/AdmissionCheck.hs:1602-1606: the assertion that command notices of the approval follow its start relay passes if any CommandChanged follows the relay, whatever its state. Only the private journey_notices.py checks the journey order. Fix: assert the specific dispatch-attempted state and position, and consider moving the journey-order check into the repository.
 
 * DONE [#E] Handoff: name only the audit rounds the 2026-09-27 closeout wrote    :documentation:
 :PROPERTIES:

@@ -360,6 +360,39 @@ command.
 - **Control.** The [controls contract](CONTROLS.md#manager-log-relays)
   describes the control relay.
 
+## Manager log endings
+
+A serving Store lifetime records the end of each review and of each request
+whose run never starts as a notice from the manager, through
+`noticeAfterCommit`. Each ending is a `Reserved` record that follows the COMMIT
+of its transition, and a failed append leaves a gap entry.
+
+- **Review ending.** `invalidatePreparations` queues one review ending for each
+  live preparation that it invalidates, with the preparation identifier and the
+  reason: `expired`, `input-changed`, `profile-changed`, `authority-changed`,
+  `worker-lost` or `discarded`. The notice is addressed to the approvers of the
+  profile, as the review record is, and it names the request. The restart
+  reconciliation at Store open invalidates live preparations without review
+  endings, and the lifetime notice counts them.
+- **Request ending.** `withdrawRequest` queues the request ending `withdrawn`
+  when it withdraws a draft or a queued request. `finalizeKnown` queues a
+  request ending when it releases a reservation whose run never started, which
+  means that no start command of the reservation was attempted. A refused
+  approval of the preparation gives `refused`. Otherwise the reason of the
+  invalidated preparation decides: `discarded` gives `discarded`, `expired`
+  gives `review-expired`, and every other reason gives `invalidated`. Without
+  an invalidated preparation, a withdrawal gives `withdrawn`, an edit gives
+  `invalidated`, and every other end gives `preparation-failed`. The ending
+  names the request and the command that caused it, when a command caused it.
+  A withdrawal of a prepared request invalidates the preparation with the reason
+  `discarded`, so its request ending names `discarded`.
+  `invalidateLivePreparation` reaches both endings through the service cleanup
+  and `finalizeKnown`.
+
+When a command causes an ending in its admission transaction, the ending
+follows the receipt of that command. An ending that `finalizeKnown` queues
+follows the discard relay of the same cleanup, when the cleanup sends one.
+
 The `flow-relay` mode of `manager-admission-check` drives real
 `routing-fixed-point-probe` workers through the service of a serving Store. It
 shows the command, receipt and start relay of an approval in that order, and the
@@ -370,4 +403,11 @@ and that the manager then discards the worker with a discard relay that names no
 command. It shows the command, receipt and discard relay of a withdrawal of a
 prepared request. It shows that a cancel whose relay append fails reaches the
 native run and leaves a gap entry, and that a lossy relay codec makes the native
-run receive the lossy cancel frame in its run log `control` record.
+run receive the lossy cancel frame in its run log `control` record. It shows
+that the withdrawal of a draft ends with its command, its receipt and the
+request ending `withdrawn`, that the withdrawal of a prepared request ends with
+the request ending `discarded` after its discard relay, and that the refused
+approval ends its request with `refused`. It shows that an approval whose
+receipt append fails still starts its run, that a gap notice names the receipt
+before the start relay, and that command notices of the approval follow the
+start relay.

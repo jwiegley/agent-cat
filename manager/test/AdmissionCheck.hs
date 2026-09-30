@@ -22,7 +22,7 @@ import qualified Agentic.Manager.Service as Service
 import Agentic.Manager.Fault (FaultClass (CommandRefusal, UnexpectedFault))
 import Agentic.Manager.Store
 import qualified Agentic.Manager.Worker as Worker
-import Agentic.Manager.Flow (ManagerFlowFault (..), RelayBody (..), RelayKind (..), relayFromFlowBody, Notice (..), MissingRecord (..), noticeFromFlowBody, managerFlowPath)
+import Agentic.Manager.Flow (ManagerFlowFault (..), RelayBody (..), RelayKind (..), relayFromFlowBody, Notice (..), RequestCause (..), MissingRecord (..), noticeFromFlowBody, managerFlowPath)
 import qualified Agentic.Runtime as Runtime
 import Data.IORef (newIORef, readIORef, writeIORef)
 import Agentic.Runtime (WorkflowDescriptor (..), FrontendPrepared (..), RunId (..), createProcessGroup, terminateProcessGroup, closeGroupPipes, groupOutput, groupErrors, waitProcessGroup)
@@ -1486,15 +1486,16 @@ interruptedAcceptanceChecks work native = do
         Left failure->case fromException failure of Just UserInterrupt->True;_->False
         Right _->False)
 
--- The start, discard and control relays of a serving Store with a manager log,
--- driven through the service against real native workers. The first fixture
--- uses the strict codec and a selective append fault. The second fixture
--- carries relays through a lossy codec that changes a cancel frame.
+-- The start, discard and control relays and the request endings of a serving
+-- Store with a manager log, driven through the service against real native
+-- workers. The first fixture uses the strict codec and a selective append
+-- fault. The second fixture carries relays through a lossy codec that changes
+-- a cancel frame.
 flowRelayChecks :: FilePath -> FilePath -> IO ()
 flowRelayChecks work native = do
   failing <- newIORef (\_ _ -> False)
   let fault = ManagerFlowFault (\schema about -> (\selects -> selects schema about) <$> readIORef failing)
-  (stream,root,requestA,runA,nativeA,approveA,cancelA,withdrawB,nativeB,requestC,nativeC) <-
+  (stream,root,requestA,runA,nativeA,approveA,cancelA,withdrawB,nativeB,requestC,nativeC,(withdrawDraft,requestDraft),(approveE,nativeE)) <-
     withFixtureOpening (withServingStoreWith Runtime.strictFlowCodec (Just fault)) work native [] "flow-relay" 3 [("a",[])] $ \fixture@(Fixture root _ owner _ _) -> do
       stream <- storeStreamId <$> storeIdentity owner
       Service.withService owner $ \service -> do
@@ -1546,11 +1547,30 @@ flowRelayChecks work native = do
         number owner ("SELECT count(*) FROM runs WHERE request_id='"<>draftId draftC<>"' AND supervision IN ('owned','cleanup-pending')")
           >>= assertion "flow-relay: the refused approval leaves no held association" . (==0)
         doesFileExist (flowRunLogPath root nativeC) >>= assertion "flow-relay: the refused approval starts no native run" . not
-        pure (stream,root,draftId draftA,runA,nativeA,approveA,cancelA,withdrawB,nativeB,draftId draftC,nativeC)
+        -- A withdrawal of a draft that holds no preparation ends the request
+        -- without a worker.
+        draftW <- newDraft fixture 0 "a" "flow_relay_w"
+        draftKey <- key owner "flow_relay_w_withdraw"
+        withdrawW <- receiptId <$> (Service.withdraw service (fixtureProof fixture) (draftId draftW) draftKey (etag draftW) (body "withdraw") >>= right)
+        -- A failed receipt append of an approval does not block its start.
+        (draftE,identE,preconditionE,approvalE) <- flowPrepared fixture service "flow_relay_e"
+        writeIORef failing (\schema about -> schema == Runtime.FlowReceipt && Runtime.aboutRequest about == Just (draftId draftE))
+        approvedE <- flowApprove fixture service "flow_relay_e" identE preconditionE approvalE
+        writeIORef failing (\_ _ -> False)
+        approveE <- receiptId <$> right approvedE
+        (runE,nativeE) <- flowRun owner (draftId draftE)
+        startedE <- await (flowRunLog root nativeE (\entries -> case entries of (first:_) -> Just first; [] -> Nothing))
+        assertion "flow-relay: an approval whose receipt append failed still starts its run"
+          (Runtime.recSchema (fst startedE) == Runtime.FlowStart && Runtime.aboutNativeRun (Runtime.recAbout (fst startedE)) == Just (RunId nativeE))
+        _ <- flowCancel fixture service runE "flow_relay_e_cancel"
+        await (flowUntil (number owner ("SELECT count(*) FROM reservations WHERE request_id='"<>draftId draftE<>"' AND state!='released'")) (==0))
+        pure (stream,root,draftId draftA,runA,nativeA,approveA,cancelA,withdrawB,nativeB,draftId draftC,nativeC,(withdrawW,draftId draftW),(approveE,nativeE))
   records <- flowLog root stream
   let relays = [(position,relay) | (position,record,value) <- records, Runtime.recSchema record == Runtime.FlowRelay, Right relay <- [relayFromFlowBody value]]
       positionOf schema command = [position | (position,record,_) <- records, Runtime.recSchema record == schema, Runtime.aboutCommand (Runtime.recAbout record) == Just command]
       gaps = concat [missing | (_,record,value) <- records, Runtime.recSchema record == Runtime.FlowNotice, Right (GapNotice missing _) <- [noticeFromFlowBody value]]
+      gapAt missing = [position | (position,record,value) <- records, Runtime.recSchema record == Runtime.FlowNotice, Right (GapNotice named _) <- [noticeFromFlowBody value], any missing named]
+      endings request = [(position,Runtime.aboutCommand (Runtime.recAbout record),cause) | (position,record,value) <- records, Runtime.recSchema record == Runtime.FlowNotice, Right (RequestEnded ended cause) <- [noticeFromFlowBody value], ended == request]
       cancelAbout = Runtime.noAbout {Runtime.aboutRequest = Just requestA, Runtime.aboutManagerRun = Just runA, Runtime.aboutNativeRun = Just (RunId nativeA), Runtime.aboutCommand = Just cancelA}
   assertion "flow-relay: the start relay precedes no second start for the same approval"
     (length [() | (_,relay) <- relays, relayBodyCommand relay == Just approveA] == 1)
@@ -1560,6 +1580,29 @@ flowRelayChecks work native = do
     case (positionOf Runtime.FlowCommand withdrawB, positionOf Runtime.FlowReceipt withdrawB, [(position,relay) | (position,relay) <- relays, relayBodyCommand relay == Just withdrawB]) of
       ([command],[receipt],[(relayAt,relay)]) -> command < receipt && receipt < relayAt && relayBodyKind relay == RelayDiscard
         && relayBodyManagerRun relay == Nothing && relayBodyNativeRun relay == RunId nativeB
+      _ -> False
+  let requestB = case [request | (_,record,_) <- records, Runtime.aboutCommand (Runtime.recAbout record) == Just withdrawB, Just request <- [Runtime.aboutRequest (Runtime.recAbout record)]] of
+        request:_ -> request
+        [] -> error "FAIL flow-relay: the withdrawal names no request"
+  assertion "flow-relay: the withdrawal of a prepared request ends with command, receipt, discard relay and a request ending that names discarded" $
+    case (positionOf Runtime.FlowReceipt withdrawB, [position | (position,relay) <- relays, relayBodyCommand relay == Just withdrawB], endings requestB) of
+      ([receipt],[relayAt],[(endAt,command,RequestDiscarded)]) -> receipt < relayAt && relayAt < endAt && command == Just withdrawB
+      _ -> False
+  assertion "flow-relay: the withdrawal of a draft ends with command, receipt and a request ending that names withdrawn, in that order" $
+    case (positionOf Runtime.FlowCommand withdrawDraft, positionOf Runtime.FlowReceipt withdrawDraft, endings requestDraft) of
+      ([command],[receipt],[(endAt,named,RequestWithdrawn)]) -> command < receipt && receipt < endAt && named == Just withdrawDraft
+      _ -> False
+  assertion "flow-relay: the refused approval ends its request with a request ending that names refused" $
+    case endings requestC of [(_,Nothing,RequestRefused)] -> True; _ -> False
+  assertion "flow-relay: a gap notice names the failed receipt of an approval, and its start relay follows" $
+    case (positionOf Runtime.FlowCommand approveE, positionOf Runtime.FlowReceipt approveE, gapAt (\missing -> missingSchema missing == Runtime.FlowReceipt && Runtime.aboutCommand (missingAbout missing) == Just approveE),
+          [(position,relay) | (position,relay) <- relays, relayBodyCommand relay == Just approveE]) of
+      ([command],[],[gap],[(relayAt,relay)]) -> command < gap && gap < relayAt && relayBodyKind relay == RelayStart && relayBodyNativeRun relay == RunId nativeE
+      _ -> False
+  assertion "flow-relay: command notices of the approval follow its start relay" $
+    case [position | (position,relay) <- relays, relayBodyCommand relay == Just approveE] of
+      [relayAt] -> not (null [() | (position,record,value) <- records, position > relayAt, Runtime.recSchema record == Runtime.FlowNotice,
+        Runtime.aboutCommand (Runtime.recAbout record) == Just approveE, Right (CommandChanged _ _) <- [noticeFromFlowBody value]])
       _ -> False
   assertion "flow-relay: the refused approval has no start relay, and the manager discards its worker"
     (null [() | (_,relay) <- relays, relayBodyKind relay == RelayStart, relayBodyNativeRun relay == RunId nativeC]

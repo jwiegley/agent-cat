@@ -365,6 +365,18 @@ a missing field and any value that its encoder does not write.
 No bearer token, credential verifier, idempotency key, page token or local path
 enters a body.
 
+A transaction queues a notice that follows its COMMIT with
+`noticeAfterCommit`. When the COMMIT succeeds, the Store appends the queued
+notices in queue order, after the transaction outcome is final and while it
+still holds the database lock, so a failed notice cannot make the committed
+transaction uncertain. A rolled back transaction appends none, and a lifetime
+without a manager log queues none. A transaction whose notices must follow a
+later record takes them with `takePostCommit` and returns them as an opaque
+`PostCommit` value, and its caller appends them with `appendPostCommit`. The
+admission transaction of a command takes them, so they follow its receipt.
+Each notice is a flushed record from the manager, never a `Refusing` record,
+and a failed append leaves a gap entry.
+
 A serving lifetime reads the configured `globalMutationLedgerBytes` before it
 opens the database, and a configuration that cannot give its limits fails the
 open. The lifetime notice follows the restart reconciliation at Store open. It
@@ -389,11 +401,12 @@ and then reports the configuration failure. Both notices are reserved records
 from the manager to the manager, and a failed append of either becomes a gap
 entry. The [command acceptance contract](COMMANDS.md#manager-log-records)
 describes the `command`, `receipt` and `failure` records of a fresh command
-and of a credential operation of the local administration channel. The
-[approval contract](APPROVAL.md#review-record) describes the `review` record.
-The [admission contract](ADMISSION.md#manager-log-relays) and the
-[controls contract](CONTROLS.md#manager-log-relays) describe the `relay`
-records.
+and of a credential operation of the local administration channel, and its
+command notices. The [approval contract](APPROVAL.md#review-record) describes
+the `review` record. The [admission contract](ADMISSION.md#manager-log-relays)
+and the [controls contract](CONTROLS.md#manager-log-relays) describe the
+`relay` records. The [admission contract](ADMISSION.md#manager-log-endings)
+describes the review endings and the request endings.
 
 ## Worker cleanup ownership
 

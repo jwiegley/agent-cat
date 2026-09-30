@@ -332,6 +332,25 @@ the ledger receipt, the response carries the ledger receipt, and a failed
 append leaves a gap entry that names the receipt. The receipt append is not
 part of the admission transaction, and its failure never refuses the command.
 
+Each later commit of command state queues a command notice that follows the
+COMMIT. The notice is from the manager to the manager, names the command, the
+request and the manager run of the command references, and states the new
+state and refusal. `attemptTicket` queues the notice of `dispatch-attempted`.
+`observeWithAdmission`, which `recordAcknowledgement`, `recordEffectWith`,
+`recordUnresolved` and `recordRefusal` use, queues a notice when the receipt
+changes, before the final transition of the owning module queues its own
+notices. `recordRuntimeObservation` and `recordExportObservation` queue a
+notice when the acknowledgement or effect changes the receipt.
+`reconcileCommandAttemptWithAdmission` queues a notice of the current state of
+a command whose acceptance it recovers, because the interrupted invocation may
+have appended no receipt. The notice of a cancel is a `Reserved` record, and
+every other command notice is a `Following` record. A failed append leaves a
+gap entry.
+
+The admission transaction takes the notices that its mutation queued, such as
+a request ending or a review ending, and `recordReceipt` appends them after the
+receipt or after the gap entry of a failed receipt. A replay appends none.
+
 The local administration channel of a serving manager records its credential
 operations in the same log. `administerCredentials` appends the `command`
 record of `issue-credential`, `rotate-credential` and `revoke-credential` as

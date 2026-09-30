@@ -1307,8 +1307,9 @@ flowChecks work = do
     flowCeilingChecks root private
   flowStoreChecks work
   flowCommandChecks work
+  flowNoticeChecks work
   flowAdministrationChecks work
-  putStrLn "PASS manager log codecs, writer, gap entries, path identity, ceiling, Store lifetimes, command admission and administration"
+  putStrLn "PASS manager log codecs, writer, gap entries, path identity, ceiling, Store lifetimes, command admission, command notices and administration"
 
 -- An administration lifetime writes no manager log. A serving lifetime writes
 -- a lifetime notice that lists the current credentials and, only when its
@@ -1513,6 +1514,46 @@ flowCommandChecks work = do
           && Runtime.recSchema lastCommand == Runtime.FlowCommand && Runtime.recReplyTo lastReply == Just (Runtime.Position 4)
           && receiptFromFlowBody lastReplyBody == Right lastReceipt
     _ -> error ("FAIL flow mode gap check expected seven records, found " <> show (map (Runtime.recSchema . fst) gapRecords))
+
+-- The command notices that follow later commits of command state. A dispatch
+-- attempt and a correlated acknowledgement each append a command notice after
+-- the receipt. A failed notice append leaves a gap entry, and the gap notice
+-- that names it precedes the next record.
+flowNoticeChecks :: FilePath -> IO ()
+flowNoticeChecks work = do
+  failing <- newIORef False
+  let fault = ManagerFlowFault (\schema about -> if schema == Runtime.FlowNotice && Runtime.aboutCommand about /= Nothing then readIORef failing else pure False)
+  ((cancelId, laterId), root, stream) <- withServedFixture work "flow-notices" (64 * commandCapacity) Runtime.strictFlowCodec (Just fault) (\_ _ -> pure ()) $ \store profile proof -> do
+    cancelReq <- request store Cancel "flow_notice_cancel"
+    accepted <- submitCommand store proof cancelReq (control profile) >>= right
+    ticket <- maybe (error "FAIL flow mode notices: the cancel has no ticket") pure (submissionTicket accepted)
+    reserveDispatch ticket >>= right
+    attemptDispatch ticket (pure ()) >>= right
+    ack <- decodeValue (object ["commandId" .= dispatchCommandId ticket, "state" .= ("delivered" :: Text), "message" .= ("delivered" :: Text), "command" .= ("cancel" :: Text), "occurrenceId" .= (Nothing :: Maybe Text), "attemptId" .= (Nothing :: Maybe Text)])
+    _ <- recordAcknowledgement ticket ack >>= right
+    writeIORef failing True
+    effect <- decodeValue (object ["kind" .= ("cancelled" :: Text), "resource" .= ("/v1/runs/run_1/snapshot" :: Text), "runtimeSequence" .= ("9" :: Text), "address" .= (Nothing :: Maybe Value)])
+    observed <- recordEffect ticket effect >>= right
+    writeIORef failing False
+    check "flow mode commits the effect whose notice cannot be appended" (receiptState observed == EffectObserved)
+    later <- request store SetInput "flow_notice_later"
+    final <- submitCommand store proof later (edit profile (commandResource later) "r1") >>= right
+    pure (dispatchCommandId ticket, receiptId (submissionReceipt final))
+  records <- servedLines root stream
+  let cancelAbout = Runtime.noAbout {Runtime.aboutCommand = Just cancelId, Runtime.aboutManagerRun = Just "run_1"}
+      notices = [(record, noticeFromFlowBody value) | (record, value) <- records, Runtime.recSchema record == Runtime.FlowNotice]
+  case records of
+    [_, (command, _), (receipt, _), (attempted, attemptedBody), (acknowledged, acknowledgedBody), (gap, gapBody), (laterCommand, _), (laterReceipt, _), _] ->
+      check "flow mode dispatch and acknowledgement append command notices after the receipt, and a failed notice append names a gap before the next record" $
+        Runtime.recSchema command == Runtime.FlowCommand && Runtime.recSchema receipt == Runtime.FlowReceipt
+          && map Runtime.recSchema [attempted, acknowledged, gap] == replicate 3 Runtime.FlowNotice
+          && noticeFromFlowBody attemptedBody == Right (CommandChanged DispatchAttempted Nothing)
+          && noticeFromFlowBody acknowledgedBody == Right (CommandChanged Acknowledged Nothing)
+          && all (\record -> Runtime.recAbout record == cancelAbout && Runtime.recFrom record == Runtime.Manager && Runtime.recTo record == Runtime.To Runtime.Manager) [attempted, acknowledged]
+          && noticeFromFlowBody gapBody == Right (GapNotice [MissingRecord Runtime.FlowNotice cancelAbout] 0)
+          && Runtime.recSchema laterCommand == Runtime.FlowCommand && Runtime.aboutCommand (Runtime.recAbout laterCommand) == Just laterId
+          && Runtime.recSchema laterReceipt == Runtime.FlowReceipt
+    _ -> error ("FAIL flow mode notices expected nine records, found " <> show (map (Runtime.recSchema . fst) records) <> " " <> show (map snd notices))
 
 -- The command and receipt records of the credential operations that a serving
 -- manager performs for the local account. No bearer, verifier or output file

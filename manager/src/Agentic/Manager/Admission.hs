@@ -19,7 +19,7 @@ import Agentic.Manager.Authorization
 import Agentic.Manager.Commands
 import Agentic.Manager.Drafts
 import Agentic.Manager.Flow
-  (FlowRecordClass (..), ManagerFlowFailure (..), MissingRecord (..), RelayKind (..), RelayBody (..),
+  (FlowRecordClass (..), ManagerFlowFailure (..), MissingRecord (..), RelayKind (..), RelayBody (..), Notice (..), RequestCause (..),
    relayFlowBody, relayFromFlowBody, appendManagerTell, managerFlowCeiling, managerFlowContent, noteManagerGap)
 import Agentic.Manager.Fault (FaultClass (InternalFault, StoreRefusal), ManagerFault (..), configurationLoan, recordUndeclaredRefusal, refuseStorageUnavailable)
 import Agentic.Manager.Profile
@@ -32,7 +32,7 @@ import Agentic.Manager.Protocol.Json (decodeStrictValue)
 import Agentic.Manager.Store
 import Agentic.Manager.Worker
 import Agentic.Runtime (FrontendPrepared (..), FrontendSetupRequest, RunId (..), Control (controlId), ControlId (..), decodeControlFor, encodeControlFor, correlatedProtocolVersion, controlAcknowledgementLimit,
-   About (..), Actor (Manager, Workflow), Address (To), Schema (FlowRelay), noAbout)
+   About (..), Actor (Manager, Workflow), Address (To, Approvers), Schema (FlowRelay), noAbout)
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (Async, async, waitCatch, poll, race, withAsync)
 import Control.Concurrent.MVar (MVar, newMVar, withMVar)
@@ -690,6 +690,7 @@ finalizeKnown controller entry = locked controller $ do
         execute "UPDATE requests SET phase=CASE WHEN phase IN ('start-pending','associated') THEN phase ELSE ? END,admission='released',revision=?,queue_ordinal=NULL,queue_origin_revision=NULL,queue_generation=NULL,blocking_reasons=? WHERE id=?"
           [text finalPhase,text next,SQL.SQLBlob(encoded([]::[Text])),text(entryRequest entry)]
         runChanges <- changeRunSupervision entry "cleanup-pending" "lost" runRevision
+        noticeRequestEnding entry kind (dispatchCommandId <$> ticket)
         pure (requestEvent(entryRequest entry)next:runChanges)
   case ticket of
     Nothing -> dbTerminalChange controller $ do events<-publish;pure((),events)
@@ -699,6 +700,29 @@ finalizeKnown controller entry = locked controller $ do
   atomically $ do
     modifyTVar'(queued controller)(Map.delete(entryRequest entry))
     notifyAdmission controller
+
+-- | Queue the request ending of a released reservation whose run never
+-- started: no start command of the reservation was attempted. It names the
+-- command that caused it, if any, and its cause. A refused approval of the
+-- preparation names refused. Otherwise the reason of the invalidated
+-- preparation decides: discarded, expired, or invalidated for every other
+-- reason. Without a preparation, a withdrawal names withdrawn, an edit names
+-- invalidated, and every other end names preparation failed.
+noticeRequestEnding :: Entry -> Text -> Maybe Text -> Transaction ()
+noticeRequestEnding entry kind command = do
+  dispatched <- query "SELECT count(*) FROM start_intents s JOIN commands c ON c.id=s.command_id WHERE s.reservation_id=? AND c.attempted_at IS NOT NULL" [text(entryReservation entry)]
+  when (dispatched==[[SQL.SQLInteger 0]]) $ do
+    refused <- query "SELECT count(*) FROM commands c JOIN preparations p ON c.resource_uri='/v1/preparations/'||p.id WHERE p.reservation_id=? AND c.operation='approve' AND c.state='refused'" [text(entryReservation entry)]
+    reasons <- query "SELECT reason FROM preparations WHERE reservation_id=? AND process_generation=? AND state='invalidated' ORDER BY id LIMIT 1" [text(entryReservation entry),text(entryGeneration entry)]
+    let cause = case (refused,reasons) of
+          ([[SQL.SQLInteger count]],_) | count>0 -> RequestRefused
+          (_,[[SQL.SQLText "discarded"]]) -> RequestDiscarded
+          (_,[[SQL.SQLText "expired"]]) -> RequestReviewExpired
+          (_,[[SQL.SQLText _]]) -> RequestInvalidated
+          _ | kind=="withdraw" -> RequestWithdrawn
+            | kind=="edit" -> RequestInvalidated
+            | otherwise -> RequestPreparationFailed
+    noticeAfterCommit Reserved (To Manager) noAbout{aboutRequest=Just(entryRequest entry),aboutCommand=command} (RequestEnded (entryRequest entry) cause)
 
 changeRunSupervision :: Entry -> Text -> Text -> Text -> Transaction [Invalidation]
 changeRunSupervision entry previous next revision = do
@@ -770,6 +794,7 @@ withdrawRequest controller proof requestId key precondition body = operation con
             editable current
             pure $ Right $ Intent (noReferences{referenceRequest=Just requestId}) False $ do
               execute "UPDATE requests SET phase='withdrawn',admission='released',revision=?,queue_ordinal=NULL,queue_origin_revision=NULL,queue_generation=NULL WHERE id=?" [text revision,text requestId]
+              noticeAfterCommit Reserved (To Manager) noAbout{aboutRequest=Just requestId,aboutCommand=Just command} (RequestEnded requestId RequestWithdrawn)
               effect<-effectValueFor "withdrawn" requestId
               pure([requestEvent requestId revision],Just effect)
           else do
@@ -1116,6 +1141,11 @@ invalidatePreparations entry reason revision = do
   rows <- query "SELECT id FROM preparations WHERE reservation_id=? AND process_generation=? AND state='live'" [text(entryReservation entry),text(entryGeneration entry)]
   execute "UPDATE preparations SET state='invalidated',reason=?,revision=? WHERE reservation_id=? AND process_generation=? AND state='live'"
     [text reason,text revision,text(entryReservation entry),text(entryGeneration entry)]
+  -- Each ended review is named to the approvers that its review record
+  -- addressed, after the COMMIT.
+  forM_ rows $ \row -> case row of
+    [SQL.SQLText ident] -> noticeAfterCommit Reserved (Approvers(entryProfile entry)) noAbout{aboutRequest=Just(entryRequest entry)} (ReviewEnded ident reason)
+    _ -> refuseTransaction StorageUnavailable
   pure [Invalidation "preparation.changed" ("/v1/preparations/"<>ident) revision | [SQL.SQLText ident] <- rows]
 
 validateEntry :: Entry -> [Text] -> [Text] -> Transaction ()

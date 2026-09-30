@@ -17,7 +17,7 @@ module Agentic.Manager.Commands
 import Agentic.Manager.Authorization
 import qualified Agentic.Manager.Flow as Flow
 import Agentic.Manager.Flow
-  (CommandBody (..), CaptureReference (..), FlowRecordClass (Refusing, Following), ManagerFlowFailure (..), MissingRecord (..),
+  (CommandBody (..), CaptureReference (..), FlowRecordClass (Refusing, Following), ManagerFlowFailure (..), MissingRecord (..), Notice (CommandChanged),
    commandFlowBody, commandFromFlowBody, receiptFlowBody, receiptFromFlowBody, appendManagerReply, managerFlowContent, noteManagerGap)
 import Agentic.Manager.Profile (ConfigurationLimits (..), PublicProfile, publicId, publicRevision, Discovery)
 import Agentic.Manager.Protocol.Command
@@ -267,7 +267,9 @@ submitBoundCommand store proof request streamed known deadline buildMutation = c
             then Just . (,) client <$> recordAdmittedCommand limits (commandPrincipal client proof) (commandAbout candidate refs) request candidate digest bodyBytes
             else pure Nothing
           forM_ deadline (lift . enforceCommitDeadline)
-          pure ((receipt, False, intentDispatch intent, refs, storeProcessGeneration identity, epoch, queue, flowed), events <> [commandEvent candidate candidate])
+          -- The notices of the admitted mutation follow the receipt.
+          deferred <- lift takePostCommit
+          pure ((receipt, False, intentDispatch intent, refs, storeProcessGeneration identity, epoch, queue, flowed, deferred), events <> [commandEvent candidate candidate])
         [[SQL.SQLText ident, SQL.SQLText profile, SQL.SQLText operation, SQL.SQLInteger retired, media, precondition, bodyDigest, bodyLength]] -> do
           require (profile == commandProfile request && operation == operationName (commandOperation request)) IdempotencyConflict
           require (retired == 0) ReceiptExpired
@@ -286,7 +288,7 @@ submitBoundCommand store proof request streamed known deadline buildMutation = c
           refs <- case referenceRows of
             [[r,u,p,d]] -> CommandReferences <$> sqlOptionalText r <*> sqlOptionalText u <*> sqlOptionalText p <*> sqlOptionalText d
             _ -> throwE StorageUnavailable
-          pure ((receipt, True, False, refs, storeProcessGeneration identity, epoch, Nothing, Nothing), [])
+          pure ((receipt, True, False, refs, storeProcessGeneration identity, epoch, Nothing, Nothing, noPostCommit), [])
         _ -> throwE StorageUnavailable) >>= traverse (recordReceipt store limits proof)
     case outcome of
       Left failure -> pure (Left failure)
@@ -363,11 +365,12 @@ admittedCommandBody request candidate digest bodyBytes = do
 -- the append fails, or the decoded receipt differs from the ledger receipt,
 -- the ledger receipt is carried and the writer keeps a gap entry for a failed
 -- append. A cancel whose command record is missing has its receipt named by
--- a gap entry. A replay appends nothing.
+-- a gap entry. A replay appends nothing. The notices of the admitted
+-- mutation, such as a request ending, follow the receipt or its gap entry.
 recordReceipt :: CoordinationStore -> ConfigurationLimits -> CredentialProof
-  -> (CommandReceipt, Bool, Bool, CommandReferences, Text, Text, Maybe QueueAssociation, Maybe (Text, Maybe Word64))
+  -> (CommandReceipt, Bool, Bool, CommandReferences, Text, Text, Maybe QueueAssociation, Maybe (Text, Maybe Word64), PostCommit)
   -> IO (CommandReceipt, Bool, Bool, CommandReferences, Text, Text, Maybe QueueAssociation)
-recordReceipt store limits proof (receipt, replayed, dispatch, refs, generation, epoch, association, flowed) = do
+recordReceipt store limits proof (receipt, replayed, dispatch, refs, generation, epoch, association, flowed, deferred) = do
   carried <- case (storeManagerFlow store, flowed) of
     (Just manager, Just (client, position)) -> do
       let about = commandAbout (receiptId receipt) refs
@@ -385,6 +388,7 @@ recordReceipt store limits proof (receipt, replayed, dispatch, refs, generation,
                 Right value | value == receipt -> value
                 _ -> receipt
     _ -> pure receipt
+  appendPostCommit store deferred
   pure (carried, replayed, dispatch, refs, generation, epoch, association)
 
 -- | One retained invocation, allocated before acceptance and never recreated from a receipt.
@@ -455,6 +459,9 @@ reconcileCommandAttemptWithAdmission admission (CommandAttempt store _ request c
            CommandReferences <$> sqlOptionalText r <*> sqlOptionalText u <*> sqlOptionalText p <*> sqlOptionalText d
          _ -> throwE OwnershipUnavailable
        receipt <- originalReceipt candidate
+       -- The acceptance that this reconciliation recovers may have no receipt
+       -- in the manager log, so a command notice states its current state.
+       currentReceipt candidate >>= noticeCommand candidate refs
        association <- case (commandOperation request,referenceRequest refs) of
          (Enqueue,Just ident) -> do
            queue <- sql "SELECT id,profile_id,profile_revision,workflow_id,descriptor_revision,queue_ordinal,queue_origin_revision,input_revision FROM requests WHERE id=? AND queue_generation=? AND enqueue_command=? AND queue_origin_revision IS NOT NULL AND phase='queued'" [text ident,text generation,text candidate]
@@ -580,7 +587,7 @@ attemptControlDispatch ticket action = attemptTicket WaitWithinBudget ticket (ma
 -- The successful claim transfers the original bytes to this invocation and clears
 -- the retained cell atomically. A losing invocation cannot touch the winner's bytes.
 attemptTicket :: StoreAdmission -> DispatchTicket -> (Maybe BS.ByteString -> IO a) -> IO (Either CommandFailure a)
-attemptTicket admission ticket@(DispatchTicket store ident generation _ state) action = mask $ \restore -> do
+attemptTicket admission ticket@(DispatchTicket store ident generation refs state) action = mask $ \restore -> do
   (claimed,payload) <- atomicModifyIORef' state $ \old -> case old of
     TicketState Reserved bytes -> (TicketState Consumed Nothing,(True,bytes))
     _ -> (old,(False,Nothing))
@@ -595,6 +602,7 @@ attemptTicket admission ticket@(DispatchTicket store ident generation _ state) a
         (now, _) <- trustedTime
         lift $ execute "UPDATE commands SET attempted_at=?,state='dispatch-attempted',revision=? WHERE id=?"
           [text now, text revision, text ident]
+        noticeCommand ident refs current {receiptState = DispatchAttempted, receiptAttemptedAt = Just now}
         pure ((), [commandEvent ident revision])
       case marked of
         Left failure -> pure (Left failure)
@@ -714,12 +722,13 @@ observeWith :: DispatchTicket -> Transaction [Invalidation] -> (CommandReceipt -
 observeWith = observeWithAdmission WaitWithinBudget
 
 observeWithAdmission :: StoreAdmission -> DispatchTicket -> Transaction [Invalidation] -> (CommandReceipt -> CommandTx CommandReceipt) -> IO (Either CommandFailure CommandReceipt)
-observeWithAdmission admission ticket@(DispatchTicket store ident _ _ _) finalTransition update = do
+observeWithAdmission admission ticket@(DispatchTicket store ident _ refs _) finalTransition update = do
   revision <- freshId "command_revision_"
   transactionWithAdmission admission store $ do
     current <- liveCommand ticket
     next <- update current
     if next == current then pure (current, []) else do
+      noticeCommand ident refs next
       changes <- lift finalTransition
       lift $ execute "UPDATE commands SET state=?,acknowledgement=?,effect_evidence=?,refusal=?,revision=? WHERE id=?"
         [text (stateName (receiptState next)), maybe SQL.SQLNull (SQL.SQLBlob . encoded) (receiptAcknowledgement next),
@@ -775,21 +784,34 @@ recordObservation ident revision acknowledgement effect = do
     updated <- case effect of
       Nothing -> pure next
       Just value -> do
-        rows <- sql "SELECT request_id,run_id,preparation_id,decision_id FROM commands WHERE id=?" [text ident]
-        refs <- case rows of
-          [[r,u,p,d]] -> CommandReferences <$> sqlOptionalText r <*> sqlOptionalText u <*> sqlOptionalText p <*> sqlOptionalText d
-          _ -> throwE StorageUnavailable
+        refs <- commandReferences ident
         require (receiptAttemptedAt next /= Nothing) StateConflict
         validateEffectBinding (receiptOperation next) ident refs value
         require (maybe True (== value) (receiptEffect next)) StateConflict
         require (receiptRefusal next == Nothing) StateConflict
         pure next {receiptState=EffectObserved,receiptEffect=Just value}
     if updated==current then pure [] else do
+      commandReferences ident >>= \refs -> noticeCommand ident refs updated
       lift $ execute "UPDATE commands SET state=?,acknowledgement=?,effect_evidence=?,revision=? WHERE id=?"
         [text(stateName(receiptState updated)),maybe SQL.SQLNull (SQL.SQLBlob . encoded) (receiptAcknowledgement updated),
          maybe SQL.SQLNull (SQL.SQLBlob . encoded) (receiptEffect updated),text revision,text ident]
       pure [commandEvent ident revision]
   either refuseTransaction pure result
+
+-- | The stored references of a command.
+commandReferences :: Text -> CommandTx CommandReferences
+commandReferences ident = do
+  rows <- sql "SELECT request_id,run_id,preparation_id,decision_id FROM commands WHERE id=?" [text ident]
+  case rows of
+    [[r,u,p,d]] -> CommandReferences <$> sqlOptionalText r <*> sqlOptionalText u <*> sqlOptionalText p <*> sqlOptionalText d
+    _ -> throwE StorageUnavailable
+
+-- | Queue the command notice of a later commit of command state. It follows
+-- the COMMIT, names the command by its identifiers, and states the new state
+-- and refusal. A cancel's notice may use the reserve.
+noticeCommand :: Text -> CommandReferences -> CommandReceipt -> CommandTx ()
+noticeCommand ident refs next = lift $ noticeAfterCommit (flowClass (receiptOperation next) Following) (To Manager)
+  (commandAbout ident refs) (CommandChanged (receiptState next) (receiptRefusal next))
 
 -- | Proven inactivity of a request and all its actual linked execution obligations.
 -- A lost owner or a released slot is not Runtime terminal evidence.

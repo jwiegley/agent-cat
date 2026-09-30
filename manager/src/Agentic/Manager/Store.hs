@@ -10,7 +10,7 @@ module Agentic.Manager.Store
     withCoordinationStore, withServingStore, withServingStoreWith, storeManagerFlow, storeIdentity, checkpointStore, withStoreConfiguration, withStoreCatalogues, withStoreRetentionRoot, validateStoreHistoryBindings, revalidateStoreRetentionRoot, storeInvocations, withStoreFiles, withStoreReader, withStoreAdmission, withStoreWorker, StoreWorker, createStoreWorkerGroup, storeWorkerCleanupConfirmed, requestStoreWorkersStop, awaitStoreWorkersStop, retryStoreCleanup, probeStoreCapabilities,
     withStoreAdministration, tryWithStoreCatalogues, tryWithStoreFiles,
     AuthorizationWatch, withStoreAuthorizationWatch, withStoreConfigurationWatch, withStoreCataloguesWatch, withStoreCatalogueContextWatch, withStoreCataloguesBorrowed, authorizationWatchCurrent, withAuthorizationObservation, withAuthorizationReadObservation, awaitAuthorizationChange,
-    CommitDeadline, withCommitDeadline, withPreparedCommitDeadline, enforceCommitDeadline, enforceAdmissionFence, managerFlowRoom, appendCommandRecord, appendReviewRecord, Transaction, execute, query, refuseTransaction, runTransaction, runRead, StoreAdmission (..), runTransactionWithAdmission, runReadWithAdmission, transactionGeneration,
+    CommitDeadline, withCommitDeadline, withPreparedCommitDeadline, enforceCommitDeadline, enforceAdmissionFence, managerFlowRoom, appendCommandRecord, appendReviewRecord, noticeAfterCommit, PostCommit, noPostCommit, takePostCommit, appendPostCommit, Transaction, execute, query, refuseTransaction, runTransaction, runRead, StoreAdmission (..), runTransactionWithAdmission, runReadWithAdmission, transactionGeneration,
     Invalidation (..), EventReadFailure (..), RetainedEvents (..), readRetainedEvents, readRetainedEventsWith, retainEvents, backupCoordinationStore, restoreCoordinationStore, reservationOccupancy
   ) where
 
@@ -19,7 +19,7 @@ import qualified Agentic.Manager.Store.Admission as Admission
 import Agentic.Manager.Configuration
   (InstalledConfiguration, acquireConfigurationStorage, releaseConfigurationStorage, withConfigurationAdministration, withConfigurationSnapshot, withConfigurationCatalogues, withConfigurationCatalogueContext, tryConfigurationCatalogueContext, withConfiguredRetentionRoot, validateHistoryBindings, revalidateRetentionRoot, configuredInvocations, configuredLimits, probeConfiguredCapabilities)
 import Agentic.Manager.Flow
-  (ManagerFlow, ManagerFlowFault, ManagerFlowFailure (..), FlowRecordClass (Refusing), CredentialEntry (..), Lifetime (..), Reconciliation (..), noReconciliation, openManagerFlow, closeManagerFlow, managerFlowBytes, managerFlowAllowance, managerFlowContent, appendManagerAsk, appendManagerTell, appendManagerReply, appendLifetime, appendShutdown)
+  (ManagerFlow, ManagerFlowFault, ManagerFlowFailure (..), FlowRecordClass (Refusing), CredentialEntry (..), Notice, noticeFlowBody, managerFlowCeiling, Lifetime (..), Reconciliation (..), noReconciliation, openManagerFlow, closeManagerFlow, managerFlowBytes, managerFlowAllowance, managerFlowContent, appendManagerAsk, appendManagerTell, appendManagerReply, appendLifetime, appendShutdown)
 import Agentic.Manager.Protocol.Command (failureCode)
 import Agentic.Manager.Profile (ConfigurationLimits (..), PublicProfile, Diagnostic (SupervisionUnavailable), Discovery)
 import Agentic.Manager.Fault.Record (ManagerFault (AuthorizationChanged), loanFault, internalLabel, refusalLabel, recordErasure)
@@ -31,7 +31,7 @@ import Agentic.Runtime
   (PrivateRoot, assertPrivateRoot, closePrivateRoot, openPrivateSubroot, privateRootPath,
    openPrivateRoot, privateRootIdentity, readPrivateFileAt, ensurePrivateDirectoryAt, removePrivateFileAt,
    publishPrivateCaptureAt, CapturePublication (..), privateCaptureBytes, privateCaptureSha256,
-   withPrivateDirectoryAt, writePrivateExclusiveAt, strictFlowCodec, FlowCodec, Actor (Manager), Address (To, Approvers), About, Position, Record, Schema (FlowCommand, FlowFailure, FlowReview), FailureKind (Refused), failureBody, WorkflowInputDescriptor (..), frontendLiteralBytes, FrontendCapabilities, FrontendInvocation, ProcessGroup, createProcessGroup, terminateProcessGroup, groupOutcome, processGroupLive)
+   withPrivateDirectoryAt, writePrivateExclusiveAt, strictFlowCodec, FlowCodec, Actor (Manager), Address (To, Approvers), About, Position, Record, Schema (FlowCommand, FlowFailure, FlowReview, FlowNotice), FailureKind (Refused), failureBody, WorkflowInputDescriptor (..), frontendLiteralBytes, FrontendCapabilities, FrontendInvocation, ProcessGroup, createProcessGroup, terminateProcessGroup, groupOutcome, processGroupLive)
 import Control.Concurrent (rtsSupportsBoundThreads)
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (race, withAsync, asyncWithUnmask, cancel, wait)
@@ -54,7 +54,7 @@ import Data.Int (Int64)
 import Data.Word (Word64)
 import Data.Bits ((.&.))
 import Data.Char (isAlphaNum, isAscii, isSpace)
-import Data.IORef (IORef, newIORef, readIORef, writeIORef)
+import Data.IORef (IORef, atomicModifyIORef', modifyIORef', newIORef, readIORef, writeIORef)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Map.Strict as Map
@@ -112,11 +112,24 @@ data StoreWorker = StoreWorker !(TMVar ()) !(MVar ()) !(MVar [ProcessGroup]) !(M
 
 -- | A manager-only transaction program. No IO lift, connection or cursor is exported.
 newtype Transaction a = Transaction (Context -> IO a)
-data Context = Context !SQL.Database !Text !Bool !(IORef Budget) !(IORef Bool) !(IORef (Maybe CommitDeadline)) !(IORef (Maybe (TVar Bool))) !(Maybe (ManagerFlow, IORef (Maybe PendingCommand)))
+data Context = Context !SQL.Database !Text !Bool !(IORef Budget) !(IORef Bool) !(IORef (Maybe CommitDeadline)) !(IORef (Maybe (TVar Bool))) !(Maybe FlowSlot)
+
+-- | The manager log of a transaction: the writer, the command record that the
+-- transaction appended, and the notices that follow its COMMIT, newest first.
+data FlowSlot = FlowSlot !ManagerFlow !(IORef (Maybe PendingCommand)) !(IORef [QueuedNotice])
 
 -- | A command record that this transaction appended to the manager log, which
 -- a definite rollback answers with a @failure@ record.
 data PendingCommand = PendingCommand !Int64 !FlowRecordClass !Position !Actor !About
+
+-- | A notice body with its record class, its address and its identifiers.
+data QueuedNotice = QueuedNotice !FlowRecordClass !Address !About !Value
+
+-- | The notices of a committed transaction that its caller appends later, in
+-- order. It grants nothing and carries no identifier of its own.
+newtype PostCommit = PostCommit [QueuedNotice]
+instance NFData PostCommit where
+  rnf (PostCommit notices) = rnf (length notices)
 data Budget = Budget !Int !Int !Int !Int
 
 instance Functor Transaction where
@@ -1162,7 +1175,7 @@ enforceAdmissionFence fence = Transaction $ \(Context _ _ writable _ _ _ pending
 -- append fails instead. The leaf writer lock is taken inside the held
 -- database lock.
 managerFlowRoom :: Int64 -> FlowRecordClass -> Transaction (Maybe Bool)
-managerFlowRoom total recordClass = Transaction $ \(Context _ _ _ _ _ _ _ slot) -> forM slot $ \(manager, _) ->
+managerFlowRoom total recordClass = Transaction $ \(Context _ _ _ _ _ _ _ slot) -> forM slot $ \(FlowSlot manager _ _) ->
   maybe True (< managerFlowAllowance total recordClass) <$> managerFlowBytes manager
 
 -- | Append the synchronized @command@ record of an admitted command, from the
@@ -1176,7 +1189,7 @@ managerFlowRoom total recordClass = Transaction $ \(Context _ _ _ _ _ _ _ slot) 
 appendCommandRecord :: Int64 -> FlowRecordClass -> Actor -> About -> Value -> Transaction (Maybe (Either ManagerFlowFailure (Position, Record, Either Text Value)))
 appendCommandRecord total recordClass principal about body = Transaction $ \(Context _ _ writable _ _ _ _ slot) -> do
   unless writable (throwIO StoreIntegrity)
-  forM slot $ \(manager, pending) -> do
+  forM slot $ \(FlowSlot manager pending _) -> do
     existing <- readIORef pending
     unless (null existing) (throwIO StoreIntegrity)
     appended <- appendManagerAsk manager total recordClass FlowCommand principal (To Manager) about body
@@ -1193,9 +1206,38 @@ appendCommandRecord total recordClass principal about body = Transaction $ \(Con
 appendReviewRecord :: Int64 -> Text -> About -> Value -> Transaction (Maybe (Either ManagerFlowFailure (Record, Either Text Value)))
 appendReviewRecord total profile about body = Transaction $ \(Context _ _ writable _ _ _ _ slot) -> do
   unless writable (throwIO StoreIntegrity)
-  forM slot $ \(manager, _) -> do
+  forM slot $ \(FlowSlot manager _ _) -> do
     appended <- appendManagerTell manager total Refusing FlowReview Manager (Approvers profile) about body
     forM appended $ \(_, record) -> (,) record <$> managerFlowContent manager record
+
+-- | Queue a flushed notice from the manager that follows the COMMIT of this
+-- transaction. After the COMMIT the notices are appended in the order of
+-- this queue, unless the transaction takes them with 'takePostCommit'. A
+-- rolled back transaction appends none. A lifetime without a manager log
+-- queues nothing. A failed append leaves a gap entry, because a notice is
+-- never a 'Refusing' record.
+noticeAfterCommit :: FlowRecordClass -> Address -> About -> Notice -> Transaction ()
+noticeAfterCommit recordClass to about notice = Transaction $ \(Context _ _ _ _ _ _ _ slot) ->
+  forM_ slot $ \(FlowSlot _ _ queue) -> modifyIORef' queue (QueuedNotice recordClass to about (noticeFlowBody notice) :)
+
+-- | Take the notices that this transaction queued, so that its caller appends
+-- them after a record that must precede them. The admission transaction of a
+-- command takes them, and they follow the receipt.
+takePostCommit :: Transaction PostCommit
+takePostCommit = Transaction $ \(Context _ _ _ _ _ _ _ slot) -> case slot of
+  Nothing -> pure noPostCommit
+  Just (FlowSlot _ _ queue) -> PostCommit . reverse <$> atomicModifyIORef' queue (\queued -> ([], queued))
+
+noPostCommit :: PostCommit
+noPostCommit = PostCommit []
+
+-- | Append the notices of a committed transaction in order.
+appendPostCommit :: CoordinationStore -> PostCommit -> IO ()
+appendPostCommit store (PostCommit notices) = forM_ (storeManagerFlow store) $ \manager -> appendQueued manager notices
+
+appendQueued :: ManagerFlow -> [QueuedNotice] -> IO ()
+appendQueued manager = mapM_ $ \(QueuedNotice recordClass to about body) ->
+  void (appendManagerTell manager (managerFlowCeiling manager) recordClass FlowNotice Manager to about body)
 
 -- | The current in-memory lifetime, never reconstructed from a database row.
 transactionGeneration :: Transaction Text
@@ -1225,6 +1267,7 @@ runWithAdmission :: NFData a => StoreAdmission -> CoordinationStore -> Bool -> T
 runWithAdmission policy store@(CoordinationStore _ _ db identity _ _ poisoned _ _ _ _ _ _ flow) writable (Transaction action) = admittedWith policy store $ \end -> do
   committing <- newIORef False
   pending <- newIORef Nothing
+  queued <- newIORef []
   changed <- newIORef False
   budget <- newIORef (Budget 256 8388608 1000 1048576)
   deadline <- newIORef Nothing
@@ -1233,7 +1276,7 @@ runWithAdmission policy store@(CoordinationStore _ _ db identity _ _ poisoned _ 
     result <- try @SomeException $ restore $ boundedWith db (maybe (pure 5000000) Admission.remainingMicros end) $ do
       mapM_ (void . Admission.remainingMicros) end
       SQL.exec db (if writable then "BEGIN IMMEDIATE" else "BEGIN")
-      (resultValue, events) <- action (Context db (storeProcessGeneration identity) writable budget changed deadline admissionFence ((\manager -> (manager, pending)) <$> flow))
+      (resultValue, events) <- action (Context db (storeProcessGeneration identity) writable budget changed deadline admissionFence ((\manager -> FlowSlot manager pending queued) <$> flow))
       validateEvents events
       value <- evaluate (force resultValue)
       didChange <- readIORef changed
@@ -1246,7 +1289,11 @@ runWithAdmission policy store@(CoordinationStore _ _ db identity _ _ poisoned _ 
       when didChange (advanceAuthorization store)
       pure value
     case result of
-      Right value -> pure value
+      Right value -> do
+        -- The notices follow the COMMIT, outside the transaction outcome, so
+        -- no failed notice can make the committed transaction uncertain.
+        forM_ flow $ \manager -> readIORef queued >>= appendQueued manager . reverse
+        pure value
       Left failure -> do
         uncertain <- readIORef committing
         cleanup <- try @SomeException (bounded db 5000000 (rollback db))
