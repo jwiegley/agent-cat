@@ -460,6 +460,7 @@ test-suite runtime-contract-test
     BrokerTests
     BucketEvidence
     CaptureTests
+    CarriageTests
     FlowCodecTests
     FlowTests
     FrontendProtocolTests

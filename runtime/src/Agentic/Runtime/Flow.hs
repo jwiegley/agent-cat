@@ -1,6 +1,8 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 
 -- | The actor flow: one append-only log of records for each run or manager
@@ -74,6 +76,7 @@ module Agentic.Runtime.Flow
     steerFromBody,
     doneBody,
     doneFromBody,
+    FailureKind (..),
     failureBody,
     failureFromBody,
     eventContent,
@@ -98,6 +101,14 @@ module Agentic.Runtime.Flow
     runAbout,
     withRunLog,
     appendEventRecord,
+
+    -- * Carriage
+    RunFlow (..),
+    FlowScope (..),
+    newFlowScope,
+    scopeRunFlow,
+    flowBroker,
+    flowScopedBroker,
   )
 where
 
@@ -106,6 +117,7 @@ import Agentic.Engine
     EngineRequest,
     EngineResult,
     EngineSteering,
+    EngineUpdate (EnginePermission),
     decodeEnginePermissionReport,
     decodeEngineRequest,
     decodeEngineResult,
@@ -116,7 +128,8 @@ import Agentic.Engine
     encodeEngineSteering,
   )
 import Agentic.Planning (El, Request, SCode, answerFromJsonExact, answerJson, requestFromJson, requestJson)
-import Agentic.Runtime.Control (Control, controlVersionFor, decodeControlFor, encodeControlFor)
+import Agentic.Runtime.Broker (DataBroker (..))
+import Agentic.Runtime.Control (Control (controlId), ControlId (controlIdText), controlVersionFor, decodeControlFor, encodeControlFor)
 import Agentic.Runtime.PrivateRoot (PrivateRoot, ensurePrivateDirectoryAt, openPrivateFileAt, readPrivateFileAt, writePrivateExclusiveAt)
 import Agentic.Runtime.Protocol
   ( FailureClass,
@@ -132,7 +145,7 @@ import Agentic.Runtime.Protocol
   )
 import Agentic.Runtime.Store (LineageOperation, RunStore, storePrivateRoot)
 import Control.Concurrent.MVar (MVar, modifyMVar, modifyMVar_, newMVar)
-import Control.Exception (Exception, IOException, bracket, onException, throwIO, try)
+import Control.Exception (Exception, IOException, SomeAsyncException, SomeException, bracket, displayException, finally, fromException, onException, throwIO, try)
 import Control.Monad (unless, when)
 import Crypto.Hash (Digest, SHA256, hash)
 import Data.Aeson (FromJSON, Key, ToJSON (toJSON), Value (..), encode, object, (.=))
@@ -705,15 +718,26 @@ doneFromBody = \case
   Null -> Right ()
   _ -> Left "done body is not null"
 
-failureBody :: FailureClass -> Text -> Value
-failureBody failure message = object ["class" .= failureText failure, "message" .= message]
+-- | The class of a @failure@ record: the runtime failure class of an operation
+-- that raised an exception, or a refusal that the receiver returned as its
+-- value, such as a steering that the engine refused.
+data FailureKind = FailedWith !FailureClass | Refused
+  deriving (Eq, Show)
 
-failureFromBody :: Value -> Either Text (FailureClass, Text)
+failureBody :: FailureKind -> Text -> Value
+failureBody failure message = object ["class" .= kindText failure, "message" .= message]
+  where
+    kindText (FailedWith class') = failureText class'
+    kindText Refused = "refused"
+
+failureFromBody :: Value -> Either Text (FailureKind, Text)
 failureFromBody value = do
   fields <- objectOf "failure body" value
   exactKeys "failure body" ["class", "message"] fields
   name <- textField "failure body" fields "class"
-  failure <- maybe (Left ("failure body has unknown class '" <> name <> "'")) Right (failureOfText name)
+  failure <- case name of
+    "refused" -> Right Refused
+    _ -> maybe (Left ("failure body has unknown class '" <> name <> "'")) (Right . FailedWith) (failureOfText name)
   (,) failure <$> textField "failure body" fields "message"
 
 eventContent :: SeqNo -> Content
@@ -788,7 +812,11 @@ appendReply :: FlowWriter -> Schema -> Position -> Actor -> Address -> About -> 
 appendReply writer schema position = append writer schema ReplySchema (Just position)
 
 append :: FlowWriter -> Schema -> SchemaRole -> Maybe Position -> Actor -> Address -> About -> Content -> IO (Position, Record)
-append writer schema role replyTo from to about content = do
+append writer = appendVia (writerCodec writer) writer
+
+-- | Append one record through the given codec, under the writer lock.
+appendVia :: FlowCodec -> FlowWriter -> Schema -> SchemaRole -> Maybe Position -> Actor -> Address -> About -> Content -> IO (Position, Record)
+appendVia codec writer schema role replyTo from to about content = do
   unless (schemaRole schema == role) $
     refuse ("the " <> schemaName schema <> " schema is not a " <> roleName role)
   modifyMVar (writerState writer) $ \current -> do
@@ -801,10 +829,10 @@ append writer schema role replyTo from to about content = do
     (body, claim) <- either refuse pure (bodyFor schema content)
     at <- getCurrentTime
     let record = Record schema from to about replyTo body at
-        line = flowEncodeLine (writerCodec writer) record
+        line = flowEncodeLine codec record
     when (BS.length line > maxFrameBytes) $
       refuse ("the " <> schemaName schema <> " record exceeds " <> T.pack (show maxFrameBytes) <> " bytes")
-    carried <- either (refuse . ("the codec does not decode its own line: " <>)) pure (flowDecodeLine (writerCodec writer) line)
+    carried <- either (refuse . ("the codec does not decode its own line: " <>)) pure (flowDecodeLine codec line)
     claims <- case claim of
       Just (digest, bytes) | Set.notMember digest (stateClaims current) -> do
         writeClaim (writerRoot writer) digest bytes
@@ -907,6 +935,174 @@ withRunLog store intake start action =
 appendEventRecord :: FlowWriter -> RunId -> SeqNo -> IO ()
 appendEventRecord writer run number =
   () <$ appendTell writer FlowEvent (Workflow run) Public (runAbout run) (eventContent number)
+
+-- ---------------------------------------------------------------------------
+-- Carriage
+-- ---------------------------------------------------------------------------
+
+-- | What 'flowBroker' needs to record the messages of one run.
+data RunFlow = RunFlow
+  { runFlowWriter :: !FlowWriter,
+    -- | The runtime protocol of the run, which fixes the codec of its controls.
+    runFlowProtocol :: !Int,
+    runFlowRun :: !RunId,
+    -- | The actor that sends the run its controls: the local principal, or
+    -- 'Manager' in service mode.
+    runFlowIntake :: !Actor,
+    -- | The actor that answers a dispatched request. The runtime resolves it
+    -- from the candidate that it dispatched and the target in the @start@
+    -- record, and never from an engine report.
+    runFlowAnswerer :: forall c. Request c -> Actor,
+    -- | The runtime failure class of an exception that a receiver raised.
+    runFlowFailureClass :: SomeException -> FailureClass,
+    -- | The occurrence whose operations this broker carries, if any.
+    runFlowScope :: !(Maybe FlowScope)
+  }
+
+-- | The scope of one occurrence, which the runtime creates for each occurrence
+-- before its first dispatch. The records that a scoped broker appends name the
+-- occurrence, its epoch and the attempt of the scope. The runtime creates each
+-- scope without an attempt at present.
+data FlowScope = FlowScope
+  { flowScopeOccurrence :: !OccurrenceId,
+    flowScopeEpoch :: !Word64,
+    flowScopeAttempt :: !(Maybe Word32),
+    -- | The control that supplied the answer of the occurrence, when a control
+    -- supplied it. The runtime creates the cell empty and does not yet fill it.
+    flowScopeAnswerSource :: !(IORef (Maybe ControlId)),
+    -- | The answerer of the question in flight, which receives the engine
+    -- start, the turns and the steering of that question. Only 'flowBroker'
+    -- writes it, for the duration of one @brokerRequest@.
+    flowScopeCandidate :: !(IORef (Maybe Actor))
+  }
+
+newFlowScope :: OccurrenceId -> Word64 -> IO FlowScope
+newFlowScope occurrence epoch = FlowScope occurrence epoch Nothing <$> newIORef Nothing <*> newIORef Nothing
+
+scopeRunFlow :: FlowScope -> RunFlow -> RunFlow
+scopeRunFlow scope flow = flow {runFlowScope = Just scope}
+
+-- | The broker of one occurrence: 'flowBroker' over the scoped flow.
+flowScopedBroker :: FlowCodec -> RunFlow -> DataBroker -> FlowScope -> DataBroker
+flowScopedBroker codec flow inner scope = flowBroker codec (scopeRunFlow scope flow) inner
+
+-- | Carry the operations of a broker through the run log.
+--
+-- Each operation appends its ask or tell through the codec before delivery,
+-- hands its receiver the value decoded from the appended bytes, and appends the
+-- reply or failure. The runtime receives the value decoded from the reply
+-- record. A record whose bytes do not decode fails the operation before
+-- delivery. Otherwise the receiver acts on the decoding, even when the codec
+-- changed the value. A reply append that fails after the receiver returned
+-- makes the operation refuse that reply. A receiver that raises a synchronous
+-- exception has its failure appended, and the original exception propagates.
+-- An asynchronous exception appends nothing.
+--
+-- @brokerEvent@ is carried by the event sink of the run, which appends each
+-- event record, and @brokerLog@ and @brokerPersistence@ append nothing.
+flowBroker :: FlowCodec -> RunFlow -> DataBroker -> DataBroker
+flowBroker codec flow inner =
+  inner
+    { brokerRequest = \receive code request -> do
+        let answerer = runFlowAnswerer flow request
+        (asked, request') <- carryAsk FlowQuestion answerer (questionBody code request) (questionFromBody code)
+        answer <- failing asked answerer (withCandidate answerer (brokerRequest inner receive code request'))
+        carryReply FlowAnswer asked answerer (answerBody code answer) (answerFromBody code),
+      brokerStart = \engine context request -> do
+        model <- candidate FlowEngineStart
+        (asked, request') <- carryAsk FlowEngineStart model (engineStartBody request) engineStartFromBody
+        conversation <- failing asked model (brokerStart inner engine context request')
+        carryReply FlowDone asked model doneBody doneFromBody
+        pure conversation,
+      brokerTurn = \conversation text -> do
+        model <- candidate FlowTurn
+        (asked, text') <- carryAsk FlowTurn model (turnBody text) turnFromBody
+        result <- failing asked model (brokerTurn inner conversation text')
+        carryReply FlowEngineResult asked model (engineResultBody result) engineResultFromBody,
+      brokerSteer = \steerer timing text -> do
+        model <- candidate FlowSteer
+        (asked, (timing', text')) <- carryAsk FlowSteer model (steerBody timing text) steerFromBody
+        outcome <- failing asked model (brokerSteer inner steerer timing' text')
+        case outcome of
+          Right () -> Right <$> carryReply FlowDone asked model doneBody doneFromBody
+          Left why -> Left . snd <$> carryReply FlowFailure asked model (failureBody Refused why) failureFromBody,
+      brokerControl = \receive control -> do
+        body <- either refuse pure (controlBody (runFlowProtocol flow) control)
+        let command = (runAbout (runFlowRun flow)) {aboutCommand = Just (controlIdText (controlId control))}
+        (_, record) <- appendVia codec writer FlowControl TellSchema Nothing (runFlowIntake flow) (To workflow) command (ContentValue body)
+        (_, control') <- carried FlowControl controlFromBody record
+        brokerControl inner receive control',
+      brokerUpdate = \sink update -> case update of
+        EnginePermission report -> do
+          adapter <- candidate FlowPermission >>= \case
+            Model name -> pure (Adapter name)
+            other -> refuse ("a permission report arrived while " <> T.pack (show other) <> " answers, not a model")
+          (_, record) <- appendVia codec writer FlowPermission TellSchema Nothing adapter (To workflow) about (ContentValue (permissionBody report))
+          report' <- carried FlowPermission permissionFromBody record
+          brokerUpdate inner sink (EnginePermission report')
+        _ -> brokerUpdate inner sink update
+    }
+  where
+    writer = runFlowWriter flow
+    workflow = Workflow (runFlowRun flow)
+    scope = runFlowScope flow
+    about = case scope of
+      Nothing -> runAbout (runFlowRun flow)
+      Just current ->
+        (runAbout (runFlowRun flow))
+          { aboutOccurrence = Just (flowScopeOccurrence current),
+            aboutEpoch = Just (flowScopeEpoch current),
+            aboutAttempt = flowScopeAttempt current
+          }
+
+    carryAsk :: Schema -> Actor -> Value -> (Value -> Either Text a) -> IO (Position, a)
+    carryAsk schema to body decode = do
+      (position, record) <- appendVia codec writer schema AskSchema Nothing workflow (To to) about (ContentValue body)
+      (,) position <$> carried schema decode record
+
+    carryReply :: Schema -> Position -> Actor -> Value -> (Value -> Either Text a) -> IO a
+    carryReply schema asked from body decode = do
+      (_, record) <- appendVia codec writer schema ReplySchema (Just asked) from (To workflow) about (ContentValue body)
+      carried schema decode record
+
+    -- A synchronous failure of the receiver is the reply to its ask.
+    failing :: Position -> Actor -> IO a -> IO a
+    failing asked from action = do
+      outcome <- try @SomeException action
+      case outcome of
+        Right value -> pure value
+        Left failure
+          | Just (_ :: SomeAsyncException) <- fromException failure -> throwIO failure
+          | otherwise -> do
+              let body = failureBody (FailedWith (runFlowFailureClass flow failure)) (T.pack (displayException failure))
+              _ <- carryReply FlowFailure asked from body failureFromBody
+              throwIO failure
+
+    carried :: Schema -> (Value -> Either Text a) -> Record -> IO a
+    carried schema decode record = do
+      content <- case recBody record of
+        Inline value -> pure value
+        body@(ClaimCheck _ _) -> readFlowContent (writerRoot writer) body >>= \case
+          Right (ContentValue value) -> pure value
+          Right (ContentEvent _) -> refuse ("the " <> schemaName schema <> " claim check names an event")
+          Left why -> refuse why
+        EventNumber _ -> refuse ("the " <> schemaName schema <> " record names an event")
+      either (\why -> refuse ("the " <> schemaName schema <> " record does not decode: " <> why)) pure (decode content)
+
+    candidate :: Schema -> IO Actor
+    candidate schema = case scope of
+      Nothing -> refuse ("a " <> schemaName schema <> " record needs the scope of an occurrence")
+      Just current ->
+        readIORef (flowScopeCandidate current)
+          >>= maybe (refuse ("a " <> schemaName schema <> " record needs a question in flight")) pure
+
+    withCandidate :: Actor -> IO a -> IO a
+    withCandidate answerer action = case scope of
+      Nothing -> action
+      Just current -> do
+        previous <- readIORef (flowScopeCandidate current)
+        writeIORef (flowScopeCandidate current) (Just answerer)
+        action `finally` writeIORef (flowScopeCandidate current) previous
 
 -- ---------------------------------------------------------------------------
 -- Strict JSON values

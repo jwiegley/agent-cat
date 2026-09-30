@@ -103,6 +103,9 @@ module Agentic.Exec
     runPlanObserved,
     runPlanPersisted,
     runPlanBrokered,
+    runPlanScoped,
+    runFlowFor,
+    requestAnswerer,
     attemptLog,
     PersistenceHooks (..),
     nullPersistenceHooks,
@@ -204,6 +207,7 @@ import Agentic.Plan
     withRequestPrompt,
   )
 import Agentic.Runtime.Broker (DataBroker (..), inProcessBroker, PersistenceHooks (..), nullPersistenceHooks)
+import Agentic.Runtime.Flow (Actor (Model, ToolActor), FlowScope, FlowWriter, RunFlow (..), Start (startPersonAnswering, startRun, startTarget), ToolKind (FixtureTool, ProgramCommand, RegistryTool), newFlowScope)
 import Agentic.Runtime.Control
   ( AttemptSteerer,
     awaitRuntimeRedirect,
@@ -230,6 +234,7 @@ import Agentic.Runtime.Protocol
     PublicTodoItem (..),
     PublicToolUpdate (..),
     PublicUsage (..),
+    PersonAnswering (PersonAnswerLocalControl),
     QuestionRef,
     RecoveryOption (..),
     RuntimeEvent (..),
@@ -697,7 +702,9 @@ data Scheduler = Scheduler
     schedulerPersistence :: !PersistenceHooks,
     schedulerSink :: !EventSink,
     schedulerControlRuntime :: !(Maybe ControlRuntime),
-    schedulerBroker :: !DataBroker
+    -- | The broker of one occurrence, derived from its scope. It is the run's
+    -- broker for a broker without a run flow.
+    schedulerScopedBroker :: !(FlowScope -> DataBroker)
   }
 
 data Claim
@@ -752,7 +759,14 @@ runPlanObservedWith = runPlanBrokered inProcessBroker
 -- sinks and persistence hooks are original, unwrapped resource loans. Workflow
 -- transitions, decoding, lane reservations and memo claims remain here.
 runPlanBrokered :: DataBroker -> Maybe ControlRuntime -> PersistenceHooks -> EventSink -> Chains -> WorldIO -> Plan '[] a -> IO (a, ExecTrace)
-runPlanBrokered broker controls persistence sink ch w p = mask $ \restore -> do
+runPlanBrokered broker = runPlanScoped broker (const broker)
+
+-- | 'runPlanBrokered' with the broker of each occurrence derived from its
+-- scope. The runtime creates the scope of an occurrence, with its occurrence
+-- identifier and epoch, before the occurrence dispatches anything, and every
+-- attempt of the occurrence uses the derived broker.
+runPlanScoped :: DataBroker -> (FlowScope -> DataBroker) -> Maybe ControlRuntime -> PersistenceHooks -> EventSink -> Chains -> WorldIO -> Plan '[] a -> IO (a, ExecTrace)
+runPlanScoped broker scoped controls persistence sink ch w p = mask $ \restore -> do
   memo <- newTVarIO (Memo Map.empty Map.empty Set.empty)
   threads <- newTVarIO []
   failed <- newEmptyTMVarIO
@@ -761,7 +775,7 @@ runPlanBrokered broker controls persistence sink ch w p = mask $ \restore -> do
   epochs <- newTVarIO 0
   nextOccurrence <- newTVarIO 0
   let scheduler = Scheduler memo threads failed effects readsSinceEffect epochs nextOccurrence
-        (brokerPersistence broker persistence) (brokerEvent broker sink) controls broker
+        (brokerPersistence broker persistence) (brokerEvent broker sink) controls scoped
       chains = ch {chainLog = brokerLog broker (chainLog ch)}
       run = do
         (a, tickets) <- execIn scheduler w chains PendingNil p
@@ -976,7 +990,7 @@ runOccurrence scheduler w ch occurrence epoch c request = do
       case Map.lookup occurrence (reservedRedirects controlState) of
         Nothing -> pure ()
         Just targets -> emit scheduler (OccurrenceDispatchPending occurrence targets)
-  context <- newAttemptContext scheduler occurrence
+  context <- newAttemptContext scheduler occurrence epoch
   outcome <- try (askOrMemo scheduler w ch context epoch c request)
   case outcome of
     Right (answer, event@(ExecEvent _ _ source _)) -> do
@@ -992,9 +1006,10 @@ runOccurrence scheduler w ch occurrence epoch c request = do
         emit scheduler (OccurrenceFailed occurrence (failureClassOf e) (failureMessage e))
       throwIO e
 
-newAttemptContext :: Scheduler -> OccurrenceId -> IO AttemptContext
-newAttemptContext scheduler occurrence = do
+newAttemptContext :: Scheduler -> OccurrenceId -> Int -> IO AttemptContext
+newAttemptContext scheduler occurrence epoch = do
   next <- newTVarIO (0 :: Word32)
+  scope <- newFlowScope occurrence (fromIntegral epoch)
   pure
     AttemptContext
       { attemptOccurrenceId = occurrence,
@@ -1009,7 +1024,7 @@ newAttemptContext scheduler occurrence = do
         attemptFailoverAvailable = pure False,
         attemptStoreQuestion =
           persistenceStoreQuestion (schedulerPersistence scheduler) occurrence,
-        attemptBroker = schedulerBroker scheduler
+        attemptBroker = schedulerScopedBroker scheduler scope
       }
 
 withAttemptSteering :: AttemptContext -> AttemptSteerer -> AttemptContext
@@ -1121,6 +1136,39 @@ questionTarget q =
 
 requestTarget :: Request c -> Text
 requestTarget = questionTarget . reqQuestion
+
+-- | The run flow of a run log, with its answerer resolved by 'requestAnswerer'
+-- over the names of the tools that the run answers in process, and its
+-- failures classified as the runtime classifies them in its events.
+runFlowFor :: FlowWriter -> Int -> Actor -> Start -> [Text] -> RunFlow
+runFlowFor writer protocol intake start inProcess =
+  RunFlow
+    { runFlowWriter = writer,
+      runFlowProtocol = protocol,
+      runFlowRun = startRun start,
+      runFlowIntake = intake,
+      runFlowAnswerer = requestAnswerer start intake inProcess,
+      runFlowFailureClass = failureClassOf,
+      runFlowScope = Nothing
+    }
+
+-- | The actor that answers a dispatched request, named by its 'requestTarget'.
+-- A person question under local control is answered through the intake. Under
+-- the scripted target the table answers every other question. Otherwise a
+-- tool that the run answers in process is answered by its registry row, a
+-- command by the command, and every other question, including a person
+-- question in engine mode, by the model that the runtime routed it to. The
+-- kind comes from the run's @start@ record, the in-process tool names and the
+-- dispatched request, never from an engine report.
+requestAnswerer :: Start -> Actor -> [Text] -> Request c -> Actor
+requestAnswerer start intake inProcess request = case qAddressee (reqQuestion request) of
+  AddrPerson _ | startPersonAnswering start == Just PersonAnswerLocalControl -> intake
+  _ | startTarget start == "scripted" -> ToolActor label FixtureTool
+  AddrTool name | name `elem` inProcess -> ToolActor label RegistryTool
+  AddrToolExec {} -> ToolActor label ProgramCommand
+  _ -> Model label
+  where
+    label = requestTarget request
 
 answerSourceText :: AnswerSource c -> Text
 answerSourceText AnswerReused = "reused"

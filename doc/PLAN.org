@@ -2681,6 +2681,32 @@ Scope once research lands: at minimum, client-side session/load (capability-gate
 ]
 #+end_src
 
+* TODO [#C] Resolve F5 fess findings in flowBroker carriage
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-actk
+:LABELS:   ["actor-flow","workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-29 Tue 17:48]
+:MODIFIED: [2026-09-29 Tue 17:48]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Follow-up from the F5 fess audit of flowBroker carriage on the scheduler path (actor-flow delta 1a). None of these findings blocks. Source: fess audit /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/fess/flow-F5-r1.md.
+
+1. (medium) runtime/src/Agentic/Runtime/Flow.hs near line 1064, runtime/src/Agentic/Exec.hs near line 1180, runtime/BROKER.md lines 200-202: D2 is only partly implemented. The design says an effect whose reply append fails is reported as potentially executed. The code raises FlowError, which is classified as FailureRuntime, and no event marks the effect as potentially executed. BROKER.md states this as a fact, not as a report that the runtime emits. The D2 test covers a flag consult only. Fix: emit a potentially-executed report for an Effect request when the reply append fails, and test it, or restate BROKER.md to state current behavior.
+2. (medium) runtime/src/Agentic/Exec.hs near lines 452 and 498, the Machine.hs default wrappers, cli/src/Agentic/Cli.hs near lines 1088 and 1271: the four direct inProcessBroker paths of delta 1a are unchanged, and gate 10 has no bypass check. TUI local-mode controls read by withMachineControls are delivered unwrapped and are not recorded. Fix: route the four paths through the run broker when the run has a store, and add the gate 10 bypass check.
+3. (medium) runtime/src/Agentic/Runtime/Flow.hs near lines 1094 and 1039: flowBroker adds refusals outside D1 to D6: an engine operation with no scope or no question in flight, and a permission report from a candidate that is not a model. No store path reaches them today, but once Exec.hs:452 gets the run broker, an engine ask without an attempt context fails with "needs the scope of an occurrence". These refusals are close to the rule that the broker never enforces a rule. Fix: give unscoped engine operations a run-level address or a scope instead of a refusal, and reconsider the permission-kind refusal.
+4. (medium) runtime/src/Agentic/Runtime/Flow.hs near line 980, runtime/src/Agentic/Exec.hs near lines 1012 and 502-505: flowScopeAttempt is always Nothing, although the runtime knows the attempt for steer and permission records inside withPhysicalAttempt. Fix: derive a per-attempt scope inside runEngineAttempt, with the attempt id, for the steerer and the update sink.
+5. (low) runtime/test/CarriageTests.hs near line 46: the negative control asserts only that the mirror produces some finding. Fix: assert that the mirror findings are exactly the request-receiver and turn-receiver mismatch labels.
+6. (low) runtime/src/Agentic/Exec.hs near line 1166: requestAnswerer detects the scripted target by comparing the label with "scripted". Fix: carry a typed target kind to runFlowFor, or document the label contract next to targetLabel.
+7. (low) runtime/src/Agentic/Runtime/Flow.hs near line 1070: when the failure append itself fails, the append error replaces the original receiver exception. Fix: attach the original exception to the append error, or rethrow the original after marking the log broken.
+8. (low) runtime/src/Agentic/Exec.hs near line 707 and the export list: the change replaces schedulerBroker instead of adding a scoping function beside it, and runPlanScoped, newFlowScope, scopeRunFlow, runFlowFor and requestAnswerer are exported publicly through Agentic.Runtime although the requirement calls scoping runtime-internal. Fix: accept as equivalent, or narrow the exports to what Cli needs.
+9. (low) runtime/src/Agentic/Exec.hs near lines 1160-1170: the answerer label is the requestTarget text (for example "model controlled@primary"), and the trace in design section 3.5 uses the backend spelling "acp:claude". Fix: reconcile the design trace with the implemented label, or record the difference.
+
 * DONE [#C] Engine: agent-deck as a payload transport beside the ACP adapters — send/output into live sessions
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -3518,7 +3544,7 @@ Owner directive 2026-08-12: use the standard libraries as much as possible; do n
 :LABELS:   ["actor-flow","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-26 Sat 23:41]
-:MODIFIED: [2026-09-29 Tue 17:22]
+:MODIFIED: [2026-09-29 Tue 17:48]
 :CREATED_BY: johnw
 :SOURCE_REPO: .
 :ORIGINAL_SIZE: 0
@@ -3564,6 +3590,13 @@ Actor-flow increment 1, delta 1a (at most 8 engineering days, after the operator
     "author": "johnw",
     "text": "Subtask F4 of delta 1a: the run writer at runMachineWith. When AGENT_CAT_RUN_STORE is set, runMachineWith opens flow.ndjson in the run store through the F3 writer. Line 0 is start from the intake actor. The intake is an explicit MachineOptions field: frontendCmd sets Manager, and every other caller sets Principal (LocalAccount realUid owner) with AGENT_CAT_RUN_OWNER as the declared owner. Under the events.ndjson lock, each public event appends an event record that names n, then writes line n of events.ndjson, then the mirrors. A failed append fails the run through the observer-failure path (D1). programSha256 is shared with the frontend. A run without a store writes no log. runtime/BROKER.md has a Run log section. Evidence scope: F4-build (-Werror, agentic-run, runtime-contract-test, routing-fixed-point-probe), runtime-contract-test at N8 with the new runLogSinkChecks, test/progress_probe.py with the golden comparison and the flow.ndjson checks, test/lineage_probe.py (a child start names the parent and the lineage operation), make -C doc check, and the Phase A tui-journey at N8 whose run store flow.ndjson begins with start from Manager each passed once under timeout 900. The fess auditor reran the build and runtime-contract-test with exit 0. Fess: not blocking. Two medium and three low findings are filed as acat-14ht. flowBroker, the four inProcessBroker paths, the reader and the flow verb have not landed, so this issue stays open.\n",
     "created_at": "2026-09-30T00:22:37Z"
+  },
+  {
+    "id": 358,
+    "issue_id": "acat-e6cp",
+    "author": "johnw",
+    "text": "Subtask F5 of delta 1a: flowBroker carriage on the scheduler path. flowBroker :: FlowCodec -> RunFlow -> DataBroker -> DataBroker is in Agentic.Runtime.Flow and is exported through Agentic.Runtime. DataBroker keeps its nine fields. runMachineWith wraps the broker it receives when the run has a store, so both inProcessBroker and the --broker-test broker are wrapped. The append points follow section 3.2 of the design record: question and answer or failure for request, engine-start and done or failure for start, turn and engine-result or failure for turn, steer and done or failure (class refused for a Left) for steer, control from the intake for control, and permission for EnginePermission only. Receivers act on the value decoded from the appended record, and the runtime acts on the decoded reply (D3). A failed reply append refuses the reply (D2). The scheduler derives a scoped attemptBroker for each occurrence with the occurrence, the epoch and an answer-source cell for F6. Evidence scope: F5-build (-Werror, agentic-run, runtime-contract-test, routing-fixed-point-probe), F5-runtime-contract at N8 (new CarriageTests: carriage, a lossy codec with a mirror negative control, D2, D3, receiver failure, asynchronous exception and two concurrent occurrences), F5-progress-probe with the golden comparison and new carriage checks of the broker-hello and broker-injected run logs, and F5-journey (Phase A tui-journey at N8) each passed once under timeout 900. The fess auditor reran F5-build and F5-runtime-contract with exit 0. Fess: not blocking. Its four medium and five low findings are filed as acat-actk. Open in delta 1a: the four direct inProcessBroker paths, the gate 10 bypass check, the reader and the flow verb, so this issue stays open.\n",
+    "created_at": "2026-09-30T00:48:52Z"
   }
 ]
 #+end_src

@@ -84,9 +84,9 @@ receiver failure to its runtime and cancels and joins its original reader on exi
 ## Flow records
 
 `Agentic.Runtime.Flow`, exported by `Agentic.Runtime`, defines the record of the
-actor flow and its writer. A machine run with a run store writes a run log, as
-the next section states. No manager writes a flow log at present, and
-`inProcessBroker` delivers data as the sections above state.
+actor flow, its writer and `flowBroker`. A machine run with a run store writes
+a run log and carries its broker operations through that log, as the next two
+sections state. No manager writes a flow log at present.
 
 A `Record` names one of seventeen schemas, a sender, an address, the
 identifiers that it concerns, the position of its ask when it is a reply, a body
@@ -152,6 +152,79 @@ fails every later event, as it does after a failed durable write. The run stops
 with that exception, and `events.ndjson` holds exactly the lines whose records
 the run log holds.
 
+## Carriage
+
+`flowBroker :: FlowCodec -> RunFlow -> DataBroker -> DataBroker` wraps a broker
+and keeps its nine operations and their types. When the run has a run store,
+`runMachineWith` wraps the broker that it receives, so `cliMain` wraps
+`inProcessBroker` and the `--broker-test` runner of
+`cli/test/RoutingFixedPointProbe.hs` wraps its injected broker. A run without a
+run store uses the broker that it receives.
+
+`RunFlow` holds the run log writer, the runtime protocol of the run, the native
+run identifier, the intake actor, the answerer function, the failure classifier
+and an optional occurrence scope. `runFlowFor` builds it from the `start`
+record, the intake and the names of the tools that the run answers in process.
+The answerer of a request is the candidate that `requestTarget` names, with a
+kind that `requestAnswerer` resolves from the run target and the
+person-answering mode in `start` and from the in-process tool names. It never
+takes the kind from an engine report. A person question under local control
+goes to the intake. Under the scripted target the table answers every other
+question as a fixture. Otherwise an in-process tool is a registry tool, a
+command is a program command, and every other question, including a person
+question in engine mode, goes to the model that the runtime routed it to.
+
+The operations append these records. The runtime of the run sends each ask and
+receives each reply.
+
+| Operation | Records |
+| --- | --- |
+| `brokerRequest` | `question` to the answerer, then `answer` from the answerer or `failure`. |
+| `brokerStart` | `engine-start` to the answerer of the question in flight, then `done` or `failure`. The conversation is not recorded. |
+| `brokerTurn` | `turn`, then `engine-result` or `failure`. |
+| `brokerSteer` | `steer`, then `done`, or `failure` of class `refused` when the engine returns a refusal. |
+| `brokerControl` | `control` from the intake, whose identifiers name the control identifier as the command. |
+| `brokerUpdate` | `permission` from `Adapter` with the name of the answerer, for an `EnginePermission` update only. |
+| `brokerEvent`, `brokerLog`, `brokerPersistence` | nothing. The event sink appends each `event` record, as the previous section states. |
+
+Carriage rule. Each ask or tell is appended before delivery, and the receiver
+gets the value decoded from the appended bytes. The runtime gets the value
+decoded from the reply record. A body above 65536 bytes is read back from its
+verified claim check. A receiver that raises a synchronous exception has a
+`failure` record with the runtime failure class and message of that exception,
+and the original exception propagates. An asynchronous exception appends
+nothing, so its ask stays without a reply.
+
+- **D1.** A failed run-log append fails the operation, and the run stops through
+  the existing observer-failure path or with the exception of the operation.
+- **D2.** When the reply append fails after the receiver returned, the operation
+  raises the append failure and the runtime does not receive that reply. An
+  effect in that position is potentially executed.
+- **D3.** A record whose bytes do not decode fails the operation before
+  delivery. Otherwise the receiver acts on the decoding, even when the codec
+  changed the value.
+
+`runPlanScoped` takes the broker of the run and a function from a `FlowScope`
+to the broker of one occurrence, and `runPlanBrokered` is `runPlanScoped` with
+the constant function. The runtime creates the scope of each occurrence before
+the occurrence dispatches anything. The scope holds the occurrence identifier,
+the epoch, an attempt field that the runtime leaves empty at present, a cell
+for the control that supplied the answer, which the runtime does not yet fill,
+and a cell for the answerer of the question in flight.
+`flowScopedBroker` wraps the broker with the scoped flow, so the records of an
+occurrence name its occurrence and epoch. Only `brokerRequest` sets the answerer
+cell, for the duration of its receiver, and `brokerStart`, `brokerTurn`,
+`brokerSteer` and `brokerUpdate` address the answerer that it holds. An engine
+operation without a scope or without a question in flight is refused before
+delivery.
+
+The runtime broker checks run `flowBroker` over a recording broker, under the
+strict codec and under a codec that changes the values that it decodes. A mirror
+that hands on the original values fails those checks. The checks also cover a
+failed reply append, undecodable bytes and bodies, receiver failures,
+asynchronous exceptions, the answerer of each kind of request, and the scopes of
+two concurrent occurrences.
+
 ## Failure and extension
 
 Success means that the original receiver operation returned successfully.
@@ -175,5 +248,7 @@ epoch delivery for reusable answers and uncertainty without effect replay.
 The ACP progress probe also runs Hello World and an injected-reply fixture through
 real local ACP processes, checking consumed answers and durable events. It
 compares the Hello World `events.ndjson`, with each timestamp replaced, with the
-golden file `test/fixtures/flow/hello-events.ndjson`. These
+golden file `test/fixtures/flow/hello-events.ndjson`, and it checks that the
+Hello World and injected-reply run logs hold a question, an engine start, a
+turn, an engine result and an answer for each occurrence. These
 checks do not establish completion of the manager service or a frontend journey.

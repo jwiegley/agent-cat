@@ -202,7 +202,7 @@ bodyRoundTrips = do
     body ("steer " <> show timing) FlowSteer (uncurry steerBody) steerFromBody (timing, unicode)
   body "done" FlowDone (const doneBody) doneFromBody ()
   refused "done with a value" (doneFromBody (Bool False))
-  forM_ [FailureSetup, FailureTransport, FailureDecode, FailureProtocol, FailureCancelled, FailureRuntime] $ \failure ->
+  forM_ (Refused : map FailedWith [FailureSetup, FailureTransport, FailureDecode, FailureProtocol, FailureCancelled, FailureRuntime]) $ \failure ->
     body ("failure " <> show failure) FlowFailure (uncurry failureBody) failureFromBody (failure, unicode)
   refused "failure of an unknown class" (failureFromBody (object ["class" .= ("other" :: Text), "message" .= ("" :: Text)]))
   let eventRecord = recordOf FlowEvent (Workflow (RunId "r")) Public noAbout (EventNumber (SeqNo 18446744073709551615))
@@ -303,7 +303,7 @@ writerChecks = do
         (p3, r3) <- appendAsk writer FlowEngineStart from to noAbout (ContentValue claimed)
         (p4, r4) <- appendReply writer FlowDone p3 (Model "acp:claude") (To from) noAbout (ContentValue doneBody)
         (p5, r5) <- appendAsk writer FlowTurn from to noAbout (ContentValue claimed)
-        (p6, r6) <- appendReply writer FlowFailure p5 (Model "acp:claude") (To from) noAbout (ContentValue (failureBody FailureTransport "gap"))
+        (p6, r6) <- appendReply writer FlowFailure p5 (Model "acp:claude") (To from) noAbout (ContentValue (failureBody (FailedWith FailureTransport) "gap"))
         (p7, r7) <- appendReply writer FlowAnswer p2 (Model "acp:claude") (To from) noAbout (ContentValue (Bool False))
         check "positions are 0-based and consecutive" (map positionIndex [p0, p1, p2, p3, p4, p5, p6, p7] == [0 .. 7])
         check "a reply names its ask" (recReplyTo r4 == Just p3 && recReplyTo r7 == Just p2 && recReplyTo r0 == Nothing)
@@ -317,8 +317,8 @@ writerChecks = do
         refusedIO "a reply to its own position" (appendReply writer FlowAnswer (Position 8) Manager to noAbout (ContentValue Null))
         refusedIO "a reply to an ask of the wrong schema" (appendReply writer FlowAnswer p3 Manager to noAbout (ContentValue Null))
         refusedIO "a done reply to a question" (appendReply writer FlowDone p2 Manager to noAbout (ContentValue doneBody))
-        refusedIO "a reply to a tell" (appendReply writer FlowFailure p0 Manager to noAbout (ContentValue (failureBody FailureRuntime "")))
-        refusedIO "a reply to a reply" (appendReply writer FlowFailure p4 Manager to noAbout (ContentValue (failureBody FailureRuntime "")))
+        refusedIO "a reply to a tell" (appendReply writer FlowFailure p0 Manager to noAbout (ContentValue (failureBody (FailedWith FailureRuntime) "")))
+        refusedIO "a reply to a reply" (appendReply writer FlowFailure p4 Manager to noAbout (ContentValue (failureBody (FailedWith FailureRuntime) "")))
         refusedIO "an ask of a tell schema" (appendAsk writer FlowControl from to noAbout (ContentValue Null))
         refusedIO "a tell of a reply schema" (appendTell writer FlowAnswer from to noAbout (ContentValue Null))
         refusedIO "an event with a value" (appendTell writer FlowEvent from Public noAbout (ContentValue Null))

@@ -4,7 +4,9 @@
 Each store-backed run must also write the run log flow.ndjson: line 0 is the
 start record from the local account with the owner that AGENT_CAT_RUN_OWNER
 declares, and the event records name the sequence numbers of events.ndjson in
-order.
+order. With a broker runner, the broker-hello and broker-injected run logs must
+also hold, for each occurrence, the question, the engine start, the turn, the
+engine result and the answer, each reply naming its ask.
 
 With a broker runner, the probe also compares the store-backed broker-hello
 events.ndjson, with each timestamp replaced, against the golden file
@@ -85,6 +87,36 @@ def assert_run_log(store: Path, run_id: str, protocol: int) -> dict:
     return body
 
 
+ANSWERS = {
+    "answer": {"question"},
+    "engine-result": {"turn"},
+    "done": {"engine-start", "steer"},
+    "failure": {"question", "engine-start", "turn", "steer", "command"},
+}
+HELLO_EXCHANGE = ["question", "engine-start", "done", "turn", "engine-result", "answer"]
+
+
+def assert_carriage(store: Path, run_id: str, expected: list[str]) -> list[dict]:
+    """Check the carried records of a run log: each reply names an earlier ask
+    that it may answer, carries the identifiers of that ask and comes from its
+    addressee, and the records other than events are the expected schemas."""
+    records = [json.loads(line) for line in (store / "flow.ndjson").read_bytes().splitlines()]
+    for index, record in enumerate(records):
+        if record["schema"] in ANSWERS:
+            asked = record["replyTo"]
+            assert 0 <= asked < index, f"{run_id}: reply {index} names position {asked}"
+            ask = records[asked]
+            assert ask["schema"] in ANSWERS[record["schema"]], f"{run_id}: {record['schema']} {index} answers {ask['schema']}"
+            assert record["about"] == ask["about"], f"{run_id}: reply {index} about {record['about']} differs from its ask {ask['about']}"
+            assert {"to": record["from"]} == ask["to"], f"{run_id}: reply {index} from {record['from']} but its ask went {ask['to']}"
+        elif record["schema"] in ("question", "engine-start", "turn"):
+            assert record["from"] == {"workflow": run_id}, record
+            assert record["about"]["nativeRun"] == run_id and "occurrence" in record["about"] and "epoch" in record["about"], record
+    schemas = [record["schema"] for record in records if record["schema"] != "event"]
+    assert schemas == expected, f"{run_id}: carried schemas {schemas}, expected {expected}"
+    return records
+
+
 DEFAULT_GOLDEN = Path(__file__).resolve().parent / "fixtures" / "flow" / "hello-events.ndjson"
 TIMESTAMP = re.compile(rb',"timestamp":"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+Z"}$')
 
@@ -157,6 +189,10 @@ def main() -> None:
             assert semantic_projection(hello)[2] == ("3", "3")
             assert_golden(normalized_events(hello_store / "events.ndjson"), golden)
             print(f"golden probe: broker-hello events.ndjson equals {golden.name} except timestamps")
+            carried = assert_carriage(hello_store, "broker-hello", ["start", *HELLO_EXCHANGE * 3])
+            questions = [record["to"] for record in carried if record["schema"] == "question"]
+            assert questions == [{"to": {"model": "model namer"}}, {"to": {"model": "model greeter"}}, {"to": {"model": "tool say"}}], questions
+            print("carriage probe: broker-hello records a question, engine start, turn, engine result and answer for each occurrence")
             broker_runner = Path(arguments[1]).resolve()
             brokered, broker_store = machine(
                 broker_runner, root, "broker-injected", 2,
@@ -168,6 +204,9 @@ def main() -> None:
             assert trace == [occurrences[0][0]] and bills == ("1", "1")
             assert brokered[-1]["event"]["type"] == "run.completed"
             inputs = assert_run_log(broker_store, "broker-injected", 2)["inputs"]
+            injected = assert_carriage(broker_store, "broker-injected", ["start", *HELLO_EXCHANGE])
+            results = [record["body"]["inline"]["answer"] for record in injected if record["schema"] == "engine-result"]
+            assert results == ["broker-delivered response"], results
             request = b"broker request"
             assert inputs == [{"name": "input", "bytes": len(request), "sha256": hashlib.sha256(request).hexdigest()}], inputs
             persisted_broker = [json.loads(line) for line in (broker_store / "events.ndjson").read_text().splitlines()]

@@ -391,13 +391,14 @@ import Agentic.Runtime
     chainsOf,
     noChains,
     nullPersistenceHooks,
-    runPlanBrokered,
+    runPlanScoped,
+    runFlowFor,
     scriptedWorld,
     sayEl,
     stderrLog,
   )
 import Agentic.Runtime (DataBroker (..), inProcessBroker, ControlRuntime, newControlRuntimeFor)
-import Agentic.Runtime (Actor (Manager, Principal), Authority (LocalAccount), Start (..), StartInput (..), withRunLog)
+import Agentic.Runtime (Actor (Manager, Principal), Authority (LocalAccount), FlowScope, Start (..), StartInput (..), flowBroker, flowScopedBroker, strictFlowCodec, withRunLog)
 import Agentic.Runtime
   ( DeferredEventSink,
     MachineCancelled (..),
@@ -2247,7 +2248,7 @@ runCmd broker reg name target prog gs =
 runCmdObserved :: DataBroker -> EventSink -> (Text -> IO ()) -> Registry -> Text -> Target -> ProgramOf r -> [Given] -> IO ExecTrace
 runCmdObserved broker observer output reg name target prog gs =
   snd
-    <$> runCmdControlled broker
+    <$> runCmdControlled broker (const broker)
       PersonAnswerEngine
       Nothing
       nullPersistenceHooks
@@ -2259,8 +2260,8 @@ runCmdObserved broker observer output reg name target prog gs =
       prog
       gs
 
-runCmdControlled :: forall r. DataBroker -> PersonAnswering -> Maybe ControlRuntime -> PersistenceHooks -> EventSink -> (Text -> IO ()) -> Registry -> Text -> Target -> ProgramOf r -> [Given] -> IO (El r, ExecTrace)
-runCmdControlled broker personAnswering runtimeControls persistence observer outputReceiver reg name target prog gs = case target of
+runCmdControlled :: forall r. DataBroker -> (FlowScope -> DataBroker) -> PersonAnswering -> Maybe ControlRuntime -> PersistenceHooks -> EventSink -> (Text -> IO ()) -> Registry -> Text -> Target -> ProgramOf r -> [Given] -> IO (El r, ExecTrace)
+runCmdControlled broker scoped personAnswering runtimeControls persistence observer outputReceiver reg name target prog gs = case target of
   Scripted -> do
     authored <- requiredChains
     output $
@@ -2653,7 +2654,7 @@ runCmdControlled broker personAnswering runtimeControls persistence observer out
       mapM_ (output . chainLine) [entry | entry <- Map.toList chainTable, not (null (snd entry))]
       output ""
       (result, tr) <-
-        runPlanBrokered broker runtimeControls persistence observer
+        runPlanScoped broker scoped runtimeControls persistence observer
           chains
           (announcingWorld (outputReceiver . ("  " <>)) world)
           (progPlan prog)
@@ -2830,14 +2831,16 @@ runMachineWith broker options control lineage parent inherited reg runId name ta
   let version = machineProtocolVersion options
       storeFormat = if version == protocolVersion then storeVersion else latestStoreVersion
   case store of
-    Nothing -> stdoutEventSinkFor version runId >>= runWith effectiveTarget nullPersistenceHooks
+    Nothing -> stdoutEventSinkFor version runId >>= runWith broker (const broker) effectiveTarget nullPersistenceHooks
     Just directory -> do
       intake <- intakeActor (machineIntake options) owner
       withRunStoreSeededVersioned storeFormat version directory (manifest effectiveTarget owner) inherited $ \runStore ->
         withRunLog runStore intake (start effectiveTarget) $ \runLog -> do
           persistence <- persistenceFor runId runStore (printedValue prog) (length inherited)
+          -- Every operation of the run is carried through its run log.
+          let flow = runFlowFor runLog version intake (start effectiveTarget) (inProcessNames reg name)
           handlesEventSinkLogged (Just runLog) version [storeEventHandle runStore, stdout] runId
-            >>= runWith effectiveTarget persistence
+            >>= runWith (flowBroker strictFlowCodec flow broker) (flowScopedBroker strictFlowCodec flow broker) effectiveTarget persistence
   where
     start effectiveTarget =
       Start
@@ -2869,27 +2872,27 @@ runMachineWith broker options control lineage parent inherited reg runId name ta
         lineage
         owner
         manifestAnswering
-    runWith effectiveTarget persistence actualSink = do
+    runWith runBroker scoped effectiveTarget persistence actualSink = do
       let started = machineStarted options name effectiveTarget
       case control of
-        Nothing -> brokerEvent broker actualSink started >> executeRun Nothing actualSink id
+        Nothing -> brokerEvent runBroker actualSink started >> executeRun Nothing actualSink id
         Just (MachineControl controls deferred sink) -> do
-          activated <- activateEventSinkBrokered broker deferred actualSink started
+          activated <- activateEventSinkBrokered runBroker deferred actualSink started
           unless activated (ioError (userError "machine event sink was activated twice"))
           executeRun (Just controls) sink id
         Just (MachineControlInput handle buffered) -> do
           controls <- newControlRuntimeFor (machineProtocolVersion options)
           -- Prepared runs establish durable history before consuming queued controls.
-          brokerEvent broker actualSink started
+          brokerEvent runBroker actualSink started
           executeRun (Just controls) actualSink
-            (withBufferedControlInputBrokered broker (machineProtocolVersion options) handle buffered actualSink controls)
+            (withBufferedControlInputBrokered runBroker (machineProtocolVersion options) handle buffered actualSink controls)
       where
         executeRun runtimeControls sink supervise = do
           -- Machine events are the trace. Human narration would duplicate full,
           -- input-expanded prompts into diagnostic stderr.
-          let emitEvent = brokerEvent broker sink
+          let emitEvent = brokerEvent runBroker sink
               run =
-                runCmdControlled broker
+                runCmdControlled runBroker scoped
                   (machinePersonAnswering options)
                   runtimeControls
                   persistence
@@ -2906,7 +2909,7 @@ runMachineWith broker options control lineage parent inherited reg runId name ta
               then emitEvent (RunCompleted (billExecFresh tr) (billMemo tr))
               else do
                 reference <-
-                  persistenceStoreResult (brokerPersistence broker persistence)
+                  persistenceStoreResult (brokerPersistence runBroker persistence)
                     (codeJson (fromSCode (progResultCode prog)))
                     (answerJson (progResultCode prog) result)
                     (sayEl (progResultCode prog) result)
