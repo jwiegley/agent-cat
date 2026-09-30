@@ -1304,7 +1304,8 @@ flowChecks work = do
     flowRenameChecks root private
     flowCeilingChecks root private
   flowStoreChecks work
-  putStrLn "PASS manager log codecs, writer, gap entries, path identity, ceiling and Store lifetimes"
+  flowCommandChecks work
+  putStrLn "PASS manager log codecs, writer, gap entries, path identity, ceiling, Store lifetimes and command admission"
 
 -- An administration lifetime writes no manager log. A serving lifetime writes
 -- a lifetime notice that lists the current credentials and, only when its
@@ -1343,6 +1344,172 @@ flowStoreChecks work = do
           && lifetimeReconciliation second == noReconciliation
           && all (\(record, _) -> Runtime.recFrom record == Runtime.Manager) records
     _ -> error ("FAIL manager log Store lifetimes expected the notices of three lifetimes, found " <> show notices)
+
+-- A serving lifetime of a seeded fixture with the given codec and fault. The
+-- action receives the Store, the profile revision, the proof of credential_a,
+-- the manager root and the stream identity.
+withServedFixture :: FilePath -> String -> Int64 -> Runtime.FlowCodec -> Maybe ManagerFlowFault
+  -> (FilePath -> Text -> IO ()) -> (CoordinationStore -> Text -> CredentialProof -> IO a) -> IO (a, FilePath, Text)
+withServedFixture work name total codec fault prepare action = do
+  (path, root) <- fixture work name total 20
+  -- The serving lifetime reconciles a restart, so the run is seeded in it.
+  stream <- withInstalled path $ \installed -> withCoordinationStore installed (fmap storeStreamId . storeIdentity)
+  prepare root stream
+  value <- withInstalled path $ \installed -> withServingStoreWith codec fault installed $ \store -> do
+    mutate store seed
+    profile <- profileRevision installed
+    proof <- authenticateCredential store bearerA >>= right
+    action store profile proof
+  pure (value, root, stream)
+
+servedLines :: FilePath -> Text -> IO [(Runtime.Record, Value)]
+servedLines root stream = bracket (Runtime.openPrivateRoot "manager flow command check" root) Runtime.closePrivateRoot $ \private ->
+  flowLines private root stream
+
+principalA :: Runtime.Actor
+principalA = Runtime.Principal (Runtime.Credential "client_1" "credential_a")
+
+commandCount :: CoordinationStore -> IO Int64
+commandCount store = scalarInt store "SELECT count(*) FROM commands"
+
+-- The command, receipt and failure records of the admission transaction.
+flowCommandChecks :: FilePath -> IO ()
+flowCommandChecks work = do
+  -- Accepted commands, refused admissions and a replay.
+  ((setReceipt, cancelReceipt, setRequest), root, stream) <- withServedFixture work "flow-admission" (64 * commandCapacity) Runtime.strictFlowCodec Nothing (\_ _ -> pure ()) $ \store profile proof -> do
+    req <- request store SetInput "flow_set"
+    accepted <- submitCommand store proof req (edit profile (commandResource req) "r1") >>= right
+    cancelReq <- request store Cancel "flow_cancel"
+    cancelled <- submitCommand store proof cancelReq (control profile) >>= right
+    before <- commandCount store
+    other <- authenticateCredential store bearerB >>= right
+    mutate store (execute "DELETE FROM credential_scopes WHERE credential_id='credential_b' AND scope='submit'" [])
+    forbidden <- request store SetInput "flow_forbidden"
+    expect "flow mode refuses a command without its scope" Forbidden $
+      submitCommand store other (forbidden {commandPrecondition = Just "\"r1\""}) (edit profile (commandResource forbidden) "never")
+    mutate store (execute "INSERT INTO command_ordinary_rate VALUES ('credential_a',CAST(unixepoch('now')/60 AS INTEGER),30) ON CONFLICT(credential_id) DO UPDATE SET minute=excluded.minute,count=30" [])
+    limited <- request store SetInput "flow_limited"
+    expect "flow mode refuses a command past its rate" RateLimit $
+      submitCommand store proof (limited {commandPrecondition = Just "\"r1\""}) (edit profile (commandResource limited) "never")
+    replay <- submitCommand store proof req (edit profile (commandResource req) "never") >>= right
+    check "flow mode replays the original receipt" (submissionReplayed replay && submissionReceipt replay == submissionReceipt accepted)
+    commandCount store >>= check "flow mode refusals and a replay add no ledger row" . (== before)
+    pure (submissionReceipt accepted, submissionReceipt cancelled, req)
+  records <- servedLines root stream
+  case records of
+    [_, (setRecord, setBody), (setReply, setReplyBody), (cancelRecord, cancelBody), (cancelReply, cancelReplyBody), _] -> do
+      let expected = CommandBody SetInput "profile_1" "POST" (commandResource setRequest) "application/json" (Just "\"r0\"")
+            (either (const Nothing) Just (eitherDecodeStrict' (commandBody setRequest))) Nothing
+      check "flow mode records an accepted command and then its receipt from the principal's client and credential" $
+        map (Runtime.recSchema . fst) (take 5 (drop 1 records)) == [Runtime.FlowCommand, Runtime.FlowReceipt, Runtime.FlowCommand, Runtime.FlowReceipt, Runtime.FlowNotice]
+          && Runtime.recFrom setRecord == principalA && Runtime.recFrom cancelRecord == principalA
+          && Runtime.recTo setReply == Runtime.To principalA && Runtime.recFrom setReply == Runtime.Manager
+          && Runtime.recReplyTo setReply == Just (Runtime.Position 1) && Runtime.recReplyTo cancelReply == Just (Runtime.Position 3)
+          && commandFromFlowBody setBody == Right expected
+          && fmap commandBodyOperation (commandFromFlowBody cancelBody) == Right Cancel
+          && receiptFromFlowBody setReplyBody == Right setReceipt && receiptFromFlowBody cancelReplyBody == Right cancelReceipt
+          && Runtime.aboutCommand (Runtime.recAbout setRecord) == Just (receiptId setReceipt)
+          && Runtime.aboutRequest (Runtime.recAbout setRecord) == Just "request_1"
+    _ -> error ("FAIL flow mode admission expected a lifetime, two commands with receipts and a shutdown, found " <> show (map (Runtime.recSchema . fst) records))
+  -- A renamed log refuses an ordinary command and still commits a cancel.
+  moved <- newIORef ""
+  (_, renamedRoot, renamedStream) <- withServedFixture work "flow-renamed" (64 * commandCapacity) Runtime.strictFlowCodec Nothing (\_ _ -> pure ()) $ \store profile proof -> do
+    identity <- storeIdentity store
+    let path = foldl (</>) (work </> "flow-renamed") (managerFlowPath (storeStreamId identity))
+        target = work </> "flow-renamed" </> "flow" </> "moved.ndjson"
+    renameFile path target
+    writeIORef moved target
+    req <- request store SetInput "flow_renamed"
+    expect "flow mode refuses an ordinary command whose record cannot be appended" StorageUnavailable $
+      submitCommand store proof req (edit profile (commandResource req) "r1")
+    commandCount store >>= check "a refused ordinary command leaves no ledger row" . (== 0)
+    cancelReq <- request store Cancel "flow_renamed_cancel"
+    cancelled <- submitCommand store proof cancelReq (control profile) >>= right
+    check "a cancel commits although its record cannot be appended" (receiptState (submissionReceipt cancelled) == Accepted)
+    commandCount store >>= check "the committed cancel has its ledger row" . (== 1)
+  target <- readIORef moved
+  movedBytes <- BS.readFile target
+  recreated <- doesFileExist (foldl (</>) renamedRoot (managerFlowPath renamedStream))
+  check "the renamed log holds only its lifetime notice, and no log is recreated"
+    (length (filter (not . BS.null) (BS.split 10 movedBytes)) == 1 && not recreated)
+  -- At the ceiling an ordinary command is refused and a cancel is admitted.
+  let ceilingTotal = 18 * commandCapacity
+      fill rootPath streamId = bracket (Runtime.openPrivateRoot "manager flow ceiling fill" rootPath) Runtime.closePrivateRoot $ \private -> do
+        flow <- openManagerFlow Runtime.strictFlowCodec Nothing private streamId ceilingTotal
+        let padded n size = commandFlowBody (CommandBody SetInput "profile_1" "POST" "/v1/requests/request_1" "application/json" Nothing
+              (Just (object ["pad" .= T.replicate size "x", "n" .= n])) Nothing)
+            untilQuota n size = do
+              outcome <- appendManagerAsk flow ceilingTotal Refusing Runtime.FlowCommand Runtime.Manager (Runtime.To Runtime.Manager) Runtime.noAbout (padded n size)
+              case outcome of
+                Right _ -> untilQuota (n + 1) size
+                Left failure -> check "the ceiling fill stops at the ordinary allowance" (failure == ManagerFlowQuota) >> pure (n + 1)
+        next <- untilQuota (0 :: Int) 30000
+        _ <- untilQuota next 10
+        closeManagerFlow flow
+  (_, ceilingRoot, ceilingStream) <- withServedFixture work "flow-ceiling" ceilingTotal Runtime.strictFlowCodec Nothing fill $ \store profile proof -> do
+    req <- request store SetInput "flow_ceiling"
+    expect "flow mode refuses an ordinary command at the log ceiling" StorageQuota $
+      submitCommand store proof req (edit profile (commandResource req) "r1")
+    cancelReq <- request store Cancel "flow_ceiling_cancel"
+    cancelled <- submitCommand store proof cancelReq (control profile) >>= right
+    check "flow mode admits a cancel at the log ceiling" (receiptState (submissionReceipt cancelled) == Accepted)
+    commandCount store >>= check "only the cancel has a ledger row at the ceiling" . (== 1)
+  ceilingRecords <- servedLines ceilingRoot ceilingStream
+  check "the cancel at the ceiling is recorded with its receipt in the reserve" $
+    case reverse ceilingRecords of
+      (_, _) : (reply, _) : (command, body) : _ ->
+        Runtime.recSchema command == Runtime.FlowCommand && Runtime.recFrom command == principalA
+          && fmap commandBodyOperation (commandFromFlowBody body) == Right Cancel && Runtime.recSchema reply == Runtime.FlowReceipt
+      _ -> False
+  -- A lossy codec refuses the admission, and the command record is answered
+  -- by a failure record.
+  let lossy = Runtime.FlowCodec Runtime.encodeFlowLine $ \line -> do
+        record <- Runtime.decodeFlowLine line
+        pure $ case (Runtime.recSchema record, Runtime.recBody record) of
+          (Runtime.FlowCommand, Runtime.Inline (Object fields)) -> record {Runtime.recBody = Runtime.Inline (Object (KM.insert "resource" (String "/v1/requests/other") fields))}
+          _ -> record
+  (_, lossyRoot, lossyStream) <- withServedFixture work "flow-lossy" (64 * commandCapacity) lossy Nothing (\_ _ -> pure ()) $ \store profile proof -> do
+    req <- request store SetInput "flow_lossy"
+    expect "flow mode refuses a command whose appended record decodes to another command" StorageUnavailable $
+      submitCommand store proof req (edit profile (commandResource req) "r1")
+    commandCount store >>= check "the lossy refusal leaves no ledger row" . (== 0)
+  lossyRecords <- servedLines lossyRoot lossyStream
+  case lossyRecords of
+    [_, (command, _), (failure, failureValue), _] ->
+      check "the refused command record is answered by a failure record" $
+        Runtime.recSchema command == Runtime.FlowCommand && Runtime.recSchema failure == Runtime.FlowFailure
+          && Runtime.recReplyTo failure == Just (Runtime.Position 1)
+          && Runtime.failureFromBody failureValue == Right (Runtime.Refused, "storage-unavailable")
+    _ -> error ("FAIL flow mode lossy codec expected a command and its failure, found " <> show (map (Runtime.recSchema . fst) lossyRecords))
+  -- A failed receipt append carries the ledger receipt. A cancel whose record
+  -- cannot be appended commits. Gap notices name the missing records.
+  failing <- newIORef (Nothing :: Maybe Runtime.Schema)
+  let selective = ManagerFlowFault (\schema _ -> (== Just schema) <$> readIORef failing)
+  ((firstReceipt, cancelId, lastReceipt), gapRoot, gapStream) <- withServedFixture work "flow-gaps" (64 * commandCapacity) Runtime.strictFlowCodec (Just selective) (\_ _ -> pure ()) $ \store profile proof -> do
+    writeIORef failing (Just Runtime.FlowReceipt)
+    req <- request store SetInput "flow_gap_first"
+    first <- submitCommand store proof req (edit profile (commandResource req) "r1") >>= right
+    ledger <- readCommand store proof (receiptId (submissionReceipt first)) >>= right
+    check "a failed receipt append carries the ledger receipt" (submissionReceipt first == ledger)
+    writeIORef failing (Just Runtime.FlowCommand)
+    cancelReq <- request store Cancel "flow_gap_cancel"
+    cancelled <- submitCommand store proof cancelReq (control profile) >>= right
+    writeIORef failing Nothing
+    later <- request store SetInput "flow_gap_last"
+    final <- submitCommand store proof (later {commandPrecondition = Just "\"r1\""}) (edit profile (commandResource later) "r2") >>= right
+    pure (submissionReceipt first, receiptId (submissionReceipt cancelled), submissionReceipt final)
+  gapRecords <- servedLines gapRoot gapStream
+  let about ident = Runtime.noAbout {Runtime.aboutCommand = Just ident, Runtime.aboutRequest = Nothing, Runtime.aboutManagerRun = Just "run_1"}
+      firstAbout = Runtime.noAbout {Runtime.aboutCommand = Just (receiptId firstReceipt), Runtime.aboutRequest = Just "request_1"}
+  case gapRecords of
+    [_, (firstCommand, _), (gapOne, gapOneBody), (gapTwo, gapTwoBody), (lastCommand, _), (lastReply, lastReplyBody), _] ->
+      check "gap notices name the missing receipt, the missing cancel record and its receipt before the next record" $
+        Runtime.recSchema firstCommand == Runtime.FlowCommand && Runtime.recSchema gapOne == Runtime.FlowNotice && Runtime.recSchema gapTwo == Runtime.FlowNotice
+          && noticeFromFlowBody gapOneBody == Right (GapNotice [MissingRecord Runtime.FlowReceipt firstAbout] 0)
+          && noticeFromFlowBody gapTwoBody == Right (GapNotice [MissingRecord Runtime.FlowCommand (about cancelId), MissingRecord Runtime.FlowReceipt (about cancelId)] 0)
+          && Runtime.recSchema lastCommand == Runtime.FlowCommand && Runtime.recReplyTo lastReply == Just (Runtime.Position 4)
+          && receiptFromFlowBody lastReplyBody == Right lastReceipt
+    _ -> error ("FAIL flow mode gap check expected seven records, found " <> show (map (Runtime.recSchema . fst) gapRecords))
 
 -- A Unicode text, a JSON false and null, exact decimals and a body above 64 KiB.
 flowCommands :: [CommandBody]

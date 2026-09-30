@@ -7,10 +7,10 @@
 -- | A single leased SQLite writer with strict, bounded transaction results.
 module Agentic.Manager.Store
   ( CoordinationStore, StoreIdentity (..), StoreFailure (..), Checkpoint (..),
-    withCoordinationStore, withServingStore, storeIdentity, checkpointStore, withStoreConfiguration, withStoreCatalogues, withStoreRetentionRoot, validateStoreHistoryBindings, revalidateStoreRetentionRoot, storeInvocations, withStoreFiles, withStoreReader, withStoreAdmission, withStoreWorker, StoreWorker, createStoreWorkerGroup, storeWorkerCleanupConfirmed, requestStoreWorkersStop, awaitStoreWorkersStop, retryStoreCleanup, probeStoreCapabilities,
+    withCoordinationStore, withServingStore, withServingStoreWith, storeManagerFlow, storeIdentity, checkpointStore, withStoreConfiguration, withStoreCatalogues, withStoreRetentionRoot, validateStoreHistoryBindings, revalidateStoreRetentionRoot, storeInvocations, withStoreFiles, withStoreReader, withStoreAdmission, withStoreWorker, StoreWorker, createStoreWorkerGroup, storeWorkerCleanupConfirmed, requestStoreWorkersStop, awaitStoreWorkersStop, retryStoreCleanup, probeStoreCapabilities,
     withStoreAdministration, tryWithStoreCatalogues, tryWithStoreFiles,
     AuthorizationWatch, withStoreAuthorizationWatch, withStoreConfigurationWatch, withStoreCataloguesWatch, withStoreCatalogueContextWatch, withStoreCataloguesBorrowed, authorizationWatchCurrent, withAuthorizationObservation, withAuthorizationReadObservation, awaitAuthorizationChange,
-    CommitDeadline, withCommitDeadline, withPreparedCommitDeadline, enforceCommitDeadline, enforceAdmissionFence, Transaction, execute, query, refuseTransaction, runTransaction, runRead, StoreAdmission (..), runTransactionWithAdmission, runReadWithAdmission, transactionGeneration,
+    CommitDeadline, withCommitDeadline, withPreparedCommitDeadline, enforceCommitDeadline, enforceAdmissionFence, managerFlowRoom, appendCommandRecord, Transaction, execute, query, refuseTransaction, runTransaction, runRead, StoreAdmission (..), runTransactionWithAdmission, runReadWithAdmission, transactionGeneration,
     Invalidation (..), EventReadFailure (..), RetainedEvents (..), readRetainedEvents, readRetainedEventsWith, retainEvents, backupCoordinationStore, restoreCoordinationStore, reservationOccupancy
   ) where
 
@@ -19,7 +19,8 @@ import qualified Agentic.Manager.Store.Admission as Admission
 import Agentic.Manager.Configuration
   (InstalledConfiguration, acquireConfigurationStorage, releaseConfigurationStorage, withConfigurationAdministration, withConfigurationSnapshot, withConfigurationCatalogues, withConfigurationCatalogueContext, tryConfigurationCatalogueContext, withConfiguredRetentionRoot, validateHistoryBindings, revalidateRetentionRoot, configuredInvocations, configuredLimits, probeConfiguredCapabilities)
 import Agentic.Manager.Flow
-  (ManagerFlow, CredentialEntry (..), Lifetime (..), Reconciliation (..), noReconciliation, openManagerFlow, closeManagerFlow, appendLifetime, appendShutdown)
+  (ManagerFlow, ManagerFlowFault, ManagerFlowFailure (..), FlowRecordClass, CredentialEntry (..), Lifetime (..), Reconciliation (..), noReconciliation, openManagerFlow, closeManagerFlow, managerFlowBytes, managerFlowAllowance, managerFlowContent, appendManagerAsk, appendManagerReply, appendLifetime, appendShutdown)
+import Agentic.Manager.Protocol.Command (failureCode)
 import Agentic.Manager.Profile (ConfigurationLimits (..), PublicProfile, Diagnostic (SupervisionUnavailable), Discovery)
 import Agentic.Manager.Fault.Record (ManagerFault (AuthorizationChanged), loanFault, internalLabel, refusalLabel, recordErasure)
 import Agentic.Manager.Worker.State (WorkerLifecycle, acceptingPreparation)
@@ -30,7 +31,7 @@ import Agentic.Runtime
   (PrivateRoot, assertPrivateRoot, closePrivateRoot, openPrivateSubroot, privateRootPath,
    openPrivateRoot, privateRootIdentity, readPrivateFileAt, ensurePrivateDirectoryAt, removePrivateFileAt,
    publishPrivateCaptureAt, CapturePublication (..), privateCaptureBytes, privateCaptureSha256,
-   withPrivateDirectoryAt, writePrivateExclusiveAt, strictFlowCodec, WorkflowInputDescriptor (..), frontendLiteralBytes, FrontendCapabilities, FrontendInvocation, ProcessGroup, createProcessGroup, terminateProcessGroup, groupOutcome, processGroupLive)
+   withPrivateDirectoryAt, writePrivateExclusiveAt, strictFlowCodec, FlowCodec, Actor (Manager), Address (To), About, Position, Record, Schema (FlowCommand, FlowFailure), FailureKind (Refused), failureBody, WorkflowInputDescriptor (..), frontendLiteralBytes, FrontendCapabilities, FrontendInvocation, ProcessGroup, createProcessGroup, terminateProcessGroup, groupOutcome, processGroupLive)
 import Control.Concurrent (rtsSupportsBoundThreads)
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (race, withAsync, asyncWithUnmask, cancel, wait)
@@ -44,7 +45,7 @@ import Control.DeepSeq (NFData (..), force)
 import Crypto.Hash (Digest, SHA256, hashInit, hashUpdate, hashFinalize)
 import qualified Crypto.Hash as Hash
 import Data.ByteArray (convert)
-import Data.Aeson (eitherDecodeStrict', encode)
+import Data.Aeson (Value, eitherDecodeStrict', encode)
 import qualified Data.ByteString.Lazy as BL
 import Crypto.Random (getRandomBytes)
 import Data.ByteArray.Encoding (Base (Base16), convertToBase)
@@ -111,7 +112,11 @@ data StoreWorker = StoreWorker !(TMVar ()) !(MVar ()) !(MVar [ProcessGroup]) !(M
 
 -- | A manager-only transaction program. No IO lift, connection or cursor is exported.
 newtype Transaction a = Transaction (Context -> IO a)
-data Context = Context !SQL.Database !Text !Bool !(IORef Budget) !(IORef Bool) !(IORef (Maybe CommitDeadline)) !(IORef (Maybe (TVar Bool)))
+data Context = Context !SQL.Database !Text !Bool !(IORef Budget) !(IORef Bool) !(IORef (Maybe CommitDeadline)) !(IORef (Maybe (TVar Bool))) !(Maybe (ManagerFlow, IORef (Maybe PendingCommand)))
+
+-- | A command record that this transaction appended to the manager log, which
+-- a definite rollback answers with a @failure@ record.
+data PendingCommand = PendingCommand !Int64 !FlowRecordClass !Position !Actor !About
 data Budget = Budget !Int !Int !Int !Int
 
 instance Functor Transaction where
@@ -129,9 +134,16 @@ instance Monad Transaction where
 data Invalidation = Invalidation !Text !Text !Text deriving (Eq, Show)
 
 -- | How a Store lifetime begins. A serving or administering lifetime migrates
--- and reconciles a restart. Only a serving lifetime writes the manager log.
--- A copying lifetime, for backup or restoration, does neither.
-data StoreMode = ServingStore | AdministeringStore | CopyingStore deriving Eq
+-- and reconciles a restart. Only a serving lifetime writes the manager log,
+-- through the line codec and the test fault that it names. A copying
+-- lifetime, for backup or restoration, does neither.
+data StoreMode = ServingStore !FlowCodec !(Maybe ManagerFlowFault) | AdministeringStore | CopyingStore
+
+-- | The codec and the test fault of the manager log of a serving lifetime.
+servingFlow :: StoreMode -> Maybe (FlowCodec, Maybe ManagerFlowFault)
+servingFlow mode = case mode of
+  ServingStore codec fault -> Just (codec, fault)
+  _ -> Nothing
 
 -- | A Store lifetime for offline administration and checks. It reconciles a
 -- restart and writes no manager log.
@@ -142,7 +154,17 @@ withCoordinationStore = withStoreMode AdministeringStore
 -- writes the manager log of its stream: a lifetime notice at open and, when
 -- the lifetime ends in order, a shutdown notice.
 withServingStore :: InstalledConfiguration -> (CoordinationStore -> IO a) -> IO a
-withServingStore = withStoreMode ServingStore
+withServingStore = withServingStoreWith strictFlowCodec Nothing
+
+-- | 'withServingStore' with the line codec and the test fault of its manager
+-- log. Production passes the strict codec and no fault. Checks pass a lossy
+-- codec or a fault to exercise the refusals of the append points.
+withServingStoreWith :: FlowCodec -> Maybe ManagerFlowFault -> InstalledConfiguration -> (CoordinationStore -> IO a) -> IO a
+withServingStoreWith codec fault = withStoreMode (ServingStore codec fault)
+
+-- | The manager log of a serving lifetime. Other lifetimes have none.
+storeManagerFlow :: CoordinationStore -> Maybe ManagerFlow
+storeManagerFlow (CoordinationStore _ _ _ _ _ _ _ _ _ _ _ _ _ flow) = flow
 
 withStoreMode :: StoreMode -> InstalledConfiguration -> (CoordinationStore -> IO a) -> IO a
 withStoreMode mode installed action = mask $ \restore -> do
@@ -167,11 +189,13 @@ withStoreMode mode installed action = mask $ \restore -> do
 
 openStore :: StoreMode -> InstalledConfiguration -> PrivateRoot -> Fd -> IO CoordinationStore
 openStore mode installed root lease = storageErrors $ do
-  let restart = mode /= CopyingStore
+  let restart = case mode of
+        CopyingStore -> False
+        _ -> True
   -- A serving lifetime needs the configured ledger ceiling for its manager
   -- log. The configuration is read before the database is opened.
-  logCeiling <- if mode /= ServingStore then pure Nothing else
-    Just . fromIntegral . limitGlobalMutationLedgerBytes <$> (configuredLimits installed >>= either throwIO pure)
+  logCeiling <- forM (servingFlow mode) $ \serving ->
+    (,) serving . fromIntegral . limitGlobalMutationLedgerBytes <$> (configuredLimits installed >>= either throwIO pure)
   requireNoRestoration root
   -- Stable operator-controlled paths are required. Runtime still checks private files.
   existing <- try @IOException (checkPrivateFile root databaseName)
@@ -205,9 +229,9 @@ openStore mode installed root lease = storageErrors $ do
     -- A serving lifetime writes the manager log of its stream. Its lifetime
     -- notice follows the reconciliation. A credential list that cannot be
     -- read fails the open. A failed append of the notice leaves a gap entry.
-    flow <- forM logCeiling $ \total -> do
+    flow <- forM logCeiling $ \((codec, fault), total) -> do
       (listed, omitted) <- bounded db 5000000 (readCredentialList db)
-      bracketOnError (openManagerFlow strictFlowCodec Nothing root stream total) closeManagerFlow $ \manager ->
+      bracketOnError (openManagerFlow codec fault root stream total) closeManagerFlow $ \manager ->
         manager <$ appendLifetime manager total (Lifetime generation reconciliation listed omitted)
     CoordinationStore installed root db (StoreIdentity schemaVersion epoch stream generation)
       <$> newMVar () <*> newIORef False <*> newIORef False <*> pure lease <*> ((,,) <$> newMVar () <*> newTVarIO 0 <*> newTVarIO (Just 0)) <*> newTVarIO (WorkerRegistry False False Nothing []) <*> newMVar () <*> newIORef False <*> newTVarIO (False, Nothing) <*> pure flow
@@ -1048,7 +1072,7 @@ admittedWith policy (CoordinationStore _ root _ _ gate closed poisoned _ _ worke
 -- | Internal callers supply source-owned SQL, never SQL obtained from a client.
 -- Statement count, binding bytes and strict result bytes share one transaction budget.
 execute :: Text -> [SQL.SQLData] -> Transaction ()
-execute sql parameters = Transaction $ \context@(Context db _ writable _ changed _ _) -> do
+execute sql parameters = Transaction $ \context@(Context db _ writable _ changed _ _ _) -> do
   unless writable (throwIO StoreIntegrity)
   unless (T.toUpper (T.takeWhile (not . isSpace) (T.stripStart sql)) `elem` ["INSERT", "UPDATE", "DELETE"]) $
     throwIO StoreIntegrity
@@ -1057,7 +1081,7 @@ execute sql parameters = Transaction $ \context@(Context db _ writable _ changed
   writeIORef changed True
 
 query :: Text -> [SQL.SQLData] -> Transaction [[SQL.SQLData]]
-query sql parameters = Transaction $ \context@(Context db _ _ budget _ _ _) -> do
+query sql parameters = Transaction $ \context@(Context db _ _ budget _ _ _ _) -> do
   unless (T.toUpper (T.takeWhile (not . isSpace) (T.stripStart sql)) `elem` ["SELECT", "WITH"]) $
     throwIO StoreIntegrity
   chargeInput context sql parameters
@@ -1107,7 +1131,7 @@ checkPreparedCommit (PreparedCommit registry (StoreWorker stop done groups _) gr
 -- | Arm one fixed final check after transactional work and invalidations, before COMMIT.
 -- This adds no general IO lift or caller-supplied acceptance predicate.
 enforceCommitDeadline :: CommitDeadline -> Transaction ()
-enforceCommitDeadline guard@(CommitDeadline owner _ _ _ _) = Transaction $ \(Context _ generation writable _ _ pending _) -> do
+enforceCommitDeadline guard@(CommitDeadline owner _ _ _ _) = Transaction $ \(Context _ generation writable _ _ pending _ _) -> do
   unless(writable && owner==generation)(throwIO StoreIntegrity)
   existing <- readIORef pending
   case existing of
@@ -1125,16 +1149,44 @@ checkCommitDeadline (CommitDeadline _ now deadline active prepared) = do
 -- | A fixed refusal-only admission check at the logical pre-COMMIT boundary.
 -- The flag grants no authority and does not make SQLite COMMIT atomic with STM.
 enforceAdmissionFence :: TVar Bool -> Transaction ()
-enforceAdmissionFence fence = Transaction $ \(Context _ _ writable _ _ _ pending) -> do
+enforceAdmissionFence fence = Transaction $ \(Context _ _ writable _ _ _ pending _) -> do
   unless writable (throwIO StoreIntegrity)
   existing <- readIORef pending
   case existing of
     Nothing -> writeIORef pending (Just fence)
     Just _ -> throwIO StoreIntegrity
 
+-- | Whether the manager log is below the part of the configured ledger
+-- ceiling that a record of the class may use, or 'Nothing' for a lifetime
+-- without a manager log. A log that could not be opened has room, and its
+-- append fails instead. The leaf writer lock is taken inside the held
+-- database lock.
+managerFlowRoom :: Int64 -> FlowRecordClass -> Transaction (Maybe Bool)
+managerFlowRoom total recordClass = Transaction $ \(Context _ _ _ _ _ _ _ slot) -> forM slot $ \(manager, _) ->
+  maybe True (< managerFlowAllowance total recordClass) <$> managerFlowBytes manager
+
+-- | Append the synchronized @command@ record of an admitted command, from the
+-- principal to the manager, as the last step of the admission transaction
+-- before its commit checks. The leaf writer lock is taken inside the held
+-- file slot, configuration and database locks, and the append counts against
+-- the operation allowance. The result is 'Nothing' for a lifetime without a
+-- manager log. A successful append returns the position, the record and its
+-- body value, each decoded from the appended bytes. After it, a definite
+-- rollback of the transaction answers the record with a @failure@ record.
+appendCommandRecord :: Int64 -> FlowRecordClass -> Actor -> About -> Value -> Transaction (Maybe (Either ManagerFlowFailure (Position, Record, Either Text Value)))
+appendCommandRecord total recordClass principal about body = Transaction $ \(Context _ _ writable _ _ _ _ slot) -> do
+  unless writable (throwIO StoreIntegrity)
+  forM slot $ \(manager, pending) -> do
+    existing <- readIORef pending
+    unless (null existing) (throwIO StoreIntegrity)
+    appended <- appendManagerAsk manager total recordClass FlowCommand principal (To Manager) about body
+    forM appended $ \(position, record) -> do
+      writeIORef pending (Just (PendingCommand total recordClass position principal about))
+      (,,) position record <$> managerFlowContent manager record
+
 -- | The current in-memory lifetime, never reconstructed from a database row.
 transactionGeneration :: Transaction Text
-transactionGeneration = Transaction $ \(Context _ generation _ _ _ _ _) -> pure generation
+transactionGeneration = Transaction $ \(Context _ generation _ _ _ _ _ _) -> pure generation
 
 refuseTransaction :: Exception e => e -> Transaction a
 refuseTransaction failure = Transaction (const (throwIO failure))
@@ -1157,8 +1209,9 @@ run :: NFData a => CoordinationStore -> Bool -> Transaction (a, [Invalidation]) 
 run = runWithAdmission WaitWithinBudget
 
 runWithAdmission :: NFData a => StoreAdmission -> CoordinationStore -> Bool -> Transaction (a, [Invalidation]) -> IO a
-runWithAdmission policy store@(CoordinationStore _ _ db identity _ _ poisoned _ _ _ _ _ _ _) writable (Transaction action) = admittedWith policy store $ \end -> do
+runWithAdmission policy store@(CoordinationStore _ _ db identity _ _ poisoned _ _ _ _ _ _ flow) writable (Transaction action) = admittedWith policy store $ \end -> do
   committing <- newIORef False
+  pending <- newIORef Nothing
   changed <- newIORef False
   budget <- newIORef (Budget 256 8388608 1000 1048576)
   deadline <- newIORef Nothing
@@ -1167,7 +1220,7 @@ runWithAdmission policy store@(CoordinationStore _ _ db identity _ _ poisoned _ 
     result <- try @SomeException $ restore $ boundedWith db (maybe (pure 5000000) Admission.remainingMicros end) $ do
       mapM_ (void . Admission.remainingMicros) end
       SQL.exec db (if writable then "BEGIN IMMEDIATE" else "BEGIN")
-      (resultValue, events) <- action (Context db (storeProcessGeneration identity) writable budget changed deadline admissionFence)
+      (resultValue, events) <- action (Context db (storeProcessGeneration identity) writable budget changed deadline admissionFence ((\manager -> (manager, pending)) <$> flow))
       validateEvents events
       value <- evaluate (force resultValue)
       didChange <- readIORef changed
@@ -1188,6 +1241,12 @@ runWithAdmission policy store@(CoordinationStore _ _ db identity _ _ poisoned _ 
             unavailable = writable && definiteWriteFailure failure
         when poison (writeIORef poisoned True)
         when (poison || unavailable) (notifyStoreFailure store unavailable)
+        -- A definite rollback answers an appended command record with a
+        -- failure record. After an uncertain COMMIT the command record keeps
+        -- no reply, which denotes the uncertainty.
+        unless poison $ forM_ flow $ \manager -> readIORef pending >>= mapM_ (\(PendingCommand total recordClass position principal about) ->
+          appendManagerReply manager total recordClass FlowFailure position Manager (To principal) about
+            (failureBody Refused (maybe "storage-unavailable" failureCode (fromException failure))))
         throwIO failure
 
 -- The writable SQL boundary observes definite recording failure before opaque mapping.
@@ -1258,7 +1317,7 @@ instance NFData RetainedEvents where
 -- | Advance at most 256 events per call. The caller can continue bounded maintenance
 -- without holding a read transaction or a client connection between calls.
 retainEvents :: CoordinationStore -> IO Int
-retainEvents store = runTransaction store $ Transaction $ \(Context db _ _ _ _ _ _) -> do
+retainEvents store = runTransaction store $ Transaction $ \(Context db _ _ _ _ _ _ _) -> do
   count <- trimEvents db
   pure (count, [])
 
@@ -1298,7 +1357,7 @@ readRetainedEventsWith :: NFData a => CoordinationStore
   -> Transaction (Text, Maybe Word64, b)
   -> (b -> RetainedEvents -> Transaction a)
   -> IO (Either EventReadFailure a)
-readRetainedEventsWith store (Transaction prepare) project = runTransaction store $ Transaction $ \context@(Context db _ _ _ _ _ _) -> do
+readRetainedEventsWith store (Transaction prepare) project = runTransaction store $ Transaction $ \context@(Context db _ _ _ _ _ _ _) -> do
   (expected, requested, binding) <- prepare context
   _ <- trimEvents db
   let Transaction readBatch = do
@@ -1347,7 +1406,7 @@ readRetainedEventsWith store (Transaction prepare) project = runTransaction stor
       _ -> refuseTransaction StoreIntegrity
 
 chargeInput :: Context -> Text -> [SQL.SQLData] -> IO ()
-chargeInput (Context _ _ _ budget _ _ _) sql parameters = do
+chargeInput (Context _ _ _ budget _ _ _ _) sql parameters = do
   when (T.length sql > 65536 || T.any (`elem` ['\0', ';']) sql) (throwIO StoreLimit)
   let sqlBytes = BS.length (TE.encodeUtf8 sql)
   when (sqlBytes > 65536) (throwIO StoreLimit)

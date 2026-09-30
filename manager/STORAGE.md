@@ -331,8 +331,9 @@ the gap notice cannot be appended, the writer does not attempt the record, and
 that record fails as well. Gap notices are lost while every append fails, and
 the entries that no notice names leave no trace when the lifetime ends. A
 failed `Refusing` append leaves no gap entry. A test mode can construct the
-writer with a fault that fails the appends that it selects. Production never
-passes a fault.
+writer with a fault that fails the appends that it selects, and
+`withServingStoreWith` opens a serving lifetime with a given line codec and
+fault. Production never passes a fault and always uses the strict codec.
 
 The five manager bodies have strict codecs. Each decoder refuses an unknown or
 a missing field and any value that its encoder does not write.
@@ -380,8 +381,9 @@ then the configuration and then the leaf writer lock. When the configuration
 cannot give its limits at that point, the close completes without the notice
 and then reports the configuration failure. Both notices are reserved records
 from the manager to the manager, and a failed append of either becomes a gap
-entry. The command, receipt, review and relay append points are not connected,
-so the manager log records no `/v1` command at present.
+entry. The [command acceptance contract](COMMANDS.md#manager-log-records)
+describes the `command`, `receipt` and `failure` records of a fresh command. The
+review and relay append points are not connected.
 
 ## Worker cleanup ownership
 

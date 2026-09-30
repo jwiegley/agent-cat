@@ -281,6 +281,57 @@ failure still refuses a durable receipt. These are conservative logical ledger
 charges, not physical database, WAL, temporary-disk, or total-heap quotas. WM-019
 retains independent physical safety supervision when durable storage is unavailable.
 
+## Manager log records
+
+A serving Store lifetime records each fresh command in its manager log, which
+[the storage contract](STORAGE.md#manager-log) describes. A lifetime that
+`withCoordinationStore` opens has no manager log and records nothing.
+
+The admission transaction of `submitBoundCommand` checks the log ceiling
+beside `checkCapacity`. When the log and its claim checks have reached L minus
+R, an ordinary command is refused with `storage-quota`. A cancel may use the
+reserve and is never refused by this check.
+
+After every check, the INSERT and the charge of the rate, and immediately
+before the commit-deadline check and COMMIT, the transaction appends the
+`command` record. Its sender is `Principal (Credential client credential)`,
+with the client that `authorizeRequest` returned and the credential identifier
+of `credentialRateKey`. Its receiver is the manager, and it names the command,
+the request and the manager run of the command references. Its body is the
+admitted request without its idempotency key. A JSON request body is its
+strictly decoded value, and a capture is named by the identifier that the
+capture mutation recorded in `command_captures`, the SHA-256 of the body
+binding and its size. A JSON request body that does not decode strictly
+refuses the command with `invalid-request`. The writer synchronizes the record
+to disk. The writer lock is taken last, inside the held file slot,
+configuration and database locks, and the append counts against the
+five-second operation allowance.
+
+The transaction decodes the appended bytes, including a claim-check file, and
+compares the decoded body, sender, receiver and identifiers with the admitted
+command. Any difference refuses the command with `storage-unavailable`. When
+the append fails, an ordinary command is refused with `storage-quota` for a
+quota failure and with `storage-unavailable` for every other failure, and the
+transaction rolls back. A cancel commits without its record. The writer keeps
+a gap entry that names the missing record and a second entry that names the
+missing receipt. A refused admission appends nothing, because every check
+precedes the append, and an exact replay appends nothing.
+
+When the transaction rolls back after the `command` record was appended, for
+example because the commit-deadline check, an invalidation or the comparison
+failed, the Store appends a `failure` record as the reply to the command
+position. Its class is `refused` and its message is the refusal code of the
+command. When the COMMIT outcome is uncertain and the Store is poisoned, the
+command record keeps no reply, which denotes the uncertainty.
+
+After COMMIT, the manager appends the `receipt` record as the reply to the
+command position, from the manager to the principal. The `/v1` response
+carries the receipt decoded from the appended bytes, which has the bytes of
+the ledger receipt. When the receipt append fails, or its decoding differs from
+the ledger receipt, the response carries the ledger receipt, and a failed
+append leaves a gap entry that names the receipt. The receipt append is not
+part of the admission transaction, and its failure never refuses the command.
+
 ## Dispatch and observations
 
 Only a fresh committed intent requesting dispatch can mint an opaque

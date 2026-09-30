@@ -28,6 +28,8 @@ module Agentic.Manager.Flow
     closeManagerFlow,
     managerFlowBytes,
     managerFlowAllowance,
+    managerFlowContent,
+    noteManagerGap,
     gapEntryLimit,
     appendManagerAsk,
     appendManagerTell,
@@ -75,7 +77,7 @@ import Agentic.Runtime
   ( About,
     Actor (Manager),
     Address (To),
-    Content (ContentValue),
+    Content (ContentValue, ContentEvent),
     FlowAppend (..),
     FlowCodec,
     FlowError (..),
@@ -84,7 +86,7 @@ import Agentic.Runtime
     FlowWriter,
     Position,
     PrivateRoot,
-    Record,
+    Record (..),
     RunId (..),
     Schema (..),
     aboutFromValue,
@@ -106,6 +108,7 @@ import Agentic.Runtime
     maxFrameBytes,
     noAbout,
     openFlowLog,
+    readFlowContentAt,
     schemaFromName,
     schemaLog,
     schemaName,
@@ -136,7 +139,9 @@ data ManagerFlow = ManagerFlow
   { managerLock :: !(MVar Gaps),
     -- | The runtime writer, or the reason why the log could not be opened.
     managerWriter :: !(Either Text FlowWriter),
-    managerFault :: !(Maybe ManagerFlowFault)
+    managerFault :: !(Maybe ManagerFlowFault),
+    managerRoot :: !PrivateRoot,
+    managerStream :: !Text
   }
 
 -- | The missing records that no gap notice names yet: at most
@@ -199,7 +204,7 @@ openManagerFlow codec fault root stream total = do
     ensurePrivateDirectoryAt root ["flow"]
     fst <$> openFlowLog codec root (managerFlowPath stream) (managerFlowClaims stream) (toInteger total)
   lock <- newMVar (Gaps Seq.empty 0)
-  pure (ManagerFlow lock (either (Left . T.pack . displayException) Right opened) fault)
+  pure (ManagerFlow lock (either (Left . T.pack . displayException) Right opened) fault root stream)
   where
     validStream text = not (T.null text) && T.length text <= 128 && T.all (\c -> isAscii c && (isAlphaNum c || c == '_' || c == '-')) text
 
@@ -219,6 +224,24 @@ managerFlowAllowance :: Int64 -> FlowRecordClass -> Integer
 managerFlowAllowance total = \case
   Reserved -> toInteger total
   _ -> toInteger (total - mutationLedgerReserve total)
+
+-- | The body value of a record that this writer appended, decoded from the
+-- appended bytes. A claim check is read from the claim-check directory of the
+-- log, and its size, digest and exact encoding are verified.
+managerFlowContent :: ManagerFlow -> Record -> IO (Either Text Value)
+managerFlowContent flow record = do
+  content <- synchronous (readFlowContentAt (managerRoot flow) (managerFlowClaims (managerStream flow)) (recBody record))
+  pure $ case content of
+    Left failure -> Left (T.pack (displayException failure))
+    Right (Left why) -> Left why
+    Right (Right (ContentValue value)) -> Right value
+    Right (Right (ContentEvent _)) -> Left "a manager record holds an event sequence number"
+
+-- | Keep a gap entry for a record that the manager did not attempt, because
+-- the record that it answers is missing. The next appended record is preceded
+-- by the gap notice that names it.
+noteManagerGap :: ManagerFlow -> MissingRecord -> IO ()
+noteManagerGap flow missing = modifyMVar (managerLock flow) (\gaps -> pure (addGap missing gaps, ()))
 
 appendManagerAsk :: ManagerFlow -> Int64 -> FlowRecordClass -> Schema -> Actor -> Address -> About -> Value -> IO (Either ManagerFlowFailure (Position, Record))
 appendManagerAsk flow total recordClass schema from to about body =

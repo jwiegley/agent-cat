@@ -15,12 +15,16 @@ module Agentic.Manager.Commands
   ) where
 
 import Agentic.Manager.Authorization
+import qualified Agentic.Manager.Flow as Flow
+import Agentic.Manager.Flow
+  (CommandBody (..), CaptureReference (..), FlowRecordClass (Refusing, Following), ManagerFlowFailure (..), MissingRecord (..),
+   commandFlowBody, commandFromFlowBody, receiptFlowBody, receiptFromFlowBody, appendManagerReply, managerFlowContent, noteManagerGap)
 import Agentic.Manager.Profile (ConfigurationLimits (..), PublicProfile, publicId, publicRevision, Discovery)
 import Agentic.Manager.Protocol.Command
 import Agentic.Manager.Protocol.Artifact (validExportName)
 import Agentic.Manager.Protocol.Json (decodeStrictValue)
 import Agentic.Manager.Store
-import Agentic.Runtime (maxFrameBytes, maxArtifactBytes)
+import Agentic.Runtime (maxFrameBytes, maxArtifactBytes, Actor (..), Authority (..), Address (To), About (..), noAbout, Position (..), Record (..), Schema (FlowReceipt))
 import Control.DeepSeq (NFData (..))
 import Control.Exception (SomeException, mask, finally, throwIO, try)
 import Control.Monad (unless, when, void, forM, forM_)
@@ -35,8 +39,10 @@ import Data.ByteArray (convert, constEq)
 import Data.ByteArray.Encoding (Base (Base16), convertToBase)
 import qualified Data.ByteString as BS
 import Data.Int (Int64)
+import Data.Word (Word64)
 import Data.IORef (IORef, atomicModifyIORef', newIORef, readIORef, writeIORef)
 import Data.List (find)
+import Data.Maybe (isJust)
 import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -195,7 +201,7 @@ submitBoundCommand store proof request streamed known deadline buildMutation = c
     let (digest, bodyBytes, legacyBytes) = case streamed of
           Nothing -> (convert (hash (commandBody request) :: Digest SHA256), BS.length (commandBody request), Just (commandBody request))
           Just (BodyBinding checksum count prefix) -> (checksum, count, prefix)
-    outcome <- restore $ configuredCatalogues store proof $ \limits profiles catalogues identity -> transaction store $ do
+    outcome <- restore $ configuredCatalogues store proof $ \limits profiles catalogues identity -> transaction store (do
       (client, epoch) <- authorizeRequest profiles proof request
       old <- sql "SELECT id,profile_id,operation,retired,media_type,precondition,body_sha256,body_bytes FROM commands WHERE client_id=? AND method=? AND resource_uri=? AND idempotency_key=?"
         [text client, text (commandMethod request), text (commandResource request), text (commandKey request)]
@@ -211,6 +217,7 @@ submitBoundCommand store proof request streamed known deadline buildMutation = c
           require (validReferences (intentReferences intent)) InvalidRequest
           (now, minute) <- trustedTime
           checkCapacity limits (commandOperation request)
+          logged <- checkFlowCeiling limits (commandOperation request)
           checkRate limits proof (commandOperation request) minute
           (events, immediate) <- lift (intentApply intent)
           let refs = intentReferences intent
@@ -256,8 +263,11 @@ submitBoundCommand store proof request streamed known deadline buildMutation = c
                 [[SQL.SQLText r,SQL.SQLText p,SQL.SQLText pr,SQL.SQLText w,SQL.SQLText d,SQL.SQLText q,SQL.SQLText o,SQL.SQLText i]] -> Just(QueueAssociation r p pr w d q o i)
                 _ -> Nothing
             _ -> pure Nothing
+          flowed <- if logged
+            then Just . (,) client <$> recordAdmittedCommand limits (commandPrincipal client proof) (commandAbout candidate refs) request candidate digest bodyBytes
+            else pure Nothing
           forM_ deadline (lift . enforceCommitDeadline)
-          pure ((receipt, False, intentDispatch intent, refs, storeProcessGeneration identity, epoch, queue), events <> [commandEvent candidate candidate])
+          pure ((receipt, False, intentDispatch intent, refs, storeProcessGeneration identity, epoch, queue, flowed), events <> [commandEvent candidate candidate])
         [[SQL.SQLText ident, SQL.SQLText profile, SQL.SQLText operation, SQL.SQLInteger retired, media, precondition, bodyDigest, bodyLength]] -> do
           require (profile == commandProfile request && operation == operationName (commandOperation request)) IdempotencyConflict
           require (retired == 0) ReceiptExpired
@@ -276,14 +286,106 @@ submitBoundCommand store proof request streamed known deadline buildMutation = c
           refs <- case referenceRows of
             [[r,u,p,d]] -> CommandReferences <$> sqlOptionalText r <*> sqlOptionalText u <*> sqlOptionalText p <*> sqlOptionalText d
             _ -> throwE StorageUnavailable
-          pure ((receipt, True, False, refs, storeProcessGeneration identity, epoch, Nothing), [])
-        _ -> throwE StorageUnavailable
+          pure ((receipt, True, False, refs, storeProcessGeneration identity, epoch, Nothing, Nothing), [])
+        _ -> throwE StorageUnavailable) >>= traverse (recordReceipt store limits proof)
     case outcome of
       Left failure -> pure (Left failure)
       Right (receipt, replayed, dispatch, refs, generation, epoch, association) -> do
         unless (generation==generationAtCreation) (throwIO OwnershipUnavailable)
         ticket <- if dispatch then pure (Just (DispatchTicket store (receiptId receipt) generation refs retained)) else pure Nothing
         pure (Right (Submission receipt replayed ticket refs (AcceptedEnqueue generation epoch (receiptId receipt) <$> association)))
+
+-- | The sender of a command in the manager log: the client that
+-- 'authorizeRequest' returned and the credential of the proof.
+commandPrincipal :: Text -> CredentialProof -> Actor
+commandPrincipal client proof = Principal (Credential client (credentialRateKey proof))
+
+-- | The identifiers of the records of one command.
+commandAbout :: Text -> CommandReferences -> About
+commandAbout ident refs = noAbout {aboutCommand = Just ident, aboutRequest = referenceRequest refs, aboutManagerRun = referenceRun refs}
+
+-- | The log ceiling check beside 'checkCapacity'. An ordinary command is
+-- refused with 'StorageQuota' when the manager log has reached its ceiling
+-- minus the cancel reserve. A cancel may use the reserve, and it is never
+-- refused here: its record becomes a gap entry when the reserve is spent. The
+-- result states whether the Store lifetime writes a manager log.
+checkFlowCeiling :: ConfigurationLimits -> Operation -> CommandTx Bool
+checkFlowCeiling limits operation = do
+  room <- lift (managerFlowRoom (fromIntegral (limitGlobalMutationLedgerBytes limits)) (flowClass operation Refusing))
+  forM_ room $ \available -> require (available || operation == Cancel) StorageQuota
+  pure (isJust room)
+
+-- | A cancel's records may use the reserve and become gap entries when they
+-- fail. Other commands use the given class.
+flowClass :: Operation -> FlowRecordClass -> FlowRecordClass
+flowClass operation ordinary = if operation == Cancel then Flow.Reserved else ordinary
+
+-- | Append the synchronized command record of an admitted command, decode the
+-- appended bytes and compare them with the admitted command. A difference
+-- refuses the command with 'StorageUnavailable'. A failed append refuses an
+-- ordinary command with 'StorageQuota' or 'StorageUnavailable'. A cancel
+-- commits without its record, and the writer keeps a gap entry that names it.
+-- The result is the position of the record, if it was appended.
+recordAdmittedCommand :: ConfigurationLimits -> Actor -> About -> CommandRequest -> Text -> BS.ByteString -> Int -> CommandTx (Maybe Word64)
+recordAdmittedCommand limits principal about request candidate digest bodyBytes = do
+  command <- admittedCommandBody request candidate digest bodyBytes
+  let operation = commandOperation request
+  appended <- lift (appendCommandRecord (fromIntegral (limitGlobalMutationLedgerBytes limits)) (flowClass operation Refusing) principal about (commandFlowBody command))
+  case appended of
+    Nothing -> throwE StorageUnavailable
+    Just (Left _) | operation == Cancel -> pure Nothing
+    Just (Left ManagerFlowQuota) -> throwE StorageQuota
+    Just (Left (ManagerFlowUnavailable _)) -> throwE StorageUnavailable
+    Just (Right (Position position, record, content)) -> do
+      let carried = content >>= commandFromFlowBody
+      require (carried == Right command && recFrom record == principal && recTo record == To Manager && recAbout record == about) StorageUnavailable
+      pure (Just position)
+
+-- | The command record body of an admitted command: its strictly decoded JSON
+-- body, or the capture that it names by identifier, digest and size.
+admittedCommandBody :: CommandRequest -> Text -> BS.ByteString -> Int -> CommandTx CommandBody
+admittedCommandBody request candidate digest bodyBytes = do
+  (value, capture) <-
+    if commandOperation request == Capture
+      then do
+        rows <- sql "SELECT capture_id FROM command_captures WHERE command_id=?" [text candidate]
+        case rows of
+          [[SQL.SQLText ident]] -> pure (Nothing, Just (CaptureReference ident (TE.decodeUtf8 (convertToBase Base16 digest)) (toInteger bodyBytes)))
+          _ -> throwE StorageUnavailable
+      else if BS.null (commandBody request)
+        then pure (Nothing, Nothing)
+        else either (const (throwE InvalidRequest)) (\decoded -> pure (Just decoded, Nothing)) (decodeStrictValue (commandBody request))
+  pure (CommandBody (commandOperation request) (commandProfile request) (commandMethod request) (commandResource request)
+    (commandMediaType request) (commandPrecondition request) value capture)
+
+-- | After COMMIT, append the receipt of a fresh command as the reply to its
+-- command record, and carry the receipt decoded from the appended bytes. When
+-- the append fails, or the decoded receipt differs from the ledger receipt,
+-- the ledger receipt is carried and the writer keeps a gap entry for a failed
+-- append. A cancel whose command record is missing has its receipt named by
+-- a gap entry. A replay appends nothing.
+recordReceipt :: CoordinationStore -> ConfigurationLimits -> CredentialProof
+  -> (CommandReceipt, Bool, Bool, CommandReferences, Text, Text, Maybe QueueAssociation, Maybe (Text, Maybe Word64))
+  -> IO (CommandReceipt, Bool, Bool, CommandReferences, Text, Text, Maybe QueueAssociation)
+recordReceipt store limits proof (receipt, replayed, dispatch, refs, generation, epoch, association, flowed) = do
+  carried <- case (storeManagerFlow store, flowed) of
+    (Just manager, Just (client, position)) -> do
+      let about = commandAbout (receiptId receipt) refs
+          principal = commandPrincipal client proof
+      case position of
+        Nothing -> receipt <$ noteManagerGap manager (MissingRecord FlowReceipt about)
+        Just index -> do
+          appended <- appendManagerReply manager (fromIntegral (limitGlobalMutationLedgerBytes limits)) (flowClass (receiptOperation receipt) Following)
+            FlowReceipt (Position index) Manager (To principal) about (receiptFlowBody receipt)
+          case appended of
+            Left _ -> pure receipt
+            Right (_, record) -> do
+              decoded <- (>>= receiptFromFlowBody) <$> managerFlowContent manager record
+              pure $ case decoded of
+                Right value | value == receipt -> value
+                _ -> receipt
+    _ -> pure receipt
+  pure (carried, replayed, dispatch, refs, generation, epoch, association)
 
 -- | One retained invocation, allocated before acceptance and never recreated from a receipt.
 data CommandAttempt = CommandAttempt !CoordinationStore !CredentialProof !CommandRequest !Text !(IORef TicketState) !Text !(IORef AttemptPhase)
