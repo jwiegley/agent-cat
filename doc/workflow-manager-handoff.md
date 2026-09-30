@@ -161,10 +161,24 @@ message as intended.
   `engine/acp/ci/acp.sh`, `cli/ci/routing-config.sh`, `cli/ci/examples.sh`
   and `engine/agent-deck/ci/deck.sh`. `bash tui/ci/tui.sh` covers the
   source boundaries, `tui-model-test` and the TUI probes.
-- The ext-pi checks, because the Pi fork has no built `dist` directories,
-  and `engine/acp/ci/route-live.sh`, which needs a paid provider.
+- `engine/acp/ci/route-live.sh`, which needs a paid provider. The ext-pi
+  checks did not run in this gate, because the Pi fork had no built `dist`
+  directories. Subtask C1 of Phase B part 2 later ran them to a pass, as the
+  paragraph after this list states.
 - The Client-facade check at N1, which is the closing condition of
   `acat-nwrj`. The gate list names only N8.
+
+Subtask C1 of Phase B part 2 ran the ext-pi checks against the built Pi fork
+at `~/src/fork/pi` (version 0.99.1) and an `agentic-run` built with
+`-ftui-tests`. `npm run check`, `npm test` (89 passed, 5 skipped) and
+`npm run test:integration` (8 Vitest cases and
+`test/pi-remote-current.mjs`) passed. The fake Pi host in
+`test/pi-remote-current.mjs` now uses `state.change`, the form that the fork
+provides. `test/owned-child-e2e.test.ts` now runs the runner verb `flow` on
+the parent run and on the resumed child run, and asserts that the verified
+run log holds one `start` record from the local principal whose owner is the
+`ownerId` of the ext-pi manifest. This closes the ext-pi part of gate 5 of
+increment 1. The evidence is under `B2/C1/impl-r1`.
 
 ### Gated subtasks
 
@@ -192,7 +206,8 @@ message as intended.
   step 11 of this gate. Its closing condition is one run at N1 with every
   503 line classified.
 - `acat-1dfc` stays open. B1 and B2 repaired its medium findings 1 to 4.
-  Finding 5 (the ext-pi checks) and the low findings remain.
+  Subtask C1 of part 2 resolved finding 5 (the ext-pi checks and the ext-pi
+  part of gate 5). The low findings remain.
 - `acat-62j0`, the F16 fess findings, stays open.
 - `acat-response-ingestion-budget-zaoi` is closed by B5, B6 and B7. The
   review findings are `acat-b5-response-review-findings-k96b`,

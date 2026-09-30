@@ -347,7 +347,7 @@ Discovered in acat-47y: migrating PMod to [CMonoid M] makes instPModSelf demand 
 :LABELS:   ["actor-flow","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-29 Tue 23:11]
-:MODIFIED: [2026-09-30 Wed 00:24]
+:MODIFIED: [2026-09-30 Wed 10:27]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -391,6 +391,13 @@ Low:
     "author": "johnw",
     "text": "Phase B subtask B2 repairs medium item 4. A control that arrives before the run log of a store-backed run exists is now held in arrival order (a cancellation first releases the held controls through the broker of the command and is then delivered at once). After withRunLog opens and before activateEventSinkBrokered, the run appends and delivers each held control through flowBroker, so the receiver acts on the value decoded from the appended record. The log order is start record, control records, run.started, then the acknowledgement events. Option 1 was not possible because the start record needs the program digest and the standard-input digests. DataBroker keeps nine fields, and Broker.hs, Machine.hs and openapi.yaml are unchanged. runtime/BROKER.md section Carriage states the new behavior with no append-after-delivery exception. test/flow_probe.py now requires a control record before every acknowledged control, including the early control, and runs agentic-run flow on the store. Evidence: B/B2/impl-r1 (the extended probe failed on the unchanged binary, 00; then build, runtime-contract-test at N8, flow_probe.py, progress_probe.py golden comparison, control_probe.py and person_control_probe.py at N8 unchanged, the ad hoc held-then-terminal script, the Phase A journey at N8, make -C doc check and the nine-field DataBroker listing, all exit 0). Items 5 to 14 remain open. Fess findings: acat-r4vj.\n",
     "created_at": "2026-09-30T07:24:40Z"
+  },
+  {
+    "id": 399,
+    "issue_id": "acat-1dfc",
+    "author": "johnw",
+    "text": "Subtask C1 (Phase B part 2) resolves medium finding 5: the ext-pi checks pass against the built Pi fork, and the ext-pi part of gate 5 has a passing assertion in ext-pi/test/owned-child-e2e.test.ts. The low findings remain. Evidence: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/B2/C1/impl-r1.",
+    "created_at": "2026-09-30T17:27:27Z"
   }
 ]
 #+end_src
@@ -1829,7 +1836,7 @@ Follow-up from the F9 fess audit of the manager log writer, the manager codecs a
 :LABELS:   ["actor-flow","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-29 Tue 22:59]
-:MODIFIED: [2026-09-29 Tue 22:59]
+:MODIFIED: [2026-09-30 Wed 10:27]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -1847,6 +1854,20 @@ Follow-up from the F16 fess audit of the increment 1 gate and the handoff curren
 4. (low) The append latency of each synchronized manager append (gate 9) is not measured. Also tracked in acat-j11d item 5. Fix: measure and report it in the journey.
 
 5. (low) cli/test/PolicyProbe.hs:555: the ReadFlow rendering repair compiles, but no expectation asserts a "flow ..." rendering, and policy-probe did not run because policies.sh is forbidden. Fix: add a policy-probe expectation for "agentic-run flow A B" when policies.sh is next allowed.
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 398,
+    "issue_id": "acat-62j0",
+    "author": "johnw",
+    "text": "Subtask C1 (Phase B part 2) resolves item 3 in full and the gate 5 part of item 2. Item 3: npm run check, npm test (89 passed, 5 skipped) and npm run test:integration (8 Vitest cases plus test/pi-remote-current.mjs) pass in ext-pi against the built Pi fork 0.99.1 and a -ftui-tests agentic-run. Item 2, gate 5 part: ext-pi/test/owned-child-e2e.test.ts runs 'agentic-run flow <storeDir>/runtime' on the parent and the resumed child, requires a verified summary and one start record, and asserts that its from field equals {principal: local, uid, owner: manifest.ownerId}. A negative copy with a wrong owner failed on owner only. Gate 6 and the broker-api-default revalidation (item 2), and items 4 and 5, remain open. Evidence: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/B2/C1/impl-r1.",
+    "created_at": "2026-09-30T17:27:26Z"
+  }
+]
+#+end_src
 
 * TODO [#C] Resolve F13 fess findings in the command notices and endings
 :PROPERTIES:
@@ -3813,6 +3834,26 @@ deep-review + alexey + validated. (1) End-of-input errors report 0:0 (Parse.lean
 ]
 #+end_src
 
+* TODO [#D] Resolve C1 fess findings on the ext-pi checks
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-c1-ext-pi-fess-findings-ld5u
+:LABELS:   ["actor-flow","workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-30 Wed 10:27]
+:MODIFIED: [2026-09-30 Wed 10:27]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of the fess audit of subtask C1 of Phase B part 2 (ext-pi checks on the built Pi fork and the gate 5 owner assertion). Source: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/fess/b2-C1-r1.md.
+
+1. (medium, corrected on landing) doc/workflow-manager-handoff.md and doc/PLAN.org still said that the ext-pi checks and the ext-pi part of gate 5 had no result. The Integrator updated the current-state section of the handoff and commented on acat-62j0 and acat-1dfc.
+
+2. (low, pre-existing) ext-pi/test/pi-remote-current.mjs lines 108-120: the cleanup in the finally block calls finishPrompt("aborted"). If that call throws, its error replaces the original test error. This is why the first C1 failure showed "no prompt is active" and not the state API error. Fix: report a cleanup error only when the try body succeeded, or rethrow the original error with the cleanup error attached.
+
 * TODO [#D] Follow-ups from F0 file-slot wait revalidation
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -4509,7 +4550,7 @@ Deliberately not a constructor; castGrade covers =. The <= case is a structural 
 :LABELS:   ["actor-flow","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-26 Sat 23:41]
-:MODIFIED: [2026-09-30 Wed 05:30]
+:MODIFIED: [2026-09-30 Wed 05:40]
 :CREATED_BY: johnw
 :SOURCE_REPO: .
 :ORIGINAL_SIZE: 0
@@ -4550,6 +4591,13 @@ Actor-flow increment 2, service subscription (4 to 6 engineering days, inside WM
     "author": "johnw",
     "text": "B19 (Phase B part 1 gate): the part 1 gate ran once on ddf3ed93 in the order of the gate list, and every kept step passed: make -C doc check, the incremental Werror ALLBUILD, make -C doc check-haskell, manager/ci/contract.sh with the additive-only openapi comparison against 9a641dd8 (no change, Capabilities identical) and nine DataBroker fields, runtime-contract-test, flow_probe and progress_probe, control_probe and person_control_probe, manager-command-check flow and main, the manager-artifact-check modes and main form, manager-history-check, the ingestion and store checks, client_native.py with the B10 fail-closed expectations, service_http.py base with CLIENT_CHECK, mixed, credential-lifecycle, boundary, pages and events-lifecycle, and JOURNEY-PAIR with a verified consent chain at N1 and N8. The two one-byte controls and the three service controls each failed with their literal messages. Checks other than the journey ran only at N8. Route assertions (routes mode, route fixtures, route-path comparison, SSE, manager-log route and actor-class assertions) were not run because B15 to B17 wait for the operator review of doc/research/actor-flow-route-threat-model.md, and B18 waits for authorization. The handoff current-state section now describes Phase B part 1. Evidence: resume-20260923/B/B19/impl-r1 and fess/b1-B19-r1.md. Not closed; the closeout review decides.",
     "created_at": "2026-09-30T12:30:57Z"
+  },
+  {
+    "id": 397,
+    "issue_id": "acat-en4g",
+    "author": "johnw",
+    "text": "Phase B part 1 status: authorization-gated. The B4 threat model doc/research/actor-flow-route-threat-model.md awaits operator review; B15, B16 (public class) and B17 (actor class) need separate operator decisions.",
+    "created_at": "2026-09-30T12:40:32Z"
   }
 ]
 #+end_src
@@ -9055,6 +9103,30 @@ HIGH (deep/alexey): SqZero has no CompleteCSemiring and no PMod P M beyond the d
   }
 ]
 #+end_src
+
+* TODO [#C] Phase B part 1 review follow-ups: download quota, id row bound, legacy history, precision gaps
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-phase-b1-review-followups-dk1v
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-30 Wed 05:40]
+:MODIFIED: [2026-09-30 Wed 05:40]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Findings of the Phase B part 1 end-of-part review (packages and safety lenses over 9a641dd8..2f0848b1) that no tracker item held. The handoff section "End-of-part review" in doc/workflow-manager-handoff.md states each one.
+
+1. Medium. The download quota of one refuses a second concurrent download at once with 429 storage-quota. Only the 5-second timeout of each 16 KiB write bounds a download, so one slow client can hold a 64 MiB download for hours. Before B6 a second download waited up to five seconds. Disposition: a wait for the quota within the five-second allowance, a total deadline for one download, or an operator ruling, plus a two-client download case in WM-028.
+2. Medium. GET /v1/requests and GET /v1/runs select every request and run of the authorized profiles with no row bound before paging. Disposition: a bounded id query that refuses with view-too-large before materialization, or keyset pages, with the bound in doc/api/README.md.
+3. Medium. The service binds no legacy retention root, so /v1/runs lists no legacy history. WM-025 stays open until the service binds the retention roots read-only or a deferral is recorded.
+4. Low. The WM-023 scope change during retained responses is shown only as an observe-only boundary.
+5. Low. An event stream holds no Store reader charge for its lifetime, so only the subscription quota and globalConnections bound the number of streams.
+6. Low. Held controls of a run that fails before carrying them, for a reason other than cancel, get no acknowledgement if the process exits first.
+7. Low. Some assertions of the boundary and events-lifecycle modes accept two refusal codes (400 or 404, 429 or 503).
 
 * DONE [#E] fanT fusion holds only laxly at m=0 after the l59 repair
 :PROPERTIES:
@@ -15368,15 +15440,17 @@ manager's correctness boundary.
 ]
 #+end_src
 
-* DOING [#B] WM-023: Implement local credential administration and authorization    :p5:
+* DONE [#B] WM-023: Implement local credential administration and authorization    :p5:
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-wm-023-d20b
 :LABELS:   ["p5","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-30 Wed 05:30]
+:MODIFIED: [2026-09-30 Wed 05:40]
 :CREATED_BY: johnw
+:FINISHED: [2026-09-30 Wed 05:40]
+:CLOSE_REASON: Met: every review verdict met. Credential lifecycle through the running HTTPS manager, evidence resume-20260923/B/B8/impl-r1 and Phase B part 1 gate steps 7 and 11 (commit 2f0848b1); scope-change item shrunk to an observe-only boundary (follow-up acat-phase-b1-review-followups-dk1v).
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-023
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -15627,7 +15701,7 @@ callers. Worker environments contain no manager credential material.
 :LABELS:   ["p5","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-30 Wed 05:30]
+:MODIFIED: [2026-09-30 Wed 05:40]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-024
 :SOURCE_REPO: agent-cat
@@ -15743,6 +15817,13 @@ leak private errors. There is no plaintext bearer development exception.
     "author": "johnw",
     "text": "B19 (Phase B part 1 gate): the part 1 gate ran once on ddf3ed93 in the order of the gate list, and every kept step passed: make -C doc check, the incremental Werror ALLBUILD, make -C doc check-haskell, manager/ci/contract.sh with the additive-only openapi comparison against 9a641dd8 (no change, Capabilities identical) and nine DataBroker fields, runtime-contract-test, flow_probe and progress_probe, control_probe and person_control_probe, manager-command-check flow and main, the manager-artifact-check modes and main form, manager-history-check, the ingestion and store checks, client_native.py with the B10 fail-closed expectations, service_http.py base with CLIENT_CHECK, mixed, credential-lifecycle, boundary, pages and events-lifecycle, and JOURNEY-PAIR with a verified consent chain at N1 and N8. The two one-byte controls and the three service controls each failed with their literal messages. Checks other than the journey ran only at N8. Route assertions (routes mode, route fixtures, route-path comparison, SSE, manager-log route and actor-class assertions) were not run because B15 to B17 wait for the operator review of doc/research/actor-flow-route-threat-model.md, and B18 waits for authorization. The handoff current-state section now describes Phase B part 1. Evidence: resume-20260923/B/B19/impl-r1 and fess/b1-B19-r1.md. Not closed; the closeout review decides.",
     "created_at": "2026-09-30T12:30:56Z"
+  },
+  {
+    "id": 394,
+    "issue_id": "acat-wm-024-28bb",
+    "author": "johnw",
+    "text": "Phase B part 1 status: package review met, but the B9 review said partial, so it stays open. Evidence resume-20260923/B/B9/impl-r1, resume-20260923/B/B10/impl-r1, gate steps 10 and 11. Outside part 1: non-loopback allowed-peer acceptance and IP Name Constraints (B18, authorization-gated). See handoff section Package status.",
+    "created_at": "2026-09-30T12:40:31Z"
   }
 ]
 #+end_src
@@ -15754,7 +15835,7 @@ leak private errors. There is no plaintext bearer development exception.
 :LABELS:   ["p5","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-30 Wed 05:30]
+:MODIFIED: [2026-09-30 Wed 05:40]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-025
 :SOURCE_REPO: agent-cat
@@ -15921,6 +16002,13 @@ through the actual HTTP response path.
     "author": "johnw",
     "text": "B19 (Phase B part 1 gate): the part 1 gate ran once on ddf3ed93 in the order of the gate list, and every kept step passed: make -C doc check, the incremental Werror ALLBUILD, make -C doc check-haskell, manager/ci/contract.sh with the additive-only openapi comparison against 9a641dd8 (no change, Capabilities identical) and nine DataBroker fields, runtime-contract-test, flow_probe and progress_probe, control_probe and person_control_probe, manager-command-check flow and main, the manager-artifact-check modes and main form, manager-history-check, the ingestion and store checks, client_native.py with the B10 fail-closed expectations, service_http.py base with CLIENT_CHECK, mixed, credential-lifecycle, boundary, pages and events-lifecycle, and JOURNEY-PAIR with a verified consent chain at N1 and N8. The two one-byte controls and the three service controls each failed with their literal messages. Checks other than the journey ran only at N8. Route assertions (routes mode, route fixtures, route-path comparison, SSE, manager-log route and actor-class assertions) were not run because B15 to B17 wait for the operator review of doc/research/actor-flow-route-threat-model.md, and B18 waits for authorization. The handoff current-state section now describes Phase B part 1. Evidence: resume-20260923/B/B19/impl-r1 and fess/b1-B19-r1.md. Not closed; the closeout review decides.",
     "created_at": "2026-09-30T12:30:56Z"
+  },
+  {
+    "id": 395,
+    "issue_id": "acat-wm-025-3utw",
+    "author": "johnw",
+    "text": "Phase B part 1 status: partial. Frozen collections, export and lineage, page sets landed (B11-B13, evidence resume-20260923/B/B11 to B13). Route items wait for B15-B17 (operator review of doc/research/actor-flow-route-threat-model.md); legacy history is not served (acat-phase-b1-review-followups-dk1v).",
+    "created_at": "2026-09-30T12:40:31Z"
   }
 ]
 #+end_src
@@ -15932,7 +16020,7 @@ through the actual HTTP response path.
 :LABELS:   ["p5","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-30 Wed 05:30]
+:MODIFIED: [2026-09-30 Wed 05:40]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-026
 :SOURCE_REPO: agent-cat
@@ -16076,6 +16164,13 @@ and enforce advertised bounds. G2 is complete with mutations still unavailable.
     "author": "johnw",
     "text": "B19 (Phase B part 1 gate): the part 1 gate ran once on ddf3ed93 in the order of the gate list, and every kept step passed: make -C doc check, the incremental Werror ALLBUILD, make -C doc check-haskell, manager/ci/contract.sh with the additive-only openapi comparison against 9a641dd8 (no change, Capabilities identical) and nine DataBroker fields, runtime-contract-test, flow_probe and progress_probe, control_probe and person_control_probe, manager-command-check flow and main, the manager-artifact-check modes and main form, manager-history-check, the ingestion and store checks, client_native.py with the B10 fail-closed expectations, service_http.py base with CLIENT_CHECK, mixed, credential-lifecycle, boundary, pages and events-lifecycle, and JOURNEY-PAIR with a verified consent chain at N1 and N8. The two one-byte controls and the three service controls each failed with their literal messages. Checks other than the journey ran only at N8. Route assertions (routes mode, route fixtures, route-path comparison, SSE, manager-log route and actor-class assertions) were not run because B15 to B17 wait for the operator review of doc/research/actor-flow-route-threat-model.md, and B18 waits for authorization. The handoff current-state section now describes Phase B part 1. Evidence: resume-20260923/B/B19/impl-r1 and fess/b1-B19-r1.md. Not closed; the closeout review decides.",
     "created_at": "2026-09-30T12:30:57Z"
+  },
+  {
+    "id": 396,
+    "issue_id": "acat-wm-026-qo1e",
+    "author": "johnw",
+    "text": "Phase B part 1 status: /v1/events lifecycle met (evidence resume-20260923/B/B14/impl-r1, resume-20260923/B/B7/impl-r1, gate steps 8, 9, 11), but the B14 review said partial and route SSE waits for B16, so it stays open.",
+    "created_at": "2026-09-30T12:40:31Z"
   }
 ]
 #+end_src

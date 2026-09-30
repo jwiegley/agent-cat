@@ -191,10 +191,11 @@ function createRuntime() {
         prompt({ message }, context) {
           if (pending) return Promise.resolve({ accepted: false, operationId: null, error: { code: "busy", message: "busy" } });
           const operationId = `operation-${++sequence}`;
+          state.change(context, (draft) => {
+            draft.snapshot.operation = { id: operationId };
+            draft.event = null;
+          });
           runtime.phase = "turn";
-          state.state.snapshot = { ...state.state.snapshot, operation: { id: operationId } };
-          state.state.event = null;
-          state.publish(context);
           return new Promise((resolvePromise) => {
             pending = { message, operationId, context, resolve: resolvePromise };
           });
@@ -244,13 +245,11 @@ function createRuntime() {
         timestamp: new Date(timestamp).toISOString(),
         message: assistant,
       };
-      state.state.snapshot = {
-        ...state.state.snapshot,
-        transcript: [...state.state.snapshot.transcript, entry],
-        operation: null,
-      };
-      state.state.event = { type: "message_end", runId: current.operationId, message: assistant };
-      state.publish(current.context);
+      state.change(current.context, (draft) => {
+        draft.snapshot.transcript.push(entry);
+        draft.snapshot.operation = null;
+        draft.event = { type: "message_end", runId: current.operationId, message: assistant };
+      });
       current.resolve({ accepted: true, operationId: current.operationId, error: null });
     },
   };

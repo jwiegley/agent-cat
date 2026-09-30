@@ -1,6 +1,8 @@
+import { execFile } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
 import { discoverRunner } from "../src/catalogue.ts";
 import { prepareLaunch, preflightLineage } from "../src/launch.ts";
@@ -49,6 +51,7 @@ describe.runIf(Boolean(runnerPath))("owned Pi child through the extension superv
     const parentResult = await new RunSupervisor().start(parent).finished;
     expect(parentResult).toMatchObject({ status: "succeeded", billFresh: "1", billMemo: "1" });
     expect(await requestCount(counter)).toBe(1);
+    expect(await startActor(runner, join(parent.storeDir, "runtime"))).toEqual({ principal: "local", uid: process.getuid?.(), owner: parent.manifest.ownerId });
 
     await preflightLineage({ runner, descriptor, cwd: directory, stateDir, inputs: {}, targetArgs, operation: "resume", parentRuntimeDir: join(parent.storeDir, "runtime") });
     const child = await prepareLaunch({
@@ -62,8 +65,21 @@ describe.runIf(Boolean(runnerPath))("owned Pi child through the extension superv
     expect(childResult.occurrences.get("0")?.state).toBe("reused");
     expect(childResult.occurrences.get("0")?.attempts.size).toBe(0);
     expect(await requestCount(counter)).toBe(1);
+    expect(await startActor(runner, join(child.storeDir, "runtime"))).toEqual({ principal: "local", uid: process.getuid?.(), owner: child.manifest.ownerId });
   }, 60_000);
 });
+
+// The actor of the single start record in the run log of a finished run, as
+// the runner verb `flow` reports it. The run log must verify.
+async function startActor(runner: RunnerConfig, runtimeDir: string): Promise<unknown> {
+  const { stdout } = await promisify(execFile)(runner.executable, [...(runner.prefixArgs ?? []), "flow", runtimeDir]);
+  const lines = stdout.trim().split("\n").map((line) => JSON.parse(line) as Record<string, unknown>);
+  const summary = lines.at(-1)?.summary as { verified?: unknown } | undefined;
+  expect(summary?.verified).toBe(true);
+  const starts = lines.filter((line) => line.schema === "start");
+  expect(starts).toHaveLength(1);
+  return starts[0]?.from;
+}
 
 async function requestCount(path: string): Promise<number> {
   try {
