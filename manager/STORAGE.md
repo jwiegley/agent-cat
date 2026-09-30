@@ -350,9 +350,10 @@ OS containment is excluded from this project and is not a pending capability.
 
 The Store lifetime of a serving manager writes the manager log of its stream
 identity through `Agentic.Manager.Flow`. `serveManager` opens that lifetime
-with `withServingStore`. The log is the private file `flow/<stream>.ndjson` in
-the manager root, and its claim-check files are the private files
-`flow/claims/<stream>/<sha256>`. Each stream has its own claim directory, so
+with `withServingStore`. The log is its sealed segments, the private files
+`flow/sealed/<stream>/<start>.ndjson` in start order, followed by the active
+private file `flow/<stream>.ndjson` in the manager root, and its claim-check
+files are the private files `flow/claims/<stream>/<sha256>`. Each stream has its own claim directory, so
 the claim checks of a log count toward the ceiling of that log only. The
 record, the strict line codec and the writer are those of
 `Agentic.Runtime.Flow`, which the [broker contract](../runtime/BROKER.md)
@@ -367,12 +368,29 @@ write no manager log. A restoration rotates the stream identity, so the next
 serving lifetime writes a new file.
 
 `openManagerFlow` opens the log for appending and creates it when it is absent.
-It reads the existing log, which must be at most the configured
-`globalMutationLedgerBytes`, and decodes every complete line with the strict
-codec. The positions of a new lifetime continue those of the earlier
-lifetimes, so a reply can name an ask that an earlier lifetime appended. A final
-line without its newline denotes no record, because its append never
-completed, and the writer truncates it. A log that cannot be opened gives a
+It reads the sealed segments and the active file, which together must be at
+most the configured `globalMutationLedgerBytes`, and decodes every complete
+line with the strict codec. Positions are global across the segments, and the
+positions of a new lifetime continue those of the earlier lifetimes, so a
+reply can name an ask that an earlier lifetime appended, in a sealed segment
+or in the active file. A final line of the active file without its newline
+denotes no record, because its append never completed, and the writer
+truncates it.
+
+The segment size is S = max(65536, (L - R) div 16), which
+`managerFlowSegmentBytes` computes from L, the configured
+`globalMutationLedgerBytes`, and R, the reserve below. When an append would take
+a non-empty active file above S, the writer, under its leaf lock and before
+that append, renames the active file to `flow/sealed/<stream>/<start>.ndjson`,
+where `<start>` is the global position of its first record as a zero-padded
+20-digit decimal. It synchronizes the file and both directories, creates a new
+active file and checks the new file by device and inode from then on. The
+first record of the new active file has the position after the last sealed
+record. A receipt, a credential receipt or a failure reply whose own append
+seals the segment of its command is accepted. When a crash falls between the
+rename and the creation of the new active file, the next open creates the
+active file at the position after the last sealed record. Nothing removes a
+sealed segment, so the retained floor is 0. A log that cannot be opened gives a
 writer whose every append fails. The section
 [Growth, open refusals and recovery](#growth-open-refusals-and-recovery)
 states the reasons and the recovery.
@@ -387,7 +405,7 @@ synchronizes the descriptor through `agentic_sync_private_descriptor`. It
 flushes every other record.
 
 The ceiling of the log is the configured `globalMutationLedgerBytes`, and the
-claim-check files count toward it. The log keeps the reserve of the command
+sealed segments and the claim-check files count toward it. The log keeps the reserve of the command
 ledger, R = min(L, 16 * C), which `mutationLedgerReserve` computes. Each record
 has one of three classes. A `Refusing` record belongs to an ordinary command
 that needs the record before a commit or a dispatch, and a failed append
@@ -483,8 +501,10 @@ and the [controls contract](CONTROLS.md#manager-log-relays) describe the
 `relay` records. The [admission contract](ADMISSION.md#manager-log-endings)
 describes the review endings and the request endings.
 
-`readManagerLog` reads one manager log file as the account that owns its flow
-directory, and `joinFlows` joins manager logs with run logs. The
+`readManagerLog` reads the manager log of one stream, named by its active
+file, as the account that owns its flow directory. It reads the sealed
+segments in start order and then the active file, gives each entry its global
+position and reports the retained floor, and `joinFlows` joins manager logs with run logs. The
 [broker contract](../runtime/BROKER.md#manager-log-reader) states what the
 reader verifies, and the `agentic-run flow` verb prints the result. The
 reader writes nothing, and the Store ledger remains the authority on
@@ -522,8 +542,8 @@ environment variable.
 
 ### Growth, open refusals and recovery
 
-The manager log grows across Store lifetimes. Nothing prunes it or rotates it
-until the retention work of Phase G. When the log and its claim checks reach L
+The manager log grows across Store lifetimes. The writer seals the active file
+into segments at the segment size, but nothing removes a segment yet. When the log and its claim checks reach L
 minus R, every ordinary command and every review publication is refused with
 `storage-quota`. A cancel and the records of the manager itself can still use
 the reserve R. The F16 gate measured 22193 bytes of manager log for one simple
@@ -533,9 +553,13 @@ about 2929 such journeys.
 
 `openManagerFlow` refuses to open a log in two cases:
 
-- The log holds more bytes than the configured `globalMutationLedgerBytes`,
+- The sealed segments and the active file hold more bytes than the
+  configured `globalMutationLedgerBytes`,
   for example after the operator lowers that limit.
-- A complete line of the log fails strict decoding.
+- A complete line of the log fails strict decoding, a sealed segment does not
+  end with a newline, the segment directory holds a name that is not a
+  segment name, or a sealed segment does not start at the position after the
+  last record of the segment before it.
 
 In both cases, and after any other failure of the open, the writer of the
 lifetime refuses every append. Each ordinary command and each review
@@ -552,8 +576,9 @@ same word.
 The operator recovers as follows:
 
 1. Stop the manager.
-2. Move `flow/<stream>.ndjson` and the directory `flow/claims/<stream>/` out of
-   the manager root into a private archive directory. For an oversized log,
+2. Move `flow/<stream>.ndjson` and the directories `flow/sealed/<stream>/`
+   and `flow/claims/<stream>/` out of the manager root into a private archive
+   directory, keeping their relative layout. For an oversized log,
    the operator can instead raise `globalMutationLedgerBytes`.
 3. Start the manager. The next serving lifetime creates a new log, which begins
    with its lifetime notice, and admits commands again.

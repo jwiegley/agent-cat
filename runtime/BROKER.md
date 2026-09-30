@@ -123,8 +123,10 @@ already exists is used only when its bytes are equal. The writer flushes each
 line and does not synchronize it. After a failed line write it refuses every
 later append. `appendAsk`, `appendTell` and `appendReply` return the
 0-based position of the record and the record decoded from its bytes. The
-writer keeps only the schema of each position, and it refuses a reply whose
-position does not name an earlier ask that the reply may answer.
+writer keeps a reply-check index of each retained position, which holds the
+schema of the record and whether a reply names it, and nothing else. It
+refuses a reply whose position lies below the retained floor or does not name
+an earlier ask that the reply may answer.
 `readFlowContent` verifies the size, digest and exact encoding of a claim check
 before it returns the body. `readFlowContentAt` does the same for a log whose
 claim-check files live in another directory.
@@ -137,7 +139,29 @@ complete line with `FlowLogUndecodable`. Neither refusal carries a path or the
 content of a line. It truncates a final line
 without its newline, because that line denotes no record. Before each append
 it checks that the path still names the file that it opened, by device and
-inode, and after one mismatch it refuses every later append. `appendAskWith`,
+inode, and after one mismatch it refuses every later append.
+
+`openFlowLog` can also take `FlowSegments`: a segment directory and a segment
+size S. The log is then its sealed segments in start order followed by the
+active file at the path, and the byte bound covers all of them. Positions are
+global. The first record of the active file has the base position, which is
+the start of the newest sealed segment plus its record count, or 0. When an
+append would take a non-empty active file above S, the writer, under its lock
+and before that append, synchronizes the active file, renames it to
+`<start>.ndjson` in the segment directory, where `<start>` is the position of
+its first record as a zero-padded 20-digit decimal (`flowSegmentName`),
+synchronizes both directories, creates a new active file and takes its device
+and inode for the path check. A failure before the rename leaves the writer as
+it was, and a failure after the rename breaks it. The reply-check index covers
+the sealed records, so a reply whose append seals the segment of its ask is
+accepted. The retained floor is the start of the oldest sealed segment, and
+nothing removes a segment. At open, a sealed segment without a final newline, a
+name in the segment directory that is not a segment name and a segment that
+does not start after the last record of the segment before it raise
+`FlowLogUndecodable`. An absent active file, as a crash between the rename and
+the creation of the next active file leaves it, is created at the base
+position. A writer without segments, which every run log uses, has base 0 and
+never seals. `appendAskWith`,
 `appendTellWith` and `appendReplyWith` take a `FlowAppend` that can
 synchronize the descriptor after the flush and can bound the bytes of the log
 and of its distinct claim-check files. An append above that bound fails with
@@ -232,7 +256,13 @@ nothing.
 
 `readFlowLogAt` reads the log at a path of a private root whose claim-check
 files live in a given directory, as a log of a given kind, and verifies each
-complete line as `readFlow` does. It refuses a record whose schema belongs to
+complete line as `readFlow` does. Given a segment directory, it reads the
+sealed segments in start order and then the file at the path, gives each entry
+its global position and returns the retained floor with the entries. An
+absent file at the path then holds no record. A segment directory with a name
+that is not a segment name, a sealed segment without a final newline or a
+segment that does not start after the segment before it makes the read fail
+with an I/O error. It refuses a record whose schema belongs to
 the other log, and it joins no event. `flowAcknowledgements` pairs each
 `control` of a run log with its first later acknowledgement event, or with
 none, which is the join behind the unacknowledged state.
@@ -240,9 +270,12 @@ none, which is the join behind the unacknowledged state.
 ## Manager-log reader
 
 `Agentic.Manager.Flow` reads the manager log. `readManagerLog` opens the flow
-directory of the log with `openPrivateRoot`, reads the log file with
-`readFlowLogAt` as a manager log and reads its claim checks from
-`claims/<stream>/`. It then decodes each body with the manager codec of its
+directory of the log with `openPrivateRoot`, reads the sealed segments in
+`sealed/<stream>/` and then the active file with `readFlowLogAt` as a manager
+log, and reads its claim checks from `claims/<stream>/`. Each entry has its
+global position, and the report carries the retained floor as
+`managerLogFloor`. The summary object of `agentic-run flow` names the floor of
+each manager log. It then decodes each body with the manager codec of its
 schema. A command body with an `administration` field decodes as a credential
 operation, and a receipt decodes with the receipt codec of the command that it
 answers and must name the identifier of that command. A body that does not

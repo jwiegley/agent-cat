@@ -6,9 +6,11 @@
 -- stream identity.
 --
 -- A 'ManagerFlow' denotes the writer of the log of one stream for one Store
--- lifetime. The log is the file @flow/<stream>.ndjson@ in the manager's
--- private root, and its claim-check files live in @flow/claims/<stream>/@. The writer
--- lock is a leaf lock: no other lock is taken while it is held. It orders the
+-- lifetime. The log is its sealed segments in @flow/sealed/<stream>/@, in start
+-- order, followed by the active file @flow/<stream>.ndjson@ in the manager's
+-- private root, and its claim-check files live in @flow/claims/<stream>/@.
+-- Positions are global: they continue across segments. The writer lock is a
+-- leaf lock: no other lock is taken while it is held. It orders the
 -- gap entries of the lifetime and the appends of the runtime writer, which
 -- this module reaches only through "Agentic.Runtime".
 --
@@ -28,6 +30,8 @@ module Agentic.Manager.Flow
     managerFlowOpenWord,
     managerFlowPath,
     managerFlowClaims,
+    managerFlowSealed,
+    managerFlowSegmentBytes,
     openManagerFlow,
     closeManagerFlow,
     managerFlowBytes,
@@ -130,6 +134,7 @@ import Agentic.Runtime
     FlowError (..),
     FlowLimitReached (..),
     FlowOpenRefusal (..),
+    FlowSegments (..),
     FlowLog (ManagerLog, RunLog),
     FlowWriter,
     Position (..),
@@ -271,16 +276,30 @@ managerFlowPath stream = ["flow", T.unpack stream <> ".ndjson"]
 managerFlowClaims :: Text -> [FilePath]
 managerFlowClaims stream = ["flow", "claims", T.unpack stream]
 
+-- | The directory of the sealed segments of the log of a stream. Each sealed
+-- segment is the file @<start>.ndjson@, where @start@ is the position of its
+-- first record as a zero-padded 20-digit decimal.
+managerFlowSealed :: Text -> [FilePath]
+managerFlowSealed stream = ["flow", "sealed", T.unpack stream]
+
+-- | The segment size of the log under the configured
+-- @globalMutationLedgerBytes@ L: the larger of 65536 and one sixteenth of L
+-- minus the reserve of 'mutationLedgerReserve'.
+managerFlowSegmentBytes :: Int64 -> Integer
+managerFlowSegmentBytes total = max 65536 (toInteger (total - mutationLedgerReserve total) `div` 16)
+
 -- | Open the log of the stream for one lifetime. The configured ledger ceiling
--- bounds the bytes that the writer reads. A log that cannot be opened gives a
--- writer whose every append fails with the fixed word of the reason, and the
--- text of the exception is dropped.
+-- bounds the bytes that the writer reads, sealed segments included, and fixes
+-- the segment size. A log that cannot be opened gives a writer whose every
+-- append fails with the fixed word of the reason, and the text of the
+-- exception is dropped.
 openManagerFlow :: FlowCodec -> Maybe ManagerFlowFault -> PrivateRoot -> Text -> Int64 -> IO ManagerFlow
 openManagerFlow codec fault root stream total = do
   opened <- synchronous $ do
     unless (validStream stream) (throwIO (FlowError "the stream identity is not a file name"))
     ensurePrivateDirectoryAt root ["flow"]
-    fst <$> openFlowLog codec root (managerFlowPath stream) (managerFlowClaims stream) (toInteger total)
+    let segments = FlowSegments (managerFlowSealed stream) (managerFlowSegmentBytes total)
+    fst <$> openFlowLog codec root (managerFlowPath stream) (managerFlowClaims stream) (Just segments) (toInteger total)
   lock <- newMVar (Gaps Seq.empty 0)
   pure (ManagerFlow lock (either (Left . openFailure) Right opened) fault root stream total)
   where
@@ -293,8 +312,8 @@ openManagerFlow codec fault root stream total = do
 closeManagerFlow :: ManagerFlow -> IO ()
 closeManagerFlow flow = withMVar (managerLock flow) $ \_ -> either (const (pure ())) closeFlowWriter (managerWriter flow)
 
--- | The bytes of the log and of its claim-check files, or 'Nothing' when the
--- log could not be opened.
+-- | The bytes of the log, sealed segments included, and of its claim-check
+-- files, or 'Nothing' when the log could not be opened.
 managerFlowBytes :: ManagerFlow -> IO (Maybe Integer)
 managerFlowBytes flow = withMVar (managerLock flow) $ \_ -> either (const (pure Nothing)) (fmap Just . flowWriterBytes) (managerWriter flow)
 
@@ -908,31 +927,38 @@ data ManagerValue
 
 -- | What a reader found in one manager log: its path, its entries as the
 -- runtime reader verified them with the failures of the manager body codecs
--- added, the decoded body of each record whose body decodes, and the size of
--- a final line without its newline.
+-- added, the decoded body of each record whose body decodes, the size of a
+-- final line without its newline and the retained floor. Each entry has its
+-- position in the whole log, sealed segments included.
 data ManagerLogReport = ManagerLogReport
   { managerLogPath :: !FilePath,
     managerLogEntries :: ![FlowEntry],
     managerLogValues :: !(Map Position ManagerValue),
-    managerLogTorn :: !(Maybe Int)
+    managerLogTorn :: !(Maybe Int),
+    -- | The position of the first retained record: the start of the oldest
+    -- sealed segment, or 0.
+    managerLogFloor :: !Position
   }
   deriving (Eq, Show)
 
--- | Read one manager log file, as the account that owns its flow directory.
+-- | Read the manager log of one stream, as the account that owns its flow
+-- directory. The path names the active file of the log.
 --
--- The flow directory of a manager private root holds the log
--- @<stream>.ndjson@ of each stream and its claim-check files in
--- @claims/<stream>/@. The reader verifies each line with 'readFlowLogAt' as a
--- manager log, and then decodes each body with the codec of its schema. A
--- receipt decodes with the receipt codec of the command that it answers.
+-- The flow directory of a manager private root holds the active file
+-- @<stream>.ndjson@ of each stream, its sealed segments in
+-- @sealed/<stream>/@ and its claim-check files in @claims/<stream>/@. The
+-- reader reads the sealed segments in start order and then the active file,
+-- verifies each line with 'readFlowLogAt' as a manager log, and then decodes
+-- each body with the codec of its schema. A receipt decodes with the receipt
+-- codec of the command that it answers.
 readManagerLog :: FilePath -> IO ManagerLogReport
 readManagerLog path =
   bracket (openPrivateRoot "manager flow" (takeDirectory path)) closePrivateRoot $ \root -> do
     let name = takeFileName path
         stream = T.pack (dropExtension name)
-    (entries, torn) <- readFlowLogAt ManagerLog root [name] (drop 1 (managerFlowClaims stream))
+    (floor', entries, torn) <- readFlowLogAt ManagerLog root (Just (drop 1 (managerFlowSealed stream))) [name] (drop 1 (managerFlowClaims stream))
     let (decoded, values) = decodeManagerEntries entries
-    pure (ManagerLogReport path decoded values torn)
+    pure (ManagerLogReport path decoded values torn floor')
 
 decodeManagerEntries :: [FlowEntry] -> ([FlowEntry], Map Position ManagerValue)
 decodeManagerEntries = go Map.empty []
@@ -1137,9 +1163,13 @@ runLogStart report = case reportEntries report of
   _ -> Nothing
 
 recordAt :: ManagerLogReport -> Position -> Maybe Record
-recordAt manager (Position index) = case drop (fromIntegral index) (managerLogEntries manager) of
-  entry : _ -> entryRecord entry
-  [] -> Nothing
+recordAt manager (Position index)
+  | index < floor' = Nothing
+  | otherwise = case drop (fromIntegral (index - floor')) (managerLogEntries manager) of
+      entry : _ -> entryRecord entry
+      [] -> Nothing
+  where
+    Position floor' = managerLogFloor manager
 
 managerRecords :: ManagerLogReport -> [(Position, Record, Maybe ManagerValue)]
 managerRecords manager =
@@ -1347,6 +1377,7 @@ flowJoinSummaryValue join =
                        [ "log" .= managerLogPath manager,
                          "kind" .= ("manager" :: Text),
                          "records" .= length (managerLogEntries manager),
+                         "floor" .= positionIndex (managerLogFloor manager),
                          "tornFinalLine" .= fmap (\size -> object ["bytes" .= size]) (managerLogTorn manager)
                        ]
                      | manager <- joinManagerLogs join

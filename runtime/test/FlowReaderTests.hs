@@ -172,9 +172,9 @@ completeLog directory = do
   -- Read as a manager log, every record of the run log has a schema of the
   -- other log.
   asManager <- bracket (openPrivateRoot "flow reader check" directory) closePrivateRoot $ \root ->
-    readFlowLogAt ManagerLog root [runLogName] [flowClaimDirectory]
+    readFlowLogAt ManagerLog root Nothing [runLogName] [flowClaimDirectory]
   check "a run log read as a manager log refuses each run-log schema"
-    (all (\entry -> any ("belongs to the run log" `T.isInfixOf`) (entryProblems entry)) (fst asManager))
+    (all (\entry -> any ("belongs to the run log" `T.isInfixOf`) (entryProblems entry)) (let (_, entries, _) = asManager in entries))
 
 -- | A log that holds every state of section 3.6, read live and ended, and the
 -- same log with its stop and an ask that follows the stop. A reader in this

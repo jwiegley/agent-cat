@@ -95,7 +95,7 @@ withManagerLog base name action = do
     Runtime.ensurePrivateDirectoryAt private ["flow"]
     let stream = "stream_" <> name
         path = root </> "flow" </> T.unpack stream <> ".ndjson"
-    bracket (fst <$> Runtime.openFlowLog Runtime.strictFlowCodec private (managerFlowPath stream) (managerFlowClaims stream) (64 * 1024 * 1024)) Runtime.closeFlowWriter $ \writer -> do
+    bracket (fst <$> Runtime.openFlowLog Runtime.strictFlowCodec private (managerFlowPath stream) (managerFlowClaims stream) Nothing (64 * 1024 * 1024)) Runtime.closeFlowWriter $ \writer -> do
       value <- action (Log writer)
       pure (value, path)
 

@@ -28,6 +28,9 @@ module Agentic.Runtime.PrivateRoot
     openPrivateFileAt,
     openPrivateLogAt,
     privateFileIdentityAt,
+    privateFileSizeAt,
+    listPrivateDirectoryAt,
+    syncPrivateDirectoryAt,
     syncPrivateHandle,
     readPrivateFileAt,
     readPrivatePrefixAt,
@@ -71,7 +74,7 @@ import System.IO.Error (isAlreadyExistsError, isDoesNotExistError)
 import qualified System.Posix.Directory as PosixDirectory
 import GHC.IO.FD (FD (fdFD))
 import GHC.IO.Handle.FD (handleToFd)
-import System.Posix.Files (FileStatus, deviceID, fileID, fileMode, fileOwner, getFdStatus, getSymbolicLinkStatus, isDirectory, isRegularFile, isSymbolicLink, linkCount, ownerModes)
+import System.Posix.Files (FileStatus, deviceID, fileID, fileSize, fileMode, fileOwner, getFdStatus, getSymbolicLinkStatus, isDirectory, isRegularFile, isSymbolicLink, linkCount, ownerModes)
 import System.Posix.IO (OpenFileFlags (append, cloexec, creat, directory, exclusive, nofollow, nonBlock), OpenMode (ReadOnly, ReadWrite, WriteOnly), closeFd, defaultFileFlags, fdToHandle, openFd, openFdAt)
 import System.Posix.Process (getProcessID)
 import System.Posix.Types (CMode (..), DeviceID, Fd (..), FileID, UserID)
@@ -264,6 +267,31 @@ privateFileIdentityAt root components = do
     Left failure
       | isDoesNotExistError failure -> pure Nothing
       | otherwise -> throwIO failure
+
+-- | The size in bytes of the regular file that the path names, without
+-- following a final symbolic link.
+privateFileSizeAt :: PrivateRoot -> [FilePath] -> IO Integer
+privateFileSizeAt root components = withParent root components $ \parent file ->
+  bracket (openFdAt (Just parent) file ReadOnly defaultFileFlags {nofollow = True, cloexec = True, nonBlock = True}) closeFd $ \descriptor -> do
+    status <- getFdStatus descriptor
+    unless (isRegularFile status) (ioError (userError "private file is not a regular file"))
+    pure (toInteger (fileSize status))
+
+-- | The names in the private directory at the path, at most the given number,
+-- or no name when the directory is absent.
+listPrivateDirectoryAt :: PrivateRoot -> [FilePath] -> Int -> IO [FilePath]
+listPrivateDirectoryAt root components limit = do
+  listed <- try @IOException (withPrivateDirectoryAt root components (`listConfinedDirectoryAt` limit))
+  case listed of
+    Right names -> pure names
+    Left failure
+      | isDoesNotExistError failure -> pure []
+      | otherwise -> throwIO failure
+
+-- | Synchronize the private directory at the path, so that a rename or a
+-- creation in it is durable.
+syncPrivateDirectoryAt :: PrivateRoot -> [FilePath] -> IO ()
+syncPrivateDirectoryAt root components = withPrivateDirectoryAt root components syncDescriptor
 
 -- | Flush a private file handle and synchronize its descriptor through
 -- @agentic_sync_private_descriptor@.

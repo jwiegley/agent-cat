@@ -43,7 +43,9 @@ import qualified Data.ByteString as BS
 import Data.IORef (writeIORef, modifyIORef', newIORef, readIORef)
 import Data.Int (Int64)
 import Data.List (sort)
+import qualified Data.Map.Strict as Map
 import Data.Maybe (isNothing)
+import Data.Word (Word64)
 import Data.Text (Text)
 import Data.Time.Clock (getCurrentTime)
 import GHC.Clock (getMonotonicTimeNSec)
@@ -58,7 +60,7 @@ import System.Directory (createDirectory, doesDirectoryExist, doesFileExist, lis
 import System.Environment (getArgs)
 import System.FilePath ((</>), takeDirectory)
 import System.IO (BufferMode (LineBuffering), hSetBuffering, stdout)
-import System.Posix.Files (setFileMode, fileMode, getSymbolicLinkStatus)
+import System.Posix.Files (setFileMode, fileMode, fileSize, getFileStatus, getSymbolicLinkStatus)
 import System.Posix.Types (CUid (..))
 import System.Posix.User (getEffectiveUserID)
 
@@ -1309,6 +1311,7 @@ flowChecks work = do
     flowGapChecks root private
     flowRenameChecks root private
     flowCeilingChecks root private
+    flowSegmentChecks root private
   flowStoreChecks work
   flowCommandChecks work
   flowOpenChecks work
@@ -1316,7 +1319,7 @@ flowChecks work = do
   flowNoticeChecks work
   flowAdministrationChecks work
   flowReaderChecks work
-  putStrLn "PASS manager log codecs, writer, gap entries, path identity, ceiling, Store lifetimes, command admission, open refusals and recovery, append latency, command notices, administration and the reader"
+  putStrLn "PASS manager log codecs, writer, gap entries, path identity, ceiling, sealed segments, Store lifetimes, command admission, open refusals and recovery, append latency, command notices, administration and the reader"
 
 -- An administration lifetime writes no manager log. A serving lifetime writes
 -- a lifetime notice that lists the current credentials and, only when its
@@ -1587,14 +1590,17 @@ flowOpenChecks work = do
         && length (filter ("manager-log open" `T.isInfixOf`) (T.lines recordedText)) == 1
     check (name <> ": the private fault log holds no path, stream identity, exception text or record content") $
       not (any (`T.isInfixOf` recordedText) [T.pack work, stream, ".ndjson", marker, "exceeds", "does not decode", "empty line"])
-    -- The operator recovery: stop the manager, move the log and its claim
-    -- checks out of the root, and restart.
+    -- The operator recovery: stop the manager, move the log, its sealed
+    -- segments and its claim checks out of the root, and restart.
     let archive = work </> (name <> "-archive")
         claims = foldl (</>) root (managerFlowClaims stream)
+        sealed = foldl (</>) root (managerFlowSealed stream)
     createDirectory archive
     renameFile (logPath root stream) (archive </> "manager.ndjson")
     claimed <- doesDirectoryExist claims
     when claimed (renameDirectory claims (archive </> "claims"))
+    segmented <- doesDirectoryExist sealed
+    when segmented (renameDirectory sealed (archive </> "sealed"))
     ((), recovered) <- withPrivateStderr (work </> (name <> "-recovered-stderr.log")) $ withInstalled path $ \installed ->
       withServingStoreWith Runtime.strictFlowCodec Nothing installed $ \store -> do
         profile <- profileRevision installed
@@ -2009,6 +2015,117 @@ flowCeilingChecks root private = do
   check "manager log ordinary records stop below the reserve, and manager records use it"
     (ordinaryQuota == ManagerFlowQuota && maybe False (<= 3000) ordinaryBytes && either (const False) (const True) extra
       && maybe False (> 3000) reservedBytes)
+
+-- | The writer seals the active file into segments without pruning. The
+-- ceiling L = 16 * C + 512 KiB leaves L - R = 512 KiB, so the segment size is
+-- its floor of 65536 bytes.
+flowSegmentChecks :: FilePath -> Runtime.PrivateRoot -> IO ()
+flowSegmentChecks root private = do
+  let stream = "stream_segments"
+      total = 16 * commandCapacity + 524288
+      segment = managerFlowSegmentBytes total
+      activePath = foldl (</>) root (managerFlowPath stream)
+      sealedDirectory = foldl (</>) root (managerFlowSealed stream)
+      principal = Runtime.Principal (Runtime.Credential "client_1" "credential_1")
+      command = Runtime.noAbout {Runtime.aboutCommand = Just "command_1"}
+      open' = openManagerFlow Runtime.strictFlowCodec Nothing private stream total
+      tellWith flow generation = appendManagerTell flow total Following Runtime.FlowNotice Runtime.Manager (Runtime.To Runtime.Manager) Runtime.noAbout (noticeFlowBody (ShutdownNotice generation)) >>= right
+      tell flow n = tellWith flow ("generation_" <> T.pack (show (n :: Int)))
+      -- The writer holds the active file open, and the runtime system locks
+      -- it against a read handle of this process, so a live size is a stat.
+      activeSize = toInteger . fileSize <$> getFileStatus activePath
+      activeBytes = BS.readFile activePath
+      sealedNames = do
+        exists <- doesDirectoryExist sealedDirectory
+        if exists then sort <$> listDirectory sealedDirectory else pure []
+      segmentsOnDisk = do
+        names <- sealedNames
+        forM names $ \name -> (,) name <$> BS.readFile (sealedDirectory </> name)
+      positionOf (position, _) = Runtime.positionIndex position
+  check "manager log segment size is the larger of 65536 and a sixteenth of L minus R"
+    (segment == 65536 && managerFlowSegmentBytes (64 * 1024 * 1024) == (64 * 1024 * 1024 - 16 * 131072) `div` 16)
+  flow <- open'
+  first <- mapM (tell flow) [1 .. 1500]
+  sealed <- segmentsOnDisk
+  active <- activeSize
+  bytes <- managerFlowBytes flow
+  let counts = [BS.count 10 contents | (_, contents) <- sealed]
+      starts = scanl (+) 0 (map fromIntegral counts)
+  check "manager log appends past the segment size seal segments named by the global position of their first record"
+    ( map positionOf first == [0 .. 1499]
+        && length sealed >= 2
+        && map fst sealed == map (Runtime.flowSegmentName . Runtime.Position) (take (length sealed) starts)
+        && all (\(_, contents) -> toInteger (BS.length contents) <= segment && BS.last contents == 10) sealed
+        && sum counts < 1500
+    )
+  check "manager log bytes count the sealed segments"
+    (bytes == Just (toInteger (sum [BS.length contents | (_, contents) <- sealed]) + active))
+  -- A receipt whose own append seals the segment that holds its command.
+  (commandAt, _) <- appendManagerAsk flow total Refusing Runtime.FlowCommand principal (Runtime.To Runtime.Manager) command (commandFlowBody (firstFlow flowCommands)) >>= right
+  sealedAfterCommand <- sealedNames
+  let fill n = do
+        before <- activeSize
+        if before + 3000 < segment
+          then tell flow n >> fill (n + 1)
+          else do
+            let generation = "generation_" <> T.pack (show n)
+            _ <- tellWith flow generation
+            after <- activeSize
+            let fixed = fromInteger (after - before) - T.length generation
+                room = fromInteger (segment - after)
+            padded <- tellWith flow (T.replicate (room - fixed - 60) "x")
+            pure (positionOf padded)
+  lastFilled <- fill 1501
+  filled <- activeSize
+  sealedBeforeReceipt <- sealedNames
+  receipt <- appendManagerReply flow total Following Runtime.FlowReceipt commandAt Runtime.Manager (Runtime.To principal) command (receiptFlowBody (firstFlow flowReceipts))
+  closeManagerFlow flow
+  sealedAfterReceipt <- segmentsOnDisk
+  afterReceipt <- activeBytes
+  let commandSegment = [name | (name, contents) <- sealedAfterReceipt, Just start <- [segmentStartOf name], start <= Runtime.positionIndex commandAt, Runtime.positionIndex commandAt < start + fromIntegral (BS.count 10 contents)]
+  check "manager log accepts a receipt whose append seals the segment of its command"
+    ( sealedBeforeReceipt == sealedAfterCommand
+        && segment - filled < 120
+        && either (const False) (\(position, _) -> Runtime.positionIndex position == lastFilled + 1) receipt
+        && length sealedAfterReceipt == length sealedBeforeReceipt + 1
+        && commandSegment == [fst (last sealedAfterReceipt)]
+        && BS.count 10 afterReceipt == 1
+        && either (const False) (\(position, _) -> sum [BS.count 10 contents | (_, contents) <- sealedAfterReceipt] == fromIntegral (Runtime.positionIndex position)) receipt
+    )
+  -- A later lifetime continues the positions across the segments.
+  appended <- either (const 0) (\(position, _) -> Runtime.positionIndex position) <$> pure receipt
+  again <- open'
+  continued <- tell again 0
+  closeManagerFlow again
+  check "manager log positions continue across reopen after rotation" (positionOf continued == appended + 1)
+  -- A crash after the rename and before the new active file leaves no active
+  -- file. The next lifetime creates it at the position after the sealed records.
+  crashed <- activeBytes
+  let base = appended + 2 - fromIntegral (BS.count 10 crashed)
+  renameFile activePath (sealedDirectory </> Runtime.flowSegmentName (Runtime.Position base))
+  recovered <- open'
+  resumed <- tell recovered 0
+  closeManagerFlow recovered
+  recreated <- activeBytes
+  check "manager log reopens at the right base after a crash between the rename and the new active file"
+    (BS.count 10 crashed >= 1 && positionOf resumed == appended + 2 && BS.count 10 recreated == 1)
+  -- The reader reads every segment in order with global positions.
+  report <- readManagerLog activePath
+  let positions = map (Runtime.positionIndex . Runtime.entryPosition) (managerLogEntries report)
+  check "manager log reader returns every entry of all segments with its global position and the floor"
+    ( positions == [0 .. appended + 2]
+        && all (null . Runtime.entryProblems) (managerLogEntries report)
+        && managerLogFloor report == Runtime.Position 0
+        && managerLogTorn report == Nothing
+        && fmap isReceipt (Map.lookup (either (const commandAt) fst receipt) (managerLogValues report)) == Just True
+        && null (flowJoinProblems (joinFlows (const False) [report] []))
+    )
+  where
+    segmentStartOf name = case splitAt 20 name of
+      (digits, ".ndjson") | length digits == 20 -> Just (read digits :: Word64)
+      _ -> Nothing
+    isReceipt (ReceiptValue _) = True
+    isReceipt _ = False
 
 firstFlow :: [a] -> a
 firstFlow values = case values of
