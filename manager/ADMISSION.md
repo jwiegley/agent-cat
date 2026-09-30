@@ -126,6 +126,22 @@ The live phase and all claims remain until joined cleanup. Another fresh conflic
 mutation refuses during cleanup, and committed start intents cannot be retroactively
 edited or withdrawn through these operations.
 
+`discardLivePreparation` accepts the `discard` operation of a preparation
+through the same retained Commands path. `Approval.discard` passes it the
+original live association of the review. The admission transaction requires
+the request in `review`, the reservation `held` and the preparation `live` for
+the same reservation and process generation. It advances the request revision,
+invalidates the preparation with the reason `discarded` and marks the
+reservation cleanup-pending with the command. The pending kind is `closed`,
+which is also the kind of the manager's own invalidation, because the stored
+pending kinds admit no separate discard kind. The original owner then discards
+and closes the worker, and final publication records the effect `discarded`
+on the command and returns the request to `draft`. A discard after an accepted
+approval, or a discard of a preparation that is not live, refuses with
+`state-conflict`. When no original live review remains, `Service.discard`
+passes the command to `replayDiscard`, which returns only an exact cached
+receipt.
+
 The same retained Worker receives discard when prepared or joined stop during
 construction. Only its confirmed cleanup, or the protected job's confirmed absence
 of native construction, enables final publication. Final SQL compares request
@@ -351,8 +367,8 @@ command.
 - **Discard.** `discardAndClose` sends a discard only to a worker in the
   prepared phase. It encodes the discard frame, appends a discard relay that
   names the native run and no manager run, and passes the decoded frame to
-  `sendWorkerDiscard`. A discard that a command caused, such as a withdrawal or
-  an edit, names that command and is a `Following` record. A discard of the
+  `sendWorkerDiscard`. A discard that a command caused, such as a discard
+  command, a withdrawal or an edit, names that command and is a `Following` record. A discard of the
   manager's own, such as an expiry, a lost worker or the stop that follows a
   failed start relay, names no command and is a `Reserved` record. A failed
   append leaves a gap entry, and the worker writes the frame that the manager
@@ -384,14 +400,23 @@ of its transition, and a failed append leaves a gap entry.
   an invalidated preparation, a withdrawal gives `withdrawn`, an edit gives
   `invalidated`, and every other end gives `preparation-failed`. The ending
   names the request and the command that caused it, when a command caused it.
-  A withdrawal of a prepared request invalidates the preparation with the reason
-  `discarded`, so its request ending names `discarded`.
+  A discard command and a withdrawal of a prepared request invalidate the
+  preparation with the reason `discarded`, so their request ending names
+  `discarded`.
   `invalidateLivePreparation` reaches both endings through the service cleanup
   and `finalizeKnown`.
 
 When a command causes an ending in its admission transaction, the ending
 follows the receipt of that command. An ending that `finalizeKnown` queues
 follows the discard relay of the same cleanup, when the cleanup sends one.
+
+The `mutations-discard` mode of `manager/test/service_http.py` discards a
+reviewed preparation through the running HTTPS manager. It shows the discard
+command, its receipt, the review ending `discarded`, the discard relay that
+names the command and the request ending `discarded` in the manager log, in
+that order. It also shows that the request returns to `draft`, that a later
+enqueue prepares a new review, and that a stale `If-Match`, a credential with
+`observe` only and a discard after approval refuse.
 
 The `flow-relay` mode of `manager-admission-check` drives real
 `routing-fixed-point-probe` workers through the service of a serving Store. It

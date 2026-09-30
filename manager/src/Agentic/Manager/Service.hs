@@ -4,7 +4,7 @@
 -- | One live coordinator and bounded indexes of its original owned associations.
 module Agentic.Manager.Service
   ( Service, withService, serviceStore, serviceFault,
-    enqueue, editInput, withdraw, approve, controlRun, controlDecision, readControl, withControl,
+    enqueue, editInput, withdraw, approve, discard, controlRun, controlDecision, readControl, withControl,
     withSnapshot, withSnapshotSource, withOverviewSource, Overview.Collection (..), withCollectionSource,
     withRun, withOutputs, withOutputsSource, withExportsSource, withExport, withLineageSource, download
   ) where
@@ -251,6 +251,16 @@ approve service proof ident key condition body = do
   case original of
     Just reviewed -> Approval.approve reviewed proof key condition body
     Nothing -> Approval.replayApproval (serviceStore service) proof ident key condition body
+
+-- | Discard the review of the original live preparation. Without it, only an
+-- exact cached receipt replays.
+discard :: Service -> CredentialProof -> Text -> Text -> Maybe Text -> BS.ByteString
+  -> IO (Either CommandFailure CommandReceipt)
+discard service proof ident key condition body = do
+  original <- reviewFor service ident
+  case original of
+    Just reviewed -> Approval.discard reviewed proof key condition body
+    Nothing -> Approval.replayDiscard (serviceStore service) proof ident key condition body
 
 controlRun :: Service -> CredentialProof -> Text -> Text -> Maybe Text -> BS.ByteString
   -> IO (Either CommandFailure CommandReceipt)

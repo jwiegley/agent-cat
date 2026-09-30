@@ -11,7 +11,7 @@ module Agentic.Manager.Admission
     retryAdmissionCleanup, awaitAdmissionCleanup, closeAdmission, ShutdownMode (..), ShutdownResult (..), shutdownAdmission, reservationIdentity, observeLivePreparation, ownsHistoryRun,
     awaitAdmissionWork, preparationRequestIdentity, awaitAcceptedStart, requestPreparationStop,
     acceptControlCommand, acceptAndDeliverControlCommand, deliverAcceptedControl, acceptedControlContext,
-    AcceptedStart, acceptStartCommand, acceptAndDeliverStartCommand, deliverAcceptedStart, stopAcceptedStart, observeAcceptedStart, acceptedStartRun, acceptedTimerRetired, invalidateLivePreparation, consumeAcceptedStart
+    AcceptedStart, acceptStartCommand, acceptAndDeliverStartCommand, deliverAcceptedStart, stopAcceptedStart, observeAcceptedStart, acceptedStartRun, acceptedTimerRetired, invalidateLivePreparation, discardLivePreparation, consumeAcceptedStart
   ) where
 
 import Agentic.Manager.Admission.Policy
@@ -536,7 +536,7 @@ selectFinalization controller entry fallback = locked controller $ do
           case result of
             Right (Just accepted) | Just _ <- submissionTicket accepted -> do
               let kind=case receiptOperation(submissionReceipt accepted) of
-                    Approve->"approve"; Withdraw->"withdraw"
+                    Approve->"approve"; Withdraw->"withdraw"; Discard->"closed"
                     op | op `elem` [Cancel,Steer,Retry,ChooseRecovery,Redirect,Answer] -> "control"
                     _->"edit"
               publishRetainedWithAdmission WaitWithinBudget controller (entryRequest entry) kind accepted
@@ -695,7 +695,7 @@ finalizeKnown controller entry = locked controller $ do
   case ticket of
     Nothing -> dbTerminalChange controller $ do events<-publish;pure((),events)
     Just actual -> do
-      effect <- need (decodeEffect(if kind=="edit" then "input-changed" else "withdrawn")(entryRequest entry))
+      effect <- need (decodeEffect(commandEffectKind kind)(entryRequest entry))
       void(recordEffectWithAdmission WaitWithinBudget actual effect publish >>= need)
   atomically $ do
     modifyTVar'(queued controller)(Map.delete(entryRequest entry))
@@ -927,6 +927,37 @@ acceptStartNow (LivePreparation controller entry) proof request builder = locked
   let same=case retained of Just value@(AcceptedStart _ _ ticket _) | dispatchCommandId ticket==receiptId(submissionReceipt accepted)->Just value;_->Nothing
   pure(accepted,same)
 
+-- | Discard the review of an unapproved original live association as a
+-- retained command, without joining its cleanup. The admission transaction
+-- invalidates the live preparation with the reason @discarded@ and holds the
+-- reservation in cleanup with the command. The reservation keeps the pending
+-- kind @closed@ of the manager's own invalidation. The original owner then
+-- discards the worker with a relay that names the command, and the release of
+-- the reservation records the effect @discarded@ and returns the request to
+-- @draft@.
+discardLivePreparation :: LivePreparation -> CredentialProof -> Text -> CommandRequest -> IO (Either CommandFailure CommandReceipt)
+discardLivePreparation (LivePreparation controller entry) proof preparation request = operation controller $ do
+  unless(commandOperation request==Discard && commandProfile request==entryProfile entry)(throwIO InvalidRequest)
+  currentPolicyRevision <- profileRevisionNow controller (entryProfile entry)
+  revision <- fresh "request_revision_"
+  let version = do
+        _ <- authorizeProfile proof (entryProfile entry) [Submit,Control] >>= either refuseTransaction pure
+        rows <- query "SELECT revision FROM preparations WHERE id=?" [text preparation]
+        case rows of [[SQL.SQLText current]] -> pure(Just(commandResource request,entryProfile entry,current)); _ -> pure Nothing
+      builder command _limits _catalogues = Right $ Mutation currentPolicyRevision version $ do
+        validateOwner entry ["review"] ["held"]
+        live <- query "SELECT count(*) FROM preparations WHERE id=? AND request_id=? AND reservation_id=? AND process_generation=? AND state='live'"
+          [text preparation,text(entryRequest entry),text(entryReservation entry),text(entryGeneration entry)]
+        unless(live==[[SQL.SQLInteger 1]])(refuseTransaction StateConflict)
+        pure $ Right $ Intent (noReferences{referenceRequest=Just(entryRequest entry),referencePreparation=Just preparation}) True $ do
+          changes <- invalidateCommand entry command "closed" revision
+          execute "UPDATE requests SET revision=? WHERE id=?" [text revision,text(entryRequest entry)]
+          pure(requestEvent(entryRequest entry)revision:changes,Nothing)
+  locked controller $ do
+    ensureController controller
+    result <- submitRetained controller proof (entryRequest entry) "closed" request builder
+    submissionReceipt <$> need result
+
 -- | Invalidate an unapproved original live association, then join its actual cleanup.
 invalidateLivePreparation :: LivePreparation -> Text -> IO (Either CommandFailure ())
 invalidateLivePreparation (LivePreparation controller entry) reason = operation controller $ do
@@ -1128,13 +1159,22 @@ retainMutationWithAdmission admission controller requestId kind outcome = case o
       _ -> throwIO OwnershipUnavailable
   _ -> pure()
 
+-- | Hold the reservation in cleanup for the command of the pending kind: an
+-- edit, a withdrawal, or @closed@ for a discard.
 invalidateCommand :: Entry -> Text -> Text -> Text -> Transaction [Invalidation]
 invalidateCommand entry command kind revision = do
   execute "UPDATE reservations SET state='cleanup-pending',pending_command=?,pending_kind=?,request_revision=? WHERE id=?"
     [text command,text kind,text revision,text(entryReservation entry)]
   execute "UPDATE admission_observations SET state='invalidated',reason=? WHERE reservation_id=?"
-    [text(if kind=="edit" then "input-changed" else "withdrawn"),text(entryReservation entry)]
+    [text(case kind of "edit"->"input-changed"; "withdraw"->"withdrawn"; _->"closed"),text(entryReservation entry)]
   invalidatePreparations entry (if kind=="edit" then "input-changed" else "discarded") revision
+
+-- | The effect of the command that holds a reservation of the pending kind.
+commandEffectKind :: Text -> Text
+commandEffectKind kind = case kind of
+  "edit" -> "input-changed"
+  "withdraw" -> "withdrawn"
+  _ -> "discarded"
 
 invalidatePreparations :: Entry -> Text -> Text -> Transaction [Invalidation]
 invalidatePreparations entry reason revision = do

@@ -199,7 +199,15 @@ operation represented by that receipt.
 
 The Served column lists the methods that the foreground service of
 `RUNNER --manager serve` routes. For `/preparations/{id}` it serves the
-`approve` operation, and it refuses `discard` with `unsupported-operation`.
+`approve` and `discard` operations. A `discard` of a live preparation whose
+request is in `review` returns a 202 receipt. It invalidates the preparation
+with the reason `discarded` at once and holds the reservation until the
+manager has discarded the prepared worker. The release of the reservation then
+records the effect `discarded` on the command and returns the request to the
+`draft` phase with `released` admission and a null `preparationId`. A later
+`enqueue` of that draft prepares a new review. A `discard` of a consumed or
+invalidated preparation, or of a preparation whose approval is accepted,
+receives 409 `state-conflict`.
 A path that the service does not route receives 404 `unavailable-resource`,
 and an unrouted method on a routed path receives 405. The `/decisions`
 collection is a page set over one durable commit boundary. The `/requests`
@@ -272,7 +280,7 @@ coordination database.
 | `/requests` | GET, POST | GET, POST | `submit` creates a draft bound to current profile and descriptor revisions without workflow execution. |
 | `/requests/{id}` | GET, POST | GET, POST | `submit` permits `set-input`, `remove-input`, `enqueue`, and `withdraw` before start intent. Editing invalidates previous admission or review. |
 | `/captures` | POST | POST | `submit` for the selected request and profile. Raw bounded UTF-8 only, with no source URL or pathname. The 202 response carries the CaptureReceipt and `Location` names the capture command. |
-| `/preparations/{id}` | GET, POST | GET, POST `approve` | `submit` and `control` for `approve` or `discard`. Approval also requires the review digest and exact live worker association. |
+| `/preparations/{id}` | GET, POST | GET, POST | `submit` and `control` for `approve` or `discard`. Approval also requires the review digest and exact live worker association. |
 | `/runs` | GET | GET | No mutation. Runtime, supervision, integrity, and verification remain distinct. |
 | `/runs/{id}` | GET | GET | No mutation. Includes lineage and links, not execution authority. |
 | `/runs/{id}/snapshot` | GET | GET | No mutation. Provides one consistent versioned runtime-derived view. |

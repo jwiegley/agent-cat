@@ -3980,6 +3980,32 @@ Non-blocking findings of the fess audit of Phase B part 2 subtask C12 (POST /v1/
 
 4. (low) manager/DRAFTS.md (about line 134). One line in the Service HTTP routes paragraph exceeds the wrap width of the surrounding text. Fix: rewrap the paragraph.
 
+* TODO [#D] Resolve C13 fess findings in the preparation discard
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-c13-discard-fess-findings-kq6l
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-30 Wed 14:52]
+:MODIFIED: [2026-09-30 Wed 14:52]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of the fess audit of Phase B part 2 subtask C13 (preparation discard as a retained command). Source: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/fess/b2-C13-r1.md.
+
+1. (low) manager/ADMISSION.md (about lines 413-417) and manager/test/service_http.py (about lines 3433-3434). The document says the mutations-discard mode shows the command, receipt, review ending, relay and request ending in that order. The test orders only command, receipt, relay and request ending, and does not check the position of the review ending. Fix: add the review ending position between the receipt and the relay in the ordering assertion, or remove the review ending from the ordered claim.
+
+2. (low) manager/test/service_http.py (about lines 3329-3331). Case 1 (stale If-Match) sends the request revision as If-Match on the preparation. That is a mismatched tag, not an earlier valid preparation revision. Fix: use a preparation ETag captured before a revision change, or relabel the case as a mismatched If-Match.
+
+3. (low) manager/src/Agentic/Manager/Approval.hs (about line 246). replayPreparationCommand keeps the attemptIO label "approval replay" for discard replays. Fix: rename the label to "preparation command replay", or build it from the operation.
+
+4. (low) manager/src/Agentic/Manager/Admission.hs (about lines 539, 955-956, 1169) and manager/src/Agentic/Manager/Schema.hs (about line 195). A discard stores reservations.pending_kind and admission_observations.reason as closed, because the schema CHECK constraints admit no discard value. Fix: a schema version 13 migration that adds a discard kind.
+
+Untested, not a finding: discard recovery after a restart, and a discard in the window between approval acceptance and consumption.
+
 * TODO [#D] Follow-ups from F0 file-slot wait revalidation
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -16601,7 +16627,7 @@ and enforce advertised bounds. G2 is complete with mutations still unavailable.
 :LABELS:   ["p5","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-30 Wed 14:37]
+:MODIFIED: [2026-09-30 Wed 14:52]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-027
 :SOURCE_REPO: agent-cat
@@ -16799,6 +16825,13 @@ Network mutation remains behind G3 until the required evidence is complete.
     "author": "johnw",
     "text": "Phase B part 2 subtask C12 routes POST /v1/captures?requestId=<id> (openapi post_captures) to the existing Drafts capture owner with no HTTP-specific state machine. The handler requires Idempotency-Key, refuses If-Match, streams the application/octet-stream body through Transport.octetStreamSource (415 for another media type, chunks of at most 65536 bytes) into Drafts.uploadCaptureCommand, and answers 202 with the CaptureReceipt, Cache-Control no-store and Location /v1/commands/<capture command id>. uploadCapture keeps its signature as fmap snd of uploadCaptureCommand. Checks passed: Werror build of agentic-run, routing-fixed-point-probe and manager-draft-check with -ftui-tests; service_http.py mutations-captures at N8 (exact sha256 and byte count of a 199994-byte multi-chunk capture, same-key replay returns the identical receipt and Location, observe-only credential gets 403 insufficient-scope, set-input with source capture, exact review, approved run whose program received the capture SHA-256); make -C doc check; the Phase A journey at N8. Evidence: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/B2/C12. Fess b2-C12-r1 non-blocking, four low findings in acat-c12-captures-fess-findings-reg4. Deferred under the functionality-first direction: hostile-input negatives for the capture route. Package stays open.",
     "created_at": "2026-09-30T21:37:31Z"
+  },
+  {
+    "id": 420,
+    "issue_id": "acat-wm-027-gcu6",
+    "author": "johnw",
+    "text": "Subtask C13 of Phase B part 2: POST /v1/preparations/{id} with operation discard is now a retained command. Admission.discardLivePreparation goes through submitRetained (the withdraw path), gives the preparation reason discarded, emits the review ending, relays discardAndClose with the command, and finalizeKnown returns the request to draft with admission released and a null preparationId, as the frozen contract states. A later enqueue publishes a fresh review. Evidence scope (B2/C13/impl-r1 in the private resume-20260923 directory): Werror build of agentic-run and routing-fixed-point-probe with -ftui-tests, the new service_http.py mode mutations-discard at N8 (discarded command, preparation reason, request state, manager-log command, receipt, relay and review ending, stale If-Match, discard after approve, same-key replay, 403), mixed at N8, make -C doc check and the Phase A journey at N8 each passed. The pre-change run of mutations-discard failed with 409 unsupported-operation. Fess: non-blocking, four low findings filed as acat-c13-discard-fess-findings-kq6l. Limitations: a discard stores pending kind and observation reason closed (no schema v13 migration), and the TUI offers no discard key yet. WM-027 stays open.",
+    "created_at": "2026-09-30T21:52:58Z"
   }
 ]
 #+end_src

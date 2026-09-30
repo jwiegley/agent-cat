@@ -3,7 +3,7 @@
 
 -- | Exact public consent and private binding to one original native preparation.
 module Agentic.Manager.Approval
-  ( ReviewedPreparation, reviewedView, projectReview, publishReview, readPreparation, withPreparation, preparationProjection, acceptApproval, approve, replayApproval,
+  ( ReviewedPreparation, reviewedView, projectReview, publishReview, readPreparation, withPreparation, preparationProjection, acceptApproval, approve, replayApproval, discard, replayDiscard,
     AcceptedStart, deliverAcceptedStart, stopAcceptedStart, observeAcceptedStart, acceptedStartRun, acceptedTimerRetired ) where
 
 import Agentic.Manager.Admission
@@ -214,12 +214,37 @@ approve :: ReviewedPreparation -> CredentialProof -> Text -> Maybe Text -> BS.By
 approve prepared proof key precondition body =
   fmap (fmap (submissionReceipt . fst)) (acceptApprovalWithDelivery True prepared proof key precondition body)
 
--- | Resolve an exact cached receipt without recovering any live preparation.
+-- | Discard the review of the original live preparation as a retained
+-- command of its Admission owner, which invalidates the preparation with the
+-- reason @discarded@ and returns the request to @draft@ after cleanup.
+discard :: ReviewedPreparation -> CredentialProof -> Text -> Maybe Text -> BS.ByteString -> IO (Either CommandFailure CommandReceipt)
+discard (ReviewedPreparation _ live preparation _) proof key precondition body = case P.decodeDiscard body of
+  Left failure -> pure (Left failure)
+  Right () -> discardLivePreparation live proof (P.preparationId preparation)
+    (CommandRequest Discard (P.preparationProfile preparation) "POST" (preparationURI(P.preparationId preparation)) key "application/json" precondition body)
+
+-- | Resolve an exact cached approval receipt without recovering any live
+-- preparation. A fresh approval without the original live preparation
+-- refuses with 'OwnershipUnavailable'.
 replayApproval :: CoordinationStore -> CredentialProof -> Text -> Text -> Maybe Text -> BS.ByteString
   -> IO (Either CommandFailure CommandReceipt)
-replayApproval store proof ident key precondition body = attemptIO "approval replay" $ do
+replayApproval store proof ident key precondition body = case P.decodeApproval body of
+  Left failure -> pure (Left failure)
+  Right _ -> replayPreparationCommand store proof Approve OwnershipUnavailable ident key precondition body
+
+-- | Resolve an exact cached discard receipt without recovering any live
+-- preparation. A fresh discard of a preparation without its original live
+-- review, such as a consumed or invalidated one, refuses with 'StateConflict'.
+replayDiscard :: CoordinationStore -> CredentialProof -> Text -> Text -> Maybe Text -> BS.ByteString
+  -> IO (Either CommandFailure CommandReceipt)
+replayDiscard store proof ident key precondition body = case P.decodeDiscard body of
+  Left failure -> pure (Left failure)
+  Right () -> replayPreparationCommand store proof Discard StateConflict ident key precondition body
+
+replayPreparationCommand :: CoordinationStore -> CredentialProof -> Operation -> CommandFailure -> Text -> Text -> Maybe Text -> BS.ByteString
+  -> IO (Either CommandFailure CommandReceipt)
+replayPreparationCommand store proof operation' refusal ident key precondition body = attemptIO "approval replay" $ do
   unless (validId ident) (throwIO InvalidRequest)
-  _ <- need (P.decodeApproval body)
   profile <- runRead store $ do
     _ <- currentClient proof >>= needT
     rows <- query "SELECT r.profile_id FROM preparations p JOIN requests r ON r.id=p.request_id WHERE p.id=?" [text ident]
@@ -228,8 +253,8 @@ replayApproval store proof ident key precondition body = attemptIO "approval rep
       _ -> refuseTransaction Forbidden
     _ <- authorizeProfile proof selected [Submit,Control] >>= needT
     pure selected
-  let request = CommandRequest Approve profile "POST" (preparationURI ident) key "application/json" precondition body
-  submissionReceipt <$> (submitConfiguredCommand store proof request (\_ _ _ -> Left OwnershipUnavailable) >>= need)
+  let request = CommandRequest operation' profile "POST" (preparationURI ident) key "application/json" precondition body
+  submissionReceipt <$> (submitConfiguredCommand store proof request (\_ _ _ -> Left refusal) >>= need)
 
 projectReview :: Text -> ReviewContext -> Either CommandFailure P.Review
 projectReview workflow context = do

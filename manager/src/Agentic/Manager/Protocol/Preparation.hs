@@ -6,7 +6,7 @@
 -- | Bounded public review facts and exact approval requests, without execution authority.
 module Agentic.Manager.Protocol.Preparation
   ( ReviewInput (..), Review (..), Preparation (..), ApprovalRequest (..),
-    PublicPolicy, policyValue, projectPolicy, decodeApproval, validDigest, observationCodeNames ) where
+    PublicPolicy, policyValue, projectPolicy, decodeApproval, decodeDiscard, validDigest, observationCodeNames ) where
 
 import Agentic.Manager.Protocol.Command (CommandFailure (..), validId, validTimestamp)
 import Agentic.Manager.Protocol.Json (decodeStrictValue)
@@ -102,6 +102,14 @@ decodeApproval :: BS.ByteString -> Either CommandFailure ApprovalRequest
 decodeApproval bytes
   | BS.length bytes>2097152 = Left SizeLimit
   | otherwise = either(const(Left InvalidRequest))Right(decodeStrictValue bytes >>= parseEither parseJSON)
+
+-- | The discard body of one preparation, which holds only its operation.
+decodeDiscard :: BS.ByteString -> Either CommandFailure ()
+decodeDiscard bytes
+  | BS.length bytes>2097152 = Left SizeLimit
+  | otherwise = case decodeStrictValue bytes of
+      Right value | value==object["operation" .= ("discard"::Text)] -> Right ()
+      _ -> Left InvalidRequest
 
 projectPolicy :: Value -> Either CommandFailure PublicPolicy
 projectPolicy raw = either(const(Left InvalidInput))Right $ parseEither project raw

@@ -197,7 +197,7 @@ dispatch service pages streams proof request respond = do
       operation <- bodyOperation bytes
       case operation of
         "approve" -> Service.approve service proof ident key condition bytes >>= need >>= receipt
-        "discard" -> throwIO C.UnsupportedOperation
+        "discard" -> Service.discard service proof ident key condition bytes >>= need >>= receipt
         _ -> throwIO C.InvalidRequest
     ("GET", ["v1", "commands", ident]) ->
       Commands.withCommand store proof ident $ \view value ->

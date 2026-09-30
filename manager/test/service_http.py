@@ -121,7 +121,20 @@ routes_mode = len(sys.argv) == 6 and sys.argv[5] == ROUTES
 # prints its own PASS line. It runs one manager lifetime.
 CAPTURES = "mutations-captures"
 captures_mode = len(sys.argv) == 6 and sys.argv[5] == CAPTURES
-assert len(sys.argv) == 5 or mixed or boundary or pages_mode or events_mode or captures_mode
+# The mutations-discard mode checks the discard operation of POST
+# /v1/preparations/{id} through the running protected manager with the
+# scripted prompt-source workflow: refusals of a stale If-Match and of a
+# credential with observe only, a discard of a reviewed preparation whose
+# command reaches the effect discarded, the preparation that shows the reason
+# discarded and the request that returns to draft, a same-key replay with the
+# same receipt, a fresh review after a later enqueue, the state-conflict
+# refusal of a discard after approval, and the discard command, its receipt,
+# the discard relay and the review and request endings in the manager log
+# through the flow verb. Each numbered case prints its own PASS line. It runs
+# one manager lifetime.
+DISCARD = "mutations-discard"
+discard_mode = len(sys.argv) == 6 and sys.argv[5] == DISCARD
+assert len(sys.argv) == 5 or mixed or boundary or pages_mode or events_mode or captures_mode or discard_mode
 assert not tui_approval or os.environ.get("TUI_CHECK")
 assert native in ("1", "8")
 print(f"work={work}", flush=True)
@@ -222,7 +235,7 @@ def administration(payload, refused=None):
 
 
 issued = administration({"version": 1, "operation": "issue-credential", "label": "HTTPS fixture",
-                         "scopes": ["observe", "submit"] + (["control", "export"] if mixed else ["control"] if captures_mode else []),
+                         "scopes": ["observe", "submit"] + (["control", "export"] if mixed else ["control"] if captures_mode or discard_mode else []),
                          "profileIds": ["profile_1"],
                          "expiresAt": "2999-01-01T00:00:00Z", "outputFile": str(work / "credential")})
 bearer = (work / "credential").read_bytes().decode("ascii")
@@ -231,9 +244,9 @@ if collections:
                     "scopes": ["observe", "submit"], "profileIds": ["profile_2"],
                     "expiresAt": "2999-01-01T00:00:00Z", "outputFile": str(work / "credential-other")})
     other_authorized = {"Authorization": "Bearer " + (work / "credential-other").read_bytes().decode("ascii")}
-# The captures mode also issues a credential of the first profile with
-# observe only, which a capture upload must refuse.
-if captures_mode:
+# The captures and discard modes also issue a credential of the first profile
+# with observe only, which a capture upload and a discard must refuse.
+if captures_mode or discard_mode:
     administration({"version": 1, "operation": "issue-credential", "label": "HTTPS observe only",
                     "scopes": ["observe"], "profileIds": ["profile_1"],
                     "expiresAt": "2999-01-01T00:00:00Z", "outputFile": str(work / "credential-observe")})
@@ -3254,6 +3267,184 @@ def capture_checks():
             process.wait(timeout=25)
             (work / "server-0.exit").write_text(str(process.returncode) + "\n")
     print("PASS mutations-captures: every capture case held against the running TLS 1.3 manager", flush=True)
+
+
+def discard_checks():
+    """The discard operation of POST /v1/preparations/{id} through the real
+    HTTPS manager. Each numbered case prints one PASS line."""
+    authorized = {"Authorization": "Bearer " + bearer}
+    observer = {"Authorization": "Bearer " + (work / "credential-observe").read_bytes().decode("ascii")}
+    discard_body = json.dumps({"operation": "discard"}, separators=(",", ":")).encode()
+
+    def discard(credential, preparation_id, key, tag):
+        """One discard POST. Returns the status, the decoded body and the raw body."""
+        headers = credential | {"Content-Type": "application/json", "Idempotency-Key": key, "If-Match": tag}
+        status, value, raw, _ = exchange("/v1/preparations/" + preparation_id, headers, method="POST", payload=discard_body)
+        validate("Problem" if status >= 400 else "CommandReceipt", value, raw)
+        return status, value, raw
+
+    def settled(path, schema, ready, failure):
+        """Read the resource until ready holds, within a deadline."""
+        deadline = time.monotonic() + 40
+        while True:
+            value, tag, raw = observed(path, schema)
+            if ready(value):
+                return value, tag, raw
+            if time.monotonic() >= deadline:
+                (work / "discard-wait-last.json").write_bytes(raw)
+                raise AssertionError(failure)
+            time.sleep(0.05)
+
+    with (work / "server-0.stdout").open("wb") as output, (work / "server-0.stderr").open("wb") as errors:
+        process = subprocess.Popen([str(runner), "--manager", "serve", "--config", str(config),
+                                    "+RTS", "-N" + native, "-RTS"], stdout=output, stderr=errors)
+        try:
+            wait_ready(process)
+            status, capabilities, _ = request("/v1/capabilities", authorized)
+            assert status == 200
+            validate("Capabilities", capabilities)
+            new_key = lambda: capabilities["authorityEpoch"] + "." + secrets.token_urlsafe(16)
+            observed, wait_for, mutate, _ = mixed_client(capabilities, authorized)
+            status, catalogue, _ = request("/v1/workflows?profileId=profile_1", authorized)
+            assert status == 200
+            workflow = next(item for item in catalogue["items"] if item["name"] == "prompt-source")
+            assert [item["name"] for item in workflow["inputs"]] == ["input"]
+            create = {"workflowId": workflow["id"], "descriptorRevision": workflow["revision"],
+                      "profileId": workflow["profileId"], "profileRevision": workflow["profileRevision"]}
+            status, created, raw = request("/v1/requests", authorized | {"Content-Type": "application/json", "Idempotency-Key": new_key()},
+                                           method="POST", payload=json.dumps(create, separators=(",", ":")).encode())
+            assert status == 201, ("request creation", status, created.get("code"))
+            validate("Request", created, raw)
+            request_uri = created["links"]["self"]
+            current, tag, _ = observed(request_uri, "Request")
+            mutate(request_uri, {"operation": "set-input", "input": {"name": "input", "source": "literal", "value": "Discard fixture input."}}, tag)
+            current, tag, _ = observed(request_uri, "Request")
+            mutate(request_uri, {"operation": "enqueue"}, tag)
+            current, _, _ = wait_for(request_uri, "Request", lambda value: value["preparationId"] is not None)
+            first, first_tag, raw = observed("/v1/preparations/" + current["preparationId"], "Preparation")
+            (work / "discard-review.json").write_bytes(raw)
+            assert first["state"] == "live" and first["reason"] is None and current["phase"] == "review", (first["state"], current["phase"])
+            first_uri = "/v1/preparations/" + first["id"]
+
+            # Case 1. A stale If-Match refuses and changes nothing.
+            status, problem, _ = discard(authorized, first["id"], new_key(), '"' + current["revision"] + '"')
+            assert status == 412 and problem["code"] == "stale-revision", ("stale discard", status, problem.get("code"))
+            still, still_tag, _ = observed(first_uri, "Preparation")
+            assert still["state"] == "live" and still_tag == first_tag, ("stale discard changed the preparation", still["state"])
+            print("PASS discard case 1: a discard with a stale If-Match received 412 stale-revision, and the preparation stayed live", flush=True)
+
+            # Case 2. A credential without submit and control is refused.
+            status, problem, _ = discard(observer, first["id"], new_key(), first_tag)
+            assert status == 403 and problem["code"] == "insufficient-scope", ("observe-only discard", status, problem.get("code"))
+            still, still_tag, _ = observed(first_uri, "Preparation")
+            assert still["state"] == "live" and still_tag == first_tag, ("observe-only discard changed the preparation", still["state"])
+            print("PASS discard case 2: a credential with observe only received 403 insufficient-scope, and the preparation stayed live", flush=True)
+
+            # Case 3. The discard ends the review as discarded and returns the request to draft.
+            discard_key = new_key()
+            status, receipt, raw = discard(authorized, first["id"], discard_key, first_tag)
+            assert status == 202, ("discard", status, receipt.get("code"))
+            (work / "discard-receipt.json").write_bytes(raw)
+            assert receipt["operation"] == "discard" and receipt["resource"] == first_uri, (receipt["operation"], receipt["resource"])
+            command_uri = receipt["links"]["self"]
+            command, _, raw = settled(command_uri, "CommandReceipt",
+                lambda value: value["state"] in ("effect-observed", "refused", "unresolved"), "discard command deadline")
+            (work / "discard-command.json").write_bytes(raw)
+            assert command["state"] == "effect-observed", ("discard command", command["state"], command.get("refusal"))
+            assert command["effect"]["kind"] == "discarded" and command["effect"]["resource"] == request_uri, command["effect"]
+            ended, _, raw = observed(first_uri, "Preparation")
+            (work / "discard-preparation.json").write_bytes(raw)
+            assert ended["state"] == "invalidated" and ended["reason"] == "discarded", (ended["state"], ended["reason"])
+            current, tag, raw = settled(request_uri, "Request", lambda value: value["phase"] == "draft", "request did not return to draft")
+            (work / "discard-request.json").write_bytes(raw)
+            assert current["admission"]["state"] == "released" and current["preparationId"] is None and current["runId"] is None, (
+                current["admission"], current["preparationId"], current["runId"])
+            print("PASS discard case 3: discard command", receipt["id"], "reached effect-observed with the effect discarded,",
+                  "preparation", first["id"], "shows invalidated with the reason discarded, and the request returned to draft",
+                  "with admission released and a null preparationId", flush=True)
+
+            # Case 4. A same-key replay returns the same receipt.
+            status, replay, _ = discard(authorized, first["id"], discard_key, first_tag)
+            assert status == 202 and replay["id"] == receipt["id"] and replay["links"]["self"] == command_uri, (
+                "discard replay", status, replay.get("id"), replay.get("code"))
+            print("PASS discard case 4: a same-key discard replay returned the same receipt", receipt["id"], flush=True)
+
+            # Case 5. A later enqueue of the draft publishes a fresh review.
+            mutate(request_uri, {"operation": "enqueue"}, tag)
+            current, _, _ = wait_for(request_uri, "Request",
+                lambda value: value["phase"] == "review" and value["preparationId"] not in (None, first["id"]))
+            second, second_tag, _ = observed("/v1/preparations/" + current["preparationId"], "Preparation")
+            assert second["state"] == "live" and second["id"] != first["id"], (second["state"], second["id"])
+            print("PASS discard case 5: a later enqueue of the draft published the fresh review", second["id"], flush=True)
+
+            # Case 6. A discard after approval refuses with state-conflict.
+            selectors = ("reviewDigest", "requestRevision", "profileRevision", "descriptorRevision", "processGeneration")
+            mutate("/v1/preparations/" + second["id"], {"operation": "approve", **{name: second[name] for name in selectors}}, second_tag)
+            current, _, _ = wait_for(request_uri, "Request", lambda value: value["runId"] is not None)
+            consumed, consumed_tag, _ = observed("/v1/preparations/" + second["id"], "Preparation")
+            assert consumed["state"] == "consumed", consumed["state"]
+            status, problem, _ = discard(authorized, second["id"], new_key(), consumed_tag)
+            assert status == 409 and problem["code"] == "state-conflict", ("discard after approval", status, problem.get("code"))
+            _, ended_tag, _ = observed(first_uri, "Preparation")
+            status, problem, _ = discard(authorized, first["id"], new_key(), ended_tag)
+            assert status == 409 and problem["code"] == "state-conflict", ("discard of a discarded preparation", status, problem.get("code"))
+            snapshot, _, _ = wait_for("/v1/runs/" + current["runId"] + "/snapshot", "RunSnapshot",
+                lambda value: value["runtime"] is not None and value["runtime"]["status"] in ("succeeded", "failed", "cancelled"))
+            assert snapshot["runtime"]["status"] == "succeeded", snapshot["runtime"]["status"]
+            print("PASS discard case 6: a discard after approval and a new-key discard of the discarded preparation received",
+                  "409 state-conflict, and run", current["runId"], "succeeded", flush=True)
+        finally:
+            if process.poll() is None:
+                process.terminate()
+            process.wait(timeout=25)
+            (work / "server-0.exit").write_text(str(process.returncode) + "\n")
+
+    # Case 7. The manager log records the discard command, its receipt, the
+    # discard relay and the review and request endings.
+    flow_dir = work / "manager" / "flow"
+    stores = sorted(work.glob("manager/runs/runs/*/runtime"))
+    completed = subprocess.run([str(runner), "flow", str(flow_dir)] + [str(store) for store in stores],
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60)
+    (work / "discard-flow.ndjson").write_bytes(completed.stdout)
+    (work / "discard-flow.stderr").write_bytes(completed.stderr)
+    lines = [json.loads(line) for line in completed.stdout.splitlines()]
+    assert lines and "summary" in lines[-1], ("flow verb", completed.returncode, completed.stderr[-2000:])
+    summary = lines[-1]["summary"]
+    assert completed.returncode == 0 and summary["verified"] and not summary["problems"], ("flow verb", completed.returncode, summary["problems"])
+    logs = sorted(flow_dir.glob("*.ndjson"))
+    assert len(logs) == 1, logs
+    manager = [line for line in lines[:-1] if line["log"] == str(logs[0])]
+    commands = [line for line in manager if line["schema"] == "command" and line["about"].get("command") == receipt["id"]]
+    assert len(commands) == 1 and commands[0]["body"]["operation"] == "discard" and commands[0]["body"]["resource"] == first_uri, (
+        "discard command record", [line["body"] for line in commands])
+    logged = commands[0]
+    replies = [line for line in manager if line["schema"] == "receipt" and line["replyTo"] == logged["position"]]
+    assert len(replies) == 1 and replies[0]["body"]["id"] == receipt["id"] and replies[0]["body"]["operation"] == "discard", "discard receipt record"
+    relays = [line for line in manager if line["schema"] == "relay" and line["body"]["kind"] == "discard"
+              and line["about"].get("command") == receipt["id"]]
+    assert len(relays) == 1 and relays[0]["body"]["command"] == receipt["id"] and relays[0]["body"]["managerRun"] is None, (
+        "discard relay record", [line["body"] for line in relays])
+    notices = [line for line in manager if line["schema"] == "notice" and isinstance(line.get("body"), dict)]
+    review_endings = [line for line in notices if line["body"].get("notice") == "review-ended" and line["body"]["preparation"] == first["id"]]
+    assert len(review_endings) == 1 and review_endings[0]["body"]["reason"] == "discarded", ("review ending", [line["body"] for line in review_endings])
+    request_endings = [line for line in notices if line["body"].get("notice") == "request-ended" and line["body"]["request"] == created["id"]]
+    assert len(request_endings) == 1 and request_endings[0]["body"]["cause"] == "discarded" and request_endings[0]["about"].get("command") == receipt["id"], (
+        "request ending", [(line["body"], line["about"]) for line in request_endings])
+    assert logged["position"] < replies[0]["position"] < relays[0]["position"] < request_endings[0]["position"], (
+        "manager-log order", logged["position"], replies[0]["position"], relays[0]["position"], request_endings[0]["position"])
+    reviews = [item for item in summary["joins"]["reviews"] if item["preparation"] == first["id"]]
+    assert len(reviews) == 1 and reviews[0]["commands"] == [logged["position"]] and reviews[0]["endings"] == [review_endings[0]["position"]], (
+        "review join", reviews)
+    print("PASS discard case 7: the manager log holds discard command", receipt["id"], "at position", logged["position"],
+          "its receipt at", replies[0]["position"], "the discard relay that names it at", relays[0]["position"],
+          "the review ending discarded at", review_endings[0]["position"], "and the request ending discarded at",
+          request_endings[0]["position"], "and the flow verb joins the review to the command and the ending", flush=True)
+    print("PASS mutations-discard: every discard case held against the running TLS 1.3 manager", flush=True)
+
+
+if discard_mode:
+    discard_checks()
+    raise SystemExit(0)
 
 
 if captures_mode:
