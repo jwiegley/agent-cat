@@ -102,14 +102,21 @@ metadata ident run kind code bytes = object
    "download" .= ("/v1/artifacts/" <> ident)]
 
 -- | The callback must finish sending before returning and must not retain bytes.
--- Store's single artifact response slot covers the whole download: capture,
+-- Store's download quota of one covers the whole download: capture,
 -- verification, authorization and every write. At most one <=64MiB artifact
--- response is held per Store, with no unaccounted response queue. The file
--- slot, the reader charge and the configuration loan cover capture and
--- materialization only. The view returns them before the first network write,
--- and its checks before each write stop a response whose authorization ended.
+-- response is held per Store, with no unaccounted response queue. A download
+-- that finds the quota charged refuses at once with 'Command.StorageQuota'
+-- and does not wait. The file slot, the reader charge and the configuration
+-- loan cover capture and materialization only. The view returns them before
+-- the first network write, and its checks before each write stop a response
+-- whose authorization ended.
 withArtifactDownload :: CoordinationStore -> CredentialProof -> Text -> (AuthorizedView -> Value -> BS.ByteString -> IO a) -> IO a
-withArtifactDownload store proof ident respond = withStoreArtifactResponse store $ do
+withArtifactDownload store proof ident respond =
+  withStoreArtifactResponse store (artifactDownload store proof ident respond)
+    >>= maybe (throwIO Command.StorageQuota) pure
+
+artifactDownload :: CoordinationStore -> CredentialProof -> Text -> (AuthorizedView -> Value -> BS.ByteString -> IO a) -> IO a
+artifactDownload store proof ident respond = do
   legacy <- runRead store $ do
     _ <- currentClient proof >>= either refuseTransaction pure
     unless (Command.validId ident) (refuseTransaction Command.InvalidRequest)

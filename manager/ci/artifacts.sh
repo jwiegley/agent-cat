@@ -13,6 +13,8 @@ work=$(mktemp -d "${TMPDIR:?Use a short private temporary root}/artifacts.XXXXXX
 printf 'Artifact evidence: %s\n' "$work"
 # History also owns local capability/catalogue children. Its 120-second deadline
 # runs inside Haskell and unwinds original query owners, not an outer killing timer.
+# The artifact check includes the response-ingestion variants, whose stalled
+# writes last about 70 seconds, so its outer bound is 300 seconds.
 for capabilities in 1 8; do
   fixture="$work/N$capabilities"
   mkdir "$fixture"
@@ -25,7 +27,7 @@ assert "GHCRTS" not in os.environ
 assert not any(name.startswith("AGENT_CAT_") for name in os.environ)
 checker, fixture, root, capabilities, history = sys.argv[1:]
 with (Path(fixture) / "check.log").open("wb") as log:
-    result = subprocess.run([checker, fixture, root, "+RTS", "-N" + capabilities, "-M512m", "-RTS"], stdout=log, stderr=subprocess.STDOUT, timeout=120)
+    result = subprocess.run([checker, fixture, root, "+RTS", "-N" + capabilities, "-M512m", "-RTS"], stdout=log, stderr=subprocess.STDOUT, timeout=300)
 raw = (Path(fixture) / "check.log").read_bytes()
 assert b"synthetic-token" not in raw and b"<script>" not in raw and b"\x1b[31m" not in raw
 sys.stdout.buffer.write(raw)

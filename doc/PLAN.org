@@ -3274,7 +3274,7 @@ From acat-l59: would delete the residual join-slack paragraph and make static/bo
 :LABELS:   []
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-30 Wed 01:46]
-:MODIFIED: [2026-09-30 Wed 01:46]
+:MODIFIED: [2026-09-30 Wed 02:08]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -3300,6 +3300,58 @@ Non-blocking review findings from subtask B5 part 1 of acat-response-ingestion-b
     "depends_on_id": "acat-response-ingestion-budget-zaoi",
     "type": "discovered-from",
     "created_at": "2026-09-30T08:46:20.068150Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 379,
+    "issue_id": "acat-b5-response-review-findings-k96b",
+    "author": "johnw",
+    "text": "B6 resolves finding 1: the artifact response slot is replaced by a non-waiting download quota, so downloads no longer wait for two slots in sequence. Findings 2 to 7 remain open. Finding 2 now concerns the download quota rather than the slot. See acat-b6-response-review-findings-gxmf for the B6 review findings.",
+    "created_at": "2026-09-30T09:08:09Z"
+  }
+]
+#+end_src
+
+* TODO [#C] Resolve B6 response-ownership review findings
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-b6-response-review-findings-gxmf
+:LABELS:   []
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-30 Wed 02:07]
+:MODIFIED: [2026-09-30 Wed 02:08]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking review findings from subtask B6 part 2 of acat-response-ingestion-budget-zaoi (fess report resume-20260923/fess/b1-B6-r1.md).
+
+1. (medium, needs operator decision) The download quota is one per Store, not one per client as the requirement says (Artifacts.hs:113-121, Store.hs:794-798). The quota is also charged before authorization and id validation, so a request with an unknown id or a refused authorization charges it while it runs, and a concurrent legitimate download refuses at once with 429 storage-quota. Charge the quota after the authorization and id-lookup transaction and before capture, get an operator ruling on per-Store versus per-client scope under a global cap, and document the scope in manager/ARTIFACTS.md and doc/api/README.md.
+2. (low) Both download-side ingestion checks (ArtifactCheck.hs:511-512 and the main-form check "ingestion is not blocked while a download holds the quota") ingest an envelope that is already recorded, so they exercise only duplicate recognition (State.hs:74-79). Ingest a new sequence and expect Right True within 5 s, as the page variant does.
+3. (low) manager/ci/artifacts.sh raises the outer checker timeout from 120 s to 300 s. artifacts.sh was not run, the -M512m cap was not exercised with the page variant, and the "about 70 seconds" comment is not measured. Run the artifact step once at N1 and N8 with -M512m, or record measured durations.
+4. (low) No response-ingestion variant covers receipt responses (Application.hs:285-291). Add a receipt variant that sends through Application json under withAuthorizedResponse.
+5. (low) A second download now returns 429 storage-quota at once instead of 503 storage-unavailable after 5 s. OpenAPI already declares 429 on /artifacts/{id}, but no changelog or version-matrix entry records the change. Decide whether one is needed.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-b6-response-review-findings-gxmf",
+    "depends_on_id": "acat-response-ingestion-budget-zaoi",
+    "type": "discovered-from",
+    "created_at": "2026-09-30T09:08:09.172975Z",
     "created_by": "johnw",
     "metadata": "{}",
     "thread_id": ""
@@ -9247,7 +9299,7 @@ grind-tests opening with an unpinned question.
 :LABELS:   []
 :ISSUE_TYPE: bug
 :CREATED:  [2026-09-23 Wed 16:24]
-:MODIFIED: [2026-09-30 Wed 01:46]
+:MODIFIED: [2026-09-30 Wed 02:08]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -9296,6 +9348,13 @@ Service-liveness and halt fess reviews identify a source-proved ceiling: protect
     "author": "johnw",
     "text": "Subtask B5 (part 1) corrects the ceiling for plain byte responses. Transport.respondBytes and Application.json now materialize the representation under the watch and the configuration loan, then release the configuration guard, the reader charge, every SQL transaction and the file slot before the first network write. The watch stays alive as an authorization token only, and revalidateAuthorizedView reacquires, briefly and in lock order, only what the check needs before each 16 KiB write. Artifact downloads take a new artifact response slot (outermost, downloads only) that keeps the one-download memory bound. No wait, budget or allowance constant changed.\n\nEvidence (/Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/B/B5/impl-r2): manager-artifact-check response-ingestion fails before the fix (b5r2-repro-before, exit 1) and passes after it at N8 in all five variants (guard, reader capacity, revocation, artifact download) (b5r2-repro-after, exit 0). response-order, ordinary-admission, fault-classification and ingestion pass at N8. The Phase A journey passes at N8, and make -C doc check passes.\n\nThis issue stays open. Server-sent event streams still hold one reader charge for their lifetime and are a later part of this issue. The review findings of this part are filed as a separate follow-up issue.\n",
     "created_at": "2026-09-30T08:46:16Z"
+  },
+  {
+    "id": 378,
+    "issue_id": "acat-response-ingestion-budget-zaoi",
+    "author": "johnw",
+    "text": "B6 (part 2): pages, receipts and artifact downloads now follow the B5 ownership rule. Pages and receipts already sent through Transport.respondBytes after 45e95147 and hold only their page-set reservation or authorization watch across writes. The artifact response slot (an MVar a second download waited on) is replaced by a non-waiting download quota of one per Store (TVar Bool): a second concurrent download refuses at once with 429 storage-quota, and ingestion is not blocked during a held download. Checks at N8 on the final source: Werror build of manager-artifact-check, agentic-run and routing-fixed-point-probe; manager-artifact-check response-ingestion (all six variants, including new page and download variants), main form (changed assertion), response-order, ordinary-admission and fault-classification; the Phase A journey at N8; make -C doc check. Evidence: resume-20260923/B/B6/impl-r1. The issue stays open: server-sent event streams still hold one reader charge for their lifetime. Review findings are filed as acat-b6-response-review-findings-gxmf.",
+    "created_at": "2026-09-30T09:08:09Z"
   }
 ]
 #+end_src

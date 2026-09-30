@@ -46,8 +46,10 @@ allowance, and a slot that stays held for the whole allowance is `StoreBusy`.
 A coordinator probe does not wait. When the slot is held, it returns at once
 and proves that its callback did not enter.
 Their lock order is file slot, configuration, then database. An artifact
-download also takes the separate artifact response slot before the file slot,
-as `manager/ARTIFACTS.md` describes. No other operation takes that slot.
+download also charges the download quota of the Store before the file slot,
+as `manager/ARTIFACTS.md` describes. The quota is accounting, not a lock: a
+charged quota refuses a second download at once, and no operation waits for
+it.
 
 ## Database and schema
 
@@ -210,8 +212,10 @@ write. After the status and headers are sent, the client receives a truncated
 body. The manager does not resend the response or any part of it.
 
 An artifact download holds its captured bytes across its writes under the
-artifact response slot, not under the file slot. That slot limits the Store to
-one such download of at most 64 MiB, and only another download waits for it.
+download quota, not under the file slot. That quota limits the Store to one
+such download of at most 64 MiB. It refuses another download at once, and no
+operation waits for it. A page response holds its page-set reservation across
+its writes, and a command receipt holds nothing but its authorization watch.
 A server-sent event stream holds one reader charge for its whole lifetime and
 writes each batch within the configuration loan of that batch.
 

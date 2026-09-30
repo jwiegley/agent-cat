@@ -16,6 +16,7 @@ import qualified Agentic.Manager.Protocol.Preparation as P
 import qualified Agentic.Manager.Transport as Transport
 import Agentic.Manager.Worker.State (WorkerFailure (WorkerUnexpectedExit))
 import qualified Agentic.Manager.Admission as Admission
+import qualified Agentic.Manager.Application as Application
 import qualified Agentic.Manager.Service as Service
 import Agentic.Manager.Protocol.Artifact (validExportDocument)
 import Agentic.Manager.Credentials (administerCredentials)
@@ -411,7 +412,7 @@ responseIngestionChecks :: FilePath -> IO ()
 responseIngestionChecks work = do
   failures <- fmap concat $ mapM variant
     [("guard", ignoring guardVariant), ("reader-capacity", ignoring readerVariant), ("file-slot", ignoring fileVariant),
-     ("artifact-download", downloadVariant), ("revocation", ignoring revocationVariant)]
+     ("artifact-download", downloadVariant), ("page", ignoring pageVariant), ("revocation", ignoring revocationVariant)]
   unless (null failures) (error ("FAIL response-ingestion variants: " <> unwords failures))
   where
     variant (name, checks) = do
@@ -435,10 +436,11 @@ responseIngestionChecks work = do
     held store proof association = heldBy $ \send ->
       withAuthorizedResponse store proof (associationProfile association) [Command.Observe] send
     heldBy owner writes = faultOf $ owner $ \view -> void $
-      Transport.respondBytes HTTP.status200 [] view body $ \response -> do
-        let (_, _, withBody) = Wai.responseToStream response
-        withBody (\stream -> stream (\_ -> atomically (modifyTVar' writes (+1)) >> threadDelay 3000000) (pure ()))
-        pure ResponseReceived
+      Transport.respondBytes HTTP.status200 [] view body (stalled writes)
+    stalled writes response = do
+      let (_, _, withBody) = Wai.responseToStream response
+      withBody (\stream -> stream (\_ -> atomically (modifyTVar' writes (+1)) >> threadDelay 3000000) (pure ()))
+      pure ResponseReceived
     reached counters = timeout 10000000 $ atomically $
       mapM readTVar counters >>= \seen -> unless (all (>= 1) seen) retry
     started = RunStartedV2 "fixture" "scripted" PersonAnswerLocalControl
@@ -491,8 +493,8 @@ responseIngestionChecks work = do
         check "the held outputs response completes under its authorization" (outcome == Right ())
         atomically (readTVar writes) >>= check "the held outputs response sends every write" . (== chunks)
     -- A download captures under the file slot and returns it before the first
-    -- write. Its artifact response slot stays held across the writes, so a
-    -- second download is the one operation that waits for it.
+    -- write. Only the download quota of the Store stays charged across the
+    -- writes, so a second download refuses at once and nothing else waits.
     downloadVariant store proof association reference = do
       ingest store association reference
       handle <- scalar store "SELECT result_artifact_id FROM runs WHERE id='run_21'"
@@ -506,11 +508,46 @@ responseIngestionChecks work = do
         check "a reader place is available during a held download" (reader == Right ())
         configuration <- withStoreConfiguration store (\_ _ -> pure ())
         check "the configuration guard is available during a held download" (configuration == Right ())
-        second <- try @StoreFailure (withArtifactDownload store proof handle (\_ _ _ -> pure ()))
-        check "a second download waits for the one artifact response slot within its allowance" (second == Left StoreBusy)
+        begun <- getMonotonicTimeNSec
+        (ingested, _) <- timedIngestAt store association 8 (RunCompletedV2 1 0 reference)
+        check "ingestion of the downloaded run completes during a held download" (ingested == Right False)
+        second <- try @Command.CommandFailure (withArtifactDownload store proof handle (\_ _ _ -> pure ()))
+        finished <- getMonotonicTimeNSec
+        check "the download quota refuses a second concurrent download" (second == Left Command.StorageQuota)
+        check "that ingestion and that refusal do not wait for the held download" (finished - begun < 5000000000)
         outcome <- wait response
         check "the held download completes under its authorization" (outcome == Right ())
         atomically (readTVar writes) >>= check "the held download sends every write" . (== chunks)
+      again <- try @Command.CommandFailure (withArtifactDownload store proof handle (\_ _ bytes -> pure (BS.length bytes)))
+      check "the completed download returns the download quota" (either (const False) (> 0) again)
+    -- A page response of the outputs owner materializes under the file slot,
+    -- the reader charge and the configuration loan, and Application.servePage
+    -- sends it. The page-set reservation stays charged across the writes, and
+    -- no Store loan does.
+    pageVariant store proof association = do
+      timedIngest store association >>= check "the run has a first projection" . (== Right True) . fst
+      pages <- newPageSets
+      writes <- newTVarIO (0 :: Int)
+      let items = [String (T.replicate 16384 "p") | _ <- [1..chunks]]
+          target = Wai.defaultRequest {Wai.rawPathInfo = "/v1/runs/run_21/outputs"}
+          page = faultOf $ withRunOutputsSource store proof association $ \view limits materialize -> void $
+            Application.servePage pages store proof target view limits Nothing
+              (materialize >> pure ("content_page", [], items)) (stalled writes)
+      withAsync page $ \response -> do
+        reached [writes] >>= check "the held page response reaches its first write" . (== Just ())
+        files <- try @StoreFailure (withStoreFiles store (\_ -> pure ()))
+        check "the file slot is available during a held page response" (files == Right ())
+        reader <- try @StoreFailure (withStoreReader store (pure ()))
+        check "a reader place is available during a held page response" (reader == Right ())
+        configuration <- withStoreConfiguration store (\_ _ -> pure ())
+        check "the configuration guard is available during a held page response" (configuration == Right ())
+        (ingested, elapsed) <- timedIngestAt store association 1
+          (OccurrenceStarted (OccurrenceId 0) "flag" "consult" "model reviewer" "Approve?")
+        check "ingestion completes during a held page response" (ingested == Right True)
+        check "that ingestion completes within its unchanged five-second allowance" (elapsed < 5000000000)
+        outcome <- wait response
+        check "the held page response completes under its authorization" (outcome == Right ())
+        atomically (readTVar writes) >>= check "the held page response sends a write for each 16 KiB of its page" . (> chunks)
     revocationVariant store proof association = do
       writes <- newTVarIO (0 :: Int)
       withAsync (held store proof association writes) $ \response -> do
@@ -1326,16 +1363,27 @@ sourceRun store = withStoreFiles store $ \root -> do
     pure (association,reference,directory)
 
 ingest :: CoordinationStore -> RunAssociation -> ResultRef -> IO ()
-ingest store association reference = do
-  let occurrence=OccurrenceId maxBound; attempt=AttemptId occurrence maxBound
-      events=[RunStartedV2 "fixture" "scripted" PersonAnswerLocalControl,
-        OccurrenceStarted occurrence "flag" "fixture" "engine" "synthetic prompt",
-        AttemptStarted attempt "scripted",AttemptOutput attempt "雪😀\n",
-        AttemptProgress attempt (ProgressMessage "Public diagnostic."),AttemptCompleted attempt "fresh",
-        OccurrenceCompleted occurrence "fresh" "false",TraceOrdered [occurrence],RunCompletedV2 1 0 reference]
-  forM_ (zip [0..] events) $ \(number,event) -> do
-    let bytes = encodeEnvelope (Envelope 2 (associationNative association) (SeqNo number) "2026-09-03T00:00:00Z" event)
-    void (ingestRuntimeEnvelope store association bytes)
+ingest store association reference =
+  forM_ (ingestEnvelopes association reference) (void . ingestRuntimeEnvelope store association)
+
+-- | Ingest the recorded completion envelope of 'ingest' again. The ingestion
+-- takes a reader place, the configuration guard and the Store gate, and it
+-- recognizes the recorded envelope without a new effect, so it returns False.
+ingestRecordedCompletion :: CoordinationStore -> RunAssociation -> ResultRef -> IO Bool
+ingestRecordedCompletion store association reference =
+  ingestRuntimeEnvelope store association (last (ingestEnvelopes association reference))
+
+ingestEnvelopes :: RunAssociation -> ResultRef -> [BS.ByteString]
+ingestEnvelopes association reference =
+  [encodeEnvelope (Envelope 2 (associationNative association) (SeqNo number) "2026-09-03T00:00:00Z" event)
+    | (number,event) <- zip [0..] events]
+  where
+    occurrence=OccurrenceId maxBound; attempt=AttemptId occurrence maxBound
+    events=[RunStartedV2 "fixture" "scripted" PersonAnswerLocalControl,
+      OccurrenceStarted occurrence "flag" "fixture" "engine" "synthetic prompt",
+      AttemptStarted attempt "scripted",AttemptOutput attempt "雪😀\n",
+      AttemptProgress attempt (ProgressMessage "Public diagnostic."),AttemptCompleted attempt "fresh",
+      OccurrenceCompleted occurrence "fresh" "false",TraceOrdered [occurrence],RunCompletedV2 1 0 reference]
 
 outputBounds :: CoordinationStore -> CredentialProof -> FilePath -> IO ()
 outputBounds store proof work = do
@@ -1425,14 +1473,19 @@ rawChecks store proof association handle reference directory original = do
         (Left (StoreCorrupt _ _),Left (StoreCorrupt _ _)) -> True
         _ -> False)
       BS.writeFile result original
+  -- The held download returns its loans before it holds, as a response does
+  -- before its first network write. Only the download quota stays charged.
   entered <- newEmptyMVar
   release <- newEmptyMVar
-  reader <- async (withArtifactDownload store proof handle (\_ _ _ -> putMVar entered () >> takeMVar release))
+  reader <- async (withArtifactDownload store proof handle (\view _ _ -> releaseResponseLoans view >> putMVar entered () >> takeMVar release))
   takeMVar entered
-  overlapping <- try @StoreFailure (withArtifactDownload store proof handle (\_ _ _ -> error "second response admitted" :: IO ()))
-  check "single aggregate read loan spans response callback" (overlapping == Left StoreBusy)
+  overlapping <- try @Command.CommandFailure (withArtifactDownload store proof handle (\_ _ _ -> error "second response admitted" :: IO ()))
+  check "the download quota refuses a second concurrent download at once" (overlapping == Left Command.StorageQuota)
+  replayed <- faultOf (ingestRecordedCompletion store association reference)
+  check "ingestion is not blocked while a download holds the quota" (replayed == Right False)
   putMVar release ()
   wait reader
+  withArtifactDownload store proof handle (\_ _ bytes -> check "the completed download returns the quota" (bytes == original))
 
 request :: CoordinationStore -> RunAssociation -> Text -> Text -> IO Commands.CommandRequest
 request store association key name = do

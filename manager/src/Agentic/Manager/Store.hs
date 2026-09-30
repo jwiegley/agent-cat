@@ -99,9 +99,9 @@ data Checkpoint = Checkpoint
 -- | One connection and admission cell. Every Store action can spend its
 -- existing five-second operation allowance waiting for the cell. The slot
 -- tuple holds the file slot, the reader count, the authorization cell and the
--- artifact response slot.
+-- download quota.
 data CoordinationStore = CoordinationStore !InstalledConfiguration !PrivateRoot !SQL.Database !StoreIdentity
-  !(MVar ()) !(IORef Bool) !(IORef Bool) !Fd !(MVar (), TVar Int, TVar (Maybe Word64), MVar ()) !(TVar WorkerRegistry) !(MVar ()) !(IORef Bool) !(TVar (Bool, Maybe (TMVar (), MVar ())))
+  !(MVar ()) !(IORef Bool) !(IORef Bool) !Fd !(MVar (), TVar Int, TVar (Maybe Word64), TVar Bool) !(TVar WorkerRegistry) !(MVar ()) !(IORef Bool) !(TVar (Bool, Maybe (TMVar (), MVar ())))
   !(Maybe ManagerFlow)
 
 -- | Original registrations and their first stop batch. A scoped fence is not permanent quarantine.
@@ -252,7 +252,7 @@ openStore mode installed root lease = storageErrors $ do
         forM_ (managerFlowOpenFailure manager) (recordFaultLine "manager-log open" . ("flow " <>) . managerFlowOpenWord)
         manager <$ appendLifetime manager total (Lifetime generation reconciliation listed omitted)
     CoordinationStore installed root db (StoreIdentity schemaVersion epoch stream generation)
-      <$> newMVar () <*> newIORef False <*> newIORef False <*> pure lease <*> ((,,,) <$> newMVar () <*> newTVarIO 0 <*> newTVarIO (Just 0) <*> newMVar ()) <*> newTVarIO (WorkerRegistry False False Nothing []) <*> newMVar () <*> newIORef False <*> newTVarIO (False, Nothing) <*> pure flow
+      <$> newMVar () <*> newIORef False <*> newIORef False <*> pure lease <*> ((,,,) <$> newMVar () <*> newTVarIO 0 <*> newTVarIO (Just 0) <*> newTVarIO False) <*> newTVarIO (WorkerRegistry False False Nothing []) <*> newMVar () <*> newIORef False <*> newTVarIO (False, Nothing) <*> pure flow
   where
     databaseName = "coordination.sqlite3"
     checkCompanion name = do
@@ -784,20 +784,18 @@ withStoreRetentionRootLoan store@(CoordinationStore installed _ _ _ _ _ _ _ _ _ 
     withConfiguredRetentionRootLoan installed path profile $ \close root -> action (close >> files) root
 
 -- | One artifact response, which holds its captured bytes across its network
--- writes after it has returned the file slot. The Store has one such slot, so
--- at most one artifact response of at most 64 MiB is held across writes. The
--- slot is taken before the file slot. The lock order is therefore artifact
--- response slot, file slot, configuration, database. An artifact response
--- waits for the slot within a fresh five-second allowance, and a slot that
--- stays held for the whole allowance is 'StoreBusy'. No other Store operation
--- takes this slot, so a slow download delays only another download.
-withStoreArtifactResponse :: CoordinationStore -> IO a -> IO a
-withStoreArtifactResponse (CoordinationStore _ _ _ _ _ closed _ _ (_,_,_,slot) _ _ _ _ _) action = mask $ \restore -> do
+-- writes after it has returned the file slot. The Store has a download quota
+-- of one, so at most one artifact response of at most 64 MiB is held across
+-- writes. The quota is accounting, not a guard: it is charged before the file
+-- slot, and a charged quota refuses at once. Nothing waits for it, so it adds
+-- no wait to the lock order file slot, configuration, database, and a slow
+-- download delays no other operation. A Nothing result proves that the action
+-- did not run. The quota is returned when the action ends, after its last write.
+withStoreArtifactResponse :: CoordinationStore -> IO a -> IO (Maybe a)
+withStoreArtifactResponse (CoordinationStore _ _ _ _ _ closed _ _ (_,_,_,quota) _ _ _ _ _) action = mask $ \restore -> do
   readIORef closed >>= \done -> when done (throwIO StoreClosed)
-  acquired <- Admission.newDeadline >>= \end -> Admission.takeWithin end slot
-  case acquired of
-    Nothing -> throwIO StoreBusy
-    Just () -> restore action `finally` putMVar slot ()
+  charged <- atomically $ readTVar quota >>= \held -> if held then pure False else True <$ writeTVar quota True
+  if charged then (Just <$> restore action) `finally` atomically (writeTVar quota False) else pure Nothing
 
 -- | One ordinary file operation, joined by store close. It waits for the file
 -- slot within a fresh five-second allowance, and a slot that stays held for

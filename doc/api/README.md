@@ -56,7 +56,7 @@ counts.
 | JSON request body | 2097152 bytes. |
 | Encoded native control | 1048576 bytes, including its framing. |
 | Capture and aggregate inputs of one request | 67108864 bytes. |
-| Verified artifact content | 67108864 bytes. |
+| Verified artifact content | 67108864 bytes, with one download in progress for each manager. A second download refuses at once with `storage-quota`. |
 | Complete SSE block | 16384 bytes. |
 | JSON page | 1048576 bytes. |
 | Materialized page set | 67108864 bytes, two active sets per client, expiring after 60 seconds. |

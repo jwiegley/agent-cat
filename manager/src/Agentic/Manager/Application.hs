@@ -1,7 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 -- | HTTP representations and commands of one existing manager service.
-module Agentic.Manager.Application (newApplication) where
+module Agentic.Manager.Application (newApplication, servePage) where
 
 import qualified Agentic.Manager.Approval as Approval
 import qualified Agentic.Manager.Authorization as Auth
@@ -210,6 +210,10 @@ dispatch service pages streams proof request respond = do
         json view HTTP.status202 [("Location", TE.encodeUtf8 ("/v1/commands/" <> C.receiptId value))]
           (toJSON value) respond
 
+-- | Send one page of a protected page set. The owner materializes the page
+-- under its loans, and 'Transport.respondBytes' returns them before the first
+-- network write. Only the page-set reservation stays charged while the page
+-- is sent.
 servePage :: Pages.PageSets -> Store.CoordinationStore -> Auth.CredentialProof
   -> Wai.Request -> Auth.AuthorizedView -> ConfigurationLimits -> Maybe Text
   -> IO (Text, [Pair], [Value])
