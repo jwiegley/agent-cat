@@ -483,33 +483,51 @@ responseIngestionChecks work = do
         check "the held outputs response completes under its authorization" (outcome == Right ())
         atomically (readTVar writes) >>= check "the held outputs response sends every write" . (== chunks)
     -- A download captures under the file slot and returns it before the first
-    -- write. Only the download quota of the Store stays charged across the
-    -- writes, so a second download refuses at once and nothing else waits.
+    -- write. Only its artifact response place stays charged across the
+    -- writes. Two downloads hold both places at the same time, a third waits
+    -- for the five-second allowance and then refuses, and nothing else waits.
     downloadVariant store proof association reference = do
       ingest store association reference
       handle <- scalar store "SELECT result_artifact_id FROM runs WHERE id='run_21'"
-      writes <- newTVarIO (0 :: Int)
+      counters <- mapM (const (newTVarIO (0 :: Int))) [1, 2 :: Int]
       let download = heldBy (\send -> withArtifactDownload store proof handle (\view _ _ -> send view))
-      withAsync (download writes) $ \response -> do
-        reached [writes] >>= check "the held download reaches its first write" . (== Just ())
+      (outcomes, ()) <- concurrently (mapConcurrently download counters) $ do
+        reached counters >>= check "two held downloads reach their first writes at the same time" . (== Just ())
         files <- try @StoreFailure (withStoreFiles store (\_ -> pure ()))
-        check "the file slot is available during a held download" (files == Right ())
+        check "the file slot is available during two held downloads" (files == Right ())
         reader <- try @StoreFailure (withStoreReader store (pure ()))
-        check "a reader place is available during a held download" (reader == Right ())
+        check "a reader place is available during two held downloads" (reader == Right ())
         configuration <- withStoreConfiguration store (\_ _ -> pure ())
-        check "the configuration guard is available during a held download" (configuration == Right ())
+        check "the configuration guard is available during two held downloads" (configuration == Right ())
         begun <- getMonotonicTimeNSec
         (ingested, _) <- timedIngestAt store association 8 (RunCompletedV2 1 0 reference)
-        check "ingestion of the downloaded run completes during a held download" (ingested == Right False)
-        second <- try @Command.CommandFailure (withArtifactDownload store proof handle (\_ _ _ -> pure ()))
-        finished <- getMonotonicTimeNSec
-        check "the download quota refuses a second concurrent download" (second == Left Command.StorageQuota)
-        check "that ingestion and that refusal do not wait for the held download" (finished - begun < 5000000000)
-        outcome <- wait response
-        check "the held download completes under its authorization" (outcome == Right ())
-        atomically (readTVar writes) >>= check "the held download sends every write" . (== chunks)
-      again <- try @Command.CommandFailure (withArtifactDownload store proof handle (\_ _ bytes -> pure (BS.length bytes)))
-      check "the completed download returns the download quota" (either (const False) (> 0) again)
+        check "ingestion of the downloaded run completes during two held downloads" (ingested == Right False)
+        ingestedAt <- getMonotonicTimeNSec
+        check "that ingestion does not wait for the held downloads" (ingestedAt - begun < 5000000000)
+        third <- try @Command.CommandFailure (withArtifactDownload store proof handle (\_ _ _ -> pure ()))
+        refusedAt <- getMonotonicTimeNSec
+        check "a third download refuses with storage-quota while both places stay held" (third == Left Command.StorageQuota)
+        check "that third download waits for the five-second allowance before it refuses"
+          (refusedAt - ingestedAt >= 5000000000 && refusedAt - ingestedAt < 8000000000)
+      check "both held downloads complete under their authorization" (all (== Right ()) outcomes)
+      mapM (atomically . readTVar) counters >>= check "both held downloads send every write" . all (== chunks)
+      -- A download past its total deadline stops at its next write boundary
+      -- and returns its place.
+      deadlineWrites <- newTVarIO (0 :: Int)
+      aborted <- heldBy (\send -> withArtifactDownloadWithin 2000000 store proof handle (\view _ _ -> send view)) deadlineWrites
+      check "a download past its total deadline is aborted" (aborted == Left (CommandRefusal Command.StorageUnavailable))
+      atomically (readTVar deadlineWrites) >>= check "the aborted download sends no write after its deadline" . (== 1)
+      entered <- newEmptyMVar
+      release <- newEmptyMVar
+      holder <- async (withArtifactDownload store proof handle (\view _ _ -> releaseResponseLoans view >> putMVar entered () >> takeMVar release))
+      takeMVar entered
+      begun <- getMonotonicTimeNSec
+      second <- try @Command.CommandFailure (withArtifactDownload store proof handle (\_ _ bytes -> pure (BS.length bytes)))
+      finished <- getMonotonicTimeNSec
+      check "the aborted download returned its place" (either (const False) (> 0) second)
+      check "a second download beside one held download does not wait" (finished - begun < 5000000000)
+      putMVar release ()
+      wait holder
     -- A page response of the outputs owner materializes under the file slot,
     -- the reader charge and the configuration loan, and Application.servePage
     -- sends it. The page-set reservation stays charged across the writes, and
@@ -1582,19 +1600,28 @@ rawChecks store proof association handle reference directory original = do
         (Left (StoreCorrupt _ _),Left (StoreCorrupt _ _)) -> True
         _ -> False)
       BS.writeFile result original
-  -- The held download returns its loans before it holds, as a response does
-  -- before its first network write. Only the download quota stays charged.
+  -- Two held downloads return their loans before they hold, as a response
+  -- does before its first network write. Only their places stay charged.
   entered <- newEmptyMVar
   release <- newEmptyMVar
-  reader <- async (withArtifactDownload store proof handle (\view _ _ -> releaseResponseLoans view >> putMVar entered () >> takeMVar release))
-  takeMVar entered
-  overlapping <- try @Command.CommandFailure (withArtifactDownload store proof handle (\_ _ _ -> error "second response admitted" :: IO ()))
-  check "the download quota refuses a second concurrent download at once" (overlapping == Left Command.StorageQuota)
+  holders <- mapM (const (async (withArtifactDownload store proof handle (\view _ bytes ->
+    releaseResponseLoans view >> putMVar entered () >> takeMVar release >> pure bytes)))) [1, 2 :: Int]
+  takeMVar entered >> takeMVar entered
   replayed <- faultOf (ingestRecordedCompletion store association reference)
-  check "ingestion is not blocked while a download holds the quota" (replayed == Right False)
+  check "ingestion is not blocked while two downloads hold both places" (replayed == Right False)
+  begun <- getMonotonicTimeNSec
+  third <- async (withArtifactDownload store proof handle (\_ _ bytes -> pure bytes))
+  threadDelay 1000000
+  poll third >>= check "a third download waits while both places are held" . maybe True (const False)
   putMVar release ()
-  wait reader
-  withArtifactDownload store proof handle (\_ _ bytes -> check "the completed download returns the quota" (bytes == original))
+  thirdBytes <- wait third
+  finished <- getMonotonicTimeNSec
+  check "the third download returns the exact bytes when a place frees" (thirdBytes == original)
+  check "the third download completes within the five-second allowance" (finished - begun < 5000000000)
+  putMVar release ()
+  held <- mapM wait holders
+  check "two concurrent downloads both return the exact bytes" (length held == 2 && all (== original) held)
+  withArtifactDownload store proof handle (\_ _ bytes -> check "the completed downloads return their places" (bytes == original))
 
 request :: CoordinationStore -> RunAssociation -> Text -> Text -> IO Commands.CommandRequest
 request store association key name = do

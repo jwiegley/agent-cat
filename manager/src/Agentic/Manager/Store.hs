@@ -7,7 +7,7 @@
 -- | A single leased SQLite writer with strict, bounded transaction results.
 module Agentic.Manager.Store
   ( CoordinationStore, StoreIdentity (..), StoreFailure (..), Checkpoint (..),
-    withCoordinationStore, withServingStore, withServingStoreWith, storeManagerFlow, pruneManagerLog, storeIdentity, checkpointStore, withStoreConfiguration, withStoreCatalogues, withStoreRetentionRoot, withStoreRetentionRootLoan, withStoreArtifactResponse, validateStoreHistoryBindings, revalidateStoreRetentionRoot, storeInvocations, withStoreFiles, withStoreFileLoan, withStoreReader, withStoreAdmission, withStoreWorker, StoreWorker, createStoreWorkerGroup, storeWorkerCleanupConfirmed, requestStoreWorkersStop, awaitStoreWorkersStop, retryStoreCleanup, probeStoreCapabilities,
+    withCoordinationStore, withServingStore, withServingStoreWith, storeManagerFlow, pruneManagerLog, storeIdentity, checkpointStore, withStoreConfiguration, withStoreCatalogues, withStoreRetentionRoot, withStoreRetentionRootLoan, withStoreArtifactResponse, withStoreArtifactResponseWithin, artifactResponsePlaces, artifactResponseWait, artifactResponseDeadline, validateStoreHistoryBindings, revalidateStoreRetentionRoot, storeInvocations, withStoreFiles, withStoreFileLoan, withStoreReader, withStoreAdmission, withStoreWorker, StoreWorker, createStoreWorkerGroup, storeWorkerCleanupConfirmed, requestStoreWorkersStop, awaitStoreWorkersStop, retryStoreCleanup, probeStoreCapabilities,
     withStoreAdministration, tryWithStoreCatalogues, tryWithStoreFiles,
     AuthorizationWatch, withStoreAuthorizationWatch, withStoreConfigurationWatch, withStoreCataloguesWatch, withStoreCatalogueContextWatch, authorizationWatchCurrent, withAuthorizationObservation, withAuthorizationReadObservation, awaitAuthorizationChange,
     CommitDeadline, withCommitDeadline, withPreparedCommitDeadline, enforceCommitDeadline, enforceAdmissionFence, managerFlowRoom, appendCommandRecord, appendReviewRecord, noticeAfterCommit, PostCommit, noPostCommit, takePostCommit, appendPostCommit, Transaction, execute, query, refuseTransaction, runTransaction, runRead, StoreAdmission (..), runTransactionWithAdmission, runReadWithAdmission, transactionGeneration,
@@ -77,6 +77,7 @@ import System.Process (CreateProcess)
 import System.Posix.Types (Fd)
 import System.Posix.User (getEffectiveUserID)
 import System.Timeout (timeout)
+import GHC.Clock (getMonotonicTimeNSec)
 
 -- | Durable identities and one fresh lifetime identifier, never live worker authority.
 data StoreIdentity = StoreIdentity
@@ -100,9 +101,9 @@ data Checkpoint = Checkpoint
 -- | One connection and admission cell. Every Store action can spend its
 -- existing five-second operation allowance waiting for the cell. The slot
 -- tuple holds the file slot, the reader count, the authorization cell and the
--- download quota.
+-- count of charged artifact response places.
 data CoordinationStore = CoordinationStore !InstalledConfiguration !PrivateRoot !SQL.Database !StoreIdentity
-  !(MVar ()) !(IORef Bool) !(IORef Bool) !Fd !(MVar (), TVar Int, TVar (Maybe Word64), TVar Bool) !(TVar WorkerRegistry) !(MVar ()) !(IORef Bool) !(TVar (Bool, Maybe (TMVar (), MVar ())))
+  !(MVar ()) !(IORef Bool) !(IORef Bool) !Fd !(MVar (), TVar Int, TVar (Maybe Word64), TVar Int) !(TVar WorkerRegistry) !(MVar ()) !(IORef Bool) !(TVar (Bool, Maybe (TMVar (), MVar ())))
   !(Maybe ManagerFlow)
 
 -- | Original registrations and their first stop batch. A scoped fence is not permanent quarantine.
@@ -361,7 +362,7 @@ openStore mode installed root lease = storageErrors $ do
         forM_ (managerFlowOpenFailure manager) (recordFaultLine "manager-log open" . ("flow " <>) . managerFlowOpenWord)
         manager <$ appendLifetime manager total (Lifetime generation reconciliation listed omitted)
     CoordinationStore installed root db (StoreIdentity schemaVersion epoch stream generation)
-      <$> newMVar () <*> newIORef False <*> newIORef False <*> pure lease <*> ((,,,) <$> newMVar () <*> newTVarIO 0 <*> newTVarIO (Just 0) <*> newTVarIO False) <*> newTVarIO (WorkerRegistry False False Nothing []) <*> newMVar () <*> newIORef False <*> newTVarIO (False, Nothing) <*> pure flow
+      <$> newMVar () <*> newIORef False <*> newIORef False <*> pure lease <*> ((,,,) <$> newMVar () <*> newTVarIO 0 <*> newTVarIO (Just 0) <*> newTVarIO 0) <*> newTVarIO (WorkerRegistry False False Nothing []) <*> newMVar () <*> newIORef False <*> newTVarIO (False, Nothing) <*> pure flow
   where
     databaseName = "coordination.sqlite3"
     checkCompanion name = do
@@ -892,19 +893,55 @@ withStoreRetentionRootLoan store@(CoordinationStore installed _ _ _ _ _ _ _ _ _ 
   withStoreFileLoan store $ \files _ ->
     withConfiguredRetentionRootLoan installed path profile $ \close root -> action (close >> files) root
 
+-- | The number of artifact responses that can hold captured bytes across
+-- their network writes at the same time. With the 64 MiB artifact ceiling,
+-- at most two such responses of at most 64 MiB each are held per Store.
+artifactResponsePlaces :: Int
+artifactResponsePlaces = 2
+
+-- | How long, in microseconds, a download waits for an artifact response
+-- place before it refuses. This is the ordinary five-second Store allowance.
+artifactResponseWait :: Int
+artifactResponseWait = 5000000
+
+-- | The total deadline of one artifact response, in microseconds, counted
+-- from the charge of its place.
+artifactResponseDeadline :: Int
+artifactResponseDeadline = 300000000
+
 -- | One artifact response, which holds its captured bytes across its network
--- writes after it has returned the file slot. The Store has a download quota
--- of one, so at most one artifact response of at most 64 MiB is held across
--- writes. The quota is accounting, not a guard: it is charged before the file
--- slot, and a charged quota refuses at once. Nothing waits for it, so it adds
--- no wait to the lock order file slot, configuration, database, and a slow
--- download delays no other operation. A Nothing result proves that the action
--- did not run. The quota is returned when the action ends, after its last write.
-withStoreArtifactResponse :: CoordinationStore -> IO a -> IO (Maybe a)
-withStoreArtifactResponse (CoordinationStore _ _ _ _ _ closed _ _ (_,_,_,quota) _ _ _ _ _) action = mask $ \restore -> do
+-- writes after it has returned the file slot. The Store has
+-- 'artifactResponsePlaces' places for such responses. The place is charged
+-- before the file slot. A download that finds every place charged waits for
+-- a place for at most 'artifactResponseWait', with no lock held, and a
+-- Nothing result then proves that the action did not run. The wait comes
+-- before the file slot, so the lock order stays file slot, configuration,
+-- database, and a held place delays no other Store operation.
+--
+-- The action receives a deadline check. After 'artifactResponseDeadline'
+-- from the charge, the check throws 'StoreDeadline'. The response runs the
+-- check at each write boundary, so a client that reads slowly cannot hold a
+-- place without end. The place is returned when the action ends, after its
+-- last write or after the abort.
+withStoreArtifactResponse :: CoordinationStore -> (IO () -> IO a) -> IO (Maybe a)
+withStoreArtifactResponse = withStoreArtifactResponseWithin artifactResponseDeadline
+
+-- | 'withStoreArtifactResponse' with an explicit total deadline in
+-- microseconds. Only the tests use a deadline other than
+-- 'artifactResponseDeadline'.
+withStoreArtifactResponseWithin :: Int -> CoordinationStore -> (IO () -> IO a) -> IO (Maybe a)
+withStoreArtifactResponseWithin deadline (CoordinationStore _ _ _ _ _ closed _ _ (_,_,_,places) _ _ _ _ _) action = mask $ \restore -> do
   readIORef closed >>= \done -> when done (throwIO StoreClosed)
-  charged <- atomically $ readTVar quota >>= \held -> if held then pure False else True <$ writeTVar quota True
-  if charged then (Just <$> restore action) `finally` atomically (writeTVar quota False) else pure Nothing
+  expired <- registerDelay artifactResponseWait
+  charged <- atomically $
+    (readTVar places >>= \held -> check (held < artifactResponsePlaces) >> True <$ writeTVar places (held + 1))
+      `orElse` (False <$ (readTVar expired >>= check))
+  if not charged then pure Nothing else do
+    let release = atomically (modifyTVar' places (subtract 1))
+    begun <- getMonotonicTimeNSec
+    let end = begun + fromIntegral deadline * 1000
+        within = getMonotonicTimeNSec >>= \now -> when (now >= end) (throwIO StoreDeadline)
+    (Just <$> restore (action within)) `finally` release
 
 -- | One ordinary file operation, joined by store close. It waits for the file
 -- slot within a fresh five-second allowance, and a slot that stays held for

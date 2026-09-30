@@ -14,6 +14,7 @@ import ssl
 import stat
 import subprocess
 import sys
+import threading
 import time
 
 source, work, runner = map(Path, sys.argv[1:4])
@@ -82,8 +83,9 @@ boundary = len(sys.argv) == 6 and sys.argv[5] == BOUNDARY
 # The pages mode checks the WM-025 page and read verification of report
 # section 7 through the running protected manager: multi-page sets and their
 # exact ETags, token binding and expiry, the per-client quota, a concurrent
-# mutation, revocation, an interrupted send, the aggregate bound and
-# redaction. Each numbered case prints its own PASS line. It runs one manager
+# mutation, revocation, an interrupted send, the aggregate bound,
+# redaction, and concurrent artifact downloads of two credentials. Each
+# numbered case prints its own PASS line. It runs one manager
 # lifetime and does not enter the restart loop.
 PAGES = "pages"
 pages_mode = len(sys.argv) == 6 and sys.argv[5] == PAGES
@@ -1934,6 +1936,44 @@ def page_checks():
             print(f"PASS pages case 8: {len(bodies)} page bodies hold none of {len(markers)} private markers: the fixture",
                   "root with the manager root and run stores, native run identifiers, argv and the worker environment value;",
                   f"the adapter name appears only in {labelled} runtime targetLabel values of run snapshot pages", flush=True)
+
+            # Case 9. Two credentials download the same artifact at the same
+            # time. The Store has two artifact response places, so neither
+            # download is refused, and both receive the verified bytes.
+            artifact = verified_download(run, client, authorized)
+            _, d_auth = issue("download", ["observe"])
+            rounds = 8
+            for number in range(rounds):
+                start = threading.Barrier(2)
+                received = [None, None]
+
+                def download(slot, credential):
+                    connection = http.client.HTTPSConnection("127.0.0.1", port, context=context, timeout=7)
+                    try:
+                        connection.connect()
+                        start.wait(timeout=7)
+                        connection.request("GET", artifact["download"], headers=credential | {"Accept": "application/octet-stream"})
+                        response = connection.getresponse()
+                        received[slot] = (response.status, response.getheader("Content-Type"),
+                                          response.read(int(artifact["bytes"]) + 1048577))
+                    finally:
+                        connection.close()
+
+                threads = [threading.Thread(target=download, args=(slot, credential))
+                           for slot, credential in enumerate((authorized, d_auth))]
+                for thread in threads:
+                    thread.start()
+                for thread in threads:
+                    thread.join(timeout=20)
+                for slot, outcome in enumerate(received):
+                    assert outcome is not None, ("concurrent download ended without a response", number, slot)
+                    status, kind, body = outcome
+                    assert status == 200, ("concurrent download refused", number, slot, status, body[:200])
+                    assert kind == "application/octet-stream", ("concurrent download type", number, slot, kind)
+                    assert len(body) == int(artifact["bytes"]) and hashlib.sha256(body).hexdigest() == artifact["sha256"], (
+                        "concurrent download bytes", number, slot)
+            print(f"PASS pages case 9: in {rounds} rounds, two credentials downloaded the same artifact at the same time",
+                  "through the running manager, and both received its exact verified bytes", flush=True)
         finally:
             if process.poll() is None:
                 process.terminate()

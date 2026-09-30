@@ -46,10 +46,11 @@ allowance, and a slot that stays held for the whole allowance is `StoreBusy`.
 A coordinator probe does not wait. When the slot is held, it returns at once
 and proves that its callback did not enter.
 Their lock order is file slot, configuration, then database. An artifact
-download also charges the download quota of the Store before the file slot,
-as `manager/ARTIFACTS.md` describes. The quota is accounting, not a lock: a
-charged quota refuses a second download at once, and no operation waits for
-it.
+download also charges one of the two artifact response places of the Store
+before the file slot, as `manager/ARTIFACTS.md` describes. When both places
+are charged, a download waits for a place for at most five seconds, with no
+lock held, and then refuses with `storage-quota`. No other operation waits for
+a place.
 
 ## Database and schema
 
@@ -211,10 +212,14 @@ recorded like any other Store refusal. The response then stops before its next
 write. After the status and headers are sent, the client receives a truncated
 body. The manager does not resend the response or any part of it.
 
-An artifact download holds its captured bytes across its writes under the
-download quota, not under the file slot. That quota limits the Store to one
-such download of at most 64 MiB. It refuses another download at once, and no
-operation waits for it. A page response holds its page-set reservation across
+An artifact download holds its captured bytes across its writes under an
+artifact response place, not under the file slot. The two places limit the
+Store to two such downloads of at most 64 MiB each. A third download waits for
+a place for at most five seconds and then refuses, and no other operation
+waits for a place. A download has a total deadline of 300 seconds from the
+charge of its place. Its view checks the deadline before each write, so a
+download past the deadline stops at its next write boundary and returns its
+place. A page response holds its page-set reservation across
 its writes, and a command receipt holds nothing but its authorization watch.
 
 A server-sent event stream holds no Store loan between its batch reads. Each

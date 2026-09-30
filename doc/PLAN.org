@@ -3588,7 +3588,7 @@ Non-blocking review findings from subtask B5 part 1 of acat-response-ingestion-b
 :LABELS:   []
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-30 Wed 02:07]
-:MODIFIED: [2026-09-30 Wed 02:08]
+:MODIFIED: [2026-09-30 Wed 12:00]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -3615,6 +3615,20 @@ Non-blocking review findings from subtask B6 part 2 of acat-response-ingestion-b
     "created_by": "johnw",
     "metadata": "{}",
     "thread_id": ""
+  }
+]
+#+end_src
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 405,
+    "issue_id": "acat-b6-response-review-findings-gxmf",
+    "author": "johnw",
+    "text": "Phase B part 2 subtask C5 changes item 1: the quota is now two places per Store with a five-second wait and a 300-second total deadline, so a second concurrent download no longer refuses. The charge still comes before id validation and authorization (tracked again as item 4 of acat-c5-download-places-fess-findings-zmog). Item 5 changes: a download that finds both places held now refuses with 429 storage-quota after a five-second wait. Evidence: build of manager-artifact-check, agentic-run and routing-fixed-point-probe with -ftui-tests; manager-artifact-check response-order and response-ingestion at -N8; service_http.py pages at N8 with the new two-client case 9; make -C doc check; the Phase A journey at N8 (logs in the private resume-20260923 evidence directory; fess report fess/b2-C5-r1.md, non-blocking, findings filed as acat-c5-download-places-fess-findings-zmog). The issue stays open.",
+    "created_at": "2026-09-30T19:00:56Z"
   }
 ]
 #+end_src
@@ -3971,6 +3985,30 @@ Non-blocking findings of the fess audit of subtask C4 of Phase B part 2 (floor i
 5. (low) doc/agent-cat.texi near line 3709: one source line is much longer than the usual wrap width. Rewrap the paragraph.
 
 Other C4 limitations: the pruner uses the fixed 604800-second age and does not read replaySeconds (the documentation states that the age equals the fixed replaySeconds limit). The N8 journey never reaches a seal, so pruned paths are covered only by manager-command-check flow and direct agentic-run flow runs on pruned fixtures.
+
+* TODO [#D] Resolve C5 fess findings on concurrent artifact downloads
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-c5-download-places-fess-findings-zmog
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-30 Wed 12:00]
+:MODIFIED: [2026-09-30 Wed 12:00]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of the fess audit of Phase B part 2 subtask C5 (concurrent artifact downloads wait within the allowance and end at a total deadline). Source: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/fess/b2-C5-r1.md.
+
+1. (medium) Pages case 9 of manager/test/service_http.py (lines 1940-1976) starts two downloads at once, but the mixed-workflow artifact is small, so each response probably ends in one write and the two need not overlap in the running manager. The case would likely also pass against the old immediate refusal. Fix: make one client hold its response open while the second completes, for example with a larger artifact and a paused read after the headers.
+2. (low, resolved on landing) doc/workflow-manager-handoff.md still listed the immediate refusal as an open finding and asked for an operator ruling. The Integrator updated those lines in the C5 commit.
+3. (low) A deadline abort throws StoreDeadline inside authorizationIO "authorization revalidation" (Authorization.hs:270, Store.hs:943). The fault log records it as a storage-unavailable erasure with the revalidation context, so it cannot tell a deadline abort from a Store failure during revalidation. Fix: record the deadline abort under its own context or label.
+4. (low) The place is charged before id validation and authorization (Artifacts.hs:127-130), the existing item in acat-b6-response-review-findings-gxmf item 1. While both places are held, an unknown-id or unauthorized request now waits 5 s and gets 429 storage-quota instead of its own refusal. Fix: charge after the id and authorization transaction and before capture.
+5. (low) A download that waits for a place does not observe Store close (Store.hs:935-938). After close it waits out the 5 s allowance and returns storage-quota, not StoreClosed. Fix: add the closed flag as an orElse branch of the wait, or check it again after the wait.
+
+Other C5 limitations: the new native checks were not shown failing against the old code. A deadline abort sends a cut-off body to the client and adds no new fault label.
 
 * TODO [#E] Record that the Cabal 3.16.1.0 expectation means cabal-install
 :PROPERTIES:
@@ -9166,7 +9204,7 @@ HIGH (deep/alexey): SqZero has no CompleteCSemiring and no PMod P M beyond the d
 :LABELS:   ["workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-30 Wed 05:40]
-:MODIFIED: [2026-09-30 Wed 05:40]
+:MODIFIED: [2026-09-30 Wed 12:00]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -9182,6 +9220,20 @@ Findings of the Phase B part 1 end-of-part review (packages and safety lenses ov
 5. Low. An event stream holds no Store reader charge for its lifetime, so only the subscription quota and globalConnections bound the number of streams.
 6. Low. Held controls of a run that fails before carrying them, for a reason other than cancel, get no acknowledgement if the process exits first.
 7. Low. Some assertions of the boundary and events-lifecycle modes accept two refusal codes (400 or 404, 429 or 503).
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 404,
+    "issue_id": "acat-phase-b1-review-followups-dk1v",
+    "author": "johnw",
+    "text": "Phase B part 2 subtask C5 resolves item 1. The download quota is now two places per Store (artifactResponsePlaces). A download that finds both places charged waits up to five seconds in STM, before the file slot and with no lock held, then refuses with 429 storage-quota. A total deadline of 300 seconds (artifactResponseDeadline) aborts a response at its next write boundary and returns its place. The pages mode of manager/test/service_http.py has a two-client download case. Evidence: build of manager-artifact-check, agentic-run and routing-fixed-point-probe with -ftui-tests; manager-artifact-check response-order and response-ingestion at -N8; service_http.py pages at N8 with the new two-client case 9; make -C doc check; the Phase A journey at N8 (logs in the private resume-20260923 evidence directory; fess report fess/b2-C5-r1.md, non-blocking, findings filed as acat-c5-download-places-fess-findings-zmog). Items 2 to 7 remain open, so this issue stays open.",
+    "created_at": "2026-09-30T19:00:56Z"
+  }
+]
+#+end_src
 
 * DONE [#E] fanT fusion holds only laxly at m=0 after the l59 repair
 :PROPERTIES:
@@ -16485,7 +16537,7 @@ Network mutation remains behind G3 until the required evidence is complete.
 :LABELS:   ["p5","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-26 Sat 23:41]
+:MODIFIED: [2026-09-30 Wed 12:00]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-028
 :SOURCE_REPO: agent-cat
@@ -16607,6 +16659,20 @@ public or production deployment.
     "created_by": "johnw",
     "metadata": "{}",
     "thread_id": ""
+  }
+]
+#+end_src
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 406,
+    "issue_id": "acat-wm-028-g1n0",
+    "author": "johnw",
+    "text": "Phase B part 2 subtask C5 adds the two-client artifact download case to the pages mode of manager/test/service_http.py and the native wait and deadline checks in manager-artifact-check. Evidence: build of manager-artifact-check, agentic-run and routing-fixed-point-probe with -ftui-tests; manager-artifact-check response-order and response-ingestion at -N8; service_http.py pages at N8 with the new two-client case 9; make -C doc check; the Phase A journey at N8 (logs in the private resume-20260923 evidence directory; fess report fess/b2-C5-r1.md, non-blocking, findings filed as acat-c5-download-places-fess-findings-zmog). The package stays open for the closeout review.",
+    "created_at": "2026-09-30T19:00:57Z"
   }
 ]
 #+end_src

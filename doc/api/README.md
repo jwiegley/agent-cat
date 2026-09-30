@@ -58,7 +58,7 @@ limits apply before unbounded allocation and are not character counts.
 | JSON request body | 2097152 bytes. |
 | Encoded native control | 1048576 bytes, including its framing. |
 | Capture and aggregate inputs of one request | 67108864 bytes. |
-| Verified artifact content | 67108864 bytes, with one download in progress for each manager. A second download refuses at once with `storage-quota`. |
+| Verified artifact content | 67108864 bytes, with at most two downloads in progress for each manager. A third download waits up to five seconds for a download to end and then refuses with `storage-quota`. A download that lasts longer than 300 seconds stops at its next write, and the client receives a truncated body. |
 | Complete SSE block | 16384 bytes. |
 | JSON page | 1048576 bytes. |
 | Materialized page set | 67108864 bytes, two active sets per client, expiring after 60 seconds. |

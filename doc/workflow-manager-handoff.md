@@ -238,15 +238,13 @@ same consent chain as step 12 of the gate. The packages lens ran no check.
 The findings that the list below marks as not filed are now in one
 follow-up item, `acat-phase-b1-review-followups-dk1v`.
 
-- Medium, not filed. The download quota of one refuses a second concurrent
-  download at once with 429 `storage-quota`. Only the 5-second timeout of
-  each 16 KiB write bounds a download, so one slow client can hold a 64 MiB
-  download for hours and refuse every other download. Before B6 a second
-  download waited up to five seconds for the file slot, as the bounded-wait
-  decision of 2026-09-29 intends. The disposition is a wait for the quota
-  within the five-second allowance before the file slot, a total deadline
-  for one download, or an operator ruling on the immediate refusal, and a
-  two-client download case in WM-028.
+- Medium, resolved by Phase B part 2 subtask C5. The download quota was one
+  place, and a second concurrent download refused at once. The quota is now
+  two places. A download that finds both places charged waits up to five
+  seconds for a place, before the file slot and with no lock held, and then
+  refuses with 429 `storage-quota`. A total deadline of 300 seconds aborts
+  a response at its next write and returns its place. The `pages` mode of
+  `manager/test/service_http.py` has a two-client download case.
 - Medium, not filed. `GET /v1/requests` and `GET /v1/runs` select every
   request and run of the authorized profiles with no row bound. The query
   builds one `json_group_array` over all rows, and the service materializes
@@ -312,8 +310,7 @@ for each said partial. WM-025 and `acat-en4g` stay open.
    actor-class serving (B17) as separate decisions, recorded in the
    governing goal. After acceptance, B15, B16 and B17 land, and the route
    checks of this gate run.
-2. The operator decides on B18, and rules on the immediate refusal of a
-   second concurrent download.
+2. The operator decides on B18.
 3. Phase B part 2 follows: WM-027, actor-flow increment 3 (`acat-c18n`),
    WM-028 with the negative checks of increments 2 and 3 and the
    cause-replacement sites, and G2 with its witness of protected

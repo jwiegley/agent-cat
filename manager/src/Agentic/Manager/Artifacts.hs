@@ -3,7 +3,7 @@
 
 -- | Authorized observations and exclusive exports of retained Runtime artifacts.
 module Agentic.Manager.Artifacts
-  ( withArtifactDownload, withRunOutputs, withRunOutputsSource, withRunExports, withRunExportsSource, submitExport, readExport, withExport, reconcileExport
+  ( withArtifactDownload, withArtifactDownloadWithin, withRunOutputs, withRunOutputsSource, withRunExports, withRunExportsSource, submitExport, readExport, withExport, reconcileExport
   ) where
 
 import Agentic.Manager.Authorization
@@ -102,17 +102,31 @@ metadata ident run kind code bytes = object
    "download" .= ("/v1/artifacts/" <> ident)]
 
 -- | The callback must finish sending before returning and must not retain bytes.
--- Store's download quota of one covers the whole download: capture,
--- verification, authorization and every write. At most one <=64MiB artifact
--- response is held per Store, with no unaccounted response queue. A download
--- that finds the quota charged refuses at once with 'Command.StorageQuota'
--- and does not wait. The file slot, the reader charge and the configuration
--- loan cover capture and materialization only. The view returns them before
--- the first network write, and its checks before each write stop a response
--- whose authorization ended.
+-- One artifact response place of the Store covers the whole download:
+-- capture, verification, authorization and every write. The Store has
+-- 'artifactResponsePlaces' places, so at most two <=64MiB artifact responses
+-- are held per Store, with no unaccounted response queue. A download that
+-- finds every place charged waits for a place for at most
+-- 'artifactResponseWait' (five seconds), with no lock held, and then refuses
+-- with 'Command.StorageQuota'. The file slot, the reader charge and the
+-- configuration loan cover capture and materialization only. The view returns
+-- them before the first network write, and its checks before each write stop
+-- a response whose authorization ended. The same checks stop a response that
+-- reaches 'artifactResponseDeadline' (300 seconds) at its next write
+-- boundary, and the place is then returned.
 withArtifactDownload :: CoordinationStore -> CredentialProof -> Text -> (AuthorizedView -> Value -> BS.ByteString -> IO a) -> IO a
-withArtifactDownload store proof ident respond =
-  withStoreArtifactResponse store (artifactDownload store proof ident respond)
+withArtifactDownload store = placedDownload (withStoreArtifactResponse store) store
+
+-- | 'withArtifactDownload' with an explicit total deadline in microseconds.
+-- Only the tests use a deadline other than 'artifactResponseDeadline'.
+withArtifactDownloadWithin :: Int -> CoordinationStore -> CredentialProof -> Text -> (AuthorizedView -> Value -> BS.ByteString -> IO a) -> IO a
+withArtifactDownloadWithin deadline store = placedDownload (withStoreArtifactResponseWithin deadline store) store
+
+-- The response place wraps the whole download, and its deadline check joins
+-- the checks that the view runs before each write.
+placedDownload :: ((IO () -> IO a) -> IO (Maybe a)) -> CoordinationStore -> CredentialProof -> Text -> (AuthorizedView -> Value -> BS.ByteString -> IO a) -> IO a
+placedDownload placed store proof ident respond =
+  placed (\within -> artifactDownload store proof ident (\view value bytes -> attachResponseCheck view within >> respond view value bytes))
     >>= maybe (throwIO Command.StorageQuota) pure
 
 artifactDownload :: CoordinationStore -> CredentialProof -> Text -> (AuthorizedView -> Value -> BS.ByteString -> IO a) -> IO a

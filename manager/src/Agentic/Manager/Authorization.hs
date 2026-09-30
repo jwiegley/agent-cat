@@ -5,7 +5,7 @@
 module Agentic.Manager.Authorization
   ( CredentialProof, authenticateCredential, currentClient, authorizeProfile, proofGeneration, credentialRateKey,
     AuthorizedView, withAuthorizedView, withAuthorizedResponse, withAuthorizedResponseLimits, withAuthorizedCatalogues, withAuthorizedCatalogueContext, authorizedViewRevision, authorizedCursorRevision, catalogueAuthorization, revalidateAuthorizedView, awaitAuthorizedView, awaitAuthorizationWakeup,
-    releaseResponseLoans, attachResponseLoan ) where
+    releaseResponseLoans, attachResponseLoan, attachResponseCheck ) where
 
 import Agentic.Manager.Fault (configurationLoan, storeFailureRefusal)
 import Agentic.Manager.Profile (ConfigurationLimits, Discovery, PublicProfile, publicId, publicRevision)
@@ -92,10 +92,11 @@ data AuthorizedView = AuthorizedView !AuthorizationWatch !ViewObservation !ViewF
 -- 'releaseResponseLoans' returns them, it acquires a reader charge, the
 -- configuration guard and one SQL read for each check alone, in the lock
 -- order configuration, then database, and returns them before the check
--- ends. The file slot is not part of any check.
+-- ends. The file slot is not part of any check. A response observation also
+-- holds the checks that its owner attached with 'attachResponseCheck'.
 data ViewObservation
   = BorrowedObservation !(IO ViewFacts)
-  | ResponseObservation !(IO ViewFacts) !(IO ViewFacts) !(IORef (Maybe (IO ())))
+  | ResponseObservation !(IO ViewFacts) !(IO ViewFacts) !(IORef (Maybe (IO ()))) !(IORef (IO ()))
 
 -- Process and execution-profile lifetimes are distinct from the permission view.
 -- Page bindings retain profile revisions. Event cursors retain current grants
@@ -138,8 +139,9 @@ withAuthorizedResponseLimits store proof profile scopes action = do
   runRead store (currentClient proof) >>= either throwIO (const (pure ()))
   result <- withStoreConfigurationWatch store $ \release watch limits profiles -> do
     loans <- newIORef (Just release)
+    checks <- newIORef (pure ())
     let fresh = withStoreReader store (currentViewFacts store proof profile scopes)
-    withView watch (\borrowed -> ResponseObservation borrowed fresh loans)
+    withView watch (\borrowed -> ResponseObservation borrowed fresh loans checks)
       (profileViewFacts store proof profile scopes profiles) $ \view -> action view limits
   configurationLoan "authorization response" result
 
@@ -148,7 +150,7 @@ withAuthorizedResponseLimits store proof profile scopes action = do
 -- check alone. A second call, or a call on a view that borrows the loans of
 -- its owner, does nothing.
 releaseResponseLoans :: AuthorizedView -> IO ()
-releaseResponseLoans (AuthorizedView _ (ResponseObservation _ _ loans) _) = mask_ $
+releaseResponseLoans (AuthorizedView _ (ResponseObservation _ _ loans _) _) = mask_ $
   atomicModifyIORef' loans (\pending -> (Nothing, pending)) >>= sequence_
 releaseResponseLoans (AuthorizedView _ (BorrowedObservation _) _) = pure ()
 
@@ -158,11 +160,22 @@ releaseResponseLoans (AuthorizedView _ (BorrowedObservation _) _) = pure ()
 -- has already returned its loans, the outer loan is returned at once. A view
 -- that borrows the loans of its owner leaves the outer loan to its own scope.
 attachResponseLoan :: AuthorizedView -> IO () -> IO ()
-attachResponseLoan (AuthorizedView _ (ResponseObservation _ _ loans) _) release = mask_ $
+attachResponseLoan (AuthorizedView _ (ResponseObservation _ _ loans _) _) release = mask_ $
   atomicModifyIORef' loans (\pending -> case pending of
     Just held -> (Just (held >> release), pure ())
     Nothing -> (Nothing, release)) >>= id
 attachResponseLoan (AuthorizedView _ (BorrowedObservation _) _) _ = pure ()
+
+-- | Join a check of the response owner, such as the total deadline of an
+-- artifact response, to every later revalidation of a response view. The
+-- check runs first in each revalidation, so it runs before each network
+-- write. A check that throws refuses the revalidation, and the response
+-- stops before its next write. A view that borrows the loans of its owner
+-- leaves such checks to its own scope.
+attachResponseCheck :: AuthorizedView -> IO () -> IO ()
+attachResponseCheck (AuthorizedView _ (ResponseObservation _ _ _ checks) _) extra =
+  atomicModifyIORef' checks (\held -> (held >> extra, ()))
+attachResponseCheck (AuthorizedView _ (BorrowedObservation _) _) _ = pure ()
 
 withView :: AuthorizationWatch -> (IO ViewFacts -> ViewObservation) -> IO ViewFacts -> (AuthorizedView -> IO a) -> IO a
 withView watch observation observe action =
@@ -200,8 +213,9 @@ withAuthorizedCatalogueContext store proof scopes action = do
   runRead store (currentClient proof) >>= either throwIO (const (pure ()))
   result <- withStoreCatalogueContextWatch store $ \release watch limits profiles catalogues invocations -> do
     loans <- newIORef (Just release)
+    checks <- newIORef (pure ())
     let fresh = withStoreReader store (currentCatalogueFacts store proof scopes)
-    catalogueView store proof scopes (\borrowed -> ResponseObservation borrowed fresh loans) (\view current visible selected ->
+    catalogueView store proof scopes (\borrowed -> ResponseObservation borrowed fresh loans checks) (\view current visible selected ->
       action view current visible selected
         [(ident,invocation) | (ident,invocation) <- invocations, ident `elem` map (publicId . fst) visible])
       watch limits profiles catalogues
@@ -246,11 +260,15 @@ catalogueAuthorization proof profiles = do
 
 -- | The bound facts must still hold at the current generation. The facts read
 -- is repeated after a concurrent commit within the observation allowance.
+-- The checks that a response owner attached with 'attachResponseCheck' run
+-- before the facts read.
 revalidateAuthorizedView :: AuthorizedView -> IO (Either CommandFailure ())
 revalidateAuthorizedView (AuthorizedView watch observation bound) = authorizationIO "authorization revalidation" $ do
   observe <- case observation of
     BorrowedObservation borrowed -> pure borrowed
-    ResponseObservation borrowed fresh loans -> maybe fresh (const borrowed) <$> readIORef loans
+    ResponseObservation borrowed fresh loans checks -> do
+      readIORef checks >>= id
+      maybe fresh (const borrowed) <$> readIORef loans
   observed <- withAuthorizationReadObservation watch $ do
     facts <- observe
     unless (facts == bound) (throwIO Unauthenticated)

@@ -9,8 +9,8 @@ The frozen public schemas remain in `doc/api/openapi.yaml`.
 State assigns source handles from its trusted run-bound Runtime references.
 Artifact IDs are lookup keys, not authority. Every content operation checks the
 current credential, observe scope, configured profile and stored run association.
-The download quota of the Store covers the whole callback of a download. The
-file loan, the profile lock and the reader charge cover capture and
+One artifact response place of the Store covers the whole callback of a
+download. The file loan, the profile lock and the reader charge cover capture and
 materialization, and the response returns them before the first network write,
 as `manager/STORAGE.md` describes.
 Credential revocation is checked before delivery and again before each 16 KiB
@@ -66,19 +66,33 @@ ingestion bounds.
 
 ## File and memory ownership
 
-Each Store has one file loan and a download quota of one. An ordinary file
-operation waits for the file loan within a fresh five-second allowance, and a
-loan that stays held for the whole allowance is `StoreBusy`. The download quota
-is accounting, not a guard, and nothing waits for it. A download charges the
-quota first and keeps it charged until its last write completes. A second
-download that starts while the quota is charged refuses at once with
-`storage-quota`, before it takes any loan. A download then takes the file loan
-for capture, verification and the authorization checks before delivery, and
-returns the loan, the reader charge and the configuration guard before its
-first network write. Concurrent downloads therefore cannot accumulate
-independent response buffers: at most one download of at most 64 MiB is held
-across network writes for each Store. Ingestion, other file operations and
-other readers do not wait for a slow download. Each source or
+Each Store has one file loan and two artifact response places
+(`artifactResponsePlaces`). An ordinary file operation waits for the file loan
+within a fresh five-second allowance, and a loan that stays held for the whole
+allowance is `StoreBusy`. A download charges one place first, before it takes
+any loan, and keeps it charged until its last write completes or until the
+response is aborted. A download that starts while both places are charged
+waits for a place for at most five seconds (`artifactResponseWait`). It holds
+no lock while it waits, so the lock order stays file slot, configuration,
+database. When a place is returned within the five seconds, the download
+continues. Otherwise it refuses with `storage-quota`, and the action of the
+download did not run. A download then takes the file loan for capture,
+verification and the authorization checks before delivery, and returns the
+loan, the reader charge and the configuration guard before its first network
+write. Concurrent downloads therefore cannot accumulate independent response
+buffers: at most two downloads of at most 64 MiB each are held across network
+writes for each Store. Ingestion, other file operations and other readers do
+not wait for a slow download.
+
+Each download also has a total deadline of 300 seconds
+(`artifactResponseDeadline`), counted from the charge of its place. The
+download joins a deadline check to its authorized view with
+`attachResponseCheck`, and the view runs that check before each 16 KiB write.
+A download that reaches its deadline therefore stops at its next write
+boundary, and its place is returned. Because each write completes within five
+seconds, a client that reads slowly holds a place for at most the deadline and
+one write. The client then receives a truncated body, and the manager records
+the refusal like any other Store refusal of a check. Each source or
 export capture is limited to 64 MiB before a response. A source download retains
 one captured byte sequence. While a download sends, one other capture under the
 file loan can hold its own bytes. Publication may retain one prepared export and
@@ -89,7 +103,7 @@ values and temporary encodings. The captured-byte ceiling is not a total Haskell
 heap quota. This library does not implement connection queues or service-wide
 quotas across independent Store instances. A transport must preserve the
 callback lifetime instead of returning a lazy or queued response after it
-returns the download quota.
+returns its artifact response place.
 
 ## Exclusive publication and reconciliation
 
