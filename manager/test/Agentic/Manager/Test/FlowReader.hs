@@ -1,8 +1,10 @@
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 -- | The manager-log reader on constructed logs: each join between a manager
--- log and run logs, each state of the manager log, and the consent
--- verification of a start relay with each of its failures.
+-- log and run logs, each state of the manager log, the consent verification
+-- of a start relay with each of its failures, and the joins of a pruned log
+-- across its retained floor.
 module Agentic.Manager.Test.FlowReader (flowReaderChecks) where
 
 import Agentic.Manager.Flow
@@ -16,6 +18,7 @@ import Data.Aeson (Value (..), encode, object, toJSON, (.=))
 import qualified Data.Aeson.KeyMap as KM
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as BL
+import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
@@ -32,7 +35,8 @@ flowReaderChecks work = do
   runTwo <- runLog (base </> "run-2") "native_2" False
   joinChecks base runOne runTwo
   consentChecks base runOne
-  putStrLn "PASS manager-log reader: joins, undecided commands, unresolved deliveries, pending reviews, lifetimes and consent"
+  prunedChecks base runOne
+  putStrLn "PASS manager-log reader: joins, undecided commands, unresolved deliveries, pending reviews, lifetimes, consent and the retained floor"
 
 -- ---------------------------------------------------------------------------
 -- Fixtures
@@ -86,8 +90,29 @@ receiptFor command body state =
 -- | The appends of one manager log under construction.
 newtype Log = Log {logWriter :: Runtime.FlowWriter}
 
+-- | Remove the oldest sealed segments of a segmented log until the retained
+-- floor is the given position.
+pruneTo :: Log -> Runtime.Position -> IO ()
+pruneTo log' (Runtime.Position target) = do
+  segments <- Runtime.flowWriterSegments (logWriter log')
+  case segments of
+    oldest : _
+      | Runtime.segmentFirst oldest < target -> do
+          removed <- Runtime.pruneFlowSegment (logWriter log') (Runtime.segmentFirst oldest)
+          unless removed (fail ("FAIL manager-log reader: the fixture cannot prune the segment at " <> show (Runtime.segmentFirst oldest)))
+          pruneTo log' (Runtime.Position target)
+    _ -> pure ()
+
 withManagerLog :: FilePath -> Text -> (Log -> IO a) -> IO (a, FilePath)
-withManagerLog base name action = do
+withManagerLog base name = withManagerLogSegments base name Nothing
+
+-- | A manager log whose writer seals before every append after the first, so
+-- each record is one segment and a prune can move the floor to any position.
+withSegmentedLog :: FilePath -> Text -> (Log -> IO a) -> IO (a, FilePath)
+withSegmentedLog base name = withManagerLogSegments base name (Just 1)
+
+withManagerLogSegments :: FilePath -> Text -> Maybe Integer -> (Log -> IO a) -> IO (a, FilePath)
+withManagerLogSegments base name segmentBytes action = do
   let root = base </> T.unpack name
   createDirectory root
   setFileMode root 0o700
@@ -95,7 +120,8 @@ withManagerLog base name action = do
     Runtime.ensurePrivateDirectoryAt private ["flow"]
     let stream = "stream_" <> name
         path = root </> "flow" </> T.unpack stream <> ".ndjson"
-    bracket (fst <$> Runtime.openFlowLog Runtime.strictFlowCodec private (managerFlowPath stream) (managerFlowClaims stream) Nothing (64 * 1024 * 1024)) Runtime.closeFlowWriter $ \writer -> do
+        segments = Runtime.FlowSegments (managerFlowSealed stream) <$> segmentBytes
+    bracket (fst <$> Runtime.openFlowLog Runtime.strictFlowCodec private (managerFlowPath stream) (managerFlowClaims stream) segments (64 * 1024 * 1024)) Runtime.closeFlowWriter $ \writer -> do
       value <- action (Log writer)
       pure (value, path)
 
@@ -322,6 +348,88 @@ consentChecks base (runOne, _) = do
     not (flowJoinVerified tampered)
       && any ("the review body does not decode" `T.isInfixOf`) (flowJoinProblems tampered)
       && any ("no earlier review record" `T.isInfixOf`) (concatMap consentProblems (joinConsent tampered))
+
+-- ---------------------------------------------------------------------------
+-- The retained floor
+-- ---------------------------------------------------------------------------
+
+-- | The consent chain of 'consentLog' in a segmented log, pruned to the floor
+-- after the relay and the shutdown notice. The result holds the positions of
+-- the lifetime notice, the review, the approve command, its receipt, the start
+-- relay and the shutdown notice, and the path of the log.
+prunedLog :: FilePath -> Text -> Runtime.Actor -> Int -> IO ([Runtime.Position], FilePath)
+prunedLog base name sender kept = withSegmentedLog base name $ \log' -> do
+  let body = reviewFor "preparation_1" "native_1" id
+      approve = approveBody "preparation_1" (reviewBodySelectors body)
+  p0 <- notice log' Runtime.noAbout (lifetime "generation_1")
+  p1 <- review log' body
+  p2 <- appendCommand log' sender "command_approve" approve
+  p3 <- receipt log' p2 "command_approve" approve Accepted
+  p4 <- relay log' RelayStart "native_1" "command_approve"
+  p5 <- notice log' Runtime.noAbout (ShutdownNotice "generation_1")
+  let positions = [p0, p1, p2, p3, p4, p5]
+  pruneTo log' (positions !! kept)
+  pure positions
+
+prunedChecks :: FilePath -> (FilePath, a) -> IO ()
+prunedChecks base (runOne, _) = do
+  run <- readRun runOne
+  let joinOf path = do
+        manager <- readManagerLog path
+        pure (manager, joinFlows credentialArgument [manager] [run])
+      summaryOf joined = case flowJoinSummaryValue joined of
+        Object top | Just (Object summary) <- KM.lookup "summary" top -> summary
+        _ -> KM.empty
+      field key object' = case object' of
+        Object fields -> KM.lookup key fields
+        _ -> Nothing
+      firstOf key summary = case KM.lookup key summary of
+        Just (Array items) | item : _ <- foldr (:) [] items -> Just item
+        _ -> Nothing
+  -- The review lies below the floor, and the approve command, its receipt and
+  -- the relay are retained.
+  (reviewPositions, reviewPath) <- prunedLog base "pruned-review" principal 2
+  (reviewManager, reviewJoin) <- joinOf reviewPath
+  check ("a log pruned to the approve command has its floor there: " <> show (managerLogFloor reviewManager)) $
+    managerLogFloor reviewManager == reviewPositions !! 2
+      && map Runtime.entryPosition (managerLogEntries reviewManager) == drop 2 reviewPositions
+  check ("a start relay whose review lies below the floor has pruned consent, and the join verifies: " <> show (joinConsent reviewJoin, flowJoinProblems reviewJoin)) $
+    flowJoinVerified reviewJoin
+      && not (flowJoinUncertain reviewJoin)
+      && map (\c -> (consentReview c, consentCommand c, consentReceipt c, consentProblems c, consentPruned c)) (joinConsent reviewJoin)
+        == [(Nothing, Just (reviewPositions !! 2), Just (reviewPositions !! 3), [], True)]
+  let reviewSummary = summaryOf reviewJoin
+      reviewConsent = firstOf "consent" reviewSummary
+  check ("the summary names the floor of the manager log: " <> show (firstOf "logs" reviewSummary)) $
+    (firstOf "logs" reviewSummary >>= field "floor") == Just (toJSON (Runtime.positionIndex (reviewPositions !! 2)))
+  check ("the summary reports the consent as pruned and not verified: " <> show reviewConsent) $
+    (reviewConsent >>= field "pruned") == Just (Bool True) && (reviewConsent >>= field "verified") == Just (Bool False)
+  -- The approve command lies below the floor, so its retained receipt replies
+  -- to a pruned ask.
+  (commandPositions, commandPath) <- prunedLog base "pruned-command" principal 3
+  (commandManager, commandJoin) <- joinOf commandPath
+  let receiptEntry = [entry | entry <- managerLogEntries commandManager, Runtime.entryPosition entry == commandPositions !! 3]
+  check ("a receipt whose command lies below the floor is pruned, decodes and fails nothing: " <> show receiptEntry) $
+    map (\entry -> (Runtime.entryPruned entry, Runtime.entryProblems entry)) receiptEntry == [(True, [])]
+      && fmap isReceipt (Map.lookup (commandPositions !! 3) (managerLogValues commandManager)) == Just True
+  check ("a start relay whose approve command lies below the floor has pruned consent, and the join verifies: " <> show (joinConsent commandJoin, flowJoinProblems commandJoin)) $
+    flowJoinVerified commandJoin
+      && map (\c -> (consentReview c, consentCommand c, consentReceipt c, consentProblems c, consentPruned c)) (joinConsent commandJoin)
+        == [(Nothing, Nothing, Just (commandPositions !! 3), [], True)]
+      && null (joinCommands commandJoin)
+      && null (joinUndecided commandJoin)
+  check ("the summary names the pruned reply of the manager log: " <> show (firstOf "logs" (summaryOf commandJoin))) $
+    (firstOf "logs" (summaryOf commandJoin) >>= field "prunedReplies") == Just (toJSON [Runtime.positionIndex (commandPositions !! 3)])
+  -- A pruned review does not excuse a retained check: an approve command from
+  -- the manager still fails the consent.
+  (_, senderPath) <- prunedLog base "pruned-review-sender" Runtime.Manager 2
+  (_, senderJoin) <- joinOf senderPath
+  check ("a retained approve command that is not from a credential fails consent across the floor: " <> show (joinConsent senderJoin)) $
+    not (flowJoinVerified senderJoin) && any ("not from a credential" `T.isInfixOf`) (concatMap consentProblems (joinConsent senderJoin))
+  where
+    isReceipt = \case
+      ReceiptValue _ -> True
+      _ -> False
 
 check :: String -> Bool -> IO ()
 check label ok = unless ok (fail ("FAIL manager-log reader: " <> label))

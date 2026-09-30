@@ -1552,7 +1552,11 @@ data FlowEntry = FlowEntry
     -- | The line of @events.ndjson@ that an event record names.
     entryEvent :: !(Maybe Envelope),
     -- | Each verification that this line fails.
-    entryProblems :: ![Text]
+    entryProblems :: ![Text],
+    -- | Whether the record is a reply whose ask lies below the retained floor
+    -- of its log, in a segment that a prune removed. The reader does not
+    -- check such a reply against its ask.
+    entryPruned :: !Bool
   }
   deriving (Eq, Show)
 
@@ -1701,7 +1705,7 @@ splitFlowLines = go []
 
 readEntry :: PrivateRoot -> [FilePath] -> (Word64, BS.ByteString) -> IO FlowEntry
 readEntry root claims (index, line) = case decodeFlowLine line of
-  Left why -> pure (FlowEntry position Nothing Nothing Nothing ["the line does not decode: " <> why])
+  Left why -> pure (FlowEntry position Nothing Nothing Nothing ["the line does not decode: " <> why] False)
   Right record -> do
     content <- case recBody record of
       Inline value -> pure (Right (Just value))
@@ -1712,8 +1716,8 @@ readEntry root claims (index, line) = case decodeFlowLine line of
           Right (ContentEvent _) -> pure (Left "the claim check names an event")
           Left why -> pure (Left why)
     pure $ case content of
-      Right value -> FlowEntry position (Just record) value Nothing []
-      Left why -> FlowEntry position (Just record) Nothing Nothing [why]
+      Right value -> FlowEntry position (Just record) value Nothing [] False
+      Left why -> FlowEntry position (Just record) Nothing Nothing [why] False
   where
     position = Position index
 
@@ -1768,10 +1772,10 @@ analyseFlow liveness entries0 torn events effects =
            ]
 
 -- | Verify each entry of a log of the given kind in log order: its schema, its
--- body, its reply position and its event.
--- | Verify the schema, the reply position and the body of each entry of a log
--- whose retained records start at the floor. A reply that names a position
--- below the floor names a record that a prune removed, and it is not checked.
+-- body, its reply position and its event. The retained records of the log
+-- start at the floor. A reply that names a position below the floor names a
+-- record that a prune removed: the entry is marked pruned, and its reply
+-- position is not checked.
 scanEntries :: FlowLog -> Word64 -> Map Word64 Envelope -> Bool -> [FlowEntry] -> [FlowEntry]
 scanEntries kind floor' eventLines eventsRead = go Map.empty Map.empty Set.empty Set.empty
   where
@@ -1787,6 +1791,7 @@ scanEntries kind floor' eventLines eventsRead = go Map.empty Map.empty Set.empty
             (code, bodyProblems) = case entryContent entry of
               Just value | schemaLog schema /= ManagerLog -> decodeEntryBody codes record value
               _ -> (Nothing, [])
+            pruned = maybe False (\(Position asked) -> asked < floor' && asked < index) (recReplyTo record)
             (replyProblems, answered') = case recReplyTo record of
               Nothing -> ([], answered)
               Just (Position asked)
@@ -1809,7 +1814,8 @@ scanEntries kind floor' eventLines eventsRead = go Map.empty Map.empty Set.empty
             entry' =
               entry
                 { entryEvent = event,
-                  entryProblems = entryProblems entry <> logProblems <> bodyProblems <> replyProblems <> eventProblems
+                  entryProblems = entryProblems entry <> logProblems <> bodyProblems <> replyProblems <> eventProblems,
+                  entryPruned = pruned
                 }
             codes' = maybe codes (\found -> Map.insert index found codes) code
          in entry' : go (Map.insert index schema schemas) codes' answered' seen' rest
@@ -1920,12 +1926,14 @@ flowReportProblems report =
 
 -- | One entry as the JSON object of the reader: its position, the fields of
 -- its record, the decoded body or the claim check with its verified value, the
--- joined event and the failed verifications.
+-- joined event, @pruned@ when the entry is a reply whose ask lies below the
+-- retained floor, and the failed verifications.
 flowEntryValue :: FlowEntry -> Value
 flowEntryValue entry =
   object $
     ["position" .= positionIndex (entryPosition entry)]
       <> maybe [] fields (entryRecord entry)
+      <> ["pruned" .= True | entryPruned entry]
       <> ["problems" .= entryProblems entry]
   where
     fields record =

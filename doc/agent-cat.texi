@@ -3694,13 +3694,20 @@ once as an ended log and joins them.  The command refuses @code{--follow}
 with more than one @code{PATH} as a usage error, and it exits 3 when
 @code{--follow} names a manager log.  It opens
 each manager log through its flow directory as the account that owns it,
-verifies each line as it verifies a run log, and decodes each body with the
-manager codec of its schema.  It writes the records of the manager logs and
+reads its sealed segments in @file{sealed/<stream>/} in start order and then
+the file that the operand names, verifies each line as it verifies a run log,
+and decodes each body with the manager codec of its schema.  Each record of a
+manager log has its position in the whole log, sealed segments included.
+The pruner of the manager removes old sealed segments, and the retained
+floor is the position of the first record that remains.  A reply whose ask
+lies below the floor carries @code{"pruned": true}, and the command does not
+check it against its ask.  It writes the records of the manager logs and
 then those of the run logs, and each record object also names its
 @code{log}.  The route and the start position apply to each log.
 
-The summary object names each log with its kind and its size, and each run
-log with its own summary.  It joins a review to the approve and discard
+The summary object names each log with its kind and its size, each manager
+log with its @code{floor} and the positions of its pruned replies as
+@code{prunedReplies}, and each run log with its own summary.  It joins a review to the approve and discard
 commands and the review endings of its preparation, a start or control relay
 to the @code{start} or @code{control} of the run log with its native run and
 command identifiers, a control to its acknowledgement event, a command to its
@@ -3719,7 +3726,13 @@ names that receipt, and the relay.  The SHA-256 of the review bytes must equal
 the @code{reviewSha256} of the binding, the SHA-256 of the binding bytes must
 equal the digest that the approve command names, the binding must name the
 native run of the relay and carry no credential in its arguments, and a run
-log that was read must begin with a @code{start} for that native run.  The
+log that was read must begin with a @code{start} for that native run.  When
+the floor of the manager log is above 0 and the review or the approve command
+is not in the retained records, that record lies below the floor.  The
+consent is then pruned: the checks of the retained records still apply, and
+a pruned consent with no failed check has @code{"verified": false} and
+@code{"pruned": true} and is not a failure.  A join whose counterpart lies
+below the floor has none and is not a failure either.  The
 command exits 1 when a verification or a consent fails.  When every
 verification passes, it exits 2 when a run log has no stop or a lifetime has no
 shutdown notice, and 0 otherwise.  To verify the consent of a start relay, the

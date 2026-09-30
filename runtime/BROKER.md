@@ -272,8 +272,11 @@ complete line as `readFlow` does. Given a segment directory, it reads the
 sealed segments in start order and then the file at the path, gives each entry
 its global position and returns the retained floor with the entries. A
 reply that names a position below the floor names a record that a prune
-removed, and the reader does not check it. An absent file at the path then
-holds no record. A segment directory with a name
+removed. The reader marks the entry as pruned in `entryPruned`, does not
+check the reply against its ask and records no failure for it, and
+`flowEntryValue` then adds `"pruned": true` to the object of the entry. A run
+log has no segments, so its floor is 0 and no entry of it is pruned. An
+absent file at the path then holds no record. A segment directory with a name
 that is not a segment name, a sealed segment without a final newline or a
 segment that does not start after the segment before it makes the read fail
 with an I/O error. It refuses a record whose schema belongs to
@@ -288,8 +291,11 @@ directory of the log with `openPrivateRoot`, reads the sealed segments in
 `sealed/<stream>/` and then the active file with `readFlowLogAt` as a manager
 log, and reads its claim checks from `claims/<stream>/`. Each entry has its
 global position, and the report carries the retained floor as
-`managerLogFloor`. The summary object of `agentic-run flow` names the floor of
-each manager log. It then decodes each body with the manager codec of its
+`managerLogFloor`. The floor is the start of the oldest sealed segment that
+the Store pruner left, or 0 before the first seal. The summary object of
+`agentic-run flow` names the floor of each manager log as `floor`, and the
+position of each reply whose ask lies below the floor as `prunedReplies`. It
+then decodes each body with the manager codec of its
 schema. A command body with an `administration` field decodes as a credential
 operation, and a receipt decodes with the receipt codec of the command that it
 answers and must name the identifier of that command. A receipt whose command
@@ -298,7 +304,11 @@ identifier of its record, and otherwise as a credential receipt. A body that doe
 decode is a failure of its entry.
 
 `joinFlows` joins manager logs with run logs by identifiers that both records
-carry. Positions never cross logs.
+carry. Positions never cross logs. Each join reads the retained records of a
+manager log, from its floor, and a record below the floor is pruned. A join
+whose counterpart is pruned has no counterpart and fails no verification. The
+pruner keeps every segment that names live work, so a pruned counterpart
+belongs to terminal work.
 
 - A `review` joins each later approve or discard command whose resource
   names its preparation, and each later review ending of that preparation.
@@ -320,8 +330,13 @@ control relay without its record in a run log that was read is an unresolved
 delivery. A review without a later command and without a review ending for its
 preparation is a pending review. A lifetime notice without a later shutdown
 notice of the same process generation before the next lifetime notice has lost
-its supervision. The Store ledger remains the authority on each command,
-review and request, and the summary states this.
+its supervision. A reply follows its ask, a command and a review ending follow
+their review, and a shutdown notice follows its lifetime notice, so a
+retained record that begins a state has its retained counterpart. A command,
+a review or a lifetime notice below the floor is pruned and is in no state,
+and a retained shutdown notice whose lifetime notice is pruned joins nothing.
+The Store ledger remains the authority on each command, review and request,
+and the summary states this.
 
 `joinFlows` verifies the consent of each start relay. The manager log must
 hold, in this order, the review of the preparation, the approve command of
@@ -336,7 +351,22 @@ predicate with which the frontend worker refuses one. A run log that was read
 must begin with a `start` that names the native run of the relay. A consent
 that fails any of these checks is a failure of the joined logs.
 
-`flowJoinVerified` holds when no manager log, run log, join or consent fails.
+A consent chain can cross the floor. When the floor is above 0 and the
+retained log holds no approve command for the command of the relay, the
+command is pruned, and the receipt is a retained reply below the floor that
+names that command, when one exists. When the approve command is retained
+and no earlier review of its preparation is, the review is pruned. The reader
+cannot tell a pruned record from one that was never written, so a missing
+record in a log whose floor is above 0 counts as pruned. The consent is then
+pruned in `consentPruned`: the checks of the retained records still apply,
+such as the credential sender and the operation of a retained approve command
+and the run-log start, and the checks that need a pruned record do not. A
+pruned consent with no failed check is neither verified nor failed. It is not
+a failure of the joined logs, and its summary object carries
+`"verified": false` and `"pruned": true`.
+
+`flowJoinVerified` holds when no manager log, run log, join or consent fails,
+so a pruned reply or a pruned consent does not break it.
 `flowJoinUncertain` holds when a run log is uncertain or a lifetime has lost
 its supervision. `flowJoinSummaryValue` renders the joins, the consent checks
 and the states as the summary object of the `agentic-run flow` verb.

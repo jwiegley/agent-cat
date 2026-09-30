@@ -413,8 +413,9 @@ reopen.
 
 A trigger holds when one of these is true:
 
-- The newest record of the segment is more than 604800 seconds old, which is
-  the retention of the invalidation events.
+- The newest record of the segment is more than 604800 seconds old. This age
+  is the retention of the invalidation events, and it equals the fixed
+  `replaySeconds` limit that the service reports.
 - The log and its claim checks hold more than (L - R) div 2 bytes.
 
 A segment is protected when one of these is true:
@@ -454,6 +455,14 @@ With no live work, a steady stream of appends keeps the log at most
 (L - R) div 2 plus one segment. A long-lived run, a pending review or a request that
 waits in the queue holds the floor, so the log can still reach L - R, and
 the refusals of the next section apply.
+
+The age trigger ties the floor to `replaySeconds`: while the log stays below
+(L - R) div 2 bytes, the pruner removes no record that is younger than 604800
+seconds. The byte trigger can move the floor above younger records, but only
+above the records of terminal work. The reader reports the floor, and a
+reply or a consent chain that crosses it is pruned and is not a failed
+verification, as the
+[broker contract](../runtime/BROKER.md#manager-log-reader) states.
 
 The writer lock is a leaf lock. The manager takes no other lock while it holds
 it. Before each append the writer checks that the path still names the file
@@ -564,9 +573,16 @@ describes the review endings and the request endings.
 `readManagerLog` reads the manager log of one stream, named by its active
 file, as the account that owns its flow directory. It reads the sealed
 segments in start order and then the active file, gives each entry its global
-position and reports the retained floor, and `joinFlows` joins manager logs with run logs. The
+position and reports the retained floor. A reply whose ask lies below the
+floor is marked pruned and is not checked against its ask. `joinFlows` joins
+manager logs with run logs from the retained records. A join whose
+counterpart lies below the floor has none and fails nothing, and the consent
+of a start relay whose review or approve command lies below the floor is
+pruned: it is neither verified nor failed. The pruner keeps the records of
+live work, so this happens only for terminal work. The
 [broker contract](../runtime/BROKER.md#manager-log-reader) states what the
-reader verifies, and the `agentic-run flow` verb prints the result. The
+reader verifies, and the `agentic-run flow` verb prints each entry with its
+global position and a summary that names the floor of each manager log. The
 reader writes nothing, and the Store ledger remains the authority on
 commands, reviews and requests.
 
@@ -602,16 +618,61 @@ environment variable.
 
 ### Growth, open refusals and recovery
 
-The manager log grows across Store lifetimes. The writer seals the active file
-into segments at the segment size, and the pruner of the section
-[Pruning](#pruning) removes the old sealed segments that no live work needs.
-When live work holds the floor and the log and its claim checks reach L
-minus R, every ordinary command and every review publication is refused with
-`storage-quota`. A cancel and the records of the manager itself can still use
-the reserve R. The F16 gate measured 22193 bytes of manager log for one simple
-TUI journey. At a ceiling of 64 MiB (L = 67108864, the value of the sample
-configuration), R is 2097152 and L minus R is 65011712 bytes, which holds
-about 2929 such journeys.
+The manager log of a stream is its sealed segments in
+`flow/sealed/<stream>/`, in start order, followed by the active file
+`flow/<stream>.ndjson`, with its claim-check files in `flow/claims/<stream>/`.
+Positions are global across the segments and across Store lifetimes. The
+writer seals the active file when an append would take it above
+S = max(65536, (L - R) div 16), where L is the configured
+`globalMutationLedgerBytes` and R the reserve of the command ledger.
+
+The pruner of the section [Pruning](#pruning) removes the oldest sealed
+segments while a trigger holds and no live work needs them. The age trigger
+holds when the newest record of the segment is more than 604800 seconds old,
+the value of `replaySeconds`. The byte trigger holds when the log and its
+claim checks hold more than (L - R) div 2 bytes. A segment is protected when it
+names a request that is not terminal, a run with `terminal_observed=0`, the
+parent run of a request that is not terminal, or an ask without a reply. The
+newest sealed segment and the active file are never removed. The retained
+floor is the start of the oldest remaining sealed segment, or 0 before the
+first seal, and the writer refuses a reply that names a position below it.
+
+When live work holds the floor and the log and its claim checks reach L minus
+R, every ordinary command and every review publication is refused with
+`storage-quota`. The cancel reserve is unchanged: a cancel and the records of
+the manager itself can still use the reserve R. The F16 gate measured 22193
+bytes of manager log for one simple TUI journey. At a ceiling of 64 MiB
+(L = 67108864, the value of the sample configuration), R is 2097152 and L
+minus R is 65011712 bytes, which holds about 2929 such journeys when live work
+holds the floor at 0.
+
+Only the log of the current stream is pruned. A restoration rotates the
+stream identity, and the logs of earlier streams stay in `flow/` as they
+were. They do not count toward the ceiling of the current log, and the
+operator archives or removes them.
+
+The pruner does not prune the SQLite command ledger. The table
+`command_ledger_usage` holds the charge of every row of `commands`. The
+triggers `command_charge_insert` and `command_charge_update` keep it current,
+and retirement shrinks a row to its tombstone charge, which stays charged.
+`Commands.checkCapacity` refuses an ordinary command with `storage-quota` when
+the charge exceeds L minus R minus one command capacity, and a cancel when it
+exceeds L minus one command capacity. So the ledger, and not the manager log,
+still bounds steady-state admission, under the same `globalMutationLedgerBytes`
+ceiling.
+
+A crash leaves a log that the next open accepts:
+
+- A crash between the rename of a seal and the creation of the new active
+  file leaves no active file. The next open creates it at the position after
+  the last sealed record.
+- A crash in a prune before the unlink leaves the segment in place. A crash
+  after the unlink and before the removal of its claim-check files leaves
+  those files. The next open removes each claim-check file that no retained
+  record names. The floor after the open is the start of the oldest remaining
+  sealed segment.
+- A final line of the active file without its newline denotes no record, and
+  the open truncates it.
 
 `openManagerFlow` refuses to open a log in two cases:
 
@@ -850,7 +911,8 @@ linked receipt eligibility rather than inventing an old inactivity date.
 
 The coordinator can call the bounded event, receipt and capture operations between
 ordinary work. Their continuation keys are scan positions, not permissions or replay
-tickets. There is no background scheduler or remote prune endpoint. Logical quotas do
+tickets. These operations have no background scheduler and no remote prune endpoint,
+and the manager-log pruner of the section [Pruning](#pruning) is separate from them. Logical quotas do
 not bound arbitrary operator-created files, SQLite journal overhead or total process
 heap usage, and uncertainty may retain charges until new work must refuse.
 

@@ -207,7 +207,9 @@ increment 1. The evidence is under `B2/C1/impl-r1`.
   503 line classified.
 - `acat-1dfc` stays open. B1 and B2 repaired its medium findings 1 to 4.
   Subtask C1 of part 2 resolved finding 5 (the ext-pi checks and the ext-pi
-  part of gate 5). The low findings remain.
+  part of gate 5). Subtasks C2, C3 and C4 of part 2 added the retention
+  that finding 2 names: the manager log is sealed into segments and pruned
+  below a protected floor. The low findings remain.
 - `acat-62j0`, the F16 fess findings, stays open.
 - `acat-response-ingestion-budget-zaoi` is closed by B5, B6 and B7. The
   review findings are `acat-b5-response-review-findings-k96b`,
@@ -383,8 +385,11 @@ subtask is under `F/<subtask>/impl-r1` or `impl-r2` in the resume directory.
   reads run logs and manager logs as the owning account. It verifies claim
   checks, joins each `event` record to its line of `events.ndjson`, joins the
   manager log to the run logs, reports the states of section 3.6 of the design
-  record, and verifies the consent chain of each start relay. It exits 1 on a
-  failed verification and 2 when the flow is uncertain.
+  record, and verifies the consent chain of each start relay. It reads a
+  manager log with its sealed segments, prints global positions and names the
+  retained floor of each manager log. A reply or a consent chain that crosses
+  the floor is reported as pruned, not as a failed verification. It exits 1 on
+  a failed verification and 2 when the flow is uncertain.
 - Increment 1 makes no `/v1` change. `doc/api/openapi.yaml` is unchanged since
   `4496dbe4`. It adds no service subscription, no live re-route and no
   enforcement at any writer.
@@ -408,8 +413,12 @@ fixed word `oversized`, `undecodable` or `io-failure`. To recover, the
 operator stops the manager, moves `flow/<stream>.ndjson`,
 `flow/sealed/<stream>/` and `flow/claims/<stream>/` out of the root or raises
 `globalMutationLedgerBytes`, restarts it, and reads the archived log with
-`agentic-run flow`. The section "Growth, open refusals and recovery" of
-`manager/STORAGE.md` holds the details and the measured append latency.
+`agentic-run flow`. The pruner does not prune the SQLite command ledger:
+`command_ledger_usage` keeps every command charged, and
+`Commands.checkCapacity` still bounds steady-state admission under the same
+`globalMutationLedgerBytes` ceiling. The section "Growth, open refusals and
+recovery" of `manager/STORAGE.md` holds the details and the measured append
+latency.
 
 ### Gate of increment 1
 
@@ -550,7 +559,9 @@ Issue `acat-1dfc` holds these findings. The medium findings are:
    than a lowered ceiling, or that holds a complete line that does not
    decode, makes each append of the lifetime fail, and the service then
    refuses ordinary commands with `storage-unavailable`. `manager/STORAGE.md`
-   does not state this limit or the recovery procedure.
+   does not state this limit or the recovery procedure. Subtasks C2 to C4
+   of part 2 resolved this finding with sealed segments and pruning below a
+   protected floor.
 3. `manager/STORAGE.md` says that no local path enters a body. The review
    body holds the exact binding bytes, which name the frontend invocation
    path, the run-root identity and the target arguments. The sentence does

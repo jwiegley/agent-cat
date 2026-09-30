@@ -1117,9 +1117,13 @@ execute broker reg = \case
 -- Any manager log, or more than one log, is read once as ended logs and
 -- joined: each record object also names its log, and the summary holds the
 -- joins, the consent of each start relay and the states of the manager log.
--- The exit status is 1 when a verification or a consent fails, 2 when every
--- verification passes but a run log or a lifetime has lost its supervision,
--- and 0 otherwise.
+-- 'Flow.readManagerLog' reads a manager log path with its sealed segments, so
+-- each record has its global position, and the summary names the retained
+-- floor of each manager log. A reply whose ask lies below the floor, and a
+-- consent whose review or approve command lies below it, are reported as
+-- pruned and fail no verification. The exit status is 1 when a verification
+-- or a consent fails, 2 when every verification passes but a run log or a
+-- lifetime has lost its supervision, and 0 otherwise.
 flowCmd :: Registry -> [FilePath] -> Bool -> Maybe FlowRoute -> Word64 -> IO ()
 flowCmd reg paths follow route from = do
   operands <- concat <$> mapM operandsOf paths

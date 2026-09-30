@@ -347,7 +347,7 @@ Discovered in acat-47y: migrating PMod to [CMonoid M] makes instPModSelf demand 
 :LABELS:   ["actor-flow","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-29 Tue 23:11]
-:MODIFIED: [2026-09-30 Wed 10:27]
+:MODIFIED: [2026-09-30 Wed 11:36]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -398,6 +398,13 @@ Low:
     "author": "johnw",
     "text": "Subtask C1 (Phase B part 2) resolves medium finding 5: the ext-pi checks pass against the built Pi fork, and the ext-pi part of gate 5 has a passing assertion in ext-pi/test/owned-child-e2e.test.ts. The low findings remain. Evidence: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/B2/C1/impl-r1.",
     "created_at": "2026-09-30T17:27:27Z"
+  },
+  {
+    "id": 403,
+    "issue_id": "acat-1dfc",
+    "author": "johnw",
+    "text": "Phase B part 2 subtasks C2, C3 and C4 resolve the retention part of medium finding 2: the manager log is sealed into segments, pruned below a protected floor, and read across the floor by agentic-run flow. The handoff marks the finding resolved. The low findings remain. Evidence: C2, C3 and C4 checks in the private resume-20260923 evidence directory.",
+    "created_at": "2026-09-30T18:36:19Z"
   }
 ]
 #+end_src
@@ -832,27 +839,23 @@ Source: fess audit /Users/johnw/Products/agent-cat-workflow-manager/implementati
 ]
 #+end_src
 
-* TODO [#C] Add Phase G retention for the manager log
+* DONE [#C] Add Phase G retention for the manager log
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-3mgw
 :LABELS:   ["actor-flow","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-30 Wed 00:02]
-:MODIFIED: [2026-09-30 Wed 11:16]
+:MODIFIED: [2026-09-30 Wed 11:36]
 :CREATED_BY: johnw
+:FINISHED: [2026-09-30 Wed 11:36]
+:CLOSE_REASON: Retention is in place: C2 seals the manager log into segments, C3 prunes below a protected floor, C4 reads across the floor and documents the behavior. Evidence recorded in the C2, C3 and C4 comments. Folding the recovery procedure into operator controls is WM-042 scope.
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
 :END:
 
-The manager log flow/<stream>.ndjson grows across lifetimes, and nothing prunes it. At L minus R (the configured ceiling minus the cancel reserve) every ordinary command and review publication is refused with storage-quota. At the default 64 MiB ceiling that is about 2929 simple journeys of 22193 bytes each (F16 measurement).
-
-Phase B subtask B1 documented the limit, the open refusals (fixed words oversized, undecodable, io-failure) and the operator recovery procedure in manager/STORAGE.md, section "Growth, open refusals and recovery", and in the current-state section of doc/workflow-manager-handoff.md.
-
-Remaining work for Phase G: add retention or pruning of the manager log (with its claim checks) that keeps lineage and never prunes remotely, and fold the recovery procedure into the WM-042 operator controls and recovery procedures.
-
-Source: acat-1dfc medium item 2; remaining-scope report 2026-09-29, section 4.
+The manager log flow/<stream>.ndjson grew across lifetimes with no pruning. At L minus R (the configured ceiling minus the cancel reserve) every ordinary command and review publication was refused with storage-quota. Phase B subtask B1 documented the limit and the recovery procedure. Phase B part 2 subtasks C2 (sealed segments, global positions), C3 (pruning below a protected retained floor) and C4 (readers across the floor and the storage documentation) added the retention. The operator recovery procedure is part of WM-042. Source: acat-1dfc medium item 2; remaining-scope report 2026-09-29, section 4.
 
 ** Comments
 
@@ -871,6 +874,13 @@ Source: acat-1dfc medium item 2; remaining-scope report 2026-09-29, section 4.
     "author": "johnw",
     "text": "Phase B part 2 subtask C3 (second half of this issue): a pruner owned by the Store runs once at open and after each seal. It removes the oldest sealed segment one at a time, each under one short admission (file slot, configuration, database, then the writer leaf lock) and one read-only protection query. A segment is kept when it names a non-terminal request, a run with terminal_observed=0, the parent run of a non-terminal request, or an ask without a reply. The newest sealed segment and the active file are never removed. Pruning runs only while the newest record is older than 604800 seconds or the log with its claims exceeds (L - R) div 2, and stops at the first protected segment, so the floor is contiguous. Orphan claim files are removed at open and after each unlink, readManagerLog reports the floor, and checkReply refuses replies below it. Evidence: build, manager-command-check flow at -N8 (new byte, age, protection, claim, floor-reopen and cancel-reserve cases; a prune round of about 2 ms), manager-store-check main form at -N8, the N8 journey and the tui-flow-approve-fault control all passed (logs in the private resume-20260923 evidence directory; fess report fess/b2-C3-r1.md, non-blocking, findings filed as acat-q0iq). The pruning half is done. This issue stays open for folding the recovery procedure into the WM-042 operator controls.",
     "created_at": "2026-09-30T18:16:25Z"
+  },
+  {
+    "id": 402,
+    "issue_id": "acat-3mgw",
+    "author": "johnw",
+    "text": "Phase B part 2 subtask C4 (readers and documentation): agentic-run flow reads a manager log with its sealed segments, prints global positions and the retained floor, and exits 0 when the only gaps lie below the floor. scanEntries marks a reply whose ask lies below the floor as pruned (entryPruned), consentChecks reports a consent chain that crosses the floor as pruned (consentPruned), flowJoinVerified does not fail on it, and flowJoinSummaryValue reports floor, pruned and prunedReplies. manager/STORAGE.md section 'Growth, open refusals and recovery', runtime/BROKER.md, doc/agent-cat.texi and the handoff state the segment layout, S, the protection rules, the byte and age triggers, the floor tied to replaySeconds, crash recovery, the unchanged cancel reserve, and that the SQLite command ledger (command_ledger_usage, Commands.checkCapacity) is not pruned. Evidence: build, manager-command-check flow at -N8 (new pruned-review, pruned-command and pruned-review-sender cases), make -C doc check, check-manual-cli.py, check-manual-members.py and the N8 journey with a verified consent chain all exited 0 (private resume-20260923 evidence directory; fess report fess/b2-C4-r1.md, non-blocking, findings in acat-c4-pruned-reader-fess-findings-9ex2).",
+    "created_at": "2026-09-30T18:36:18Z"
   }
 ]
 #+end_src
@@ -3937,6 +3947,30 @@ Actor-flow increment 3, live re-route and asks answered by people (6 to 9 engine
   }
 ]
 #+end_src
+
+* TODO [#D] Resolve C4 fess findings on the pruned flow reader
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-c4-pruned-reader-fess-findings-9ex2
+:LABELS:   ["actor-flow","workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-30 Wed 11:36]
+:MODIFIED: [2026-09-30 Wed 11:36]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of the fess audit of subtask C4 of Phase B part 2 (floor in the flow verb, joins across the floor, storage documentation). Source: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/fess/b2-C4-r1.md.
+
+1. (medium) manager/src/Agentic/Manager/Flow.hs, consentChecks: when the approve command lies below the floor (commandPruned), the consent problem list is only runStartProblems, and the receipt query skips receipts in state Refused. A retained refused receipt that replies below the floor and names the command is ignored, so the consent is reported as pruned and flowJoinVerified holds. This contradicts runtime/BROKER.md and doc/agent-cat.texi, which say the checks of the retained records still apply. Fix: when commandPruned and a retained reply below the floor names the command, require that reply to be an accepted receipt and keep the receipt problem otherwise. Add a FlowReader case with a retained Refused receipt that must fail consent.
+2. (low, deferred to the security stage under the functionality-first direction of 2026-09-30) In a log whose floor is above 0, any missing review or approve command counts as pruned, even far above the floor, because the log does not record where pruned records were. A prune manifest or recorded pruned ranges would let the reader tell a pruned record from one that was never written.
+3. (low, resolved on landing) doc/workflow-manager-handoff.md medium item 2 and acat-3mgw still said that nothing prunes the manager log. The Integrator marked the handoff item resolved by C2 to C4 and closed acat-3mgw.
+4. (low) manager/test/Agentic/Manager/Test/FlowReader.hs: no case covers the gap-notice path with a pruned command (Flow.hs, a gap notice with no retained command) or a retained refused receipt.
+5. (low) doc/agent-cat.texi near line 3709: one source line is much longer than the usual wrap width. Rewrap the paragraph.
+
+Other C4 limitations: the pruner uses the fixed 604800-second age and does not read replaySeconds (the documentation states that the age equals the fixed replaySeconds limit). The N8 journey never reaches a seal, so pruned paths are covered only by manager-command-check flow and direct agentic-run flow runs on pruned fixtures.
 
 * TODO [#E] Record that the Cabal 3.16.1.0 expectation means cabal-install
 :PROPERTIES:

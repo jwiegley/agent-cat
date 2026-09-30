@@ -977,7 +977,8 @@ data ManagerLogReport = ManagerLogReport
 -- reader reads the sealed segments in start order and then the active file,
 -- verifies each line with 'readFlowLogAt' as a manager log, and then decodes
 -- each body with the codec of its schema. A receipt decodes with the receipt
--- codec of the command that it answers.
+-- codec of the command that it answers. The report carries the retained
+-- floor, and a reply whose ask lies below it is marked pruned.
 readManagerLog :: FilePath -> IO ManagerLogReport
 readManagerLog path =
   bracket (openPrivateRoot "manager flow" (takeDirectory path)) closePrivateRoot $ \root -> do
@@ -1086,8 +1087,13 @@ data AnswerJoin = AnswerJoin
 -- | The verification of the consent of one start relay (section 2 of the
 -- design): the review, the approve command, its accepted receipt or the gap
 -- notice that names that receipt, and the @start@ of the run log that names
--- the native run of the relay. The consent is verified when the list of
--- problems is empty.
+-- the native run of the relay.
+--
+-- A record of the chain that the retained log does not hold, in a log whose
+-- floor is above 0, lies below the floor: a prune removed it. The consent is
+-- then pruned, and only the checks of the retained records apply. The
+-- consent fails when the list of problems is not empty, it is pruned when the
+-- list is empty and a record is pruned, and it is verified otherwise.
 data ConsentCheck = ConsentCheck
   { consentRelay :: !LogPosition,
     consentNativeRun :: !RunId,
@@ -1096,7 +1102,9 @@ data ConsentCheck = ConsentCheck
     consentReceipt :: !(Maybe Position),
     consentGap :: !(Maybe Position),
     consentRunStart :: !(Maybe LogPosition),
-    consentProblems :: ![Text]
+    consentProblems :: ![Text],
+    -- | Whether the review or the approve command lies below the floor.
+    consentPruned :: !Bool
   }
   deriving (Eq, Show)
 
@@ -1129,6 +1137,12 @@ data FlowJoin = FlowJoin
 -- | Join manager logs with run logs. The predicate recognises an argument
 -- that carries a credential, as the frontend worker refuses one in its
 -- invocation.
+--
+-- Each join reads the retained records of a manager log, from its floor. A
+-- record below the floor is pruned. A join whose counterpart is pruned has no
+-- counterpart and fails no verification, and the consent of a start relay
+-- whose review or approve command is pruned is pruned. The pruner keeps every
+-- record of live work, so such a join arises only for terminal work.
 joinFlows :: (String -> Bool) -> [ManagerLogReport] -> [(FilePath, FlowReport)] -> FlowJoin
 joinFlows credentialArgument managers runs =
   FlowJoin
@@ -1274,45 +1288,61 @@ consentChecks credentialArgument runStarts manager =
   where
     path = managerLogPath manager
     records = managerRecords manager
+    floor' = managerLogFloor manager
+    -- A prune removed the records below the floor, so a record of the chain
+    -- that the retained log does not hold lies below it.
+    pruning = floor' > Position 0
     consentOf relayAt relay =
       let run = relayBodyNativeRun relay
+          identifier = relayBodyCommand relay
           command =
             listToMaybe
-              (reverse [(at, record, body) | (at, record, Just (CommandValue body)) <- records, at < relayAt, aboutCommand (recAbout record) == relayBodyCommand relay, isJust (relayBodyCommand relay)])
+              (reverse [(at, record, body) | (at, record, Just (CommandValue body)) <- records, at < relayAt, aboutCommand (recAbout record) == identifier, isJust identifier])
           commandAt = (\(at, _, _) -> at) <$> command
+          commandPruned = pruning && isJust identifier && isNothing command
           preparation = command >>= \(_, _, body) -> commandPreparation body
           review =
             listToMaybe
               (reverse [(at, body) | Just commandPosition <- [commandAt], (at, _, Just (ReviewValue body)) <- records, at < commandPosition, Just (reviewBodyPreparation body) == preparation])
+          reviewPruned = pruning && isJust command && isNothing review
+          -- The receipt replies to the command. When the command lies below
+          -- the floor, the receipt is a retained reply below the floor that
+          -- names the command.
+          answersCommand record = case commandAt of
+            Just commandPosition -> recReplyTo record == Just commandPosition
+            Nothing -> commandPruned && maybe False (< floor') (recReplyTo record) && aboutCommand (recAbout record) == identifier
           receipt =
             listToMaybe
               [ at
-                | Just commandPosition <- [commandAt],
-                  (at, record, Just (ReceiptValue body)) <- records,
-                  recReplyTo record == Just commandPosition,
+                | (at, record, Just (ReceiptValue body)) <- records,
+                  answersCommand record,
                   at < relayAt,
                   receiptState body /= Refused
               ]
           gap =
             listToMaybe
               [ at
-                | Just commandPosition <- [commandAt],
-                  (at, _, Just (NoticeValue (GapNotice missing _))) <- records,
-                  at > commandPosition,
+                | (at, _, Just (NoticeValue (GapNotice missing _))) <- records,
+                  maybe commandPruned (at >) commandAt,
                   at < relayAt,
-                  any (\entry -> missingSchema entry == FlowReceipt && aboutCommand (missingAbout entry) == relayBodyCommand relay) missing
+                  any (\entry -> missingSchema entry == FlowReceipt && aboutCommand (missingAbout entry) == identifier) missing
               ]
           runStart = LogPosition <$> lookup run runStarts <*> pure (Position 0)
+          runStartProblems = [ "no run log that was read begins with a start for native run " <> runIdText run | isNothing runStart ]
           problems = case (command, review) of
-            (Nothing, _) -> ["no earlier command record names the command " <> fromMaybe "(none)" (relayBodyCommand relay) <> " of the start relay"]
+            (Nothing, _)
+              | commandPruned -> runStartProblems
+              | otherwise -> ["no earlier command record names the command " <> fromMaybe "(none)" identifier <> " of the start relay"]
             (Just (_, record, body), found) ->
               [ "the command of the start relay is a " <> operationName (commandBodyOperation body) <> " command" | commandBodyOperation body /= Approve ]
                 <> [ "the approve command is not from a credential" | not (fromCredential (recFrom record)) ]
                 <> case found of
-                  Nothing -> ["no earlier review record names the preparation " <> fromMaybe "(none)" preparation <> " of the approve command"]
+                  Nothing
+                    | reviewPruned -> []
+                    | otherwise -> ["no earlier review record names the preparation " <> fromMaybe "(none)" preparation <> " of the approve command"]
                   Just (_, reviewed) -> reviewProblems body reviewed
                 <> [ "neither an accepted receipt nor a gap notice that names the receipt lies between the approve command and the start relay" | isNothing receipt && isNothing gap ]
-                <> [ "no run log that was read begins with a start for native run " <> runIdText run | isNothing runStart ]
+                <> runStartProblems
           reviewProblems body reviewed =
             let binding = either (const Nothing) Just (Aeson.eitherDecodeStrict' (reviewBodyBinding reviewed)) :: Maybe Value
                 bindingText key = case binding of
@@ -1327,7 +1357,7 @@ consentChecks credentialArgument runStarts manager =
                   <> [ "the approve command names another digest than the binding digest" | reviewDigest /= reviewBodyBindingDigest reviewed ]
                   <> [ "the binding names another native run than the start relay" | bindingText "nativeRunId" /= Just (runIdText (relayBodyNativeRun relay)) ]
                   <> [ "the binding carries a credential in its invocation or target arguments" | any credentialArgument (bindingArguments binding) ]
-       in ConsentCheck (LogPosition path relayAt) run (fst <$> review) commandAt receipt gap runStart problems
+       in ConsentCheck (LogPosition path relayAt) run (fst <$> review) commandAt receipt gap runStart problems (commandPruned || reviewPruned)
     fromCredential = \case
       Principal (Credential _ _) -> True
       _ -> False
@@ -1350,7 +1380,9 @@ bindingArguments = \case
       _ -> []
 
 -- | The undecided commands: each command without a reply. The ledger is the
--- authority on its state.
+-- authority on its state. A reply follows its command, so a retained command
+-- has a retained reply, and a command below the floor is pruned and is in no
+-- state.
 joinUndecided :: FlowJoin -> [LogPosition]
 joinUndecided join = [commandJoinCommand command | command <- joinCommands join, isNothing (commandJoinReply command)]
 
@@ -1360,12 +1392,14 @@ joinUnresolvedDelivery :: FlowJoin -> [LogPosition]
 joinUnresolvedDelivery join = [relayJoinRelay relay | relay <- joinRelays join, isNothing (relayJoinDelivered relay)]
 
 -- | The pending reviews: each review without a later command and without a
--- review ending with its preparation identifier.
+-- review ending with its preparation identifier. A review below the floor is
+-- pruned and is in no state.
 joinPendingReview :: FlowJoin -> [LogPosition]
 joinPendingReview join = [reviewJoinReview review | review <- joinReviews join, null (reviewJoinCommands review), null (reviewJoinEndings review)]
 
 -- | The lifetimes that end without their shutdown notice, which lost their
--- supervision.
+-- supervision. A lifetime notice below the floor is pruned and is in no
+-- state, and its shutdown notice then joins nothing.
 joinLostLifetimes :: FlowJoin -> [LogPosition]
 joinLostLifetimes join = [lifetimeJoinStart lifetime | lifetime <- joinLifetimes join, isNothing (lifetimeJoinShutdown lifetime)]
 
@@ -1401,7 +1435,10 @@ flowJoinUncertain join = any (flowUncertain . snd) (joinRunLogs join) || not (nu
 
 -- | The summary object of a joined reading: the summary of each log, the
 -- verification result and its failures, the joins, the consent of each start
--- relay and the states. It states that the Store ledger is the authority.
+-- relay and the states. It states that the Store ledger is the authority. The
+-- summary of a manager log names its retained floor and the position of each
+-- reply whose ask lies below the floor, and a consent is verified, pruned or
+-- failed, as 'ConsentCheck' states.
 flowJoinSummaryValue :: FlowJoin -> Value
 flowJoinSummaryValue join =
   object
@@ -1414,6 +1451,7 @@ flowJoinSummaryValue join =
                          "kind" .= ("manager" :: Text),
                          "records" .= length (managerLogEntries manager),
                          "floor" .= positionIndex (managerLogFloor manager),
+                         "prunedReplies" .= [positionIndex (entryPosition entry) | entry <- managerLogEntries manager, entryPruned entry],
                          "tornFinalLine" .= fmap (\size -> object ["bytes" .= size]) (managerLogTorn manager)
                        ]
                      | manager <- joinManagerLogs join
@@ -1440,7 +1478,8 @@ flowJoinSummaryValue join =
                        "receipt" .= fmap positionIndex (consentReceipt consent),
                        "gap" .= fmap positionIndex (consentGap consent),
                        "runStart" .= fmap at (consentRunStart consent),
-                       "verified" .= null (consentProblems consent),
+                       "verified" .= (null (consentProblems consent) && not (consentPruned consent)),
+                       "pruned" .= (null (consentProblems consent) && consentPruned consent),
                        "problems" .= consentProblems consent
                      ]
                    | consent <- joinConsent join
