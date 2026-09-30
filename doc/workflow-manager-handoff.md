@@ -2,6 +2,223 @@
 
 <!-- handoff-id: wm023-20260923; status: paused-unaccepted-wip; accepted: WM-001..WM-022,G0,G1; resume-branch: workflow-manager-checkpoint-20260923; fess: every-subtask -->
 
+## Phase B part 1 of 2026-09-30
+
+The resume workflow delivered Phase B part 1 under the operator direction of
+2026-09-29 for fast validation, as subtasks B1 to B19 after `9a641dd8`. Part
+1 holds the four medium repairs of the increment 1 review, the disposition
+evidence of `acat-dxos` and `acat-nwrj`, the threat model of actor-flow
+increment 2, the P1 findings `acat-response-ingestion-budget-zaoi` and
+`acat-tls-name-forms-6gbo`, and the part 1 work of WM-023 to WM-026. Subtasks
+B1 to B14 landed. Subtasks B15 to B18 did not land, because each needs an
+operator review or authorization, as the section "Gated subtasks" states.
+Subtask B19 ran the part 1 gate on the tree of `ddf3ed93` and wrote this
+section. This section describes the current state. Where any section below
+differs, this section supersedes it, and the sections below remain as
+chronology. The evidence of each subtask is under `B/<subtask>/impl-r1` or
+`impl-r2` in the resume directory.
+
+| Subtask | Commit | Result |
+| --- | --- | --- |
+| B1 | `a803f5f3` | A cancel whose appended record decodes to another value is committed and named in a gap notice. The manager log names its open faults `oversized`, `undecodable` and `io-failure`. `manager/STORAGE.md` states the growth limit and the recovery, and no longer says that no local path enters a body. |
+| B2 | `27150239` | A control that arrives before the run log exists is held, then appended and delivered through `flowBroker` after the run log opens and before activation. |
+| B3 | `452272bf` | Evidence only. The Client-facade check passed at N8 with no 503 line. Two of three `tui-approval` runs at N8 passed, and the third failed through a harness race (`acat-2ua3`), not the `acat-dxos` signature. |
+| B4 | `b574255b` | The record `doc/research/actor-flow-route-threat-model.md`: the additive paths `GET /v1/routes` and `GET /v1/runs/{id}/routes`, the cursor alias, the 410 rules, the projection and visibility tables and the route-class authorization. It changes no code. |
+| B5 | `45e95147` | Protected byte responses release the configuration guard, the reader charge, every SQL transaction and the file slot before the first network write, and revalidate authorization before each 16 KiB write. |
+| B6 | `312fd25d` | Pages, downloads and receipts follow the same rule. A per-Store download quota of one replaces the artifact response slot, and a second concurrent download is refused with 429 `storage-quota`. |
+| B7 | `052a41bf` | An event stream takes its reader charge and configuration loan for each batch read and holds no loan while it writes. This closes `acat-response-ingestion-budget-zaoi`. |
+| B8 | `776be8e7` | WM-023: the mode `credential-lifecycle` of `service_http.py` shows rotation, cutoff, revocation during retained responses, the scope boundary and the absence of bearer bytes through the running HTTPS manager. No production source changed. |
+| B9 | `8c4140b7` | WM-024: the HTTPS boundary returns the frozen refusal codes for origins, preflights, content codings, request targets and slow bodies, and the mode `boundary` checks every negative with raw sockets. |
+| B10 | `303f655a` | The manager client refuses a chain whose Name Constraints use a form that `crypton-x509-validation` 1.9.1 does not evaluate or evaluates wrongly. No dependency changed. This closes `acat-tls-name-forms-6gbo`. |
+| B11 | `bea2d57b` | WM-025: `GET /v1/requests`, `/v1/runs` and `/v1/decisions` are routed as page sets of the frozen contract. |
+| B12 | `d652b37f` | WM-025: `GET /v1/runs/{id}/exports`, `/v1/runs/{id}/lineage-requests` and `/v1/exports/{id}` are routed. |
+| B13 | `87b255b9` | WM-025: the mode `pages` checks multi-page sets, exact ETags, token binding and expiry, the quota, revocation, an interrupted send, the aggregate bound and redaction. |
+| B14 | `ddf3ed93` | WM-026: the mode `events-lifecycle` checks snapshot attachment, filtered cursors, reconnection, restart and restore. An open event stream now ends at a block boundary on shutdown. |
+| B15 | not landed | Increment 2: the run route resource. It waits for the operator review of B4. |
+| B16 | not landed | Increment 2: route SSE, the manager-log route, wakeups and quota. It waits for the operator review of B4. |
+| B17 | not landed | Increment 2: actor-class serving for observe-with-control principals. It waits for the operator review of B4. |
+| B18 | not landed | Optional: a patch of `crypton-x509-validation` for IP Name Constraints. It waits for operator authorization. |
+| B19 | this section | The part 1 gate below and this section. |
+
+### Delivered behavior
+
+- The manager serves the frozen read collections `/v1/requests`,
+  `/v1/runs` and `/v1/decisions` and the export and lineage detail
+  resources as page sets with exact ETags. Each page set is bound to its
+  client, path, query and view, and it expires after 60 seconds.
+- A protected response materializes its bytes under its loans and returns
+  every Store loan before its first network write. It revalidates
+  authorization before each write, so a revocation stops the next write.
+  An event stream holds no Store loan while it writes or waits. Accepted
+  ingestion is no longer blocked by a slow reader.
+- The HTTPS boundary refuses with the frozen codes of `doc/api/README.md`.
+  An ordinary shutdown ends each open event stream at a block boundary,
+  and new streams are refused with 503 while the manager closes.
+- The manager client refuses the Name Constraints forms that the TLS
+  library misreads. It adds refusals only and never accepts a chain that
+  the default validation refuses.
+- The run log carries a control that arrives before activation, and a
+  cancel that the manager log cannot record exactly still proceeds.
+- `doc/api/openapi.yaml` and `runtime/src/Agentic/Runtime/Broker.hs` are
+  unchanged since `9a641dd8`. The `/v1` contract gains no path and no
+  schema in part 1, `Capabilities` keeps its bytes, and `DataBroker` keeps
+  its nine fields. No route resource is served.
+
+### Gate of Phase B part 1
+
+Subtask B19 ran the gate once on the tree of `ddf3ed93`, in the order of the
+gate list. Steps 15 and 16 ran on that tree with this handoff edit. Each step has a `.log` and an `.exit` file under
+`B/B19/impl-r1`. The first failure is under `B/B19/impl-r1/failed-r0`.
+Every check listed here passed, and each control failed with its literal
+message as intended.
+
+1. `make -C doc check` passed (`01-doc-check`).
+2. The incremental Werror build of all targets with `-ftui-tests` and
+   `tui-model-test` passed (`02-allbuild`).
+3. `make -C doc check-haskell` passed within its budget
+   (`03-doc-check-haskell`).
+4. `bash manager/ci/contract.sh` passed with 99 schemas, 29 operations,
+   333 payload cases, 20 SSE cases and 3 byte-bound downloads
+   (`04-contract`). The comparison of `doc/api/openapi.yaml` with
+   `9a641dd8` found no removed or changed path or component, no added path
+   or schema, no route path, and identical `Capabilities` bytes
+   (`04b-api-additive`). `Broker.hs` is unchanged since `9a641dd8`, and
+   `DataBroker` has nine fields (`04c-broker`). The first run of the field
+   count counted one field because its expression required a leading comma
+   (`failed-r0/04c-broker-countdefect`). The repair counts each field name
+   that begins a line.
+5. `runtime-contract-test` passed at N8 (`05a-runtime-contract-N8`),
+   `test/flow_probe.py` passed (`05b-flow-probe`), and
+   `test/progress_probe.py` passed with the golden
+   `test/fixtures/flow/hello-events.ndjson` (`05c-progress-probe`). With the
+   one-byte golden `hello-events-one-byte.ndjson` the probe failed as
+   intended with "broker-hello events.ndjson differs from ... at line 11"
+   (`05d-golden-control`).
+6. `test/control_probe.py` and `test/person_control_probe.py` passed at N8
+   (`06a-control-probe-N8`, `06b-person-control-probe-N8`).
+7. `manager-command-check flow` passed at N8 (`07a-command-flow-N8`), and
+   the main form of `manager-command-check` with `command_contract.py` and
+   `credential_cli.py` passed at N8 (`07b-command-main-N8`).
+8. `manager-artifact-check` passed its modes `response-ingestion`,
+   `stream-ingestion`, `response-order`, `fault-classification`,
+   `ordinary-admission`, `events` and `ordinary-stream` at N8 (`08a` to
+   `08g`). Its main form, `manager-history-check` and
+   `artifact_contract.py` passed at N8 (`08h-artifact-main-history-N8`).
+9. `manager-approval-check ingestion` and the main mode of
+   `manager-store-check` passed at N8 (`09a-ingestion-N8`,
+   `09b-store-main-N8`).
+10. `manager/test/client_native.py` passed at N8 with 28 PASS lines and the
+    fail-closed expectations of B10 (`10-client-native-N8`).
+11. `manager/test/service_http.py` passed at N8 in base mode with
+    `CLIENT_CHECK`, and then in the modes `mixed`, `credential-lifecycle`,
+    `boundary`, `pages` and `events-lifecycle`, each with a fresh fixture
+    (`11a` to `11f`). The Client facade passed against the running manager.
+12. `tui-journey` passed at N1 and then N8 with every `FLOW-ASSERT` and a
+    verified consent chain (`12-journey-pair`, fixture root
+    `/Users/johnw/Products/k.M0a5ItPm/tmp/b19-gate-journey.nbgbC6ul`). In
+    both runs the chain was review 7, approve 8, receipt 9, start relay 10
+    and run start 0. The manager logs held 26 records in 22192 and 22193
+    bytes.
+13. The consent control changed one review byte in a copy of the N8
+    manager log of step 12, and `agentic-run flow` exited 1 with "the review
+    body does not decode: review body reviewSha256 does not match its review
+    bytes" (`13-consent-control`).
+14. The control `tui-journey-broken-answer` failed with "JOURNEY-ASSERT
+    typed answer is not JSON false", `tui-consent-control` failed with
+    "detail-view key approved a review", and `tui-flow-approve-fault`
+    failed with "FLOW-FAULT the approve append failed and the manager
+    refused the approval with storage-unavailable", each at N8 (`14a` to
+    `14c`).
+15. `make -C doc check` passed after this section (`15-doc-check-final`).
+16. `bash tui/ci/tui.sh` passed last (`16-tui-ci`).
+
+### Checks not run
+
+- The route checks: the mode `routes` of `service_http.py`, the route
+  contract fixtures and the additive-only comparison of route paths. B15
+  did not land, so no route path exists, and the openapi comparison shows no
+  change. The SSE, manager-log route and route-restore assertions did not
+  run because B16 did not land. The actor-class assertions did not run
+  because B17 did not land.
+- A client check with IP Name Constraints evaluated by the library. B18 did
+  not land, so `client_native.py` ran with the fail-closed expectations of
+  B10.
+- `cli/ci/policies.sh`, `manager/ci/approval.sh`, `manager/ci/controls.sh`,
+  the `admission_audit.py` mutation audits, mutant suites, stability samples
+  of more than a few starts and `-fforce-recomp` builds. The operator
+  direction of 2026-09-29 removes them from routine validation.
+- `bisim/ci/tier0.sh` and every Lean or oracle check. The operator direction
+  forbids them for this run.
+- The N1 runs of the runtime and manager checks. Each ran once at N8, and
+  only the journey ran at N1 and N8.
+- The increment 1 gate checks that the part 1 gate list does not name:
+  `engine-api-test`, `test/lineage_probe.py`, the modes `flow-review` and
+  `flow-relay`, `manager-admission-check`, `manager-worker-check`, the
+  store modes other than main, `manager-draft-check`,
+  `engine/acp/ci/acp.sh`, `cli/ci/routing-config.sh`, `cli/ci/examples.sh`
+  and `engine/agent-deck/ci/deck.sh`. `bash tui/ci/tui.sh` covers the
+  source boundaries, `tui-model-test` and the TUI probes.
+- The ext-pi checks, because the Pi fork has no built `dist` directories,
+  and `engine/acp/ci/route-live.sh`, which needs a paid provider.
+- The Client-facade check at N1, which is the closing condition of
+  `acat-nwrj`. The gate list names only N8.
+
+### Gated subtasks
+
+- B15, B16 and B17 serve actor-flow increment 2. Section 6.2 of the design
+  record requires that the operator review the threat model before
+  increment 2 serves any route, and section 4 requires that review before an
+  actor or restricted body leaves the owning account. The record is
+  `doc/research/actor-flow-route-threat-model.md` (B4). The operator has not
+  reviewed it. B15 adds `GET /v1/runs/{id}/routes` with JSON batches of the
+  public class. B16 adds its SSE form and `GET /v1/routes` over the manager
+  log. B17 serves the actor class to principals with observe and control.
+- B18 is a second patch to `crypton-x509-validation` 1.9.1 that adds an
+  `AltNameIP` branch to `isIncludedIn`, applied through
+  `nix/haskell-overrides.nix`. A new dependency patch needs operator
+  authorization. It is optional, because B10 already refuses those chains.
+- WM-025 and WM-026 are not complete until B15 and B16 land, because
+  increment 2 lands inside them.
+
+### Open tracker items
+
+- `acat-dxos` stays open. The Integrator kept it open with the B3
+  evidence, because three runs cannot prove that the closed-release cause
+  is gone. The harness race that B3 found is `acat-2ua3`.
+- `acat-nwrj` stays open. The Client-facade check passed at N8 in B3 and in
+  step 11 of this gate. Its closing condition is one run at N1 with every
+  503 line classified.
+- `acat-1dfc` stays open. B1 and B2 repaired its medium findings 1 to 4.
+  Finding 5 (the ext-pi checks) and the low findings remain.
+- `acat-62j0`, the F16 fess findings, stays open.
+- `acat-response-ingestion-budget-zaoi` is closed by B5, B6 and B7. The
+  review findings are `acat-b5-response-review-findings-k96b`,
+  `acat-b6-response-review-findings-gxmf` and
+  `acat-b7-stream-review-findings-n6v5`.
+- `acat-tls-name-forms-6gbo` is closed by B10. Its fess findings are
+  `acat-3iof`.
+- `acat-en4g`, increment 2, stays open. B4 wrote its threat model, and its
+  serving waits for the operator review.
+- The fess findings of the subtasks are `acat-76le` (B1), `acat-3mgw`
+  (manager-log retention, which blocks WM-042), `acat-r4vj` (B2),
+  `acat-2ua3` (B3), `acat-55qg` (B4), `acat-ec5s` (B8), `acat-8tzp` (B9),
+  `acat-b11-fess-g9wh`, `acat-b12-fess-fw1z`, `acat-b13-fess-en44` and
+  `acat-b14-fess-gehi`. The medium finding of B13 asks for an operator
+  ruling on the redaction exception for the runtime `targetLabel`
+  `acp:mixed-adapter` in run snapshots.
+
+### Next action
+
+1. The operator reviews `doc/research/actor-flow-route-threat-model.md`
+   (B4). After acceptance, B15, B16 and B17 land and the route checks of
+   this gate run.
+2. The operator decides on B18.
+3. Phase B part 2 follows: WM-027, actor-flow increment 3 (`acat-c18n`),
+   WM-028 and G2.
+
+Accepted state is unchanged at WM-001 to WM-022 and G0 and G1. Part 1 closes
+no gate.
+
 ## Actor-flow increment 1 of 2026-09-29
 
 The operator accepted Phase A on 2026-09-29 and kept the file-slot and
@@ -10,8 +227,9 @@ actor-flow increment 1 (`acat-e6cp`, then `acat-5m60`) under the operator
 direction for fast validation, as subtasks F0 to F16 after `4496dbe4`. The
 run completed every subtask and did not stop early. Its last subtask commit
 is `d4ec7a6d`, and the closeout commit that follows it changes only this
-section. This section describes the current state. Where any section below
-differs, this section supersedes it, and the sections below remain as chronology. The
+section. The section "Phase B part 1 of 2026-09-30" above supersedes this
+section where they differ. Where any section below differs, this section
+supersedes it, and the sections below remain as chronology. The
 contract is `doc/research/actor-flow-amendment.md`, `runtime/BROKER.md` and
 the section "Manager log" of `manager/STORAGE.md`. The evidence of each
 subtask is under `F/<subtask>/impl-r1` or `impl-r2` in the resume directory.
