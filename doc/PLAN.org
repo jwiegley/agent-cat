@@ -1867,7 +1867,7 @@ Follow-up from the F9 fess audit of the manager log writer, the manager codecs a
 :LABELS:   ["actor-flow","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-29 Tue 22:59]
-:MODIFIED: [2026-09-30 Wed 10:27]
+:MODIFIED: [2026-09-30 Wed 16:01]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -1896,6 +1896,13 @@ Follow-up from the F16 fess audit of the increment 1 gate and the handoff curren
     "author": "johnw",
     "text": "Subtask C1 (Phase B part 2) resolves item 3 in full and the gate 5 part of item 2. Item 3: npm run check, npm test (89 passed, 5 skipped) and npm run test:integration (8 Vitest cases plus test/pi-remote-current.mjs) pass in ext-pi against the built Pi fork 0.99.1 and a -ftui-tests agentic-run. Item 2, gate 5 part: ext-pi/test/owned-child-e2e.test.ts runs 'agentic-run flow <storeDir>/runtime' on the parent and the resumed child, requires a verified summary and one start record, and asserts that its from field equals {principal: local, uid, owner: manifest.ownerId}. A negative copy with a wrong owner failed on owner only. Gate 6 and the broker-api-default revalidation (item 2), and items 4 and 5, remain open. Evidence: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/B2/C1/impl-r1.",
     "created_at": "2026-09-30T17:27:26Z"
+  },
+  {
+    "id": 426,
+    "issue_id": "acat-62j0",
+    "author": "johnw",
+    "text": "Subtask C17 (Phase B part 2) resolves the gate 6 part of item 2: a /v1 fail-over and a /v1 redirect before dispatch are each shown in the run log (agentic-run flow on the run store) by service_http.py mode controls-routing at N8, and the redirect also in events.ndjson. The broker-api-default revalidation of gate 11 and the gate-to-evidence mapping remain open. Evidence: B2/C17/impl-r1 in the private resume-20260923 evidence directory.",
+    "created_at": "2026-09-30T23:01:20Z"
   }
 ]
 #+end_src
@@ -4153,6 +4160,54 @@ when a fixture with an open dispatch is available.
 8. (low) manager/test/service_http.py (about lines 3911-3932). The act helper repeats the
 head-decision driving logic of the mixed driver (about lines 597-621). Fix: factor out one shared
 driver if a third copy appears.
+
+* TODO [#D] Resolve C17 fess findings in the routing controls
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-c17-routing-fess-findings-fadw
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-30 Wed 16:01]
+:MODIFIED: [2026-09-30 Wed 16:01]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of the fess audit of Phase B part 2 subtask C17 (fail-over and dispatch-window
+redirect through /v1, service_http.py mode controls-routing, and the steer and redirect ordering fix
+in the runtime). Report: fess/b2-C17-r1.md in the private evidence directory.
+
+1. (low) runtime/src/Agentic/Runtime/Machine.hs (about lines 327-337),
+runtime/src/Agentic/Runtime/Control.hs (about lines 341 and 390-392), runtime/src/Agentic/Exec.hs
+(about line 1117). The steer lock and the redirect "emitted" cell are released only when the receive
+loop reaches afterAcknowledgement. If the sink throws while it emits AttemptSteered,
+OccurrenceRedirected or the ack, closeAttemptSteering or awaitRuntimeRedirect blocks with no timeout
+until the owner cancellation ends it. Fix: run the event emission and the ack under
+`finally afterAcknowledgement` (or onException) in Machine.hs receive.
+
+2. (low) manager/test/service_http.py (routing_cases, about lines 3957-4088) and
+runtime/src/Agentic/Exec.hs (about lines 843-845). No configurable dispatch window exists. The test
+relies on the automatic 30-second window for any question with more than one target, so the
+fail-over case also waits the full window. Fix: accept this, or add a configurable or shorter window
+to make the tests faster.
+
+3. (low) manager/test/service_http.py (control_checks finally, about lines 4254-4262). Neither
+controls nor controls-routing checks server-0.stderr for "class=store StoreIntegrity", the root
+symptom of the race. The routing rerun also logged one GET /v1/runs/{id}/control 503
+storage-unavailable class=store StoreBusy during polling. Fix: assert that no StoreIntegrity line
+appears at the end of both modes, and triage the StoreBusy 503 on a GET.
+
+4. (low) runtime/test/Main.hs (about lines 290-293 and 306-308). The ordering unit tests wait 50 ms
+and then call tryReadMVar to show that a waiter has not finished. Under load they can miss a
+regression. The test was not shown failing before the fix. Fix: add a deterministic check, for
+example that the lock MVar is empty while the steer delivery is pending.
+
+5. (low) runtime/src/Agentic/Runtime/Control.hs (about lines 437-446). The ACP 2-second steer-ack
+timeout bounds the steer lock hold only for ACP. Nothing bounds the steer call of another
+EngineSteerer, and the attempt end now waits on it. Fix: document the bound as specific to ACP, or
+put a timeout around the steer call inside the lock.
 
 * TODO [#B] Actor flow increment 3: live re-route and asks answered by people
 :PROPERTIES:
@@ -16752,7 +16807,7 @@ and enforce advertised bounds. G2 is complete with mutations still unavailable.
 :LABELS:   ["p5","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-30 Wed 15:33]
+:MODIFIED: [2026-09-30 Wed 16:01]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-027
 :SOURCE_REPO: agent-cat
@@ -16978,6 +17033,13 @@ Network mutation remains behind G3 until the required evidence is complete.
     "author": "johnw",
     "text": "Phase B part 2 C16: new service_http.py mode controls exercises cancel, steer, retry, choose-recovery abandon and answer through POST /v1/runs/{id}/control and POST /v1/decisions/{id} at N8. Each control reached its runtime effect with no production change. Concurrent answers to one head decision give one delivered answer and one 412 stale-revision. An unoffered steer refuses with unsupported-operation and a non-head answer with decision-not-head, and the FIFO order holds. Checks passed: Werror build with -ftui-tests, controls at N8, make -C doc check, Phase A journey at N8. Evidence: B2/C16 in the private evidence directory. Fess non-blocking, findings in acat-c16-controls-fess-findings-7xop.",
     "created_at": "2026-09-30T22:33:03Z"
+  },
+  {
+    "id": 425,
+    "issue_id": "acat-wm-027-gcu6",
+    "author": "johnw",
+    "text": "Subtask C17 (Phase B part 2): choose-recovery fail-over through POST /v1/decisions/{id} and a dispatch-window redirect through POST /v1/runs/{id}/control reach their runtime effects through the running manager. The new service_http.py mode controls-routing asserts the run-log order (question to primary, control, control.ack, failure, question to spare) and occurrence.redirected in events.ndjson. A runtime race that emitted attempt.steered after attempt.completed (and occurrence.redirected after attempt.started) is fixed. Checks passed: Werror build, controls-routing at N8, test/control_probe.py, make -C doc check, the Phase A journey at N8, plus controls and runtime-contract-test. Evidence: B2/C17/impl-r1 in the private resume-20260923 evidence directory. Fess findings: acat-c17-routing-fess-findings-fadw.",
+    "created_at": "2026-09-30T23:01:19Z"
   }
 ]
 #+end_src

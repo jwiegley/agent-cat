@@ -104,6 +104,24 @@ with `occurrence.retried`. Steering checks the exact attempt and hashes the nati
 timing/text effect against its original binding. Redirect checks its target binding.
 Abandon checks the correlated recovery choice.
 
+## Fail-over and redirect
+
+A fail-over is a `choose-recovery` decision with the choice `failover`. The
+Runtime offers that choice only when a later candidate of the question is still
+available. The chosen fail-over ends the walk at the current candidate. The run
+log then holds a `failure` reply to the `question` of that candidate, and a new
+`question` to the next candidate. The effect `recovery-chosen` of the command
+correlates with `occurrence.recovery-chosen` and `occurrence.retried`.
+
+A redirect is a run control with the operation `redirect`. Before the first
+attempt of a question with more than one candidate target, the Runtime reserves
+a dispatch window of at most 30 seconds. While the window is open, the
+run-control resource offers `redirect` for the occurrence with its targets. A
+redirect inside the window closes it and puts the chosen target first, and the
+run log holds a `question` to that target. The effect `redirected` correlates
+with `occurrence.redirected` in `events.ndjson`. When the window ends without a
+redirect, the Runtime asks the candidates in their authored order.
+
 `RunCancelled` has no causal ControlId in the existing protocol. The manager keeps
 its terminal observation and any correlated cancellation acknowledgement, but does
 not manufacture a cancelled command effect from temporal proximity, EOF, text or
@@ -139,6 +157,15 @@ reach their effects, and that an answer reaches `answer-accepted`. It also
 checks the `decision-not-head` and `unsupported-operation` refusals, the
 per-run FIFO order, and that two credentials that answer one head decision at
 the same time give one delivered answer and one `stale-revision` refusal.
+The `controls-routing` mode configures one more profile, whose question has the
+ACP retry fixture as its first candidate and the ACP stub fixture as its spare
+candidate. It checks that a `choose-recovery` fail-over through
+`/decisions/{id}` asks the spare candidate, and that a redirect through
+`/runs/{id}/control` inside the dispatch window asks the chosen target. For each
+run it reads the run store with `agentic-run flow` and checks the relayed
+`control` from the manager, its acknowledgement event and the `question` records
+that [Fail-over and redirect](#fail-over-and-redirect) describes. For the redirect it also checks
+`occurrence.redirected` in `events.ndjson`.
 Fixture barriers delay original work or original control delivery, never invent
 successful Runtime envelopes. The steering fixture completes its original prompt
 through its normal event loop, including when no steer is delivered. Every fixture

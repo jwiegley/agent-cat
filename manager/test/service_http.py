@@ -169,11 +169,27 @@ lineage_mode = len(sys.argv) == 6 and sys.argv[5] == LINEAGE
 # prints its own PASS line. It runs one manager lifetime.
 CONTROLS = "controls"
 controls_mode = len(sys.argv) == 6 and sys.argv[5] == CONTROLS
+# The controls-routing mode checks the two-candidate controls of WM-027
+# through the running protected manager. Only this mode configures
+# profile_route, whose first model candidate is the recovery-offering retry
+# adapter and whose spare candidate is the stub adapter. Each question with
+# two candidates opens the dispatch window that the runtime reserves for a
+# redirect before the first attempt. A choose-recovery fail-over through the
+# decision asks the spare candidate, and the run log of the run store holds
+# the relayed control, its acknowledgement, a failure for the first question
+# and a new question to the spare candidate. A redirect through the run
+# control inside the dispatch window asks the chosen target, and the run log
+# holds the relayed control, its acknowledgement and a question to that
+# target, and events.ndjson holds occurrence.redirected. Each numbered case
+# prints its own PASS line. It runs one manager lifetime.
+ROUTING = "controls-routing"
+routing_mode = len(sys.argv) == 6 and sys.argv[5] == ROUTING
 # The modes that configure the control fixture profiles in place of the
 # scripted profile: profile_1 runs the recovery-offering retry adapter and
-# profile_steer runs the steerable adapter. Other modes keep their profiles.
-control_profiles = controls_mode
-assert len(sys.argv) == 5 or mixed or boundary or pages_mode or events_mode or captures_mode or discard_mode or exports_mode or lineage_mode or controls_mode
+# profile_steer runs the steerable adapter. The controls-routing mode also
+# configures profile_route. Other modes keep their profiles.
+control_profiles = controls_mode or routing_mode
+assert len(sys.argv) == 5 or mixed or boundary or pages_mode or events_mode or captures_mode or discard_mode or exports_mode or lineage_mode or control_profiles
 assert not tui_approval or os.environ.get("TUI_CHECK")
 assert native in ("1", "8")
 print(f"work={work}", flush=True)
@@ -254,7 +270,7 @@ if mixed:
 if control_profiles:
     adapters = work / "adapters"
     adapters.mkdir(mode=0o700)
-    for launcher_name, program_name in (("retry-adapter", "retry_adapter.py"), ("steer-adapter", "steer_adapter.py")):
+    for launcher_name, program_name in (("retry-adapter", "retry_adapter.py"), ("steer-adapter", "steer_adapter.py"), ("spare-adapter", "stub_adapter.py")):
         launcher = adapters / launcher_name
         program = source / "engine/acp/test" / program_name
         launcher.write_text(f"#!{sys.executable} -B\nimport os\nos.execv({sys.executable!r},[{sys.executable!r},'-B',{str(program)!r}])\n")
@@ -266,6 +282,15 @@ if control_profiles:
              targetArguments=["--engine", "acp", "--adapter", "retry-adapter"], environment=fixture_path),
         dict(scripted, id="profile_steer", workspaceLabel="HTTPS steer fixture", targetLabel="Deterministic ACP steer",
              targetArguments=["--engine", "acp", "--adapter", "steer-adapter"], environment=fixture_path)]
+    if routing_mode:
+        # The route named spare answers the spare candidate of the
+        # mixed-controls question. The primary candidate keeps the retry
+        # adapter, which offers a recovery after its decoding budget.
+        configuration["profiles"].append(
+            dict(scripted, id="profile_route", workspaceLabel="HTTPS route fixture", targetLabel="Deterministic ACP route",
+                 targetArguments=["--engine", "acp", "--adapter", "retry-adapter", "--route", "spare=acp:spare-adapter"],
+                 environment=fixture_path))
+CONTROL_PROFILES = [profile["id"] for profile in configuration["profiles"]] if control_profiles else []
 config = work / "configuration.json"
 config.write_text(json.dumps(configuration))
 config.chmod(0o600)
@@ -290,7 +315,7 @@ def administration(payload, refused=None):
 
 issued = administration({"version": 1, "operation": "issue-credential", "label": "HTTPS fixture",
                          "scopes": ["observe", "submit"] + (["control", "export"] if mixed else ["control"] if captures_mode or discard_mode or lineage_mode or control_profiles else ["control", "export"] if exports_mode else []),
-                         "profileIds": ["profile_1"] + (["profile_steer"] if control_profiles else []),
+                         "profileIds": CONTROL_PROFILES or ["profile_1"],
                          "expiresAt": "2999-01-01T00:00:00Z", "outputFile": str(work / "credential")})
 bearer = (work / "credential").read_bytes().decode("ascii")
 if collections:
@@ -310,7 +335,7 @@ if captures_mode or discard_mode:
 # ordinary mutation rate.
 if control_profiles:
     administration({"version": 1, "operation": "issue-credential", "label": "HTTPS control peer",
-                    "scopes": ["observe", "submit", "control"], "profileIds": ["profile_1", "profile_steer"],
+                    "scopes": ["observe", "submit", "control"], "profileIds": CONTROL_PROFILES,
                     "expiresAt": "2999-01-01T00:00:00Z", "outputFile": str(work / "credential-peer")})
 configuration["administrationRoot"] = str(work / "admin")
 config.write_text(json.dumps(configuration))
@@ -3931,6 +3956,137 @@ def control_checks():
             "recovery choice not offered", choice, control["offers"])
         return mutate("/v1/decisions/" + head, dict(body, operation="choose-recovery", choice=choice), decision_tag), "recovery-chosen"
 
+    def new_store(before):
+        """The one run store that appeared after the stores in before."""
+        deadline = time.monotonic() + 20
+        while True:
+            stores = sorted(set(work.glob("manager/runs/runs/*/runtime")) - before)
+            if len(stores) == 1:
+                return stores[0]
+            assert len(stores) == 0 and time.monotonic() < deadline, ("new run store", stores)
+            time.sleep(0.05)
+
+    def store_flow(name, store):
+        """The run-log records and the summary that the flow verb of the
+        runner reads from the run store of an ended run."""
+        completed = subprocess.run([str(runner), "flow", str(store)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60)
+        (work / (name + ".ndjson")).write_bytes(completed.stdout)
+        (work / (name + ".stderr")).write_bytes(completed.stderr)
+        lines = [json.loads(line) for line in completed.stdout.splitlines()]
+        assert lines and "summary" in lines[-1], ("flow verb", name, completed.returncode, completed.stderr[-2000:])
+        summary = lines[-1]["summary"]
+        assert completed.returncode == 0 and summary["verified"] and not summary["problems"] and not summary["live"], (
+            "the flow verb did not verify the ended run log", name, completed.returncode, summary["problems"])
+        assert not summary["states"]["unacknowledged"], ("the run log has an unacknowledged control", name, summary["states"]["unacknowledged"])
+        return lines[:-1], summary
+
+    def acknowledged_control(records, identity):
+        """The one run-log control of the command, from the manager, and the
+        position of the first later event record that acknowledges it."""
+        found = [record for record in records if record["schema"] == "control" and record["about"].get("command") == identity]
+        assert len(found) == 1 and found[0]["from"] == "manager", ("run-log control of command", identity, [record["from"] for record in found])
+        control = found[0]
+        acknowledgements = [record["position"] for record in records if record["schema"] == "event" and record["position"] > control["position"]
+                            and record["event"]["line"]["event"]["type"] == "control.ack"
+                            and record["event"]["line"]["event"]["controlId"] == identity]
+        assert acknowledgements, ("run-log control acknowledgement", identity)
+        return control, acknowledgements[0]
+
+    def model_questions(records, occurrence):
+        """The run-log questions of the occurrence to a model, in log order."""
+        return [record for record in records if record["schema"] == "question" and str(record["about"].get("occurrence")) == occurrence
+                and isinstance(record["to"].get("to"), dict) and "model" in record["to"]["to"]]
+
+    def settle(client, capabilities, run, choice):
+        """Act on each head decision of the run until it ends: typed false
+        for a question and choose-recovery with the choice for a recovery.
+        Returns the recovery commands and the decisions they acted on."""
+        recoveries = []
+        deadline = time.monotonic() + 90
+        while True:
+            snapshot, _, _ = client[0](f"/v1/runs/{run}/snapshot", "RunSnapshot")
+            if snapshot["runtime"] is not None and snapshot["runtime"]["status"] in terminal:
+                return recoveries
+            assert time.monotonic() < deadline, ("routing run terminal deadline", run)
+            control, _, _ = client[0](f"/v1/runs/{run}/control", "RunControl")
+            if control["decisionHeadId"] is None:
+                time.sleep(0.05)
+                continue
+            decision, _, _ = client[0]("/v1/decisions/" + control["decisionHeadId"], "Decision")
+            uri, kind = act(client, capabilities, run, control["decisionHeadId"], choice)
+            command = effect(client, uri, kind)
+            if command["operation"] == "choose-recovery":
+                recoveries.append((command, decision))
+
+    def routing_cases(first, first_capabilities):
+        """Fail-over and redirect of the two-candidate question of
+        profile_route through /v1, with the run-log and event evidence."""
+        # Case 1. A choose-recovery fail-over through the decision asks the
+        # spare candidate. The run log holds the relayed control and its
+        # acknowledgement, a failure for the first question and a new question
+        # to the spare candidate.
+        before = set(work.glob("manager/runs/runs/*/runtime"))
+        run = start(first, first_capabilities, "profile_route")
+        store = new_store(before)
+        recoveries = settle(first, first_capabilities, run, "failover")
+        ended(first, run, "succeeded")
+        assert len(recoveries) == 1, ("fail-over recoveries", [command["id"] for command, _ in recoveries])
+        failover, decision = recoveries[0]
+        assert any(item["choice"] == "failover" for item in decision["choices"]), ("failover not offered", decision["choices"])
+        occurrence = decision["address"]["occurrenceId"]
+        records, _ = store_flow("routing-failover-flow", store)
+        control, acknowledgement = acknowledged_control(records, failover["id"])
+        questions = model_questions(records, occurrence)
+        assert len(questions) == 2, ("fail-over questions", [(record["position"], record["to"]) for record in questions])
+        asked, spare = questions
+        failures = [record for record in records if record["schema"] == "failure" and record.get("replyTo") == asked["position"]]
+        assert len(failures) == 1 and asked["position"] < control["position"] < failures[0]["position"] < spare["position"], (
+            "fail-over order", asked["position"], control["position"], [record["position"] for record in failures], spare["position"])
+        first_target, spare_target = asked["to"]["to"]["model"], spare["to"]["to"]["model"]
+        assert first_target.endswith("@primary") and spare_target.endswith("@spare"), ("fail-over targets", first_target, spare_target)
+        answers = [record for record in records if record["schema"] == "answer" and record.get("replyTo") == spare["position"]]
+        assert len(answers) == 1 and answers[0]["from"] == {"model": spare_target}, ("spare answer", [record["from"] for record in answers])
+        print("PASS controls-routing case 1: choose-recovery command", failover["id"], "chose failover for occurrence", occurrence,
+              "of run", run, "and the run succeeded; the run log holds control", control["position"], "from the manager with",
+              "acknowledgement event", acknowledgement, "failure", failures[0]["position"], "for question", asked["position"], "to",
+              first_target, "and question", spare["position"], "to", spare_target, "with its answer", flush=True)
+
+        # Case 2. A redirect through the run control inside the dispatch
+        # window asks the chosen target. The run log holds the relayed control,
+        # its acknowledgement and a question to that target, and events.ndjson
+        # holds occurrence.redirected.
+        before = set(work.glob("manager/runs/runs/*/runtime"))
+        run = start(first, first_capabilities, "profile_route")
+        store = new_store(before)
+        base = "/v1/runs/" + run
+        control, tag, raw = first[1](base + "/control", "RunControl",
+            lambda value: any(offer["operation"] == "redirect" for offer in value["offers"]))
+        (work / "control-redirect-before.json").write_bytes(raw)
+        offer = next(offer for offer in control["offers"] if offer["operation"] == "redirect")
+        occurrence = offer["address"]["occurrenceId"]
+        assert len(offer["targets"]) == 2 and offer["targets"][0].endswith("@primary"), ("redirect targets", offer["targets"])
+        target = offer["targets"][-1]
+        uri = first[2](base + "/control", {"operation": "redirect", "occurrenceId": occurrence, "target": target}, tag)
+        redirect = effect(first, uri, "redirected")
+        assert settle(first, first_capabilities, run, "abandon") == [], "a redirected run offered a recovery"
+        ended(first, run, "succeeded")
+        records, _ = store_flow("routing-redirect-flow", store)
+        control, acknowledgement = acknowledged_control(records, redirect["id"])
+        questions = model_questions(records, occurrence)
+        assert len(questions) == 1 and questions[0]["to"] == {"to": {"model": target}} and control["position"] < questions[0]["position"], (
+            "redirected questions", control["position"], [(record["position"], record["to"]) for record in questions])
+        answers = [record for record in records if record["schema"] == "answer" and record.get("replyTo") == questions[0]["position"]]
+        assert len(answers) == 1 and answers[0]["from"] == {"model": target}, ("redirected answer", [record["from"] for record in answers])
+        events = [json.loads(line) for line in (store / "events.ndjson").read_bytes().splitlines()]
+        events = [event.get("event", event) for event in events]
+        redirected = [event for event in events if event["type"] == "occurrence.redirected"]
+        assert len(redirected) == 1 and redirected[0]["target"] == target and str(redirected[0]["occurrenceId"]) == occurrence, (
+            "occurrence.redirected event", redirected)
+        print("PASS controls-routing case 2: redirect command", redirect["id"], "sent occurrence", occurrence, "of run", run,
+              "to", target, "inside the dispatch window and reached the effect redirected; the run log holds control",
+              control["position"], "from the manager with acknowledgement event", acknowledgement, "and question", questions[0]["position"],
+              "to", target, "with its answer, events.ndjson holds occurrence.redirected, and the run succeeded", flush=True)
+
     with (work / "server-0.stdout").open("wb") as output, (work / "server-0.stderr").open("wb") as errors:
         process = subprocess.Popen([str(runner), "--manager", "serve", "--config", str(config),
                                     "+RTS", "-N" + native, "-RTS"], stdout=output, stderr=errors)
@@ -3941,10 +4097,13 @@ def control_checks():
                 status, capabilities, _ = request("/v1/capabilities", credential)
                 assert status == 200 and "control" in capabilities["scopes"], ("control capabilities", label, status)
                 validate("Capabilities", capabilities)
-                assert sorted(capabilities["profileIds"]) == ["profile_1", "profile_steer"], capabilities["profileIds"]
+                assert sorted(capabilities["profileIds"]) == sorted(CONTROL_PROFILES), capabilities["profileIds"]
                 clients[label] = (mixed_client(capabilities, credential), capabilities)
             first, first_capabilities = clients["first"]
             second, second_capabilities = clients["peer"]
+            if routing_mode:
+                routing_cases(first, first_capabilities)
+                return
 
             # Case 1. A cancel of a running run is acknowledged, and the run ends cancelled.
             run = start(first, first_capabilities, "profile_steer")
@@ -4101,11 +4260,11 @@ def control_checks():
                 process.terminate()
             process.wait(timeout=25)
             (work / "server-0.exit").write_text(str(process.returncode) + "\n")
-    print("PASS controls: every control case held against the running TLS 1.3 manager", flush=True)
 
 
-if controls_mode:
+if control_profiles:
     control_checks()
+    print("PASS", sys.argv[5] + ": every control case held against the running TLS 1.3 manager", flush=True)
     raise SystemExit(0)
 
 

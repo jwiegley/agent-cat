@@ -34,6 +34,18 @@ root path, device number, and inode number captured by the parent. The child reo
 and validates that identity before confined input, lineage, or store access. The
 identity is not an authorization token and does not relax ownership or mode checks.
 
+## Control event order
+
+A delivered person answer, steer or redirect emits its effect event and its
+terminal acknowledgement before the workflow acts on it. The occurrence waits
+for the acknowledgement of a person answer before it continues. An attempt
+closes its steering before it emits `attempt.completed` or `attempt.failed`.
+Closing waits for a steer delivery in progress, and a later steer of that
+attempt is unsupported. So `attempt.steered` always precedes the end of its
+attempt. The occurrence waits for the events of a delivered redirect before it
+starts its first attempt, so `occurrence.redirected` precedes that attempt. A
+redirect that arrives as the 30-second dispatch window closes is still taken.
+
 ## Verified result capture and export
 
 `readResultArtifactBytesAt` returns the exact verified native envelope and its

@@ -18,6 +18,7 @@ module Agentic.Runtime.Control
     newControlRuntimeFor,
     registerControlAttempt,
     unregisterControlAttempt,
+    closeAttemptSteering,
     waitForRuntimeRecovery,
     waitForRuntimePersonAnswer,
     registerRuntimeRedirects,
@@ -63,8 +64,11 @@ import Control.Concurrent.MVar
     putMVar,
     takeMVar,
     tryPutMVar,
+    tryTakeMVar,
+    withMVar,
   )
-import Control.Exception (SomeAsyncException, SomeException, displayException, finally, fromException, tryJust)
+import Control.Applicative ((<|>))
+import Control.Exception (SomeAsyncException, SomeException, displayException, finally, fromException, mask, onException, tryJust)
 import Control.Monad (when)
 import System.Timeout (timeout)
 import Data.Aeson
@@ -166,8 +170,16 @@ data LiveControlState = LiveControlState
   { liveObserveAvailability :: !Bool,
     liveSnapshot :: !ControlSnapshot,
     liveSteerers :: !(Map AttemptId (Maybe AttemptSteerer)),
+    -- | One lock for each registered attempt. A steer delivery holds it from
+    -- the lookup of the steerer until its events are emitted, and the attempt
+    -- takes it to close steering before it emits its own end. So
+    -- @attempt.steered@ never follows the end of its attempt.
+    liveSteerLocks :: !(Map AttemptId (MVar ())),
     liveRetries :: !(Map OccurrenceId (MVar (ControlId, RecoveryControl))),
-    liveRedirects :: !(Map OccurrenceId (MVar Text)),
+    -- | A delivered redirect carries its target and a cell that the delivery
+    -- fills after it emits its events. The occurrence waits for that cell
+    -- before it dispatches, so @occurrence.redirected@ precedes the attempt.
+    liveRedirects :: !(Map OccurrenceId (MVar (Text, MVar ()))),
     livePersonAnswers :: !(Map OccurrenceId PersonAnswerGate),
     liveNonReplayable :: !(Map OccurrenceId ()),
     liveAcks :: !(Map ControlId ControlAck)
@@ -182,16 +194,30 @@ newControlRuntimeFor :: Int -> IO ControlRuntime
 newControlRuntimeFor version
   | version `notElem` supportedProtocolVersions = ioError (userError "unsupported control observation version")
   | otherwise = ControlRuntime <$> newMVar
-      (LiveControlState (version == latestProtocolVersion) emptyControlSnapshot Map.empty Map.empty Map.empty Map.empty Map.empty Map.empty)
+      (LiveControlState (version == latestProtocolVersion) emptyControlSnapshot Map.empty Map.empty Map.empty Map.empty Map.empty Map.empty Map.empty)
 
 registerControlAttempt :: ControlRuntime -> AttemptId -> Maybe AttemptSteerer -> IO ()
-registerControlAttempt (ControlRuntime state) attempt steerer =
+registerControlAttempt (ControlRuntime state) attempt steerer = do
+  lock <- newMVar ()
   modifyMVar_ state $ \live ->
     pure
       live
         { liveSnapshot = (liveSnapshot live) {activeAttempts = activeAttempts (liveSnapshot live) <> [attempt]},
-          liveSteerers = Map.insert attempt steerer (liveSteerers live)
+          liveSteerers = Map.insert attempt steerer (liveSteerers live),
+          liveSteerLocks = Map.insert attempt lock (liveSteerLocks live)
         }
+
+-- | Close steering of an attempt before the attempt emits its end. It waits
+-- for a steer delivery in progress to emit its events, and afterwards no
+-- steer reaches the attempt.
+closeAttemptSteering :: ControlRuntime -> AttemptId -> IO ()
+closeAttemptSteering (ControlRuntime state) attempt = do
+  lock <- Map.lookup attempt . liveSteerLocks <$> readMVar state
+  case lock of
+    Nothing -> pure ()
+    Just held ->
+      withMVar held $ \() ->
+        modifyMVar_ state $ \live -> pure live {liveSteerers = Map.adjust (const Nothing) attempt (liveSteerers live)}
 
 unregisterControlAttempt :: ControlRuntime -> AttemptId -> IO ()
 unregisterControlAttempt (ControlRuntime state) attempt =
@@ -199,7 +225,8 @@ unregisterControlAttempt (ControlRuntime state) attempt =
     pure
       live
         { liveSnapshot = (liveSnapshot live) {activeAttempts = filter (/= attempt) (activeAttempts (liveSnapshot live))},
-          liveSteerers = Map.delete attempt (liveSteerers live)
+          liveSteerers = Map.delete attempt (liveSteerers live),
+          liveSteerLocks = Map.delete attempt (liveSteerLocks live)
         }
 
 waitForRuntimeRecovery :: ControlRuntime -> OccurrenceId -> [RecoveryControl] -> IO () -> IO (ControlId, RecoveryControl)
@@ -290,20 +317,28 @@ awaitRuntimeRedirect (ControlRuntime state) occurrence = do
   gate <- Map.lookup occurrence . liveRedirects <$> readMVar state
   case gate of
     Nothing -> pure Nothing
-    Just pending ->
+    Just pending -> do
       -- A human-visible bounded decision window; no attempt exists during it.
-      timeout (30 * 1000 * 1000) (takeMVar pending) `finally`
-        modifyMVar_ state
-          ( \live ->
+      -- Closing the window under the state lock also takes a delivery that
+      -- landed after the timeout, so a delivered redirect is never ignored.
+      let close =
+            modifyMVar state $ \live -> do
+              late <- tryTakeMVar pending
               pure
-                live
-                  { liveSnapshot =
-                      (liveSnapshot live)
-                        { reservedRedirects = Map.delete occurrence (reservedRedirects (liveSnapshot live))
-                        },
-                    liveRedirects = Map.delete occurrence (liveRedirects live)
-                  }
-          )
+                ( live
+                    { liveSnapshot =
+                        (liveSnapshot live)
+                          { reservedRedirects = Map.delete occurrence (reservedRedirects (liveSnapshot live))
+                          },
+                      liveRedirects = Map.delete occurrence (liveRedirects live)
+                    },
+                  late
+                )
+      first <- timeout (30 * 1000 * 1000) (takeMVar pending) `onException` close
+      late <- close
+      case first <|> late of
+        Nothing -> pure Nothing
+        Just (target, emitted) -> Just target <$ takeMVar emitted
 
 runtimeOccurrenceReplayable :: ControlRuntime -> OccurrenceId -> IO Bool
 runtimeOccurrenceReplayable (ControlRuntime state) occurrence =
@@ -348,16 +383,13 @@ deliverRuntimeActionDeferred :: ControlRuntime -> Control -> ControlAction -> IO
 deliverRuntimeActionDeferred runtime@(ControlRuntime state) control action = do
   (ack, afterAcknowledgement) <- case action of
     ActSteer attempt timing text -> do
-      handler <- Map.lookup attempt . liveSteerers <$> readMVar state
-      result <- case joinMaybe handler of
-        Nothing -> pure (ControlAck cid Unsupported "active target no longer supports steering")
-        Just steer -> do
-          outcome <- tryDelivery (steer timing text)
-          pure $ case outcome of
-            Left failure -> ControlAck cid ControlFailed (T.pack (displayException failure))
-            Right (Left why) -> ControlAck cid ControlFailed why
-            Right (Right ()) -> ControlAck cid Delivered "steer delivered to active attempt"
-      pure (result, pure ())
+      lock <- Map.lookup attempt . liveSteerLocks <$> readMVar state
+      case lock of
+        Nothing -> pure (ControlAck cid Unsupported "active target no longer supports steering", pure ())
+        Just held -> mask $ \restore -> do
+          takeMVar held
+          result <- restore (steerWith attempt timing text) `onException` putMVar held ()
+          pure (result, putMVar held ())
     ActRecover occurrence recovery -> do
       gate <- Map.lookup occurrence . liveRetries <$> readMVar state
       result <- case gate of
@@ -370,16 +402,14 @@ deliverRuntimeActionDeferred runtime@(ControlRuntime state) control action = do
               else ControlAck cid ControlFailed "recovery choice was already delivered"
       pure (result, pure ())
     ActRedirect occurrence target -> do
-      gate <- Map.lookup occurrence . liveRedirects <$> readMVar state
-      result <- case gate of
-        Nothing -> pure (ControlAck cid RejectedStale "occurrence is no longer waiting for redirect")
-        Just redirect -> do
-          delivered <- tryPutMVar redirect target
-          pure $
-            if delivered
-              then ControlAck cid Delivered "redirect delivered before attempt dispatch"
-              else ControlAck cid ControlFailed "redirect was already delivered"
-      pure (result, pure ())
+      emitted <- newEmptyMVar
+      delivered <- modifyMVar state $ \live -> case Map.lookup occurrence (liveRedirects live) of
+        Nothing -> pure (live, Nothing)
+        Just redirect -> (,) live . Just <$> tryPutMVar redirect (target, emitted)
+      pure $ case delivered of
+        Nothing -> (ControlAck cid RejectedStale "occurrence is no longer waiting for redirect", pure ())
+        Just True -> (ControlAck cid Delivered "redirect delivered before attempt dispatch", putMVar emitted ())
+        Just False -> (ControlAck cid ControlFailed "redirect was already delivered", pure ())
     ActAnswerPerson occurrence answer -> do
       pending <- Map.lookup occurrence . livePersonAnswers <$> readMVar state
       case pending of
@@ -404,6 +434,16 @@ deliverRuntimeActionDeferred runtime@(ControlRuntime state) control action = do
   pure (ack, afterAcknowledgement)
   where
     cid = controlId control
+    steerWith attempt timing text = do
+      handler <- Map.lookup attempt . liveSteerers <$> readMVar state
+      case joinMaybe handler of
+        Nothing -> pure (ControlAck cid Unsupported "active target no longer supports steering")
+        Just steer -> do
+          outcome <- tryDelivery (steer timing text)
+          pure $ case outcome of
+            Left failure -> ControlAck cid ControlFailed (T.pack (displayException failure))
+            Right (Left why) -> ControlAck cid ControlFailed why
+            Right (Right ()) -> ControlAck cid Delivered "steer delivered to active attempt"
 
 recordAck :: ControlRuntime -> ControlAck -> IO ()
 recordAck (ControlRuntime state) ack =

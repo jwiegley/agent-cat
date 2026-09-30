@@ -199,6 +199,7 @@ contractTests = do
       Nothing -> False
   expect "protocol-v2 completion retains result reference" (snapshotResult personSnapshot == Just resultRef)
   personControlTests
+  steerRedirectOrderingTests
   catalogueContractTests
   storeContractTests
   putStrLn "runtime contracts: descriptor, protocol, controls, snapshot, store, and shared fixtures passed"
@@ -274,6 +275,41 @@ personControlTests = do
     validAnswer = \case
       Bool _ -> True
       _ -> False
+
+-- | A delivered steer emits its events before the end of its attempt, and a
+-- delivered redirect emits its events before its occurrence dispatches.
+steerRedirectOrderingTests :: IO ()
+steerRedirectOrderingTests = do
+  runtime <- newControlRuntime
+  let attempt = AttemptId occurrence0 0
+      steerControl name = Control (ControlId name) (Just occurrence0) (Just attempt) (Steer InterruptNow "focus")
+  registerControlAttempt runtime attempt (Just (\_ _ -> pure (Right ())))
+  (steered, releaseSteer) <- deliverRuntimeActionDeferred runtime (steerControl "steer-order") (ActSteer attempt InterruptNow "focus")
+  expect "steer reaches delivered state" (acknowledgementState steered == Delivered)
+  closed <- newEmptyMVar
+  _ <- forkIO (closeAttemptSteering runtime attempt >> putMVar closed ())
+  threadDelay 50000
+  beforeSteerEvents <- tryReadMVar closed
+  expect "attempt end waits for the events of a delivered steer" (beforeSteerEvents == Nothing)
+  releaseSteer
+  takeMVar closed
+  (late, releaseLate) <- deliverRuntimeActionDeferred runtime (steerControl "steer-late") (ActSteer attempt InterruptNow "focus")
+  releaseLate
+  expect "no steer reaches an attempt whose steering is closed" (acknowledgementState late == Unsupported)
+  unregisterControlAttempt runtime attempt
+  let occurrence = OccurrenceId 1
+      redirectControl = Control (ControlId "redirect-order") (Just occurrence) Nothing (RedirectOccurrence "deck:other")
+  registerRuntimeRedirects runtime occurrence ["deck:default", "deck:other"]
+  redirected <- newEmptyMVar
+  _ <- forkIO (awaitRuntimeRedirect runtime occurrence >>= putMVar redirected)
+  (delivered, releaseRedirect) <- deliverRuntimeActionDeferred runtime redirectControl (ActRedirect occurrence "deck:other")
+  expect "redirect reaches delivered state" (acknowledgementState delivered == Delivered)
+  threadDelay 50000
+  beforeRedirectEvents <- tryReadMVar redirected
+  expect "dispatch waits for the events of a delivered redirect" (beforeRedirectEvents == Nothing)
+  releaseRedirect
+  target <- takeMVar redirected
+  expect "dispatch receives the delivered redirect target" (target == Just "deck:other")
 
 catalogueContractTests :: IO ()
 catalogueContractTests = do

@@ -212,6 +212,7 @@ import Agentic.Runtime.Flow (Actor (Model, ToolActor), FlowScope (flowScopeAnswe
 import Agentic.Runtime.Control
   ( AttemptSteerer,
     awaitRuntimeRedirect,
+    closeAttemptSteering,
     ControlRuntime,
     RecoveryControl (RecoveryAbandon, RecoveryFailOver, RecoveryRetry),
     SteeringTiming (InterruptNow, NextBoundary),
@@ -1112,6 +1113,8 @@ withPhysicalAttempt context target action = mask $ \restore -> do
           support <- registeredAttemptSteerability controls attempt
           forM_ support (attemptEvents context . AttemptControlAvailability attempt)
         outcome <- try (restore (action attempt))
+        -- A steer delivery in progress emits its events before this end.
+        forM_ (attemptControlRuntime context) (`closeAttemptSteering` attempt)
         case outcome of
           Right answer -> attemptEvents context (AttemptCompleted attempt target) >> pure answer
           Left (e :: SomeException) -> do
