@@ -2,6 +2,8 @@
 
 `Agentic.Manager.Artifacts` is an internal library adapter. It does not implement
 HTTP transport, page sets, history retention, restart scanning or client displays.
+The foreground service routes the export mutation of `/v1` to it, as the
+[service HTTP section](#service-http-route) describes.
 The frozen public schemas remain in `doc/api/openapi.yaml`.
 
 ## References and content
@@ -141,6 +143,33 @@ reconciliation nor idempotency replay repeats publication. Actual completion
 receives a fresh revision. Reconciliation of an already completed observation
 still checks authority, provenance and bytes without rewriting resource revisions
 or emitting duplicate invalidations.
+
+## Service HTTP route
+
+The foreground service routes `POST /v1/runs/{id}/exports` to `submitExport`
+through `Service.submitExport`. The service resolves the run under the scopes
+of the export operation, `observe` and `export`, and passes the
+`Idempotency-Key`, the `If-Match` value and the exact JSON body as the command
+request. `submitExport` decodes the body strictly. The route adds no state of
+its own. Acceptance, publication, the command ledger and the replay of an
+exact retry are those of `submitExport`. The service answers 202 with the
+command receipt and `Location: /v1/commands/ID`.
+
+`withRunExportsSource` returns the collection revision together with the
+receipts. The collection revision is the run revision that `submitExport`
+checks as the precondition. The first page of `GET /v1/runs/{id}/exports`
+carries it as its strong ETag and as `page.revision`, so a client reads the
+collection and supplies that ETag as `If-Match`. The run revision also changes
+when the supervision of the run or the verification of its result changes.
+A client therefore reads the collection again after such a change.
+
+The `mutations-exports` mode of `manager/test/service_http.py` exports the
+result of a succeeded run through the running manager. It checks the effect
+`exported` of the command, the published receipt in the collection and as its
+detail resource, and a download whose bytes and SHA-256 equal the receipt and
+the published file. It also checks that a same-key replay returns the same
+receipt and `Location`, and that the collection ETag from before the export
+receives 412 `stale-revision`.
 
 ## Evidence
 

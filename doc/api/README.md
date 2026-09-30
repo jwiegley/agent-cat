@@ -182,7 +182,12 @@ capture command, because a capture has no resource URI of its own. An exact
 retry of the capture key returns the same receipt and the same `Location`.
 Export and lineage collections have GET methods so their POSTs use same-URI
 validators. An ETag from a snapshot, parent run, different query, or later
-page is not substituted for that collection's ETag.
+page is not substituted for that collection's ETag. The first page of
+`/runs/{id}/exports` carries the collection revision as its strong ETag, and
+its `page.revision` holds the same value. The collection revision changes
+when an export of the run is accepted, and also when the supervision of the
+run or the verification of its result changes. A later page of the
+collection has a representation tag.
 
 A 201 response creates a draft. A 202 response records accepted coordination
 intent. Neither response asserts runtime delivery, terminal success,
@@ -239,6 +244,18 @@ facts of each operation after approval. A run identifier that names no run,
 or a run of a profile that the credential cannot observe, receives 403
 `insufficient-scope`. An unknown export receives 404 `unavailable-resource`,
 and an export of such a profile receives 403 `insufficient-scope`.
+A POST to `/runs/{id}/exports` with the body `{"name": NAME}` exports the
+verified result of the run as `NAME`. It requires `observe` and `export` on
+the profile of the run and the strong ETag of the first collection page as
+`If-Match`. The service answers 202 with the CommandReceipt of the `export`
+command and `Location: /v1/commands/{id}`. The manager publishes the export
+once. The command then records the effect `exported` with the resource
+`/v1/exports/export_{commandId}`. The receipt of the export appears in the
+collection and as `/exports/{id}` with the state `published`, and its
+`download` link `/artifacts/{id}` returns the exported bytes. An exact retry
+of the key returns the same receipt and the same `Location` without another
+publication. A stale `If-Match` receives 412 `stale-revision`, and a name that
+another export of the destination holds receives 409 `state-conflict`.
 `/runs/{id}/routes` serves the run log `flow.ndjson` of the run store of a
 managed run. It requires `observe` on the profile of the run, and a run
 identifier that names no managed run, or a run of a profile that the
@@ -290,7 +307,7 @@ coordination database.
 | `/commands/{id}` | GET | GET | No mutation. A known command identifier does not bypass current operation or profile authorization. |
 | `/runs/{id}/outputs` | GET | GET | No mutation. Intermediate output and diagnostics are separate from verified final content. |
 | `/artifacts/{id}` | GET | GET | No mutation. The server resolves and verifies its retained internal reference before sending content. |
-| `/runs/{id}/exports` | GET, POST | GET | `observe` and `export`, current collection ETag, verified source, and a permitted single-component name. |
+| `/runs/{id}/exports` | GET, POST | GET, POST | `observe` and `export`, current collection ETag, verified source, and a permitted single-component name. |
 | `/exports/{id}` | GET | GET | No mutation. Returns receipt metadata and an authorized download link without a server path. |
 | `/runs/{id}/lineage-requests` | GET, POST | GET | `observe` and `submit`, current collection ETag, eligible parent, compatible trusted invocation, and no conflicting ownership or quarantine. |
 | `/snapshot` | GET | GET | No mutation. Provides a consistent authorized overview and replay cursor. |
@@ -401,7 +418,8 @@ one item larger than the page bound, or a view larger than the page-set bound,
 receives 413 `view-too-large` and holds no capacity.
 
 The ETag of each page is a representation tag of the request target and the
-exact page bytes. A first-page ETag is not interchangeable with another page's
+exact page bytes, except that the first page of an export collection carries
+the collection revision. A first-page ETag is not interchangeable with another page's
 validator. An open SSE response ends when its credential is revoked.
 
 SSE uses UTF-8 and dispatches only complete blocks ending in a blank line.

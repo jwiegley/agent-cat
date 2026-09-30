@@ -4029,6 +4029,32 @@ Follow-up to subtask F0 of actor-flow increment 1 (revalidation of the manager s
 
 Also noted by the implementer: store.sh and artifacts.sh ran without their admission_audit.py steps (restore-interruption, store-cancel-gap, store-cancel-mutant, store-expiry-mutant, history-observation), because the operator direction of 2026-09-29 forbids those audits in the fast run. Run them when that direction is lifted.
 
+* TODO [#D] Resolve C14 fess findings in the export route
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-c14-exports-fess-findings-kvuh
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-30 Wed 15:04]
+:MODIFIED: [2026-09-30 Wed 15:04]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of the fess audit of Phase B part 2 subtask C14 (POST /v1/runs/{id}/exports). Report: fess/b2-C14-r1.md in the private evidence directory.
+
+1. (medium) manager/test/service_http.py (about lines 1777-1781) and manager/src/Agentic/Manager/Application.hs (about lines 300-323). The pages-mode ETag assertion now expects the run revision as the first-page ETag of the exports collection. Pages mode was not run after the change, and the servePage/servePageTagged refactor touches every paged collection. Fix: run service_http.py pages mode at N8 once and keep the log.
+
+2. (low) manager/src/Agentic/Manager/Artifacts.hs (about lines 275-280), manager/src/Agentic/Manager/Drafts.hs (about lines 185 and 280), doc/api/README.md (about lines 183-185). The export and lineage preconditions both check runs.revision, so the exports first-page ETag is also a valid If-Match for POST /v1/runs/{id}/lineage-requests on the same run. This contradicts the README statement that another resource's ETag is not substituted. Fix: decide on per-collection validators in the lineage POST subtask.
+
+3. (low) manager/src/Agentic/Manager/Application.hs (about lines 246-256). The lineage-requests GET still sends a representation tag, so the lineage POST has no usable If-Match. Fix: apply the same first-page collection-revision ETag in the lineage subtask.
+
+4. (low) doc/api/README.md (about lines 185-190). The export validator is the run revision, which changes when supervision is released after the terminal status. A client that exports right after a run ends can get 412 once. Fix: consider a narrower export-collection revision in a later stage.
+
+5. (low) manager/src/Agentic/Manager/Application.hs (about lines 233-239). For exports, page.revision is now the run revision, so two different bodies (unresolved and then published) can share one first-page ETag. This does no harm while If-None-Match is not served. Fix: revisit if If-None-Match is served.
+
 * TODO [#B] Actor flow increment 3: live re-route and asks answered by people
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -16627,7 +16653,7 @@ and enforce advertised bounds. G2 is complete with mutations still unavailable.
 :LABELS:   ["p5","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-30 Wed 14:52]
+:MODIFIED: [2026-09-30 Wed 15:04]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-027
 :SOURCE_REPO: agent-cat
@@ -16832,6 +16858,13 @@ Network mutation remains behind G3 until the required evidence is complete.
     "author": "johnw",
     "text": "Subtask C13 of Phase B part 2: POST /v1/preparations/{id} with operation discard is now a retained command. Admission.discardLivePreparation goes through submitRetained (the withdraw path), gives the preparation reason discarded, emits the review ending, relays discardAndClose with the command, and finalizeKnown returns the request to draft with admission released and a null preparationId, as the frozen contract states. A later enqueue publishes a fresh review. Evidence scope (B2/C13/impl-r1 in the private resume-20260923 directory): Werror build of agentic-run and routing-fixed-point-probe with -ftui-tests, the new service_http.py mode mutations-discard at N8 (discarded command, preparation reason, request state, manager-log command, receipt, relay and review ending, stale If-Match, discard after approve, same-key replay, 403), mixed at N8, make -C doc check and the Phase A journey at N8 each passed. The pre-change run of mutations-discard failed with 409 unsupported-operation. Fess: non-blocking, four low findings filed as acat-c13-discard-fess-findings-kq6l. Limitations: a discard stores pending kind and observation reason closed (no schema v13 migration), and the TUI offers no discard key yet. WM-027 stays open.",
     "created_at": "2026-09-30T21:52:58Z"
+  },
+  {
+    "id": 421,
+    "issue_id": "acat-wm-027-gcu6",
+    "author": "johnw",
+    "text": "Phase B part 2 subtask C14: POST /v1/runs/{id}/exports now dispatches to Service.submitExport, which resolves the run under requiredScopes Export and calls Artifacts.submitExport. The first page of GET /v1/runs/{id}/exports carries the run revision as a strong ETag so that a client has a usable If-Match. Evidence (private, B2/C14): Werror build of agentic-run and routing-fixed-point-probe, service_http.py mutations-exports at N8 (exported effect, published receipt, download bytes and SHA-256, same-key replay, 412 on a stale ETag), make -C doc check and the Phase A journey at N8 passed. Fess non-blocking; findings in acat-c14-exports-fess-findings-kvuh. Hostile-input negatives for the route are deferred under the functionality-first direction. The WM package stays open.",
+    "created_at": "2026-09-30T22:04:49Z"
   }
 ]
 #+end_src

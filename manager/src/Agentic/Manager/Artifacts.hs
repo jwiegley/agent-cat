@@ -389,16 +389,18 @@ validateDocument document = unless (validExportDocument document) (throwIO (Stor
 -- | Bounded receipt items under one current profile loan.
 withRunExports :: CoordinationStore -> CredentialProof -> RunAssociation -> (AuthorizedView -> [Value] -> IO ()) -> IO ()
 withRunExports store proof association respond =
-  withRunExportsSource store proof association $ \view _ materialize -> materialize >>= respond view
+  withRunExportsSource store proof association $ \view _ materialize -> materialize >>= respond view . snd
 
 -- | The export receipts of one run under the response loans of its profile.
 -- Receipts need no file, so the source takes the configuration guard and one
 -- reader charge and not the file slot. 'Transport.respondBytes' returns them
--- before the first network write. The materializer refuses more than 256
--- receipts or 1 MiB of encoded receipts, and refuses with 'StoreBusy' when the
--- collection revision changes while it reads.
+-- before the first network write. The materializer returns the collection
+-- revision, which is the validator that 'submitExport' requires, together
+-- with the receipts. It refuses more than 256 receipts or 1 MiB of encoded
+-- receipts, and refuses with 'StoreBusy' when the collection revision changes
+-- while it reads.
 withRunExportsSource :: CoordinationStore -> CredentialProof -> RunAssociation
-  -> (AuthorizedView -> ConfigurationLimits -> IO [Value] -> IO a) -> IO a
+  -> (AuthorizedView -> ConfigurationLimits -> IO (Text, [Value]) -> IO a) -> IO a
 withRunExportsSource store proof association action =
   withAuthorizedResponseLimits store proof (associationProfile association) [Command.Observe] $ \view limits ->
     action view limits $ do
@@ -421,7 +423,8 @@ withRunExportsSource store proof association action =
         current <- exportVersion association
         unless (revision == current) (refuseTransaction StoreBusy)
       revalidateAuthorizedView view >>= either throwIO pure
-      pure (reverse reversed)
+      collection <- maybe (throwIO StoreIntegrity) (\(_,_,value) -> pure value) revision
+      pure (collection, reverse reversed)
 
 readExport :: CoordinationStore -> CredentialProof -> Text -> IO Value
 readExport store proof ident = withExport store proof ident (\_ receipt -> pure receipt)

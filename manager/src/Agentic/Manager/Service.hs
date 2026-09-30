@@ -4,7 +4,7 @@
 -- | One live coordinator and bounded indexes of its original owned associations.
 module Agentic.Manager.Service
   ( Service, withService, serviceStore, serviceFault,
-    enqueue, editInput, withdraw, approve, discard, controlRun, controlDecision, readControl, withControl,
+    enqueue, editInput, withdraw, approve, discard, submitExport, controlRun, controlDecision, readControl, withControl,
     withSnapshot, withSnapshotSource, withOverviewSource, Overview.Collection (..), withCollectionSource,
     withRun, withOutputs, withOutputsSource, withExportsSource, withExport, withLineageSource, download
   ) where
@@ -18,7 +18,7 @@ import Agentic.Manager.Fault (FaultClass (CommandRefusal), classifyFault, record
 import qualified Agentic.Manager.History as History
 import qualified Agentic.Manager.Overview as Overview
 import Agentic.Manager.Pages (Producer)
-import Agentic.Manager.Commands (submissionReceipt)
+import Agentic.Manager.Commands (CommandRequest (..), submissionReceipt)
 import Data.Aeson.Types (Pair)
 import Agentic.Manager.Profile (ConfigurationLimits, publicId)
 import Agentic.Manager.Protocol.Command
@@ -262,6 +262,19 @@ discard service proof ident key condition body = do
     Just reviewed -> Approval.discard reviewed proof key condition body
     Nothing -> Approval.replayDiscard (serviceStore service) proof ident key condition body
 
+-- | Export the verified result of one run under a single-component name. The
+-- run resolves under the scopes of the export operation, and the export owner
+-- decodes the body strictly, checks the collection precondition, records the
+-- acceptance and publishes once. An exact retry returns the original receipt
+-- without another publication.
+submitExport :: Service -> CredentialProof -> Text -> Text -> Maybe Text -> BS.ByteString
+  -> IO (Either CommandFailure CommandReceipt)
+submitExport service proof ident key condition body = do
+  association <- State.resolveRun (serviceStore service) proof (requiredScopes Export) ident
+  let request = CommandRequest Export (State.associationProfile association) "POST"
+        ("/v1/runs/" <> State.associationRun association <> "/exports") key "application/json" condition body
+  fmap submissionReceipt <$> Artifacts.submitExport (serviceStore service) proof association request
+
 controlRun :: Service -> CredentialProof -> Text -> Text -> Maybe Text -> BS.ByteString
   -> IO (Either CommandFailure CommandReceipt)
 controlRun service proof ident key condition body = do
@@ -340,10 +353,11 @@ withOutputsSource service proof ident respond = do
   association <- State.resolveRun (serviceStore service) proof [Observe] ident
   Artifacts.withRunOutputsSource (serviceStore service) proof association respond
 
--- | The export receipts of one run. A run of a profile that the credential
--- cannot observe refuses as the other run resources refuse.
+-- | The export receipts of one run and their collection revision. A run of
+-- a profile that the credential cannot observe refuses as the other run
+-- resources refuse.
 withExportsSource :: Service -> CredentialProof -> Text
-  -> (AuthorizedView -> ConfigurationLimits -> IO [Value] -> IO a) -> IO a
+  -> (AuthorizedView -> ConfigurationLimits -> IO (Text, [Value]) -> IO a) -> IO a
 withExportsSource service proof ident respond = do
   association <- State.resolveRun (serviceStore service) proof [Observe] ident
   Artifacts.withRunExportsSource (serviceStore service) proof association respond

@@ -134,7 +134,17 @@ captures_mode = len(sys.argv) == 6 and sys.argv[5] == CAPTURES
 # one manager lifetime.
 DISCARD = "mutations-discard"
 discard_mode = len(sys.argv) == 6 and sys.argv[5] == DISCARD
-assert len(sys.argv) == 5 or mixed or boundary or pages_mode or events_mode or captures_mode or discard_mode
+# The mutations-exports mode checks POST /v1/runs/{id}/exports through the
+# running protected manager after a succeeded run of the scripted
+# prompt-source workflow: an export whose command reaches the effect exported,
+# whose receipt is published in the export collection and as its detail
+# resource, and whose artifact downloads with the bytes and SHA-256 of the
+# receipt and of the published file, a same-key replay with the same receipt
+# and Location, and a 412 refusal of the stale collection ETag. Each numbered
+# case prints its own PASS line. It runs one manager lifetime.
+EXPORTS = "mutations-exports"
+exports_mode = len(sys.argv) == 6 and sys.argv[5] == EXPORTS
+assert len(sys.argv) == 5 or mixed or boundary or pages_mode or events_mode or captures_mode or discard_mode or exports_mode
 assert not tui_approval or os.environ.get("TUI_CHECK")
 assert native in ("1", "8")
 print(f"work={work}", flush=True)
@@ -235,7 +245,7 @@ def administration(payload, refused=None):
 
 
 issued = administration({"version": 1, "operation": "issue-credential", "label": "HTTPS fixture",
-                         "scopes": ["observe", "submit"] + (["control", "export"] if mixed else ["control"] if captures_mode or discard_mode else []),
+                         "scopes": ["observe", "submit"] + (["control", "export"] if mixed else ["control"] if captures_mode or discard_mode else ["control", "export"] if exports_mode else []),
                          "profileIds": ["profile_1"],
                          "expiresAt": "2999-01-01T00:00:00Z", "outputFile": str(work / "credential")})
 bearer = (work / "credential").read_bytes().decode("ascii")
@@ -1764,7 +1774,11 @@ def page_checks():
             time.sleep(0.05)
         if status == 200:
             validate(schema, value, raw)
-            assert received.get("etag") == representation_tag(target, raw), ("page ETag", target, received.get("etag"))
+            # The first page of an export collection carries the strong
+            # collection revision, which an export POST supplies as If-Match.
+            expected = ('"' + value["page"]["revision"] + '"' if re.fullmatch(r"/v1/runs/[A-Za-z0-9_-]+/exports", target)
+                        else representation_tag(target, raw))
+            assert received.get("etag") == expected, ("page ETag", target, received.get("etag"))
             bodies.append((target, raw))
         return status, value
 
@@ -3444,6 +3458,143 @@ def discard_checks():
 
 if discard_mode:
     discard_checks()
+    raise SystemExit(0)
+
+
+def export_checks():
+    """POST /v1/runs/{id}/exports through the real HTTPS manager. Each
+    numbered case prints one PASS line."""
+    authorized = {"Authorization": "Bearer " + bearer}
+    name = "c14-export.json"
+    body = json.dumps({"name": name}, separators=(",", ":")).encode()
+
+    def export(run, key, tag, payload=body):
+        """One export POST. Returns the status, the decoded body, the raw body and the headers."""
+        headers = authorized | {"Content-Type": "application/json", "Idempotency-Key": key, "If-Match": tag}
+        status, value, raw, received = exchange("/v1/runs/" + run + "/exports", headers, method="POST", payload=payload)
+        validate("Problem" if status >= 400 else "CommandReceipt", value, raw)
+        return status, value, raw, received
+
+    def collection(run):
+        """The first page of the export collection of the run and its ETag."""
+        status, value, raw, received = fetch("/v1/runs/" + run + "/exports", authorized)
+        assert status == 200, ("export collection", status, value.get("code"))
+        validate("ExportPage", value, raw)
+        assert value["runId"] == run and value["page"]["next"] is None, ("export collection page", value["page"])
+        tag = received.get("etag")
+        assert tag == '"' + value["page"]["revision"] + '"', ("export collection ETag", tag, value["page"]["revision"])
+        return value, tag, raw
+
+    with (work / "server-0.stdout").open("wb") as output, (work / "server-0.stderr").open("wb") as errors:
+        process = subprocess.Popen([str(runner), "--manager", "serve", "--config", str(config),
+                                    "+RTS", "-N" + native, "-RTS"], stdout=output, stderr=errors)
+        try:
+            wait_ready(process)
+            status, capabilities, _ = request("/v1/capabilities", authorized)
+            assert status == 200
+            validate("Capabilities", capabilities)
+            assert "export" in capabilities["scopes"], capabilities["scopes"]
+            new_key = lambda: capabilities["authorityEpoch"] + "." + secrets.token_urlsafe(16)
+            observed, wait_for, mutate, _ = mixed_client(capabilities, authorized)
+            status, catalogue, _ = request("/v1/workflows?profileId=profile_1", authorized)
+            assert status == 200
+            workflow = next(item for item in catalogue["items"] if item["name"] == "prompt-source")
+            create = {"workflowId": workflow["id"], "descriptorRevision": workflow["revision"],
+                      "profileId": workflow["profileId"], "profileRevision": workflow["profileRevision"]}
+            status, created, raw = request("/v1/requests", authorized | {"Content-Type": "application/json", "Idempotency-Key": new_key()},
+                                           method="POST", payload=json.dumps(create, separators=(",", ":")).encode())
+            assert status == 201, ("request creation", status, created.get("code"))
+            validate("Request", created, raw)
+            request_uri = created["links"]["self"]
+            current, tag, _ = observed(request_uri, "Request")
+            mutate(request_uri, {"operation": "set-input", "input": {"name": "input", "source": "literal", "value": "Export fixture input."}}, tag)
+            current, tag, _ = observed(request_uri, "Request")
+            mutate(request_uri, {"operation": "enqueue"}, tag)
+            current, _, _ = wait_for(request_uri, "Request", lambda value: value["preparationId"] is not None)
+            preparation, tag, _ = observed("/v1/preparations/" + current["preparationId"], "Preparation")
+            selectors = ("reviewDigest", "requestRevision", "profileRevision", "descriptorRevision", "processGeneration")
+            mutate("/v1/preparations/" + preparation["id"], {"operation": "approve", **{item: preparation[item] for item in selectors}}, tag)
+            current, _, _ = wait_for(request_uri, "Request", lambda value: value["runId"] is not None)
+            run = current["runId"]
+            snapshot, _, _ = wait_for("/v1/runs/" + run + "/snapshot", "RunSnapshot",
+                lambda value: value["runtime"] is not None and value["runtime"]["status"] in ("succeeded", "failed", "cancelled"))
+            assert snapshot["runtime"]["status"] == "succeeded", snapshot["runtime"]["status"]
+            # The release of the worker after the terminal status changes the
+            # supervision of the run and with it the collection revision, so
+            # the export waits until the supervision settles.
+            wait_for("/v1/runs/" + run, "Run", lambda value: value["supervision"] not in ("owned", "cleanup-pending"))
+            before, before_tag, raw = collection(run)
+            (work / "exports-before.json").write_bytes(raw)
+            assert before["items"] == [] and before["page"]["totalItems"] == 0, before["items"]
+
+            # Case 1. The export is accepted, published and downloadable.
+            export_key = new_key()
+            status, receipt, raw, headers = export(run, export_key, before_tag)
+            assert status == 202, ("export", status, receipt.get("code"))
+            (work / "export-receipt.json").write_bytes(raw)
+            collection_uri = "/v1/runs/" + run + "/exports"
+            assert receipt["operation"] == "export" and receipt["resource"] == collection_uri, (receipt["operation"], receipt["resource"])
+            assert headers.get("location") == "/v1/commands/" + receipt["id"], ("export Location", headers.get("location"))
+            command, _, raw = wait_for(receipt["links"]["self"], "CommandReceipt",
+                lambda value: value["state"] in ("effect-observed", "refused", "unresolved"))
+            (work / "export-command.json").write_bytes(raw)
+            export_uri = "/v1/exports/export_" + receipt["id"]
+            assert command["state"] == "effect-observed", ("export command", command["state"], command.get("refusal"))
+            assert command["effect"]["kind"] == "exported" and command["effect"]["resource"] == export_uri, command["effect"]
+            detail, _, raw = observed(export_uri, "ExportReceipt")
+            (work / "export-detail.json").write_bytes(raw)
+            assert detail["state"] == "published" and detail["name"] == name and detail["runId"] == run, (detail["state"], detail["name"])
+            assert detail["commandId"] == receipt["id"] and detail["download"] is not None, (detail["commandId"], detail["download"])
+            after, after_tag, raw = collection(run)
+            (work / "exports-after.json").write_bytes(raw)
+            assert after["items"] == [detail] and after_tag != before_tag, ("export collection after the export", after["items"])
+            connection = http.client.HTTPSConnection("127.0.0.1", port, context=context, timeout=15)
+            try:
+                connection.request("GET", detail["download"], headers=authorized | {"Accept": "application/octet-stream"})
+                response = connection.getresponse()
+                downloaded = response.read(int(detail["bytes"]) + 1)
+                assert response.status == 200 and response.getheader("Content-Type") == "application/octet-stream", (
+                    "export download", response.status)
+            finally:
+                connection.close()
+            (work / "export-download.bin").write_bytes(downloaded)
+            published = work / "manager" / "runs" / "exports" / name
+            assert len(downloaded) == int(detail["bytes"]) and hashlib.sha256(downloaded).hexdigest() == detail["sha256"], (
+                "export download differs from its receipt", len(downloaded), detail["bytes"])
+            assert published.read_bytes() == downloaded, "export download differs from the published file"
+            print("PASS exports case 1: export command", receipt["id"], "of run", run, "reached effect-observed with the effect exported,",
+                  "the collection and", export_uri, "show it published, and", detail["download"], "returned", detail["bytes"],
+                  "bytes with SHA-256", detail["sha256"], "equal to the receipt and to the published file", flush=True)
+
+            # Case 2. A same-key replay returns the same receipt.
+            status, replay, _, replay_headers = export(run, export_key, before_tag)
+            assert status == 202 and replay["id"] == receipt["id"] and replay_headers.get("location") == headers.get("location"), (
+                "export replay", status, replay.get("id"), replay.get("code"))
+            again, again_tag, raw = collection(run)
+            (work / "exports-replay.json").write_bytes(raw)
+            assert again["items"] == [detail] and again_tag == after_tag, ("the replay changed the export collection", again_tag, after_tag)
+            print("PASS exports case 2: a same-key export replay returned the same receipt", receipt["id"],
+                  "and Location, and the collection kept one export", flush=True)
+
+            # Case 3. The stale collection ETag refuses.
+            other = json.dumps({"name": "c14-stale.json"}, separators=(",", ":")).encode()
+            status, problem, _, _ = export(run, new_key(), before_tag, other)
+            assert status == 412 and problem["code"] == "stale-revision", ("stale export", status, problem.get("code"))
+            again, again_tag, _ = collection(run)
+            assert again["items"] == [detail] and again_tag == after_tag, "the stale export changed the export collection"
+            assert not (work / "manager" / "runs" / "exports" / "c14-stale.json").exists(), "the stale export published a file"
+            print("PASS exports case 3: an export with the collection ETag from before the first export received",
+                  "412 stale-revision, and the collection kept one export", flush=True)
+        finally:
+            if process.poll() is None:
+                process.terminate()
+            process.wait(timeout=25)
+            (work / "server-0.exit").write_text(str(process.returncode) + "\n")
+    print("PASS mutations-exports: every export case held against the running TLS 1.3 manager", flush=True)
+
+
+if exports_mode:
+    export_checks()
     raise SystemExit(0)
 
 

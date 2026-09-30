@@ -69,6 +69,7 @@ methods path = case path of
     | C.validId ident && kind `elem` ["requests", "preparations", "decisions"] -> ["GET", "POST"]
     | C.validId ident && kind `elem` ["commands", "artifacts", "workflows", "runs", "exports"] -> ["GET"]
   ["v1", "runs", ident, "control"] | C.validId ident -> ["GET", "POST"]
+  ["v1", "runs", ident, "exports"] | C.validId ident -> ["GET", "POST"]
   ["v1", "runs", ident, leaf]
     | C.validId ident && leaf `elem` ("routes" : runPages) -> ["GET"]
   _ -> []
@@ -230,10 +231,15 @@ dispatch service pages streams proof request respond = do
           items <- materialize
           pure (contentRevision (toJSON items), ["runId" .= ident], items)
     ("GET", ["v1", "runs", ident, "exports"]) ->
+      -- The page-set revision is the collection revision. The first page
+      -- carries it as its strong ETag, which is the If-Match of an export.
       Service.withExportsSource service proof ident $ \view limits materialize ->
-        page view limits token $ do
-          items <- materialize
-          pure (contentRevision (toJSON items), ["runId" .= ident], items)
+        servePageTagged pages store proof request view limits token (Pages.wholeSet $ do
+          (revision, items) <- materialize
+          pure (revision, ["runId" .= ident], items)) respond (collectionTag token)
+    ("POST", ["v1", "runs", ident, "exports"]) -> do
+      (key, condition, bytes) <- jsonMutation request
+      Service.submitExport service proof ident key condition bytes >>= need >>= receipt
     ("GET", ["v1", "exports", ident]) ->
       Service.withExport service proof ident $ \view value ->
         json view HTTP.status200 [("ETag", representationTag request (C.encoded value))] value respond
@@ -273,6 +279,11 @@ dispatch service pages streams proof request respond = do
     routeStream pump = respond $ Wai.responseStream HTTP.status200
       [("Content-Type", "text/event-stream"), ("X-Accel-Buffering", "no")] $ \write flush ->
         pump (\bytes -> write (Builder.byteString bytes) >> flush)
+    -- The first page of a validated collection has the strong collection
+    -- revision as its ETag. A later page has a representation tag, so it is
+    -- never a validator of the collection.
+    collectionTag Nothing revision _ = TE.encodeUtf8 ("\"" <> revision <> "\"")
+    collectionTag (Just _) _ bytes = representationTag request bytes
     receipt value = Auth.withAuthorizedResponse store proof (C.receiptProfile value)
       (C.requiredScopes (C.receiptOperation value)) $ \view ->
         json view HTTP.status202 [("Location", TE.encodeUtf8 ("/v1/commands/" <> C.receiptId value))]
@@ -290,14 +301,25 @@ servePage :: Pages.PageSets -> Store.CoordinationStore -> Auth.CredentialProof
   -> Wai.Request -> Auth.AuthorizedView -> ConfigurationLimits -> Maybe Text
   -> Pages.Producer
   -> (Wai.Response -> IO Wai.ResponseReceived) -> IO Wai.ResponseReceived
-servePage pages store proof request view limits token produce respond = do
+servePage pages store proof request view limits token produce respond =
+  servePageTagged pages store proof request view limits token produce respond
+    (\_ bytes -> representationTag request bytes)
+
+-- | 'servePage' with the ETag that the given function computes from the set
+-- revision and the page bytes.
+servePageTagged :: Pages.PageSets -> Store.CoordinationStore -> Auth.CredentialProof
+  -> Wai.Request -> Auth.AuthorizedView -> ConfigurationLimits -> Maybe Text
+  -> Pages.Producer
+  -> (Wai.Response -> IO Wai.ResponseReceived) -> (Text -> BS.ByteString -> BS.ByteString)
+  -> IO Wai.ResponseReceived
+servePageTagged pages store proof request view limits token produce respond tag = do
   client <- Store.runRead store (Auth.currentClient proof) >>= need
   binding <- Auth.authorizedViewRevision view
   let query = TE.decodeUtf8 (Wai.rawPathInfo request <> HTTP.renderQuery True
         [(key,value) | (key,value) <- Wai.queryString request, key /= "pageToken"])
-  Pages.withPage pages client binding query (limitGlobalPageSets limits) token produce $ \_ bytes ->
+  Pages.withPage pages client binding query (limitGlobalPageSets limits) token produce $ \revision bytes ->
     Transport.respondBytes HTTP.status200
-      [("Content-Type", "application/json"), ("ETag", representationTag request bytes)]
+      [("Content-Type", "application/json"), ("ETag", tag revision bytes)]
       view bytes respond
 
 -- | The selector and page token of a selected collection, each at most once
