@@ -340,6 +340,54 @@ Discovered in acat-47y: migrating PMod to [CMonoid M] makes instPModSelf demand 
 ]
 #+end_src
 
+* TODO [#C] Resolve the increment 1 end-of-increment review findings
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-1dfc
+:LABELS:   ["actor-flow","workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-29 Tue 23:11]
+:MODIFIED: [2026-09-30 Wed 00:03]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Findings of the end-of-increment review of actor-flow increment 1 (4496dbe4..d4ec7a6d). The conformance and safety lenses each returned "approve with notes" with no critical or high finding. Source: the section "End-of-increment review" of doc/workflow-manager-handoff.md. The first subtask of Phase B repairs medium findings 1 to 4.
+
+Medium:
+1. A cancel whose appended record decodes to a value other than the admitted command is refused with storage-unavailable (manager/src/Agentic/Manager/Commands.hs, recordAdmittedCommand). A cancel is exempt only when its append fails. No check covers a cancel with the lossy codec.
+2. The manager log flow/<stream>.ndjson grows across lifetimes and nothing prunes it before Phase G. manager/STORAGE.md does not state the storage-quota limit, the storage-unavailable failure on an oversized or undecodable log, or the recovery procedure.
+3. manager/STORAGE.md says that no local path enters a body. The review body holds the exact binding bytes, which name the frontend invocation path, the run-root identity and the target arguments.
+4. A control delivered before activation of a store-backed run does not pass through flowBroker, so the run log has no control record. runtime/BROKER.md states this limit, but it differs from Delta 1a of the design record.
+5. The ext-pi checks and the ext-pi part of gate 5 have no result (also in acat-62j0).
+
+Low:
+6. A failed failure-reply append after a rollback leaves no gap entry.
+7. A review record that a later pre-commit step rolls back has no ending.
+8. Offline credential administration writes no manager-log record.
+9. An engine ask without a scope is refused by flowBroker, and no test shows that a store-backed path cannot reach it.
+10. A receipt or relay whose decoded value differs from the ledger is carried as the ledger value with no gap entry.
+11. The reader loads the whole log prefix before it checks the line bound, and --follow accepts only one run log.
+12. Run-log bodies and the output of the verb are not redacted, and runtime/BROKER.md does not say so.
+13. A failed append of an ACP permission report fails the turn after the grant was sent.
+14. The pending slot of a command record is set after the append, so a deadline in that window leaves the record uncertain.
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 372,
+    "issue_id": "acat-1dfc",
+    "author": "johnw",
+    "text": "Phase B subtask B1 repairs medium items 1, 2 and 3. (1) A cancel whose appended record decodes to another value is committed and dispatched, and the manager log names its command record and receipt in a gap notice; the flow-lossy case of manager-command-check flow shows it, and an ordinary command stays refused with storage-unavailable. (2) manager/STORAGE.md section 'Growth, open refusals and recovery' and the handoff state the limit, the open refusals with fixed words oversized, undecodable and io-failure recorded once at open, the recovery procedure and the measured append latency (median 5.511 ms, max 7.523 ms over 60 commands); retention follows in acat-3mgw under WM-042. (3) STORAGE.md and the Flow.hs header no longer claim that no local path enters a body. Evidence: B/B1/impl-r1 (build, manager-command-check flow, main mode with command_contract.py at N8, journey at N8, make -C doc check, all exit 0). Items 4 to 14 remain open. Low fess findings: acat-76le.",
+    "created_at": "2026-09-30T07:03:10Z"
+  }
+]
+#+end_src
+
 * DONE [#C] Delete dead weight (probe/grep-verified zero consumers)
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -693,6 +741,28 @@ Source: fess audit /Users/johnw/Products/agent-cat-workflow-manager/implementati
   }
 ]
 #+end_src
+
+* TODO [#C] Add Phase G retention for the manager log
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-3mgw
+:LABELS:   ["actor-flow","workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-30 Wed 00:02]
+:MODIFIED: [2026-09-30 Wed 00:02]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+The manager log flow/<stream>.ndjson grows across lifetimes, and nothing prunes it. At L minus R (the configured ceiling minus the cancel reserve) every ordinary command and review publication is refused with storage-quota. At the default 64 MiB ceiling that is about 2929 simple journeys of 22193 bytes each (F16 measurement).
+
+Phase B subtask B1 documented the limit, the open refusals (fixed words oversized, undecodable, io-failure) and the operator recovery procedure in manager/STORAGE.md, section "Growth, open refusals and recovery", and in the current-state section of doc/workflow-manager-handoff.md.
+
+Remaining work for Phase G: add retention or pruning of the manager log (with its claim checks) that keeps lineage and never prunes remotely, and fold the recovery procedure into the WM-042 operator controls and recovery procedures.
+
+Source: acat-1dfc medium item 2; remaining-scope report 2026-09-29, section 4.
 
 * DONE [#D] Leastness at expectation: SqZero star has no order; IdemAdd (SqZero P M) derivable when M's accumulation is idempotent
 :PROPERTIES:
@@ -1487,7 +1557,7 @@ Two small residues of acat-192/acat-9kn: prune the deriving clauses if nothing w
 :LABELS:   ["actor-flow","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-26 Sat 23:41]
-:MODIFIED: [2026-09-29 Tue 22:59]
+:MODIFIED: [2026-09-29 Tue 23:12]
 :CREATED_BY: johnw
 :FINISHED: [2026-09-29 Tue 22:59]
 :CLOSE_REASON: Increment 1 gate passed (F16)
@@ -1572,6 +1642,13 @@ Actor-flow increment 1, delta 1b (at most 8 engineering days). Add the manager l
     "author": "johnw",
     "text": "Subtask F16: the increment 1 gate and the handoff current state. The gate ran once, in order, on the tree of 9da234ec with two repairs: cli/test/PolicyProbe.hs now renders the list of ReadFlow paths (F14 changed ReadFlow to take a list, which broke the -ftui-tests build of policy-probe), and doc/agent-cat.texi names the constructor ReadFlow in the Command entry (make -C doc check-haskell). doc/workflow-manager-handoff.md has a new current-state section, Actor-flow increment 1 of 2026-09-29.\n\nEvidence scope (F/F16/impl-r1, each with .log and .exit): make -C doc check, ALLBUILD with -Werror and -ftui-tests, openapi.yaml and Broker.hs unchanged since 4496dbe4 with DataBroker at exactly nine fields, manager/ci/contract.sh, tui-model-test at N1 and N8, source-boundaries, runtime-contract-test at N8, engine-api-test, the progress, lineage, control, person-control and flow probes, the manager command (flow and main), approval flow-review, admission flow-relay and main modes, worker, store, ingestion, draft and artifact checks at N8, the tui-journey pair at N1 then N8 with every FLOW-ASSERT and a verified consent chain (review 7, approve 8, receipt 9, start relay 10, run start 0; 26 manager records, 22193 bytes; run-log ratio 1.407 and 1.408), the three controls with their literal failures (broken-answer, consent, approve-fault), and last, without -ftui-tests, check-haskell, acp.sh (23 scenarios), routing-config.sh, examples.sh, deck.sh and tui.sh. Each passed.\n\nNot run: the ext-pi checks (the Pi fork has no dist directories), and, under the operator direction of 2026-09-29, policies.sh, approval.sh, controls.sh, admission_audit.py, bisim, Lean, mutants, stability samples, -fforce-recomp and N1 runs of checks other than the journey. Design gate 6, the gate 5 ext-pi owner check, the gate 11 broker-api-default revalidation and the gate 9 append latency have no evidence. Fess: not blocking. Its two medium findings on the handoff were corrected on landing, and all findings are filed as acat-62j0. Increment 1 is accepted as a whole with this subtask. Accepted WM state is unchanged.",
     "created_at": "2026-09-30T05:59:17Z"
+  },
+  {
+    "id": 371,
+    "issue_id": "acat-5m60",
+    "author": "johnw",
+    "text": "Closeout of the increment 1 run: every subtask F0 to F16 landed (6e63a8b1 to d4ec7a6d) with no early stop. The closeout commit updates only the section 'Actor-flow increment 1 of 2026-09-29' of doc/workflow-manager-handoff.md: the F16 commit, the controls not rerun in the F16 gate (evidence F/F1/impl-r1/F1-golden-control.log and F/F14/impl-r1/F14-consent-negative.log), the end-of-increment review (conformance and safety lenses, approve with notes, no critical or high finding, JOURNEY-PAIR passed again) and the next action. Review findings filed as acat-1dfc. Check: make -C doc check passed (exit 0).",
+    "created_at": "2026-09-30T06:12:23Z"
   }
 ]
 #+end_src
@@ -1859,6 +1936,28 @@ scopeT is parameterised (G) but gateT hard-wires Bool; §2/§9 want the Grant la
   }
 ]
 #+end_src
+
+* TODO [#D] Resolve the low findings of the B1 fess review
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-76le
+:LABELS:   ["actor-flow","workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-30 Wed 00:03]
+:MODIFIED: [2026-09-30 Wed 00:03]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of the fess review of Phase B subtask B1 (report fess/b1-B1-r1.md in the private resume directory). All low.
+
+1. manager/src/Agentic/Manager/Commands.hs:345 and manager/COMMANDS.md:316 say a cancel commits "without a record that the log carries". In the CommandMismatched case a record with another decoded value sits at that position, and the gap notice still calls the command record missing. Say that the log carries no faithful record of the cancel.
+2. manager/src/Agentic/Manager/Flow.hs:1288 (joinUndecided): a mismatched cancel record stays in the log with no reply, and agentic-run flow lists it as an undecided command that may name another resource. State in STORAGE.md or COMMANDS.md that the gap notice and the ledger are the authority, and optionally assert it in the flow-lossy case.
+3. manager/test/CommandCheck.hs flowLatencyChecks: the synchronized-append series re-appends the recorded bodies to a separate writer outside the Store. State this in the STORAGE.md latency paragraph, and say that the admission series includes the in-path append.
+4. doc/workflow-manager-handoff.md: the growth paragraph says "At L minus R" without defining L or R. Write "the configured ceiling minus the cancel reserve (L minus R)".
+5. runtime/src/Agentic/Runtime/Flow.hs:901-908: openFlowLog refusals changed to the typed FlowOpenRefusal, and runtime-contract-test was not run. Run it once at the next gate, or add a runtime FlowTests case for the oversized and undecodable refusals.
 
 * DONE [#E] Frag.meet: complete the grade lattice
 :PROPERTIES:
@@ -17229,7 +17328,7 @@ Publish precommitted workload and resource ceilings. All core advertised bounds 
 :LABELS:   ["p10","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-09 Wed 22:34]
+:MODIFIED: [2026-09-30 Wed 00:03]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-042
 :SOURCE_REPO: agent-cat
@@ -17287,6 +17386,15 @@ recipe that ignores WAL or unresolved effects.
 
 #+begin_src json
 [
+  {
+    "issue_id": "acat-wm-042-sdg9",
+    "depends_on_id": "acat-3mgw",
+    "type": "blocks",
+    "created_at": "2026-09-30T07:03:04.482047Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  },
   {
     "issue_id": "acat-wm-042-sdg9",
     "depends_on_id": "acat-wm-008-rr0q",

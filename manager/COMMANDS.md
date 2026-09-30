@@ -309,13 +309,15 @@ five-second operation allowance.
 
 The transaction decodes the appended bytes, including a claim-check file, and
 compares the decoded body, sender, receiver and identifiers with the admitted
-command. Any difference refuses the command with `storage-unavailable`. When
-the append fails, an ordinary command is refused with `storage-quota` for a
-quota failure and with `storage-unavailable` for every other failure, and the
-transaction rolls back. A cancel commits without its record. The writer keeps
-a gap entry that names the missing record and a second entry that names the
-missing receipt. A refused admission appends nothing, because every check
-precedes the append, and an exact replay appends nothing.
+command. Any difference refuses an ordinary command with
+`storage-unavailable`. When the append fails, an ordinary command is refused
+with `storage-quota` for a quota failure and with `storage-unavailable` for
+every other failure, and the transaction rolls back. A cancel commits and is
+dispatched in both cases, without a record that the log carries. The writer
+keeps a gap entry that names the missing command record and a second entry
+that names the missing receipt. The next appended record follows the gap
+notice that names both. A refused admission appends nothing,
+because every check precedes the append, and an exact replay appends nothing.
 
 When the transaction rolls back after the `command` record was appended, for
 example because the commit-deadline check, an invalidation or the comparison

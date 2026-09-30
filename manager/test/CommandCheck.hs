@@ -21,6 +21,7 @@ import Agentic.Manager.Store
 import qualified Agentic.Manager.Test.AcceptanceAudit as Audit
 import Agentic.Manager.Test.Contention (blocked, withHeldStore, withHeldConfiguration)
 import Agentic.Manager.Test.FlowReader (flowReaderChecks)
+import Agentic.Manager.Test.PrivateLog (recordCount, withPrivateStderr)
 import qualified Agentic.Runtime as Runtime
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.STM (atomically)
@@ -29,7 +30,7 @@ import Control.Concurrent.MVar (newEmptyMVar, putMVar, readMVar, takeMVar, tryPu
 import System.Timeout (timeout)
 import Control.DeepSeq (NFData)
 import Control.Exception (AsyncException (UserInterrupt), IOException, bracket, fromException, throwIO, try)
-import Control.Monad (forM_, unless, void, when)
+import Control.Monad (forM, forM_, unless, void, when)
 import Crypto.Hash (Digest, SHA256, hash)
 import Data.Aeson (FromJSON (parseJSON), Value (..), eitherDecodeStrict', object, toJSON, withObject, (.:), (.=))
 import qualified Data.Aeson.Key as Key
@@ -41,17 +42,19 @@ import Data.ByteArray (convert)
 import qualified Data.ByteString as BS
 import Data.IORef (writeIORef, modifyIORef', newIORef, readIORef)
 import Data.Int (Int64)
+import Data.List (sort)
 import Data.Maybe (isNothing)
 import Data.Text (Text)
 import Data.Time.Clock (getCurrentTime)
 import GHC.Clock (getMonotonicTimeNSec)
+import Numeric (showFFloat)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
 import qualified Database.SQLite3 as SQL
 import qualified Database.SQLite3.Direct as Direct
 import Foreign.Ptr (Ptr)
 import Foreign.C.Types (CInt (..))
-import System.Directory (createDirectory, doesDirectoryExist, doesFileExist, listDirectory, renameFile)
+import System.Directory (createDirectory, doesDirectoryExist, doesFileExist, listDirectory, renameDirectory, renameFile)
 import System.Environment (getArgs)
 import System.FilePath ((</>), takeDirectory)
 import System.IO (BufferMode (LineBuffering), hSetBuffering, stdout)
@@ -1308,10 +1311,12 @@ flowChecks work = do
     flowCeilingChecks root private
   flowStoreChecks work
   flowCommandChecks work
+  flowOpenChecks work
+  flowLatencyChecks work
   flowNoticeChecks work
   flowAdministrationChecks work
   flowReaderChecks work
-  putStrLn "PASS manager log codecs, writer, gap entries, path identity, ceiling, Store lifetimes, command admission, command notices, administration and the reader"
+  putStrLn "PASS manager log codecs, writer, gap entries, path identity, ceiling, Store lifetimes, command admission, open refusals and recovery, append latency, command notices, administration and the reader"
 
 -- An administration lifetime writes no manager log. A serving lifetime writes
 -- a lifetime notice that lists the current credentials and, only when its
@@ -1467,26 +1472,45 @@ flowCommandChecks work = do
         Runtime.recSchema command == Runtime.FlowCommand && Runtime.recFrom command == principalA
           && fmap commandBodyOperation (commandFromFlowBody body) == Right Cancel && Runtime.recSchema reply == Runtime.FlowReceipt
       _ -> False
-  -- A lossy codec refuses the admission, and the command record is answered
-  -- by a failure record.
+  -- A lossy codec refuses the admission of an ordinary command, and the
+  -- command record is answered by a failure record. A cancel under the same
+  -- codec commits and is dispatched, and gap entries name its command record
+  -- and its receipt.
   let lossy = Runtime.FlowCodec Runtime.encodeFlowLine $ \line -> do
         record <- Runtime.decodeFlowLine line
         pure $ case (Runtime.recSchema record, Runtime.recBody record) of
           (Runtime.FlowCommand, Runtime.Inline (Object fields)) -> record {Runtime.recBody = Runtime.Inline (Object (KM.insert "resource" (String "/v1/requests/other") fields))}
           _ -> record
-  (_, lossyRoot, lossyStream) <- withServedFixture work "flow-lossy" (64 * commandCapacity) lossy Nothing (\_ _ -> pure ()) $ \store profile proof -> do
+  (lossyCancel, lossyRoot, lossyStream) <- withServedFixture work "flow-lossy" (64 * commandCapacity) lossy Nothing (\_ _ -> pure ()) $ \store profile proof -> do
     req <- request store SetInput "flow_lossy"
     expect "flow mode refuses a command whose appended record decodes to another command" StorageUnavailable $
       submitCommand store proof req (edit profile (commandResource req) "r1")
     commandCount store >>= check "the lossy refusal leaves no ledger row" . (== 0)
+    cancelReq <- request store Cancel "flow_lossy_cancel"
+    cancelled <- submitCommand store proof cancelReq (control profile) >>= right
+    check "a cancel whose appended record decodes to another command commits" (receiptState (submissionReceipt cancelled) == Accepted)
+    commandCount store >>= check "the committed lossy cancel has its ledger row" . (== 1)
+    ticket <- ticketOf cancelled
+    reserveDispatch ticket >>= right
+    attemptDispatch ticket (pure ()) >>= right
+    ledger <- readCommand store proof (dispatchCommandId ticket) >>= right
+    check "the lossy cancel is dispatched" (receiptState ledger == DispatchAttempted)
+    pure (dispatchCommandId ticket)
   lossyRecords <- servedLines lossyRoot lossyStream
+  let lossyAbout = Runtime.noAbout {Runtime.aboutCommand = Just lossyCancel, Runtime.aboutManagerRun = Just "run_1"}
   case lossyRecords of
-    [_, (command, _), (failure, failureValue), _] ->
+    [_, (command, _), (failure, failureValue), (cancelRecord, _), (gap, gapBody), (attempted, attemptedBody), _] -> do
       check "the refused command record is answered by a failure record" $
         Runtime.recSchema command == Runtime.FlowCommand && Runtime.recSchema failure == Runtime.FlowFailure
           && Runtime.recReplyTo failure == Just (Runtime.Position 1)
           && Runtime.failureFromBody failureValue == Right (Runtime.Refused, "storage-unavailable")
-    _ -> error ("FAIL flow mode lossy codec expected a command and its failure, found " <> show (map (Runtime.recSchema . fst) lossyRecords))
+      check "a gap notice names the command record and the receipt of the lossy cancel before its dispatch notice" $
+        Runtime.recSchema cancelRecord == Runtime.FlowCommand && Runtime.recAbout cancelRecord == lossyAbout
+          && Runtime.recSchema gap == Runtime.FlowNotice
+          && noticeFromFlowBody gapBody == Right (GapNotice [MissingRecord Runtime.FlowCommand lossyAbout, MissingRecord Runtime.FlowReceipt lossyAbout] 0)
+          && Runtime.recSchema attempted == Runtime.FlowNotice && Runtime.recAbout attempted == lossyAbout
+          && noticeFromFlowBody attemptedBody == Right (CommandChanged DispatchAttempted Nothing)
+    _ -> error ("FAIL flow mode lossy codec expected a refused command, a cancel, its gap notice and its dispatch notice, found " <> show (map (Runtime.recSchema . fst) lossyRecords))
   -- A failed receipt append carries the ledger receipt. A cancel whose record
   -- cannot be appended commits. Gap notices name the missing records.
   failing <- newIORef (Nothing :: Maybe Runtime.Schema)
@@ -1516,6 +1540,120 @@ flowCommandChecks work = do
           && Runtime.recSchema lastCommand == Runtime.FlowCommand && Runtime.recReplyTo lastReply == Just (Runtime.Position 4)
           && receiptFromFlowBody lastReplyBody == Right lastReceipt
     _ -> error ("FAIL flow mode gap check expected seven records, found " <> show (map (Runtime.recSchema . fst) gapRecords))
+
+-- An oversized manager log and a manager log with an undecodable complete line
+-- each name their reason once, by a fixed word, in the private fault log. No
+-- path, stream identity, exception text or record content enters that log.
+-- The lifetime refuses an ordinary command with storage-unavailable. After the
+-- log and its claim checks are moved out of the root while no manager serves,
+-- the next serving lifetime opens a new log and admits the command.
+flowOpenChecks :: FilePath -> IO ()
+flowOpenChecks work = do
+  let total = 18 * commandCapacity
+      marker = "undecodable-record-content" :: Text
+      withFlowAt rootPath streamId ceiling' action = bracket (Runtime.openPrivateRoot "manager flow open check" rootPath) Runtime.closePrivateRoot $ \private ->
+        bracket (openManagerFlow Runtime.strictFlowCodec Nothing private streamId ceiling') closeManagerFlow action
+      logPath rootPath streamId = foldl (</>) rootPath (managerFlowPath streamId)
+      padded n = commandFlowBody (CommandBody SetInput "profile_1" "POST" "/v1/requests/request_1" "application/json" Nothing
+        (Just (object ["pad" .= T.replicate 30000 "x", "n" .= (n :: Int)])) Nothing)
+      oversize rootPath streamId = withFlowAt rootPath streamId (2 * total) $ \flow -> do
+        let grow n = do
+              size <- managerFlowBytes flow
+              when (maybe True (<= toInteger total) size) $ do
+                _ <- appendManagerAsk flow (2 * total) Reserved Runtime.FlowCommand Runtime.Manager (Runtime.To Runtime.Manager) Runtime.noAbout (padded n) >>= right
+                grow (n + 1)
+        grow 0
+      undecodable rootPath streamId = do
+        withFlowAt rootPath streamId total $ \flow ->
+          void (appendManagerTell flow total Reserved Runtime.FlowNotice Runtime.Manager (Runtime.To Runtime.Manager) Runtime.noAbout (noticeFlowBody (ShutdownNotice "generation_old")) >>= right)
+        BS.appendFile (logPath rootPath streamId) (TE.encodeUtf8 ("{\"marker\":\"" <> marker <> "\"}\n"))
+  forM_ [("flow-open-oversized", oversize, ManagerFlowOversized), ("flow-open-undecodable", undecodable, ManagerFlowUndecodable)] $ \(name, prepare, reason) -> do
+    (path, root) <- fixture work name total 20
+    stream <- withInstalled path $ \installed -> withCoordinationStore installed (fmap storeStreamId . storeIdentity)
+    prepare root stream
+    ((), recorded) <- withPrivateStderr (work </> (name <> "-stderr.log")) $ withInstalled path $ \installed ->
+      withServingStoreWith Runtime.strictFlowCodec Nothing installed $ \store -> do
+        mutate store seed
+        profile <- profileRevision installed
+        proof <- authenticateCredential store bearerA >>= right
+        check (name <> ": the writer holds the reason of the failed open") ((storeManagerFlow store >>= managerFlowOpenFailure) == Just reason)
+        req <- request store SetInput "flow_open_refused"
+        expect (name <> ": an ordinary command is refused with storage-unavailable") StorageUnavailable $
+          submitCommand store proof req (edit profile (commandResource req) "r1")
+        commandCount store >>= check (name <> ": the refusal leaves no ledger row") . (== 0)
+    let recordedText = TE.decodeUtf8 recorded
+    check (name <> ": one fixed-word diagnostic names the reason at open") $
+      recordCount recorded ("manager-log open class=flow " <> managerFlowOpenWord reason) == 1
+        && length (filter ("manager-log open" `T.isInfixOf`) (T.lines recordedText)) == 1
+    check (name <> ": the private fault log holds no path, stream identity, exception text or record content") $
+      not (any (`T.isInfixOf` recordedText) [T.pack work, stream, ".ndjson", marker, "exceeds", "does not decode", "empty line"])
+    -- The operator recovery: stop the manager, move the log and its claim
+    -- checks out of the root, and restart.
+    let archive = work </> (name <> "-archive")
+        claims = foldl (</>) root (managerFlowClaims stream)
+    createDirectory archive
+    renameFile (logPath root stream) (archive </> "manager.ndjson")
+    claimed <- doesDirectoryExist claims
+    when claimed (renameDirectory claims (archive </> "claims"))
+    ((), recovered) <- withPrivateStderr (work </> (name <> "-recovered-stderr.log")) $ withInstalled path $ \installed ->
+      withServingStoreWith Runtime.strictFlowCodec Nothing installed $ \store -> do
+        profile <- profileRevision installed
+        proof <- authenticateCredential store bearerA >>= right
+        check (name <> ": the next lifetime opens a new log") (fmap managerFlowOpenFailure (storeManagerFlow store) == Just Nothing)
+        req <- request store SetInput "flow_open_recovered"
+        accepted <- submitCommand store proof req (edit profile (commandResource req) "r1") >>= right
+        check (name <> ": the next lifetime admits the ordinary command") (receiptState (submissionReceipt accepted) == Accepted)
+        commandCount store >>= check (name <> ": the admitted command has its ledger row") . (== 1)
+    check (name <> ": the recovered lifetime records no open failure") (not ("manager-log open" `BS.isInfixOf` recovered))
+    records <- servedLines root stream
+    case records of
+      (_, lifetime) : (command, _) : (receipt, _) : _ ->
+        check (name <> ": the new log begins with a lifetime notice and holds the command and its receipt") $
+          either (const False) isLifetime (noticeFromFlowBody lifetime)
+            && Runtime.recSchema command == Runtime.FlowCommand && Runtime.recSchema receipt == Runtime.FlowReceipt
+      _ -> error ("FAIL " <> name <> ": the new log holds " <> show (map (Runtime.recSchema . fst) records))
+  where
+    isLifetime (LifetimeNotice _) = True
+    isLifetime _ = False
+
+-- The latency of the synchronized command record. One serving lifetime admits
+-- 60 ordinary commands, and each admission is timed. The command records of
+-- that log are then appended again, synchronized, to a separate log of the
+-- same root, and each append is timed. The check prints the count, the median
+-- and the maximum of each series. It asserts no threshold.
+flowLatencyChecks :: FilePath -> IO ()
+flowLatencyChecks work = do
+  -- Each admitted command holds commandCapacity bytes of the ledger.
+  let total = 256 * commandCapacity
+      count = 60 :: Int
+      revision n = "r" <> T.pack (show n)
+  (admissions, root, stream) <- withServedFixture work "flow-latency" total Runtime.strictFlowCodec Nothing (\_ _ -> pure ()) $ \store profile proof ->
+    forM [1 .. count] $ \n -> do
+      mutate store (execute "DELETE FROM command_ordinary_rate" [])
+      req <- request store SetInput ("flow_latency_" <> T.pack (show n))
+      started <- getMonotonicTimeNSec
+      accepted <- submitCommand store proof (req {commandPrecondition = Just ("\"" <> revision (n - 1) <> "\"")}) (edit profile (commandResource req) (revision n)) >>= right
+      ended <- getMonotonicTimeNSec
+      check "the latency lifetime admits each command" (receiptState (submissionReceipt accepted) == Accepted)
+      pure (ended - started)
+  records <- servedLines root stream
+  let bodies = [value | (record, value) <- records, Runtime.recSchema record == Runtime.FlowCommand]
+  check "the latency lifetime records each admitted command" (length bodies == count)
+  appends <- bracket (Runtime.openPrivateRoot "manager flow latency check" root) Runtime.closePrivateRoot $ \private ->
+    bracket (openManagerFlow Runtime.strictFlowCodec Nothing private "stream_latency" total) closeManagerFlow $ \flow ->
+      forM bodies $ \body -> do
+        started <- getMonotonicTimeNSec
+        _ <- appendManagerAsk flow total Refusing Runtime.FlowCommand principalA (Runtime.To Runtime.Manager) Runtime.noAbout body >>= right
+        ended <- getMonotonicTimeNSec
+        pure (ended - started)
+  report "synchronized command-record append" appends
+  report "admission of an ordinary command with its synchronized record" admissions
+  where
+    report label samples = do
+      let sorted = sort samples
+          millis value = showFFloat (Just 3) (fromIntegral value / 1000000 :: Double) " ms"
+      putStrLn ("REPORT manager log " <> label <> ": count=" <> show (length sorted)
+        <> " median=" <> millis (sorted !! (length sorted `div` 2)) <> " max=" <> millis (last sorted))
 
 -- The command notices that follow later commits of command state. A dispatch
 -- attempt and a correlated acknowledgement each append a command notice after

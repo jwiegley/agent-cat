@@ -301,7 +301,9 @@ codec. The positions of a new lifetime continue those of the earlier
 lifetimes, so a reply can name an ask that an earlier lifetime appended. A final
 line without its newline denotes no record, because its append never
 completed, and the writer truncates it. A log that cannot be opened gives a
-writer whose every append fails.
+writer whose every append fails. The section
+[Growth, open refusals and recovery](#growth-open-refusals-and-recovery)
+states the reasons and the recovery.
 
 The writer lock is a leaf lock. The manager takes no other lock while it holds
 it. Before each append the writer checks that the path still names the file
@@ -362,8 +364,9 @@ a missing field and any value that its encoder does not write.
   request ending are `withdrawn`, `discarded`, `refused`, `invalidated`,
   `review-expired` and `preparation-failed`.
 
-No bearer token, credential verifier, idempotency key, page token or local path
-enters a body.
+A `review` body holds the exact binding bytes, which name the frontend
+invocation path, the run-root identity and the target arguments. No bearer
+token, credential verifier, idempotency key or page token enters a record.
 
 A transaction queues a notice that follows its COMMIT with
 `noticeAfterCommit`. When the COMMIT succeeds, the Store appends the queued
@@ -444,6 +447,56 @@ the writer creates no new log, and that no run store exists. It fails with the
 message "FLOW-FAULT the approve append failed and the manager refused the
 approval with storage-unavailable". The control adds no production hook and no
 environment variable.
+
+### Growth, open refusals and recovery
+
+The manager log grows across Store lifetimes. Nothing prunes it or rotates it
+until the retention work of Phase G. When the log and its claim checks reach L
+minus R, every ordinary command and every review publication is refused with
+`storage-quota`. A cancel and the records of the manager itself can still use
+the reserve R. The F16 gate measured 22193 bytes of manager log for one simple
+TUI journey. At a ceiling of 64 MiB (L = 67108864, the value of the sample
+configuration), R is 2097152 and L minus R is 65011712 bytes, which holds
+about 2929 such journeys.
+
+`openManagerFlow` refuses to open a log in two cases:
+
+- The log holds more bytes than the configured `globalMutationLedgerBytes`,
+  for example after the operator lowers that limit.
+- A complete line of the log fails strict decoding.
+
+In both cases, and after any other failure of the open, the writer of the
+lifetime refuses every append. Each ordinary command and each review
+publication is then refused with `storage-unavailable`, because its
+`Refusing` record cannot be appended. A cancel still commits, and it has no
+record in the log. The serving lifetime records the reason once in the private
+fault log at open, as one of three fixed words: `oversized`, `undecodable` or
+`io-failure`. The line has the form
+`manager-fault <time> manager-log open class=flow <word>`. It holds no path,
+no stream identity, no exception text and no record content. The text of the
+exception is dropped, and every failed append of the lifetime carries only the
+same word.
+
+The operator recovers as follows:
+
+1. Stop the manager.
+2. Move `flow/<stream>.ndjson` and the directory `flow/claims/<stream>/` out of
+   the manager root into a private archive directory. For an oversized log,
+   the operator can instead raise `globalMutationLedgerBytes`.
+3. Start the manager. The next serving lifetime creates a new log, which begins
+   with its lifetime notice, and admits commands again.
+4. Read the archived log with `agentic-run flow`.
+
+The positions of the new log start again at 0, and a reply in it never names
+a record of the archived log.
+
+The `manager-command-check flow` mode checks both refusals and the recovery.
+It also measures the synchronized `command` record. On 2026-09-29, on the local
+macOS development machine at `-N8`, 60 synchronized appends of admitted
+command records took a median of 5.511 ms and a maximum of 7.523 ms. The
+admission of an ordinary command with its synchronized record took a median of
+7.817 ms and a maximum of 235.933 ms over 60 commands. The mode prints both
+series on each run and asserts no threshold.
 
 ## Worker cleanup ownership
 

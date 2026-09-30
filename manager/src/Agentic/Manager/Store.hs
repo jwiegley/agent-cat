@@ -19,10 +19,10 @@ import qualified Agentic.Manager.Store.Admission as Admission
 import Agentic.Manager.Configuration
   (InstalledConfiguration, acquireConfigurationStorage, releaseConfigurationStorage, withConfigurationAdministration, withConfigurationSnapshot, withConfigurationCatalogues, withConfigurationCatalogueContext, tryConfigurationCatalogueContext, withConfiguredRetentionRoot, validateHistoryBindings, revalidateRetentionRoot, configuredInvocations, configuredLimits, probeConfiguredCapabilities)
 import Agentic.Manager.Flow
-  (ManagerFlow, ManagerFlowFault, ManagerFlowFailure (..), FlowRecordClass (Refusing), CredentialEntry (..), Notice, noticeFlowBody, managerFlowCeiling, Lifetime (..), Reconciliation (..), noReconciliation, openManagerFlow, closeManagerFlow, managerFlowBytes, managerFlowAllowance, managerFlowContent, appendManagerAsk, appendManagerTell, appendManagerReply, appendLifetime, appendShutdown)
+  (ManagerFlow, ManagerFlowFault, ManagerFlowFailure (..), FlowRecordClass (Refusing), CredentialEntry (..), Notice, noticeFlowBody, managerFlowCeiling, Lifetime (..), Reconciliation (..), noReconciliation, openManagerFlow, managerFlowOpenFailure, managerFlowOpenWord, closeManagerFlow, managerFlowBytes, managerFlowAllowance, managerFlowContent, appendManagerAsk, appendManagerTell, appendManagerReply, appendLifetime, appendShutdown)
 import Agentic.Manager.Protocol.Command (failureCode)
 import Agentic.Manager.Profile (ConfigurationLimits (..), PublicProfile, Diagnostic (SupervisionUnavailable), Discovery)
-import Agentic.Manager.Fault.Record (ManagerFault (AuthorizationChanged), loanFault, internalLabel, refusalLabel, recordErasure)
+import Agentic.Manager.Fault.Record (ManagerFault (AuthorizationChanged), loanFault, internalLabel, refusalLabel, recordErasure, recordFaultLine)
 import Agentic.Manager.Worker.State (WorkerLifecycle, acceptingPreparation)
 import Agentic.Manager.Lease (duplicateLease)
 import Agentic.Manager.Root (validateRootSeparation)
@@ -242,9 +242,12 @@ openStore mode installed root lease = storageErrors $ do
     -- A serving lifetime writes the manager log of its stream. Its lifetime
     -- notice follows the reconciliation. A credential list that cannot be
     -- read fails the open. A failed append of the notice leaves a gap entry.
+    -- A log that cannot be opened is recorded once in the private fault log by
+    -- the fixed word of its reason.
     flow <- forM logCeiling $ \((codec, fault), total) -> do
       (listed, omitted) <- bounded db 5000000 (readCredentialList db)
-      bracketOnError (openManagerFlow codec fault root stream total) closeManagerFlow $ \manager ->
+      bracketOnError (openManagerFlow codec fault root stream total) closeManagerFlow $ \manager -> do
+        forM_ (managerFlowOpenFailure manager) (recordFaultLine "manager-log open" . ("flow " <>) . managerFlowOpenWord)
         manager <$ appendLifetime manager total (Lifetime generation reconciliation listed omitted)
     CoordinationStore installed root db (StoreIdentity schemaVersion epoch stream generation)
       <$> newMVar () <*> newIORef False <*> newIORef False <*> pure lease <*> ((,,) <$> newMVar () <*> newTVarIO 0 <*> newTVarIO (Just 0)) <*> newTVarIO (WorkerRegistry False False Nothing []) <*> newMVar () <*> newIORef False <*> newTVarIO (False, Nothing) <*> pure flow

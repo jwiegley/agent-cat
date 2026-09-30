@@ -131,7 +131,10 @@ claim-check files live in another directory.
 
 `openFlowLog` opens a log for appending and creates it when it is absent. It
 decodes every complete line of the existing log with its codec and continues
-the positions and claim checks of those records. It truncates a final line
+the positions and claim checks of those records. It refuses a log above its
+byte bound with `FlowLogOversized`, and a log with an empty or undecodable
+complete line with `FlowLogUndecodable`. Neither refusal carries a path or the
+content of a line. It truncates a final line
 without its newline, because that line denotes no record. Before each append
 it checks that the path still names the file that it opened, by device and
 inode, and after one mismatch it refuses every later append. `appendAskWith`,

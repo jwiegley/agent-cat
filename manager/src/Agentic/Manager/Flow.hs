@@ -13,15 +13,19 @@
 -- this module reaches only through "Agentic.Runtime".
 --
 -- Every manager body codec satisfies @decode (encode x) = Right x@ and refuses
--- a value that is not the exact encoding of its decoding. No bearer token,
--- credential verifier, idempotency key, page token or local path enters a
--- body.
+-- a value that is not the exact encoding of its decoding. A review body holds
+-- the exact binding bytes, which name the frontend invocation path, the
+-- run-root identity and the target arguments. No bearer token, credential
+-- verifier, idempotency key or page token enters a record.
 module Agentic.Manager.Flow
   ( -- * Writer
     ManagerFlow,
     ManagerFlowFault (..),
     FlowRecordClass (..),
     ManagerFlowFailure (..),
+    ManagerFlowOpenFailure (..),
+    managerFlowOpenFailure,
+    managerFlowOpenWord,
     managerFlowPath,
     managerFlowClaims,
     openManagerFlow,
@@ -125,6 +129,7 @@ import Agentic.Runtime
     FlowCodec,
     FlowError (..),
     FlowLimitReached (..),
+    FlowOpenRefusal (..),
     FlowLog (ManagerLog, RunLog),
     FlowWriter,
     Position (..),
@@ -186,7 +191,7 @@ import System.FilePath (dropExtension, takeDirectory, takeFileName)
 data ManagerFlow = ManagerFlow
   { managerLock :: !(MVar Gaps),
     -- | The runtime writer, or the reason why the log could not be opened.
-    managerWriter :: !(Either Text FlowWriter),
+    managerWriter :: !(Either ManagerFlowOpenFailure FlowWriter),
     managerFault :: !(Maybe ManagerFlowFault),
     managerRoot :: !PrivateRoot,
     managerStream :: !Text,
@@ -222,6 +227,29 @@ data ManagerFlowFailure
   | ManagerFlowUnavailable !Text
   deriving (Eq, Show)
 
+-- | Why the log of a lifetime could not be opened. Each reason has one fixed
+-- word, which is the only text of the reason that leaves the writer.
+data ManagerFlowOpenFailure
+  = -- | The log holds more bytes than the configured ledger ceiling.
+    ManagerFlowOversized
+  | -- | A complete line of the log fails strict decoding.
+    ManagerFlowUndecodable
+  | -- | Any other failure of the open, such as an I/O failure.
+    ManagerFlowIOFailure
+  deriving (Eq, Show)
+
+-- | The fixed word of an open failure.
+managerFlowOpenWord :: ManagerFlowOpenFailure -> Text
+managerFlowOpenWord = \case
+  ManagerFlowOversized -> "oversized"
+  ManagerFlowUndecodable -> "undecodable"
+  ManagerFlowIOFailure -> "io-failure"
+
+-- | The reason why the log of the lifetime could not be opened, or 'Nothing'
+-- when the writer is open.
+managerFlowOpenFailure :: ManagerFlow -> Maybe ManagerFlowOpenFailure
+managerFlowOpenFailure = either Just (const Nothing) . managerWriter
+
 -- | A missing record, named by its schema and identifiers.
 data MissingRecord = MissingRecord
   { missingSchema :: !Schema,
@@ -245,7 +273,8 @@ managerFlowClaims stream = ["flow", "claims", T.unpack stream]
 
 -- | Open the log of the stream for one lifetime. The configured ledger ceiling
 -- bounds the bytes that the writer reads. A log that cannot be opened gives a
--- writer whose every append fails.
+-- writer whose every append fails with the fixed word of the reason, and the
+-- text of the exception is dropped.
 openManagerFlow :: FlowCodec -> Maybe ManagerFlowFault -> PrivateRoot -> Text -> Int64 -> IO ManagerFlow
 openManagerFlow codec fault root stream total = do
   opened <- synchronous $ do
@@ -253,8 +282,12 @@ openManagerFlow codec fault root stream total = do
     ensurePrivateDirectoryAt root ["flow"]
     fst <$> openFlowLog codec root (managerFlowPath stream) (managerFlowClaims stream) (toInteger total)
   lock <- newMVar (Gaps Seq.empty 0)
-  pure (ManagerFlow lock (either (Left . T.pack . displayException) Right opened) fault root stream total)
+  pure (ManagerFlow lock (either (Left . openFailure) Right opened) fault root stream total)
   where
+    openFailure failure = case fromException failure of
+      Just FlowLogOversized -> ManagerFlowOversized
+      Just FlowLogUndecodable -> ManagerFlowUndecodable
+      Nothing -> ManagerFlowIOFailure
     validStream text = not (T.null text) && T.length text <= 128 && T.all (\c -> isAscii c && (isAlphaNum c || c == '_' || c == '-')) text
 
 closeManagerFlow :: ManagerFlow -> IO ()
@@ -337,7 +370,7 @@ appendManager flow total recordClass schema appendRecord about = modifyMVar (man
     attempt current target identifiers action
       | schemaLog target == RunLog = pure (Left (ManagerFlowUnavailable ("the " <> schemaName target <> " schema belongs to the run log")))
       | otherwise = case managerWriter flow of
-          Left why -> pure (Left (ManagerFlowUnavailable why))
+          Left why -> pure (Left (ManagerFlowUnavailable (managerFlowOpenWord why)))
           Right writer -> do
             injected <- maybe (pure False) (\(ManagerFlowFault selects) -> selects target identifiers) (managerFault flow)
             if injected

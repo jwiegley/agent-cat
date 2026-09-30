@@ -52,9 +52,10 @@ subtask is under `F/<subtask>/impl-r1` or `impl-r2` in the resume directory.
   command after the Store admits it and before the commit, synchronized to
   disk, and each receipt, review, start, discard and control relay, command
   notice, review ending, request ending, lifetime, shutdown and local
-  administration change. A command whose record cannot be written is refused
-  with `storage-unavailable`, except a cancel, which proceeds and is named in
-  a later gap notice. At its ceiling the log refuses an ordinary command with
+  administration change. A command whose record cannot be written, or whose
+  appended record decodes to another value, is refused with
+  `storage-unavailable`, except a cancel, which proceeds and is named in a
+  later gap notice. At its ceiling the log refuses an ordinary command with
   `storage-quota` and keeps the cancel reserve.
 - `agentic-run flow PATH... [--follow] [--route PREDICATE] [--from CURSOR]`
   reads run logs and manager logs as the owning account. It verifies claim
@@ -65,6 +66,20 @@ subtask is under `F/<subtask>/impl-r1` or `impl-r2` in the resume directory.
 - Increment 1 makes no `/v1` change. `doc/api/openapi.yaml` is unchanged since
   `4496dbe4`. It adds no service subscription, no live re-route and no
   enforcement at any writer.
+
+The manager log grows across lifetimes, and nothing prunes it before the
+retention work of Phase G. At L minus R every ordinary command and review
+publication is refused with `storage-quota`. At a 64 MiB ceiling that is
+about 2929 simple journeys of 22193 bytes each. A log above the configured
+`globalMutationLedgerBytes`, or one with an undecodable complete line, makes
+every append of the lifetime fail, so ordinary commands are refused with
+`storage-unavailable`. The manager records the reason once at open with the
+fixed word `oversized`, `undecodable` or `io-failure`. To recover, the
+operator stops the manager, moves `flow/<stream>.ndjson` and
+`flow/claims/<stream>/` out of the root or raises
+`globalMutationLedgerBytes`, restarts it, and reads the archived log with
+`agentic-run flow`. The section "Growth, open refusals and recovery" of
+`manager/STORAGE.md` holds the details and the measured append latency.
 
 ### Gate of increment 1
 

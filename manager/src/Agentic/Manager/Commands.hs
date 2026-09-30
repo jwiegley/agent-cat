@@ -24,7 +24,7 @@ import Agentic.Manager.Protocol.Command
 import Agentic.Manager.Protocol.Artifact (validExportName)
 import Agentic.Manager.Protocol.Json (decodeStrictValue)
 import Agentic.Manager.Store
-import Agentic.Runtime (maxFrameBytes, maxArtifactBytes, Actor (..), Authority (..), Address (To), About (..), noAbout, Position (..), Record (..), Schema (FlowReceipt))
+import Agentic.Runtime (maxFrameBytes, maxArtifactBytes, Actor (..), Authority (..), Address (To), About (..), noAbout, Position (..), Record (..), Schema (FlowCommand, FlowReceipt))
 import Control.DeepSeq (NFData (..))
 import Control.Exception (SomeException, mask, finally, throwIO, try)
 import Control.Monad (unless, when, void, forM, forM_)
@@ -322,26 +322,44 @@ checkFlowCeiling limits operation = do
 flowClass :: Operation -> FlowRecordClass -> FlowRecordClass
 flowClass operation ordinary = if operation == Cancel then Flow.Reserved else ordinary
 
+-- | The command record of an admitted command in the manager log.
+data CommandRecord
+  = -- | The record was appended at this position, and it decodes to the
+    -- admitted command.
+    CommandRecorded !Word64
+  | -- | The append of the record of a cancel failed. The writer already keeps
+    -- a gap entry that names it.
+    CommandNotAppended
+  | -- | The record of a cancel was appended, but it decodes to another value.
+    -- After the commit the writer keeps a gap entry that names it.
+    CommandMismatched
+  deriving (Eq)
+
+instance NFData CommandRecord where
+  rnf value = value `seq` ()
+
 -- | Append the synchronized command record of an admitted command, decode the
 -- appended bytes and compare them with the admitted command. A difference
--- refuses the command with 'StorageUnavailable'. A failed append refuses an
--- ordinary command with 'StorageQuota' or 'StorageUnavailable'. A cancel
--- commits without its record, and the writer keeps a gap entry that names it.
--- The result is the position of the record, if it was appended.
-recordAdmittedCommand :: ConfigurationLimits -> Actor -> About -> CommandRequest -> Text -> BS.ByteString -> Int -> CommandTx (Maybe Word64)
+-- refuses an ordinary command with 'StorageUnavailable'. A failed append
+-- refuses an ordinary command with 'StorageQuota' or 'StorageUnavailable'. A
+-- cancel commits in both cases, without a record that the log carries, and
+-- the writer keeps a gap entry that names its command record.
+recordAdmittedCommand :: ConfigurationLimits -> Actor -> About -> CommandRequest -> Text -> BS.ByteString -> Int -> CommandTx CommandRecord
 recordAdmittedCommand limits principal about request candidate digest bodyBytes = do
   command <- admittedCommandBody request candidate digest bodyBytes
   let operation = commandOperation request
   appended <- lift (appendCommandRecord (fromIntegral (limitGlobalMutationLedgerBytes limits)) (flowClass operation Refusing) principal about (commandFlowBody command))
   case appended of
     Nothing -> throwE StorageUnavailable
-    Just (Left _) | operation == Cancel -> pure Nothing
+    Just (Left _) | operation == Cancel -> pure CommandNotAppended
     Just (Left ManagerFlowQuota) -> throwE StorageQuota
     Just (Left (ManagerFlowUnavailable _)) -> throwE StorageUnavailable
-    Just (Right (Position position, record, content)) -> do
-      let carried = content >>= commandFromFlowBody
-      require (carried == Right command && recFrom record == principal && recTo record == To Manager && recAbout record == about) StorageUnavailable
-      pure (Just position)
+    Just (Right (Position position, record, content))
+      | carried == Right command && recFrom record == principal && recTo record == To Manager && recAbout record == about -> pure (CommandRecorded position)
+      | operation == Cancel -> pure CommandMismatched
+      | otherwise -> throwE StorageUnavailable
+      where
+        carried = content >>= commandFromFlowBody
 
 -- | The command record body of an admitted command: its strictly decoded JSON
 -- body, or the capture that it names by identifier, digest and size.
@@ -364,11 +382,13 @@ admittedCommandBody request candidate digest bodyBytes = do
 -- command record, and carry the receipt decoded from the appended bytes. When
 -- the append fails, or the decoded receipt differs from the ledger receipt,
 -- the ledger receipt is carried and the writer keeps a gap entry for a failed
--- append. A cancel whose command record is missing has its receipt named by
--- a gap entry. A replay appends nothing. The notices of the admitted
+-- append. A cancel whose command record the log does not carry has its
+-- receipt named by a gap entry. When that record was appended but decodes to
+-- another value, a gap entry names the command record first. A replay appends
+-- nothing. The notices of the admitted
 -- mutation, such as a request ending, follow the receipt or its gap entry.
 recordReceipt :: CoordinationStore -> ConfigurationLimits -> CredentialProof
-  -> (CommandReceipt, Bool, Bool, CommandReferences, Text, Text, Maybe QueueAssociation, Maybe (Text, Maybe Word64), PostCommit)
+  -> (CommandReceipt, Bool, Bool, CommandReferences, Text, Text, Maybe QueueAssociation, Maybe (Text, CommandRecord), PostCommit)
   -> IO (CommandReceipt, Bool, Bool, CommandReferences, Text, Text, Maybe QueueAssociation)
 recordReceipt store limits proof (receipt, replayed, dispatch, refs, generation, epoch, association, flowed, deferred) = do
   carried <- case (storeManagerFlow store, flowed) of
@@ -376,8 +396,11 @@ recordReceipt store limits proof (receipt, replayed, dispatch, refs, generation,
       let about = commandAbout (receiptId receipt) refs
           principal = commandPrincipal client proof
       case position of
-        Nothing -> receipt <$ noteManagerGap manager (MissingRecord FlowReceipt about)
-        Just index -> do
+        CommandNotAppended -> receipt <$ noteManagerGap manager (MissingRecord FlowReceipt about)
+        CommandMismatched -> do
+          noteManagerGap manager (MissingRecord FlowCommand about)
+          receipt <$ noteManagerGap manager (MissingRecord FlowReceipt about)
+        CommandRecorded index -> do
           appended <- appendManagerReply manager (fromIntegral (limitGlobalMutationLedgerBytes limits)) (flowClass (receiptOperation receipt) Following)
             FlowReceipt (Position index) Manager (To principal) about (receiptFlowBody receipt)
           case appended of

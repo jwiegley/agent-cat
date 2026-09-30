@@ -87,6 +87,7 @@ module Agentic.Runtime.Flow
     -- * Writer
     FlowWriter,
     FlowError (..),
+    FlowOpenRefusal (..),
     FlowLimitReached (..),
     flowClaimDirectory,
     openFlowWriter,
@@ -837,6 +838,17 @@ newtype FlowError = FlowError Text
 
 instance Exception FlowError
 
+-- | Why 'openFlowLog' refused the content of an existing log. The refusal
+-- carries no path and no line content.
+data FlowOpenRefusal
+  = -- | The log holds more bytes than the limit of the open.
+    FlowLogOversized
+  | -- | A complete line of the log is empty or fails strict decoding.
+    FlowLogUndecodable
+  deriving (Eq, Show)
+
+instance Exception FlowOpenRefusal
+
 -- | An append that would take the log and its claim checks above the limit
 -- that the append named. The writer stays usable.
 data FlowLimitReached = FlowLimitReached
@@ -871,7 +883,9 @@ openFlowWriter codec root name = do
 -- is absent. The claim-check files of the log live in the given directory.
 --
 -- The writer reads the existing log, which must be at most the given number
--- of bytes, and decodes every complete line with the codec. It continues the
+-- of bytes, and decodes every complete line with the codec. A larger log
+-- raises 'FlowLogOversized', and an empty or undecodable complete line raises
+-- 'FlowLogUndecodable'. It continues the
 -- positions and the claim checks of those records. A final line without its
 -- newline denotes no record, because its append never completed, and the
 -- writer truncates it. Before each append the writer checks that the path
@@ -884,14 +898,14 @@ openFlowLog codec root path claims limit = do
   (handle, identity) <- openPrivateLogAt root path
   flip onException (hClose handle) $ do
     size <- hFileSize handle
-    when (size > limit) (refuse ("the log exceeds " <> T.pack (show limit) <> " bytes"))
+    when (size > limit) (throwIO FlowLogOversized)
     contents <- BS.hGet handle (fromIntegral size)
     unless (toInteger (BS.length contents) == size) (refuse "the log changed while it was read")
     let complete = BS.length contents - BS.length (BS.takeWhileEnd (/= 10) contents)
         torn = toInteger (BS.length contents - complete)
         lines' = filter (not . BS.null) (BS.split 10 (BS.take complete contents))
-    unless (length lines' == BS.count 10 (BS.take complete contents)) (refuse "the log holds an empty line")
-    records <- either (\why -> refuse ("the log holds a line that does not decode: " <> why)) pure (traverse (flowDecodeLine codec) lines')
+    unless (length lines' == BS.count 10 (BS.take complete contents)) (throwIO FlowLogUndecodable)
+    records <- either (const (throwIO FlowLogUndecodable)) pure (traverse (flowDecodeLine codec) lines')
     when (torn > 0) (hSetFileSize handle (toInteger complete))
     let claimed = Map.fromList [(digest, size') | Record {recBody = ClaimCheck digest size'} <- records]
         bytes = toInteger complete + sum (Map.elems claimed)
