@@ -4,7 +4,7 @@
 -- | Verified credential possession, rechecked against current transactional facts.
 module Agentic.Manager.Authorization
   ( CredentialProof, authenticateCredential, currentClient, authorizeProfile, proofGeneration, credentialRateKey,
-    AuthorizedView, withAuthorizedView, withAuthorizedResponse, withAuthorizedResponseLimits, withAuthorizedCatalogues, withAuthorizedCatalogueContext, withBorrowedAuthorizedCatalogues, authorizedViewRevision, authorizedCursorRevision, catalogueAuthorization, revalidateAuthorizedView, awaitAuthorizedView,
+    AuthorizedView, withAuthorizedView, withAuthorizedResponse, withAuthorizedResponseLimits, withAuthorizedCatalogues, withAuthorizedCatalogueContext, authorizedViewRevision, authorizedCursorRevision, catalogueAuthorization, revalidateAuthorizedView, awaitAuthorizedView, awaitAuthorizationWakeup,
     releaseResponseLoans, attachResponseLoan ) where
 
 import Agentic.Manager.Fault (configurationLoan, storeFailureRefusal)
@@ -207,16 +207,6 @@ withAuthorizedCatalogueContext store proof scopes action = do
       watch limits profiles catalogues
   configurationLoan "authorization catalogue-context" result
 
--- | A batch response borrowing the stream's original charged reader. Each
--- call owns only its configuration/watch scope, not a second reader slot.
-withBorrowedAuthorizedCatalogues :: AuthorizationWatch -> CredentialProof -> [Scope]
-  -> (AuthorizedView -> ConfigurationLimits -> [(PublicProfile, [Scope])] -> [(Text, Discovery)] -> IO a)
-  -> IO a
-withBorrowedAuthorizedCatalogues original proof scopes action = do
-  unless (length (take 5 scopes) <= 4) (throwIO InvalidRequest)
-  result <- withStoreCataloguesBorrowed original $ \store -> catalogueView store proof scopes BorrowedObservation action
-  configurationLoan "authorization borrowed-catalogues" result
-
 catalogueView :: CoordinationStore -> CredentialProof -> [Scope] -> (IO ViewFacts -> ViewObservation)
   -> (AuthorizedView -> ConfigurationLimits -> [(PublicProfile, [Scope])] -> [(Text, Discovery)] -> IO a)
   -> AuthorizationWatch -> ConfigurationLimits -> [PublicProfile] -> [(Text, Discovery)] -> IO a
@@ -268,8 +258,13 @@ revalidateAuthorizedView (AuthorizedView watch observation bound) = authorizatio
 
 -- A wakeup is not current authority. Every timer expiry rechecks SQLite time.
 awaitAuthorizedView :: AuthorizedView -> IO (Either CommandFailure ())
-awaitAuthorizedView view@(AuthorizedView watch _ _) =
-  awaitAuthorizationChange watch >> revalidateAuthorizedView view
+awaitAuthorizedView view = awaitAuthorizationWakeup view >> revalidateAuthorizedView view
+
+-- | Wait for a commit, a closed scope or the one-second timer on the watch of
+-- the view, with no Store loan held. The wakeup carries no authority. The
+-- caller authorizes its next read again.
+awaitAuthorizationWakeup :: AuthorizedView -> IO ()
+awaitAuthorizationWakeup (AuthorizedView watch _ _) = awaitAuthorizationChange watch
 
 currentViewFacts :: CoordinationStore -> CredentialProof -> Text -> [Scope] -> IO ViewFacts
 currentViewFacts store proof profile scopes = do

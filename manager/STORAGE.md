@@ -216,8 +216,22 @@ download quota, not under the file slot. That quota limits the Store to one
 such download of at most 64 MiB. It refuses another download at once, and no
 operation waits for it. A page response holds its page-set reservation across
 its writes, and a command receipt holds nothing but its authorization watch.
-A server-sent event stream holds one reader charge for its whole lifetime and
-writes each batch within the configuration loan of that batch.
+
+A server-sent event stream holds no Store loan between its batch reads. Each
+batch read acquires one reader charge and the configuration guard, in the lock
+order configuration, then database, each within its own five-second allowance.
+It reads and encodes the batch under these loans and then returns both with
+`releaseResponseLoans`. The stream revalidates its view immediately before
+each block and each heartbeat. A block or heartbeat write therefore holds no
+configuration guard, reader charge, file slot or SQL transaction. A stream
+with nothing more to read waits on the authorization watch of its last batch
+view. The watch is an authorization token only, so the wait holds no loan.
+Each write completes within five seconds, the heartbeat interval is 15
+seconds, and a revocation ends the stream before its next block. Streams that
+stall in a write, up to the Store reader capacity, therefore leave the
+reader places and the configuration guard free for ingestion. The limit of two
+subscriptions for each client is a separate count and not a Store reader
+charge.
 
 Operations require the threaded RTS. Cancellation repeatedly interrupts the
 original SQLite operation until its thread joins. A single interrupt can precede

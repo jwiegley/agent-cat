@@ -30,6 +30,7 @@ import Control.Exception (ErrorCall (..), SomeException, toException)
 import qualified Data.ByteString.Builder as Builder
 import qualified Data.Text.Encoding as TE
 import Data.Time (getCurrentTime)
+import Data.Word (Word64)
 import qualified Network.HTTP.Types as HTTP
 import qualified Network.Wai as Wai
 import Network.Wai.Internal (ResponseReceived (..))
@@ -82,6 +83,7 @@ main = do
     ["ordinary-admission",work] -> ordinaryAdmissionChecks work
     ["ordinary-stream",work] -> ordinaryStreamChecks work
     ["response-ingestion",work] -> responseIngestionChecks work
+    ["stream-ingestion",work] -> streamIngestionChecks work
     [work,source] -> do
       createDirectory(work </> "composition")
       compositionChecks(work </> "composition")
@@ -103,8 +105,10 @@ main = do
       ordinaryStreamChecks(work </> "ordinary-stream")
       createDirectory(work </> "response-ingestion")
       responseIngestionChecks(work </> "response-ingestion")
+      createDirectory(work </> "stream-ingestion")
+      streamIngestionChecks(work </> "stream-ingestion")
       artifactChecks work source
-    _ -> error "usage: manager-artifact-check [retention|composition|observation|events|admission-contention|response-order|fault-classification|ordinary-admission|ordinary-stream|response-ingestion] PRIVATE_DIRECTORY [PACKAGE_DIRECTORY]"
+    _ -> error "usage: manager-artifact-check [retention|composition|observation|events|admission-contention|response-order|fault-classification|ordinary-admission|ordinary-stream|response-ingestion|stream-ingestion] PRIVATE_DIRECTORY [PACKAGE_DIRECTORY]"
 
 -- Each converted cause site keeps its own class or records its own erased
 -- cause, genuine Store failures keep the storage-unavailable problem, and the
@@ -192,13 +196,12 @@ faultClassificationChecks work = do
     streams <- Events.newStreamReaders
     start <- Events.withBoundary store proof (\_ cursor _ -> pure cursor) (\_ _ cursor -> pure cursor)
     (sites, siteRecord) <- withPrivateStderr (work </> "sites-stderr.log") $ do
-      -- One holder keeps the configuration guard past the allowance of four
+      -- One holder keeps the configuration guard past the allowance of three
       -- waiters, which wait together and expire together.
-      (reader, borrowed, viewFacts, preparationRead) <- withStoreAuthorizationWatch store $ \watch ->
+      (reader, viewFacts, preparationRead) <-
         fmap (either (error . show) id) $ withAuthorizedView store proof "profile_1" [Command.Observe] $ \view ->
-          withHeldConfiguration store $ \_ -> runConcurrently $ (,,,)
+          withHeldConfiguration store $ \_ -> runConcurrently $ (,,)
             <$> Concurrently (faultOf (withStoreReader store (pure ())))
-            <*> Concurrently (faultOf (withBorrowedAuthorizedCatalogues watch proof [Command.Observe] (\_ _ _ _ -> pure ())))
             <*> Concurrently (revalidateAuthorizedView view)
             <*> Concurrently (fmap (const ()) <$> readPreparation store proof "preparation_1")
       observed <- withStoreAuthorizationWatch store $ \watch ->
@@ -206,8 +209,6 @@ faultClassificationChecks work = do
       callback <- withStoreConfiguration store (\_ _ -> ioError (userError marker) :: IO ())
       responseLoan <- faultOf (withAuthorizedResponse store proof "profile_1" [Command.Observe] (\_ -> throwIO ProcessFailure :: IO ()))
       catalogue <- faultOf (withAuthorizedCatalogueContext store proof [Command.Observe] (\_ _ _ _ _ -> throwIO ProcessFailure :: IO ()))
-      available <- withStoreAuthorizationWatch store $ \watch ->
-        faultOf (withBorrowedAuthorizedCatalogues watch proof [Command.Observe] (\_ _ _ _ -> pure ()))
       operation <- Admission.withAdmission store $ \controller ->
         withRaw (work </> "sites" </> "manager") $ \db -> do
           SQL.exec db "BEGIN IMMEDIATE"
@@ -215,8 +216,8 @@ faultClassificationChecks work = do
           SQL.exec db "ROLLBACK"
           pure outcome
       streamed <- faultOf (Events.withStream streams store proof start $ \pump -> pump (\_ _ -> pure ()) (\_ -> threadDelay 7000000))
-      pure (reader, observed, callback, responseLoan, catalogue, borrowed, available, viewFacts, preparationRead, operation, streamed)
-    let (reader, observed, callback, responseLoan, catalogue, borrowed, available, viewFacts, preparationRead, operation, streamed) = sites
+      pure (reader, observed, callback, responseLoan, catalogue, viewFacts, preparationRead, operation, streamed)
+    let (reader, observed, callback, responseLoan, catalogue, viewFacts, preparationRead, operation, streamed) = sites
         erased context cause value = recordCount siteRecord (context <> " class=" <> cause <> " erased=" <> value) == 1
         declared = "command StorageUnavailable"
     check "reader admission keeps configuration contention as Store contention" (reader == Left (StoreRefusal StoreBusy))
@@ -235,10 +236,6 @@ faultClassificationChecks work = do
     check "a catalogue loan keeps the declared refusal" (catalogue == storageUnavailable)
     check "a catalogue loan records its own configuration cause"
       (erased "authorization catalogue-context" "internal ConfigurationRefused ProcessFailure" declared)
-    check "a borrowed catalogue loan keeps the declared refusal" (borrowed == storageUnavailable)
-    check "a borrowed catalogue loan records configuration contention"
-      (erased "authorization borrowed-catalogues" "internal ConfigurationBusy" declared)
-    check "the borrowed catalogue loan succeeds when the guard is free" (available == Right ())
     check "view revalidation keeps its declared refusal" (viewFacts == Left Command.StorageUnavailable)
     check "view revalidation records configuration contention"
       (erased "authorization view-facts" "internal ConfigurationBusy" declared)
@@ -443,14 +440,7 @@ responseIngestionChecks work = do
       pure ResponseReceived
     reached counters = timeout 10000000 $ atomically $
       mapM readTVar counters >>= \seen -> unless (all (>= 1) seen) retry
-    started = RunStartedV2 "fixture" "scripted" PersonAnswerLocalControl
-    timedIngest store association = timedIngestAt store association 0 started
-    timedIngestAt store association number event = do
-      begun <- getMonotonicTimeNSec
-      outcome <- faultOf (ingestRuntimeEnvelope store association
-        (encodeEnvelope (Envelope 2 (associationNative association) (SeqNo number) "2026-09-03T00:00:00Z" event)))
-      finished <- getMonotonicTimeNSec
-      pure (outcome, finished - begun)
+    timedIngest store association = timedIngestAt store association 0 ingestionStart
     guardVariant store proof association = do
       writes <- newTVarIO (0 :: Int)
       withAsync (held store proof association writes) $ \response -> do
@@ -557,6 +547,91 @@ responseIngestionChecks work = do
         check "a revocation during the hold refuses the next write" (outcome == Left (CommandRefusal Command.Unauthenticated))
         atomically (readTVar writes) >>= check "a revocation during the hold stops the response before its next write" . (== 1)
 
+-- | The first runtime event of the fixture run.
+ingestionStart :: RuntimeEvent
+ingestionStart = RunStartedV2 "fixture" "scripted" PersonAnswerLocalControl
+
+-- | Ingest one runtime envelope of an associated run and measure how long the
+-- ingestion took, in nanoseconds.
+timedIngestAt :: CoordinationStore -> RunAssociation -> Word64 -> RuntimeEvent -> IO (Either FaultClass Bool, Word64)
+timedIngestAt store association number event = do
+  begun <- getMonotonicTimeNSec
+  outcome <- faultOf (ingestRuntimeEnvelope store association
+    (encodeEnvelope (Envelope 2 (associationNative association) (SeqNo number) "2026-09-03T00:00:00Z" event)))
+  finished <- getMonotonicTimeNSec
+  pure (outcome, finished - begun)
+
+-- | Event streams whose writes stall and actual ingestion of an associated
+-- run. A stream reads each batch under a brief reader charge and
+-- configuration loan and returns both before it writes, so stalled streams up
+-- to the Store reader capacity leave every Store loan free for ingestion.
+-- Each variant uses its own Store, and every variant runs even after an
+-- earlier one fails.
+streamIngestionChecks :: FilePath -> IO ()
+streamIngestionChecks work = do
+  failures <- fmap concat $ mapM variant [("reader-capacity", stalledVariant), ("revocation", revocationVariant)]
+  unless (null failures) (error ("FAIL stream-ingestion variants: " <> unwords failures))
+  where
+    variant (name, checks) = do
+      createDirectory (work </> name)
+      outcome <- try @ErrorCall (withStreamStore (work </> name) checks)
+      case outcome of
+        Right () -> putStrLn ("PASS stream-ingestion variant " <> name) >> pure []
+        Left failure -> putStrLn ("FAIL stream-ingestion variant " <> name <> ": " <> show failure) >> pure [name]
+    withStreamStore directory checks = do
+      (config,_) <- fixture directory
+      withInstalled config $ \installed -> withCoordinationStore installed $ \store -> do
+        seed store
+        proof <- authenticateCredential store bearer >>= right
+        (association,_,_) <- sourceRun store
+        start <- Events.withBoundary store proof (\_ cursor _ -> pure cursor) (\_ _ cursor -> pure cursor)
+        readers <- Events.newStreamReaders
+        checks directory store proof association start readers
+    -- One open stream of the fixture client. Each block and heartbeat write
+    -- counts itself and then stalls for the given number of microseconds.
+    stream readers store proof start stall writes = faultOf $
+      Events.withStream readers store proof start $ \pump ->
+        let write = atomically (modifyTVar' writes (+ (1 :: Int))) >> threadDelay stall
+        in pump (\_ _ -> write) (\_ -> write)
+    reached counters = timeout 10000000 $ atomically $
+      mapM readTVar counters >>= \seen -> unless (all (>= 1) seen) retry
+    -- Each write stalls beyond the five-second write deadline, so each stream
+    -- ends through its write timeout.
+    stalledVariant directory store proof association start readers = do
+      capacity <- withStoreConfiguration store (\limits _ -> pure (limitGlobalDatabaseReaders limits)) >>= right
+      check "the Store reader capacity fits the subscription quota of one client" (capacity >= 1 && capacity <= 2)
+      counters <- mapM (const (newTVarIO 0)) [1..capacity]
+      ((outcomes, ()), record) <- withPrivateStderr (directory </> "stream-stderr.log") $
+        concurrently (mapConcurrently (stream readers store proof start 8000000) counters) $ do
+          reached counters >>= check "streams up to the Store reader capacity stall in a write at the same time" . (== Just ())
+          reader <- try @StoreFailure (withStoreReader store (pure ()))
+          check "a reader place is available while every stream stalls in a write" (reader == Right ())
+          configuration <- withStoreConfiguration store (\_ _ -> pure ())
+          check "the configuration guard is available while every stream stalls in a write" (configuration == Right ())
+          (ingested, elapsed) <- timedIngestAt store association 0 ingestionStart
+          check "ingestion of an associated run completes while streams up to the reader capacity stall" (ingested == Right True)
+          check "that ingestion completes within its unchanged five-second allowance" (elapsed < 5000000000)
+      check "each stalled stream ends through its write timeout with the declared refusal"
+        (all (== Left (CommandRefusal Command.StorageUnavailable)) outcomes)
+      check "each stalled stream records its write timeout"
+        (recordCount record "events write class=internal ResponseWriteTimeout erased=command StorageUnavailable" == capacity)
+      counts <- mapM (atomically . readTVar) counters
+      check "no stalled stream writes again after its write timeout" (all (== 1) counts)
+    -- The write stalls for less than the write deadline. The credential is
+    -- revoked during the stall, and ingestion then publishes a change that the
+    -- stream would otherwise send.
+    revocationVariant _ store proof association start readers = do
+      writes <- newTVarIO 0
+      withAsync (stream readers store proof start 3000000 writes) $ \open -> do
+        reached [writes] >>= check "the stream to revoke stalls in its first write" . (== Just ())
+        mutate store (execute "UPDATE credentials SET revoked=1 WHERE id='credential_1'" [])
+        (ingested, _) <- timedIngestAt store association 0 ingestionStart
+        check "ingestion completes during the stalled write" (ingested == Right True)
+        outcome <- timeout 12000000 (wait open)
+        check "a revocation during a stalled write ends the stream with the declared refusal"
+          (outcome == Just (Left (CommandRefusal Command.Unauthenticated)))
+        atomically (readTVar writes) >>= check "a revocation during a stalled write prevents any later block" . (== 1)
+
 ordinaryStreamChecks :: FilePath -> IO ()
 ordinaryStreamChecks work = do
   (config,_) <- fixture work
@@ -593,10 +668,15 @@ ordinaryStreamChecks work = do
       idle stream
       publish "stream_after_store"
       deliveredAtLeast 3 >>= check "a stream whose next batch meets a short Store holder waits and continues" . (== Just ())
+      -- The next batch waits for the guard in its reader admission, which
+      -- keeps configuration contention as Store contention.
       withHeldConfiguration store $ \_ -> do
         ended <- timeout 12000000 (wait stream)
-        check "a stream whose next batch meets a configuration holder past the allowance ends with storage-unavailable"
-          (fmap (either (Left . classifyFault) Right) ended == Just (Left (CommandRefusal Command.StorageUnavailable)))
+        let outcome = fmap (either (Left . classifyFault) Right) ended
+        check "a stream whose next batch meets a configuration holder past the allowance ends with its reader-admission refusal"
+          (outcome == Just (Left (StoreRefusal StoreBusy)))
+        check "that refusal keeps the public storage-unavailable problem"
+          (fmap (either faultProblem (const (200, ""))) outcome == Just (503, "storage-unavailable"))
 
 -- | Run independent refusals at the same time, so their five-second waits
 -- overlap, and then check each outcome in order. Each refusal still waits its

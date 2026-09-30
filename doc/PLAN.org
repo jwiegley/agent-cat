@@ -3359,6 +3359,43 @@ Non-blocking review findings from subtask B6 part 2 of acat-response-ingestion-b
 ]
 #+end_src
 
+* TODO [#C] Resolve B7 event-stream review findings
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-b7-stream-review-findings-n6v5
+:LABELS:   []
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-30 Wed 02:23]
+:MODIFIED: [2026-09-30 Wed 02:23]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking review findings from subtask B7 part 3 of acat-response-ingestion-budget-zaoi (fess report resume-20260923/fess/b1-B7-r1.md).
+
+1. (medium) No test checks the pre-write revalidateAuthorizedView call in Events.withStream (Events.hs:165, ArtifactCheck.hs:625-634). Deleting it leaves every test green, because the revocation variant refuses at the next batch authorization. Add a seam between releaseResponseLoans and the write (a test hook, or a variant whose revocation lands after the batch read and before the write) and assert that the stream refuses with zero writes after the revocation.
+2. (low) The block or heartbeat write and the idle wait still run inside the configurationIO scope of tryConfigurationLoan (Configuration.hs:207-212,295, Fault.hs:38, Events.hs:151-170). The lock is released, but an IOException from send, such as a broken socket, becomes InvalidConfiguration and is recorded as an authorization catalogue-context configuration fault and refused as storage-unavailable. This behavior existed before B7. Return the batch from the withAuthorizedCatalogues callback and run the revalidation, write and wait outside it with a live watch, or classify transport exceptions before configurationIO catches them.
+3. (low) manager/STORAGE.md:229 and the comment at Events.hs:126 say that each write completes within five seconds. The code limits each write to five seconds, and a longer write ends the stream through ResponseWriteTimeout. Reword to state the limit and the timeout cause.
+4. (low, informational) A stream batch that meets a configuration holder past the allowance now ends at reader admission as StoreRefusal StoreBusy (record 'store reader-admission class=internal ConfigurationBusy') instead of CommandRefusal StorageUnavailable. The public 503 storage-unavailable is unchanged (ArtifactCheck.hs:671-679). Record the class change in the handoff or fault-classification notes if they list stream refusal classes.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-b7-stream-review-findings-n6v5",
+    "depends_on_id": "acat-response-ingestion-budget-zaoi",
+    "type": "discovered-from",
+    "created_at": "2026-09-30T09:23:18.540358Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
 * TODO [#E] Qualify A5S1D reachability record section 1 poll bullets    :documentation:
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -9292,15 +9329,17 @@ grind-tests opening with an unpinned question.
 ]
 #+end_src
 
-* TODO [#B] Resolve protected-response ingestion contention
+* DONE [#B] Resolve protected-response ingestion contention
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-response-ingestion-budget-zaoi
 :LABELS:   []
 :ISSUE_TYPE: bug
 :CREATED:  [2026-09-23 Wed 16:24]
-:MODIFIED: [2026-09-30 Wed 02:08]
+:MODIFIED: [2026-09-30 Wed 02:23]
 :CREATED_BY: johnw
+:FINISHED: [2026-09-30 Wed 02:23]
+:CLOSE_REASON: Parts 1 to 3 (B5, B6, B7) reproduce and correct the protected-response and ingestion contention; evidence resume-20260923/B/B5, B6, B7
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
@@ -9355,6 +9394,13 @@ Service-liveness and halt fess reviews identify a source-proved ceiling: protect
     "author": "johnw",
     "text": "B6 (part 2): pages, receipts and artifact downloads now follow the B5 ownership rule. Pages and receipts already sent through Transport.respondBytes after 45e95147 and hold only their page-set reservation or authorization watch across writes. The artifact response slot (an MVar a second download waited on) is replaced by a non-waiting download quota of one per Store (TVar Bool): a second concurrent download refuses at once with 429 storage-quota, and ingestion is not blocked during a held download. Checks at N8 on the final source: Werror build of manager-artifact-check, agentic-run and routing-fixed-point-probe; manager-artifact-check response-ingestion (all six variants, including new page and download variants), main form (changed assertion), response-order, ordinary-admission and fault-classification; the Phase A journey at N8; make -C doc check. Evidence: resume-20260923/B/B6/impl-r1. The issue stays open: server-sent event streams still hold one reader charge for their lifetime. Review findings are filed as acat-b6-response-review-findings-gxmf.",
     "created_at": "2026-09-30T09:08:09Z"
+  },
+  {
+    "id": 380,
+    "issue_id": "acat-response-ingestion-budget-zaoi",
+    "author": "johnw",
+    "text": "B7 (part 3): server-sent event streams now follow the B5 ownership rule. Events.withStream holds no Store loan between batch reads. Each batch takes one reader charge and the configuration loan in lock order within the allowance (withAuthorizedCatalogues), reads and encodes the batch, and returns both with releaseResponseLoans. The stream revalidates its view immediately before each block and heartbeat, and each write runs under the unchanged 5-second timeout with no configuration guard, reader charge, file slot or SQL transaction held. An idle stream waits on the watch of its last batch with no loan. The 15-second heartbeat, cursor rules, revocation closing and the per-client quota of two are unchanged. Checks at N8 on the final source: Werror build of manager-artifact-check, agentic-run and routing-fixed-point-probe; manager-artifact-check stream-ingestion (new; fails before the fix, b7-stream-ingestion-before exit 1, passes after), events and ordinary-stream; service_http.py base mode; the Phase A journey; make -C doc check. Evidence: resume-20260923/B/B7/impl-r1. With parts 1 to 3, plain byte responses, pages, receipts, downloads and event streams all release Store loans before network writes, and the held-response and ingestion contention is reproduced and corrected with no change to waits, budgets or allowances. This issue is closed. Review findings are filed as acat-b7-stream-review-findings-n6v5.",
+    "created_at": "2026-09-30T09:23:18Z"
   }
 ]
 #+end_src

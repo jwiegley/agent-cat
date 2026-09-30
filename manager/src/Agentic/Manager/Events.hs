@@ -106,8 +106,9 @@ readBatch store proof supplied view profiles = do
     revalidateAuthorizedView view >>= either throwIO pure
     pure result
 
--- | Active per-client subscriptions of one application lifetime. Global reader
--- capacity remains charged by the original Store watch for the whole stream.
+-- | Active per-client subscriptions of one application lifetime. This count
+-- is separate from the Store reader capacity. A stream holds no reader charge
+-- between its batch reads.
 newtype StreamReaders = StreamReaders (TVar (Map.Map Text Int))
 
 newStreamReaders :: IO StreamReaders
@@ -116,8 +117,15 @@ newStreamReaders = StreamReaders <$> newTVarIO Map.empty
 type StreamPump = (AuthorizedView -> Value -> IO ()) -> (AuthorizedView -> IO ()) -> IO ()
 
 -- | Validate before response entry, then lend one single-use pump to the actual
--- response callback. Writers finish within each batch's configuration/view loan.
--- Waiting never retains configuration, SQL, or a worker pipe.
+-- response callback. Each batch read acquires one reader charge and the
+-- configuration guard, in the lock order configuration, then database, each
+-- within its five-second allowance. It reads and encodes the batch and returns
+-- both loans with 'releaseResponseLoans'. The view is then revalidated
+-- immediately before the block or heartbeat write, and the write holds no
+-- configuration guard, reader charge, file slot or SQL transaction. Each write
+-- completes within five seconds. A stream that has nothing more to read waits
+-- on the watch of its last batch view, which is an authorization token only,
+-- so waiting holds no Store loan and no worker pipe.
 withStream :: StreamReaders -> CoordinationStore -> CredentialProof -> Text
   -> (StreamPump -> IO a) -> IO a
 withStream (StreamReaders readers) store proof supplied action = do
@@ -128,8 +136,8 @@ withStream (StreamReaders readers) store proof supplied action = do
         when (count >= 2) (throwSTM StorageQuota)
         writeTVar readers (Map.insert client (count + 1) counts)
       release = atomically $ modifyTVar' readers (Map.update (\count -> if count == 1 then Nothing else Just (count - 1)) client)
-  bracket_ acquire release $ withStoreAuthorizationWatch store $ \watch -> do
-    initial <- withBorrowedAuthorizedCatalogues watch proof [Observe] $ \view _ profiles _ -> do
+  bracket_ acquire release $ do
+    initial <- withAuthorizedCatalogues store proof [Observe] $ \view _ profiles _ -> do
       void (readBatch store proof supplied view (map fst profiles))
       authorizedViewRevision view
     used <- newTVarIO False
@@ -138,10 +146,10 @@ withStream (StreamReaders readers) store proof supplied action = do
         started <- readTVar used
         when started (throwSTM StateConflict)
         writeTVar used True
-      loop watch initial supplied Nothing send heartbeat
+      loop initial supplied Nothing send heartbeat
   where
-    loop watch initial cursor lastWrite send heartbeat = do
-      (next, more, written) <- withBorrowedAuthorizedCatalogues watch proof [Observe] $ \view _ profiles _ -> do
+    loop initial cursor lastWrite send heartbeat = do
+      (next, written) <- withAuthorizedCatalogues store proof [Observe] $ \view _ profiles _ -> do
         current <- authorizedViewRevision view
         unless (current == initial) (throwIO ViewExpired)
         batch <- readBatch store proof cursor view (map fst profiles)
@@ -150,18 +158,16 @@ withStream (StreamReaders readers) store proof supplied action = do
             Just (Bool more) <- KM.lookup "hasMore" fields, Just (Array events) <- KM.lookup "events" fields ->
               pure (next,more,not (null events))
           _ -> throwIO StoreIntegrity
+        releaseResponseLoans view
         now <- getMonotonicTimeNSec
         let due = maybe True (\previous -> now - previous >= 15000000000) lastWrite
         when (populated || due) $ do
           revalidateAuthorizedView view >>= either throwIO pure
           result <- timeout 5000000 (if populated then send view batch else heartbeat view)
           maybe (refuseStorageUnavailable "events write" (InternalFault ResponseWriteTimeout)) pure result
-        pure (next,more,if populated || due then Just now else lastWrite)
-      unless more $ do
-        alive <- withAuthorizationReadObservation watch (pure ())
-        unless (alive == Just ()) (throwIO StoreClosed)
-        awaitAuthorizationChange watch
-      loop watch initial next written send heartbeat
+        unless more (awaitAuthorizationWakeup view)
+        pure (next,if populated || due then Just now else lastWrite)
+      loop initial next written send heartbeat
 
 refuse :: EventReadFailure -> IO a
 refuse failure = throwIO $ case failure of

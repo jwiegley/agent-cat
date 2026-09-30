@@ -9,7 +9,7 @@ module Agentic.Manager.Store
   ( CoordinationStore, StoreIdentity (..), StoreFailure (..), Checkpoint (..),
     withCoordinationStore, withServingStore, withServingStoreWith, storeManagerFlow, storeIdentity, checkpointStore, withStoreConfiguration, withStoreCatalogues, withStoreRetentionRoot, withStoreRetentionRootLoan, withStoreArtifactResponse, validateStoreHistoryBindings, revalidateStoreRetentionRoot, storeInvocations, withStoreFiles, withStoreFileLoan, withStoreReader, withStoreAdmission, withStoreWorker, StoreWorker, createStoreWorkerGroup, storeWorkerCleanupConfirmed, requestStoreWorkersStop, awaitStoreWorkersStop, retryStoreCleanup, probeStoreCapabilities,
     withStoreAdministration, tryWithStoreCatalogues, tryWithStoreFiles,
-    AuthorizationWatch, withStoreAuthorizationWatch, withStoreConfigurationWatch, withStoreCataloguesWatch, withStoreCatalogueContextWatch, withStoreCataloguesBorrowed, authorizationWatchCurrent, withAuthorizationObservation, withAuthorizationReadObservation, awaitAuthorizationChange,
+    AuthorizationWatch, withStoreAuthorizationWatch, withStoreConfigurationWatch, withStoreCataloguesWatch, withStoreCatalogueContextWatch, authorizationWatchCurrent, withAuthorizationObservation, withAuthorizationReadObservation, awaitAuthorizationChange,
     CommitDeadline, withCommitDeadline, withPreparedCommitDeadline, enforceCommitDeadline, enforceAdmissionFence, managerFlowRoom, appendCommandRecord, appendReviewRecord, noticeAfterCommit, PostCommit, noPostCommit, takePostCommit, appendPostCommit, Transaction, execute, query, refuseTransaction, runTransaction, runRead, StoreAdmission (..), runTransactionWithAdmission, runReadWithAdmission, transactionGeneration,
     Invalidation (..), EventReadFailure (..), RetainedEvents (..), readRetainedEvents, readRetainedEventsWith, retainEvents, backupCoordinationStore, restoreCoordinationStore, reservationOccupancy
   ) where
@@ -925,18 +925,6 @@ withStoreCatalogueContextWatch store@(CoordinationStore installed _ _ _ _ _ _ _ 
   withStoreReaderLoan store $ \reader ->
     withConfigurationLoan installed $ \configuration limits profiles catalogues invocations ->
       withAuthorizationWatch store $ \watch -> action (configuration >> reader) watch limits profiles catalogues invocations
-
--- | Reborrow configuration under the original watch's already charged reader.
--- The caller retains that original scope throughout the call. The child watch
--- expires before configuration is released, including between stream batches.
-withStoreCataloguesBorrowed :: AuthorizationWatch
-  -> (CoordinationStore -> AuthorizationWatch -> ConfigurationLimits -> [PublicProfile] -> [(Text, Discovery)] -> IO a)
-  -> IO (Either Diagnostic a)
-withStoreCataloguesBorrowed original@(AuthorizationWatch store _ _ _) action = do
-  alive <- withAuthorizationReadObservation original (pure ())
-  unless (alive == Just ()) (throwIO StoreClosed)
-  withStoreCatalogues store $ \limits profiles catalogues ->
-    withAuthorizationWatch store $ \watch -> action store watch limits profiles catalogues
 
 withAuthorizationWatch :: CoordinationStore -> (AuthorizationWatch -> IO a) -> IO a
 withAuthorizationWatch store@(CoordinationStore _ _ _ _ _ _ _ _ (_,_,cell,_) _ _ _ _ _) action =
