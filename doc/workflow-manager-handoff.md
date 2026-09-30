@@ -463,8 +463,6 @@ The verbatim decisions are in `GOAL.md` of the resume directory.
 
 - `acat-response-ingestion-budget-zaoi`, P1, protected-response ingestion
   contention.
-- `acat-tls-name-forms-6gbo`, P1, residual unsupported Name Constraints
-  validation in the TLS stack.
 - `acat-dxos` and `acat-nwrj`, P1, stay open for the Integrator to decide
   whether bounded-wait admission resolves them.
 - Review finding, medium, not filed: a failed result retrieval stays failed

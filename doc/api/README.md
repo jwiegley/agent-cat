@@ -380,6 +380,40 @@ reference, not a credential supplied by the model or inferred from history.
 Exactly one local or service mode is active. Mode or endpoint changes advance
 the client's fetch generation and do not transfer live worker ownership.
 
+The Haskell client trusts only the certificates in the `caFile` of its
+profile. It does not read a platform certificate store. It accepts only TLS
+1.3. It runs the default certificate validation of crypton-x509-validation
+1.9.1, including hostname validation against the endpoint host, and then an
+extra Name Constraints check. The extra check only adds refusals. It examines
+each certificate that the server presents and each certificate in the
+`caFile`. The handshake fails, before any HTTP request, when a
+`nameConstraints` extension of one of these certificates meets one of these
+conditions:
+
+- The extension cannot be decoded.
+- A subtree is not a `dNSName`, for example an `iPAddress`, `rfc822Name`,
+  `uniformResourceIdentifier` or `directoryName` subtree, or a subtree has a
+  minimum or maximum distance. The validator does not evaluate these forms
+  correctly, so the client refuses them even when the chain is otherwise valid.
+- An excluded `dNSName` subtree contains a `dNSName` of the leaf
+  `subjectAltName` or the endpoint host name.
+- The certificate has permitted subtrees, and a `dNSName` of the leaf
+  `subjectAltName`, or the endpoint host name, is outside all of them.
+
+Before it compares two names, the extra check converts ASCII letters to lower
+case and removes one trailing dot. A subtree that starts with a dot contains
+only names below it. Each certificate is checked on its own, so a subordinate
+CA cannot widen the subtrees of its issuer. A host that is a dotted-quad IPv4
+literal is not compared with `dNSName` subtrees. The client also refuses a
+chain whose leaf `subjectAltName` cannot be decoded when any of these
+certificates has Name Constraints.
+
+The default validation itself refuses some forms that other validators accept.
+A permitted `dNSName` subtree must equal the leaf name, or equal the part of
+the leaf name after a dot, in the same letter case and with the same trailing
+dot. A permitted subtree that starts with a dot therefore matches no name. A
+CA without Name Constraints below a CA that has them is refused.
+
 ## Verification
 
 Run the contract gate in the configured Nix environment:

@@ -755,6 +755,44 @@ npm run test:integration imports the removed pi-coding-agent/client RemoteSessio
 ]
 #+end_src
 
+* TODO [#C] Resolve B10 fess findings in the TLS Name Constraints check
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-3iof
+:LABELS:   []
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-30 Wed 03:32]
+:MODIFIED: [2026-09-30 Wed 03:32]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking review findings from subtask B10 of acat-tls-name-forms-6gbo (fess report resume-20260923/fess/b1-B10-r1.md).
+
+1. Medium. manager/src/Agentic/Manager/Client.hs near lines 145, 147 and 161: several documented refusal branches have no scenario. These are an undecodable nameConstraints extension, a subtree with a minimum or maximum distance, rfc822Name, URI and directoryName subtrees, an undecodable leaf SAN, and a Name-Constrained caFile anchor that is not on the path. Add client_native.py scenarios for at least one rfc822Name or directoryName subtree and one undecodable or distance-bearing nameConstraints, each expected to fail with transport and send no request.
+2. Low. manager/test/client_native.py lines 57-60: the comment says openssl accepts a permitted dNSName that differs from the leaf in a trailing dot. openssl refuses it, and the table marks it so. Remove "or a trailing dot" from that sentence.
+3. Low. The fail-first run stopped at ip-excluded. Optionally run each new scenario against the unchanged client to record that each fails open.
+4. Low. client_native.py lines 74-75: name-excluded-leading-dot connects to localhost with DNS:localhost in the leaf SANs, not through an example.invalid name. State this interpretation in the scenario comment.
+5. Low, informational. The client refuses by exception rather than a FailedReason, so the reason is lost inside the transport category. It checks an IPv6 host as a DNS name. A Name-Constrained certificate anywhere in the caFile refuses every connection. Returning InvalidName needs crypton-x509-validation as a direct build-depends, which needs operator authorization.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-3iof",
+    "depends_on_id": "acat-tls-name-forms-6gbo",
+    "type": "discovered-from",
+    "created_at": "2026-09-30T10:32:45.572762Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
 * TODO [#E] Record that K41 covers the K40 site, which fails by timeout    :documentation:
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -10043,15 +10081,17 @@ Operator authorizes the targeted pinned-dependency update. Fixed Name Constraint
 ]
 #+end_src
 
-* TODO [#B] Correct residual unsupported Name Constraints validation
+* DONE [#B] Correct residual unsupported Name Constraints validation
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-tls-name-forms-6gbo
 :LABELS:   []
 :ISSUE_TYPE: bug
 :CREATED:  [2026-09-23 Wed 12:05]
-:MODIFIED: [2026-09-23 Wed 12:05]
+:MODIFIED: [2026-09-30 Wed 03:32]
 :CREATED_BY: johnw
+:FINISHED: [2026-09-30 Wed 03:32]
+:CLOSE_REASON: Client refuses unsupported or wrongly evaluated Name Constraints forms; evidence resume-20260923/B/B10/impl-r1, all checks exit 0.
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
@@ -10071,6 +10111,20 @@ The targeted1.9.1 upgrade fixes the exercised DNS permitted/excluded cases, but 
     "created_by": "johnw",
     "metadata": "{}",
     "thread_id": ""
+  }
+]
+#+end_src
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 383,
+    "issue_id": "acat-tls-name-forms-6gbo",
+    "author": "johnw",
+    "text": "B10 resolves this without a dependency patch. Client.hs connectClientProfile adds a clientHooks onServerCertificate that runs validateDefault first and then refuses a chain when any presented certificate or configured caFile certificate carries a nameConstraints extension with an iPAddress, rfc822Name, URI, directoryName or other form the library does not evaluate, a base with minimum or maximum distance, an undecodable extension, or an excluded dNSName that after normalization (ASCII lowercase, trailing dot removed, leading dot as subdomain) excludes a leaf dNSName SAN or the connect host. client_native.py adds ten scenarios (ip-excluded, ip-permitted-other, ip-permitted, name-case, name-label-boundary, name-trailing-dot, name-inherited, name-excluded-case, name-excluded-trailing-dot, name-excluded-leading-dot); none is accepted where openssl verify refuses. Evidence resume-20260923/B/B10/impl-r1: build, client_native at N8 (28 PASS), Phase A journey at N8, make -C doc check, all exit 0; prefix-client shows the unchanged client accepting ip-excluded. Trust arrangement documented in doc/api/README.md and doc/agent-cat.texi. No dependency, version, patch or Nix change. Fess b1-B10-r1: not blocking.",
+    "created_at": "2026-09-30T10:32:31Z"
   }
 ]
 #+end_src

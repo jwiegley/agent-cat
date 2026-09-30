@@ -38,43 +38,74 @@ def openssl(*arguments):
 
 ca, ca_key = work / "ca.pem", work / "ca.key"
 openssl("req", "-x509", "-newkey", "rsa:2048", "-nodes", "-sha256", "-days", "1",
-        "-subj", "/CN=Fixture Root", "-addext", "basicConstraints=critical,CA:TRUE,pathlen:1",
+        "-subj", "/CN=Fixture Root", "-addext", "basicConstraints=critical,CA:TRUE,pathlen:2",
         "-addext", "keyUsage=critical,keyCertSign,cRLSign", "-keyout", ca_key, "-out", ca)
 
 
-def constrained_certificate(name, constraint):
-    issuer, leaf = work / (name + "-issuer.pem"), work / (name + "-leaf.pem")
-    issuer_key, leaf_key = work / (name + "-issuer.key"), work / (name + "-leaf.key")
-    for cert_path, key_path, common_name, signer, signing_key, serial, extensions in [
-        (issuer, issuer_key, name, ca, ca_key, "2",
-         "basicConstraints=critical,CA:TRUE,pathlen:0\nkeyUsage=critical,keyCertSign,cRLSign\n"
-         + "nameConstraints=critical," + constraint + "\n"),
-        (leaf, leaf_key, "localhost", issuer, issuer_key, "3",
-         "basicConstraints=critical,CA:FALSE\nkeyUsage=critical,digitalSignature,keyEncipherment\n"
-         "extendedKeyUsage=serverAuth\nsubjectAltName=DNS:localhost\n"),
-    ]:
-        csr, ext = cert_path.with_suffix(".csr"), cert_path.with_suffix(".ext")
-        ext.write_text(extensions)
-        openssl("req", "-new", "-newkey", "rsa:2048", "-nodes", "-sha256",
-                "-subj", "/CN=" + common_name, "-keyout", key_path, "-out", csr)
-        openssl("x509", "-req", "-in", csr, "-CA", signer, "-CAkey", signing_key,
-                "-set_serial", serial, "-days", "1", "-sha256", "-extfile", ext, "-out", cert_path)
-    checked = subprocess.run(["openssl", "verify", "-purpose", "sslserver", "-verify_hostname", "localhost",
-                              "-CAfile", str(ca), "-untrusted", str(issuer), str(leaf)],
+def issue(cert_path, key_path, common_name, signer, signing_key, serial, extensions):
+    csr, ext = cert_path.with_suffix(".csr"), cert_path.with_suffix(".ext")
+    ext.write_text(extensions)
+    openssl("req", "-new", "-newkey", "rsa:2048", "-nodes", "-sha256",
+            "-subj", "/CN=" + common_name, "-keyout", key_path, "-out", csr)
+    openssl("x509", "-req", "-in", csr, "-CA", signer, "-CAkey", signing_key,
+            "-set_serial", serial, "-days", "1", "-sha256", "-extfile", ext, "-out", cert_path)
+
+
+# Each scenario lists its intermediate constraints from the root down (None is
+# an intermediate without nameConstraints), the leaf SAN, the connect host, and
+# the independent openssl verdict. The client must refuse every chain that
+# openssl refuses. It also refuses the chains that openssl accepts but that use
+# a documented unsupported form: an iPAddress subtree, a permitted dNSName that
+# differs from the leaf name in letter case or a trailing dot, and an excluded
+# dNSName with a trailing dot, which the client normalizes before it compares.
+CONSTRAINED = {
+    "name-permitted": (["permitted;DNS:localhost"], "DNS:localhost", "localhost", True),
+    "name-excluded": (["excluded;DNS:localhost"], "DNS:localhost", "localhost", False),
+    "name-outside": (["permitted;DNS:example.invalid"], "DNS:localhost", "localhost", False),
+    "ip-excluded": (["excluded;IP:127.0.0.1/255.255.255.255"], "IP:127.0.0.1", "127.0.0.1", False),
+    "ip-permitted-other": (["permitted;IP:10.0.0.0/255.0.0.0"], "IP:127.0.0.1", "127.0.0.1", False),
+    "ip-permitted": (["permitted;IP:127.0.0.0/255.0.0.0"], "IP:127.0.0.1", "127.0.0.1", True),
+    "name-case": (["permitted;DNS:LOCALHOST"], "DNS:localhost", "localhost", True),
+    "name-label-boundary": (["permitted;DNS:calhost"], "DNS:localhost", "localhost", False),
+    "name-trailing-dot": (["permitted;DNS:localhost."], "DNS:localhost", "localhost", False),
+    "name-inherited": (["permitted;DNS:example.invalid", None], "DNS:localhost", "localhost", False),
+    "name-excluded-case": (["excluded;DNS:LOCALHOST"], "DNS:localhost", "localhost", False),
+    "name-excluded-trailing-dot": (["excluded;DNS:localhost."], "DNS:localhost", "localhost", True),
+    "name-excluded-leading-dot": (["excluded;DNS:.example.invalid"],
+                                  "DNS:localhost,DNS:www.example.invalid", "localhost", False),
+}
+
+
+def constrained_certificate(name, constraints, san, host, accepted):
+    signer, signing_key, intermediates = ca, ca_key, []
+    for depth, constraint in enumerate(constraints):
+        issuer, issuer_key = work / f"{name}-issuer{depth}.pem", work / f"{name}-issuer{depth}.key"
+        issue(issuer, issuer_key, f"{name} issuer {depth}", signer, signing_key, str(2 + depth),
+              f"basicConstraints=critical,CA:TRUE,pathlen:{len(constraints) - depth - 1}\n"
+              "keyUsage=critical,keyCertSign,cRLSign\n"
+              + ("" if constraint is None else "nameConstraints=critical," + constraint + "\n"))
+        signer, signing_key = issuer, issuer_key
+        intermediates.insert(0, issuer)
+    leaf, leaf_key = work / (name + "-leaf.pem"), work / (name + "-leaf.key")
+    issue(leaf, leaf_key, "localhost", signer, signing_key, "9",
+          "basicConstraints=critical,CA:FALSE\nkeyUsage=critical,digitalSignature,keyEncipherment\n"
+          "extendedKeyUsage=serverAuth\nsubjectAltName=" + san + "\n")
+    untrusted_bundle = work / (name + "-untrusted.pem")
+    untrusted_bundle.write_bytes(b"".join(path.read_bytes() for path in intermediates))
+    target = ["-verify_ip", host] if host[0].isdigit() else ["-verify_hostname", host]
+    checked = subprocess.run(["openssl", "verify", "-purpose", "sslserver", *target,
+                              "-CAfile", str(ca), "-untrusted", str(untrusted_bundle), str(leaf)],
                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30)
-    assert checked.returncode == (0 if name == "name-permitted" else 2), checked.stderr
-    if name != "name-permitted":
-        assert b"subtree violation" in checked.stderr, checked.stderr
+    (work / (name + "-openssl.log")).write_bytes(checked.stdout + checked.stderr)
+    assert checked.returncode == (0 if accepted else 2), (name, checked.stderr)
+    if not accepted:
+        assert b"subtree violation" in checked.stderr, (name, checked.stderr)
     chain = work / (name + "-chain.pem")
-    chain.write_bytes(leaf.read_bytes() + issuer.read_bytes())
+    chain.write_bytes(leaf.read_bytes() + untrusted_bundle.read_bytes())
     return chain, leaf_key
 
 
-constrained = {name: constrained_certificate(name, constraint) for name, constraint in [
-    ("name-permitted", "permitted;DNS:localhost"),
-    ("name-excluded", "excluded;DNS:localhost"),
-    ("name-outside", "permitted;DNS:example.invalid"),
-]}
+constrained = {name: constrained_certificate(name, *spec) for name, spec in CONSTRAINED.items()}
 cert, key = certificate("trusted")
 untrusted, _ = certificate("other")
 ip_san, ip_san_key = certificate("ip-san", "localhost")
@@ -85,7 +116,7 @@ san_certificates = {
 }
 for scenario, mode, expected in [
     ("name-permitted", "pages", None),
-    ("name-excluded", "failure", "transport"), ("name-outside", "failure", "transport"),
+    *((name, "failure", "transport") for name in CONSTRAINED if name != "name-permitted"),
     ("ip-san", "pages", None), ("pages", "pages", None), ("bad-pages", "bad-pages", None),
     ("nonce", "nonce", None), ("lost", "lost", None),
     ("changed", "changed", None), ("cancel", "cancel", None),
@@ -191,7 +222,7 @@ for scenario, mode, expected in [
     server_cert, server_key = constrained.get(scenario, san_certificates.get(scenario, (cert, key)))
     tls.load_cert_chain(server_cert, server_key)
     server.socket = tls.wrap_socket(server.socket, server_side=True)
-    host = "localhost" if scenario == "wrong-host" or scenario in constrained else "127.0.0.1"
+    host = CONSTRAINED[scenario][2] if scenario in CONSTRAINED else "localhost" if scenario == "wrong-host" else "127.0.0.1"
     profile = root / "profile.json"
     trust = ca if scenario in constrained else untrusted if scenario == "wrong-ca" else server_cert
     settings = {"version": 1, "endpoint": f"https://{host}:{server.server_port}/v1",
@@ -229,7 +260,7 @@ for scenario, mode, expected in [
         if scenario == "redirect":
             assert requests == [("GET", "/v1/capabilities")], "redirect was followed"
         if scenario in ("bad-profile", "writable-profile", "wrong-ca", "wrong-host",
-                        "wrong-ip", "dns-ip", "name-excluded", "name-outside"):
+                        "wrong-ip", "dns-ip") or (scenario in CONSTRAINED and scenario != "name-permitted"):
             assert not requests, "invalid profile or TLS crossed request boundary"
         print("PASS public client", scenario, flush=True)
     finally:

@@ -27,7 +27,9 @@ import qualified Data.Aeson.Key as Key
 import qualified Data.Aeson.KeyMap as KM
 import Data.Aeson.Types (Parser, parseEither)
 import Data.Bits ((.&.))
-import Data.List (nub, sort)
+import Data.Char (isAsciiUpper, isDigit, toLower)
+import Data.List (isPrefixOf, isSuffixOf, nub, sort)
+import Data.Maybe (fromMaybe, mapMaybe)
 import qualified Data.ByteArray as BA
 import Data.ByteArray.Encoding (Base (Base16, Base64URLUnpadded), convertToBase)
 import qualified Data.ByteString as BS
@@ -39,7 +41,9 @@ import Data.Time.Format.ISO8601 (iso8601ParseM)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
-import Data.X509 (SignedCertificate)
+import Data.X509 (AltName (AltNameDNS), CertificateChain (CertificateChain), ExtNameConstraints (ExtNameConstraints),
+  ExtSubjectAltName (ExtSubjectAltName), Extensions (Extensions), GeneralSubtree (GeneralSubtree), SignedCertificate,
+  certExtensions, extensionDecode, extensionGetE, getCertificate)
 import Data.X509.Memory (readSignedObjectFromMemory)
 import Data.X509.CertificateStore (makeCertificateStore)
 import Network.Connection (TLSSettings (TLSSettings))
@@ -88,7 +92,8 @@ instance Exception ClientFailure
 -- | The composition root supplies verified TLS settings and a private byte reader.
 -- Environment proxies, cookies, redirects and implicit transport retries are disabled.
 -- | An explicit operator-supplied client profile, with no implicit registry or
--- manager-store access. Normal certificate and hostname validation remain enabled.
+-- manager-store access. Normal certificate and hostname validation remain enabled,
+-- and nameConstraintsRefused adds the Name Constraints refusals that it lacks.
 connectClientProfile :: FilePath -> IO (Either ClientFailure Client)
 connectClientProfile path = clientIO $ do
   bytes <- readClientFile True 16384 path
@@ -100,11 +105,73 @@ connectClientProfile path = clientIO $ do
   let certificates = readSignedObjectFromMemory caBytes :: [SignedCertificate]
   when (null certificates) (throwIO InvalidClientProfile)
   let defaults = TLS.defaultParamsClient (BC.unpack (HTTP.host base)) ""
+      hooks = TLS.clientHooks defaults
+      -- The default validation runs first. The extra check only adds refusals.
+      verified store cache service chain = do
+        reasons <- TLS.onServerCertificate hooks store cache service chain
+        when (null reasons && nameConstraintsRefused certificates (fst service) chain)
+          (throwIO NameConstraintsRefused)
+        pure reasons
       parameters = defaults
         { TLS.clientShared = (TLS.clientShared defaults) {TLS.sharedCAStore = makeCertificateStore certificates},
-          TLS.clientSupported = (TLS.clientSupported defaults) {TLS.supportedVersions = [TLS.TLS13]} }
+          TLS.clientSupported = (TLS.clientSupported defaults) {TLS.supportedVersions = [TLS.TLS13]},
+          TLS.clientHooks = hooks {TLS.onServerCertificate = verified} }
   connectClient (mkManagerSettings (TLSSettings parameters) Nothing) endpoint
     (readClientFile True 512 credentialPath) >>= either throwIO pure
+
+-- | A certificate refusal that the default validation does not make. tls 2.3.0
+-- turns a synchronous exception from onServerCertificate into a certificate
+-- rejection, so the handshake fails before any HTTP request.
+data NameConstraintsRefused = NameConstraintsRefused deriving Show
+instance Exception NameConstraintsRefused
+
+-- | True when a nameConstraints extension of a presented or configured
+-- certificate uses a form that crypton-x509-validation 1.9.1 evaluates
+-- wrongly. That library compares only dNSName and directoryName subtrees. It
+-- ignores every other form, treats an undecodable extension as absent, and
+-- compares dNSName subtrees case-sensitively, without a trailing-dot or
+-- leading-dot reading. This check therefore refuses every subtree that is not
+-- a plain dNSName, every extension or leaf subjectAltName that it cannot
+-- decode, and every dNSName subtree that excludes, or does not permit, a leaf
+-- dNSName or the checked host name after normalization. Each certificate is
+-- checked on its own, so a subordinate CA cannot widen its issuer's subtrees.
+-- A host that is a dotted-quad IPv4 literal is matched only against iPAddress
+-- names, which the default validation checks. Any other host is checked as a
+-- DNS name.
+nameConstraintsRefused :: [SignedCertificate] -> TLS.HostName -> CertificateChain -> Bool
+nameConstraintsRefused anchors host (CertificateChain presented) = case presented of
+  [] -> True
+  leaf : _ -> case (sequence (concatMap constraintsOf (presented ++ anchors)), leafNames (getCertificate leaf)) of
+    (Left _, _) -> True
+    (Right [], _) -> False
+    (Right _, Nothing) -> True
+    (Right constraints, Just sans) ->
+      any (refuses (map normalName (sans ++ [host | not (ipv4Literal host)]))) constraints
+  where
+    constraintsOf signed = case certExtensions (getCertificate signed) of
+      Extensions raws -> mapMaybe extensionDecode (fromMaybe [] raws) :: [Either String ExtNameConstraints]
+    leafNames certificate = case extensionGetE (certExtensions certificate) of
+      Nothing -> Just []
+      Just (Left _) -> Nothing
+      Just (Right (ExtSubjectAltName alternatives)) -> Just [name | AltNameDNS name <- alternatives]
+    refuses names (ExtNameConstraints permitted excluded) = case traverse dnsBase (permitted ++ excluded) of
+      Nothing -> True
+      Just _ -> any (\name -> any (within name) (bases excluded)) names
+        || (not (null permitted) && any (\name -> not (any (within name) (bases permitted))) names)
+    dnsBase (GeneralSubtree (AltNameDNS base) 0 Nothing) = Just base
+    dnsBase _ = Nothing
+    bases subtrees = [normalName base | GeneralSubtree (AltNameDNS base) _ _ <- subtrees]
+    within name base
+      | null base = True
+      | "." `isPrefixOf` base = base `isSuffixOf` name && length name > length base
+      | otherwise = name == base || ('.' : base) `isSuffixOf` name
+    normalName name = let lowered = map (\c -> if isAsciiUpper c then toLower c else c) name
+      in if "." `isSuffixOf` lowered then init lowered else lowered
+    ipv4Literal name = case T.splitOn "." (T.pack name) of
+      octets@[_, _, _, _] -> all octet octets
+      _ -> False
+    octet digits = not (T.null digits) && T.all isDigit digits && T.length digits <= 3
+      && (digits == "0" || T.head digits /= '0') && (T.length digits < 3 || digits <= "255")
 
 parseClientProfile :: Value -> Parser (Text, FilePath, FilePath)
 parseClientProfile = withObject "client profile" $ \fields -> do

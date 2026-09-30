@@ -3290,8 +3290,14 @@ example table.
 Select the manager backend with @option{--tui}.  The argument is an absolute
 path to a private version-1 JSON client profile identifying an HTTPS API
 endpoint, a @code{credentialFile}, and a @code{caFile}.  These files belong to
-the client.  They are not manager registry or store paths.  Certificate and
-hostname verification remain enabled.
+the client.  They are not manager registry or store paths.  The client trusts
+only the certificates in the @code{caFile}, accepts only TLS 1.3, and keeps
+certificate and hostname verification enabled.  It also refuses a certificate
+chain whose Name Constraints use a form that the pinned validator evaluates
+incorrectly, such as an @code{iPAddress} subtree or an excluded
+@code{dNSName} subtree that differs from the server name only in letter case
+or a trailing dot, or that uses the leading-dot form.  The API reference in
+@file{doc/api/README.md} lists these refusals.
 
 Service mode performs one workflow journey through a running manager.  It
 browses the manager's profiles, workflows, and help, creates one request,
