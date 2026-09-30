@@ -45,7 +45,9 @@ ordinary file operation waits for the slot within a fresh five-second
 allowance, and a slot that stays held for the whole allowance is `StoreBusy`.
 A coordinator probe does not wait. When the slot is held, it returns at once
 and proves that its callback did not enter.
-Their lock order is file slot, configuration, then database.
+Their lock order is file slot, configuration, then database. An artifact
+download also takes the separate artifact response slot before the file slot,
+as `manager/ARTIFACTS.md` describes. No other operation takes that slot.
 
 ## Database and schema
 
@@ -171,6 +173,47 @@ budget are checked after acquisition. Exhaustion refuses before the transaction
 body or BEGIN. The SQL action and its deadline monitor both use the remaining
 allowance, without resetting it. Rollback retains its separate five-second bound.
 Admitted failures are not retried, including uncertain publication.
+
+A protected response materializes its representation under the loans of its
+owner: one reader charge, the configuration guard and, for an owner that reads
+files, the file slot. `Transport.respondBytes` checks the view once under those
+loans. It then returns them with `releaseResponseLoans` before the first
+network write, the configuration guard and the reader charge first and the file
+slot after them. No configuration guard, reader charge, file slot or SQL
+transaction is held across a network write. The authorization watch of the
+view stays registered until the owner callback returns. It spans every write
+as an authorization token only.
+
+Before each 16 KiB write, `revalidateAuthorizedView` reads the bound
+authorization facts again. It acquires one reader charge, the configuration
+guard and one SQL read for that check alone, in the lock order configuration,
+then database, and returns them before the write. The cost is one brief reader
+and guard acquisition for each write. It contends with ingestion and other Store
+work only for the duration of the check. A revocation, a scope change or a
+configuration change between two writes makes the check refuse, and the
+response stops before the next write. A write that does not complete within
+five seconds is the internal `ResponseWriteTimeout` cause. Ingestion therefore
+waits for a response only during such a brief check and never during a send.
+
+Each acquisition of the check waits within its own unchanged five-second
+allowance, as for every other Store action. The allowances are not combined
+into one. The observation retries within its own allowance after a concurrent
+commit, and each attempt can wait for a reader place, for the configuration
+guard and for the Store gate, each within its own allowance. The longest wait
+before one write is therefore the sum of these allowances, not one five-second
+allowance. It occurs only when each of these waits lasts for its whole
+allowance.
+
+A check whose allowance expires refuses with its Store failure, which is
+recorded like any other Store refusal. The response then stops before its next
+write. After the status and headers are sent, the client receives a truncated
+body. The manager does not resend the response or any part of it.
+
+An artifact download holds its captured bytes across its writes under the
+artifact response slot, not under the file slot. That slot limits the Store to
+one such download of at most 64 MiB, and only another download waits for it.
+A server-sent event stream holds one reader charge for its whole lifetime and
+writes each batch within the configuration loan of that batch.
 
 Operations require the threaded RTS. Cancellation repeatedly interrupts the
 original SQLite operation until its thread joins. A single interrupt can precede
@@ -646,9 +689,10 @@ SQL ownership before the callback, and completion or an exception returns capaci
 State uses this scope for complete prefix replay and ingestion. Its profile projection
 scope acquires reader capacity before entering the current configuration guard,
 validates profile and client authority before replay, and retains both reader capacity
-and configuration through the response callback. File responses retain
-the existing single Store file slot, while SQL still has its single admission
-slot, which waits within each action's allowance. Neither reader pressure nor
+and configuration while it materializes. A response returns both, and the file
+slot of its owner, before its first network write, as "Internal transactions
+and bounds" describes. SQL still has its single admission slot, which waits
+within each action's allowance. Neither reader pressure nor
 retention consumes the separate
 original-worker stop cells or the cancellation ledger reserve.
 

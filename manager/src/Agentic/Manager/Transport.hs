@@ -5,10 +5,10 @@
 -- | A bounded authenticated HTTPS boundary around the existing coordinator.
 module Agentic.Manager.Transport
   ( AuthenticatedApplication, runHttps, authenticated, readJsonRequest,
-    respondJSON, respondBytes, problem, HttpFailure (..)
+    respondBytes, problem, HttpFailure (..)
   ) where
 
-import Agentic.Manager.Authorization (CredentialProof, authenticateCredential)
+import Agentic.Manager.Authorization (AuthorizedView, CredentialProof, authenticateCredential, releaseResponseLoans, revalidateAuthorizedView)
 import Agentic.Manager.Configuration (HttpsConfiguration (..))
 import Agentic.Manager.Fault (FaultClass, ManagerFault (ResponseWriteTimeout), classifyFault, faultProblem, recordFault)
 import Agentic.Manager.Profile (ConfigurationLimits (..))
@@ -22,7 +22,7 @@ import Control.Exception
   (Exception, SomeException, SomeAsyncException, bracket, catch,
    finally, fromException, mask, onException, throwIO)
 import Control.Monad (forM_, replicateM_, unless, void, when)
-import Data.Aeson (Value, object, (.=))
+import Data.Aeson (object, (.=))
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BC
 import qualified Data.ByteString.Builder as Builder
@@ -213,18 +213,22 @@ problem instanceURI status code = Wai.responseLBS (HTTP.mkStatus status "Request
      "status" .= status, "instance" .= instanceURI, "code" .= code,
      "links" .= object ["snapshot" .= ("/v1/snapshot" :: Text)]]))))
 
-respondJSON :: HTTP.Status -> HTTP.ResponseHeaders -> Value
+-- | Send a materialized protected representation. The first check reads
+-- under the materialization loans of the view. The view then returns those
+-- loans, so no configuration guard, reader charge or joined file slot is held
+-- across a network write, and no SQL transaction spans one. The view's watch
+-- stays alive as an authorization token, and a check that acquires only what
+-- it needs, for its own duration, precedes each 16 KiB write. A refused check
+-- stops the response before that write. After the status and headers are
+-- sent, such a refusal also includes an expired allowance of the check under
+-- ordinary Store contention, with its recorded cause. The client then receives
+-- a truncated body, and nothing is resent. Each write completes within five
+-- seconds.
+respondBytes :: HTTP.Status -> HTTP.ResponseHeaders -> AuthorizedView -> BS.ByteString
   -> (Wai.Response -> IO Wai.ResponseReceived) -> IO Wai.ResponseReceived
-respondJSON status headers value respond = do
-  let bytes = encoded value
-  when (BS.length bytes > 1048576) (throwIO ViewTooLarge)
-  respondBytes status (("Content-Type","application/json"):headers) (pure ()) bytes respond
-
--- | Complete each bounded socket write while the caller retains response authority.
-respondBytes :: HTTP.Status -> HTTP.ResponseHeaders -> IO () -> BS.ByteString
-  -> (Wai.Response -> IO Wai.ResponseReceived) -> IO Wai.ResponseReceived
-respondBytes status headers authorize bytes respond = do
+respondBytes status headers view bytes respond = do
   authorize
+  releaseResponseLoans view
   respond $ Wai.responseStream status headers $ \write flush -> do
     let send chunk = do
           authorize
@@ -233,3 +237,5 @@ respondBytes status headers authorize bytes respond = do
         chunks value | BS.null value = pure ()
                      | otherwise = let (chunk,rest) = BS.splitAt 16384 value in send chunk >> chunks rest
     chunks bytes
+  where
+    authorize = revalidateAuthorizedView view >>= either throwIO pure

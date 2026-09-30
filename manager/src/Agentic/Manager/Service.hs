@@ -11,7 +11,7 @@ module Agentic.Manager.Service
 import qualified Agentic.Manager.Admission as A
 import qualified Agentic.Manager.Approval as Approval
 import qualified Agentic.Manager.Artifacts as Artifacts
-import Agentic.Manager.Authorization (CredentialProof, AuthorizedView, withAuthorizedCatalogueContext)
+import Agentic.Manager.Authorization (CredentialProof, AuthorizedView, attachResponseLoan, withAuthorizedCatalogueContext)
 import Agentic.Manager.Fault (FaultClass (CommandRefusal), classifyFault, recordFault)
 import qualified Agentic.Manager.History as History
 import qualified Agentic.Manager.Overview as Overview
@@ -22,7 +22,7 @@ import Agentic.Manager.Protocol.Command
 import qualified Agentic.Manager.Protocol.Preparation as P
 import qualified Agentic.Manager.State as State
 import qualified Agentic.Manager.Observation as Observation
-import Agentic.Manager.Store (CoordinationStore, StoreFailure (..), withStoreFiles)
+import Agentic.Manager.Store (CoordinationStore, StoreFailure (..), withStoreFileLoan)
 import Agentic.Manager.Worker (WorkerObservation (..))
 import Agentic.Runtime (FrontendPrepared (..))
 import Control.Concurrent (threadDelay)
@@ -280,8 +280,9 @@ withOverviewSource :: Service -> CredentialProof
 withOverviewSource service proof = Overview.withOverviewSource (serviceStore service) proof (Just (admission service))
 
 withRun :: Service -> CredentialProof -> Text -> (AuthorizedView -> Value -> IO a) -> IO a
-withRun service proof ident respond = withStoreFiles (serviceStore service) $ \root ->
-  withAuthorizedCatalogueContext (serviceStore service) proof [Observe] $ \view _ _ _ invocations ->
+withRun service proof ident respond = withStoreFileLoan (serviceStore service) $ \files root ->
+  withAuthorizedCatalogueContext (serviceStore service) proof [Observe] $ \view _ _ _ invocations -> do
+    attachResponseLoan view files
     History.managedRunInView (serviceStore service) root proof view (Just (admission service)) invocations ident >>= respond view
 
 withSnapshot :: Service -> CredentialProof -> Text -> (AuthorizedView -> Observation.SnapshotProjection -> IO a) -> IO a

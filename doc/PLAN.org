@@ -3267,6 +3267,46 @@ Also from the implementer's limitations: on an uncertain COMMIT no failure reply
 
 From acat-l59: would delete the residual join-slack paragraph and make static/bounded-0 indistinguishable outright; larger index-type change interacting with fanT 0. Candidate simplification, weigh against the definitional-reduction discipline.
 
+* TODO [#C] Resolve B5 response-ownership review findings
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-b5-response-review-findings-k96b
+:LABELS:   []
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-30 Wed 01:46]
+:MODIFIED: [2026-09-30 Wed 01:46]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking review findings from subtask B5 part 1 of acat-response-ingestion-budget-zaoi (fess report resume-20260923/fess/b1-B5-r2.md). Each needs an operator decision or a small correction.
+
+1. (medium, needs operator decision) A new artifact response slot sits in front of the lock order file slot, configuration, database (Store.hs:794-800, STORAGE.md:48-50). Downloads now wait for two slots in sequence, each within its own 5 s allowance, so worst-case download admission is 10 s. Decide whether this is acceptable, or share one deadline across both acquisitions, or fold the slot into the file-slot owner.
+2. (medium, needs operator decision) The memory bound is looser (ARTIFACTS.md:73-75). One held download of up to 64 MiB and one other capture under the file slot can hold bytes at the same time. Before, the Store allowed one capture in total. Accept the two-capture bound, or make other captures wait for the artifact slot.
+3. (medium) The check before each write chains separate 5 s allowances (observation retry, reader admission, configuration guard, Store gate) instead of one (Authorization.hs:129-148, Store.hs:862-866, STORAGE.md:196-205). It is documented, not fixed. Pass one deadline through withStoreReaderLoan, withStoreConfiguration and runRead, or record operator acceptance.
+4. (medium) Verification gap. The legacy retention-root download branch now uses withStoreRetentionRootLoan and attachResponseLoan (Artifacts.hs:125-137, Store.hs:781-784), but manager-history-check (HistoryCheck.hs:146) was not rebuilt or run, and manager-artifact-check in its default mode (overlapping-download StoreBusy test, ArtifactCheck.hs:1432) was not run. Run both once.
+5. (low) The documentation understates the acquisitions of each check (Authorization.hs:88-95, STORAGE.md:187-192). Reader admission takes the configuration guard and the Store gate, currentViewFacts takes the guard again, and observeAuthorizationAt takes the gate: two guard acquisitions and up to three gate acquisitions per write. State the actual acquisitions.
+6. (low) releaseResponseLoans does nothing for a BorrowedObservation view (Authorization.hs:153). No current caller passes one to respondBytes. Make respondBytes refuse a borrowed view, or give response views their own type.
+7. (low) The only before-fix evidence for the guard and reader-capacity variants (B/B5/impl-r1/b5-repro-before.log) came from an earlier test version that cannot be recovered. Round 2 saved its own before-fix sources and log (B/B5/impl-r2/b5r2-before-*.hs, b5r2-repro-before.log).
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-b5-response-review-findings-k96b",
+    "depends_on_id": "acat-response-ingestion-budget-zaoi",
+    "type": "discovered-from",
+    "created_at": "2026-09-30T08:46:20.068150Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
 * TODO [#E] Qualify A5S1D reachability record section 1 poll bullets    :documentation:
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -9207,7 +9247,7 @@ grind-tests opening with an unpinned question.
 :LABELS:   []
 :ISSUE_TYPE: bug
 :CREATED:  [2026-09-23 Wed 16:24]
-:MODIFIED: [2026-09-29 Tue 11:50]
+:MODIFIED: [2026-09-30 Wed 01:46]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -9249,6 +9289,13 @@ Service-liveness and halt fess reviews identify a source-proved ceiling: protect
     "author": "johnw",
     "text": "Subtask A5S2b changes Store admission to a bounded wait within the unchanged five-second allowance (operator decision of 2026-09-29). It did not reproduce or correct the held-response and ingestion composition that this issue describes, so this issue stays open. Evidence: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A5S2b/fast-impl-r1.",
     "created_at": "2026-09-29T18:50:20Z"
+  },
+  {
+    "id": 377,
+    "issue_id": "acat-response-ingestion-budget-zaoi",
+    "author": "johnw",
+    "text": "Subtask B5 (part 1) corrects the ceiling for plain byte responses. Transport.respondBytes and Application.json now materialize the representation under the watch and the configuration loan, then release the configuration guard, the reader charge, every SQL transaction and the file slot before the first network write. The watch stays alive as an authorization token only, and revalidateAuthorizedView reacquires, briefly and in lock order, only what the check needs before each 16 KiB write. Artifact downloads take a new artifact response slot (outermost, downloads only) that keeps the one-download memory bound. No wait, budget or allowance constant changed.\n\nEvidence (/Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/B/B5/impl-r2): manager-artifact-check response-ingestion fails before the fix (b5r2-repro-before, exit 1) and passes after it at N8 in all five variants (guard, reader capacity, revocation, artifact download) (b5r2-repro-after, exit 0). response-order, ordinary-admission, fault-classification and ingestion pass at N8. The Phase A journey passes at N8, and make -C doc check passes.\n\nThis issue stays open. Server-sent event streams still hold one reader charge for their lifetime and are a later part of this issue. The review findings of this part are filed as a separate follow-up issue.\n",
+    "created_at": "2026-09-30T08:46:16Z"
   }
 ]
 #+end_src

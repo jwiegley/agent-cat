@@ -194,7 +194,7 @@ dispatch service pages streams proof request respond = do
         Transport.respondBytes HTTP.status200
           [("Content-Type", "application/octet-stream"), ("Content-Disposition", "attachment"),
            ("Content-Length", BC.pack (show (BS.length bytes))),
-           ("ETag", representationTag request bytes)] (current view) bytes respond
+           ("ETag", representationTag request bytes)] view bytes respond
     _ -> throwIO C.ResourceUnavailable
   where
     store = Service.serviceStore service
@@ -222,7 +222,7 @@ servePage pages store proof request view limits token produce respond = do
   Pages.withPage pages client binding query (limitGlobalPageSets limits) token produce $ \_ bytes ->
     Transport.respondBytes HTTP.status200
       [("Content-Type", "application/json"), ("ETag", representationTag request bytes)]
-      (current view) bytes respond
+      view bytes respond
 
 workflowParameters :: Wai.Request -> IO (Maybe Text, Maybe Text)
 workflowParameters request = do
@@ -276,13 +276,15 @@ eventBlock (Object fields)
       pure bytes
 eventBlock _ = throwIO C.StorageUnavailable
 
+-- | A JSON representation is encoded under the loans of its view, which
+-- 'Transport.respondBytes' returns before the first network write.
 json :: Auth.AuthorizedView -> HTTP.Status -> HTTP.ResponseHeaders -> Value
   -> (Wai.Response -> IO Wai.ResponseReceived) -> IO Wai.ResponseReceived
 json view status headers value respond = do
   let bytes = C.encoded value
   when (BS.length bytes > 1048576) (throwIO C.ViewTooLarge)
   Transport.respondBytes status (("Content-Type", "application/json") : headers)
-    (current view) bytes respond
+    view bytes respond
 
 current :: Auth.AuthorizedView -> IO ()
 current view = Auth.revalidateAuthorizedView view >>= need

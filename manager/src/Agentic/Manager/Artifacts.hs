@@ -102,10 +102,14 @@ metadata ident run kind code bytes = object
    "download" .= ("/v1/artifacts/" <> ident)]
 
 -- | The callback must finish sending before returning and must not retain bytes.
--- Store's single file loan covers capture, verification, authorization and response.
--- At most one <=64MiB artifact is served per Store, with no unaccounted response queue.
+-- Store's single artifact response slot covers the whole download: capture,
+-- verification, authorization and every write. At most one <=64MiB artifact
+-- response is held per Store, with no unaccounted response queue. The file
+-- slot, the reader charge and the configuration loan cover capture and
+-- materialization only. The view returns them before the first network write,
+-- and its checks before each write stop a response whose authorization ended.
 withArtifactDownload :: CoordinationStore -> CredentialProof -> Text -> (AuthorizedView -> Value -> BS.ByteString -> IO a) -> IO a
-withArtifactDownload store proof ident respond = do
+withArtifactDownload store proof ident respond = withStoreArtifactResponse store $ do
   legacy <- runRead store $ do
     _ <- currentClient proof >>= either refuseTransaction pure
     unless (Command.validId ident) (refuseTransaction Command.InvalidRequest)
@@ -121,7 +125,7 @@ withArtifactDownload store proof ident respond = do
     Just (run,profile,identity,native,path,reference) -> do
       -- A persisted local binding is only an observation address. Configuration
       -- must still allow this exact root and profile before any file is opened.
-      result <- withStoreRetentionRoot store (T.unpack path) profile $ \root -> contentRead $ do
+      result <- withStoreRetentionRootLoan store (T.unpack path) profile $ \files root -> contentRead $ do
         unless (T.pack(privateRootIdentity root) == identity) (throwIO StoreIntegrity)
         nativeId <- either (const (throwIO StoreIntegrity)) pure (mkRunId native)
         ref <- either (const (throwIO StoreIntegrity)) pure (decodeStrictValue reference) >>= json
@@ -129,14 +133,16 @@ withArtifactDownload store proof ident respond = do
         revalidateStoreRetentionRoot store root profile >>= either (const (throwIO Command.ResourceUnavailable)) pure
         runRead store $ void (authorizeProfile proof profile [Command.Observe] >>= either refuseTransaction pure)
         revalidateStoreRetentionRoot store root profile >>= either (const (throwIO Command.ResourceUnavailable)) pure
-        withAuthorizedResponse store proof profile [Command.Observe] $ \view ->
+        withAuthorizedResponse store proof profile [Command.Observe] $ \view -> do
+          attachResponseLoan view files
           respond view (metadata ident run "source-result" (resultArtifactCode ref) bytes) bytes
       either (const (throwIO Command.ResourceUnavailable)) pure result
 
 withManagedArtifactDownload :: CoordinationStore -> CredentialProof -> Text -> (AuthorizedView -> Value -> BS.ByteString -> IO a) -> IO a
-withManagedArtifactDownload store proof ident respond = withStoreFiles store $ \root -> do
+withManagedArtifactDownload store proof ident respond = withStoreFileLoan store $ \files root -> do
   ArtifactBinding association _ code reference <- binding store proof ident
   withAuthorizedResponse store proof (associationProfile association) [Command.Observe] $ \view -> do
+    attachResponseLoan view files
     (kind,bytes) <- contentRead $ withRunRoot root association $ \runs -> case reference of
       Object fields | Just (String exportId) <- KM.lookup "exportId" fields -> do
         record@(ExportRecord _ _ _ artifact _ _ _ _ _ _ state) <- loadExport store proof exportId
@@ -161,8 +167,9 @@ withRunOutputs store proof association respond =
 
 withRunOutputsSource :: CoordinationStore -> CredentialProof -> RunAssociation
   -> (AuthorizedView -> ConfigurationLimits -> IO [Value] -> IO a) -> IO a
-withRunOutputsSource store proof association action = withStoreFiles store $ \root ->
-  withProfileProjectionSource store proof association $ \view limits readSnapshot ->
+withRunOutputsSource store proof association action = withStoreFileLoan store $ \files root ->
+  withProfileProjectionSource store proof association $ \view limits readSnapshot -> do
+    attachResponseLoan view files
     action view limits $ do
       snapshot <- readSnapshot
       items <- materialize root snapshot

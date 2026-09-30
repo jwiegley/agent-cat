@@ -43,8 +43,9 @@ withOverviewSource = withOverviewSourceWithin 5000000
 -- privately first.
 withOverviewSourceWithin :: Int -> CoordinationStore -> CredentialProof -> Maybe Admission
   -> (AuthorizedView -> ConfigurationLimits -> IO (Text,[Pair],[Value]) -> IO a) -> IO a
-withOverviewSourceWithin allowance store proof admission action = withStoreFiles store $ \root ->
-  withAuthorizedCatalogueContext store proof [C.Observe] $ \view limits visible _ invocations ->
+withOverviewSourceWithin allowance store proof admission action = withStoreFileLoan store $ \files root ->
+  withAuthorizedCatalogueContext store proof [C.Observe] $ \view limits visible _ invocations -> do
+    attachResponseLoan view files
     action view limits $ do
       revalidateAuthorizedView view >>= either throwIO pure
       result <- timeout allowance (materialize root view (map fst visible) invocations)

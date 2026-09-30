@@ -437,8 +437,8 @@ negative controls. It does not introduce HTTP endpoints or client presentation.
 
 The [artifact contract](ARTIFACTS.md) describes bounded output items, authorized
 captured-byte downloads and explicit exclusive publication. State owns trusted
-references, Store owns the response-lifetime file loan, Commands owns acceptance
-and dispatch, and Runtime owns verification and publication. Source and export
+references, Store owns the file loan and the response-lifetime artifact response
+slot, Commands owns acceptance and dispatch, and Runtime owns verification and publication. Source and export
 byte identities remain distinct. Durable successful-publisher observations can be
 reconciled after reopen, while filesystem-only publication remains unresolved.
 `manager/ci/artifacts.sh` checks the shared primitives, frozen representations and

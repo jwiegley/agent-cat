@@ -495,8 +495,9 @@ withDraft :: CoordinationStore -> CredentialProof -> Text
   -> (AuthorizedView -> DraftView -> IO a) -> IO a
 withDraft store proof ident respond = do
   original <- runRead store (requestState proof ident [Observe])
-  withStoreFiles store $ \root ->
+  withStoreFileLoan store $ \files root ->
     withAuthorizedResponse store proof (draftProfile (requestView original)) [Observe] $ \view -> do
+      attachResponseLoan view files
       draft <- readDraftAt store root proof ident
       revalidateAuthorizedView view >>= requireEither
       respond view draft

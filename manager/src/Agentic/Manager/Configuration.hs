@@ -8,13 +8,13 @@ module Agentic.Manager.Configuration
     configurationSnapshot, selectConfiguredProfile, probeConfiguredProfile,
     configurationAdministrationRoot, withConfigurationAdministration,
     HttpsConfiguration (..), configurationHttps,
-    acquireConfigurationStorage, releaseConfigurationStorage, withConfigurationSnapshot, withConfigurationCatalogues, withConfigurationCatalogueContext, tryConfigurationCatalogueContext, probeConfiguredCapabilities, withConfiguredRetentionRoot, validateHistoryBindings, revalidateRetentionRoot, configuredInvocations, configuredLimits
+    acquireConfigurationStorage, releaseConfigurationStorage, withConfigurationSnapshot, withConfigurationCatalogues, tryConfigurationCatalogueContext, withConfigurationLoan, probeConfiguredCapabilities, withConfiguredRetentionRootLoan, validateHistoryBindings, revalidateRetentionRoot, configuredInvocations, configuredLimits
   ) where
 
 import Agentic.Manager.Lease (acquireLease, duplicateLease)
 import Agentic.Manager.Profile
 import Agentic.Manager.Root (validateRootSeparation)
-import Agentic.Manager.Store.Admission (newDeadline, takeWithin)
+import Agentic.Manager.Store.Admission (newDeadline, releaseOnce, takeWithin)
 import Agentic.Runtime
   ( PrivateRoot, ProcessGroup, FrontendCapabilities, FrontendInvocation (..), StateRootRole (ManagerStateRoot), assertPrivateRoot,
     privateRootPath, openPrivateRoot, openPrivateSubroot, closePrivateRoot, withPrivateDirectoryAt, readStateRootRoleAt,
@@ -169,14 +169,7 @@ withConfigurationSnapshot installed action = withConfigurationCatalogues install
 
 withConfigurationCatalogues :: InstalledConfiguration -> (ConfigurationLimits -> [PublicProfile] -> [(Text, Discovery)] -> IO a) -> IO (Either Diagnostic a)
 withConfigurationCatalogues installed action =
-  withConfigurationCatalogueContext installed $ \limits profiles catalogues _ -> action limits profiles catalogues
-
--- | Catalogue and invocation observations from the same original configuration loan.
-withConfigurationCatalogueContext :: InstalledConfiguration
-  -> (ConfigurationLimits -> [PublicProfile] -> [(Text, Discovery)] -> [(Text, FrontendInvocation)] -> IO a)
-  -> IO (Either Diagnostic a)
-withConfigurationCatalogueContext installed action =
-  maybe (Left SupervisionUnavailable) id <$> tryConfigurationCatalogueContext installed action
+  withConfigurationLoan installed $ \_ limits profiles catalogues _ -> action limits profiles catalogues
 
 -- | The guard is waited for within one five-second allowance. Nothing proves
 -- that the original guard was not acquired within that allowance and the
@@ -185,19 +178,38 @@ withConfigurationCatalogueContext installed action =
 tryConfigurationCatalogueContext :: InstalledConfiguration
   -> (ConfigurationLimits -> [PublicProfile] -> [(Text, Discovery)] -> [(Text, FrontendInvocation)] -> IO a)
   -> IO (Maybe (Either Diagnostic a))
-tryConfigurationCatalogueContext (InstalledConfiguration lock _) action = mask $ \restore -> do
+tryConfigurationCatalogueContext installed action = tryConfigurationLoan installed (const action)
+
+-- | The same configuration loan, with its release action. A response owner
+-- calls the release after it materializes its representation and before its
+-- first network write. The observations passed to the callback are immutable
+-- values, but they are not current after the release, so a later check reads
+-- configuration again under a new loan. The scope end releases the guard when
+-- the callback did not.
+withConfigurationLoan :: InstalledConfiguration
+  -> (IO () -> ConfigurationLimits -> [PublicProfile] -> [(Text, Discovery)] -> [(Text, FrontendInvocation)] -> IO a)
+  -> IO (Either Diagnostic a)
+withConfigurationLoan installed action =
+  maybe (Left SupervisionUnavailable) id <$> tryConfigurationLoan installed action
+
+tryConfigurationLoan :: InstalledConfiguration
+  -> (IO () -> ConfigurationLimits -> [PublicProfile] -> [(Text, Discovery)] -> [(Text, FrontendInvocation)] -> IO a)
+  -> IO (Maybe (Either Diagnostic a))
+tryConfigurationLoan (InstalledConfiguration lock _) action = mask $ \restore -> do
   available <- newDeadline >>= \end -> takeWithin end lock
   case available of
     Nothing -> pure Nothing
-    Just current -> (Just <$> (case current of
-      Nothing -> pure (Left InvalidConfiguration)
-      Just active@(ActiveConfiguration _ _ _ limits registry _ _ _) ->
-        configurationIO $ do
-          assertActive active
-          profiles <- publicProfiles registry
-          catalogues <- currentCatalogues registry
-          invocations <- profileInvocations registry
-          restore (action limits profiles catalogues invocations))) `finally` putMVar lock current
+    Just current -> do
+      release <- releaseOnce (putMVar lock current)
+      (Just <$> (case current of
+        Nothing -> pure (Left InvalidConfiguration)
+        Just active@(ActiveConfiguration _ _ _ limits registry _ _ _) ->
+          configurationIO $ do
+            assertActive active
+            profiles <- publicProfiles registry
+            catalogues <- currentCatalogues registry
+            invocations <- profileInvocations registry
+            restore (action release limits profiles catalogues invocations))) `finally` release
 
 -- | The limits of the active configuration.
 configuredLimits :: InstalledConfiguration -> IO (Either Diagnostic ConfigurationLimits)
@@ -224,8 +236,11 @@ validateHistoryBindings installed bindings = withActive installed $ \active@(Act
   require (all ((`elem` map publicId profiles) . snd) bindings)
 
 -- | Local composition only. A configured retention path never becomes execution authority.
-withConfiguredRetentionRoot :: InstalledConfiguration -> FilePath -> Text -> (PrivateRoot -> IO a) -> IO (Either Diagnostic a)
-withConfiguredRetentionRoot installed path profile action = mask $ \restore -> do
+-- The callback receives the release action that closes the root. A response
+-- owner calls it before its first network write, and the scope end calls it
+-- otherwise. The root must not be used after the release.
+withConfiguredRetentionRootLoan :: InstalledConfiguration -> FilePath -> Text -> (IO () -> PrivateRoot -> IO a) -> IO (Either Diagnostic a)
+withConfiguredRetentionRootLoan installed path profile action = mask $ \restore -> do
   acquired <- withActive installed $ \active@(ActiveConfiguration _ _ retention _ registry _ _ _) -> do
     assertActive active
     require (path `elem` retention)
@@ -234,7 +249,9 @@ withConfiguredRetentionRoot installed path profile action = mask $ \restore -> d
     openPrivateRoot "configured retention root" path
   case acquired of
     Left failure -> pure (Left failure)
-    Right root -> (Right <$> restore (action root)) `finally` closePrivateRoot root
+    Right root -> do
+      close <- releaseOnce (closePrivateRoot root)
+      (Right <$> restore (action close root)) `finally` close
 
 configurationSnapshot :: InstalledConfiguration -> IO (Either Diagnostic (ConfigurationLimits, [PublicProfile]))
 configurationSnapshot installed = withActive installed $ \(ActiveConfiguration _ _ _ limits registry _ _ _) ->

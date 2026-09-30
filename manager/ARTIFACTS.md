@@ -9,11 +9,14 @@ The frozen public schemas remain in `doc/api/openapi.yaml`.
 State assigns source handles from its trusted run-bound Runtime references.
 Artifact IDs are lookup keys, not authority. Every content operation checks the
 current credential, observe scope, configured profile and stored run association.
-The retained Store file loan and profile lock cover the response callback.
-Credential revocation is checked before delivery. A credential can be revoked in
-SQLite during a callback, and this library does not cancel ongoing delivery.
-WM-023/A16 owns ongoing transport revocation. Callbacks finish sending before returning and must not retain content or queue a
-response for later delivery. Questions continue through State's shared verified
+The Store artifact response slot covers the whole callback of a download. The
+file loan, the profile lock and the reader charge cover capture and
+materialization, and the response returns them before the first network write,
+as `manager/STORAGE.md` describes.
+Credential revocation is checked before delivery and again before each 16 KiB
+write. A credential that is revoked in SQLite during a callback stops the
+response before its next write. Callbacks finish sending before returning and
+must not retain content or queue a response for later delivery. Questions continue through State's shared verified
 question reader and its decision projection.
 
 `withArtifactDownload` supplies metadata and exact captured bytes to its callback.
@@ -57,21 +60,26 @@ its existing transaction, projection and ingestion bounds.
 
 ## File and memory ownership
 
-Each Store has one file loan. An ordinary operation waits for the loan within
-a fresh five-second allowance, and a loan that stays held for the whole
-allowance is `StoreBusy`. The loan spans capture, verification,
-authorization checks before delivery and the actual response callback. Concurrent content reads
-cannot accumulate independent response buffers outside that loan. Each source or
+Each Store has one file loan and one artifact response slot. An ordinary
+operation waits for either within a fresh five-second allowance, and a slot
+that stays held for the whole allowance is `StoreBusy`. A download takes the
+artifact response slot first and keeps it until its last write completes. It
+then takes the file loan for capture, verification and the authorization
+checks before delivery, and returns the loan before its first network write.
+Concurrent downloads therefore cannot accumulate independent response buffers:
+at most one download of at most 64 MiB is held across network writes for each
+Store. Other file operations do not wait for a slow download. Each source or
 export capture is limited to 64 MiB before a response. A source download retains
-one captured byte sequence. Publication may retain one prepared export and one
-verification reread, each bounded by 64 MiB, while completing its receipt.
+one captured byte sequence. While a download sends, one other capture under the
+file loan can hold its own bytes. Publication may retain one prepared export and
+one verification reread, each bounded by 64 MiB, while completing its receipt.
 
 Runtime's bounded parsing and canonical-byte comparison also allocate decoded
 values and temporary encodings. The captured-byte ceiling is not a total Haskell
 heap quota. This library does not implement connection queues or service-wide
-quotas across independent Store instances. A future transport must preserve the
+quotas across independent Store instances. A transport must preserve the
 callback lifetime instead of returning a lazy or queued response after releasing
-the loan.
+the artifact response slot.
 
 ## Exclusive publication and reconciliation
 

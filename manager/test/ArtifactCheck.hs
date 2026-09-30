@@ -32,7 +32,7 @@ import Data.Time (getCurrentTime)
 import qualified Network.HTTP.Types as HTTP
 import qualified Network.Wai as Wai
 import Network.Wai.Internal (ResponseReceived (..))
-import Agentic.Manager.Profile (Diagnostic (..), publicId)
+import Agentic.Manager.Profile (ConfigurationLimits (..), Diagnostic (..), publicId)
 import qualified Agentic.Manager.Protocol.Command as Command
 import Agentic.Manager.State
 import qualified Agentic.Manager.Observation as Observation
@@ -80,6 +80,7 @@ main = do
     ["fault-classification",work] -> faultClassificationChecks work
     ["ordinary-admission",work] -> ordinaryAdmissionChecks work
     ["ordinary-stream",work] -> ordinaryStreamChecks work
+    ["response-ingestion",work] -> responseIngestionChecks work
     [work,source] -> do
       createDirectory(work </> "composition")
       compositionChecks(work </> "composition")
@@ -99,8 +100,10 @@ main = do
       ordinaryAdmissionChecks(work </> "ordinary-admission")
       createDirectory(work </> "ordinary-stream")
       ordinaryStreamChecks(work </> "ordinary-stream")
+      createDirectory(work </> "response-ingestion")
+      responseIngestionChecks(work </> "response-ingestion")
       artifactChecks work source
-    _ -> error "usage: manager-artifact-check [retention|composition|observation|events|admission-contention|response-order|fault-classification|ordinary-admission|ordinary-stream] PRIVATE_DIRECTORY [PACKAGE_DIRECTORY]"
+    _ -> error "usage: manager-artifact-check [retention|composition|observation|events|admission-contention|response-order|fault-classification|ordinary-admission|ordinary-stream|response-ingestion] PRIVATE_DIRECTORY [PACKAGE_DIRECTORY]"
 
 -- Each converted cause site keeps its own class or records its own erased
 -- cause, genuine Store failures keep the storage-unavailable problem, and the
@@ -162,16 +165,17 @@ faultClassificationChecks work = do
   atomically (reservePageSet pages "client_2" "view" "/v1/profiles" 2 0 "set_b")
   quota <- faultOf (atomically (reservePageSet pages "client_3" "view" "/v1/profiles" 2 0 "set_c"))
   check "page-set capacity keeps the declared quota refusal" (quota == Left (CommandRefusal Command.StorageQuota))
-  stalled <- faultOf (Transport.respondBytes HTTP.status200 [] (pure ()) "bytes" $ \response -> do
-    let (_, _, withBody) = Wai.responseToStream response
-    withBody (\body -> body (\_ -> threadDelay 10000000) (pure ()))
-    pure ResponseReceived)
-  check "a stalled response write is its own internal cause" (fmap (const ()) stalled == Left (InternalFault ResponseWriteTimeout))
   createDirectory (work </> "sites")
   (config,_) <- fixture (work </> "sites")
   escaped <- withInstalled config $ \installed -> withCoordinationStore installed $ \store -> do
     seed store
     proof <- authenticateCredential store bearer >>= right
+    stalled <- faultOf $ withAuthorizedResponse store proof "profile_1" [Command.Observe] $ \view ->
+      Transport.respondBytes HTTP.status200 [] view "bytes" $ \response -> do
+        let (_, _, withBody) = Wai.responseToStream response
+        withBody (\body -> body (\_ -> threadDelay 10000000) (pure ()))
+        pure ResponseReceived
+    check "a stalled response write is its own internal cause" (fmap (const ()) stalled == Left (InternalFault ResponseWriteTimeout))
     -- A separate SQLite connection hides a table that authentication reads, so
     -- the checks below meet a genuine Store failure. Contention for the Store
     -- gate waits instead of failing.
@@ -397,6 +401,124 @@ ordinaryAdmissionChecks work = do
     check "the control route before the first projection keeps its run, supervision and revision"
       (field "runId" surface == String (associationRun association) && field "supervision" surface == String "observer"
         && field "revision" surface == String "closed_revision")
+
+-- | A protected response that is slow to send and actual ingestion of an
+-- associated run. Each response write stalls for three seconds, so one
+-- four-write response lasts longer than two five-second ingestion allowances
+-- while no single write reaches the write timeout. Each variant uses its own
+-- Store, and every variant runs even after an earlier one fails.
+responseIngestionChecks :: FilePath -> IO ()
+responseIngestionChecks work = do
+  failures <- fmap concat $ mapM variant
+    [("guard", ignoring guardVariant), ("reader-capacity", ignoring readerVariant), ("file-slot", ignoring fileVariant),
+     ("artifact-download", downloadVariant), ("revocation", ignoring revocationVariant)]
+  unless (null failures) (error ("FAIL response-ingestion variants: " <> unwords failures))
+  where
+    variant (name, checks) = do
+      createDirectory (work </> name)
+      outcome <- try @ErrorCall (withResponseStore (work </> name) checks)
+      case outcome of
+        Right () -> putStrLn ("PASS response-ingestion variant " <> name) >> pure []
+        Left failure -> putStrLn ("FAIL response-ingestion variant " <> name <> ": " <> show failure) >> pure [name]
+    withResponseStore directory checks = do
+      (config,_) <- fixture directory
+      withInstalled config $ \installed -> withCoordinationStore installed $ \store -> do
+        seed store
+        proof <- authenticateCredential store bearer >>= right
+        (association,reference,_) <- sourceRun store
+        checks store proof association reference
+    ignoring checks store proof association _ = checks store proof association
+    chunks = 4 :: Int
+    body = BS.replicate (chunks * 16384) 120
+    -- One protected response whose every write stalls. The counter records
+    -- each write that the response reached.
+    held store proof association = heldBy $ \send ->
+      withAuthorizedResponse store proof (associationProfile association) [Command.Observe] send
+    heldBy owner writes = faultOf $ owner $ \view -> void $
+      Transport.respondBytes HTTP.status200 [] view body $ \response -> do
+        let (_, _, withBody) = Wai.responseToStream response
+        withBody (\stream -> stream (\_ -> atomically (modifyTVar' writes (+1)) >> threadDelay 3000000) (pure ()))
+        pure ResponseReceived
+    reached counters = timeout 10000000 $ atomically $
+      mapM readTVar counters >>= \seen -> unless (all (>= 1) seen) retry
+    started = RunStartedV2 "fixture" "scripted" PersonAnswerLocalControl
+    timedIngest store association = timedIngestAt store association 0 started
+    timedIngestAt store association number event = do
+      begun <- getMonotonicTimeNSec
+      outcome <- faultOf (ingestRuntimeEnvelope store association
+        (encodeEnvelope (Envelope 2 (associationNative association) (SeqNo number) "2026-09-03T00:00:00Z" event)))
+      finished <- getMonotonicTimeNSec
+      pure (outcome, finished - begun)
+    guardVariant store proof association = do
+      writes <- newTVarIO (0 :: Int)
+      withAsync (held store proof association writes) $ \response -> do
+        reached [writes] >>= check "the held response reaches its first write" . (== Just ())
+        (ingested, elapsed) <- timedIngest store association
+        check "ingestion of an associated run completes during a held response" (ingested == Right True)
+        check "that ingestion completes within its unchanged five-second allowance" (elapsed < 5000000000)
+        configuration <- withStoreConfiguration store (\_ _ -> pure ())
+        check "the configuration guard is available during a held response" (configuration == Right ())
+        outcome <- wait response
+        check "the held response completes under its authorization" (outcome == Right ())
+        atomically (readTVar writes) >>= check "the held response sends every write" . (== chunks)
+    readerVariant store proof association = do
+      capacity <- withStoreConfiguration store (\limits _ -> pure (limitGlobalDatabaseReaders limits)) >>= right
+      counters <- mapM (const (newTVarIO (0 :: Int))) [1..capacity]
+      (outcomes, ()) <- concurrently (mapConcurrently (held store proof association) counters) $ do
+        reached counters >>= check "responses up to the Store reader capacity are held at the same time" . (== Just ())
+        reader <- try @StoreFailure (withStoreReader store (pure ()))
+        check "a reader place is available while every held response sends" (reader == Right ())
+        (ingested, elapsed) <- timedIngest store association
+        check "ingestion completes while responses up to the reader capacity are held" (ingested == Right True)
+        check "that ingestion completes within its unchanged five-second allowance" (elapsed < 5000000000)
+      check "every response held at the reader capacity completes under its authorization"
+        (all (== Right ()) outcomes)
+    -- The outputs owner materializes under the file slot and joins that loan
+    -- to the loans that its response returns before the first write.
+    fileVariant store proof association = do
+      timedIngest store association >>= check "the run has a first projection" . (== Right True) . fst
+      writes <- newTVarIO (0 :: Int)
+      let outputs = heldBy (\send -> withRunOutputs store proof association (\view _ -> send view))
+      withAsync (outputs writes) $ \response -> do
+        reached [writes] >>= check "the held outputs response reaches its first write" . (== Just ())
+        files <- try @StoreFailure (withStoreFiles store (\_ -> pure ()))
+        check "the file slot is available during a held outputs response" (files == Right ())
+        (ingested, elapsed) <- timedIngestAt store association 1
+          (OccurrenceStarted (OccurrenceId 0) "flag" "consult" "model reviewer" "Approve?")
+        check "ingestion completes during a held outputs response" (ingested == Right True)
+        check "that ingestion completes within its unchanged five-second allowance" (elapsed < 5000000000)
+        outcome <- wait response
+        check "the held outputs response completes under its authorization" (outcome == Right ())
+        atomically (readTVar writes) >>= check "the held outputs response sends every write" . (== chunks)
+    -- A download captures under the file slot and returns it before the first
+    -- write. Its artifact response slot stays held across the writes, so a
+    -- second download is the one operation that waits for it.
+    downloadVariant store proof association reference = do
+      ingest store association reference
+      handle <- scalar store "SELECT result_artifact_id FROM runs WHERE id='run_21'"
+      writes <- newTVarIO (0 :: Int)
+      let download = heldBy (\send -> withArtifactDownload store proof handle (\view _ _ -> send view))
+      withAsync (download writes) $ \response -> do
+        reached [writes] >>= check "the held download reaches its first write" . (== Just ())
+        files <- try @StoreFailure (withStoreFiles store (\_ -> pure ()))
+        check "the file slot is available during a held download" (files == Right ())
+        reader <- try @StoreFailure (withStoreReader store (pure ()))
+        check "a reader place is available during a held download" (reader == Right ())
+        configuration <- withStoreConfiguration store (\_ _ -> pure ())
+        check "the configuration guard is available during a held download" (configuration == Right ())
+        second <- try @StoreFailure (withArtifactDownload store proof handle (\_ _ _ -> pure ()))
+        check "a second download waits for the one artifact response slot within its allowance" (second == Left StoreBusy)
+        outcome <- wait response
+        check "the held download completes under its authorization" (outcome == Right ())
+        atomically (readTVar writes) >>= check "the held download sends every write" . (== chunks)
+    revocationVariant store proof association = do
+      writes <- newTVarIO (0 :: Int)
+      withAsync (held store proof association writes) $ \response -> do
+        reached [writes] >>= check "the response to revoke reaches its first write" . (== Just ())
+        mutate store (execute "UPDATE clients SET authorization_revision='revoked' WHERE id='client_1'" [])
+        outcome <- wait response
+        check "a revocation during the hold refuses the next write" (outcome == Left (CommandRefusal Command.Unauthenticated))
+        atomically (readTVar writes) >>= check "a revocation during the hold stops the response before its next write" . (== 1)
 
 ordinaryStreamChecks :: FilePath -> IO ()
 ordinaryStreamChecks work = do

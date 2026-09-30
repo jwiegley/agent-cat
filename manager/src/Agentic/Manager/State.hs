@@ -106,7 +106,8 @@ restoreRunProjection :: CoordinationStore -> RunAssociation -> IO (Maybe Snapsho
 restoreRunProjection store association = withStoreReader store (restoreProjection store association)
 
 -- | One charged projection and response under current profile authority. Reader
--- admission precedes the configuration loan, which remains held through response.
+-- admission precedes the configuration loan. Both are held while the response
+-- materializes, and the response returns both before its first network write.
 withProfileProjection :: CoordinationStore -> CredentialProof -> RunAssociation -> (AuthorizedView -> RunSnapshot -> IO a) -> IO a
 withProfileProjection store proof association respond =
   withProfileProjectionSource store proof association $ \view _ materialize -> materialize >>= respond view
@@ -449,8 +450,9 @@ readDecision store proof association ident = withDecision store proof associatio
 
 withDecision :: CoordinationStore -> CredentialProof -> RunAssociation -> Text
   -> (AuthorizedView -> Value -> IO a) -> IO a
-withDecision store proof association ident respond = withStoreFiles store $ \root ->
+withDecision store proof association ident respond = withStoreFileLoan store $ \files root ->
   withAuthorizedResponse store proof (associationProfile association) [Command.Observe] $ \view -> do
+    attachResponseLoan view files
     value <- decisionInView store root proof view association ident
     respond view value
 

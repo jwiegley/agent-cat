@@ -1,11 +1,12 @@
 -- | Admission to one Store operation, with no SQL activity while waiting.
 module Agentic.Manager.Store.Admission
   ( StoreAdmission (..), AdmissionFailure (..), Deadline,
-    withGate, newDeadline, takeWithin, remainingMicros, remainingAt ) where
+    withGate, newDeadline, takeWithin, remainingMicros, remainingAt, releaseOnce ) where
 
 import Control.Concurrent.MVar (MVar, takeMVar, tryTakeMVar, putMVar)
-import Control.Exception (Exception, mask, finally, throwIO)
+import Control.Exception (Exception, mask, mask_, finally, throwIO)
 import Control.Monad (void)
+import Data.IORef (atomicModifyIORef', newIORef)
 import Data.Word (Word64)
 import GHC.Clock (getMonotonicTimeNSec)
 import System.Timeout (timeout)
@@ -53,3 +54,14 @@ withGate policy gate check action = mask $ \restore -> do
     Nothing -> throwIO (case policy of FailFast -> AdmissionBusy; WaitWithinBudget -> AdmissionExpired)
     Just () -> (check >> mapM_ (void . remainingMicros) deadline >> restore (action deadline))
       `finally` putMVar gate ()
+
+-- | A release action that runs at most once. A loan owner calls it at the end
+-- of its scope, and a response calls it earlier, before its first network
+-- write. Later calls do nothing. The release runs with asynchronous
+-- exceptions masked, so an interruption cannot lose the returned loan.
+releaseOnce :: IO () -> IO (IO ())
+releaseOnce release = do
+  pending <- newIORef True
+  pure $ mask_ $ do
+    first <- atomicModifyIORef' pending (\current -> (False, current))
+    if first then release else pure ()

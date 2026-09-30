@@ -7,7 +7,7 @@
 -- | A single leased SQLite writer with strict, bounded transaction results.
 module Agentic.Manager.Store
   ( CoordinationStore, StoreIdentity (..), StoreFailure (..), Checkpoint (..),
-    withCoordinationStore, withServingStore, withServingStoreWith, storeManagerFlow, storeIdentity, checkpointStore, withStoreConfiguration, withStoreCatalogues, withStoreRetentionRoot, validateStoreHistoryBindings, revalidateStoreRetentionRoot, storeInvocations, withStoreFiles, withStoreReader, withStoreAdmission, withStoreWorker, StoreWorker, createStoreWorkerGroup, storeWorkerCleanupConfirmed, requestStoreWorkersStop, awaitStoreWorkersStop, retryStoreCleanup, probeStoreCapabilities,
+    withCoordinationStore, withServingStore, withServingStoreWith, storeManagerFlow, storeIdentity, checkpointStore, withStoreConfiguration, withStoreCatalogues, withStoreRetentionRoot, withStoreRetentionRootLoan, withStoreArtifactResponse, validateStoreHistoryBindings, revalidateStoreRetentionRoot, storeInvocations, withStoreFiles, withStoreFileLoan, withStoreReader, withStoreAdmission, withStoreWorker, StoreWorker, createStoreWorkerGroup, storeWorkerCleanupConfirmed, requestStoreWorkersStop, awaitStoreWorkersStop, retryStoreCleanup, probeStoreCapabilities,
     withStoreAdministration, tryWithStoreCatalogues, tryWithStoreFiles,
     AuthorizationWatch, withStoreAuthorizationWatch, withStoreConfigurationWatch, withStoreCataloguesWatch, withStoreCatalogueContextWatch, withStoreCataloguesBorrowed, authorizationWatchCurrent, withAuthorizationObservation, withAuthorizationReadObservation, awaitAuthorizationChange,
     CommitDeadline, withCommitDeadline, withPreparedCommitDeadline, enforceCommitDeadline, enforceAdmissionFence, managerFlowRoom, appendCommandRecord, appendReviewRecord, noticeAfterCommit, PostCommit, noPostCommit, takePostCommit, appendPostCommit, Transaction, execute, query, refuseTransaction, runTransaction, runRead, StoreAdmission (..), runTransactionWithAdmission, runReadWithAdmission, transactionGeneration,
@@ -17,7 +17,7 @@ module Agentic.Manager.Store
 import Agentic.Manager.Store.Admission (StoreAdmission (..))
 import qualified Agentic.Manager.Store.Admission as Admission
 import Agentic.Manager.Configuration
-  (InstalledConfiguration, acquireConfigurationStorage, releaseConfigurationStorage, withConfigurationAdministration, withConfigurationSnapshot, withConfigurationCatalogues, withConfigurationCatalogueContext, tryConfigurationCatalogueContext, withConfiguredRetentionRoot, validateHistoryBindings, revalidateRetentionRoot, configuredInvocations, configuredLimits, probeConfiguredCapabilities)
+  (InstalledConfiguration, acquireConfigurationStorage, releaseConfigurationStorage, withConfigurationAdministration, withConfigurationSnapshot, withConfigurationCatalogues, tryConfigurationCatalogueContext, withConfigurationLoan, withConfiguredRetentionRootLoan, validateHistoryBindings, revalidateRetentionRoot, configuredInvocations, configuredLimits, probeConfiguredCapabilities)
 import Agentic.Manager.Flow
   (ManagerFlow, ManagerFlowFault, ManagerFlowFailure (..), FlowRecordClass (Refusing), CredentialEntry (..), Notice, noticeFlowBody, managerFlowCeiling, Lifetime (..), Reconciliation (..), noReconciliation, openManagerFlow, managerFlowOpenFailure, managerFlowOpenWord, closeManagerFlow, managerFlowBytes, managerFlowAllowance, managerFlowContent, appendManagerAsk, appendManagerTell, appendManagerReply, appendLifetime, appendShutdown)
 import Agentic.Manager.Protocol.Command (failureCode)
@@ -97,9 +97,11 @@ data Checkpoint = Checkpoint
   } deriving (Eq, Show)
 
 -- | One connection and admission cell. Every Store action can spend its
--- existing five-second operation allowance waiting for the cell.
+-- existing five-second operation allowance waiting for the cell. The slot
+-- tuple holds the file slot, the reader count, the authorization cell and the
+-- artifact response slot.
 data CoordinationStore = CoordinationStore !InstalledConfiguration !PrivateRoot !SQL.Database !StoreIdentity
-  !(MVar ()) !(IORef Bool) !(IORef Bool) !Fd !(MVar (), TVar Int, TVar (Maybe Word64)) !(TVar WorkerRegistry) !(MVar ()) !(IORef Bool) !(TVar (Bool, Maybe (TMVar (), MVar ())))
+  !(MVar ()) !(IORef Bool) !(IORef Bool) !Fd !(MVar (), TVar Int, TVar (Maybe Word64), MVar ()) !(TVar WorkerRegistry) !(MVar ()) !(IORef Bool) !(TVar (Bool, Maybe (TMVar (), MVar ())))
   !(Maybe ManagerFlow)
 
 -- | Original registrations and their first stop batch. A scoped fence is not permanent quarantine.
@@ -250,7 +252,7 @@ openStore mode installed root lease = storageErrors $ do
         forM_ (managerFlowOpenFailure manager) (recordFaultLine "manager-log open" . ("flow " <>) . managerFlowOpenWord)
         manager <$ appendLifetime manager total (Lifetime generation reconciliation listed omitted)
     CoordinationStore installed root db (StoreIdentity schemaVersion epoch stream generation)
-      <$> newMVar () <*> newIORef False <*> newIORef False <*> pure lease <*> ((,,) <$> newMVar () <*> newTVarIO 0 <*> newTVarIO (Just 0)) <*> newTVarIO (WorkerRegistry False False Nothing []) <*> newMVar () <*> newIORef False <*> newTVarIO (False, Nothing) <*> pure flow
+      <$> newMVar () <*> newIORef False <*> newIORef False <*> pure lease <*> ((,,,) <$> newMVar () <*> newTVarIO 0 <*> newTVarIO (Just 0) <*> newMVar ()) <*> newTVarIO (WorkerRegistry False False Nothing []) <*> newMVar () <*> newIORef False <*> newTVarIO (False, Nothing) <*> pure flow
   where
     databaseName = "coordination.sqlite3"
     checkCompanion name = do
@@ -653,7 +655,7 @@ closeStore = closeStoreWith False
 -- that the operator stopped it. Only such a close of a Store that is not
 -- poisoned writes the shutdown notice of the manager log.
 closeStoreWith :: Bool -> CoordinationStore -> IO ()
-closeStoreWith returned store@(CoordinationStore installed root db identity gate closed poisoned lease (files,_,_) workers closing retired admission flow) =
+closeStoreWith returned store@(CoordinationStore installed root db identity gate closed poisoned lease (files,_,_,_) workers closing retired admission flow) =
   uninterruptibleMask_ $ withMVar closing $ \_ -> do
     already <- readIORef retired
     unless already $ do
@@ -717,7 +719,7 @@ stopWorkers workers = do
 
 -- No callback, SQL acquisition or join runs in this notification transaction.
 notifyStoreFailure :: CoordinationStore -> Bool -> IO ()
-notifyStoreFailure (CoordinationStore _ _ _ _ _ _ _ _ (_,_,authorization) workers _ _ admission _) unavailable = atomically $ do
+notifyStoreFailure (CoordinationStore _ _ _ _ _ _ _ _ (_,_,authorization,_) workers _ _ admission _) unavailable = atomically $ do
   writeTVar authorization Nothing
   modifyTVar' workers (\state -> state {registryClosed=True, registryUnavailable=registryUnavailable state || unavailable})
   (_, owner) <- readTVar admission
@@ -771,8 +773,31 @@ validateStoreHistoryBindings store@(CoordinationStore installed _ _ _ _ _ _ _ _ 
 
 -- | A Store-lifetime loan of an explicitly configured read-only retention root.
 withStoreRetentionRoot :: CoordinationStore -> FilePath -> Text -> (PrivateRoot -> IO a) -> IO (Either Diagnostic a)
-withStoreRetentionRoot store@(CoordinationStore installed _ _ _ _ _ _ _ _ _ _ _ _ _) path profile action =
-  withStoreFiles store $ \_ -> withConfiguredRetentionRoot installed path profile action
+withStoreRetentionRoot store path profile action = withStoreRetentionRootLoan store path profile (const action)
+
+-- | The same retention-root loan, with its release action. The release closes
+-- the retention root and returns the file slot. A response owner calls it
+-- before its first network write, and the scope end calls it otherwise.
+withStoreRetentionRootLoan :: CoordinationStore -> FilePath -> Text -> (IO () -> PrivateRoot -> IO a) -> IO (Either Diagnostic a)
+withStoreRetentionRootLoan store@(CoordinationStore installed _ _ _ _ _ _ _ _ _ _ _ _ _) path profile action =
+  withStoreFileLoan store $ \files _ ->
+    withConfiguredRetentionRootLoan installed path profile $ \close root -> action (close >> files) root
+
+-- | One artifact response, which holds its captured bytes across its network
+-- writes after it has returned the file slot. The Store has one such slot, so
+-- at most one artifact response of at most 64 MiB is held across writes. The
+-- slot is taken before the file slot. The lock order is therefore artifact
+-- response slot, file slot, configuration, database. An artifact response
+-- waits for the slot within a fresh five-second allowance, and a slot that
+-- stays held for the whole allowance is 'StoreBusy'. No other Store operation
+-- takes this slot, so a slow download delays only another download.
+withStoreArtifactResponse :: CoordinationStore -> IO a -> IO a
+withStoreArtifactResponse (CoordinationStore _ _ _ _ _ closed _ _ (_,_,_,slot) _ _ _ _ _) action = mask $ \restore -> do
+  readIORef closed >>= \done -> when done (throwIO StoreClosed)
+  acquired <- Admission.newDeadline >>= \end -> Admission.takeWithin end slot
+  case acquired of
+    Nothing -> throwIO StoreBusy
+    Just () -> restore action `finally` putMVar slot ()
 
 -- | One ordinary file operation, joined by store close. It waits for the file
 -- slot within a fresh five-second allowance, and a slot that stays held for
@@ -780,30 +805,42 @@ withStoreRetentionRoot store@(CoordinationStore installed _ _ _ _ _ _ _ _ _ _ _ 
 -- database. The retained root and duplicated lease cannot escape this
 -- callback's lifetime.
 withStoreFiles :: CoordinationStore -> (PrivateRoot -> IO a) -> IO a
-withStoreFiles store action = acquireStoreFiles WaitWithinBudget store action >>= maybe (throwIO StoreBusy) pure
+withStoreFiles store action = withStoreFileLoan store (const action)
+
+-- | The same file operation, with its release action. A response owner that
+-- materializes under the file slot calls the release before its first network
+-- write, so a slow send never holds the slot. The retained root is closed by
+-- that release and must not be used after it. The scope end releases the slot
+-- when the callback did not.
+withStoreFileLoan :: CoordinationStore -> (IO () -> PrivateRoot -> IO a) -> IO a
+withStoreFileLoan store action = acquireStoreFiles WaitWithinBudget store action >>= maybe (throwIO StoreBusy) pure
 
 -- | One file operation for coordinator work that does not wait for the slot.
 -- Nothing proves that the file guard was not acquired. Failures from acquisition or the entered
 -- callback propagate unchanged and never become a deferred action.
 tryWithStoreFiles :: CoordinationStore -> (PrivateRoot -> IO a) -> IO (Maybe a)
-tryWithStoreFiles = acquireStoreFiles FailFast
+tryWithStoreFiles store action = acquireStoreFiles FailFast store (const action)
 
 -- | Take the file slot under the admission policy. Nothing proves that the
 -- slot was not taken, so the action did not run.
-acquireStoreFiles :: StoreAdmission -> CoordinationStore -> (PrivateRoot -> IO a) -> IO (Maybe a)
-acquireStoreFiles policy store@(CoordinationStore _ root _ _ _ closed _ lease (files,_,_) _ _ _ _ _) action = mask $ \restore -> do
+acquireStoreFiles :: StoreAdmission -> CoordinationStore -> (IO () -> PrivateRoot -> IO a) -> IO (Maybe a)
+acquireStoreFiles policy store@(CoordinationStore _ root _ _ _ closed _ lease (files,_,_,_) _ _ _ _ _) action = mask $ \restore -> do
   readIORef closed >>= \done -> when done (throwIO StoreClosed)
   acquired <- case policy of
     FailFast -> tryTakeMVar files
     WaitWithinBudget -> Admission.newDeadline >>= \end -> Admission.takeWithin end files
   case acquired of
     Nothing -> pure Nothing
-    Just () -> (Just <$> bracket acquire release (\(retained, _) -> restore (action retained))) `finally` putMVar files ()
+    Just () -> do
+      slot <- Admission.releaseOnce (putMVar files ())
+      (do
+        (retained, copied) <- acquire
+        release <- Admission.releaseOnce ((closePrivateRoot retained `finally` closeFd copied) `finally` slot)
+        Just <$> restore (action release retained) `finally` release) `finally` slot
   where
     acquire = admitted store $ bracketOnError (openPrivateSubroot root []) closePrivateRoot $ \retained -> do
       copied <- duplicateLease lease
       pure (retained, copied)
-    release (retained, copied) = closePrivateRoot retained `finally` closeFd copied
 
 -- | A bounded materialization lifetime at the existing file/read owner. Acquisition
 -- uses current configuration, but neither configuration nor SQL is held by a reader.
@@ -817,7 +854,13 @@ acquireStoreFiles policy store@(CoordinationStore _ root _ _ _ closed _ lease (f
 -- the Store gate, so the readers that hold places keep their access. A full
 -- reader capacity for the whole allowance is 'StoreLimit'.
 withStoreReader :: CoordinationStore -> IO a -> IO a
-withStoreReader store@(CoordinationStore _ _ _ _ _ _ _ _ (_,readers,_) _ _ _ _ _) action = mask $ \restore -> do
+withStoreReader store action = withStoreReaderLoan store (const action)
+
+-- | The same reader charge, with its release action. A response owner calls
+-- the release after materialization and before its first network write, so
+-- a slow send never holds a reader place.
+withStoreReaderLoan :: CoordinationStore -> (IO () -> IO a) -> IO a
+withStoreReaderLoan store@(CoordinationStore _ _ _ _ _ _ _ _ (_,readers,_,_) _ _ _ _ _) action = mask $ \restore -> do
   end <- Admission.newDeadline
   let admit = do
         result <- withStoreConfiguration store $ \limits _ -> admitted store $ atomically $ do
@@ -838,7 +881,8 @@ withStoreReader store@(CoordinationStore _ _ _ _ _ _ _ _ (_,readers,_) _ _ _ _ _
                 atomically $ (readTVar readers >>= \count -> check (count < seen)) `orElse` (readTVar expired >>= check)
                 admit
   admit
-  restore action `finally` atomically(modifyTVar' readers (subtract 1))
+  release <- Admission.releaseOnce (atomically(modifyTVar' readers (subtract 1)))
+  restore (action release) `finally` release
 
 -- | Refuse with a declared Store failure after one private record of the
 -- distinct internal cause that it replaces.
@@ -853,27 +897,36 @@ data AuthorizationWatch = AuthorizationWatch !CoordinationStore !(TVar (Maybe Wo
 withStoreAuthorizationWatch :: CoordinationStore -> (AuthorizationWatch -> IO a) -> IO a
 withStoreAuthorizationWatch store action = withStoreReader store (withAuthorizationWatch store action)
 
--- | One charged response whose watch expires before its configuration loan ends.
+-- | One charged response. The reader charge and the configuration loan cover
+-- materialization. The release action passed to the callback returns both
+-- loans, configuration first, and a response calls it before its first
+-- network write. The watch stays registered until the callback returns, so it
+-- spans every write as an authorization token only. After the release, each
+-- revalidation acquires a new reader charge and configuration loan for the
+-- duration of its check alone. The scope end returns any loan that the
+-- callback did not release.
 withStoreConfigurationWatch :: CoordinationStore
-  -> (AuthorizationWatch -> ConfigurationLimits -> [PublicProfile] -> IO a) -> IO (Either Diagnostic a)
-withStoreConfigurationWatch store action = withStoreReader store $
-  withStoreConfiguration store $ \limits profiles ->
-    withAuthorizationWatch store $ \watch -> action watch limits profiles
+  -> (IO () -> AuthorizationWatch -> ConfigurationLimits -> [PublicProfile] -> IO a) -> IO (Either Diagnostic a)
+withStoreConfigurationWatch store@(CoordinationStore installed _ _ _ _ _ _ _ _ _ _ _ _ _) action =
+  withStoreReaderLoan store $ \reader ->
+    withConfigurationLoan installed $ \configuration limits profiles _ _ ->
+      withAuthorizationWatch store $ \watch -> action (configuration >> reader) watch limits profiles
 
--- | One charged catalogue response under the same configuration and watch
--- lifetime. Catalogue consumers do not reacquire the configuration guard.
+-- | One charged catalogue response under the same loans, release action and
+-- watch lifetime.
 withStoreCataloguesWatch :: CoordinationStore
-  -> (AuthorizationWatch -> ConfigurationLimits -> [PublicProfile] -> [(Text, Discovery)] -> IO a)
+  -> (IO () -> AuthorizationWatch -> ConfigurationLimits -> [PublicProfile] -> [(Text, Discovery)] -> IO a)
   -> IO (Either Diagnostic a)
-withStoreCataloguesWatch store action = withStoreCatalogueContextWatch store $ \watch limits profiles catalogues _ ->
-  action watch limits profiles catalogues
+withStoreCataloguesWatch store action = withStoreCatalogueContextWatch store $ \release watch limits profiles catalogues _ ->
+  action release watch limits profiles catalogues
 
 withStoreCatalogueContextWatch :: CoordinationStore
-  -> (AuthorizationWatch -> ConfigurationLimits -> [PublicProfile] -> [(Text, Discovery)] -> [(Text,FrontendInvocation)] -> IO a)
+  -> (IO () -> AuthorizationWatch -> ConfigurationLimits -> [PublicProfile] -> [(Text, Discovery)] -> [(Text,FrontendInvocation)] -> IO a)
   -> IO (Either Diagnostic a)
 withStoreCatalogueContextWatch store@(CoordinationStore installed _ _ _ _ _ _ _ _ _ _ _ _ _) action =
-  withStoreReader store $ withConfigurationCatalogueContext installed $ \limits profiles catalogues invocations ->
-    withAuthorizationWatch store $ \watch -> action watch limits profiles catalogues invocations
+  withStoreReaderLoan store $ \reader ->
+    withConfigurationLoan installed $ \configuration limits profiles catalogues invocations ->
+      withAuthorizationWatch store $ \watch -> action (configuration >> reader) watch limits profiles catalogues invocations
 
 -- | Reborrow configuration under the original watch's already charged reader.
 -- The caller retains that original scope throughout the call. The child watch
@@ -888,7 +941,7 @@ withStoreCataloguesBorrowed original@(AuthorizationWatch store _ _ _) action = d
     withAuthorizationWatch store $ \watch -> action store watch limits profiles catalogues
 
 withAuthorizationWatch :: CoordinationStore -> (AuthorizationWatch -> IO a) -> IO a
-withAuthorizationWatch store@(CoordinationStore _ _ _ _ _ _ _ _ (_,_,cell) _ _ _ _ _) action =
+withAuthorizationWatch store@(CoordinationStore _ _ _ _ _ _ _ _ (_,_,cell,_) _ _ _ _ _) action =
   bracket acquire release action
   where
     acquire = atomically (readTVar cell) >>= maybe (throwIO StoreClosed)
@@ -963,11 +1016,11 @@ awaitAuthorizationChange (AuthorizationWatch _ cell revision active) = do
     check (not live || current /= Just expected)) `orElse` (readTVar timer >>= check)
 
 advanceAuthorization :: CoordinationStore -> IO ()
-advanceAuthorization (CoordinationStore _ _ _ _ _ _ _ _ (_,_,cell) _ _ _ _ _) = atomically $
+advanceAuthorization (CoordinationStore _ _ _ _ _ _ _ _ (_,_,cell,_) _ _ _ _ _) = atomically $
   modifyTVar' cell (>>= \revision -> if revision == maxBound then Nothing else Just (revision + 1))
 
 invalidateAuthorization :: CoordinationStore -> IO ()
-invalidateAuthorization (CoordinationStore _ _ _ _ _ _ _ _ (_,_,cell) _ _ _ _ _) =
+invalidateAuthorization (CoordinationStore _ _ _ _ _ _ _ _ (_,_,cell,_) _ _ _ _ _) =
   atomically (writeTVar cell Nothing)
 
 -- | One admission owner, separate from the physical worker registration ceiling.
