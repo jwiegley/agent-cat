@@ -84,8 +84,9 @@ boundary = len(sys.argv) == 6 and sys.argv[5] == BOUNDARY
 # section 7 through the running protected manager: multi-page sets and their
 # exact ETags, token binding and expiry, the per-client quota, a concurrent
 # mutation, revocation, an interrupted send, the aggregate bound,
-# redaction, and concurrent artifact downloads of two credentials. Each
-# numbered case prints its own PASS line. It runs one manager
+# redaction, concurrent artifact downloads of two credentials, and the
+# legacy entry of a bound local retention root. Each numbered case prints its
+# own PASS line. It runs one manager
 # lifetime and does not enter the restart loop.
 PAGES = "pages"
 pages_mode = len(sys.argv) == 6 and sys.argv[5] == PAGES
@@ -155,6 +156,13 @@ if collections:
 PAGES_ENVIRONMENT_MARKER = "acatpagesenvironment" + secrets.token_hex(16)
 if pages_mode:
     configuration["limits"]["globalPageSets"] = 8
+# The pages mode also configures one local retention root. A local frontend
+# run writes one completed run into it before the manager starts, and the
+# manager serves it through --legacy-history as a read-only legacy entry.
+LEGACY_ROOT = work / "legacy"
+if pages_mode:
+    LEGACY_ROOT.mkdir(mode=0o700)
+    configuration["localRetentionRoots"] = [str(LEGACY_ROOT)]
 if mixed:
     adapters = work / "adapters"
     adapters.mkdir(mode=0o700)
@@ -1654,6 +1662,42 @@ if boundary:
     raise SystemExit(0)
 
 
+def legacy_frontend_run():
+    """Complete one scripted prompt-source run through the local frontend
+    session of the runner, with the legacy retention root as its state
+    directory. The frontend writes a version-2 supervisor manifest and a
+    runtime store with a result. Returns the run directory."""
+    workspace = work / "legacy-workspace"
+    workspace.mkdir(mode=0o700)
+    environment = {key: value for key, value in os.environ.items() if not key.startswith("AGENT_CAT_")}
+    environment["XDG_CONFIG_HOME"] = str(workspace / "config")
+    prepare = {"version": 1, "operation": "prepare", "workflow": "prompt-source", "stateDirectory": str(LEGACY_ROOT),
+               "targetArguments": ["--scripted"],
+               "inputs": [{"name": "input", "source": "literal", "value": "legacy history fixture"}]}
+    with (work / "legacy-frontend.stderr").open("wb") as errors:
+        process = subprocess.Popen([str(runner), "frontend"], cwd=workspace, env=environment,
+                                   stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=errors)
+        try:
+            process.stdin.write(json.dumps(prepare).encode() + b"\n")
+            process.stdin.flush()
+            preview = json.loads(process.stdout.readline())
+            assert preview["operation"] == "prepared", ("legacy frontend preparation", preview)
+            process.stdin.write(json.dumps({"version": 1, "operation": "start",
+                                            "approvalId": preview["approvalId"]}).encode() + b"\n")
+            process.stdin.flush()
+            frames = [json.loads(line) for line in process.stdout]
+            assert process.wait(timeout=60) == 0, ("legacy frontend exit", process.returncode)
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.wait()
+    assert frames and frames[-1]["event"]["type"] == "run.completed", ("legacy frontend run", frames[-1:])
+    directory = LEGACY_ROOT / "runs" / preview["runId"]
+    manifest = json.loads((directory / "supervisor-manifest.json").read_bytes())
+    assert manifest["frontendManifestVersion"] == 2 and "invocation" not in manifest
+    return directory
+
+
 def page_checks():
     """WM-025 page and read verification through the real HTTPS manager,
     numbered as in the B13 requirement. Each case prints one PASS line."""
@@ -1751,8 +1795,18 @@ def page_checks():
             connection.close()
 
     environment = dict(os.environ)
+    legacy_run = legacy_frontend_run()
+    legacy_result = (legacy_run / "runtime" / "result.json").read_bytes()
+    # A binding of a path that is not a configured retention root refuses
+    # the start before the listener opens.
+    unbound = subprocess.run([str(runner), "--manager", "serve", "--config", str(config),
+                              "--legacy-history", str(work / "unconfigured") + "=profile_1"],
+                             capture_output=True, env=environment, timeout=60)
+    assert unbound.returncode == 1 and b"manager configuration or HTTPS listener is unavailable" in unbound.stderr, (
+        "unconfigured legacy root", unbound.returncode, unbound.stderr[-400:])
     with (work / "server-0.stdout").open("wb") as output, (work / "server-0.stderr").open("wb") as errors:
         process = subprocess.Popen([str(runner), "--manager", "serve", "--config", str(config),
+                                    "--legacy-history", f"{LEGACY_ROOT}=profile_1",
                                     "+RTS", "-N" + native, "-RTS"], stdout=output, stderr=errors, env=environment)
         try:
             wait_ready(process)
@@ -1974,6 +2028,67 @@ def page_checks():
                         "concurrent download bytes", number, slot)
             print(f"PASS pages case 9: in {rounds} rounds, two credentials downloaded the same artifact at the same time",
                   "through the running manager, and both received its exact verified bytes", flush=True)
+
+            # Case 10. The legacy entry of the bound retention root.
+            run_pages = whole("/v1/runs", authorized, "RunPage")
+            union(run_pages)
+            items = [item for value in run_pages for item in value["items"]]
+            assert [item["id"] for item in items] == sorted(item["id"] for item in items), "run collection order"
+            legacy = [item for item in items if item.get("supervision") == "observer"]
+            assert len(legacy) == 1, ("one legacy entry", [item.get("supervision") for item in items])
+            entry = legacy[0]
+            validate("Run", entry)
+            assert entry["id"] != run and entry["profileId"] == "profile_1" and entry["requestId"] is None
+            assert entry["manifest"] == {"kind": "versioned", "frontendManifestVersion": 2}, entry["manifest"]
+            assert entry["runtime"]["status"] == "succeeded" and entry["integrity"] == "valid", (entry["runtime"], entry["integrity"])
+            assert entry["verification"]["state"] == "referenced", entry["verification"]
+            assert entry["workflowId"] == next(item["id"] for item in catalogue["items"] if item["name"] == "prompt-source")
+            base = "/v1/runs/" + entry["id"]
+            status, detail, raw, received = fetch(base, authorized)
+            assert status == 200, ("legacy detail", status, detail.get("code"))
+            validate("Run", detail, raw)
+            assert detail == entry, ("legacy detail differs from its collection item", detail, entry)
+            assert received.get("etag") == representation_tag(base, raw), ("legacy detail ETag", received.get("etag"))
+            status, again, _, _ = fetch(base, authorized)
+            assert status == 200 and again == detail, "a second legacy detail read differs"
+            connection = http.client.HTTPSConnection("127.0.0.1", port, context=context, timeout=7)
+            try:
+                connection.request("GET", "/v1/artifacts/" + entry["verification"]["artifactId"],
+                                   headers=authorized | {"Accept": "application/octet-stream"})
+                response = connection.getresponse()
+                downloaded = response.read(len(legacy_result) + 1)
+                assert response.status == 200 and response.getheader("Content-Type") == "application/octet-stream", (
+                    "legacy result download", response.status)
+            finally:
+                connection.close()
+            assert downloaded == legacy_result, "legacy result bytes"
+            tag = '"' + entry["revision"] + '"'
+            key = capabilities["authorityEpoch"] + "." + secrets.token_urlsafe(16)
+            status, value, _, _ = exchange(base + "/control", authorized | {
+                "Content-Type": "application/json", "Idempotency-Key": key, "If-Match": tag},
+                method="POST", payload=b'{"operation":"cancel"}')
+            assert status == 403 and value["code"] == "insufficient-scope", ("legacy control", status, value.get("code"))
+            for path in (base + "/control", base + "/snapshot", base + "/outputs", base + "/exports",
+                         base + "/lineage-requests", "/v1/decisions?runId=" + entry["id"]):
+                status, value, _, _ = exchange(path, authorized)
+                assert status == 403 and value["code"] == "insufficient-scope", ("legacy run resource", path, status, value.get("code"))
+            connection = http.client.HTTPSConnection("127.0.0.1", port, context=context, timeout=7)
+            try:
+                connection.request("POST", base, body=b"{}", headers=authorized | {"Content-Type": "application/json"})
+                response = connection.getresponse()
+                response.read(65536)
+                assert response.status == 405, ("legacy run mutation", response.status)
+            finally:
+                connection.close()
+            status, value, _, _ = exchange(base, other_authorized)
+            assert status == 404 and value["code"] == "unavailable-resource", ("legacy entry of another profile", status, value.get("code"))
+            status, after, _, _ = fetch(base, authorized)
+            assert status == 200 and after == detail, "a refused mutation changed the legacy entry"
+            (work / "legacy-run.json").write_bytes(raw)
+            print("PASS pages case 10: /v1/runs listed the legacy entry of the bound retention root in identifier order;",
+                  "the item and GET", "/v1/runs/{id}", "were equal and schema-valid, its result downloaded with the exact",
+                  "retained bytes, a control POST and every run subresource returned 403 insufficient-scope, a POST",
+                  "to the run returned 405, and another profile's credential received 404", flush=True)
         finally:
             if process.poll() is None:
                 process.terminate()

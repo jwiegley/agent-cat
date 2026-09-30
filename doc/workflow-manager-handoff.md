@@ -253,11 +253,12 @@ follow-up item, `acat-phase-b1-review-followups-dk1v`.
   overview lists and the decision collection refuse with `view-too-large`
   above 1024 live items. `doc/api/README.md` states the windows. The open
   C6 audit findings are in `acat-c6-keyset-windows-fess-findings-7ufp`.
-- Medium, not filed. The service binds no legacy retention root, so
-  `/v1/runs` lists no legacy history entry. Only the native
-  `manager-history-check` shows the history read path. WM-025 stays open
-  until the service binds the retention roots read-only or an explicit
-  deferral is recorded.
+- Medium, resolved by Phase B part 2 subtask C7. The service bound no
+  legacy retention root. It now binds configured roots read-only through
+  the `--legacy-history ROOT=PROFILE` option of `--manager serve`.
+  `/v1/runs` and `/v1/runs/{id}` serve their entries, and case 10 of the
+  `pages` mode of `manager/test/service_http.py` checks them through the
+  running manager.
 - Medium. The Name Constraints check has no scenario for `rfc822Name`, URI
   or `directoryName` subtrees, distance fields, an undecodable extension or
   subjectAltName, or a constrained `caFile` certificate off the path. This
@@ -292,7 +293,7 @@ follow-up item, `acat-phase-b1-review-followups-dk1v`.
 | --- | --- | --- |
 | WM-023 (`acat-wm-023-d20b`) | Met, with the scope-change item shrunk | `B/B8/impl-r1`, gate steps 7 and 11 |
 | WM-024 (`acat-wm-024-28bb`) | Met, with the non-loopback peer and IP Name Constraints acceptance outside part 1 | `B/B9/impl-r1`, `B/B10/impl-r1`, gate steps 10 and 11 |
-| WM-025 (`acat-wm-025-3utw`) | Partial: the frozen resources are met, the route items wait for B15 to B17, and legacy history is not served | `B/B11` to `B/B13`, gate step 11 |
+| WM-025 (`acat-wm-025-3utw`) | Partial: the frozen resources and served legacy history are met, and the route items wait for B15 to B17 | `B/B11` to `B/B13`, gate step 11 |
 | WM-026 (`acat-wm-026-qo1e`) | Met for `/v1/events`, and route SSE waits for B16 | `B/B14/impl-r1`, `B/B7/impl-r1`, gate steps 8, 9 and 11 |
 | Increment 2 (`acat-en4g`) | Gated by operator review | `doc/research/actor-flow-route-threat-model.md` |
 | `acat-response-ingestion-budget-zaoi` | Met and closed | `B/B5/impl-r2`, `B/B6/impl-r1`, `B/B7/impl-r1`, gate step 8 |

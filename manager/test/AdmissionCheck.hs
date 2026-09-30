@@ -1035,7 +1035,7 @@ serviceFaultChecks work native source python=do
             statement<-SQL.prepare database "SELECT count(*) FROM reservations WHERE state='released'"
             (SQL.step statement>>SQL.columns statement) `finally` SQL.finalize statement
           unless(rows==[SQL.SQLInteger 1])(threadDelay 1000>>released)
-    (_,recorded)<-withPrivateStderr captured $ Service.withService owner $ \_->await released
+    (_,recorded)<-withPrivateStderr captured $ Service.withService owner [] $ \_->await released
     reservation<-scalarText owner "SELECT id FROM reservations"
     number owner "SELECT count(*) FROM reservations WHERE state!='released'" >>=assertion "a failed service preparation releases its reservation" . (==0)
     assertion "the admission owner records the worker cause of a failed preparation"
@@ -1062,7 +1062,7 @@ serviceFaultChecks work native source python=do
     (observed,recorded)<-withPrivateStderr pollCaptured $
       bracket(SQL.open(T.pack(root </> "coordination.sqlite3")))SQL.close $ \database->do
         SQL.exec database "BEGIN IMMEDIATE"
-        Service.withService owner $ \service->do
+        Service.withService owner [] $ \service->do
           fault<-await(faulted service)
           SQL.exec database "ROLLBACK"
           pure fault
@@ -1105,7 +1105,7 @@ serviceFaultChecks work native source python=do
             released=rawRows "SELECT count(*) FROM reservations WHERE state='released'" []
               >>= \rows->unless(rows==[[SQL.SQLInteger 1]])(threadDelay 1000>>released)
             writable statement=bracket(SQL.open(T.pack(root </> "coordination.sqlite3")))SQL.close(`SQL.exec` statement)
-        (receipt,recorded)<-withPrivateStderr(work </> (name<>"-stderr.log")) $ Service.withService owner $ \service->do
+        (receipt,recorded)<-withPrivateStderr(work </> (name<>"-stderr.log")) $ Service.withService owner [] $ \service->do
           (ident,precondition,approval)<-await published
           writable trigger
           -- The service publishes the preparation row before it holds the
@@ -1189,7 +1189,7 @@ serviceFaultChecks work native source python=do
     unbound<-rewrite "DELETE FROM request_restart_bindings WHERE request_id=?" []
     corrupted<-rewrite "UPDATE requests SET workflow_id=CAST(X'C0FF' AS TEXT) WHERE id=? AND phase='queued'" []
     assertion "the separate connection stores undecodable text in the queued request" (unbound==1 && corrupted==1)
-    (observed,recorded)<-withPrivateStderr decodingCaptured $ Service.withService owner $ \service->do
+    (observed,recorded)<-withPrivateStderr decodingCaptured $ Service.withService owner [] $ \service->do
       fault<-await(faulted service)
       restored<-rewrite "UPDATE requests SET workflow_id=? WHERE id=?" [SQL.SQLText workflow]
       unless(restored==1)(error "the separate connection did not restore the queued request")
@@ -1498,7 +1498,7 @@ flowRelayChecks work native = do
   (stream,root,requestA,runA,nativeA,approveA,cancelA,withdrawB,nativeB,requestC,nativeC,(withdrawDraft,requestDraft),(approveE,nativeE)) <-
     withFixtureOpening (withServingStoreWith Runtime.strictFlowCodec (Just fault)) work native [] "flow-relay" 3 [("a",[])] $ \fixture@(Fixture root _ owner _ _) -> do
       stream <- storeStreamId <$> storeIdentity owner
-      Service.withService owner $ \service -> do
+      Service.withService owner [] $ \service -> do
         -- An approval yields its command, its receipt and the start relay.
         (draftA,approvedA) <- flowPrepared fixture service "flow_relay_a" >>= \(draft,ident,precondition,approval) ->
           (,) draft <$> flowApprove fixture service "flow_relay_a" ident precondition approval
@@ -1618,7 +1618,7 @@ flowRelayChecks work native = do
           _ -> record
   withFixtureOpening (withServingStoreWith lossy Nothing) work native [] "flow-relay-lossy" 1 [("a",[])] $ \fixture@(Fixture lossyRoot _ owner _ _) -> do
     lossyStream <- storeStreamId <$> storeIdentity owner
-    Service.withService owner $ \service -> do
+    Service.withService owner [] $ \service -> do
       (draftD,identD,preconditionD,approvalD) <- flowPrepared fixture service "flow_relay_d"
       _ <- flowApprove fixture service "flow_relay_d" identD preconditionD approvalD >>= right
       (runD,nativeD) <- flowRun owner (draftId draftD)

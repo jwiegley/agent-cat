@@ -14,7 +14,7 @@ import Agentic.Manager.Authorization
 import Agentic.Manager.Drafts (readDraftAt)
 import Agentic.Manager.Fault (FaultClass (InternalFault), ManagerFault (DeadlineElapsed), refuseStorageUnavailable)
 import qualified Agentic.Manager.Events as Events
-import Agentic.Manager.History (managedRunInView)
+import Agentic.Manager.History (LegacyRun (..), managedRunInView)
 import Agentic.Manager.Pages (Producer (..), Window (..))
 import Agentic.Manager.Profile (ConfigurationLimits, publicId)
 import qualified Agentic.Manager.Protocol.Command as C
@@ -28,6 +28,7 @@ import Data.Aeson (Value, object, toJSON, (.=))
 import qualified Data.Aeson.Key as Key
 import Data.Aeson.Types (Pair)
 import qualified Data.ByteString as BS
+import qualified Data.Map.Strict as Map
 import Data.Maybe (fromMaybe, listToMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -36,10 +37,10 @@ import qualified Database.SQLite3 as SQL
 import System.Timeout (timeout)
 
 -- | One frozen paged read collection. 'Requests' lists every request of the
--- authorized profiles and 'Runs' every managed run, both in identifier order
--- and in keyset windows. 'Decisions' without a run lists the pending run
--- heads in manager observation order, and with a run lists the pending FIFO
--- queue of that run.
+-- authorized profiles and 'Runs' every managed run and every supplied legacy
+-- entry of those profiles, both in identifier order and in keyset windows.
+-- 'Decisions' without a run lists the pending run heads in manager
+-- observation order, and with a run lists the pending FIFO queue of that run.
 data Collection = Requests | Runs | Decisions !(Maybe Text)
 
 -- | The most identifiers of one keyset window, and the most live items of
@@ -50,8 +51,9 @@ windowSize = 1024
 -- The overview graph, or one collection of its members.
 data Source = Overview | Members !Collection
 
--- The kind of one graph member. Its word is the overview tag.
-data Kind = RequestKind | PreparationKind | RunKind | DecisionKind
+-- The kind of one graph member. Its word is the overview tag. A legacy run
+-- is a member of the run collection only.
+data Kind = RequestKind | PreparationKind | RunKind | LegacyRunKind | DecisionKind
 
 instance NFData Kind where
   rnf kind = kind `seq` ()
@@ -61,6 +63,7 @@ kindWord kind = case kind of
   RequestKind -> "request"
   PreparationKind -> "preparation"
   RunKind -> "run"
+  LegacyRunKind -> "run"
   DecisionKind -> "decision"
 
 -- | Reservation precedes the supplied materializer. The original reader and
@@ -78,7 +81,7 @@ withOverviewSource = withOverviewSourceWithin 5000000
 withOverviewSourceWithin :: Int -> CoordinationStore -> CredentialProof -> Maybe Admission
   -> (AuthorizedView -> ConfigurationLimits -> IO (Text,[Pair],[Value]) -> IO a) -> IO a
 withOverviewSourceWithin allowance store proof admission action =
-  withSourceWithin allowance windowSize Overview store proof admission $ \view limits materialize ->
+  withSourceWithin allowance windowSize Overview store proof admission [] $ \view limits materialize ->
     action view limits $ do
       (revision, fields, _, Window items _) <- materialize Nothing
       pure (revision, fields, items)
@@ -88,25 +91,29 @@ withOverviewSourceWithin allowance store proof admission action =
 -- A run selector that names no run of an authorized profile refuses with
 -- `forbidden`, as the detail resources do. Each window of a request or run
 -- collection has its own boundary, and the total counts the members at the
--- boundary of the first window.
-withCollectionSource :: CoordinationStore -> CredentialProof -> Maybe Admission -> Collection
+-- boundary of the first window. The run collection merges the supplied legacy
+-- entries into the same identifier order and keyset condition, and lists
+-- those of the authorized profiles. The other collections ignore them. The
+-- caller retains the legacy entries before the source takes its loans, so no
+-- window writes to the Store.
+withCollectionSource :: CoordinationStore -> CredentialProof -> Maybe Admission -> [LegacyRun] -> Collection
   -> (AuthorizedView -> ConfigurationLimits -> Producer -> IO a) -> IO a
 withCollectionSource = withCollectionSourceWindow windowSize
 
 -- | 'withCollectionSource' with an explicit window size. Only tests choose a
 -- size other than 'windowSize'.
-withCollectionSourceWindow :: Int -> CoordinationStore -> CredentialProof -> Maybe Admission -> Collection
+withCollectionSourceWindow :: Int -> CoordinationStore -> CredentialProof -> Maybe Admission -> [LegacyRun] -> Collection
   -> (AuthorizedView -> ConfigurationLimits -> Producer -> IO a) -> IO a
-withCollectionSourceWindow window store proof admission collection action =
-  withSourceWithin 5000000 window (Members collection) store proof admission $ \view limits materialize ->
+withCollectionSourceWindow window store proof admission legacy collection action =
+  withSourceWithin 5000000 window (Members collection) store proof admission legacy $ \view limits materialize ->
     action view limits $
       Producer (materialize Nothing) (\after -> (\(_, _, _, members) -> members) <$> materialize (Just after))
 
 -- The materializer takes the last identifier of the previous window, and
 -- returns the revision, fields and total of its boundary with one window.
-withSourceWithin :: Int -> Int -> Source -> CoordinationStore -> CredentialProof -> Maybe Admission
+withSourceWithin :: Int -> Int -> Source -> CoordinationStore -> CredentialProof -> Maybe Admission -> [LegacyRun]
   -> (AuthorizedView -> ConfigurationLimits -> (Maybe Text -> IO (Text,[Pair],Int,Window)) -> IO a) -> IO a
-withSourceWithin allowance window source store proof admission action = withStoreFileLoan store $ \files root ->
+withSourceWithin allowance window source store proof admission legacy action = withStoreFileLoan store $ \files root ->
   withAuthorizedCatalogueContext store proof [C.Observe] $ \view limits visible _ invocations -> do
     attachResponseLoan view files
     action view limits $ \after -> do
@@ -121,6 +128,8 @@ withSourceWithin allowance window source store proof admission action = withStor
       revision <- authorizedCursorRevision view
       let publicProfiles = map publicId profiles
           allowed = SQL.SQLText (TE.decodeUtf8 (C.encoded publicProfiles))
+          legacyVisible = Map.fromList [(legacyRunId entry, legacyRunValue entry) | entry <- legacy,
+            legacyRunProfile entry `elem` publicProfiles]
       queue <- case source of
         Members (Decisions (Just run)) -> do
           association <- resolveRun store proof [C.Observe] run
@@ -138,18 +147,22 @@ withSourceWithin allowance window source store proof admission action = withStor
             when (length found > window) (refuseTransaction C.ViewTooLarge)
             pure found
           -- One keyset window of a request or run table in identifier order,
-          -- with the member count of the table at the first window.
-          keyset kind table = do
+          -- with the member count of the table at the first window. The
+          -- extra members are merged into the same order under the same
+          -- keyset condition, and the total counts them.
+          keyset kind table extra = do
             found <- case after of
               Nothing -> ids (window + 1) ("SELECT id FROM " <> table <> profileFilter <> " ORDER BY id") [allowed]
               Just previous -> ids (window + 1) ("SELECT id FROM " <> table <> profileFilter <> " AND id>? ORDER BY id")
                 [allowed, SQL.SQLText previous]
             total <- case after of
-              Nothing -> Just <$> count ("SELECT count(*) FROM " <> table <> profileFilter) [allowed]
+              Nothing -> Just . (+ length extra) <$> count ("SELECT count(*) FROM " <> table <> profileFilter) [allowed]
               Just _ -> pure Nothing
-            let kept = take window found
-                continuation = if length found > window then listToMaybe (reverse kept) else Nothing
-            pure (tag kind kept, total, continuation)
+            let following = [member | member@(_, ident) <- extra, maybe True (ident >) after]
+                merged = take (window + 1) (mergeMembers (tag kind found) following)
+                kept = take window merged
+                continuation = if length merged > window then snd <$> listToMaybe (reverse kept) else Nothing
+            pure (kept, total, continuation)
           whole kind found = (tag kind found, Nothing, Nothing)
           identifiers = case (source, queue) of
             (Overview, _) -> do
@@ -159,8 +172,8 @@ withSourceWithin allowance window source store proof admission action = withStor
               decisions <- live "SELECT d.id FROM decisions d JOIN runs r ON r.id=d.run_id WHERE r.profile_id IN (SELECT value FROM json_each(?)) AND d.state IN ('pending','submitting') ORDER BY length(d.observed_order),d.observed_order,d.id"
               pure (tag RequestKind requests <> tag PreparationKind preparations <> tag RunKind runs <> tag DecisionKind decisions,
                 Nothing, Nothing)
-            (Members Requests, _) -> keyset RequestKind "requests"
-            (Members Runs, _) -> keyset RunKind "runs"
+            (Members Requests, _) -> keyset RequestKind "requests" []
+            (Members Runs, _) -> keyset RunKind "runs" (tag LegacyRunKind (Map.keys legacyVisible))
             (Members (Decisions _), Just association) -> whole DecisionKind <$> (decisionQueueIds (window + 1) association >>= bounded)
             (Members (Decisions _), Nothing) -> whole DecisionKind <$> (decisionHeadIds (window + 1) publicProfiles >>= bounded)
           boundary :: NFData b => Transaction b -> IO (Text,Text,b)
@@ -181,6 +194,7 @@ withSourceWithin allowance window source store proof admission action = withStor
             RequestKind -> toJSON <$> readDraftAt store root proof ident
             PreparationKind -> toJSON <$> runRead store (preparationProjection proof profiles ident)
             RunKind -> managedRunInView store root proof view admission invocations ident
+            LegacyRunKind -> maybe (throwIO StoreIntegrity) pure (Map.lookup ident legacyVisible)
             DecisionKind -> do
               association <- resolveDecision store proof [C.Observe] ident
               decisionInView store root proof view association ident
@@ -201,6 +215,14 @@ withSourceWithin allowance window source store proof admission action = withStor
         Overview -> ("overview_" <> digest,
           ["snapshotVersion" .= (1 :: Int),"cursor" .= cursor,"oldestCursor" .= oldest],counted,members')
         Members collection -> (collectionName collection <> "_" <> digest,[],counted,members')
+
+-- Two identifier-ordered member lists in one identifier order.
+mergeMembers :: [(Kind,Text)] -> [(Kind,Text)] -> [(Kind,Text)]
+mergeMembers left [] = left
+mergeMembers [] right = right
+mergeMembers left@(l:ls) right@(r:rs)
+  | snd r < snd l = r : mergeMembers left rs
+  | otherwise = l : mergeMembers ls right
 
 collectionName :: Collection -> Text
 collectionName collection = case collection of

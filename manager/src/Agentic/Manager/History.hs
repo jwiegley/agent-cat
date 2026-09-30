@@ -3,7 +3,8 @@
 
 -- | Bounded retained observations. Neither an opaque handle nor a native address owns a worker.
 module Agentic.Manager.History
-  ( LegacyHistory, bindLegacyHistory, withHistory, withHistoryResult, createHistoryLineage, retainView, verificationValue, managedRunInView ) where
+  ( LegacyHistory, bindLegacyHistory, LegacyRun (..), legacyRuns, legacyRun, withHistory, withHistoryResult, createHistoryLineage,
+    retainView, verificationValue, managedRunInView ) where
 
 import Agentic.Manager.Artifacts (withArtifactDownload)
 import Agentic.Manager.Admission (Admission, ownsHistoryRun)
@@ -23,6 +24,7 @@ import Crypto.Random (getRandomBytes)
 import Data.Aeson (Value (..), object, (.=), toJSON, fromJSON, Result (..))
 import qualified Data.Aeson.KeyMap as KM
 import qualified Data.ByteString as BS
+import Data.List (sortOn)
 import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -92,11 +94,7 @@ withHistory store proof legacy admission respond = bounded $ do
             rendered <- renderManaged runs row (CatalogueCorrupt (privateRootPath runs </> "runs" </> T.unpack native) "")
             foldM appendItem current rendered) (size,items) [(native,row) | (native,row) <- addresses,Set.notMember native seen]
           pure (reverse complete)
-  observed <- foldM (\items binding -> do
-    values <- legacyItems store proof (256-length items) binding
-    let combined = items <> values
-    when (BS.length(C.encoded combined) > 1048576) (throwIO C.ViewTooLarge)
-    pure combined) managed legacy
+  observed <- legacyObserved store proof managed legacy
   items <- mapM (retainView store) observed
   when (length items > 256 || BS.length(C.encoded items) > 1048576) (throwIO C.ViewTooLarge)
   forM_ (Set.toList(Set.fromList [profile | Object fields <- items, Just(String profile) <- [KM.lookup "profileId" fields]])) $ \profile -> do
@@ -118,6 +116,57 @@ withHistory store proof legacy admission respond = bounded $ do
             item <- renderEntry store runs profile ident revision (case workflow of SQL.SQLText value -> Just value; _ -> Nothing) (sqlValue request) (sqlValue parent) (sqlValue lineage) supervisionNow result observed
             pure [item]
         _ -> throwIO StoreIntegrity
+
+-- | One legacy entry of a bound retention root in the frozen Run
+-- representation, with its identifier and profile.
+data LegacyRun = LegacyRun { legacyRunId :: !Text, legacyRunProfile :: !Text, legacyRunValue :: !Value }
+
+-- | The legacy entries of the bound roots of the observable profiles, in
+-- identifier order, with their retained revisions. The same bounds as
+-- 'withHistory' apply: at most 256 entries, 1 MiB encoded and 30 seconds.
+-- Handles, result references and revisions are retained before the entries
+-- return, so a caller renders them without a Store write. Without a binding
+-- the result is empty and nothing is read.
+legacyRuns :: CoordinationStore -> CredentialProof -> [LegacyHistory] -> IO [LegacyRun]
+legacyRuns _ _ [] = pure []
+legacyRuns store proof legacy = bounded $ do
+  observed <- legacyObserved store proof [] legacy
+  items <- mapM (retainView store) observed
+  runs <- mapM (\item -> case item of
+    Object fields | Just (String ident) <- KM.lookup "id" fields, Just (String profile) <- KM.lookup "profileId" fields ->
+      pure (LegacyRun ident profile item)
+    _ -> throwIO StoreIntegrity) items
+  pure (sortOn legacyRunId runs)
+
+-- | The legacy entry with this identifier. The result is 'Nothing' when no
+-- retained legacy entry has the identifier, so the caller reads a managed
+-- run. A retained entry of a root that this service does not bind, or of a
+-- profile that the credential cannot observe, refuses as an unknown run.
+legacyRun :: CoordinationStore -> CredentialProof -> [LegacyHistory] -> Text -> IO (Maybe LegacyRun)
+legacyRun _ _ [] _ = pure Nothing
+legacyRun store proof legacy ident = do
+  roots <- runRead store $ do
+    _ <- currentClient proof >>= either refuseTransaction pure
+    unless (C.validId ident) (refuseTransaction C.InvalidRequest)
+    rows <- query "SELECT root_identity FROM history_entries WHERE id=?" [text ident]
+    mapM (\row -> case row of [SQL.SQLText identity] -> pure identity; _ -> refuseTransaction StoreIntegrity) rows
+  case roots of
+    [] -> pure Nothing
+    [identity] -> do
+      found <- legacyRuns store proof [binding | binding@(LegacyHistory _ _ bound) <- legacy, bound == identity]
+      case [entry | entry <- found, legacyRunId entry == ident] of
+        [entry] -> pure (Just entry)
+        _ -> throwIO C.ResourceUnavailable
+    _ -> throwIO StoreIntegrity
+
+-- The legacy entries of each binding after the given items, within the shared
+-- bounds of one history observation.
+legacyObserved :: CoordinationStore -> CredentialProof -> [Value] -> [LegacyHistory] -> IO [Value]
+legacyObserved store proof = foldM (\items binding -> do
+  values <- legacyItems store proof (256-length items) binding
+  let combined = items <> values
+  when (BS.length(C.encoded combined) > 1048576) (throwIO C.ViewTooLarge)
+  pure combined)
 
 legacyItems :: CoordinationStore -> CredentialProof -> Int -> LegacyHistory -> IO [Value]
 legacyItems store proof limit binding@(LegacyHistory _ profile _) = do

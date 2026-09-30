@@ -4032,6 +4032,35 @@ Non-blocking findings of the fess audit of Phase B part 2 subtask C6 (keyset win
 4. (low) No test covers the expiry renewal at a new window (Pages.hs:162), the branch where a concurrent follower installed the window first (Pages.hs:165-167), the 1024-item refusal of the decision collection and the overview lists, or a multi-window set over HTTP. Fix: add in-process cases for a follow after the original deadline, for two followers of the same token, and for a decision collection above a small W.
 5. (low, no change needed) withCollectionSourceWindow is exported from a production module for tests only (Overview.hs:8-9,96-100). Optionally move it to an internal module.
 
+* TODO [#D] Resolve C7 fess findings on served legacy history
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-c7-legacy-history-fess-findings-vbak
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-30 Wed 12:50]
+:MODIFIED: [2026-09-30 Wed 12:50]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of the fess audit of Phase B part 2 subtask C7 (legacy history entries in GET /v1/runs). Source:
+/Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/fess/b2-C7-r1.md.
+
+1. (medium) No test covers the merge of legacy entries across a keyset window boundary, a continuation that lands on a legacy identifier, or the first-window total that adds the legacy count (manager/src/Agentic/Manager/Overview.hs:327-343). Case 10 of the pages mode has one legacy entry, and the windowed unit test in manager/test/ArtifactCheck.hs:788 passes [] for legacy. Fix: pass interleaved LegacyRun entries with a window size of 2 or 3 in ArtifactCheck.collectionChecks and assert the union, the order, no repeats and the total.
+
+2. (medium) With a binding, more than 256 legacy entries or more than 1 MiB of them make all of GET /v1/runs refuse with view-too-large, so managed runs become unlistable too (manager/src/Agentic/Manager/History.hs:163-172,197-201). Legacy entries are not paged by the keyset. Fix: page legacy entries within the keyset windows, or at least state the whole-collection refusal in manager/README.md.
+
+3. (low) No HTTP check of a lineage draft (POST /v1/requests) that names a legacy entry as parent. By reading, parentAddress (manager/src/Agentic/Manager/Drafts.hs:324-334) reads only the runs table and refuses. Fix: add that case to case 10 and assert the refusal code.
+
+4. (low) A retained entry of a root that an earlier serve bound, but that this serve does not bind, returns 404 from GET /v1/runs/{id}, yet its result artifact still downloads, because artifactDownload (manager/src/Agentic/Manager/Artifacts.hs:137) joins on the persisted history_roots.legacy=1 row. Fix: document it, or pass the service bindings to the legacy download path.
+
+5. (low) Every legacy GET /v1/runs/{id} walks the whole bound root to find one entry (History.hs:189). Fix: look up the entry directly through its history_entries component.
+
+6. (low) The served path shows no limitation marker because the version-2 fixture carries none. Only manager-history-check covers the legacy marker and the unreadable-manifest form. Fix: optionally add a version-1 manifest entry to the pages fixture.
+
 * TODO [#E] Record that the Cabal 3.16.1.0 expectation means cabal-install
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -9226,7 +9255,7 @@ HIGH (deep/alexey): SqZero has no CompleteCSemiring and no PMod P M beyond the d
 :LABELS:   ["workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-30 Wed 05:40]
-:MODIFIED: [2026-09-30 Wed 12:20]
+:MODIFIED: [2026-09-30 Wed 12:50]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -9260,6 +9289,13 @@ Findings of the Phase B part 1 end-of-part review (packages and safety lenses ov
     "author": "johnw",
     "text": "Phase B part 2 subtask C6 resolves the row-bound finding (item 2): GET /v1/requests and /v1/runs now read members in keyset windows of at most 1024 identifiers, a page set holds only its current window, and the overview lists and decision collection refuse view-too-large above 1024 live items. Evidence: build of manager-artifact-check, agentic-run and routing-fixed-point-probe with -ftui-tests; manager-artifact-check collections at -N8 (21 of 21 pass, rerun by fess on the final build); service_http.py pages at N8; make -C doc check; the Phase A journey at N8 (logs in the private resume-20260923 evidence directory; fess report fess/b2-C6-r1.md, non-blocking, findings filed as acat-c6-keyset-windows-fess-findings-7ufp). The issue stays open for its other items.",
     "created_at": "2026-09-30T19:20:38Z"
+  },
+  {
+    "id": 410,
+    "issue_id": "acat-phase-b1-review-followups-dk1v",
+    "author": "johnw",
+    "text": "The unfiled medium item (service binds no legacy retention root) is resolved by Phase B part 2 subtask C7 (--legacy-history ROOT=PROFILE on --manager serve, pages case 10). Follow-ups: acat-c7-legacy-history-fess-findings-vbak.",
+    "created_at": "2026-09-30T19:50:15Z"
   }
 ]
 #+end_src
@@ -16017,7 +16053,7 @@ leak private errors. There is no plaintext bearer development exception.
 :LABELS:   ["p5","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-30 Wed 12:20]
+:MODIFIED: [2026-09-30 Wed 12:50]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-025
 :SOURCE_REPO: agent-cat
@@ -16198,6 +16234,13 @@ through the actual HTTP response path.
     "author": "johnw",
     "text": "Phase B part 2 subtask C6 bounds the request and run collections with keyset windows of 1024 identifiers and frozen-syntax tokens. Evidence: build of manager-artifact-check, agentic-run and routing-fixed-point-probe with -ftui-tests; manager-artifact-check collections at -N8 (21 of 21 pass, rerun by fess on the final build); service_http.py pages at N8; make -C doc check; the Phase A journey at N8 (logs in the private resume-20260923 evidence directory; fess report fess/b2-C6-r1.md, non-blocking, findings filed as acat-c6-keyset-windows-fess-findings-7ufp). WM-025 stays open.",
     "created_at": "2026-09-30T19:20:38Z"
+  },
+  {
+    "id": 409,
+    "issue_id": "acat-wm-025-3utw",
+    "author": "johnw",
+    "text": "Phase B part 2 subtask C7: the running manager now serves legacy retained history read-only. agentic-run --manager serve accepts a repeatable --legacy-history ROOT=PROFILE option, each binding goes through History.bindLegacyHistory at serve start, and GET /v1/runs (merged into the C6 keyset windows) and GET /v1/runs/{id} serve the legacy entries of authorized profiles in the frozen Run representation. Mutation routes refuse them (403 insufficient-scope, POST 405). No schema gap. Evidence: Werror build of manager-history-check, agentic-run and routing-fixed-point-probe with -ftui-tests; manager-history-check at -N8; service_http.py pages at N8 (case 10 lists, validates, compares and downloads the legacy entry with verified bytes); make -C doc check; doc/check-manual-cli.py; Phase A journey at N8. Package stays open for closeout review. Follow-ups: acat-c7-legacy-history-fess-findings-vbak.",
+    "created_at": "2026-09-30T19:50:14Z"
   }
 ]
 #+end_src

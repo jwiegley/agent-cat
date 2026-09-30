@@ -645,6 +645,7 @@ executable manager-admission-check
     Agentic.Manager.Artifacts
     Agentic.Manager.History
     Agentic.Manager.Overview
+    Agentic.Manager.Pages
     Agentic.Manager.Observation
     Agentic.Manager.Events
     Agentic.Manager.State

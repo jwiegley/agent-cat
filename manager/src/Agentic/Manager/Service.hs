@@ -20,7 +20,7 @@ import qualified Agentic.Manager.Overview as Overview
 import Agentic.Manager.Pages (Producer)
 import Agentic.Manager.Commands (submissionReceipt)
 import Data.Aeson.Types (Pair)
-import Agentic.Manager.Profile (ConfigurationLimits)
+import Agentic.Manager.Profile (ConfigurationLimits, publicId)
 import Agentic.Manager.Protocol.Command
 import qualified Agentic.Manager.Protocol.Preparation as P
 import qualified Agentic.Manager.State as State
@@ -53,18 +53,21 @@ data Completion = Completion !(Maybe State.RunAssociation) !(Maybe FaultClass)
 data Owned = Working !A.LivePreparation !(TVar Phase) !(Async Completion)
   | Held !A.LivePreparation !Completion
 
--- | A Store lifetime with at most sixteen retained preparation/ingestion tasks.
+-- | A Store lifetime with at most sixteen retained preparation/ingestion tasks,
+-- and the legacy retention roots that its run resources list read-only.
 data Service = Service
-  { serviceStore :: !CoordinationStore, admission :: !A.Admission,
+  { serviceStore :: !CoordinationStore, admission :: !A.Admission, legacyHistory :: ![History.LegacyHistory],
     stopping :: !(TVar Bool), owned :: !(TVar (Map.Map Text Owned)),
     faultCell :: !(TVar (Maybe FaultClass)), scheduler :: !(TMVar (Async ())) }
 
 serviceFault :: Service -> IO (Maybe FaultClass)
 serviceFault = readTVarIO . faultCell
 
-withService :: CoordinationStore -> (Service -> IO a) -> IO a
-withService current action = A.withAdmission current $ \controller -> mask $ \restore -> do
-  service <- Service current controller <$> newTVarIO False <*> newTVarIO Map.empty
+-- | The service of one Store lifetime. The legacy bindings come from
+-- 'History.bindLegacyHistory' and are never controllable.
+withService :: CoordinationStore -> [History.LegacyHistory] -> (Service -> IO a) -> IO a
+withService current legacy action = A.withAdmission current $ \controller -> mask $ \restore -> do
+  service <- Service current controller legacy <$> newTVarIO False <*> newTVarIO Map.empty
     <*> newTVarIO Nothing <*> newEmptyTMVarIO
   withAsync (restore (schedule service)) $ \driver -> do
     atomically (putTMVar (scheduler service) driver)
@@ -284,16 +287,30 @@ withOverviewSource service proof = Overview.withOverviewSource (serviceStore ser
 
 -- | One frozen request, run or decision collection with this service's
 -- original Admission, so that managed supervision reads as the detail
--- resources read it.
+-- resources read it. The run collection also lists the legacy entries of the
+-- bound retention roots, which are retained before the source takes its loans.
 withCollectionSource :: Service -> CredentialProof -> Overview.Collection
   -> (AuthorizedView -> ConfigurationLimits -> Producer -> IO a) -> IO a
-withCollectionSource service proof = Overview.withCollectionSource (serviceStore service) proof (Just (admission service))
+withCollectionSource service proof collection respond = do
+  legacy <- case collection of
+    Overview.Runs -> History.legacyRuns (serviceStore service) proof (legacyHistory service)
+    _ -> pure []
+  Overview.withCollectionSource (serviceStore service) proof (Just (admission service)) legacy collection respond
 
+-- | One managed run, or one legacy entry of a bound retention root, in the
+-- representation of its run collection item.
 withRun :: Service -> CredentialProof -> Text -> (AuthorizedView -> Value -> IO a) -> IO a
-withRun service proof ident respond = withStoreFileLoan (serviceStore service) $ \files root ->
-  withAuthorizedCatalogueContext (serviceStore service) proof [Observe] $ \view _ _ _ invocations -> do
-    attachResponseLoan view files
-    History.managedRunInView (serviceStore service) root proof view (Just (admission service)) invocations ident >>= respond view
+withRun service proof ident respond = do
+  legacy <- History.legacyRun (serviceStore service) proof (legacyHistory service) ident
+  withStoreFileLoan (serviceStore service) $ \files root ->
+    withAuthorizedCatalogueContext (serviceStore service) proof [Observe] $ \view _ visible _ invocations -> do
+      attachResponseLoan view files
+      case legacy of
+        Just entry -> do
+          unless (History.legacyRunProfile entry `elem` map (publicId . fst) visible) (throwIO ResourceUnavailable)
+          respond view (History.legacyRunValue entry)
+        Nothing ->
+          History.managedRunInView (serviceStore service) root proof view (Just (admission service)) invocations ident >>= respond view
 
 withSnapshot :: Service -> CredentialProof -> Text -> (AuthorizedView -> Observation.SnapshotProjection -> IO a) -> IO a
 withSnapshot service = Observation.withRunSnapshot (serviceStore service)

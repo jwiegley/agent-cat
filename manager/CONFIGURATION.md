@@ -17,6 +17,9 @@ The file is a JSON object with six required fields and one optional field:
 - `version` is the integer 1.
 - `managerRoot` is an absolute path to an existing private manager directory.
 - `localRetentionRoots` lists absolute paths owned by configured local retention.
+  The service lists the runs of such a root only when the
+  `--legacy-history ROOT=PROFILE` option of `RUNNER --manager serve` binds it,
+  as [the manager README](README.md#served-legacy-history) states.
 - `runners` lists installed runner definitions.
 - `limits` contains the configurable fields of the frozen manager Limits contract.
 - `profiles` lists installed profile definitions.

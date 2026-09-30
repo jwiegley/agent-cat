@@ -87,9 +87,8 @@ and associated requests. The run collection lists every managed run of those
 profiles. The decision collection lists the pending run heads that
 `State.decisionHeadIds` selects in manager observation order, or, with a run
 selector, the pending queue that `State.decisionQueueIds` selects for that
-run. The service does not use
-`History.withHistory` and binds no legacy retention root, so the run
-collection does not list legacy entries.
+run. The run collection also lists the legacy entries of the retention
+roots that the service binds, as "Served legacy history" states.
 
 `Pages.withPage` reserves a set for the client, authorization view, path and
 query before the owner materializes it, and keeps the encoded pages until the
@@ -108,6 +107,46 @@ running protected manager: every page of multi-page sets and their ETags, token
 binding and expiry, the per-client quota, a mutation between two pages,
 revocation, a connection reset during a page, the 413 bound and the absence of
 private bytes from every page body.
+
+### Served legacy history
+
+`RUNNER --manager serve --config ABSOLUTE_FILE` accepts the repeatable option
+`--legacy-history ROOT=PROFILE`. ROOT is an absolute path that must be one of
+the configured `localRetentionRoots`, and PROFILE must be a configured profile.
+The profile follows the last equals sign, and each ROOT can appear once. At
+service start, `serveManager` binds each pair through
+`History.bindLegacyHistory`, which records the root in `history_roots` with
+`legacy=1` and refuses a binding of the same root to another profile. A
+binding that fails refuses the start with the configuration diagnostic, and
+the listener does not open. Without the option the service binds no retention
+root, and the run collection lists managed runs only. The service does not
+require a binding for each configured root.
+
+`Service` keeps the bindings. For the run collection, `History.legacyRuns`
+renders the entries of the bound roots of the observable profiles before the
+Overview source takes its loans. It applies the history bounds of 256 entries,
+1 MiB and 30 seconds, and it retains each opaque handle, result reference and
+revision first. Overview then merges these entries into the identifier order
+and keyset condition of the managed runs, lists those of the authorized
+profiles, and counts them in the total. No window writes to the Store.
+`GET /v1/runs/{id}` reads a retained legacy entry through `History.legacyRun`
+and returns the same representation. A retained entry of a root that the
+service does not bind, or of a profile that the credential cannot observe,
+refuses as an unknown run.
+
+A legacy entry uses the frozen Run representation with `observer`
+supervision, a null `requestId`, and the limitations that
+`History.legacyItems` computes. An unreadable legacy manifest gives the
+`unreadable-manifest` form. The frozen Run schema represents every legacy
+entry without a contract change. Its advertised result artifact downloads
+through `Artifacts.artifactDownload`, which rechecks the configured root and
+profile. The control, snapshot, output, export and lineage-request resources
+resolve runs through `State.resolveRun`, which finds no managed run for a
+legacy entry, so they refuse with `insufficient-scope`. Case 10 of the `pages`
+mode of `manager/test/service_http.py` writes one completed run into a
+configured retention root through a local frontend session, serves it with
+`--legacy-history`, and checks the collection item, the detail resource, the
+result bytes and these refusals.
 
 The export and lineage-request collections of one run use their owners.
 `Artifacts.withRunExportsSource` supplies the export receipts, as

@@ -289,7 +289,7 @@ import Control.Exception
     throwIO,
     try,
   )
-import Control.Monad (filterM, foldM, forM_, unless, void, when)
+import Control.Monad (filterM, foldM, forM_, guard, unless, void, when)
 import Data.Aeson (Value (..), eitherDecodeStrict', encode, object, toJSON, withObject, (.:), (.=))
 import qualified Data.Aeson.Key as K
 import qualified Data.Aeson.KeyMap as KM
@@ -944,15 +944,35 @@ cliMainWithBroker broker reg = do
   args <- map T.pack <$> getArgs
   case args of
     ["--manager", "admin", "--config", path] -> runLocalAdmin (loadManagerConfiguration reg) (T.unpack path)
-    ["--manager", "serve", "--config", path] -> managerServeCmd reg (T.unpack path)
+    ("--manager" : "serve" : "--config" : path : options) -> case legacyHistoryOptions options of
+      Just legacy -> managerServeCmd reg (T.unpack path) legacy
+      Nothing -> die reg 1 "manager serve takes only --legacy-history ROOT=PROFILE options with distinct absolute roots"
     _ -> runOrdinaryCommand broker reg args
 
-managerServeCmd :: Registry -> FilePath -> IO ()
-managerServeCmd reg path = do
+-- | The repeatable @--legacy-history ROOT=PROFILE@ options of @--manager
+-- serve@. The profile follows the last equals sign. Each root is absolute and
+-- appears once. The manager checks that each root is a configured local
+-- retention root and each profile a configured profile.
+legacyHistoryOptions :: [Text] -> Maybe [(FilePath, Text)]
+legacyHistoryOptions options = do
+  bindings <- go options
+  guard (length (nub (map fst bindings)) == length bindings)
+  pure bindings
+  where
+    go [] = Just []
+    go ("--legacy-history" : binding : rest) = do
+      let (prefix, profile) = T.breakOnEnd "=" binding
+      root <- T.unpack <$> T.stripSuffix "=" prefix
+      guard (isAbsolute root && not (T.null profile))
+      ((root, profile) :) <$> go rest
+    go _ = Nothing
+
+managerServeCmd :: Registry -> FilePath -> [(FilePath, Text)] -> IO ()
+managerServeCmd reg path legacy = do
   unless (isAbsolute path) (die reg 1 "manager --config requires an absolute file")
   withManagerSignals (do
     configuration <- loadManagerConfiguration reg path >>= either throwIO pure
-    Manager.serveManager configuration)
+    Manager.serveManager configuration legacy)
     `catches`
       [ Handler $ \(_ :: Manager.Diagnostic) ->
           die reg 1 "manager configuration or HTTPS listener is unavailable",

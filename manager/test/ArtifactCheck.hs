@@ -723,7 +723,7 @@ responseOrderChecks work = do
   withInstalled config $ \installed -> withCoordinationStore installed $ \store -> do
     seed store
     proof <- authenticateCredential store bearer >>= right
-    Service.withService store $ \service -> do
+    Service.withService store [] $ \service -> do
       entered <- newIORef False
       let association = RunAssociation "run_missing" "profile_1" "root_missing" (RunId "native_missing")
       -- Exhaust readers as well as files. A configuration-first response would
@@ -785,7 +785,7 @@ collectionChecks work = do
         [SQL.SQLText ident,SQL.SQLText runsIdentity,SQL.SQLText ("native-" <> ident)]
     pages <- newPageSets
     let path collection = case collection of Overview.Requests -> "/v1/requests"; _ -> "/v1/runs"
-        fetch size collection token = Overview.withCollectionSourceWindow size store proof Nothing collection $ \view limits producer -> do
+        fetch size collection token = Overview.withCollectionSourceWindow size store proof Nothing [] collection $ \view limits producer -> do
           binding <- authorizedViewRevision view
           withPage pages "client_1" binding (path collection) (limitGlobalPageSets limits) token producer
             (\_ bytes -> either error pure (eitherDecodeStrict' bytes :: Either String Value))

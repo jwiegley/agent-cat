@@ -206,8 +206,15 @@ lists the pending run heads in manager observation order. With `runId`, it
 lists the pending queue of that run in its opening order. A `runId` that
 names no run, or a run of a profile that the credential cannot observe,
 receives 403 `insufficient-scope`.
-The service does not bind configured legacy retention roots, so `/runs` does
-not list their entries.
+With the `--legacy-history ROOT=PROFILE` option, `RUNNER --manager serve`
+binds a configured local retention root to a configured profile. `/runs` then
+also lists the legacy entries of the bound roots of the authorized profiles,
+in the same identifier order and windows, and `/runs/{id}` serves each one
+with the same representation. A legacy entry has `observer` supervision and a
+null `requestId`. Its result artifact downloads through `/artifacts/{id}`.
+The other run resources refuse a legacy entry with 403 `insufficient-scope`,
+because no stored record grants control, export or lineage authority. Without
+the option, `/runs` lists managed runs only.
 `/runs/{id}/exports` and `/runs/{id}/lineage-requests` are page sets of one
 run. The first lists the export receipts of the run in identifier order, and
 each item equals the `/exports/{id}` representation. The second lists the
@@ -436,7 +443,7 @@ administration operations, including `reload-profiles`, receive
 Existing `RUNNER --tui` and native frontend commands remain unchanged.
 
 ```text
-RUNNER --manager serve --config ABSOLUTE_FILE
+RUNNER --manager serve --config ABSOLUTE_FILE [--legacy-history ROOT=PROFILE]...
 RUNNER --manager admin --config ABSOLUTE_FILE
 RUNNER --tui --service CLIENT_PROFILE
 RUNNER --tui --local
