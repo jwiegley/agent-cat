@@ -332,6 +332,28 @@ the ledger receipt, the response carries the ledger receipt, and a failed
 append leaves a gap entry that names the receipt. The receipt append is not
 part of the admission transaction, and its failure never refuses the command.
 
+The local administration channel of a serving manager records its credential
+operations in the same log. `administerCredentials` appends the `command`
+record of `issue-credential`, `rotate-credential` and `revoke-credential` as
+the last step of the operation transaction, after its final checks and before
+COMMIT. The sender is `Principal (LocalAccount uid Nothing)`, with the
+effective user identifier of the manager, which the channel requires of its
+peer. The channel declares no owner. The receiver is the manager. The body
+names the operation, the client, the credential that the operation issues,
+rotates to or revokes, the credential that a rotation supersedes, and the label,
+scopes, profiles and expiry of that credential. The bearer, its verifier and the
+output file never enter a record. The appends use the ceiling with which the
+lifetime opened its log, so a revocation still takes no configuration lock. The
+writer synchronizes the record. A failed append, or a decoded record that
+differs from the operation, refuses the operation with `storage-unavailable`,
+and a rollback after the append adds a `failure` reply as it does for a
+command. After COMMIT, the manager appends the response that the operator
+receives as the `receipt` reply, from the manager to the local account, and
+returns the response decoded from the appended bytes when it equals the
+original. A failed receipt append leaves a gap entry. `list-credentials`, a
+refused operation and every operation of an offline administration lifetime
+append nothing.
+
 ## Dispatch and observations
 
 Only a fresh committed intent requesting dispatch can mint an opaque

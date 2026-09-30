@@ -342,7 +342,11 @@ a missing field and any value that its encoder does not write.
   operation, the profile, the method, the resource, the media type, the
   precondition, the JSON request body as its strictly decoded value, and a
   capture by identifier, SHA-256 and size. The capture bytes are not copied.
-- A `receipt` body is the frozen `CommandReceipt` JSON.
+  The `command` body of a credential operation of the local administration
+  channel is the operation, the client, the credential, the superseded
+  credential of a rotation, and the label, scopes, profiles and expiry.
+- A `receipt` body is the frozen `CommandReceipt` JSON. The `receipt` body of a
+  credential operation is the frozen local administration response.
 - A `review` body is the preparation identifier, the public review bytes and
   their SHA-256, the private binding bytes and their digest, the expiry and the
   five approval selectors. The decoder verifies both digests against their
@@ -382,8 +386,10 @@ cannot give its limits at that point, the close completes without the notice
 and then reports the configuration failure. Both notices are reserved records
 from the manager to the manager, and a failed append of either becomes a gap
 entry. The [command acceptance contract](COMMANDS.md#manager-log-records)
-describes the `command`, `receipt` and `failure` records of a fresh command. The
-review and relay append points are not connected.
+describes the `command`, `receipt` and `failure` records of a fresh command
+and of a credential operation of the local administration channel. The
+[approval contract](APPROVAL.md#review-record) describes the `review` record.
+The relay append point is not connected.
 
 ## Worker cleanup ownership
 

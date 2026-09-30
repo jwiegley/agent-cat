@@ -50,6 +50,29 @@ nonce and expiry rather than reminting consent. Read operations require current
 Observe authorization and check stored public/private binding integrity. An old
 process-generation row is unavailable as live preparation after reopen.
 
+## Review record
+
+A serving Store lifetime records each published review in its manager log,
+which [the storage contract](STORAGE.md#manager-log) describes. On the insert
+path, `publishReview` appends the `review` record after the INSERT and the
+request and reservation updates, as the last step before the commit checks and
+COMMIT. The record is from the manager to `Approvers profile`, the approvers of
+the profile of the review, and it names the request. Its body holds the
+preparation identifier, the public review bytes and their SHA-256, the private
+binding bytes and their digest, the expiry and the five selectors that approval
+checks: the binding digest, the request revision, the profile revision, the
+descriptor revision and the process generation. The writer synchronizes the
+record to disk before COMMIT.
+
+The transaction decodes the appended bytes and compares the decoded body,
+sender and address with the review. A failed append or any difference refuses
+the publication with `storage-unavailable`, and the transaction rolls back. The
+review is then not published, and the live preparation stays available to a
+later publication. A republish of a live preparation returns the existing view
+and appends nothing, so each review record names the digest that its own commit
+publishes. A lifetime that `withCoordinationStore` opens has no manager log and
+records nothing.
+
 ## Native target authority
 
 Configuration now requires an explicit PreparedTargetValidator in addition to its
@@ -134,6 +157,15 @@ after preliminary entry, delayed delivery after timer retirement, actual running
 exclusion, unexpected exit, native backpressure and original-owner cleanup. Actual
 ACP derived/explicit scratch and RoutingUnloaded cases use deterministic private
 adapter wrappers, with forged target/policy negatives.
+
+`manager-approval-check flow-review WORK [NATIVE]` runs one real native review in
+a serving lifetime with a test fault on the review append. It checks that a
+failed append refuses the publication and leaves no preparation row and no
+record, that one insert appends one review record with the published bytes,
+binding, selectors and address, and that a republish appends nothing. When NATIVE
+is omitted, it locates the native runner through
+`bash test/cabal.sh list-bin -ftui-tests routing-fixed-point-probe`.
+`manager/ci/approval.sh` does not run this mode.
 
 Approved test-only Commands instrumentation pauses after genuine fresh commit and
 after the original native start callback returns. Tests interrupt the original

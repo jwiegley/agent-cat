@@ -27,6 +27,7 @@ module Agentic.Manager.Flow
     openManagerFlow,
     closeManagerFlow,
     managerFlowBytes,
+    managerFlowCeiling,
     managerFlowAllowance,
     managerFlowContent,
     noteManagerGap,
@@ -42,6 +43,13 @@ module Agentic.Manager.Flow
     CaptureReference (..),
     commandFlowBody,
     commandFromFlowBody,
+
+    -- * Administration bodies
+    AdministrationOperation (..),
+    AdministrationBody (..),
+    administrationFlowBody,
+    administrationFromFlowBody,
+    administrationReceiptFromFlowBody,
 
     -- * Receipt bodies
     receiptFlowBody,
@@ -141,7 +149,8 @@ data ManagerFlow = ManagerFlow
     managerWriter :: !(Either Text FlowWriter),
     managerFault :: !(Maybe ManagerFlowFault),
     managerRoot :: !PrivateRoot,
-    managerStream :: !Text
+    managerStream :: !Text,
+    managerCeiling :: !Int64
   }
 
 -- | The missing records that no gap notice names yet: at most
@@ -204,7 +213,7 @@ openManagerFlow codec fault root stream total = do
     ensurePrivateDirectoryAt root ["flow"]
     fst <$> openFlowLog codec root (managerFlowPath stream) (managerFlowClaims stream) (toInteger total)
   lock <- newMVar (Gaps Seq.empty 0)
-  pure (ManagerFlow lock (either (Left . T.pack . displayException) Right opened) fault root stream)
+  pure (ManagerFlow lock (either (Left . T.pack . displayException) Right opened) fault root stream total)
   where
     validStream text = not (T.null text) && T.length text <= 128 && T.all (\c -> isAscii c && (isAlphaNum c || c == '_' || c == '-')) text
 
@@ -215,6 +224,12 @@ closeManagerFlow flow = withMVar (managerLock flow) $ \_ -> either (const (pure 
 -- log could not be opened.
 managerFlowBytes :: ManagerFlow -> IO (Maybe Integer)
 managerFlowBytes flow = withMVar (managerLock flow) $ \_ -> either (const (pure Nothing)) (fmap Just . flowWriterBytes) (managerWriter flow)
+
+-- | The configured @globalMutationLedgerBytes@ with which the log of the
+-- lifetime was opened. A caller that holds no configuration uses it as the
+-- ceiling of its appends.
+managerFlowCeiling :: ManagerFlow -> Int64
+managerFlowCeiling = managerCeiling
 
 -- | The bytes that the log and its claim checks may reach with a record of the
 -- class, under the configured @globalMutationLedgerBytes@: the whole ceiling
@@ -397,6 +412,86 @@ commandFromFlowBody value = do
       <*> pure payload
       <*> pure capture
   exact "command body" commandFlowBody command value
+
+-- ---------------------------------------------------------------------------
+-- Administration bodies
+-- ---------------------------------------------------------------------------
+
+-- | A credential operation of the local administration channel.
+data AdministrationOperation = AdministerIssue | AdministerRotate | AdministerRevoke
+  deriving (Eq, Show, Enum, Bounded)
+
+administrationOperationName :: AdministrationOperation -> Text
+administrationOperationName = \case
+  AdministerIssue -> "issue-credential"
+  AdministerRotate -> "rotate-credential"
+  AdministerRevoke -> "revoke-credential"
+
+-- | An admitted credential operation of the local administration channel: the
+-- client, the credential that the operation issues, rotates to or revokes, the
+-- credential that a rotation supersedes, and the label, scopes, profiles and
+-- expiry of the credential. The bearer, its verifier and the output file never
+-- appear.
+data AdministrationBody = AdministrationBody
+  { administrationOperation :: !AdministrationOperation,
+    administrationClient :: !Text,
+    administrationCredential :: !Text,
+    administrationPrevious :: !(Maybe Text),
+    administrationLabel :: !Text,
+    administrationScopes :: ![Text],
+    administrationProfiles :: ![Text],
+    administrationExpires :: !Text
+  }
+  deriving (Eq, Show)
+
+administrationFlowBody :: AdministrationBody -> Value
+administrationFlowBody command =
+  object
+    [ "administration" .= administrationOperationName (administrationOperation command),
+      "client" .= administrationClient command,
+      "credential" .= administrationCredential command,
+      "previousCredential" .= administrationPrevious command,
+      "label" .= administrationLabel command,
+      "scopes" .= administrationScopes command,
+      "profiles" .= administrationProfiles command,
+      "expiresAt" .= administrationExpires command
+    ]
+
+administrationFromFlowBody :: Value -> Either Text AdministrationBody
+administrationFromFlowBody value = do
+  fields <- flowObject "administration body" value
+  flowExactKeys "administration body" ["administration", "client", "credential", "previousCredential", "label", "scopes", "profiles", "expiresAt"] fields
+  operation <- flowTextField "administration body" fields "administration" >>= named "administration operation" administrationOperationName
+  previous <- flowField "administration body" fields "previousCredential" >>= flowOptionalText "administration previousCredential"
+  scopes <- flowField "administration body" fields "scopes" >>= array "administration scopes" >>= traverse (textValue "administration scope")
+  unless (all (`elem` ["observe", "submit", "control", "export"]) scopes && nub scopes == scopes) (Left "administration body has an invalid scope list")
+  profiles <- flowField "administration body" fields "profiles" >>= array "administration profiles" >>= traverse (textValue "administration profile")
+  command <-
+    AdministrationBody operation
+      <$> flowTextField "administration body" fields "client"
+      <*> flowTextField "administration body" fields "credential"
+      <*> pure previous
+      <*> flowTextField "administration body" fields "label"
+      <*> pure scopes
+      <*> pure profiles
+      <*> flowTextField "administration body" fields "expiresAt"
+  exact "administration body" administrationFlowBody command value
+
+-- | The receipt of a credential operation is the frozen local administration
+-- response that the operator receives: its version, its operation, and either
+-- its metadata-only result or its error.
+administrationReceiptFromFlowBody :: Value -> Either Text Value
+administrationReceiptFromFlowBody value = do
+  fields <- flowObject "administration receipt" value
+  succeeded <- flowField "administration receipt" fields "ok" >>= \case
+    Bool flag -> Right flag
+    _ -> Left "administration receipt ok is not a boolean"
+  flowExactKeys "administration receipt" ["version", "operation", "ok", if succeeded then "result" else "error"] fields
+  version <- flowField "administration receipt" fields "version" >>= flowInteger "administration receipt version"
+  unless (version == 1) (Left "administration receipt has an unknown version")
+  _ <- flowTextField "administration receipt" fields "operation" >>= named "administration operation" administrationOperationName
+  _ <- flowField "administration receipt" fields (if succeeded then "result" else "error") >>= flowObject "administration receipt outcome"
+  pure value
 
 -- ---------------------------------------------------------------------------
 -- Receipt bodies

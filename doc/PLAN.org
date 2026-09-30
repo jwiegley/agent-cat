@@ -1459,7 +1459,7 @@ Two small residues of acat-192/acat-9kn: prune the deriving clauses if nothing w
 :LABELS:   ["actor-flow","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-26 Sat 23:41]
-:MODIFIED: [2026-09-29 Tue 20:24]
+:MODIFIED: [2026-09-29 Tue 20:47]
 :CREATED_BY: johnw
 :SOURCE_REPO: .
 :ORIGINAL_SIZE: 0
@@ -1500,6 +1500,13 @@ Actor-flow increment 1, delta 1b (at most 8 engineering days). Add the manager l
     "author": "johnw",
     "text": "Subtask F10 of delta 1b: command, receipt and failure records in the admission transaction. submitBoundCommand appends the synchronized command record from Principal (Credential client credential) immediately before the commit-deadline check and COMMIT, decodes the appended bytes and refuses with storage-unavailable on any difference (D3). A failed append rolls back and refuses, except that a Cancel commits without its record and gap entries name its command and receipt. checkFlowCeiling sits beside checkCapacity: an ordinary command past the ceiling minus the reserve gets storage-quota, and a cancel may use the reserve. After COMMIT the receipt is appended as the reply to the command position, and the /v1 response carries the receipt decoded from the appended bytes, or the ledger receipt with a gap entry if the append fails. A definite rollback after the command append adds a failure reply. Replays and refused admissions append nothing. manager/COMMANDS.md and manager/STORAGE.md describe the records. Evidence scope: F10-build (ALLBUILD, -Werror), F10-flow-unit (manager-command-check flow mode with the new flowCommandChecks: accepted command and receipt with the principal ids, missing-scope and rate-limit refusals and a replay with no record or row, renamed log, ceiling, lossy codec, receipt-only fault), F10-command-check at N8 (manager-command-check, command_contract.py, credential_cli.py; rerun once with an N8-named work directory because credential_cli.py requires it, no code change) and F10-journey (tui-journey at N8 with command and receipt records for enqueue and approve) each passed under timeout. The fess auditor reran F10-flow-unit with exit 0. Fess: not blocking. Its three medium and four low findings are filed as acat-b1yt. N1, the Phase A controls and source-boundaries were not run.",
     "created_at": "2026-09-30T03:24:18Z"
+  },
+  {
+    "id": 365,
+    "issue_id": "acat-5m60",
+    "author": "johnw",
+    "text": "Subtask F11 of delta 1b: the review and administration records. publishReview appends the synchronized review record from Manager to Approvers profile on the INSERT path only, after the INSERT and the request and reservation UPDATEs and before COMMIT. The record body is decoded from the appended bytes and compared with the review. A failed append, or any difference in the body, sender or address, refuses with StorageUnavailable and rolls back, so the review is not published. A republish of a live preparation appends nothing. Issue, rotate and revoke in LocalAdmin append a command record from Principal (LocalAccount euid Nothing) as the last step before COMMIT, with a strict administration body (operation, client, credential, previous credential, label, scopes, profiles, expiry, and never a bearer, verifier or path). After COMMIT the frozen admin response is appended as the receipt reply. Revoke uses the log's own ceiling and still takes no configuration lock. List-credentials, refused operations and offline lifetimes append nothing. manager-approval-check has the new targeted mode flow-review. manager/APPROVAL.md, manager/COMMANDS.md and manager/STORAGE.md describe the records.\n\nEvidence scope: F11-build (ALLBUILD, -Werror), F11-flow-unit (manager-command-check flow mode with the new flowAdministrationChecks: codec round-trip and shape refusal, issue, rotate and revoke each as a local-account command followed by its receipt at positions 1, 3 and 5, no record for a refused operation or list-credentials, a command-append fault that refuses with storage-unavailable and activates no credential, and a grep of the log file and claim files for each issued bearer and its raw and hex verifier), F11-approval-review (flow-review at N8: one review record per insert, a republish appends nothing, a failed review append leaves the review unpublished) and F11-journey (tui-journey at N8: the manager log puts the review at position 7, between the enqueue receipt at 6 and the approve command at 8) each passed under timeout. Three earlier flow-review attempts failed while the probe itself was being corrected, before the final run. The fess auditor reran flow-review and command-check flow with exit 0. Fess: not blocking. Its one medium and six low findings are filed as acat-o7ax. N1, the Phase A controls, source-boundaries and manager/ci/approval.sh were not run. This issue stays open until increment 1 is accepted as a whole.\n",
+    "created_at": "2026-09-30T03:47:26Z"
   }
 ]
 #+end_src
@@ -8089,6 +8096,54 @@ ponytail pass, corroborated by dead-code. (1) RawBlock.bounded / checkBlock_boun
     "author": "johnw",
     "text": "Closed by commit 4aed549 ('The condemned stratum retires; its results stay'), executing the owner-approved hybrid of 2026-08-20: the no-consumer stratum excised (16 files, 9,931 lines; Agentic/ is now Core/ + Scope.lean), the results preserved with exact citations in doc/research/term-algebra-results.md, this ticket's residue folded in the same pass (see the commit message), all gates green (lake 1490 jobs, corpus-gen 189 byte-identical, tier0 189/189, tier1 29/29, bisim clean, examples 7/0, acp 15/15, deck 7/7, citations 249/249), independently verified and fess-audited before push.",
     "created_at": "2026-08-20T18:42:28Z"
+  }
+]
+#+end_src
+
+* TODO [#C] Resolve F11 fess findings in the review and administration records
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-o7ax
+:LABELS:   ["actor-flow","workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-29 Tue 20:47]
+:MODIFIED: [2026-09-29 Tue 20:47]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Follow-up from the F11 fess audit of the review and administration records (actor-flow delta 1b). None of these findings blocks. Source: fess audit /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/fess/flow-F11-r1.md.
+
+1. (medium) manager/src/Agentic/Manager/Store.hs:1187-1198 and 1237-1262, manager/APPROVAL.md:71-72: appendReviewRecord records no pending state. After the review append, runWithAdmission still runs validateEvents, appendInvalidation, checkCommitDeadline and the admission-fence check before COMMIT. A definite rollback at any of these points leaves a synchronized review record for a preparation that was never published, and no record answers it. APPROVAL.md claims that each review record names the digest that its own commit publishes, which is false in this case. Fix: record pending state for the review so that a definite rollback appends a failure or notice that names the review position, as PendingCommand does, or correct APPROVAL.md and STORAGE.md. Add a flow-review case that forces a commit-check refusal after the append.
+
+2. (low) manager/src/Agentic/Manager/Credentials.hs:95-106: recordAdministrationReceipt returns the original response when the decoded receipt differs or fails strict decoding, and writes no gap entry or notice. Fix: record a gap or notice for a receipt mismatch, or document why the fallback is correct.
+
+3. (low) manager/test/CommandCheck.hs:1537 and 1548-1550, manager/COMMANDS.md:346-348: the documentation says that a rollback after a successful administration append adds a failure reply, but the test fault fires on the append itself. Fix: add a case that makes the transaction fail after the command append and checks the failure reply.
+
+4. (low) manager/test/CommandCheck.hs:1580: the check that administrationReceiptFromFlowBody of each receipt equals Right of the same receipt only proves that the decoder accepts the body. Fix: compare the receipts with the expected frozen admin responses.
+
+5. (low) manager/src/Agentic/Manager/Flow.hs:436-457: the administration body records the operator label. The design forbids only tokens, verifiers and paths, and the frozen admin response already carries the label. Fix: confirm that the label is acceptable, or remove it from the body.
+
+6. (low) cli/test/ManagerApprovalProbe.hs:691-697: builtNative runs bash test/cabal.sh list-bin as a subprocess when NATIVE is omitted, so flow-review works only from the repository root. Fix: keep it as documented, or require NATIVE.
+
+7. (low) manager/src/Agentic/Manager/Flow.hs:416-494: manager command records now have two body shapes, a /v1 command and an administration operation. Fix: the delta 1b manager-log reader must dispatch command bodies on the administration key.
+
+Also from the implementer's limitations: if the COMMIT after a review append is uncertain, the review record stays in the log and no notice marks the case. The administration checks call administerCredentials directly on a serving Store and do not go through the local socket.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-o7ax",
+    "depends_on_id": "acat-5m60",
+    "type": "blocks",
+    "created_at": "2026-09-30T03:47:17.095352Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
   }
 ]
 #+end_src

@@ -4,11 +4,18 @@
 -- | Local administration on the original Store. Possession proofs grant no access here.
 module Agentic.Manager.Credentials (administerCredentials) where
 
+import Agentic.Manager.Flow
+  (AdministrationBody (..), AdministrationOperation (..), FlowRecordClass (Refusing, Following),
+   administrationFlowBody, administrationFromFlowBody, administrationReceiptFromFlowBody,
+   appendManagerReply, managerFlowCeiling, managerFlowContent)
 import Agentic.Manager.Profile (publicId, publicRevision)
 import Agentic.Manager.Protocol.Command (Scope (..), scopeName, encoded)
+import Agentic.Manager.Protocol.Json (decodeStrictValue)
 import Agentic.Manager.Protocol.LocalAdmin
 import Agentic.Manager.Store
-import Agentic.Runtime (openPrivateRoot, closePrivateRoot, publishPrivateCaptureAt, CapturePublication (..))
+import Agentic.Runtime
+  (openPrivateRoot, closePrivateRoot, publishPrivateCaptureAt, CapturePublication (..),
+   Actor (Manager, Principal), Authority (LocalAccount), Address (To), Position (..), Record (..), Schema (FlowReceipt), noAbout)
 import Control.Exception (IOException, bracket, throwIO, try)
 import Control.Monad (unless)
 import Crypto.Hash (Digest, SHA256, hash)
@@ -17,51 +24,110 @@ import Data.Aeson (Value, eitherDecodeStrict', object, toJSON, (.=))
 import Data.ByteArray (convert)
 import Data.ByteArray.Encoding (Base (Base16), convertToBase)
 import qualified Data.ByteString as BS
+import Data.Int (Int64)
 import Data.IORef (newIORef, atomicModifyIORef')
 import Data.Text (Text)
+import Data.Word (Word64)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
 import qualified Database.SQLite3 as SQL
 import System.FilePath (takeDirectory, takeFileName)
 import System.IO.Error (isAlreadyExistsError)
+import System.Posix.Types (CUid (..))
+import System.Posix.User (getEffectiveUserID)
 
 -- | Trusted local composition supplies the Store, never a bearer or stored ID.
 -- Offline callers acquire the existing exclusive lease. The live local channel
 -- calls this same operation on its original Store without opening another writer.
 administerCredentials :: CoordinationStore -> LocalAdminRequest -> IO BS.ByteString
 administerCredentials store request = do
+  principal <- localAdministrator
   result <- try @IOException $ try @StoreFailure $ try @AdminFailure $ do
     unless (validAdminRequest request) (throwIO MalformedRequest)
-    perform store request
-  pure $ case result of
-    Left _ -> failure StorageUnavailable
-    Right (Left StoreLimit) -> failure SizeLimit
-    Right (Left _) -> failure StorageUnavailable
-    Right (Right (Left problem)) -> failure problem
-    Right (Right (Right value)) -> adminSuccess operation value
+    perform store principal request
+  case result of
+    Left _ -> pure (failure StorageUnavailable)
+    Right (Left StoreLimit) -> pure (failure SizeLimit)
+    Right (Left _) -> pure (failure StorageUnavailable)
+    Right (Right (Left problem)) -> pure (failure problem)
+    Right (Right (Right (value, logged))) -> recordAdministrationReceipt store principal logged (adminSuccess operation value)
   where
     operation = adminOperation request
     failure = adminError (Just operation)
 
-perform :: CoordinationStore -> LocalAdminRequest -> IO Value
-perform store request = case request of
+-- | The sender of an administration record: the local account whose user
+-- identifier the channel verified, since 'withLocalAdministration' admits only
+-- a peer with the effective user identifier of the manager. The channel
+-- declares no owner.
+localAdministrator :: IO Actor
+localAdministrator = do
+  CUid uid <- getEffectiveUserID
+  pure (Principal (LocalAccount uid Nothing))
+
+-- | The position of an appended administration command record and the ceiling
+-- of its log, which the receipt after COMMIT answers.
+type Logged = Maybe (Word64, Int64)
+
+-- | Append the synchronized @command@ record of an admitted credential
+-- operation from the local account, as the last step before COMMIT. The
+-- ceiling is that of the lifetime's log, so the operation takes no
+-- configuration lock that it does not already hold. A failed append, or an
+-- appended record whose decoded body, sender or address differs from the
+-- operation, refuses the operation with 'StorageUnavailable', and the
+-- transaction answers the record with a @failure@ record when it rolls back. A
+-- lifetime without a manager log, such as offline administration, appends
+-- nothing.
+recordAdministration :: CoordinationStore -> Actor -> AdministrationBody -> Transaction Logged
+recordAdministration store principal command = do
+  let total = maybe 0 managerFlowCeiling (storeManagerFlow store)
+  appended <- appendCommandRecord total Refusing principal noAbout (administrationFlowBody command)
+  case appended of
+    Nothing -> pure Nothing
+    Just (Left _) -> refuseTransaction StorageUnavailable
+    Just (Right (Position position, record, content)) -> do
+      unless ((content >>= administrationFromFlowBody) == Right command && recFrom record == principal && recTo record == To Manager)
+        (refuseTransaction StorageUnavailable)
+      pure (Just (position, total))
+
+-- | After COMMIT, append the response that the operator receives as the
+-- receipt that replies to the command record, and return the response decoded
+-- from the appended bytes. When the append fails, or the decoded response
+-- differs, the original response is returned, and a failed append leaves a gap
+-- entry.
+recordAdministrationReceipt :: CoordinationStore -> Actor -> Logged -> BS.ByteString -> IO BS.ByteString
+recordAdministrationReceipt store principal logged response = case (storeManagerFlow store, logged, decodeStrictValue response) of
+  (Just manager, Just (position, total), Right value) -> do
+    appended <- appendManagerReply manager total Following FlowReceipt (Position position) Manager (To principal) noAbout value
+    case appended of
+      Left _ -> pure response
+      Right (_, record) -> do
+        decoded <- (>>= administrationReceiptFromFlowBody) <$> managerFlowContent manager record
+        pure $ case decoded of
+          Right carried | carried == value -> encoded carried
+          _ -> response
+  _ -> pure response
+
+perform :: CoordinationStore -> Actor -> LocalAdminRequest -> IO (Value, Logged)
+perform store principal request = case request of
   ListCredentials -> do
     values <- runRead store $ do
       rows <- query (metadataSQL <> " ORDER BY c.id LIMIT 257") []
       unless (length rows <= 256) (refuseTransaction SizeLimit)
       mapM decodeMetadata rows
-    pure (object ["credentials" .= values])
+    pure (object ["credentials" .= values], Nothing)
   RevokeCredential ident -> do
     revision <- freshId "authorization_"
-    runTransaction store $ do
+    logged <- runTransaction store $ do
       rows <- query "SELECT client_id FROM credentials WHERE id=?" [text ident]
       client <- case rows of
         [[SQL.SQLText value]] -> pure value
         _ -> refuseTransaction StateConflict
       execute "UPDATE credentials SET revoked=1 WHERE id=?" [text ident]
       reviseClient client revision
-      pure ((), changed revision)
-    pure (object ["credentialId" .= ident, "state" .= ("revoked" :: Text)])
+      revoked <- metadataById ident
+      logged <- recordAdministration store principal (administered AdministerRevoke Nothing revoked)
+      pure (logged, changed revision)
+    pure (object ["credentialId" .= ident, "state" .= ("revoked" :: Text)], logged)
   IssueCredential label scopes profiles declaredExpiry destination -> do
     let expiry = T.toUpper declaredExpiry
     snapshot <- withProfiles store profiles $ runRead store (futureExpiry expiry)
@@ -80,8 +146,9 @@ perform store request = case request of
           [text ident,jsonText profiles,jsonText (map scopeName scopes)]
         value <- metadataById ident
         futureExpiry expiry
-        pure (value, changed revision)
-    pure (object ["credential" .= metadata, "secretWritten" .= True])
+        logged <- recordAdministration store principal (administered AdministerIssue Nothing value)
+        pure ((value, logged), changed revision)
+    pure (object ["credential" .= fst metadata, "secretWritten" .= True], snd metadata)
   RotateCredential previous declaredExpiry destination -> do
     let expiry = T.toUpper declaredExpiry
     original <- runRead store (rotationTarget previous <* futureExpiry expiry)
@@ -111,9 +178,17 @@ perform store request = case request of
         futureExpiry expiry
         active <- query "SELECT c.id FROM credentials c JOIN clients p ON p.id=c.client_id JOIN credential_administration a ON a.credential_id=c.id WHERE c.id=? AND c.revoked=0 AND p.retired=0 AND julianday(c.expires_at)>julianday('now') AND julianday(a.rotation_cutoff)>julianday('now') AND a.superseded_by=?" [text previous,text ident]
         unless (active == [[text previous]]) (refuseTransaction StateConflict)
-        pure (value, changed revision)
-    pure (object ["credential" .= metadata, "previousCredentialId" .= previous, "secretWritten" .= True])
+        logged <- recordAdministration store principal (administered AdministerRotate (Just previous) value)
+        pure ((value, logged), changed revision)
+    pure (object ["credential" .= fst metadata, "previousCredentialId" .= previous, "secretWritten" .= True], snd metadata)
   OtherAdmin _ -> throwIO StateConflict
+
+-- | The command body of a credential operation, from the metadata of the
+-- credential that it issues, rotates to or revokes.
+administered :: AdministrationOperation -> Maybe Text -> CredentialMetadata -> AdministrationBody
+administered operation previous metadata =
+  AdministrationBody operation (credentialClientId metadata) (credentialId metadata) previous (credentialLabel metadata)
+    (map scopeName (credentialScopes metadata)) (credentialProfileIds metadata) (credentialExpiresAt metadata)
 
 -- The configuration lock covers the final SQL revalidation, never publication.
 configured :: CoordinationStore -> ([(Text,Text)] -> IO a) -> IO a

@@ -12,11 +12,13 @@ import Agentic.Manager.Fault (configurationLoan, storeFailureRefusal)
 import Agentic.Manager.Admission.Policy (Resource (..), effectiveResources)
 import Agentic.Manager.Authorization
 import Agentic.Manager.Commands
+import Agentic.Manager.Flow (ReviewBody (..), reviewFlowBody, reviewFromFlowBody)
 import Agentic.Manager.Profile hiding (StaleRevision)
 import Agentic.Manager.Protocol.Command
 import qualified Agentic.Manager.Protocol.Preparation as P
 import Agentic.Manager.Store
 import Agentic.Runtime hiding (Control)
+import qualified Agentic.Runtime as Runtime (Record (..))
 import Control.Exception (SomeException, try, throwIO, fromException)
 import Control.Monad (unless)
 import Crypto.Hash (Digest, SHA256, hash)
@@ -55,7 +57,7 @@ publishReview store live = attempt "approval publish-review" $ withReviewAccepta
   revision<-fresh "preparation_revision_"
   requestRevision<-fresh "request_revision_"
   nonce<-fresh "binding_"
-  published<-withStoreCatalogues store $ \_ _ catalogues->runTransaction store $ do
+  published<-withStoreCatalogues store $ \limits _ catalogues->runTransaction store $ do
     unless(currentCatalogue catalogues (P.reviewProfile public) (reviewProfileRevision context) descriptor workflow)(refuseTransaction StaleRevision)
     current<-query "SELECT r.revision,v.request_revision FROM requests r JOIN reservations v ON v.request_id=r.id WHERE r.id=? AND v.id=? AND r.phase='review' AND v.state='held' AND v.process_generation=?"
       [text(reviewRequest context),text(reviewReservation context),text(reviewGeneration context)]
@@ -91,10 +93,28 @@ publishReview store live = attempt "approval publish-review" $ withReviewAccepta
         execute "INSERT INTO preparation_captures SELECT ?,capture_id FROM request_inputs WHERE request_id=? AND capture_id IS NOT NULL GROUP BY capture_id" [text ident,text(reviewRequest context)]
         execute "UPDATE requests SET revision=? WHERE id=?" [text requestRevision,text(reviewRequest context)]
         execute "UPDATE reservations SET request_revision=? WHERE id=?" [text requestRevision,text(reviewReservation context)]
+        recordReview limits (P.reviewProfile public) (reviewRequest context)
+          (ReviewBody ident (encoded public) (digest(encoded public)) privateBytes checksum expires
+            (P.ApprovalRequest checksum requestRevision (reviewProfileRevision context) descriptor (reviewGeneration context)))
         pure((view,privateBytes),[Invalidation "preparation.changed" (preparationURI ident) revision,Invalidation "request.changed" (requestURI(reviewRequest context))requestRevision])
       _->refuseTransaction StateConflict
   (view,binding)<-configurationLoan "approval publish-review" published
   pure(ReviewedPreparation store live view binding)
+
+-- | Append the synchronized review record of a review that this transaction
+-- publishes, addressed to the approvers of its profile, as the last step before
+-- COMMIT. A failed append, or an appended record whose decoded body, sender or
+-- address differs from the review, refuses the publication with
+-- 'StorageUnavailable'. A lifetime without a manager log appends nothing.
+recordReview :: ConfigurationLimits -> Text -> Text -> ReviewBody -> Transaction ()
+recordReview limits profile request review = do
+  body<-either(const(refuseTransaction StorageUnavailable))pure(reviewFlowBody review)
+  appended<-appendReviewRecord (fromIntegral(limitGlobalMutationLedgerBytes limits)) profile noAbout{aboutRequest=Just request} body
+  case appended of
+    Nothing->pure()
+    Just(Left _)->refuseTransaction StorageUnavailable
+    Just(Right(record,content))->
+      unless((content>>=reviewFromFlowBody)==Right review && Runtime.recFrom record==Manager && Runtime.recTo record==Approvers profile)(refuseTransaction StorageUnavailable)
 
 readPreparation :: CoordinationStore -> CredentialProof -> Text -> IO (Either CommandFailure P.Preparation)
 readPreparation store proof ident = attemptIO "approval preparation-read" $ do

@@ -50,11 +50,13 @@ import qualified Database.SQLite3 as SQL
 import qualified Database.SQLite3.Direct as Direct
 import Foreign.Ptr (Ptr)
 import Foreign.C.Types (CInt (..))
-import System.Directory (createDirectory, doesFileExist, renameFile)
+import System.Directory (createDirectory, doesDirectoryExist, doesFileExist, listDirectory, renameFile)
 import System.Environment (getArgs)
 import System.FilePath ((</>), takeDirectory)
 import System.IO (BufferMode (LineBuffering), hSetBuffering, stdout)
 import System.Posix.Files (setFileMode, fileMode, getSymbolicLinkStatus)
+import System.Posix.Types (CUid (..))
+import System.Posix.User (getEffectiveUserID)
 
 main :: IO ()
 main = do
@@ -1305,7 +1307,8 @@ flowChecks work = do
     flowCeilingChecks root private
   flowStoreChecks work
   flowCommandChecks work
-  putStrLn "PASS manager log codecs, writer, gap entries, path identity, ceiling, Store lifetimes and command admission"
+  flowAdministrationChecks work
+  putStrLn "PASS manager log codecs, writer, gap entries, path identity, ceiling, Store lifetimes, command admission and administration"
 
 -- An administration lifetime writes no manager log. A serving lifetime writes
 -- a lifetime notice that lists the current credentials and, only when its
@@ -1510,6 +1513,82 @@ flowCommandChecks work = do
           && Runtime.recSchema lastCommand == Runtime.FlowCommand && Runtime.recReplyTo lastReply == Just (Runtime.Position 4)
           && receiptFromFlowBody lastReplyBody == Right lastReceipt
     _ -> error ("FAIL flow mode gap check expected seven records, found " <> show (map (Runtime.recSchema . fst) gapRecords))
+
+-- The command and receipt records of the credential operations that a serving
+-- manager performs for the local account. No bearer, verifier or output file
+-- enters the log or its claim checks.
+flowAdministrationChecks :: FilePath -> IO ()
+flowAdministrationChecks work = do
+  let sample = AdministrationBody AdministerRotate "client_1" "credential_2" (Just "credential_1") "Terminal \10003" ["observe", "submit"] ["profile_1"] "2999-01-01T00:00:00Z"
+      withField (Object fields) = Object (KM.insert "extra" (Bool False) fields)
+      withField other = other
+  check "manager log administration bodies round-trip and refuse an unknown field or the shape of another command" $
+    administrationFromFlowBody (administrationFlowBody sample) == Right sample
+      && isLeftEither (administrationFromFlowBody (withField (administrationFlowBody sample)))
+      && isLeftEither (commandFromFlowBody (administrationFlowBody sample))
+      && isLeftEither (administrationFromFlowBody (commandFlowBody (firstFlow flowCommands)))
+  CUid uid <- getEffectiveUserID
+  let local = Runtime.Principal (Runtime.LocalAccount uid Nothing)
+      expiry = "2999-01-01T00:00:00Z"
+      issuePath = work </> "flow-issue.credential"
+      rotatePath = work </> "flow-rotate.credential"
+      refusedPath = work </> "flow-refused.credential"
+  failing <- newIORef False
+  let fault = ManagerFlowFault (\schema _ -> if schema == Runtime.FlowCommand then readIORef failing else pure False)
+  ((issued, rotated, revoked), root, stream) <- withServedFixture work "flow-administration" (64 * commandCapacity) Runtime.strictFlowCodec (Just fault) (\_ _ -> pure ()) $ \store _ _ -> do
+    issued <- adminOK store (Admin.IssueCredential "Flow terminal" [Observe, Submit] ["profile_1"] expiry issuePath)
+    issuedId <- adminText (adminField "credentialId" (adminField "credential" issued))
+    rotated <- adminOK store (Admin.RotateCredential issuedId expiry rotatePath)
+    rotatedId <- adminText (adminField "credentialId" (adminField "credential" rotated))
+    revoked <- adminOK store (Admin.RevokeCredential rotatedId)
+    _ <- adminOK store Admin.ListCredentials
+    adminRefused "a credential operation refused before its record appends nothing" Admin.StateConflict store (Admin.RevokeCredential "credential_missing")
+    before <- scalarInt store "SELECT count(*) FROM credentials"
+    writeIORef failing True
+    adminRefused "a credential operation whose record cannot be appended is refused with storage-unavailable" Admin.StorageUnavailable store
+      (Admin.IssueCredential "Refused terminal" [Observe] ["profile_1"] expiry refusedPath)
+    writeIORef failing False
+    scalarInt store "SELECT count(*) FROM credentials" >>= check "the refused credential operation activates no credential" . (== before)
+    pure (issued, rotated, revoked)
+  let body operation previous metadata = do
+        let field key = adminText (adminField key metadata)
+            fields key = case adminField key metadata of
+              Array items -> mapM adminText (toList items)
+              _ -> error "FAIL administration metadata list missing"
+        AdministrationBody operation <$> field "clientId" <*> field "credentialId" <*> pure previous
+          <*> field "label" <*> fields "scopes" <*> fields "profileIds" <*> field "expiresAt"
+      issuedMetadata = adminField "credential" issued
+      rotatedMetadata = adminField "credential" rotated
+  issuedId <- adminText (adminField "credentialId" issuedMetadata)
+  expected <- sequence
+    [ body AdministerIssue Nothing issuedMetadata
+    , body AdministerRotate (Just issuedId) rotatedMetadata
+    , body AdministerRevoke Nothing rotatedMetadata
+    ]
+  records <- servedLines root stream
+  case records of
+    [_, c1, r1, c2, r2, c3, r3, _] -> do
+      let commands = [c1, c2, c3]
+          receipts = [r1, r2, r3]
+      check "flow mode records issue, rotate and revoke as commands from the local account, each followed by its receipt" $
+        all (\(record, _) -> Runtime.recSchema record == Runtime.FlowCommand && Runtime.recFrom record == local
+                && Runtime.recTo record == Runtime.To Runtime.Manager && Runtime.recReplyTo record == Nothing) commands
+          && all (\(record, _) -> Runtime.recSchema record == Runtime.FlowReceipt && Runtime.recFrom record == Runtime.Manager
+                && Runtime.recTo record == Runtime.To local) receipts
+          && map (Runtime.recReplyTo . fst) receipts == map (Just . Runtime.Position) [1, 3, 5]
+          && map (administrationFromFlowBody . snd) commands == map Right expected
+          && map (administrationReceiptFromFlowBody . snd) receipts == map (Right . snd) receipts
+          && map (adminField "result" . snd) receipts == [issued, rotated, revoked]
+    _ -> error ("FAIL flow mode administration expected a lifetime, three commands with receipts and a shutdown, found " <> show (map (Runtime.recSchema . fst) records))
+  logBytes <- BS.readFile (foldl (</>) root (managerFlowPath stream))
+  let claims = foldl (</>) root (managerFlowClaims stream)
+  hasClaims <- doesDirectoryExist claims
+  claimBytes <- if hasClaims then listDirectory claims >>= mapM (BS.readFile . (claims </>)) else pure []
+  let paths = [issuePath, rotatePath, refusedPath]
+  bearers <- mapM BS.readFile paths
+  let secrets = concat [[bearer, verifier bearer, convertToBase Base16 (verifier bearer)] | bearer <- bearers] <> map (TE.encodeUtf8 . T.pack) paths
+  check "no bearer, verifier or output file appears in the manager log or its claim checks" $
+    all ((== 64) . BS.length) bearers && not (any (\secret -> any (secret `BS.isInfixOf`) (logBytes : claimBytes)) secrets)
 
 -- A Unicode text, a JSON false and null, exact decimals and a body above 64 KiB.
 flowCommands :: [CommandBody]

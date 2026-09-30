@@ -10,7 +10,7 @@ module Agentic.Manager.Store
     withCoordinationStore, withServingStore, withServingStoreWith, storeManagerFlow, storeIdentity, checkpointStore, withStoreConfiguration, withStoreCatalogues, withStoreRetentionRoot, validateStoreHistoryBindings, revalidateStoreRetentionRoot, storeInvocations, withStoreFiles, withStoreReader, withStoreAdmission, withStoreWorker, StoreWorker, createStoreWorkerGroup, storeWorkerCleanupConfirmed, requestStoreWorkersStop, awaitStoreWorkersStop, retryStoreCleanup, probeStoreCapabilities,
     withStoreAdministration, tryWithStoreCatalogues, tryWithStoreFiles,
     AuthorizationWatch, withStoreAuthorizationWatch, withStoreConfigurationWatch, withStoreCataloguesWatch, withStoreCatalogueContextWatch, withStoreCataloguesBorrowed, authorizationWatchCurrent, withAuthorizationObservation, withAuthorizationReadObservation, awaitAuthorizationChange,
-    CommitDeadline, withCommitDeadline, withPreparedCommitDeadline, enforceCommitDeadline, enforceAdmissionFence, managerFlowRoom, appendCommandRecord, Transaction, execute, query, refuseTransaction, runTransaction, runRead, StoreAdmission (..), runTransactionWithAdmission, runReadWithAdmission, transactionGeneration,
+    CommitDeadline, withCommitDeadline, withPreparedCommitDeadline, enforceCommitDeadline, enforceAdmissionFence, managerFlowRoom, appendCommandRecord, appendReviewRecord, Transaction, execute, query, refuseTransaction, runTransaction, runRead, StoreAdmission (..), runTransactionWithAdmission, runReadWithAdmission, transactionGeneration,
     Invalidation (..), EventReadFailure (..), RetainedEvents (..), readRetainedEvents, readRetainedEventsWith, retainEvents, backupCoordinationStore, restoreCoordinationStore, reservationOccupancy
   ) where
 
@@ -19,7 +19,7 @@ import qualified Agentic.Manager.Store.Admission as Admission
 import Agentic.Manager.Configuration
   (InstalledConfiguration, acquireConfigurationStorage, releaseConfigurationStorage, withConfigurationAdministration, withConfigurationSnapshot, withConfigurationCatalogues, withConfigurationCatalogueContext, tryConfigurationCatalogueContext, withConfiguredRetentionRoot, validateHistoryBindings, revalidateRetentionRoot, configuredInvocations, configuredLimits, probeConfiguredCapabilities)
 import Agentic.Manager.Flow
-  (ManagerFlow, ManagerFlowFault, ManagerFlowFailure (..), FlowRecordClass, CredentialEntry (..), Lifetime (..), Reconciliation (..), noReconciliation, openManagerFlow, closeManagerFlow, managerFlowBytes, managerFlowAllowance, managerFlowContent, appendManagerAsk, appendManagerReply, appendLifetime, appendShutdown)
+  (ManagerFlow, ManagerFlowFault, ManagerFlowFailure (..), FlowRecordClass (Refusing), CredentialEntry (..), Lifetime (..), Reconciliation (..), noReconciliation, openManagerFlow, closeManagerFlow, managerFlowBytes, managerFlowAllowance, managerFlowContent, appendManagerAsk, appendManagerTell, appendManagerReply, appendLifetime, appendShutdown)
 import Agentic.Manager.Protocol.Command (failureCode)
 import Agentic.Manager.Profile (ConfigurationLimits (..), PublicProfile, Diagnostic (SupervisionUnavailable), Discovery)
 import Agentic.Manager.Fault.Record (ManagerFault (AuthorizationChanged), loanFault, internalLabel, refusalLabel, recordErasure)
@@ -31,7 +31,7 @@ import Agentic.Runtime
   (PrivateRoot, assertPrivateRoot, closePrivateRoot, openPrivateSubroot, privateRootPath,
    openPrivateRoot, privateRootIdentity, readPrivateFileAt, ensurePrivateDirectoryAt, removePrivateFileAt,
    publishPrivateCaptureAt, CapturePublication (..), privateCaptureBytes, privateCaptureSha256,
-   withPrivateDirectoryAt, writePrivateExclusiveAt, strictFlowCodec, FlowCodec, Actor (Manager), Address (To), About, Position, Record, Schema (FlowCommand, FlowFailure), FailureKind (Refused), failureBody, WorkflowInputDescriptor (..), frontendLiteralBytes, FrontendCapabilities, FrontendInvocation, ProcessGroup, createProcessGroup, terminateProcessGroup, groupOutcome, processGroupLive)
+   withPrivateDirectoryAt, writePrivateExclusiveAt, strictFlowCodec, FlowCodec, Actor (Manager), Address (To, Approvers), About, Position, Record, Schema (FlowCommand, FlowFailure, FlowReview), FailureKind (Refused), failureBody, WorkflowInputDescriptor (..), frontendLiteralBytes, FrontendCapabilities, FrontendInvocation, ProcessGroup, createProcessGroup, terminateProcessGroup, groupOutcome, processGroupLive)
 import Control.Concurrent (rtsSupportsBoundThreads)
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (race, withAsync, asyncWithUnmask, cancel, wait)
@@ -1183,6 +1183,19 @@ appendCommandRecord total recordClass principal about body = Transaction $ \(Con
     forM appended $ \(position, record) -> do
       writeIORef pending (Just (PendingCommand total recordClass position principal about))
       (,,) position record <$> managerFlowContent manager record
+
+-- | Append the synchronized @review@ record of a published review, from the
+-- manager to the approvers of its profile, as the last step of the
+-- publication transaction before its commit checks. It is a 'Refusing' record,
+-- so a failed append refuses the publication and leaves no gap entry. The
+-- result is 'Nothing' for a lifetime without a manager log. A successful append
+-- returns the record and its body value, each decoded from the appended bytes.
+appendReviewRecord :: Int64 -> Text -> About -> Value -> Transaction (Maybe (Either ManagerFlowFailure (Record, Either Text Value)))
+appendReviewRecord total profile about body = Transaction $ \(Context _ _ writable _ _ _ _ slot) -> do
+  unless writable (throwIO StoreIntegrity)
+  forM slot $ \(manager, _) -> do
+    appended <- appendManagerTell manager total Refusing FlowReview Manager (Approvers profile) about body
+    forM appended $ \(_, record) -> (,) record <$> managerFlowContent manager record
 
 -- | The current in-memory lifetime, never reconstructed from a database row.
 transactionGeneration :: Transaction Text

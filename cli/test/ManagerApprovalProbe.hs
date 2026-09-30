@@ -11,6 +11,7 @@ import Agentic.Manager.Authorization
 import Agentic.Manager.Commands
 import Agentic.Manager.Configuration
 import Agentic.Manager.Drafts
+import qualified Agentic.Manager.Flow as Flow
 import Agentic.Manager.History
 import Agentic.Manager.Lineage
 import qualified Agentic.Manager.Worker as Worker
@@ -56,6 +57,9 @@ import System.Environment (getArgs)
 import System.FilePath ((</>),takeExtension,dropExtension)
 import System.IO (BufferMode (LineBuffering),hSetBuffering,stdout,hPutStrLn,stderr)
 import System.Posix.Files (setFileMode)
+import qualified System.Posix.IO as PosixIO
+import System.IO.Error (isEOFError)
+import qualified System.Posix.IO.ByteString as PosixBytes
 import System.Timeout (timeout)
 import GHC.Conc (threadStatus, ThreadStatus (ThreadBlocked), BlockReason (BlockedOnException, BlockedOnMVar))
 import GHC.Clock (getMonotonicTimeNSec)
@@ -113,6 +117,8 @@ main=do
     ["supervision",work,native]->supervisionChecks work native
     ["reservation-integrity",work,native]->reservationChecks work native
     ["review-gap",work,native]->reviewGapChecks work native
+    ["flow-review",work]->builtNative >>= flowReviewChecks work
+    ["flow-review",work,native]->flowReviewChecks work native
     ["interrupted-approval",work,native]->interruptionChecks work native
     ["worker-loss",work,native,source,python]->workerLossChecks work native source python
     [work,native]->positive work native
@@ -286,7 +292,11 @@ withReadyRunnerLedger :: Int64 -> FilePath -> FilePath -> [Text] -> Text -> Stri
 withReadyRunnerLedger = withReadyRunnerProfiles [("profile",["shared"])]
 
 withReadyRunnerProfiles :: [(Text,[Text])] -> Int64 -> FilePath -> FilePath -> [Text] -> Text -> String -> [Text] -> [(Text,Text)] -> (Fixture -> IO a) -> IO a
-withReadyRunnerProfiles configuredProfiles ledger work native prefix selectedWorkflow name arguments environment action=do
+withReadyRunnerProfiles = withReadyStore withCoordinationStore
+
+-- | The ready fixture in a Store lifetime that the given function opens.
+withReadyStore :: (InstalledConfiguration -> (CoordinationStore -> IO a) -> IO a) -> [(Text,[Text])] -> Int64 -> FilePath -> FilePath -> [Text] -> Text -> String -> [Text] -> [(Text,Text)] -> (Fixture -> IO a) -> IO a
+withReadyStore openStore configuredProfiles ledger work native prefix selectedWorkflow name arguments environment action=do
   capabilities <- getNumCapabilities
   let root=work </> name;path=work </> (name<>".json")
   createDirectory root;setFileMode root 0o700
@@ -301,7 +311,7 @@ withReadyRunnerProfiles configuredProfiles ledger work native prefix selectedWor
       validate requested=either(const(Left InvalidConfiguration))Right(Cli.validateManagerTarget registry requested)
       validatePrepared requested nativePrepared=either(const(Left InvalidReply))Right(Cli.validateManagerPreparedTarget registry requested nativePrepared)
   config<-loadConfiguration validate validatePrepared (const False) path >>=right
-  bracket (installConfiguration config >>=right) closeConfiguration $ \installed->withCoordinationStore installed $ \store->do
+  bracket (installConfiguration config >>=right) closeConfiguration $ \installed->openStore installed $ \store->do
     (_,profiles)<-configurationSnapshot installed >>=right
     policy<-case filter ((=="profile") . publicId) profiles of [profile]->pure(publicRevision profile);_->error "profile count"
     catalogue<-probeConfiguredProfile installed "profile" policy>>=right
@@ -677,6 +687,77 @@ withPrepared (Fixture _ _ store proof key ready) clock action=withAdmissionClock
     case rows of [[SQL.SQLText value]]->pure value;_->refuseTransaction StoreIntegrity
   public<-readPreparation store proof ident>>=right
   action controller live context reviewed public
+
+-- | The native runner that the Cabal build of this tree provides.
+builtNative :: IO FilePath
+builtNative=do
+  (code,out,err)<-readProcessWithExitCode "bash" ["test/cabal.sh","list-bin","-ftui-tests","routing-fixed-point-probe"] ""
+  case (code,reverse(filter(not.null)(lines out))) of
+    (ExitSuccess,path:_)->pure path
+    _->error("FAIL flow-review cannot locate the native runner: "<>err)
+
+-- | The review record of the manager log. A serving lifetime appends one
+-- synchronized review record, addressed to the approvers of the profile, when
+-- a publication inserts its preparation. A republish of the live preparation
+-- appends nothing, and a failed append leaves the review unpublished.
+flowReviewChecks :: FilePath -> FilePath -> IO ()
+flowReviewChecks work native=do
+  failing<-newIORef True
+  let fault=Flow.ManagerFlowFault(\schema _->if schema==Runtime.FlowReview then readIORef failing else pure False)
+      name="flow-review"
+  withReadyStore (withServingStoreWith Runtime.strictFlowCodec (Just fault)) [("profile",["shared"])] 8388608 work native [] "person-controlled" name ["--scripted"] [] $ \(Fixture root _ store proof key ready)->do
+    stream<-storeStreamId<$>storeIdentity store
+    -- The serving writer holds a Haskell handle on the log, and the runtime
+    -- refuses a second handle on the same file in one process, so the check
+    -- reads the log through a plain descriptor.
+    let readAll fd chunks=do
+          chunk<-try @IOException(PosixBytes.fdRead fd 65536)
+          case chunk of
+            Right bytes | not(BS.null bytes)->readAll fd (bytes:chunks)
+            Left failure | not(isEOFError failure)->throwIO failure
+            _->pure(BS.concat(reverse chunks))
+        logged=bracket(Runtime.openPrivateRoot "flow review check" root)Runtime.closePrivateRoot $ \private->do
+          bytes<-bracket(PosixIO.openFd(foldl (</>) root (Flow.managerFlowPath stream)) PosixIO.ReadOnly PosixIO.defaultFileFlags)PosixIO.closeFd(\fd->readAll fd [])
+          forM (filter(not.BS.null)(BS.split 10 bytes)) $ \line->do
+            record<-right(Runtime.decodeFlowLine line)
+            content<-Runtime.readFlowContentAt private (Flow.managerFlowClaims stream) (Runtime.recBody record)>>=right
+            case content of
+              Runtime.ContentValue value->pure(record,value)
+              Runtime.ContentEvent _->error "FAIL manager log holds an event body"
+        reviews=filter((==Runtime.FlowReview).Runtime.recSchema.fst)<$>logged
+    withAdmissionClock fixedClock store $ \controller->do
+      _<-enqueueRequest controller proof(draftId ready)(key "flow_enqueue")(Just("\""<>draftRevision ready<>"\""))(encoded(object["operation" .= ("enqueue"::Text)]))>>=right
+      live<-admitOldest controller>>=right>>=maybe(error "no live admission")pure
+      context<-await(awaitReview live)>>=right
+      refused<-publishReview store live
+      check "a failed review append refuses the publication with storage-unavailable" (case refused of Left StorageUnavailable->True;_->False)
+      number store "SELECT count(*) FROM preparations" >>=check "a failed review append leaves the review unpublished" . (==0)
+      reviews>>=check "a failed review append leaves no review record" . null
+      writeIORef failing False
+      _<-publishReview store live>>=right
+      ident<-runRead store $ do
+        rows<-query "SELECT id FROM preparations WHERE state='live'" []
+        case rows of [[SQL.SQLText value]]->pure value;_->refuseTransaction StoreIntegrity
+      (reviewBytes,binding)<-runRead store $ do
+        rows<-query "SELECT review,private_binding FROM preparations WHERE id=?" [SQL.SQLText ident]
+        case rows of [[SQL.SQLBlob a,SQL.SQLBlob b]]->pure(a,b);_->refuseTransaction StoreIntegrity
+      public<-readPreparation store proof ident>>=right
+      let digest bytes=T.pack(show(hash bytes::Digest SHA256))
+          expected=Flow.ReviewBody ident reviewBytes (digest reviewBytes) binding (P.preparationDigest public) (P.preparationExpiresAt public)
+            (P.ApprovalRequest (P.preparationDigest public) (P.preparationRequestRevision public) (P.preparationProfileRevision public) (P.preparationDescriptorRevision public) (P.preparationGeneration public))
+      published<-reviews
+      check "one insert appends one review record from the manager to the approvers of the profile with the published bytes, binding and selectors" $
+        case published of
+          [(record,value)]->Runtime.recFrom record==Runtime.Manager && Runtime.recTo record==Runtime.Approvers "profile"
+            && Runtime.aboutRequest(Runtime.recAbout record)==Just(reviewRequest context) && Runtime.recReplyTo record==Nothing
+            && Flow.reviewFromFlowBody value==Right expected
+          _->False
+      before<-length<$>logged
+      _<-publishReview store live>>=right
+      after<-logged
+      check "a republish of the live preparation appends nothing" (length after==before && length(filter((==Runtime.FlowReview).Runtime.recSchema.fst)after)==1)
+      same<-readPreparation store proof ident>>=right
+      check "the republish returns the published preparation" (same==public)
 
 shutdownDrainChecks :: FilePath -> FilePath -> IO ()
 shutdownDrainChecks work native = withReadyRunnerProfiles [("profile",["shared"]),("pending",["pending"])] 8388608 work native [] "person-controlled" "shutdown-drain" ["--scripted"] [] $ \fixture@(Fixture _ installed store proof key _) -> do
