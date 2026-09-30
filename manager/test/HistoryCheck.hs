@@ -108,7 +108,15 @@ main = do
               mutate store (execute "UPDATE runs SET supervision='observer' WHERE id=?" [txt parent])
             check "Emacs missing invocation refused only for v3" (isLeft(retainLineageInvocation manifest Nothing) == (version==3))
             check "v3 exact invocation mismatch refuses" (isLeft(retainLineageInvocation manifest (Just(invocation {frontendInvocationExecutable="/never-run"}))) == (version==3))
-            withLineageRequests store proof parent (\children -> check "complete parent child-request links" (length children==3 && all ((==Just parent) . draftParent) children))
+            withLineageRequests store proof parent $ \lineage -> do
+              let children = lineageChildren lineage
+              check "complete parent child-request links" (length children==3 && all ((==Just parent) . draftParent) children)
+              check "released observer parent is eligible for every lineage operation"
+                (lineageEligible lineage == ["restart","resume","fork"] && lineageRefusal lineage == Nothing)
+            mutate store (execute "UPDATE runs SET supervision='cleanup-pending' WHERE id=?" [txt parent])
+            withLineageRequests store proof parent $ \lineage ->
+              check "quarantined parent lists no lineage operation" (null (lineageEligible lineage) && lineageRefusal lineage == Just "quarantined")
+            mutate store (execute "UPDATE runs SET supervision='observer' WHERE id=?" [txt parent])
           now <- getCurrentTime
           let ownerPath = root </> "runs/runs/native-2/owner.json"
           BS.writeFile ownerPath (encoded(object ["version" .= (1::Int),"ownerId" .= ("foreign"::Text),"pid" .= (99999::Int),"heartbeat" .= formatTime defaultTimeLocale "%Y-%m-%dT%H:%M:%SZ" now]))
@@ -116,6 +124,8 @@ main = do
           current <- scalar store "SELECT revision FROM runs WHERE id='run_2'" []
           foreignRequest <- createLineageDraft store proof "run_2" nonce (Just(etag "" "" current)) (encoded RestartParent)
           check "foreign live owner cannot become a parent" (foreignRequest == Left OwnershipUnavailable)
+          withLineageRequests store proof "run_2" $ \lineage ->
+            check "foreign live owner lists no lineage operation" (null (lineageEligible lineage) && lineageRefusal lineage == Just "ownership-unavailable")
           observedForeign <- history store proof [binding]
           check "foreign owner stays observer" (any (\v -> field "limitations" v == toJSON (["foreign-owner"]::[Text]) && field "supervision" v == String "observer") observedForeign)
           removeFile ownerPath

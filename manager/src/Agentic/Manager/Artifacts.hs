@@ -3,7 +3,7 @@
 
 -- | Authorized observations and exclusive exports of retained Runtime artifacts.
 module Agentic.Manager.Artifacts
-  ( withArtifactDownload, withRunOutputs, withRunOutputsSource, withRunExports, submitExport, readExport, reconcileExport
+  ( withArtifactDownload, withRunOutputs, withRunOutputsSource, withRunExports, withRunExportsSource, submitExport, readExport, withExport, reconcileExport
   ) where
 
 import Agentic.Manager.Authorization
@@ -369,35 +369,56 @@ captureExport runs (ExportRecord _ _ _ _ root name digest size code _ _) = do
 validateDocument :: Value -> IO ()
 validateDocument document = unless (validExportDocument document) (throwIO (StoreCorrupt "" "result does not fit the public export document"))
 
--- | Bounded receipt items under one current profile loan, not a page-set service.
+-- | Bounded receipt items under one current profile loan.
 withRunExports :: CoordinationStore -> CredentialProof -> RunAssociation -> (AuthorizedView -> [Value] -> IO ()) -> IO ()
-withRunExports store proof association respond = withAuthorizedResponse store proof (associationProfile association) [Command.Observe] $ \view -> do
-  (revision,idents) <- runRead store $ do
-    authorizeObservation proof association
-    revision <- exportVersion association
-    rows <- query "SELECT id FROM exports WHERE run_id=? ORDER BY id LIMIT 257" [text (associationRun association)]
-    idents <- mapM (\row -> case row of [SQL.SQLText ident] -> pure ident; _ -> refuseTransaction StoreIntegrity) rows
-    when (length idents > 256) (refuseTransaction Command.ViewTooLarge)
-    pure (revision,idents)
-  (_,reversed) <- foldM (\(size,items) ident -> do
-    record@(ExportRecord _ _ _ _ _ _ _ _ _ _ state) <- loadExport store proof ident
-    let item = exportReceipt record (state == "published")
-        next = size + BS.length (encoded item) + if null items then 0 else 1
-    when (next > 1048576) (throwIO Command.ViewTooLarge)
-    pure (next,item:items)) (2,[]) idents
-  let items = reverse reversed
-  runRead store $ do
-    authorizeObservation proof association
-    current <- exportVersion association
-    unless (revision == current) (refuseTransaction StoreBusy)
-  respond view items
+withRunExports store proof association respond =
+  withRunExportsSource store proof association $ \view _ materialize -> materialize >>= respond view
+
+-- | The export receipts of one run under the response loans of its profile.
+-- Receipts need no file, so the source takes the configuration guard and one
+-- reader charge and not the file slot. 'Transport.respondBytes' returns them
+-- before the first network write. The materializer refuses more than 256
+-- receipts or 1 MiB of encoded receipts, and refuses with 'StoreBusy' when the
+-- collection revision changes while it reads.
+withRunExportsSource :: CoordinationStore -> CredentialProof -> RunAssociation
+  -> (AuthorizedView -> ConfigurationLimits -> IO [Value] -> IO a) -> IO a
+withRunExportsSource store proof association action =
+  withAuthorizedResponseLimits store proof (associationProfile association) [Command.Observe] $ \view limits ->
+    action view limits $ do
+      revalidateAuthorizedView view >>= either throwIO pure
+      (revision,idents) <- runRead store $ do
+        authorizeObservation proof association
+        revision <- exportVersion association
+        rows <- query "SELECT id FROM exports WHERE run_id=? ORDER BY id LIMIT 257" [text (associationRun association)]
+        idents <- mapM (\row -> case row of [SQL.SQLText ident] -> pure ident; _ -> refuseTransaction StoreIntegrity) rows
+        when (length idents > 256) (refuseTransaction Command.ViewTooLarge)
+        pure (revision,idents)
+      (_,reversed) <- foldM (\(size,items) ident -> do
+        record@(ExportRecord _ _ _ _ _ _ _ _ _ _ state) <- loadExport store proof ident
+        let item = exportReceipt record (state == "published")
+            next = size + BS.length (encoded item) + if null items then 0 else 1
+        when (next > 1048576) (throwIO Command.ViewTooLarge)
+        pure (next,item:items)) (2,[]) idents
+      runRead store $ do
+        authorizeObservation proof association
+        current <- exportVersion association
+        unless (revision == current) (refuseTransaction StoreBusy)
+      revalidateAuthorizedView view >>= either throwIO pure
+      pure (reverse reversed)
 
 readExport :: CoordinationStore -> CredentialProof -> Text -> IO Value
-readExport store proof ident = do
-  record@(ExportRecord association _ _ _ _ _ _ _ _ _ state) <- loadExport store proof ident
-  withProfile store (associationProfile association) $ do
-    runRead store (authorizeObservation proof association)
-    pure (exportReceipt record (state == "published"))
+readExport store proof ident = withExport store proof ident (\_ receipt -> pure receipt)
+
+-- | One export receipt under the response loans of its run's profile. The
+-- record is read again under those loans and must keep its run association.
+withExport :: CoordinationStore -> CredentialProof -> Text -> (AuthorizedView -> Value -> IO a) -> IO a
+withExport store proof ident respond = do
+  ExportRecord association _ _ _ _ _ _ _ _ _ _ <- loadExport store proof ident
+  withAuthorizedResponse store proof (associationProfile association) [Command.Observe] $ \view -> do
+    record@(ExportRecord bound _ _ _ _ _ _ _ _ _ state) <- loadExport store proof ident
+    unless (bound == association) (throwIO StoreIntegrity)
+    revalidateAuthorizedView view >>= either throwIO pure
+    respond view (exportReceipt record (state == "published"))
 
 -- | Only a durable successful publisher witness can close a lost receipt.
 -- Matching bytes without that witness remain unresolved, including after reopen.

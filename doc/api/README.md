@@ -206,6 +206,17 @@ names no run, or a run of a profile that the credential cannot observe,
 receives 403 `insufficient-scope`.
 The service does not bind configured legacy retention roots, so `/runs` does
 not list their entries.
+`/runs/{id}/exports` and `/runs/{id}/lineage-requests` are page sets of one
+run. The first lists the export receipts of the run in identifier order, and
+each item equals the `/exports/{id}` representation. The second lists the
+child requests of the run in identifier order, and each item equals the
+`/requests/{id}` representation. Its `eligible` field lists the operations
+that a new lineage request may name now. When it lists none, `refusal` gives
+the reason. The native preparation still checks the checkpoint and effect
+facts of each operation after approval. A run identifier that names no run,
+or a run of a profile that the credential cannot observe, receives 403
+`insufficient-scope`. An unknown export receives 404 `unavailable-resource`,
+and an export of such a profile receives 403 `insufficient-scope`.
 
 | Resource | Methods | Served | Mutation scopes and guard |
 |---|---|---|---|
@@ -226,9 +237,9 @@ not list their entries.
 | `/commands/{id}` | GET | GET | No mutation. A known command identifier does not bypass current operation or profile authorization. |
 | `/runs/{id}/outputs` | GET | GET | No mutation. Intermediate output and diagnostics are separate from verified final content. |
 | `/artifacts/{id}` | GET | GET | No mutation. The server resolves and verifies its retained internal reference before sending content. |
-| `/runs/{id}/exports` | GET, POST | None | `observe` and `export`, current collection ETag, verified source, and a permitted single-component name. |
-| `/exports/{id}` | GET | None | No mutation. Returns receipt metadata and an authorized download link without a server path. |
-| `/runs/{id}/lineage-requests` | GET, POST | None | `observe` and `submit`, current collection ETag, eligible parent, compatible trusted invocation, and no conflicting ownership or quarantine. |
+| `/runs/{id}/exports` | GET, POST | GET | `observe` and `export`, current collection ETag, verified source, and a permitted single-component name. |
+| `/exports/{id}` | GET | GET | No mutation. Returns receipt metadata and an authorized download link without a server path. |
+| `/runs/{id}/lineage-requests` | GET, POST | GET | `observe` and `submit`, current collection ETag, eligible parent, compatible trusted invocation, and no conflicting ownership or quarantine. |
 | `/snapshot` | GET | GET | No mutation. Provides a consistent authorized overview and replay cursor. |
 | `/events` | GET | GET | No mutation. SSE and bounded JSON use the same durable cursor and retention rules. |
 

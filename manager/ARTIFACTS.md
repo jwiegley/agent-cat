@@ -54,9 +54,15 @@ transitions receive fresh revisions, including a return to a previous status.
 Unchanged observations do not rewrite revisions or emit invalidations.
 
 The adapter refuses more than 256 items or an encoded item array above 1 MiB.
-`withRunExports` supplies receipt items under the same bounds and checks that the
-collection revision did not change while reading them. It does not invent page tokens or claim a complete paginated service. Store retains
-its existing transaction, projection and ingestion bounds.
+`withRunExportsSource` supplies the receipt items of one run under the same
+bounds for the `/v1/runs/{id}/exports` page set. Receipts need no file, so it
+takes the configuration guard and one reader charge and not the file slot,
+and `Transport.respondBytes` returns them before the first network write. It
+refuses with `StoreBusy` when the collection revision changes while it reads
+the receipts. `withExport` reads one receipt again under the response loans
+of its run's profile for `/v1/exports/{id}`. `withRunExports` and `readExport`
+use the same sources. Store retains its existing transaction, projection and
+ingestion bounds.
 
 ## File and memory ownership
 

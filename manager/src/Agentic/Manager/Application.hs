@@ -61,10 +61,10 @@ methods path = case path of
   ["v1", "decisions"] -> ["GET"]
   ["v1", kind, ident]
     | C.validId ident && kind `elem` ["requests", "preparations", "decisions"] -> ["GET", "POST"]
-    | C.validId ident && kind `elem` ["commands", "artifacts", "workflows", "runs"] -> ["GET"]
+    | C.validId ident && kind `elem` ["commands", "artifacts", "workflows", "runs", "exports"] -> ["GET"]
   ["v1", "runs", ident, "control"] | C.validId ident -> ["GET", "POST"]
   ["v1", "runs", ident, leaf]
-    | C.validId ident && leaf `elem` ["snapshot", "outputs"] -> ["GET"]
+    | C.validId ident && leaf `elem` runPages -> ["GET"]
   _ -> []
 
 dispatch :: Service.Service -> Pages.PageSets -> Events.StreamReaders -> Transport.AuthenticatedApplication
@@ -195,6 +195,22 @@ dispatch service pages streams proof request respond = do
         page view limits token $ do
           items <- materialize
           pure (contentRevision (toJSON items), ["runId" .= ident], items)
+    ("GET", ["v1", "runs", ident, "exports"]) ->
+      Service.withExportsSource service proof ident $ \view limits materialize ->
+        page view limits token $ do
+          items <- materialize
+          pure (contentRevision (toJSON items), ["runId" .= ident], items)
+    ("GET", ["v1", "exports", ident]) ->
+      Service.withExport service proof ident $ \view value ->
+        json view HTTP.status200 [("ETag", representationTag request (C.encoded value))] value respond
+    ("GET", ["v1", "runs", ident, "lineage-requests"]) ->
+      Service.withLineageSource service proof ident $ \view limits materialize ->
+        page view limits token $ do
+          lineage <- materialize
+          let fields = ["runId" .= ident, "eligible" .= Drafts.lineageEligible lineage,
+                "refusal" .= Drafts.lineageRefusal lineage]
+              items = map toJSON (Drafts.lineageChildren lineage)
+          pure (contentRevision (toJSON (object fields, items)), fields, items)
     ("GET", ["v1", "artifacts", ident]) ->
       Service.download service proof ident $ \view _ bytes ->
         Transport.respondBytes HTTP.status200
@@ -209,7 +225,7 @@ dispatch service pages streams proof request respond = do
     decisionList = Wai.requestMethod request == "GET" && Wai.pathInfo request == ["v1", "decisions"]
     paged = Wai.requestMethod request == "GET" && case Wai.pathInfo request of
       ["v1", kind] -> kind `elem` ["profiles", "snapshot", "requests", "runs"]
-      ["v1", "runs", _, leaf] -> leaf `elem` ["snapshot", "outputs"]
+      ["v1", "runs", _, leaf] -> leaf `elem` runPages
       _ -> False
     page view limits token produce = servePage pages store proof request view limits token produce respond
     collection token members = Service.withCollectionSource service proof members $ \view limits materialize ->
@@ -218,6 +234,10 @@ dispatch service pages streams proof request respond = do
       (C.requiredScopes (C.receiptOperation value)) $ \view ->
         json view HTTP.status202 [("Location", TE.encodeUtf8 ("/v1/commands/" <> C.receiptId value))]
           (toJSON value) respond
+
+-- The paged subresources of one run.
+runPages :: [Text]
+runPages = ["snapshot", "outputs", "exports", "lineage-requests"]
 
 -- | Send one page of a protected page set. The owner materializes the page
 -- under its loans, and 'Transport.respondBytes' returns them before the first

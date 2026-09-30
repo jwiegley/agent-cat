@@ -590,6 +590,38 @@ def check_collections(name, authorized, profile, requests=(), runs=(), decisions
     return found
 
 
+def check_run_resources(run, authorized):
+    """Read the export and lineage-request collections of the terminal mixed
+    run, and an unknown export receipt. Each collection must be one
+    schema-valid page of the run with no private marker. The run has no
+    export and no child request. Its released reservation leaves every
+    lineage operation eligible. The second credential is refused, and an
+    unknown export is absent for both credentials."""
+    markers = private_markers()
+    found = {}
+    for label, path, schema in (("exports", f"/v1/runs/{run}/exports", "ExportPage"),
+                                ("lineage", f"/v1/runs/{run}/lineage-requests", "LineagePage")):
+        status, value, raw, received = fetch(path, authorized)
+        assert status == 200, ("run resource read", path, status, value.get("code"))
+        validate(schema, value, raw)
+        assert value["runId"] == run and value["items"] == [], ("run resource members", path)
+        assert value["page"]["next"] is None and value["page"]["totalItems"] == 0, ("run resource page", path)
+        assert received.get("etag", "").startswith('"'), ("run resource ETag", path)
+        leaked = [marker for marker in markers if marker in raw]
+        assert not leaked, ("run resource body holds private bytes", path, leaked)
+        (work / f"run-{label}.json").write_bytes(raw)
+        found[label] = value
+        status, problem, _ = request(path, other_authorized)
+        assert status == 403 and problem["code"] == "insufficient-scope", ("other profile run resource", path, status)
+        status, problem, _ = request(path + "?runId=" + run, authorized)
+        assert status == 400 and problem["code"] == "malformed-request", ("run resource query refusal", path, status)
+    lineage = found["lineage"]
+    assert lineage["eligible"] == ["restart", "resume", "fork"] and lineage["refusal"] is None, ("lineage eligibility", lineage["eligible"], lineage["refusal"])
+    for credential in (authorized, other_authorized):
+        status, problem, _ = request("/v1/exports/export_absent", credential)
+        assert status == 404 and problem["code"] == "unavailable-resource", ("unknown export", status, problem.get("code"))
+
+
 def command_receipts(cursor, authorized):
     """The resource and receipt of each command that a command.changed event
     after the cursor names, in event order, from read-only reads."""
@@ -2333,6 +2365,10 @@ for iteration in range(2):
                     if collections:
                         check_collections("terminal", authorized, "profile_1", requests=[created["id"]], runs=[mixed_run], absent=[other_created["id"]])
                         print("PASS collections list the mixed request and its terminal run after completion", flush=True)
+                        check_run_resources(mixed_run, authorized)
+                        print("PASS export and lineage-request collections of the terminal run are schema-valid single pages "
+                              "with every lineage operation eligible, refuse the other profile, hold no private path or native "
+                              "identifier, and an unknown export is absent", flush=True)
                 cursor = before["cursor"]
                 status, batch, raw = request("/v1/events?after=" + cursor, authorized | {"Accept": "application/json"})
                 assert status == 200 and batch["events"]

@@ -82,6 +82,21 @@ run. The service does not use
 `History.withHistory` and binds no legacy retention root, so the run
 collection does not list legacy entries.
 
+The export and lineage-request collections of one run use their owners.
+`Artifacts.withRunExportsSource` supplies the export receipts, as
+[ARTIFACTS.md](ARTIFACTS.md) describes. `Drafts.withLineageRequestsSource`
+takes the file slot, then the configuration guard and one reader charge. It
+reads every child request through `Drafts.readDraftAt` and refuses more than
+256 children or 1 MiB of encoded children. It refuses with `StoreBusy` when
+the parent revision changes while it reads. Its eligibility applies the parent
+checks of `createLineageDraft` in the same order: supervision and reservation,
+profile quarantine, root identity and ownership, invocation, and the parent
+workflow in the current catalogue. Cleanup-pending supervision and a
+quarantined profile give `quarantined`. Live or foreign ownership and a changed
+root give `ownership-unavailable`. A different invocation and a workflow absent
+from the catalogue give `incompatible-parent`. A refusal lists no eligible
+operation. Eligibility does not read inherited inputs, checkpoints or effects.
+
 ## Non-network lifecycle harness
 
 `manager/ci/vertical.sh` builds `manager-vertical-check` and its configured native

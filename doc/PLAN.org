@@ -3299,6 +3299,53 @@ Non-blocking review findings from subtask B11 of acat-wm-025-3utw (fess report r
 ]
 #+end_src
 
+* TODO [#D] Resolve B12 fess findings in the WM-025 export and lineage resources
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-b12-fess-fw1z
+:LABELS:   []
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-30 Wed 04:08]
+:MODIFIED: [2026-09-30 Wed 04:08]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking review findings from subtask B12 of acat-wm-025-3utw (fess report
+resume-20260923/fess/b1-B12-r1.md).
+
+1. Medium. manager/test/service_http.py lines 461-466 and doc/api/README.md lines 218-219: the HTTP
+schema and private-marker checks run only on empty ExportPage and LineagePage bodies. No
+ExportReceipt or lineage Request item passes through HTTP, and no test sees GET /v1/exports/{id}
+return 200 or refuse another profile with 403. Put an export receipt and a lineage child into an
+HTTP fixture (possible after WM-027 routes the POSTs), then assert a nonempty schema-valid item with
+no private markers, the 200, and the other-profile 403.
+2. Medium. manager/src/Agentic/Manager/Drafts.hs lines 279-295 and manager/test/HistoryCheck.hs
+lines 111-127: no test covers the incompatible-parent refusal code, for a different invocation
+(ParentInvocation) or for a workflow missing from the catalogue (ParentWorkflow). Add HistoryCheck
+cases for both, and check that createLineageDraft still returns StateConflict and StaleRevision.
+3. Medium. manager/src/Agentic/Manager/Application.hs lines 198-212 and doc/api/openapi.yaml line
+1706: the export and lineage collection GETs send a representation ETag, but
+Commands.checkPrecondition expects the quoted run revision as the POST If-Match. The contract says
+the POSTs accept the collection GET ETag. WM-027 must choose one validator before it routes the
+POSTs. A child request can change without a change to the parent run revision, so the run revision
+alone is not a strong validator for the lineage collection.
+4. Low. manager/src/Agentic/Manager/Drafts.hs lines 343-354: a corrupt parent journal, or a race in
+which revalidateLineageParentAt raises ioError, makes the whole lineage GET fail with no refusal
+code. Document the behavior or map the owner-appears race to ownership-unavailable.
+5. Low. doc/api/README.md lines 206 and 218-219: /v1/exports/{id} returns 404 for an unknown export
+and 403 for an export of another profile, which reveals that the export exists. The run resources
+return 403 for both cases. Justify the split or return one refusal for both.
+6. Low. manager/src/Agentic/Manager/Drafts.hs line 262: `eligible` ignores whether the credential
+has the submit scope. Record whether it describes the parent only or the parent and the caller.
+7. Low. manager/src/Agentic/Manager/Drafts.hs line 252: when the parent's profile has no catalogue,
+the lineage collection throws StorageUnavailable and reports no refusal code. Document it in
+manager/README.md or report incompatible-parent.
+8. Low (implementer limitation). Both collections keep the owner limits of 256 items and 1 MiB, so
+they are always single pages. Multi-page behavior has no test.
+
 * TODO [#C] Resolve F10 fess findings in the command and receipt records
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -15623,7 +15670,7 @@ leak private errors. There is no plaintext bearer development exception.
 :LABELS:   ["p5","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-30 Wed 03:49]
+:MODIFIED: [2026-09-30 Wed 04:08]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-025
 :SOURCE_REPO: agent-cat
@@ -15769,6 +15816,13 @@ through the actual HTTP response path.
     "author": "johnw",
     "text": "B11 routes the frozen read collections GET /v1/requests, /v1/runs and /v1/decisions through servePage and Pages.withPage, using the Overview source under the file slot, configuration guard and reader charge order. Items render through the detail owners. Evidence (resume-20260923/B/B11/impl-r1): Werror build, service_http.py base and mixed modes at N8 (schema-valid pages, other-profile absence, no private path or native run id in bodies), manager-history-check at N8, manager/ci/contract.sh, the Phase A journey at N8 and make -C doc check all passed. Limitation: /v1/runs lists managed runs only, not legacy history entries. Review findings are filed as acat-b11-fess-g9wh. The package stays open for its other queries and closeout review.",
     "created_at": "2026-09-30T10:49:45Z"
+  },
+  {
+    "id": 385,
+    "issue_id": "acat-wm-025-3utw",
+    "author": "johnw",
+    "text": "B12 (Phase B part 1): GET /v1/runs/{id}/exports and GET /v1/runs/{id}/lineage-requests are routed through servePage and Pages.withPage with PageToken, and GET /v1/exports/{id} is a plain detail with a representation ETag. Exports use Artifacts.withRunExportsSource and withExport; lineage uses Drafts.withLineageRequestsSource with the frozen refusal codes (quarantined, ownership-unavailable, incompatible-parent). A missing or foreign run gets 403 insufficient-scope. Evidence (stage dir B/B12/impl-r1): Werror build of manager-history-check, agentic-run and routing-fixed-point-probe; service_http.py mixed mode at N8 (both collections schema-valid as empty pages, lineage lists all three operations, other-profile refusal, no private markers); manager-history-check at N8; manager/ci/contract.sh; Phase A journey at N8; make -C doc check; plus the artifact check and artifact contract. Limits: no 200 on /v1/exports/{id} over HTTP until WM-027 routes POST exports; incompatible-parent untested; single pages only. Follow-up findings: acat-b12-fess-fw1z. Package stays open for closeout.",
+    "created_at": "2026-09-30T11:08:55Z"
   }
 ]
 #+end_src
@@ -15914,7 +15968,7 @@ and enforce advertised bounds. G2 is complete with mutations still unavailable.
 :LABELS:   ["p5","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-26 Sat 23:41]
+:MODIFIED: [2026-09-30 Wed 04:08]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-027
 :SOURCE_REPO: agent-cat
@@ -16098,6 +16152,13 @@ Network mutation remains behind G3 until the required evidence is complete.
     "author": "johnw",
     "text": "A1 baseline on unchanged source at HEAD 32c72f80. S1, the Python protected-HTTP mixed workflow (deterministic native fixture), failed at N1 in 3 of 3 independent runs, and N8 did not run. The request route committed the enqueue (durable command effect-observed, effect enqueued, admission released, phase draft), but the protected response was 503 storage-unavailable. One reservation exists with state released, no slot and pending_kind closed. Runs, preparations, admission observations, start intents, ingestions and reservation resources are all zero. The read-only classification places the failure at the protected response to an already committed mutation, not at admission refusal or ingestion. The cause of the 503 and the source of the closed release are unproved. Evidence: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A1/verify-r3/V3-mixed-http.log, V3-mixed-classify.log, impl-r3/A1-classification.md, and preserved roots A1-mixed.CG34SN9q, A1-mixed.tXBqMFus and A1-mixed.VztqwomL under /Users/johnw/Products/k.M0a5ItPm/tmp. No source change, replay or fix was attempted. The issue stays open.\n",
     "created_at": "2026-09-24T09:50:41Z"
+  },
+  {
+    "id": 386,
+    "issue_id": "acat-wm-027-gcu6",
+    "author": "johnw",
+    "text": "From B12 (WM-025): the export and lineage collection GETs now send a representation ETag, while Commands.checkPrecondition expects the quoted run revision as the POST If-Match. The contract says the POSTs accept the collection GET ETag. Before routing POST /v1/runs/{id}/exports and the lineage POSTs, WM-027 must choose one validator. See acat-b12-fess-fw1z item 3.",
+    "created_at": "2026-09-30T11:08:55Z"
   }
 ]
 #+end_src

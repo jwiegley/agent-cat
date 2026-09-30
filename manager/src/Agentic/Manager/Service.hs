@@ -6,12 +6,13 @@ module Agentic.Manager.Service
   ( Service, withService, serviceStore, serviceFault,
     enqueue, editInput, withdraw, approve, controlRun, controlDecision, readControl, withControl,
     withSnapshot, withSnapshotSource, withOverviewSource, Overview.Collection (..), withCollectionSource,
-    withRun, withOutputs, withOutputsSource, download
+    withRun, withOutputs, withOutputsSource, withExportsSource, withExport, withLineageSource, download
   ) where
 
 import qualified Agentic.Manager.Admission as A
 import qualified Agentic.Manager.Approval as Approval
 import qualified Agentic.Manager.Artifacts as Artifacts
+import qualified Agentic.Manager.Drafts as Drafts
 import Agentic.Manager.Authorization (CredentialProof, AuthorizedView, attachResponseLoan, withAuthorizedCatalogueContext)
 import Agentic.Manager.Fault (FaultClass (CommandRefusal), classifyFault, recordFault)
 import qualified Agentic.Manager.History as History
@@ -310,6 +311,25 @@ withOutputsSource :: Service -> CredentialProof -> Text
 withOutputsSource service proof ident respond = do
   association <- State.resolveRun (serviceStore service) proof [Observe] ident
   Artifacts.withRunOutputsSource (serviceStore service) proof association respond
+
+-- | The export receipts of one run. A run of a profile that the credential
+-- cannot observe refuses as the other run resources refuse.
+withExportsSource :: Service -> CredentialProof -> Text
+  -> (AuthorizedView -> ConfigurationLimits -> IO [Value] -> IO a) -> IO a
+withExportsSource service proof ident respond = do
+  association <- State.resolveRun (serviceStore service) proof [Observe] ident
+  Artifacts.withRunExportsSource (serviceStore service) proof association respond
+
+withExport :: Service -> CredentialProof -> Text -> (AuthorizedView -> Value -> IO a) -> IO a
+withExport service = Artifacts.withExport (serviceStore service)
+
+-- | The lineage-request collection of one parent run, with the same run
+-- refusal as the other run resources.
+withLineageSource :: Service -> CredentialProof -> Text
+  -> (AuthorizedView -> ConfigurationLimits -> IO Drafts.LineageRequests -> IO a) -> IO a
+withLineageSource service proof ident respond = do
+  _ <- State.resolveRun (serviceStore service) proof [Observe] ident
+  Drafts.withLineageRequestsSource (serviceStore service) proof ident respond
 
 download :: Service -> CredentialProof -> Text -> (AuthorizedView -> Value -> BS.ByteString -> IO a) -> IO a
 download service = Artifacts.withArtifactDownload (serviceStore service)

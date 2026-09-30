@@ -6,7 +6,7 @@
 
 -- | Durable input representations and verified captures, never workflow execution.
 module Agentic.Manager.Drafts
-  ( reconcileDrafts, createDraft, createLineageDraft, withLineageRequests, checkLineageParent, changeDraftInput, changeDraftInputGuarded, InputTransition (..), RequestState, requestView, requestOwner, requestState, currentVersion, editable, checkDraftCapacity, uploadCapture, collectCaptures, readDraft, readDraftAt, withDraft, assembleDraft, DraftAssembly, assemblyRequest, assemblyRevision, assemblyProfile, assemblyProfileRevision, assemblySetup, assemblyFrame, assemblyInputSummaries, assemblySelection, assemblyParentBinding, validateAssemblyParent, assembleDraftSnapshot, assembleAcceptedDraft, structuralReadiness, verifyFrontendFiles, verifyFrontendFilesAt, timed ) where
+  ( reconcileDrafts, createDraft, createLineageDraft, LineageRequests (..), withLineageRequests, withLineageRequestsSource, checkLineageParent, changeDraftInput, changeDraftInputGuarded, InputTransition (..), RequestState, requestView, requestOwner, requestState, currentVersion, editable, checkDraftCapacity, uploadCapture, collectCaptures, readDraft, readDraftAt, withDraft, assembleDraft, DraftAssembly, assemblyRequest, assemblyRevision, assemblyProfile, assemblyProfileRevision, assemblySetup, assemblyFrame, assemblyInputSummaries, assemblySelection, assemblyParentBinding, validateAssemblyParent, assembleDraftSnapshot, assembleAcceptedDraft, structuralReadiness, verifyFrontendFiles, verifyFrontendFilesAt, timed ) where
 
 import Agentic.Manager.Authorization
 import Agentic.Manager.Commands
@@ -29,7 +29,7 @@ import Agentic.Runtime
    readRunRecordWithEnvelopesAt, revalidateLineageParentAt, readFrontendInputBytesBoundedAt,
    retainLineageInvocation, encodeFrontendManifest, FrontendPrepared (..))
 import Control.Concurrent (threadDelay)
-import Control.DeepSeq (NFData)
+import Control.DeepSeq (NFData (rnf))
 import Control.Exception (IOException, SomeException, bracket, evaluate, throwIO, try)
 import Control.Monad (forM, forM_, unless, when, void)
 import Crypto.Hash (Context, Digest, SHA256, hash, hashInit, hashUpdate, hashFinalize)
@@ -195,9 +195,7 @@ createLineageDraft store proof parent key precondition body = draftIO $ do
         policy = selectionContext selection
     record <- readParent store root parent selection
     let manifest = recordManifest record
-    (workflow,descriptor) <- case [(ident,descriptor) | (ident,descriptor) <- discoveryEntries catalogue, workflowName descriptor == frontendWorkflow manifest] of
-      [entry] -> pure entry
-      _ -> throwIO StaleRevision
+    (workflow,descriptor) <- maybe (throwIO (parentRefusalFailure ParentWorkflow)) pure (parentWorkflow catalogue record)
     _ <- parentInputs root record descriptor
     ident <- fresh "request_"
     parentRevision <- fresh "run_revision_"
@@ -227,25 +225,60 @@ createLineageDraft store proof parent key precondition body = draftIO $ do
     unless (operatorId policy == profile) (throwIO StaleRevision)
     submissionReceipt <$> (submitConfiguredCommand store proof request builder >>= requireEither)
 
--- | Complete bounded child-request collection, not an HTTP page-set implementation.
-withLineageRequests :: CoordinationStore -> CredentialProof -> Text -> ([DraftView] -> IO ()) -> IO ()
-withLineageRequests store proof parent respond = do
-  (profile,revision,idents) <- runRead store $ do
-    (profile,_,_) <- parentAddress parent
-    _ <- authorizeProfile proof profile [Observe] >>= requireTransaction
-    versions <- query "SELECT revision FROM runs WHERE id=?" [text parent]
-    revision <- case versions of [[SQL.SQLText value]] -> pure value; _ -> refuseTransaction ResourceUnavailable
-    rows <- query "SELECT id FROM requests WHERE parent_run_id=? ORDER BY id LIMIT 257" [text parent]
-    when (length rows > 256) (refuseTransaction ViewTooLarge)
-    idents <- mapM (\row -> case row of [SQL.SQLText ident] -> pure ident; _ -> refuseTransaction StorageUnavailable) rows
-    pure (profile,revision,idents)
-  views <- mapM (\ident -> readDraft store proof ident >>= requireEither) idents
-  when (BS.length(encoded views) > 1048576) (throwIO ViewTooLarge)
-  runRead store $ do
-    _ <- authorizeProfile proof profile [Observe] >>= requireTransaction
-    versions <- query "SELECT revision FROM runs WHERE id=?" [text parent]
-    unless (versions == [[text revision]]) (refuseTransaction StaleRevision)
-  respond views
+-- | One parent's lineage-request collection. 'lineageEligible' lists the
+-- operations that a new lineage draft of the parent may name now, and
+-- 'lineageRefusal' gives the frozen reason when it lists none. The native
+-- preparation still checks the checkpoint and effect facts of each operation
+-- after approval. 'lineageChildren' holds every child request in identifier
+-- order.
+data LineageRequests = LineageRequests
+  { lineageEligible :: ![Text], lineageRefusal :: !(Maybe Text), lineageChildren :: ![DraftView] }
+
+-- | The complete bounded collection, read as 'withLineageRequestsSource'
+-- reads it.
+withLineageRequests :: CoordinationStore -> CredentialProof -> Text -> (LineageRequests -> IO a) -> IO a
+withLineageRequests store proof parent respond =
+  withLineageRequestsSource store proof parent $ \_ _ materialize -> materialize >>= respond
+
+-- | The lineage-request collection of one parent run under response loans.
+-- The source takes the file slot, then the configuration guard and one reader
+-- charge, in the Store lock order, and 'Transport.respondBytes' returns them
+-- before the first network write. Materialization has an allowance of five
+-- seconds. It refuses more than 256 children or 1 MiB of encoded children,
+-- and it refuses with 'StoreBusy' when the parent revision changes while it
+-- reads. Eligibility uses the parent checks of 'createLineageDraft' in the same
+-- order: supervision and reservation, profile quarantine, root identity and
+-- ownership, invocation and the parent workflow in the current catalogue.
+withLineageRequestsSource :: CoordinationStore -> CredentialProof -> Text
+  -> (AuthorizedView -> ConfigurationLimits -> IO LineageRequests -> IO a) -> IO a
+withLineageRequestsSource store proof parent action = withStoreFileLoan store $ \files root ->
+  withAuthorizedCatalogueContext store proof [Observe] $ \view limits _ catalogues _ -> do
+    attachResponseLoan view files
+    action view limits $ timed 5000000 $ do
+      revalidateAuthorizedView view >>= requireEither
+      (profile,revision,idents) <- runRead store $ do
+        (profile,_,_) <- parentAddress parent
+        _ <- authorizeProfile proof profile [Observe] >>= requireTransaction
+        revision <- parentRevision
+        rows <- query "SELECT id FROM requests WHERE parent_run_id=? ORDER BY id LIMIT 257" [text parent]
+        when (length rows > 256) (refuseTransaction ViewTooLarge)
+        idents <- mapM (\row -> case row of [SQL.SQLText ident] -> pure ident; _ -> refuseTransaction StorageUnavailable) rows
+        pure (profile,revision,idents)
+      catalogue <- maybe (throwIO StorageUnavailable) pure (lookup profile catalogues)
+      checked <- lineageParent store root parent (discoverySelection catalogue)
+      let refusal = either Just (maybe (Just ParentWorkflow) (const Nothing) . parentWorkflow catalogue) checked
+      views <- mapM (readDraftAt store root proof) idents
+      when (BS.length (encoded views) > 1048576) (throwIO ViewTooLarge)
+      runRead store $ do
+        _ <- authorizeProfile proof profile [Observe] >>= requireTransaction
+        current <- parentRevision
+        unless (current == revision) (refuseTransaction StoreBusy)
+      revalidateAuthorizedView view >>= requireEither
+      pure (LineageRequests (maybe ["restart","resume","fork"] (const []) refusal) (parentRefusalCode <$> refusal) views)
+  where
+    parentRevision = do
+      versions <- query "SELECT revision FROM runs WHERE id=?" [text parent]
+      case versions of [[SQL.SQLText value]] -> pure value; _ -> refuseTransaction ResourceUnavailable
 
 parentAddress :: Text -> Transaction (Text,Text,Text)
 parentAddress parent = do
@@ -254,28 +287,77 @@ parentAddress parent = do
     [[SQL.SQLText profile,SQL.SQLText root,SQL.SQLText native]] -> pure (profile,root,native)
     _ -> refuseTransaction ResourceUnavailable
 
--- | Durable conflicts are refusals, never a reconstructed ownership capability.
-checkLineageParent :: Text -> Transaction ()
-checkLineageParent parent = do
+-- | Why a new lineage draft of a parent refuses now. Each refusal keeps the
+-- command failure of the lineage mutation and has one frozen collection code.
+data ParentRefusal = ParentQuarantined | ParentOwnership | ParentInvocation | ParentWorkflow
+
+instance NFData ParentRefusal where
+  rnf refusal = refusal `seq` ()
+
+parentRefusalCode :: ParentRefusal -> Text
+parentRefusalCode refusal = case refusal of
+  ParentQuarantined -> "quarantined"
+  ParentOwnership -> "ownership-unavailable"
+  ParentInvocation -> "incompatible-parent"
+  ParentWorkflow -> "incompatible-parent"
+
+parentRefusalFailure :: ParentRefusal -> CommandFailure
+parentRefusalFailure refusal = case refusal of
+  ParentInvocation -> StateConflict
+  ParentWorkflow -> StaleRevision
+  _ -> OwnershipUnavailable
+
+-- The durable supervision and reservation facts of a parent. Cleanup-pending
+-- supervision is quarantine. Any other parent without a released reservation,
+-- or without an observer or lost association, has live ownership.
+parentState :: Text -> Transaction (Maybe ParentRefusal)
+parentState parent = do
   rows <- query "SELECT u.supervision,v.state FROM runs u LEFT JOIN start_intents i ON i.run_id=u.id LEFT JOIN reservations v ON v.id=i.reservation_id WHERE u.id=?" [text parent]
   case rows of
-    [[SQL.SQLText supervision,state]] -> unless (supervision /= "cleanup-pending" && (state == text "released" || (supervision `elem` ["observer","lost"] && state == SQL.SQLNull))) (refuseTransaction OwnershipUnavailable)
+    [[SQL.SQLText supervision,state]]
+      | supervision == "cleanup-pending" -> pure (Just ParentQuarantined)
+      | state == text "released" || (supervision `elem` ["observer","lost"] && state == SQL.SQLNull) -> pure Nothing
+      | otherwise -> pure (Just ParentOwnership)
     _ -> refuseTransaction ResourceUnavailable
 
+-- | Durable conflicts are refusals, never a reconstructed ownership capability.
+checkLineageParent :: Text -> Transaction ()
+checkLineageParent parent = parentState parent >>= maybe (pure ()) (const (refuseTransaction OwnershipUnavailable))
+
 readParent :: CoordinationStore -> PrivateRoot -> Text -> Selection -> IO RunRecord
-readParent store root parent selection = do
-  (profile,identity,native) <- runRead store (checkLineageParent parent >> parentAddress parent)
-  unless (operatorId (selectionContext selection) == profile && not (operatorQuarantined (selectionContext selection))) (throwIO OwnershipUnavailable)
-  nativeId <- either (const (throwIO ResourceUnavailable)) pure (mkRunId native)
-  bracket (openPrivateSubroot root ["runs"]) closePrivateRoot $ \runs -> do
-    unless (T.pack (privateRootIdentity runs) == identity) (throwIO OwnershipUnavailable)
-    now <- getCurrentTime
-    record <- withPrivateDirectoryAt runs ["runs",T.unpack native] $ \fd ->
-      fst <$> readRunRecordWithEnvelopesAt (privateRootPath runs </> "runs" </> T.unpack native) fd Nothing now
-    unless (frontendRunId (recordManifest record) == nativeId && recordOwnership record /= RunOwnedElsewhere) (throwIO OwnershipUnavailable)
-    _ <- either (const (throwIO StateConflict)) pure (retainLineageInvocation (recordManifest record) (Just(selectionInvocation selection)))
-    withPrivateDirectoryAt runs ["runs",T.unpack native] (revalidateLineageParentAt record)
-    pure record
+readParent store root parent selection =
+  lineageParent store root parent selection >>= either (throwIO . parentRefusalFailure) pure
+
+-- | The parent record, or the refusal of a new lineage draft of it.
+lineageParent :: CoordinationStore -> PrivateRoot -> Text -> Selection -> IO (Either ParentRefusal RunRecord)
+lineageParent store root parent selection = do
+  (state,(profile,identity,native)) <- runRead store ((,) <$> parentState parent <*> parentAddress parent)
+  let policy = selectionContext selection
+  case state of
+    Just refusal -> pure (Left refusal)
+    Nothing
+      | operatorId policy /= profile -> pure (Left ParentOwnership)
+      | operatorQuarantined policy -> pure (Left ParentQuarantined)
+      | otherwise -> do
+          nativeId <- either (const (throwIO ResourceUnavailable)) pure (mkRunId native)
+          bracket (openPrivateSubroot root ["runs"]) closePrivateRoot $ \runs ->
+            if T.pack (privateRootIdentity runs) /= identity then pure (Left ParentOwnership) else do
+              now <- getCurrentTime
+              record <- withPrivateDirectoryAt runs ["runs",T.unpack native] $ \fd ->
+                fst <$> readRunRecordWithEnvelopesAt (privateRootPath runs </> "runs" </> T.unpack native) fd Nothing now
+              if frontendRunId (recordManifest record) /= nativeId || recordOwnership record == RunOwnedElsewhere then pure (Left ParentOwnership)
+              else case retainLineageInvocation (recordManifest record) (Just (selectionInvocation selection)) of
+                Left _ -> pure (Left ParentInvocation)
+                Right _ -> do
+                  withPrivateDirectoryAt runs ["runs",T.unpack native] (revalidateLineageParentAt record)
+                  pure (Right record)
+
+-- | The one current catalogue workflow of the parent's manifest.
+parentWorkflow :: Discovery -> RunRecord -> Maybe (Text,WorkflowDescriptor)
+parentWorkflow catalogue record =
+  case [(ident,descriptor) | (ident,descriptor) <- discoveryEntries catalogue, workflowName descriptor == frontendWorkflow (recordManifest record)] of
+    [entry] -> Just entry
+    _ -> Nothing
 
 parentInputs :: PrivateRoot -> RunRecord -> WorkflowDescriptor -> IO [ReviewInput]
 parentInputs root record descriptor = do
