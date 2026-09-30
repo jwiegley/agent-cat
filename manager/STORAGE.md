@@ -351,9 +351,11 @@ a missing field and any value that its encoder does not write.
   their SHA-256, the private binding bytes and their digest, the expiry and the
   five approval selectors. The decoder verifies both digests against their
   bytes.
-- A `relay` body is the kind, start or control, the manager run identifier, the
-  native run identifier, the command identifier and the exact frame bytes,
-  which are UTF-8 and at most `maxFrameBytes`.
+- A `relay` body is the kind, start, discard or control, the manager run
+  identifier, the native run identifier, the command identifier and the exact
+  frame bytes, which are UTF-8 and at most `maxFrameBytes`. A start and a
+  control name a manager run and a command. A discard names no manager run,
+  and it names no command when the manager discards on its own.
 - A `notice` body is a command change with its state and refusal, a review
   ending with its preparation and reason, a request ending with its request and
   cause, a lifetime notice, a shutdown notice or a gap notice. The causes of a
@@ -389,7 +391,9 @@ entry. The [command acceptance contract](COMMANDS.md#manager-log-records)
 describes the `command`, `receipt` and `failure` records of a fresh command
 and of a credential operation of the local administration channel. The
 [approval contract](APPROVAL.md#review-record) describes the `review` record.
-The relay append point is not connected.
+The [admission contract](ADMISSION.md#manager-log-relays) and the
+[controls contract](CONTROLS.md#manager-log-relays) describe the `relay`
+records.
 
 ## Worker cleanup ownership
 

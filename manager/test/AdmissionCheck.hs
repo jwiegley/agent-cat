@@ -22,6 +22,9 @@ import qualified Agentic.Manager.Service as Service
 import Agentic.Manager.Fault (FaultClass (CommandRefusal, UnexpectedFault))
 import Agentic.Manager.Store
 import qualified Agentic.Manager.Worker as Worker
+import Agentic.Manager.Flow (ManagerFlowFault (..), RelayBody (..), RelayKind (..), relayFromFlowBody, Notice (..), MissingRecord (..), noticeFromFlowBody, managerFlowPath)
+import qualified Agentic.Runtime as Runtime
+import Data.IORef (newIORef, readIORef, writeIORef)
 import Agentic.Runtime (WorkflowDescriptor (..), FrontendPrepared (..), RunId (..), createProcessGroup, terminateProcessGroup, closeGroupPipes, groupOutput, groupErrors, waitProcessGroup)
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (AsyncCancelled (..), async, asyncThreadId, cancel, waitCatch, wait, poll, withAsync)
@@ -52,6 +55,10 @@ import Foreign.C.Types (CInt (..))
 import System.FilePath ((</>))
 import System.IO (BufferMode (LineBuffering), hSetBuffering, stdout)
 import System.Posix.Files (setFileMode)
+import qualified System.Posix.IO as PosixIO
+import qualified System.Posix.IO.ByteString as PosixBytes
+import System.IO.Error (isEOFError)
+import Control.Exception (IOException)
 import System.Timeout (timeout)
 import Test.QuickCheck hiding (label, output)
 
@@ -72,6 +79,7 @@ main = do
     ["service-faults",work,native,source,python] -> serviceFaultChecks work native source python
     ["ordinary-admission",work,native] -> ordinaryAdmissionChecks work native
     ["ordinary-coordinator",work,native] -> ordinaryCoordinatorChecks work native
+    ["flow-relay",work,native] -> flowRelayChecks work native
     [work,native,source,python] -> do
       policyChecks
       activeRetryChecks work native
@@ -593,7 +601,12 @@ withFixture :: FilePath -> FilePath -> String -> Int -> [(Text,[Text])] -> (Fixt
 withFixture work native name slots profiles = withFixtureUsing work native [] name slots profiles
 
 withFixtureUsing :: FilePath -> FilePath -> [String] -> String -> Int -> [(Text,[Text])] -> (Fixture -> IO a) -> IO a
-withFixtureUsing work native prefix name slots profiles action = do
+withFixtureUsing = withFixtureOpening withCoordinationStore
+
+-- | A fixture whose Store is opened by the given owner, such as a serving
+-- Store with a manager log.
+withFixtureOpening :: (InstalledConfiguration -> (CoordinationStore -> IO a) -> IO a) -> FilePath -> FilePath -> [String] -> String -> Int -> [(Text,[Text])] -> (Fixture -> IO a) -> IO a
+withFixtureOpening opening work native prefix name slots profiles action = do
   let root=work </> name;path=work </> (name<>".json")
   createDirectory root
   setFileMode root 0o700
@@ -608,7 +621,7 @@ withFixtureUsing work native prefix name slots profiles action = do
       "globalMutationLedgerBytes" .= (134217728::Int),"safetyControlsPerMinute" .= (20::Int),"executionReservations" .= slots]]))
   setFileMode path 0o600
   configuration<-loadConfiguration (\arguments->if arguments==["--scripted"] then Right() else Left InvalidConfiguration)  exactPreparedTarget (const False) path >>= right
-  bracket (installConfiguration configuration >>= right) closeConfiguration $ \installed -> withCoordinationStore installed $ \owner -> do
+  bracket (installConfiguration configuration >>= right) closeConfiguration $ \installed -> opening installed $ \owner -> do
     (_,public)<-configurationSnapshot installed >>=right
     catalogues<-forM public $ \profile->do value<-probeConfiguredProfile installed(publicId profile)(publicRevision profile)>>=right;pure(publicId profile,value)
     proofs<-forM [1..12::Int] $ \index->do
@@ -1472,3 +1485,205 @@ interruptedAcceptanceChecks work native = do
       assertion "original command thread interruption survives reconciliation and publication" (case outcome of
         Left failure->case fromException failure of Just UserInterrupt->True;_->False
         Right _->False)
+
+-- The start, discard and control relays of a serving Store with a manager log,
+-- driven through the service against real native workers. The first fixture
+-- uses the strict codec and a selective append fault. The second fixture
+-- carries relays through a lossy codec that changes a cancel frame.
+flowRelayChecks :: FilePath -> FilePath -> IO ()
+flowRelayChecks work native = do
+  failing <- newIORef (\_ _ -> False)
+  let fault = ManagerFlowFault (\schema about -> (\selects -> selects schema about) <$> readIORef failing)
+  (stream,root,requestA,runA,nativeA,approveA,cancelA,withdrawB,nativeB,requestC,nativeC) <-
+    withFixtureOpening (withServingStoreWith Runtime.strictFlowCodec (Just fault)) work native [] "flow-relay" 3 [("a",[])] $ \fixture@(Fixture root _ owner _ _) -> do
+      stream <- storeStreamId <$> storeIdentity owner
+      Service.withService owner $ \service -> do
+        -- An approval yields its command, its receipt and the start relay.
+        (draftA,approvedA) <- flowPrepared fixture service "flow_relay_a" >>= \(draft,ident,precondition,approval) ->
+          (,) draft <$> flowApprove fixture service "flow_relay_a" ident precondition approval
+        approveA <- receiptId <$> right approvedA
+        (runA,nativeA) <- flowRun owner (draftId draftA)
+        records <- flowLog root stream
+        let startRelays = [(position,relay) | (position,record,value) <- records, Runtime.recSchema record == Runtime.FlowRelay, Right relay <- [relayFromFlowBody value], relayBodyCommand relay == Just approveA]
+            commandAt = [position | (position,record,_) <- records, Runtime.recSchema record == Runtime.FlowCommand, Runtime.aboutCommand (Runtime.recAbout record) == Just approveA]
+            receiptAt = [position | (position,record,_) <- records, Runtime.recSchema record == Runtime.FlowReceipt, Runtime.aboutCommand (Runtime.recAbout record) == Just approveA]
+        assertion "flow-relay: an approval records its command, its receipt and one start relay in that order" $ case (commandAt,receiptAt,startRelays) of
+          ([command],[receipt],[(relayAt,relay)]) -> command < receipt && receipt < relayAt && relayBodyKind relay == RelayStart
+            && relayBodyManagerRun relay == Just runA && relayBodyNativeRun relay == RunId nativeA
+          _ -> False
+        started <- await (flowRunLog root nativeA (\entries -> case entries of (first:_) -> Just first; [] -> Nothing))
+        assertion "flow-relay: the run log starts with a start that names the native run of the relay"
+          (Runtime.recSchema (fst started) == Runtime.FlowStart && Runtime.aboutNativeRun (Runtime.recAbout (fst started)) == Just (RunId nativeA))
+        -- A cancel whose relay append fails is still dispatched.
+        writeIORef failing (\schema about -> schema == Runtime.FlowRelay && Runtime.aboutManagerRun about == Just runA)
+        cancelA <- receiptId <$> flowCancel fixture service runA "flow_relay_a_cancel"
+        writeIORef failing (\_ _ -> False)
+        received <- await (flowRunLog root nativeA (find (\(record,_) -> Runtime.recSchema record == Runtime.FlowControl && Runtime.aboutCommand (Runtime.recAbout record) == Just cancelA)))
+        assertion "flow-relay: a cancel whose relay append failed reaches the native run from the manager"
+          (Runtime.recFrom (fst received) == Runtime.Manager)
+        await (flowUntil (number owner ("SELECT count(*) FROM reservations WHERE request_id='"<>draftId draftA<>"' AND state!='released'")) (==0))
+        -- A withdrawal of a prepared request yields its command, its receipt
+        -- and the discard relay.
+        (draftB,_,_,_) <- flowPrepared fixture service "flow_relay_b"
+        nativeB <- flowPreparedRun owner (draftId draftB)
+        currentB <- viewNow fixture 0 (draftId draftB)
+        withdrawKey <- key owner "flow_relay_b_withdraw"
+        withdrawB <- receiptId <$> (Service.withdraw service (fixtureProof fixture) (draftId draftB) withdrawKey (etag currentB) (body "withdraw") >>= right)
+        await (flowUntil (number owner ("SELECT count(*) FROM reservations WHERE request_id='"<>draftId draftB<>"' AND state!='released'")) (==0))
+        -- A failed start relay append refuses the approval and dispatches
+        -- nothing, and the original owner releases the preparation.
+        (draftC,identC,preconditionC,approvalC) <- flowPrepared fixture service "flow_relay_c"
+        nativeC <- flowPreparedRun owner (draftId draftC)
+        writeIORef failing (\schema about -> schema == Runtime.FlowRelay && Runtime.aboutRequest about == Just (draftId draftC) && Runtime.aboutManagerRun about /= Nothing)
+        refusedC <- flowApprove fixture service "flow_relay_c" identC preconditionC approvalC
+        writeIORef failing (\_ _ -> False)
+        assertion "flow-relay: a failed start relay append refuses the approval with storage-unavailable" (refusedC == Left StorageUnavailable)
+        ledger <- runRead owner $ do
+          rows <- query "SELECT state,refusal,attempted_at IS NULL FROM commands WHERE operation='approve' AND request_id=?" [SQL.SQLText(draftId draftC)]
+          pure $ case rows of [[SQL.SQLText state,SQL.SQLText refusal,SQL.SQLInteger 1]] -> Just (state,refusal); _ -> Nothing
+        assertion "flow-relay: the refused approval is recorded as refused and was never attempted" (ledger == Just ("refused","storage-unavailable"))
+        await (flowUntil (number owner ("SELECT count(*) FROM reservations WHERE request_id='"<>draftId draftC<>"' AND state!='released'")) (==0))
+        number owner ("SELECT count(*) FROM runs WHERE request_id='"<>draftId draftC<>"' AND supervision IN ('owned','cleanup-pending')")
+          >>= assertion "flow-relay: the refused approval leaves no held association" . (==0)
+        doesFileExist (flowRunLogPath root nativeC) >>= assertion "flow-relay: the refused approval starts no native run" . not
+        pure (stream,root,draftId draftA,runA,nativeA,approveA,cancelA,withdrawB,nativeB,draftId draftC,nativeC)
+  records <- flowLog root stream
+  let relays = [(position,relay) | (position,record,value) <- records, Runtime.recSchema record == Runtime.FlowRelay, Right relay <- [relayFromFlowBody value]]
+      positionOf schema command = [position | (position,record,_) <- records, Runtime.recSchema record == schema, Runtime.aboutCommand (Runtime.recAbout record) == Just command]
+      gaps = concat [missing | (_,record,value) <- records, Runtime.recSchema record == Runtime.FlowNotice, Right (GapNotice missing _) <- [noticeFromFlowBody value]]
+      cancelAbout = Runtime.noAbout {Runtime.aboutRequest = Just requestA, Runtime.aboutManagerRun = Just runA, Runtime.aboutNativeRun = Just (RunId nativeA), Runtime.aboutCommand = Just cancelA}
+  assertion "flow-relay: the start relay precedes no second start for the same approval"
+    (length [() | (_,relay) <- relays, relayBodyCommand relay == Just approveA] == 1)
+  assertion "flow-relay: a gap notice names the cancel relay that could not be appended"
+    (MissingRecord Runtime.FlowRelay cancelAbout `elem` gaps && null [() | (_,relay) <- relays, relayBodyCommand relay == Just cancelA])
+  assertion "flow-relay: a withdrawal of a prepared request records its command, its receipt and a discard relay in that order" $
+    case (positionOf Runtime.FlowCommand withdrawB, positionOf Runtime.FlowReceipt withdrawB, [(position,relay) | (position,relay) <- relays, relayBodyCommand relay == Just withdrawB]) of
+      ([command],[receipt],[(relayAt,relay)]) -> command < receipt && receipt < relayAt && relayBodyKind relay == RelayDiscard
+        && relayBodyManagerRun relay == Nothing && relayBodyNativeRun relay == RunId nativeB
+      _ -> False
+  assertion "flow-relay: the refused approval has no start relay, and the manager discards its worker"
+    (null [() | (_,relay) <- relays, relayBodyKind relay == RelayStart, relayBodyNativeRun relay == RunId nativeC]
+      && [relayBodyCommand relay | (_,relay) <- relays, relayBodyKind relay == RelayDiscard, relayBodyNativeRun relay == RunId nativeC] == [Nothing]
+      && requestC /= requestA)
+  -- A lossy relay codec changes the cancel frame, and the native worker
+  -- receives the changed control.
+  let lossy = Runtime.FlowCodec Runtime.encodeFlowLine $ \line -> do
+        record <- Runtime.decodeFlowLine line
+        pure $ case (Runtime.recSchema record, Runtime.recBody record) of
+          (Runtime.FlowRelay, Runtime.Inline (Object fields)) | Just (String frame) <- KM.lookup "frame" fields, "cancelRun" `T.isInfixOf` frame ->
+            record {Runtime.recBody = Runtime.Inline (Object (KM.insert "frame" (String (T.replace "\"expectedOccurrenceId\":null" "\"expectedOccurrenceId\":\"999999\"" frame)) fields))}
+          _ -> record
+  withFixtureOpening (withServingStoreWith lossy Nothing) work native [] "flow-relay-lossy" 1 [("a",[])] $ \fixture@(Fixture lossyRoot _ owner _ _) -> do
+    lossyStream <- storeStreamId <$> storeIdentity owner
+    Service.withService owner $ \service -> do
+      (draftD,identD,preconditionD,approvalD) <- flowPrepared fixture service "flow_relay_d"
+      _ <- flowApprove fixture service "flow_relay_d" identD preconditionD approvalD >>= right
+      (runD,nativeD) <- flowRun owner (draftId draftD)
+      cancelD <- receiptId <$> flowCancel fixture service runD "flow_relay_d_cancel"
+      (control,value) <- await (flowRunLog lossyRoot nativeD (find (\(record,_) -> Runtime.recSchema record == Runtime.FlowControl && Runtime.aboutCommand (Runtime.recAbout record) == Just cancelD)))
+      let occurrence = case value of
+            Object fields | Just (Object frame) <- KM.lookup "control" fields -> KM.lookup "expectedOccurrenceId" frame
+            _ -> Nothing
+      assertion "flow-relay: under a lossy relay codec the native worker receives the lossy control"
+        (Runtime.recFrom control == Runtime.Manager && occurrence == Just (String "999999"))
+      lossyRecords <- flowLog lossyRoot lossyStream
+      assertion "flow-relay: the lossy relay record holds the original cancel frame"
+        (any (\(_,record,relayValue) -> Runtime.recSchema record == Runtime.FlowRelay && Runtime.aboutCommand (Runtime.recAbout record) == Just cancelD
+          && either (const False) (\relay -> "\"expectedOccurrenceId\":null" `T.isInfixOf` TE.decodeUtf8 (relayBodyFrame relay)) (relayFromFlowBody relayValue)) lossyRecords)
+  putStrLn "PASS manager admission flow relays"
+
+fixtureProof :: Fixture -> CredentialProof
+fixtureProof (Fixture _ _ _ _ proofs) = case proofs of
+  proof:_ -> proof
+  [] -> error "FAIL the fixture holds no credential"
+
+-- Enqueue a new draft through the service and wait for its published
+-- preparation: the preparation, its precondition and the exact approval body.
+flowPrepared :: Fixture -> Service.Service -> Text -> IO (DraftView,Text,Maybe Text,BS.ByteString)
+flowPrepared fixture@(Fixture _ _ owner _ _) service suffix = do
+  draft <- newDraft fixture 0 "a" suffix
+  nonce <- key owner ("enqueue_"<>suffix)
+  _ <- Service.enqueue service (fixtureProof fixture) (draftId draft) nonce (etag draft) (body "enqueue") >>= right
+  let published = do
+        row <- runRead owner $ do
+          rows <- query "SELECT p.id,p.revision,p.request_revision,p.profile_revision,r.descriptor_revision,p.process_generation,p.review_digest FROM preparations p JOIN requests r ON r.id=p.request_id WHERE p.request_id=? AND p.state='live'" [SQL.SQLText(draftId draft)]
+          pure $ case rows of
+            [[SQL.SQLText ident,SQL.SQLText revision,SQL.SQLText requestRevision,SQL.SQLText profileRevision,SQL.SQLText descriptorRevision,SQL.SQLText generation,SQL.SQLText digest']] ->
+              Just (ident,Just("\""<>revision<>"\""),encoded(object["operation" .= ("approve"::Text),"reviewDigest" .= digest',"requestRevision" .= requestRevision,
+                "profileRevision" .= profileRevision,"descriptorRevision" .= descriptorRevision,"processGeneration" .= generation]))
+            _ -> Nothing
+        maybe (threadDelay 10000 >> published) pure row
+  (ident,precondition,approval) <- await published
+  pure (draft,ident,precondition,approval)
+
+-- Approve through the service. Until the service holds the reviewed
+-- preparation, an approval takes the replay path and refuses before any
+-- mutation, so that refusal is retried.
+flowApprove :: Fixture -> Service.Service -> Text -> Text -> Maybe Text -> BS.ByteString -> IO (Either CommandFailure CommandReceipt)
+flowApprove fixture@(Fixture _ _ owner _ _) service suffix ident precondition approval = do
+  approveKey <- key owner (suffix<>"_approve")
+  let approved = Service.approve service (fixtureProof fixture) ident approveKey precondition approval >>= \outcome -> case outcome of
+        Left OwnershipUnavailable -> threadDelay 10000 >> approved
+        _ -> pure outcome
+  await approved
+
+-- Cancel a run through the service once the service has observed it running.
+-- A refused admission leaves no ledger row, so the same key is used again.
+flowCancel :: Fixture -> Service.Service -> Text -> Text -> IO CommandReceipt
+flowCancel fixture@(Fixture _ _ owner _ _) service run suffix = do
+  cancelKey <- key owner suffix
+  let cancelled = do
+        revision <- scalarText owner ("SELECT control_revision FROM runs WHERE id='"<>run<>"'")
+        outcome <- Service.controlRun service (fixtureProof fixture) run cancelKey (Just("\""<>revision<>"\"")) (body "cancel")
+        case outcome of
+          Right receipt -> pure receipt
+          Left _ -> threadDelay 100000 >> cancelled
+  await cancelled
+
+-- The manager run and native run of the approved request.
+flowRun :: CoordinationStore -> Text -> IO (Text,Text)
+flowRun owner request = runRead owner $ do
+  rows <- query "SELECT id,native_run_id FROM runs WHERE request_id=?" [SQL.SQLText request]
+  case rows of [[SQL.SQLText run,SQL.SQLText nativeRun]] -> pure (run,nativeRun); _ -> refuseTransaction StoreIntegrity
+
+-- The native run of the live preparation of a request.
+flowPreparedRun :: CoordinationStore -> Text -> IO Text
+flowPreparedRun owner request = runRead owner $ do
+  rows <- query "SELECT native_run_id FROM preparations WHERE request_id=? AND state='live'" [SQL.SQLText request]
+  case rows of [[SQL.SQLText nativeRun]] -> pure nativeRun; _ -> refuseTransaction StoreIntegrity
+
+flowUntil :: IO a -> (a -> Bool) -> IO ()
+flowUntil observe accept = do
+  value <- observe
+  unless (accept value) (threadDelay 20000 >> flowUntil observe accept)
+
+-- Each record of the manager log with its position and inline body. The
+-- serving Store of this process holds the log open for appends, so the log is
+-- read through its own descriptor and not through a locking file handle.
+flowLog :: FilePath -> Text -> IO [(Int,Runtime.Record,Value)]
+flowLog root stream = do
+  bytes <- bracket (PosixIO.openFd (foldl (</>) root (managerFlowPath stream)) PosixIO.ReadOnly PosixIO.defaultFileFlags) PosixIO.closeFd $ \descriptor ->
+    let chunks acc = try @IOException (PosixBytes.fdRead descriptor 65536) >>= \outcome -> case outcome of
+          Left failure | isEOFError failure -> pure (BS.concat (reverse acc))
+          Left failure -> throwIO failure
+          Right chunk -> chunks (chunk:acc)
+     in chunks []
+  forM (zip [0..] (filter (not . BS.null) (BS.split 10 bytes))) $ \(position,line) -> do
+    record <- either (\why -> error ("FAIL manager log line: "<>T.unpack why)) pure (Runtime.decodeFlowLine line)
+    case Runtime.recBody record of
+      Runtime.Inline value -> pure (position,record,value)
+      _ -> error "FAIL manager log record without an inline body"
+
+flowRunLogPath :: FilePath -> Text -> FilePath
+flowRunLogPath root nativeRun = root </> "runs" </> "runs" </> T.unpack nativeRun </> "runtime" </> "flow.ndjson"
+
+-- Wait until the run log of a native run holds complete records that the
+-- selector accepts.
+flowRunLog :: FilePath -> Text -> ([(Runtime.Record,Value)] -> Maybe a) -> IO a
+flowRunLog root nativeRun select = do
+  present <- doesFileExist (flowRunLogPath root nativeRun)
+  entries <- if not present then pure [] else do
+    bytes <- BS.readFile (flowRunLogPath root nativeRun)
+    let complete = if BS.null bytes || BS.last bytes == 10 then bytes else BS.intercalate "\n" (init (BS.split 10 bytes))
+    pure [(record,case Runtime.recBody record of Runtime.Inline value -> value; _ -> Null) | line <- BS.split 10 complete, not (BS.null line), Right record <- [Runtime.decodeFlowLine line]]
+  maybe (threadDelay 20000 >> flowRunLog root nativeRun select) pure (select entries)

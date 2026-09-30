@@ -325,3 +325,49 @@ The internal owner stop and unexpected accepted-worker exit follow existing
 finalization. Claims release only after original cleanup, while accepted consent
 remains consumed and lost supervision is separate from Runtime result. This does
 not supply the later public control/decision surface or durable ingestion.
+
+## Manager log relays
+
+A serving Store lifetime records each frame that the manager sends to a worker
+as a synchronized `relay` record in the manager log, from the manager to the
+workflow of the native run. The worker writes the frame decoded from the
+appended record. A lifetime without a manager log sends the original frame.
+The decoded relay must name the same kind, runs and command as the relay that
+the manager appended, or the append counts as failed. The record is a tell, and
+its identifiers are the request, the manager run, the native run and the
+command.
+
+- **Start.** `deliverStartNow` encodes the start frame with
+  `encodeWorkerStart`, then reserves the dispatch. After the reservation
+  commits, it appends a `Refusing` start relay that names the manager run, the
+  native run, the approve command and the frame. The dispatch attempt then
+  passes the decoded frame to `sendWorkerStart`. When the append fails, nothing
+  is dispatched. `recordRefusal` refuses the approve command with
+  `storage-unavailable`, `discardControlPayload` clears the ticket, and the
+  entry receives the stop `StopService "closed"`, as `stopAcceptedStart` gives
+  it. The original owner then discards and closes the worker, marks the service
+  cleanup and releases the reservation and the association. The approval
+  returns `storage-unavailable`.
+- **Discard.** `discardAndClose` sends a discard only to a worker in the
+  prepared phase. It encodes the discard frame, appends a discard relay that
+  names the native run and no manager run, and passes the decoded frame to
+  `sendWorkerDiscard`. A discard that a command caused, such as a withdrawal or
+  an edit, names that command and is a `Following` record. A discard of the
+  manager's own, such as an expiry, a lost worker or the stop that follows a
+  failed start relay, names no command and is a `Reserved` record. A failed
+  append leaves a gap entry, and the worker writes the frame that the manager
+  encoded.
+- **Control.** The [controls contract](CONTROLS.md#manager-log-relays)
+  describes the control relay.
+
+The `flow-relay` mode of `manager-admission-check` drives real
+`routing-fixed-point-probe` workers through the service of a serving Store. It
+shows the command, receipt and start relay of an approval in that order, and the
+run log `start` that names the native run of the relay. It shows that a failed
+start relay append refuses the approval with `storage-unavailable`, attempts no
+dispatch, starts no native run and releases the reservation and the association,
+and that the manager then discards the worker with a discard relay that names no
+command. It shows the command, receipt and discard relay of a withdrawal of a
+prepared request. It shows that a cancel whose relay append fails reaches the
+native run and leaves a gap entry, and that a lossy relay codec makes the native
+run receive the lossy cancel frame in its run log `control` record.

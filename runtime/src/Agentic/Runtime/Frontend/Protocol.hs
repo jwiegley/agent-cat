@@ -23,6 +23,7 @@ module Agentic.Runtime.Frontend.Protocol
     parseSessionDecision,
     encodeFrontendSetupRequestFor,
     encodeFrontendDecisionFor,
+    decodeFrontendDecisionFor,
     encodeFrontendPreparedFor,
     decodeFrontendPreparedFor,
     sessionRuntimeProtocol,
@@ -296,6 +297,11 @@ encodeFrontendSetupRequestFor version = encodeBounded (toInteger maxFrontendQuer
 encodeFrontendDecisionFor :: Int -> FrontendDecision -> Either Text BS.ByteString
 encodeFrontendDecisionFor version = encodeBounded (toInteger maxFrontendQueryBytes)
   "frontend request exceeds its byte bound" (parseSession version (parseJSON :: Value -> Parser FrontendDecision)) . sessionValue version . toJSON
+
+-- | Decode a session decision against the approval of the live preparation.
+-- The result is 'True' for start and 'False' for discard.
+decodeFrontendDecisionFor :: Int -> Text -> BS.ByteString -> Either Text Bool
+decodeFrontendDecisionFor version approval = decodeRequest (parseSessionDecision version approval)
 
 encodeFrontendPreparedFor :: Int -> FrontendPrepared -> Either Text BS.ByteString
 encodeFrontendPreparedFor version = encodeReply (parseSession version (parseJSON :: Value -> Parser FrontendPrepared)) . sessionValue version . toJSON

@@ -18,6 +18,9 @@ import Agentic.Manager.Admission.Policy
 import Agentic.Manager.Authorization
 import Agentic.Manager.Commands
 import Agentic.Manager.Drafts
+import Agentic.Manager.Flow
+  (FlowRecordClass (..), ManagerFlowFailure (..), MissingRecord (..), RelayKind (..), RelayBody (..),
+   relayFlowBody, relayFromFlowBody, appendManagerTell, managerFlowCeiling, managerFlowContent, noteManagerGap)
 import Agentic.Manager.Fault (FaultClass (InternalFault, StoreRefusal), ManagerFault (..), configurationLoan, recordUndeclaredRefusal, refuseStorageUnavailable)
 import Agentic.Manager.Profile
   (ConfigurationLimits (..), Discovery, discoverySelection, discoveryProfileRevision,
@@ -28,7 +31,8 @@ import Agentic.Manager.Protocol.Preparation (ReviewInput)
 import Agentic.Manager.Protocol.Json (decodeStrictValue)
 import Agentic.Manager.Store
 import Agentic.Manager.Worker
-import Agentic.Runtime (FrontendPrepared (..), FrontendSetupRequest, RunId (..), Control (controlId), ControlId (..), decodeControlFor, encodeControlFor, correlatedProtocolVersion, controlAcknowledgementLimit)
+import Agentic.Runtime (FrontendPrepared (..), FrontendSetupRequest, RunId (..), Control (controlId), ControlId (..), decodeControlFor, encodeControlFor, correlatedProtocolVersion, controlAcknowledgementLimit,
+   About (..), Actor (Manager, Workflow), Address (To), Schema (FlowRelay), noAbout)
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (Async, async, waitCatch, poll, race, withAsync)
 import Control.Concurrent.MVar (MVar, newMVar, withMVar)
@@ -575,7 +579,7 @@ finishEntry controller entry worker stopping = do
   case effective of
     StopCommand ticket kind revision -> do
       atomically(writeTVar(entryFinal entry)(Just(Finalization(Just ticket)kind revision)))
-      dispatchCleanup entry ticket (discardAndClose worker)
+      dispatchCleanup entry ticket (discardAndClose controller entry (Just ticket) worker)
     StopService kind -> do
       pending <- readTVarIO(entryFinal entry)
       case pending of
@@ -583,7 +587,7 @@ finishEntry controller entry worker stopping = do
           revision <- locked controller (markServiceCleanup controller entry kind)
           atomically(writeTVar(entryFinal entry)(Just(Finalization Nothing kind revision)))
         Just _ -> pure()
-      discardAndClose worker
+      discardAndClose controller entry Nothing worker
   atomically(writeTVar(entryCleanupConfirmed entry)True)
   finalizeKnown controller entry
 
@@ -593,15 +597,50 @@ dispatchCleanup entry ticket action = do
   reserveDispatchWithAdmission WaitWithinBudget ticket >>= need
   attemptDispatchWithAdmission WaitWithinBudget ticket action >>= need
 
-discardAndClose :: FrontendWorker -> IO ()
-discardAndClose worker = do
+-- | Discard a prepared worker and close it. The discard frame is recorded as
+-- a relay before the worker writes the frame decoded from it. A discard that a
+-- command caused names that command and is a following record. A discard of
+-- the manager's own is a reserved record. A failed append leaves a gap entry,
+-- and the worker then writes the frame that it encoded.
+discardAndClose :: Admission -> Entry -> Maybe DispatchTicket -> FrontendWorker -> IO ()
+discardAndClose controller entry cause worker = do
   observation <- observeWorker worker
   case observedWorkerPhase observation of
     WorkerPrepared -> do
-      result <- try @WorkerFailure(discardWorker worker)
+      result <- try @WorkerFailure $ do
+        frame <- encodeWorkerDiscard worker
+        native <- preparedRunId <$> workerPrepared worker
+        let command = dispatchCommandId <$> cause
+            about = noAbout {aboutRequest=Just(entryRequest entry), aboutNativeRun=Just native, aboutCommand=command}
+        relayed <- relayFrame controller (maybe Reserved (const Following) cause) about (RelayBody RelayDiscard Nothing native command frame)
+        sendWorkerDiscard worker (either (const frame) id relayed)
       case result of Left WorkerClosed -> pure();Left failure->throwIO failure;Right()->pure()
     _ -> pure()
   closeWorker worker
+
+-- | Append the synchronized relay of one frame, from the manager to the
+-- workflow of its native run, and return the frame decoded from the appended
+-- bytes. A lifetime without a manager log relays the original frame. The
+-- decoded relay must name the same kind, runs and command. A failure of a
+-- record class other than 'Refusing' leaves a gap entry.
+relayFrame :: Admission -> FlowRecordClass -> About -> RelayBody -> IO (Either ManagerFlowFailure BS.ByteString)
+relayFrame controller recordClass about relay = case storeManagerFlow (store controller) of
+  Nothing -> pure (Right (relayBodyFrame relay))
+  Just manager -> case relayFlowBody relay of
+    Left why -> do
+      unless (recordClass == Refusing) (noteManagerGap manager (MissingRecord FlowRelay about))
+      pure (Left (ManagerFlowUnavailable why))
+    Right value -> do
+      appended <- appendManagerTell manager (managerFlowCeiling manager) recordClass FlowRelay Manager (To (Workflow (relayBodyNativeRun relay))) about value
+      case appended of
+        Left failure -> pure (Left failure)
+        Right (_, record) -> do
+          content <- managerFlowContent manager record
+          pure $ case content >>= relayFromFlowBody of
+            Left why -> Left (ManagerFlowUnavailable why)
+            Right carried
+              | carried {relayBodyFrame = relayBodyFrame relay} == relay -> Right (relayBodyFrame carried)
+              | otherwise -> Left (ManagerFlowUnavailable "the appended relay names another worker or command")
 
 markServiceCleanup :: Admission -> Entry -> Text -> IO Text
 markServiceCleanup controller entry reason = markServiceCleanupWithReason WaitWithinBudget controller entry reason Nothing
@@ -882,7 +921,7 @@ deliverAcceptedStart original@(AcceptedStart controller _ _ _) = runOperation co
 
 deliverStartNow :: AcceptedStart -> IO ()
 deliverStartNow (AcceptedStart controller entry ticket run) = do
-  worker<-locked controller $ do
+  (worker,native)<-locked controller $ do
     ensureRunController controller
     dbRead controller $ do
       validateOwner entry ["start-pending","associated"] ["held"]
@@ -891,9 +930,27 @@ deliverStartNow (AcceptedStart controller entry ticket run) = do
       unless(rows==[[SQL.SQLInteger 1]])(refuseTransaction OwnershipUnavailable)
     stopped<-atomically(tryReadTMVar(entryStop entry))
     when(isJust stopped)(throwIO StateConflict)
-    atomically(readTMVar(entryWorker entry))
+    context<-atomically(readTMVar(entryReview entry)) >>= need
+    worker<-atomically(readTMVar(entryWorker entry))
+    pure(worker,preparedRunId(reviewNative context))
+  -- Encoding writes nothing. The start relay follows the reservation, and the
+  -- worker writes only the frame decoded from the appended relay.
+  frame<-encodeWorkerStart worker
   reserveDispatch ticket >>= need
-  attemptDispatch ticket (startWorker worker) >>= need
+  let command=dispatchCommandId ticket
+      about=noAbout {aboutRequest=Just(entryRequest entry), aboutManagerRun=Just run, aboutNativeRun=Just native, aboutCommand=Just command}
+  relayed<-relayFrame controller Refusing about (RelayBody RelayStart (Just run) native (Just command) frame)
+  case relayed of
+    Right carried -> attemptDispatch ticket (sendWorkerStart worker carried) >>= need
+    Left _ -> refuseUnrelayed ticket (atomically(void(tryPutTMVar(entryStop entry)(StopService "closed"))))
+
+-- | Refuse a reserved command whose relay append failed. Nothing is
+-- dispatched. The ticket is cleared, and the given original-owner cleanup runs
+-- even when the refusal cannot be recorded.
+refuseUnrelayed :: DispatchTicket -> IO () -> IO a
+refuseUnrelayed ticket cleanup = do
+  refused <- (recordRefusal ticket "storage-unavailable") `finally` (discardControlPayload ticket >> cleanup)
+  either throwIO (const(throwIO StorageUnavailable)) refused
 
 -- | Observation context from the original association. It cannot create a ticket.
 acceptedControlContext :: AcceptedStart -> IO (CoordinationStore, Text, Text, FrontendPrepared)
@@ -975,15 +1032,26 @@ deliverAcceptedControl original@(AcceptedStart controller _ _ _) command = runOp
 
 deliverControlNow :: AcceptedStart -> Text -> IO ()
 deliverControlNow (AcceptedStart controller entry _ run) command = do
-  (ticket,worker) <- locked controller $ do
+  (operation',ticket,worker,native) <- locked controller $ do
     ensureRunController controller
-    (_,ticket) <- Map.lookup command <$> readTVarIO(entryControls entry) >>= maybe(throwIO OwnershipUnavailable)pure
+    (operation',ticket) <- Map.lookup command <$> readTVarIO(entryControls entry) >>= maybe(throwIO OwnershipUnavailable)pure
     dbRead controller $ do
       rows <- query "SELECT command_id FROM control_intents WHERE command_id=? AND run_id=?" [text command,text run]
       unless(rows==[[text command]])(refuseTransaction OwnershipUnavailable)
+    context <- atomically(readTMVar(entryReview entry)) >>= need
     worker <- atomically(readTMVar(entryWorker entry))
-    pure(ticket,worker)
+    pure(operation',ticket,worker,preparedRunId(reviewNative context))
   reserveDispatch ticket >>= need
+  original <- reservedPayload ticket >>= maybe(throwIO OwnershipUnavailable)pure
+  -- A cancel is dispatched without its relay when the append fails, so a user
+  -- can always stop spending. Every other control is refused.
+  let cancelling=operation'==Cancel
+      about=noAbout {aboutRequest=Just(entryRequest entry), aboutManagerRun=Just run, aboutNativeRun=Just native, aboutCommand=Just command}
+  relayed <- relayFrame controller (if cancelling then Reserved else Refusing) about (RelayBody RelayControl (Just run) native (Just command) original)
+  carried <- case relayed of
+    Right bytes -> pure bytes
+    Left _ | cancelling -> pure original
+    Left _ -> refuseUnrelayed ticket (pure())
   attemptControlDispatch ticket (\bytes -> do
     control <- either (const(throwIO InvalidRequest)) pure (decodeControlFor correlatedProtocolVersion bytes)
     encodedControl <- either (const(throwIO InvalidRequest)) pure (encodeControlFor correlatedProtocolVersion control)
@@ -991,7 +1059,12 @@ deliverControlNow (AcceptedStart controller entry _ run) command = do
     dbRead controller $ do
       rows <- query "SELECT native_sha256,native_bytes FROM control_intents WHERE command_id=? AND run_id=?" [text command,text run]
       unless(rows==[[text(T.pack(show(hash bytes::Digest SHA256))),SQL.SQLInteger(fromIntegral(BS.length bytes))]])(refuseTransaction OwnershipUnavailable)
-    writeWorkerControl worker control) >>= need
+    -- The worker writes the control decoded from the relay, which must keep
+    -- the control identifier and re-encode to the relayed bytes.
+    relayedControl <- either (const(throwIO InvalidRequest)) pure (decodeControlFor correlatedProtocolVersion carried)
+    encodedRelay <- either (const(throwIO InvalidRequest)) pure (encodeControlFor correlatedProtocolVersion relayedControl)
+    unless(controlId relayedControl==ControlId command && encodedRelay==carried)(throwIO InvalidRequest)
+    writeWorkerControl worker relayedControl) >>= need
 
 -- | Internal owner stop, not a public control receipt or fabricated cancellation event.
 stopAcceptedStart :: AcceptedStart -> IO (Either CommandFailure ())

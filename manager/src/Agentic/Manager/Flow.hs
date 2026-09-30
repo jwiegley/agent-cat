@@ -581,15 +581,21 @@ reviewFromFlowBody value = do
 -- Relay bodies
 -- ---------------------------------------------------------------------------
 
-data RelayKind = RelayStart | RelayControl
+-- | The frame that a relay carries: a start or discard decision for a
+-- prepared worker, or a native control for a running worker.
+data RelayKind = RelayStart | RelayDiscard | RelayControl
   deriving (Eq, Show, Enum, Bounded)
 
--- | One native start or control frame for one worker, with its exact bytes.
+-- | One native start, discard or control frame for one worker, with its exact
+-- bytes. A start and a control name the manager run and the command. A discard
+-- names no manager run, because no run exists before an approval, and it names
+-- the command that caused it, or no command when the manager discards on its
+-- own.
 data RelayBody = RelayBody
   { relayBodyKind :: !RelayKind,
-    relayBodyManagerRun :: !Text,
+    relayBodyManagerRun :: !(Maybe Text),
     relayBodyNativeRun :: !RunId,
-    relayBodyCommand :: !Text,
+    relayBodyCommand :: !(Maybe Text),
     relayBodyFrame :: !BS.ByteString
   }
   deriving (Eq, Show)
@@ -597,13 +603,19 @@ data RelayBody = RelayBody
 relayKindName :: RelayKind -> Text
 relayKindName = \case
   RelayStart -> "start"
+  RelayDiscard -> "discard"
   RelayControl -> "control"
 
--- | The relay body, or a refusal when the frame is above 'maxFrameBytes' or
--- is not UTF-8.
+-- | The relay body, or a refusal when the frame is above 'maxFrameBytes', is
+-- not UTF-8, or names identifiers that its kind does not permit.
 relayFlowBody :: RelayBody -> Either Text Value
 relayFlowBody relay = do
   when (BS.length (relayBodyFrame relay) > maxFrameBytes) (Left "relay frame exceeds the frame bound")
+  case (relayBodyKind relay, relayBodyManagerRun relay, relayBodyCommand relay) of
+    (RelayDiscard, Nothing, _) -> Right ()
+    (RelayDiscard, Just _, _) -> Left "a discard relay names no manager run"
+    (_, Just _, Just _) -> Right ()
+    _ -> Left "a start or control relay names its manager run and its command"
   frame <- utf8 "relay frame" (relayBodyFrame relay)
   pure $
     object
@@ -619,11 +631,12 @@ relayFromFlowBody value = do
   fields <- flowObject "relay body" value
   flowExactKeys "relay body" ["kind", "managerRun", "nativeRun", "command", "frame"] fields
   kind <- flowTextField "relay body" fields "kind" >>= named "relay kind" relayKindName
+  managerRun <- flowField "relay body" fields "managerRun" >>= flowOptionalText "relay managerRun"
+  command <- flowField "relay body" fields "command" >>= flowOptionalText "relay command"
   relay <-
-    RelayBody kind
-      <$> flowTextField "relay body" fields "managerRun"
-      <*> (RunId <$> flowTextField "relay body" fields "nativeRun")
-      <*> flowTextField "relay body" fields "command"
+    RelayBody kind managerRun
+      <$> (RunId <$> flowTextField "relay body" fields "nativeRun")
+      <*> pure command
       <*> (TE.encodeUtf8 <$> flowTextField "relay body" fields "frame")
   exactEither "relay body" relayFlowBody relay value
 

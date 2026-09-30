@@ -87,6 +87,22 @@ consumption. No constructor, Generic or JSON operation recreates FrontendWorker.
 A closed handle cannot write or signal. The low-level start operation is not an
 approval decision. The approval owner binds it to exact live review and committed intent.
 
+A start or discard has two steps. `encodeWorkerStart` and `encodeWorkerDiscard`
+build the decision frame for the current preparation with
+`encodeFrontendDecisionFor` and write nothing. `sendWorkerStart` and
+`sendWorkerDiscard` take the frame bytes. Under the serialized writer they check
+again that the worker is in the prepared phase and that the frame names the
+approval identifier of the current preparation. They decode the bytes with
+`decodeFrontendDecisionFor`, require that the decision re-encodes to the same
+bytes, and only then write them. A frame that fails any check fails with
+`WorkerConfiguration`, and nothing is written. Between the two steps the owner
+records the frame in the manager log as a `relay` and passes the frame decoded
+from the appended record to the send step, as the
+[admission contract](ADMISSION.md#manager-log-relays) describes.
+`startWorker` and `discardWorker` run both steps without a relay.
+`writeWorkerControl` encodes the given control, requires that it decodes, and
+writes it.
+
 One fail-fast writer serializes setup/decision/control bytes. A contending caller
 receives WorkerWriterBusy without an attempted write or waiting queue. An actual
 write has a five-second budget. Partial, failed or cancelled writes stop the owned

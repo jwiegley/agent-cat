@@ -67,6 +67,29 @@ original payload or ticket. Matching retries return the original receipt without
 another dispatch permission. Unresolved controls are never replayed after
 supervisor loss.
 
+## Manager log relays
+
+A serving Store lifetime records each control frame as a synchronized `relay`
+record before the worker writes it. After `reserveDispatch` commits,
+`deliverControlNow` reads the original frame of the reserved ticket through
+`reservedPayload`, which does not consume the ticket. It appends a control
+relay that names the manager run, the native run, the command and the frame.
+`attemptControlDispatch` then keeps the `control_intents` digest and length
+check on the original ticket bytes. It decodes the frame from the appended
+relay, requires that it keeps the command's control identifier and re-encodes
+to the relayed bytes, and writes that control with `writeWorkerControl`. The
+worker therefore writes the frame that the log carries, and a lossy codec
+reaches the native run.
+
+A cancel relay is a `Reserved` record. When its append fails, the cancel is
+dispatched with its original frame and the writer keeps a gap entry, so a user
+can always stop spending. Every other control relay is a `Refusing` record. When
+its append fails, nothing is dispatched, `recordRefusal` refuses the command
+with `storage-unavailable`, `discardControlPayload` clears the ticket, and the
+operation returns `storage-unavailable`. The
+[admission contract](ADMISSION.md#manager-log-relays) describes the start and
+discard relays and the check that covers them.
+
 ## Native evidence
 
 Manager acceptance, attempted write, Runtime acknowledgement, effect and terminal

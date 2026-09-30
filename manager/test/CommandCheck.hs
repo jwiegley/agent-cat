@@ -1621,8 +1621,10 @@ flowReview size =
 
 flowRelays :: [RelayBody]
 flowRelays =
-  [ RelayBody RelayStart "run_1" (Runtime.RunId "native_1") "command_3" (TE.encodeUtf8 "{\"type\":\"start\",\"inputs\":{\"text\":\"\10003\"},\"ok\":false}")
-  , RelayBody RelayControl "run_1" (Runtime.RunId "native_1") "command_4" (TE.encodeUtf8 ("{\"type\":\"control\",\"pad\":\"" <> T.replicate 70000 "x" <> "\"}"))
+  [ RelayBody RelayStart (Just "run_1") (Runtime.RunId "native_1") (Just "command_3") (TE.encodeUtf8 "{\"type\":\"start\",\"inputs\":{\"text\":\"\10003\"},\"ok\":false}")
+  , RelayBody RelayControl (Just "run_1") (Runtime.RunId "native_1") (Just "command_4") (TE.encodeUtf8 ("{\"type\":\"control\",\"pad\":\"" <> T.replicate 70000 "x" <> "\"}"))
+  , RelayBody RelayDiscard Nothing (Runtime.RunId "native_2") (Just "command_5") (TE.encodeUtf8 "{\"type\":\"discard\"}")
+  , RelayBody RelayDiscard Nothing (Runtime.RunId "native_3") Nothing (TE.encodeUtf8 "{\"type\":\"discard\"}")
   ]
 
 flowNotices :: [Notice]
@@ -1650,6 +1652,14 @@ flowCodecChecks = do
     (map reviewFromFlowBody reviews == map (Right . flowReview) [16, 40000])
   relays <- mapM (right . relayFlowBody) flowRelays
   check "manager log relay bodies round-trip with exact frame bytes" (map relayFromFlowBody relays == map Right flowRelays)
+  let discardWithRun = RelayBody RelayDiscard (Just "run_1") (Runtime.RunId "native_2") Nothing BS.empty
+      startWithoutCommand = RelayBody RelayStart (Just "run_1") (Runtime.RunId "native_1") Nothing BS.empty
+      renamedKind = case firstFlow relays of
+        Object fields -> Object (KM.insert "kind" (String "discard") fields)
+        other -> other
+  check "manager log relay bodies refuse identifiers that their kind does not permit" $
+    isLeftEither (relayFlowBody discardWithRun) && isLeftEither (relayFlowBody startWithoutCommand)
+      && isLeftEither (relayFromFlowBody renamedKind)
   check "manager log notice bodies round-trip" (all (\notice -> noticeFromFlowBody (noticeFlowBody notice) == Right notice) flowNotices)
   let withField (Object fields) = Object (KM.insert "extra" (Bool False) fields)
       withField other = other

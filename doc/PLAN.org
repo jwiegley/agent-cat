@@ -1242,6 +1242,34 @@ Runtime.Store verifies canonical envelope, reference code, run, size and digest 
 
 Live target precedence: when --engine or --session is present, use only that explicit command-line route table even if --routing is also present. When neither is present, always load routing configuration. Routing-only execution must prove every engine-bound question has a configured model pin and refuse otherwise. Preserve routing-only frontend launch fingerprints and lineage.
 
+* TODO [#C] Resolve F12 fess findings in the start, discard and control relays
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-4pn3
+:LABELS:   ["actor-flow","workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-29 Tue 21:17]
+:MODIFIED: [2026-09-29 Tue 21:17]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Follow-up from the F12 fess audit of the start, discard and control relays (actor-flow delta 1b). None of these findings blocks. Source: fess audit /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/fess/flow-F12-r1.md.
+
+1. (medium) manager/src/Agentic/Manager/Admission.hs:605-619 (discardAndClose), called from finishEntry at :575: if the discard frame decoded from the relay fails the exact check in sendWorkerDiscard (lossy codec or corrupted append), the send raises WorkerConfiguration. discardAndClose rethrows it before closeWorker, and the exception leaves finishEntry before entryCleanupConfirmed and finalizeKnown. No test covers it, because the lossy fixture changes only cancel frames. Fix: run closeWorker in a finally, define how finalization proceeds when the relayed discard is refused, and add a flow-relay case with a lossy discard frame.
+
+2. (medium) manager/src/Agentic/Manager/Admission.hs:938: the requirement says to encode the start frame after reserveDispatch commits. The code runs encodeWorkerStart before reserveDispatch (line 939). An encode failure (WorkerClosed or WorkerConfiguration) now leaves deliverStartNow before the reservation, and the approve stays accepted with no refusal and no attempt recorded. Fix: record the reordering in the design record, or move the encode step after the reservation and refuse with refuseUnrelayed when the encode fails.
+
+3. (low) manager/src/Agentic/Manager/Admission.hs:636-643 (relayFrame): for the Refusing start and control relays, a decode or identity mismatch after a successful append returns Left. The command is refused, but the appended relay stays in the manager log with no notice that it was never sent. Fix: append a notice for a relay that was appended but not sent, or document that such a relay was not delivered.
+
+4. (low) manager/src/Agentic/Manager/Admission.hs:1045, 942, 1051: an exception after reserveDispatch leaves the ticket reserved, with neither recordRefusal nor discardControlPayload (for example reservedPayload returning Nothing, which throws OwnershipUnavailable, or relayFrame throwing instead of returning Left). Fix: wrap the relay step so that any exception after the reservation goes through refuseUnrelayed.
+
+5. (low) manager/test/AdmissionCheck.hs:1493ff (flowRelayChecks): no test covers a failed non-cancel control relay refused by refuseUnrelayed (Admission.hs:1054), a failed discard relay append that leaves a gap entry (Following and Reserved), or a relayed control rejected by the controlId or re-encode check. The "no live worker" item after a failed start relay checks only that no run log exists (line 1548), not that the worker process exited. Fix: add flow-relay cases for these branches and assert that the refused-start worker process has exited.
+
+6. (low) F12-flow-relay.log: flow-relay prints the fault lines "WorkerUnexpectedExit erased=command StorageUnavailable" after the cancelled run and "WorkerClosed" after the refused start. No run compares them with the behavior before this change. The journey relay order is checked only by the private script journey_relays.py, not by the repository journey. Fix: compare these fault lines with a cancel of a scripted run at HEAD, and consider moving the relay-order assertion into the repository journey check.
+
 * DONE [#C] Make /wf launch through current Agent Deck session
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -1459,7 +1487,7 @@ Two small residues of acat-192/acat-9kn: prune the deriving clauses if nothing w
 :LABELS:   ["actor-flow","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-26 Sat 23:41]
-:MODIFIED: [2026-09-29 Tue 20:47]
+:MODIFIED: [2026-09-29 Tue 21:17]
 :CREATED_BY: johnw
 :SOURCE_REPO: .
 :ORIGINAL_SIZE: 0
@@ -1507,6 +1535,13 @@ Actor-flow increment 1, delta 1b (at most 8 engineering days). Add the manager l
     "author": "johnw",
     "text": "Subtask F11 of delta 1b: the review and administration records. publishReview appends the synchronized review record from Manager to Approvers profile on the INSERT path only, after the INSERT and the request and reservation UPDATEs and before COMMIT. The record body is decoded from the appended bytes and compared with the review. A failed append, or any difference in the body, sender or address, refuses with StorageUnavailable and rolls back, so the review is not published. A republish of a live preparation appends nothing. Issue, rotate and revoke in LocalAdmin append a command record from Principal (LocalAccount euid Nothing) as the last step before COMMIT, with a strict administration body (operation, client, credential, previous credential, label, scopes, profiles, expiry, and never a bearer, verifier or path). After COMMIT the frozen admin response is appended as the receipt reply. Revoke uses the log's own ceiling and still takes no configuration lock. List-credentials, refused operations and offline lifetimes append nothing. manager-approval-check has the new targeted mode flow-review. manager/APPROVAL.md, manager/COMMANDS.md and manager/STORAGE.md describe the records.\n\nEvidence scope: F11-build (ALLBUILD, -Werror), F11-flow-unit (manager-command-check flow mode with the new flowAdministrationChecks: codec round-trip and shape refusal, issue, rotate and revoke each as a local-account command followed by its receipt at positions 1, 3 and 5, no record for a refused operation or list-credentials, a command-append fault that refuses with storage-unavailable and activates no credential, and a grep of the log file and claim files for each issued bearer and its raw and hex verifier), F11-approval-review (flow-review at N8: one review record per insert, a republish appends nothing, a failed review append leaves the review unpublished) and F11-journey (tui-journey at N8: the manager log puts the review at position 7, between the enqueue receipt at 6 and the approve command at 8) each passed under timeout. Three earlier flow-review attempts failed while the probe itself was being corrected, before the final run. The fess auditor reran flow-review and command-check flow with exit 0. Fess: not blocking. Its one medium and six low findings are filed as acat-o7ax. N1, the Phase A controls, source-boundaries and manager/ci/approval.sh were not run. This issue stays open until increment 1 is accepted as a whole.\n",
     "created_at": "2026-09-30T03:47:26Z"
+  },
+  {
+    "id": 366,
+    "issue_id": "acat-5m60",
+    "author": "johnw",
+    "text": "Subtask F12 of delta 1b: start, discard and control relays. The worker decision step is split into an encode step (encodeWorkerStart, encodeWorkerDiscard) that writes nothing and a send step under serializedWrite that rechecks the prepared phase and id, decodes the bytes, requires an exact re-encode and writes them. Commands.hs gains reservedPayload, a non-consuming accessor for a reserved DispatchTicket. deliverStartNow appends a synchronized start relay after reserveDispatch and dispatches the frame decoded from the relay; a failed append refuses with storage-unavailable, discards the payload and closes the entry through the existing stop path. discardAndClose records a discard relay (Following for a withdraw or edit, Reserved for a manager-initiated discard) and a failed append leaves a gap entry. deliverControlNow appends a control relay and attemptControlDispatch keeps the control_intents digest check on the original bytes, then writes the relayed control after a controlId and re-encode check; a failed cancel relay still dispatches the cancel with a gap entry. RelayKind gains RelayDiscard. manager-admission-check has the new mode flow-relay. manager/WORKERS.md, ADMISSION.md, CONTROLS.md and STORAGE.md describe the relays. Evidence scope: F12-build (ALLBUILD, -Werror), F12-flow-relay at N8, F12-worker-check at N8 with worker_evidence.py, F12-admission-check main mode at N8 and F12-journey (tui-journey at N8, with the start relay after the approve receipt and control relays for the answer and the retry, checked by a private script) each passed under timeout. The fess auditor reran F12-flow-relay with exit 0. Fess: not blocking. Its two medium and four low findings are filed as acat-4pn3. N1, the Phase A controls, source-boundaries and manager/ci/controls.sh were not run.",
+    "created_at": "2026-09-30T04:17:08Z"
   }
 ]
 #+end_src

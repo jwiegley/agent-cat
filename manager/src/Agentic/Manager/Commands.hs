@@ -10,7 +10,7 @@ module Agentic.Manager.Commands
     Submission, submissionReceipt, submissionReplayed, submissionTicket, submissionReferences, submissionEnqueue, AcceptedEnqueue, acceptedRequest, checkAcceptedEnqueue, currentAcceptedEnqueues, restoreAcceptedEnqueues,
     CommandAttempt, newCommandAttempt, newControlCommandAttempt, submitCommandAttempt, submitCommandAttemptWithDeadline, reconcileCommandAttempt, reconcileCommandAttemptWithAdmission, DispatchTicket, dispatchCommandId, submitCommand, submitConfiguredCommand, submitStreamedCommand, commandPreflight, commandPreflightVersion, readCommand, withCommand,
     BodyBinding, measureCommandBody, bodyBindingBytes, bodyBindingSha256,
-    reserveDispatch, reserveDispatchWithAdmission, attemptDispatch, attemptDispatchWithAdmission, attemptControlDispatch, discardControlPayload, discardControlAttempt, recordAcknowledgement, recordEffect, recordEffectWith, recordEffectWithAdmission, recordUnresolved, recordRefusal,
+    reserveDispatch, reserveDispatchWithAdmission, reservedPayload, attemptDispatch, attemptDispatchWithAdmission, attemptControlDispatch, discardControlPayload, discardControlAttempt, recordAcknowledgement, recordEffect, recordEffectWith, recordEffectWithAdmission, recordUnresolved, recordRefusal,
     recordRuntimeObservation, recordExportObservation, retireReceipt, retainReceipts, requestInactive, commandCapacity, tombstoneCapacity
   ) where
 
@@ -558,6 +558,14 @@ reserveDispatchWithAdmission admission ticket@(DispatchTicket store ident genera
       lift $ execute "UPDATE commands SET dispatch_generation=?,revision=? WHERE id=?"
         [text generation, text revision, text ident]
       pure ((), [commandEvent ident revision])
+
+-- | The original bytes of a reserved ticket, without consuming it. The result
+-- is 'Nothing' for a ticket that is not reserved or holds no bytes. Reading
+-- grants nothing: only the attempt of the same ticket dispatches.
+reservedPayload :: DispatchTicket -> IO (Maybe BS.ByteString)
+reservedPayload (DispatchTicket _ _ _ _ state) = do
+  TicketState current bytes <- readIORef state
+  pure (if current == Reserved then bytes else Nothing)
 
 -- Consuming the ticket is irreversible even if storage or the callback becomes uncertain.
 attemptDispatch :: DispatchTicket -> IO a -> IO (Either CommandFailure a)

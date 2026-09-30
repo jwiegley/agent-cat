@@ -6,7 +6,8 @@
 module Agentic.Manager.Worker
   ( FrontendWorker, WorkerFailure (..), WorkerPhase (..), WorkerObservation (..),
     WorkerEvent, workerEventEnvelope, workerEventBytes,
-    withFrontendWorker, withStartingFrontendWorker, withWorkerCommitDeadline, workerPrepared, startWorker, discardWorker, writeWorkerControl,
+    withFrontendWorker, withStartingFrontendWorker, withWorkerCommitDeadline, workerPrepared, startWorker, discardWorker,
+    encodeWorkerStart, encodeWorkerDiscard, sendWorkerStart, sendWorkerDiscard, writeWorkerControl,
     consumeWorkerEvent, observeWorker, workerProtocolVersion, workerDiagnostics, waitWorker, closeWorker
   ) where
 
@@ -23,7 +24,7 @@ import Agentic.Runtime
    ensurePrivateDirectoryAt, openPrivateSubroot, closePrivateRoot,
    FrontendSetupRequest (..), FrontendSetup (..), FrontendDecision (..),
    FrontendPrepared (..), FrontendPreparedLineage (..), editMetadata, FrontendCapabilities (..), WorkflowDescriptor (..),
-   encodeFrontendSetupRequestFor, encodeFrontendDecisionFor, decodeFrontendPreparedFor, sessionRuntimeProtocol,
+   encodeFrontendSetupRequestFor, encodeFrontendDecisionFor, decodeFrontendDecisionFor, decodeFrontendPreparedFor, sessionRuntimeProtocol,
    maxFrontendReplyBytes, maxFrameBytes, correlatedProtocolVersion, readNdjsonFrame,
    Envelope (..), RuntimeEvent (..), SeqNo, checkSequence, decodeEnvelopeFor,
    Control, encodeControlFor, decodeControlFor)
@@ -309,19 +310,52 @@ awaitPrepared worker = atomically $ do
     _ -> readTMVar (prepared worker)
 
 startWorker :: FrontendWorker -> IO ()
-startWorker worker = decision worker WorkerStartSent FrontendStart
+startWorker worker = encodeWorkerStart worker >>= sendWorkerStart worker
 
 discardWorker :: FrontendWorker -> IO ()
-discardWorker worker = decision worker WorkerDiscardSent FrontendDiscard
+discardWorker worker = encodeWorkerDiscard worker >>= sendWorkerDiscard worker
 
-decision :: FrontendWorker -> WorkerPhase -> (Text -> FrontendDecision) -> IO ()
-decision worker next construct = serializedWrite worker $ do
+-- | The start frame for the current preparation. It writes nothing, and it
+-- grants nothing: only 'sendWorkerStart' writes a frame.
+encodeWorkerStart :: FrontendWorker -> IO BS.ByteString
+encodeWorkerStart worker = encodeDecision worker True
+
+-- | The discard frame for the current preparation. It writes nothing.
+encodeWorkerDiscard :: FrontendWorker -> IO BS.ByteString
+encodeWorkerDiscard worker = encodeDecision worker False
+
+-- | Write the given start frame. The frame must be the exact start frame of
+-- the current preparation in the prepared phase.
+sendWorkerStart :: FrontendWorker -> BS.ByteString -> IO ()
+sendWorkerStart worker = sendDecision worker True
+
+-- | Write the given discard frame. The frame must be the exact discard frame
+-- of the current preparation in the prepared phase.
+sendWorkerDiscard :: FrontendWorker -> BS.ByteString -> IO ()
+sendWorkerDiscard worker = sendDecision worker False
+
+decisionFor :: Bool -> Text -> FrontendDecision
+decisionFor starting = if starting then FrontendStart else FrontendDiscard
+
+encodeDecision :: FrontendWorker -> Bool -> IO BS.ByteString
+encodeDecision worker starting = do
+  reply <- workerPrepared worker
+  version <- atomically (readTVar (sessionVersion worker))
+  either (const (throwIO WorkerConfiguration)) pure (encodeFrontendDecisionFor version (decisionFor starting (preparedApprovalId reply)))
+
+-- Under the serialized writer, recheck the phase and the current prepared
+-- identifier, decode the given bytes against that identifier, and require that
+-- the decision re-encodes to the same bytes before any byte is written.
+sendDecision :: FrontendWorker -> Bool -> BS.ByteString -> IO ()
+sendDecision worker starting bytes = serializedWrite worker $ do
   reply <- workerPrepared worker
   state <- atomically (readTVar (phase worker))
   unless (state == WorkerPrepared) (throwIO WorkerPhaseViolation)
   version <- atomically (readTVar (sessionVersion worker))
-  bytes <- either (const (throwIO WorkerConfiguration)) pure (encodeFrontendDecisionFor version (construct (preparedApprovalId reply)))
-  send worker (Just next) bytes
+  decided <- either (const (throwIO WorkerConfiguration)) pure (decodeFrontendDecisionFor version (preparedApprovalId reply) bytes)
+  again <- either (const (throwIO WorkerConfiguration)) pure (encodeFrontendDecisionFor version (decisionFor starting (preparedApprovalId reply)))
+  unless (decided == starting && again == bytes) (throwIO WorkerConfiguration)
+  send worker (Just (if starting then WorkerStartSent else WorkerDiscardSent)) bytes
 
 -- | The protocol negotiated on this original session, not a runner-name inference.
 workerProtocolVersion :: FrontendWorker -> IO Int
