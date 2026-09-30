@@ -24,7 +24,7 @@ READ_PATHS = {
     "/decisions", "/decisions/{id}", "/commands/{id}",
     "/runs/{id}/outputs", "/artifacts/{id}", "/runs/{id}/exports",
     "/exports/{id}", "/runs/{id}/lineage-requests", "/snapshot", "/events",
-    "/runs/{id}/routes",
+    "/runs/{id}/routes", "/routes",
 }
 POST_SCOPES = {
     "/requests": {"submit"}, "/requests/{id}": {"submit"},

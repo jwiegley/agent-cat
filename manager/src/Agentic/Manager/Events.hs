@@ -2,7 +2,7 @@
 
 -- | Authorized projections of the existing durable invalidation stream.
 module Agentic.Manager.Events
-  ( CursorBinding, captureBinding, bindingEpoch, durableStream, publicStreamId, cursorAt, parseCursor, withBatch, withBoundary,
+  ( CursorBinding, captureBinding, bindingEpoch, bindingGrants, durableStream, publicStreamId, cursorAt, parseCursor, withBatch, withBoundary,
     StreamReaders, newStreamReaders, closeStreams, StreamPump, withStream ) where
 
 import Agentic.Manager.Authorization

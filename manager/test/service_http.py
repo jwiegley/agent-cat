@@ -98,12 +98,14 @@ pages_mode = len(sys.argv) == 6 and sys.argv[5] == PAGES
 # own PASS line. It runs two manager lifetimes of the scripted base fixture.
 EVENTS = "events-lifecycle"
 events_mode = len(sys.argv) == 6 and sys.argv[5] == EVENTS
-# The routes mode checks GET /v1/runs/{id}/routes through the running
-# protected manager after one mixed run: the public records for an
+# The routes mode checks GET /v1/runs/{id}/routes and GET /v1/routes through
+# the running protected manager after one mixed run: the public records for an
 # observe-only credential, the actor records for a control credential, no
 # restricted record, the route predicate, paging through after, the 410
-# cursors and an unchanged database across route reads. Each numbered case
-# prints its own PASS line. It runs one manager lifetime.
+# cursors and an unchanged database across route reads. For the manager log
+# it also checks the records of the profile of each credential against the
+# flow verb, and cursors across a seal and a prune. Each numbered case prints
+# its own PASS line. It runs three manager lifetimes.
 ROUTES = "routes"
 routes_mode = len(sys.argv) == 6 and sys.argv[5] == ROUTES
 assert len(sys.argv) == 5 or mixed or boundary or pages_mode or events_mode
@@ -156,7 +158,9 @@ configuration = {
 # collections. A second profile, visible only to a second credential, holds
 # a request that the collections of the first credential must not show.
 collections = len(sys.argv) == 5 or sys.argv[5] in ("mixed", "mixed-confirm", PAGES, EVENTS)
-if collections:
+# The routes mode also configures the second profile, for a credential that
+# must receive no manager-log record of the first profile.
+if collections or routes_mode:
     configuration["profiles"].append(dict(configuration["profiles"][0], id="profile_2", workspaceLabel="HTTPS other fixture"))
 # The pages mode raises the global page-set bound above the per-client bound,
 # so that the per-client refusal is the one under test. The worker
@@ -2428,6 +2432,131 @@ def route_checks():
         finally:
             connection.close()
 
+    def manager_batch(credential, after=None, route=None, extra=None):
+        query = []
+        if after is not None:
+            query.append("after=" + after)
+        if route is not None:
+            query.append("route=" + urllib.parse.quote(route, safe=""))
+        return request("/v1/routes" + ("?" + "&".join(query) if query else ""), credential | json_accept | (extra or {}))
+
+    def manager_walk(credential, route=None, after=None):
+        """Every manager route batch from the cursor, or from the floor, until
+        hasMore is false. Returns the records, the final cursor and the floor."""
+        records, cursor, batches = [], after, 0
+        while True:
+            status, value, raw = manager_batch(credential, cursor, route)
+            assert status == 200, ("manager route batch", status, value.get("code"))
+            validate("ManagerRouteBatch", value, raw)
+            assert len(raw) <= 1048576
+            floor = number(value["oldestCursor"])
+            assert alias(value["oldestCursor"]) == alias(value["cursor"]), ("manager route floor alias", value["oldestCursor"])
+            if cursor is not None:
+                assert alias(value["cursor"]) == alias(cursor) and number(value["cursor"]) >= number(cursor), ("manager cursor", cursor, value["cursor"])
+            for record in value["records"]:
+                assert record["id"] == alias(value["cursor"]) + "." + str(record["position"] + 1), ("manager record id", record["id"])
+                assert floor <= record["position"] < number(value["cursor"]), ("manager record outside the batch", record["position"])
+            records += value["records"]
+            cursor = value["cursor"]
+            batches += 1
+            if not value["hasMore"]:
+                return records, cursor, floor
+            assert batches < 1024, "manager route pages did not end"
+
+    def manager_named(records, request_id, run_id):
+        """The enqueue and approve commands with their receipts, the review and
+        the start relay of the request and its run, each found exactly once."""
+        def one(label, predicate):
+            found = [record for record in records if predicate(record)]
+            assert len(found) == 1, ("manager route record", label, len(found))
+            return found[0]
+        named = {}
+        for operation in ("enqueue", "approve"):
+            # The run has exactly one enqueue and one approve command.
+            named[operation] = one(operation, lambda r: r["schema"] == "command" and r["body"]["operation"] == operation)
+            named[operation + "-receipt"] = one(operation + " receipt", lambda r: r["schema"] == "receipt"
+                                                and r["replyTo"] == named[operation]["position"])
+            assert named[operation + "-receipt"]["about"]["command"] == named[operation]["about"]["command"]
+        assert named["enqueue"]["about"]["request"] == request_id, ("enqueue request", named["enqueue"]["about"])
+        named["review"] = one("review", lambda r: r["schema"] == "review" and r["about"].get("request") == request_id)
+        named["start"] = one("start relay", lambda r: r["schema"] == "relay" and r["about"].get("managerRun") == run_id
+                             and r["about"].get("command") == named["approve"]["about"]["command"])
+        if "body" in named["start"]:
+            assert named["start"]["body"]["kind"] == "start"
+        return named
+
+    def flow_entries(name, flow_dir, active):
+        """The manager-log entries that the flow verb of the runner reads, by
+        position, and the retained floor, after the manager has exited. The
+        run store of the run is read with it, so that the relays join."""
+        stores = sorted(work.glob("manager/runs/runs/*/runtime"))
+        completed = subprocess.run([str(runner), "flow", str(flow_dir)] + [str(store) for store in stores],
+                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60)
+        (work / (name + ".ndjson")).write_bytes(completed.stdout)
+        (work / (name + ".stderr")).write_bytes(completed.stderr)
+        lines = [json.loads(line) for line in completed.stdout.splitlines()]
+        assert lines and "summary" in lines[-1], ("flow verb", completed.returncode, completed.stderr[-2000:])
+        entries = {line["position"]: line for line in lines[:-1] if line["log"] == str(active)}
+        assert entries and all(line["log"] in [str(active)] + [str(store) for store in stores] for line in lines[:-1])
+        manager_logs = [item for item in lines[-1]["summary"]["logs"] if item["kind"] == "manager"]
+        assert len(manager_logs) == 1, ("flow verb manager logs", lines[-1]["summary"]["logs"])
+        return entries, manager_logs[0]["floor"]
+
+    def compare_flow(records, entries):
+        for record in records:
+            entry = entries[record["position"]]
+            for field in ("schema", "from", "to", "about", "replyTo", "at"):
+                assert record[field] == entry.get(field), ("manager record differs from the flow verb", record["position"], field)
+            if "claim" in record:
+                assert record["claim"] == entry["claim"] and "body" not in record, ("manager claim check", record["position"])
+            else:
+                assert record["body"] == entry["body"], ("manager inline body", record["position"])
+
+    def record_owner(entry):
+        """The owner row of a manager-log entry, by the rule of the manager route."""
+        about, schema = entry.get("about", {}), entry.get("schema")
+        if schema in ("command", "receipt"):
+            return ("commands", about.get("command"))
+        if schema == "review":
+            return ("requests", about.get("request"))
+        if schema == "relay":
+            return ("runs", about["managerRun"]) if "managerRun" in about else ("requests", about.get("request"))
+        if schema == "notice" and isinstance(entry.get("body"), dict):
+            kind = entry["body"].get("notice")
+            if kind == "command-changed":
+                return ("commands", about.get("command"))
+            if kind in ("review-ended", "request-ended"):
+                return ("requests", about.get("request"))
+        return None
+
+    def database_owners():
+        """Every command, request and run identifier of profile_1."""
+        found = sorted((work / "manager").rglob("coordination.sqlite3"))
+        connection = sqlite3.connect(found[0].as_uri() + "?mode=ro", uri=True)
+        try:
+            return {(table, row[0]) for table in ("commands", "requests", "runs")
+                    for row in connection.execute(f"SELECT id FROM {table} WHERE profile_id='profile_1'")}
+        finally:
+            connection.close()
+
+    def seal(active, sealed_dir, start):
+        sealed_dir.parent.mkdir(mode=0o700, exist_ok=True)
+        sealed_dir.mkdir(mode=0o700, exist_ok=True)
+        active.rename(sealed_dir / ("%020d.ndjson" % start))
+
+    @contextlib.contextmanager
+    def serving(index):
+        with (work / f"server-{index}.stdout").open("wb") as output, (work / f"server-{index}.stderr").open("wb") as errors:
+            process = subprocess.Popen([str(runner), "--manager", "serve", "--config", str(config),
+                                        "+RTS", "-N" + native, "-RTS"], stdout=output, stderr=errors)
+            try:
+                wait_ready(process)
+                yield process
+            finally:
+                if process.poll() is None:
+                    process.terminate()
+                process.wait(timeout=25)
+
     with (work / "server-0.stdout").open("wb") as output, (work / "server-0.stderr").open("wb") as errors:
         process = subprocess.Popen([str(runner), "--manager", "serve", "--config", str(config),
                                     "+RTS", "-N" + native, "-RTS"], stdout=output, stderr=errors)
@@ -2450,6 +2579,11 @@ def route_checks():
                             "scopes": ["observe"], "profileIds": ["profile_1"],
                             "expiresAt": "2999-01-01T00:00:00Z", "outputFile": str(observer_file)})
             observer = {"Authorization": "Bearer " + observer_file.read_bytes().decode("ascii")}
+            stranger_file = work / "credential-stranger"
+            administration({"version": 1, "operation": "issue-credential", "label": "Routes other profile",
+                            "scopes": ["observe", "control"], "profileIds": ["profile_2"],
+                            "expiresAt": "2999-01-01T00:00:00Z", "outputFile": str(stranger_file)})
+            stranger = {"Authorization": "Bearer " + stranger_file.read_bytes().decode("ascii")}
 
             # The local run store of the run: its event log and its run log.
             stores = [entry for entry in (work / "manager" / "runs" / "runs").iterdir()]
@@ -2546,11 +2680,150 @@ def route_checks():
             changed = [table for table in sorted(set(before) | set(after)) if before.get(table) != after.get(table)]
             assert not changed, ("route reads changed the database", changed)
             print(f"PASS routes case 6: the {len(before)} tables of the database are unchanged across the route reads", flush=True)
+
+            # Case 7. A control credential of the profile receives the
+            # manager-log records of the mixed run as actor records.
+            managed, managed_end, floor = manager_walk(authorized)
+            (work / "manager-routes-control.json").write_text(json.dumps(managed, indent=1, ensure_ascii=False, default=str))
+            assert floor == 0, ("manager route floor before any prune", floor)
+            assert managed and all(record["class"] == "actor" for record in managed), "manager route served a record of another class"
+            assert {record["schema"] for record in managed} <= {"command", "receipt", "review", "relay", "notice"}
+            named = manager_named(managed, created["id"], run)
+            print("PASS routes case 7: the control credential received", len(managed), "manager-log records, including the enqueue",
+                  "command at", named["enqueue"]["position"], "and its receipt, the review at", named["review"]["position"],
+                  "the approve command at", named["approve"]["position"], "and its receipt, and the start relay at",
+                  named["start"]["position"], flush=True)
+
+            # Case 8. An observe-only credential receives no manager-log record,
+            # and its cursor advances over every record as a filtered gap.
+            hidden, hidden_end, _ = manager_walk(observer)
+            assert hidden == [], ("the observe-only credential received manager-log records", [r["position"] for r in hidden])
+            assert number(hidden_end) >= number(managed_end) > named["start"]["position"], ("observe-only cursor", hidden_end, managed_end)
+            print("PASS routes case 8: the observe-only credential received no manager-log record, and its cursor advanced to",
+                  number(hidden_end), flush=True)
+
+            # Case 9. A control credential of another profile receives none of
+            # the records of the first profile.
+            foreign, foreign_end, _ = manager_walk(stranger)
+            assert not {record["position"] for record in foreign} & {record["position"] for record in managed}, "another profile received a record"
+            assert foreign == [] and number(foreign_end) >= number(managed_end), ("other profile manager route", foreign_end)
+            print("PASS routes case 9: a control credential of profile_2 received no manager-log record of profile_1, and its",
+                  "cursor advanced to", number(foreign_end), flush=True)
+
+            # Case 10. The route predicate, paging and the 410 cursors of the
+            # manager route behave as those of the run route.
+            commands, _, _ = manager_walk(authorized, "schema=command")
+            expected = [record for record in managed if record["schema"] == "command"]
+            assert commands[:len(expected)] == expected and all(r["schema"] == "command" for r in commands), "manager route schema=command"
+            for index, record in enumerate(managed):
+                status, value, raw = manager_batch(authorized, record["id"])
+                assert status == 200, ("manager resume", status, value.get("code"))
+                validate("ManagerRouteBatch", value, raw)
+                following = managed[index + 1:index + 1 + len(value["records"])]
+                assert value["records"][:len(following)] == following, ("manager resume from a record id", record["id"])
+            status, problem, _ = manager_batch(authorized, "route_" + "0" * 64 + ".1")
+            assert status == 410 and problem["code"] == "view-expired", ("manager wrong alias", status, problem.get("code"))
+            status, problem, _ = manager_batch(authorized, served_end)
+            assert status == 410 and problem["code"] == "view-expired", ("run-route alias on the manager route", status, problem.get("code"))
+            status, problem, _ = manager_batch(authorized, alias(managed_end) + "." + str(number(hidden_end) + 100000))
+            assert status == 410 and problem["code"] == "cursor-expired", ("manager future cursor", status, problem.get("code"))
+            status, problem, _ = request("/v1/routes", authorized | {"Accept": "text/event-stream"})
+            assert status == 409 and problem["code"] == "unsupported-operation", ("manager route SSE", status, problem.get("code"))
+            status, problem, _ = manager_batch(authorized, managed[0]["id"], extra={"Last-Event-ID": managed[0]["id"]})
+            assert status == 400 and problem["code"] == "malformed-request", ("manager after with Last-Event-ID", status)
+            after = database_rows()
+            changed = [table for table in sorted(set(before) | set(after)) if before.get(table) != after.get(table)]
+            assert not changed, ("manager route reads changed the database", changed)
+            print(f"PASS routes case 10: schema=command selected the {len(expected)} commands, resuming after each of the",
+                  f"{len(managed)} record ids returned the following records, a wrong alias and a run-route cursor returned",
+                  "410 view-expired, a future cursor returned 410 cursor-expired, text/event-stream returned 409, and the",
+                  "database is unchanged", flush=True)
         finally:
             if process.poll() is None:
                 process.terminate()
             process.wait(timeout=25)
-    print("PASS routes: every run-route case held against the running TLS 1.3 manager", flush=True)
+
+    # Case 11. Each served record is the entry that the flow verb reads from
+    # the same manager log, and every other retained record is a gap: a
+    # failure record, or a record whose profile does not resolve.
+    flow_dir = work / "manager" / "flow"
+    logs = sorted(flow_dir.glob("*.ndjson"))
+    assert len(logs) == 1, ("manager logs", logs)
+    active, stream = logs[0], logs[0].stem
+    entries, flow_floor = flow_entries("manager-flow-1", flow_dir, active)
+    assert flow_floor == 0
+    owners = database_owners()
+    compare_flow(managed, entries)
+    ends = number(managed_end)
+    expected = [p for p in sorted(entries) if p < ends and entries[p]["schema"] != "failure" and record_owner(entries[p]) in owners]
+    assert [record["position"] for record in managed] == expected, ("served positions differ from the resolved flow records",
+                                                                     [record["position"] for record in managed], expected)
+    gaps = [p for p in sorted(entries) if p < ends and p not in expected]
+    assert any(entries[p]["schema"] == "notice" and entries[p]["body"].get("notice") == "lifetime" for p in gaps), "no lifetime gap"
+    print(f"PASS routes case 11: the {len(managed)} served records equal the flow-verb entries of the manager log, and the",
+          f"{len(gaps)} other records, lifetime notices included, are gaps", flush=True)
+
+    # Case 12. A cursor survives a seal. The first lifetime left one active
+    # file. Sealing moves it to its segment name, as the writer does, and the
+    # next lifetime writes a new active file.
+    sealed_dir = flow_dir / "sealed" / stream
+    assert not sealed_dir.exists() or not any(sealed_dir.iterdir()), ("the manager log already has sealed segments", sealed_dir)
+    first_count = len(active.read_bytes().splitlines())
+    seal(active, sealed_dir, 0)
+    with serving(1):
+        resumed, resumed_end, floor = manager_walk(authorized, after=named["enqueue"]["id"])
+        index = managed.index(named["enqueue"])
+        assert floor == 0 and alias(resumed_end) == alias(managed_end), ("manager cursor after a seal", floor, resumed_end)
+        assert resumed[:len(managed) - index - 1] == managed[index + 1:], "resume across a seal"
+        status, capabilities, _ = request("/v1/capabilities", authorized)
+        assert status == 200
+        status, catalogue, _ = request("/v1/workflows?profileId=profile_1", authorized)
+        workflow = next(item for item in catalogue["items"] if item["name"] == "mixed-controls")
+        body = {"workflowId": workflow["id"], "descriptorRevision": workflow["revision"],
+                "profileId": workflow["profileId"], "profileRevision": workflow["profileRevision"]}
+        key = capabilities["authorityEpoch"] + "." + secrets.token_urlsafe(16)
+        status, draft, _ = request("/v1/requests", authorized | {"Content-Type": "application/json", "Idempotency-Key": key},
+                                   method="POST", payload=json.dumps(body, separators=(",", ":")).encode())
+        assert status == 201, ("draft creation", status, draft.get("code"))
+        later, later_end, _ = manager_walk(authorized, after=managed_end)
+        creation = [record for record in later if record["schema"] == "command" and record["body"]["operation"] == "create"]
+        assert len(creation) == 1 and creation[0]["position"] >= first_count, ("draft create command after the seal", creation, first_count)
+        replies = [record for record in later if record["schema"] == "receipt" and record["replyTo"] == creation[0]["position"]]
+        assert len(replies) == 1, "draft create receipt after the seal"
+        whole, whole_end, _ = manager_walk(authorized)
+        assert whole[:len(managed)] == managed and whole[len(managed):] == later, "a walk from the floor crosses the sealed segment"
+    print(f"PASS routes case 12: after a seal at position {first_count}, a cursor of the first lifetime resumed across the",
+          f"sealed segment with the same alias, and the create command at {creation[0]['position']} and its receipt followed",
+          "in the new active file", flush=True)
+
+    # Case 13. The oldest cursor is the retained floor, and a cursor below it
+    # returns 410. The second lifetime is sealed as well, and the oldest
+    # segment is then removed, as the pruner removes it.
+    second_count = len(active.read_bytes().splitlines())
+    seal(active, sealed_dir, first_count)
+    (sealed_dir / ("%020d.ndjson" % 0)).unlink()
+    with serving(2):
+        kept, kept_end, floor = manager_walk(authorized)
+        assert floor == first_count, ("retained floor after a prune", floor, first_count)
+        assert alias(kept_end) == alias(managed_end)
+        retained = [record for record in later if record["position"] >= first_count]
+        assert retained and kept[:len(retained)] == retained, "the records above the floor after a prune"
+        status, value, raw = manager_batch(authorized)
+        assert status == 200 and value["oldestCursor"] == alias(managed_end) + "." + str(first_count), ("oldest cursor", value["oldestCursor"])
+        for position in (0, first_count - 1):
+            status, problem, _ = manager_batch(authorized, alias(managed_end) + "." + str(position))
+            assert status == 410 and problem["code"] == "cursor-expired", ("cursor below the floor", position, status, problem.get("code"))
+        status, value, raw = manager_batch(authorized, alias(managed_end) + "." + str(first_count))
+        assert status == 200 and value["records"][:1] == retained[:1], "cursor at the floor"
+        status, value, raw = manager_batch(authorized, creation[0]["id"])
+        assert status == 200 and value["records"][:1] == replies, "resume after the create command above the floor"
+    entries, flow_floor = flow_entries("manager-flow-3", flow_dir, active)
+    assert flow_floor == first_count, ("flow verb floor", flow_floor)
+    compare_flow(kept, entries)
+    print(f"PASS routes case 13: after a prune the oldest cursor names the floor {first_count}, cursors at 0 and",
+          f"{first_count - 1} returned 410 cursor-expired, the cursor at the floor and the create command id resumed, and",
+          f"the {len(kept)} records above the floor equal the flow-verb entries; the second sealed segment holds {second_count} records", flush=True)
+    print("PASS routes: every run-route and manager-route case held against the running TLS 1.3 manager", flush=True)
 
 
 if routes_mode:

@@ -2019,6 +2019,24 @@
       "file": "valid/route-cursor-expired.json",
       "schema": "Problem",
       "valid": true
+    },
+    {
+      "name": "manager-route-batch",
+      "file": "valid/manager-route-batch.json",
+      "schema": "ManagerRouteBatch",
+      "valid": true
+    },
+    {
+      "name": "manager-route-batch-event",
+      "file": "invalid/manager-route-batch-event.json",
+      "schema": "ManagerRouteBatch",
+      "valid": false
+    },
+    {
+      "name": "manager-route-cursor-expired",
+      "file": "valid/manager-route-cursor-expired.json",
+      "schema": "Problem",
+      "valid": true
     }
   ],
   "operations": [
@@ -2294,6 +2312,15 @@
       ],
       "success": "route-batch",
       "refusal": "route-cursor-expired"
+    },
+    {
+      "method": "get",
+      "path": "/routes",
+      "scopes": [
+        "observe"
+      ],
+      "success": "manager-route-batch",
+      "refusal": "manager-route-cursor-expired"
     }
   ],
   "sse": [

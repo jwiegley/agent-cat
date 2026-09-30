@@ -1,0 +1,89 @@
+{
+  "version": 1,
+  "cursor": "route_5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e.9",
+  "oldestCursor": "route_5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e.2",
+  "records": [
+    {
+      "id": "route_5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e.4",
+      "class": "actor",
+      "position": 3,
+      "schema": "command",
+      "from": {
+        "principal": "credential",
+        "client": "client_1",
+        "credentialId": "credential_1"
+      },
+      "to": {
+        "to": "manager"
+      },
+      "about": {
+        "request": "request_1",
+        "command": "command_1"
+      },
+      "replyTo": null,
+      "at": "2026-09-30T12:00:00.123456Z",
+      "body": {
+        "operation": "enqueue",
+        "profile": "profile_1",
+        "method": "POST",
+        "resource": "/v1/requests/request_1",
+        "mediaType": "application/json",
+        "precondition": "\"revision_1\"",
+        "value": {
+          "action": "enqueue"
+        },
+        "capture": null
+      }
+    },
+    {
+      "id": "route_5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e.5",
+      "class": "actor",
+      "position": 4,
+      "schema": "event",
+      "from": "manager",
+      "to": {
+        "to": {
+          "principal": "credential",
+          "client": "client_1",
+          "credentialId": "credential_1"
+        }
+      },
+      "about": {
+        "request": "request_1",
+        "command": "command_1"
+      },
+      "replyTo": 3,
+      "at": "2026-09-30T12:00:00.223456Z",
+      "body": {
+        "id": "command_1",
+        "operation": "enqueue",
+        "state": "effect-observed"
+      }
+    },
+    {
+      "id": "route_5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e.9",
+      "class": "actor",
+      "position": 8,
+      "schema": "relay",
+      "from": "manager",
+      "to": {
+        "to": {
+          "workflow": "run_20260930_native"
+        }
+      },
+      "about": {
+        "request": "request_1",
+        "managerRun": "run_1",
+        "nativeRun": "run_20260930_native",
+        "command": "command_2"
+      },
+      "replyTo": null,
+      "at": "2026-09-30T12:00:01.123456Z",
+      "claim": {
+        "sha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+        "bytes": 70000
+      }
+    }
+  ],
+  "hasMore": false
+}

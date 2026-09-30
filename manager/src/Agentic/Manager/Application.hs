@@ -60,6 +60,7 @@ methods path = case path of
   ["v1", "profiles"] -> ["GET"]
   ["v1", "workflows"] -> ["GET"]
   ["v1", "events"] -> ["GET"]
+  ["v1", "routes"] -> ["GET"]
   ["v1", "requests"] -> ["GET", "POST"]
   ["v1", "runs"] -> ["GET"]
   ["v1", "decisions"] -> ["GET"]
@@ -138,6 +139,12 @@ dispatch service pages streams proof request respond = do
       (after, route) <- routeParameters request
       case lookup "Accept" (Wai.requestHeaders request) of
         Just "application/json" -> Routes.withRouteBatch store proof ident after route $ \view value ->
+          json view HTTP.status200 [] value respond
+        _ -> throwIO C.UnsupportedOperation
+    ("GET", ["v1", "routes"]) -> do
+      (after, route) <- routeParameters request
+      case lookup "Accept" (Wai.requestHeaders request) of
+        Just "application/json" -> Routes.withManagerRouteBatch store proof after route $ \view value ->
           json view HTTP.status200 [] value respond
         _ -> throwIO C.UnsupportedOperation
     ("GET", ["v1", "requests"]) -> collection token Service.Requests
@@ -233,6 +240,7 @@ dispatch service pages streams proof request respond = do
     eventRequest = Wai.pathInfo request == ["v1", "events"]
     routeRequest = case Wai.pathInfo request of
       ["v1", "runs", _, "routes"] -> True
+      ["v1", "routes"] -> True
       _ -> False
     workflowList = Wai.pathInfo request == ["v1", "workflows"]
     decisionList = Wai.requestMethod request == "GET" && Wai.pathInfo request == ["v1", "decisions"]
@@ -398,12 +406,12 @@ eventParameter request = case (Wai.queryString request, lookup "Last-Event-ID" (
   ([], Just bytes) -> noQuery request >> cursorText bytes
   _ -> throwIO C.InvalidRequest
 
--- | The optional cursor and route predicate of a run route. The cursor comes
--- from the query parameter @after@ or the @Last-Event-ID@ header, with the
--- character rules of an event cursor, and never from both. The predicate is
--- the query parameter @route@, at most 1024 bytes of UTF-8 in the syntax of
--- 'Runtime.parseFlowRoute'. Each parameter appears at most once, and no
--- other parameter is accepted.
+-- | The optional cursor and route predicate of a run route or the manager
+-- route. The cursor comes from the query parameter @after@ or the
+-- @Last-Event-ID@ header, with the character rules of an event cursor, and
+-- never from both. The predicate is the query parameter @route@, at most
+-- 1024 bytes of UTF-8 in the syntax of 'Runtime.parseFlowRoute'. Each
+-- parameter appears at most once, and no other parameter is accepted.
 routeParameters :: Wai.Request -> IO (Maybe Text, Maybe Runtime.FlowRoute)
 routeParameters request = do
   let parameters = Wai.queryString request

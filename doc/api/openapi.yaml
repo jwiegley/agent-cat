@@ -1971,6 +1971,80 @@ paths:
           type: string
           enum:
           - application/json
+  /routes:
+    get:
+      operationId: get_routes
+      summary: GET /routes
+      x-required-scopes:
+      - observe
+      x-profile-authorization: Current credential access to at least one configured
+        profile on every batch. Observe with control on the profile of a record gives
+        that actor-class record. A record whose profile does not resolve is never
+        served.
+      x-lifecycle-precondition: Current authority and profile authorization.
+      security:
+      - bearerAuth: []
+      responses:
+        '200':
+          description: One bounded batch of the manager log of the current stream.
+          headers:
+            Cache-Control:
+              description: Protected data is not cacheable.
+              schema:
+                const: no-store
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ManagerRouteBatch'
+        '400':
+          $ref: '#/components/responses/Problem400'
+        '401':
+          $ref: '#/components/responses/Problem401'
+        '403':
+          $ref: '#/components/responses/Problem403'
+        '409':
+          $ref: '#/components/responses/Problem409'
+        '410':
+          $ref: '#/components/responses/Problem410'
+        '413':
+          $ref: '#/components/responses/Problem413'
+        '429':
+          $ref: '#/components/responses/Problem429'
+        '503':
+          $ref: '#/components/responses/Problem503'
+      parameters:
+      - name: after
+        in: query
+        required: false
+        schema:
+          $ref: '#/components/schemas/ManagerRouteCursor'
+        description: Cursor of a completed manager route batch or the id of a served
+          record. Missing starts at the retained floor of the manager log. It cannot
+          be supplied together with Last-Event-ID.
+      - name: Last-Event-ID
+        in: header
+        required: false
+        schema:
+          $ref: '#/components/schemas/ManagerRouteCursor'
+        description: The same cursor as after, supplied as a header.
+      - name: route
+        in: query
+        required: false
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 1024
+        description: Comma-separated field=value terms that every served record must
+          match. The fields are schema, from, to, request, managerRun, nativeRun, occurrence,
+          epoch, attempt and command.
+      - name: Accept
+        in: header
+        required: true
+        schema:
+          type: string
+          enum:
+          - application/json
 components:
   securitySchemes:
     bearerAuth:
@@ -5553,6 +5627,110 @@ components:
         The cursor advances over every scanned record, including records that the
         class or the route predicate omits, so record ids have gaps. A batch serves
         at least one record when a served record follows within its scan bound.
+    ManagerRouteCursor:
+      $ref: '#/components/schemas/EventCursor'
+      description: Manager route alias plus the canonical UInt64Decimal position
+        of the next record to read. The alias binds the public stream identity of
+        the credential and the manager log, and names no segment, so a seal or a
+        prune keeps it valid. A cursor of another alias receives 410 view-expired,
+        and a position below the retained floor or after the last complete record
+        receives 410 cursor-expired.
+    ManagerRouteRecord:
+      type: object
+      properties:
+        id:
+          $ref: '#/components/schemas/ManagerRouteCursor'
+        class:
+          type: string
+          enum:
+          - actor
+        position:
+          type: integer
+          minimum: 0
+        schema:
+          type: string
+          enum:
+          - command
+          - receipt
+          - review
+          - relay
+          - notice
+        from:
+          oneOf:
+          - const: manager
+            type: string
+          - type: object
+        to:
+          oneOf:
+          - const: public
+            type: string
+          - type: object
+        about:
+          type: object
+        replyTo:
+          type:
+          - integer
+          - 'null'
+          minimum: 0
+        at:
+          type: string
+        body: {}
+        claim:
+          type: object
+          properties:
+            sha256:
+              type: string
+              pattern: ^[0-9a-f]{64}$
+            bytes:
+              type: integer
+              minimum: 0
+          required:
+          - sha256
+          - bytes
+          additionalProperties: false
+      required:
+      - id
+      - class
+      - position
+      - schema
+      - from
+      - to
+      - about
+      - replyTo
+      - at
+      additionalProperties: false
+      description: One manager-log record in the JSON form of the local flow reader.
+        The id of the record at position p names position p+1. An inline body is
+        body, and a claim check is claim without its content. Failure records and
+        records whose profile does not resolve are never served.
+    ManagerRouteBatch:
+      type: object
+      properties:
+        version:
+          const: 1
+          type: integer
+        cursor:
+          $ref: '#/components/schemas/ManagerRouteCursor'
+        oldestCursor:
+          $ref: '#/components/schemas/ManagerRouteCursor'
+        records:
+          type: array
+          items:
+            $ref: '#/components/schemas/ManagerRouteRecord'
+        hasMore:
+          type: boolean
+      required:
+      - version
+      - cursor
+      - oldestCursor
+      - records
+      - hasMore
+      additionalProperties: false
+      description: One bounded batch of the manager log, at most 1048576 encoded bytes.
+        oldestCursor names the retained floor. The cursor advances over every scanned
+        record, including records that the credential cannot receive, so record ids
+        have gaps. A batch serves at least one record when a served record follows
+        within its scan bound.
     OverviewItem:
       oneOf:
       - type: object

@@ -591,6 +591,28 @@ global position and a summary that names the floor of each manager log. The
 reader writes nothing, and the Store ledger remains the authority on
 commands, reviews and requests.
 
+`readManagerWindow` reads one positioned window of the manager log of a
+stream. It starts in the sealed segment or the active file that holds the
+position, continues across segments within the window limits, and reports the
+retained floor. It never takes the writer lock. The protected resource
+`GET /v1/routes` serves windows of the manager log of the current stream in
+this way, under a Store file loan that it returns before its first network
+write. The [protocol document](../doc/api/README.md) states which records each
+credential receives.
+
+In the mode `routes`, the service fixture checks `GET /v1/routes` after one
+mixed run. A control credential of the profile receives the enqueue command
+and its receipt, the review, the approve command and its receipt and the start
+relay, and every served record equals the entry that `agentic-run flow` reads
+at the same position. The lifetime notice and the administration records are
+gaps. An observe-only credential and a control credential of another profile
+receive no record, and their cursors advance. The fixture then stops the
+manager, moves the active file to its segment name as the writer seals it,
+and starts the manager again. A cursor of the first lifetime resumes across
+the sealed segment. It seals the second lifetime too and removes the oldest
+segment as the pruner removes it. `oldestCursor` then names the new floor,
+and a cursor below it receives 410 `cursor-expired`.
+
 The service fixture `manager/test/service_http.py` checks the manager log of
 the TUI service journey. In the mode `tui-journey`, after the TUI session and
 after the manager process exits, it runs `agentic-run flow` on the flow

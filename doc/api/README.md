@@ -61,7 +61,7 @@ limits apply before unbounded allocation and are not character counts.
 | Verified artifact content | 67108864 bytes, with at most two downloads in progress for each manager. A third download waits up to five seconds for a download to end and then refuses with `storage-quota`. A download that lasts longer than 300 seconds stops at its next write, and the client receives a truncated body. |
 | Complete SSE block | 16384 bytes. |
 | JSON page | 1048576 bytes. |
-| Run route batch | 1048576 encoded bytes. A batch reads windows of at most 64 records and scans at most 1024 records. |
+| Route batch | 1048576 encoded bytes, for a run route batch and a manager route batch. A batch reads windows of at most 64 records and scans at most 1024 records. |
 | Materialized page set | 67108864 bytes, two active sets per client, expiring after 60 seconds. For `/requests` and `/runs`, the byte bound applies to each window of 1024 members. |
 | Live collection | 1024 items in each list of `/snapshot` and in `/decisions`. A larger list receives 413 `view-too-large`. |
 | Queue | 100 queued requests. Drafts have a separately enforced, advertised positive bound. |
@@ -238,6 +238,24 @@ records as well. The restricted records, `engine-result` and `failure`, are
 never served. Only `Accept: application/json` is served, and any other
 `Accept` value receives 409 `unsupported-operation`. A route read writes
 nothing to the coordination database.
+`/routes` serves the manager log of the current stream: its sealed segments
+and its active file, as the [storage contract](../../manager/STORAGE.md#manager-log)
+describes them. It requires `observe` on at least one configured profile, as
+`/events` does. The profile of each record comes from the identifiers in its
+`about`. A `command` record, a `receipt` record and a `command-changed` notice
+belong to the profile of their command. A `review` record, a `review-ended`
+notice and a `request-ended` notice belong to the profile of their request. A
+`start` or `control` relay belongs to the profile of its run, and a `discard`
+relay to the profile of its request. A record whose profile does not resolve
+is never served. These are the administration records of the local channel,
+the `lifetime`, `shutdown` and `gap` notices, and a command whose transaction
+rolled back. Every other manager-log record is an actor record, and a
+credential receives it only when it holds `observe` and `control` on the
+profile of the record. The manager log has no public record, so a credential
+with `observe` alone receives filtered gaps only. The `failure` records are
+restricted and are never served. Only `Accept: application/json` is served,
+and any other `Accept` value receives 409 `unsupported-operation`. A read of
+`/routes` writes nothing to the coordination database.
 
 | Resource | Methods | Served | Mutation scopes and guard |
 |---|---|---|---|
@@ -264,6 +282,7 @@ nothing to the coordination database.
 | `/snapshot` | GET | GET | No mutation. Provides a consistent authorized overview and replay cursor. |
 | `/events` | GET | GET | No mutation. SSE and bounded JSON use the same durable cursor and retention rules. |
 | `/runs/{id}/routes` | GET | GET | No mutation. Serves bounded JSON batches of the run log of the run by route class. `observe` gives public records, and `observe` with `control` also gives actor records. |
+| `/routes` | GET | GET | No mutation. Serves bounded JSON batches of the manager log of the current stream. `observe` and `control` on the profile of a record give that record. A record without a profile is never served. |
 
 OPTIONS preflight is the sole unauthenticated HTTP operation. After the
 [transport checks](#transport-boundary), it checks only an exact allowlisted
@@ -439,6 +458,22 @@ A cursor whose position lies after the last complete record receives 410
 `cursor-expired`. The floor of a run log is position 0, so `oldestCursor`
 always names position 0. Authorization is checked on every batch and again
 before each write of the response.
+
+A manager route batch has the same fields and the same cursor, parameter,
+batch and gap rules as a run route batch. Its records are the `command`,
+`receipt`, `review`, `relay` and `notice` records of the manager log, each
+with the class `actor`. Its alias is `route_` and the SHA-256 of the public
+stream identity of the credential and the name of the manager log. The alias
+names no segment and no file, so a cursor stays valid when the writer seals
+the active file and when the pruner removes a sealed segment. A restoration
+gives a new stream identity, so a cursor taken before it receives 410
+`view-expired`. `oldestCursor` names the retained floor, which is the start of
+the oldest remaining sealed segment, or position 0 before the first prune. A
+request without a cursor starts at the retained floor. A cursor whose
+position lies below the retained floor, or after the last complete record,
+receives 410 `cursor-expired`. The manager reads each batch without the
+writer lock of the manager log, and it resolves the profiles of the records
+of each window in one read transaction.
 
 Refreshes are serialized per resource. An invalidation received during a
 refresh sets a dirty flag, and the resource is fetched again afterward. A
