@@ -284,6 +284,41 @@ the other log, and it joins no event. `flowAcknowledgements` pairs each
 `control` of a run log with its first later acknowledgement event, or with
 none, which is the join behind the unacknowledged state.
 
+## Positioned windows
+
+`readFlowWindow` reads one window of a log file by position. It takes the path
+of the file in a private root, the position of the first line of the file, the
+requested position and a `FlowWindowLimits` value, which bounds the records and
+the line bytes of the window. `flowWindowLimits` is 64 records and
+`maxFrameBytes` of line bytes, so a window with these bounds holds at least one
+record when one remains. The reader opens the file with `withPrivatePrefixAt`
+and reads only the prefix that the opened descriptor measures, in pieces of
+64 KiB. It reads the descriptor without a handle, so it takes no handle lock
+and reads a log whose writer is open in the same process. It never holds the
+whole file in memory.
+
+The reader skips the lines before the requested position by counting newline
+bytes and does not decode them. It then decodes complete lines with
+`decodeFlowLine` until the window holds the most records of its limits or the
+next line would take the line bytes above the limit. A final line without its
+newline is never decoded. The reader never opens a claim-check file.
+`flowWindowBody` gives the body of each entry: an inline value as it is, a
+claim check as `{"omitted":"claim","sha256":...,"bytes":...}` with the digest
+and the size that the record names, and nothing for an event record.
+
+A `FlowWindow` holds the entries with their positions, the position after the
+last returned record in `windowNext`, whether the file holds a complete record
+at that position in `windowMore`, and the line bytes of the entries. A
+requested position below the first position of the file gives
+`FlowWindowBelowFloor` with that position. A requested position after the last
+complete record gives `FlowWindowAhead` with the position after that record,
+and the position after the last complete record gives an empty window. A
+complete line that does not decode, or a line longer than `maxFrameBytes`,
+gives `FlowWindowUndecodable` when the window starts at it. A window that
+reaches such a line after it decoded records ends before the line with
+`windowMore` set. `flowSealedSegments` lists the sealed segments of a segment
+directory in start order, each with its start position and its path.
+
 ## Manager-log reader
 
 `Agentic.Manager.Flow` reads the manager log. `readManagerLog` opens the flow
@@ -302,6 +337,23 @@ answers and must name the identifier of that command. A receipt whose command
 lies below the floor decodes as a command receipt when it names the command
 identifier of its record, and otherwise as a credential receipt. A body that does not
 decode is a failure of its entry.
+
+`readManagerWindow` reads one positioned window of the manager log of a stream
+in the manager's private root. It lists the sealed segments of the stream and
+starts in the newest sealed segment whose start is at or below the requested
+position, or in the active file when the log has no sealed segment. When a
+window reaches the end of a sealed segment within its limits, it continues in
+the next sealed segment, or in the active file after the newest one, with the
+limits that remain. The first position of the active file is the position
+after the last record of the newest sealed segment, or 0, and an absent active
+file holds no record. The result carries the retained floor of the log as
+`managerWindowFloor`. A requested position below the floor gives
+`FlowWindowBelowFloor` with the floor, and a requested position after the last
+complete record of the log gives `FlowWindowAhead`. A refusal in a later file
+of a window that already holds records ends the window before that file with
+`windowMore` set. When the list of sealed segments changes during the read,
+because the writer sealed or the pruner removed a segment, the reader reads the
+window again, at most four times.
 
 `joinFlows` joins manager logs with run logs by identifiers that both records
 carry. Positions never cross logs. Each join reads the retained records of a

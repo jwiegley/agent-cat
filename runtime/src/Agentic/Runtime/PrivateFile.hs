@@ -7,6 +7,7 @@ module Agentic.Runtime.PrivateFile
     readConfinedFile,
     readConfinedFileAt,
     readConfinedPrefixAt,
+    withConfinedPrefixAt,
     withConfinedDirectory,
     withConfinedDirectoryAt,
     withConfinedDirectoryIfPresentAt,
@@ -17,6 +18,7 @@ where
 import Control.Exception (IOException, bracket, bracketOnError, throwIO, try)
 import Control.Monad (unless, when)
 import qualified Data.ByteString as BS
+import Data.ByteString.Internal (createAndTrim)
 import Data.Bits ((.&.))
 import Foreign.C.Error (throwErrnoIfMinus1, throwErrnoIfMinus1Retry, throwErrnoIfNull)
 import Foreign.C.String (CString)
@@ -35,6 +37,7 @@ import System.Posix.IO
     OpenMode (ReadOnly),
     closeFd,
     defaultFileFlags,
+    fdReadBuf,
     fdToHandle,
     openFd,
     openFdAt,
@@ -72,7 +75,24 @@ readConfinedFileAtChecked check = readConfinedWith (readOpened check)
 readConfinedPrefixAt :: Fd -> [FilePath] -> Integer -> IO BS.ByteString
 readConfinedPrefixAt root components limit = fst <$> readConfinedWith (readOpenedPrefix (const (pure ()))) root components limit
 
-readConfinedWith :: (Integer -> IO Fd -> IO (BS.ByteString, FileStatus)) -> Fd -> [FilePath] -> Integer -> IO (BS.ByteString, FileStatus)
+-- | Open a confined regular file for reading and run the action with a read
+-- of the opened descriptor and the size in bytes that the descriptor measures.
+-- Each call of the read returns at most the given number of bytes, and an
+-- empty result at the end of the file. The action reads the measured prefix in
+-- pieces of its choice, so a caller never holds the whole file in memory. The
+-- descriptor is read without a handle, so the read takes no handle lock, and
+-- a writer that holds the file open in the same process does not refuse it.
+-- The descriptor is closed when the action returns.
+withConfinedPrefixAt :: Fd -> [FilePath] -> ((Int -> IO BS.ByteString) -> Integer -> IO a) -> IO a
+withConfinedPrefixAt root components action = readConfinedWith opened root components 0
+  where
+    opened _ open = bracket open closeFd $ \descriptor -> do
+      status <- getFdStatus descriptor
+      unless (isRegularFile status) (throwIO (userError "confined path is not a regular file"))
+      let readPiece count = createAndTrim count (\buffer -> fromIntegral <$> fdReadBuf descriptor buffer (fromIntegral count))
+      action readPiece (toInteger (fileSize status))
+
+readConfinedWith :: (Integer -> IO Fd -> IO a) -> Fd -> [FilePath] -> Integer -> IO a
 readConfinedWith readFile' root components limit = case components of
   [] -> throwIO (userError "confined file path is empty")
   _ -> go root components

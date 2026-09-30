@@ -4061,6 +4061,29 @@ Non-blocking findings of the fess audit of Phase B part 2 subtask C7 (legacy his
 
 6. (low) The served path shows no limitation marker because the version-2 fixture carries none. Only manager-history-check covers the legacy marker and the unreadable-manifest form. Fix: optionally add a version-1 manifest entry to the pages fixture.
 
+* TODO [#D] Resolve C8 fess findings on the flow window reader
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-c8-flow-window-fess-findings-ii69
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-30 Wed 13:11]
+:MODIFIED: [2026-09-30 Wed 13:11]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of the fess audit of Phase B part 2 subtask C8 (positioned window reader for flow logs). Source:
+/Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/fess/b2-C8-r1.md.
+
+1. (medium) runtime/src/Agentic/Runtime/Flow.hs:1830 (doc at Flow.hs:1799 and runtime/BROKER.md:316). When a window has no records yet and the first complete line is longer than windowMaxBytes, the guard `used + index > windowMaxBytes limits` returns an empty window with windowMore set, so a caller that follows windowNext reads the same window forever. With the default limits, a line from maxFrameBytes+1 up to about maxFrameBytes+64 KiB whose newline arrives in the same piece takes this path, not FlowWindowUndecodable, which contradicts the documentation. The writer refuses such lines (Flow.hs:1152), so only a damaged log or a small caller-chosen byte bound reaches it. Fix: with no record decoded and index > maxFrameBytes, return FlowWindowUndecodable. With no record decoded and a line that exceeds only the caller bound, return that one record or refuse it, so that every window makes progress or refuses. Align the doc comment and BROKER.md.
+
+2. (low) manager/test/Agentic/Manager/Test/FlowReader.hs:503. The check "the sealed segments of the window log are named by their start" compares only the number of directory entries with the segment count. Fix: compare the sorted names with map (flowSegmentName . segmentFirst) segments, or rename the check.
+
+3. (low) manager/STORAGE.md:578. The storage reader paragraph describes readManagerLog but not readManagerWindow. Fix: add one sentence that names readManagerWindow and the floor it reports, or accept the link to BROKER.md.
+
 * TODO [#E] Record that the Cabal 3.16.1.0 expectation means cabal-install
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -4694,7 +4717,7 @@ Deliberately not a constructor; castGrade covers =. The <= case is a structural 
 :LABELS:   ["actor-flow","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-26 Sat 23:41]
-:MODIFIED: [2026-09-30 Wed 05:40]
+:MODIFIED: [2026-09-30 Wed 13:11]
 :CREATED_BY: johnw
 :SOURCE_REPO: .
 :ORIGINAL_SIZE: 0
@@ -4742,6 +4765,13 @@ Actor-flow increment 2, service subscription (4 to 6 engineering days, inside WM
     "author": "johnw",
     "text": "Phase B part 1 status: authorization-gated. The B4 threat model doc/research/actor-flow-route-threat-model.md awaits operator review; B15, B16 (public class) and B17 (actor class) need separate operator decisions.",
     "created_at": "2026-09-30T12:40:32Z"
+  },
+  {
+    "id": 411,
+    "issue_id": "acat-en4g",
+    "author": "johnw",
+    "text": "Phase B part 2 subtask C8: the bounded, positioned window reader for the route resource landed. runtime Flow.readFlowWindow reads only the prefix measured at open in 64 KiB pieces, skips lines before the requested position by counting newlines without decoding, decodes at most 64 records or 1 MiB with decodeFlowLine, never decodes a torn tail and never opens a claim-check file (flowWindowBody summarizes it as omitted/sha256/bytes). It reports windowNext and windowMore, and refuses a position below the base (BelowFloor) and past the end (Ahead) distinctly. manager Flow.readManagerWindow selects the sealed segment or the active file by position, continues across segments with the remaining limits and reports the floor. Evidence: Werror build of runtime-contract-test, manager-command-check, agentic-run and routing-fixed-point-probe with -ftui-tests; runtime-contract-test at -N8; manager-command-check flow at -N8; doc/check-manual-members.py; the Phase A journey at N8 (logs in resume-20260923/B2/C8/impl-r1; fess b2-C8-r1 non-blocking, findings filed as acat-c8-flow-window-fess-findings-ii69). Deferred under the functionality-first direction: the sparse offset index, per-request extension budget and file slot per read from threat-model section 7, and all hostile-input negatives. Not closed.",
+    "created_at": "2026-09-30T20:11:38Z"
   }
 ]
 #+end_src
@@ -16053,7 +16083,7 @@ leak private errors. There is no plaintext bearer development exception.
 :LABELS:   ["p5","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-30 Wed 12:50]
+:MODIFIED: [2026-09-30 Wed 13:11]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-025
 :SOURCE_REPO: agent-cat
@@ -16241,6 +16271,13 @@ through the actual HTTP response path.
     "author": "johnw",
     "text": "Phase B part 2 subtask C7: the running manager now serves legacy retained history read-only. agentic-run --manager serve accepts a repeatable --legacy-history ROOT=PROFILE option, each binding goes through History.bindLegacyHistory at serve start, and GET /v1/runs (merged into the C6 keyset windows) and GET /v1/runs/{id} serve the legacy entries of authorized profiles in the frozen Run representation. Mutation routes refuse them (403 insufficient-scope, POST 405). No schema gap. Evidence: Werror build of manager-history-check, agentic-run and routing-fixed-point-probe with -ftui-tests; manager-history-check at -N8; service_http.py pages at N8 (case 10 lists, validates, compares and downloads the legacy entry with verified bytes); make -C doc check; doc/check-manual-cli.py; Phase A journey at N8. Package stays open for closeout review. Follow-ups: acat-c7-legacy-history-fess-findings-vbak.",
     "created_at": "2026-09-30T19:50:14Z"
+  },
+  {
+    "id": 412,
+    "issue_id": "acat-wm-025-3utw",
+    "author": "johnw",
+    "text": "Phase B part 2 subtask C8 adds the positioned window reader for flow logs (runtime Flow.readFlowWindow, manager Flow.readManagerWindow across sealed segments with the floor), the storage primitive for the route resource of acat-en4g. Evidence: resume-20260923/B2/C8/impl-r1 (all five checks exit 0); fess b2-C8-r1 non-blocking, follow-ups acat-c8-flow-window-fess-findings-ii69. Package stays open.",
+    "created_at": "2026-09-30T20:11:38Z"
   }
 ]
 #+end_src

@@ -10,7 +10,7 @@ import qualified Agentic.Engine as E
 import qualified Agentic.Planning as P
 import BucketEvidence (withCaptureBucket)
 import Control.Exception (bracket)
-import Control.Monad (unless, void)
+import Control.Monad (forM_, unless, void)
 import Data.Aeson (Value (Null, String), object, (.=))
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BC
@@ -20,7 +20,8 @@ import qualified Data.Text as T
 import Data.Time.Calendar (fromGregorian)
 import Data.Time.Clock (UTCTime (UTCTime))
 import Data.Word (Word64)
-import System.Directory (getTemporaryDirectory, listDirectory)
+import System.Directory (createDirectory, doesDirectoryExist, getTemporaryDirectory, listDirectory)
+import System.Posix.Files (setFileMode)
 import System.FilePath ((</>))
 
 flowReaderTests :: IO ()
@@ -29,7 +30,8 @@ flowReaderTests = do
   withCaptureBucket "agentic-flow-reader-" temporary $ \bucket -> do
     completeLog (bucket </> "complete")
     stateLog (bucket </> "states")
-  putStrLn "flow reader checks passed: torn lines, claim checks, reply positions and every run-log state"
+    windowLog (bucket </> "windows")
+  putStrLn "flow reader checks passed: torn lines, claim checks, reply positions, every run-log state and positioned windows"
 
 run :: RunId
 run = RunId "flow-reader"
@@ -270,6 +272,96 @@ populate stopping fixture = do
 
 emptyStates :: FlowStates
 emptyStates = FlowStates [] [] [] [] [] [] [] False []
+
+-- | Positioned windows over a log of 1500 records, which spans many reads of
+-- the reader: every record once in bounded windows, a claim check summarized
+-- without its file, a torn tail that no window returns, the refusals of a
+-- position ahead of the log and below its base, and a line that does not
+-- decode, which a window skips without decoding it.
+windowLog :: FilePath -> IO ()
+windowLog directory = do
+  createDirectory directory
+  setFileMode directory 0o700
+  let moment = UTCTime (fromGregorian 2026 9 29) 0
+      digest = T.replicate 64 "d"
+      recordAt :: Int -> Record
+      recordAt index
+        | index == 5 = Record FlowTurn model (To workflow) (scoped 5) Nothing (ClaimCheck digest 70000) moment
+        | index == 6 = Record FlowEvent workflow Public (runAbout run) Nothing (EventNumber (SeqNo 3)) moment
+        | otherwise = Record FlowTurn model (To workflow) (scoped (fromIntegral index)) Nothing (Inline (turnBody ("turn " <> T.pack (show index)))) moment
+      records = map recordAt [0 .. 1499]
+      lineBytes = map encodeFlowLine records
+      torn = "{\"schema\":\"turn\""
+  BS.writeFile (directory </> "log.ndjson") (BS.concat [line <> "\n" | line <- lineBytes] <> torn)
+  check "the window log spans several reads" (sum (map BS.length lineBytes) > 4 * 64 * 1024)
+  bracket (openPrivateRoot "flow window check" directory) closePrivateRoot $ \root -> do
+    let window base from limits = readFlowWindow root ["log.ndjson"] (Position base) (Position from) limits
+        walk base from limits = do
+          outcome <- window base from limits
+          case outcome of
+            Left refusal -> fail ("flow reader: the window at " <> show from <> " is refused: " <> show refusal)
+            Right found
+              | windowMore found -> ((from, found) :) <$> walk base (positionIndex (windowNext found)) limits
+              | otherwise -> pure [(from, found)]
+    windows <- walk 0 0 flowWindowLimits
+    let entries = concatMap (windowEntries . snd) windows
+    check ("bounded windows return every record once, in order: " <> show (length entries)) $
+      map windowPosition entries == map Position [0 .. 1499] && map windowRecord entries == records
+    check "each window holds at most 64 records, and each but the last holds 64" $
+      all ((== 64) . length . windowEntries . snd) (init windows) && all ((<= 64) . length . windowEntries . snd) windows
+    check "each window ends at the position after its last record" $
+      and [windowNext found == Position (from + fromIntegral (length (windowEntries found))) | (from, found) <- windows]
+    check "the last window reaches the last complete record and leaves the torn tail" $
+      case last windows of
+        (_, found) -> windowNext found == Position 1500 && not (windowMore found)
+    check "the line bytes of each window are those of its records" $
+      and [windowBytes found == sum [BS.length (encodeFlowLine (windowRecord entry)) | entry <- windowEntries found] | (_, found) <- windows]
+    claimsPresent <- doesDirectoryExist (directory </> flowClaimDirectory)
+    check "a claim check is summarized by its digest and size without its file" $
+      not claimsPresent
+        && windowBody (entries !! 5) == Just (object ["omitted" .= ("claim" :: Text), "sha256" .= digest, "bytes" .= (70000 :: Int)])
+    check "an event record carries no body in a window" (isNothing (windowBody (entries !! 6)))
+    check "an inline body is returned as it is" (windowBody (entries !! 7) == Just (turnBody "turn 7"))
+    -- Windows bounded by bytes hold whole records within the bound.
+    let byteLimit = 3 * BS.length (lineBytes !! 100)
+    byteWindows <- walk 0 0 (FlowWindowLimits 64 byteLimit)
+    check "byte-bounded windows return every record once within their bound" $
+      map windowPosition (concatMap (windowEntries . snd) byteWindows) == map Position [0 .. 1499]
+        && all (\(_, found) -> windowBytes found <= byteLimit && not (null (windowEntries found))) byteWindows
+    -- A window deep in the log skips across reads without decoding.
+    deep <- window 0 1400 (FlowWindowLimits 10 maxFrameBytes)
+    check ("a window deep in the log starts at its position: " <> show (fmap windowNext deep)) $
+      fmap (map windowPosition . windowEntries) deep == Right (map Position [1400 .. 1409]) && fmap windowMore deep == Right True
+    atEnd <- window 0 1500 flowWindowLimits
+    check ("the position after the last complete record gives an empty window: " <> show atEnd) (atEnd == Right (FlowWindow [] (Position 1500) False 0))
+    ahead <- window 0 1501 flowWindowLimits
+    check ("a position ahead of the complete records is refused with the end: " <> show ahead) (ahead == Left (FlowWindowAhead (Position 1500)))
+    counted <- window 0 1499 (FlowWindowLimits 0 maxFrameBytes)
+    check ("a window of no records reports that a record remains: " <> show counted) (counted == Right (FlowWindow [] (Position 1499) True 0))
+    below <- window 100 99 flowWindowLimits
+    check ("a position below the base is refused with the base: " <> show below) (below == Left (FlowWindowBelowFloor (Position 100)))
+    based <- window 100 100 (FlowWindowLimits 2 maxFrameBytes)
+    check "a file with a base gives its records positions from the base" $
+      fmap (map windowPosition . windowEntries) based == Right [Position 100, Position 101]
+        && fmap (map windowRecord . windowEntries) based == Right (take 2 records)
+    -- A line that does not decode is skipped undecoded, and refused where a
+    -- window reaches it.
+    BS.writeFile (directory </> "broken.ndjson") (BS.concat [line <> "\n" | line <- take 2 lineBytes] <> "not a record\n" <> BS.concat [line <> "\n" | line <- take 3 (drop 3 lineBytes)])
+    let brokenWindow from = readFlowWindow root ["broken.ndjson"] (Position 0) (Position from) flowWindowLimits
+    skipped <- brokenWindow 3
+    check ("a window after a line that does not decode skips it: " <> show (fmap windowNext skipped)) $
+      fmap (map windowPosition . windowEntries) skipped == Right (map Position [3, 4, 5]) && fmap windowMore skipped == Right False
+    before <- brokenWindow 0
+    check ("a window ends before a line that does not decode: " <> show (fmap windowNext before)) $
+      fmap (map windowPosition . windowEntries) before == Right [Position 0, Position 1] && fmap windowMore before == Right True
+    refusedAt <- brokenWindow 2
+    check ("a window at a line that does not decode is refused there: " <> show refusedAt) $
+      case refusedAt of
+        Left (FlowWindowUndecodable (Position 2) _) -> True
+        _ -> False
+    forM_ [(1, 1), (0, 2)] $ \(from, count) -> do
+      found <- brokenWindow from
+      check ("a window of " <> show count <> " records before the broken line decodes them") (fmap (length . windowEntries) found == Right count)
 
 check :: String -> Bool -> IO ()
 check label ok = unless ok (fail ("flow reader: " <> label))

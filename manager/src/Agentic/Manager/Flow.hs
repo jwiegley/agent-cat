@@ -1,6 +1,7 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeApplications #-}
 
 -- | The manager log: one append-only log of flow records for each Store
 -- stream identity.
@@ -92,6 +93,8 @@ module Agentic.Manager.Flow
     ManagerValue (..),
     ManagerLogReport (..),
     readManagerLog,
+    ManagerWindow (..),
+    readManagerWindow,
     LogPosition (..),
     ReviewJoin (..),
     RelayJoin (..),
@@ -139,6 +142,11 @@ import Agentic.Runtime
     FlowOpenRefusal (..),
     FlowSegments (..),
     FlowSegment (..),
+    FlowWindow (..),
+    FlowWindowLimits (..),
+    FlowWindowRefusal (..),
+    flowSealedSegments,
+    readFlowWindow,
     FlowLog (ManagerLog, RunLog),
     FlowWriter,
     Position (..),
@@ -175,8 +183,8 @@ import Agentic.Runtime
   )
 import Control.Concurrent.MVar (MVar, modifyMVar, newMVar, withMVar)
 import Control.Concurrent.STM (STM)
-import Control.Exception (SomeAsyncException, SomeException, bracket, displayException, fromException, throwIO, try)
-import Control.Monad (unless, when)
+import Control.Exception (IOException, SomeAsyncException, SomeException, bracket, displayException, fromException, throwIO, try)
+import Control.Monad (forM_, unless, when)
 import Data.Aeson (Value (..), object, toJSON, (.=))
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.KeyMap as KeyMap
@@ -196,6 +204,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
 import System.FilePath (dropExtension, takeDirectory, takeFileName)
+import System.IO.Error (isDoesNotExistError)
 
 -- ---------------------------------------------------------------------------
 -- Writer
@@ -987,6 +996,89 @@ readManagerLog path =
     (floor', entries, torn) <- readFlowLogAt ManagerLog root (Just (drop 1 (managerFlowSealed stream))) [name] (drop 1 (managerFlowClaims stream))
     let (decoded, values) = decodeManagerEntries floor' entries
     pure (ManagerLogReport path decoded values torn floor')
+
+-- | One positioned window of the manager log of a stream, with the retained
+-- floor of the log when the window was read.
+data ManagerWindow = ManagerWindow
+  { managerWindowFloor :: !Position,
+    managerWindowResult :: !(Either FlowWindowRefusal FlowWindow)
+  }
+  deriving (Eq, Show)
+
+-- | Read one window of the manager log of the stream in the manager's private
+-- root, from the requested position, within the limits.
+--
+-- The reader lists the sealed segments of the stream. Their names are their
+-- start positions, so it starts in the newest sealed segment whose start is at
+-- or below the requested position, or in the active file when no such segment
+-- exists and the log has no sealed segment. It reads with 'readFlowWindow',
+-- which never opens a claim-check file. When a window reaches the end of a
+-- sealed segment within its limits, it continues in the next sealed segment,
+-- or in the active file after the newest one, with the limits that remain.
+-- The first position of the active file is the position after the last
+-- record of the newest sealed segment, or 0. An absent active file holds no
+-- record. The floor is the start of the oldest sealed segment, or 0. A
+-- requested position below the floor gives 'FlowWindowBelowFloor' with the
+-- floor, and one after the last complete record of the log gives
+-- 'FlowWindowAhead'. A refusal in a later file of a window that already holds
+-- records ends the window before that file, with 'windowMore' set, so the
+-- next window from 'windowNext' reports it. A sealed segment that does not
+-- start at the position after the segment before it raises an I/O error.
+-- When the list of sealed
+-- segments changes during the read, because the writer sealed or the pruner
+-- removed a segment, the reader reads the window again, at most four times.
+readManagerWindow :: PrivateRoot -> Text -> Position -> FlowWindowLimits -> IO ManagerWindow
+readManagerWindow root stream from limits = attempt (4 :: Int)
+  where
+    attempt tries = do
+      before <- flowSealedSegments root (managerFlowSealed stream)
+      outcome <- try @IOException (windowIn before)
+      after <- flowSealedSegments root (managerFlowSealed stream)
+      case outcome of
+        _ | before /= after, tries > 1 -> attempt (tries - 1)
+        _ | before /= after -> ioError (userError "the sealed segments of the manager log changed during every read of its window")
+        Left failure -> throwIO failure
+        Right window -> pure window
+    windowIn sealed = do
+      let floor' = maybe (Position 0) fst (listToMaybe sealed)
+          (below, above) = span ((<= from) . fst) sealed
+          files = drop (length below - 1) below <> above
+      ManagerWindow floor' <$>
+        if from < floor'
+          then pure (Left (FlowWindowBelowFloor floor'))
+          else continue files Nothing from limits [] 0
+    -- Read from the cursor in the first file, and continue in the files after
+    -- it while each window reaches the end of its sealed segment.
+    continue files expected cursor remaining done used = case files of
+      [] -> do
+        let base = fromMaybe (Position 0) expected
+        found <- try @IOException (readFlowWindow root (managerFlowPath stream) base cursor remaining)
+        combined <- case found of
+          Left failure
+            | isDoesNotExistError failure ->
+                pure (if cursor == base then Right (FlowWindow [] cursor False 0) else Left (FlowWindowAhead base))
+            | otherwise -> throwIO failure
+          Right window -> pure window
+        pure (joined combined)
+      (start, file) : rest -> do
+        forM_ expected $ \position ->
+          when (position /= start) $
+            ioError (userError ("the sealed segment at " <> show (positionIndex start) <> " does not start at position " <> show (positionIndex position)))
+        readFlowWindow root file start cursor remaining >>= \case
+          Left (FlowWindowAhead end) -> continue rest (Just end) cursor remaining done used
+          Left refusal -> pure (joined (Left refusal))
+          Right window
+            | windowMore window -> pure (joined (Right window))
+            | otherwise ->
+                let taken = length (windowEntries window)
+                    left = FlowWindowLimits (windowMaxRecords remaining - taken) (windowMaxBytes remaining - windowBytes window)
+                 in continue rest (Just (windowNext window)) (windowNext window) left (done <> windowEntries window) (used + windowBytes window)
+      where
+        joined = \case
+          Right window -> Right window {windowEntries = done <> windowEntries window, windowBytes = used + windowBytes window}
+          Left refusal
+            | null done -> Left refusal
+            | otherwise -> Right (FlowWindow done cursor True used)
 
 decodeManagerEntries :: Position -> [FlowEntry] -> ([FlowEntry], Map Position ManagerValue)
 decodeManagerEntries floor' = go Map.empty []

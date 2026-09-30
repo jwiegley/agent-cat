@@ -148,6 +148,16 @@ module Agentic.Runtime.Flow
     flowReportValue,
     FlowRoute,
     parseFlowRoute,
+
+    -- * Positioned windows
+    FlowWindowLimits (..),
+    flowWindowLimits,
+    FlowWindowEntry (..),
+    FlowWindow (..),
+    FlowWindowRefusal (..),
+    readFlowWindow,
+    flowWindowBody,
+    flowSealedSegments,
     flowRouteMatches,
     actorName,
     addressName,
@@ -180,7 +190,7 @@ import Agentic.Engine
 import Agentic.Planning (El, Request, SCode, SomeCode (..), answerFromJsonExact, answerJson, requestCodeFromJson, requestFromJson, requestJson)
 import Agentic.Runtime.Broker (DataBroker (..))
 import Agentic.Runtime.Control (Control (controlId), ControlId (controlIdText), controlVersionFor, decodeControlFor, encodeControlFor)
-import Agentic.Runtime.PrivateRoot (PrivateRoot, closePrivateRoot, ensurePrivateDirectoryAt, listPrivateDirectoryAt, movePrivateAt, openPrivateFileAt, openPrivateLogAt, openPrivateRoot, privateFileIdentityAt, privateFileSizeAt, readPrivateFileAt, readPrivatePrefixAt, removePrivateFileAt, syncPrivateDirectoryAt, syncPrivateHandle, writePrivateExclusiveAt)
+import Agentic.Runtime.PrivateRoot (PrivateRoot, closePrivateRoot, ensurePrivateDirectoryAt, listPrivateDirectoryAt, movePrivateAt, openPrivateFileAt, openPrivateLogAt, openPrivateRoot, privateFileIdentityAt, privateFileSizeAt, readPrivateFileAt, readPrivatePrefixAt, removePrivateFileAt, syncPrivateDirectoryAt, syncPrivateHandle, withPrivatePrefixAt, writePrivateExclusiveAt)
 import Agentic.Runtime.Protocol
   ( Envelope (..),
     FailureClass,
@@ -1661,9 +1671,7 @@ readFlow liveness directory =
 -- manager log are left to the manager's codecs.
 readFlowLogAt :: FlowLog -> PrivateRoot -> Maybe [FilePath] -> [FilePath] -> [FilePath] -> IO (Position, [FlowEntry], Maybe Int)
 readFlowLogAt kind root segments path claims = do
-  sealed <- case segments of
-    Nothing -> pure []
-    Just directory -> sealedSegments root directory >>= either (\name -> ioError (userError ("the segment directory holds " <> name <> ", which is not a segment name"))) pure
+  sealed <- maybe (pure []) (fmap (map (\(Position start, file) -> (start, file))) . flowSealedSegments root) segments
   let floor' = maybe 0 fst (listToMaybe sealed)
   (sealedEntries, base, remaining) <- foldM readSegment ([], floor', maxFlowLogBytes) sealed
   active <- try @IOException (readFlowLines root path claims base remaining)
@@ -1702,6 +1710,168 @@ splitFlowLines = go []
       | otherwise = case BS.elemIndex 10 rest of
           Nothing -> (reverse lines', Just (BS.length rest))
           Just index -> go (BS.take index rest : lines') (BS.drop (index + 1) rest)
+
+-- | The sealed segments of a segment directory of the root, in start order,
+-- each with its start position and its path. An absent directory holds none.
+-- A name that is not a segment name raises an I/O error.
+flowSealedSegments :: PrivateRoot -> [FilePath] -> IO [(Position, [FilePath])]
+flowSealedSegments root directory =
+  sealedSegments root directory >>= \case
+    Left name -> ioError (userError ("the segment directory holds " <> name <> ", which is not a segment name"))
+    Right found -> pure [(Position start, file) | (start, file) <- found]
+
+-- | The bounds of one positioned window: the most records that it decodes and
+-- the most line bytes, newlines excluded, that its records take.
+data FlowWindowLimits = FlowWindowLimits
+  { windowMaxRecords :: !Int,
+    windowMaxBytes :: !Int
+  }
+  deriving (Eq, Show)
+
+-- | The bounds of a served window: 64 records and 'maxFrameBytes' of lines. A
+-- window with these bounds holds at least one record when one remains,
+-- because no complete line of a log exceeds 'maxFrameBytes'.
+flowWindowLimits :: FlowWindowLimits
+flowWindowLimits = FlowWindowLimits 64 maxFrameBytes
+
+-- | One record of a window, with its position in the whole log and its body
+-- as 'flowWindowBody' gives it.
+data FlowWindowEntry = FlowWindowEntry
+  { windowPosition :: !Position,
+    windowRecord :: !Record,
+    windowBody :: !(Maybe Value)
+  }
+  deriving (Eq, Show)
+
+-- | The records of one window, in log order.
+data FlowWindow = FlowWindow
+  { windowEntries :: ![FlowWindowEntry],
+    -- | The position after the last returned record, or the requested
+    -- position when the window returned none.
+    windowNext :: !Position,
+    -- | Whether the file holds a complete record at 'windowNext'.
+    windowMore :: !Bool,
+    -- | The line bytes of the returned records, newlines excluded.
+    windowBytes :: !Int
+  }
+  deriving (Eq, Show)
+
+-- | Why a window returned no records.
+data FlowWindowRefusal
+  = -- | The requested position lies below the first position of the file,
+    -- which is the one carried.
+    FlowWindowBelowFloor !Position
+  | -- | The requested position lies after the last complete record of the
+    -- file. The position carried is the one after that record.
+    FlowWindowAhead !Position
+  | -- | The complete line at the position does not decode, or a line longer
+    -- than 'maxFrameBytes' starts there.
+    FlowWindowUndecodable !Position !Text
+  deriving (Eq, Show)
+
+-- | The body of a record as a window returns it: an inline value as it is, a
+-- claim check as @{"omitted":"claim","sha256":...,"bytes":...}@ with the
+-- digest and the size that the record names, and nothing for an event record,
+-- whose sequence number the record carries.
+flowWindowBody :: Body -> Maybe Value
+flowWindowBody = \case
+  Inline value -> Just value
+  ClaimCheck digest size -> Just (object ["omitted" .= ("claim" :: Text), "sha256" .= digest, "bytes" .= size])
+  EventNumber _ -> Nothing
+
+-- | Read one window of the log file at the path of the root, whose first line
+-- has the given base position, from the requested position.
+--
+-- The reader opens the file with 'withPrivatePrefixAt' and reads only the
+-- prefix that the opened descriptor measures, in pieces of 64 KiB, so it never
+-- holds the whole file in memory. It takes no handle lock, so it reads a log
+-- whose writer is open in the same process. It skips the lines before the requested
+-- position by counting newline bytes and does not decode them. It then decodes
+-- complete lines with 'decodeFlowLine' until it has decoded the most records
+-- of the limits or the next line would take the line bytes above the limit.
+-- A final line without its newline is never decoded, and a window that meets
+-- one ends there. The reader never opens a claim-check file. Each entry
+-- carries its body as 'flowWindowBody' gives it.
+--
+-- A requested position below the base gives 'FlowWindowBelowFloor', and one
+-- after the last complete record gives 'FlowWindowAhead'. The position after
+-- the last complete record is a valid position, and its window is empty. A
+-- complete line that does not decode and a line longer than 'maxFrameBytes'
+-- give 'FlowWindowUndecodable' when the window starts at them. A window that
+-- reaches one after it decoded records ends before it, with 'windowMore' set,
+-- so the next window reports it. A file that
+-- becomes shorter than its measured prefix during the read raises an I/O
+-- error, and so does an absent file.
+readFlowWindow :: PrivateRoot -> [FilePath] -> Position -> Position -> FlowWindowLimits -> IO (Either FlowWindowRefusal FlowWindow)
+readFlowWindow root path (Position base) (Position from) limits
+  | from < base = pure (Left (FlowWindowBelowFloor (Position base)))
+  | otherwise = withPrivatePrefixAt root path $ \readPiece size -> do
+      remaining <- newIORef size
+      let piece = do
+            left <- readIORef remaining
+            if left <= 0
+              then pure Nothing
+              else do
+                bytes <- readPiece (fromInteger (min windowPieceBytes left))
+                when (BS.null bytes) (ioError (userError "the log became shorter while its window was read"))
+                writeIORef remaining (left - toInteger (BS.length bytes))
+                pure (Just bytes)
+          -- Count newlines up to the requested position without decoding.
+          skip position pending
+            | position == from = collect position pending [] 0 0
+            | otherwise = case newlineAfter (from - position) pending of
+                Right index -> collect from (BS.drop (index + 1) pending) [] 0 0
+                Left count ->
+                  piece >>= \case
+                    Nothing -> pure (Left (FlowWindowAhead (Position (position + count))))
+                    Just bytes -> skip (position + count) bytes
+          collect position buffer done count used = case BS.elemIndex 10 buffer of
+            Just index
+              | count >= windowMaxRecords limits || used + index > windowMaxBytes limits -> finish position done used True
+              | otherwise -> case decodeFlowLine (BS.take index buffer) of
+                  Left why -> refused position done used (FlowWindowUndecodable (Position position) why)
+                  Right record ->
+                    collect (position + 1) (BS.drop (index + 1) buffer) (FlowWindowEntry (Position position) record (flowWindowBody (recBody record)) : done) (count + 1) (used + index)
+            Nothing
+              | BS.length buffer > maxFrameBytes -> refused position done used (FlowWindowUndecodable (Position position) ("a line exceeds " <> T.pack (show maxFrameBytes) <> " bytes"))
+              | count >= windowMaxRecords limits -> scan (BS.length buffer) >>= finish position done used
+              | otherwise ->
+                  piece >>= \case
+                    Nothing -> finish position done used False
+                    Just bytes -> collect position (buffer <> bytes) done count used
+          -- Whether a newline, and so a complete record, follows.
+          scan seen
+            | seen > maxFrameBytes = pure True
+            | otherwise =
+                piece >>= \case
+                  Nothing -> pure False
+                  Just bytes
+                    | BS.elem 10 bytes -> pure True
+                    | otherwise -> scan (seen + BS.length bytes)
+          finish position done used more = pure (Right (FlowWindow (reverse done) (Position position) more used))
+          -- A window that holds records ends before a line that it refuses.
+          refused position done used refusal
+            | null done = pure (Left refusal)
+            | otherwise = finish position done used True
+      skip base BS.empty
+
+-- | The size of one read of 'readFlowWindow'.
+windowPieceBytes :: Integer
+windowPieceBytes = 64 * 1024
+
+-- | The index of the newline that ends the given number of lines of the
+-- bytes, or the number of newlines that the bytes hold when they hold fewer.
+newlineAfter :: Word64 -> BS.ByteString -> Either Word64 Int
+newlineAfter wanted bytes
+  | available < wanted = Left available
+  | otherwise = go wanted 0
+  where
+    available = fromIntegral (BS.count 10 bytes)
+    go remaining offset = case BS.elemIndex 10 (BS.drop offset bytes) of
+      Just index
+        | remaining <= 1 -> Right (offset + index)
+        | otherwise -> go (remaining - 1) (offset + index + 1)
+      Nothing -> Left (wanted - remaining)
 
 readEntry :: PrivateRoot -> [FilePath] -> (Word64, BS.ByteString) -> IO FlowEntry
 readEntry root claims (index, line) = case decodeFlowLine line of

@@ -4,7 +4,7 @@
 -- | The manager-log reader on constructed logs: each join between a manager
 -- log and run logs, each state of the manager log, the consent verification
 -- of a start relay with each of its failures, and the joins of a pruned log
--- across its retained floor.
+-- across its retained floor, and positioned windows across sealed segments.
 module Agentic.Manager.Test.FlowReader (flowReaderChecks) where
 
 import Agentic.Manager.Flow
@@ -22,7 +22,7 @@ import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
-import System.Directory (createDirectory)
+import System.Directory (createDirectory, listDirectory)
 import System.FilePath ((</>))
 import System.Posix.Files (setFileMode)
 
@@ -36,7 +36,8 @@ flowReaderChecks work = do
   joinChecks base runOne runTwo
   consentChecks base runOne
   prunedChecks base runOne
-  putStrLn "PASS manager-log reader: joins, undecided commands, unresolved deliveries, pending reviews, lifetimes, consent and the retained floor"
+  windowChecks base
+  putStrLn "PASS manager-log reader: joins, undecided commands, unresolved deliveries, pending reviews, lifetimes, consent, the retained floor and positioned windows"
 
 -- ---------------------------------------------------------------------------
 -- Fixtures
@@ -430,6 +431,91 @@ prunedChecks base (runOne, _) = do
     isReceipt = \case
       ReceiptValue _ -> True
       _ -> False
+
+-- ---------------------------------------------------------------------------
+-- Positioned windows
+-- ---------------------------------------------------------------------------
+
+-- | Windows of manager logs by position: across one-record segments below and
+-- above a pruned floor, across segments of several records, in a log without
+-- segments and in a log that does not exist. Each window is read while the
+-- writer of its log is open, as the manager reads it.
+windowChecks :: FilePath -> IO ()
+windowChecks base = do
+  let windowOf name from limits =
+        bracket (Runtime.openPrivateRoot "manager window check" (base </> T.unpack name)) Runtime.closePrivateRoot $ \private ->
+          readManagerWindow private ("stream_" <> name) (Runtime.Position from) limits
+      walk name from limits = do
+        found <- windowOf name from limits
+        case managerWindowResult found of
+          Left refusal -> fail ("FAIL manager-log reader: the window of " <> T.unpack name <> " at " <> show from <> " is refused: " <> show refusal)
+          Right window
+            | Runtime.windowMore window -> (window :) <$> walk name (Runtime.positionIndex (Runtime.windowNext window)) limits
+            | otherwise -> pure [window]
+      positionsOf = map Runtime.windowPosition . concatMap Runtime.windowEntries
+      limit count = Runtime.FlowWindowLimits count Runtime.maxFrameBytes
+      big = String (T.replicate 70000 "z")
+      small index = object ["fixture" .= (index :: Int)]
+  -- One record in each segment, pruned to a floor of 2, with a claim check at 3.
+  (_, _) <- withSegmentedLog base "window-pruned" $ \log' -> do
+    positions <- mapM (\index -> tell log' Runtime.FlowNotice Runtime.Manager (Runtime.To Runtime.Manager) Runtime.noAbout (if index == 3 then big else small index)) [0 .. 7]
+    check ("the pruned window log has positions 0 to 7: " <> show positions) (positions == map Runtime.Position [0 .. 7])
+    pruneTo log' (Runtime.Position 2)
+    belowFloor <- windowOf "window-pruned" 0 Runtime.flowWindowLimits
+    check ("a position below the floor is refused with the floor: " <> show belowFloor) $
+      belowFloor == ManagerWindow (Runtime.Position 2) (Left (Runtime.FlowWindowBelowFloor (Runtime.Position 2)))
+    whole <- windowOf "window-pruned" 2 Runtime.flowWindowLimits
+    check ("a window from the floor continues through every segment into the active file: " <> show (fmap Runtime.windowNext (managerWindowResult whole))) $
+      managerWindowFloor whole == Runtime.Position 2
+        && fmap (map Runtime.windowPosition . Runtime.windowEntries) (managerWindowResult whole) == Right (map Runtime.Position [2 .. 7])
+        && fmap Runtime.windowNext (managerWindowResult whole) == Right (Runtime.Position 8)
+        && fmap Runtime.windowMore (managerWindowResult whole) == Right False
+    claimed <- case managerWindowResult whole of
+      Right window | entry : _ <- drop 1 (Runtime.windowEntries window) -> pure entry
+      other -> fail ("FAIL manager-log reader: the pruned window has no claim-check record: " <> show other)
+    check ("a claim-check body is summarized by the digest and size of its record: " <> show (Runtime.windowBody claimed)) $
+      case Runtime.recBody (Runtime.windowRecord claimed) of
+        Runtime.ClaimCheck digest size -> Runtime.windowBody claimed == Just (object ["omitted" .= ("claim" :: Text), "sha256" .= digest, "bytes" .= size])
+        _ -> False
+    threes <- walk "window-pruned" 2 (limit 3)
+    check ("windows of three records cross segment boundaries: " <> show (map Runtime.windowNext threes)) $
+      map (map Runtime.windowPosition . Runtime.windowEntries) threes == [map Runtime.Position [2, 3, 4], map Runtime.Position [5, 6, 7]]
+    atEnd <- windowOf "window-pruned" 8 Runtime.flowWindowLimits
+    check ("the position after the last record gives an empty window: " <> show atEnd) $
+      managerWindowResult atEnd == Right (Runtime.FlowWindow [] (Runtime.Position 8) False 0)
+    ahead <- windowOf "window-pruned" 9 Runtime.flowWindowLimits
+    check ("a position ahead of the log is refused with its end, distinctly from the floor: " <> show ahead) $
+      ahead == ManagerWindow (Runtime.Position 2) (Left (Runtime.FlowWindowAhead (Runtime.Position 8)))
+  -- Segments of several records.
+  (sealedCount, _) <- withManagerLogSegments base "window-segments" (Just 600) $ \log' -> do
+    mapM_ (\index -> tell log' Runtime.FlowNotice Runtime.Manager (Runtime.To Runtime.Manager) Runtime.noAbout (small index)) [0 .. 19]
+    segments <- Runtime.flowWriterSegments (logWriter log')
+    check ("the segmented window log holds segments of several records: " <> show (map Runtime.segmentRecords segments)) $
+      length segments > 2 && all ((> 1) . Runtime.segmentRecords) segments
+    fours <- walk "window-segments" 0 (limit 4)
+    check ("windows of four records return every record once across segments: " <> show (map Runtime.windowNext fours)) $
+      positionsOf fours == map Runtime.Position [0 .. 19] && all ((== 4) . length . Runtime.windowEntries) fours
+    middle <- windowOf "window-segments" 5 (limit 64)
+    check ("a window from a position inside a segment starts there: " <> show (fmap Runtime.windowNext (managerWindowResult middle))) $
+      fmap (map Runtime.windowPosition . Runtime.windowEntries) (managerWindowResult middle) == Right (map Runtime.Position [5 .. 19])
+    pure (length segments)
+  sealedNames <- listDirectory (base </> "window-segments" </> "flow" </> "sealed" </> "stream_window-segments")
+  check "the sealed segments of the window log are named by their start" (length sealedNames == sealedCount)
+  -- A log without segments, and a log that does not exist.
+  _ <- withManagerLog base "window-plain" $ \log' -> do
+    mapM_ (\index -> tell log' Runtime.FlowNotice Runtime.Manager (Runtime.To Runtime.Manager) Runtime.noAbout (small index)) [0 .. 2]
+    plain <- windowOf "window-plain" 1 Runtime.flowWindowLimits
+    check ("a log without segments has its floor at 0: " <> show plain) $
+      managerWindowFloor plain == Runtime.Position 0
+        && fmap (map Runtime.windowPosition . Runtime.windowEntries) (managerWindowResult plain) == Right [Runtime.Position 1, Runtime.Position 2]
+  createDirectory (base </> "window-absent")
+  setFileMode (base </> "window-absent") 0o700
+  absent <- windowOf "window-absent" 0 Runtime.flowWindowLimits
+  check ("a log that does not exist gives an empty window: " <> show absent) $
+    absent == ManagerWindow (Runtime.Position 0) (Right (Runtime.FlowWindow [] (Runtime.Position 0) False 0))
+  absentAhead <- windowOf "window-absent" 1 Runtime.flowWindowLimits
+  check ("a position ahead of a log that does not exist is refused: " <> show absentAhead) $
+    managerWindowResult absentAhead == Left (Runtime.FlowWindowAhead (Runtime.Position 0))
 
 check :: String -> Bool -> IO ()
 check label ok = unless ok (fail ("FAIL manager-log reader: " <> label))
