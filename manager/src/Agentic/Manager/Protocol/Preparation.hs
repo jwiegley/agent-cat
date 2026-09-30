@@ -6,7 +6,7 @@
 -- | Bounded public review facts and exact approval requests, without execution authority.
 module Agentic.Manager.Protocol.Preparation
   ( ReviewInput (..), ReviewEdit (..), ReviewLineage (..), Review (..), Preparation (..), ApprovalRequest (..),
-    PublicPolicy, policyValue, projectPolicy, decodeApproval, decodeDiscard, validDigest, observationCodeNames ) where
+    PublicPolicy, policyValue, policyRouteNames, projectPolicy, decodeApproval, decodeDiscard, validDigest, observationCodeNames ) where
 
 import Agentic.Manager.Protocol.Command (CommandFailure (..), validId, validTimestamp)
 import Agentic.Manager.Protocol.Json (decodeStrictValue)
@@ -30,6 +30,14 @@ policyValue :: PublicPolicy -> Value
 policyValue (PublicPolicy value)=value
 instance ToJSON PublicPolicy where toJSON=policyValue
 instance FromJSON PublicPolicy where parseJSON value=validatePolicy value >> pure(PublicPolicy value)
+
+-- | The route names of a routed policy, in their order in the policy. Each
+-- name is a model axis of the routing table that the review shows.
+policyRouteNames :: PublicPolicy -> [Text]
+policyRouteNames (PublicPolicy (Object o))=case KM.lookup "routes" o of
+  Just(Array rows)->[name|Object row<-foldr(:)[]rows,Just(String name)<-[KM.lookup "name" row]]
+  _->[]
+policyRouteNames _=[]
 
 -- | A captured input's original representation and exact native byte identity.
 data ReviewInput = ReviewInput {reviewInputName:: !Text,reviewInputSource:: !Text,reviewInputBytes:: !Text,reviewInputSha256:: !Text}

@@ -391,7 +391,13 @@ remote shell, or arbitrary engine-prompt operation.
 `choose-recovery` for that decision. The control view offers `steer` for a
 running attempt that registered steering support, `redirect` for an open
 dispatch, and `answer`, `retry`, or `choose-recovery` for the pending decision
-head of the run. `cancelAllowed` is true while the manager owns the live run
+head of the run. It also offers `redirect` for an occurrence whose one attempt
+runs after its dispatch window closed, when the occurrence intent is not
+`effect`. The targets of that offer come from the route names of the approved
+policy of the run, each written as the occurrence addressee with the route
+name as its model axis, without the candidate in flight. The runtime then stops
+the attempt and asks the chosen target in a new question, or rejects a target
+that is not a live candidate of its fail-over chain. `cancelAllowed` is true while the manager owns the live run
 and the run is running. The `If-Match` value is the control revision for
 `/runs/{id}/control` and the decision revision for `/decisions/{id}`.
 

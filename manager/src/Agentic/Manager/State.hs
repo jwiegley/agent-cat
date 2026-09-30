@@ -16,6 +16,7 @@ import Agentic.Manager.Authorization
 import qualified Agentic.Manager.Commands as Commands
 import qualified Agentic.Manager.Protocol.Command as Command
 import Agentic.Manager.Protocol.Json (decodeStrictValue, representableEditorSchema)
+import Agentic.Manager.Protocol.Preparation (policyRouteNames, projectPolicy)
 import Agentic.Manager.Profile (ConfigurationLimits, publicId, publicRevision)
 import Agentic.Manager.Store
 import Agentic.Manager.Worker (workerEventBytes, workerEventEnvelope, WorkerObservation (..), WorkerPhase (..))
@@ -30,6 +31,7 @@ import qualified Data.Aeson.KeyMap as KM
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as BL
 import qualified Data.Map.Strict as Map
+import Data.List (nub)
 import Data.Maybe (isJust)
 import Data.Scientific (floatingOrInteger)
 import Data.Text (Text)
@@ -368,7 +370,7 @@ withControlSurface accepted proof respond = do
   withAuthorizedResponse store proof profile [Command.Observe] $ \view -> do
     worker <- observeAcceptedStart accepted
     let live = observedWorkerPhase worker `elem` [WorkerStartSent,WorkerRunning] && observedWorkerExit worker == Nothing
-    value <- controlSurfaceBorrowed store proof association live
+    value <- controlSurfaceBorrowed store proof association (approvedRoutes prepared) live
     revalidateAuthorizedView view >>= either throwIO pure
     respond view value
 
@@ -380,15 +382,16 @@ withClosedControlSurface :: CoordinationStore -> CredentialProof -> RunAssociati
   -> (AuthorizedView -> Value -> IO a) -> IO a
 withClosedControlSurface store proof association respond =
   withAuthorizedResponse store proof (associationProfile association) [Command.Observe] $ \view -> do
-    value <- controlSurfaceBorrowed store proof association False
+    value <- controlSurfaceBorrowed store proof association [] False
     revalidateAuthorizedView view >>= either throwIO pure
     respond view value
 
 -- | Before the first projection the run has no validated runtime state, as
 -- the snapshot route reports with a null runtime. The surface then offers no
--- control and names no decision head.
-controlSurfaceBorrowed :: CoordinationStore -> CredentialProof -> RunAssociation -> Bool -> IO Value
-controlSurfaceBorrowed store proof association live = do
+-- control and names no decision head. The approved names are the route names
+-- of the approved policy, from which a live redirect takes its targets.
+controlSurfaceBorrowed :: CoordinationStore -> CredentialProof -> RunAssociation -> [Text] -> Bool -> IO Value
+controlSurfaceBorrowed store proof association approved live = do
   (revision,supervision) <- runRead store $ do
     authorizeObservation proof association
     rows <- query "SELECT control_revision,supervision FROM runs WHERE id=?" [text(associationRun association)]
@@ -412,7 +415,9 @@ controlSurfaceBorrowed store proof association live = do
         [offer "steer" (snapshotOccurrenceId occurrence) (Just(snapshotAttemptId attempt)) Nothing ["interrupt-now","next-boundary"] [] [] |
           attempt<-Map.elems(snapshotOccurrenceAttempts occurrence),snapshotAttemptState attempt==AttemptRunning,snapshotAttemptSteerable attempt==Just True] <>
         [offer "redirect" (snapshotOccurrenceId occurrence) Nothing Nothing [] [] (dispatchTargets dispatch) |
-          Just dispatch<-[snapshotOccurrenceDispatch occurrence],dispatchOpen dispatch] |
+          Just dispatch<-[snapshotOccurrenceDispatch occurrence],dispatchOpen dispatch] <>
+        [offer "redirect" (snapshotOccurrenceId occurrence) Nothing Nothing [] [] targets |
+          let targets=liveRedirectTargets approved occurrence,not(null targets)] |
         occurrence<-Map.elems(snapshotOccurrences snapshot)]
       mandatory=case heads of
         (_,occurrence,generation,_,kind,"pending"):_ -> concat
@@ -689,14 +694,14 @@ submitControl dispatch accepted proof decision key precondition body = do
                       | maybe False (/=ident) decision -> pure(Left Command.InvalidRequest)
                       | case pending of (headId,_,_,_,_,_):_->headId/=ident;_->True -> pure(Left Command.DecisionNotHead)
                       | state/="pending" -> pure(Left Command.StaleRevision)
-                      | otherwise -> reserveControl association snapshot candidate operation (Just ident) base
+                      | otherwise -> reserveControl association snapshot (approvedRoutes prepared) candidate operation (Just ident) base
                     (True,_) -> pure(Left Command.StaleRevision)
                     (False,_) | isJust decision -> pure(Left Command.InvalidRequest)
-                    _ -> reserveControl association snapshot candidate operation Nothing base
+                    _ -> reserveControl association snapshot (approvedRoutes prepared) candidate operation Nothing base
             })
 
-reserveControl :: RunAssociation -> RunSnapshot -> Text -> Command.Operation -> Maybe Text -> Control -> Transaction (Either Command.CommandFailure Commands.Intent)
-reserveControl association snapshot candidate operation decision base = do
+reserveControl :: RunAssociation -> RunSnapshot -> [Text] -> Text -> Command.Operation -> Maybe Text -> Control -> Transaction (Either Command.CommandFailure Commands.Intent)
+reserveControl association snapshot approved candidate operation decision base = do
   let occurrence=expectedOccurrence base >>= (`Map.lookup` snapshotOccurrences snapshot)
       control=addressControl snapshot operation base
       permitted=case controlCommand control of
@@ -705,6 +710,7 @@ reserveControl association snapshot candidate operation decision base = do
         RetryOccurrence -> recoveryOffered occurrence "retry"
         ChooseRecovery choice -> recoveryOffered occurrence (case choice of RecoveryRetry->"retry";RecoveryFailOver->"failover";RecoveryAbandon->"abandon")
         RedirectOccurrence target -> maybe False (\dispatch->dispatchOpen dispatch && target `elem` dispatchTargets dispatch) (occurrence >>= snapshotOccurrenceDispatch)
+          || maybe False ((target `elem`) . liveRedirectTargets approved) occurrence
         Steer _ _ -> case (occurrence,expectedAttempt control) of
           (Just current,Just attempt) -> maybe False (\value->snapshotAttemptState value==AttemptRunning && snapshotAttemptSteerable value==Just True) (Map.lookup attempt(snapshotOccurrenceAttempts current))
           _ -> False
@@ -727,6 +733,31 @@ reserveControl association snapshot candidate operation decision base = do
     }
   where
     recoveryOffered occurrence choice=maybe False (any ((==choice) . recoveryChoice) . snapshotRecoveryChoices) (occurrence >>= snapshotOccurrenceRecovery)
+
+-- | The route names of the approved policy of a prepared run.
+approvedRoutes :: FrontendPrepared -> [Text]
+approvedRoutes prepared=either (const []) policyRouteNames (projectPolicy (preparedPolicy prepared))
+
+-- | The targets that a live redirect of the occurrence may name. They exist
+-- while exactly one attempt of the occurrence runs, no dispatch window is open
+-- and the question is not an effect. A runtime candidate label is the
+-- addressee with a model axis, as the occurrence names its authored candidate.
+-- Each route name of the approved policy becomes such a label with that name
+-- as its model axis. The label of the candidate in flight is left out: the
+-- target of the latest redirect of the occurrence, or else the authored
+-- candidate. The Runtime decides whether a target is a live candidate of the
+-- chain.
+liveRedirectTargets :: [Text] -> OccurrenceSnapshot -> [Text]
+liveRedirectTargets approved occurrence
+  | length running==1 && not windowOpen && snapshotOccurrenceIntent occurrence/="effect"
+      && not(T.null addressee) && not(T.null axis) = filter (/=current) (map (addressee<>) (nub approved))
+  | otherwise = []
+  where
+    authored=snapshotOccurrenceAddressee occurrence
+    (addressee,axis)=T.breakOnEnd "@" authored
+    current=maybe authored snd (snapshotOccurrenceDispatch occurrence >>= dispatchRedirect)
+    running=[attempt|attempt<-Map.elems(snapshotOccurrenceAttempts occurrence),snapshotAttemptState attempt==AttemptRunning]
+    windowOpen=maybe False dispatchOpen (snapshotOccurrenceDispatch occurrence)
 
 addressControl :: RunSnapshot -> Command.Operation -> Control -> Control
 addressControl snapshot operation control

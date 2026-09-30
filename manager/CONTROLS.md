@@ -130,10 +130,27 @@ after `occurrence.redirected`. The run log holds a `failure` reply for the
 question that names the control, and a new `question` with a new attempt to the
 chosen target. The stopped candidate counts against the chain. The Runtime
 rejects a redirect of an effect in flight and a redirect to any other target,
-and the run continues. The manager offers `redirect` only while the dispatch
-window is open. A redirect of an attempt in flight therefore reaches the
-Runtime only through the machine control descriptor that `AGENT_CAT_CONTROL_FD`
-names.
+and the run continues.
+
+The manager offers this live redirect through the run-control resource. It
+offers `redirect` for an occurrence while exactly one attempt of the occurrence
+runs, no dispatch window is open and the occurrence intent is not `effect`. The
+targets come from the approved policy of the preparation, so the manager adds
+no event to the run. A route name of the policy is a model axis and not a
+runtime candidate label. The manager therefore forms each target from the
+addressee that the occurrence names, such as `model controlled@primary`, with
+the route name as its model axis, such as `model controlled@spare`. It leaves
+out the candidate in flight: the target of the latest redirect of the
+occurrence, or else the authored candidate. A redirect command whose target is
+not offered receives 409 `unsupported-operation`, so a redirect of an effect in
+flight refuses at admission. The required scopes stay those of `redirect`,
+submit and control. The Runtime remains the authority. When it rejects an
+offered target that is not a live candidate of the chain, the command records
+the `rejected-stale` acknowledgement and no effect. An accepted live redirect
+records the effect `redirected`, correlated with `occurrence.redirected`. The
+manager log holds the command, its receipt and the control relay. The run log
+holds the `control` from the manager with its acknowledgement events, the
+`failure` of the current question and the new `question` to the chosen target.
 
 `RunCancelled` has no causal ControlId in the existing protocol. The manager keeps
 its terminal observation and any correlated cancellation acknowledgement, but does
@@ -179,6 +196,21 @@ run it reads the run store with `agentic-run flow` and checks the relayed
 `control` from the manager, its acknowledgement event and the `question` records
 that [Fail-over and redirect](#fail-over-and-redirect) describes. For the redirect it also checks
 `occurrence.redirected` in `events.ndjson`.
+The `live-redirect` mode configures two more profiles, whose first candidate
+is the ACP hold fixture and whose spare candidate is the ACP stub fixture. Each
+run closes the dispatch window at once by a redirect to the first target. While
+the first candidate of a question that is not an effect holds its turn, the
+mode checks that the run-control resource offers a redirect to the spare target
+only, that the redirect reaches the effect `redirected`, that the stopped
+attempt ends `attempt.failed` and that the run succeeds with the answer of the
+spare candidate. For an effect in flight it checks that no redirect is offered,
+that a redirect receives 409 `unsupported-operation` while the attempt keeps
+running, and that the run succeeds with the answer of the first candidate.
+After the manager exits, it reads the manager log and the run stores with
+`agentic-run flow`. It checks that the reader joins the redirect command, its
+receipt and its relay to the run-log `control` and its acknowledgement, and
+that the run log holds the `failure` of the first question and the new
+`question` to the spare target.
 Fixture barriers delay original work or original control delivery, never invent
 successful Runtime envelopes. The steering fixture completes its original prompt
 through its normal event loop, including when no steer is delivered. Every fixture

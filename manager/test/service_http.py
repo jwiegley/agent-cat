@@ -184,11 +184,27 @@ controls_mode = len(sys.argv) == 6 and sys.argv[5] == CONTROLS
 # prints its own PASS line. It runs one manager lifetime.
 ROUTING = "controls-routing"
 routing_mode = len(sys.argv) == 6 and sys.argv[5] == ROUTING
+# The live-redirect mode checks the live redirect of increment 3 through the
+# running protected manager. Only this mode configures profile_live, whose
+# first model candidate holds its turn open and whose spare candidate is the
+# stub adapter, and profile_live_effect, whose first candidate holds its turn
+# for eight seconds. While the first candidate of a question that is not an
+# effect holds its turn, the run control offers a redirect to the spare
+# target, a redirect command is accepted, and the run completes with the
+# answer of the spare candidate. A redirect of an effect in flight refuses
+# with unsupported-operation, and nothing is re-routed. After the manager
+# exits, the flow verb over the manager log and the run stores joins the
+# command, its relay, the run-log control and its acknowledgement, and shows
+# the failure of the first question and the new question. Each numbered case
+# prints its own PASS line. It runs one manager lifetime.
+LIVE = "live-redirect"
+live_mode = len(sys.argv) == 6 and sys.argv[5] == LIVE
 # The modes that configure the control fixture profiles in place of the
 # scripted profile: profile_1 runs the recovery-offering retry adapter and
 # profile_steer runs the steerable adapter. The controls-routing mode also
-# configures profile_route. Other modes keep their profiles.
-control_profiles = controls_mode or routing_mode
+# configures profile_route, and the live-redirect mode also configures
+# profile_live and profile_live_effect. Other modes keep their profiles.
+control_profiles = controls_mode or routing_mode or live_mode
 assert len(sys.argv) == 5 or mixed or boundary or pages_mode or events_mode or captures_mode or discard_mode or exports_mode or lineage_mode or control_profiles
 assert not tui_approval or os.environ.get("TUI_CHECK")
 assert native in ("1", "8")
@@ -270,10 +286,16 @@ if mixed:
 if control_profiles:
     adapters = work / "adapters"
     adapters.mkdir(mode=0o700)
-    for launcher_name, program_name in (("retry-adapter", "retry_adapter.py"), ("steer-adapter", "steer_adapter.py"), ("spare-adapter", "stub_adapter.py")):
+    # The hold adapters of the live-redirect mode hold each turn open for
+    # the given number of seconds.
+    for launcher_name, program_name, arguments in (
+            ("retry-adapter", "retry_adapter.py", []), ("steer-adapter", "steer_adapter.py", []),
+            ("spare-adapter", "stub_adapter.py", []), ("hold-adapter", "hold_adapter.py", ["3600"]),
+            ("hold-effect-adapter", "hold_adapter.py", ["8"])):
         launcher = adapters / launcher_name
         program = source / "engine/acp/test" / program_name
-        launcher.write_text(f"#!{sys.executable} -B\nimport os\nos.execv({sys.executable!r},[{sys.executable!r},'-B',{str(program)!r}])\n")
+        argv = [sys.executable, "-B", str(program)] + arguments
+        launcher.write_text(f"#!{sys.executable} -B\nimport os\nos.execv({sys.executable!r},{argv!r})\n")
         launcher.chmod(0o700)
     scripted = configuration["profiles"][0]
     fixture_path = [{"name": "PATH", "value": str(adapters)}]
@@ -290,6 +312,17 @@ if control_profiles:
             dict(scripted, id="profile_route", workspaceLabel="HTTPS route fixture", targetLabel="Deterministic ACP route",
                  targetArguments=["--engine", "acp", "--adapter", "retry-adapter", "--route", "spare=acp:spare-adapter"],
                  environment=fixture_path))
+    if live_mode:
+        # The route named spare answers the spare candidate. The first
+        # candidate of profile_live holds its turn until a redirect stops it.
+        # The first candidate of profile_live_effect answers after eight
+        # seconds, since no redirect may stop an effect.
+        for profile_id, label, adapter in (("profile_live", "HTTPS live fixture", "hold-adapter"),
+                                           ("profile_live_effect", "HTTPS live effect fixture", "hold-effect-adapter")):
+            configuration["profiles"].append(
+                dict(scripted, id=profile_id, workspaceLabel=label, targetLabel="Deterministic ACP hold",
+                     targetArguments=["--engine", "acp", "--adapter", adapter, "--route", "spare=acp:spare-adapter"],
+                     environment=fixture_path))
 CONTROL_PROFILES = [profile["id"] for profile in configuration["profiles"]] if control_profiles else []
 config = work / "configuration.json"
 config.write_text(json.dumps(configuration))
@@ -3873,6 +3906,9 @@ def control_checks():
     authorized = {"Authorization": "Bearer " + bearer}
     peer = {"Authorization": "Bearer " + (work / "credential-peer").read_bytes().decode("ascii")}
     terminal = ("succeeded", "failed", "cancelled")
+    # The live-redirect cases leave here the facts that the joined flow check
+    # reads after the manager exits.
+    live_facts = {}
 
     def post(path, credential, capabilities, body, tag):
         """One control POST. Returns the status and the decoded body."""
@@ -3883,13 +3919,13 @@ def control_checks():
         validate("Problem" if status >= 400 else "CommandReceipt", value, raw)
         return status, value
 
-    def start(client, capabilities, profile):
-        """Create, enqueue and approve one mixed-controls request of the
-        profile. Returns the run."""
+    def start(client, capabilities, profile, name="mixed-controls"):
+        """Create, enqueue and approve one request of the named workflow of
+        the profile. Returns the run."""
         credential = client[3]
         status, catalogue, _ = request("/v1/workflows?profileId=" + profile, credential)
         assert status == 200, ("control catalogue", profile, status)
-        workflow = next(item for item in catalogue["items"] if item["name"] == "mixed-controls")
+        workflow = next(item for item in catalogue["items"] if item["name"] == name)
         create = {"workflowId": workflow["id"], "descriptorRevision": workflow["revision"],
                   "profileId": workflow["profileId"], "profileRevision": workflow["profileRevision"]}
         key = capabilities["authorityEpoch"] + "." + secrets.token_urlsafe(16)
@@ -4087,6 +4123,126 @@ def control_checks():
               control["position"], "from the manager with acknowledgement event", acknowledgement, "and question", questions[0]["position"],
               "to", target, "with its answer, events.ndjson holds occurrence.redirected, and the run succeeded", flush=True)
 
+    def occurrence_of(snapshot, occurrence):
+        """The occurrence of a run snapshot with the identifier."""
+        assert snapshot["page"]["next"] is None, "the run snapshot has more than one page"
+        found = [item for item in snapshot["items"] if item["occurrenceId"] == occurrence]
+        assert len(found) == 1, ("snapshot occurrence", occurrence, len(found))
+        return found[0]
+
+    def running_attempts(snapshot, occurrence):
+        """The running attempts of the occurrence in a run snapshot, or none
+        when the snapshot does not hold the occurrence yet."""
+        found = [item for item in snapshot["items"] if item["occurrenceId"] == occurrence]
+        return [attempt for item in found for attempt in item.get("attempts", []) if attempt["state"] == "running"]
+
+    def close_window(client, run):
+        """Close the dispatch window of the two-candidate question of the run
+        at once by a redirect to its first target. Returns the occurrence,
+        the two targets and the redirect command."""
+        base = "/v1/runs/" + run
+        control, tag, _ = client[1](base + "/control", "RunControl",
+            lambda value: any(offer["operation"] == "redirect" and len(offer["targets"]) == 2 for offer in value["offers"]))
+        window = next(offer for offer in control["offers"] if offer["operation"] == "redirect")
+        occurrence = window["address"]["occurrenceId"]
+        first_target, spare_target = window["targets"]
+        assert first_target.endswith("@primary") and spare_target.endswith("@spare"), ("dispatch targets", window["targets"])
+        uri = client[2](base + "/control", {"operation": "redirect", "occurrenceId": occurrence, "target": first_target}, tag)
+        return occurrence, first_target, spare_target, effect(client, uri, "redirected")
+
+    def attempt_events(store, occurrence):
+        """The attempt start and end events and the occurrence.redirected
+        events of the occurrence in events.ndjson of the run store."""
+        events = [json.loads(line) for line in (store / "events.ndjson").read_bytes().splitlines()]
+        events = [event.get("event", event) for event in events]
+        mine = lambda event: str(event.get("occurrenceId", (event.get("attemptId") or {}).get("occurrenceId"))) == occurrence
+        attempts = [event for event in events if event["type"] in ("attempt.started", "attempt.completed", "attempt.failed") and mine(event)]
+        redirected = [event for event in events if event["type"] == "occurrence.redirected" and mine(event)]
+        return attempts, redirected
+
+    def live_cases(first, first_capabilities):
+        """Live redirect of an in-flight attempt through /v1, and its refusal
+        for an effect in flight."""
+        # Case 1. While the first candidate of a question that is not an
+        # effect holds its turn, the run control offers a redirect to the
+        # spare target from the approved policy. The redirect is accepted, and
+        # the run completes with the answer of the spare candidate.
+        before = set(work.glob("manager/runs/runs/*/runtime"))
+        run = start(first, first_capabilities, "profile_live")
+        store = new_store(before)
+        base = "/v1/runs/" + run
+        occurrence, first_target, spare_target, window_command = close_window(first, run)
+        control, tag, raw = first[1](base + "/control", "RunControl",
+            lambda value: any(offer["operation"] == "redirect" for offer in value["offers"]))
+        (work / "live-redirect-offer.json").write_bytes(raw)
+        offers = [offer for offer in control["offers"] if offer["operation"] == "redirect"]
+        assert len(offers) == 1 and offers[0]["address"] == {"occurrenceId": occurrence} and offers[0]["targets"] == [spare_target], (
+            "live redirect offer", offers)
+        snapshot, _, _ = first[0](base + "/snapshot", "RunSnapshot")
+        running = running_attempts(snapshot, occurrence)
+        assert len(running) == 1, ("running attempt", running)
+        uri = first[2](base + "/control", {"operation": "redirect", "occurrenceId": occurrence, "target": spare_target}, tag)
+        live_command = effect(first, uri, "redirected")
+        assert settle(first, first_capabilities, run, "abandon") == [], "a redirected run offered a recovery"
+        ended(first, run, "succeeded")
+        snapshot, _, _ = first[0](base + "/snapshot", "RunSnapshot")
+        completed = occurrence_of(snapshot, occurrence)
+        assert completed["state"] == "completed" and completed["source"] == "asked:" + spare_target, (
+            "live redirect answer source", completed["state"], completed["source"])
+        attempts, redirected = attempt_events(store, occurrence)
+        assert [event["type"] for event in attempts] == ["attempt.started", "attempt.failed", "attempt.started", "attempt.completed"], (
+            "live redirect attempts", attempts)
+        assert live_command["id"] in attempts[1]["message"], ("stopped attempt message", attempts[1])
+        assert [(event["controlId"], event["target"]) for event in redirected] == [
+            (window_command["id"], first_target), (live_command["id"], spare_target)], ("occurrence.redirected events", redirected)
+        live_facts["redirect"] = (run, store, occurrence, first_target, spare_target, live_command["id"], window_command["id"])
+        print("PASS live-redirect case 1: while", first_target, "held its turn, the run control of run", run, "offered redirect of",
+              "occurrence", occurrence, "to", spare_target, "only; redirect command", live_command["id"], "reached the effect redirected,",
+              "the stopped attempt ended attempt.failed naming the command, the run succeeded with the answer of", spare_target,
+              "and events.ndjson holds occurrence.redirected for the window command and the live command", flush=True)
+
+        # Case 2. A redirect of an effect in flight refuses at admission with
+        # unsupported-operation. The attempt keeps running, the run completes
+        # with the answer of the first candidate, and nothing is re-routed.
+        before = set(work.glob("manager/runs/runs/*/runtime"))
+        run = start(first, first_capabilities, "profile_live_effect", "controlled-effect")
+        store = new_store(before)
+        base = "/v1/runs/" + run
+        occurrence, first_target, spare_target, window_command = close_window(first, run)
+        snapshot, _, _ = first[1](base + "/snapshot", "RunSnapshot", lambda value: running_attempts(value, occurrence))
+        effect_occurrence = occurrence_of(snapshot, occurrence)
+        assert effect_occurrence["intent"] == "effect", ("effect occurrence intent", effect_occurrence["intent"])
+        running = running_attempts(snapshot, occurrence)
+        control, tag, raw = first[0](base + "/control", "RunControl")
+        (work / "live-redirect-effect-control.json").write_bytes(raw)
+        assert not any(offer["operation"] == "redirect" for offer in control["offers"]), ("effect redirect offered", control["offers"])
+        status, problem = post(base + "/control", authorized, first_capabilities,
+                               {"operation": "redirect", "occurrenceId": occurrence, "target": spare_target}, tag)
+        assert status == 409 and problem["code"] == "unsupported-operation", ("effect live redirect", status, problem.get("code"))
+        snapshot, _, _ = first[0](base + "/snapshot", "RunSnapshot")
+        still = running_attempts(snapshot, occurrence)
+        assert [attempt["address"] for attempt in still] == [attempt["address"] for attempt in running], (
+            "the effect attempt ended before the refusal was checked", running, still)
+        assert settle(first, first_capabilities, run, "abandon") == [], "the effect run offered a recovery"
+        ended(first, run, "succeeded")
+        snapshot, _, _ = first[0](base + "/snapshot", "RunSnapshot")
+        assert occurrence_of(snapshot, occurrence)["source"] == "asked:" + first_target, (
+            "effect answer source", occurrence_of(snapshot, occurrence)["source"])
+        attempts, redirected = attempt_events(store, occurrence)
+        assert [event["type"] for event in attempts] == ["attempt.started", "attempt.completed"], ("effect attempts", attempts)
+        assert [(event["controlId"], event["target"]) for event in redirected] == [(window_command["id"], first_target)], (
+            "effect occurrence.redirected events", redirected)
+        records, _ = store_flow("live-redirect-effect-flow", store)
+        questions = model_questions(records, occurrence)
+        assert [record["to"] for record in questions] == [{"to": {"model": first_target}}], ("effect questions", questions)
+        assert not [record for record in records if record["schema"] == "failure"], "the effect run log holds a failure"
+        assert [record["about"].get("command") for record in records if record["schema"] == "control"] == [window_command["id"]], (
+            "effect run-log controls", [record["about"] for record in records if record["schema"] == "control"])
+        print("PASS live-redirect case 2: the run control of run", run, "offered no redirect of effect occurrence", occurrence,
+              "in flight, a redirect to", spare_target, "refused with 409 unsupported-operation while attempt", running[0]["address"]["attemptId"],
+              "kept running, the run succeeded with the answer of", first_target, "and the run log holds one question and",
+              "only the window control", flush=True)
+
     with (work / "server-0.stdout").open("wb") as output, (work / "server-0.stderr").open("wb") as errors:
         process = subprocess.Popen([str(runner), "--manager", "serve", "--config", str(config),
                                     "+RTS", "-N" + native, "-RTS"], stdout=output, stderr=errors)
@@ -4104,6 +4260,9 @@ def control_checks():
             if routing_mode:
                 routing_cases(first, first_capabilities)
                 return
+            if live_mode:
+                live_cases(first, first_capabilities)
+                return live_facts
 
             # Case 1. A cancel of a running run is acknowledged, and the run ends cancelled.
             run = start(first, first_capabilities, "profile_steer")
@@ -4262,8 +4421,62 @@ def control_checks():
             (work / "server-0.exit").write_text(str(process.returncode) + "\n")
 
 
+def live_flow_checks(facts):
+    """Read the manager log and the run stores with the flow verb after the
+    manager exits, and require the joins of the live redirect command."""
+    run, store, occurrence, first_target, spare_target, identity, window = facts["redirect"]
+    flow_dir = work / "manager" / "flow"
+    stores = sorted(work.glob("manager/runs/runs/*/runtime"))
+    completed = subprocess.run([str(runner), "flow", str(flow_dir)] + [str(path) for path in stores],
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=120)
+    (work / "live-redirect-joined.ndjson").write_bytes(completed.stdout)
+    (work / "live-redirect-joined.stderr").write_bytes(completed.stderr)
+    lines = [json.loads(line) for line in completed.stdout.splitlines()]
+    assert lines and "summary" in lines[-1], ("flow verb", completed.returncode, completed.stderr[-2000:])
+    summary = lines[-1]["summary"]
+    assert completed.returncode == 0 and summary["verified"] and not summary["problems"], ("flow verb", completed.returncode, summary["problems"])
+    at = lambda log, position: {"log": log, "position": position}
+    runlog = [line for line in lines[:-1] if line["log"] == str(store)]
+    manager = [line for line in lines[:-1] if line["log"] not in [str(path) for path in stores]]
+    commands = [line for line in manager if line["schema"] == "command" and line["about"].get("command") == identity]
+    assert len(commands) == 1 and commands[0]["body"]["operation"] == "redirect" and commands[0]["body"]["resource"] == f"/v1/runs/{run}/control", (
+        "live redirect command record", [line["body"] for line in commands])
+    command = commands[0]
+    receipts = [line for line in manager if line["schema"] == "receipt" and line["replyTo"] == command["position"] and line["log"] == command["log"]]
+    assert len(receipts) == 1 and receipts[0]["body"]["id"] == identity and receipts[0]["body"]["state"] != "refused", (
+        "live redirect receipt record", [line["body"] for line in receipts])
+    relays = [line for line in manager if line["schema"] == "relay" and line["body"]["kind"] == "control" and line["about"].get("command") == identity]
+    assert len(relays) == 1 and relays[0]["body"]["nativeRun"] == store.parent.name, ("live redirect relay record", [line["body"] for line in relays])
+    relay = relays[0]
+    delivered = [item["delivered"] for item in summary["joins"]["relays"] if item["relay"] == at(relay["log"], relay["position"])]
+    assert len(delivered) == 1 and delivered[0] is not None and delivered[0]["log"] == str(store), ("live redirect relay delivery", delivered)
+    control = next(line for line in runlog if line["position"] == delivered[0]["position"])
+    assert control["schema"] == "control" and control["from"] == "manager" and control["about"].get("command") == identity, (
+        "live redirect run-log control", control["schema"], control["from"], control["about"])
+    acknowledged = [item["acknowledgement"] for item in summary["joins"]["controls"] if item["control"] == at(str(store), control["position"])]
+    assert len(acknowledged) == 1 and acknowledged[0] is not None, ("live redirect acknowledgement", acknowledged)
+    questions = [line for line in runlog if line["schema"] == "question" and str(line["about"].get("occurrence")) == occurrence
+                 and isinstance(line["to"].get("to"), dict) and "model" in line["to"]["to"]]
+    assert [line["to"]["to"]["model"] for line in questions] == [first_target, spare_target], (
+        "live redirect questions", [(line["position"], line["to"]) for line in questions])
+    asked, spare = questions
+    failures = [line for line in runlog if line["schema"] == "failure" and line.get("replyTo") == asked["position"]]
+    assert len(failures) == 1 and identity in json.dumps(failures[0]), ("live redirect failure", failures)
+    assert asked["position"] < control["position"] < failures[0]["position"] < spare["position"], (
+        "live redirect order", asked["position"], control["position"], failures[0]["position"], spare["position"])
+    answers = [line for line in runlog if line["schema"] == "answer" and line.get("replyTo") == spare["position"]]
+    assert len(answers) == 1 and answers[0]["from"] == {"model": spare_target}, ("spare answer", [line["from"] for line in answers])
+    print("PASS live-redirect case 3: the flow verb joins redirect command", identity, "at manager position", command["position"],
+          "its receipt at", receipts[0]["position"], "and its relay at", relay["position"], "to run-log control", control["position"],
+          "from the manager with acknowledgement", acknowledged[0], "and the run log holds failure", failures[0]["position"],
+          "for question", asked["position"], "to", first_target, "and question", spare["position"], "to", spare_target,
+          "with its answer", flush=True)
+
+
 if control_profiles:
-    control_checks()
+    facts = control_checks()
+    if live_mode:
+        live_flow_checks(facts)
     print("PASS", sys.argv[5] + ": every control case held against the running TLS 1.3 manager", flush=True)
     raise SystemExit(0)
 
