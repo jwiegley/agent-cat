@@ -186,8 +186,10 @@ which is the first event record whose event ends the run, and the states of the
 log, each computed from the records alone:
 
 - an ask without a reply is in flight in a live log and uncertain in an ended
-  log. An `engine-start` with a `done` reply does not answer the question above
-  it, so a killed run leaves its question uncertain.
+  log without its stop. An `engine-start` with a `done` reply does not answer
+  the question above it, so a killed run leaves its question uncertain.
+- an ask without a reply in an ended log with its stop is reported as
+  unanswered at the stop, as a run that races a cancel can leave one.
 - a `control` without a later acknowledgement event for its identifier is
   unacknowledged.
 - an `OccurrenceRecoveryPending` event without a later
@@ -201,11 +203,15 @@ log, each computed from the records alone:
   one.
 
 `flowVerified` holds when no verification failed, and the states do not affect
-it. `flowEntryValue` and `flowSummaryValue` render the report as the JSON
-objects of the `agentic-run flow` verb, and `parseFlowRoute` and
-`flowRouteMatches` select records by a conjunction of `field=value` terms over
-the schema, the sender, the address and the identifiers. The reader writes
-nothing and delivers nothing.
+it. `flowUncertain` holds when an ended log has lost its supervision, which
+includes every log with an uncertain ask. The `agentic-run flow` verb exits 1
+when a verification fails, 2 when every verification passes and
+`flowUncertain` holds, and 0 otherwise. `flowEntryValue` and
+`flowSummaryValue` render the report as the JSON objects of the
+`agentic-run flow` verb, and `parseFlowRoute` and `flowRouteMatches` select
+records by a conjunction of `field=value` terms over the schema, the sender,
+the address and the identifiers. The reader writes nothing and delivers
+nothing.
 
 ## Carriage
 
@@ -326,7 +332,16 @@ real local ACP processes, checking consumed answers and durable events. It
 compares the Hello World `events.ndjson`, with each timestamp replaced, with the
 golden file `test/fixtures/flow/hello-events.ndjson`, and it checks that the
 Hello World and injected-reply run logs hold a question, an engine start, a
-turn, an engine result and an answer for each occurrence.
+turn, an engine result and an answer for each occurrence. It reads the Hello
+World run log through `agentic-run flow` and compares it with the reference
+trace of the actor-flow design for each of the three occurrences: the order of
+all records, the schema, sender, address and reply position of each record
+other than an event, and one event record for each line of `events.ndjson` in
+order. For each store-backed run, it checks that `flow.ndjson` and its claim
+checks take at most 2.5 times the bytes of `events.ndjson`, `answers.json` and
+`effects.ndjson`, and it prints each ratio. The ACP gate `engine/acp/ci/acp.sh`
+runs the flagship as a store-backed machine run and requires a `permission`
+record from the adapter of the `tool apply` question with the granted answer.
 
 The flow probe `test/flow_probe.py` reads the run logs of store-backed machine
 runs as JSON lines. It checks that a registry tool, a program command, a
@@ -342,7 +357,10 @@ inside an open turn when the question goes to a model, and requires every
 acknowledgement of a control delivered after activation to follow a `control`
 record with its identifier. The check fails on a copy of a log without one turn
 record. In each broker-test run, the counts of the inner broker equal the
-records of the run log. A static check lists every source line under
+records of the run log. The probe kills a store-backed Hello World run with
+`SIGKILL` after the engine start of its last question has its `done` reply, and
+`agentic-run flow` must report that question as uncertain, report lost
+supervision and exit 2. A static check lists every source line under
 `runtime/src` and `cli/src` that names `inProcessBroker` and fails on a line
 outside its allowlist. With `--journey FIXTURE`, the probe checks that the
 control records and control-supplied answers of a frontend journey come from

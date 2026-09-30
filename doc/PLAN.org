@@ -2784,7 +2784,7 @@ The owner's full architecture note is preserved below for the design round.
 :LABELS:   ["actor-flow","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-29 Tue 18:36]
-:MODIFIED: [2026-09-29 Tue 18:36]
+:MODIFIED: [2026-09-29 Tue 19:00]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -2801,6 +2801,20 @@ Follow-up from the F7 fess audit of the run-log reader and the agentic-run flow 
 6. (low) cli/src/Agentic/Cli.hs (flowCmd --follow): each poll rereads and reverifies the whole log, every claim check, events.ndjson and effects.ndjson at 4 Hz. Fix: read and verify only the new suffix, or document the cost.
 7. (low) cli/src/Agentic/Cli.hs (flow parser and usage): "flow --follow" treats --follow as PATH and exits 3. The usage line prints "flow <store>", but the manual and --help say PATH. Fix: refuse a PATH that begins with "--", and make the usage wording match the manual.
 8. (low) doc/workflow-manager-handoff.md: the current-state section does not describe F7 or the completion of delta 1a. Fix: update it at the next handoff record.
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 362,
+    "issue_id": "acat-amd8",
+    "author": "johnw",
+    "text": "Item 1 (the definition of uncertain) is resolved by the F8 commit: statesUncertain now holds only for an ended log without its stop, and statesUnansweredAtStop (summary key unansweredAtStop) reports an ask without a reply in a log that has its stop. runtime/BROKER.md, doc/agent-cat.texi and runtime/test/FlowReaderTests.hs match. Items 2 to 8 stay open.",
+    "created_at": "2026-09-30T02:00:30Z"
+  }
+]
+#+end_src
 
 * TODO [#D] Accepted gap: no classification check at Approval.hs:96 (K19)
 :PROPERTIES:
@@ -3569,7 +3583,7 @@ Owner directive 2026-08-12: use the standard libraries as much as possible; do n
 :LABELS:   ["actor-flow","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-26 Sat 23:41]
-:MODIFIED: [2026-09-29 Tue 18:36]
+:MODIFIED: [2026-09-29 Tue 19:00]
 :CREATED_BY: johnw
 :FINISHED: [2026-09-29 Tue 18:36]
 :CLOSE_REASON: Delta 1a landed: F1 to F7. Follow-ups acat-c13k, acat-thc9, acat-h9oi, acat-actk, acat-hxm7, acat-amd8.
@@ -3638,6 +3652,13 @@ Actor-flow increment 1, delta 1a (at most 8 engineering days, after the operator
     "author": "johnw",
     "text": "Subtask F7 of delta 1a: the run-log reader and the agentic-run flow verb. readFlow in Agentic.Runtime.Flow reads the flow.ndjson prefix through openPrivateRoot, reports a torn final line by its size without decoding it, decodes each complete line strictly under maxFrameBytes, verifies each claim check (size, digest, exact encoding), each body against its schema codec, each reply position, the start record and the join of each event record to its events.ndjson line. It computes the section 3.6 run-log states: in flight, uncertain, unacknowledged control, pending recovery, pending person answer, potentially executed (from effects.ndjson), lost supervision and ask after the stop. The verb agentic-run flow PATH [--follow] [--route PREDICATE] [--from CURSOR] prints one JSON object per record and one summary object, and exits 0 only when everything verifies (1 on a failed check, 3 when the store cannot be opened). doc/agent-cat.texi, doc/runner-index.texi and runtime/BROKER.md describe it. Evidence scope: F7-build (-Werror, agentic-run, runtime-contract-test, routing-fixed-point-probe), F7-runtime-contract at N8 (new FlowReaderTests: torn line, one changed claim-check byte, bad reply position, and each state on a constructed log with its negative counterpart), F7-doc-check (make -C doc check and check-manual-cli.py on the built runner) and F7-journey (tui-journey at N8, then flow on its run store: 43 records, verified, no ask after the stop) each passed once under timeout 900. The changed-claim-check-byte refusal was shown on a copy of a stub prompt-source store, because the journey store has no claim checks. The fess auditor reran runtime-contract-test at N8 with exit 0. Fess: not blocking. Its three medium and five low findings are filed as acat-amd8. With F7, every item of delta 1a has landed (record and schemas, run writer, flowBroker, bypass removal, strict and versioned codecs, EnginePermission and its ACP report, amendment record, reader and verb), so this issue closes. Increment 1 as a whole stays open under acat-5m60.",
     "created_at": "2026-09-30T01:36:18Z"
+  },
+  {
+    "id": 361,
+    "issue_id": "acat-e6cp",
+    "author": "johnw",
+    "text": "Subtask F8 of delta 1a: the reference trace, the storage ratio, the ACP permission scenario and the uncertainty check. test/progress_probe.py reads the broker-hello log through agentic-run flow, asserts the non-event records of the section 3.5 trace exactly (schema, sender, address and reply position), asserts that the event records name every events.ndjson line in order, and prints the record count. Four changed copies of the records (a removed done record, an answer to another ask, a reply from another sender, a changed event line) each fail for their own reason. The probe checks and prints the storage ratio (flow.ndjson plus claim checks against events.ndjson, answers.json and effects.ndjson) for each of its store-backed fixtures, with a ceiling of 2.5. engine/acp/ci/acp.sh scenario 23 runs the stub permission request as a store-backed machine run and finds a permission record from the adapter with the granted answer; the same selection with outcome refused matches nothing. test/flow_probe.py kills a store-backed run with SIGKILL after its engine start has its done reply, and the verb reports question 25 as uncertain, reports lost supervision and exits 2. The reader now follows design section 3.6: uncertain holds only for an ended log without its stop, and the new summary key unansweredAtStop reports an ask without a reply in a log that has its stop (a new flow_probe scenario checks it, and the verb exits 0 there). This resolves item 1 of acat-amd8. runtime/BROKER.md, doc/agent-cat.texi and engine/acp/README.md describe the change. Evidence scope: F8-build (-Werror, -ftui-tests, agentic-run, runtime-contract-test, routing-fixed-point-probe), runtime-contract-test at N8, F8-progress-probe (golden comparison, reference trace and its controls, every ratio at most 2.5), F8-flow-probe, F8-journey (tui-journey at N8) and F8-acp each passed once under timeout 900. The fess auditor rebuilt with -ftui-tests and reran F8-flow-probe with exit 0. Fess round 2: not blocking. Its six low findings are filed as acat-iugd. Delta 1a is complete with F8. Increment 1 as a whole stays open under acat-5m60.\n",
+    "created_at": "2026-09-30T02:00:30Z"
   }
 ]
 #+end_src
@@ -6056,6 +6077,30 @@ doc/research/isaac-workflows.md §6 holds ten yes/no decisions from the incite/a
   }
 ]
 #+end_src
+
+* TODO [#C] Resolve F8 fess findings in the flow probes and acp.sh scenario
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-iugd
+:LABELS:   ["actor-flow","workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-29 Tue 19:00]
+:MODIFIED: [2026-09-29 Tue 19:00]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Follow-up from the F8 fess audit of the reference trace, the storage ratio, the ACP permission scenario and the uncertainty check (actor-flow delta 1a). None of these findings blocks. Source: fess audit /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/fess/flow-F8-r2.md.
+
+1. (low) test/progress_probe.py (assert_storage_ratio control): the negative control shows only that the comparison fails under 0.99 times the observed ratio. It does not show that the byte sums respond to a larger log. Fix: append bytes to a copy of flow.ndjson or of a claim check, and require the ratio to rise above the ceiling.
+2. (low) test/progress_probe.py (design section 6.1, gate 9): the storage ratio covers only the progress-probe fixtures. It does not cover the flow_probe fixtures, the journey stores or cli/ci/examples.sh. Fix: call assert_storage_ratio from flow_probe.py, from the journey reader and from examples.sh.
+3. (low) test/flow_probe.py (uncertainty): the uncertainty run sends stderr to DEVNULL. If the run ends before occurrence 2, the killpg in the finally block can raise EPERM on a zombie group and hide the AssertionError. This affects diagnostics only. Fix: capture stderr to a file under the fixture root, and guard the cleanup killpg with process.poll(), or catch ProcessLookupError and PermissionError there only.
+4. (low) cli/src/Agentic/Cli.hs (flowCmd): without --follow, the verb reads the log as ended, so it reports lost supervision and exits 2 on a run that is still running. Fix: state this result in runtime/BROKER.md and doc/agent-cat.texi.
+5. (low) test/flow_probe.py (module docstring): one edited docstring sentence was not reflowed. Fix: reflow the paragraph.
+6. (low) engine/acp/ci/acp.sh (build configuration): acp.sh builds agentic-run without -ftui-tests and leaves the shared build directory in that configuration. Fix: rebuild with -ftui-tests before a later stage runs a binary, or make acp.sh restore the configuration.
+7. (low) test/flow_probe.py (unanswered_at_stop): the red run of the new scenario failed on the missing summary key in the old binary, before it reached the old exit status 2, and the new FlowReaderTests assertions were not run against the old code. Fix: accept, or add a red run that checks the exit status alone.
 
 * TODO [#D] Keep the TUI stale status visible across a refresh start
 :PROPERTIES:

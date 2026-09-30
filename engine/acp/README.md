@@ -28,7 +28,10 @@ request only for an effect-annotated occurrence, and it cancels the request for
 consultations and observations. Every decision is announced on standard error.
 A decision on a request that matches the active prompt is also reported to the
 attempt's update sink as `EnginePermission`, after the agent receives its
-answer. A stale or out-of-turn request is refused and reports nothing.
+answer. A stale or out-of-turn request is refused and reports nothing. In a
+store-backed machine run, the runtime writes each reported decision to the run
+log as a `permission` record from the adapter, and the gate checks that record
+for the granted request of the flagship.
 The commands and pins for Claude, Codex, and Droid belong to the three child
 directories.
 

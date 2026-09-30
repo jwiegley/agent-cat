@@ -187,14 +187,19 @@ stateLog directory = do
   check ("an ended log without its stop has its open ask uncertain and lost supervision: " <> show (reportStates ended))
     (reportStates ended == pending {statesUncertain = [open], statesLostSupervision = True})
   check "an ended log without its stop has no stop" (isNothing (reportStop ended))
+  check "an ended log without its stop is uncertain" (flowUncertain ended)
+  check "a live log is not uncertain" (not (flowUncertain live))
 
   (_, _, stopAndLate) <- withFixture stoppedDirectory (populate True)
   (stop, late) <- maybe (fail "flow reader: the stopped log has no stop") pure stopAndLate
   stopped <- readFlow FlowEnded stoppedDirectory
   check ("the stopped log verifies: " <> show (flowReportProblems stopped)) (flowVerified stopped)
   check "the stop is the cancel" (reportStop stopped == Just stop)
-  check ("an ask after the stop is reported and uncertain: " <> show (reportStates stopped))
-    (reportStates stopped == pending {statesUncertain = [open, late], statesAskAfterStop = [late]})
+  -- The log has its stop, so its asks without a reply are unanswered at the
+  -- stop and not uncertain.
+  check ("an ask after the stop is reported and unanswered at the stop: " <> show (reportStates stopped))
+    (reportStates stopped == pending {statesUnansweredAtStop = [open, late], statesAskAfterStop = [late]})
+  check "a log with its stop is not uncertain" (not (flowUncertain stopped))
 
   -- Routes select records by schema, sender, address and identifiers.
   let selected route = either (fail . T.unpack) (\parsed -> pure [entryPosition entry | entry <- reportEntries stopped, Just record <- [entryRecord entry], flowRouteMatches parsed record]) (parseFlowRoute route)
@@ -252,7 +257,7 @@ populate stopping fixture = do
   pure (pending, open, stopAndLate)
 
 emptyStates :: FlowStates
-emptyStates = FlowStates [] [] [] [] [] [] False []
+emptyStates = FlowStates [] [] [] [] [] [] [] False []
 
 check :: String -> Bool -> IO ()
 check label ok = unless ok (fail ("flow reader: " <> label))

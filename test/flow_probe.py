@@ -25,14 +25,22 @@ of a log without one turn record. The static check lists every source line
 that names inProcessBroker under runtime/src and cli/src and fails on a line
 outside the allowlist, and it fails when a synthetic extra line is added.
 
+Uncertainty. A store-backed run whose adapter hangs is killed with SIGKILL
+after the engine start of its last question has its done reply. The
+"agentic-run flow" verb reports that question as uncertain and the log as
+without supervision, and it exits 2. A completed run has no ask without a
+reply. A copy of its log with one more question after the stop reports that
+question as unanswered at the stop and after the stop, not as uncertain, and
+the verb exits 0.
+
 With --journey FIXTURE, the probe instead checks every run log under the
 fixture directory of a tui-journey: each control record and each answer that a
 control supplied comes from the manager and names a command identifier.
 
 With --reader AGENTIC_RUN ROUTING_FIXED_POINT_PROBE FIXTURE, the probe runs
 "agentic-run flow" on every run store under the fixture directory of a
-tui-journey. Each exits 0 with a verified summary, a stop and no ask after the
-stop. A route and a start position select the records that the verb prints,
+tui-journey. Each exits 0 with a verified summary, a stop, no ask after the
+stop and no ask unanswered at the stop. A route and a start position select the records that the verb prints,
 and --follow on an ended log prints the same summary. The probe then makes a
 run whose question and turn bodies are claim checks. The verb exits 0 on its
 store and 1 on a copy of the store with one changed claim-check byte.
@@ -44,6 +52,7 @@ import json
 import os
 import queue
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -459,6 +468,73 @@ def retry_forms(root: Path, fixed: Path) -> None:
     print("retry forms: a decoding re-ask shows two turn records, and a fail-over shows two question records")
 
 
+def uncertainty(root: Path, frontend: Path) -> None:
+    """A store-backed Hello World run whose adapter hangs on the third prompt
+    is killed with SIGKILL after the engine start of that question has its done
+    reply. The verb reports the question as uncertain and lost supervision, and
+    exits 2."""
+    run_id = "flow-killed"
+    store = root / run_id / "runtime"
+    scratch = root / run_id / "scratch"
+    scratch.mkdir(parents=True)
+    command = [str(frontend), "machine", run_id, "hello", "--engine", "acp", "--adapter", sys.executable,
+               "--adapter-arg", str(ADAPTERS / "effect_hang_adapter.py"), "--timeout", "60000",
+               "--scratch", str(scratch), "--protocol-version", "2"]
+    process = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                               text=True, start_new_session=True, env=environment_for(store, run_id))
+    try:
+        assert process.stdout is not None
+        for line in process.stdout:
+            event = json.loads(line)["event"]
+            if event["type"] == "attempt.started" and event["occurrenceId"] == "2":
+                break
+        else:
+            raise AssertionError(f"{run_id} ended before the attempt of occurrence 2")
+        records = read_records(store / "flow.ndjson")
+        [question] = [index for index, record in enumerate(records)
+                      if record["schema"] == "question" and record["about"].get("occurrence") == 2]
+        [start] = [index for index, record in enumerate(records)
+                   if record["schema"] == "engine-start" and record["about"] == records[question]["about"]]
+        assert any(record["schema"] == "done" and record.get("replyTo") == start for record in records), records[start:]
+    finally:
+        # One SIGKILL to the whole group, then reap. A second killpg after the
+        # first can fail with EPERM on macOS while the process is not yet reaped.
+        os.killpg(process.pid, signal.SIGKILL)
+        process.wait(timeout=30)
+    _, summary = flow_verb(frontend, store, 2)
+    states = summary["states"]
+    assert summary["verified"] and summary["stop"] is None and states["lostSupervision"], summary
+    assert question in states["uncertain"] and start not in states["uncertain"], summary
+    print(f"uncertainty: the killed run leaves question {question} uncertain although engine start {start} has its "
+          f"done reply; the verb reports uncertain {states['uncertain']}, lost supervision, and exits 2")
+
+
+def unanswered_at_stop(root: Path, frontend: Path, fixed: Path) -> None:
+    """A completed run has its stop and no ask without a reply. A copy of its
+    log with one more question after the stop, as a run that races a cancel can
+    append, reports that question as unanswered at the stop and after the stop.
+    The log keeps its stop, so the question is not uncertain, and the verb exits
+    0."""
+    run = machine(root, fixed, "flow-stopped", "prompt-source", [*STUB, "--input-arg", "input=stopped"])
+    _, summary = flow_verb(frontend, run.store, 0)
+    states = summary["states"]
+    assert summary["verified"] and summary["stop"] is not None, summary
+    assert not states["unansweredAtStop"] and not states["uncertain"] and not states["askAfterStop"], summary
+    copy = root / "flow-stopped-race" / "runtime"
+    shutil.copytree(run.store, copy)
+    lines = (copy / "flow.ndjson").read_bytes().splitlines(keepends=True)
+    [question] = [line for line, record in zip(lines, run.records) if record["schema"] == "question"][:1]
+    with open(copy / "flow.ndjson", "ab") as log:
+        log.write(question)
+    late = len(lines)
+    _, raced = flow_verb(frontend, copy, 0)
+    states = raced["states"]
+    assert raced["verified"] and raced["stop"] == summary["stop"] and not states["lostSupervision"], raced
+    assert states["unansweredAtStop"] == [late] and states["askAfterStop"] == [late] and not states["uncertain"], raced
+    print(f"uncertainty: a question appended after the stop at {late} is unanswered at the stop, not uncertain, "
+          "and the verb exits 0")
+
+
 def journey(fixture: Path) -> None:
     logs = sorted(fixture.rglob("flow.ndjson"))
     assert logs, f"no run log under {fixture}"
@@ -501,6 +577,7 @@ def reader(frontend: Path, fixed: Path, fixture: Path) -> None:
         assert summary["verified"] and not summary["problems"], summary
         assert summary["stop"] is not None and not summary["states"]["askAfterStop"], summary
         assert not summary["states"]["lostSupervision"] and not summary["states"]["uncertain"], summary
+        assert not summary["states"]["unansweredAtStop"], summary
         assert [record["position"] for record in records] == list(range(summary["records"])), records
         assert all(record["line"] is not None for record in (r["event"] for r in records if r["schema"] == "event")), records
         answers, _ = flow_verb(frontend, store, 0, "--route", "schema=answer", "--from", "1")
@@ -550,8 +627,10 @@ def main() -> None:
     attribution(root, frontend, fixed)
     local_person(root, fixed)
     retry_forms(root, fixed)
+    uncertainty(root, frontend)
+    unanswered_at_stop(root, frontend, fixed)
     shutil.rmtree(root)
-    print("flow probe: attribution, retry forms and carriage passed")
+    print("flow probe: attribution, retry forms, carriage and uncertainty passed")
 
 
 if __name__ == "__main__":

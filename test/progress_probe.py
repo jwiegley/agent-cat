@@ -10,7 +10,20 @@ engine result and the answer, each reply naming its ask.
 
 With a broker runner, the probe also compares the store-backed broker-hello
 events.ndjson, with each timestamp replaced, against the golden file
-test/fixtures/flow/hello-events.ndjson or the file that --golden names.
+test/fixtures/flow/hello-events.ndjson or the file that --golden names. It then
+reads the broker-hello run log through "agentic-run flow" and checks it against
+the reference trace of the actor-flow design, section 3.5, for each of the
+three occurrences: the order of every record, the schema, sender, address and
+reply position of each record other than an event, and an event record for
+every line of events.ndjson in order. It prints the number of records. The
+same comparison must fail on four changed copies of the records: one done
+record removed, one answer that names another ask, one reply from another
+sender and one event record with a changed line.
+
+For every store-backed run, the probe checks that flow.ndjson and its claim
+checks take at most 2.5 times the bytes of events.ndjson, answers.json and
+effects.ndjson, and it prints each ratio. The same check must fail under a
+ceiling below the observed ratio.
 """
 
 from __future__ import annotations
@@ -54,6 +67,13 @@ def machine(
     events = [json.loads(line) for line in result.stdout.splitlines()]
     assert events and all(event["protocolVersion"] == protocol for event in events)
     assert_run_log(store, run_id, protocol)
+    ratio = assert_storage_ratio(store, run_id)
+    try:
+        assert_storage_ratio(store, run_id, ratio * 0.99)
+    except AssertionError:
+        pass
+    else:
+        raise AssertionError(f"{run_id}: the storage-ratio check passed under a ceiling below its ratio {ratio:.3f}")
     return events, store
 
 
@@ -85,6 +105,142 @@ def assert_run_log(store: Path, run_id: str, protocol: int) -> dict:
         if record["schema"] == "event":
             assert record["from"] == {"workflow": run_id} and record["to"] == "public", record
     return body
+
+
+STORAGE_CEILING = 2.5
+
+
+def assert_storage_ratio(store: Path, run_id: str, ceiling: float = STORAGE_CEILING) -> float:
+    """Check that the run log and its claim checks take at most the ceiling,
+    2.5 by default, times the bytes of events.ndjson, answers.json and
+    effects.ndjson, and print the ratio."""
+    claims = store / "flow-claims"
+    logged = (store / "flow.ndjson").stat().st_size + sum(
+        path.stat().st_size for path in (claims.rglob("*") if claims.is_dir() else ()) if path.is_file())
+    public = sum((store / name).stat().st_size for name in ("events.ndjson", "answers.json", "effects.ndjson")
+                 if (store / name).exists())
+    assert public > 0, f"{run_id}: the store holds no events, answers or effects"
+    ratio = logged / public
+    if ceiling == STORAGE_CEILING:
+        print(f"storage ratio: {run_id} run log {logged} bytes, public files {public} bytes, ratio {ratio:.3f}")
+    assert ratio <= ceiling, f"{run_id}: the run log takes {ratio:.3f} times the public files, above {ceiling}"
+    return ratio
+
+
+def flow_verb(runner: Path, store: Path) -> tuple[list[dict], dict]:
+    """The records and the summary that "agentic-run flow" prints for a store."""
+    result = subprocess.run([str(runner), "flow", str(store)], capture_output=True, check=False, timeout=120)
+    stderr = result.stderr.decode("utf8", "replace")
+    assert result.returncode == 0, f"flow {store} exited {result.returncode}: {stderr}"
+    lines = [json.loads(line) for line in result.stdout.splitlines()]
+    assert lines and "summary" in lines[-1], lines[-1:]
+    return lines[:-1], lines[-1]["summary"]
+
+
+def reference_trace(events: list[dict]) -> list[str]:
+    """The labels of the records of section 3.5 for the given events, each
+    record by its schema and each event record by the type of its event: the
+    question, engine start, done and turn follow the start of an occurrence,
+    and the engine result and answer follow the completion of its attempt."""
+    labels = ["start"]
+    for event in events:
+        kind = event["event"]["type"]
+        labels.append("event " + kind)
+        if kind == "occurrence.started":
+            labels.extend(["question", "engine-start", "done", "turn"])
+        elif kind == "attempt.completed":
+            labels.extend(["engine-result", "answer"])
+    return labels
+
+
+def assert_reference_trace(runner: Path, store: Path, run_id: str, addressees: list[dict]) -> int:
+    """Read a run log through the verb and check it against section 3.5: the
+    order of every record, the sender, address and reply position of each
+    record other than an event, and an event record for every line of
+    events.ndjson in order. Return the number of records."""
+    records, summary = flow_verb(runner, store)
+    events = [json.loads(line) for line in (store / "events.ndjson").read_bytes().splitlines()]
+    check_reference_trace(records, summary, events, run_id, addressees)
+    reference_trace_controls(records, summary, events, run_id, addressees)
+    return len(records)
+
+
+def check_reference_trace(records: list[dict], summary: dict, events: list[dict], run_id: str,
+                          addressees: list[dict]) -> None:
+    """Check the records and the summary that the verb printed for a run log
+    against section 3.5 and the lines of its events.ndjson."""
+    assert summary["verified"] and not summary["problems"] and summary["stop"] is not None, summary
+    assert not summary["states"]["uncertain"] and not summary["states"]["lostSupervision"], summary
+    assert not summary["states"]["unansweredAtStop"], summary
+    assert summary["records"] == len(records) and [record["position"] for record in records] == list(range(len(records)))
+    labels = [record["schema"] if record["schema"] != "event" else "event " + record["event"]["line"]["event"]["type"]
+              for record in records]
+    assert labels == reference_trace(events), f"{run_id}: records {labels}"
+    numbered = [record for record in records if record["schema"] == "event"]
+    assert [record["event"]["sequence"] for record in numbered] == list(range(len(events))), numbered
+    assert [record["event"]["line"] for record in numbered] == events, f"{run_id}: joined event lines differ from events.ndjson"
+    assert all(record["from"] == {"workflow": run_id} and record["to"] == "public" for record in numbered)
+    workflow = {"workflow": run_id}
+    local = {"principal": "local", "uid": os.getuid(), "owner": owner_for(run_id)}
+    expected = [("start", local, {"to": workflow}, None)]
+    for addressee in addressees:
+        base = len(expected)
+        expected.extend([
+            ("question", workflow, {"to": addressee}, None),
+            ("engine-start", workflow, {"to": addressee}, None),
+            ("done", addressee, {"to": workflow}, base + 1),
+            ("turn", workflow, {"to": addressee}, None),
+            ("engine-result", addressee, {"to": workflow}, base + 3),
+            ("answer", addressee, {"to": workflow}, base),
+        ])
+    carried = [record for record in records if record["schema"] != "event"]
+    positions = [record["position"] for record in carried]
+    observed = [(record["schema"], record["from"], record["to"],
+                 None if record["replyTo"] is None else positions.index(record["replyTo"])) for record in carried]
+    assert observed == expected, f"{run_id}: records other than events {observed}, expected {expected}"
+
+
+def without_record(records: list[dict], summary: dict, drop: int) -> tuple[list[dict], dict]:
+    """The records without the record at a position, renumbered, with each
+    reply position moved to the new position of its ask."""
+    moved = {record["position"]: index for index, record in enumerate(r for r in records if r["position"] != drop)}
+    kept = [dict(record, position=moved[record["position"]],
+                 replyTo=None if record["replyTo"] is None else moved.get(record["replyTo"]))
+            for record in records if record["position"] != drop]
+    return kept, dict(summary, records=len(kept))
+
+
+def reference_trace_controls(records: list[dict], summary: dict, events: list[dict], run_id: str,
+                             addressees: list[dict]) -> None:
+    """Check that the reference-trace comparison fails on four changed copies
+    of the verb's output, each for its own reason: one done record removed, one
+    answer that names another ask, one reply from another sender and one event
+    record whose joined line differs from events.ndjson."""
+    done = next(record["position"] for record in records if record["schema"] == "done")
+    answer = next(index for index, record in enumerate(records) if record["schema"] == "answer")
+    reply = next(index for index, record in enumerate(records) if record["schema"] == "engine-result")
+    event = next(index for index, record in enumerate(records) if record["schema"] == "event")
+    wrong_answer = [dict(record) for record in records]
+    wrong_answer[answer]["replyTo"] = wrong_answer[answer]["replyTo"] + 1
+    wrong_sender = [dict(record) for record in records]
+    wrong_sender[reply]["from"] = {"model": "model elsewhere"}
+    wrong_line = [dict(record) for record in records]
+    line = dict(wrong_line[event]["event"]["line"], sequence="999")
+    wrong_line[event]["event"] = dict(wrong_line[event]["event"], line=line)
+    controls = [
+        ("one done record removed", *without_record(records, summary, done), f"{run_id}: records ["),
+        ("an answer that names another ask", wrong_answer, summary, f"{run_id}: records other than events"),
+        ("a reply from another sender", wrong_sender, summary, f"{run_id}: records other than events"),
+        ("a changed joined event line", wrong_line, summary, f"{run_id}: joined event lines differ"),
+    ]
+    for name, changed, changed_summary, reason in controls:
+        try:
+            check_reference_trace(changed, changed_summary, events, run_id, addressees)
+        except AssertionError as failure:
+            assert str(failure).startswith(reason), f"{run_id}: control {name} failed for another reason: {failure}"
+        else:
+            raise AssertionError(f"{run_id}: the reference-trace check passed with {name}")
+    print(f"reference trace controls: {len(controls)} changed copies of the {run_id} records each fail")
 
 
 ANSWERS = {
@@ -189,9 +345,12 @@ def main() -> None:
             assert semantic_projection(hello)[2] == ("3", "3")
             assert_golden(normalized_events(hello_store / "events.ndjson"), golden)
             print(f"golden probe: broker-hello events.ndjson equals {golden.name} except timestamps")
-            carried = assert_carriage(hello_store, "broker-hello", ["start", *HELLO_EXCHANGE * 3])
-            questions = [record["to"] for record in carried if record["schema"] == "question"]
-            assert questions == [{"to": {"model": "model namer"}}, {"to": {"model": "model greeter"}}, {"to": {"model": "tool say"}}], questions
+            assert_carriage(hello_store, "broker-hello", ["start", *HELLO_EXCHANGE * 3])
+            count = assert_reference_trace(
+                runner, hello_store, "broker-hello",
+                [{"model": "model namer"}, {"model": "model greeter"}, {"model": "tool say"}])
+            print(f"reference trace: agentic-run flow reads {count} broker-hello records that match section 3.5 "
+                  "for three occurrences and name every line of events.ndjson in order")
             print("carriage probe: broker-hello records a question, engine start, turn, engine result and answer for each occurrence")
             broker_runner = Path(arguments[1]).resolve()
             brokered, broker_store = machine(

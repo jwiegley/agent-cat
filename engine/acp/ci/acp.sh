@@ -661,9 +661,54 @@ else
   bad "ACP permission reports did not reach the update sink exactly"
 fi
 
+# ---------------------------------------------------------------------------
+# 23. A permission decision is a record of the run log.
+#
+# The flagship runs as a store-backed machine run. The stub's `Apply:` turn asks
+# permission, and the run log must hold a `permission` record from the adapter
+# of the `tool apply` question, addressed to the workflow, with the granted
+# answer. `agentic-run flow` reads the log and verifies it. The same selection
+# for the refused outcome must match no record.
+# ---------------------------------------------------------------------------
+scenario=permission-record
+state="$work/$scenario"
+mkdir -p "$state/scratch" "$state/config"
+store="$state/runtime"
+if AGENT_CAT_RUN_STORE="$store" XDG_CONFIG_HOME="$state/config" "$runner" machine permission-record harden \
+    --engine acp --adapter stub --timeout 60000 --scratch "$state/scratch" --protocol-version 2 \
+    < /dev/null > "$state/events" 2> "$state/stderr" \
+  && "$runner" flow "$store" --route schema=permission > "$state/permissions" 2> "$state/flow-stderr" \
+  && python3 - "$state/permissions" <<'PY'
+import json
+import sys
+
+lines = [json.loads(line) for line in open(sys.argv[1], encoding="utf-8")]
+records, summary = lines[:-1], lines[-1]["summary"]
+assert summary["verified"] and summary["stop"] is not None, summary
+assert records and all(record["schema"] == "permission" for record in records), records
+
+
+def decided(outcome):
+    return [record for record in records
+            if record["from"] == {"adapter": "tool apply"}
+            and record["to"] == {"to": {"workflow": "permission-record"}}
+            and record["body"]["tool"] == "apply the patch"
+            and record["body"]["answer"]["outcome"] == outcome]
+
+
+assert decided("granted"), records
+# Negative control: the same selection for another outcome matches nothing.
+assert not decided("refused"), records
+PY
+then
+  note "permission-record: the store-backed flagship logged the adapter's granted permission"
+else
+  bad "no permission record from the adapter with the granted answer; stderr was:$(printf '\n  %s' "$(cat "$state/stderr" "$state/flow-stderr" 2>/dev/null)")"
+fi
+
 scenario=summary
 if [ "$failures" = 0 ]; then
-  echo "ci/acp: 22 scenarios passed, 0 failed"
+  echo "ci/acp: 23 scenarios passed, 0 failed"
 else
   echo "ci/acp: $failures scenario assertion(s) failed" >&2
 fi

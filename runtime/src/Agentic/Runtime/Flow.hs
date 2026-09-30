@@ -110,6 +110,7 @@ module Agentic.Runtime.Flow
     FlowReport (..),
     readFlow,
     flowVerified,
+    flowUncertain,
     flowReportProblems,
     flowEntryValue,
     flowSummaryValue,
@@ -182,7 +183,7 @@ import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.List (nub)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
-import Data.Maybe (isNothing, listToMaybe)
+import Data.Maybe (isJust, isNothing, listToMaybe)
 import Data.Scientific (Scientific, toBoundedInteger)
 import Data.Sequence (Seq, (|>))
 import qualified Data.Sequence as Seq
@@ -1177,8 +1178,11 @@ data PendingEffect = PendingEffect
 data FlowStates = FlowStates
   { -- | Asks without a reply in a live log.
     statesInFlight :: ![Position],
-    -- | Asks without a reply in an ended log.
+    -- | Asks without a reply in an ended log without its stop.
     statesUncertain :: ![Position],
+    -- | Asks without a reply in an ended log with its stop, as a run that
+    -- races a cancel can leave one.
+    statesUnansweredAtStop :: ![Position],
     -- | Controls without a later acknowledgement event for their identifier.
     statesUnacknowledged :: ![Position],
     -- | @OccurrenceRecoveryPending@ event records without a later
@@ -1298,7 +1302,8 @@ analyseFlow liveness entries0 torn events effects =
     states =
       FlowStates
         { statesInFlight = if liveness == FlowLive then open else [],
-          statesUncertain = if liveness == FlowEnded then open else [],
+          statesUncertain = if liveness == FlowEnded && isNothing stop then open else [],
+          statesUnansweredAtStop = if liveness == FlowEnded && isJust stop then open else [],
           statesUnacknowledged = [position | (position, key) <- controls, maybe True (\name -> not (acknowledged name position)) key],
           statesPendingRecovery =
             [ position
@@ -1435,6 +1440,12 @@ pendingEffects = go [] . zip [0 ..]
 flowVerified :: FlowReport -> Bool
 flowVerified = null . flowReportProblems
 
+-- | Whether the log leaves the outcome of the run uncertain: an ended log
+-- without its stop has lost its supervision, and each of its asks without a
+-- reply is uncertain.
+flowUncertain :: FlowReport -> Bool
+flowUncertain = statesLostSupervision . reportStates
+
 -- | Every failed verification, each line's under its position.
 flowReportProblems :: FlowReport -> [Text]
 flowReportProblems report =
@@ -1484,6 +1495,7 @@ flowSummaryValue report =
               .= object
                 [ "inFlight" .= positions statesInFlight,
                   "uncertain" .= positions statesUncertain,
+                  "unansweredAtStop" .= positions statesUnansweredAtStop,
                   "unacknowledged" .= positions statesUnacknowledged,
                   "pendingRecovery" .= positions statesPendingRecovery,
                   "pendingPersonAnswer" .= positions statesPendingPersonAnswer,

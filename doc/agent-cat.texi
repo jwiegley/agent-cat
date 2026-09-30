@@ -3652,14 +3652,17 @@ After the records, the command writes one summary object with the number of
 records, the verification result and its failures, the torn final line, the
 position of the stop and the states of the log.  The stop is the first event
 record whose event ends the run.  The states are the asks without a reply, in
-flight in a live log and uncertain in an ended log, the controls without a
+flight in a live log, uncertain in an ended log without its stop and
+unanswered at the stop in an ended log with its stop, the controls without a
 later acknowledgement event, the recovery waits without a later choice, the
 person-answer waits without a later answer, the effect starts in
 @file{effects.ndjson} without a completion, lost supervision when an ended log
 has no stop, and each ask after the stop.  A killed run therefore leaves its
-question uncertain even when its engine start has a reply.  The command exits
-0 when every verification passes and 1 when one fails, and the states do not
-change the exit status.  A store that the command cannot open exits 3.
+question uncertain even when its engine start has a reply.  A run that races a
+cancel can leave an ask unanswered at the stop.  The command exits 1 when a
+verification fails.  When every verification passes, it exits 2 when the
+ended log has no stop, and 0 otherwise.  The other states do not change the
+exit status.  A store that the command cannot open exits 3.
 
 @code{--route} prints only the records that match a conjunction of
 @code{field=value} terms separated by commas.  The fields are @code{schema},

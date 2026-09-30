@@ -401,7 +401,7 @@ import Agentic.Runtime
   )
 import Agentic.Runtime (DataBroker (..), inProcessBroker, ControlRuntime, newControlRuntimeFor)
 import Agentic.Runtime (Actor (Manager, Principal), Authority (LocalAccount), FlowScope, Start (..), StartInput (..), flowBroker, flowScopedBroker, strictFlowCodec, withRunLog)
-import Agentic.Runtime (FlowEntry (..), FlowLiveness (..), FlowReport (..), FlowRoute, Position (..), Record (recBody), Body (EventNumber), flowEntryValue, flowRouteMatches, flowSummaryValue, flowVerified, parseFlowRoute, readFlow, runLogName)
+import Agentic.Runtime (FlowEntry (..), FlowLiveness (..), FlowReport (..), FlowRoute, Position (..), Record (recBody), Body (EventNumber), flowEntryValue, flowRouteMatches, flowSummaryValue, flowUncertain, flowVerified, parseFlowRoute, readFlow, runLogName)
 import Agentic.Runtime
   ( DeferredEventSink,
     MachineCancelled (..),
@@ -1098,11 +1098,12 @@ execute broker reg = \case
         withFinalTarget reg name effective program (\finalTarget -> runMachineLineageCmd broker options control reg lineage runId parent edits name finalTarget program bindings)
 
 -- | @flow PATH@: print each record of a run log as one JSON object, then one
--- summary object, and exit 0 only when every verification passes. Without
--- @--follow@ the log is read once as an ended log. With it the log is read as a
--- live log every 250 milliseconds, each record is printed once its line is
--- complete and an event record once its event line exists, and the reading
--- ends at the stop, which is then read once more as an ended log.
+-- summary object. Exit 1 when a verification fails, 2 when every verification
+-- passes but the ended log has no stop, and 0 otherwise. Without @--follow@
+-- the log is read once as an ended log. With it the log is read as a live log
+-- every 250 milliseconds, each record is printed once its line is complete and
+-- an event record once its event line exists, and the reading ends at the
+-- stop, which is then read once more as an ended log.
 flowCmd :: Registry -> FilePath -> Bool -> Maybe FlowRoute -> Word64 -> IO ()
 flowCmd reg path follow route from = do
   absolute <- makeAbsolute path
@@ -1125,7 +1126,9 @@ flowCmd reg path follow route from = do
       finish next report = do
         mapM_ (emit . flowEntryValue) (filter shown [entry | entry <- reportEntries report, positionIndex (entryPosition entry) >= next])
         emit (flowSummaryValue report)
-        if flowVerified report then exitSuccess else exitWith (ExitFailure 1)
+        if not (flowVerified report)
+          then exitWith (ExitFailure 1)
+          else if flowUncertain report then exitWith (ExitFailure 2) else exitSuccess
       poll next = do
         report <- reading FlowLive
         next' <- emitFrom next (reportEntries report)
