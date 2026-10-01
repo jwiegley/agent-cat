@@ -142,16 +142,18 @@ the legacy entries of the window by their component names, at most 256
 entries, and keeps the longest prefix of at most 1 MiB encoded. It retains
 the parent handles, result references and revisions of those entries before
 the window takes its boundary, and the window ends before the first legacy
-entry that it does not hold. A handle that a retention adds inside the
-window, for example the handle of a parent that the root does not hold,
-repeats the window, at most three times, and then the window refuses with a
-busy Store. A handle whose entry directory is absent lists in the
-`unreadable-manifest` form. `GET /v1/runs/{id}` reads a retained legacy entry
-through `History.legacyRun`, which resolves the component name from
-`history_entries` and decodes only that entry, and returns the same
-representation. A retained entry of a root that the service does not bind,
-or of a profile that the credential cannot observe, refuses as an unknown
-run.
+entry that it does not hold. The next window starts at that entry. The
+retention bound of 65536 names for each root is therefore the only bound on
+the number of legacy entries that the run collection lists. A handle that a
+retention adds inside the window, for example the handle of a parent that
+the root does not hold, repeats the window, at most three times, and then
+the window refuses with a busy Store. A handle whose entry directory is
+absent lists in the `unreadable-manifest` form. `GET /v1/runs/{id}` reads a
+retained legacy entry through `History.legacyRun`, which resolves the
+component name from `history_entries` and decodes only that entry, and
+returns the same representation. A retained entry of a root that the
+service does not bind, or of a profile that the credential cannot observe,
+refuses as an unknown run.
 
 A legacy entry uses the frozen Run representation with `observer`
 supervision, a null `requestId`, and the limitations that
@@ -163,9 +165,14 @@ profile. The control, snapshot, output, export and lineage-request resources
 resolve runs through `State.resolveRun`, which finds no managed run for a
 legacy entry, so they refuse with `insufficient-scope`. Case 10 of the `pages`
 mode of `manager/test/service_http.py` writes one completed run into a
-configured retention root through a local frontend session, serves it with
-`--legacy-history`, and checks the collection item, the detail resource, the
-result bytes and these refusals.
+configured retention root through a local frontend session. It then copies
+that run directory 299 times under new run identifiers, with the private
+modes of the original, and rewrites each identifier that the catalogue
+reader checks and the result reference of each copy. The service serves the
+300 entries with `--legacy-history`. The case follows every window and page
+of the run collection and checks that each legacy entry and the managed run
+appear once in identifier order. It also checks the detail resource of three
+legacy entries, the result bytes of two entries and these refusals.
 
 The export and lineage-request collections of one run use their owners.
 `Artifacts.withRunExportsSource` supplies the export receipts, as

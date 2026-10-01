@@ -9,6 +9,7 @@ import json
 import os
 import re
 import secrets
+import shutil
 import signal
 import socket
 import ssl
@@ -86,8 +87,8 @@ boundary = len(sys.argv) == 6 and sys.argv[5] == BOUNDARY
 # exact ETags, token binding and expiry, the per-client quota, a concurrent
 # mutation, revocation, an interrupted send, the aggregate bound,
 # redaction, concurrent artifact downloads of two credentials, and the
-# legacy entry of a bound local retention root. Each numbered case prints its
-# own PASS line. It runs one manager
+# legacy entries of a bound local retention root, more than one window of
+# /v1/runs holds. Each numbered case prints its own PASS line. It runs one manager
 # lifetime and does not enter the restart loop.
 PAGES = "pages"
 pages_mode = len(sys.argv) == 6 and sys.argv[5] == PAGES
@@ -372,9 +373,12 @@ STORAGE_RAISED_LEDGER = 16777216
 if storage_mode:
     configuration["limits"]["globalMutationLedgerBytes"] = STORAGE_LEDGER
 # The pages mode also configures one local retention root. A local frontend
-# run writes one completed run into it before the manager starts, and the
-# manager serves it through --legacy-history as a read-only legacy entry.
+# run writes one completed run into it before the manager starts, and copies
+# of that run under new run identifiers fill the root to LEGACY_ENTRIES
+# entries, more than the 256 legacy entries of one window. The manager serves
+# them through --legacy-history as read-only legacy entries.
 LEGACY_ROOT = work / "legacy"
+LEGACY_ENTRIES = 300
 if pages_mode:
     LEGACY_ROOT.mkdir(mode=0o700)
     configuration["localRetentionRoots"] = [str(LEGACY_ROOT)]
@@ -938,13 +942,25 @@ def check_collections(name, authorized, profile, requests=(), runs=(), decisions
         status, value, raw, received = fetch(path, authorized)
         assert status == 200, ("collection read", path, status, value.get("code"))
         validate(schema, value, raw)
-        assert value["page"]["next"] is None and value["page"]["totalItems"] == len(value["items"]), ("collection page", path)
         assert received.get("etag", "").startswith('"'), ("collection ETag", path)
-        assert all(item["profileId"] == profile for item in value["items"]), ("collection profile", path)
-        leaked = [marker for marker in markers if marker in raw]
+        # The run collection of the pages mode also lists the legacy entries
+        # of its bound root, which span more than one window. The check
+        # follows every page of that set. Every other collection is one page.
+        pages, bodies = [value], [raw]
+        while pages_mode and label == "runs" and pages[-1]["page"]["next"] is not None:
+            status, following, following_raw, _ = fetch(pages[-1]["page"]["next"], authorized)
+            assert status == 200, ("collection continuation", path, status, following.get("code"))
+            validate(schema, following, following_raw)
+            pages.append(following)
+            bodies.append(following_raw)
+        items = [item for page in pages for item in page["items"]]
+        assert pages[-1]["page"]["next"] is None and value["page"]["totalItems"] == len(items), ("collection page", path)
+        assert len({item["id"] for item in items}) == len(items), ("collection duplicate", path)
+        assert all(item["profileId"] == profile for item in items), ("collection profile", path)
+        leaked = [marker for marker in markers for body in bodies if marker in body]
         assert not leaked, ("collection body holds private bytes", path, leaked)
         (work / f"collection-{name}-{label}.json").write_bytes(raw)
-        found[label] = [item["id"] for item in value["items"]]
+        found[label] = [item["id"] for item in items]
     for label, expected in (("requests", requests), ("runs", runs), ("decisions", decisions)):
         assert set(expected) <= set(found[label]), ("collection member missing", label, expected, found[label])
     if queue is not None:
@@ -2030,6 +2046,44 @@ def legacy_frontend_run():
     return directory
 
 
+def clone_legacy_runs(directory, count):
+    """Copy the completed run directory count times into the same retention
+    root, each copy under a new run identifier, so that the root holds
+    count + 1 legacy entries without count more runs. The catalogue reader
+    checks the run identifier of the supervisor manifest against the
+    directory name, the runtime manifest and every event envelope against the
+    supervisor manifest, and the result document against the run. Each copy
+    therefore replaces the original identifier in every file that holds it,
+    and then records the size and SHA-256 digest of its rewritten result in
+    the run.completed event. Each file and directory of a copy keeps the
+    private mode of its original. Returns the result bytes of every entry."""
+    original = directory.name.encode()
+    results = [(directory / "runtime" / "result.json").read_bytes()]
+    for number in range(1, count + 1):
+        name = f"{directory.name}-clone-{number:03d}"
+        target = directory.parent / name
+        shutil.copytree(directory, target, symlinks=True)
+        for path in sorted(target.rglob("*")):
+            source_mode = stat.S_IMODE((directory / path.relative_to(target)).lstat().st_mode)
+            assert stat.S_IMODE(path.lstat().st_mode) == source_mode, ("clone mode", path)
+            if path.is_file() and original in (raw := path.read_bytes()):
+                path.write_bytes(raw.replace(original, name.encode()))
+        result = (target / "runtime" / "result.json").read_bytes()
+        events = target / "runtime" / "events.ndjson"
+        lines = events.read_bytes().splitlines()
+        completed = json.loads(lines[-1])
+        reference = completed["event"].get("result") or {}
+        assert completed["event"]["type"] == "run.completed" and reference.get("path") == "result.json", (
+            "clone result reference", completed["event"])
+        reference.update(bytes=str(len(result)), sha256=hashlib.sha256(result).hexdigest())
+        lines[-1] = json.dumps(completed, ensure_ascii=False, separators=(",", ":"), sort_keys=True).encode()
+        events.write_bytes(b"\n".join(lines) + b"\n")
+        assert json.loads((target / "supervisor-manifest.json").read_bytes())["runId"] == name
+        assert json.loads(result)["runId"] == name
+        results.append(result)
+    return results
+
+
 def page_checks():
     """WM-025 page and read verification through the real HTTPS manager,
     numbered as in the B13 requirement. Each case prints one PASS line."""
@@ -2133,8 +2187,8 @@ def page_checks():
             connection.close()
 
     environment = dict(os.environ)
-    legacy_run = legacy_frontend_run()
-    legacy_result = (legacy_run / "runtime" / "result.json").read_bytes()
+    legacy_results = clone_legacy_runs(legacy_frontend_run(), LEGACY_ENTRIES - 1)
+    assert len(set(legacy_results)) == LEGACY_ENTRIES
     # A binding of a path that is not a configured retention root refuses
     # the start before the listener opens.
     unbound = subprocess.run([str(runner), "--manager", "serve", "--config", str(config),
@@ -2296,8 +2350,7 @@ def page_checks():
             for path in ("/v1/requests", "/v1/snapshot"):
                 refused(path, authorized, 413, "view-too-large", "oversized item")
             for path in ("/v1/runs", f"/v1/runs/{run}/snapshot"):
-                status, value = page(path, authorized, "RunPage" if path == "/v1/runs" else "RunSnapshot")
-                assert status == 200, ("page after the refusals", path, status, value.get("code"))
+                whole(path, authorized, "RunPage" if path == "/v1/runs" else "RunSnapshot")
             print("PASS pages case 7: a request with one item larger than the page bound made /v1/requests and",
                   "/v1/snapshot return 413 view-too-large, and the refused sets held no capacity", flush=True)
 
@@ -2306,8 +2359,7 @@ def page_checks():
                                  (f"/v1/decisions?runId={run}", "DecisionPage"), (f"/v1/runs/{run}/snapshot", "RunSnapshot"),
                                  (f"/v1/runs/{run}/outputs", "OutputPage"), (f"/v1/runs/{run}/exports", "ExportPage"),
                                  (f"/v1/runs/{run}/lineage-requests", "LineagePage"), ("/v1/profiles", "ProfilePage")):
-                status, value = page(path, authorized, schema)
-                assert status == 200, ("redaction read", path, status, value.get("code"))
+                whole(path, authorized, schema)
             markers = private_markers() + [PAGES_ENVIRONMENT_MARKER.encode()]
             stores = work / "manager" / "runs" / "runs"
             assert stores.is_dir() and any(stores.iterdir()), "the run has no run store to redact"
@@ -2367,39 +2419,56 @@ def page_checks():
             print(f"PASS pages case 9: in {rounds} rounds, two credentials downloaded the same artifact at the same time",
                   "through the running manager, and both received its exact verified bytes", flush=True)
 
-            # Case 10. The legacy entry of the bound retention root.
+            # Case 10. The legacy entries of the bound retention root: the
+            # completed run and its copies, more than the 256 legacy entries
+            # that one window of /v1/runs decodes.
             run_pages = whole("/v1/runs", authorized, "RunPage")
             union(run_pages)
             items = [item for value in run_pages for item in value["items"]]
             assert [item["id"] for item in items] == sorted(item["id"] for item in items), "run collection order"
             legacy = [item for item in items if item.get("supervision") == "observer"]
-            assert len(legacy) == 1, ("one legacy entry", [item.get("supervision") for item in items])
-            entry = legacy[0]
-            validate("Run", entry)
-            assert entry["id"] != run and entry["profileId"] == "profile_1" and entry["requestId"] is None
-            assert entry["manifest"] == {"kind": "versioned", "frontendManifestVersion": 2}, entry["manifest"]
-            assert entry["runtime"]["status"] == "succeeded" and entry["integrity"] == "valid", (entry["runtime"], entry["integrity"])
-            assert entry["verification"]["state"] == "referenced", entry["verification"]
-            assert entry["workflowId"] == next(item["id"] for item in catalogue["items"] if item["name"] == "prompt-source")
-            base = "/v1/runs/" + entry["id"]
-            status, detail, raw, received = fetch(base, authorized)
-            assert status == 200, ("legacy detail", status, detail.get("code"))
-            validate("Run", detail, raw)
-            assert detail == entry, ("legacy detail differs from its collection item", detail, entry)
-            assert received.get("etag") == representation_tag(base, raw), ("legacy detail ETag", received.get("etag"))
+            assert len(legacy) == LEGACY_ENTRIES, ("every legacy entry", len(legacy), LEGACY_ENTRIES)
+            assert [item["id"] for item in items if item.get("supervision") != "observer"] == [run], "the managed run"
+            assert len(run_pages) >= 2 and run_pages[0]["page"]["totalItems"] == LEGACY_ENTRIES + 1, (
+                len(run_pages), run_pages[0]["page"]["totalItems"])
+            prompt_source = next(item["id"] for item in catalogue["items"] if item["name"] == "prompt-source")
+            for entry in legacy:
+                validate("Run", entry)
+                assert entry["id"] != run and entry["profileId"] == "profile_1" and entry["requestId"] is None
+                assert entry["manifest"] == {"kind": "versioned", "frontendManifestVersion": 2}, entry["manifest"]
+                assert entry["runtime"]["status"] == "succeeded" and entry["integrity"] == "valid", (entry["runtime"], entry["integrity"])
+                assert entry["verification"]["state"] == "referenced", entry["verification"]
+                assert entry["workflowId"] == prompt_source
+            # The detail of the first, middle and last legacy entry. At least
+            # two of the three are copies.
+            for entry in (legacy[0], legacy[len(legacy) // 2], legacy[-1]):
+                base = "/v1/runs/" + entry["id"]
+                status, detail, raw, received = fetch(base, authorized)
+                assert status == 200, ("legacy detail", status, detail.get("code"))
+                validate("Run", detail, raw)
+                assert detail == entry, ("legacy detail differs from its collection item", detail, entry)
+                assert received.get("etag") == representation_tag(base, raw), ("legacy detail ETag", received.get("etag"))
+            # The checks below use the last of these entries, its base path and its detail.
             status, again, _, _ = fetch(base, authorized)
             assert status == 200 and again == detail, "a second legacy detail read differs"
-            connection = http.client.HTTPSConnection("127.0.0.1", port, context=context, timeout=7)
-            try:
-                connection.request("GET", "/v1/artifacts/" + entry["verification"]["artifactId"],
-                                   headers=authorized | {"Accept": "application/octet-stream"})
-                response = connection.getresponse()
-                downloaded = response.read(len(legacy_result) + 1)
-                assert response.status == 200 and response.getheader("Content-Type") == "application/octet-stream", (
-                    "legacy result download", response.status)
-            finally:
-                connection.close()
-            assert downloaded == legacy_result, "legacy result bytes"
+
+            def legacy_download(entry):
+                connection = http.client.HTTPSConnection("127.0.0.1", port, context=context, timeout=7)
+                try:
+                    connection.request("GET", "/v1/artifacts/" + entry["verification"]["artifactId"],
+                                       headers=authorized | {"Accept": "application/octet-stream"})
+                    response = connection.getresponse()
+                    downloaded = response.read(max(map(len, legacy_results)) + 1)
+                    assert response.status == 200 and response.getheader("Content-Type") == "application/octet-stream", (
+                        "legacy result download", response.status)
+                finally:
+                    connection.close()
+                assert downloaded in legacy_results, "legacy result bytes"
+                return downloaded
+
+            # Each entry has its own result, so two different downloads
+            # include the result of at least one copy.
+            assert legacy_download(legacy[0]) != legacy_download(legacy[-1]), "two legacy entries downloaded one result"
             tag = '"' + entry["revision"] + '"'
             key = capabilities["authorityEpoch"] + "." + secrets.token_urlsafe(16)
             status, value, _, _ = exchange(base + "/control", authorized | {
@@ -2423,10 +2492,12 @@ def page_checks():
             status, after, _, _ = fetch(base, authorized)
             assert status == 200 and after == detail, "a refused mutation changed the legacy entry"
             (work / "legacy-run.json").write_bytes(raw)
-            print("PASS pages case 10: /v1/runs listed the legacy entry of the bound retention root in identifier order;",
-                  "the item and GET", "/v1/runs/{id}", "were equal and schema-valid, its result downloaded with the exact",
-                  "retained bytes, a control POST and every run subresource returned 403 insufficient-scope, a POST",
-                  "to the run returned 405, and another profile's credential received 404", flush=True)
+            print(f"PASS pages case 10: {len(run_pages)} pages of /v1/runs listed each of the {LEGACY_ENTRIES} legacy",
+                  "entries of the bound retention root (one completed run and its copies) and the managed run once,",
+                  "in identifier order; the item and GET", "/v1/runs/{id}", "were equal and schema-valid for three",
+                  "legacy entries, two results downloaded with the exact retained bytes of two different entries,",
+                  "a control POST and every run subresource returned 403 insufficient-scope, a POST to the run",
+                  "returned 405, and another profile's credential received 404", flush=True)
         finally:
             if process.poll() is None:
                 process.terminate()
