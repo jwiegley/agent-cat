@@ -136,6 +136,10 @@ data ServiceEvent
     -- generation in which it started, and the event cursor and members of
     -- the overview.
   | ServiceOverviewReady !Int !OverviewOrigin !Manager.FetchGeneration !(Lane.CallOutcome (Text, [Service.OverviewMember]))
+    -- | The read of the pending decision heads with this ticket, whether
+    -- the explicit g key started it, and the heads in manager observation
+    -- order.
+  | ServiceDecisionsReady !Int !Bool !(Lane.CallOutcome [Service.DecisionView])
     -- | The retrieval of the verified result of this run.
   | ServiceResultReady !Int !Text !(Lane.CallOutcome (Maybe Service.VerifiedResult))
 
@@ -251,6 +255,13 @@ data AppState = AppState
     -- | The selected row of the manager overview view, by the kind and
     -- identity of the row.
     stateServiceOverviewFocus :: !(Lane.RowFocus (Manager.OverviewKind, Text)),
+    -- | The last complete pending decision heads of @/v1/decisions@ in
+    -- manager observation order and their stale mark. Only
+    -- 'Lane.requestStep' installs them or marks them stale.
+    stateServiceDecisions :: !(Lane.Installed [Service.DecisionView]),
+    -- | The selected row of the manager decisions view, by the kind and
+    -- identity of the row.
+    stateServiceDecisionsFocus :: !(Lane.RowFocus (Manager.OverviewKind, Text)),
     -- | The text drafts by identity: the input editor text of each request
     -- and input, and the answer text of each decision. The editors show the
     -- draft of the displayed identity ('serviceDraftKey').
@@ -406,6 +417,8 @@ runAppWith backend = mask $ \restore -> do
             stateServiceObservation = Lane.noObservation,
             stateServiceOverview = Lane.noObservation,
             stateServiceOverviewFocus = Lane.noFocus,
+            stateServiceDecisions = Lane.noObservation,
+            stateServiceDecisionsFocus = Lane.noFocus,
             stateServiceDrafts = Lane.noDrafts,
             stateServiceCaptures = Map.empty,
             stateServiceSink = sink,
@@ -503,6 +516,14 @@ startServiceOverview client origin = do
     ServiceOverviewReady ticket origin generation <$> Lane.serviceCall
       ((>>= \overview -> (,) (Manager.overviewCursor overview) <$> traverse Service.decodeOverviewItem (Manager.overviewItems overview))
         <$> Manager.loadOverview client)
+
+-- | Read the pending decision heads of @/v1/decisions@ through the
+-- single-flight lane, given whether the explicit g key starts the read. A
+-- read of live delivery keeps the status line.
+startServiceDecisions :: Manager.Client -> Bool -> EventM Name AppState ()
+startServiceDecisions client explicit =
+  startServiceReadShown Lane.PageSetRead (if explicit then Just "reading the manager decisions" else Nothing) $ \ticket ->
+    ServiceDecisionsReady ticket explicit <$> Lane.serviceCall (Service.loadDecisions client)
 
 -- | Start the event worker of the session from the cursor of an installed
 -- overview that started in the given fetch generation, when
@@ -608,6 +629,11 @@ serviceEventWorker channel sink client = stream . Lane.newFollow
 serviceOverviewRows :: AppState -> [Service.OverviewRow]
 serviceOverviewRows = maybe [] Service.overviewRows . Lane.installedRead . stateServiceOverview
 
+-- | The rows of the installed pending decision heads, in manager
+-- observation order.
+serviceDecisionRows :: AppState -> [Service.OverviewRow]
+serviceDecisionRows = maybe [] Service.decisionRows . Lane.installedRead . stateServiceDecisions
+
 -- | Load the workflow catalogue of a profile, and then open the given
 -- request when one is given.
 startServiceWorkflows :: Manager.Client -> Service.Profile -> Maybe Manager.DraftView -> EventM Name AppState ()
@@ -630,12 +656,31 @@ openOverviewRow client = do
     Nothing -> refused "no overview row is selected"
     Just key -> case Service.overviewOpen members key of
       Service.OpenNothing reason -> refused reason
-      Service.OpenRun run profile -> openServiceRun run profile
+      Service.OpenRun run profile -> openServiceRun OverviewList run profile
       Service.OpenRequest request -> case find (`Service.requestMatches` request) (stateServiceWorkflows state) of
         Just workflow -> openServiceRequest workflow request
         Nothing -> case find ((== Manager.draftProfile request) . Service.profileId) (stateServiceProfiles state) of
           Just profile -> startServiceWorkflows client profile (Just request)
           Nothing -> refused "the manager catalogue lists no profile of this request"
+
+-- | Open the run of the selected decision head of the manager decisions
+-- with 'Service.decisionsOpen'. Only an idle command lane opens a row, as on
+-- the overview. Esc on the live monitor of the run returns to the manager
+-- decisions.
+openDecisionRow :: EventM Name AppState ()
+openDecisionRow = do
+  state <- get
+  let keys = map Service.overviewRowKey (serviceDecisionRows state)
+      heads = fromMaybe [] (Lane.installedRead (stateServiceDecisions state))
+      refused :: Text -> EventM Name AppState ()
+      refused reason = put state {stateModel = (stateModel state) {modelStatus = "decision row not opened: " <> reason}}
+  case atMay keys (Lane.focusedIndex keys (stateServiceDecisionsFocus state)) of
+    _ | not (serviceIdle state) -> refused "a manager command is in progress"
+    Nothing -> refused "no decision row is selected"
+    Just key -> case Service.decisionsOpen heads key of
+      Service.OpenRun run profile -> openServiceRun DecisionsList run profile
+      Service.OpenRequest _ -> refused "a decision row opens only its run"
+      Service.OpenNothing reason -> refused reason
 
 -- | Select this request of this catalogue row and show it by its phase. The
 -- request screen shows at once, and the next installed read shows the
@@ -649,21 +694,22 @@ openServiceRequest workflow request = do
   put (if same then state else newServiceSelection state) {stateServiceSelected = Just (Service.RequestSelection (Manager.draftId request) Nothing),
     stateServiceWorkflow = Just workflow,
     stateModel = (stateModel state) {modelWorkflow = Just (Service.workflowDisplay workflow), modelInputs = Service.literalInputs shown,
-      modelScreen = ServiceRequestScreen shown, modelStatus = "manager request opened: " <> Manager.draftPhase shown}}
+      modelScreen = ServiceRequestScreen shown, modelServiceList = OverviewList, modelStatus = "manager request opened: " <> Manager.draftPhase shown}}
   invalidateServiceFetches [Lane.RequestFetch]
 
--- | Select this run by its identifier and show its live monitor. The run
--- that the installed observation already shows keeps its observation and
--- its monitor position. Any other run starts with no observation.
-openServiceRun :: Text -> Text -> EventM Name AppState ()
-openServiceRun run profile = do
+-- | Select this run by its identifier and show its live monitor, opened
+-- from this service view. The run that the installed observation already
+-- shows keeps its observation and its monitor position. Any other run starts
+-- with no observation.
+openServiceRun :: ServiceList -> Text -> Text -> EventM Name AppState ()
+openServiceRun list run profile = do
   state <- get
   case mkRunId run of
     Left _ -> put state {stateModel = (stateModel state) {modelStatus = "overview row not opened: the run identifier is not valid"}}
     Right ident -> do
       let same = fmap (runIdText . Service.runIdentity) (serviceRun state) == Just run
           selected = if same then state else (newServiceSelection state) {stateServiceSelected = Just (Service.RunSelection run profile)}
-      put selected {stateModel = (stateModel state) {modelScreen = LiveScreen ident,
+      put selected {stateModel = (stateModel state) {modelScreen = LiveScreen ident, modelServiceList = list,
         modelSnapshot = if same then serviceRun state >>= Service.runSnapshot else Nothing, modelStatus = "manager run opened"}}
       invalidateServiceFetches [Lane.RequestFetch]
 
@@ -858,7 +904,7 @@ onEndpointsRefresh change state = case stateBackend state of
 -- | Take the invalidations and the delivery state from the live sink and
 -- clear the pending wakeup. A 410 refusal of the stream is a resnapshot
 -- ('Lane.resnapshotFetches'): the coordinator advances its generation, so
--- a fetch in flight installs nothing, and both reads are fetched again. The
+-- a fetch in flight installs nothing, and every read is fetched again. The
 -- next installed overview starts the stream again.
 handleServiceWakeup :: EventM Name AppState ()
 handleServiceWakeup = do
@@ -893,6 +939,7 @@ pumpServiceFetches client = do
           startable key = allowed && case key of
             Lane.OverviewFetch -> modelScreen (stateModel state) == ServiceOverviewScreen || stateServiceDelivery state == Lane.DeliveryResnapshot
             Lane.RequestFetch -> True
+            Lane.DecisionsFetch -> modelScreen (stateModel state) == ServiceDecisionsScreen
       case Lane.takeFetch startable lane fetches of
         Nothing -> put state {stateServiceFetches = fetches}
         Just (fetch, rest) -> do
@@ -900,6 +947,7 @@ pumpServiceFetches client = do
           case fst fetch of
             Lane.OverviewFetch -> startServiceOverview client LiveOverview
             Lane.RequestFetch -> refreshServiceRequest client Lane.AutomaticRefresh
+            Lane.DecisionsFetch -> startServiceDecisions client False
           after <- get
           case Lane.laneReadTicket (stateServiceLane after) of
             Just ticket -> put after {stateServiceFetches = Lane.fetchStarted (Lane.ticketNumber ticket) fetch rest}
@@ -1284,6 +1332,7 @@ serviceEventTicket serviceEvent = case serviceEvent of
   ServiceSent ticket _ -> ticket
   ServiceRequestReady ticket _ -> ticket
   ServiceOverviewReady ticket _ _ _ -> ticket
+  ServiceDecisionsReady ticket _ _ -> ticket
   ServiceResultReady ticket _ _ -> ticket
 
 -- | The refresh coordinator of the session.
@@ -1342,6 +1391,21 @@ handleServiceResultCore client serviceEvent = do
           in do
             put next {stateModel = if origin == ExplicitOverview then (stateModel next) {modelStatus = "manager overview read"} else stateModel next}
             mapM_ (startServiceEvents client generation) cursor
+    -- A refused read of the decision heads keeps the last complete heads
+    -- and marks them stale with the refusal code. The focus keeps the
+    -- identity of the selected row.
+    ServiceDecisionsReady ticket explicit result ->
+      case Lane.requestStep (const Service.ReadCurrent) ticket result (stateServiceLane state) (stateServiceDecisions state) of
+        (Lane.RequestStale,lane,_) -> put state {stateServiceLane = lane}
+        (Lane.RequestFaulted,lane,_) -> faultService state lane
+        (Lane.RequestRefused problem,lane,installed) ->
+          let next = state {stateServiceLane = lane, stateServiceDecisions = installed}
+          in put (if explicit
+            then next {stateModel = refuseRequestRead (Lane.refusalCode problem) (isJust (Lane.installedRead installed)) (stateModel next)}
+            else next)
+        (Lane.RequestInstalled _,lane,installed) ->
+          let next = state {stateServiceLane = lane, stateServiceDecisions = installed}
+          in put (if explicit then next {stateModel = (stateModel next) {modelStatus = "manager decisions read"}} else next)
     -- A catalogue that the overview loaded for a request opens that request
     -- when it lists the workflow revision of the request.
     ServiceWorkflowsReady ticket profile opening result -> case Lane.readStep ticket result (stateServiceLane state) of
@@ -1520,12 +1584,15 @@ handleServiceEventCore client event = do
       -- outcome, including while a command is in progress.
       | Just (operation,start) <- serviceNewMutationKey state key modifiers -> serviceMutationKey operation start
       | serviceSending state -> pure ()
-      -- h, O and Esc move among the workflow browser, the workflow help and
-      -- the manager overview. Every other browser key keeps its behavior.
+      -- h, O, D and Esc move among the workflow browser, the workflow help,
+      -- the manager overview and the manager decisions. Every other browser
+      -- key keeps its behavior. Opening the manager decisions reads the
+      -- pending decision heads through live delivery.
       | Just model <- serviceBrowserKey (Service.workflowHelp <$> atMay (stateServiceWorkflows state) (modelWorkflowIndex (stateModel state)))
-          key modifiers (stateModel state) ->
-          put state {stateModel = model, statePaneFocus = if ServiceOverviewScreen `elem` [modelScreen model, modelScreen (stateModel state)]
+          key modifiers (stateModel state) -> do
+          put state {stateModel = model, statePaneFocus = if any (`elem` [ServiceOverviewScreen, ServiceDecisionsScreen]) [modelScreen model, modelScreen (stateModel state)]
             then PrimaryPane else statePaneFocus state}
+          when (modelScreen model == ServiceDecisionsScreen) (invalidateServiceFetches [Lane.DecisionsFetch])
       | null modifiers -> case key of
           Vty.KEsc -> serviceBack state
           Vty.KUp -> serviceMove (-1) state
@@ -1544,6 +1611,8 @@ handleServiceEventCore client event = do
           Vty.KRight -> put state {statePaneFocus = SecondaryPane}
           -- Enter on the manager overview opens the selected row.
           Vty.KEnter | ServiceOverviewScreen <- modelScreen (stateModel state) -> openOverviewRow client
+          -- Enter on the manager decisions opens the run of the selected head.
+          Vty.KEnter | ServiceDecisionsScreen <- modelScreen (stateModel state) -> openDecisionRow
           Vty.KEnter | serviceIdle state -> case modelScreen (stateModel state) of
             ServiceProfilesScreen {} -> case selectedServiceProfile (stateModel state) of
               Just profile | Service.profileReadiness profile == "ready", Service.profileRefusal profile == Nothing -> startServiceWorkflows client profile Nothing
@@ -1573,6 +1642,10 @@ handleServiceEventCore client event = do
           Vty.KChar 'g' | modelScreen (stateModel state) == ServiceOverviewScreen -> case Lane.laneReadTicket (stateServiceLane state) of
             Nothing -> startServiceOverview client ExplicitOverview
             Just _ -> put state {stateModel = (stateModel state) {modelStatus = "overview read not started: another manager read is in flight; press g again"}}
+          -- g on the manager decisions reads the decision heads again.
+          Vty.KChar 'g' | modelScreen (stateModel state) == ServiceDecisionsScreen -> case Lane.laneReadTicket (stateServiceLane state) of
+            Nothing -> startServiceDecisions client True
+            Just _ -> put state {stateModel = (stateModel state) {modelStatus = "decisions read not started: another manager read is in flight; press g again"}}
           Vty.KChar 'g' -> refreshServiceRequest client Lane.ExplicitRefresh
           Vty.KChar 'x' | Lane.resendOffered (stateServiceLane state) -> put (onLane (\lane -> lane {Lane.laneResendConfirm = True}) state)
           Vty.KChar 'r' | ServiceProfilesScreen {} <- modelScreen (stateModel state) -> startServiceProfiles client
@@ -1685,6 +1758,9 @@ handleServiceEventCore client event = do
       ServiceRequestScreen _ -> vScrollBy (viewportScroll FailureViewport) delta
       ServiceOverviewScreen | statePaneFocus state == PrimaryPane -> do
         put state {stateServiceOverviewFocus = Lane.moveFocus delta (map Service.overviewRowKey (serviceOverviewRows state)) (stateServiceOverviewFocus state)}
+        vScrollToBeginning (viewportScroll BrowserDetailViewport)
+      ServiceDecisionsScreen | statePaneFocus state == PrimaryPane -> do
+        put state {stateServiceDecisionsFocus = Lane.moveFocus delta (map Service.overviewRowKey (serviceDecisionRows state)) (stateServiceDecisionsFocus state)}
         vScrollToBeginning (viewportScroll BrowserDetailViewport)
       ServiceReviewScreen {} | stateConfirmDetails state -> vScrollBy (viewportScroll ConfirmDetailsViewport) delta
       LiveScreen _
@@ -1853,6 +1929,8 @@ clearServiceSession state =
       stateServiceObservation = Lane.noObservation,
       stateServiceOverview = Lane.noObservation,
       stateServiceOverviewFocus = Lane.noFocus,
+      stateServiceDecisions = Lane.noObservation,
+      stateServiceDecisionsFocus = Lane.noFocus,
       stateServiceDrafts = Lane.noDrafts,
       stateServiceCaptures = Map.empty,
       stateServiceDelivery = Lane.DeliveryIdle,
@@ -1957,6 +2035,9 @@ toPresentation state =
       presentationServiceOverview = let installed = stateServiceOverview state in
         OverviewView (serviceOverviewRows state) (Lane.focusedIndex (map Service.overviewRowKey (serviceOverviewRows state)) (stateServiceOverviewFocus state))
           (Service.overviewStatus (Lane.installedStale installed) (Service.overviewRows <$> Lane.installedRead installed)),
+      presentationServiceDecisions = let installed = stateServiceDecisions state in
+        OverviewView (serviceDecisionRows state) (Lane.focusedIndex (map Service.overviewRowKey (serviceDecisionRows state)) (stateServiceDecisionsFocus state))
+          (Service.decisionsStatus (Lane.installedStale installed) (Service.decisionRows <$> Lane.installedRead installed)),
       presentationServiceObservation = let installed = stateServiceObservation state in
         Service.observationLines (Lane.refreshPaused (stateNow state) (stateServiceLane state) (stateServiceKeyOutcome state))
           (Lane.installedStale installed) (isJust (Lane.installedRead installed)) (serviceRun state),

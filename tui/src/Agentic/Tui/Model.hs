@@ -4,6 +4,8 @@
 module Agentic.Tui.Model
   ( BrowserTab (..),
     Screen (..),
+    ServiceList (..),
+    serviceListScreen,
     TuiModel (..),
     initialModel,
     initialServiceModel,
@@ -84,6 +86,10 @@ data Screen
     -- | The manager overview. Its rows and cursor belong to the application
     -- state, which installs each overview read.
   | ServiceOverviewScreen
+    -- | The manager decisions: the pending decision heads of the runs in
+    -- manager observation order. Its rows and cursor belong to the
+    -- application state, which installs each read of @/v1/decisions@.
+  | ServiceDecisionsScreen
   | ServiceRequestScreen !Manager.DraftView
   | ServiceReviewScreen !Manager.Preparation !Text
   | ServiceCommandScreen !Text
@@ -98,6 +104,18 @@ data Screen
   | LiveScreen !RunId
   | FailureScreen !Text
   deriving (Eq, Show)
+
+-- | The service list view that the operator last used: @O@ and @D@ open
+-- one, and a row of one opens a request or a run. Esc on the live monitor or
+-- the request screen returns to it.
+data ServiceList = OverviewList | DecisionsList
+  deriving (Eq, Show)
+
+-- | The screen of a service view.
+serviceListScreen :: ServiceList -> Screen
+serviceListScreen list = case list of
+  OverviewList -> ServiceOverviewScreen
+  DecisionsList -> ServiceDecisionsScreen
 
 -- | All behaviorally relevant frontend state.
 data TuiModel = TuiModel
@@ -114,6 +132,9 @@ data TuiModel = TuiModel
     modelInputs :: !(Map Text Text),
     modelTarget :: !(Maybe TargetSelection),
     modelSnapshot :: !(Maybe RunSnapshot),
+    -- | The service list view that Esc on the live monitor or the request
+    -- screen returns to.
+    modelServiceList :: !ServiceList,
     modelStatus :: !Text
   }
   deriving (Eq, Show)
@@ -134,6 +155,7 @@ initialModel workflows runs routing =
       modelInputs = Map.empty,
       modelTarget = Nothing,
       modelSnapshot = Nothing,
+      modelServiceList = OverviewList,
       modelStatus = "ready"
     }
 
@@ -148,18 +170,23 @@ selectedServiceProfile model = case modelScreen model of
   _ -> Nothing
 
 -- | The navigation of one key among the service workflow browser, the help
--- of the selected workflow and the manager overview, given the help text of
--- the selected workflow. @h@ opens that help, @O@ opens the manager overview,
--- and @Esc@ returns from either one to the workflow browser. Every other key
--- gives 'Nothing', and the caller keeps its own behavior for that key, so the
+-- of the selected workflow, the manager overview and the manager decisions,
+-- given the help text of the selected workflow. @h@ opens that help, @O@
+-- opens the manager overview, @D@ opens the manager decisions, and @Esc@
+-- returns from each of them to the workflow browser. Every other key gives
+-- 'Nothing', and the caller keeps its own behavior for that key, so the
 -- browser keys of the Phase A journey keep their meaning.
 serviceBrowserKey :: Maybe Text -> Vty.Key -> [Vty.Modifier] -> TuiModel -> Maybe TuiModel
 serviceBrowserKey help key modifiers model = case (modelScreen model, key, modifiers) of
   (BrowserScreen, Vty.KChar 'h', []) -> (\text -> model {modelScreen = HelpScreen text}) <$> help
   (BrowserScreen, Vty.KChar 'O', []) ->
-    Just model {modelScreen = ServiceOverviewScreen, modelStatus = "manager overview: g reads it again"}
+    Just model {modelScreen = ServiceOverviewScreen, modelServiceList = OverviewList, modelStatus = "manager overview: g reads it again"}
+  (BrowserScreen, Vty.KChar 'D', []) ->
+    Just model {modelScreen = ServiceDecisionsScreen, modelServiceList = DecisionsList,
+      modelStatus = "manager decisions: Enter opens the run at the selected head"}
   (HelpScreen _, Vty.KEsc, []) -> Just model {modelScreen = BrowserScreen}
   (ServiceOverviewScreen, Vty.KEsc, []) -> Just model {modelScreen = BrowserScreen, modelStatus = "manager workflows"}
+  (ServiceDecisionsScreen, Vty.KEsc, []) -> Just model {modelScreen = BrowserScreen, modelStatus = "manager workflows"}
   _ -> Nothing
 
 -- | The model after a refused read of the selected request, given the
@@ -192,8 +219,8 @@ serviceRunObserved idle run model = case (idle, modelScreen model, run) of
   _ -> Nothing
 
 -- | Whether the screen shows the selected request or run: the request,
--- review, input, command and live screens. The browsers, the help and the
--- manager overview do not, so an installed read of the selection never
+-- review, input, command and live screens. The browsers, the help, the
+-- manager overview and the manager decisions do not, so an installed read of the selection never
 -- replaces them.
 serviceShowsSelection :: Screen -> Bool
 serviceShowsSelection screen = case screen of
@@ -204,15 +231,20 @@ serviceShowsSelection screen = case screen of
   LiveScreen _ -> True
   _ -> False
 
--- | Esc on the live monitor or the request screen: the manager overview.
--- The selection, its drafts and its observation stay, and nothing is sent,
--- so a run continues at the manager. Every other screen gives 'Nothing'.
+-- | Esc on the live monitor or the request screen: the service list view
+-- that the operator last used ('modelServiceList'), the manager overview or
+-- the manager decisions. The selection, its drafts and its observation stay, and nothing
+-- is sent, so a run continues at the manager. Every other screen gives
+-- 'Nothing'.
 serviceLeave :: TuiModel -> Maybe TuiModel
 serviceLeave model = case modelScreen model of
-  LiveScreen _ -> overview
-  ServiceRequestScreen _ -> overview
+  LiveScreen _ -> back
+  ServiceRequestScreen _ -> back
   _ -> Nothing
-  where overview = Just model {modelScreen = ServiceOverviewScreen, modelStatus = "manager overview: Enter opens the selected row"}
+  where
+    back = Just model {modelScreen = serviceListScreen (modelServiceList model), modelStatus = case modelServiceList model of
+      OverviewList -> "manager overview: Enter opens the selected row"
+      DecisionsList -> "manager decisions: Enter opens the run at the selected head"}
 
 selectedWorkflow :: TuiModel -> Maybe WorkflowDescriptor
 selectedWorkflow model = atMay (visibleWorkflows model) (modelWorkflowIndex model)

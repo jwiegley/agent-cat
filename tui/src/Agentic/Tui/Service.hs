@@ -16,6 +16,7 @@ module Agentic.Tui.Service
     observeSnapshot, observeControl, observeDecision, observeResult, decodeSnapshot, decodeControl, decodeDecision,
     RunItem (..), RunContent (..), KnownRun (..), OverviewMember (..), decodeRequestItem, decodeRunItem, decodeOverviewMember,
     decodeOverviewItem, OverviewRow (..), overviewRows, overviewStatus, overviewRowKey, OverviewOpen (..), overviewOpen,
+    loadDecisions, decodeDecisionHeads, decisionRows, decisionsStatus, decisionsOpen, decisionAddressee,
     decisionPrompt, answerValue, answerOffered, retryOffer, headMatches,
     DecisionHead (..), decisionHead, answerMutation, answerBody,
     retryMutation, retryBody, retryEffect,
@@ -141,6 +142,22 @@ collection client uri parser = case C.reference client uri of
       closed ["version"] fields
       versionOne fields
       parser (C.pageSetItems pages))) (C.pageSetMetadata pages)
+
+-- | The pending decision heads of the authorized runs: the complete page set
+-- of @/v1/decisions@ without @runId@, in manager observation order
+-- ('decodeDecisionHeads').
+loadDecisions :: C.Client -> IO (Either C.ClientFailure [DecisionView])
+loadDecisions client = collection client "/v1/decisions" parseDecisionHeads
+
+-- | The decision heads of the items of one complete @/v1/decisions@ page
+-- set, in the order of the items. Each item is a decision representation,
+-- and one decision and one run appear at most once, because the collection
+-- lists one head for each run.
+decodeDecisionHeads :: [Value] -> Either C.ClientFailure [DecisionView]
+decodeDecisionHeads = either (const (Left C.InvalidResponse)) Right . parseEither parseDecisionHeads
+
+parseDecisionHeads :: [Value] -> Parser [DecisionView]
+parseDecisionHeads values = traverse parseDecision values >>= uniqueBy decisionId >>= uniqueBy decisionRun
 
 -- | The closed request-creation body, bound to the selected catalogue identity.
 createBody :: Workflow -> Value
@@ -1112,17 +1129,21 @@ overviewRow positions member = case member of
         "Integrity: " <> knownIntegrity known, "Limitations: " <> listed (knownLimitations known) ]
         <> maybe [] (\parent -> ["Lineage: " <> fromMaybe "unknown" (knownLineage known) <> " of run " <> parent]) (knownParent known))
   DecisionMember view -> OverviewRow C.OverviewDecision (decisionId view)
-    ("decision " <> decisionKind view <> "  run " <> decisionRun view)
-    ([ "Decision: " <> decisionId view, "Run: " <> decisionRun view, "Kind: " <> decisionKind view,
+    ("decision " <> decisionKindName view <> "  run " <> decisionRun view)
+    ([ "Decision: " <> decisionId view, "Run: " <> decisionRun view, "Kind: " <> decisionKindName view,
        "State: " <> decisionState view, "Occurrence: " <> occurrenceText (decisionOccurrence view) ]
       <> case decisionContent view of
-        QuestionContent _ prompt -> ["Prompt: " <> prompt]
+        QuestionContent code prompt -> [ "Answer type: " <> (case code of String name -> name; _ -> "structured"),
+          "Addressee: " <> fromMaybe "none" (decisionAddressee view), "Prompt: " <> prompt ]
         RecoveryContent _ message _ -> ["Recovery: " <> message])
   where
     listed values = if null values then "none" else T.intercalate ", " values
-    decisionKind view = case decisionContent view of
-      QuestionContent {} -> "question"
-      RecoveryContent {} -> "recovery"
+
+-- | The kind of a decision: question or recovery.
+decisionKindName :: DecisionView -> Text
+decisionKindName view = case decisionContent view of
+  QuestionContent {} -> "question"
+  RecoveryContent {} -> "recovery"
 
 -- | The kind and identity of an overview row. The overview view keeps its
 -- focus by this key, not by the index of the row.
@@ -1153,6 +1174,41 @@ overviewOpen members key = case [member | member <- members, overviewRowKey (ove
       request : _ -> OpenRequest request
       [] -> OpenNothing "the overview does not list the request of this preparation"
   [] -> OpenNothing "no overview row is selected"
+
+-- | The addressee that a question decision names, such as @person
+-- model:fixed-point@ for an ask that the policy field @personAnswers@ routes
+-- to the person. A recovery decision names none.
+decisionAddressee :: DecisionView -> Maybe Text
+decisionAddressee view = case (decisionContent view, decisionValue view) of
+  (QuestionContent {}, Object fields) | Just (Object question) <- KM.lookup "question" fields,
+    Just (String addressee) <- KM.lookup "addressee" question -> Just addressee
+  _ -> Nothing
+
+-- | The rows of the manager decisions: one row for each pending decision
+-- head, in manager observation order. The rows keep the order of the
+-- decision collection and are not sorted. Each row has the details of the
+-- decision row of the overview, and its list label names only the kind and
+-- the run, because every row is a decision.
+decisionRows :: [DecisionView] -> [OverviewRow]
+decisionRows = map $ \view -> (overviewRow Map.empty (DecisionMember view))
+  {overviewRowLabel = decisionKindName view <> "  run " <> decisionRun view}
+
+-- | What Enter on the decision row with this key opens: the run of the
+-- decision at that head, with the profile of the decision.
+decisionsOpen :: [DecisionView] -> (C.OverviewKind, Text) -> OverviewOpen
+decisionsOpen = overviewOpen . map DecisionMember
+
+-- | The status line of the installed manager decisions, given the refusal
+-- code of the latest read when that read was refused and the installed
+-- rows. A refusal keeps the last complete decision heads and marks them
+-- stale.
+decisionsStatus :: Maybe Text -> Maybe [OverviewRow] -> Text
+decisionsStatus stale rows = case (stale, rows) of
+  (Nothing, Nothing) -> "Decisions: not read"
+  (Nothing, Just current) -> "Decisions: current; pending heads: " <> count current
+  (Just code, Just retained) -> "Decisions: stale (" <> code <> "); the last complete heads are retained; pending heads: " <> count retained
+  (Just code, Nothing) -> "Decisions: refused (" <> code <> "); no complete decision heads are installed"
+  where count = T.pack . show . length
 
 -- | The status line of the installed overview, given the refusal code of the
 -- latest read when that read was refused and the installed rows. A refusal

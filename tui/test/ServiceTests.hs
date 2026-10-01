@@ -171,6 +171,7 @@ serviceTests render = do
   endpointTests render profile
   switchTests render row profile
   overviewTests render row request0 preparation
+  decisionsViewTests render row decisionValue
   draftTests profile request0
   liveDeliveryTests render profile
   where
@@ -387,6 +388,72 @@ overviewTests render row request0 preparation = do
       ("Enter with no row opens nothing", case S.overviewOpen members (C.OverviewRun, "run_absent") of S.OpenNothing _ -> True; _ -> False)
     ]
   where atIndex values index = if index >= 0 && index < length values then Just (values !! index) else Nothing
+
+-- | The manager decisions: D from the workflow browser, the pending heads of
+-- @/v1/decisions@ in manager observation order, Enter on a head, Esc back to
+-- the decisions from the run, and a person-routed ask with its typed answer.
+decisionsViewTests :: ((Int,Int) -> Presentation -> T.Text) -> S.Workflow -> Value -> IO ()
+decisionsViewTests render row decisionValue = do
+  runId <- either (die . show) pure (mkRunId "run_7")
+  let browser = (initialModel [S.workflowDisplay row] [] (Left "manager owns routing")) {modelStatus = "manager catalogue: profile_main"}
+      help = Just (S.workflowHelp row)
+      press model (key, modifiers) = fromMaybe model (serviceBrowserKey help key modifiers model)
+      phaseA = map (\character -> (Vty.KChar character, [])) "slmfci1" <> [(Vty.KChar '\t', []), (Vty.KChar 'h', []), (Vty.KEsc, [])]
+      decisionsModel = press browser (Vty.KChar 'D', [])
+      -- The person-routed ask of the run run_7, observed before the head of
+      -- run_21 in the collection.
+      personValue = put "id" (String "decision_9") $ put "runId" (String "run_7") $ put "queue" (String "/v1/decisions?runId=run_7")
+        $ alter "question" (put "code" (String "text") . put "semanticSchema" (String "string")
+          . put "addressee" (String "person model:fixed-point") . put "prompt" (String "Name the fixed point.")) decisionValue
+      decoded = S.decodeDecisionHeads [personValue, decisionValue]
+      heads = either (const []) id decoded
+      rows = S.decisionRows heads
+      keys = map S.overviewRowKey rows
+      detailsOf ident = maybe [] S.overviewRowDetails (listToMaybe [entry | entry <- rows, S.overviewRowId entry == ident])
+      current = S.decisionsStatus Nothing (Just rows)
+      presentation model focus = (emptyPresentation model) {presentationService = True, presentationNoColor = True,
+        presentationPaneFocus = focus, presentationServiceDecisions = OverviewView rows 0 current}
+      wide = render (80,24) (presentation decisionsModel PrimaryPane)
+      liveModel = decisionsModel {modelScreen = LiveScreen runId}
+      liveFrame = render (100,30) ((emptyPresentation liveModel) {presentationService = True, presentationNoColor = True})
+      overviewLive = (press browser (Vty.KChar 'O', [])) {modelScreen = LiveScreen runId}
+  putStrLn "RENDER manager decisions at (80,24):" >> putStr (T.unpack wide)
+  checks
+    [ ("D opens the manager decisions from the workflow browser, and Esc returns to the workflows list",
+        modelScreen decisionsModel == ServiceDecisionsScreen && modelServiceList decisionsModel == DecisionsList
+          && modelScreen (press decisionsModel (Vty.KEsc, [])) == BrowserScreen),
+      ("no Phase A key and no Tab opens the manager decisions",
+        all (\step -> modelScreen (press browser step) /= ServiceDecisionsScreen) phaseA
+          && serviceBrowserKey help (Vty.KChar 'd') [] browser == Nothing),
+      ("the decision heads keep the manager observation order of the collection",
+        map snd keys == ["decision_9", "decision_3"] && all ((== C.OverviewDecision) . fst) keys),
+      ("a second head of one run or a repeated decision refuses the collection",
+        S.decodeDecisionHeads [decisionValue, put "id" (String "decision_4") decisionValue] == Left C.InvalidResponse
+          && S.decodeDecisionHeads [decisionValue, decisionValue] == Left C.InvalidResponse),
+      ("a person-routed ask is a question decision with its answer type, addressee and prompt",
+        all (`elem` detailsOf "decision_9") ["Run: run_7", "Kind: question", "Answer type: text", "Addressee: person model:fixed-point",
+          "Prompt: Name the fixed point."]),
+      ("a person-routed text ask takes the typed text of the existing simple code",
+        fmap (\view -> S.answerValue view "forty-two") (listToMaybe heads) == Just (Right (String "forty-two"))
+          && fmap (\view -> S.answerValue view "no") (listToMaybe (drop 1 heads)) == Just (Right (Bool False))),
+      ("Enter on a head opens the run of the decision with its profile",
+        S.decisionsOpen heads (C.OverviewDecision, "decision_9") == S.OpenRun "run_7" "profile_main"
+          && case S.decisionsOpen heads (C.OverviewDecision, "decision_absent") of S.OpenNothing _ -> True; _ -> False),
+      ("Esc on a run opened from the manager decisions returns to the decisions, and from the overview to the overview",
+        fmap modelScreen (serviceLeave liveModel) == Just ServiceDecisionsScreen
+          && fmap modelScreen (serviceLeave overviewLive) == Just ServiceOverviewScreen),
+      ("the live monitor of a run opened from the manager decisions names Esc DECISIONS",
+        "Esc DECISIONS" `T.isInfixOf` liveFrame && not ("Esc OVERVIEW" `T.isInfixOf` liveFrame)),
+      ("the decisions status counts the pending heads and keeps a stale mark",
+        current == "Decisions: current; pending heads: 2"
+          && "Decisions: stale (TransportUnavailable); the last complete heads are retained" `T.isPrefixOf` S.decisionsStatus (Just "TransportUnavailable") (Just rows)
+          && S.decisionsStatus Nothing Nothing == "Decisions: not read"),
+      ("the decisions view at (80,24) lists the heads beside the details of the first head",
+        all (`T.isInfixOf` wide) ["Manager decisions", "Decisions: current; pending heads: 2", "> question  run run_7",
+          "Answer type: text", "Enter OPEN RUN"]),
+      ("the service workflow browser names D DECISIONS",
+        "D DECISIONS" `T.isInfixOf` render (100,30) ((emptyPresentation browser) {presentationService = True, presentationNoColor = True}))
+    ]
 
 -- | The drafts by identity, Esc on the live monitor and the request
 -- screen, and the screens that an installed read of the selection replaces.
@@ -2369,15 +2436,16 @@ liveDeliveryTests render profile = do
         routed ["/v1/requests/req_1"] == [L.OverviewFetch, L.RequestFetch]),
       ("a request invalidation of another request invalidates only the overview",
         routed ["/v1/requests/req_2"] == [L.OverviewFetch]),
-      ("a snapshot or control invalidation of the selected run invalidates the overview and the composite read",
-        routed ["/v1/runs/run_1/snapshot"] == [L.OverviewFetch, L.RequestFetch]
-          && routed ["/v1/runs/run_1/control"] == [L.OverviewFetch, L.RequestFetch]),
-      ("a snapshot, output or export invalidation of another run invalidates the overview, which shows its runtime status",
-        all (\resource -> routed [resource] == [L.OverviewFetch])
+      ("a snapshot or control invalidation of the selected run invalidates the overview, the composite read and the decision heads",
+        routed ["/v1/runs/run_1/snapshot"] == [L.OverviewFetch, L.RequestFetch, L.DecisionsFetch]
+          && routed ["/v1/runs/run_1/control"] == [L.OverviewFetch, L.RequestFetch, L.DecisionsFetch]),
+      ("a snapshot, output or export invalidation of another run invalidates the overview, which shows its runtime status, and the decision heads",
+        all (\resource -> routed [resource] == [L.OverviewFetch, L.DecisionsFetch])
           ["/v1/runs/run_2/snapshot", "/v1/runs/run_2/outputs", "/v1/runs/run_2/exports", "/v1/runs/run_2"]),
-      ("a resource below a preparation, request or decision of another request invalidates the overview",
-        all (\resource -> routed [resource] == [L.OverviewFetch])
-          ["/v1/preparations/prep_2/draft", "/v1/requests/req_2/history", "/v1/decisions/dec_2/answer"]),
+      ("a resource below a preparation or request of another request invalidates only the overview",
+        all (\resource -> routed [resource] == [L.OverviewFetch]) ["/v1/preparations/prep_2/draft", "/v1/requests/req_2/history"]),
+      ("a decision or a resource below it invalidates the overview and the decision heads",
+        all (\resource -> routed [resource] == [L.OverviewFetch, L.DecisionsFetch]) ["/v1/decisions/dec_2", "/v1/decisions/dec_2/answer"]),
       ("a collection resource without a member identifier is no overview member",
         L.OverviewFetch `notElem` routed ["/v1/runs"] && L.OverviewFetch `notElem` routed ["/v1/runs/"]
           && null (routed ["/v1/decisions"])),
@@ -2388,7 +2456,7 @@ liveDeliveryTests render profile = do
       ("the invalidated set holds each resource once and sets its overflow mark beyond its bound",
         L.invalidatedResources (noted ["/v1/requests/a", "/v1/requests/a"]) == Set.fromList ["/v1/requests/a"]
           && L.invalidatedOverflow overflowing && Set.size (L.invalidatedResources overflowing) == L.invalidatedBound
-          && L.invalidatedFetches [] overflowing == [L.OverviewFetch, L.RequestFetch]),
+          && L.invalidatedFetches [] overflowing == [L.OverviewFetch, L.RequestFetch, L.DecisionsFetch]),
       ("an invalidation of an idle read starts one fetch, which waits for the read lane",
         L.fetchesWaiting f1 == [(L.OverviewFetch, g0)] && C.refreshFlights r1 == Map.fromList [(L.OverviewFetch, C.Flight g0 False)]),
       ("no fetch starts while another read holds the read ticket, and a read that may not start keeps waiting",
@@ -2412,14 +2480,14 @@ liveDeliveryTests render profile = do
       ("a fetch whose read lost the read ticket without a completion waits again at the front",
         L.fetchesWaiting abandoned == [(L.OverviewFetch, g0)] && isNothing (L.fetchesReading abandoned)
           && L.fetchAbandoned (reading 5) f2 == f2),
-      ("a resnapshot advances the fetch generation and fetches both reads again after the fetch in flight",
-        C.refreshGeneration rs == g1 && L.fetchesWaiting fs == [(L.OverviewFetch, g1), (L.RequestFetch, g1)]
+      ("a resnapshot advances the fetch generation and fetches every read again after the fetch in flight",
+        C.refreshGeneration rs == g1 && L.fetchesWaiting fs == [(L.OverviewFetch, g1), (L.RequestFetch, g1), (L.DecisionsFetch, g1)]
           && L.fetchesReading fs == Just (5, L.OverviewFetch, g0) && isNothing (L.takeFetch (const True) idleLane fs)),
       ("an overview fetch from before the resnapshot completes without installing its old cursor",
         fmap (\(install, _, fetches) -> (install, L.fetchesReading fetches, L.fetchesWaiting fetches)) completedBefore
-          == Just (False, Nothing, [(L.OverviewFetch, g1), (L.RequestFetch, g1)])),
-      ("the overview fetch of the resnapshot installs and leaves the composite fetch waiting",
-        fmap (\(install, _, fetches) -> (install, L.fetchesWaiting fetches)) completedAfter == Just (True, [(L.RequestFetch, g1)])),
+          == Just (False, Nothing, [(L.OverviewFetch, g1), (L.RequestFetch, g1), (L.DecisionsFetch, g1)])),
+      ("the overview fetch of the resnapshot installs and leaves the composite and decision fetches waiting",
+        fmap (\(install, _, fetches) -> (install, L.fetchesWaiting fetches)) completedAfter == Just (True, [(L.RequestFetch, g1), (L.DecisionsFetch, g1)])),
       ("a refused overview read is read again after the backoff of the client, which doubles up to its limit",
         L.retryDue retry1 == Just (addUTCTime 1 now)
           && not (L.overviewRetryDue (Just retry1) now)

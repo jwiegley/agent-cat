@@ -206,8 +206,10 @@ decision at their head by the run identifier, with no request, so a run
 without a request of this session opens. A row opens only while the command
 lane is idle, and otherwise the status line states that a command is in
 progress. `Esc` on the live monitor, on the question and recovery heads, and
-on an idle request screen returns to the overview and sends nothing
-(`Agentic.Tui.Model.serviceLeave`). The selection and its observation stay,
+on an idle request screen returns to the service list view that the operator
+last used, the overview or the Manager decisions view, and sends nothing
+(`Agentic.Tui.Model.serviceLeave` and `modelServiceList`). The footer of the
+live monitor names that view as `Esc OVERVIEW` or `Esc DECISIONS`. The selection and its observation stay,
 so the reads that confirm a command in progress continue, and the run
 continues at the manager. An installed read of the selection never replaces
 the overview, a browser or the help (`serviceShowsSelection`). `Enter` on the
@@ -220,6 +222,36 @@ client started, and `Enter` on the row of such a run shows its live monitor.
 The tui-overview mode of `manager/test/service_http.py` runs two runs at once
 with two execution reservations, queues a third request behind them, and
 opens both runs after a restart of the frontend.
+
+`D` opens the Manager decisions view from the workflow browser. `Tab` and the
+other browser keys keep their behavior, and `Esc` returns from the view to the
+workflow browser. The view reads the complete page set of `/v1/decisions`
+without `runId` (`Agentic.Tui.Service.loadDecisions`), which lists the
+pending decision head of each run of the authorized profiles in manager
+observation order. `decodeDecisionHeads` decodes each item with the decision
+decoder and refuses a collection that names one decision or one run twice.
+`decisionRows` keeps the order of the collection and does not sort it. Each
+row shows the kind and the run of the head in the list, and the details show
+the decision, the run, the kind, the state, the occurrence and, for a
+question, the answer type, the addressee and the prompt. An ask that the
+reviewed policy field `personAnswers` routes to the person is a question
+decision whose addressee names the person, for example `person
+model:fixed-point`, so it appears in the view like every other pending head.
+The overview shows the same detail lines for its decision rows. `Up` and
+`Down` select a row, and the application state keeps the selected row by its
+identity. `Enter` opens the run of the selected head by its identifier with
+the profile of the decision (`decisionsOpen`), as a decision row of the
+overview does, and the live monitor shows the question head of that run. The
+answer editor converts the typed text with the existing simple codes of
+`Agentic.Tui.Person.personAnswerValue`, and `Ctrl-D` sends it to that decision
+with the decision observation as `If-Match`. `Esc` on the live monitor
+returns to the Manager decisions view. Opening the view starts a read of the
+decision heads through live delivery, and live delivery keeps them current
+while the view is shown. `g` reads them again. A declared refusal keeps the
+last complete heads and marks them stale with the refusal code, for example
+`Decisions: stale (TransportUnavailable)`. The status line above the list
+states the number of pending heads, for example `Decisions: current; pending
+heads: 2`.
 
 In the input editor of a request, `Ctrl-D` sends the editor text as a
 literal. `Ctrl-T` captures the exact editor text as raw UTF-8 bytes instead.
@@ -305,6 +337,18 @@ and the monitor shows the `rejected-stale` acknowledgement without a resend
 offer or a second send. A digit without an offered target is refused locally,
 and the mode checks the redirect commands in the coordination database.
 
+The tui-decisions mode of `manager/test/service_http.py` answers asks that
+the policy field `personAnswers` routes to the person through the Manager
+decisions view. It configures two profiles with the fixture of the
+person-answers mode, and the harness starts one prompt-source run of each.
+Without a key press, the view lists the two pending heads in the order of
+`GET /v1/decisions`, each a `text` ask addressed to `person
+model:fixed-point`. `Enter` on the second head opens its run, the typed answer
+completes that run with the typed text as its only recorded answer, and the
+other head stays pending. `Esc` returns to the view, which then lists only the
+other head. The frontend answers that head in the same way, and the view then
+lists no pending head.
+
 The application state keeps the text drafts by identity
 (`Agentic.Tui.ServiceLane.Drafts`): the input editor text of each request and
 input, and the answer text of each decision of each run. An editor shows the
@@ -325,7 +369,7 @@ invalidation in a set of at most 1024 resources (`Invalidated`) and records
 the delivery state. It then writes one `ServiceWakeup` event to the Brick
 channel unless a wakeup is pending, so a full channel never drops an
 invalidation. A resource beyond the bound sets the overflow mark of the set,
-which invalidates both reads. The handler of the wakeup takes the set and the
+which invalidates every read. The handler of the wakeup takes the set and the
 delivery state, and `Agentic.Tui.ServiceLane.invalidatedFetches` routes the
 resources to the reads that read them. An invalidation of an overview member,
 `/v1/requests/{id}`, `/v1/preparations/{id}`, `/v1/runs/{id}` or
@@ -335,7 +379,10 @@ overview. The manager reports a change of the runtime status of a run as
 invalidation reads the overview again. An invalidation of a resource
 that the composite read of the selected request reads
 (`Agentic.Tui.Service.compositeResources`), or of a resource below or above
-one of them, invalidates the composite read. The refresh coordinator of the
+one of them, invalidates the composite read. An invalidation of a run or a
+decision, or of a resource below one, invalidates the decision heads of the
+Manager decisions view, because a new head, an answered head and the end of a
+run change them. The refresh coordinator of the
 session decides each fetch, so each read has at most one fetch in flight and
 invalidations during that fetch give exactly one later fetch. An invalidation
 of a read whose fetch waits for the read lane changes nothing. `Fetches` holds
@@ -344,8 +391,9 @@ through the single-flight read lane like any other read, under the rules of
 automatic refresh: no fetch starts during a preparation or a send, after an
 internal fault, or while a deferred key pauses refresh. A mutation key or an
 exact resend that ends the read of a fetch makes that fetch wait again. The
-overview is fetched while its view is shown. An invalidation of the overview
-while the view is hidden leaves its fetch waiting until the view opens. A fetch of the composite read
+overview is fetched while its view is shown, and the decision heads are
+fetched while the Manager decisions view is shown. An invalidation of either
+read while its view is hidden leaves its fetch waiting until the view opens. A fetch of the composite read
 without a selected request reads nothing. A result of an earlier generation
 does not install. The header row above the identity row shows the delivery
 state at its right end: `delivery connecting`, `delivery live`, `delivery
@@ -372,8 +420,8 @@ connection that delivers returns the state to `delivery live`. A 410 refusal
 of the stream or of a poll ends the worker. The frontend then makes a resnapshot
 (`Agentic.Tui.ServiceLane.resnapshotFetches`): the refresh coordinator
 advances its generation, so a fetch in flight completes without installing,
-and an overview read from before the refusal installs no old cursor. Both
-reads are fetched again in the new generation. Only an overview read that
+and an overview read from before the refusal installs no old cursor. Every
+read is fetched again in the new generation. Only an overview read that
 started in the current generation starts a new worker from its cursor
 (`overviewStartsStream`). The session generation does not change, so the
 other worker results of the session stay admitted. When an overview read of

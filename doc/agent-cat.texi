@@ -3378,14 +3378,44 @@ identifier, and a decision row selects the run of the decision.  The frontend
 reads a selected run by its identifier, so a run that no request of this
 session created opens.  A row opens only while no manager command is in
 progress.  @key{ESC} on the live monitor, on a question or recovery head, and on
-the request screen while no command is in progress returns to the overview and
-sends nothing.  The selection stays, so the run continues at the manager, and
-@key{RET} on its row shows it again.  @key{RET} on the row of another run
-selects that run, and the earlier run continues at the manager.  The workflow
-browser creates a new request while earlier runs continue.  A frontend that
-starts again reads the overview, which lists the active runs that an earlier
-session or another client started, and @key{RET} on the row of such a run
-shows its live monitor.
+the request screen while no command is in progress returns to the overview, or
+to the Manager decisions view when the operator last used that view, and
+sends nothing.  The footer of the live monitor names that view as
+@samp{Esc OVERVIEW} or @samp{Esc DECISIONS}.  The selection stays, so the run
+continues at the manager, and @key{RET} on its row shows it again.
+@key{RET} on the row of another run selects that run, and the earlier run
+continues at the manager.  The workflow browser creates a new request while
+earlier runs continue.  A frontend that starts again reads the overview, which
+lists the active runs that an earlier session or another client started, and
+@key{RET} on the row of such a run shows its live monitor.
+
+@kbd{D} opens the Manager decisions view from the workflow browser.
+@key{TAB} and the other browser keys keep their behavior, and @key{ESC}
+returns from the view to the workflow browser.  The view reads
+@code{/v1/decisions} without @code{runId}, which lists the pending decision
+head of each run of the authorized profiles in manager observation order, and
+it keeps that order.  A collection that names one decision or one run twice
+is refused.  Each row shows the kind and the run of the head, and the details
+show the decision, the run, the kind, the state, the occurrence, and, for a
+question, the answer type, the addressee, and the prompt.  An ask that the
+reviewed policy field @code{personAnswers} routes to the person is a question
+decision whose addressee names the person, for example
+@samp{person model:fixed-point}, so it appears in the view like every other
+pending head.  The decision rows of the overview show the same details.
+@key{UP} and @key{DOWN} select a row, and the frontend keeps the selected row
+by its identity.  @key{RET} opens the run of the selected head by its
+identifier, and the live monitor shows the question head of that run.  The
+answer editor converts the typed text with the simple answer codes:
+@code{text} takes the text, @code{flag} takes yes, no, true, or false,
+@code{receipt} takes no text, and @code{verdict} and structured codes take
+JSON.  @kbd{C-d} sends the answer to that decision.  @key{ESC} on the live
+monitor returns to the Manager decisions view.  The frontend reads the
+decision heads when the view opens and keeps them current through the manager
+event stream while the view is shown.  @kbd{g} reads them again.  A declared
+refusal keeps the last complete heads and marks them stale with the refusal
+code, for example @samp{Decisions: stale (TransportUnavailable)}.  The status
+line above the list states the number of pending heads, for example
+@samp{Decisions: current; pending heads: 2}.
 
 The frontend keeps the text drafts by identity: the input text of each request
 and input, and the answer text of each decision.  A draft survives a refresh, a
@@ -3404,8 +3434,11 @@ change of the runtime status of a run as the snapshot resource of that run,
 so the overview shows the new runtime status.  When the view is hidden, that read waits and runs when the view
 opens.  An invalidation of a resource that the composite read of the selected
 request reads, such as the request, its run snapshot, or the receipt of a
-retained command, causes that read to be read again.  Each of the two reads
-has at most one fetch in progress, and invalidations that arrive during it
+retained command, causes that read to be read again.  An invalidation of a
+run or a decision, or of a resource below one, causes the decision heads to be
+read again while the Manager decisions view is shown, and that read waits
+while the view is hidden.  Each of the three reads has at most one fetch in
+progress, and invalidations that arrive during it
 cause exactly one later fetch.  These reads use the single-flight read lane
 under the rules of automatic refresh, so no read starts during a preparation
 or a send, after an internal fault, or while a deferred key pauses refresh.
@@ -3425,7 +3458,8 @@ tries the stream again after the delay, and a stream that delivers returns
 the state to @samp{delivery live}.  While the frontend polls or is
 disconnected, it reads the selected request every second.  When the manager
 refuses the cursor with status 410, the frontend discards the results of the
-reads in progress, reads the overview and the selected request again, and
+reads in progress, reads the overview, the selected request, and the decision
+heads again, and
 follows the stream from the cursor of the new overview.  When the manager refuses that overview read, or
 an overview read that follows an invalidation, the frontend reads the overview
 again after a delay of one second that doubles up to thirty seconds, until an

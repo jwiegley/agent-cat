@@ -187,6 +187,10 @@ data Presentation = Presentation
     -- | The rows of the installed manager overview, the selected row and the
     -- overview status line, which the manager overview view shows.
     presentationServiceOverview :: !OverviewView,
+    -- | The rows of the installed pending decision heads in manager
+    -- observation order, the selected row and the decisions status line,
+    -- which the manager decisions view shows.
+    presentationServiceDecisions :: !OverviewView,
     presentationConfig :: !(Maybe TuiConfig),
     presentationPersonPrompt :: !(Maybe PersonPrompt),
     presentationPersonSubmitted :: !Bool,
@@ -206,7 +210,8 @@ data Presentation = Presentation
     presentationSpinner :: !Text
   }
 
--- | The display state of the manager overview view.
+-- | The display state of the manager overview view and of the manager
+-- decisions view.
 data OverviewView = OverviewView
   { overviewViewRows :: ![Service.OverviewRow], overviewViewCursor :: !Int, overviewViewStatus :: !Text }
 
@@ -250,6 +255,7 @@ emptyPresentation model =
       presentationServiceSavable = False,
       presentationServiceKeyOutcome = Nothing,
       presentationServiceOverview = OverviewView [] 0 (Service.overviewStatus Nothing Nothing),
+      presentationServiceDecisions = OverviewView [] 0 (Service.decisionsStatus Nothing Nothing),
       presentationConfig = Nothing,
       presentationPersonPrompt = Nothing,
       presentationPersonSubmitted = False,
@@ -387,6 +393,7 @@ headerContext :: Presentation -> Widget Name
 headerContext presentation = case modelScreen model of
   BrowserScreen | presentationService presentation -> displayText "Manager workflows"
   ServiceOverviewScreen -> displayText "Manager overview"
+  ServiceDecisionsScreen -> displayText "Manager decisions"
   BrowserScreen -> tabs (modelTab model)
   LiveScreen _ -> hBox [withAttr (attrName "title") (displayText (liveContext presentation))]
   LaunchingScreen _ -> displayText "Starting runner…"
@@ -460,7 +467,8 @@ screenView presentation width totalHeight mainHeight = case modelScreen model of
   InitialLoading -> loadingView presentation "Loading workflows, stored runs, and offline routing..." "q cancels"
   BrowserScreen -> browserView presentation width totalHeight
   ServiceProfilesScreen _ _ -> browserView presentation width totalHeight
-  ServiceOverviewScreen -> serviceOverviewView presentation width totalHeight
+  ServiceOverviewScreen -> serviceRowsView "Overview" "Select an overview row." (presentationServiceOverview presentation) presentation width totalHeight
+  ServiceDecisionsScreen -> serviceRowsView "Decisions" "Select a decision row." (presentationServiceDecisions presentation) presentation width totalHeight
   ServiceRequestScreen request -> serviceRequestView presentation request
   ServiceReviewScreen preparation tag -> serviceReviewView presentation preparation tag width totalHeight mainHeight
   ServiceCommandScreen message -> pane "Manager command" (viewport FailureViewport Vertical (displayTextWrap message))
@@ -581,13 +589,14 @@ serviceReviewView presentation preparation tag width _ mainHeight
         [ "Lineage: " <> Manager.reviewLineageOperation lineage <> " of run " <> Manager.reviewLineageParent lineage,
           "Lineage edits:", jsonTextValue (toJSON (Manager.reviewLineageEdits lineage)) ]) (Manager.reviewLineage review)
 
--- | The manager overview: the status line, the list of overview rows and the
--- detail lines of the selected row. A wide terminal shows the list beside the
--- details. A narrow terminal shows the focused pane only.
-serviceOverviewView :: Presentation -> Int -> Int -> Widget Name
-serviceOverviewView presentation width totalHeight = vBox [displayTextWrap (overviewViewStatus overview), body]
+-- | The manager overview or the manager decisions, given the title of the
+-- list pane, the text of an empty detail pane and the display state: the
+-- status line, the list of rows and the detail lines of the selected row. A
+-- wide terminal shows the list beside the details. A narrow terminal shows
+-- the focused pane only.
+serviceRowsView :: Text -> Text -> OverviewView -> Presentation -> Int -> Int -> Widget Name
+serviceRowsView title unselected overview presentation width totalHeight = vBox [displayTextWrap (overviewViewStatus overview), body]
   where
-    overview = presentationServiceOverview presentation
     rows = overviewViewRows overview
     cursor = overviewViewCursor overview
     wide = width >= 72 && totalHeight >= 16
@@ -597,7 +606,7 @@ serviceOverviewView presentation width totalHeight = vBox [displayTextWrap (over
       | wide = hBox [hLimit listWidth listPane, muted vBorder, detailPane]
       | primaryFocused = listPane
       | otherwise = detailPane
-    listPane = pane ("Overview" <> focusMark primaryFocused) $ viewport BrowserListViewport Vertical $
+    listPane = pane (title <> focusMark primaryFocused) $ viewport BrowserListViewport Vertical $
       if null rows then displayTextWrap "No rows are visible." else vBox (zipWith entry [0 ..] rows)
     entry index row =
       let selected = index == cursor
@@ -605,7 +614,7 @@ serviceOverviewView presentation width totalHeight = vBox [displayTextWrap (over
           styled = if selected then withAttr (attrName "selected") (padRight Max line) else line
        in if selected && primaryFocused then visible styled else styled
     detailPane = pane ("Details" <> focusMark (not primaryFocused)) $ viewport BrowserDetailViewport Vertical $
-      maybe (displayText "Select an overview row.") (vBox . map displayTextWrap . Service.overviewRowDetails) (atMay rows cursor)
+      maybe (displayText unselected) (vBox . map displayTextWrap . Service.overviewRowDetails) (atMay rows cursor)
 
 loadingView :: Presentation -> Text -> Text -> Widget Name
 loadingView presentation message action = padLeftRight 2 (vBox [displayText "", withAttr (attrName "title") (displayTextWrap (presentationSpinner presentation <> "  " <> message)), muted (displayText action)])
@@ -1079,9 +1088,12 @@ keyHelpLines :: Presentation -> [Text]
 keyHelpLines presentation = case modelScreen model of
   BrowserScreen | presentationService presentation ->
     ["Up/Down select"] <> ["Enter creates a manager request" | not faulted]
-      <> ["Right/Left focus details/list", "h workflow help", "O manager overview", "Esc profiles", "E manager endpoints", "q detach", "? or Esc close this help"]
+      <> ["Right/Left focus details/list", "h workflow help", "O manager overview", "D manager decisions", "Esc profiles", "E manager endpoints", "q detach",
+        "? or Esc close this help"]
   ServiceOverviewScreen -> ["Up/Down select", "Enter opens the selected request or run", "Right/Left focus details/list", "g reads the overview again", "Esc workflows",
     "E manager endpoints", "q detach", "? or Esc close this help"]
+  ServiceDecisionsScreen -> ["Up/Down select", "Enter opens the run at the selected decision head", "Right/Left focus details/list",
+    "g reads the decision heads again", "Esc workflows", "E manager endpoints", "q detach", "? or Esc close this help"]
   BrowserScreen ->
     [ "Up/Down       select",
       "Right/Left    focus details/list",
@@ -1246,16 +1258,16 @@ footerItems presentation width height
   CancelLayer -> ["n/Esc KEEP RUNNING", "y CANCEL RUN"]
   PersonLayer
     | presentationService presentation, presentationPersonSubmitted presentation -> ["WAITING FOR THE MANAGER EFFECT", "Ctrl-C DETACH"]
-    | presentationService presentation -> ["Ctrl-D SEND ANSWER", "Enter newline", "PgUp/PgDn prompt", "Esc OVERVIEW", "Ctrl-C DETACH"]
+    | presentationService presentation -> ["Ctrl-D SEND ANSWER", "Enter newline", "PgUp/PgDn prompt", serviceBackLabel presentation, "Ctrl-C DETACH"]
     | Nothing <- presentationPersonPrompt presentation -> ["Esc CANCEL RUN", "LOADING VERIFIED QUESTION"]
     | presentationPersonSubmitted presentation -> ["Esc CANCEL RUN", "WAITING FOR DELIVERY"]
     | otherwise -> ["Esc CANCEL RUN", "Ctrl-D SUBMIT", "Enter newline", "PgUp/PgDn prompt"]
   RecoveryLayer
     | presentationService presentation, offered@(_ : _) <- presentationServiceRecoveryOffers presentation ->
         [recoveryKeyText choice <> " " <> T.toUpper choice | choice <- offered] <> presentationServiceRunKeys presentation
-          <> ["d DETAILS", "g REFRESH", "Esc OVERVIEW", "? KEYS", "q DETACH"]
+          <> ["d DETAILS", "g REFRESH", serviceBackLabel presentation, "? KEYS", "q DETACH"]
     | presentationService presentation -> ["NO RECOVERY OFFERED"] <> presentationServiceRunKeys presentation
-        <> ["d DETAILS", "g REFRESH", "Esc OVERVIEW", "? KEYS", "q DETACH"]
+        <> ["d DETAILS", "g REFRESH", serviceBackLabel presentation, "? KEYS", "q DETACH"]
     | otherwise -> recoveryItems presentation <> ["c CANCEL RUN", "PgUp/PgDn scroll"]
   SteerLayer -> ["Esc CLOSE", "Ctrl-D SEND", "Enter newline"]
   SaveLayer -> ["Esc CANCEL", "Ctrl-D SAVE"] <> ["PgUp/PgDn ERROR" | Just _ <- [presentationSaveError presentation]]
@@ -1284,8 +1296,9 @@ footerItems presentation width height
       InitialLoading -> ["q/Esc QUIT"]
       ServiceProfilesScreen _ _ -> ["Enter SELECT", "r REFRESH", browserPaneHint, "? KEYS", "q DETACH", "E ENDPOINTS"]
       ServiceOverviewScreen -> ["Enter OPEN", "g REFRESH", "Esc WORKFLOWS", browserPaneHint, "? KEYS", "q DETACH", "E ENDPOINTS"]
+      ServiceDecisionsScreen -> ["Enter OPEN RUN", "g REFRESH", "Esc WORKFLOWS", browserPaneHint, "? KEYS", "q DETACH", "E ENDPOINTS"]
       ServiceRequestScreen request ->
-        ["g REFRESH", "q DETACH"] <> ["Esc OVERVIEW" | presentationServiceMutation presentation == Nothing]
+        ["g REFRESH", "q DETACH"] <> [serviceBackLabel presentation | presentationServiceMutation presentation == Nothing]
           <> (if Manager.draftPhase request == "draft" && presentationServiceMutation presentation == Nothing
                 && not (presentationServiceFault presentation)
               then ["e EDIT INPUTS"] <> ["Enter REQUEST REVIEW" | Service.requestReady request] else [])
@@ -1298,7 +1311,7 @@ footerItems presentation width height
       ServiceCommandScreen _ -> ["g REFRESH", "q DETACH"] <>
         ["x EXACT RESEND" | Just (_,_,True) <- [presentationServiceMutation presentation]]
       BrowserScreen
-        | presentationService presentation -> ["h HELP", "O OVERVIEW", "Esc PROFILES", browserPaneHint, "? KEYS", "q DETACH"]
+        | presentationService presentation -> ["h HELP", "O OVERVIEW", "D DECISIONS", "Esc PROFILES", browserPaneHint, "? KEYS", "q DETACH"]
             <> ["Enter NEW REQUEST" | presentationServiceMutation presentation == Nothing, not (presentationServiceFault presentation)]
             <> ["E ENDPOINTS"]
         | presentationRunning presentation -> ["Esc REATTACH", "c CANCEL RUN", "Tab SECTION", "? KEYS", browserPaneHint]
@@ -1315,9 +1328,9 @@ footerItems presentation width height
       ConfirmScreen _ -> confirmItems False
       ProcessLoading _ -> ["Esc CANCEL STARTUP"]
       LaunchingScreen _ -> ["Esc DETACH", "c CANCEL RUN", "? KEYS"]
-      LiveScreen _ | presentationService presentation, compact -> ["q DETACH", "Esc OVERVIEW"] <> presentationServiceRunKeys presentation
+      LiveScreen _ | presentationService presentation, compact -> ["q DETACH", serviceBackLabel presentation] <> presentationServiceRunKeys presentation
                        <> ["Tab PANE", "d DETAILS", "? KEYS"] <> saveItem
-                   | presentationService presentation -> ["q DETACH", "Esc OVERVIEW"] <> presentationServiceRunKeys presentation
+                   | presentationService presentation -> ["q DETACH", serviceBackLabel presentation] <> presentationServiceRunKeys presentation
                        <> saveItem <> ["g REFRESH", "d DETAILS", compactNavigation, "? KEYS"]
       LiveScreen _ | compact ->
         ["Esc " <> if presentationRunning presentation then "DETACH" else "RUNS", "Tab PANE", "d DETAILS", "? KEYS"]
@@ -1379,6 +1392,13 @@ controlHintLine presentation = case modelSnapshot model of
         | dispatchOpen dispatch -> T.unwords [shown index <> " " <> target | (index, target) <- zip [1 :: Int .. 9] (take 9 (dispatchTargets dispatch))]
       _ -> ""
 
+-- | The footer label of Esc on the live monitor and the request screen of
+-- the service frontend: the service list view that Esc returns to.
+serviceBackLabel :: Presentation -> Text
+serviceBackLabel presentation = case modelServiceList (presentationModel presentation) of
+  OverviewList -> "Esc OVERVIEW"
+  DecisionsList -> "Esc DECISIONS"
+
 recoveryKeyText :: Text -> Text
 recoveryKeyText "retry" = "r"
 recoveryKeyText "failover" = "f"
@@ -1391,6 +1411,7 @@ screenTitle = \case
   BrowserScreen -> "browser"
   ServiceProfilesScreen _ _ -> "manager profiles"
   ServiceOverviewScreen -> "manager overview"
+  ServiceDecisionsScreen -> "manager decisions"
   ServiceRequestScreen _ -> "manager request"
   ServiceReviewScreen {} -> "exact manager review"
   ServiceCommandScreen _ -> "manager command"

@@ -5061,6 +5061,29 @@ From acat-jyw: shareT l (shareT l' t) unspecified; Scope sets the precedent (inn
 
 Purity review: 89/120 audited compat names have ZERO consumers (constant-graph, not grep) — pure deletion (~500 lines). The 31 live aliases (PMonoid 136 uses, CSemiring 70, PMod 63...) keep a private vocabulary over Mathlib: rewrite binders to Monoid/CommMonoid/CommSemiring/Module/kstar/<=; same pass makes CompleteCSemiring a mixin [CommSemiring S], killing the non-defeq Semiring diamond (probe P4) and the Std.IdempotentOp workarounds.
 
+* TODO [#D] Resolve the non-blocking fess findings of subtask PC24    :review:
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-dc6b
+:LABELS:   ["review","workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-01 Thu 04:52]
+:MODIFIED: [2026-10-01 Thu 04:52]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess audit fess/pc-PC24-r1.md (2026-10-01) on subtask PC24 (WM-034 Decisions view and person-routed asks).
+
+1. (medium) tui/src/Agentic/Tui/App.hs (ServiceDecisionsReady handler in handleServiceResultCore) compared with tui/src/Agentic/Tui/ServiceLane.hs OverviewRetry: a refused live read of the decision heads marks the heads stale and schedules no retry. After a 410 no stream runs, so the view can stay stale until another run or decision event arrives or the operator presses g. Fix: give DecisionsFetch the backoff retry model of the overview (OverviewRetry and retryDue), or state the limit in tui/README.md and doc/agent-cat.texi.
+2. (low) tui/src/Agentic/Tui/App.hs pumpServiceFetches and tui/src/Agentic/Tui/Service.hs decisionsStatus: a hidden view does not read. A reopened view draws the last installed heads with the status "Decisions: current" until the new read installs, so rows can name heads that were answered. Enter still opens the run by its identifier. Fix: show a reading or stale status for a reopened view until its first read installs.
+3. (low) tui/src/Agentic/Tui/Model.hs serviceLeave and modelServiceList: Esc returns to the list view used last, not always the view that opened the current selection. Fix: record the originating list view with the selection.
+4. (low) tui/src/Agentic/Tui/App.hs openServiceRun (invalid run id branch): a decision row with a run id that is not valid shows "overview row not opened". Fix: choose the refusal prefix from the ServiceList argument.
+5. (low) manager/test/service_http.py decisions_checks send_answer copies the deferral-and-resend key loop of an existing helper. Fix: factor the helper out and call it from decisions_checks.
+6. (low) tui/src/Agentic/Tui/Model.hs serviceShowsSelection comment: one line is much wider than the rest of the block. Fix: rewrap the comment.
+
 * DONE [#B] Migrate the algebra hierarchy to Mathlib
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -19033,7 +19056,7 @@ to an unapproved local launch.
 :LABELS:   ["p7","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-01 Thu 04:27]
+:MODIFIED: [2026-10-01 Thu 04:53]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-034
 :SOURCE_REPO: agent-cat
@@ -19210,6 +19233,13 @@ Local-mode behavior remains intact without a duplicated service runtime model.
     "author": "johnw",
     "text": "PC23 (dispatch-window and live redirect from the service TUI): digit keys 1 to 9 in the run monitor send a Redirect mutation to POST /v1/runs/{id}/control with the displayed control ETag and the occurrence and target of a redirect offer. A target that is not offered is refused locally with fixed text. The monitor shows the redirected effect or the runtime acknowledgement; a rejecting acknowledgement (rejected-stale, unsupported, failed) is now a final outcome of every run control with no resend offer, which changes the PC22 behavior. New mode tui-redirect: a live redirect of the held attempt reaches the spare candidate and the run completes, a dispatch-window redirect puts the chosen target first, a redirect during an effect is refused, and a rejected-stale redirect shows without a resend. Evidence scope (/Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/PC/PC23/impl-r1): Werror build, tui-model-test at N8, tui-redirect at N8, Phase A journey at N8, make -C doc check, all exit 0. Limitations: the frozen redirect body has no attempt field; tui/ci/tui.sh, ALLBUILD, the N=1 journey and the live-redirect and controls-routing modes were not run. Fess r1 non-blocking; findings in acat-0vo1. Package stays open.",
     "created_at": "2026-10-01T11:27:43Z"
+  },
+  {
+    "id": 498,
+    "issue_id": "acat-wm-034-3vqz",
+    "author": "johnw",
+    "text": "PC24 (Decisions view and person-routed asks): D on the service workflow browser (not Tab) opens a Manager decisions view that reads the full /v1/decisions page set without runId and lists the pending head of each run in manager observation order; a list that names one decision or one run twice is refused. Enter opens the run at the selected head, and Esc returns to the list view used last. A question decision shows its answer type, addressee (for example person model:fixed-point) and prompt. An ask that personAnswers routes to the person is answered with the simple codes of personAnswerValue. The new tui-decisions mode, on the person-answers fixture, answers a person-routed ask from the Decisions view and the run continues with the typed value. Evidence scope (/Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/PC/PC24/impl-r1): Werror build, tui-model-test at N8 (attempt 1 failed; fixed, model-test-2 exit 0), tui-decisions at N8 (four earlier attempts failed during development; final exit 0, and the fess audit reran it on the final code with exit 0), Phase A journey at N8, make -C doc check, all exit 0. Limitations: a refused decisions read has no backoff retry; Esc returns to the list view used last; tui/ci/tui.sh, ALLBUILD and the N=1 journey were not run. Fess r1 non-blocking; findings in acat-dc6b. Package stays open.",
+    "created_at": "2026-10-01T11:53:06Z"
   }
 ]
 #+end_src

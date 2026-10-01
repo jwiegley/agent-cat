@@ -54,8 +54,9 @@
 -- for its own profile, and no later session sends it. A failed connection
 -- keeps the active session and records its fixed reason.
 --
--- Live delivery keeps two reads current: the manager overview and the
--- composite read of the selected request ('FetchKey'). The event worker of
+-- Live delivery keeps three reads current: the manager overview, the
+-- composite read of the selected request and the pending decision heads of
+-- the manager decisions ('FetchKey'). The event worker of
 -- the session records each invalidated resource in a bounded set
 -- ('Invalidated') and wakes the frontend once. 'invalidatedFetches' routes
 -- the set to the reads that read an invalidated resource, and the refresh
@@ -1006,9 +1007,10 @@ shutdownNotices uncertain faulted =
   ["The frontend stopped manager operations after an internal frontend fault." | faulted]
     <> ["Manager command outcome may be uncertain. The manager run was not cancelled." | uncertain]
 
--- | A read that live delivery keeps current: the manager overview, or the
--- composite read of the selected request.
-data FetchKey = OverviewFetch | RequestFetch
+-- | A read that live delivery keeps current: the manager overview, the
+-- composite read of the selected request, or the pending decision heads of
+-- the manager decisions.
+data FetchKey = OverviewFetch | RequestFetch | DecisionsFetch
   deriving (Eq, Ord, Show, Enum, Bounded)
 
 -- | The state of live delivery of the session.
@@ -1193,17 +1195,21 @@ noteInvalidation resource invalidated@(Invalidated resources overflow)
 -- invalidates the overview. The composite read reads its resources and the
 -- resources below them, such as the snapshot and the controls of its run,
 -- so a resource invalidates it when one of the two resources is the other
--- or lies below it. An overflowing set invalidates both reads.
+-- or lies below it. The decision heads change with a decision, such as a
+-- new head or an answered head, and with a run, whose end leaves its queue,
+-- so a resource at or below a decision or a run invalidates them. An
+-- overflowing set invalidates every read.
 invalidatedFetches :: [Text] -> Invalidated -> [FetchKey]
 invalidatedFetches composite (Invalidated resources overflow)
   | overflow = [minBound .. maxBound]
   | otherwise =
-      [OverviewFetch | any member invalidated]
+      [OverviewFetch | any (member ["requests", "preparations", "runs", "decisions"]) invalidated]
         <> [RequestFetch | any (\resource -> any (related resource) composite) invalidated]
+        <> [DecisionsFetch | any (member ["runs", "decisions"]) invalidated]
   where
     invalidated = Set.toList resources
-    member resource = case T.splitOn "/" resource of
-      "" : "v1" : collection : ident : _ -> collection `elem` ["requests", "preparations", "runs", "decisions"] && not (T.null ident)
+    member collections resource = case T.splitOn "/" resource of
+      "" : "v1" : collection : ident : _ -> collection `elem` collections && not (T.null ident)
       _ -> False
     related one other = one == other || below one other || below other one
     below parent child = (parent <> "/") `T.isPrefixOf` child
@@ -1286,7 +1292,7 @@ fetchAbandoned lane fetches = case fetchesReading fetches of
 -- advances its generation, so a fetch still in flight completes without
 -- installing, and in particular an overview read from before the refusal
 -- installs no old cursor. The waiting fetches of the earlier generation are
--- dropped, and both reads are fetched again in the new generation. The
+-- dropped, and every read is fetched again in the new generation. The
 -- fetch in flight keeps the read ticket until it completes, so the new
 -- fetches start after it.
 resnapshotFetches :: C.Refresh FetchKey -> Fetches -> (C.Refresh FetchKey, Fetches)

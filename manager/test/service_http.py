@@ -457,9 +457,37 @@ TUI_CONTROLS = "tui-controls"
 # candidate keeps running. c and y then cancel the run.
 # Each step prints its own PASS line. It runs one manager lifetime.
 TUI_REDIRECT = "tui-redirect"
+# The tui-decisions mode answers asks that the policy field personAnswers
+# routes to the person through the Decisions view of the service TUI. It
+# configures profile_1 with the person-answers fixture of the person-answers
+# mode: --person-answer model:fixed-point routes the model ask of the
+# scripted prompt-source workflow to the person. It also configures
+# profile_2 with the same fixture. The manager has two execution
+# reservations, and each profile has its own resource key.
+# 1. The TUI selects profile_1, and D on the workflows browser opens the
+# Decisions view, which shows no pending head.
+# 2. The harness creates, enqueues and approves one prompt-source request of
+# each profile with its own credential. Each run then waits at its
+# person-routed ask.
+# Without a key press, the view must list the two pending heads in the order
+# of GET /v1/decisions of the harness, which is manager observation order.
+# Each row must name the answer type text and the addressee person
+# model:fixed-point.
+# 3. Down and Enter on the second head open the run of that decision at its
+# head, and the live monitor names Esc DECISIONS. The TUI types an answer and
+# sends it with Ctrl-D, which it presses again after a numbered deferral
+# during a page-set read. The run must succeed with the typed text as its only
+# recorded answer, and the adapter must receive no session/prompt.
+# 4. Esc returns to the Decisions view, which must list only the other head
+# without a key press. Enter opens its run, and the TUI answers it in the
+# same way, so that the run succeeds with its own typed text.
+# 5. Esc returns to the Decisions view, which must list no pending head.
+# Each step prints its own PASS line. It runs one manager lifetime.
+TUI_DECISIONS = "tui-decisions"
 TUI_MODES = {OVERVIEW: (["profile_1", "profile_2"], ["observe", "submit"]), INPUTS: (["profile_1"], ["observe", "submit", "control"]),
              TUI_CONTROLS: (["profile_1", "profile_steer", "profile_route"], ["observe", "submit", "control"]),
-             TUI_REDIRECT: (["profile_live", "profile_live_effect", "profile_live_stale"], ["observe", "submit", "control"])}
+             TUI_REDIRECT: (["profile_live", "profile_live_effect", "profile_live_stale"], ["observe", "submit", "control"]),
+             TUI_DECISIONS: (["profile_1", "profile_2"], ["observe", "submit", "control"])}
 tui_mode = sys.argv[5] if len(sys.argv) == 6 and sys.argv[5] in TUI_MODES else None
 # The tui-controls and tui-redirect modes configure the control fixture
 # profiles.
@@ -572,7 +600,7 @@ if tui_mode == OVERVIEW:
     configuration["profiles"][0]["resourceKeys"] = ["overview_one"]
     configuration["profiles"].append(dict(configuration["profiles"][0], id="profile_2",
                                           workspaceLabel="HTTPS second fixture", resourceKeys=["overview_two"]))
-if tui_mode in (INPUTS, TUI_CONTROLS, TUI_REDIRECT):
+if tui_mode in (INPUTS, TUI_CONTROLS, TUI_REDIRECT, TUI_DECISIONS):
     configuration["limits"]["executionReservations"] = 2
 # The restart quarantines the reservation of the lost run, or of a request
 # in review, with its execution slot and resource keys, until the operator
@@ -630,7 +658,8 @@ if control_profiles:
                 dict(scripted, id="profile_live_stale", workspaceLabel="HTTPS live stale fixture", targetLabel="Deterministic ACP hold",
                      targetArguments=["--engine", "acp", "--adapter", "hold-adapter", "--route", "primary=acp:hold-adapter",
                                       "--route", "spare=acp:hold-adapter"], environment=fixture_path)]
-if person_mode:
+# The tui-decisions mode configures the person-answers fixture too.
+if person_mode or tui_mode == TUI_DECISIONS:
     # The launcher relays its input to the stub adapter. It records its
     # launch and the method of each JSON-RPC request that it relays, so that
     # the record shows each engine turn as session/prompt.
@@ -667,6 +696,13 @@ if person_mode:
     configuration["profiles"].append(dict(
         configuration["profiles"][0], id="profile_plain", workspaceLabel="HTTPS plain fixture", targetLabel="Deterministic ACP model answers",
         targetArguments=["--engine", "acp", "--adapter", "person-adapter"]))
+# The tui-decisions mode runs two person-answer runs at once. Each of its two
+# person-answer profiles has its own resource key, so one run of each
+# profile holds one of the two execution reservations.
+if tui_mode == TUI_DECISIONS:
+    configuration["profiles"][0]["resourceKeys"] = ["decisions_one"]
+    configuration["profiles"].append(dict(configuration["profiles"][0], id="profile_2",
+                                          workspaceLabel="HTTPS second person fixture", resourceKeys=["decisions_two"]))
 CONTROL_PROFILES = [profile["id"] for profile in configuration["profiles"]] if control_profiles else []
 config = work / "configuration.json"
 config.write_text(json.dumps(configuration))
@@ -5079,6 +5115,198 @@ def tui_control_checks():
             (work / "server-0.exit").write_text(str(process.returncode) + "\n")
 
 
+def decisions_checks():
+    """The tui-decisions mode. See TUI_DECISIONS for the steps."""
+    harness = tui_fixture.harness
+    requests = work / "adapter-requests"
+    terminal = ("succeeded", "failed", "cancelled")
+
+    def save(session, name):
+        (work / ("tui-decisions-" + name + ".screen.txt")).write_text(session.screen.text())
+
+    def details(screen):
+        """The details column joined without separators, so that a long
+        identifier that wraps across rows stays one string."""
+        return "".join(line.split("\u2502", 1)[1].strip() for line in screen.splitlines() if "\u2502" in line).replace(" ", "")
+
+    def start(client, profile):
+        """Create, enqueue and approve one prompt-source request of the
+        profile through HTTP with the credential of the harness. Returns the
+        run, its pending decision head and its run store."""
+        before = set(work.glob("manager/runs/runs/*/runtime"))
+        status, catalogue, _ = request("/v1/workflows?profileId=" + profile, harness)
+        assert status == 200, ("decisions catalogue", profile, status)
+        workflow = next(item for item in catalogue["items"] if item["name"] == "prompt-source")
+        key = capabilities["authorityEpoch"] + "." + secrets.token_urlsafe(16)
+        body = {"workflowId": workflow["id"], "descriptorRevision": workflow["revision"],
+                "profileId": workflow["profileId"], "profileRevision": workflow["profileRevision"]}
+        status, created, raw = request("/v1/requests", harness | {"Content-Type": "application/json", "Idempotency-Key": key},
+                                       method="POST", payload=json.dumps(body, separators=(",", ":")).encode())
+        assert status == 201, ("decisions request creation", status, created.get("code"))
+        validate("Request", created, raw)
+        _, run = approve_mixed(created, workflow, client)
+        control, _, _ = client[1]("/v1/runs/" + run + "/control", "RunControl", lambda value: value["decisionHeadId"] is not None)
+        stores = sorted(set(work.glob("manager/runs/runs/*/runtime")) - before)
+        assert len(stores) == 1, ("decisions run stores", run, stores)
+        return run, control["decisionHeadId"], stores[0]
+
+    def focused(session, decision):
+        """Wait until the focused row of the Decisions view shows this
+        decision in its details. Returns the screen."""
+        deadline = time.monotonic() + 10
+        while True:
+            screen = session.screen.text()
+            if "Decision:" + decision in details(screen):
+                return screen
+            assert time.monotonic() < deadline, ("the focused decision row is not the decision", decision, screen)
+            session.pump(0.1)
+
+    def send_answer(session):
+        """Press Ctrl-D until the TUI starts the answer. An answer key is
+        deferred while a page-set read is in flight, and a deferred key is
+        never replayed, so a new numbered key outcome that names the deferral
+        sends Ctrl-D again, as the operator does. Any other key outcome
+        fails."""
+        deferral = re.compile(r"Key (\d+): answer deferred during a page-set read\.")
+        refusal = re.compile(r"Key (\d+): (.*)")
+        seen = max([int(number) for number in re.findall(r"Key (\d+):", session.screen.text())], default=0)
+        started = ("preparing explicit answer", "sending one answer attempt", "Answer sent to the manager")
+        for _ in range(10):
+            session.send(b"\x04")
+            deadline = time.monotonic() + 15
+            while True:
+                session.pump()
+                screen = session.screen.text()
+                if any(marker in screen for marker in started):
+                    return
+                found = deferral.search(screen)
+                if found and int(found.group(1)) > seen:
+                    seen = int(found.group(1))
+                    break
+                other = refusal.search(screen)
+                assert not (other and int(other.group(1)) > seen), ("the answer key was refused", other.group(2) if other else "")
+                assert time.monotonic() < deadline, ("the answer key showed no outcome", screen)
+        raise AssertionError("the answer did not start after ten presses")
+
+    def answer(session, run, store, text):
+        """Enter on the focused head opens its run at the head. The TUI types
+        the answer and sends it with Ctrl-D. The run must succeed with the
+        typed text as its only recorded answer."""
+        session.send(b"\r")
+        screen = session.wait_screen("Your answer", timeout=20)
+        save(session, run + "-head")
+        assert "Esc DECISIONS" in screen, ("the live monitor of a run opened from the Decisions view does not name Esc DECISIONS", screen)
+        session.send(text.encode())
+        session.wait_screen(text, timeout=10)
+        send_answer(session)
+        try:
+            snapshot, _, raw = client[1]("/v1/runs/" + run + "/snapshot", "RunSnapshot",
+                lambda value: value["runtime"] is not None and value["runtime"]["status"] in terminal)
+        finally:
+            save(session, run + "-sent")
+            _, _, control = client[0]("/v1/runs/" + run + "/control", "RunControl")
+            (work / ("tui-decisions-" + run + "-control.json")).write_bytes(control)
+        (work / ("tui-decisions-" + run + "-terminal.json")).write_bytes(raw)
+        assert snapshot["runtime"]["status"] == "succeeded", ("decisions run terminal status", run, snapshot["runtime"]["status"])
+        answers = json.loads((store / "answers.json").read_bytes())["answers"]
+        assert [record["answer"] for record in answers] == [text], ("recorded answers", run, [record["answer"] for record in answers])
+        relayed = requests.read_text().splitlines() if requests.exists() else []
+        assert "session/prompt" not in relayed, ("the adapter received a turn for a person-routed ask", relayed)
+        save(session, run + "-answered")
+
+    def back(session, count):
+        """Esc from the live monitor returns to the Decisions view, which
+        must list this number of pending heads without a key press."""
+        session.send(b"\x1b")
+        session.wait_screen("Manager decisions", timeout=10)
+        return session.wait_screen("Decisions: current; pending heads: " + str(count), timeout=10)
+
+    with (work / "server-0.stdout").open("wb") as output, (work / "server-0.stderr").open("wb") as errors:
+        process = subprocess.Popen([str(runner), "--manager", "serve", "--config", str(config),
+                                    "+RTS", "-N" + native, "-RTS"], stdout=output, stderr=errors)
+        try:
+            wait_ready(process)
+            status, capabilities, _ = request("/v1/capabilities", harness)
+            assert status == 200
+            client = mixed_client(capabilities, harness)
+            with tui_fixture.session(rows=40, columns=140) as session:
+                # 1. D opens the Decisions view, which shows no pending head.
+                session.wait_screen("Manager profiles")
+                session.wait_screen("profile_1")
+                session.send(b"\r")
+                session.wait_screen("Manager workflows")
+                session.wait_screen("D DECISIONS")
+                session.send(b"D")
+                session.wait_screen("Manager decisions")
+                screen = session.wait_screen("Decisions: current; pending heads: 0", timeout=20)
+                assert "No rows are visible." in screen, "the empty Decisions view lists a row"
+                save(session, "empty")
+                print("PASS tui-decisions 1: D on the workflows browser opens the Decisions view, which shows no pending head", flush=True)
+
+                # 2. Two person-routed asks appear in manager observation order.
+                run_a, head_a, store_a = start(client, "profile_1")
+                run_b, head_b, store_b = start(client, "profile_2")
+                screen = session.wait_screen("Decisions: current; pending heads: 2", timeout=10)
+                status, listed, raw = request("/v1/decisions", harness)
+                assert status == 200, ("decision heads", status)
+                validate("DecisionPage", listed, raw)
+                (work / "tui-decisions-heads.json").write_bytes(raw)
+                order = [item["id"] for item in listed["items"]]
+                assert sorted(order) == sorted([head_a, head_b]), ("the decision heads are not the heads of the two runs", order, head_a, head_b)
+                for item in listed["items"]:
+                    assert item["question"]["code"] == "text" and item["question"]["addressee"] == "person model:fixed-point", (
+                        "a head is not the person-routed ask", item["id"], item["question"]["code"], item["question"]["addressee"])
+                runs = {head_a: (run_a, store_a), head_b: (run_b, store_b)}
+                session.send(b"\x1b[A" * 4)
+                session.settle()
+                for index, decision in enumerate(order):
+                    screen = focused(session, decision)
+                    shown = details(screen)
+                    for line in ("Run:" + runs[decision][0], "Kind:question", "Answertype:text", "Addressee:personmodel:fixed-point"):
+                        assert line in shown, ("the focused head lacks a detail line", decision, line)
+                    if index + 1 < len(order):
+                        session.send(b"\x1b[B")
+                        session.settle()
+                save(session, "two-heads")
+                print("PASS tui-decisions 2: without a key press the Decisions view lists heads", ", ".join(order),
+                      "in the order of GET /v1/decisions, each a text ask addressed to person model:fixed-point", flush=True)
+
+                # 3. Enter on the second head opens its run, and the typed answer completes it.
+                second = order[1]
+                run, store = runs[second]
+                answer(session, run, store, "Answered from the Decisions view, second head.")
+                other, _, _ = client[0]("/v1/decisions/" + order[0], "Decision")
+                assert other["state"] == "pending", ("the answer reached the other head", order[0], other["state"])
+                print("PASS tui-decisions 3: Enter on head", second, "opened run", run, "at its head with Esc DECISIONS, the typed",
+                      "answer completed the run with that text as its only recorded answer and no adapter turn, and head", order[0],
+                      "stayed pending", flush=True)
+
+                # 4. Esc returns to the Decisions view without the answered head.
+                screen = back(session, 1)
+                first = order[0]
+                focused(session, first)
+                save(session, "one-head")
+                run, store = runs[first]
+                answer(session, run, store, "Answered from the Decisions view, first head.")
+                print("PASS tui-decisions 4: without a key press the Decisions view dropped head", second, "and listed only head", first,
+                      ", and its typed answer completed run", run, flush=True)
+
+                # 5. The Decisions view lists no pending head.
+                screen = back(session, 0)
+                assert "No rows are visible." in screen, "the Decisions view still lists a row"
+                save(session, "done")
+                print("PASS tui-decisions 5: after both answers the Decisions view lists no pending head", flush=True)
+                session.send(b"q")
+                assert session.wait_exit(20) == 0
+                session.assert_restored()
+            print("PASS tui-decisions: person-routed asks were answered from the Decisions view of the actual service TUI", flush=True)
+        finally:
+            if process.poll() is None:
+                process.terminate()
+            process.wait(timeout=25)
+            (work / "server-0.exit").write_text(str(process.returncode) + "\n")
+
+
 def capture_checks():
     """POST /v1/captures through the real HTTPS manager. Each numbered case
     prints one PASS line."""
@@ -7555,6 +7783,11 @@ if tui_mode == INPUTS:
 
 if tui_mode in (TUI_CONTROLS, TUI_REDIRECT):
     tui_control_checks()
+    raise SystemExit(0)
+
+
+if tui_mode == TUI_DECISIONS:
+    decisions_checks()
     raise SystemExit(0)
 
 
