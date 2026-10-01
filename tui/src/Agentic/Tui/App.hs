@@ -37,6 +37,7 @@ import Agentic.Runtime
     WorkflowDescriptor (..),
     WorkflowInputDescriptor (workflowInputName),
     initialRunSnapshot,
+    mkRunId,
     readResultArtifactAt,
     stepRunSnapshot,
   )
@@ -125,7 +126,9 @@ data AppEvent
 -- | The results of the service workers of one session.
 data ServiceEvent
   = ServiceProfilesReady !Int !(Lane.CallOutcome [Service.Profile])
-  | ServiceWorkflowsReady !Int !Service.Profile !(Lane.CallOutcome [Service.Workflow])
+    -- | The workflow catalogue of a profile, and the request of that profile
+    -- that opens after the catalogue loads, when the overview asked for it.
+  | ServiceWorkflowsReady !Int !Service.Profile !(Maybe Manager.DraftView) !(Lane.CallOutcome [Service.Workflow])
   | ServicePrepared !Int !(Lane.CallOutcome Manager.PendingCommand)
   | ServiceSent !Int !(Lane.CallOutcome Manager.ClientResponse)
   | ServiceRequestReady !Int !(Lane.CallOutcome (Service.RequestRead Manager.Observed))
@@ -230,15 +233,23 @@ data AppState = AppState
     stateServiceProfiles :: ![Service.Profile],
     stateServiceWorkflows :: ![Service.Workflow],
     stateServiceWorkflow :: !(Maybe Service.Workflow),
-    stateServiceRequestId :: !(Maybe Text),
+    -- | The selected identity: a request, or a run opened by its
+    -- identifier. The run of a request selection is the run that the
+    -- installed observation names ('serviceSelection').
+    stateServiceSelected :: !(Maybe Service.Selection),
     -- | The last complete composite read of the selected request and its
     -- stale mark. Only 'Lane.requestStep' installs a read or marks it stale.
     stateServiceObservation :: !(Lane.Installed (Service.RequestRead Manager.Observed)),
     -- | The last complete manager overview and its stale mark. Only
     -- 'Lane.requestStep' installs an overview or marks it stale.
     stateServiceOverview :: !(Lane.Installed [Service.OverviewMember]),
-    -- | The selected row of the manager overview view.
-    stateServiceOverviewCursor :: !Int,
+    -- | The selected row of the manager overview view, by the kind and
+    -- identity of the row.
+    stateServiceOverviewFocus :: !(Lane.RowFocus (Manager.OverviewKind, Text)),
+    -- | The text drafts by identity: the input editor text of each request
+    -- and input, and the answer text of each decision. The editors show the
+    -- draft of the displayed identity ('serviceDraftKey').
+    stateServiceDrafts :: !Lane.Drafts,
     -- | The live sink of the event worker of the session.
     stateServiceSink :: !LiveSink,
     -- | The delivery state that the latest wakeup read from the live sink.
@@ -373,10 +384,11 @@ runAppWith backend = mask $ \restore -> do
             stateServiceProfiles = [],
             stateServiceWorkflows = [],
             stateServiceWorkflow = Nothing,
-            stateServiceRequestId = Nothing,
+            stateServiceSelected = Nothing,
             stateServiceObservation = Lane.noObservation,
             stateServiceOverview = Lane.noObservation,
-            stateServiceOverviewCursor = 0,
+            stateServiceOverviewFocus = Lane.noFocus,
+            stateServiceDrafts = Lane.noDrafts,
             stateServiceSink = sink,
             stateServiceDelivery = Lane.DeliveryIdle,
             stateServiceFetches = Lane.noFetches,
@@ -575,16 +587,87 @@ serviceEventWorker channel sink client = stream . Lane.newFollow
 serviceOverviewRows :: AppState -> [Service.OverviewRow]
 serviceOverviewRows = maybe [] Service.overviewRows . Lane.installedRead . stateServiceOverview
 
-startServiceWorkflows :: Manager.Client -> Service.Profile -> EventM Name AppState ()
-startServiceWorkflows client profile = startServiceRead Lane.PageSetRead "loading manager catalogue" $ \ticket ->
-  ServiceWorkflowsReady ticket profile <$> Lane.serviceCall (Service.loadWorkflows client profile)
+-- | Load the workflow catalogue of a profile, and then open the given
+-- request when one is given.
+startServiceWorkflows :: Manager.Client -> Service.Profile -> Maybe Manager.DraftView -> EventM Name AppState ()
+startServiceWorkflows client profile opening = startServiceRead Lane.PageSetRead "loading manager catalogue" $ \ticket ->
+  ServiceWorkflowsReady ticket profile opening <$> Lane.serviceCall (Service.loadWorkflows client profile)
+
+-- | Open the selected row of the manager overview with
+-- 'Service.overviewOpen'. Only an idle command lane opens a row, so a
+-- command in progress keeps the selection whose reads confirm it.
+openOverviewRow :: Manager.Client -> EventM Name AppState ()
+openOverviewRow client = do
+  state <- get
+  let rows = serviceOverviewRows state
+      keys = map Service.overviewRowKey rows
+      members = fromMaybe [] (Lane.installedRead (stateServiceOverview state))
+      refused :: Text -> EventM Name AppState ()
+      refused reason = put state {stateModel = (stateModel state) {modelStatus = "overview row not opened: " <> reason}}
+  case atMay keys (Lane.focusedIndex keys (stateServiceOverviewFocus state)) of
+    _ | not (serviceIdle state) -> refused "a manager command is in progress"
+    Nothing -> refused "no overview row is selected"
+    Just key -> case Service.overviewOpen members key of
+      Service.OpenNothing reason -> refused reason
+      Service.OpenRun run profile -> openServiceRun run profile
+      Service.OpenRequest request -> case find (`Service.requestMatches` request) (stateServiceWorkflows state) of
+        Just workflow -> openServiceRequest workflow request
+        Nothing -> case find ((== Manager.draftProfile request) . Service.profileId) (stateServiceProfiles state) of
+          Just profile -> startServiceWorkflows client profile (Just request)
+          Nothing -> refused "the manager catalogue lists no profile of this request"
+
+-- | Select this request of this catalogue row and show it by its phase. The
+-- request screen shows at once, and the next installed read shows the
+-- review or the live monitor of its run. A newly selected request starts
+-- with no observation. The drafts stay.
+openServiceRequest :: Service.Workflow -> Manager.DraftView -> EventM Name AppState ()
+openServiceRequest workflow request = do
+  state <- get
+  let same = stateServiceSelected state == Just (Service.RequestSelection (Manager.draftId request) Nothing)
+      shown = if same then maybe request snd (serviceRequest state) else request
+  put (if same then state else newServiceSelection state) {stateServiceSelected = Just (Service.RequestSelection (Manager.draftId request) Nothing),
+    stateServiceWorkflow = Just workflow,
+    stateModel = (stateModel state) {modelWorkflow = Just (Service.workflowDisplay workflow), modelInputs = Service.literalInputs shown,
+      modelScreen = ServiceRequestScreen shown, modelStatus = "manager request opened: " <> Manager.draftPhase shown}}
+  invalidateServiceFetches [Lane.RequestFetch]
+
+-- | Select this run by its identifier and show its live monitor. The run
+-- that the installed observation already shows keeps its observation and
+-- its monitor position. Any other run starts with no observation.
+openServiceRun :: Text -> Text -> EventM Name AppState ()
+openServiceRun run profile = do
+  state <- get
+  case mkRunId run of
+    Left _ -> put state {stateModel = (stateModel state) {modelStatus = "overview row not opened: the run identifier is not valid"}}
+    Right ident -> do
+      let same = fmap (runIdText . Service.runIdentity) (serviceRun state) == Just run
+          selected = if same then state else (newServiceSelection state) {stateServiceSelected = Just (Service.RunSelection run profile)}
+      put selected {stateModel = (stateModel state) {modelScreen = LiveScreen ident,
+        modelSnapshot = if same then serviceRun state >>= Service.runSnapshot else Nothing, modelStatus = "manager run opened"}}
+      invalidateServiceFetches [Lane.RequestFetch]
+
+-- | The state before a new selection: no observation, approval notice or
+-- monitor position of the earlier selection. The drafts, the overview and
+-- the retained results stay.
+newServiceSelection :: AppState -> AppState
+newServiceSelection state = state {stateServiceObservation = Lane.noObservation, stateServiceWorkflow = Nothing,
+  stateRunView = emptyRunView, stateOutputFollow = True, stateRunDetails = False, stateConfirmDetails = False,
+  statePaneFocus = PrimaryPane}
+
+-- | Esc on the live monitor or the request screen ('serviceLeave'): the
+-- manager overview. The selection and its observation stay, so the reads
+-- that confirm a command in progress continue, and nothing is sent.
+leaveServiceSelection :: EventM Name AppState ()
+leaveServiceSelection = modify $ \state -> case serviceLeave (stateModel state) of
+  Just model -> state {stateModel = model, statePaneFocus = PrimaryPane}
+  Nothing -> state
 
 serviceMutation :: AppState -> MutationState
 serviceMutation = Lane.laneMutation . stateServiceLane
 
 -- | The installed request observation.
 serviceRequest :: AppState -> Maybe (Manager.Observed,Manager.DraftView)
-serviceRequest = fmap Service.readRequest . Lane.installedRead . stateServiceObservation
+serviceRequest state = Lane.installedRead (stateServiceObservation state) >>= Service.readRequest
 
 -- | The installed run observation.
 serviceRun :: AppState -> Maybe Service.RunObservation
@@ -634,10 +717,55 @@ serviceAnswerPending state view = case serviceMutation state of
 servicePreparation :: AppState -> Maybe (Manager.Observed,Manager.Preparation)
 servicePreparation state = Lane.installedRead (stateServiceObservation state) >>= Service.readPreparation
 
--- | The selected request and the run that its installed observation names.
+-- | The selection: the selected request with the run that its installed
+-- observation names, or the selected run.
 serviceSelection :: AppState -> Maybe Service.Selection
-serviceSelection state = (\ident -> Service.Selection ident (serviceRequest state >>= Manager.draftRun . snd))
-  <$> stateServiceRequestId state
+serviceSelection state = case stateServiceSelected state of
+  Just (Service.RequestSelection ident _) -> Just (Service.RequestSelection ident (serviceRequest state >>= Manager.draftRun . snd))
+  other -> other
+
+-- | The profile of the selection: the profile of the installed request, or
+-- the profile that the overview row of a selected run names.
+serviceProfile :: AppState -> Maybe Text
+serviceProfile state = case stateServiceSelected state of
+  Just (Service.RunSelection _ profile) -> Just profile
+  _ -> Manager.draftProfile . snd <$> serviceRequest state
+
+-- | The identity of the draft that an editor displays: the input of the
+-- selected request on the input screen, or the question at the head of the
+-- displayed run.
+serviceDraftKey :: AppState -> Maybe Lane.DraftKey
+serviceDraftKey state = case (modelScreen (stateModel state), serviceHead state) of
+  (_, Just (Service.QuestionHead view _)) -> Just (Lane.AnswerDraft (Service.decisionRun view) (Service.decisionId view))
+  (InputScreen index, _) | Just (Service.RequestSelection request _) <- stateServiceSelected state,
+    Just input <- modelWorkflow (stateModel state) >>= (`atMay` index) . workflowInputs ->
+      Just (Lane.InputDraft request (workflowInputName input))
+  _ -> Nothing
+
+-- | Keep the text of the displayed editor as the draft of its identity.
+recordServiceDraft :: EventM Name AppState ()
+recordServiceDraft = modify $ \state -> case serviceDraftKey state of
+  Just key@(Lane.AnswerDraft {}) -> state {stateServiceDrafts = Lane.recordDraft key (editorContents (statePersonEditor state)) (stateServiceDrafts state)}
+  Just key@(Lane.InputDraft {}) -> state {stateServiceDrafts = Lane.recordDraft key (editorContents (stateEditor state)) (stateServiceDrafts state)}
+  Nothing -> state
+
+-- | Show the draft of the displayed identity after the identity changed
+-- from the given one with 'Lane.showDraft'. An answer without a draft shows
+-- an empty editor, so the text of an earlier head never stays. An input
+-- without a draft shows its accepted literal.
+showServiceDraft :: Maybe Lane.DraftKey -> AppState -> AppState
+showServiceDraft before state = case Lane.showDraft before after (stateServiceDrafts state) of
+  (_, Nothing) -> state
+  (drafts, Just text) ->
+    let shown = state {stateServiceDrafts = drafts}
+     in case after of
+          Just (Lane.AnswerDraft {}) -> shown {statePersonEditor = Edit.editorText InputEditor Nothing (fromMaybe "" text)}
+          Just (Lane.InputDraft {}) -> shown {stateEditor = Edit.editorText InputEditor Nothing (fromMaybe (inputValue (stateModel state)) text)}
+          Nothing -> shown
+  where after = serviceDraftKey state
+
+editorContents :: Edit.Editor Text Name -> Text
+editorContents = T.intercalate "\n" . Edit.getEditContents
 
 serviceResendConfirm :: AppState -> Bool
 serviceResendConfirm = Lane.laneResendConfirm . stateServiceLane
@@ -758,11 +886,22 @@ pumpServiceFetches client = do
               put (onEndpointsRefresh (\refresh -> Lane.fetchSkipped fetch refresh rest) after)
               pumpServiceFetches client
 
--- | Refresh the observation of the selected request for this cause.
+-- | Refresh the observation of the selection for this cause.
 refreshServiceRequest :: Manager.Client -> Lane.RefreshCause -> EventM Name AppState ()
 refreshServiceRequest client cause = do
   state <- get
-  case (stateServiceWorkflow state,stateServiceRequestId state) of
+  let pending = servicePendingReceipt state
+      -- Receipt visibility and request visibility are independently authorized.
+      -- A declared receipt failure stays in its slot. An internal fault faults the whole read.
+      readReceipt = liftIO (traverse (\(mutation,location) -> (,) mutation <$> Lane.declaredCall (Service.observeReceipt client mutation location)) pending)
+      -- Any declared refusal of a run component refuses the whole read, so
+      -- no partial composite reaches the install.
+      readComponents profile runId = do
+        snapshot <- ExceptT (Service.observeSnapshot client runId)
+        control <- ExceptT (Service.observeControl client runId)
+        decision <- traverse (ExceptT . Service.observeDecision client profile runId) (Service.controlHead (snd control))
+        pure (Service.RunRead snapshot control decision)
+  case serviceSelection state of
     -- A succeeded run with a verified or referenced result is retrieved
     -- through the same single-flight read lane, in place of the composite
     -- read, when 'Lane.retrievalDue' holds: once per run until its verified
@@ -770,34 +909,31 @@ refreshServiceRequest client cause = do
     -- retries only after the next installed composite read, and g retries at
     -- once. 'Service.retrieveResult' downloads only for a snapshot that
     -- publishes the verified state.
-    (Just _,Just _) | not (serviceSending state), Just run <- serviceRun state,
+    Just _ | not (serviceSending state), Just run <- serviceRun state,
       Service.resultWanted run || Service.resultReferenced run,
       Lane.retrievalDue cause (runIdText (Service.runIdentity run)) (stateServiceResult state) ->
         startServiceRead Lane.PageSetRead "retrieving the verified result" $ \ticket ->
           ServiceResultReady ticket (runIdText (Service.runIdentity run)) <$> Lane.serviceCall (Service.retrieveResult client run)
-    (Just workflow,Just ident) | not (serviceSending state) -> do
-      let pending = servicePendingReceipt state
-          -- The run components are read only for the run that the installed
-          -- request names, so the read kind is known before the read starts.
-          run = serviceSelection state >>= Service.selectedRun
+    -- The run components are read only for the run that the installed
+    -- request names, so the read kind is known before the read starts.
+    Just (Service.RequestSelection ident run) | Just workflow <- stateServiceWorkflow state, not (serviceSending state) ->
       startServiceRead (maybe Lane.SingleResourceRead (const Lane.PageSetRead) run)
         (maybe "reading manager request" (const "reading manager request and run") run) $ \ticket ->
         ServiceRequestReady ticket <$> Lane.serviceCall (runExceptT $ do
-          -- Receipt visibility and request visibility are independently authorized.
-          -- A declared receipt failure stays in its slot. An internal fault faults the whole read.
-          receipt <- liftIO (traverse (\(mutation,location) -> (,) mutation <$> Lane.declaredCall (Service.observeReceipt client mutation location)) pending)
+          receipt <- readReceipt
           (observed,request) <- ExceptT (Service.observeDraft client workflow ident)
           preparation <- if Manager.draftPhase request == "review" && isJust (Manager.draftPreparation request)
             then Just <$> ExceptT (Service.observePreparation client request) else pure Nothing
-          -- Any declared refusal of a run component refuses the whole read, so
-          -- no partial composite reaches the install.
-          components <- traverse (\runId -> do
-            snapshot <- ExceptT (Service.observeSnapshot client runId)
-            control <- ExceptT (Service.observeControl client runId)
-            decision <- traverse (ExceptT . Service.observeDecision client (Manager.draftProfile request) runId)
-              (Service.controlHead (snd control))
-            pure (Service.RunRead snapshot control decision)) run
-          pure (Service.RequestRead (observed,request) preparation receipt components))
+          components <- traverse (readComponents (Manager.draftProfile request)) run
+          pure (Service.RequestRead (Just (observed,request)) preparation receipt components))
+    -- A run opened by its identifier reads its snapshot, its controls and
+    -- the decision at their head, with no request.
+    Just (Service.RunSelection run profile) | not (serviceSending state) ->
+      startServiceRead Lane.PageSetRead "reading manager run" $ \ticket ->
+        ServiceRequestReady ticket <$> Lane.serviceCall (runExceptT $ do
+          receipt <- readReceipt
+          components <- readComponents profile run
+          pure (Service.RequestRead Nothing Nothing receipt (Just components)))
     _ -> pure ()
 
 -- | Decide one key that asks for a new mutation with 'Lane.mutationKeyOutcome':
@@ -883,7 +1019,7 @@ handleServiceSent client ticket result = do
                   model = (stateModel state) {modelWorkflow = Just descriptor, modelInputs = Map.empty,
                     modelScreen = if null (workflowInputs descriptor) then ServiceRequestScreen request else InputScreen 0,
                     modelStatus = "request created; fetching its exact validator"}
-              put (idleService state) {stateServiceRequestId = Just (Manager.draftId request),
+              put (idleService state) {stateServiceSelected = Just (Service.RequestSelection (Manager.draftId request) Nothing),
                 stateServiceObservation = Lane.noObservation, stateServiceWorkflow = Just workflow, stateModel = model, stateEditor = blankEditor}
               liftIO (writeIORef (stateServiceUncertainExit state) False)
               refreshServiceRequest client Lane.AutomaticRefresh
@@ -903,7 +1039,7 @@ handleServiceSent client ticket result = do
 -- a read with run components shows the run in the live monitor. The
 -- occurrence selection, pane focus, output position and run details stay.
 applyServiceObservation :: Service.RequestRead Manager.Observed -> EventM Name AppState ()
-applyServiceObservation (Service.RequestRead (_,request) preparation receiptResult runComponents) = do
+applyServiceObservation (Service.RequestRead requestRead preparation receiptResult runComponents) = do
   before <- get
   let fresh = case receiptResult of Just (_,Right received) -> Just received; _ -> Nothing
       state = before {stateServiceLastReceipt = maybe (stateServiceLastReceipt before) Just fresh,
@@ -917,9 +1053,13 @@ applyServiceObservation (Service.RequestRead (_,request) preparation receiptResu
       confirmed kind = maybe False (\value -> Manager.stateName (Manager.receiptState value) == "effect-observed"
         && Service.receiptEffectKind value == Just kind
         && maybe False (\(mutation,_,_) -> Service.receiptMatches mutation value) pending) fresh
+      -- A completed command shows its screen only while a screen of the
+      -- selection is shown, so it never replaces the overview or a browser.
+      shownScreen current screen = if serviceShowsSelection (modelScreen (stateModel current)) then screen else modelScreen (stateModel current)
+      requested = snd <$> requestRead
   put state
-  case pending of
-    Just (mutation@(Service.SaveLiteral _ name value index),command,location)
+  case (pending, requested) of
+    (Just (mutation@(Service.SaveLiteral _ name value index),command,location), Just request)
       | confirmed "input-changed" ->
           if Service.literalInputs request == Map.insert name value (modelInputs (stateModel state))
             && Manager.draftPhase request == "draft"
@@ -929,34 +1069,36 @@ applyServiceObservation (Service.RequestRead (_,request) preparation receiptResu
                     Just descriptor | index + 1 < length (workflowInputs descriptor) -> InputScreen (index + 1)
                     _ -> ServiceRequestScreen request, modelStatus = "input effect observed"}
             put (idleService state) {stateModel = model,
-              stateEditor = Edit.editorText InputEditor Nothing (inputValue model)}
+              stateEditor = Edit.editorText InputEditor Nothing (inputValue model),
+              stateServiceDrafts = Lane.dropDraft (Lane.InputDraft (Manager.draftId request) name) (stateServiceDrafts state)}
             liftIO (writeIORef (stateServiceUncertainExit state) (isJust (stateServiceApproval state)))
           else settleService state (Lane.Attempt mutation command location) "request no longer matches the submitted literals"
     -- The answer completes only on its own effect-observed receipt of kind
     -- answer-accepted, whose address 'Service.receiptMatches' binds to the
-    -- answered occurrence and run.
-    Just (Service.Answer {},_,_) | confirmed "answer-accepted" -> do
+    -- answered occurrence and run. Its draft ends with it.
+    (Just (Service.Answer decision _,_,_), _) | confirmed "answer-accepted" -> do
       put (idleService state) {statePersonEditor = blankEditor,
+        stateServiceDrafts = Lane.dropDraft (Lane.AnswerDraft (Service.decisionRun decision) (Service.decisionId decision)) (stateServiceDrafts state),
         stateModel = (stateModel state) {modelStatus = "answer effect observed"}}
       liftIO (writeIORef (stateServiceUncertainExit state) (isJust (stateServiceApproval state)))
     -- The retry completes only on its own effect-observed receipt of the
     -- effect kind of its offer, whose address 'Service.receiptMatches' binds
     -- to the recovering occurrence and attempt of the run controls.
-    Just (Service.Retry _ _ offer _,_,_) | confirmed (Service.retryEffect offer) -> do
+    (Just (Service.Retry _ _ offer _,_,_), _) | confirmed (Service.retryEffect offer) -> do
       put (idleService state) {stateModel = (stateModel state) {modelStatus = "retry effect observed"}}
       liftIO (writeIORef (stateServiceUncertainExit state) (isJust (stateServiceApproval state)))
-    Just (Service.Enqueue _,_,_) | confirmed "enqueued" -> do
-      put (idleService state) {stateModel = (stateModel state) {modelScreen = ServiceRequestScreen request}}
+    (Just (Service.Enqueue _,_,_), Just request) | confirmed "enqueued" -> do
+      put (idleService state) {stateModel = (stateModel state) {modelScreen = shownScreen state (ServiceRequestScreen request)}}
       liftIO (writeIORef (stateServiceUncertainExit state) (isJust (stateServiceApproval state)))
-    Just (mutation@(Service.Approve approvedRequest _),command,location)
+    (Just (mutation@(Service.Approve approvedRequest _),command,location), Just request)
       | Manager.draftPhase request == "associated", isJust (Manager.draftRun request),
         Manager.draftId request == Manager.draftId approvedRequest,
         Service.literalInputs request == modelInputs (stateModel state) ->
           put (idleService state) {stateServiceApproval = Just (mutation,command,location),
             stateServiceApprovalStatus = Just (Service.approvalStatus mutation receiptResult Nothing),
-            stateModel = (stateModel state) {modelScreen = ServiceRequestScreen request,
+            stateModel = (stateModel state) {modelScreen = shownScreen state (ServiceRequestScreen request),
               modelStatus = "run associated; approval receipt remains distinct from runtime outcome"}}
-    Just (mutation,command,location) | Just reason <- Service.receiptSettlement mutation receiptResult ->
+    (Just (mutation,command,location), _) | Just reason <- Service.receiptSettlement mutation receiptResult ->
       settleService state (Lane.Attempt mutation command location) reason
     _ -> pure ()
   current <- get
@@ -967,9 +1109,11 @@ applyServiceObservation (Service.RequestRead (_,request) preparation receiptResu
       put current {stateConfirmDetails = False, stateModel = model,
         stateRunView = maybe (stateRunView current) (`reconcileRunView` stateRunView current) (modelSnapshot model)}
       when (stateOutputFollow current) (vScrollToEnd (viewportScroll OutputViewport))
-    Nothing -> when (serviceIdle current) $ case modelScreen (stateModel current) of
-      InputScreen _ -> put current {stateModel = (stateModel current) {modelStatus = "request validator current; Ctrl-D sends the literal"}}
-      _ -> case (stateServiceWorkflow current,preparation) of
+    -- The request and review screens follow the installed request only
+    -- while a screen of the selection is shown.
+    Nothing -> when (serviceIdle current && serviceShowsSelection (modelScreen (stateModel current))) $ case (modelScreen (stateModel current), requested) of
+      (InputScreen _, _) -> put current {stateModel = (stateModel current) {modelStatus = "request validator current; Ctrl-D sends the literal"}}
+      (_, Just request) -> case (stateServiceWorkflow current,preparation) of
         (Just workflow,Just (prepObserved,prep))
           | Service.reviewMatches workflow request prep, Service.literalInputs request == modelInputs (stateModel current),
             Service.reviewLive (stateNow current) prep -> do
@@ -978,14 +1122,17 @@ applyServiceObservation (Service.RequestRead (_,request) preparation receiptResu
                 stateModel = (stateModel current) {modelScreen = screen, modelStatus = "exact manager review observed"}}
         _ -> put current {stateConfirmDetails = False, stateModel = (stateModel current)
           {modelScreen = ServiceRequestScreen request, modelStatus = "manager request: " <> Manager.draftPhase request}}
+      (_, Nothing) -> pure ()
 
 -- | Handle one service event, start the next waiting fetch of live
--- delivery, then apply the approval-notice and key-outcome lifetimes.
+-- delivery, show the draft of the displayed identity when that identity
+-- changed, then apply the approval-notice and key-outcome lifetimes.
 handleServiceEvent :: Manager.Client -> BrickEvent Name AppEvent -> EventM Name AppState ()
 handleServiceEvent client event = do
   before <- get
   handleServiceEventCore client event
   pumpServiceFetches client
+  modify (showServiceDraft (serviceDraftKey before))
   after <- get
   let view current = (modelScreen (stateModel current), stateConfirmDetails current, stateKeyHelp current, serviceResendConfirm current)
       noticeEvent = Approval.NoticeEvent
@@ -1051,7 +1198,7 @@ handleServiceResult client serviceEvent = do
 serviceEventTicket :: ServiceEvent -> Int
 serviceEventTicket serviceEvent = case serviceEvent of
   ServiceProfilesReady ticket _ -> ticket
-  ServiceWorkflowsReady ticket _ _ -> ticket
+  ServiceWorkflowsReady ticket _ _ _ -> ticket
   ServicePrepared ticket _ -> ticket
   ServiceSent ticket _ -> ticket
   ServiceRequestReady ticket _ -> ticket
@@ -1107,20 +1254,27 @@ handleServiceResultCore client serviceEvent = do
                   else stateServiceOverviewRetry state}
           in put (if origin == LiveOverview then next
             else next {stateModel = refuseRequestRead (Lane.refusalCode problem) (isJust (Lane.installedRead installed)) (stateModel next)})
+        -- The focus keeps the identity of the selected row, so the same row
+        -- stays selected wherever the new overview lists it.
         (Lane.RequestInstalled _,lane,installed) ->
           let next = shown state {stateServiceLane = lane, stateServiceOverview = installed, stateServiceOverviewRetry = Nothing}
-              rows = serviceOverviewRows next
           in do
-            put next {stateServiceOverviewCursor = max 0 (min (length rows - 1) (stateServiceOverviewCursor state)),
-              stateModel = if origin == ExplicitOverview then (stateModel next) {modelStatus = "manager overview read"} else stateModel next}
+            put next {stateModel = if origin == ExplicitOverview then (stateModel next) {modelStatus = "manager overview read"} else stateModel next}
             mapM_ (startServiceEvents client generation) cursor
-    ServiceWorkflowsReady ticket profile result -> case Lane.readStep ticket result (stateServiceLane state) of
+    -- A catalogue that the overview loaded for a request opens that request
+    -- when it lists the workflow revision of the request.
+    ServiceWorkflowsReady ticket profile opening result -> case Lane.readStep ticket result (stateServiceLane state) of
       (Lane.ReadStale,_) -> pure ()
       (Lane.ReadFaulted,lane) -> faultService state lane
       (Lane.ReadRefused problem,lane) -> put (failed lane problem)
-      (Lane.ReadDelivered workflows,lane) -> put state {stateServiceLane = lane, stateServiceWorkflows = workflows,
-        stateModel = (initialModel (map Service.workflowDisplay workflows) [] (Left "manager owns routing"))
-          {modelStatus = "manager catalogue: " <> Service.profileId profile}, statePaneFocus = PrimaryPane}
+      (Lane.ReadDelivered workflows,lane) -> do
+        put state {stateServiceLane = lane, stateServiceWorkflows = workflows,
+          stateModel = (initialModel (map Service.workflowDisplay workflows) [] (Left "manager owns routing"))
+            {modelStatus = "manager catalogue: " <> Service.profileId profile}, statePaneFocus = PrimaryPane}
+        forM_ opening $ \request -> case find (`Service.requestMatches` request) workflows of
+          Just workflow -> openServiceRequest workflow request
+          Nothing -> modify $ \current -> current {stateModel = (stateModel current)
+            {modelStatus = "overview row not opened: the catalogue of " <> Service.profileId profile <> " lists no workflow revision of this request"}}
     ServicePrepared ticket result -> case Lane.prepareStep ticket result (stateServiceLane state) of
       (Lane.PrepareStale,_) -> pure ()
       (Lane.PrepareFaulted,lane) -> faultService state lane
@@ -1188,10 +1342,12 @@ handleServiceEventCore client event = do
     -- The Endpoints view takes every key while it is open.
     VtyEvent (Vty.EvKey key modifiers) | stateEndpointsView state -> handleEndpointsKey key modifiers
     -- A question head takes the text entry keys. Ctrl-D sends one answer for
-    -- the displayed head. Text keys edit the answer, so q does not detach
-    -- here, and Ctrl-C detaches. No key sends while an answer to this
-    -- decision is in the command lane.
+    -- the displayed head. Text keys edit the answer, which is kept as the
+    -- draft of the decision, so q does not detach here, and Ctrl-C detaches.
+    -- Esc returns to the manager overview and sends nothing. No key sends
+    -- while an answer to this decision is in the command lane.
     VtyEvent key | Just (Service.QuestionHead view _) <- serviceHead state, not (stateKeyHelp state), not (serviceResendConfirm state) -> case key of
+      Vty.EvKey Vty.KEsc [] -> leaveServiceSelection
       Vty.EvKey Vty.KPageUp [] -> vScrollBy (viewportScroll PersonViewport) (-10)
       Vty.EvKey Vty.KPageDown [] -> vScrollBy (viewportScroll PersonViewport) 10
       Vty.EvKey Vty.KHome [] -> vScrollToBeginning (viewportScroll PersonViewport)
@@ -1199,16 +1355,15 @@ handleServiceEventCore client event = do
       _ | serviceAnswerPending state view -> pure ()
       -- Every Ctrl-D has one numbered visible outcome: a start, or a key
       -- outcome that names why nothing was sent.
-      Vty.EvKey (Vty.KChar 'd') [Vty.MCtrl] -> case (serviceRunRead state, serviceRequest state) of
-        (Just components, Just (_,request))
+      Vty.EvKey (Vty.KChar 'd') [Vty.MCtrl] -> case (serviceRunRead state, serviceProfile state) of
+        (Just components, Just profile)
           | isJust (Lane.installedStale (stateServiceObservation state)) ->
               serviceKeyOutcome False "answer did not start: the decision observation is stale."
-          | otherwise -> case Service.answerMutation (Manager.draftProfile request) components
-              (T.intercalate "\n" (Edit.getEditContents (statePersonEditor state))) of
+          | otherwise -> case Service.answerMutation profile components (editorContents (statePersonEditor state)) of
                 Left failure -> serviceKeyOutcome False ("answer did not start: " <> failure)
                 Right (mutation,observed) -> serviceMutationKey "answer" (beginServiceMutation client mutation (Just observed))
         _ -> serviceKeyOutcome False "answer did not start: the decision is not observed."
-      _ -> handlePersonEditorInput event
+      _ -> handlePersonEditorInput event >> recordServiceDraft
     -- The save dialog of the verified result takes the text entry keys, so q
     -- edits the path here, and Ctrl-C detaches.
     VtyEvent key | activeLayer state == SaveLayer -> handleSaveResultKey event key
@@ -1222,7 +1377,7 @@ handleServiceEventCore client event = do
       Vty.EvKey Vty.KEsc [] | serviceIdle state -> case serviceRequest state of
         Just (_,request) -> put state {stateModel = (stateModel state) {modelScreen = ServiceRequestScreen request}}
         _ -> pure ()
-      _ | serviceIdle state -> handleEditorInput event
+      _ | serviceIdle state -> handleEditorInput event >> recordServiceDraft
         | otherwise -> pure ()
     VtyEvent (Vty.EvKey key modifiers)
       | key == Vty.KChar 'q' && null modifiers -> halt
@@ -1285,9 +1440,11 @@ handleServiceEventCore client event = do
                    | otherwise -> vScrollToEnd (viewportScroll (serviceViewport state))
           Vty.KLeft -> put state {statePaneFocus = PrimaryPane}
           Vty.KRight -> put state {statePaneFocus = SecondaryPane}
+          -- Enter on the manager overview opens the selected row.
+          Vty.KEnter | ServiceOverviewScreen <- modelScreen (stateModel state) -> openOverviewRow client
           Vty.KEnter | serviceIdle state -> case modelScreen (stateModel state) of
             ServiceProfilesScreen {} -> case selectedServiceProfile (stateModel state) of
-              Just profile | Service.profileReadiness profile == "ready", Service.profileRefusal profile == Nothing -> startServiceWorkflows client profile
+              Just profile | Service.profileReadiness profile == "ready", Service.profileRefusal profile == Nothing -> startServiceWorkflows client profile Nothing
               _ -> pure ()
             _ -> pure ()
           Vty.KChar 'd' | ServiceReviewScreen {} <- modelScreen (stateModel state) -> do
@@ -1328,7 +1485,7 @@ handleServiceEventCore client event = do
     serviceNewMutationKey state key modifiers = case (modelScreen (stateModel state), key, modifiers) of
       (BrowserScreen, Vty.KEnter, []) | Just workflow <- atMay (stateServiceWorkflows state) (modelWorkflowIndex (stateModel state)) ->
         Just ("create", do
-          put state {stateServiceWorkflow = Just workflow, stateServiceRequestId = Nothing, stateServiceObservation = Lane.noObservation,
+          put state {stateServiceWorkflow = Just workflow, stateServiceSelected = Nothing, stateServiceObservation = Lane.noObservation,
             stateModel = (stateModel state) {modelInputs = Map.empty, modelWorkflow = Just (Service.workflowDisplay workflow)}}
           beginServiceMutation client (Service.Create workflow) Nothing)
       (ServiceRequestScreen request, Vty.KEnter, []) | Service.requestReady request, Manager.draftPhase request == "draft" ->
@@ -1336,11 +1493,11 @@ handleServiceEventCore client event = do
       -- r at a recovery head retries only through the offer that the
       -- installed control observation presents for that head.
       (LiveScreen _, Vty.KChar 'r', []) | Just (Service.RecoveryHead {}) <- serviceHead state ->
-        Just ("retry", case (serviceRunRead state, serviceRequest state) of
-          (Just components, Just (_,request))
+        Just ("retry", case (serviceRunRead state, serviceProfile state) of
+          (Just components, Just profile)
             | isJust (Lane.installedStale (stateServiceObservation state)) ->
                 serviceKeyOutcome False "retry did not start: the control observation is stale."
-            | otherwise -> case Service.retryMutation (Manager.draftProfile request) components of
+            | otherwise -> case Service.retryMutation profile components of
                 Left failure -> serviceKeyOutcome False ("retry did not start: " <> failure)
                 Right (mutation,observed) -> beginServiceMutation client mutation (Just observed)
           _ -> serviceKeyOutcome False "retry did not start: the decision is not observed.")
@@ -1351,6 +1508,8 @@ handleServiceEventCore client event = do
       _ -> False
     serviceBack state = case modelScreen (stateModel state) of
       LiveScreen _ | stateRunDetails state -> put state {stateRunDetails = False}
+      LiveScreen _ -> leaveServiceSelection
+      ServiceRequestScreen _ | serviceIdle state -> leaveServiceSelection
       ServiceProfilesScreen {} -> halt
       InitialLoading -> halt
       ServiceReviewScreen {} | stateConfirmDetails state -> put state {stateConfirmDetails = False}
@@ -1364,7 +1523,7 @@ handleServiceEventCore client event = do
       FailureScreen _ -> vScrollBy (viewportScroll FailureViewport) delta
       ServiceRequestScreen _ -> vScrollBy (viewportScroll FailureViewport) delta
       ServiceOverviewScreen | statePaneFocus state == PrimaryPane -> do
-        put state {stateServiceOverviewCursor = max 0 (min (length (serviceOverviewRows state) - 1) (stateServiceOverviewCursor state + delta))}
+        put state {stateServiceOverviewFocus = Lane.moveFocus delta (map Service.overviewRowKey (serviceOverviewRows state)) (stateServiceOverviewFocus state)}
         vScrollToBeginning (viewportScroll BrowserDetailViewport)
       ServiceReviewScreen {} | stateConfirmDetails state -> vScrollBy (viewportScroll ConfirmDetailsViewport) delta
       LiveScreen _
@@ -1464,10 +1623,11 @@ clearServiceSession state =
       stateServiceProfiles = [],
       stateServiceWorkflows = [],
       stateServiceWorkflow = Nothing,
-      stateServiceRequestId = Nothing,
+      stateServiceSelected = Nothing,
       stateServiceObservation = Lane.noObservation,
       stateServiceOverview = Lane.noObservation,
-      stateServiceOverviewCursor = 0,
+      stateServiceOverviewFocus = Lane.noFocus,
+      stateServiceDrafts = Lane.noDrafts,
       stateServiceDelivery = Lane.DeliveryIdle,
       stateServiceFetches = Lane.noFetches,
       stateServiceSafetyAt = Nothing,
@@ -1556,11 +1716,13 @@ toPresentation state =
       presentationServiceEndpoints = case stateBackend state of ServiceBackend _ endpoints -> Just endpoints; LocalBackend {} -> Nothing,
       presentationServiceMutation = Lane.mutationNotice (stateServiceLane state),
       presentationServiceResendConfirm = serviceResendConfirm state,
-      presentationServiceApproval = stateServiceApprovalStatus state,
+      presentationServiceApproval = case stateServiceApproval state of
+        Just (Service.Approve approved _,_,_) | fmap (Manager.draftId . snd) (serviceRequest state) /= Just (Manager.draftId approved) -> Nothing
+        _ -> stateServiceApprovalStatus state,
       presentationServiceFault = serviceFaulted state,
       presentationServiceKeyOutcome = stateServiceKeyOutcome state,
       presentationServiceOverview = let installed = stateServiceOverview state in
-        OverviewView (serviceOverviewRows state) (stateServiceOverviewCursor state)
+        OverviewView (serviceOverviewRows state) (Lane.focusedIndex (map Service.overviewRowKey (serviceOverviewRows state)) (stateServiceOverviewFocus state))
           (Service.overviewStatus (Lane.installedStale installed) (Service.overviewRows <$> Lane.installedRead installed)),
       presentationServiceObservation = let installed = stateServiceObservation state in
         Service.observationLines (Lane.refreshPaused (stateNow state) (stateServiceLane state) (stateServiceKeyOutcome state))

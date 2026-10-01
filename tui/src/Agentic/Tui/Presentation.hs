@@ -1031,7 +1031,7 @@ keyHelpLines presentation = case modelScreen model of
   BrowserScreen | presentationService presentation ->
     ["Up/Down select"] <> ["Enter creates a manager request" | not faulted]
       <> ["Right/Left focus details/list", "h workflow help", "O manager overview", "Esc profiles", "E manager endpoints", "q detach", "? or Esc close this help"]
-  ServiceOverviewScreen -> ["Up/Down select", "Right/Left focus details/list", "g reads the overview again", "Esc workflows",
+  ServiceOverviewScreen -> ["Up/Down select", "Enter opens the selected request or run", "Right/Left focus details/list", "g reads the overview again", "Esc workflows",
     "E manager endpoints", "q detach", "? or Esc close this help"]
   BrowserScreen ->
     [ "Up/Down       select",
@@ -1043,7 +1043,7 @@ keyHelpLines presentation = case modelScreen model of
       <> ["? or Esc      close this help"]
   ServiceProfilesScreen _ _ -> ["Up/Down select profile", "Right/Left focus details/list", "Enter select ready profile", "r refresh profiles", "E manager endpoints", "q detach", "? or Esc close this help"]
   ServiceRequestScreen _ -> ["Enter requests review when the draft is ready" | not faulted] <> ["e edits draft inputs" | not faulted]
-    <> ["g refreshes observations", "E manager endpoints", "q detaches without cancelling the manager run"]
+    <> ["g refreshes observations", "Esc returns to the manager overview", "E manager endpoints", "q detaches without cancelling the manager run"]
   ServiceReviewScreen {} -> ["y approves the exact visible selectors" | not faulted]
     <> ["Enter does not approve", "d toggles complete review details", "Up/Down scroll details", "q detaches"]
   ServiceCommandScreen _ -> ["g refreshes observations without sending a mutation"]
@@ -1063,7 +1063,7 @@ keyHelpLines presentation = case modelScreen model of
         ["d full run details and error", "Tab focus pane", "Up/Down move or scroll", "j/k select occurrence", "G follow output",
          "g refreshes observations"] <> ["r retries the recovery that the manager offers" | presentationServiceRetry presentation]
           <> ["s saves the verified result bytes to a new file" | presentationServiceSavable presentation]
-          <> ["q detaches; the manager run continues", "? or Esc close this help"]
+          <> ["Esc returns to the manager overview; the manager run continues", "q detaches; the manager run continues", "? or Esc close this help"]
   LiveScreen _ ->
     ["d full run details and error", "Tab focus pane", "Up/Down move or scroll", "j/k select occurrence", "G follow output"]
       <> [hint | hint <- [liveResultHint presentation, controlHintLine presentation, if presentationRunning presentation then "c cancel owned run" else ""], not (T.null hint)]
@@ -1188,13 +1188,13 @@ footerItems presentation width height = case presentationLayer presentation of
   CancelLayer -> ["n/Esc KEEP RUNNING", "y CANCEL RUN"]
   PersonLayer
     | presentationService presentation, presentationPersonSubmitted presentation -> ["WAITING FOR THE MANAGER EFFECT", "Ctrl-C DETACH"]
-    | presentationService presentation -> ["Ctrl-D SEND ANSWER", "Enter newline", "PgUp/PgDn prompt", "Ctrl-C DETACH"]
+    | presentationService presentation -> ["Ctrl-D SEND ANSWER", "Enter newline", "PgUp/PgDn prompt", "Esc OVERVIEW", "Ctrl-C DETACH"]
     | Nothing <- presentationPersonPrompt presentation -> ["Esc CANCEL RUN", "LOADING VERIFIED QUESTION"]
     | presentationPersonSubmitted presentation -> ["Esc CANCEL RUN", "WAITING FOR DELIVERY"]
     | otherwise -> ["Esc CANCEL RUN", "Ctrl-D SUBMIT", "Enter newline", "PgUp/PgDn prompt"]
   RecoveryLayer
-    | presentationService presentation, presentationServiceRetry presentation -> ["r RETRY", "d DETAILS", "g REFRESH", "? KEYS", "q DETACH"]
-    | presentationService presentation -> ["READ-ONLY RECOVERY", "d DETAILS", "g REFRESH", "? KEYS", "q DETACH"]
+    | presentationService presentation, presentationServiceRetry presentation -> ["r RETRY", "d DETAILS", "g REFRESH", "Esc OVERVIEW", "? KEYS", "q DETACH"]
+    | presentationService presentation -> ["READ-ONLY RECOVERY", "d DETAILS", "g REFRESH", "Esc OVERVIEW", "? KEYS", "q DETACH"]
     | otherwise -> recoveryItems presentation <> ["c CANCEL RUN", "PgUp/PgDn scroll"]
   SteerLayer -> ["Esc CLOSE", "Ctrl-D SEND", "Enter newline"]
   SaveLayer -> ["Esc CANCEL", "Ctrl-D SAVE"] <> ["PgUp/PgDn ERROR" | Just _ <- [presentationSaveError presentation]]
@@ -1221,9 +1221,9 @@ footerItems presentation width height = case presentationLayer presentation of
     screenItems = case modelScreen model of
       InitialLoading -> ["q/Esc QUIT"]
       ServiceProfilesScreen _ _ -> ["Enter SELECT", "r REFRESH", browserPaneHint, "? KEYS", "q DETACH", "E ENDPOINTS"]
-      ServiceOverviewScreen -> ["g REFRESH", "Esc WORKFLOWS", browserPaneHint, "? KEYS", "q DETACH", "E ENDPOINTS"]
+      ServiceOverviewScreen -> ["Enter OPEN", "g REFRESH", "Esc WORKFLOWS", browserPaneHint, "? KEYS", "q DETACH", "E ENDPOINTS"]
       ServiceRequestScreen request ->
-        ["g REFRESH", "q DETACH"]
+        ["g REFRESH", "q DETACH"] <> ["Esc OVERVIEW" | presentationServiceMutation presentation == Nothing]
           <> (if Manager.draftPhase request == "draft" && presentationServiceMutation presentation == Nothing
                 && not (presentationServiceFault presentation)
               then ["e EDIT INPUTS"] <> ["Enter REQUEST REVIEW" | Service.requestReady request] else [])
@@ -1249,8 +1249,8 @@ footerItems presentation width height = case presentationLayer presentation of
       ConfirmScreen _ -> confirmItems False
       ProcessLoading _ -> ["Esc CANCEL STARTUP"]
       LaunchingScreen _ -> ["Esc DETACH", "c CANCEL RUN", "? KEYS"]
-      LiveScreen _ | presentationService presentation, compact -> ["q DETACH", "Tab PANE", "d DETAILS", "? KEYS"] <> saveItem
-                   | presentationService presentation -> ["q DETACH"] <> saveItem <> ["g REFRESH", "d DETAILS", compactNavigation, "? KEYS"]
+      LiveScreen _ | presentationService presentation, compact -> ["q DETACH", "Esc OVERVIEW", "Tab PANE", "d DETAILS", "? KEYS"] <> saveItem
+                   | presentationService presentation -> ["q DETACH", "Esc OVERVIEW"] <> saveItem <> ["g REFRESH", "d DETAILS", compactNavigation, "? KEYS"]
       LiveScreen _ | compact ->
         ["Esc " <> if presentationRunning presentation then "DETACH" else "RUNS", "Tab PANE", "d DETAILS", "? KEYS"]
           <> ["c CANCEL" | presentationRunning presentation]

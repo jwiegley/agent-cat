@@ -167,7 +167,8 @@ serviceTests render = do
   resourceVectorTests
   endpointTests render profile
   switchTests render row profile
-  overviewTests render row request0
+  overviewTests render row request0 preparation
+  draftTests profile request0
   liveDeliveryTests render profile
   where
     profileValue = object ["version" .= (1 :: Int), "id" .= ("profile_main" :: T.Text),
@@ -279,8 +280,8 @@ endpointTests render profile = do
 -- session, a failed connection, the switch back and the Endpoints view.
 -- | The navigation keys of the service workflow browser, the projection of
 -- the manager overview, its stale mark and fixed-size renders of its view.
-overviewTests :: ((Int,Int) -> Presentation -> T.Text) -> S.Workflow -> C.DraftView -> IO ()
-overviewTests render row request0 = do
+overviewTests :: ((Int,Int) -> Presentation -> T.Text) -> S.Workflow -> C.DraftView -> C.Preparation -> IO ()
+overviewTests render row request0 preparation = do
   let browser = (initialModel [S.workflowDisplay row] [] (Left "manager owns routing")) {modelStatus = "manager catalogue: profile_main"}
       help = Just (S.workflowHelp row)
       press model (key, modifiers) = fromMaybe model (serviceBrowserKey help key modifiers model)
@@ -341,6 +342,86 @@ overviewTests render row request0 = do
           && "Phase: draft" `T.isInfixOf` narrowDetails && not ("> request draft" `T.isInfixOf` narrowDetails))
     ]
   putStrLn "RENDER manager overview at (80,24):" >> putStr (T.unpack wide)
+  -- The overview focus follows the identity of the selected row, and Enter
+  -- opens a row by its identity.
+  let keys = map S.overviewRowKey rows
+      runKey = (C.OverviewRun, "run_overview_1")
+      onRun = L.moveFocus 1 keys L.noFocus
+      orphan = preparation {C.preparationId = "prep_overview_1", C.preparationRequest = "req_missing"}
+      listed = preparation {C.preparationId = "prep_overview_2", C.preparationRequest = "req_overview_1"}
+      withPreparation = S.PreparationMember orphan : S.PreparationMember listed : members
+      reordered = map S.overviewRowKey (S.overviewRows (S.RequestMember request {C.draftId = "req_overview_0"} : members))
+      withoutRun = filter (/= runKey) keys
+  checks
+    [ ("Down on the overview focuses the next row by its identity", L.focusKey onRun == Just runKey && L.focusedIndex keys onRun == 1),
+      ("a refresh that adds a row above keeps the focus on the same run row",
+        L.focusedIndex reordered onRun == 2 && atIndex reordered (L.focusedIndex reordered onRun) == Just runKey),
+      ("a refresh without the focused row selects the row at its last index", L.focusedIndex withoutRun onRun == 1),
+      ("a move from a vanished row moves from the row shown", L.focusKey (L.moveFocus 1 withoutRun onRun) == atIndex withoutRun 2),
+      ("the focus is bounded by the rows", L.focusedIndex keys (L.moveFocus 99 keys onRun) == length keys - 1
+        && L.focusedIndex [] onRun == 0 && L.focusedIndex keys L.noFocus == 0),
+      ("Enter on a run row opens the run by its identifier with the profile of the row",
+        S.overviewOpen members runKey == S.OpenRun "run_overview_1" "profile_main"),
+      ("Enter on a decision row opens the run of the decision",
+        S.overviewOpen members (C.OverviewDecision, "dec_overview_1") == S.OpenRun "run_overview_1" "profile_main"),
+      ("Enter on a request row opens the request", S.overviewOpen members (C.OverviewRequest, "req_overview_1") == S.OpenRequest request),
+      ("Enter on a preparation row whose request is not listed opens nothing",
+        case S.overviewOpen withPreparation (C.OverviewPreparation, "prep_overview_1") of S.OpenNothing _ -> True; _ -> False),
+      ("Enter on a preparation row opens its listed request",
+        S.overviewOpen withPreparation (C.OverviewPreparation, "prep_overview_2") == S.OpenRequest request),
+      ("Enter with no row opens nothing", case S.overviewOpen members (C.OverviewRun, "run_absent") of S.OpenNothing _ -> True; _ -> False)
+    ]
+  where atIndex values index = if index >= 0 && index < length values then Just (values !! index) else Nothing
+
+-- | The drafts by identity, Esc on the live monitor and the request
+-- screen, and the screens that an installed read of the selection replaces.
+draftTests :: S.Profile -> C.DraftView -> IO ()
+draftTests profile request0 = do
+  runId <- either (die . show) pure (mkRunId "run_21")
+  let input = L.InputDraft "req_8" "topic"
+      first = L.AnswerDraft "run_21" "decision_3"
+      next = L.AnswerDraft "run_21" "decision_4"
+      other = L.AnswerDraft "run_9" "decision_1"
+      typed = L.recordDraft first "draft-pc18" (L.recordDraft input "literal" L.noDrafts)
+      (left, leftShown) = L.showDraft (Just first) Nothing typed
+      (reopened, reopenedShown) = L.showDraft Nothing (Just first) left
+      (advanced, advancedShown) = L.showDraft (Just first) (Just next) typed
+      (later, laterShown) = L.showDraft Nothing (Just next) typed
+      withOther = L.recordDraft other "keep" typed
+      full = foldr (\index -> L.recordDraft (L.InputDraft "req_full" (T.pack (show index))) "x") L.noDrafts [1 .. L.draftsBound]
+      liveModel = (initialServiceModel [profile]) {modelScreen = LiveScreen runId}
+      requestModel = (initialServiceModel [profile]) {modelScreen = ServiceRequestScreen request0}
+      overviewModel = (initialServiceModel [profile]) {modelScreen = ServiceOverviewScreen}
+  checks
+    [ ("a typed answer draft is kept by its decision", L.draftText first typed == Just "draft-pc18"),
+      ("leaving the run keeps the draft and changes no editor", left == typed && leftShown == Just Nothing),
+      ("reopening the run shows the draft of its head", reopened == typed && reopenedShown == Just (Just "draft-pc18")),
+      ("a refresh or a resize with the same head keeps the editor and the drafts",
+        L.showDraft (Just first) (Just first) typed == (typed, Nothing)),
+      ("a new head of the run removes the stale draft of the earlier head and shows an empty answer",
+        L.draftText first advanced == Nothing && advancedShown == Just Nothing && L.draftText input advanced == Just "literal"),
+      ("a head that changed while the run was not shown also removes the stale draft",
+        L.draftText first later == Nothing && laterShown == Just Nothing),
+      ("the head of one run keeps the drafts of other runs",
+        L.draftText other (fst (L.showDraft Nothing (Just next) withOther)) == Just "keep"),
+      ("an input draft is kept by its request and input",
+        L.draftText input typed == Just "literal" && snd (L.showDraft Nothing (Just input) typed) == Just (Just "literal")),
+      ("empty text and a completed command remove a draft",
+        L.draftText first (L.recordDraft first "" typed) == Nothing && L.draftText input (L.dropDraft input typed) == Nothing),
+      ("the drafts are bounded, and a kept draft still changes at the bound",
+        length (L.draftKeys full) == L.draftsBound
+          && L.recordDraft (L.InputDraft "req_full" "new") "x" full == full
+          && L.draftText (L.InputDraft "req_full" "1") (L.recordDraft (L.InputDraft "req_full" "1") "y" full) == Just "y"),
+      ("Esc on the live monitor returns to the manager overview", fmap modelScreen (serviceLeave liveModel) == Just ServiceOverviewScreen),
+      ("Esc on the request screen returns to the manager overview", fmap modelScreen (serviceLeave requestModel) == Just ServiceOverviewScreen),
+      ("Esc on the overview is not a leave of the selection", serviceLeave overviewModel == Nothing),
+      ("a read of the selected run never replaces the overview",
+        serviceRunObserved True (Just (runId, Nothing)) overviewModel == Nothing
+          && fmap modelScreen (serviceRunObserved True (Just (runId, Nothing)) requestModel) == Just (LiveScreen runId)),
+      ("only the screens of the selection show it",
+        all serviceShowsSelection [LiveScreen runId, ServiceRequestScreen request0, InputScreen 0]
+          && not (any serviceShowsSelection [ServiceOverviewScreen, BrowserScreen, HelpScreen ""]))
+    ]
 
 switchTests :: ((Int,Int) -> Presentation -> T.Text) -> S.Workflow -> S.Profile -> IO ()
 switchTests render row profile = do
@@ -715,11 +796,11 @@ compositeTests render profile row request0 preparation snapshot absentRuntime (m
       decisionObs = ("/v1/decisions/decision_3", "\"decisionrev_1\"") :: (T.Text,T.Text)
       associated = request0 {C.draftPhase = "associated", C.draftRun = Just "run_21"}
       runRead = S.RunRead snapshot (controlObs,control) (Just (decisionObs,decision))
-      composite = S.RequestRead (requestObs,associated) Nothing Nothing (Just runRead)
-      before = S.RequestRead (requestObs,request0) Nothing Nothing Nothing
-      firstAssociation = S.RequestRead (requestObs,associated) Nothing Nothing Nothing
-      afterSelection = S.Selection "req_8" (Just "run_21")
-      beforeSelection = S.Selection "req_8" Nothing
+      composite = S.RequestRead (Just (requestObs,associated)) Nothing Nothing (Just runRead)
+      before = S.RequestRead (Just (requestObs,request0)) Nothing Nothing Nothing
+      firstAssociation = S.RequestRead (Just (requestObs,associated)) Nothing Nothing Nothing
+      afterSelection = S.RequestSelection "req_8" (Just "run_21")
+      beforeSelection = S.RequestSelection "req_8" Nothing
       verdict = S.readVerdict binding afterSelection
       withRun changed = composite {S.readRun = Just changed}
   check "a complete bound composite for the selected request and run is current" (verdict composite == S.ReadCurrent)
@@ -738,17 +819,37 @@ compositeTests render profile row request0 preparation snapshot absentRuntime (m
       ("a named head without its decision is invalid", withRun runRead {S.runReadDecision = Nothing}),
       ("a decision without a named head is invalid", withRun runRead {S.runReadControl = (controlObs,control {S.controlHead = Nothing})}),
       ("missing run components after association are invalid", composite {S.readRun = Nothing}),
-      ("a request with another entity tag is invalid", composite {S.readRequest = (("/v1/requests/req_8","\"request_rev_9\""),associated)}),
+      ("a request with another entity tag is invalid", composite {S.readRequest = Just (("/v1/requests/req_8","\"request_rev_9\""),associated)}),
       ("a preparation that the request does not name is invalid", composite {S.readPreparation = Just (("/v1/preparations/prep_9","\"preprev_1\""),preparation)})
     ] ]
   checks
-    [ ("a composite for another request is foreign", S.readVerdict binding (S.Selection "req_other" (Just "run_21")) composite == S.ReadForeign),
+    [ ("a composite for another request is foreign", S.readVerdict binding (S.RequestSelection "req_other" (Just "run_21")) composite == S.ReadForeign),
       ("a read before association without run components is current", S.readVerdict binding beforeSelection before == S.ReadCurrent),
       ("the read that first observes the association carries no run components and is current",
         S.readVerdict binding beforeSelection firstAssociation == S.ReadCurrent),
       ("run components that the selection did not name are invalid", S.readVerdict binding beforeSelection composite == S.ReadInvalid),
       ("controls without a head and without a decision are valid",
         S.runReadValid binding "profile_main" "run_21" runRead {S.runReadControl = (controlObs,control {S.controlHead = Nothing}), S.runReadDecision = Nothing})
+    ]
+  -- A run opened by its identifier reads its snapshot, controls and head
+  -- decision with no request, so a run without a request of this session
+  -- opens.
+  let runSelection = S.RunSelection "run_21" "profile_main"
+      runComposite = S.RequestRead Nothing Nothing Nothing (Just runRead)
+  checks
+    [ ("a run read with valid components and no request is current for the run selection",
+        S.readVerdict binding runSelection runComposite == S.ReadCurrent),
+      ("a request composite is foreign to a run selection", S.readVerdict binding runSelection composite == S.ReadForeign),
+      ("a run read is foreign to a request selection", S.readVerdict binding afterSelection runComposite == S.ReadForeign),
+      ("a run read of another run is foreign to the run selection",
+        S.readVerdict binding (S.RunSelection "run_other" "profile_main") runComposite == S.ReadForeign),
+      ("a run read whose head decision belongs to another profile is invalid",
+        S.readVerdict binding (S.RunSelection "run_21" "profile_other") runComposite == S.ReadInvalid),
+      ("a run read without run components is invalid",
+        S.readVerdict binding runSelection runComposite {S.readRun = Nothing} == S.ReadInvalid),
+      ("the composite read of a run selection reads the run and the head decision, and no request",
+        S.compositeResources runSelection (Just runComposite) Nothing == ["/v1/runs/run_21", "/v1/decisions/decision_3"]),
+      ("the selected run of a run selection is its run", S.selectedRun runSelection == Just "run_21")
     ]
   -- The completion of the composite read over the lane and the installed observation.
   let create = S.Create row
@@ -764,8 +865,8 @@ compositeTests render profile row request0 preparation snapshot absentRuntime (m
       stepAfter = L.requestStep verdict
       stepBefore = L.requestStep (S.readVerdict binding beforeSelection)
       staleTicket = stepAfter 6 (L.Declared (Right composite)) afterLane priorAfter
-      otherRequest = L.requestStep (S.readVerdict binding (S.Selection "req_other" (Just "run_21"))) 5 (L.Declared (Right composite)) afterLane priorAfter
-      otherRun = L.requestStep (S.readVerdict binding (S.Selection "req_8" (Just "run_other"))) 5 (L.Declared (Right composite)) afterLane priorAfter
+      otherRequest = L.requestStep (S.readVerdict binding (S.RequestSelection "req_other" (Just "run_21"))) 5 (L.Declared (Right composite)) afterLane priorAfter
+      otherRun = L.requestStep (S.readVerdict binding (S.RequestSelection "req_8" (Just "run_other"))) 5 (L.Declared (Right composite)) afterLane priorAfter
       invalid = stepAfter 5 (L.Declared (Right composite {S.readRun = Nothing})) afterLane priorAfter
       installed = stepAfter 5 (L.Declared (Right composite)) afterLane (priorAfter {L.installedStale = Just "503 storage-unavailable"})
       faulted = stepAfter 5 (L.InternalFault :: L.CallOutcome (S.RequestRead (T.Text,T.Text))) afterLane priorAfter
@@ -882,7 +983,7 @@ compositeTests render profile row request0 preparation snapshot absentRuntime (m
       ("the status after a refusal without an installed observation claims no retained observation",
         L.staleStatus "503 storage-unavailable" False == "observation refused: 503 storage-unavailable; no complete observation is installed"),
       ("a composite that names another run than the selected one is invalid, not foreign",
-        S.readVerdict binding (S.Selection "req_8" (Just "run_other")) composite == S.ReadInvalid),
+        S.readVerdict binding (S.RequestSelection "req_8" (Just "run_other")) composite == S.ReadInvalid),
       ("a composite that names no run after association is invalid, not foreign",
         S.readVerdict binding afterSelection before == S.ReadInvalid),
       ("a result that names another run is not installed and marks the observation stale",
@@ -1985,7 +2086,7 @@ liveDeliveryTests :: ((Int,Int) -> Presentation -> T.Text) -> S.Profile -> IO ()
 liveDeliveryTests render profile = do
   now <- maybe (die "time") pure (iso8601ParseM "2026-10-01T12:00:00Z" :: Maybe UTCTime)
   let noted = foldr L.noteInvalidation L.noInvalidations
-      composite = S.compositeResources (S.Selection "req_1" (Just "run_1")) Nothing (Just "/v1/commands/cmd_1")
+      composite = S.compositeResources (S.RequestSelection "req_1" (Just "run_1")) Nothing (Just "/v1/commands/cmd_1")
       routed resources = L.invalidatedFetches composite (noted resources)
       idleLane = L.sessionLane :: L.Lane T.Text T.Text
       reading ticket = L.Lane (Just (L.ReadTicket ticket L.PageSetRead)) L.MutationIdle False False :: L.Lane T.Text T.Text

@@ -3353,10 +3353,35 @@ with their runtime status, supervision, and verification as distinct fields,
 and then the pending decisions with their run and kind.  A wide terminal shows
 the list beside the details of the selected row.  A narrow terminal shows one
 pane at a time, and @key{LEFT} and @key{RIGHT} select the pane.  @key{UP} and
-@key{DOWN} select a row.  @kbd{g} reads the overview again.  A declared
+@key{DOWN} select a row.  The frontend keeps the selected row by its kind and
+identity, so the same row stays selected when a refresh adds or removes other
+rows.  When the selected row leaves the overview, the row at its last position
+is selected.  @kbd{g} reads the overview again.  A declared
 refusal keeps the last complete overview and marks it stale with the refusal
 code, for example @samp{Overview: stale (TransportUnavailable)} after the
 manager stops.  The view is not read on the one-second timer.
+
+@key{RET} on an overview row opens it.  A request row selects the request and
+shows it by its phase: the request screen for a draft, and the review or the
+live monitor of its run after the next read.  When the loaded workflow
+catalogue does not list the workflow revision of the request, the frontend
+first loads the catalogue of its profile.  A preparation row opens its request
+when the overview lists that request.  A run row selects the run by its
+identifier, and a decision row selects the run of the decision.  The frontend
+reads a selected run by its identifier, so a run that no request of this
+session created opens.  A row opens only while no manager command is in
+progress.  @key{ESC} on the live monitor, on a question or recovery head, and on
+the request screen while no command is in progress returns to the overview and
+sends nothing.  The selection stays, so the run continues at the manager, and
+@key{RET} on its row shows it again.
+
+The frontend keeps the text drafts by identity: the input text of each request
+and input, and the answer text of each decision.  A draft survives a refresh, a
+resize, a change of the selection, and leaving and reopening a run.  A
+completed input or answer command removes its draft.  When the decision at the
+head of a run changes, the draft of the earlier decision is removed, and the
+answer editor shows the draft of the new head or no text.  At most 64 drafts
+are kept.
 
 After the first overview of a session is installed, the frontend follows the
 manager event stream from the cursor of that overview.  Each invalidation
@@ -3407,8 +3432,9 @@ discard, @code{control} to answer, retry, or use any run control, and
 @samp{Approval did not start: this credential lacks @var{scope}.}, and the
 approval hint is absent.
 
-Service mode performs one workflow journey through a running manager.  It
-browses the manager's profiles, workflows, and help, creates one request,
+Service mode follows one selected request or run at a time through a running
+manager.  It browses the manager's profiles, workflows, and help, creates a
+request, opens an existing request or run from the Manager overview view,
 submits literal inputs, and displays the exact manager review before explicit
 approval.  After approval it follows the run in the live monitor, answers the
 questions that the manager routes to the person, invokes an offered recovery

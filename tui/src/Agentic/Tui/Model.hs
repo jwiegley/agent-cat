@@ -12,6 +12,8 @@ module Agentic.Tui.Model
     refuseRequestRead,
     refuseCatalogueRead,
     serviceRunObserved,
+    serviceShowsSelection,
+    serviceLeave,
     selectedWorkflow,
     visibleWorkflows,
     setWorkflowFilter,
@@ -179,14 +181,38 @@ refuseCatalogueRead problem model =
 -- outside the input screen, such a read shows the run in the live monitor, and
 -- a published runtime becomes the displayed snapshot. An absent runtime leaves
 -- no snapshot, so no runtime status is shown and none is invented. A busy
--- lane, the input screen and a read without run components give 'Nothing',
--- and the caller keeps or chooses the screen.
+-- lane, the input screen, a screen that does not show the selection and a
+-- read without run components give 'Nothing', and the caller keeps or
+-- chooses the screen.
 serviceRunObserved :: Bool -> Maybe (RunId, Maybe RunSnapshot) -> TuiModel -> Maybe TuiModel
 serviceRunObserved idle run model = case (idle, modelScreen model, run) of
   (True, InputScreen _, _) -> Nothing
-  (True, _, Just (ident, snapshot)) ->
+  (True, screen, Just (ident, snapshot)) | serviceShowsSelection screen ->
     Just model {modelScreen = LiveScreen ident, modelSnapshot = snapshot, modelStatus = "manager run observed"}
   _ -> Nothing
+
+-- | Whether the screen shows the selected request or run: the request,
+-- review, input, command and live screens. The browsers, the help and the
+-- manager overview do not, so an installed read of the selection never
+-- replaces them.
+serviceShowsSelection :: Screen -> Bool
+serviceShowsSelection screen = case screen of
+  ServiceRequestScreen _ -> True
+  ServiceReviewScreen {} -> True
+  ServiceCommandScreen _ -> True
+  InputScreen _ -> True
+  LiveScreen _ -> True
+  _ -> False
+
+-- | Esc on the live monitor or the request screen: the manager overview.
+-- The selection, its drafts and its observation stay, and nothing is sent,
+-- so a run continues at the manager. Every other screen gives 'Nothing'.
+serviceLeave :: TuiModel -> Maybe TuiModel
+serviceLeave model = case modelScreen model of
+  LiveScreen _ -> overview
+  ServiceRequestScreen _ -> overview
+  _ -> Nothing
+  where overview = Just model {modelScreen = ServiceOverviewScreen, modelStatus = "manager overview: Enter opens the selected row"}
 
 selectedWorkflow :: TuiModel -> Maybe WorkflowDescriptor
 selectedWorkflow model = atMay (visibleWorkflows model) (modelWorkflowIndex model)

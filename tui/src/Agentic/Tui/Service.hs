@@ -13,12 +13,12 @@ module Agentic.Tui.Service
     ControlView (..), ControlOffer (..), DecisionView (..), DecisionContent (..),
     observeSnapshot, observeControl, observeDecision, observeResult, decodeSnapshot, decodeControl, decodeDecision,
     RunItem (..), RunContent (..), KnownRun (..), OverviewMember (..), decodeRequestItem, decodeRunItem, decodeOverviewMember,
-    decodeOverviewItem, OverviewRow (..), overviewRows, overviewStatus,
+    decodeOverviewItem, OverviewRow (..), overviewRows, overviewStatus, overviewRowKey, OverviewOpen (..), overviewOpen,
     decisionPrompt, answerValue, answerOffered, retryOffer, headMatches,
     DecisionHead (..), decisionHead, answerMutation, answerBody,
     retryMutation, retryBody, retryEffect,
     runTerminal, resultWanted, resultReferenced, decodeOutputs, VerifiedResult (..), retrieveResult, resultLines,
-    observedBinding, RunRead (..), RequestRead (..), Selection (..), compositeResources, ReadVerdict (..), readVerdict, runReadValid,
+    observedBinding, RunRead (..), RequestRead (..), Selection (..), selectedRun, compositeResources, ReadVerdict (..), readVerdict, runReadValid,
     readRequestId, readRequestRun, runtimeStatus, observationLines,
     approvalStatus, receiptSettlement
   ) where
@@ -882,6 +882,36 @@ overviewRow member = case member of
       QuestionContent {} -> "question"
       RecoveryContent {} -> "recovery"
 
+-- | The kind and identity of an overview row. The overview view keeps its
+-- focus by this key, not by the index of the row.
+overviewRowKey :: OverviewRow -> (C.OverviewKind, Text)
+overviewRowKey row = (overviewRowKind row, overviewRowId row)
+
+-- | What Enter on an overview row opens.
+data OverviewOpen
+  = -- | A request, which opens by its phase.
+    OpenRequest !C.DraftView
+  | -- | A run by its identifier, with the profile that the row names.
+    OpenRun !Text !Text
+  | -- | Nothing, for the reason given.
+    OpenNothing !Text
+  deriving (Eq, Show)
+
+-- | What Enter on the overview row with this key opens, given the overview
+-- members. A request row opens its request and a run row its run. A
+-- decision row opens the run of the decision. A preparation row opens its
+-- request when the overview lists that request.
+overviewOpen :: [OverviewMember] -> (C.OverviewKind, Text) -> OverviewOpen
+overviewOpen members key = case [member | member <- members, overviewRowKey (overviewRow member) == key] of
+  RequestMember request : _ -> OpenRequest request
+  RunMember item : _ -> OpenRun (runItemId item) (runItemProfile item)
+  DecisionMember view : _ -> OpenRun (decisionRun view) (decisionProfile view)
+  PreparationMember preparation : _ ->
+    case [request | RequestMember request <- members, C.draftId request == C.preparationRequest preparation] of
+      request : _ -> OpenRequest request
+      [] -> OpenNothing "the overview does not list the request of this preparation"
+  [] -> OpenNothing "no overview row is selected"
+
 -- | The status line of the installed overview, given the refusal code of the
 -- latest read when that read was refused and the installed rows. A refusal
 -- keeps the last complete overview and marks it stale.
@@ -1303,22 +1333,33 @@ data RunRead observed = RunRead
     runReadDecision :: !(Maybe (observed, DecisionView))
   } deriving (Eq, Show)
 
--- | One composite read of the selected request: the request, its
--- preparation in the review phase, the result of the receipt read for a
--- retained command together with that command's mutation, and the run
--- components when the selection names a run. A declared receipt failure
--- stays in its slot.
+-- | One composite read of the selection: the request of a request
+-- selection, its preparation in the review phase, the result of the receipt
+-- read for a retained command together with that command's mutation, and the
+-- run components when the selection names a run. A run selection reads no
+-- request and no preparation. A declared receipt failure stays in its slot.
 data RequestRead observed = RequestRead
-  { readRequest :: !(observed, C.DraftView),
+  { readRequest :: !(Maybe (observed, C.DraftView)),
     readPreparation :: !(Maybe (observed, C.Preparation)),
     readReceipt :: !(Maybe (Mutation, Either C.ClientFailure C.CommandReceipt)),
     readRun :: !(Maybe (RunRead observed))
   } deriving (Eq, Show)
 
--- | The selected request and the run that its installed observation names.
--- A read of the run components takes place only when the run is known.
-data Selection = Selection { selectedRequest :: !Text, selectedRun :: !(Maybe Text) }
+-- | The selected identity. A request selection names the request and the
+-- run that its installed observation names. A read of the run components
+-- takes place only when the run is known. A run selection names a run by its
+-- identifier and the profile that its overview item names, so a run without
+-- a request of this session can be read.
+data Selection
+  = RequestSelection !Text !(Maybe Text)
+  | RunSelection !Text !Text
   deriving (Eq, Show)
+
+-- | The run that the selection names, when it names one.
+selectedRun :: Selection -> Maybe Text
+selectedRun selection = case selection of
+  RequestSelection _ run -> run
+  RunSelection run _ -> Just run
 
 -- | The resources that the composite read of the selection reads, given
 -- the installed composite read and the receipt URI of a retained command:
@@ -1327,10 +1368,10 @@ data Selection = Selection { selectedRequest :: !Text, selectedRun :: !(Maybe Te
 -- the receipt. An invalidation of one of these resources, or of a resource
 -- below or above one of them, invalidates the composite read.
 compositeResources :: Selection -> Maybe (RequestRead observed) -> Maybe Text -> [Text]
-compositeResources (Selection request run) installed receipt =
-  ["/v1/requests/" <> request]
-    <> ["/v1/preparations/" <> preparation | Just preparation <- [installed >>= C.draftPreparation . snd . readRequest]]
-    <> ["/v1/runs/" <> ident | Just ident <- [run]]
+compositeResources selection installed receipt =
+  ["/v1/requests/" <> request | RequestSelection request _ <- [selection]]
+    <> ["/v1/preparations/" <> preparation | Just preparation <- [installed >>= readRequest >>= C.draftPreparation . snd]]
+    <> ["/v1/runs/" <> ident | Just ident <- [selectedRun selection]]
     <> ["/v1/decisions/" <> decision | Just decision <- [installed >>= readRun >>= controlHead . snd . runReadControl]]
     <> [uri | Just uri <- [receipt]]
 
@@ -1344,11 +1385,11 @@ data ReadVerdict
     ReadInvalid
   deriving (Eq, Show)
 
-readRequestId :: RequestRead observed -> Text
-readRequestId = C.draftId . snd . readRequest
+readRequestId :: RequestRead observed -> Maybe Text
+readRequestId = fmap (C.draftId . snd) . readRequest
 
 readRequestRun :: RequestRead observed -> Maybe Text
-readRequestRun = C.draftRun . snd . readRequest
+readRequestRun composite = readRequest composite >>= C.draftRun . snd
 
 -- | Decide a delivered composite read against the current selection. The
 -- first argument reads the URI and entity tag of an observation.
@@ -1361,19 +1402,30 @@ readRequestRun = C.draftRun . snd . readRequest
 -- present exactly when the selection names a run and are valid for that run
 -- and the request profile. A read before association that observes the first
 -- association carries no run components. The next read reads them.
+--
+-- For a run selection, a read with a request, or with run components of
+-- another run, is foreign. A read is current only when it carries no
+-- request and no preparation, and its run components are valid for the
+-- selected run and profile.
 readVerdict :: (observed -> (Text, Text)) -> Selection -> RequestRead observed -> ReadVerdict
-readVerdict binding selection composite
-  | C.draftId request /= selectedRequest selection = ReadForeign
-  | Just run <- selectedRun selection, C.draftRun request /= Just run = ReadInvalid
-  | not (bound binding requestObserved ("/v1/requests/" <> C.draftId request) (C.draftRevision request)) = ReadInvalid
-  | not (all preparationBound (readPreparation composite)) = ReadInvalid
-  | otherwise = case (selectedRun selection, readRun composite) of
-      (Nothing, Nothing) -> ReadCurrent
-      (Just run, Just components) | runReadValid binding (C.draftProfile request) run components -> ReadCurrent
-      _ -> ReadInvalid
+readVerdict binding selection composite = case (selection, readRequest composite) of
+  (RequestSelection selected run, Just (requestObserved, request))
+    | C.draftId request /= selected -> ReadForeign
+    | Just ident <- run, C.draftRun request /= Just ident -> ReadInvalid
+    | not (bound binding requestObserved ("/v1/requests/" <> C.draftId request) (C.draftRevision request)) -> ReadInvalid
+    | not (all (preparationBound request) (readPreparation composite)) -> ReadInvalid
+    | otherwise -> case (run, readRun composite) of
+        (Nothing, Nothing) -> ReadCurrent
+        (Just ident, Just components) | runReadValid binding (C.draftProfile request) ident components -> ReadCurrent
+        _ -> ReadInvalid
+  (RunSelection run profile, Nothing) -> case readRun composite of
+    Just components
+      | runIdText (runIdentity (runReadSnapshot components)) /= run -> ReadForeign
+      | null (readPreparation composite), runReadValid binding profile run components -> ReadCurrent
+    _ -> ReadInvalid
+  _ -> ReadForeign
   where
-    (requestObserved, request) = readRequest composite
-    preparationBound (observed, preparation) = C.draftPreparation request == Just (C.preparationId preparation)
+    preparationBound request (observed, preparation) = C.draftPreparation request == Just (C.preparationId preparation)
       && bound binding observed ("/v1/preparations/" <> C.preparationId preparation) (C.preparationRevision preparation)
 
 -- | Whether the run components are valid for this profile and run. The

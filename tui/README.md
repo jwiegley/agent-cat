@@ -114,8 +114,9 @@ in [`../doc/tui-release-evidence.md`](../doc/tui-release-evidence.md).
 same frontend to a running workflow manager through the public
 `Agentic.Manager.Client` facade. It takes 1 to 8 absolute client-profile paths
 and connects the first one at startup.
-It performs one workflow journey. It browses the manager catalogue, creates one
-request with literal inputs, and shows the exact manager review. Only `y` in the
+It follows one selected request or run at a time. It browses the manager
+catalogue, creates a request with literal inputs, opens an existing request or
+run from the Manager overview view, and shows the exact manager review. Only `y` in the
 summary view approves that review. The frontend then follows the run in the
 live monitor, answers the questions that the manager routes to the person,
 invokes an offered recovery retry with `r`, recognizes the terminal state,
@@ -174,12 +175,48 @@ decodes each member with the decoders of the request and run collections, and
 `overviewRows` projects it for display. No runtime reducer takes part. A wide
 terminal shows the list beside the details of the selected row. A narrow
 terminal shows one pane at a time, and `Left` and `Right` select the pane.
-`Up` and `Down` select a row, and the application state keeps the selected
-row. `g` reads the overview again. While another read is in flight, `g`
+`Up` and `Down` select a row. The application state keeps the selected row by
+its kind and identity (`Agentic.Tui.ServiceLane.RowFocus`), not by its index,
+so the same row stays selected when a refresh adds or removes other rows. When
+the selected row leaves the overview, the row at its last index is selected.
+`g` reads the overview again. While another read is in flight, `g`
 starts nothing and the status line states it. A declared refusal keeps the
 last complete overview and marks it stale with the refusal code, for example
 `Overview: stale (TransportUnavailable)` after the manager stops. The view is
 not read on the one-second timer.
+
+`Enter` on an overview row opens it (`Agentic.Tui.Service.overviewOpen`). A
+request row selects the request and shows it by its phase: the request
+screen for a draft, and the review or the live monitor of its run after the
+next composite read. When the loaded workflow catalogue does not list the
+workflow revision of the request, the frontend first loads the catalogue of
+the request profile. A preparation row opens its request when the overview
+lists that request. A run row selects the run by its identifier with the
+profile of the row, and a decision row selects the run of the decision. The
+composite read of a selected run reads its snapshot, its controls and the
+decision at their head by the run identifier, with no request, so a run
+without a request of this session opens. A row opens only while the command
+lane is idle, and otherwise the status line states that a command is in
+progress. `Esc` on the live monitor, on the question and recovery heads, and
+on an idle request screen returns to the overview and sends nothing
+(`Agentic.Tui.Model.serviceLeave`). The selection and its observation stay,
+so the reads that confirm a command in progress continue, and the run
+continues at the manager. An installed read of the selection never replaces
+the overview, a browser or the help (`serviceShowsSelection`). `Enter` on the
+row of the run that the installed observation already shows opens it at once
+with that observation.
+
+The application state keeps the text drafts by identity
+(`Agentic.Tui.ServiceLane.Drafts`): the input editor text of each request and
+input, and the answer text of each decision of each run. An editor shows the
+draft of the displayed identity, so a draft survives a refresh, a resize, a
+change of the selection, and leaving and reopening a run. A completed
+`set-input` or answer command removes its draft. An input without a draft
+shows its accepted literal, and a question without a draft shows an empty
+editor. Only the decision at the head of a run can be answered, so the display
+of the head of a run removes the answer drafts of the other decisions of that
+run, and the text typed for an earlier head never stays in the editor. At
+most 64 drafts are kept, and each is bounded by its editor.
 
 After the first overview of a session is installed, the frontend starts the
 event worker of the session in its own worker slot (`ServiceEventsWork`). The
@@ -329,7 +366,7 @@ description](../doc/api/README.md#pages-and-live-delivery) describes.
 
 Service mode does not support cancellation, steering, redirect, failover or
 abandon, the structured answer editor, captured and other non-literal inputs,
-withdrawal or discarding of a request, more than one concurrent run, run history,
+withdrawal or discarding of a request, more than one selection at a time, run history,
 lineage, export, reconnection of the session after a manager restart or a
 credential revocation, observation of earlier runs after a
 frontend restart, or acceptance at 40x12 and 80x24. The

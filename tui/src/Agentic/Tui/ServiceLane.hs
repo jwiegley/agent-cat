@@ -180,15 +180,29 @@ module Agentic.Tui.ServiceLane
     overviewRetryStarted,
     safetyReadInterval,
     safetyReadDue,
+    RowFocus (..),
+    noFocus,
+    focusedIndex,
+    moveFocus,
+    DraftKey (..),
+    Drafts,
+    noDrafts,
+    draftsBound,
+    draftText,
+    draftKeys,
+    recordDraft,
+    dropDraft,
+    showDraft,
   )
 where
 
 import qualified Agentic.Manager.Client as C
 import Agentic.Tui.Service (Endpoint, Mutation, ReadVerdict (..), missingScope, mutationOperation, mutationURI)
 import Control.Exception (SomeAsyncException, SomeException, evaluate, fromException, throwIO, try)
-import Data.List (findIndex)
+import Data.List (elemIndex, findIndex)
+import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
-import Data.Maybe (isJust)
+import Data.Maybe (fromMaybe, isJust)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Time.Clock (NominalDiffTime, UTCTime, addUTCTime, diffUTCTime)
@@ -1267,3 +1281,92 @@ safetyReadDue :: Delivery -> Maybe UTCTime -> UTCTime -> Bool
 safetyReadDue delivery latest now = case (delivery, latest) of
   (DeliveryLive, Just previous) -> diffUTCTime now previous >= safetyReadInterval
   _ -> True
+
+-- | The focus of a list of rows by the identity of the selected row, with
+-- the index at which that row was last selected. A refresh, a selection
+-- change and a resize keep the identity, so the same row stays selected
+-- wherever it moves in the list.
+data RowFocus key = RowFocus
+  { focusKey :: !(Maybe key),
+    focusIndex :: !Int
+  }
+  deriving (Eq, Show)
+
+-- | The focus before any row is selected: the first row.
+noFocus :: RowFocus key
+noFocus = RowFocus Nothing 0
+
+-- | The index of the selected row in these rows: the row with the focused
+-- identity, or the last selected index bounded by the rows when no row has
+-- that identity.
+focusedIndex :: Eq key => [key] -> RowFocus key -> Int
+focusedIndex keys (RowFocus key index) =
+  fromMaybe (max 0 (min (length keys - 1) index)) (key >>= (`elemIndex` keys))
+
+-- | Move the focus by this many rows from the selected row, bounded by the
+-- rows, and focus the identity of the row reached.
+moveFocus :: Eq key => Int -> [key] -> RowFocus key -> RowFocus key
+moveFocus delta keys focus =
+  let index = max 0 (min (length keys - 1) (focusedIndex keys focus + delta))
+   in RowFocus (if null keys then focusKey focus else Just (keys !! index)) index
+
+-- | The identity of one text draft of the service frontend: the input
+-- editor text of one input of one request, or the answer text of one
+-- decision of one run.
+data DraftKey
+  = InputDraft !Text !Text
+  | AnswerDraft !Text !Text
+  deriving (Eq, Ord, Show)
+
+-- | The text drafts by identity. A refresh, a selection change and a resize
+-- change no draft. Only typed text, a completed command and a change of the
+-- answer head change them.
+newtype Drafts = Drafts (Map.Map DraftKey Text)
+  deriving (Eq, Show)
+
+noDrafts :: Drafts
+noDrafts = Drafts Map.empty
+
+-- | The largest number of drafts that are kept. Each draft is bounded by its
+-- editor.
+draftsBound :: Int
+draftsBound = 64
+
+-- | The draft with this identity.
+draftText :: DraftKey -> Drafts -> Maybe Text
+draftText key (Drafts drafts) = Map.lookup key drafts
+
+-- | The identities of the kept drafts.
+draftKeys :: Drafts -> [DraftKey]
+draftKeys (Drafts drafts) = Map.keys drafts
+
+-- | Keep the typed text as the draft with this identity. Empty text removes
+-- the draft. A new identity is not kept when 'draftsBound' drafts are kept,
+-- and its text then stays only in the editor.
+recordDraft :: DraftKey -> Text -> Drafts -> Drafts
+recordDraft key text (Drafts drafts)
+  | T.null text = Drafts (Map.delete key drafts)
+  | Map.member key drafts || Map.size drafts < draftsBound = Drafts (Map.insert key text drafts)
+  | otherwise = Drafts drafts
+
+-- | Remove the draft with this identity, as after its command completed.
+dropDraft :: DraftKey -> Drafts -> Drafts
+dropDraft key (Drafts drafts) = Drafts (Map.delete key drafts)
+
+-- | The drafts and the editor text after the displayed draft changes from
+-- the first identity to the second. 'Nothing' keeps the editor when the
+-- identity is the same. Otherwise the editor shows the draft of the new
+-- identity, or 'Nothing' inside 'Just' when it has none. Only the decision
+-- at the head of a run can be answered, so the display of the answer draft
+-- of one decision removes the drafts of the other decisions of that run: a
+-- draft for an earlier head is stale.
+showDraft :: Maybe DraftKey -> Maybe DraftKey -> Drafts -> (Drafts, Maybe (Maybe Text))
+showDraft before after drafts@(Drafts kept)
+  | before == after = (drafts, Nothing)
+  | otherwise = (current, Just (after >>= (`draftText` current)))
+  where
+    current = case after of
+      Just (AnswerDraft run decision) -> Drafts (Map.filterWithKey (\key _ -> case key of
+        AnswerDraft other earlier -> other /= run || earlier == decision
+        InputDraft {} -> True) kept)
+      _ -> drafts

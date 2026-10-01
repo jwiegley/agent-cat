@@ -322,7 +322,16 @@ endpoints_mode = len(sys.argv) == 6 and sys.argv[5] == ENDPOINTS
 # state must still read live. The harness then runs the request through
 # HTTP with the mixed fixture: it approves the request, and the view must
 # show the run with runtime status Running and its pending question without
-# a key press. It answers the question and retries the recovery. The
+# a key press. While the run waits at its question, the TUI opens the run
+# from the overview row by its identifier: Down moves the focus to the run
+# row, and Enter shows the question head of the run. The TUI types an answer
+# draft and leaves with Esc, which must return to the overview and send
+# nothing: the harness reads through HTTP that the run is still running,
+# that the same decision is still the pending head, and that no control
+# acknowledgement was added. The focus must still be on the run row, and
+# Enter must show the question head with the same draft again, after a
+# safety read and after a resize. Esc returns to the overview again. The
+# harness then answers the question and retries the recovery. The
 # overview lists only live requests and active runs, so within 3 seconds
 # after the harness observes the terminal status Succeeded, and without a
 # key press, the view must no longer list the run. The harness then creates
@@ -3848,10 +3857,61 @@ def overview_checks():
                 # leave it.
                 client = mixed_client(capabilities, harness)
                 _, run = approve_mixed(created, workflow, client)
-                drive_mixed(run, client, stop_at_question=True, overview=False)
+                head, _, _ = drive_mixed(run, client, stop_at_question=True, overview=False)
                 screen = session.wait_screen("decision question", timeout=3)
                 assert "run Running" in screen, "the overview lacks the running run"
                 save(session, "running")
+                print("PASS tui-overview 3a: without a key press the overview shows run", run, "Running with its question", flush=True)
+                # 3b. The held run opens from the overview by its identifier,
+                # keeps a typed answer draft, and Esc leaves it running.
+                held_before, _, _ = client[0]("/v1/runs/" + run + "/snapshot", "RunSnapshot")
+                decision_before, _, _ = client[0]("/v1/decisions/" + head, "Decision")
+                for _ in range(8):
+                    if "> run Running" in session.screen.text():
+                        break
+                    session.send(b"\x1b[B")
+                    session.settle()
+                screen = session.wait_screen("> run Running", timeout=5)
+                assert "Run:" + run in details(screen).replace(" ", ""), "the focused overview row is not the held run"
+                session.send(b"\r")
+                session.wait_screen("Your answer", timeout=20)
+                save(session, "held-open")
+                draft = "pc18 held draft"
+                session.send(draft.encode())
+                session.wait_screen(draft, timeout=10)
+                save(session, "held-draft")
+                session.send(b"\x1b")
+                screen = session.wait_screen("Manager overview", timeout=10)
+                screen = session.wait_screen("> run Running", timeout=10)
+                assert "Your answer" not in screen and draft not in screen, "Esc did not return to the overview"
+                save(session, "held-left")
+                held_after, _, _ = client[0]("/v1/runs/" + run + "/snapshot", "RunSnapshot")
+                control_after, _, _ = client[0]("/v1/runs/" + run + "/control", "RunControl")
+                decision_after, _, _ = client[0]("/v1/decisions/" + head, "Decision")
+                assert held_after["runtime"]["status"] == "running", ("Esc changed the held run", held_after["runtime"]["status"])
+                assert control_after["decisionHeadId"] == head and decision_after["state"] == "pending" \
+                    and decision_after["revision"] == decision_before["revision"], "Esc changed the pending question"
+                assert held_after["controlAcks"] == held_before["controlAcks"], "Esc sent a manager control"
+                print("PASS tui-overview 3b: Enter on the focused run row opened run", run, "by its identifier with its question head,",
+                      "and Esc returned to the overview while the run stays running with the same pending question and no new control acknowledgement",
+                      flush=True)
+                # 3c. Reopening the run shows the same draft, after a safety
+                # read and after a resize.
+                session.send(b"\r")
+                session.wait_screen("Your answer", timeout=20)
+                session.wait_screen(draft, timeout=10)
+                time.sleep(6)
+                session.wait_screen(draft, timeout=5)
+                session.resize(30, 100)
+                session.wait_screen(draft, timeout=10)
+                session.resize(24, 80)
+                screen = session.wait_screen(draft, timeout=10)
+                save(session, "held-reopen")
+                assert "Your answer" in screen, "the reopened run lost its question head"
+                session.send(b"\x1b")
+                session.wait_screen("Manager overview", timeout=10)
+                print("PASS tui-overview 3c: the reopened run showed the typed answer draft again, after a safety read and after a resize,",
+                      "and Esc returned to the overview", flush=True)
                 _, answered, recovered = drive_mixed(run, client, overview=False)
                 assert answered and recovered, ("mixed workflow decisions", answered, recovered)
                 finished_at = time.monotonic()
