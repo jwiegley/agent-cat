@@ -166,6 +166,16 @@ send was in flight, stays listed under its own profile as `unresolved
 OPERATION URI`. No later session sends it, and its pending command is bound to
 the closed session, so the client refuses it with `WrongEndpoint`. Selecting an
 earlier profile again opens a new session with new references.
+The tui-failures mode of `manager/test/service_http.py` switches the
+endpoint while responses of the earlier endpoint are late. The harness starts
+the TUI with two client profiles. The first names a TCP forwarder of the
+harness, which passes the TLS bytes through and, in its delay window, sends
+each byte from the manager five seconds late. The second names the manager
+directly. The harness starts an overview read through the forwarder with `g`,
+withdraws a draft request, and switches to the direct profile while the
+forwarder still holds delayed bytes. Until those bytes are due and three
+seconds more, no frame shows the forwarder endpoint as active, the forwarder
+address in the identity row or the withdrawn draft.
 
 After the profiles load, the frontend reads the authorized manager overview
 (`/v1/snapshot`) through `Agentic.Manager.Client.loadOverview` in the
@@ -678,7 +688,13 @@ shows a held run and a second request waits for the one execution
 reservation, starts a new lifetime on the same root, releases the quarantined
 reservation through `check-store`, `check-quarantine` and
 `release-quarantine`, and approves the queued request in the TUI, whose run
-then completes in the live monitor.
+then completes in the live monitor. The mode then answers the first question
+of a structured-person run through HTTP while the TUI holds a typed draft for
+it. The TUI answer receives 412 `stale-revision`, the second question shows
+the kept draft, and the TUI sends the draft only after `Ctrl-D`. The control
+`tui-failures-broken-stale` lets the TUI answer first, so its answer is
+delivered, and the control fails with `JOURNEY-ASSERT stale answer kept
+draft`.
 
 A credential refusal (`Agentic.Tui.ServiceLane.credentialRefusal`: a 401
 refusal, `CredentialUnavailable` or `CredentialChanged`) of a read, a

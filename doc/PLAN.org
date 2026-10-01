@@ -10684,6 +10684,48 @@ Non-blocking findings of fess audit fess/pc-PC32-r1.md (2026-10-01) on subtask P
 
 Evidence: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/PC/PC32/impl-r1 (private).
 
+* TODO [#D] Resolve the non-blocking fess findings of subtask PC33    :review:
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pc33-follow-fess-7vx9
+:LABELS:   ["review","workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-01 Thu 08:52]
+:MODIFIED: [2026-10-01 Thu 08:52]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess audit fess/pc-PC33-r1.md (2026-10-01) on subtask PC33 (WM-035
+failure PTY journeys: stale answer, delayed responses and endpoint change).
+
+1. (medium) manager/test/service_http.py lines 8728-8830 (tui-failures step 8): the endpoint
+switch closes the earlier session's client, and DelayForwarder drops every held chunk (3 dropped
+chunks in the log). No late byte reaches the frontend, so step 8 would still pass without the
+session-generation fence in Tui.App. The fence has only model-test evidence
+(tui/test/ServiceTests.hs:3045 and :3111). Fix: add a variant in which a late result of an earlier
+generation reaches the frontend (for example switch back to endpoint 1 while chunks are held, or
+keep a connection open), or record the model test as the evidence for the fence.
+2. (low) doc/tui-release-evidence.md line 46: the new row lists the session generation of worker
+results in Tui.App as covered by tui-failures. The journey does not reach that code path. Fix: cite
+the ServiceTests generation-fence check, or state that the journey covers it only through
+connection closure.
+3. (low) manager/test/service_http.py near lines 8628-8633 (step 5, SIGSTOP path): Ctrl-D enters
+the PTY while the TUI is stopped. After SIGCONT, an event-worker refresh can move the view to
+question 2 before the key is handled, so the draft goes to question 2 with no 412 and the mode
+fails with STALE_KEPT_DRAFT. This can cause a flaky failure, never a false pass (4 of 4 runs
+passed). Fix: hold SSE delivery back, or accept and record the race.
+4. (low) manager/test/service_http.py lines 979-1086 and 767-771: on upstream EOF DelayForwarder
+only calls shutdown(SHUT_WR) on the client socket and never closes the client or upstream socket.
+forward_listener is never closed. The 'closed' parameter of manager_to_queue is unused. Fix: close
+both sockets on upstream EOF, close the listener in the finally block of tui_failure_checks, and
+drop the unused parameter.
+
+Also from the implementer: one unused variable was renamed after the last checks. The fess
+reviewer reran BUILD and tui-failures at N8 on the final code (both exit 0).
+
 * TODO [#C] Resolve PC5 fess findings in legacy history windows    :review:
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -19490,7 +19532,7 @@ Local-mode behavior remains intact without a duplicated service runtime model.
 :LABELS:   ["p7","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-01 Thu 08:28]
+:MODIFIED: [2026-10-01 Thu 08:52]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-035
 :SOURCE_REPO: agent-cat
@@ -19617,6 +19659,13 @@ check fail.
     "author": "johnw",
     "text": "PC32 (2026-10-01): the lifecycle modes tui-overview, tui-inputs, tui-controls, tui-redirect, tui-decisions and tui-history of manager/test/service_http.py now run at 80x24 over the actual manager and deterministic workers. Each step reads manager facts through HTTP with the harness credential, each session ends with q, exit 0 and assert_restored, and each mode fails past LIFECYCLE_SECONDS=900 (final N8 runs: overview 195 s, controls 163 s, inputs 46 s, redirect 53 s, history 53 s, decisions 34 s). Negative control tui-controls-broken-cancel presses Esc in the cancel confirmation and fails with 'JOURNEY-ASSERT cancel accepted before cancelled'. Fixes: Presentation.hs keyOutcomeRows lets a key outcome wider than the terminal use a footer row (new tui-model-test check); App.hs scrolls the history detail to a new save, export or lineage outcome. tui/README.md, doc/tui-release-evidence.md and doc/agent-cat.texi describe service mode as supported. Checks passed: Werror build with -ftui-tests of agentic-run, routing-fixed-point-probe, tui-model-test; the six lifecycle modes at N8; tui-controls-broken-cancel (expected nonzero with its literal); Phase A journey at N8; make -C doc check. Evidence: resume-20260923/PC/PC32/impl-r1; fess/pc-PC32-r1.md (non-blocking), follow-up acat-pc32-follow-fess-9owj. Limitation: the tui-history restart-child review (two lineage rows) does not fit 80x24 and is approved at 100x30. Package stays open.",
     "created_at": "2026-10-01T15:28:43Z"
+  },
+  {
+    "id": 508,
+    "issue_id": "acat-wm-035-9uqq",
+    "author": "johnw",
+    "text": "PC33 (failure PTY journeys): tui-failures now has eight steps, adding a stale answer whose draft is kept (412 stale-revision, draft kept, no automatic send) and a delayed-response endpoint switch through a TLS pass-through DelayForwarder listed in https.allowedHosts. New control tui-failures-broken-stale fails with 'JOURNEY-ASSERT stale answer kept draft'. Evidence: Werror BUILD of agentic-run, routing-fixed-point-probe, tui-model-test; tui-failures at N8 exit 0 (8 PASS lines, rerun by fess on final code); broken-stale control nonzero with its literal message; JOURNEY-ONCE(pc33, 8) pass; make -C doc check pass. No frontend defect found. The generation fence is covered by model tests only (follow-up acat-pc33-follow-fess-7vx9).",
+    "created_at": "2026-10-01T15:52:54Z"
   }
 ]
 #+end_src

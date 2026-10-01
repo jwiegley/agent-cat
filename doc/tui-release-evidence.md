@@ -43,6 +43,7 @@ publication was performed.
 | macOS/Linux support and terminal restoration | POSIX fd/process-group implementation; three-system flake | Darwin PTY normal/exception/signal tests; Darwin and Linux builds below |
 | Service-mode journey at 40x12, 80x24 and 140x36 with resizes | `Tui.Presentation.serviceReviewRows`, `serviceReviewAllowed` and the header row; drafts kept by identity in `Tui.App` | The tui-sizes mode and its `tui-sizes-broken-draft` control in `manager/test/service_http.py`; `tui-model-test` review-fit and header-row checks |
 | Service-mode lifecycle at 80x24: overview, inputs, run controls, redirects, decisions and history | `Tui.App`, `Tui.Service`, `Tui.ServiceLane` and `Tui.Presentation`, with the wrapped key outcome (`keyOutcomeRows`) and the scroll of the run detail to a new outcome (`historyOutcomeLines`) | The tui-overview, tui-inputs, tui-controls, tui-redirect, tui-decisions and tui-history modes and the `tui-controls-broken-cancel` control in `manager/test/service_http.py`, and the `tui-model-test` check of the wrapped key outcome at 80x24 |
+| Service-mode failures: manager loss and restart, stale answer, refused credential, quit during a held run, and endpoint change during delayed responses | `Tui.ServiceLane` (`readReachability`, `credentialRefusal`, `keepDraft`, `beginSwitch` and `switchStep`) and the session generation of worker results in `Tui.App` | The tui-failures mode and its `tui-failures-broken-stale` control in `manager/test/service_http.py`, with the delay forwarder `DelayForwarder` of the harness |
 | Downstream `wf --tui` uses its own 74-workflow registry | Public `Agentic.Tui` facade reached through `cliMain` | Downstream gates and a scripted `wf --tui` `hello-world` PTY launch |
 
 ## Fresh validation record
@@ -85,6 +86,60 @@ again. One step leaves 80 by 24 on purpose: the summary review of the
 restart child in tui-history has two lineage rows and does not fit 80 by 24,
 so `y` there shows the notice of the consent rule while the request stays in
 review, and `y` approves the review after a resize to 100 by 30. The Phase A journey (`tui-journey`) passes with these changes.
+
+### Service-mode failure journey (2026-10-01)
+
+The tui-failures mode of `manager/test/service_http.py` drives the service TUI
+through `test/tui_probe.py` at 140 by 36 cells with the mixed fixture, one
+profile and one execution reservation, over two manager lifetimes. Each step
+checks the screen against manager facts that the harness reads through HTTP
+with its own credential.
+
+1. The TUI shows a held run at its question, and a second request waits for
+   the execution reservation.
+2. After SIGKILL of the manager, the header shows `manager unreachable since
+   T` without a key press, and the live monitor keeps the question and the
+   last observation, marked stale.
+3. After a new lifetime starts on the same root, the TUI reconnects without a
+   key press and shows the earlier run with lost supervision. No command is
+   added.
+4. After the harness releases the quarantined reservation, the queued request
+   reaches review, the TUI approves it, and its run succeeds in the live
+   monitor with the verified result.
+5. The TUI types a JSON draft at the first question of a structured-person
+   run. The harness stops the TUI process, answers the question through HTTP,
+   writes `Ctrl-D` and lets the TUI continue. The TUI answer receives 412
+   `stale-revision`, the monitor states `answer refused: 412 stale-revision;
+   decision changed; draft kept`, and the second question shows the draft.
+   The TUI sends nothing by itself, and `Ctrl-D` then sends the draft. The run
+   records the harness answer and the draft.
+6. After the harness revokes the TUI credential, the header shows
+   `credential refused`, `Ctrl-D` and `Enter` start nothing, and `q` quits
+   while the held run still runs.
+7. A second session with a new credential opens the held run and quits with
+   `Ctrl-C`. No process of the TUI remains.
+8. A third session starts with two client profiles. The first names
+   `DelayForwarder`, a TCP forwarder of the harness. Its port is allocated
+   before the manager configuration is written and is listed in the
+   `allowedHosts` of the HTTPS configuration, because the manager refuses any
+   other Host header. The forwarder passes the TLS bytes through, so the
+   certificate still matches its address. In its delay window it sends each
+   byte from the manager five seconds late. The second profile names the
+   manager directly. With the forwarder profile active, `g` starts an
+   overview read through the forwarder, the harness withdraws a draft
+   request, and the TUI switches to the direct profile while the forwarder
+   holds delayed bytes of the earlier endpoint. Until those bytes are due and
+   three seconds more, and at least three seconds after the Manager overview
+   of the direct endpoint opens, no frame shows endpoint 1 as active, the
+   forwarder address in the identity row, a draft row or the withdrawn
+   request.
+
+The control `tui-failures-broken-stale` lets the TUI answer the first
+question of step 5 before the harness answers it through HTTP. The TUI
+answer is delivered, the harness answer receives 412 `stale-revision`, and
+the control fails with `JOURNEY-ASSERT stale answer kept draft`. The mode
+passed at `+RTS -N8` in 112 seconds, and the journey found no defect in the
+frontend. The Phase A journey (`tui-journey`) passes with these changes.
 
 ### Service-mode size journey (2026-10-01)
 

@@ -593,7 +593,18 @@ HISTORY_LEGACY_ENTRIES = 300
 # the new run with its own credential, and the live monitor must show the
 # runtime status Succeeded and the verified result whose SHA-256 the harness
 # download agrees with.
-# 5. The harness runs a third request to its person question with its own
+# 5. The harness approves a structured-person request with its own
+# credential, and the TUI opens its run from the Manager overview at the first
+# question and types a valid JSON answer, the draft. The harness stops the TUI
+# process, answers the first question through HTTP and waits for its effect,
+# writes Ctrl-D and lets the TUI continue. The TUI answer must receive 412
+# stale-revision: the live monitor must state "answer refused: 412
+# stale-revision; decision changed; draft kept", or the mode fails with
+# STALE_KEPT_DRAFT. The second question must show the draft in its editor,
+# and the TUI must send nothing by itself. Ctrl-D then sends the draft, and
+# the run must succeed with the harness answer and the draft as its recorded
+# answers.
+# 6. The harness runs a third request to its person question with its own
 # credential, and the TUI opens that held run from the Manager overview. The
 # harness revokes the TUI credential through local administration. Without a
 # key press, the header must show "credential refused" and the status line
@@ -603,13 +614,42 @@ HISTORY_LEGACY_ENTRIES = 300
 # its own credential that the run still runs at its question under owned
 # supervision. q quits the TUI with status 0. The TUI never owned a child
 # process, no process of its process group remains, and the run still runs.
-# 6. The harness issues a new TUI credential with its own client profile. A
+# 7. The harness issues a new TUI credential with its own client profile. A
 # second TUI session opens the held run from the Manager overview, owns no
 # child process, and quits with Ctrl-C and status 0. No process of its
 # process group remains, and the harness reads through HTTP that the run
 # still runs at its question under owned supervision.
+# 8. The harness issues a third TUI credential with two client profiles. The
+# first names the endpoint of DelayForwarder, a TCP forwarder of the harness
+# whose port is allocated before the manager configuration is written and
+# listed in the allowedHosts of the HTTPS configuration, because the manager
+# refuses any other Host header. The forwarder passes the TLS bytes through, so
+# the certificate still matches its address. The second profile names the
+# manager directly. A third TUI session starts with both profiles, so the
+# forwarder profile is active, and the Manager overview lists a draft request
+# of the harness. The harness opens the delay window of the forwarder, in
+# which every byte from the manager to the TUI arrives FORWARD_DELAY seconds
+# late, and g starts an overview read through the forwarder. The harness
+# withdraws the draft through HTTP and then switches the TUI to the direct
+# profile in the Endpoints view while the forwarder still holds delayed bytes
+# of the earlier endpoint. After the switch the screen must show only the
+# state of the direct endpoint: until the delayed bytes are due and three
+# seconds more, and at least three seconds after the Manager overview of the
+# direct endpoint opens, no frame may show endpoint 1 as active, the
+# forwarder address in the identity row of the header, the withdrawn draft or
+# a draft row. The manager overview must not list the
+# withdrawn request. q then quits with status 0.
+# The tui-failures-broken-stale control lets the TUI answer the first
+# question of step 5 before the harness answers it through HTTP, so the TUI
+# answer is delivered, the harness answer receives 412, and the mode must
+# fail with STALE_KEPT_DRAFT.
 # Each step prints its own PASS line. It runs two manager lifetimes.
 TUI_FAILURES = "tui-failures"
+TUI_FAILURES_BROKEN = "tui-failures-broken-stale"
+STALE_KEPT_DRAFT = "JOURNEY-ASSERT stale answer kept draft"
+# The delay of each byte from the manager to the TUI while the delay window
+# of the forwarder is open, in seconds.
+FORWARD_DELAY = 5.0
 # The tui-sizes mode drives the service journey of the mixed fixture through
 # the keyboard at three terminal sizes, 40x12, 80x24 and 140x36, with one
 # profile and one execution reservation. Each resize waits for the redraw of
@@ -654,11 +694,17 @@ TUI_MODES = {OVERVIEW: (["profile_1", "profile_2"], ["observe", "submit"]), INPU
              TUI_SIZES: (["profile_1"], ["observe", "submit", "control"]),
              TUI_SIZES_BROKEN: (["profile_1"], ["observe", "submit", "control"])}
 TUI_MODES[TUI_CONTROLS_BROKEN] = TUI_MODES[TUI_CONTROLS]
+TUI_MODES[TUI_FAILURES_BROKEN] = TUI_MODES[TUI_FAILURES]
 tui_mode = sys.argv[5] if len(sys.argv) == 6 and sys.argv[5] in TUI_MODES else None
 # The broken-cancel control is the tui-controls mode with one changed key.
 cancel_control = tui_mode == TUI_CONTROLS_BROKEN
 if cancel_control:
     tui_mode = TUI_CONTROLS
+# The broken-stale control is the tui-failures mode with the order of the two
+# answers of step 5 reversed.
+stale_control = tui_mode == TUI_FAILURES_BROKEN
+if stale_control:
+    tui_mode = TUI_FAILURES
 # The lifecycle modes tui-overview, tui-inputs, tui-controls, tui-redirect,
 # tui-decisions and tui-history share one standard. Each TUI session runs at
 # 80x24 over the actual manager and deterministic workers. Each step checks
@@ -714,6 +760,16 @@ with (work / "certificate.log").open("wb") as log:
 with socket.socket() as reservation:
     reservation.bind(("127.0.0.1", 0))
     port = reservation.getsockname()[1]
+# The tui-failures mode listens on the port of its delay forwarder before the
+# manager configuration is written, and the manager allows the Host header of
+# that exact address.
+forward_listener = None
+allowed_hosts = [f"127.0.0.1:{port}"]
+if tui_mode == TUI_FAILURES:
+    forward_listener = socket.socket()
+    forward_listener.bind(("127.0.0.1", 0))
+    forward_listener.listen(16)
+    allowed_hosts.append(f"127.0.0.1:{forward_listener.getsockname()[1]}")
 configuration = {
     "version": 1, "managerRoot": str(work / "manager"), "localRetentionRoots": [],
     "runners": [{"alias": "runner", "executable": str(runner), "prefix": []}],
@@ -725,7 +781,7 @@ configuration = {
                "globalPageSets": 2, "globalConnections": 8, "globalDatabaseReaders": 2,
                "globalMutationLedgerBytes": 16777216, "safetyControlsPerMinute": 100, "executionReservations": 1},
     "https": {"host": "127.0.0.1", "port": port, "certificateFile": str(cert), "keyFile": str(key),
-              "allowedHosts": [f"127.0.0.1:{port}"], "allowedOrigins": ["https://example.invalid"],
+              "allowedHosts": allowed_hosts, "allowedOrigins": ["https://example.invalid"],
               "allowedPeers": ["127.0.0.1"]}}
 # The base and mixed modes also read the frozen request, run and decision
 # collections. A second profile, visible only to a second credential, holds
@@ -920,6 +976,116 @@ def administration(payload, refused=None):
     return value
 
 
+class DelayForwarder:
+    """A TCP forwarder from its listening socket to the manager port. It
+    passes the bytes of each connection through unchanged in both
+    directions, so TLS runs end to end. While the delay window is open, each
+    chunk from the manager is sent to the client the given delay after it
+    arrived, and the chunks of one connection keep their order. A connection
+    that the client closes is closed at the manager too, and its chunks that
+    are not yet sent are dropped. chunks records the connection number,
+    arrival time, due time and size of each chunk from the manager."""
+
+    def __init__(self, listener, upstream_port, delay):
+        self.listener, self.upstream_port, self.delay = listener, upstream_port, delay
+        self.lock = threading.Lock()
+        self.window_end = 0.0
+        self.chunks = []
+        self.dropped = 0
+        self.connections = 0
+        threading.Thread(target=self.accept, daemon=True).start()
+
+    def open_window(self, seconds):
+        """Delay each chunk from the manager that arrives in the next seconds."""
+        with self.lock:
+            self.window_end = time.monotonic() + seconds
+
+    def pending_at(self, moment):
+        """The chunks that arrived before the moment and were due after it."""
+        with self.lock:
+            return [chunk for chunk in self.chunks if chunk[1] <= moment < chunk[2]]
+
+    def accept(self):
+        while True:
+            try:
+                client, _ = self.listener.accept()
+            except OSError:
+                return
+            with self.lock:
+                self.connections += 1
+                number = self.connections
+            try:
+                upstream = socket.create_connection(("127.0.0.1", self.upstream_port), timeout=10)
+            except OSError:
+                client.close()
+                continue
+            upstream.settimeout(None)
+            closed = threading.Event()
+            queued = []
+            ready = threading.Condition()
+            threading.Thread(target=self.client_to_manager, args=(client, upstream, closed, ready), daemon=True).start()
+            threading.Thread(target=self.manager_to_queue, args=(number, upstream, queued, ready, closed), daemon=True).start()
+            threading.Thread(target=self.queue_to_client, args=(client, queued, ready, closed), daemon=True).start()
+
+    def client_to_manager(self, client, upstream, closed, ready):
+        try:
+            while data := client.recv(65536):
+                upstream.sendall(data)
+        except OSError:
+            pass
+        closed.set()
+        for end in (upstream, client):
+            with contextlib.suppress(OSError):
+                end.shutdown(socket.SHUT_RDWR)
+        with ready:
+            ready.notify_all()
+
+    def manager_to_queue(self, number, upstream, queued, ready, closed):
+        while True:
+            try:
+                data = upstream.recv(65536)
+            except OSError:
+                data = b""
+            now = time.monotonic()
+            with self.lock:
+                due = now + self.delay if now < self.window_end else now
+                if data:
+                    self.chunks.append((number, now, due, len(data)))
+            with ready:
+                queued.append((due, data))
+                ready.notify_all()
+            if not data:
+                return
+
+    def queue_to_client(self, client, queued, ready, closed):
+        while True:
+            with ready:
+                while not queued and not closed.is_set():
+                    ready.wait()
+                if closed.is_set():
+                    with self.lock:
+                        self.dropped += sum(1 for _, data in queued if data)
+                    queued.clear()
+                    client.close()
+                    return
+                due, data = queued.pop(0)
+            delay = due - time.monotonic()
+            if delay > 0:
+                closed.wait(delay)
+            if closed.is_set():
+                with self.lock:
+                    self.dropped += 1 if data else 0
+                continue
+            if not data:
+                with contextlib.suppress(OSError):
+                    client.shutdown(socket.SHUT_WR)
+                return
+            try:
+                client.sendall(data)
+            except OSError:
+                closed.set()
+
+
 class TuiModeFixture:
     """The shared fixture of the TUI modes. It writes the manager
     configuration with the profiles that the mode names. It issues one
@@ -966,11 +1132,13 @@ class TuiModeFixture:
         self.issue(name, self.scopes)
         return self.write_profile(name)
 
-    def session(self, rows=24, columns=80, client_profile=None):
+    def session(self, rows=24, columns=80, client_profile=None, client_profiles=None):
         """The service TUI of the TUI credential, or of the given client
-        profile, in a new pseudo-terminal."""
+        profile, or of the given client profiles in that order, in a new
+        pseudo-terminal."""
         from tui_probe import TuiSession
-        command = [os.environ["TUI_CHECK"], "--tui", "--service", str(client_profile or self.client_profile), "+RTS", "-N" + native, "-RTS"]
+        profiles = client_profiles or [client_profile or self.client_profile]
+        command = [os.environ["TUI_CHECK"], "--tui", "--service"] + [str(path) for path in profiles] + ["+RTS", "-N" + native, "-RTS"]
         return TuiSession(runner, self.client_state, rows=rows, columns=columns, command=command, explicit_state=False)
 
 
@@ -8421,12 +8589,75 @@ def tui_failure_checks():
             assert squeeze("Result SHA-256: " + artifact["sha256"]) in squeeze(screen), "the TUI result digest differs from the harness download"
             print("PASS tui-failures 4: after release-quarantine of", quarantine, "request", queued["id"], "reached review without a",
                   "client command, the TUI approved it, and run", second_run, "succeeded in the live monitor with verified result", artifact["id"], flush=True)
-            # 5. A held run is open in the TUI when the harness revokes the
-            # TUI credential. The restart published a new profile revision,
-            # so the catalogue is read again.
+            # The restart published a new profile revision, so the catalogue
+            # is read again.
             status, catalogue, _ = request("/v1/workflows?profileId=profile_1", harness)
             assert status == 200
             current = next(item for item in catalogue["items"] if item["name"] == "mixed-controls")
+            # 5. A stale answer receives 412 and keeps its draft.
+            structured = next(item for item in catalogue["items"] if item["name"] == "structured-person")
+            stores_before = set(work.glob("manager/runs/runs/*/runtime"))
+            _, stale_run = approve_mixed(create_draft(structured), structured, client)
+            control, _, _ = wait_for("/v1/runs/" + stale_run + "/control", "RunControl", lambda value: value["decisionHeadId"] is not None)
+            first = control["decisionHeadId"]
+            stores = sorted(set(work.glob("manager/runs/runs/*/runtime")) - stores_before)
+            assert len(stores) == 1, ("the run store of the structured run", stale_run, stores)
+            session.send(b"\x1b")
+            session.wait_screen("Manager overview", timeout=10)
+            focus_row(session, "run Running", "Run:" + stale_run, 30)
+            session.send(b"\r")
+            session.wait_screen("Your answer", timeout=20)
+            session.wait_screen("structured JSON {\"notes\": [string], \"ok\": boolean}", timeout=20)
+            draft = '{"ok": true, "notes": ["kept draft"]}'
+            session.send(draft.encode())
+            session.wait_screen(draft, timeout=10)
+            head, tag, _ = observed("/v1/decisions/" + first, "Decision")
+            theirs = {"ok": False, "notes": ["harness answer"]}
+            body = {"operation": "answer", "occurrenceId": head["address"]["occurrenceId"], "generation": head["generation"], "value": theirs}
+            if stale_control:
+                # The control lets the TUI answer first. Its answer is
+                # delivered, and the later harness answer receives 412.
+                mutation_key(session, b"\x04", "Request 2 \u00b7 structured JSON", 30)
+                wait_for("/v1/runs/" + stale_run + "/control", "RunControl", lambda value: value["decisionHeadId"] not in (None, first))
+                key = capabilities["authorityEpoch"] + "." + secrets.token_urlsafe(16)
+                status, problem, _, _ = exchange("/v1/decisions/" + first, harness | {
+                    "Content-Type": "application/json", "Idempotency-Key": key, "If-Match": tag},
+                    method="POST", payload=json.dumps(body, separators=(",", ":")).encode())
+                assert status == 412 and problem["code"] == "stale-revision", ("the late harness answer", status, problem.get("code"))
+            else:
+                os.kill(session.process.pid, signal.SIGSTOP)
+                try:
+                    client[2]("/v1/decisions/" + first, body, tag)
+                    session.send(b"\x04")
+                finally:
+                    os.kill(session.process.pid, signal.SIGCONT)
+            refused = "answer refused: 412 stale-revision; decision changed; draft kept"
+            deadline = time.monotonic() + 20
+            while squeeze(refused) not in squeeze(session.screen.text()):
+                assert time.monotonic() < deadline, STALE_KEPT_DRAFT
+                session.pump(0.1)
+            save(session, "stale-refused")
+            control, _, _ = wait_for("/v1/runs/" + stale_run + "/control", "RunControl", lambda value: value["decisionHeadId"] not in (None, first))
+            second = control["decisionHeadId"]
+            screen = session.wait_screen("Request 2 \u00b7 structured JSON", timeout=20)
+            assert draft in screen, ("the second question does not show the kept draft", screen)
+            save(session, "stale-kept")
+            time.sleep(2)
+            waiting, _, _ = observed("/v1/decisions/" + second, "Decision")
+            assert waiting["state"] == "pending", ("the TUI sent the kept draft by itself", waiting["state"])
+            recorded = [record["answer"] for record in json.loads((stores[0] / "answers.json").read_bytes())["answers"]]
+            assert recorded == [theirs], ("the stale TUI answer reached the run", recorded)
+            mutation_key(session, b"\x04", "Runtime: Succeeded", 60)
+            snapshot, _, _ = wait_for("/v1/runs/" + stale_run + "/snapshot", "RunSnapshot",
+                                      lambda value: value["runtime"] is not None and value["runtime"]["status"] in ("succeeded", "failed", "cancelled"))
+            save(session, "stale-sent")
+            assert snapshot["runtime"]["status"] == "succeeded", ("structured run terminal status", snapshot["runtime"]["status"])
+            recorded = {record["occurrenceId"]: record["answer"] for record in json.loads((stores[0] / "answers.json").read_bytes())["answers"]}
+            assert recorded == {"0": theirs, "1": json.loads(draft)}, ("structured recorded answers by occurrence", recorded)
+            print("PASS tui-failures 5: the TUI answer to decision", first, "of run", stale_run, "after the harness answer received 412",
+                  "stale-revision, the draft moved to decision", second, "without a send, and Ctrl-D sent it, so the run recorded", recorded, flush=True)
+            # 6. A held run is open in the TUI when the harness revokes the
+            # TUI credential.
             third = create_draft(current)
             _, held_run = approve_mixed(third, current, client)
             held_head, _, _ = drive_mixed(held_run, client, stop_at_question=True, overview=False)
@@ -8470,10 +8701,10 @@ def tui_failure_checks():
             session.assert_restored()
             assert not own_processes(tui_pid), ("a process of the quit TUI remains", own_processes(tui_pid))
             still_running(held_run, held_head)
-            print("PASS tui-failures 5: after revocation of the TUI credential the header showed credential refused after", f"{refused_after:.2f}",
+            print("PASS tui-failures 6: after revocation of the TUI credential the header showed credential refused after", f"{refused_after:.2f}",
                   "seconds, Ctrl-D and Enter started nothing, no command was added, run", held_run, "still runs at question", held_head,
                   "and q quit the TUI with no child process", flush=True)
-        # 6. A second TUI session with a new credential quits with Ctrl-C
+        # 7. A second TUI session with a new credential quits with Ctrl-C
         # while the held run is open.
         renewed = tui_fixture.renew("tui-renewed")
         with tui_fixture.session(rows=36, columns=140, client_profile=renewed) as session:
@@ -8492,10 +8723,113 @@ def tui_failure_checks():
             session.assert_restored()
             assert not own_processes(tui_pid), ("a process of the quit TUI remains", own_processes(tui_pid))
             still_running(held_run, held_head)
-            print("PASS tui-failures 6: a second TUI session with a new credential opened run", held_run, "and quit with Ctrl-C;",
+            print("PASS tui-failures 7: a second TUI session with a new credential opened run", held_run, "and quit with Ctrl-C;",
                   "no process of the TUI remains, and the run still runs at question", held_head, flush=True)
+        # 8. During the delay window of the forwarder the TUI switches from
+        # the forwarder profile to the direct profile, and no late response
+        # of the earlier endpoint appears.
+        forwarder = DelayForwarder(forward_listener, port, FORWARD_DELAY)
+        direct = tui_fixture.renew("tui-delay")
+        forwarded = work / "client-profile-forward.json"
+        forwarded.write_text(json.dumps(dict(json.loads(direct.read_text()),
+                                             endpoint=f"https://127.0.0.1:{forward_listener.getsockname()[1]}/v1")))
+        forwarded.chmod(0o600)
+        withdrawn = create_draft(current)
+        with tui_fixture.session(rows=36, columns=140, client_profiles=[forwarded, direct]) as session:
+            session.wait_screen("Manager profiles")
+            session.wait_screen("profile_1")
+            session.send(b"E")
+            screen = session.wait_screen("Manager endpoints")
+            assert f"> 1. active  {forwarded}" in screen and f"  2. not connected  {direct}" in screen, (
+                "the forwarder profile is not the active endpoint", screen)
+            session.send(b"\x1b")
+            session.wait_screen("Manager profiles")
+            session.send(b"\r")
+            session.wait_screen("Manager workflows")
+            session.send(b"O")
+            session.wait_screen("Manager overview")
+            focus_row(session, "request draft", "Request:" + withdrawn["id"], 30)
+            save(session, "forwarded-overview")
+            assert f"manager 127.0.0.1:{forward_listener.getsockname()[1]} " in header(session), (
+                "the header does not name the forwarder address", header(session))
+            assert forwarder.connections > 0, "the TUI did not connect through the forwarder"
+            forwarder.open_window(60)
+            opened_at = time.monotonic()
+            session.send(b"g")
+            # The manager answers the read at once, and the forwarder holds the
+            # answer for FORWARD_DELAY seconds.
+            session.pump(1.0)
+            _, draft_tag, _ = observed(withdrawn["links"]["self"], "Request")
+            client[2](withdrawn["links"]["self"], {"operation": "withdraw"}, draft_tag)
+            session.send(b"E")
+            session.wait_screen("Manager endpoints")
+            session.send(b"\x1b[B\r")
+            screen = session.wait_screen(f"> 2. active  {direct}", timeout=10)
+            switched_at = time.monotonic()
+            save(session, "switched")
+            late = forwarder.pending_at(switched_at)
+            assert switched_at < opened_at + FORWARD_DELAY and late, (
+                "the switch did not happen while the forwarder held delayed bytes of the earlier endpoint",
+                round(switched_at - opened_at, 2), late)
+            assert f"  1. not connected  {forwarded}" in screen, ("the forwarder endpoint is not closed after the switch", screen)
+            frames = 0
+            # The identity row of the header names the manager address of the
+            # active session.
+            forward_address = f"manager 127.0.0.1:{forward_listener.getsockname()[1]} "
+
+            def watched(key, needle):
+                """Send the key and check every frame until the screen shows
+                the needle: no frame may show the earlier endpoint as active,
+                a draft row or the withdrawn request."""
+                nonlocal frames
+                session.send(key)
+                deadline = time.monotonic() + 20
+                while True:
+                    session.pump(0.05)
+                    screen = session.screen.text()
+                    frames += 1
+                    assert "request draft" not in screen and withdrawn["id"] not in squeeze(details(screen)) \
+                        and "1. active" not in screen and forward_address not in header(session), (
+                        "a late response of the earlier endpoint appeared after the switch", screen)
+                    if needle is not None and needle in screen:
+                        return screen
+                    assert time.monotonic() < deadline, ("the TUI did not show", needle, screen)
+                    if needle is None and time.monotonic() >= until:
+                        return screen
+
+            # Every frame is checked from the switch until the delayed bytes
+            # are due and three seconds more, and at least three seconds
+            # after the Manager overview of the direct endpoint opens.
+            until = max(late_chunk[2] for late_chunk in late) + 3
+            watched(b"\x1b", "Manager profiles")
+            watched(b"\r", "Manager workflows")
+            watched(b"O", "Manager overview")
+            listed, _, _ = observed("/v1/snapshot", "OverviewSnapshot")
+            assert not any(item["kind"] == "request" and item["request"]["id"] == withdrawn["id"] for item in listed["items"]), (
+                "the manager overview still lists the withdrawn request")
+            reached = time.monotonic()
+            until = max(until, reached + 3)
+            screen = watched(b"", None)
+            assert "Manager overview" in screen and f"manager 127.0.0.1:{port} " in header(session), (
+                "the TUI does not show the Manager overview of the direct endpoint", screen)
+            save(session, "after-delay")
+            focus_row(session, "run Running", "Run:" + held_run, 10)
+            session.send(b"E")
+            screen = session.wait_screen("Manager endpoints")
+            assert f"> 2. active  {direct}" in screen and f"  1. not connected  {forwarded}" in screen, (
+                "the endpoints changed after the delay", screen)
+            session.send(b"q")
+            assert session.wait_exit(20) == 0
+            session.assert_restored()
+        print("PASS tui-failures 8: g started an overview read through the forwarder, request", withdrawn["id"], "was withdrawn,",
+              "and the switch to the direct profile happened", f"{switched_at - opened_at:.2f}", "seconds after the delay window opened,",
+              "while the forwarder held", len(late), "delayed chunks of the earlier endpoint; the Manager overview of the direct endpoint",
+              "opened", f"{reached - switched_at:.2f}", "seconds after the switch, and in", frames, "frames until",
+              f"{until - switched_at:.2f}", "seconds after the switch no frame showed the earlier endpoint as active or the withdrawn draft,",
+              "and the forwarder dropped", forwarder.dropped, "chunks of closed connections", flush=True)
         assert not tui_fixture.client_state.exists(), "the service TUI created local runner state"
-        print("PASS tui-failures: the service TUI followed a manager loss and restart, a refused credential and a quit during a held run", flush=True)
+        print("PASS tui-failures: the service TUI followed a manager loss and restart, a stale answer, a refused credential, a quit during",
+              "a held run and an endpoint change during delayed responses", flush=True)
     finally:
         for process in lifetimes:
             if process.poll() is None:
