@@ -2,6 +2,258 @@
 
 <!-- handoff-id: wm023-20260923; status: paused-unaccepted-wip; accepted: WM-001..WM-022,G0,G1; resume-branch: workflow-manager-checkpoint-20260923; fess: every-subtask -->
 
+## Phase E stopping point of 2026-10-01
+
+The resume workflow started Phase E under the operator directions of
+2026-09-29 for fast validation and of 2026-09-30 for functionality first.
+Its plan has 28 subtasks after `33f84fe4`, the commit of the Phase C
+closeout. PE1 to PE9 repair the functional findings of the Phase C review
+and the two open Phase A polish items. PE10 to PE28 deliver WM-036 to
+WM-038, Pi service mode through `ext-pi` and the built Pi fork, and the
+Phase E gate. PE1 landed as `d133764c`. PE2 stopped with a design question
+for the owner, and the workflow stopped there. PE3 to PE28 did not start,
+and the Phase E gate did not run. This section describes the current
+state. Where any section below differs, this section supersedes it, and
+the sections below remain as chronology. The evidence of each subtask is
+under `PE/<subtask>/impl-r1` in the resume directory, and the audit of PE1
+is `fess/pe-PE1-r1.md`.
+
+Accepted state is unchanged at WM-001 to WM-022 and G0 and G1. This run
+closes no package and no gate. No authorization is pending.
+
+| Subtask | Commit | Result |
+| --- | --- | --- |
+| PE1 | `d133764c` | The restart reconciliation no longer marks the start command of a run with a terminal observation as unresolved. |
+| PE2 | Uncommitted | The inner worker holds `runs/<run>/owner.lock`, and a Runtime session leader inherits it. The engine half stopped with the design question below. |
+| PE3 to PE28 | None | Not started. |
+
+### Delivered behavior
+
+- PE1 repairs item 4 of the Phase C review (`acat-70ll`). The restart
+  reconciliation in `manager/src/Agentic/Manager/Store.hs` no longer
+  reclassifies a start command whose run has a terminal observation
+  (`runs.terminal_observed`). Such a command keeps its state, its revision
+  and its receipt, and the manager publishes no `command.changed` event for
+  it. Control commands keep the earlier rule, and the start command of a
+  run that was lost in flight still becomes unresolved. The two copies of
+  the uncertain-command SQL in `reconcileRestart` and `reconcileChanged`
+  are now one fragment, `uncertainCommands`. Case 9 of `failures-manager`
+  expects no unresolved command again, and it checks that no command row
+  changes at the third restart. `manager/WORKERS.md` and
+  `manager/STORAGE.md` state the rule. Item 4 of the Phase C review below,
+  and item 2 of its next action, describe the state before PE1.
+- The `/v1` contract, `doc/api/openapi.yaml`,
+  `test/manager_client_vectors.json`, the nine `DataBroker` operations and
+  the golden flow fixtures have no change since `33f84fe4`.
+
+### Stop reason
+
+PE2 asked for one owner lock that the inner frontend worker holds and that
+its engine sessions inherit, so that PE3 can read the release of the lock
+as evidence that the processes of a launched run have ended. The
+implementer found that the inner worker does not start its engine
+processes through `Agentic.Runtime.ProcessGroup.spawnSession`. ACP uses
+`System.Process.createProcess` in `connectAcp`
+(`engine/acp/src/Agentic/Acp.hs`), agent-deck uses `withCreateProcess`
+(`engine/agent-deck/src/Agentic/AgentDeck.hs`), and shell steps use
+`readCreateProcessWithExitCode` (`runtime/src/Agentic/Runtime/Shell.hs`).
+While the descriptor of `owner.lock` keeps `FD_CLOEXEC`, no engine process
+receives the lock. The owner must select one of these designs for the
+engine half of PE2:
+
+- **(A)** Clear `FD_CLOEXEC` on `owner.lock` in the inner worker, so that
+  every process-library child receives the lock. This covers the engines,
+  the shell steps and each descendant that does not close its descriptors.
+  A descendant that continues in the background then holds the lock with
+  no limit. This reverses the rules "keep `FD_CLOEXEC`" and "process-library
+  spawns do not inherit it".
+- **(B)** Move the ACP and agent-deck engine starts onto Runtime
+  `ProcessGroup` sessions. This needs a neutral spawn hook in `engine/api`,
+  because `engine/acp/AGENTS.md` forbids an import of the runtime, and it
+  changes engine signalling to session groups. The inheritance through
+  `spawnSession` in the uncommitted PE2 tree already supports this option.
+- **(C)** Accept for now a lock that covers only the inner worker. The
+  absence of the lock then proves only that the worker has ended, and the
+  coverage of the engine processes is recorded as deferred.
+
+### Uncommitted PE2 tree
+
+The worktree holds the uncommitted PE2 changes in eleven files. The
+Integrator commits them, or keeps them in the tree, after the owner
+answers. They implement the worker half and match option C as
+documented:
+
+- `runtime/src/Agentic/Runtime/PrivateRoot.hs` and
+  `runtime/cbits/private_sync.c` add `createPrivateLockAt` and
+  `lockPrivateDescriptor`, which create a private lock file exclusively
+  and take an exclusive, nonblocking `flock` on its open description. The
+  manager service lease in `manager/src/Agentic/Manager/Lease.hs` takes its
+  lock through the same function, and `manager/cbits/coordination.c` loses
+  its own copy.
+- `runtime/src/Agentic/Runtime/ProcessGroup.hs` and
+  `runtime/cbits/process_spawn.c` add `setInheritedOwnerLock`. On macOS
+  each later session spawn adds the named descriptor to its file actions
+  with `posix_spawn_file_actions_addinherit_np`, so the session leader
+  holds the same lock while the descriptor keeps `FD_CLOEXEC` in the
+  parent.
+- `cli/src/Agentic/Cli/Frontend.hs` creates `runs/<run>/owner.lock` in the
+  inner worker before the supervisor manifest and the first heartbeat, and
+  names it with `setInheritedOwnerLock`. No component reads the lock yet.
+- `runtime/test/ProcessGroupTests.hs` adds the inherited owner-lock case,
+  and `test/frontend_session_probe.py` checks the lock of the inner worker.
+  `runtime/README.md` and the new section "Run directory owner lock" of
+  `manager/WORKERS.md` state that the lock covers the inner worker only.
+
+No fess audit ran for PE2, because the subtask stopped before its audit.
+
+### Checks run
+
+Each check ran once under its timeout. Each has a `.log` and an `.exit`
+file in the evidence directory of its subtask.
+
+- PE1 (`PE/PE1/impl-r1`): the Werror build of `agentic-run`,
+  `routing-fixed-point-probe` and `manager-store-check` passed
+  (`build`). `manager-store-check` passed at N8 (`store-check`).
+  `failures-manager` passed at N8 with `TUI_CHECK` across three manager
+  lifetimes (`failures-manager`, fixture root
+  `/Users/johnw/Products/k.M0a5ItPm/tmp/pe1-fm.lEu950uZ`). One
+  `tui-journey` passed at N8 (`journey`, fixture root
+  `/Users/johnw/Products/k.M0a5ItPm/tmp/pe1.v91878GW`). `make -C doc check`
+  passed (`doc-check`). The fess audit reran the build and
+  `failures-manager` at N8, and both passed. The new assertion of case 9
+  did not run against the code before the fix.
+- PE2 (`PE/PE2/impl-r1`), on the uncommitted tree: `runtime-contract-test`
+  failed first, as intended, with "FAIL spawned session leader holds the
+  inherited owner lock after the parent closes its descriptor"
+  (`fail-first`). After the change the Werror build passed (`build`),
+  `runtime-contract-test` passed with the inherited owner-lock case
+  (`runtime-contract`), `test/control_probe.py` passed (`control-probe`),
+  `test/frontend_session_probe.py` passed (`frontend-session-probe`),
+  `tui-model-test` passed (`tui-model`), the `ext-pi` integration suite
+  passed its 8 cases (`ext-pi-integration`), one `tui-journey` passed at N8
+  (`journey`, fixture root
+  `/Users/johnw/Products/k.M0a5ItPm/tmp/pe2.gaRhckki`) and
+  `make -C doc check` passed (`doc-check`).
+- The closeout ran `make -C doc check` after its edits to this section.
+
+### Checks not run
+
+- The Phase E gate did not run, because the run stopped at PE2. It names
+  the incremental Werror build of all targets, `tui-model-test` at N1 and
+  N8, `runtime-contract-test`, the client vectors, `client_native.py`, the
+  manager owner checks, `test/control_probe.py`, the `service_http.py`
+  modes that did not run after Phase C (`mixed`, `routes`, the four
+  `mutations-*` modes, `controls`, `controls-routing`, `failures-worker`
+  and `storage`), the Phase E modes `failures-launched`, `pi-client`,
+  `pi-host-smoke`, `pi-host` and `pi-host-model`, the touched TUI PTY
+  modes, `tui-journey` at N1 and N8 with its negative controls, the three
+  `ext-pi` checks and `bash tui/ci/tui.sh`.
+- The checks that the operator direction of 2026-09-29 removes from routine
+  validation: `cli/ci/policies.sh`, `manager/ci/approval.sh`,
+  `manager/ci/controls.sh`, the `admission_audit.py` mutation audits,
+  `proof_opacity.py`, `bisim/ci/tier0.sh`, every Lean or oracle check,
+  mutant suites, stability samples and `-fforce-recomp` builds.
+- `cli/ci/routing-config.sh`, `cli/ci/examples.sh`,
+  `engine/agent-deck/ci/deck.sh`, `manager/ci/vertical.sh` and
+  `manager/ci/supervision.sh`, which section 4 of the remaining-scope
+  report defers. `engine/acp/ci/acp.sh`, because no engine code changed.
+  `engine/acp/ci/route-live.sh`, which needs a paid provider.
+- The owner lock on the spawn path of other platforms, which local macOS
+  validation does not cover.
+
+### Deferred security items
+
+The operator direction of 2026-09-30 defers security work. The run plan
+recorded these items for Phase E, and none of them ran:
+
+- Name Constraints parity in the TypeScript client. The Haskell client adds
+  a Name Constraints check after default validation, and the `ext-pi`
+  client would use the default TLS validation of Node with the `caFile`
+  only. This goes with the remaining Name Constraints work, patch B18
+  included.
+- Credential-file hardening in TypeScript beyond the functional checks of
+  private mode, owner and size: an `O_NOFOLLOW` open, a link-count check and
+  descriptor reads that are safe against a change between check and use.
+- Secret-marker scans that show that the bearer never appears in Pi
+  transcripts, tool results, notifications, logs or crash output.
+- A separate model credential, so that the manager log records a
+  model-initiated action under its own principal.
+- Hostile tool-argument and prompt-injection negatives for the
+  `agent_cat_workflow` tool beyond the functional check that a grant or
+  approval field never grants.
+- Hostile-input and transport negatives for the TypeScript client beyond
+  the shared vectors: malformed SSE frames, slow streams, cross-origin
+  credential forwarding and proxy environment probes.
+- Revocation-during-stream matrices for `ext-pi`.
+- Redaction projections of manager data in Pi transcript entries and
+  widgets.
+- A threat model for Pi service mode and a security gate for WM-036 to
+  WM-038.
+- An analysis of owner-lock spoofing for the quarantine evidence of PE3. A
+  process of the same account could hold or release `owner.lock`, and an
+  engine could close the inherited descriptor early.
+- A review of test hooks in shipped extension code, such as the planned
+  reconnect command of PE25.
+- The G2 observation-only witness and the hostile-input and transport
+  negatives of WM-024 and WM-028, and every item of the deferred security
+  stage of the Phase C section below and of section 8 of the
+  remaining-scope report.
+
+### Operator decisions since Phase C
+
+The governing goal records two operator decisions of 2026-10-01:
+
+- Phase D may edit and commit locally, with no push, on the `emacs-native`
+  branch of agent-workflows in `~/src/agent-workflows-emacs-native`. Emacs
+  checks run in an isolated Emacs configuration. Phase D follows Phase E.
+- The operator approved the force push of
+  `workflow-manager-checkpoint-20260923`. Origin moved from `b95ce6d1` to
+  `33f84fe4` with `--force-with-lease`. Later commits on the branch push as
+  ordinary fast-forwards. The local branch `tui` now reads `33f84fe4` and
+  is not pushed.
+
+### Package status
+
+| Package or item | Status | Tracker |
+| --- | --- | --- |
+| Unresolved approve after a restart (`acat-70ll`, item 4 of the Phase C review) | Met by PE1 | `acat-70ll` open for the Integrator. The PE1 audit lows are in `acat-vbze`. |
+| Launched quarantine claim with no terminal record (item 1 of `acat-phase-c-review-findings-hwxy`) | Open. PE2 and PE3 hold the repair, and PE2 waits for the owner. | `acat-phase-c-review-findings-hwxy` |
+| Overview fence after a 410, 40x12 monitor, 80x24 lineage review | Open (PE5 to PE7 not started) | `acat-pc17-follow-fess-jd40`, `acat-jdmd`, `acat-phase-c-review-findings-hwxy` |
+| Phase A polish remainder (early `StoreBusy`, one Store deadline) | Open (PE8 and PE9 not started) | `acat-a6a7-fess-followup-1exm`, `acat-a10a11-fess-followup-33k1`, `acat-a5s2b-fess-followup-s9rl` |
+| WM-036 (`acat-wm-036-5ndj`) | Not started | Open |
+| WM-037 (`acat-wm-037-dz3v`) | Not started | Open |
+| WM-038 (`acat-wm-038-mgb7`) | Not started | Open |
+| WM-029, WM-033, WM-034, WM-035 | Unchanged from the Phase C section | Unchanged |
+
+### Open findings
+
+- The lows of the PE1 audit (`acat-vbze`): no check reads the event stream
+  to show that the third restart publishes no `command.changed` event, two
+  edited paragraphs of `manager/STORAGE.md` and `manager/WORKERS.md` are
+  not reflowed, and an untracked `manager/test/__pycache__` must not be
+  committed. This section corrects the stale handoff item that the audit
+  named.
+- Every finding of the Phase C review below except item 4 stays open, with
+  the remaining limits of the Phase C section.
+
+### Next action
+
+1. The owner answers the PE2 question above with option A, B or C.
+2. The Integrator commits this closeout, decides with the answer whether
+   the uncommitted PE2 tree lands as it is, and records the state above in
+   the tracker.
+3. The next run resumes Phase E at PE2 under the same plan, the
+   functionality-first direction of 2026-09-30 and the fast-validation
+   direction of 2026-09-29. It completes the engine half of PE2 as the
+   owner directs, then PE3 to PE9 at their owners, then WM-036 to WM-038
+   (PE10 to PE26) on the built Pi fork through linked packages with no fork
+   edit, and the Phase E gate (PE28). PE27 is optional and needs operator
+   authorization for the exact pin change.
+4. Phase D, Emacs service mode (WM-030 to WM-032), follows on the
+   authorized `emacs-native` branch. Phase F (its functional parts) and
+   Phase G follow under the same directions. The security stage waits for
+   the operator to schedule it.
+
 ## Phase C of 2026-10
 
 The resume workflow delivered Phase C under the operator directions of
