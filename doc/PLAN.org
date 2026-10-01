@@ -10175,6 +10175,28 @@ Non-blocking findings of fess audit fess/pc-PC10-r1.md (2026-09-30) on subtask P
 
 Limitations recorded by the implementer: the generator script for the vector file is not committed (the JSON file is the artifact); the vectors use aeson's ordinary decoder, so there are no duplicate-key cases; the server writes the unreadable-manifest category manifest-unavailable while the v1 fixtures use malformed-manifest (both are in the openapi list); answer refusals use the vector code InvalidAnswer.
 
+* TODO [#E] Resolve the non-blocking fess findings of subtask PC11    :review:
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pc11-live-delivery-fess-pm15
+:LABELS:   ["review","workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-30 Wed 23:15]
+:MODIFIED: [2026-09-30 Wed 23:15]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess audit fess/pc-PC11-r2.md (2026-09-30) on subtask PC11 (WM-029 live delivery in the client: SSE stream, typed polling and Overview bootstrap).
+
+1. (low) The five new native modes of manager/test/client_native.py (stream-idle, stream-close, stream-gone, overview, bad-overview; near lines 123-124, with Client.hs near 371-372) have never been shown to fail. Run each once with its expectation inverted and record the FAIL. The 45-second production idle bound has never run; only the 1000 ms native bound and the 4000 ms real bound ran. Optionally run one slow check at 45 seconds.
+2. (low) The real /v1/snapshot overview in manager/test/ClientCheck.hs (near 171-174) has only one page. Only the native overview and bad-overview fixtures (client_native.py near 173-182) cover the rule that every page carries the same cursor. Add a real case with more than one snapshot page, or record this as accepted fixture-only coverage.
+3. (low) doc/api/README.md near line 654: one line of the live-delivery paragraph runs past 100 characters. Rewrap the paragraph to the line width of the rest of the file.
+
+Limitations recorded by the implementer: no test reproduces the credential-rotation window between two reads (the fix closes it by construction, since withExchange reads the credential once and sends the checked bearer); the real mode leaves one closed stream registered on the server until the server next writes to it, and this release timing is not documented; the TUI does not yet use streamEvents, pollEventBatch or loadOverview (WM-033 to WM-035); security hardening and hostile-stream negatives are deferred under the 2026-09-30 operator direction.
+
 * TODO [#C] Resolve PC5 fess findings in legacy history windows    :review:
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -18096,7 +18118,7 @@ public or production deployment.
 :LABELS:   ["p6","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-30 Wed 22:55]
+:MODIFIED: [2026-09-30 Wed 23:15]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-029
 :SOURCE_REPO: agent-cat
@@ -18250,6 +18272,13 @@ coordination or SQL into the TUI.
     "author": "johnw",
     "text": "PC10 (DTO vectors for the public resource types): test/manager_client_vectors.json gains a resources section with 201 cases (drafts, preparations, receipts for the facade; decisions, answers, controls, requests, runs for the TUI). manager-client-check vectors mode runs the facade cases; tui-model-test runs the TUI cases through new Service.hs decoders (decodeRequestItem, decodeRunItem, decodeOverviewMember, not yet used by service mode). Checks passed: Werror build with -ftui-tests, vectors mode, tui-model-test +RTS -N8, make -C doc check. Evidence: resume-20260923/PC/PC10/impl-r1, fess/pc-PC10-r1.md (non-blocking). Follow-up: acat-pc10-resource-vectors-fess-54zn. Package stays open.",
     "created_at": "2026-10-01T05:55:28Z"
+  },
+  {
+    "id": 475,
+    "issue_id": "acat-wm-029-nlmg",
+    "author": "johnw",
+    "text": "PC11 (live delivery in the client): Agentic.Manager.Client gains streamEvents (one GET /v1/events with Accept text/event-stream and Last-Event-ID under the session and credential checks of exchange; checks status 200, text/event-stream and no-store; reads with brRead through the PC9 parser; gives each invalidation or heartbeat to a callback; ends after reconnectIdleSeconds 45 without bytes and returns the last complete event identifier or a ClientFailure; 410 problems map through problemFailure; closeClient ends the stream), pollEventBatch (pollEvents decoded into the typed EventBatch) and loadOverview (getPageSet of /v1/snapshot with kind and resource identity, cursor and oldestCursor, the same cursor required on every page). withExchange now reads the credential once through sessionBearer and sends the checked bearer. The real mode of manager-client-check streams a request.changed invalidation for a request it created within 10 seconds, polls the same event from the same cursor, and ends an idle stream at a 4000 ms test bound with the last event identifier. client_native.py gains stream-idle, stream-close, stream-gone, overview and bad-overview. Checks passed: Werror build with -ftui-tests, vectors mode, service_http base with CLIENT_CHECK, client_native.py, events-lifecycle, the Phase A journey at N=8, make -C doc check. Evidence: resume-20260923/PC/PC11/impl-r2; fess/pc-PC11-r2.md (non-blocking). Follow-up: acat-pc11-live-delivery-fess-pm15. The TUI does not use these operations yet (WM-033 to WM-035). Package stays open.",
+    "created_at": "2026-10-01T06:15:30Z"
   }
 ]
 #+end_src

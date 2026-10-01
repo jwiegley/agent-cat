@@ -6,7 +6,9 @@ module Agentic.Manager.Client
   ( Client, Reference, Observed, PendingCommand, PageSet, pageSetMetadata, pageSetItems, getPageSet, ClientResponse (..), ClientFailure (..),
     connectClient, connectClientProfile, closeClient, clientCapabilities, reference, referenceURI,
     getResource, observeResource, observedReference, observedETag, observedValue, prepareObserved,
-    pollEvents, prepareCommand, sendCommand, downloadVerified, decodeObservation,
+    pollEvents, pollEventBatch, StreamItem (..), streamEvents, streamEventsWithin, reconnectIdleMilliseconds,
+    Overview (..), OverviewItem (..), OverviewKind (..), loadOverview,
+    prepareCommand, sendCommand, downloadVerified, decodeObservation,
     DraftView (..), Readiness (..), InputDeclaration (..), SuppliedInput (..), InputError (..),
     Preparation (..), Review (..), ReviewInput (..), ReviewLineage (..), ReviewEdit (..), PublicPolicy, policyValue,
     CommandReceipt (..), CommandState, Operation, stateName, operationName, effectValue,
@@ -20,9 +22,11 @@ import Agentic.Manager.Client.Events
 import Agentic.Manager.Client.Failure (ClientFailure (..), problemFailure)
 
 import Agentic.Manager.Protocol.Command
-  (validId, validResource, encoded, CommandReceipt (..), CommandState, Operation, stateName, operationName, effectValue)
+  (validId, validResource, validRevision, encoded, CommandReceipt (..), CommandState, Operation, stateName, operationName, effectValue)
 import Agentic.Manager.Protocol.Draft (DraftView (..), Readiness (..), InputDeclaration (..), SuppliedInput (..), InputError (..))
 import Agentic.Manager.Protocol.Preparation (Preparation (..), Review (..), ReviewInput (..), ReviewLineage (..), ReviewEdit (..), PublicPolicy, policyValue)
+import Control.Concurrent.Async (race)
+import Control.Concurrent.STM (TVar, atomically, check, newTVarIO, readTVar, readTVarIO, writeTVar)
 import Control.DeepSeq (NFData, deepseq)
 import Agentic.Manager.Protocol.Json (decodeStrictValue)
 import Control.Exception (Exception, IOException, bracket, bracketOnError, throwIO, try)
@@ -42,7 +46,6 @@ import Data.ByteArray.Encoding (Base (Base16, Base64URLUnpadded), convertToBase)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BC
 import qualified Data.CaseInsensitive as CI
-import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Time.Clock (UTCTime, getCurrentTime)
 import Data.Time.Format.ISO8601 (iso8601ParseM)
 import Data.Text (Text)
@@ -63,6 +66,7 @@ import System.IO (hClose)
 import System.Posix.Files (getFdStatus, isRegularFile, fileSize, fileMode, fileOwner, linkCount)
 import System.Posix.IO (OpenFileFlags (nofollow, cloexec, nonBlock), OpenMode (ReadOnly), openFd, closeFd, defaultFileFlags, fdToHandle)
 import System.Posix.User (getEffectiveUserID)
+import System.Timeout (timeout)
 
 -- | Decode and force public observation data using the shared protocol codec.
 -- Its identities and receipt facts do not create live ownership or approval.
@@ -74,7 +78,7 @@ decodeObservation value = case parseEither parseJSON value of
 -- | One locally retained transport session and its private credential source.
 -- No Show, Generic or serialization can disclose that source or its bearer.
 data Client = Client !Text !HTTP.Request !HTTP.Manager !(IO BS.ByteString)
-  !BS.ByteString !Text !Value !(IORef Bool)
+  !BS.ByteString !Text !Value !(TVar Bool)
 
 -- | A URI paired with the original client session, not a retargetable string.
 data Reference = Reference !Text !Text deriving (Eq, Ord)
@@ -230,7 +234,7 @@ connectClient settings endpoint credentials = clientIO $ do
          HTTP.managerResponseTimeout = HTTP.responseTimeoutMicro 15000000}
   -- ponytail: no idle pooling; add a scoped pool if handshake cost dominates.
   manager <- HTTP.newManager configured
-  active <- newIORef True
+  active <- newTVarIO True
   let pending = Client identity parsed manager credentials (fingerprint bearer) "" Null active
   location <- either throwIO pure (reference pending "/v1/capabilities")
   capabilities <- getJSON pending location >>= requireCapabilities
@@ -238,9 +242,10 @@ connectClient settings endpoint credentials = clientIO $ do
     (capabilityEpoch capabilities) capabilities active)
 
 -- | Refuse further work and discard late results. The caller joins its request
--- tasks, whose withResponse scopes close their non-pooled connections.
+-- tasks, whose withResponse scopes close their non-pooled connections. An open
+-- 'streamEvents' ends at once with 'ClientClosed' and closes its connection.
 closeClient :: Client -> IO ()
-closeClient (Client _ _ _ _ _ _ _ active) = writeIORef active False
+closeClient (Client _ _ _ _ _ _ _ active) = atomically (writeTVar active False)
 
 clientCapabilities :: Client -> Value
 clientCapabilities (Client _ _ _ _ _ _ value _) = value
@@ -349,6 +354,113 @@ pollEvents client cursor = clientIO $ do
   location <- either throwIO pure (reference client "/v1/events")
   exchangeJSON client location "GET" [("Last-Event-ID",TE.encodeUtf8 cursor)] (HTTP.RequestBodyBS BS.empty)
 
+-- | One JSON polling batch of @/events@ after the cursor, decoded as an
+-- 'EventBatch'. A status other than 200 refuses with 'InvalidResponse'.
+pollEventBatch :: Client -> Text -> IO (Either ClientFailure EventBatch)
+pollEventBatch client cursor = do
+  outcome <- pollEvents client cursor
+  pure $ outcome >>= \response ->
+    if responseStatus response == 200 then decodeObservation (responseValue response) else Left InvalidResponse
+
+-- | One complete item of the @/events@ stream: an invalidation or a
+-- comment-only heartbeat.
+data StreamItem = StreamInvalidation !InvalidationEvent | StreamHeartbeat
+  deriving (Eq, Show)
+
+-- | The @reconnectIdleSeconds@ limit of @/capabilities@ in milliseconds.
+reconnectIdleMilliseconds :: Int
+reconnectIdleMilliseconds = 45000
+
+-- | 'streamEventsWithin' with the 'reconnectIdleMilliseconds' bound.
+streamEvents :: Client -> Text -> (StreamItem -> IO ()) -> IO (Either ClientFailure Text)
+streamEvents = streamEventsWithin reconnectIdleMilliseconds
+
+-- | One SSE connection to @/events@ that resumes after the cursor, sent in
+-- @Last-Event-ID@, under the original session and credential. The action
+-- receives each complete invalidation and heartbeat in order. The stream ends
+-- when the manager ends the response or when the given number of
+-- milliseconds, at most 'reconnectIdleMilliseconds', passes without a byte.
+-- It then returns the last complete event identifier, which is the supplied
+-- cursor when no event arrived. 'closeClient' ends the stream with
+-- 'ClientClosed'. A refusal of the request is the failure of its problem
+-- response, so an expired cursor gives @Refused 410@ with its code. The client
+-- never reconnects by itself.
+streamEventsWithin :: Int -> Client -> Text -> (StreamItem -> IO ()) -> IO (Either ClientFailure Text)
+streamEventsWithin idle client@(Client _ _ _ _ _ _ _ active) cursor deliver = clientIO $ do
+  unless (validCursor cursor && idle > 0 && idle <= reconnectIdleMilliseconds) (throwIO InvalidResponse)
+  location <- either throwIO pure (reference client "/v1/events")
+  withExchange client location "GET" [("Accept","text/event-stream"),("Last-Event-ID",TE.encodeUtf8 cursor)]
+    (HTTP.RequestBodyBS BS.empty) $ \status received reader -> do
+      unless (status == 200) (consumeBody 1048576 reader >>= refuseProblem status received)
+      unless (mediaType received == Just "text/event-stream" && lookup "Cache-Control" received == Just "no-store")
+        (throwIO InvalidResponse)
+      let closed = atomically (readTVar active >>= check . not)
+          follow parser = do
+            next <- race closed (timeout (idle * 1000) (HTTP.brRead reader))
+            case next of
+              Left () -> throwIO ClientClosed
+              Right Nothing -> finish parser
+              Right (Just chunk)
+                | BS.null chunk -> finish parser
+                | otherwise -> do
+                    (parser', blocks) <- either throwIO pure (feedSse parser chunk)
+                    items <- either throwIO pure (traverse streamItem blocks)
+                    unless (null blocks) (checkSession client)
+                    mapM_ deliver (concat items)
+                    follow parser'
+          finish parser = checkSession client >> maybe (throwIO InvalidResponse) pure (closeSse parser)
+      follow (newSseParser (Just cursor))
+  where
+    streamItem block = case block of
+      SseDispatch event -> (: []) . StreamInvalidation <$> decodeEventBlock event
+      SseHeartbeat -> Right [StreamHeartbeat]
+      SseAdvance _ -> Right []
+
+-- | The kind of an overview member.
+data OverviewKind = OverviewRequest | OverviewPreparation | OverviewRun | OverviewDecision
+  deriving (Eq, Ord, Show, Enum, Bounded)
+
+-- | One overview member: its kind, the reference of its detail resource,
+-- which is the resource of its invalidations, its revision and its value.
+data OverviewItem = OverviewItem
+  { overviewKind :: !OverviewKind, overviewResource :: !Reference, overviewRevision :: !Text, overviewValue :: !Value }
+
+-- | One complete overview with the event cursor and the oldest resume
+-- boundary of its database boundary.
+data Overview = Overview
+  { overviewCursor :: !Text, overviewOldestCursor :: !Text, overviewItems :: ![OverviewItem] }
+
+-- | Assemble the page set of @/snapshot@. Every page repeats the same
+-- @cursor@ and @oldestCursor@, or the set refuses with 'InvalidResponse'.
+loadOverview :: Client -> IO (Either ClientFailure Overview)
+loadOverview client = clientIO $ do
+  location <- either throwIO pure (reference client "/v1/snapshot")
+  set <- getPageSet client location >>= either throwIO pure
+  (cursor, oldest) <- parseClientValue overviewMetadata (pageSetMetadata set)
+  items <- mapM (parseClientValue overviewItem) (pageSetItems set)
+  Overview cursor oldest <$> mapM (\(kind, uri, revision, value) ->
+    either throwIO (\resource -> pure (OverviewItem kind resource revision value)) (reference client uri)) items
+  where
+    overviewMetadata = withObject "overview" $ \fields -> do
+      unless (KM.size fields == 4 && all (`KM.member` fields) ["version","snapshotVersion","cursor","oldestCursor"])
+        (fail "overview fields")
+      version <- fields .: "version" :: Parser Int
+      snapshotVersion <- fields .: "snapshotVersion" :: Parser Int
+      cursor <- fields .: "cursor"
+      oldest <- fields .: "oldestCursor"
+      unless (version == 1 && snapshotVersion == 1 && validCursor cursor && validCursor oldest) (fail "overview cursor")
+      pure (cursor, oldest)
+    overviewItem = withObject "overview item" $ \fields -> do
+      name <- fields .: "kind"
+      (kind, collection) <- maybe (fail "overview kind") pure (lookup (name :: Text)
+        [("request",(OverviewRequest,"requests")),("preparation",(OverviewPreparation,"preparations")),
+         ("run",(OverviewRun,"runs")),("decision",(OverviewDecision,"decisions"))])
+      unless (KM.size fields == 2) (fail "overview item fields")
+      value <- fields .: Key.fromText name
+      (ident, revision) <- flip (withObject "overview member") value $ \member -> (,) <$> member .: "id" <*> member .: "revision"
+      unless (validId ident && validRevision revision) (fail "overview identity")
+      pure (kind, "/v1/" <> collection <> "/" <> ident, revision, value)
+
 prepareCommand :: Client -> Reference -> Maybe Text -> Value -> IO (Either ClientFailure PendingCommand)
 prepareCommand client@(Client _ _ _ _ _ epoch _ _) location precondition value = clientIO $ do
   checkReference client location
@@ -378,7 +490,7 @@ exchangeJSON :: Client -> Reference -> HTTP.Method -> HTTP.RequestHeaders -> HTT
 exchangeJSON client location method headers body = do
   (status, returnedHeaders, bytes) <- exchange client location method
     (("Accept","application/json"):headers) body 1048576
-  let media = fmap (BC.takeWhile (/= ';')) (lookup "Content-Type" returnedHeaders)
+  let media = mediaType returnedHeaders
       expectedMedia = if status >= 200 && status < 300 then "application/json" else "application/problem+json"
   unless (media == Just expectedMedia && lookup "Cache-Control" returnedHeaders == Just "no-store") (throwIO InvalidResponse)
   value <- either (const (throwIO InvalidResponse)) pure (decodeStrictValue bytes)
@@ -392,6 +504,18 @@ exchangeJSON client location method headers body = do
   where
     checkedETagText value = checkedETag value >> pure value
 
+-- | The media type of a response without its parameters.
+mediaType :: HTTP.ResponseHeaders -> Maybe BS.ByteString
+mediaType received = fmap (BC.takeWhile (/= ';')) (lookup "Content-Type" received)
+
+-- | Refuse with the failure of a problem response.
+refuseProblem :: Int -> HTTP.ResponseHeaders -> BS.ByteString -> IO a
+refuseProblem status received bytes = do
+  unless (mediaType received == Just "application/problem+json" && lookup "Cache-Control" received == Just "no-store")
+    (throwIO InvalidResponse)
+  value <- either (const (throwIO InvalidResponse)) pure (decodeStrictValue bytes)
+  throwIO (problemFailure status value)
+
 -- | Verify exact downloaded bytes rather than reserializing a JSON value.
 downloadVerified :: Client -> Reference -> Int -> Text -> IO (Either ClientFailure BS.ByteString)
 downloadVerified client location size checksum = clientIO $ do
@@ -403,7 +527,7 @@ downloadVerified client location size checksum = clientIO $ do
     problem <- either (const (throwIO InvalidResponse)) pure (decodeStrictValue bytes)
     throwIO (problemFailure status problem)
   unless (BS.length bytes == size
-    && fmap (BC.takeWhile (/= ';')) (lookup "Content-Type" headers) == Just "application/octet-stream"
+    && mediaType headers == Just "application/octet-stream"
     && lookup "Cache-Control" headers == Just "no-store"
     && lookup "X-Content-Type-Options" headers == Just "nosniff"
     && maybe False ("attachment" `BS.isPrefixOf`) (lookup "Content-Disposition" headers)) (throwIO InvalidResponse)
@@ -412,11 +536,22 @@ downloadVerified client location size checksum = clientIO $ do
 
 exchange :: Client -> Reference -> HTTP.Method -> HTTP.RequestHeaders -> HTTP.RequestBody -> Int
   -> IO (Int, HTTP.ResponseHeaders, BS.ByteString)
-exchange client@(Client _ base manager credentials expected _ _ _) location method headers body limit = do
+exchange client location method headers body limit =
+  withExchange client location method headers body $ \status received reader -> do
+    bytes <- consumeBody limit reader
+    checkSession client
+    pure (status,received,bytes)
+
+-- | One request under the original session: the endpoint and session checks,
+-- the bearer of one credential read that matches the session fingerprint
+-- before the request, no redirect, proxy, cookie,
+-- decompression or retry, and the bounded response header checks. The action
+-- receives the status, the headers and the body reader of the open response.
+withExchange :: Client -> Reference -> HTTP.Method -> HTTP.RequestHeaders -> HTTP.RequestBody
+  -> (Int -> HTTP.ResponseHeaders -> HTTP.BodyReader -> IO a) -> IO a
+withExchange client@(Client _ base manager _ _ _ _ _) location method headers body action = do
   checkReference client location
-  checkActive client
-  bearer <- readCredential credentials
-  unless (BA.constEq (fingerprint bearer) expected) (throwIO CredentialChanged)
+  bearer <- sessionBearer client
   let (path,query) = BS.break (== 63) (TE.encodeUtf8 (referenceURI location))
       request = base {HTTP.method=method, HTTP.path=path, HTTP.queryString=query,
         HTTP.requestHeaders = ("Authorization","Bearer " <> bearer):("Accept-Encoding","identity"):("Connection","close"):headers,
@@ -435,24 +570,40 @@ exchange client@(Client _ base manager credentials expected _ _ _) location meth
       (throwIO InvalidResponse)
     when (status >= 300 && status < 400) (throwIO RedirectRefused)
     when (lookup "Content-Encoding" received /= Nothing) (throwIO InvalidResponse)
-    bytes <- consume limit [] (HTTP.responseBody response)
-    currentBearer <- readCredential credentials
-    unless (BA.constEq (fingerprint currentBearer) expected) (throwIO CredentialChanged)
-    checkActive client
-    pure (status,HTTP.responseHeaders response,bytes)
+    action status received (HTTP.responseBody response)
+
+-- | The whole body, refused with 'ResponseTooLarge' above the limit.
+consumeBody :: Int -> HTTP.BodyReader -> IO BS.ByteString
+consumeBody limit = go limit []
   where
-    consume remaining chunks reader = do
+    go remaining chunks reader = do
       chunk <- HTTP.brRead reader
       if BS.null chunk then pure (BS.concat (reverse chunks)) else do
         when (BS.length chunk > remaining) (throwIO ResponseTooLarge)
-        consume (remaining - BS.length chunk) (chunk:chunks) reader
+        go (remaining - BS.length chunk) (chunk:chunks) reader
+
+-- | The bearer of one read of the credential source, refused with
+-- 'CredentialChanged' when its fingerprint is not the fingerprint of the
+-- session, and with 'ClientClosed' when the client is closed. A request sends
+-- this same bearer, so no unchecked read reaches the manager.
+sessionBearer :: Client -> IO BS.ByteString
+sessionBearer client@(Client _ _ _ credentials expected _ _ _) = do
+  checkActive client
+  bearer <- readCredential credentials
+  unless (BA.constEq (fingerprint bearer) expected) (throwIO CredentialChanged)
+  pure bearer
+
+-- | The credential source still gives the bearer of the session, and the
+-- client is open.
+checkSession :: Client -> IO ()
+checkSession client = () <$ sessionBearer client
 
 checkReference :: Client -> Reference -> IO ()
 checkReference (Client identity _ _ _ _ _ _ _) (Reference owner _) =
   unless (identity == owner) (throwIO WrongEndpoint)
 
 checkActive :: Client -> IO ()
-checkActive (Client _ _ _ _ _ _ _ active) = readIORef active >>= \open -> unless open (throwIO ClientClosed)
+checkActive (Client _ _ _ _ _ _ _ active) = readTVarIO active >>= \open -> unless open (throwIO ClientClosed)
 
 readCredential :: IO BS.ByteString -> IO BS.ByteString
 readCredential readBytes = do

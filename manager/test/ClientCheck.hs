@@ -3,7 +3,9 @@
 module Main (main) where
 
 import qualified Agentic.Manager.Client as C
-import Control.Concurrent.Async (AsyncCancelled, async, cancel, waitCatch)
+import Control.Concurrent (threadDelay)
+import Control.Concurrent.Async (AsyncCancelled, async, cancel, wait, waitCatch)
+import Control.Concurrent.STM (TVar, atomically, modifyTVar', newTVarIO, readTVar, readTVarIO, retry)
 import Control.Exception (bracket, fromException)
 import Control.Monad (forM_, unless, void, when)
 import Data.Aeson (ToJSON (toJSON), Value (..), eitherDecodeStrict, object, (.=))
@@ -12,13 +14,14 @@ import qualified Data.Aeson.KeyMap as KM
 import qualified Data.ByteString as BS
 import Data.Char (digitToInt, isHexDigit)
 import Data.Foldable (toList)
-import Data.List (isPrefixOf)
+import Data.List (find, isPrefixOf)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
 import System.Environment (getArgs)
 import System.Exit (die)
 import System.IO (hSetBuffering, stdout, BufferMode (LineBuffering))
+import System.Timeout (timeout)
 
 check :: String -> Bool -> IO ()
 check label value = unless value (die ("FAIL " <> label)) >> putStrLn ("PASS " <> label)
@@ -57,6 +60,10 @@ main = do
       let cursor = string (field "cursor" (C.pageSetMetadata snapshot))
       events <- C.pollEvents client cursor >>= right
       check "public client sends Last-Event-ID polling" (C.responseStatus events == 200)
+      workflow <- case C.pageSetItems workflows of
+        first : _ -> pure first
+        [] -> die "expected one workflow"
+      liveDelivery client workflow
       observed <- C.observeResource client workflowsURI >>= right
       check "GET observation retains exact resource URI" (C.referenceURI (C.observedReference observed) == C.referenceURI workflowsURI)
       withClient profile $ \other -> do
@@ -108,9 +115,106 @@ main = do
         Left C.RedirectRefused -> kind == "redirect"
         _ -> False
       either (const (pure ())) (void . C.closeClient) result
+    ["stream-idle",profile] -> withClient profile $ \client -> do
+      received <- newTVarIO []
+      result <- C.streamEventsWithin 1000 client "stream_fixture.0" (collect received)
+      items <- reverse <$> readTVarIO received
+      check "idle stream ends after its bound with the last complete event identifier"
+        (result == Right "stream_fixture.1" && items == [C.StreamInvalidation fixtureEvent, C.StreamHeartbeat])
+    ["stream-close",profile] -> withClient profile $ \client -> do
+      received <- newTVarIO []
+      stream <- async (C.streamEvents client "stream_fixture.0" (collect received))
+      arrived <- timeout 5000000 (atomically (readTVar received >>= \items -> if null items then retry else pure ()))
+      check "stream delivers the invalidation before the close" (arrived == Just ())
+      C.closeClient client
+      outcome <- timeout 5000000 (wait stream)
+      check "closeClient ends an open stream with ClientClosed" (outcome == Just (Left C.ClientClosed))
+    ["stream-gone",profile] -> withClient profile $ \client -> do
+      result <- C.streamEvents client "stream_fixture.0" (const (pure ()))
+      check "expired stream cursor gives the 410 problem" (result == Left (C.Refused 410 "cursor-expired"))
+    ["overview",profile] -> withClient profile $ \client -> do
+      overview <- C.loadOverview client >>= right
+      check "overview assembles every page with one cursor"
+        (C.overviewCursor overview == "stream_fixture.7" && C.overviewOldestCursor overview == "stream_fixture.0"
+          && [(C.overviewKind item, C.referenceURI (C.overviewResource item), C.overviewRevision item) | item <- C.overviewItems overview]
+            == [(C.OverviewRequest, "/v1/requests/request_probe", "revision_probe"), (C.OverviewRun, "/v1/runs/run_probe", "revision_run")])
+    ["bad-overview",profile] -> withClient profile $ \client -> do
+      result <- C.loadOverview client
+      check "overview whose pages differ in cursor refuses" (case result of Left C.InvalidResponse -> True; _ -> False)
     ["vectors",path] -> BS.readFile path >>= either (die . ("vector file: " <>)) (\root -> eventVectors root >> resourceVectors root)
       . eitherDecodeStrict
     _ -> die "usage: manager-client-check MODE ABS_CLIENT_PROFILE [FAILURE_KIND] | manager-client-check vectors PATH"
+
+-- | Record each stream item, newest first.
+collect :: TVar [C.StreamItem] -> C.StreamItem -> IO ()
+collect received item = atomically (modifyTVar' received (item :))
+
+-- | The invalidation that the native stream fixture serves.
+fixtureEvent :: C.InvalidationEvent
+fixtureEvent = C.InvalidationEvent "stream_fixture.1" C.RequestChanged (C.Invalidation "/v1/requests/request_probe" "revision_probe")
+
+-- | The idle bound of the live-delivery case against the running manager,
+-- shorter than the 15-second heartbeat interval, so that the stream ends
+-- after the last event and the check stays inside its 30-second timeout.
+realIdleMilliseconds :: Int
+realIdleMilliseconds = 4000
+
+-- | Live delivery against the running manager: bootstrap from the overview,
+-- stream from its cursor, create a request, and require its request.changed
+-- invalidation on the stream and in polling from the same cursor. The
+-- request is then withdrawn, so that the overview is empty again.
+liveDelivery :: C.Client -> Value -> IO ()
+liveDelivery client workflow = do
+  overview <- C.loadOverview client >>= right
+  let cursor = C.overviewCursor overview
+  check "overview bootstrap gives a cursor and an oldest cursor"
+    (C.validCursor cursor && C.validCursor (C.overviewOldestCursor overview))
+  received <- newTVarIO []
+  stream <- async (C.streamEventsWithin realIdleMilliseconds client cursor (collect received))
+  requestsURI <- right (C.reference client "/v1/requests")
+  pending <- C.prepareCommand client requestsURI Nothing (object
+    [ "workflowId" .= field "id" workflow, "descriptorRevision" .= field "revision" workflow,
+      "profileId" .= field "profileId" workflow, "profileRevision" .= field "profileRevision" workflow ]) >>= right
+  created <- C.sendCommand client pending >>= right
+  check "public client creates a request through prepareCommand and sendCommand" (C.responseStatus created == 201)
+  let resource = "/v1/requests/" <> string (field "id" (C.responseValue created))
+      matching item = case item of
+        C.StreamInvalidation event -> C.invalidationEventName event == C.RequestChanged
+          && C.invalidationResource (C.invalidationEventData event) == resource
+        C.StreamHeartbeat -> False
+  refreshed <- C.loadOverview client >>= right
+  check "overview holds the created request with its kind and detail resource"
+    ([C.overviewKind item | item <- C.overviewItems refreshed, C.referenceURI (C.overviewResource item) == resource]
+      == [C.OverviewRequest])
+  streamed <- timeout 10000000 (atomically (readTVar received >>= maybe retry pure . find matching))
+  event <- case streamed of
+    Just (C.StreamInvalidation event) -> pure event
+    _ -> die "FAIL the stream did not deliver the request.changed invalidation within 10 seconds"
+  check "streamEvents delivers the request.changed invalidation of the created request" True
+  let pollFrom position remaining = do
+        batch <- C.pollEventBatch client position >>= right
+        if event `elem` C.batchEvents batch || not (C.batchHasMore batch) || remaining <= (0 :: Int)
+          then pure (event `elem` C.batchEvents batch)
+          else pollFrom (C.batchCursor batch) (remaining - 1)
+  polled <- pollFrom cursor 8
+  check "polling from the same cursor delivers the same event" polled
+  ended <- timeout 10000000 (wait stream)
+  items <- readTVarIO received
+  let lastStreamed = case [ident | C.StreamInvalidation (C.InvalidationEvent ident _ _) <- items] of
+        newest : _ -> newest
+        [] -> cursor
+  check "idle stream ends after its bound with the last complete event identifier" (ended == Just (Right lastStreamed))
+  requestURI <- right (C.reference client resource)
+  observed <- C.observeResource client requestURI >>= right
+  withdraw <- C.prepareObserved client observed (object ["operation" .= ("withdraw" :: Text)]) >>= right
+  withdrawn <- C.sendCommand client withdraw >>= right
+  check "public client withdraws the created request" (C.responseStatus withdrawn == 202)
+  let settled remaining = do
+        current <- C.observeResource client requestURI >>= right
+        if field "phase" (C.observedValue current) == String "withdrawn" then pure True
+          else if remaining <= (0 :: Int) then pure False
+          else threadDelay 100000 >> settled (remaining - 1)
+  settled 100 >>= check "the created request reaches the withdrawn phase"
 
 -- The fields of one vector object, or a failure that names the vector.
 members :: Text -> Value -> [Value]

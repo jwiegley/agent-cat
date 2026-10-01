@@ -638,6 +638,33 @@ status, or whose `code` is not a bounded identifier, gives `InvalidResponse`.
 `validCursor` checks the cursor syntax. `validETag` checks a strong entity
 tag, and the client compares entity tags only for equality.
 
+The facade also performs live delivery through one connection at a time.
+`loadOverview` assembles the page set of `/snapshot` and returns its `cursor`,
+its `oldestCursor` and its members. Each member has its kind (`request`,
+`preparation`, `run` or `decision`), the reference of its detail resource,
+its revision and its value. The reference is the resource of the
+invalidations of that member, for example `/v1/requests/{id}`. The page set
+refuses with `InvalidResponse` when a page repeats a different `cursor` or
+`oldestCursor`. `pollEventBatch` sends one JSON polling request after a
+cursor and decodes the response as an `EventBatch`. `streamEvents` sends one
+`GET /v1/events` with `Accept: text/event-stream` and the cursor in
+`Last-Event-ID`. It uses the session checks of every other request: the
+endpoint of the session, one credential read before the request whose
+fingerprint is the session fingerprint and whose bearer the request sends,
+the credential fingerprint again before each delivery, no redirect, no proxy, no cookie, no decompression and
+no retry. It requires status 200, the media type `text/event-stream` and
+`Cache-Control: no-store`. A refusal gives the failure of its problem
+response, so an expired cursor gives `Refused 410` with its code. The stream
+reads the body incrementally with the parser above and gives each complete
+invalidation and each heartbeat to the caller in order. It ends when the
+manager ends the response, or when `reconnectIdleSeconds` (45 seconds) pass
+without a byte. It then returns the last complete event identifier, which is
+the supplied cursor when no event arrived. `streamEventsWithin` takes a
+shorter idle bound in milliseconds. `closeClient` ends an open stream at once
+with `ClientClosed` and closes its connection. The client never reconnects by
+itself. The caller reconnects with the returned identifier or takes a new
+overview after a 410 refusal.
+
 The `events` section of `test/manager_client_vectors.json` holds the vectors
 of these functions. An `sse` vector describes a byte stream as `text`, `hex`
 and `repeat` segments, lists split points, and states the expected outcomes
@@ -855,3 +882,16 @@ public client and opens no connection:
 ```sh
 direnv exec . bash -c '"$(bash test/cabal.sh list-bin manager-client-check)" vectors test/manager_client_vectors.json'
 ```
+
+`manager/test/client_native.py` runs the connection modes of the check
+against a local TLS fixture. Its stream cases check the idle end with the
+last complete event identifier, the end of an open stream at `closeClient`,
+and a 410 refusal. Its overview cases check a two-page overview and the
+refusal of pages that differ in their cursor. The `real` mode, which
+`manager/test/service_http.py` runs when `CLIENT_CHECK` names the check, loads
+the overview of the running manager and streams from its cursor. It creates
+a request with `prepareCommand` and `sendCommand`, requires that a new
+overview holds that request with the kind `request` and the resource
+`/v1/requests/{id}`, and it requires the
+`request.changed` invalidation of that request on the stream within 10
+seconds and in polling from the same cursor. It then withdraws the request.

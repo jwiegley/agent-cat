@@ -120,6 +120,8 @@ for scenario, mode, expected in [
     ("ip-san", "pages", None), ("pages", "pages", None), ("bad-pages", "bad-pages", None),
     ("nonce", "nonce", None), ("lost", "lost", None),
     ("changed", "changed", None), ("cancel", "cancel", None),
+    ("stream-idle", "stream-idle", None), ("stream-close", "stream-close", None),
+    ("stream-gone", "stream-gone", None), ("overview", "overview", None), ("bad-overview", "bad-overview", None),
     ("wrong-ca", "failure", "transport"), ("wrong-host", "failure", "transport"),
     ("wrong-ip", "failure", "transport"), ("dns-ip", "failure", "transport"),
     ("bad-version", "failure", "version"), ("redirect", "failure", "redirect"),
@@ -168,6 +170,41 @@ for scenario, mode, expected in [
                 if scenario == "bad-version":
                     value["versions"]["runtimeProtocol"] = [99]
                 self.reply(200, value)
+            elif self.path.startswith("/v1/snapshot") and scenario in ("overview", "bad-overview"):
+                second = "pageToken=" in self.path
+                item = ({"kind": "run", "run": {"id": "run_probe", "revision": "revision_run"}} if second
+                        else {"kind": "request", "request": {"id": "request_probe", "revision": "revision_probe"}})
+                value = {"version": 1, "page": {"setId": "set_fixture", "revision": "revision_fixture", "expiresAt": expiry,
+                    "index": int(second), "totalItems": 2, "next": None if second else "/v1/snapshot?pageToken=second"},
+                    "items": [item], "snapshotVersion": 1,
+                    "cursor": "stream_fixture.8" if second and scenario == "bad-overview" else "stream_fixture.7",
+                    "oldestCursor": "stream_fixture.0"}
+                self.reply(200, value)
+            elif self.path == "/v1/events" and scenario.startswith("stream-"):
+                if self.headers["Accept"] != "text/event-stream" or self.headers["Last-Event-ID"] != "stream_fixture.0":
+                    failures.append("stream request headers changed")
+                if scenario == "stream-gone":
+                    self.reply(410, {"status": 410, "code": "cursor-expired"})
+                    return
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream")
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                data = json.dumps({"version": 1, "resource": "/v1/requests/request_probe", "revision": "revision_probe"},
+                                  separators=(",", ":"))
+                self.wfile.write(("id: stream_fixture.1\nevent: request.changed\ndata: " + data + "\n\n: heartbeat\n\n").encode())
+                self.wfile.flush()
+                # No byte follows. The client ends the connection at its idle
+                # bound or at closeClient.
+                self.connection.settimeout(10)
+                try:
+                    if self.connection.recv(1) == b"":
+                        peer_closed.set()
+                except ssl.SSLEOFError:
+                    peer_closed.set()
+                except Exception:
+                    failures.append("stream connection did not close")
+                self.close_connection = True
             elif self.path.startswith("/v1/snapshot"):
                 second = "pageToken=" in self.path
                 value = {"version": 1, "page": {"setId": "set_other" if second and scenario == "bad-pages" else "set_fixture",
@@ -251,6 +288,8 @@ for scenario, mode, expected in [
             (root / "stdout.log").write_bytes(output)
             (root / "stderr.log").write_bytes(errors)
             assert completed.returncode == 0, (scenario, completed.returncode, errors.decode())
+            if scenario in ("stream-idle", "stream-close"):
+                assert peer_closed.wait(5), "the ended stream did not close its connection"
         (root / "stdout.log").write_bytes(output)
         (root / "stderr.log").write_bytes(errors)
         assert not failures, (scenario, failures)
