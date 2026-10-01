@@ -218,7 +218,7 @@ The governing goal records two operator decisions of 2026-10-01:
 | --- | --- | --- |
 | Unresolved approve after a restart (`acat-70ll`, item 4 of the Phase C review) | Met by PE1 | `acat-70ll` open for the Integrator. The PE1 audit lows are in `acat-vbze`. |
 | Launched quarantine claim with no terminal record (item 1 of `acat-phase-c-review-findings-hwxy`) | Open. PE2 and PE3 hold the repair, and PE2 waits for the owner. | `acat-phase-c-review-findings-hwxy` |
-| Overview fence after a 410, 40x12 monitor, 80x24 lineage review | Open (PE5 to PE7 not started) | `acat-pc17-follow-fess-jd40`, `acat-jdmd`, `acat-phase-c-review-findings-hwxy` |
+| Overview fence after a 410, 40x12 monitor, 80x24 lineage review | Fence met by PE5. PE6 and PE7 not started. | `acat-pc17-follow-fess-jd40`, `acat-jdmd`, `acat-phase-c-review-findings-hwxy` |
 | Phase A polish remainder (early `StoreBusy`, one Store deadline) | Open (PE8 and PE9 not started) | `acat-a6a7-fess-followup-1exm`, `acat-a10a11-fess-followup-33k1`, `acat-a5s2b-fess-followup-s9rl` |
 | WM-036 (`acat-wm-036-5ndj`) | Not started | Open |
 | WM-037 (`acat-wm-037-dz3v`) | Not started | Open |
@@ -491,15 +491,15 @@ these:
    terminal record, for example when the runtime died with the manager,
    reads cleanup-required and cannot be released. With the default
    `executionReservations` of 1, such a crash still blocks every later run.
-3. After a 410, the fetch generation fences only the overview reads that
-   the refresh coordinator started. An overview read that `g` or the
-   startup bootstrap started before the 410 still installs its rows,
-   because the `RequestInstalled` branch of `ServiceOverviewReady` in
-   `tui/src/Agentic/Tui/App.hs` does not compare the generations
-   (`acat-pc17-follow-fess-jd40`). The stream restart is fenced. The
-   closeout corrected `doc/tui-design.md`, `tui/README.md` and
-   `doc/agent-cat.texi`, which stated that no result of the earlier
-   generation installs.
+3. Met by PE5. After a 410, the fetch generation fences every overview
+   read: `g`, the startup bootstrap and live delivery. The
+   `ServiceOverviewReady` handler in `tui/src/Agentic/Tui/App.hs` calls
+   `overviewStep` in `tui/src/Agentic/Tui/ServiceLane.hs`. A result of an
+   earlier generation installs no rows and starts no stream. It only frees
+   the read lane, and the queued resnapshot read then installs and starts
+   the stream from its cursor. The reads of the decision heads, the run
+   list and the selected request that `g` starts are not fenced in this
+   way (`acat-pc17-follow-fess-jd40`, items 3 to 6 open).
 4. The restart reconciliation in `manager/src/Agentic/Manager/Store.hs`
    marks every start command with a dispatch attempt as unresolved, the
    approve of a run that already succeeded included (`acat-70ll`). Case 9

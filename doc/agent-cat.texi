@@ -3584,11 +3584,11 @@ the state to @samp{delivery live}.  While the frontend polls or is
 disconnected, it reads the selected request every second.  When the manager
 refuses the cursor with status 410, the frontend discards the results of the
 reads in progress that its refresh coordinator started, reads the overview,
-the selected request, and the decision heads again, and
-follows the stream from the cursor of the new overview.  An overview read
-that @kbd{g} or the startup bootstrap started before the 410 is not fenced
-in this way, so it can still install its rows until a later overview read
-replaces them.  When the manager refuses that overview read, or
+the selected request, and the decision heads again, and follows the stream from the cursor of the new
+overview.  This holds for every overview read in progress, also one that
+@kbd{g} or the startup bootstrap started before the 410: it installs no
+rows, and the overview read that follows the 410 then installs its rows
+and starts the stream.  When the manager refuses that overview read, or
 an overview read that follows an invalidation, the frontend reads the overview
 again after a delay of one second that doubles up to thirty seconds, until an
 overview is installed.  A switch to another

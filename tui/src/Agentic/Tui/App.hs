@@ -1610,8 +1610,7 @@ handleServiceResultFetch client serviceEvent = do
       -- the result was admitted.
       if install
         then handleServiceResultCore client serviceEvent
-        else modify (onLane (\lane -> if fmap Lane.ticketNumber (Lane.laneReadTicket lane) == Just (serviceEventTicket serviceEvent)
-          then lane {Lane.laneReadTicket = Nothing} else lane))
+        else modify (onLane (Lane.releaseRead (serviceEventTicket serviceEvent)))
 
 -- | The ticket of a worker result.
 serviceEventTicket :: ServiceEvent -> Int
@@ -1651,9 +1650,13 @@ handleServiceResultCore client serviceEvent = do
       (Lane.ReadDelivered profiles,lane) -> do
         put state {stateServiceLane = lane, stateServiceProfiles = profiles, stateServiceWorkflows = []}
         startServiceOverview client BootstrapOverview
-    -- A refused overview read keeps the last complete overview and marks it
-    -- stale with the refusal code. An installed overview starts the event
-    -- worker from its cursor when no stream runs.
+    -- Every overview read is fenced by the fetch generation in which it
+    -- started ('Lane.overviewStep'), whatever its origin: a read of an
+    -- earlier generation only ends its read ticket, so the waiting
+    -- resnapshot fetch starts at the current generation. A refused overview
+    -- read keeps the last complete overview and marks it stale with the
+    -- refusal code. An installed overview starts the event worker from its
+    -- cursor when no stream runs.
     ServiceOverviewReady ticket origin generation result ->
       let bootstrap = origin == BootstrapOverview
           shown current
@@ -1665,7 +1668,7 @@ handleServiceResultCore client serviceEvent = do
           cursor = case result of
             Lane.Declared (Right (value, _)) -> Just value
             _ -> Nothing
-      in case Lane.requestStep (const Service.ReadCurrent) ticket members (stateServiceLane state) (stateServiceOverview state) of
+      in case Lane.overviewStep generation (Manager.refreshGeneration (serviceRefresh state)) ticket members (stateServiceLane state) (stateServiceOverview state) of
         (Lane.RequestStale,lane,_) -> put state {stateServiceLane = lane}
         (Lane.RequestFaulted,lane,_) -> faultService state lane
         -- A refused read of live delivery or of a resnapshot is read again

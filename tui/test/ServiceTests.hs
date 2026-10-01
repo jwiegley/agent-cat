@@ -3192,6 +3192,57 @@ followTests now = do
               && fmap (\(install, _, _) -> install) installed == Just True
               && L.overviewStartsStream g1 (C.refreshGeneration r2) delivery
               && L.followCursor (L.newFollow "c_99") == "c_99" && L.followCursor follow /= "c_99"
+      -- The overview read of one origin started with ticket 7 in generation
+      -- 0: the explicit g key and the startup bootstrap start a plain read
+      -- of the read lane, and live delivery starts the overview fetch. A 410
+      -- resnapshot then advances the generation to 1 and queues the
+      -- resnapshot fetch of the overview. The read of generation 0 completes
+      -- with the rows and cursor of generation 0 over a retained overview.
+      -- It must install nothing and free the read lane, so the queued
+      -- resnapshot fetch starts with ticket 8 in generation 1, installs its
+      -- rows and starts the event worker from its cursor.
+      fencedOrigin live =
+        let retained = L.Installed (Just ("c_5", ["run_old"])) Nothing :: L.Installed (T.Text, [T.Text])
+            (r0, f0) = if live then L.invalidateFetches [L.OverviewFetch] C.newRefresh L.noFetches else (C.newRefresh, L.noFetches)
+            started = C.refreshGeneration r0
+            reading7 = fromMaybe idle (L.startRead 7 L.PageSetRead idle)
+            inFlight = if live then maybe f0 (\(fetch, rest) -> L.fetchStarted 7 fetch rest) (L.takeFetch (const True) idle f0) else f0
+            (r1, f1) = L.resnapshotFetches r0 inFlight
+            -- The live read completes its fetch first. The g and bootstrap
+            -- reads perform no fetch.
+            completed7 = L.fetchCompleted 7 r1 f1
+            (r2, f2) = maybe (r1, f1) (\(_, refresh, fetches) -> (refresh, fetches)) completed7
+            (staleStep, afterStale, staleInstalled) =
+              L.overviewStep started (C.refreshGeneration r2) 7 (L.Declared (Right ("c_6", ["run_before"]))) reading7 retained
+            taken = L.takeFetch (const True) afterStale f2
+            reading8 = fromMaybe afterStale (L.startRead 8 L.PageSetRead afterStale)
+            f3 = maybe f2 (\(fetch, rest) -> L.fetchStarted 8 fetch rest) taken
+            completed8 = L.fetchCompleted 8 r2 f3
+            r3 = maybe r2 (\(_, refresh, _) -> refresh) completed8
+            (freshStep, afterFresh, freshInstalled) =
+              L.overviewStep (C.FetchGeneration 1) (C.refreshGeneration r3) 8 (L.Declared (Right ("c_40", ["run_new"]))) reading8 staleInstalled
+         in C.refreshGeneration r1 == C.FetchGeneration 1
+              -- The resnapshot fetch waits while the stale read holds the lane.
+              && isNothing (L.takeFetch (const True) reading7 f1)
+              && (if live then fmap (\(install, _, _) -> install) completed7 == Just False else isNothing completed7)
+              -- The stale read installs nothing, marks nothing stale and frees the lane.
+              && (case staleStep of L.RequestStale -> True; _ -> False)
+              && staleInstalled == retained
+              && isNothing (L.laneReadTicket afterStale)
+              -- A refusal or a fault of a stale read changes nothing either.
+              && all (\outcome -> case L.overviewStep started (C.refreshGeneration r2) 7 outcome reading7 retained of
+                    (L.RequestStale, lane, installed) -> isNothing (L.laneReadTicket lane) && installed == retained
+                    _ -> False)
+                   [L.Declared (Left (C.Refused 503 "storage-unavailable")), L.InternalFault]
+              -- The queued resnapshot fetch starts at generation 1 and installs.
+              && fmap fst taken == Just (L.OverviewFetch, C.FetchGeneration 1)
+              && fmap (\(install, _, _) -> install) completed8 == Just True
+              && (case freshStep of L.RequestInstalled ("c_40", ["run_new"]) -> True; _ -> False)
+              && freshInstalled == L.Installed (Just ("c_40", ["run_new"])) Nothing
+              && isNothing (L.laneReadTicket afterFresh)
+              -- Only the read of the current generation starts the worker from its cursor.
+              && L.overviewStartsStream (C.FetchGeneration 1) (C.refreshGeneration r3) L.DeliveryResnapshot
+              && not (L.overviewStartsStream started (C.refreshGeneration r3) L.DeliveryResnapshot)
       idle = L.sessionLane :: L.Lane T.Text T.Text
       -- A connection that delivered up to c_17 and then lost its transport.
       (lost1, lostShown1, lostStep1) = stream (L.StreamEnd True "c_17" transport) L.DeliveryLive start
@@ -3216,6 +3267,10 @@ followTests now = do
         resnapshotPath "cursor-expired" False),
       ("a 410 view-expired or cursor-expired refusal of a poll takes the same resnapshot path",
         resnapshotPath "view-expired" True && resnapshotPath "cursor-expired" True),
+      ("an overview read that the g key or the startup bootstrap started before a 410 resnapshot installs nothing, and the queued resnapshot read installs",
+        fencedOrigin False),
+      ("an overview fetch of live delivery started before a 410 resnapshot installs nothing, and the queued resnapshot read installs",
+        fencedOrigin True),
       ("an installed overview starts no second worker while a stream is live, polling or disconnected",
         not (any (L.overviewStartsStream (C.FetchGeneration 1) (C.FetchGeneration 1))
           [L.DeliveryConnecting, L.DeliveryLive, L.DeliveryPolling, L.DeliveryDisconnected now "TransportUnavailable"])

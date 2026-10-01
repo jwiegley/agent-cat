@@ -66,7 +66,10 @@
 -- holds the read ticket. A fetch runs through the single-flight read lane
 -- like any other read, so the mutation deferral rule is unchanged. While the
 -- stream is live, the timer refresh of the selected request is only a
--- safety read ('safetyReadDue').
+-- safety read ('safetyReadDue'). Every overview read is fenced by the
+-- generation of the refresh coordinator, whatever started it: the explicit
+-- g key, the startup bootstrap or live delivery ('overviewStep'). A read of
+-- an earlier generation installs nothing and only ends its read ticket.
 --
 -- A credential refusal ('credentialRefusal': a 401 refusal, an unavailable
 -- credential or a credential that changed during the session) sets the
@@ -104,6 +107,8 @@ module Agentic.Tui.ServiceLane
     noObservation,
     RequestStep (..),
     requestStep,
+    releaseRead,
+    overviewStep,
     refusalCode,
     staleStatus,
     KeyAdmission (..),
@@ -470,6 +475,35 @@ requestStep verdict ticket outcome lane installed = case readStep ticket outcome
     ReadCurrent -> (RequestInstalled value, next, Installed (Just value) Nothing)
   where
     refused failure next = (RequestRefused failure, next, installed {installedStale = Just (refusalCode failure)})
+
+-- | End the read with this ticket number when it still holds the read
+-- ticket. Nothing of its result is installed, and the lane is otherwise
+-- unchanged.
+releaseRead :: Int -> Lane pending location -> Lane pending location
+releaseRead ticket lane
+  | fmap ticketNumber (laneReadTicket lane) == Just ticket = lane {laneReadTicket = Nothing}
+  | otherwise = lane
+
+-- | Complete an overview read that started in the first fetch generation,
+-- given the current generation of the refresh coordinator. The fence holds
+-- for every overview read, whatever started it: the explicit g key, the
+-- startup bootstrap or live delivery. A read of an earlier generation, such
+-- as a read from before a 410 resnapshot or an endpoint switch, is stale:
+-- it ends its read ticket ('releaseRead'), so a waiting fetch of the
+-- current generation can start, and it installs nothing and marks nothing
+-- stale. A read of the current generation completes as 'requestStep'
+-- states.
+overviewStep ::
+  C.FetchGeneration ->
+  C.FetchGeneration ->
+  Int ->
+  CallOutcome a ->
+  Lane pending location ->
+  Installed a ->
+  (RequestStep a, Lane pending location, Installed a)
+overviewStep started current ticket outcome lane installed
+  | started /= current = (RequestStale, releaseRead ticket lane, installed)
+  | otherwise = requestStep (const ReadCurrent) ticket outcome lane installed
 
 -- | The public code of a declared failure: the status and problem code of a
 -- manager refusal, or the name of a client failure.
