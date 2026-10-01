@@ -9,13 +9,16 @@ where
 
 import Agentic.Tui.App (runApp, runServiceApp, withTerminationHandlers)
 import qualified Agentic.Manager.Client as Client
+import qualified Agentic.Tui.Service as Service
+import qualified Agentic.Tui.ServiceLane as Lane
 import Control.Exception (bracket)
 import Agentic.Tui.Root (withPrivateRoot)
 import Agentic.Tui.Types (TuiConfig (..))
 import Control.Monad (unless)
 import qualified Data.Text as T
 import System.FilePath (isAbsolute)
-import System.IO (hIsTerminalDevice, stdin, stdout)
+import System.Exit (ExitCode (ExitFailure), exitWith)
+import System.IO (hIsTerminalDevice, hPutStrLn, stderr, stdin, stdout)
 
 runTui :: TuiConfig -> IO ()
 runTui config = withTerminationHandlers $ do
@@ -31,6 +34,9 @@ runTui config = withTerminationHandlers $ do
   withPrivateRoot (tuiStateDir config) (runApp config)
 
 -- | A terminal client session using only the explicitly supplied client profile.
+-- A declared connection failure prints its one fixed line from
+-- 'Lane.startupFailureText' and exits with status 1 before the terminal
+-- interface starts. Service mode starts no local machine or helper process.
 runServiceTui :: FilePath -> IO ()
 runServiceTui profile = withTerminationHandlers $ do
   inputTerminal <- hIsTerminalDevice stdin
@@ -38,6 +44,11 @@ runServiceTui profile = withTerminationHandlers $ do
   unless (inputTerminal && outputTerminal) $
     ioError (userError "--tui --service requires terminal input and output")
   bracket
-    (Client.connectClientProfile profile >>= either (ioError . userError . show) pure)
+    (Client.connectClientProfile profile >>= either startupFailure pure)
     Client.closeClient
-    runServiceApp
+    (\client -> either startupFailure (runServiceApp client) (Service.clientIdentity client))
+  where
+    startupFailure :: Client.ClientFailure -> IO a
+    startupFailure failure = do
+      hPutStrLn stderr (T.unpack (Lane.startupFailureText failure))
+      exitWith (ExitFailure 1)

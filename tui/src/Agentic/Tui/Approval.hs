@@ -9,7 +9,8 @@
 -- 'approvalDecision' decides the one outcome of each press. Forbidden keys and
 -- views are refused first, before any command-lane, read-lane or review fact
 -- is consulted. No key approves under the key help, Enter never approves, and
--- y never approves in the detail view. A y in the summary then requires the
+-- y never approves in the detail view. A y in the summary then requires every
+-- scope that the manager requires for approval in the credential scopes, the
 -- mutation-key admission of 'mutationAdmission' to start, and a displayed
 -- review that is current, live, bound to the request and its literals, and
 -- complete on the screen.
@@ -41,6 +42,7 @@ module Agentic.Tui.Approval
     refusalText,
     approvalStartText,
     preflightRefusedText,
+    unscopedText,
     noticeLine,
     noticeTexts,
     unsentApproval,
@@ -168,20 +170,25 @@ data ApprovalDecision a
   = -- | Start the approval with this value.
     Approve !a
   | Refuse !Refusal
+  | -- | A summary y whose credential lacks this scope, which the manager
+    -- requires for approval. Nothing is prepared or sent.
+    Unscoped !Text
   deriving (Eq, Show)
 
--- | Decide one approval-key press, given the view, the service lane and the
--- checked review.
+-- | Decide one approval-key press, given the credential scopes, the view, the
+-- service lane and the checked review.
 --
 -- The view and the key decide first, so no forbidden-key refusal depends on
--- the lane or the review. A summary y then takes the mutation-key admission
--- of the lane, and only a start consults the review.
-approvalDecision :: ApprovalKey -> ReviewView -> Lane pending location -> ReviewCheck a -> ApprovalDecision a
-approvalDecision key view lane review = case (view, key) of
+-- the scopes, the lane or the review. A summary y then requires the scopes
+-- that 'Service.missingScope' names for approval, then takes the mutation-key
+-- admission of the lane, and only a start consults the review.
+approvalDecision :: [Text] -> ApprovalKey -> ReviewView -> Lane pending location -> ReviewCheck a -> ApprovalDecision a
+approvalDecision scopes key view lane review = case (view, key) of
   (KeyHelpView, _) -> Refuse HelpRefused
   (DetailView, EnterKey) -> Refuse EnterDetailRefused
   (SummaryView, EnterKey) -> Refuse EnterRefused
   (DetailView, ApproveKey) -> Refuse DetailRefused
+  (SummaryView, ApproveKey) | Just scope <- Service.missingScope scopes "approve" -> Unscoped scope
   (SummaryView, ApproveKey) -> case mutationAdmission lane of
     KeyBusy -> Refuse CommandBusy
     KeyFaulted -> Refuse FaultStopped
@@ -195,10 +202,11 @@ approvalDecision key view lane review = case (view, key) of
 
 -- | Whether y would approve in the current view. The approval hint is shown
 -- exactly when this holds.
-approvalOffered :: ReviewView -> Lane pending location -> ReviewCheck a -> Bool
-approvalOffered view lane review = case approvalDecision ApproveKey view lane review of
+approvalOffered :: [Text] -> ReviewView -> Lane pending location -> ReviewCheck a -> Bool
+approvalOffered scopes view lane review = case approvalDecision scopes ApproveKey view lane review of
   Approve _ -> True
   Refuse _ -> False
+  Unscoped _ -> False
 
 -- | The visible outcome of one approval-key press: the sequence number of the
 -- press and a fixed text.
@@ -213,6 +221,7 @@ decisionNotice :: Int -> ApprovalDecision a -> KeyNotice
 decisionNotice serial decision = KeyNotice serial $ case decision of
   Approve _ -> approvalStartText
   Refuse refusal -> refusalText refusal
+  Unscoped scope -> unscopedText scope
 
 -- | The fixed text of each refusal.
 refusalText :: Refusal -> Text
@@ -229,6 +238,10 @@ refusalText refusal = case refusal of
   MismatchedReview -> "Approval did not start: the review does not match the request and its literals."
   ClippedReview -> "Approval did not start: the complete review does not fit. Resize the terminal."
 
+-- | The fixed text of a summary y whose credential lacks the given scope.
+unscopedText :: Text -> Text
+unscopedText scope = "Approval did not start: this credential lacks " <> scope <> "."
+
 -- | The fixed text of an approval start.
 approvalStartText :: Text
 approvalStartText = "Approval started for the exact displayed review."
@@ -242,9 +255,12 @@ preflightRefusedText = "Approval was not sent: the preflight check refused it be
 noticeLine :: KeyNotice -> Text
 noticeLine notice = "Approval key " <> T.pack (show (noticeKey notice)) <> ": " <> noticeText notice
 
--- | Every fixed notice text. The summary review reserves room for the longest.
+-- | Every fixed notice text, with the scope refusal for each scope that the
+-- manager requires for approval. The summary review reserves room for the
+-- longest.
 noticeTexts :: [Text]
 noticeTexts = approvalStartText : preflightRefusedText : map refusalText [minBound .. maxBound]
+  <> map unscopedText (maybe [] (map C.scopeName . C.requiredScopes) (C.parseOperation "approve"))
 
 -- | The press whose approval one service event returned to idle before any
 -- send, given the press that started the latest approval and the command

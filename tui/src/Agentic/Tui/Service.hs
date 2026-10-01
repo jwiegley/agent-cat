@@ -3,7 +3,8 @@
 -- | Public manager observations used by the existing terminal presentation.
 -- These records carry no local launch, process, filesystem or control authority.
 module Agentic.Tui.Service
-  ( Profile (..), Workflow (..), loadProfiles, loadWorkflows,
+  ( Endpoint (..), decodeEndpoint, clientIdentity, missingScope,
+    Profile (..), Workflow (..), loadProfiles, loadWorkflows,
     decodeProfile, decodeWorkflow, createBody,
     Mutation (..), mutationOperation, mutationURI, mutationProfile, prepareMutation,
     observeDraft, observePreparation, observeReceipt, requestMatches, reviewMatches, reviewLive,
@@ -50,6 +51,34 @@ import Data.Word (Word32, Word64)
 import Data.Maybe (isJust, listToMaybe)
 import qualified Data.Text.Encoding as TE
 import Data.Text.Encoding.Error (lenientDecode)
+
+-- | The identity of the manager endpoint of one session, for display: the
+-- host and port of the client profile endpoint, and the stream identifier,
+-- the authority epoch and the credential scopes of the verified capabilities.
+data Endpoint = Endpoint
+  { endpointHost :: !Text, endpointPort :: !Int, endpointStream :: !Text,
+    endpointAuthority :: !Text, endpointScopes :: ![Text]
+  } deriving (Eq, Show)
+
+-- | The endpoint identity of a host, a port and a capabilities document. A
+-- document without a string @streamId@, a string @authorityEpoch@ and a list
+-- of string @scopes@ refuses with 'C.InvalidResponse'.
+decodeEndpoint :: (Text, Int) -> Value -> Either C.ClientFailure Endpoint
+decodeEndpoint (host, port) = decode $ withObject "capabilities" $ \fields ->
+  Endpoint host port <$> fields .: "streamId" <*> fields .: "authorityEpoch" <*> fields .: "scopes"
+
+-- | The endpoint identity of a connected session.
+clientIdentity :: C.Client -> Either C.ClientFailure Endpoint
+clientIdentity client = decodeEndpoint (C.clientEndpoint client) (C.clientCapabilities client)
+
+-- | The first scope that the manager requires for the named operation and
+-- that the given credential scopes do not list. The manager rule
+-- 'C.requiredScopes' decides the required scopes. A name that is not a
+-- manager operation requires no scope here, because no key sends it.
+missingScope :: [Text] -> Text -> Maybe Text
+missingScope granted operation = do
+  known <- C.parseOperation operation
+  listToMaybe [scope | scope <- map C.scopeName (C.requiredScopes known), scope `notElem` granted]
 
 -- | One configured execution profile's public identity and readiness.
 data Profile = Profile

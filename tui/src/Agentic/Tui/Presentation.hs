@@ -15,6 +15,7 @@ module Agentic.Tui.Presentation
     launchReviewAllowed,
     serviceReviewAllowed,
     serviceReviewRows,
+    endpointLine,
     serviceRequestLines,
     serviceSaveRefusal,
     serviceSavedLine,
@@ -64,7 +65,7 @@ import qualified Data.ByteString.Lazy as BL
 import Data.Char (isControl, isSpace)
 import Data.List (intersperse)
 import qualified Data.Map.Strict as Map
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, isJust)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
@@ -118,6 +119,9 @@ data Presentation = Presentation
     presentationRunning :: !Bool,
     presentationNoColor :: !Bool,
     presentationService :: !Bool,
+    -- | The endpoint identity of the service session. The service shell shows
+    -- it in its own header row when the terminal has room for that row.
+    presentationServiceEndpoint :: !(Maybe Service.Endpoint),
     -- | Operation, URI, and whether an explicit exact resend is offered.
     presentationServiceMutation :: !(Maybe (Text,Text,Bool)),
     presentationServiceResendConfirm :: !Bool,
@@ -191,6 +195,7 @@ emptyPresentation model =
       presentationRunning = False,
       presentationNoColor = False,
       presentationService = False,
+      presentationServiceEndpoint = Nothing,
       presentationServiceMutation = Nothing,
       presentationServiceResendConfirm = False,
       presentationServiceApproval = Nothing,
@@ -241,18 +246,21 @@ layout presentation width height
             <> footerWidgets
         )
   where
-    headerRows = shellHeaderRows width height
+    identity = isJust (presentationServiceEndpoint presentation)
+    headerRows = shellHeaderRows identity width height
     statusRows = shellStatusRows height
     footerRows = shellFooterRows height
-    mainRows = shellMainRows width height
+    mainRows = shellMainRows identity width height
+    identityRows = [bar width (muted (displayText (oneLine width (" " <> endpointLine endpoint)))) | Just endpoint <- [presentationServiceEndpoint presentation]]
     headerWidgets = case headerRows of
       0 -> []
       1 -> [bar width (hBox [withAttr (attrName "title") (displayText "agent-cat"), displayText " / ", headerContext presentation])]
       _ | LiveScreen _ <- modelScreen (presentationModel presentation) ->
             [ bar width (padLeft (Pad 1) (headerContext presentation)),
               bar width (muted (displayText (oneLine width (liveSubtitle presentation))))
-            ]
+            ] <> identityRows
         | otherwise -> [bar width (withAttr (attrName "title") (displayText (" agent-cat  /  " <> screenTitle (modelScreen (presentationModel presentation))))), bar width (padLeft (Pad 1) (headerContext presentation))]
+            <> identityRows
     mainWidget = hLimit width (vLimit mainRows (padBottom Max (layerView presentation width height mainRows)))
     statusWidgets = [bar width (statusView presentation width) | statusRows == 1]
     footerWidgets = map (bar width . (\line -> if T.all isSpace line then muted hBorder else shortcutLine line)) footerLines
@@ -269,10 +277,12 @@ liveSubtitle presentation
   | otherwise =
       " persona " <> fromMaybe "none" (presentationRunPersona presentation) <> " · target " <> fromMaybe "pending" (presentationRunRealization presentation)
 
-shellHeaderRows :: Int -> Int -> Int
-shellHeaderRows width height
+-- | The header rows, given whether the shell shows an endpoint identity row.
+-- That row appears only where the two-row header fits.
+shellHeaderRows :: Bool -> Int -> Int -> Int
+shellHeaderRows identity width height
   | height <= 2 = 0
-  | width >= 72 && height >= 16 = 2
+  | width >= 72 && height >= 16 = if identity then 3 else 2
   | otherwise = 1
 
 shellStatusRows :: Int -> Int
@@ -286,8 +296,25 @@ shellFooterRows height
   | height >= 8 = 2
   | otherwise = 1
 
-shellMainRows :: Int -> Int -> Int
-shellMainRows width height = max 0 (height - shellHeaderRows width height - shellStatusRows height - shellFooterRows height)
+shellMainRows :: Bool -> Int -> Int -> Int
+shellMainRows identity width height = max 0 (height - shellHeaderRows identity width height - shellStatusRows height - shellFooterRows height)
+
+-- | The endpoint identity row of the service shell: the endpoint host and
+-- port, the leading characters of the authority epoch, the credential scopes
+-- and the stream identifier. The stream identifier comes last, so a narrow
+-- terminal shows its leading characters.
+endpointLine :: Service.Endpoint -> Text
+endpointLine endpoint =
+  "manager " <> host <> ":" <> shown (Service.endpointPort endpoint)
+    <> " · " <> authority
+    <> " · scopes " <> (if null scopes then "none" else T.unwords scopes)
+    <> " · " <> Service.endpointStream endpoint
+  where
+    named = Service.endpointHost endpoint
+    host = if T.any (== ':') named then "[" <> named <> "]" else named
+    epoch = Service.endpointAuthority endpoint
+    authority = if T.length epoch > 18 then T.take 18 epoch <> "…" else epoch
+    scopes = Service.endpointScopes endpoint
 
 bar :: Int -> Widget n -> Widget n
 bar width widget = hLimit width (padRight Max widget)
@@ -424,12 +451,14 @@ serviceReviewRows preparation tag =
     "If-Match: " <> tag ] <> Service.approvalSelectors preparation
       <> ["d shows the complete exact review.", "Only y approves. Enter does not approve."]
 
--- | Whether the complete summary review fits. The rows of the longest
--- approval-key notice are always reserved, so a notice never clips the review.
+-- | Whether the complete summary review fits in the service shell, whose
+-- header includes the endpoint identity row where it fits. The rows of the
+-- longest approval-key notice are always reserved, so a notice never clips the
+-- review.
 serviceReviewAllowed :: Manager.Preparation -> Text -> (Int,Int) -> Bool
 serviceReviewAllowed preparation tag (width,height) = width >= 40 &&
   length (concatMap (wrapDisplayLines innerWidth) (serviceReviewRows preparation tag)) + serviceNoticeRows innerWidth
-    <= max 0 (shellMainRows width height - 2)
+    <= max 0 (shellMainRows True width height - 2)
   where innerWidth = max 1 (min 84 width - 4)
 
 -- | The rows that the longest approval-key notice needs at this inner width,
@@ -997,7 +1026,7 @@ liveView presentation width totalHeight snapshot = vBox (failureBanner <> banner
       Nothing -> []
       Just failure ->
         let rows = wrapDisplayLines width (T.takeWhile (/= '\n') (T.strip failure))
-            limit = max 1 (min 6 (shellMainRows width totalHeight - serviceRows - if Map.null (snapshotOccurrences snapshot) then 4 else 6))
+            limit = max 1 (min 6 (shellMainRows (isJust (presentationServiceEndpoint presentation)) width totalHeight - serviceRows - if Map.null (snapshotOccurrences snapshot) then 4 else 6))
          in [ withAttr (attrName "error") (displayText ("Run " <> T.toLower (runStatusLabel (snapshotRunStatus snapshot)))),
               vBox (map displayText (take limit rows))
             ]
@@ -1263,7 +1292,7 @@ confirmationRequiredRows config preview width =
   sum [length (wrapDisplayLines (confirmationInnerWidth width) line) | (line, _) <- confirmationSummary config preview]
 
 confirmationBodyRows :: Int -> Int -> Int
-confirmationBodyRows width height = max 0 (shellMainRows width height - 2)
+confirmationBodyRows width height = max 0 (shellMainRows False width height - 2)
 
 confirmationInnerWidth :: Int -> Int
 confirmationInnerWidth width = max 1 (min 84 width - 4)

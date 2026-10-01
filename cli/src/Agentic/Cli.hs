@@ -732,7 +732,8 @@ policySha256 :: Value -> Text
 policySha256 = Frontend.frontendDigest . BL.toStrict . encode
 
 data Command
-  = -- | Explicit full-screen terminal frontend.
+  = -- | Explicit full-screen terminal frontend in local mode, which
+    -- @--tui@ and @--tui --local@ both select.
     Tui
   | -- | A terminal client using an explicit manager client-profile file.
     TuiService !FilePath
@@ -3810,6 +3811,7 @@ parseCommand reg = \case
   [] -> Left (usage reg)
   ["--help"] -> Right Usage
   ["--tui"] -> Right Tui
+  ["--tui", "--local"] -> Right Tui
   ["--tui", "--service", profile]
     | isAbsolute (T.unpack profile),
       BS.length (encodeUtf8 profile) <= 4096,
@@ -4380,7 +4382,7 @@ usage reg =
     "\n"
     [ bin <> " — " <> regBanner reg,
       "",
-      "  " <> bin <> " --tui",
+      "  " <> bin <> " --tui [--local]",
       "  " <> bin <> " --tui --service ABS_CLIENT_PROFILE",
       "  " <> bin <> " frontend --capabilities",
       "  " <> bin <> " frontend",

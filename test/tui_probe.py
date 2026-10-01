@@ -719,6 +719,33 @@ def test_non_tty(runner: Path) -> None:
     assert result.returncode != 0
     assert b"--tui requires terminal input and output" in result.stderr
 
+def test_explicit_local(runner: Path, root: Path) -> None:
+    """--tui --local is the explicit form of the local frontend of --tui."""
+    result = subprocess.run(
+        [str(runner), "--tui", "--local"],
+        input=b"",
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+        timeout=20,
+    )
+    assert result.returncode != 0
+    assert b"--tui requires terminal input and output" in result.stderr
+    state = root / "explicit-local-state"
+    with TuiSession(runner, state, command=[str(runner), "--tui", "--local"]) as session:
+        cursor = session.wait_for(b"Workflows")
+        session.settle()
+        session.send(b"h")
+        session.wait_for(b"Corpus entry `example-000`", after=cursor)
+        session.send(ESCAPE)
+        session.wait_for(b"browser", after=cursor)
+        session.settle()
+        session.send(b"q")
+        assert session.wait_exit() == 0
+        session.assert_restored()
+    assert state.is_dir() and runs(state) == [], "--tui --local did not use its local state root"
+
+
 def test_state_root_confinement(runner: Path, root: Path) -> None:
     external = root / "outside-state"
     external.mkdir(mode=0o700)
@@ -1925,6 +1952,7 @@ def main() -> None:
     if arguments.driver is not None:
         test_spawn_descriptors(arguments.driver.resolve(), root)
     test_startup_and_input(runner, root)
+    test_explicit_local(runner, root)
     test_default_state_isolation(runner, root)
     test_state_root_confinement(runner, root)
     test_catalogue_fifo(runner, root)

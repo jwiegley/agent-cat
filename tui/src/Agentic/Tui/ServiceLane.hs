@@ -25,8 +25,9 @@
 -- marks it stale with the refusal code.
 --
 -- Every mutation key has exactly one visible outcome, which
--- 'mutationAdmission' and 'resendAdmission' decide from the lane: a start, a
--- refusal or a deferral. A key never cancels a page-set read, because an
+-- 'mutationKeyOutcome' and 'resendAdmission' decide: a start, a refusal or a
+-- deferral. A key whose operation needs a scope that the credential lacks is
+-- refused first. 'mutationAdmission' then decides from the lane. A key never cancels a page-set read, because an
 -- abandoned page set holds a manager slot until it expires. It defers
 -- instead, and a deferred key is never replayed. A key during a
 -- single-resource read ends and cancels that read and starts. A refusal or a
@@ -69,6 +70,9 @@ module Agentic.Tui.ServiceLane
     ResendAdmission (..),
     resendAdmission,
     admissionText,
+    scopeText,
+    mutationKeyOutcome,
+    startupFailureText,
     resendDeferredText,
     resendUnofferedText,
     keyHelpText,
@@ -105,7 +109,7 @@ module Agentic.Tui.ServiceLane
 where
 
 import qualified Agentic.Manager.Client as C
-import Agentic.Tui.Service (Mutation, ReadVerdict (..), mutationOperation, mutationURI)
+import Agentic.Tui.Service (Mutation, ReadVerdict (..), missingScope, mutationOperation, mutationURI)
 import Control.Exception (SomeAsyncException, SomeException, evaluate, fromException, throwIO, try)
 import Data.Maybe (isJust)
 import Data.Text (Text)
@@ -409,6 +413,43 @@ admissionText operation admission = case admission of
   KeyDeferred -> Just (operation <> " deferred during a page-set read. Press the key again.")
   KeyBusy -> Just (operation <> " did not start: a command is in progress or unresolved.")
   KeyFaulted -> Just (operation <> " did not start: an internal fault stopped all mutations.")
+
+-- | The fixed text of a key that asks for an operation whose scope the
+-- credential lacks, given the operation and the first missing scope.
+scopeText :: Text -> Text -> Text
+scopeText operation scope = operation <> " did not start: this credential lacks " <> scope <> "."
+
+-- | The visible outcome of a key that asks for a new mutation, given the
+-- scopes of the credential, the operation and the lane: 'Nothing' for a
+-- start, or the fixed text of a key outcome that starts nothing and whether
+-- it is a deferral. A missing scope decides first, so such a key never starts
+-- a preparation or a send, and it never defers.
+mutationKeyOutcome :: [Text] -> Text -> Lane pending location -> Maybe (Text, Bool)
+mutationKeyOutcome scopes operation lane = case missingScope scopes operation of
+  Just scope -> Just (scopeText operation scope, False)
+  Nothing -> (\text -> (text, admission == KeyDeferred)) <$> admissionText operation admission
+  where
+    admission = mutationAdmission lane
+
+-- | The one fixed line that the service frontend prints for a declared
+-- failure of its connection at startup, before it exits with status 1.
+startupFailureText :: C.ClientFailure -> Text
+startupFailureText failure = "--tui --service: " <> case failure of
+  C.InvalidClientProfile -> "invalid client profile"
+  C.ClientFileUnavailable -> "client profile, credential or CA file unavailable"
+  C.InvalidEndpoint -> "invalid manager endpoint"
+  C.WrongEndpoint -> "wrong manager endpoint"
+  C.CredentialUnavailable -> "credential unavailable"
+  C.CredentialChanged -> "credential changed during the connection"
+  C.TransportUnavailable -> "manager unreachable"
+  C.RedirectRefused -> "manager redirect refused"
+  C.InvalidResponse -> "invalid manager response"
+  C.ResponseTooLarge -> "manager response too large"
+  C.UnsupportedVersion -> "manager API version unsupported"
+  C.ClientClosed -> "client closed"
+  C.Refused 401 _ -> "credential refused"
+  C.Refused 403 "insufficient-scope" -> "credential lacks the observe scope"
+  C.Refused status code -> "manager refused the connection: " <> T.pack (show status) <> " " <> code
 
 -- | The fixed status text of a deferred resend confirmation.
 resendDeferredText :: Text

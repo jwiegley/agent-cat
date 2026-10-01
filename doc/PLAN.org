@@ -10220,6 +10220,30 @@ Non-blocking findings of fess audit fess/pc-PC12-r1.md (2026-09-30) on subtask P
 
 Limitations recorded by the implementer: nothing calls the coordinator, the backoff or reconcile yet; the TUI service lane keeps its own receipt-based reconciliation, and moving it onto Agentic.Manager.Client.Refresh belongs to WM-033 to WM-035; resendAdmission stays the only resend; the caller supplies the jitter fraction and the client never reconnects by itself; advanceGeneration returns no actions, so earlier-generation fetches still on the wire are discarded on completion and early cancellation is left to the caller; reconciliation from the target alone depends on the caller deciding whether the effect is visible, and the pure rule only adds the guard that the target ETag must differ from the precondition.
 
+* TODO [#E] Resolve the non-blocking fess findings of subtask PC13    :review:
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pc13-backend-identity-fess-1k0y
+:LABELS:   ["review","workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-30 Wed 23:57]
+:MODIFIED: [2026-09-30 Wed 23:57]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess audit fess/pc-PC13-r1.md (2026-09-30) on subtask PC13 (WM-033 explicit backend selection, endpoint identity and capability refusal states).
+
+1. (low) tui/README.md near line 137 and doc/agent-cat.texi near lines 3323-3324 say the scope refusal comes before any other admission. For answer and set-input (tui/src/Agentic/Tui/App.hs near lines 836-842 and 850-855), the stale-observation, not-observed and answer-validation refusals are decided before serviceMutationKey, so an unscoped credential can see the stale refusal in place of the scope refusal. Nothing is sent either way. Check missingScope before those branches, or reword the documents to say "before any lane admission".
+2. (low) tui/src/Agentic/Tui/Presentation.hs near lines 838 and 948: browserView and liveView get the pseudo total height mainHeight + 5, which assumes a two-row header. With the service identity row, the live failure-banner limit (near line 1029) loses one row, and at height 16 browserView takes its narrow form under a wide header. Pass the real total height, or add the identity row to the constant.
+3. (low) tui/src/Agentic/Tui/Service.hs near lines 78-80: missingScope returns Nothing for an operation name that parseOperation does not know, so a misspelled operation at a future key site skips the scope gate silently. Take C.Operation in place of Text in missingScope and mutationKeyOutcome so that the compiler checks the names.
+4. (low, no change needed) Approve and discard require submit and control, not only control as the task text said, because the gate uses the manager's own requiredScopes (manager/src/Agentic/Manager/Protocol/Command.hs near line 61, tui/src/Agentic/Tui/Approval.hs near line 191). This behavior is correct and is recorded as a deviation from the task text.
+5. (low) The last tui/src/Agentic/Tui/ServiceLane.hs edit (a comment edit) came after the model test, the journey and tui/ci/tui.sh. Only the final build covered it, and the auditor reran the model test, which passed. Rerun JOURNEY-ONCE(8) and tui/ci/tui.sh on the committed tree at the next opportunity.
+
+Limitations recorded by the implementer: service mode has no keys yet for withdraw, discard, capture, remove-input, export or the run controls (the gate covers them by operation name once they exist); at 140 columns the identity row cuts the streamId with an ellipsis; refusals other than 401 or 403 insufficient-scope print the status and problem code; cli/test/PolicyProbe.hs has the new parse case but policies.sh did not run (operator exclusion); the journey ran only at N=8, and the broken-answer and consent controls did not run.
+
 * TODO [#C] Resolve PC5 fess findings in legacy history windows    :review:
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -18141,7 +18165,7 @@ public or production deployment.
 :LABELS:   ["p6","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-30 Wed 23:26]
+:MODIFIED: [2026-09-30 Wed 23:57]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-029
 :SOURCE_REPO: agent-cat
@@ -18309,6 +18333,13 @@ coordination or SQL into the TUI.
     "author": "johnw",
     "text": "PC12 (2026-09-30): pure refresh coordinator in Agentic.Manager.Client.Refresh (single flight per resource, dirty coalescing, generation fencing, advanceGeneration for resnapshot and endpoint switch), bounded reconnect backoff (1 to 30 seconds) with jitter, and uncertain-command reconciliation whose result cannot carry a send. New refresh section in test/manager_client_vectors.json (271 PASS in the vectors mode, 39 of them refresh, backoff, jitter or reconciliation). Checks passed: Werror build with -ftui-tests of manager-client-check, agentic-run, routing-fixed-point-probe, tui-model-test; vectors mode; source-boundaries; make -C doc check. Fess pc-PC12-r1 non-blocking, findings filed as acat-pc12-refresh-fess-109a. Not yet called by the TUI (WM-033 to WM-035). WM-029 stays open for closeout.",
     "created_at": "2026-10-01T06:26:01Z"
+  },
+  {
+    "id": 478,
+    "issue_id": "acat-wm-029-nlmg",
+    "author": "johnw",
+    "text": "PC13 (2026-09-30): the facade gains clientEndpoint and re-exports parseOperation, Scope, scopeName and requiredScopes (additive only). The TUI service shell consumes them for the endpoint identity row and the scope gate. Evidence as recorded on acat-wm-033-4g77.",
+    "created_at": "2026-10-01T06:57:11Z"
   }
 ]
 #+end_src
@@ -18551,7 +18582,7 @@ until WM-039 supplies it.
 :LABELS:   ["p7","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-24 Thu 09:19]
+:MODIFIED: [2026-09-30 Wed 23:57]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-033
 :SOURCE_REPO: agent-cat
@@ -18667,6 +18698,13 @@ to an unapproved local launch.
     "author": "johnw",
     "text": "Phase A subtask A5 (resume-20260923) advances this package. It does not complete it. The TUI service read lane now issues one composite read through the original single-flight lane: request, receipt, preparation, snapshot, control and the head decision. The composite installs in one event only when the ticket, request id and run id match the current selection and every component validates. A declared refusal (503, 429, 410) keeps the last complete observation and marks it stale without changing mutation state. An unreadable receipt leaves the approval outcome unresolved and offers no resend. A compiled mutation-key admission predicate gives every key exactly one visible outcome.\n\nEvidence and ceilings: Werror package build passed (package build). tui-model-test passed at N1 and N8, 387 checks (pure model test), and 27 verifier guard-breaking overlays each fail a named check. tui-approval passed at N1 then N8 twice, and the PTY consent control failed as required at N1 and N8 (actual UI interaction, deterministic native fixture). tui/ci/tui.sh passed. Evidence: resume-20260923/A/A5/impl-r2 and A/A5/verify-r2 in the private evidence directory. Fess: fess/A-A5-r2.md, not blocking.\n\nLimits: no PTY run exercises a refused request read, the stale display, a key outcome or a decision-head install (acat-lzlp, acat-i9aj). The round-1 N8 failure is unexplained (acat-dxos). Deferral starvation risk for post-association keys is open (acat-ftw9).\n",
     "created_at": "2026-09-24T16:19:59Z"
+  },
+  {
+    "id": 477,
+    "issue_id": "acat-wm-033-4g77",
+    "author": "johnw",
+    "text": "PC13 (2026-09-30): explicit backend selection (agentic-run --tui --local, same as --tui; --tui --service PROFILE unchanged), service-shell endpoint identity row (manager HOST:PORT from the new additive facade accessor clientEndpoint, authority epoch prefix, scopes, streamId), a numbered scope refusal that sends no request (gate uses the manager's requiredScopes, re-exported by the facade), and a total fixed-line startup failure table with exit 1 and no local process. Evidence: Werror BUILD of agentic-run, routing-fixed-point-probe, tui-model-test, tui-test-driver with -ftui-tests; tui-model-test; source-boundaries; JOURNEY-ONCE(8) including the bad-profile startup check and a no-child-process check at three points; bash tui/ci/tui.sh including test_explicit_local; make -C doc check. All exit 0. Remaining for WM-033: keys for withdraw, discard, capture, remove-input, export and run controls do not exist yet. Fess non-blocking, filed as acat-pc13-backend-identity-fess-1k0y. Package stays open for closeout.",
+    "created_at": "2026-10-01T06:57:10Z"
   }
 ]
 #+end_src

@@ -123,7 +123,10 @@ data Work = InitialWork | PreviewWork | HelpWork | RunsWork | RoutingWork | Mach
   deriving (Eq, Ord)
 
 -- | Disjoint original local and manager-client owners.
-data Backend = LocalBackend !TuiConfig !PrivateRoot | ServiceBackend !Manager.Client
+-- | The local runner backend, or the service backend: the client session and
+-- the endpoint identity that the shell shows and that decides the credential
+-- scopes.
+data Backend = LocalBackend !TuiConfig !PrivateRoot | ServiceBackend !Manager.Client !Service.Endpoint
 
 -- Each attempted mutation retains the original immutable pending command.
 type MutationState = Lane.MutationState Manager.PendingCommand Manager.Reference
@@ -226,8 +229,8 @@ data AppState = AppState
 runApp :: TuiConfig -> PrivateRoot -> IO ()
 runApp config root = runAppWith (LocalBackend config root)
 
-runServiceApp :: Manager.Client -> IO ()
-runServiceApp = runAppWith . ServiceBackend
+runServiceApp :: Manager.Client -> Service.Endpoint -> IO ()
+runServiceApp client endpoint = runAppWith (ServiceBackend client endpoint)
 
 runAppWith :: Backend -> IO ()
 runAppWith backend = mask $ \restore -> do
@@ -335,7 +338,7 @@ runAppWith backend = mask $ \restore -> do
               (uninterruptibleMask_ (cancel ticker >> (readMVar workers >>= mapM_ cancel))
                 `finally` (readIORef owned >>= mapM_ terminateMachine))
                 `finally` writeIORef owned Nothing
-            ServiceBackend client -> mask_ $
+            ServiceBackend client _ -> mask_ $
               (Manager.closeClient client `finally`
                 (readMVar workers >>= stopAll . (ticker :) . Map.elems)) `finally` do
                   unresolved <- readIORef uncertainExit
@@ -531,16 +534,23 @@ refreshServiceRequest client cause = do
           pure (Service.RequestRead (observed,request) preparation receipt components))
     _ -> pure ()
 
--- | Decide one key that asks for a new mutation with 'Lane.mutationAdmission'.
--- A start runs the given action. Every other outcome shows its fixed text as
+-- | Decide one key that asks for a new mutation with 'Lane.mutationKeyOutcome':
+-- a scope that the credential lacks refuses first, then the lane decides with
+-- 'Lane.mutationAdmission'. A start runs the given action. Every other outcome shows its fixed text as
 -- a key outcome, and the key is not replayed later.
 serviceMutationKey :: Text -> EventM Name AppState () -> EventM Name AppState ()
 serviceMutationKey operation start = do
   state <- get
-  let admission = Lane.mutationAdmission (stateServiceLane state)
-  case Lane.admissionText operation admission of
+  case Lane.mutationKeyOutcome (serviceScopes state) operation (stateServiceLane state) of
     Nothing -> start
-    Just refusal -> serviceKeyOutcome (admission == Lane.KeyDeferred) refusal
+    Just (refusal,deferred) -> serviceKeyOutcome deferred refusal
+
+-- | The credential scopes that the capabilities of the service session list.
+-- The local backend has no manager credential.
+serviceScopes :: AppState -> [Text]
+serviceScopes state = case stateBackend state of
+  ServiceBackend _ endpoint -> Service.endpointScopes endpoint
+  LocalBackend {} -> []
 
 -- | Show the fixed text of a mutation key that started nothing as the next
 -- numbered key outcome, given whether a page-set read deferred the key. A
@@ -730,13 +740,14 @@ handleApprovalKey :: Manager.Client -> (Approval.ApprovalKey, Manager.Preparatio
 handleApprovalKey client (key,displayed,tag) = do
   state <- get
   let serial = stateServiceKeySerial state + 1
-      decision = Approval.approvalDecision key (serviceReviewView state) (stateServiceLane state) (serviceReviewCheck state displayed tag)
+      decision = Approval.approvalDecision (serviceScopes state) key (serviceReviewView state) (stateServiceLane state) (serviceReviewCheck state displayed tag)
       pressed = state {stateServiceKeySerial = serial, stateServiceNotice = Just (Approval.decisionNotice serial decision)}
   case decision of
     Approval.Approve (request,observed) -> do
       put pressed {stateServiceApprovalPress = Just serial}
       beginServiceMutation client (Service.Approve request displayed) (Just observed)
     Approval.Refuse _ -> put pressed
+    Approval.Unscoped _ -> put pressed
 
 -- | The view of the review screen that the operator sees.
 serviceReviewView :: AppState -> Approval.ReviewView
@@ -1038,7 +1049,7 @@ startInitialLoad = do
   case stateBackend state of
     LocalBackend config root ->
       liftIO . startWorker state InitialWork $ loadInitialData config root >>= writeBChan (stateChannel state) . InitialReady
-    ServiceBackend client -> startServiceProfiles client
+    ServiceBackend client _ -> startServiceProfiles client
 
 draw :: AppState -> [Widget Name]
 draw = drawPresentation . toPresentation
@@ -1048,6 +1059,7 @@ toPresentation state =
   (emptyPresentation (stateModel state))
     { presentationConfig = case stateBackend state of LocalBackend config _ -> Just config; ServiceBackend {} -> Nothing,
       presentationService = case stateBackend state of ServiceBackend {} -> True; LocalBackend {} -> False,
+      presentationServiceEndpoint = case stateBackend state of ServiceBackend _ endpoint -> Just endpoint; LocalBackend {} -> Nothing,
       presentationServiceMutation = Lane.mutationNotice (stateServiceLane state),
       presentationServiceResendConfirm = serviceResendConfirm state,
       presentationServiceApproval = stateServiceApprovalStatus state,
@@ -1068,7 +1080,7 @@ toPresentation state =
       presentationServiceRequestLines = maybe [] (serviceRequestLines . snd) (serviceRequest state),
       presentationServiceApprovalOffered = case modelScreen (stateModel state) of
         ServiceReviewScreen displayed tag ->
-          Approval.approvalOffered (serviceReviewView state) (stateServiceLane state) (serviceReviewCheck state displayed tag)
+          Approval.approvalOffered (serviceScopes state) (serviceReviewView state) (stateServiceLane state) (serviceReviewCheck state displayed tag)
         _ -> False,
       presentationServiceNotice = stateServiceNotice state,
       presentationEditor = currentEditor state,
@@ -1169,7 +1181,7 @@ handleEventCore event = do
   state <- get
   case stateBackend state of
     LocalBackend {} -> handleLocalEvent event
-    ServiceBackend client -> handleServiceEvent client event
+    ServiceBackend client _ -> handleServiceEvent client event
 
 handleLocalEvent :: BrickEvent Name AppEvent -> EventM Name AppState ()
 handleLocalEvent event = case event of

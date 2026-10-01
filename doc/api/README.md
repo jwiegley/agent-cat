@@ -679,6 +679,14 @@ status, or whose `code` is not a bounded identifier, gives `InvalidResponse`.
 `validCursor` checks the cursor syntax. `validETag` checks a strong entity
 tag, and the client compares entity tags only for equality.
 
+`clientCapabilities` returns the capabilities document that the session
+verified at connection, and `clientEndpoint` returns the host and port of the
+endpoint that the session is bound to. `requiredScopes` gives the scopes that
+the manager requires for an operation that `parseOperation` names, and
+`scopeName` gives the public name of each scope. A client compares them with
+the `scopes` of the capabilities to refuse an operation locally before it
+sends a request.
+
 The facade also performs live delivery through one connection at a time.
 `loadOverview` assembles the page set of `/snapshot` and returns its `cursor`,
 its `oldestCursor` and its members. Each member has its kind (`request`,

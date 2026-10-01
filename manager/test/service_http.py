@@ -16,6 +16,7 @@ import ssl
 import stat
 import subprocess
 import sys
+import termios
 import threading
 import time
 
@@ -6065,8 +6066,52 @@ for iteration in range(2):
                                             "+RTS", "-N" + native, "-RTS"], stdout=log, stderr=log, check=True, timeout=30)
                         print("PASS public Client facade against the running protected manager", flush=True)
                     if os.environ.get("TUI_CHECK") is not None:
-                        from tui_probe import TuiSession
+                        from tui_probe import PS_PROGRAM, TuiSession
                         client_state = work / "unused-client-state"
+
+                        def tui_children(session):
+                            """The processes other than the TUI in its process group or with the TUI as parent."""
+                            leader = session.process.pid
+                            listed = subprocess.check_output([PS_PROGRAM, "-axo", "pid=,ppid=,pgid="], text=True)
+                            return [row.strip() for row in listed.splitlines() if len(row.split()) == 3
+                                    and int(row.split()[0]) != leader and leader in (int(row.split()[1]), int(row.split()[2]))]
+
+                        def assert_no_tui_children(session, moment):
+                            assert session.process.poll() is None, ("the service TUI exited before the child check", moment)
+                            children = tui_children(session)
+                            assert children == [], ("JOURNEY-ASSERT the service TUI has a child process", moment, children)
+                            print("PASS the service TUI has no child process", moment, flush=True)
+
+                        # A connection failure at startup prints its one fixed line, exits
+                        # with status 1 and starts no terminal interface, local machine or
+                        # helper process.
+                        with socket.socket() as unused:
+                            unused.bind(("127.0.0.1", 0))
+                            closed_port = unused.getsockname()[1]
+                        startup_failures = (
+                            ("invalid", {"version": 2, "endpoint": f"https://127.0.0.1:{port}/v1",
+                                         "credentialFile": str(work / "credential"), "caFile": str(cert)},
+                             "--tui --service: invalid client profile"),
+                            ("unreachable", {"version": 1, "endpoint": f"https://127.0.0.1:{closed_port}/v1",
+                                             "credentialFile": str(work / "credential"), "caFile": str(cert)},
+                             "--tui --service: manager unreachable"))
+                        for name, value, line in startup_failures:
+                            failed_profile = work / ("client-profile-" + name + ".json")
+                            failed_profile.write_text(json.dumps(value))
+                            failed_profile.chmod(0o600)
+                            failed_state = work / ("unused-client-state-" + name)
+                            with TuiSession(runner, failed_state, explicit_state=False,
+                                            command=[os.environ["TUI_CHECK"], "--tui", "--service", str(failed_profile)]) as failed:
+                                assert failed.wait_exit(20) == 1, ("a startup failure did not exit with status 1", name)
+                                (work / ("tui-startup-" + name + ".output")).write_bytes(bytes(failed.output))
+                                shown = [row.strip() for row in bytes(failed.output).decode(errors="replace").splitlines() if row.strip()]
+                                assert shown == [line], ("JOURNEY-ASSERT a startup failure did not print its one fixed line", name, shown)
+                                assert b"\x1b[?1049h" not in failed.output, ("a startup failure started the terminal interface", name)
+                                assert termios.tcgetattr(failed.slave) == failed.before, ("a startup failure changed the terminal", name)
+                                leftover = subprocess.check_output([PS_PROGRAM, "-axo", "pgid="], text=True).split()
+                                assert str(failed.process.pid) not in leftover, ("a startup failure left a process in its group", name)
+                            assert not failed_state.exists(), ("a startup failure created local runner state", name)
+                            print("PASS a service TUI startup failure prints", repr(line), "exits 1, and starts no interface, process or local state", flush=True)
                         if journey or approve_fault:
                             # The event cursor before the session bounds the read-only command evidence.
                             status, start_overview, raw = request("/v1/snapshot", authorized)
@@ -6081,6 +6126,13 @@ for iteration in range(2):
                             session.send(b"\r")
                             screen = session.wait_screen("Manager workflows")
                             (work / "tui-catalogue.screen.txt").write_text(screen)
+                            # The identity row: the endpoint, the authority prefix, the scopes
+                            # and the leading characters of the stream identifier.
+                            identity = [f"manager 127.0.0.1:{port}", capabilities["authorityEpoch"][:18],
+                                        "scopes " + " ".join(capabilities["scopes"]), capabilities["streamId"][:40]]
+                            assert all(part in screen for part in identity), ("JOURNEY-ASSERT the service shell lacks its endpoint identity", identity)
+                            print("PASS actual service TUI shows the endpoint, authority prefix, scopes and stream identifier", flush=True)
+                            assert_no_tui_children(session, "at the catalogue")
                             session.wait_screen(catalogue["items"][0]["name"])
                             session.send(b"slmfci1\t")
                             session.wait_screen("Manager workflows")
@@ -6217,6 +6269,7 @@ for iteration in range(2):
                                     assert time.monotonic() < deadline and session.process.poll() is None, "explicit TUI approval did not associate a run"
                                     session.pump()
                                 (work / "tui-associated.screen.txt").write_text(session.wait_screen("Phase: associated"))
+                                assert_no_tui_children(session, "after the approval")
                                 status, associated, raw = request(submitted["links"]["self"], authorized)
                                 assert status == 200 and associated["runId"] is not None, "explicit TUI approval did not associate a run"
                                 validate("Request", associated)
@@ -6680,6 +6733,7 @@ for iteration in range(2):
                                     print("PASS single command identity per operation from read-only events and receipts: approve", identities["approve"][0],
                                           "answer", answer_command, "retry", retry_command, "; operations",
                                           {operation: len(values) for operation, values in sorted(identities.items())}, flush=True)
+                            assert_no_tui_children(session, "before the detach")
                             session.send(b"q")
                             assert session.wait_exit() == 0, "service TUI did not exit successfully"
                             session.assert_restored()

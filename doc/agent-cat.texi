@@ -3247,7 +3247,7 @@ repository.  Terminal service mode uses the selected manager's catalogue.
 @section Synopsis
 
 @example
-agentic-run --tui
+agentic-run --tui [--local]
 agentic-run --tui --service CLIENT_PROFILE
 agentic-run frontend --capabilities
 agentic-run frontend
@@ -3278,6 +3278,7 @@ refused rather than interpreted as help or execution.
 @section Terminal frontend
 
 @c COVER CLI --tui author
+@c COVER CLI --local author
 @c COVER CLI --service author
 @table @code
 @item --tui
@@ -3286,6 +3287,9 @@ requires terminal input and output and refuses pipes before initializing Vty.
 A downstream executable that calls @code{cliMain}, including @command{wf},
 therefore browses and launches its own registry rather than this repository's
 example table.
+@item --local
+Select the local backend with @option{--tui}.  The form
+@samp{--tui --local} behaves exactly as @option{--tui} alone.
 @item --service CLIENT_PROFILE
 Select the manager backend with @option{--tui}.  The argument is an absolute
 path to a private version-1 JSON client profile identifying an HTTPS API
@@ -3298,6 +3302,34 @@ incorrectly, such as an @code{iPAddress} subtree or an excluded
 @code{dNSName} subtree that differs from the server name only in letter case
 or a trailing dot, or that uses the leading-dot form.  The API reference in
 @file{doc/api/README.md} lists these refusals.
+
+Service mode starts no local machine, helper process, or local runner state.
+When the connection fails at startup, the frontend prints one fixed line for
+the declared failure and exits with status 1 before it initializes Vty.  The
+lines include @samp{--tui --service: invalid client profile},
+@samp{--tui --service: client profile, credential or CA file unavailable},
+@samp{--tui --service: credential refused},
+@samp{--tui --service: manager API version unsupported}, and
+@samp{--tui --service: manager unreachable}.
+
+When the terminal has at least 72 columns and 16 rows, the header of every
+service screen has an identity row.  The row names the endpoint host and port
+of the client profile, the first 18 characters of the authority epoch, the
+credential scopes, and the stream identifier of the manager capabilities.  The
+stream identifier comes last, so a narrow terminal shows only its leading
+characters.
+
+A key whose operation needs a credential scope that the capabilities do not
+list starts nothing.  It shows the numbered key outcome
+@samp{@var{operation} did not start: this credential lacks @var{scope}.} before
+any other admission, and it sends no request.  The scopes are those that the
+manager requires: @code{submit} to create a request, capture, set or remove an
+input, enqueue, or withdraw, @code{submit} and @code{control} to approve or
+discard, @code{control} to answer, retry, or use any run control, and
+@code{observe} and @code{export} to export.  On the exact review, a summary
+@kbd{y} without such a scope shows the approval notice
+@samp{Approval did not start: this credential lacks @var{scope}.}, and the
+approval hint is absent.
 
 Service mode performs one workflow journey through a running manager.  It
 browses the manager's profiles, workflows, and help, creates one request,

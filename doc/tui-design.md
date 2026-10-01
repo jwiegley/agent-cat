@@ -250,6 +250,8 @@ Terminal column width can disagree across emulators. Vty's Unicode-width calcula
 
 The explicit `--tui` mode requires terminal input and output. When either side is not a terminal, it should refuse before Vty initialization and direct the caller to `list`, `plan`, `run`, or machine mode as appropriate.
 
+`agentic-run --tui --local` is the explicit form of the local mode, and `agentic-run --tui` keeps that meaning. `agentic-run --tui --service CLIENT_PROFILE` selects the manager backend, which the [service mode section of the TUI README](../tui/README.md#service-mode) describes. A service session starts no local machine or helper process. When its connection fails at startup, it prints one fixed line that names the failure, exits with status 1, and does not initialize Vty. Its shell header shows the endpoint identity in a row of its own: the endpoint host and port, a prefix of the authority epoch, the credential scopes and the stream identifier. A key whose operation needs a credential scope that the capabilities do not list shows a numbered refusal and sends no request.
+
 Although Brick and Vty provide Windows backends, agent-cat's present machine-control and cancellation paths use POSIX file descriptors, the `unix` package, and Unix process groups. The first TUI support target is therefore macOS and Linux. Windows support requires a separate control-handle and process-tree design; vty-crossplatform alone does not supply it.
 
 ### 5.7 Rendering cache

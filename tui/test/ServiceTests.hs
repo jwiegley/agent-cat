@@ -10,7 +10,7 @@ import Agentic.Runtime (DescriptorCapabilities (..), WorkflowDescriptor (..), Wo
 import Agentic.Tui.Person (PersonPrompt (..))
 import Agentic.Tui.Model
 import qualified Agentic.Tui.Approval as A
-import Agentic.Tui.Presentation (ActiveLayer (..), Presentation (..), emptyPresentation, serviceRequestLines, serviceReviewAllowed, serviceReviewRows,
+import Agentic.Tui.Presentation (ActiveLayer (..), Presentation (..), emptyPresentation, endpointLine, serviceRequestLines, serviceReviewAllowed, serviceReviewRows,
   savedLeftoverNote, serviceSaveRefusal, serviceSavedLine, wrapDisplayLines)
 import Agentic.Tui.RunModel (emptyRunView, reconcileRunView)
 import Agentic.Tui.Save (SaveRefusal (..), Saved (..), saveExact, saveExactUsing)
@@ -164,6 +164,7 @@ serviceTests render = do
   saveTests
   laneTests render row profile
   resourceVectorTests
+  endpointTests render profile
   where
     profileValue = object ["version" .= (1 :: Int), "id" .= ("profile_main" :: T.Text),
       "revision" .= ("profile_rev_4" :: T.Text), "workspaceLabel" .= ("Café 雪 λ" :: T.Text),
@@ -173,6 +174,101 @@ serviceTests render = do
     duplicateSchema = object ["json" .= object ["schema" .= property (property (String "object"))]]
     duplicate (Array values) = Array (values V.++ values)
     duplicate other = other
+
+-- | Every scope that a manager credential can hold.
+allScopes :: [T.Text]
+allScopes = ["observe", "submit", "control", "export"]
+
+-- | The endpoint identity of the service shell, the scope refusal of the
+-- mutation keys and the fixed startup failure lines.
+endpointTests :: ((Int,Int) -> Presentation -> T.Text) -> S.Profile -> IO ()
+endpointTests render profile = do
+  capabilities <- BS.readFile "test/fixtures/manager/v1/valid/capabilities.json" >>= either die pure . eitherDecodeStrict'
+  endpoint <- either (die . show) pure (S.decodeEndpoint ("127.0.0.1", 8443) capabilities)
+  let stream = "stream_" <> T.replicate 64 "a"
+      authority = "authority_0123456789abcdef0123"
+      wide = S.Endpoint "127.0.0.1" 54321 stream authority ["observe", "submit"]
+      shell size model ident = render size ((emptyPresentation model) {presentationService = True, presentationNoColor = True,
+        presentationServiceEndpoint = ident})
+      catalogue = initialServiceModel [profile]
+      -- A key outcome that starts nothing, with its text and whether it defers.
+      idle = L.Lane Nothing L.MutationIdle False False :: L.Lane T.Text T.Text
+      paging = L.Lane (Just (L.ReadTicket 3 L.PageSetRead)) L.MutationIdle False False :: L.Lane T.Text T.Text
+      outcome scopes operation lane = L.mutationKeyOutcome scopes operation lane
+      submitOperations = ["create", "capture", "set-input", "remove-input", "enqueue", "withdraw"]
+      controlOperations = ["cancel", "steer", "retry", "choose-recovery", "redirect", "answer"]
+      current = A.ReviewCurrent () :: A.ReviewCheck ()
+      failures = [ (C.InvalidClientProfile, "invalid client profile"),
+        (C.ClientFileUnavailable, "client profile, credential or CA file unavailable"),
+        (C.InvalidEndpoint, "invalid manager endpoint"), (C.WrongEndpoint, "wrong manager endpoint"),
+        (C.CredentialUnavailable, "credential unavailable"), (C.CredentialChanged, "credential changed during the connection"),
+        (C.TransportUnavailable, "manager unreachable"), (C.RedirectRefused, "manager redirect refused"),
+        (C.InvalidResponse, "invalid manager response"), (C.ResponseTooLarge, "manager response too large"),
+        (C.UnsupportedVersion, "manager API version unsupported"), (C.ClientClosed, "client closed"),
+        (C.Refused 401 "unauthenticated", "credential refused"),
+        (C.Refused 403 "insufficient-scope", "credential lacks the observe scope"),
+        (C.Refused 503 "storage-unavailable", "manager refused the connection: 503 storage-unavailable") ]
+  checks
+    [ ("the endpoint identity takes the stream, authority and scopes of the capabilities",
+        endpoint == S.Endpoint "127.0.0.1" 8443 "stream_A" "epoch_A" ["observe", "submit", "control", "export"]),
+      ("capabilities without a string streamId refuse the endpoint identity",
+        S.decodeEndpoint ("h", 1) (put "streamId" Null capabilities) == Left C.InvalidResponse),
+      ("capabilities without a scope list refuse the endpoint identity",
+        S.decodeEndpoint ("h", 1) (remove "scopes" capabilities) == Left C.InvalidResponse),
+      ("the identity row names the host and port, the authority prefix, the scopes and the full stream",
+        S.endpointStream wide `T.isInfixOf` endpointLine wide
+          && "manager 127.0.0.1:54321 · authority_01234567… · scopes observe submit · " `T.isPrefixOf` endpointLine wide),
+      ("an IPv6 host is bracketed and an empty scope list reads none",
+        "manager [::1]:9 · epoch_A · scopes none · stream_A" == endpointLine (S.Endpoint "::1" 9 "stream_A" "epoch_A" [])),
+      ("a wide service shell shows the complete identity row",
+        endpointLine wide `T.isInfixOf` shell (200,36) catalogue (Just wide)),
+      ("an acceptance-size service shell shows the endpoint, authority prefix, scopes and the leading stream characters",
+        all (`T.isInfixOf` shell (140,36) catalogue (Just wide))
+          ["127.0.0.1:54321", "authority_01234567…", "scopes observe submit", T.take 40 stream]),
+      ("the identity row is a header row of its own in every service screen",
+        all (\screen -> "127.0.0.1:54321" `T.isInfixOf` shell (80,24) catalogue {modelScreen = screen} (Just wide))
+          [InitialLoading, BrowserScreen, ServiceCommandScreen "notice"]),
+      ("a small terminal keeps its one-row header without the identity row",
+        not ("127.0.0.1:54321" `T.isInfixOf` shell (40,12) catalogue (Just wide))),
+      ("the local shell has no identity row", not ("manager 127.0.0.1" `T.isInfixOf` shell (140,36) catalogue Nothing)),
+      ("every submit operation without the submit scope refuses with the scope, even during a page-set read",
+        and [ outcome ["observe", "control"] operation lane == Just (operation <> " did not start: this credential lacks submit.", False)
+            | operation <- submitOperations, lane <- [idle, paging] ]),
+      ("every run control and answer without the control scope refuses with the scope",
+        and [ outcome ["observe", "submit"] operation idle == Just (operation <> " did not start: this credential lacks control.", False)
+            | operation <- controlOperations ]),
+      ("export without the export scope refuses with the scope",
+        outcome ["observe", "submit", "control"] "export" idle == Just ("export did not start: this credential lacks export.", False)),
+      ("approve needs submit and control and names the first one missing",
+        S.missingScope ["observe", "control"] "approve" == Just "submit" && S.missingScope ["observe", "submit"] "approve" == Just "control"
+          && S.missingScope allScopes "approve" == Nothing),
+      ("with every scope an idle lane starts the key and a page-set read defers it",
+        and [ outcome allScopes operation idle == Nothing
+              && outcome allScopes operation paging == Just (operation <> " deferred during a page-set read. Press the key again.", True)
+            | operation <- submitOperations <> controlOperations <> ["approve", "discard", "export"] ]),
+      ("a summary y without the control scope refuses with the scope before the lane and the review",
+        A.approvalDecision ["observe", "submit"] A.ApproveKey A.SummaryView idle current == A.Unscoped "control"
+          && A.approvalDecision ["observe", "submit"] A.ApproveKey A.SummaryView paging current == A.Unscoped "control"),
+      ("forbidden approval keys and views refuse before the scope",
+        A.approvalDecision [] A.EnterKey A.SummaryView idle current == A.Refuse A.EnterRefused
+          && A.approvalDecision [] A.ApproveKey A.DetailView idle current == A.Refuse A.DetailRefused
+          && A.approvalDecision [] A.ApproveKey A.KeyHelpView idle current == A.Refuse A.HelpRefused),
+      ("the scope refusal of approval carries its numbered notice and withholds the approval hint",
+        A.decisionNotice 4 (A.Unscoped "control" :: A.ApprovalDecision ()) == A.KeyNotice 4 "Approval did not start: this credential lacks control."
+          && not (A.approvalOffered ["observe", "submit"] A.SummaryView idle current)
+          && A.approvalOffered allScopes A.SummaryView idle current),
+      ("both approval scope refusals are listed for layout reservation",
+        all (`elem` A.noticeTexts) [A.unscopedText "submit", A.unscopedText "control"]),
+      ("a scope refusal renders as a numbered key outcome on the status line",
+        "Key 5: create did not start: this credential lacks submit." `T.isInfixOf`
+          render (80,24) ((emptyPresentation catalogue) {presentationService = True, presentationNoColor = True,
+            presentationServiceKeyOutcome = Just (L.KeyOutcome 5 (L.scopeText "create" "submit") Nothing)})),
+      ("every startup failure has its one fixed line",
+        and [ L.startupFailureText failure == "--tui --service: " <> line | (failure, line) <- failures ]),
+      ("the startup failure lines are distinct single lines",
+        let lines' = map (L.startupFailureText . fst) failures
+         in length (Set.fromList lines') == length lines' && not (any (T.any (== '\n')) lines'))
+    ]
 
 -- | The decision, answer, control, request and run sections of the resources
 -- section of the shared client vectors, run with the TUI service parsers. The
@@ -1528,7 +1624,7 @@ approvalTests render profile row request preparation expiry = do
       -- The outcome of one case: Nothing when the press is not an approval
       -- press and keeps its other meaning, otherwise the decision.
       decide c@(_,_,view,mutation,readTicket,faulted,(_,checked)) =
-        fmap (\(approval,_,_) -> A.approvalDecision approval view (laneOf mutation readTicket faulted) checked) (press c)
+        fmap (\(approval,_,_) -> A.approvalDecision allScopes approval view (laneOf mutation readTicket faulted) checked) (press c)
       onReview ((name,_),_,_,_,_,_,_) = name == ("review" :: String)
       keyName (_,(name,_,_),_,_,_,_,_) = name :: String
       viewOf (_,_,view,_,_,_,_) = view
@@ -1602,7 +1698,7 @@ approvalTests render profile row request preparation expiry = do
         and [A.decisionNotice 7 outcome == A.KeyNotice 7 (fixedText refusal) | c <- cases, Just outcome@(A.Refuse refusal) <- [decide c]]),
       ("an approval start carries its own fixed notice", A.decisionNotice 7 (A.Approve ()) == A.KeyNotice 7 startText),
       ("the approval hint is offered exactly when summary y would approve",
-        and [A.approvalOffered view (laneOf mutation readTicket faulted) checked == approves (decide c)
+        and [A.approvalOffered allScopes view (laneOf mutation readTicket faulted) checked == approves (decide c)
             | c@(_,(name,_,_),view,mutation,readTicket,faulted,(_,checked)) <- reviewCases, name == "y"]),
       ("the notice line names the key number", A.noticeLine (A.KeyNotice 12 "text") == "Approval key 12: text"),
       ("every fixed text is listed for layout reservation",
@@ -1687,7 +1783,8 @@ approvalTests render profile row request preparation expiry = do
   -- review and its status.
   let serviceModel = initialServiceModel [profile]
       reviewPresentation screen status view notice offered = (emptyPresentation (serviceModel {modelScreen = screen, modelStatus = status}))
-        {presentationService = True, presentationExactDetails = view == A.DetailView, presentationServiceNotice = notice,
+        {presentationService = True, presentationServiceEndpoint = Just (S.Endpoint "127.0.0.1" 8443 "stream_A" "epoch_A" allScopes),
+          presentationExactDetails = view == A.DetailView, presentationServiceNotice = notice,
           presentationServiceApprovalOffered = offered, presentationNoColor = True,
           presentationLayer = if view == A.KeyHelpView then KeyHelpLayer else presentationLayer (emptyPresentation serviceModel {modelScreen = screen})}
       noticeShown size frame notice = all (`T.isInfixOf` frame) (wrapDisplayLines (min 84 (fst size) - 4) (A.noticeLine notice))

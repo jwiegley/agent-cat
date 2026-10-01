@@ -1,6 +1,8 @@
 # Terminal interface
 
-`Agentic.Tui` is the terminal frontend for an agent-cat runner. It discovers
+`Agentic.Tui` is the terminal frontend for an agent-cat runner. `agentic-run
+--tui` and its explicit form `agentic-run --tui --local` select local mode,
+which this section describes. Local mode discovers
 workflows and routing through bounded machine-readable subprocesses. Routing
 inspection supplies opaque routing-only arguments and a launch fingerprint owned
 by the CLI. A shared strict runtime decoder supplies exact post-input plan facts.
@@ -116,6 +118,30 @@ summary view approves that review. The frontend then follows the run in the
 live monitor, answers the questions that the manager routes to the person,
 invokes an offered recovery retry with `r`, recognizes the terminal state,
 retrieves the verified result, and saves it with `s`.
+
+Service mode starts no local machine, helper process or local runner state.
+When the connection fails at startup, the frontend prints one fixed line that
+`Agentic.Tui.ServiceLane.startupFailureText` gives for the declared failure,
+for example `--tui --service: manager unreachable` or `--tui --service:
+credential refused`, and exits with status 1 before the terminal interface
+starts. The shell header has an identity row in every service screen when the
+terminal has at least 72 columns and 16 rows. The row names the endpoint host
+and port from the client profile (`Agentic.Manager.Client.clientEndpoint`), the
+first 18 characters of the authority epoch, the credential scopes, and the
+stream identifier of the capabilities. The stream identifier comes last, so a
+narrow terminal shows only its leading characters. A smaller terminal keeps its
+one-row header without the identity row.
+
+A key whose operation needs a scope that the capabilities do not list starts
+nothing and shows the numbered key outcome `OPERATION did not start: this
+credential lacks SCOPE.` before any other admission is decided, so it never
+defers and sends no request. The manager rule `requiredScopes` of the client
+facade decides the scopes: `submit` for create, capture, set-input,
+remove-input, enqueue and withdraw, `submit` and `control` for approve and
+discard, `control` for answer, retry and every run control, and `observe` and
+`export` for export. On the exact review, a summary `y` without such a scope
+shows the approval notice `Approval did not start: this credential lacks
+SCOPE.`, and the approval hint is absent.
 
 `Agentic.Tui.ServiceLane` owns the read ticket, the one command lane, the
 internal-fault flag and the resend confirmation. Every read of the manager

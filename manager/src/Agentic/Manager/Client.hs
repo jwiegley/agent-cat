@@ -4,14 +4,15 @@
 -- | Endpoint-bound observations and explicit HTTP attempts, never worker ownership.
 module Agentic.Manager.Client
   ( Client, Reference, Observed, PendingCommand, PageSet, pageSetMetadata, pageSetItems, getPageSet, ClientResponse (..), ClientFailure (..),
-    connectClient, connectClientProfile, closeClient, clientCapabilities, reference, referenceURI,
+    connectClient, connectClientProfile, closeClient, clientCapabilities, clientEndpoint, reference, referenceURI,
     getResource, observeResource, observedReference, observedETag, observedValue, prepareObserved,
     pollEvents, pollEventBatch, StreamItem (..), streamEvents, streamEventsWithin, reconnectIdleMilliseconds,
     Overview (..), OverviewItem (..), OverviewKind (..), loadOverview,
     prepareCommand, sendCommand, downloadVerified, decodeObservation,
     DraftView (..), Readiness (..), InputDeclaration (..), SuppliedInput (..), InputError (..),
     Preparation (..), Review (..), ReviewInput (..), ReviewLineage (..), ReviewEdit (..), PublicPolicy, policyValue,
-    CommandReceipt (..), CommandState, Operation, stateName, operationName, effectValue,
+    CommandReceipt (..), CommandState, Operation, stateName, operationName, parseOperation, effectValue,
+    Scope, scopeName, requiredScopes,
     problemFailure, validCursor, validETag,
     sseBlockBytes, SseParser, SseEvent (..), SseBlock (..), newSseParser, feedSse, closeSse,
     EventName (..), eventNameText, parseEventName, Invalidation (..), InvalidationEvent (..), EventBatch (..),
@@ -28,7 +29,8 @@ import Agentic.Manager.Client.Refresh
 import Agentic.Manager.Client.Failure (ClientFailure (..), problemFailure)
 
 import Agentic.Manager.Protocol.Command
-  (validId, validResource, validRevision, encoded, CommandReceipt (..), CommandState, Operation, stateName, operationName, effectValue)
+  (validId, validResource, validRevision, encoded, CommandReceipt (..), CommandState, Operation, stateName, operationName,
+   parseOperation, Scope, scopeName, requiredScopes, effectValue)
 import Agentic.Manager.Protocol.Draft (DraftView (..), Readiness (..), InputDeclaration (..), SuppliedInput (..), InputError (..))
 import Agentic.Manager.Protocol.Preparation (Preparation (..), Review (..), ReviewInput (..), ReviewLineage (..), ReviewEdit (..), PublicPolicy, policyValue)
 import Control.Concurrent.Async (race)
@@ -255,6 +257,11 @@ closeClient (Client _ _ _ _ _ _ _ active) = atomically (writeTVar active False)
 
 clientCapabilities :: Client -> Value
 clientCapabilities (Client _ _ _ _ _ _ value _) = value
+
+-- | The host and port of the endpoint that the session is bound to, for
+-- display. The host is the name or address of the profile endpoint.
+clientEndpoint :: Client -> (Text, Int)
+clientEndpoint (Client _ base _ _ _ _ _ _) = (TE.decodeLatin1 (HTTP.host base), HTTP.port base)
 
 reference :: Client -> Text -> Either ClientFailure Reference
 reference (Client identity _ _ _ _ _ _ _) uri

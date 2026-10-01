@@ -2687,6 +2687,7 @@ main = do
       ("cost NAME is the verb", parsedAs ["cost", "ordinary"] == "cost ordinary"),
       ("`list` is the verb", parsedAs ["list"] == "list"),
       ("leading --tui cannot collide with a workflow name", parsedAs ["--tui"] == "tui"),
+      ("--tui --local is the explicit local mode of --tui", parsedAs ["--tui", "--local"] == "tui"),
       ("--tui --service takes an absolute client-profile path", parsedAs ["--tui", "--service", "/tmp/client-profile.json"] == "tui-service /tmp/client-profile.json"),
       ("--tui --service refuses a relative client-profile path", parsedAs ["--tui", "--service", "client-profile.json"] == "no-verb"),
       ("frontend is the prepared-session verb", parsedAs ["frontend"] == "frontend"),
