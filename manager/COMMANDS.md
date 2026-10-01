@@ -33,6 +33,15 @@ For ordinary callers, an unavailable lock or writer produces explicit
 storage-unavailable refusal. A caller may retry the exact same key after such a
 refusal, never substitute a new key to discover an outcome.
 
+One submission, preflight or receipt read is one request with one five-second
+admission deadline, as `STORAGE.md` describes. Its wait for the configuration
+guard, its wait for the Store gate of the identity read and its wait for the
+Store gate of the transaction share that deadline. A request that is not
+admitted when the deadline ends is refused as `storage-unavailable`, and its
+mutation never runs. The retained `CommandAttempt` and `DispatchTicket` keep
+the store without that deadline, so a later reconciliation or dispatch step
+starts a fresh deadline.
+
 The original terminal owner can explicitly select bounded Store admission for
 reconciliation, retained dispatch coordination and effect publication through
 the corresponding `WithAdmission` functions. These retain the same opaque
@@ -97,8 +106,8 @@ states the evidence rules and the facts of each rule.
 `release-quarantine` takes a `quarantineId` and the `cleanupEvidenceId` and
 `cleanupEvidenceDigest` that `check-quarantine` returned for it, and releases
 the reservation for reuse. It takes the Store file slot, the configuration
-guard and the database in that lock order, each within its five-second
-allowance. Under the held file slot and configuration guard it computes the
+guard and the database in that lock order, within one five-second admission
+deadline for the three waits. Under the held file slot and configuration guard it computes the
 cleanup evidence again with the current process generation, as
 `check-quarantine` does. An unknown identity and a reservation that is not
 quarantined, a reservation that a release already released included, refuse
@@ -192,14 +201,18 @@ without callbacks or file/configuration lock acquisition. The coalesced signal
 wakes observers but does not itself revoke authorization. Revalidation checks
 current facts once across a stable Store generation before acknowledging the
 signal, so an ordinary request mutation does not invalidate unchanged authority.
-Final acknowledgement waits for the Store gate within its allowance, so it
-follows the whole interval between SQL COMMIT and its notification. The
+Final acknowledgement waits for the Store gate within the allowance of the
+observation, so it follows the whole interval between SQL COMMIT and its
+notification. The first observation of a view, which materializes it, uses
+the rest of the admission deadline of the request that registered the view.
+Each later revalidation starts a fresh allowance. The
 observation action runs outside that final admission. For a view, its
 materialization, a revalidation and an event stream liveness check, the action
 is a read. A concurrent commit is then ordinary contention: the read runs again
 under the newer generation. A new attempt starts only while one five-second
-allowance lasts, the Store actions of each attempt keep their own allowances,
-and each read runs once for its own generation. A read that meets a new commit for the whole
+allowance lasts. The reads of every attempt and the final acknowledgement wait
+for their locks within the rest of that one allowance, and each read runs once
+for its own generation. A read that meets a new commit for the whole
 allowance keeps the `StoreBusy` refusal, which is public `storage-unavailable`.
 Any other observation action runs once, and a concurrent commit refuses it
 without replay.

@@ -72,8 +72,8 @@ withHistory store proof legacy admission respond = bounded $ do
   configured <- validateStoreHistoryBindings store [(path,profile) | LegacyHistory path profile _ <- legacy]
   either (const (throwIO C.ResourceUnavailable)) pure configured
   unless (length legacy <= 256 && Set.size(Set.fromList [identity | LegacyHistory _ _ identity <- legacy]) == length legacy) (throwIO C.InvalidRequest)
-  managed <- withStoreFiles store $ \root -> do
-    rows <- map (map (maybe SQL.SQLNull text)) <$> runRead store (do
+  managed <- withStoreRequest store $ \scoped -> withStoreFiles scoped $ \root -> do
+    rows <- map (map (maybe SQL.SQLNull text)) <$> runRead scoped (do
       _ <- currentClient proof >>= either refuseTransaction pure
       values <- query "SELECT u.id,u.profile_id,u.root_identity,u.native_run_id,u.revision,u.supervision,r.workflow_id,u.request_id,u.parent_run_id,r.lineage_operation,u.result_artifact_id,u.result_state,a.verification_failure FROM runs u LEFT JOIN requests r ON r.id=u.request_id LEFT JOIN artifacts a ON a.id=u.result_artifact_id ORDER BY u.id LIMIT 257" []
       mapM (mapM (\value -> case value of SQL.SQLText t -> pure (Just t); SQL.SQLNull -> pure Nothing; _ -> refuseTransaction StoreIntegrity)) values)

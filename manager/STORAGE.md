@@ -30,19 +30,57 @@ action, including each command, protected read, event stream batch and admission
 coordinator step, waits for the Store gate through `WaitWithinBudget`. Waiting
 and execution share that Store action's existing five-second allowance. A
 waiter that is not admitted within the allowance is refused with
-`StoreDeadline` and never runs. An admitted action executes once. A protected
+`StoreDeadline` and never runs. An admitted action executes once.
+
+One request of the owners below has one admission deadline. A request that
+takes more than one lock in turn, such as the file slot, then the configuration guard, then the
+Store gate, waits for all of them within one five-second allowance. The
+allowance starts when the request starts. Each wait uses only the rest of it,
+so the sum of the admission waits of one request is at most five seconds. A
+lock that is free is taken at once, also after the allowance ends. A wait that
+the allowance ends keeps the refusal of its lock: `StoreBusy` for the file
+slot, `SupervisionUnavailable` for the configuration guard, which its owner
+refuses as `StoreBusy` or as public `storage-unavailable`, `StoreLimit` for a
+reader place and `StoreDeadline` for the Store gate. The refused action never
+runs. `withStoreRequest` gives such a request a store value that carries its
+deadline. The reader admission, the configuration loan of a response, the
+administration loan and the file operation that opens its retained root use
+one deadline for their own waits. The owners that take the file slot and then
+the configuration guard or the database for one bounded operation run under
+`withStoreRequest`: draft reads, draft assembly, lineage draft creation, the
+frontend file check, export submission and reconciliation, quarantine
+inspection and release, managed history and the approval preparation read.
+Command submission and command preflight also run under one deadline: the
+configuration guard, the Store gate of the identity read and the Store gate
+of the acceptance transaction share it. So the submission of an answer, a
+decision or any other command waits at most five seconds for these locks
+before it is admitted or refused as `storage-unavailable`. A protected view also has one deadline for its
+credential read, its reader place, its configuration loan and its first
+authorization observation, which `withAuthorizationRequestReadObservation`
+runs. A scope inside a scope of the same store value keeps the outer
+deadline. A value that is kept after the request, such as a command attempt,
+a dispatch ticket or the store of a later revalidation, starts a fresh
+deadline for each later wait. A Store action that a route owner runs through
+its own store value inside a protected view, and the owners that write a
+file or produce an outside effect before their Store record, such as a
+capture upload, start a fresh allowance for each lock.
+Operation bounds stay separate. The operation allowance of an admitted SQL
+action starts when its wait for the gate starts, as before. The 100 ms busy
+timeout, the rollback bound and the five-second bound of a draft operation do
+not change, and none of them is part of the admission deadline. A protected
 read whose authorization observation meets a concurrent commit reads again under
 the newer generation, as `COMMANDS.md` describes. A new attempt starts only
-while one five-second allowance lasts, and the Store actions of each attempt
-keep their own allowances. The gate admits waiters in order, and each holder
+while one five-second allowance lasts, and the waits of every attempt and of
+the final acknowledgement use the rest of that allowance. The gate admits waiters in order, and each holder
 is bounded by its own earlier allowance. The configured positive reader
 allowance is an upper bound, not a promise of parallel readers. An escaped
 store handle refuses after its callback scope. The scoped owner waits for
 in-flight database and file operations and their joined cleanup before
 closing SQLite and releasing the lease. File operations
 use one separate slot and retain a private root plus lease duplicate. An
-ordinary file operation waits for the slot within a fresh five-second
-allowance, and a slot that stays held for the whole allowance is `StoreBusy`.
+ordinary file operation waits for the slot within the admission deadline of
+its request, and a slot that stays held until that deadline ends is
+`StoreBusy`.
 A coordinator probe does not wait. When the slot is held, it returns at once
 and proves that its callback did not enter.
 Their lock order is file slot, configuration, then database. An artifact
@@ -198,14 +236,12 @@ response stops before the next write. A write that does not complete within
 five seconds is the internal `ResponseWriteTimeout` cause. Ingestion therefore
 waits for a response only during such a brief check and never during a send.
 
-Each acquisition of the check waits within its own unchanged five-second
-allowance, as for every other Store action. The allowances are not combined
-into one. The observation retries within its own allowance after a concurrent
-commit, and each attempt can wait for a reader place, for the configuration
-guard and for the Store gate, each within its own allowance. The longest wait
-before one write is therefore the sum of these allowances, not one five-second
-allowance. It occurs only when each of these waits lasts for its whole
-allowance.
+One check is one request with one five-second admission deadline. The
+observation starts it. Every attempt of the check waits for a reader place,
+for the configuration guard and for the Store gate within the rest of that
+deadline, and so does the final acknowledgement. The observation retries
+after a concurrent commit only while the deadline lasts. The sum of the
+admission waits before one write is therefore at most five seconds.
 
 A check whose allowance expires refuses with its Store failure, which is
 recorded like any other Store refusal. The response then stops before its next
@@ -224,7 +260,8 @@ its writes, and a command receipt holds nothing but its authorization watch.
 
 A server-sent event stream holds no Store loan between its batch reads. Each
 batch read acquires one reader charge and the configuration guard, in the lock
-order configuration, then database, each within its own five-second allowance.
+order configuration, then database, within one five-second admission deadline
+for the batch read.
 It reads and encodes the batch under these loans and then returns both with
 `releaseResponseLoans`. The stream revalidates its view immediately before
 each block and each heartbeat. A block or heartbeat write therefore holds no
@@ -295,9 +332,9 @@ The command layer and the transport then record their own lines, such as
 
 | Site | Refusal |
 | --- | --- |
-| `store-file-slot` | The file slot stayed held for the whole allowance of an ordinary file operation. |
+| `store-file-slot` | The file slot stayed held until the admission deadline of an ordinary file operation ended. |
 | `store-reader-admission` | The configuration guard was not acquired during reader admission. |
-| `configuration-guard`, `configuration-administration` | The configuration guard stayed held for its whole allowance. These lines carry `class=configuration SupervisionUnavailable`, which the Store owner then refuses as `StoreBusy`. |
+| `configuration-guard`, `configuration-administration` | The configuration guard stayed held until the admission deadline of its request ended. These lines carry `class=configuration SupervisionUnavailable`, which the Store owner then refuses as `StoreBusy`. |
 | `store-gate` | A `FailFast` Store action found the Store gate held. A `WaitWithinBudget` action that is not admitted is `StoreDeadline`. |
 | `store-authorization-observation`, `store-authorization-read-observation` | A concurrent commit changed the authorization generation of an observation. |
 | `store-admission`, `store-worker-registry` | A second Store admission, or a seventeenth Store worker. |
@@ -1054,9 +1091,10 @@ and credential identity independently of content collection.
 
 `withStoreReader` reserves materialization capacity against the current installed
 `globalDatabaseReaders` limit before invoking a callback. When every place is taken, it
-waits for a place within a fresh five-second allowance, outside the
-configuration guard and the Store gate, and a capacity that stays full for the
-whole allowance is `StoreLimit`. Reloaded limits apply to
+waits for a place within the admission deadline of its request, outside the
+configuration guard and the Store gate, and a capacity that stays full until
+that deadline ends is `StoreLimit`. The waits of reader admission for the
+configuration guard, the Store gate and a place share that deadline. Reloaded limits apply to
 new readers even while older readers finish. Acquisition releases configuration and
 SQL ownership before the callback, and completion or an exception returns capacity.
 State uses this scope for complete prefix replay and ingestion. Its profile projection

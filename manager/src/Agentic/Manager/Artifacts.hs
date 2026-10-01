@@ -286,12 +286,12 @@ submitExport store proof association request
         case preflight of
           Left failure -> pure (Left failure)
           Right True -> Commands.submitConfiguredCommand store proof request (\_ _ _ -> Left Command.StateConflict)
-          Right False -> withStoreFiles store $ \root -> do
-            configured <- withStoreConfiguration store $ \_ profiles -> do
+          Right False -> withStoreRequest store $ \scoped -> withStoreFiles scoped $ \root -> do
+            configured <- withStoreConfiguration scoped $ \_ profiles -> do
               profileRevision <- case [publicRevision p | p <- profiles, publicId p == associationProfile association] of
                 [found] -> pure found
                 _ -> throwIO Command.Forbidden
-              ident <- runRead store $ do
+              ident <- runRead scoped $ do
                 authorizeObservation proof association
                 _ <- authorizeProfile proof (associationProfile association) [Command.ExportScope] >>= either refuseTransaction pure
                 rows <- query "SELECT result_artifact_id FROM runs WHERE id=?" [text (associationRun association)]
@@ -438,10 +438,10 @@ withExport store proof ident respond = do
 -- | Only a durable successful publisher witness can close a lost receipt.
 -- Matching bytes without that witness remain unresolved, including after reopen.
 reconcileExport :: CoordinationStore -> CredentialProof -> Text -> IO Value
-reconcileExport store proof ident = withStoreFiles store $ \root -> do
-  record@(ExportRecord association _ _ _ _ _ _ _ _ witness _) <- loadExport store proof ident
-  withProfile store (associationProfile association) $ do
-    runRead store $ do
+reconcileExport store proof ident = withStoreRequest store $ \scoped -> withStoreFiles scoped $ \root -> do
+  record@(ExportRecord association _ _ _ _ _ _ _ _ witness _) <- loadExport scoped proof ident
+  withProfile scoped (associationProfile association) $ do
+    runRead scoped $ do
       authorizeObservation proof association
       _ <- authorizeProfile proof (associationProfile association) [Command.ExportScope] >>= either refuseTransaction pure
       pure ()

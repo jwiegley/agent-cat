@@ -80,8 +80,11 @@ ingestion bounds.
 
 Each Store has one file loan and two artifact response places
 (`artifactResponsePlaces`). An ordinary file operation waits for the file loan
-within a fresh five-second allowance, and a loan that stays held for the whole
-allowance is `StoreBusy`. A download charges one place first, before it takes
+within the five-second admission deadline of its request, and a loan that
+stays held until that deadline ends is `StoreBusy`. Export submission and
+export reconciliation are each one request: the waits for the file loan, the
+configuration guard and the Store gate share one deadline, as
+`manager/STORAGE.md` describes. A download charges one place first, before it takes
 any loan, and keeps it charged until its last write completes or until the
 response is aborted. A download that starts while both places are charged
 waits for a place for at most five seconds (`artifactResponseWait`). It holds

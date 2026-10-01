@@ -201,7 +201,7 @@ submitBoundCommand store proof request streamed known deadline buildMutation = c
     let (digest, bodyBytes, legacyBytes) = case streamed of
           Nothing -> (convert (hash (commandBody request) :: Digest SHA256), BS.length (commandBody request), Just (commandBody request))
           Just (BodyBinding checksum count prefix) -> (checksum, count, prefix)
-    outcome <- restore $ configuredCatalogues store proof $ \limits profiles catalogues identity -> transaction store (do
+    outcome <- restore $ configuredCatalogues store proof $ \scoped limits profiles catalogues identity -> transaction scoped (do
       (client, epoch) <- authorizeRequest profiles proof request
       old <- sql "SELECT id,profile_id,operation,retired,media_type,precondition,body_sha256,body_bytes FROM commands WHERE client_id=? AND method=? AND resource_uri=? AND idempotency_key=?"
         [text client, text (commandMethod request), text (commandResource request), text (commandKey request)]
@@ -294,7 +294,7 @@ submitBoundCommand store proof request streamed known deadline buildMutation = c
       Left failure -> pure (Left failure)
       Right (receipt, replayed, dispatch, refs, generation, epoch, association) -> do
         unless (generation==generationAtCreation) (throwIO OwnershipUnavailable)
-        ticket <- if dispatch then pure (Just (DispatchTicket store (receiptId receipt) generation refs retained)) else pure Nothing
+        ticket <- if dispatch then pure (Just (DispatchTicket (outsideRequest store) (receiptId receipt) generation refs retained)) else pure Nothing
         pure (Right (Submission receipt replayed ticket refs (AcceptedEnqueue generation epoch (receiptId receipt) <$> association)))
 
 -- | The sender of a command in the manager log: the client that
@@ -423,7 +423,7 @@ newCommandAttempt store proof request = do
   candidate <- freshId "command_"
   state <- newIORef (TicketState Unreserved Nothing)
   phase <- newIORef AttemptNew
-  pure (CommandAttempt store proof request candidate state (proofGeneration proof) phase)
+  pure (CommandAttempt (outsideRequest store) proof request candidate state (proofGeneration proof) phase)
 
 -- | Capture only for a fresh, authorized original control attempt. The encoder
 -- uses the already allocated correlation ID, not mutable lifecycle observations.
@@ -498,7 +498,7 @@ reconcileCommandAttemptWithAdmission admission (CommandAttempt store _ request c
        pure (Just(receipt,refs,epoch,association,pending==[[SQL.SQLInteger 1]] || started==[[SQL.SQLInteger 1]] || controlled==[[SQL.SQLInteger 1]]),[])
    case outcome of Right Nothing -> discardTicketState retained; _ -> pure ()
    pure $ fmap (fmap (\(receipt,refs,epoch,association,dispatch) -> Submission receipt False
-     (if dispatch then Just(DispatchTicket store candidate generation refs retained) else Nothing) refs
+     (if dispatch then Just(DispatchTicket (outsideRequest store) candidate generation refs retained) else Nothing) refs
      (AcceptedEnqueue generation epoch candidate <$> association))) outcome
 
 -- | Reserve bounded pre-body work without claiming command acceptance or exposing a receipt.
@@ -507,7 +507,7 @@ commandPreflight :: NFData a => CoordinationStore -> CredentialProof -> CommandR
   -> IO (Either CommandFailure a)
 commandPreflight store proof request action = case validateRequest request of
   Left failure -> pure (Left failure)
-  Right () -> configuredCatalogues store proof $ \limits profiles catalogues _ -> transaction store $ do
+  Right () -> configuredCatalogues store proof $ \scoped limits profiles catalogues _ -> transaction scoped $ do
     (client, _) <- authorizeRequest profiles proof request
     rows <- sql "SELECT profile_id,operation,retired FROM commands WHERE client_id=? AND method=? AND resource_uri=? AND idempotency_key=?"
       [text client, text (commandMethod request), text (commandResource request), text (commandKey request)]
@@ -542,7 +542,7 @@ authorizeRequest profiles proof request = do
 readCommand :: CoordinationStore -> CredentialProof -> Text -> IO (Either CommandFailure CommandReceipt)
 readCommand store proof ident
   | not (validId ident) = pure (Left InvalidRequest)
-  | otherwise = configured store proof $ \_ profiles _ -> transaction store $ do
+  | otherwise = configured store proof $ \scoped _ profiles _ -> transaction scoped $ do
       receipt <- commandProjection proof profiles ident
       pure (receipt, [])
 
@@ -933,15 +933,20 @@ retireReceipt store ident inactiveSince
             pure ((), [commandEvent ident revision])
           _ -> throwE ResourceUnavailable
 
-configured :: CoordinationStore -> CredentialProof -> (ConfigurationLimits -> [PublicProfile] -> StoreIdentity -> IO (Either CommandFailure a)) -> IO (Either CommandFailure a)
-configured store proof action = configuredCatalogues store proof $ \limits profiles _ identity -> action limits profiles identity
+configured :: CoordinationStore -> CredentialProof -> (CoordinationStore -> ConfigurationLimits -> [PublicProfile] -> StoreIdentity -> IO (Either CommandFailure a)) -> IO (Either CommandFailure a)
+configured store proof action = configuredCatalogues store proof $ \request limits profiles _ identity -> action request limits profiles identity
 
-configuredCatalogues :: CoordinationStore -> CredentialProof -> (ConfigurationLimits -> [PublicProfile] -> [(Text, Discovery)] -> StoreIdentity -> IO (Either CommandFailure a)) -> IO (Either CommandFailure a)
+-- | One command request. The waits for the configuration guard, for the gate
+-- of the store identity and for the gate of the transaction that the action
+-- runs through the store value that it receives share one admission deadline.
+-- So the request waits at most five seconds in total before it is admitted or
+-- refused with 'StorageUnavailable'.
+configuredCatalogues :: CoordinationStore -> CredentialProof -> (CoordinationStore -> ConfigurationLimits -> [PublicProfile] -> [(Text, Discovery)] -> StoreIdentity -> IO (Either CommandFailure a)) -> IO (Either CommandFailure a)
 configuredCatalogues store proof action = do
-  result <- try @StoreFailure $ withStoreCatalogues store $ \limits profiles catalogues -> do
-    identity <- storeIdentity store
+  result <- try @StoreFailure $ withStoreRequest store $ \request -> withStoreCatalogues request $ \limits profiles catalogues -> do
+    identity <- storeIdentity request
     if proofGeneration proof /= storeProcessGeneration identity then pure (Left Unauthenticated)
-      else action limits profiles catalogues identity
+      else action request limits profiles catalogues identity
   pure $ case result of
     Left _ -> Left StorageUnavailable
     Right (Left _) -> Left StorageUnavailable

@@ -8,9 +8,9 @@
 -- | A single leased SQLite writer with strict, bounded transaction results.
 module Agentic.Manager.Store
   ( CoordinationStore, StoreIdentity (..), StoreFailure (..), Checkpoint (..),
-    withCoordinationStore, withServingStore, withServingStoreWith, storeManagerFlow, pruneManagerLog, storeIdentity, checkpointStore, withStoreConfiguration, withStoreCatalogues, withStoreRetentionRoot, withStoreRetentionRootLoan, withStoreRetentionRootsLoan, withStoreArtifactResponse, withStoreArtifactResponseWithin, artifactResponsePlaces, artifactResponseWait, artifactResponseDeadline, validateStoreHistoryBindings, revalidateStoreRetentionRoot, storeInvocations, withStoreFiles, withStoreFileLoan, withRecordedRunRoot, withStoreReader, withStoreAdmission, withStoreWorker, StoreWorker, createStoreWorkerGroup, storeWorkerCleanupConfirmed, requestStoreWorkersStop, awaitStoreWorkersStop, retryStoreCleanup, probeStoreCapabilities,
+    withCoordinationStore, withServingStore, withServingStoreWith, storeManagerFlow, pruneManagerLog, storeIdentity, checkpointStore, withStoreConfiguration, withStoreCatalogues, withStoreRetentionRoot, withStoreRetentionRootLoan, withStoreRetentionRootsLoan, withStoreArtifactResponse, withStoreArtifactResponseWithin, artifactResponsePlaces, artifactResponseWait, artifactResponseDeadline, validateStoreHistoryBindings, revalidateStoreRetentionRoot, storeInvocations, withStoreRequest, outsideRequest, withStoreFiles, withStoreFileLoan, withRecordedRunRoot, withStoreReader, withStoreAdmission, withStoreWorker, StoreWorker, createStoreWorkerGroup, storeWorkerCleanupConfirmed, requestStoreWorkersStop, awaitStoreWorkersStop, retryStoreCleanup, probeStoreCapabilities,
     withStoreAdministration, tryWithStoreCatalogues, tryWithStoreFiles,
-    AuthorizationWatch, withStoreAuthorizationWatch, withStoreConfigurationWatch, withStoreCataloguesWatch, withStoreCatalogueContextWatch, authorizationWatchCurrent, withAuthorizationObservation, withAuthorizationReadObservation, awaitAuthorizationChange,
+    AuthorizationWatch, withStoreAuthorizationWatch, withStoreConfigurationWatch, withStoreCataloguesWatch, withStoreCatalogueContextWatch, authorizationWatchCurrent, withAuthorizationObservation, withAuthorizationReadObservation, withAuthorizationRequestReadObservation, awaitAuthorizationChange,
     CommitDeadline, withCommitDeadline, withPreparedCommitDeadline, enforceCommitDeadline, enforceAdmissionFence, managerFlowRoom, appendCommandRecord, appendReviewRecord, noticeAfterCommit, PostCommit, noPostCommit, takePostCommit, appendPostCommit, Transaction, execute, query, refuseTransaction, refuseBusy, refuseBusyAt, refuseBusyTransaction, repeatChangedRead, runTransaction, runRead, StoreAdmission (..), runTransactionWithAdmission, runReadWithAdmission, transactionGeneration,
     commandReceiptColumns, commandRowReceipt,
     Invalidation (..), EventReadFailure (..), RetainedEvents (..), readRetainedEvents, readRetainedEventsWith, retainEvents, backupCoordinationStore, restoreCoordinationStore, reservationOccupancy
@@ -106,10 +106,12 @@ data Checkpoint = Checkpoint
 -- | One connection and admission cell. Every Store action can spend its
 -- existing five-second operation allowance waiting for the cell. The slot
 -- tuple holds the file slot, the reader count, the authorization cell and the
--- count of charged artifact response places.
+-- count of charged artifact response places. The last field is the admission
+-- deadline of the request that this store value serves, which
+-- 'withStoreRequest' sets. Without it, each admission starts a fresh deadline.
 data CoordinationStore = CoordinationStore !InstalledConfiguration !PrivateRoot !SQL.Database !StoreIdentity
   !(MVar ()) !(IORef Bool) !(IORef Bool) !Fd !(MVar (), TVar Int, TVar (Maybe Word64), TVar Int) !(TVar WorkerRegistry) !(MVar ()) !(IORef Bool) !(TVar (Bool, Maybe (TMVar (), MVar ())))
-  !(Maybe ManagerFlow)
+  !(Maybe ManagerFlow) !(Maybe Admission.Deadline)
 
 -- | Original registrations and their first stop batch. A scoped fence is not permanent quarantine.
 data WorkerRegistry = WorkerRegistry
@@ -190,7 +192,7 @@ withServingStoreWith codec fault = withStoreMode (ServingStore codec fault)
 
 -- | The manager log of a serving lifetime. Other lifetimes have none.
 storeManagerFlow :: CoordinationStore -> Maybe ManagerFlow
-storeManagerFlow (CoordinationStore _ _ _ _ _ _ _ _ _ _ _ _ _ flow) = flow
+storeManagerFlow (CoordinationStore _ _ _ _ _ _ _ _ _ _ _ _ _ flow _) = flow
 
 withStoreMode :: StoreMode -> InstalledConfiguration -> (CoordinationStore -> IO a) -> IO a
 withStoreMode mode installed action = mask $ \restore -> do
@@ -280,8 +282,8 @@ pruneManagerLog store = forM_ (storeManagerFlow store) loop
       segments <- managerFlowSegments manager
       case segments of
         oldest : _ : _ -> do
-          pruned <- withStoreFiles store $ \_ -> do
-            result <- withStoreConfiguration store $ \limits _ -> runRead store (pruneCandidate manager limits oldest)
+          pruned <- withStoreRequest store $ \request -> withStoreFiles request $ \_ -> do
+            result <- withStoreConfiguration request $ \limits _ -> runRead request (pruneCandidate manager limits oldest)
             either (\diagnostic -> do
               when (diagnostic == SupervisionUnavailable) (recordBusy "store-manager-log-prune" (refusalLabel "store" StoreBusy) Nothing)
               refuseErased "store manager-log prune" (loanFault diagnostic)
@@ -379,7 +381,7 @@ openStore mode installed root lease = storageErrors $ do
         when (isNothing (managerFlowOpenFailure manager)) (answerOrphanedAsks db manager total)
         pure manager
     CoordinationStore installed root db (StoreIdentity schemaVersion epoch stream generation)
-      <$> newMVar () <*> newIORef False <*> newIORef False <*> pure lease <*> ((,,,) <$> newMVar () <*> newTVarIO 0 <*> newTVarIO (Just 0) <*> newTVarIO 0) <*> newTVarIO (WorkerRegistry False False Nothing []) <*> newMVar () <*> newIORef False <*> newTVarIO (False, Nothing) <*> pure flow
+      <$> newMVar () <*> newIORef False <*> newIORef False <*> pure lease <*> ((,,,) <$> newMVar () <*> newTVarIO 0 <*> newTVarIO (Just 0) <*> newTVarIO 0) <*> newTVarIO (WorkerRegistry False False Nothing []) <*> newMVar () <*> newIORef False <*> newTVarIO (False, Nothing) <*> pure flow <*> pure Nothing
   where
     databaseName = "coordination.sqlite3"
     checkCompanion name = do
@@ -628,7 +630,7 @@ requireNoRestoration root = do
 -- | A same-root, offline coherent snapshot. An active Store refuses slot acquisition.
 -- Callers first finish Admission and close its Store through their original owners.
 backupCoordinationStore :: InstalledConfiguration -> FilePath -> IO ()
-backupCoordinationStore installed destination = withStoreMode CopyingStore installed $ \(CoordinationStore _ root db _ _ _ _ _ _ _ _ _ _ _) ->
+backupCoordinationStore installed destination = withStoreMode CopyingStore installed $ \(CoordinationStore _ root db _ _ _ _ _ _ _ _ _ _ _ _) ->
   bracket (openPrivateRoot "coordination backup" destination) closePrivateRoot $ \backup -> do
     validateRootSeparation root [destination]
     writePrivateExclusiveAt backup ["coordination.sqlite3"] BS.empty
@@ -641,7 +643,7 @@ backupCoordinationStore installed destination = withStoreMode CopyingStore insta
 -- | Restore only with a readable current safety state under the original service lease.
 -- No Store escapes, and an interrupted publication leaves startup fenced by the marker.
 restoreCoordinationStore :: InstalledConfiguration -> FilePath -> IO ()
-restoreCoordinationStore installed source = withStoreMode CopyingStore installed $ \(CoordinationStore _ root db identity _ _ _ _ _ _ _ _ _ _) ->
+restoreCoordinationStore installed source = withStoreMode CopyingStore installed $ \(CoordinationStore _ root db identity _ _ _ _ _ _ _ _ _ _ _) ->
   bracket (openPrivateRoot "coordination backup" source) closePrivateRoot $ \backup -> do
     validateRootSeparation root [source]
     let expected = TE.encodeUtf8(T.pack(privateRootIdentity root))
@@ -915,7 +917,7 @@ closeStore = closeStoreWith False
 -- that the operator stopped it. Only such a close of a Store that is not
 -- poisoned writes the shutdown notice of the manager log.
 closeStoreWith :: Bool -> CoordinationStore -> IO ()
-closeStoreWith returned store@(CoordinationStore installed root db identity gate closed poisoned lease (files,_,_,_) workers closing retired admission flow) =
+closeStoreWith returned store@(CoordinationStore installed root db identity gate closed poisoned lease (files,_,_,_) workers closing retired admission flow _) =
   uninterruptibleMask_ $ withMVar closing $ \_ -> do
     already <- readIORef retired
     unless already $ do
@@ -964,7 +966,7 @@ closeStoreWith returned store@(CoordinationStore installed root db identity gate
 -- | Fence construction and notify every original registration before any join or SQL.
 -- This is physical safety authority, not durable acceptance or containment evidence.
 requestStoreWorkersStop :: CoordinationStore -> IO [StoreWorker]
-requestStoreWorkersStop (CoordinationStore _ _ _ _ _ _ _ _ _ workers _ _ _ _) = atomically(stopWorkers workers)
+requestStoreWorkersStop (CoordinationStore _ _ _ _ _ _ _ _ _ workers _ _ _ _ _) = atomically(stopWorkers workers)
 
 stopWorkers :: TVar WorkerRegistry -> STM [StoreWorker]
 stopWorkers workers = do
@@ -979,7 +981,7 @@ stopWorkers workers = do
 
 -- No callback, SQL acquisition or join runs in this notification transaction.
 notifyStoreFailure :: CoordinationStore -> Bool -> IO ()
-notifyStoreFailure (CoordinationStore _ _ _ _ _ _ _ _ (_,_,authorization,_) workers _ _ admission _) unavailable = atomically $ do
+notifyStoreFailure (CoordinationStore _ _ _ _ _ _ _ _ (_,_,authorization,_) workers _ _ admission _ _) unavailable = atomically $ do
   writeTVar authorization Nothing
   modifyTVar' workers (\state -> state {registryClosed=True, registryUnavailable=registryUnavailable state || unavailable})
   (_, owner) <- readTVar admission
@@ -1003,32 +1005,69 @@ retryStoreCleanup = closeStore
 
 -- | Configuration authority associated with this store, never a caller-selected registry.
 withStoreConfiguration :: CoordinationStore -> (ConfigurationLimits -> [PublicProfile] -> IO a) -> IO (Either Diagnostic a)
-withStoreConfiguration (CoordinationStore installed _ _ _ _ _ _ _ _ _ _ _ _ _) = withConfigurationSnapshot installed
+withStoreConfiguration store@(CoordinationStore installed _ _ _ _ _ _ _ _ _ _ _ _ _ _) action =
+  admissionDeadline store >>= \end -> withConfigurationSnapshot end installed action
 
 -- | The local administration namespace of this Store's original configuration.
 withStoreAdministration :: CoordinationStore -> (PrivateRoot -> IO a) -> IO (Either Diagnostic a)
-withStoreAdministration store@(CoordinationStore installed _ _ _ _ _ _ _ _ _ _ _ _ _) action =
-  withConfigurationAdministration installed $ \root -> admitted store (pure ()) >> action root
+withStoreAdministration store@(CoordinationStore installed _ _ _ _ _ _ _ _ _ _ _ _ _ _) action =
+  admissionDeadline store >>= \end ->
+    withConfigurationAdministration end installed $ \root -> admitted (scopedTo end store) (pure ()) >> action root
+
+-- | One request. Every admission wait through the store value that the
+-- callback receives shares one admission deadline: the waits for the file
+-- slot, a reader place, the configuration guard and the Store gate. The
+-- deadline starts when the outermost scope of the request starts. A scope
+-- inside a scope of the same store value keeps the deadline of the outer
+-- scope, so a request that is part of a larger request shares the deadline of
+-- the larger request. So the sum of the admission waits of the request is at
+-- most five seconds. A lock that is free is taken at once, also after the
+-- deadline ends. A later check, such as the revalidation of a response before
+-- a write, uses the store value of its watch with a fresh deadline, and it is
+-- a request of its own. Operation bounds stay separate: an admitted SQL
+-- action keeps its own five-second allowance, and the busy and rollback
+-- bounds do not change. A value that is kept past the request, such as a
+-- command attempt or a dispatch ticket, keeps 'outsideRequest' of the store.
+withStoreRequest :: CoordinationStore -> (CoordinationStore -> IO a) -> IO a
+withStoreRequest store action = admissionDeadline store >>= \end -> action (scopedTo end store)
+
+-- | The admission deadline of the request of this store value, or a fresh
+-- deadline when the value serves no request scope.
+admissionDeadline :: CoordinationStore -> IO Admission.Deadline
+admissionDeadline (CoordinationStore _ _ _ _ _ _ _ _ _ _ _ _ _ _ request) = maybe Admission.newDeadline pure request
+
+-- | The same store with a given admission deadline.
+scopedTo :: Admission.Deadline -> CoordinationStore -> CoordinationStore
+scopedTo end (CoordinationStore installed root db identity gate closed poisoned lease slots workers closing retired admission flow _) =
+  CoordinationStore installed root db identity gate closed poisoned lease slots workers closing retired admission flow (Just end)
+
+-- | The same store without a request scope, for a value that is kept past
+-- the request. Each admission through it starts a fresh deadline.
+outsideRequest :: CoordinationStore -> CoordinationStore
+outsideRequest (CoordinationStore installed root db identity gate closed poisoned lease slots workers closing retired admission flow _) =
+  CoordinationStore installed root db identity gate closed poisoned lease slots workers closing retired admission flow Nothing
 
 -- | Current catalogue facts from the same associated configuration and lock.
 withStoreCatalogues :: CoordinationStore -> (ConfigurationLimits -> [PublicProfile] -> [(Text, Discovery)] -> IO a) -> IO (Either Diagnostic a)
-withStoreCatalogues (CoordinationStore installed _ _ _ _ _ _ _ _ _ _ _ _ _) = withConfigurationCatalogues installed
+withStoreCatalogues store@(CoordinationStore installed _ _ _ _ _ _ _ _ _ _ _ _ _ _) action =
+  admissionDeadline store >>= \end -> withConfigurationCatalogues end installed action
 
 -- | A proven unentered configuration callback is distinguishable from its failures.
 tryWithStoreCatalogues :: CoordinationStore
   -> (ConfigurationLimits -> [PublicProfile] -> [(Text,Discovery)] -> IO a)
   -> IO (Maybe (Either Diagnostic a))
-tryWithStoreCatalogues (CoordinationStore installed _ _ _ _ _ _ _ _ _ _ _ _ _) action =
-  tryConfigurationCatalogueContext installed $ \limits profiles catalogues _ -> action limits profiles catalogues
+tryWithStoreCatalogues store@(CoordinationStore installed _ _ _ _ _ _ _ _ _ _ _ _ _ _) action =
+  admissionDeadline store >>= \end ->
+    tryConfigurationCatalogueContext end installed $ \limits profiles catalogues _ -> action limits profiles catalogues
 
 storeInvocations :: CoordinationStore -> IO (Either Diagnostic [(Text,FrontendInvocation)])
-storeInvocations (CoordinationStore installed _ _ _ _ _ _ _ _ _ _ _ _ _) = configuredInvocations installed
+storeInvocations (CoordinationStore installed _ _ _ _ _ _ _ _ _ _ _ _ _ _) = configuredInvocations installed
 
 revalidateStoreRetentionRoot :: CoordinationStore -> PrivateRoot -> Text -> IO (Either Diagnostic ())
-revalidateStoreRetentionRoot (CoordinationStore installed _ _ _ _ _ _ _ _ _ _ _ _ _) = revalidateRetentionRoot installed
+revalidateStoreRetentionRoot (CoordinationStore installed _ _ _ _ _ _ _ _ _ _ _ _ _ _) = revalidateRetentionRoot installed
 
 validateStoreHistoryBindings :: CoordinationStore -> [(FilePath,Text)] -> IO (Either Diagnostic ())
-validateStoreHistoryBindings store@(CoordinationStore installed _ _ _ _ _ _ _ _ _ _ _ _ _) bindings =
+validateStoreHistoryBindings store@(CoordinationStore installed _ _ _ _ _ _ _ _ _ _ _ _ _ _) bindings =
   withStoreFiles store $ \_ -> validateHistoryBindings installed bindings
 
 -- | A Store-lifetime loan of an explicitly configured read-only retention root.
@@ -1039,7 +1078,7 @@ withStoreRetentionRoot store path profile action = withStoreRetentionRootLoan st
 -- the retention root and returns the file slot. A response owner calls it
 -- before its first network write, and the scope end calls it otherwise.
 withStoreRetentionRootLoan :: CoordinationStore -> FilePath -> Text -> (IO () -> PrivateRoot -> IO a) -> IO (Either Diagnostic a)
-withStoreRetentionRootLoan store@(CoordinationStore installed _ _ _ _ _ _ _ _ _ _ _ _ _) path profile action =
+withStoreRetentionRootLoan store@(CoordinationStore installed _ _ _ _ _ _ _ _ _ _ _ _ _ _) path profile action =
   withStoreFileLoan store $ \files _ ->
     withConfiguredRetentionRootLoan installed path profile $ \close root -> action (close >> files) root
 
@@ -1052,7 +1091,7 @@ withStoreRetentionRootLoan store@(CoordinationStore installed _ _ _ _ _ _ _ _ _ 
 -- the whole loan with its diagnostic.
 withStoreRetentionRootsLoan :: CoordinationStore -> [(FilePath, Text)]
   -> (IO () -> PrivateRoot -> [PrivateRoot] -> IO a) -> IO (Either Diagnostic a)
-withStoreRetentionRootsLoan store@(CoordinationStore installed _ _ _ _ _ _ _ _ _ _ _ _ _) bindings action =
+withStoreRetentionRootsLoan store@(CoordinationStore installed _ _ _ _ _ _ _ _ _ _ _ _ _ _) bindings action =
   withStoreFileLoan store $ \files root -> open root files bindings []
   where
     open root release [] opened = Right <$> action release root (reverse opened)
@@ -1097,7 +1136,7 @@ withStoreArtifactResponse = withStoreArtifactResponseWithin artifactResponseDead
 -- microseconds. Only the tests use a deadline other than
 -- 'artifactResponseDeadline'.
 withStoreArtifactResponseWithin :: Int -> CoordinationStore -> (IO () -> IO a) -> IO (Maybe a)
-withStoreArtifactResponseWithin deadline (CoordinationStore _ _ _ _ _ closed _ _ (_,_,_,places) _ _ _ _ _) action = mask $ \restore -> do
+withStoreArtifactResponseWithin deadline (CoordinationStore _ _ _ _ _ closed _ _ (_,_,_,places) _ _ _ _ _ _) action = mask $ \restore -> do
   readIORef closed >>= \done -> when done (throwIO StoreClosed)
   expired <- registerDelay artifactResponseWait
   charged <- atomically $
@@ -1123,10 +1162,10 @@ withRecordedRunRoot root recorded action = bracket (openPrivateSubroot root ["ru
   pure result
 
 -- | One ordinary file operation, joined by store close. It waits for the file
--- slot within a fresh five-second allowance, and a slot that stays held for
--- the whole allowance is 'StoreBusy'. Lock order: file, configuration,
--- database. The retained root and duplicated lease cannot escape this
--- callback's lifetime.
+-- slot within the admission deadline of its request, and a slot that stays
+-- held until that deadline ends is 'StoreBusy'. Lock order: file,
+-- configuration, database. The retained root and duplicated lease cannot
+-- escape this callback's lifetime.
 withStoreFiles :: CoordinationStore -> (PrivateRoot -> IO a) -> IO a
 withStoreFiles store action = withStoreFileLoan store (const action)
 
@@ -1147,22 +1186,22 @@ tryWithStoreFiles store action = acquireStoreFiles FailFast store (const action)
 -- | Take the file slot under the admission policy. Nothing proves that the
 -- slot was not taken, so the action did not run.
 acquireStoreFiles :: StoreAdmission -> CoordinationStore -> (IO () -> PrivateRoot -> IO a) -> IO (Maybe a)
-acquireStoreFiles policy store@(CoordinationStore _ root _ _ _ closed _ lease (files,_,_,_) _ _ _ _ _) action = mask $ \restore -> do
+acquireStoreFiles policy store@(CoordinationStore _ root _ _ _ closed _ lease (files,_,_,_) _ _ _ _ _ _) action = mask $ \restore -> do
   readIORef closed >>= \done -> when done (throwIO StoreClosed)
   acquired <- case policy of
-    FailFast -> tryTakeMVar files
-    WaitWithinBudget -> Admission.newDeadline >>= \end -> Admission.takeWithin end files >>= \taken ->
-      taken <$ when (isNothing taken) (recordBusy "store-file-slot" (refusalLabel "store" StoreBusy) (Just end))
+    FailFast -> tryTakeMVar files >>= traverse (const (admissionDeadline store))
+    WaitWithinBudget -> admissionDeadline store >>= \end -> Admission.takeWithin end files >>= \taken ->
+      (end <$ taken) <$ when (isNothing taken) (recordBusy "store-file-slot" (refusalLabel "store" StoreBusy) (Just end))
   case acquired of
     Nothing -> pure Nothing
-    Just () -> do
+    Just end -> do
       slot <- Admission.releaseOnce (putMVar files ())
       (do
-        (retained, copied) <- acquire
+        (retained, copied) <- acquire end
         release <- Admission.releaseOnce ((closePrivateRoot retained `finally` closeFd copied) `finally` slot)
         Just <$> restore (action release retained) `finally` release) `finally` slot
   where
-    acquire = admitted store $ bracketOnError (openPrivateSubroot root []) closePrivateRoot $ \retained -> do
+    acquire end = admitted (scopedTo end store) $ bracketOnError (openPrivateSubroot root []) closePrivateRoot $ \retained -> do
       copied <- duplicateLease lease
       pure (retained, copied)
 
@@ -1173,10 +1212,12 @@ acquireStoreFiles policy store@(CoordinationStore _ root _ _ _ closed _ lease (f
 -- diagnostic is 'StoreUnavailable'. The distinct configuration cause is
 -- recorded privately before that refusal.
 --
--- When every reader place is taken, the reader waits for a place within a
--- fresh five-second allowance. It waits outside the configuration guard and
--- the Store gate, so the readers that hold places keep their access. A full
--- reader capacity for the whole allowance is 'StoreLimit'.
+-- When every reader place is taken, the reader waits for a place within the
+-- admission deadline of its request. It waits outside the configuration guard
+-- and the Store gate, so the readers that hold places keep their access. A
+-- full reader capacity until that deadline ends is 'StoreLimit'. The waits for
+-- the configuration guard, the Store gate and a reader place share that one
+-- deadline.
 withStoreReader :: CoordinationStore -> IO a -> IO a
 withStoreReader store action = withStoreReaderLoan store (const action)
 
@@ -1184,10 +1225,11 @@ withStoreReader store action = withStoreReaderLoan store (const action)
 -- the release after materialization and before its first network write, so
 -- a slow send never holds a reader place.
 withStoreReaderLoan :: CoordinationStore -> (IO () -> IO a) -> IO a
-withStoreReaderLoan store@(CoordinationStore _ _ _ _ _ _ _ _ (_,readers,_,_) _ _ _ _ _) action = mask $ \restore -> do
-  end <- Admission.newDeadline
-  let admit = do
-        result <- withStoreConfiguration store $ \limits _ -> admitted store $ atomically $ do
+withStoreReaderLoan store@(CoordinationStore _ _ _ _ _ _ _ _ (_,readers,_,_) _ _ _ _ _ _) action = mask $ \restore -> do
+  end <- admissionDeadline store
+  let request = scopedTo end store
+      admit = do
+        result <- withStoreConfiguration request $ \limits _ -> admitted request $ atomically $ do
           count <- readTVar readers
           if count>=limitGlobalDatabaseReaders limits
             then pure (Just count)
@@ -1204,8 +1246,13 @@ withStoreReaderLoan store@(CoordinationStore _ _ _ _ _ _ _ _ (_,readers,_,_) _ _
               Left _ -> throwIO StoreLimit
               Right micros -> do
                 expired <- registerDelay micros
-                atomically $ (readTVar readers >>= \count -> check (count < seen)) `orElse` (readTVar expired >>= check)
-                admit
+                -- A place that is returned admits again under the rest of the
+                -- deadline. A deadline that ends while the capacity stays full
+                -- is 'StoreLimit' at once, without a further wait for the
+                -- configuration guard.
+                returned <- atomically $ (readTVar readers >>= \count -> True <$ check (count < seen))
+                  `orElse` (readTVar expired >>= \ended -> False <$ check ended)
+                if returned then admit else throwIO StoreLimit
   admit
   release <- Admission.releaseOnce (atomically(modifyTVar' readers (subtract 1)))
   restore (action release) `finally` release
@@ -1255,7 +1302,7 @@ refuseErased context cause failure = do
 data AuthorizationWatch = AuthorizationWatch !CoordinationStore !(TVar (Maybe Word64)) !(TVar Word64) !(TVar Bool)
 
 withStoreAuthorizationWatch :: CoordinationStore -> (AuthorizationWatch -> IO a) -> IO a
-withStoreAuthorizationWatch store action = withStoreReader store (withAuthorizationWatch store action)
+withStoreAuthorizationWatch store action = withStoreRequest store $ \request -> withStoreReader request (withAuthorizationWatch request action)
 
 -- | One charged response. The reader charge and the configuration loan cover
 -- materialization. The release action passed to the callback returns both
@@ -1267,10 +1314,11 @@ withStoreAuthorizationWatch store action = withStoreReader store (withAuthorizat
 -- callback did not release.
 withStoreConfigurationWatch :: CoordinationStore
   -> (IO () -> AuthorizationWatch -> ConfigurationLimits -> [PublicProfile] -> IO a) -> IO (Either Diagnostic a)
-withStoreConfigurationWatch store@(CoordinationStore installed _ _ _ _ _ _ _ _ _ _ _ _ _) action =
-  withStoreReaderLoan store $ \reader ->
-    withConfigurationLoan installed $ \configuration limits profiles _ _ ->
-      withAuthorizationWatch store $ \watch -> action (configuration >> reader) watch limits profiles
+withStoreConfigurationWatch store@(CoordinationStore installed _ _ _ _ _ _ _ _ _ _ _ _ _ _) action =
+  admissionDeadline store >>= \end ->
+    withStoreReaderLoan (scopedTo end store) $ \reader ->
+      withConfigurationLoan end installed $ \configuration limits profiles _ _ ->
+        withAuthorizationWatch (scopedTo end store) $ \watch -> action (configuration >> reader) watch limits profiles
 
 -- | One charged catalogue response under the same loans, release action and
 -- watch lifetime.
@@ -1283,13 +1331,18 @@ withStoreCataloguesWatch store action = withStoreCatalogueContextWatch store $ \
 withStoreCatalogueContextWatch :: CoordinationStore
   -> (IO () -> AuthorizationWatch -> ConfigurationLimits -> [PublicProfile] -> [(Text, Discovery)] -> [(Text,FrontendInvocation)] -> IO a)
   -> IO (Either Diagnostic a)
-withStoreCatalogueContextWatch store@(CoordinationStore installed _ _ _ _ _ _ _ _ _ _ _ _ _) action =
-  withStoreReaderLoan store $ \reader ->
-    withConfigurationLoan installed $ \configuration limits profiles catalogues invocations ->
-      withAuthorizationWatch store $ \watch -> action (configuration >> reader) watch limits profiles catalogues invocations
+withStoreCatalogueContextWatch store@(CoordinationStore installed _ _ _ _ _ _ _ _ _ _ _ _ _ _) action =
+  admissionDeadline store >>= \end ->
+    withStoreReaderLoan (scopedTo end store) $ \reader ->
+      withConfigurationLoan end installed $ \configuration limits profiles catalogues invocations ->
+        withAuthorizationWatch (scopedTo end store) $ \watch -> action (configuration >> reader) watch limits profiles catalogues invocations
 
+-- | The watch keeps the store value of the request that registers it, with
+-- the admission deadline of that request. Only
+-- 'withAuthorizationRequestReadObservation' uses that deadline. Every other
+-- observation starts a fresh deadline.
 withAuthorizationWatch :: CoordinationStore -> (AuthorizationWatch -> IO a) -> IO a
-withAuthorizationWatch store@(CoordinationStore _ _ _ _ _ _ _ _ (_,_,cell,_) _ _ _ _ _) action =
+withAuthorizationWatch store@(CoordinationStore _ _ _ _ _ _ _ _ (_,_,cell,_) _ _ _ _ _ _) action =
   bracket acquire release action
   where
     acquire = atomically (readTVar cell) >>= maybe (throwIO StoreClosed)
@@ -1313,22 +1366,36 @@ withAuthorizationObservation watch action = do
   initial <- authorizationGeneration watch
   case initial of
     Nothing -> pure Nothing
-    Just expected -> observeAuthorizationAt watch expected action
+    Just expected -> Admission.newDeadline >>= \end -> observeAuthorizationAt watch end expected action
       >>= either (const (recordBusy "store-authorization-observation" (refusalLabel "store" StoreBusy) Nothing
         >> refuseErased "store authorization-observation" AuthorizationChanged StoreBusy)) pure
 
 -- | Observe current authorization with a read that is safe to repeat, such as a
 -- read of authorization facts or a public materialization. A concurrent commit
 -- is ordinary contention for such a read, so it starts a fresh read under the
--- newer generation while one five-second allowance lasts. Each read runs once
+-- newer generation while one five-second allowance lasts. The read receives
+-- the store of the watch with that allowance as its admission deadline, so the
+-- waits of every attempt and of the final acknowledgement share it. Each read runs once
 -- for its own generation, and no earlier value is acknowledged. When commits
 -- keep arriving for the whole allowance, the observation keeps the declared
 -- 'StoreBusy' refusal and its private record. An action that changes state
 -- uses 'withAuthorizationObservation', which never runs its action again.
-withAuthorizationReadObservation :: NFData a => AuthorizationWatch -> IO a -> IO (Maybe a)
-withAuthorizationReadObservation watch action = do
-  end <- Admission.newDeadline
-  let attempt expected = observeAuthorizationAt watch expected action >>= \outcome -> case outcome of
+withAuthorizationReadObservation :: NFData a => AuthorizationWatch -> (CoordinationStore -> IO a) -> IO (Maybe a)
+withAuthorizationReadObservation watch action = Admission.newDeadline >>= \end -> readObservationWithin end watch action
+
+-- | The first observation of the request that registered the watch, such as
+-- the observation that materializes a response. It is the same read
+-- observation, but its waits use the rest of the admission deadline of that
+-- request instead of a fresh deadline. So the reader place, the configuration
+-- guard, the Store gate and this observation of one request share one
+-- deadline. A later revalidation uses 'withAuthorizationReadObservation'.
+withAuthorizationRequestReadObservation :: NFData a => AuthorizationWatch -> (CoordinationStore -> IO a) -> IO (Maybe a)
+withAuthorizationRequestReadObservation watch@(AuthorizationWatch store _ _ _) action =
+  admissionDeadline store >>= \end -> readObservationWithin end watch action
+
+readObservationWithin :: NFData a => Admission.Deadline -> AuthorizationWatch -> (CoordinationStore -> IO a) -> IO (Maybe a)
+readObservationWithin end watch@(AuthorizationWatch store _ _ _) action = do
+  let attempt expected = observeAuthorizationAt watch end expected (action (scopedTo end store)) >>= \outcome -> case outcome of
         Right value -> pure value
         Left newer -> try @Admission.AdmissionFailure (Admission.remainingMicros end) >>= either
           (const (recordBusy "store-authorization-read-observation" (refusalLabel "store" StoreBusy) (Just end)
@@ -1343,10 +1410,12 @@ authorizationGeneration (AuthorizationWatch _ cell _ active) = atomically $ do
 
 -- | One action under one expected generation. Left carries the newer
 -- generation that a concurrent commit published. A closed scope is Nothing.
-observeAuthorizationAt :: NFData a => AuthorizationWatch -> Word64 -> IO a -> IO (Either Word64 (Maybe a))
-observeAuthorizationAt (AuthorizationWatch store cell revision active) expected action = do
+-- The final acknowledgement waits for the Store gate within the given
+-- deadline of the whole observation.
+observeAuthorizationAt :: NFData a => AuthorizationWatch -> Admission.Deadline -> Word64 -> IO a -> IO (Either Word64 (Maybe a))
+observeAuthorizationAt (AuthorizationWatch store cell revision active) end expected action = do
   value <- action >>= evaluate . force
-  admitted store $ atomically $ do
+  admitted (scopedTo end store) $ atomically $ do
     live <- readTVar active
     current <- readTVar cell
     case current of
@@ -1366,16 +1435,16 @@ awaitAuthorizationChange (AuthorizationWatch _ cell revision active) = do
     check (not live || current /= Just expected)) `orElse` (readTVar timer >>= check)
 
 advanceAuthorization :: CoordinationStore -> IO ()
-advanceAuthorization (CoordinationStore _ _ _ _ _ _ _ _ (_,_,cell,_) _ _ _ _ _) = atomically $
+advanceAuthorization (CoordinationStore _ _ _ _ _ _ _ _ (_,_,cell,_) _ _ _ _ _ _) = atomically $
   modifyTVar' cell (>>= \revision -> if revision == maxBound then Nothing else Just (revision + 1))
 
 invalidateAuthorization :: CoordinationStore -> IO ()
-invalidateAuthorization (CoordinationStore _ _ _ _ _ _ _ _ (_,_,cell,_) _ _ _ _ _) =
+invalidateAuthorization (CoordinationStore _ _ _ _ _ _ _ _ (_,_,cell,_) _ _ _ _ _ _) =
   atomically (writeTVar cell Nothing)
 
 -- | One admission owner, separate from the physical worker registration ceiling.
 withStoreAdmission :: CoordinationStore -> (STM Bool -> IO a) -> IO a
-withStoreAdmission store@(CoordinationStore _ _ _ _ _ closed poisoned _ _ workers _ _ admission _) action = mask $ \restore -> do
+withStoreAdmission store@(CoordinationStore _ _ _ _ _ closed poisoned _ _ workers _ _ admission _ _) action = mask $ \restore -> do
   stop <- newEmptyTMVarIO
   done <- newEmptyMVar
   readIORef closed >>= \closing -> when closing (throwIO StoreClosed)
@@ -1406,7 +1475,7 @@ withStoreAdmission store@(CoordinationStore _ _ _ _ _ closed poisoned _ _ worker
 
 -- | A separate bounded lifetime for workers. Close signals and joins it without SQL.
 withStoreWorker :: CoordinationStore -> (StoreWorker -> PrivateRoot -> STM Bool -> IO a) -> IO a
-withStoreWorker store@(CoordinationStore _ root _ _ _ _ _ lease _ workers _ _ _ _) action = mask $ \restore -> do
+withStoreWorker store@(CoordinationStore _ root _ _ _ _ _ lease _ workers _ _ _ _ _) action = mask $ \restore -> do
   entry@(StoreWorker stop done _ resources) <- StoreWorker <$> newEmptyTMVarIO <*> newEmptyMVar <*> newMVar [] <*> newMVar Nothing
   refuseBusyAt "store-worker-registry" Nothing $ atomically $ do
     state <- readTVar workers
@@ -1447,7 +1516,7 @@ storeWorkerCleanupConfirmed (StoreWorker _ _ groups _) = do
   pure (all (\value -> case value of Just (Right _) -> True; _ -> False) results)
 
 releaseStoreWorker :: CoordinationStore -> StoreWorker -> IO ()
-releaseStoreWorker (CoordinationStore _ _ _ _ _ closed _ _ _ workers _ _ _ _) entry@(StoreWorker stop done _ resources) = do
+releaseStoreWorker (CoordinationStore _ _ _ _ _ closed _ _ _ workers _ _ _ _ _) entry@(StoreWorker stop done _ resources) = do
   void (atomically (tryPutTMVar stop ()))
   confirmed <- storeWorkerCleanupConfirmed entry
   if confirmed then do
@@ -1461,13 +1530,13 @@ releaseStoreWorker (CoordinationStore _ _ _ _ _ closed _ _ _ workers _ _ _ _) en
 
 
 probeStoreCapabilities :: CoordinationStore -> StoreWorker -> Text -> Text -> IO (Either Diagnostic FrontendCapabilities)
-probeStoreCapabilities (CoordinationStore installed _ _ _ _ _ _ _ _ _ _ _ _ _) owner = probeConfiguredCapabilities installed (createStoreWorkerGroup owner)
+probeStoreCapabilities (CoordinationStore installed _ _ _ _ _ _ _ _ _ _ _ _ _ _) owner = probeConfiguredCapabilities installed (createStoreWorkerGroup owner)
 
 storeIdentity :: CoordinationStore -> IO StoreIdentity
-storeIdentity store@(CoordinationStore _ _ _ identity _ _ _ _ _ _ _ _ _ _) = admitted store (pure identity)
+storeIdentity store@(CoordinationStore _ _ _ identity _ _ _ _ _ _ _ _ _ _ _) = admitted store (pure identity)
 
 checkpointStore :: CoordinationStore -> IO Checkpoint
-checkpointStore store@(CoordinationStore _ _ db _ _ _ _ _ _ _ _ _ _ _) = admitted store $ bounded db 5000000 $ do
+checkpointStore store@(CoordinationStore _ _ db _ _ _ _ _ _ _ _ _ _ _ _) = admitted store $ bounded db 5000000 $ do
   verifyPragmas db
   values <- rawRows db "PRAGMA wal_checkpoint(PASSIVE)" []
   case values of
@@ -1478,14 +1547,14 @@ admitted :: CoordinationStore -> IO a -> IO a
 admitted store action = admittedWith WaitWithinBudget store (const action)
 
 admittedWith :: StoreAdmission -> CoordinationStore -> (Maybe Admission.Deadline -> IO a) -> IO a
-admittedWith policy (CoordinationStore _ root _ _ gate closed poisoned _ _ workers _ _ _ _) action = do
+admittedWith policy (CoordinationStore _ root _ _ gate closed poisoned _ _ workers _ _ _ _ request) action = do
   readIORef closed >>= \value -> when value (throwIO StoreClosed)
   let ready = do
         readIORef closed >>= \value -> when value (throwIO StoreClosed)
         readIORef poisoned >>= \value -> when value (throwIO StorePoisoned)
         readTVarIO workers >>= \state -> when (registryUnavailable state) (throwIO StoreUnavailable)
         assertPrivateRoot root
-  storageErrors (Admission.withGate policy gate ready action) `catch` \failure -> case failure of
+  storageErrors (Admission.withGate policy request gate ready action) `catch` \failure -> case failure of
     Admission.AdmissionBusy -> refuseBusy "store-gate" Nothing
     Admission.AdmissionExpired -> throwIO StoreDeadline
 
@@ -1517,14 +1586,14 @@ data CommitDeadline = CommitDeadline !Text !(IO Word64) !Word64 !(IORef Bool) !(
 data PreparedCommit = PreparedCommit !(TVar WorkerRegistry) !StoreWorker !ProcessGroup !WorkerLifecycle !(TVar Bool)
 
 withCommitDeadline :: CoordinationStore -> IO Word64 -> Word64 -> (CommitDeadline -> IO a) -> IO a
-withCommitDeadline (CoordinationStore _ _ _ identity _ closed _ _ _ _ _ _ _ _) now deadline action = mask $ \restore -> do
+withCommitDeadline (CoordinationStore _ _ _ identity _ closed _ _ _ _ _ _ _ _ _) now deadline action = mask $ \restore -> do
   readIORef closed >>= \closing -> when closing(throwIO StoreClosed)
   active <- newIORef True
   restore(action(CommitDeadline(storeProcessGeneration identity)now deadline active Nothing)) `finally` writeIORef active False
 
 -- | The prepared variant binds the original registration, process and adapter cells.
 withPreparedCommitDeadline :: CoordinationStore -> StoreWorker -> ProcessGroup -> WorkerLifecycle -> TVar Bool -> IO Word64 -> Word64 -> (CommitDeadline -> IO a) -> IO a
-withPreparedCommitDeadline store@(CoordinationStore _ _ _ _ _ _ _ _ _ registry _ _ _ _) owner group state fence now deadline action =
+withPreparedCommitDeadline store@(CoordinationStore _ _ _ _ _ _ _ _ _ registry _ _ _ _ _) owner group state fence now deadline action =
   withCommitDeadline store now deadline $ \(CommitDeadline generation clock end active _) ->
     action(CommitDeadline generation clock end active(Just(PreparedCommit registry owner group state fence)))
 
@@ -1671,7 +1740,7 @@ run :: NFData a => CoordinationStore -> Bool -> Transaction (a, [Invalidation]) 
 run = runWithAdmission WaitWithinBudget
 
 runWithAdmission :: NFData a => StoreAdmission -> CoordinationStore -> Bool -> Transaction (a, [Invalidation]) -> IO a
-runWithAdmission policy store@(CoordinationStore _ _ db identity _ _ poisoned _ _ _ _ _ _ flow) writable (Transaction action) = admittedWith policy store $ \end -> do
+runWithAdmission policy store@(CoordinationStore _ _ db identity _ _ poisoned _ _ _ _ _ _ flow _) writable (Transaction action) = admittedWith policy store $ \end -> do
   committing <- newIORef False
   pending <- newIORef Nothing
   queued <- newIORef []

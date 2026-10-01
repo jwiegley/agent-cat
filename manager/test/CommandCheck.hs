@@ -927,12 +927,34 @@ ordinaryAdmissionChecks work = withFixture work "ordinary-admission" (64*command
     check "that command waited the whole five-second allowance" (finished - started >= 5000000000)
   scalarInt store "SELECT count(*) FROM commands" >>= check "the refused command left no receipt" . (== commands)
   scalarText store "SELECT revision FROM requests WHERE id='request_1'" >>= check "the refused command left its resource unchanged" . (== "after_transaction")
+  -- One command request waits for the configuration guard for three seconds
+  -- and then for the Store gate of its identity read. The two waits share one
+  -- five-second admission deadline, so the request refuses about five seconds
+  -- after it starts. With a fresh allowance for each wait it would wait about
+  -- eight seconds.
+  stacked <- accept "stacked_admission" "after_transaction" "never"
+  (stackedOutcome, stackedFor) <- withHeldConfiguration store $ \releaseConfiguration -> do
+    started <- getMonotonicTimeNSec
+    withAsync stacked $ \waiter -> do
+      blocked waiter
+      threadDelay 3000000
+      withHeldStore store $ \_ -> do
+        releaseConfiguration
+        outcome <- wait waiter
+        finished <- getMonotonicTimeNSec
+        pure (outcome, finished - started)
+  check "a command behind the configuration guard and then the Store gate is refused as storage-unavailable"
+    (case stackedOutcome of Left StorageUnavailable -> True; _ -> False)
+  check "that command waited about five seconds in total, not a fresh allowance for each lock"
+    (stackedFor >= 4900000000 && stackedFor < 5500000000)
+  scalarInt store "SELECT count(*) FROM commands" >>= check "the command refused at its one deadline left no receipt" . (== commands)
+  scalarText store "SELECT revision FROM requests WHERE id='request_1'" >>= check "the command refused at its one deadline left its resource unchanged" . (== "after_transaction")
   -- A protected read meets one concurrent commit between its read and its
   -- acknowledgement. The commit runs inside the first read only to place it
   -- there. The second read is a fresh read under the newer generation.
   withStoreAuthorizationWatch store $ \watch -> do
     attempts <- newIORef (0 :: Int)
-    observed <- withAuthorizationReadObservation watch $ do
+    observed <- withAuthorizationReadObservation watch $ \_ -> do
       modifyIORef' attempts (+1)
       count <- readIORef attempts
       when (count == 1) (mutate store (execute "UPDATE clients SET revision='read_observation_commit' WHERE id='client_1'" []))
@@ -942,7 +964,7 @@ ordinaryAdmissionChecks work = withFixture work "ordinary-admission" (64*command
     authorizationWatchCurrent watch >>= check "the fresh read acknowledged the newer generation"
     -- Every read meets a new commit, so the allowance ends before any read is stable.
     started <- getMonotonicTimeNSec
-    refused <- try @StoreFailure $ withAuthorizationReadObservation watch
+    refused <- try @StoreFailure $ withAuthorizationReadObservation watch $ \_ ->
       (mutate store (execute "UPDATE clients SET revision='read_observation_churn' WHERE id='client_1'" []))
     finished <- getMonotonicTimeNSec
     check "a protected read that meets commits for the whole allowance keeps the declared refusal" (refused == Left StoreBusy)

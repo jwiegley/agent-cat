@@ -186,14 +186,14 @@ createLineageDraft store proof parent key precondition body = draftIO $ do
         pure $ case rows of [[SQL.SQLText revision]] -> Just (uri,profile,revision); _ -> Nothing
   replay <- commandPreflightVersion store proof request version >>= requireEither
   if replay then submissionReceipt <$> (submitConfiguredCommand store proof request (\_ _ _ -> Left StateConflict) >>= requireEither)
-  else withStoreFiles store $ \root -> timed 5000000 $ do
-    configured <- withStoreCatalogues store $ \_ _ catalogues -> case lookup profile catalogues of
+  else withStoreRequest store $ \scoped -> withStoreFiles scoped $ \root -> timed 5000000 $ do
+    configured <- withStoreCatalogues scoped $ \_ _ catalogues -> case lookup profile catalogues of
       Just catalogue -> pure catalogue
       Nothing -> throwIO StaleRevision
     catalogue <- either (const (throwIO StorageUnavailable)) pure configured
     let selection = discoverySelection catalogue
         policy = selectionContext selection
-    record <- readParent store root parent selection
+    record <- readParent scoped root parent selection
     let manifest = recordManifest record
     (workflow,descriptor) <- maybe (throwIO (parentRefusalFailure ParentWorkflow)) pure (parentWorkflow catalogue record)
     _ <- parentInputs root record descriptor
@@ -223,7 +223,7 @@ createLineageDraft store proof parent key precondition body = draftIO $ do
               pure ([requestEvent ident ident,Invalidation "run.changed" uri parentRevision],Just effect)
     when (BS.length (encodeFrontendManifest manifest) > 1048576) (throwIO ViewTooLarge)
     unless (operatorId policy == profile) (throwIO StaleRevision)
-    submissionReceipt <$> (submitConfiguredCommand store proof request builder >>= requireEither)
+    submissionReceipt <$> (submitConfiguredCommand scoped proof request builder >>= requireEither)
 
 -- | One parent's lineage-request collection. 'lineageEligible' lists the
 -- operations that a new lineage draft of the parent may name now, and
@@ -595,7 +595,7 @@ withDraft store proof ident respond = do
       respond view draft
 
 readDraft :: CoordinationStore -> CredentialProof -> Text -> IO (Either CommandFailure DraftView)
-readDraft store proof ident = draftIO $ withStoreFiles store $ \root -> readDraftAt store root proof ident
+readDraft store proof ident = draftIO $ withStoreRequest store $ \scoped -> withStoreFiles scoped $ \root -> readDraftAt scoped root proof ident
 
 readDraftAt :: CoordinationStore -> PrivateRoot -> CredentialProof -> Text -> IO DraftView
 readDraftAt store root proof ident = timed 5000000 $ do
@@ -665,8 +665,8 @@ assemblyParentRun = fmap (fmap frontendRunId) . assemblyParent
 validateAssemblyParent :: CoordinationStore -> DraftAssembly -> FrontendPrepared -> IO ()
 validateAssemblyParent store assembly prepared = case assemblyParent assembly of
   Nothing -> pure ()
-  Just (parent,expected) -> withStoreFiles store $ \root -> do
-    record <- readParent store root parent (assemblySelection assembly)
+  Just (parent,expected) -> withStoreRequest store $ \scoped -> withStoreFiles scoped $ \root -> do
+    record <- readParent scoped root parent (assemblySelection assembly)
     unless (recordManifest record == expected && preparedDescriptor prepared == assemblyDescriptor assembly
       && workflowName (preparedDescriptor prepared) == frontendWorkflow expected) (throwIO StateConflict)
     summaries <- parentInputs root record (assemblyDescriptor assembly)
@@ -688,7 +688,7 @@ assembleAcceptedDraft store permit = draftIO $ timed 5000000 available
       maybe (threadDelay 10000 >> available) pure result
 
 assembleWith :: CoordinationStore -> DraftAccess -> Text -> IO (Either CommandFailure DraftAssembly)
-assembleWith store access ident = draftIO $ withStoreFiles store $ \root -> timed 5000000 (assembleAt store access ident root)
+assembleWith store access ident = draftIO $ withStoreRequest store $ \scoped -> withStoreFiles scoped $ \root -> timed 5000000 (assembleAt scoped access ident root)
 
 assembleAt :: CoordinationStore -> DraftAccess -> Text -> PrivateRoot -> IO DraftAssembly
 assembleAt store access ident root = do
@@ -760,7 +760,7 @@ assembleRoot store access root snapshot@(RequestState view _ _) catalogue descri
 -- | Worker-side revalidation of File sources against actual retained capture records.
 -- Literal/Transport sources carry values, not paths. This grants no approval authority.
 verifyFrontendFiles :: CoordinationStore -> Text -> FrontendSetupRequest -> IO ()
-verifyFrontendFiles store profile setup = withStoreFiles store $ \root -> verifyFrontendFilesAt store root profile setup
+verifyFrontendFiles store profile setup = withStoreRequest store $ \scoped -> withStoreFiles scoped $ \root -> verifyFrontendFilesAt scoped root profile setup
 
 -- | Revalidation under the original Store file loan, never an unowned path.
 verifyFrontendFilesAt :: CoordinationStore -> PrivateRoot -> Text -> FrontendSetupRequest -> IO ()

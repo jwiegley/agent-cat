@@ -147,9 +147,9 @@ instance NFData Claim where
 -- record, the free owner lock of the run shows that its inner frontend worker
 -- has ended.
 inspectQuarantine :: CoordinationStore -> Text -> IO (QuarantineState, Maybe CleanupEvidence)
-inspectQuarantine store ident = withStoreFiles store $ \root -> do
-  generation <- storeProcessGeneration <$> storeIdentity store
-  claim <- runRead store (readClaim ident)
+inspectQuarantine store ident = withStoreRequest store $ \scoped -> withStoreFiles scoped $ \root -> do
+  generation <- storeProcessGeneration <$> storeIdentity scoped
+  claim <- runRead scoped (readClaim ident)
   classify root generation ident claim
 
 -- | The state and cleanup evidence of a claim that the Store records, under
@@ -221,11 +221,11 @@ checkQuarantine store ident = answered "check-quarantine" $ do
 releaseQuarantine :: CoordinationStore -> IO () -> Text -> Text -> Text -> IO BS.ByteString
 releaseQuarantine store wake ident suppliedId suppliedDigest = do
   principal <- localAdministrator
-  attempted <- attempt operation $ withStoreFiles store $ \root -> do
+  attempted <- attempt operation $ withStoreRequest store $ \scoped -> withStoreFiles scoped $ \root -> do
     revision <- ("request_revision_" <>) . TE.decodeUtf8 . convertToBase Base16 <$> (getRandomBytes 24 :: IO BS.ByteString)
-    configured <- withStoreConfiguration store $ \_ _ -> do
-      generation <- storeProcessGeneration <$> storeIdentity store
-      claim <- runRead store (readClaim ident)
+    configured <- withStoreConfiguration scoped $ \_ _ -> do
+      generation <- storeProcessGeneration <$> storeIdentity scoped
+      claim <- runRead scoped (readClaim ident)
       found <- classify root generation ident claim
       request <- case (found, claim) of
         ((QuarantineClean, Just current), ClaimUnlaunched request _)
@@ -233,13 +233,13 @@ releaseQuarantine store wake ident suppliedId suppliedDigest = do
         ((QuarantineClean, Just current), ClaimLaunched request _ _ _)
           | matches current -> pure request
         _ -> throwIO CleanupUnverified
-      runTransaction store $ do
+      runTransaction scoped $ do
         unchanged <- (== claim) <$> readClaim ident
         unless unchanged (refuseTransaction CleanupUnverified)
         execute "DELETE FROM reservation_resources WHERE reservation_id=?" [SQL.SQLText ident]
         execute "UPDATE reservations SET state='released',slot=NULL,request_revision=? WHERE id=? AND state='quarantined'" [SQL.SQLText revision, SQL.SQLText ident]
         execute "UPDATE requests SET admission=CASE WHEN admission='reserved' THEN 'released' ELSE admission END,revision=? WHERE id=?" [SQL.SQLText revision, SQL.SQLText request]
-        logged <- recordAdministration store principal (ReleaseAdministration ident request suppliedId suppliedDigest)
+        logged <- recordAdministration scoped principal (ReleaseAdministration ident request suppliedId suppliedDigest)
         pure (logged, [Invalidation "request.changed" ("/v1/requests/" <> request) revision])
     either (const (throwIO StorageUnavailable)) pure configured
   case attempted of

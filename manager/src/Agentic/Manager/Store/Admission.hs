@@ -8,6 +8,7 @@ module Agentic.Manager.Store.Admission
 import Control.Concurrent.MVar (MVar, takeMVar, tryTakeMVar, putMVar)
 import Control.Exception (Exception, mask, mask_, finally, throwIO)
 import Control.Monad (void)
+import Data.Maybe (fromMaybe)
 import Data.IORef (atomicModifyIORef', newIORef)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -20,7 +21,9 @@ data StoreAdmission = FailFast | WaitWithinBudget deriving (Eq, Show)
 data AdmissionFailure = AdmissionBusy | AdmissionExpired deriving (Eq, Show)
 instance Exception AdmissionFailure
 
--- | The monotonic start of the unchanged five-second operation allowance.
+-- | The monotonic start of one five-second allowance. An admission deadline
+-- bounds the waits of one request for its locks. An operation allowance bounds
+-- one admitted Store action.
 newtype Deadline = Deadline Word64
 
 remainingAt :: Word64 -> Word64 -> Int
@@ -44,10 +47,18 @@ waitDetail (Just (Deadline start)) = do
   pure ("elapsed=" <> milliseconds elapsed <> " remaining=" <> milliseconds (remainingAt start now `div` 1000))
 
 -- | Take a lock before the allowance ends. Nothing proves that the lock was
--- not taken. The caller masks asynchronous exceptions, so a taken value
--- cannot be lost between the take and the caller's release handler.
+-- not taken. A lock that is free is taken at once, also after the allowance
+-- ends, because taking it is no wait. A lock that is held is waited for only
+-- for the rest of the allowance. So one deadline that several locks of one
+-- request share bounds the sum of their waits. The caller masks asynchronous
+-- exceptions, so a taken value cannot be lost between the take and the
+-- caller's release handler.
 takeWithin :: Deadline -> MVar a -> IO (Maybe a)
-takeWithin end lock = remainingMicros end >>= \left -> timeout left (takeMVar lock)
+takeWithin (Deadline start) lock = tryTakeMVar lock >>= \free -> case free of
+  Just value -> pure (Just value)
+  Nothing -> do
+    left <- remainingAt start <$> getMonotonicTimeNSec
+    if left > 0 then timeout left (takeMVar lock) else pure Nothing
 
 remainingMicros :: Deadline -> IO Int
 remainingMicros (Deadline start) = do
@@ -57,14 +68,20 @@ remainingMicros (Deadline start) = do
 
 -- Acquisition stays masked so interruption cannot lose a successfully taken token.
 -- The supplied health check runs after acquisition, before the action is exposed.
-withGate :: StoreAdmission -> MVar () -> IO () -> (Maybe Deadline -> IO a) -> IO a
-withGate policy gate check action = mask $ \restore -> do
+--
+-- A waiting admission starts the five-second operation allowance of its
+-- action, which the action receives. The wait for the gate uses the
+-- admission deadline of the request when the caller gives one, and the
+-- operation allowance otherwise. The admission deadline bounds only the wait.
+-- The operation allowance stays separate and unchanged.
+withGate :: StoreAdmission -> Maybe Deadline -> MVar () -> IO () -> (Maybe Deadline -> IO a) -> IO a
+withGate policy request gate check action = mask $ \restore -> do
   deadline <- case policy of
     FailFast -> pure Nothing
     WaitWithinBudget -> Just <$> newDeadline
   token <- case deadline of
     Nothing -> tryTakeMVar gate
-    Just end -> takeWithin end gate
+    Just end -> takeWithin (fromMaybe end request) gate
   case token of
     Nothing -> throwIO (case policy of FailFast -> AdmissionBusy; WaitWithinBudget -> AdmissionExpired)
     Just () -> (check >> mapM_ (void . remainingMicros) deadline >> restore (action deadline))

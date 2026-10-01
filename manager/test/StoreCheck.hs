@@ -17,7 +17,7 @@ import Agentic.Manager.Protocol.Command (CommandReceipt (..), CommandState (Acce
 import qualified "agentic" Agentic.Runtime as Runtime
 import Control.Concurrent (threadDelay, throwTo)
 import Control.Concurrent.Async (AsyncCancelled (..), async, asyncThreadId, wait, cancel, poll, waitCatch, withAsync)
-import Control.Concurrent.MVar (newEmptyMVar, putMVar, takeMVar)
+import Control.Concurrent.MVar (newEmptyMVar, putMVar, readMVar, takeMVar, tryPutMVar)
 import Control.Exception
   (AsyncException (UserInterrupt), bracket, finally, fromException, onException, throwIO, try)
 import Control.Monad (forM_, replicateM_, unless, void, when)
@@ -65,6 +65,7 @@ main = do
     ["terminal-admission",work] -> terminalAdmissionChecks work
     ["ordinary-admission",work] -> ordinaryAdmissionChecks work
     ["ordinary-expiry",work] -> ordinaryExpiryChecks work
+    ["request-admission",work] -> requestAdmissionChecks work
     ["hold", path] -> withInstalled path $ \installed -> withCoordinationStore installed $ \_ ->
       putStrLn "ready" >> threadDelay 60000000
     ["refuse", path] -> do
@@ -81,6 +82,7 @@ main = do
       ingestionMigrationChecks work
       conditionalTransactionChecks work
       flowFloorChecks work
+      requestAdmissionChecks work
       putStrLn "PASS manager coordination storage"
     _ -> error "usage: manager-store-check PRIVATE_DIRECTORY"
 
@@ -888,6 +890,107 @@ ordinaryExpiryChecks work = do
       check "a configuration loan past the allowance keeps the declared diagnostic" (either (== SupervisionUnavailable) (const False) refused)
       expect "reader admission past the allowance keeps the declared Store refusal" StoreBusy (withStoreReader store (pure ()))
     readIORef entered >>= check "an expired configuration waiter never enters" . (== 0)
+
+-- | One request shares one five-second admission deadline across its waits
+-- for the file slot, the configuration guard and the Store gate. Each holder
+-- keeps its lock until the check releases it, and the check proves that the
+-- request waits on the file slot before it starts the next holder. So the
+-- order of the waits does not depend on timing. Only the release times are
+-- measured from the start of the request, with margins of one second or more.
+-- A request that waits for the locks in turn longer than five seconds in total
+-- refuses when the shared deadline ends, and its action never runs. A request
+-- that obtains each lock within the deadline runs its action once. The first
+-- observation of a protected read shares the deadline of the configuration
+-- watch that registered it. With a fresh allowance for each lock, each of the
+-- three refused requests below would wait longer than five seconds.
+requestAdmissionChecks :: FilePath -> IO ()
+requestAdmissionChecks work = do
+  (path,_) <- fixture work "request-admission"
+  withInstalled path $ \installed -> withCoordinationStore installed $ \store -> do
+    entered <- newIORef (0::Int)
+    let request = try @StoreFailure $ withStoreRequest store $ \scoped -> withStoreFiles scoped $ \_ ->
+          withStoreConfiguration scoped $ \_ _ ->
+            withCommitDeadline scoped (modifyIORef' entered (+1) >> pure 0) 1 $ \guard ->
+              runTransaction scoped (enforceCommitDeadline guard >> pure ((), []))
+        -- Wait until the given number of seconds after the start.
+        at :: Word64 -> Double -> IO ()
+        at begun offset = do
+          now <- getMonotonicTimeNSec
+          let target = toInteger begun + round (offset * 1000000000)
+          threadDelay (fromInteger (max 0 ((target - toInteger now) `div` 1000)))
+        -- Hold the file slot until the check releases it.
+        holdingFiles action = do
+          held <- newEmptyMVar
+          resume <- newEmptyMVar
+          let release = void (tryPutMVar resume ())
+          withAsync (withStoreFiles store (\_ -> putMVar held () >> readMVar resume)) $ \holder -> do
+            takeMVar held
+            value <- action release
+            release
+            void (waitCatch holder)
+            pure value
+        -- Start the request behind the held file slot and prove that it waits there.
+        behindFiles stages = holdingFiles $ \releaseFiles -> do
+          begun <- getMonotonicTimeNSec
+          withAsync request $ \waiter -> do
+            StoreAdmissionCheck.blocked waiter
+            stages begun releaseFiles $ do
+              outcome <- wait waiter
+              finished <- getMonotonicTimeNSec
+              pure (outcome, finished - begun)
+    (refused, waited) <- behindFiles $ \begun releaseFiles finish ->
+      withHeldConfiguration store $ \_ -> at begun 3 >> releaseFiles >> finish
+    check "a request behind the file slot and then the configuration guard refuses when its one deadline ends"
+      (refused == Right (Left SupervisionUnavailable))
+    check "that request waited about five seconds in total, not a fresh allowance for each lock"
+      (waited >= 4900000000 && waited < 5500000000)
+    readIORef entered >>= check "that refused request never ran its action" . (== 0)
+    (expired, spent) <- behindFiles $ \begun releaseFiles finish ->
+      withHeldConfiguration store $ \releaseConfiguration -> do
+        at begun 2 >> releaseFiles
+        at begun 3.5
+        withHeldStore store $ \_ -> releaseConfiguration >> finish
+    check "a request behind the file slot, the configuration guard and the Store gate in turn refuses with StoreDeadline"
+      (expired == Left StoreDeadline)
+    check "that request waited about five seconds in total for the three locks"
+      (spent >= 4900000000 && spent < 5500000000)
+    readIORef entered >>= check "that expired request never ran its action" . (== 0)
+    (admitted, taken) <- behindFiles $ \begun releaseFiles finish ->
+      withHeldConfiguration store $ \releaseConfiguration -> do
+        at begun 1 >> releaseFiles
+        at begun 2
+        withHeldStore store $ \releaseStore -> releaseConfiguration >> at begun 3 >> releaseStore >> finish
+    check "a request that obtains each lock within its one deadline succeeds" (admitted == Right (Right ()))
+    check "that request was admitted within its five-second deadline" (taken >= 2900000000 && taken < 5000000000)
+    readIORef entered >>= check "that admitted request ran its action once" . (== 1)
+    -- A protected read waits for the configuration guard of its watch for
+    -- three seconds. Its first observation then meets a held Store gate and
+    -- refuses when the deadline of the watch ends.
+    inside <- newEmptyMVar
+    proceed <- newEmptyMVar
+    observations <- newIORef (0::Int)
+    let protected = withStoreConfigurationWatch store $ \_ watch _ _ -> do
+          putMVar inside ()
+          readMVar proceed
+          try @StoreFailure $ withAuthorizationRequestReadObservation watch $ \scoped ->
+            modifyIORef' observations (+1) >> count scoped "clients"
+    (observed, observedFor) <- withHeldConfiguration store $ \releaseConfiguration -> do
+      begun <- getMonotonicTimeNSec
+      withAsync protected $ \waiter -> do
+        StoreAdmissionCheck.blocked waiter
+        at begun 3
+        releaseConfiguration
+        takeMVar inside
+        withHeldStore store $ \_ -> do
+          putMVar proceed ()
+          outcome <- wait waiter
+          finished <- getMonotonicTimeNSec
+          pure (outcome, finished - begun)
+    check "the first observation of a protected read refuses when the deadline of its configuration watch ends"
+      (observed == Right (Left StoreDeadline))
+    check "that protected read waited about five seconds in total, not a fresh allowance for its observation"
+      (observedFor >= 4900000000 && observedFor < 5500000000)
+    readIORef observations >>= check "the refused observation was attempted once" . (== 1)
 
 -- Focused Store checks. Execution requires a separately authorized fresh fixture.
 terminalAdmissionChecks :: FilePath -> IO ()

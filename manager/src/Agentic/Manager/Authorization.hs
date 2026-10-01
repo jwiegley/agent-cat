@@ -95,8 +95,8 @@ data AuthorizedView = AuthorizedView !AuthorizationWatch !ViewObservation !ViewF
 -- ends. The file slot is not part of any check. A response observation also
 -- holds the checks that its owner attached with 'attachResponseCheck'.
 data ViewObservation
-  = BorrowedObservation !(IO ViewFacts)
-  | ResponseObservation !(IO ViewFacts) !(IO ViewFacts) !(IORef (Maybe (IO ()))) !(IORef (IO ()))
+  = BorrowedObservation !(CoordinationStore -> IO ViewFacts)
+  | ResponseObservation !(CoordinationStore -> IO ViewFacts) !(CoordinationStore -> IO ViewFacts) !(IORef (Maybe (IO ()))) !(IORef (IO ()))
 
 -- Process and execution-profile lifetimes are distinct from the permission view.
 -- Page bindings retain profile revisions. Event cursors retain current grants
@@ -108,7 +108,7 @@ withAuthorizedView :: CoordinationStore -> CredentialProof -> Text -> [Scope]
 withAuthorizedView store proof profile scopes action = authorizationIO "authorization view" $ do
   unless (validId profile && length (take 5 scopes) <= 4) (throwIO InvalidRequest)
   withStoreAuthorizationWatch store $ \watch ->
-    withView watch BorrowedObservation (currentViewFacts store proof profile scopes) action
+    withView watch BorrowedObservation (\request -> currentViewFacts request proof profile scopes) action
 
 -- | A response view. The representation is materialized under one reader
 -- charge and the original configuration loan, and revalidation borrows that
@@ -117,16 +117,15 @@ withAuthorizedView store proof profile scopes action = authorizationIO "authoriz
 -- file slot that its owner joined with 'attachResponseLoan'. No SQL
 -- transaction spans a write. The watch stays alive until the callback returns, as an
 -- authorization token only. Each later revalidation acquires a reader charge
--- and the configuration guard for its check alone, each within its unchanged
--- five-second allowance, so a revocation or scope change still stops the next
--- write. One such check precedes each 16 KiB write, and it contends with
--- ingestion only for its own duration. The allowances of one check are not
--- combined: the observation retries within its own allowance, and each
--- attempt can wait for a reader place, the configuration guard and the Store
--- gate, each within its own allowance. The longest wait before one write is
--- the sum of these allowances. An allowance that expires refuses the check
--- with its Store failure, which stops the response before its next write,
--- even when the status and part of the body are already sent.
+-- and the configuration guard for its check alone, so a revocation or scope
+-- change still stops the next write. One such check precedes each 16 KiB
+-- write, and it contends with ingestion only for its own duration. One check
+-- has one five-second admission deadline: the observation retries only while
+-- it lasts, and every attempt waits for a reader place, the configuration
+-- guard and the Store gate within the rest of it, as does the final
+-- acknowledgement. A deadline that ends refuses the check with its Store
+-- failure, which stops the response before its next write, even when the
+-- status and part of the body are already sent.
 withAuthorizedResponse :: CoordinationStore -> CredentialProof -> Text -> [Scope]
   -> (AuthorizedView -> IO a) -> IO a
 withAuthorizedResponse store proof profile scopes action =
@@ -134,15 +133,15 @@ withAuthorizedResponse store proof profile scopes action =
 
 withAuthorizedResponseLimits :: CoordinationStore -> CredentialProof -> Text -> [Scope]
   -> (AuthorizedView -> ConfigurationLimits -> IO a) -> IO a
-withAuthorizedResponseLimits store proof profile scopes action = do
+withAuthorizedResponseLimits store proof profile scopes action = withStoreRequest store $ \scoped -> do
   unless (validId profile && length (take 5 scopes) <= 4) (throwIO InvalidRequest)
-  runRead store (currentClient proof) >>= either throwIO (const (pure ()))
-  result <- withStoreConfigurationWatch store $ \release watch limits profiles -> do
+  runRead scoped (currentClient proof) >>= either throwIO (const (pure ()))
+  result <- withStoreConfigurationWatch scoped $ \release watch limits profiles -> do
     loans <- newIORef (Just release)
     checks <- newIORef (pure ())
-    let fresh = withStoreReader store (currentViewFacts store proof profile scopes)
+    let fresh request = withStoreReader request (currentViewFacts request proof profile scopes)
     withView watch (\borrowed -> ResponseObservation borrowed fresh loans checks)
-      (profileViewFacts store proof profile scopes profiles) $ \view -> action view limits
+      (\request -> profileViewFacts request proof profile scopes profiles) $ \view -> action view limits
   configurationLoan "authorization response" result
 
 -- | Return the materialization loans of a response view before its first
@@ -177,20 +176,23 @@ attachResponseCheck (AuthorizedView _ (ResponseObservation _ _ _ checks) _) extr
   atomicModifyIORef' checks (\held -> (held >> extra, ()))
 attachResponseCheck (AuthorizedView _ (BorrowedObservation _) _) _ = pure ()
 
-withView :: AuthorizationWatch -> (IO ViewFacts -> ViewObservation) -> IO ViewFacts -> (AuthorizedView -> IO a) -> IO a
+withView :: AuthorizationWatch -> ((CoordinationStore -> IO ViewFacts) -> ViewObservation) -> (CoordinationStore -> IO ViewFacts)
+  -> (AuthorizedView -> IO a) -> IO a
 withView watch observation observe action =
-  withViewResult watch observation ((\facts -> (facts, ())) <$> observe) (\view () -> action view)
+  withViewResult watch observation (fmap (\facts -> (facts, ())) . observe) (\view () -> action view)
 
 -- A public materialization and its authorization facts come from the same
 -- observation. Neither part can be resampled independently after acknowledgement.
 -- Both are reads, so a concurrent commit starts a fresh read of both within
--- the observation allowance.
-withViewResult :: NFData a => AuthorizationWatch -> (IO ViewFacts -> ViewObservation) -> IO (ViewFacts, a)
-  -> (AuthorizedView -> a -> IO b) -> IO b
+-- the observation allowance. This first observation is part of the request
+-- that registered the watch, so its waits share the admission deadline of
+-- that request.
+withViewResult :: NFData a => AuthorizationWatch -> ((CoordinationStore -> IO ViewFacts) -> ViewObservation)
+  -> (CoordinationStore -> IO (ViewFacts, a)) -> (AuthorizedView -> a -> IO b) -> IO b
 withViewResult watch observation observe action = do
-  observed <- withAuthorizationReadObservation watch observe
+  observed <- withAuthorizationRequestReadObservation watch observe
   (facts, value) <- maybe (throwIO Unauthenticated) pure observed
-  action (AuthorizedView watch (observation (fst <$> observe)) facts) value
+  action (AuthorizedView watch (observation (fmap fst . observe)) facts) value
 
 -- | A filtered catalogue loan and its live authorization view. One reader charge
 -- and one original configuration loan cover materialization. A response returns
@@ -208,24 +210,24 @@ withAuthorizedCatalogues store proof scopes action =
 withAuthorizedCatalogueContext :: CoordinationStore -> CredentialProof -> [Scope]
   -> (AuthorizedView -> ConfigurationLimits -> [(PublicProfile,[Scope])] -> [(Text,Discovery)] -> [(Text,FrontendInvocation)] -> IO a)
   -> IO a
-withAuthorizedCatalogueContext store proof scopes action = do
+withAuthorizedCatalogueContext store proof scopes action = withStoreRequest store $ \scoped -> do
   unless (length (take 5 scopes) <= 4) (throwIO InvalidRequest)
-  runRead store (currentClient proof) >>= either throwIO (const (pure ()))
-  result <- withStoreCatalogueContextWatch store $ \release watch limits profiles catalogues invocations -> do
+  runRead scoped (currentClient proof) >>= either throwIO (const (pure ()))
+  result <- withStoreCatalogueContextWatch scoped $ \release watch limits profiles catalogues invocations -> do
     loans <- newIORef (Just release)
     checks <- newIORef (pure ())
-    let fresh = withStoreReader store (currentCatalogueFacts store proof scopes)
-    catalogueView store proof scopes (\borrowed -> ResponseObservation borrowed fresh loans checks) (\view current visible selected ->
+    let fresh request = withStoreReader request (currentCatalogueFacts request proof scopes)
+    catalogueView proof scopes (\borrowed -> ResponseObservation borrowed fresh loans checks) (\view current visible selected ->
       action view current visible selected
         [(ident,invocation) | (ident,invocation) <- invocations, ident `elem` map (publicId . fst) visible])
       watch limits profiles catalogues
   configurationLoan "authorization catalogue-context" result
 
-catalogueView :: CoordinationStore -> CredentialProof -> [Scope] -> (IO ViewFacts -> ViewObservation)
+catalogueView :: CredentialProof -> [Scope] -> ((CoordinationStore -> IO ViewFacts) -> ViewObservation)
   -> (AuthorizedView -> ConfigurationLimits -> [(PublicProfile, [Scope])] -> [(Text, Discovery)] -> IO a)
   -> AuthorizationWatch -> ConfigurationLimits -> [PublicProfile] -> [(Text, Discovery)] -> IO a
-catalogueView store proof scopes observation action watch limits profiles catalogues =
-  withViewResult watch observation (catalogueViewFacts store proof scopes profiles) $ \view grants -> do
+catalogueView proof scopes observation action watch limits profiles catalogues =
+  withViewResult watch observation (\request -> catalogueViewFacts request proof scopes profiles) $ \view grants -> do
     let visible = [(profile, allowed) | profile <- profiles, Just allowed <- [lookup (publicId profile) grants]]
         identifiers = map fst grants
     action view limits visible [(ident, value) | (ident, value) <- catalogues, ident `elem` identifiers]
@@ -269,8 +271,8 @@ revalidateAuthorizedView (AuthorizedView watch observation bound) = authorizatio
     ResponseObservation borrowed fresh loans checks -> do
       readIORef checks >>= id
       maybe fresh (const borrowed) <$> readIORef loans
-  observed <- withAuthorizationReadObservation watch $ do
-    facts <- observe
+  observed <- withAuthorizationReadObservation watch $ \request -> do
+    facts <- observe request
     unless (facts == bound) (throwIO Unauthenticated)
   unless (observed == Just ()) (throwIO Unauthenticated)
 

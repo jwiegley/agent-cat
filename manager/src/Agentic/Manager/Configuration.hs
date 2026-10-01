@@ -15,7 +15,7 @@ import Agentic.Manager.Lease (acquireLease, duplicateLease)
 import Agentic.Manager.Profile
 import Agentic.Manager.Root (validateRootSeparation)
 import Agentic.Manager.Fault.Record (recordBusy)
-import Agentic.Manager.Store.Admission (newDeadline, releaseOnce, takeWithin)
+import Agentic.Manager.Store.Admission (Deadline, releaseOnce, takeWithin)
 import Agentic.Runtime
   ( PrivateRoot, ProcessGroup, FrontendCapabilities, FrontendInvocation (..), StateRootRole (ManagerStateRoot), assertPrivateRoot,
     privateRootPath, openPrivateRoot, openPrivateSubroot, closePrivateRoot, withPrivateDirectoryAt, readStateRootRoleAt,
@@ -140,10 +140,9 @@ releaseConfigurationStorage (InstalledConfiguration _ slot) =
 -- | A loan of the local administration namespace under its own exclusive lease.
 -- The original manager lease remains retained, but configuration is not held
 -- while serving. This creates neither another Store slot nor a database reader.
--- The guard is waited for within one five-second allowance.
-withConfigurationAdministration :: InstalledConfiguration -> (PrivateRoot -> IO a) -> IO (Either Diagnostic a)
-withConfigurationAdministration (InstalledConfiguration lock _) action = mask $ \restore -> do
-  end <- newDeadline
+-- The guard is waited for within the admission deadline of the request.
+withConfigurationAdministration :: Deadline -> InstalledConfiguration -> (PrivateRoot -> IO a) -> IO (Either Diagnostic a)
+withConfigurationAdministration end (InstalledConfiguration lock _) action = mask $ \restore -> do
   available <- takeWithin end lock
   acquired <- case available of
     Nothing -> recordBusy "configuration-administration" "configuration SupervisionUnavailable" (Just end)
@@ -165,23 +164,25 @@ withConfigurationAdministration (InstalledConfiguration lock _) action = mask $ 
           retained <- duplicateLease original
           pure (root, lease, retained)
 
--- | Internal configuration boundary. The guard is waited for within one
--- five-second allowance. Lock order is configuration, then store.
-withConfigurationSnapshot :: InstalledConfiguration -> (ConfigurationLimits -> [PublicProfile] -> IO a) -> IO (Either Diagnostic a)
-withConfigurationSnapshot installed action = withConfigurationCatalogues installed $ \limits profiles _ -> action limits profiles
+-- | Internal configuration boundary. The guard is waited for within the
+-- admission deadline of the request, which the Store owner supplies. That
+-- deadline is a fresh five-second allowance unless the request already waited
+-- for an earlier lock. Lock order is configuration, then store.
+withConfigurationSnapshot :: Deadline -> InstalledConfiguration -> (ConfigurationLimits -> [PublicProfile] -> IO a) -> IO (Either Diagnostic a)
+withConfigurationSnapshot end installed action = withConfigurationCatalogues end installed $ \limits profiles _ -> action limits profiles
 
-withConfigurationCatalogues :: InstalledConfiguration -> (ConfigurationLimits -> [PublicProfile] -> [(Text, Discovery)] -> IO a) -> IO (Either Diagnostic a)
-withConfigurationCatalogues installed action =
-  withConfigurationLoan installed $ \_ limits profiles catalogues _ -> action limits profiles catalogues
+withConfigurationCatalogues :: Deadline -> InstalledConfiguration -> (ConfigurationLimits -> [PublicProfile] -> [(Text, Discovery)] -> IO a) -> IO (Either Diagnostic a)
+withConfigurationCatalogues end installed action =
+  withConfigurationLoan end installed $ \_ limits profiles catalogues _ -> action limits profiles catalogues
 
--- | The guard is waited for within one five-second allowance. Nothing proves
--- that the original guard was not acquired within that allowance and the
--- callback was never entered. Failures after acquisition remain distinct
--- inside Just.
-tryConfigurationCatalogueContext :: InstalledConfiguration
+-- | The guard is waited for within the admission deadline of the request.
+-- Nothing proves that the original guard was not acquired within that
+-- deadline and the callback was never entered. Failures after acquisition
+-- remain distinct inside Just.
+tryConfigurationCatalogueContext :: Deadline -> InstalledConfiguration
   -> (ConfigurationLimits -> [PublicProfile] -> [(Text, Discovery)] -> [(Text, FrontendInvocation)] -> IO a)
   -> IO (Maybe (Either Diagnostic a))
-tryConfigurationCatalogueContext installed action = tryConfigurationLoan installed (const action)
+tryConfigurationCatalogueContext end installed action = tryConfigurationLoan end installed (const action)
 
 -- | The same configuration loan, with its release action. A response owner
 -- calls the release after it materializes its representation and before its
@@ -189,17 +190,16 @@ tryConfigurationCatalogueContext installed action = tryConfigurationLoan install
 -- values, but they are not current after the release, so a later check reads
 -- configuration again under a new loan. The scope end releases the guard when
 -- the callback did not.
-withConfigurationLoan :: InstalledConfiguration
+withConfigurationLoan :: Deadline -> InstalledConfiguration
   -> (IO () -> ConfigurationLimits -> [PublicProfile] -> [(Text, Discovery)] -> [(Text, FrontendInvocation)] -> IO a)
   -> IO (Either Diagnostic a)
-withConfigurationLoan installed action =
-  maybe (Left SupervisionUnavailable) id <$> tryConfigurationLoan installed action
+withConfigurationLoan end installed action =
+  maybe (Left SupervisionUnavailable) id <$> tryConfigurationLoan end installed action
 
-tryConfigurationLoan :: InstalledConfiguration
+tryConfigurationLoan :: Deadline -> InstalledConfiguration
   -> (IO () -> ConfigurationLimits -> [PublicProfile] -> [(Text, Discovery)] -> [(Text, FrontendInvocation)] -> IO a)
   -> IO (Maybe (Either Diagnostic a))
-tryConfigurationLoan (InstalledConfiguration lock _) action = mask $ \restore -> do
-  end <- newDeadline
+tryConfigurationLoan end (InstalledConfiguration lock _) action = mask $ \restore -> do
   available <- takeWithin end lock
   case available of
     Nothing -> recordBusy "configuration-guard" "configuration SupervisionUnavailable" (Just end) >> pure Nothing

@@ -119,7 +119,7 @@ recordReview limits profile request review = do
 readPreparation :: CoordinationStore -> CredentialProof -> Text -> IO (Either CommandFailure P.Preparation)
 readPreparation store proof ident = attemptIO "approval preparation-read" $ do
   unless(validId ident)(throwIO InvalidRequest)
-  result <- withStoreConfiguration store $ \_ profiles -> runRead store (preparationProjection proof profiles ident)
+  result <- withStoreRequest store $ \scoped -> withStoreConfiguration scoped $ \_ profiles -> runRead scoped (preparationProjection proof profiles ident)
   configurationLoan "approval preparation-read" result
 
 withPreparation :: CoordinationStore -> CredentialProof -> Text

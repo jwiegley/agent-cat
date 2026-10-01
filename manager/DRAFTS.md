@@ -83,8 +83,14 @@ preparations remain intact.
 ## Upload admission and publication
 
 There is one file/materialization slot per actual Store lifetime. An ordinary
-operation waits for the slot within a fresh five-second allowance, and a slot
-that stays held for the whole allowance is `StoreBusy`. Its operation retains a
+operation waits for the slot within the five-second admission deadline of its
+request, and a slot that stays held until that deadline ends is `StoreBusy`.
+A draft read, draft assembly, the frontend file check, the parent check of an
+assembly and the creation of a lineage draft are each one request. Their waits
+for the file slot, the configuration guard and the Store gate share that one
+deadline, as `manager/STORAGE.md` describes. The five-second operation bound of
+a draft operation starts after the file slot is taken and stays separate from
+the admission deadline. Its operation retains a
 Runtime private subroot and an atomic duplicate of the actual service lease.
 Lock order is file slot, configuration, then database. No database transaction
 remains open while awaiting upload chunks or performing file IO.
