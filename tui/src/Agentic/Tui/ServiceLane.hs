@@ -154,12 +154,18 @@ module Agentic.Tui.ServiceLane
     mutationNotice,
     internalFaultStatus,
     unresolvedNotice,
+    receiptReconciliation,
     faultScreen,
     shutdownNotices,
     FetchKey (..),
     Delivery (..),
     deliveryText,
     disconnected,
+    Reachability (..),
+    managerUnreachable,
+    readReachability,
+    reachabilityText,
+    shownStale,
     Follow (..),
     newFollow,
     streamFailureLimit,
@@ -1022,6 +1028,22 @@ unresolvedNotice lane = case laneMutation lane of
           else ["Internal frontend fault. No exact resend is offered."] <> faultClosing
   _ -> Nothing
 
+-- | The reason that leaves a retained attempt unresolved after a read of
+-- its receipt location reported this receipt state. The reconciliation rule
+-- of the client ('C.reconcile') decides it from the receipt alone: a receipt
+-- location makes the receipt state decisive. The reason names the receipt
+-- state and the reconciliation, for example @receipt unresolved;
+-- reconciliation uncertain@ for an approval whose dispatch a manager restart
+-- left unresolved. No reason carries a send.
+receiptReconciliation :: Attempt pending location -> C.CommandState -> Text
+receiptReconciliation attempt state =
+  "receipt " <> C.stateName state <> "; reconciliation " <> case C.reconcile uncertain (C.ObservedReceipt state) of
+    C.ReconciledEffect -> "effect observed"
+    C.ReconciledRefused -> "refused"
+    C.ReconciledUncertain _ -> "uncertain"
+  where
+    uncertain = C.Uncertain () () Nothing (() <$ attemptLocation attempt)
+
 -- | The notice shown after an internal fault. An unresolved attempt or an
 -- accepted intent remains visible with its original operation and URI.
 faultScreen :: Lane pending location -> Text
@@ -1095,6 +1117,54 @@ disconnected :: UTCTime -> C.ClientFailure -> Delivery -> Delivery
 disconnected now failure current = case current of
   DeliveryDisconnected since _ -> DeliveryDisconnected since (refusalCode failure)
   _ -> DeliveryDisconnected now (refusalCode failure)
+
+-- | Whether the manager answers the reads of the session. 'Unreachable'
+-- holds the UTC time of the first failed read since a read last reached the
+-- manager.
+data Reachability = Reachable | Unreachable !UTCTime
+  deriving (Eq, Show)
+
+-- | Whether a declared failure of a read shows that the manager does not
+-- answer: the transport failed, or the manager refused with 503
+-- @storage-unavailable@, as it does while it starts, stops or cannot reach
+-- its store.
+managerUnreachable :: C.ClientFailure -> Bool
+managerUnreachable failure = case failure of
+  C.TransportUnavailable -> True
+  C.Refused 503 "storage-unavailable" -> True
+  _ -> False
+
+-- | The reachability after one completed read at this time. A delivered
+-- read, and any other manager refusal, reach the manager. A failure that
+-- 'managerUnreachable' selects makes the manager unreachable and keeps the
+-- time of the first such failure. Every other failure, for example an
+-- invalid response, changes nothing.
+readReachability :: UTCTime -> Either C.ClientFailure () -> Reachability -> Reachability
+readReachability now outcome current = case outcome of
+  Right () -> Reachable
+  Left failure
+    | managerUnreachable failure -> case current of
+        Unreachable since -> Unreachable since
+        Reachable -> Unreachable now
+  Left (C.Refused _ _) -> Reachable
+  Left _ -> current
+
+-- | The shell text of an unreachable manager, with the UTC time of day of
+-- the first failed read.
+reachabilityText :: Reachability -> Maybe Text
+reachabilityText reachability = case reachability of
+  Reachable -> Nothing
+  Unreachable since -> Just ("manager unreachable since " <> T.pack (formatTime defaultTimeLocale "%H:%M:%SZ" since))
+
+-- | The stale mark that the shell shows for an installed observation: the
+-- refusal code of its own latest read, or else @manager unreachable@ while
+-- the manager is unreachable. Every retained observation is then shown as
+-- stale, also one whose view has not been read since the first failure.
+shownStale :: Reachability -> Maybe Text -> Maybe Text
+shownStale reachability stale = case (stale, reachability) of
+  (Just code, _) -> Just code
+  (Nothing, Unreachable _) -> Just "manager unreachable"
+  (Nothing, Reachable) -> Nothing
 
 -- | The transport state of the event worker: the last complete event
 -- identifier, which every reconnection and every poll sends, the backoff of

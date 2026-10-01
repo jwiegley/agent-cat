@@ -129,7 +129,10 @@ data ServiceEvent
   = ServiceProfilesReady !Int !(Lane.CallOutcome [Service.Profile])
     -- | The workflow catalogue of a profile, and the request of that profile
     -- that opens after the catalogue loads, when the overview asked for it.
-  | ServiceWorkflowsReady !Int !Service.Profile !(Maybe Manager.DraftView) !(Lane.CallOutcome [Service.Workflow])
+    -- | The current profile and its workflow catalogue, and the request of
+    -- that profile that opens after the catalogue loads, when the overview
+    -- or a lineage request asked for it.
+  | ServiceWorkflowsReady !Int !(Maybe Manager.DraftView) !(Lane.CallOutcome (Service.Profile, [Service.Workflow]))
   | ServicePrepared !Int !(Lane.CallOutcome Manager.PendingCommand)
   | ServiceSent !Int !(Lane.CallOutcome Manager.ClientResponse)
   | ServiceRequestReady !Int !(Lane.CallOutcome (Service.RequestRead Manager.Observed))
@@ -305,6 +308,9 @@ data AppState = AppState
     stateServiceSink :: !LiveSink,
     -- | The delivery state that the latest wakeup read from the live sink.
     stateServiceDelivery :: !Lane.Delivery,
+    -- | Whether the manager answers the reads of the session, as
+    -- 'Lane.readReachability' decides it from each completed read.
+    stateServiceReach :: !Lane.Reachability,
     -- | The fetches of live delivery that wait for the read lane, and the
     -- one that holds the read ticket.
     stateServiceFetches :: !Lane.Fetches,
@@ -470,6 +476,7 @@ runAppWith backend = mask $ \restore -> do
             stateServiceCaptures = Map.empty,
             stateServiceSink = sink,
             stateServiceDelivery = Lane.DeliveryIdle,
+            stateServiceReach = Lane.Reachable,
             stateServiceFetches = Lane.noFetches,
             stateServiceSafetyAt = Nothing,
             stateServiceOverviewRetry = Nothing,
@@ -711,9 +718,12 @@ serviceHistoryRows = maybe [] Service.historyRows . Lane.installedRead . stateSe
 
 -- | Load the workflow catalogue of a profile, and then open the given
 -- request when one is given.
+-- | Read the current profile and its workflow catalogue
+-- ('Service.loadProfileWorkflows'), so a profile revision that a manager
+-- restart published binds the catalogue.
 startServiceWorkflows :: Manager.Client -> Service.Profile -> Maybe Manager.DraftView -> EventM Name AppState ()
 startServiceWorkflows client profile opening = startServiceRead Lane.PageSetRead "loading manager catalogue" $ \ticket ->
-  ServiceWorkflowsReady ticket profile opening <$> Lane.serviceCall (Service.loadWorkflows client profile)
+  ServiceWorkflowsReady ticket opening <$> Lane.serviceCall (Service.loadProfileWorkflows client (Service.profileId profile))
 
 -- | Open the selected row of the manager overview with
 -- 'Service.overviewOpen'. Only an idle command lane opens a row, so a
@@ -1425,8 +1435,13 @@ applyServiceObservation client (Service.RequestRead requestRead preparation rece
             stateServiceApprovalStatus = Just (Service.approvalStatus mutation receiptResult Nothing),
             stateModel = (stateModel state) {modelScreen = shownScreen state (ServiceRequestScreen request),
               modelStatus = "run associated; approval receipt remains distinct from runtime outcome"}}
-    (Just (mutation,command,location), _) | Just reason <- Service.receiptSettlement mutation receiptResult ->
-      settleService state (Lane.Attempt mutation command location) reason
+    -- A receipt that reports the command refused or unresolved leaves the
+    -- retained attempt unresolved, with the reconciliation of its receipt
+    -- state, for example after a manager restart. Only the explicit exact
+    -- resend can send it again.
+    (Just (mutation,command,location), _) | Just _ <- Service.receiptSettlement mutation receiptResult, Just received <- fresh ->
+      let attempt = Lane.Attempt mutation command location
+       in settleService state attempt (Lane.receiptReconciliation attempt (Manager.receiptState received))
     _ -> pure ()
   current <- get
   let run = (\components -> let observed = Service.runReadSnapshot components in (Service.runIdentity observed, Service.runSnapshot observed))
@@ -1502,9 +1517,52 @@ serviceReviewCheck state displayed tag =
     (stateServiceWorkflow state) (serviceRequest state) (servicePreparation state) (modelInputs (stateModel state))
     (stateServiceCaptures state) displayed tag
 
--- | Handle one worker result of the active session.
+-- | Handle one worker result of the active session. The completion of the
+-- read that holds the read ticket also decides whether the manager answers
+-- ('Lane.readReachability'). When a read reaches the manager again after it
+-- was unreachable, every read of live delivery is invalidated, so each
+-- retained observation is read again when its view is shown.
 handleServiceResult :: Manager.Client -> ServiceEvent -> EventM Name AppState ()
 handleServiceResult client serviceEvent = do
+  before <- get
+  let owned = fmap Lane.ticketNumber (Lane.laneReadTicket (stateServiceLane before)) == Just (serviceEventTicket serviceEvent)
+  handleServiceResultFetch client serviceEvent
+  forM_ (if owned then serviceReadOutcome serviceEvent else Nothing) $ \outcome -> do
+    now <- liftIO getCurrentTime
+    current <- get
+    let reach = Lane.readReachability now outcome (stateServiceReach current)
+    put current {stateServiceReach = reach}
+    when (stateServiceReach current /= Lane.Reachable && reach == Lane.Reachable) $
+      invalidateServiceFetches [minBound .. maxBound]
+
+-- | The outcome of a completed read for 'Lane.readReachability': a declared
+-- failure, or a delivered value. A preparation, a send and an internal fault
+-- are not reads that decide it.
+serviceReadOutcome :: ServiceEvent -> Maybe (Either Manager.ClientFailure ())
+serviceReadOutcome serviceEvent = case serviceEvent of
+  ServiceProfilesReady _ result -> declared result
+  ServiceWorkflowsReady _ _ result -> declared result
+  ServicePrepared {} -> Nothing
+  ServiceSent {} -> Nothing
+  ServiceRequestReady _ result -> declared result
+  ServiceOverviewReady _ _ _ result -> declared result
+  ServiceDecisionsReady _ _ result -> declared result
+  ServiceHistoryReady _ _ result -> declared result
+  ServiceHistoryDetailReady _ _ _ result -> declared result
+  ServiceResultReady _ _ result -> declared result
+  ServiceExportReady _ result -> declared result
+  ServiceLineageMenuReady _ _ _ result -> declared result
+  ServiceLineageReady _ result -> declared result
+  where
+    declared :: Lane.CallOutcome a -> Maybe (Either Manager.ClientFailure ())
+    declared result = case result of
+      Lane.Declared outcome -> Just (() <$ outcome)
+      Lane.InternalFault -> Nothing
+
+-- | Complete the fetch of live delivery that the result performs, if any,
+-- and handle the result.
+handleServiceResultFetch :: Manager.Client -> ServiceEvent -> EventM Name AppState ()
+handleServiceResultFetch client serviceEvent = do
   before <- get
   -- The completion of a read that performs a fetch of live delivery
   -- completes that fetch first. A result that the coordinator discards only
@@ -1526,7 +1584,7 @@ handleServiceResult client serviceEvent = do
 serviceEventTicket :: ServiceEvent -> Int
 serviceEventTicket serviceEvent = case serviceEvent of
   ServiceProfilesReady ticket _ -> ticket
-  ServiceWorkflowsReady ticket _ _ _ -> ticket
+  ServiceWorkflowsReady ticket _ _ -> ticket
   ServicePrepared ticket _ -> ticket
   ServiceSent ticket _ -> ticket
   ServiceRequestReady ticket _ -> ticket
@@ -1648,12 +1706,15 @@ handleServiceResultCore client serviceEvent = do
           in put (if explicit then next {stateModel = (stateModel next) {modelStatus = "manager run detail read"}} else next)
     -- A catalogue that the overview loaded for a request opens that request
     -- when it lists the workflow revision of the request.
-    ServiceWorkflowsReady ticket profile opening result -> case Lane.readStep ticket result (stateServiceLane state) of
+    -- The current profile replaces the earlier observation of that profile.
+    ServiceWorkflowsReady ticket opening result -> case Lane.readStep ticket result (stateServiceLane state) of
       (Lane.ReadStale,_) -> pure ()
       (Lane.ReadFaulted,lane) -> faultService state lane
       (Lane.ReadRefused problem,lane) -> put (failed lane problem)
-      (Lane.ReadDelivered workflows,lane) -> do
+      (Lane.ReadDelivered (profile, workflows),lane) -> do
         put state {stateServiceLane = lane, stateServiceWorkflows = workflows,
+          stateServiceProfiles = map (\listed -> if Service.profileId listed == Service.profileId profile then profile else listed)
+            (stateServiceProfiles state),
           stateModel = (initialModel (map Service.workflowDisplay workflows) [] (Left "manager owns routing"))
             {modelStatus = "manager catalogue: " <> Service.profileId profile}, statePaneFocus = PrimaryPane}
         forM_ opening $ \request -> case find (`Service.requestMatches` request) workflows of
@@ -2307,6 +2368,7 @@ clearServiceSession state =
       stateServiceDrafts = Lane.noDrafts,
       stateServiceCaptures = Map.empty,
       stateServiceDelivery = Lane.DeliveryIdle,
+      stateServiceReach = Lane.Reachable,
       stateServiceFetches = Lane.noFetches,
       stateServiceSafetyAt = Nothing,
       stateServiceOverviewRetry = Nothing,
@@ -2403,6 +2465,7 @@ toPresentation state =
       presentationService = case stateBackend state of ServiceBackend {} -> True; LocalBackend {} -> False,
       presentationServiceEndpoint = case stateBackend state of ServiceBackend _ endpoints -> Lane.activeIdentity endpoints; LocalBackend {} -> Nothing,
       presentationServiceDelivery = stateServiceDelivery state,
+      presentationServiceReach = stateServiceReach state,
       presentationServiceEndpoints = case stateBackend state of ServiceBackend _ endpoints -> Just endpoints; LocalBackend {} -> Nothing,
       presentationServiceMutation = Lane.mutationNotice (stateServiceLane state),
       presentationServiceResendConfirm = serviceResendConfirm state,
@@ -2414,18 +2477,18 @@ toPresentation state =
       presentationServiceKeyOutcome = stateServiceKeyOutcome state,
       presentationServiceOverview = let installed = stateServiceOverview state in
         OverviewView (serviceOverviewRows state) (Lane.focusedIndex (map Service.overviewRowKey (serviceOverviewRows state)) (stateServiceOverviewFocus state))
-          (Service.overviewStatus (Lane.installedStale installed) (Service.overviewRows <$> Lane.installedRead installed)),
+          (Service.overviewStatus (shownStale installed) (Service.overviewRows <$> Lane.installedRead installed)),
       presentationServiceDecisions = let installed = stateServiceDecisions state in
         OverviewView (serviceDecisionRows state) (Lane.focusedIndex (map Service.overviewRowKey (serviceDecisionRows state)) (stateServiceDecisionsFocus state))
-          (Service.decisionsStatus (Lane.installedStale installed) (Service.decisionRows <$> Lane.installedRead installed)),
+          (Service.decisionsStatus (shownStale installed) (Service.decisionRows <$> Lane.installedRead installed)),
       presentationServiceHistory = let installed = stateServiceHistory state in
         OverviewView (serviceHistoryRows state) (Lane.focusedIndex (map Service.overviewRowKey (serviceHistoryRows state)) (stateServiceHistoryFocus state))
-          (Service.historyStatus (Lane.installedStale installed) (Lane.installedRead installed)),
+          (Service.historyStatus (shownStale installed) (Lane.installedRead installed)),
       presentationServiceHistoryDetail = case modelScreen (stateModel state) of
         ServiceHistoryRunScreen run ->
           let installed = stateServiceHistoryDetail state
               detail = mfilter ((== run) . Service.historyDetailRun) (Lane.installedRead installed)
-          in [case (Lane.installedStale installed, detail) of
+          in [case (shownStale installed, detail) of
                 (Nothing, Nothing) -> "Run detail: reading run " <> run
                 (Nothing, Just _) -> "Run detail: current"
                 (Just code, Just _) -> "Run detail: stale (" <> code <> "); the last complete detail is retained"
@@ -2437,7 +2500,7 @@ toPresentation state =
         _ -> [],
       presentationServiceObservation = let installed = stateServiceObservation state in
         Service.observationLines (Lane.refreshPaused (stateNow state) (stateServiceLane state) (stateServiceKeyOutcome state))
-          (Lane.installedStale installed) (isJust (Lane.installedRead installed)) (serviceRun state),
+          (shownStale installed) (isJust (Lane.installedRead installed)) (serviceRun state),
       presentationServiceRun = serviceRun state,
       presentationServiceRecoveryOffers = case (serviceHead state, serviceRunRead state) of
         (Just (Service.RecoveryHead view _ _), Just (Service.RunRead _ (_,control) _)) ->
@@ -2506,6 +2569,11 @@ toPresentation state =
       presentationRunRealization = stateRunRealization state,
       presentationSpinner = spinnerFrame (stateNow state)
     }
+  where
+    -- While the manager is unreachable, every retained observation is shown
+    -- as stale.
+    shownStale :: Lane.Installed a -> Maybe Text
+    shownStale = Lane.shownStale (stateServiceReach state) . Lane.installedStale
 
 currentEditor :: AppState -> Edit.Editor Text Name
 currentEditor state = case activeLayer state of

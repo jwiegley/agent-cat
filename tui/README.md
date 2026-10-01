@@ -639,6 +639,35 @@ live delivery keeps the status line, and the overview line shows the refusal
 code. Closing the client ends the worker, and an internal
 fault of the worker stops the stream.
 
+`Agentic.Tui.ServiceLane.readReachability` decides from each completed read
+whether the manager answers. A read that fails with `TransportUnavailable`,
+or that the manager refuses with 503 `storage-unavailable`
+(`managerUnreachable`), makes the manager unreachable, and the time of the
+first such failure stays until a read reaches the manager again. Any other
+manager refusal also reaches the manager. While the manager is unreachable,
+the header row shows `manager unreachable since HH:MM:SSZ` in place of the
+delivery state, and the screen context gives way to it. Every retained
+observation is shown as stale (`shownStale`), with the refusal code of its own
+latest read or else `manager unreachable`, so the live monitor keeps the
+question of a held run and its last observation. The frontend sends no
+command by itself and shows no run as cancelled or completed because of the
+failure. The first read that reaches the manager again ends the state and
+invalidates every read of live delivery, so each view is read again when it
+is shown. The event worker reconnects as described above. After a manager
+restart, the live monitor shows a run of the earlier lifetime as the manager
+reports it: the runtime line names every supervision other than `owned` after
+the runtime status of the snapshot, for example `Runtime: Running;
+supervision lost`. A restart publishes new profile revisions, so each
+workflow catalogue read first reads the current profile
+(`Agentic.Tui.Service.loadProfileWorkflows`), and a request that the earlier
+lifetime queued opens from the overview. The tui-failures mode of
+`manager/test/service_http.py` kills the manager with SIGKILL while the TUI
+shows a held run and a second request waits for the one execution
+reservation, starts a new lifetime on the same root, releases the quarantined
+reservation through `check-store`, `check-quarantine` and
+`release-quarantine`, and approves the queued request in the TUI, whose run
+then completes in the live monitor.
+
 A key whose operation needs a scope that the capabilities do not list starts
 nothing and shows the numbered key outcome `OPERATION did not start: this
 credential lacks SCOPE.` before any other admission is decided, so it never
@@ -674,7 +703,14 @@ paused instead of `Observation: current`.
 Every command is sent once. The lane retains the original pending command and
 receipt location. An uncertain send is never repeated automatically. When the
 manager offers an exact resend, `x` opens a confirmation and `y` sends the
-retained command unchanged. A 412 `stale-revision` refusal of a send is
+retained command unchanged. When the receipt read of a retained command
+reports `refused` or `unresolved`, for example for an approval or an answer
+whose dispatch a manager restart left unresolved, the lane keeps the original
+pending command and receipt location, and the notice states the receipt state
+and the reconciliation that `Agentic.Manager.Client.reconcile` gives
+(`Agentic.Tui.ServiceLane.receiptReconciliation`), for example `Outcome
+unresolved: receipt unresolved; reconciliation uncertain`. Only `x` and `y`
+send it again. A 412 `stale-revision` refusal of a send is
 definite, because the manager recognizes a matching retry of a durable
 command before it evaluates the precondition. The lane becomes idle, retains
 nothing to resend, and reads the selection again
@@ -787,7 +823,7 @@ the answer conversion against the `resources` section of
 `test/manager_client_vectors.json`, which [the protocol
 description](../doc/api/README.md#pages-and-live-delivery) describes.
 
-Service mode does not support reconnection of the session after a manager
-restart or a credential revocation, or acceptance at 40x12 and 80x24. The
+Service mode does not support reconnection of the session after a credential
+revocation, or acceptance at 40x12 and 80x24. The
 [manual](../doc/agent-cat.texi) entry for `--service` states the complete key
 behavior. Service mode is not an accepted milestone.

@@ -3587,6 +3587,25 @@ again after a delay of one second that doubles up to thirty seconds, until an
 overview is installed.  A switch to another
 endpoint stops the stream of the earlier session.
 
+When a read fails because the transport fails, or because the manager refuses
+it with status 503 and the code @code{storage-unavailable}, the header row
+shows @samp{manager unreachable since @var{time}} in place of the delivery
+state.  @var{time} is the UTC time of the first such failure.  The frontend
+keeps every last observation and shows it as stale, also an observation whose
+view it has not read since that failure.  The pending decisions stay on the
+screen.  The frontend sends no command by itself, and it shows no run as
+cancelled or completed because of the failure.  The first read that reaches
+the manager again ends the state, and every view is then read again when it is
+shown.  The event stream reconnects from the identifier of its last complete
+event, or reads a new overview after a 410 refusal, as described above.  After
+a manager restart, the live monitor shows a run of the earlier lifetime as the
+manager reports it, with its lost supervision after the runtime status of its
+snapshot, for example @samp{Runtime: Running; supervision lost}.  The runtime
+line names every supervision other than @code{owned} in the same way.  A
+restart publishes new profile revisions, so the frontend reads the current
+profile before each workflow catalogue, and a request that the earlier
+lifetime queued opens from the overview.
+
 A key whose operation needs a credential scope that the capabilities do not
 list starts nothing.  It shows the numbered key outcome
 @samp{@var{operation} did not start: this credential lacks @var{scope}.} before
@@ -3652,7 +3671,13 @@ When the effect of a send is uncertain, the frontend states that it made no
 automatic resend.  If the manager offers an exact resend, @kbd{x} opens a
 confirmation, @kbd{y} sends the retained command again unchanged, and @kbd{n}
 or @key{ESC} closes the confirmation without a send.  The frontend never repeats
-an uncertain send without that confirmation.
+an uncertain send without that confirmation.  When a read of the receipt
+location reports the command @code{refused} or @code{unresolved}, for example
+an approval or an answer whose dispatch a manager restart left unresolved, the
+frontend keeps the retained command and its receipt location.  The notice
+then states the receipt state and the reconciliation rule of the client, for
+example @samp{Outcome unresolved: receipt unresolved; reconciliation
+uncertain}, and only @kbd{x} and @kbd{y} can send the command again.
 
 All reads of the manager pass through one single-flight observation lane.  No
 read starts while another read is in flight.  The frontend reads the selected
@@ -3843,8 +3868,7 @@ the observation line states that automatic refresh is paused instead of
 A declared client failure keeps its declared meaning, and the internal-fault
 rules above apply to every step of the journey.
 
-Service mode does not support these features.  Except
-for its event stream, it does not reconnect after a manager restart or a
+Service mode does not support these features.  It does not reconnect after a
 credential revocation.  It has no accepted layout at 40
 columns by 12 rows or at 80 columns by 24 rows.  Service mode is not an
 accepted milestone, and it closes no workflow-manager package or gate.

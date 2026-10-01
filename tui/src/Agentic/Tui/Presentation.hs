@@ -57,7 +57,8 @@ import Agentic.Tui.RunModel
 import Agentic.Tui.Save (SaveRefusal (..), Saved (..))
 import Agentic.Tui.Types
 import qualified Agentic.Tui.Service as Service
-import Agentic.Tui.ServiceLane (Delivery (..), EndpointSlot (..), EndpointState (..), Endpoints (..), KeyOutcome, deliveryText, internalFaultStatus, keyOutcomeLine)
+import Agentic.Tui.ServiceLane (Delivery (..), EndpointSlot (..), EndpointState (..), Endpoints (..), KeyOutcome, Reachability (..), deliveryText, internalFaultStatus, keyOutcomeLine,
+  reachabilityText)
 import qualified Agentic.Manager.Client as Manager
 import Brick
 import Brick.Widgets.Border (borderWithLabel, hBorder, hBorderWithLabel, vBorder)
@@ -136,6 +137,10 @@ data Presentation = Presentation
     -- | The delivery state of the event stream of the service session, which
     -- the header row of the screen context shows above the identity row.
     presentationServiceDelivery :: !Delivery,
+    -- | Whether the manager answers the reads of the service session. While
+    -- it does not, the header row shows @manager unreachable since T@ in
+    -- place of the delivery state.
+    presentationServiceReach :: !Reachability,
     -- | The client profiles of the service frontend, their connection
     -- states and identities, which the Endpoints view lists.
     presentationServiceEndpoints :: !(Maybe Endpoints),
@@ -266,6 +271,7 @@ emptyPresentation model =
       presentationService = False,
       presentationServiceEndpoint = Nothing,
       presentationServiceDelivery = DeliveryIdle,
+      presentationServiceReach = Reachable,
       presentationServiceEndpoints = Nothing,
       presentationServiceMutation = Nothing,
       presentationServiceResendConfirm = False,
@@ -341,9 +347,15 @@ layout presentation width height
     mainRows = shellMainRows identity width height
     identityRows = [bar width (muted (displayText (oneLine width (" " <> endpointLine endpoint)))) | Just endpoint <- [presentationServiceEndpoint presentation]]
     -- The header row of the screen context. Above the identity row it also
-    -- shows the delivery state of the event stream at its right end.
-    contextRow = bar width (hBox ([padLeft (Pad 1) (headerContext presentation)]
-      <> [padLeft Max (muted (displayText (deliveryText (presentationServiceDelivery presentation) <> " "))) | identity]))
+    -- shows the delivery state of the event stream at its right end, or the
+    -- time since when the manager is unreachable. The unreachable state is
+    -- shown complete, and the screen context gives way to it.
+    unreachable = reachabilityText (presentationServiceReach presentation)
+    contextWidth = case unreachable of
+      Just text | identity -> max 0 (width - T.length text - 2)
+      _ -> width
+    contextRow = bar width (hBox ([hLimit contextWidth (padLeft (Pad 1) (headerContext presentation))]
+      <> [padLeft Max (muted (displayText (fromMaybe (deliveryText (presentationServiceDelivery presentation)) unreachable <> " "))) | identity]))
     headerWidgets = case headerRows of
       0 -> []
       1 -> [bar width (hBox [withAttr (attrName "title") (displayText "agent-cat"), displayText " / ", headerContext presentation])]

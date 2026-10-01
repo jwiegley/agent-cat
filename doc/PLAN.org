@@ -13476,6 +13476,31 @@ deep-review + validated (both medium). Parse.lean:447-451 reads the two idents w
 ]
 #+end_src
 
+* TODO [#D] Resolve the non-blocking fess findings of subtask PC29    :review:
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-w8t0
+:LABELS:   ["review","workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-01 Thu 06:59]
+:MODIFIED: [2026-10-01 Thu 06:59]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess audit fess/pc-PC29-r1.md (2026-10-01) on subtask PC29 (WM-034 manager loss and restart in the TUI).
+
+1. (medium) tui/src/Agentic/Tui/App.hs near lines 1442-1444 and ServiceLane.hs receiptReconciliation: a receipt that reports refused gives ReconciledRefused under C.reconcile (manager/src/Agentic/Manager/Client/Refresh.hs near line 152), which PC12 treats as definite. The lane still settles the attempt as uncertain with the notice 'Outcome unresolved: receipt refused; reconciliation refused' and keeps x EXACT RESEND offered. No test covers the refused branch. Fix: settle a ReconciledRefused receipt as definite (idle lane, no resend), or change the notice so that it does not claim 'unresolved'. Add a model test for the refused branch.
+2. (low) tui/src/Agentic/Tui/App.hs handleServiceResult and serviceReadOutcome: only reads that hold the read ticket decide Reachability, and failures of the event worker do not feed it. A screen that starts no timer read (the profile browser, or a workflow browser with no selection) keeps showing 'delivery disconnected' and never shows 'manager unreachable since T'. Only the live-monitor path was exercised. Fix: check a SIGKILL while the workflow browser is shown; if needed, start a read when the stream disconnects, or let a TransportUnavailable refusal of the stream feed the reachability.
+3. (low) tui/test/ServiceTests.hs managerLossTests: the model tests cover only pure ServiceLane and Service functions. The owned-ticket rule, the invalidation of every fetch on recovery and the replacement of the profile in ServiceWorkflowsReady have no model test; only the end-to-end fixture covers them. The check 'held run stays installed and stale' is close to tautological. Fix: add an App-level or state-transition test for reachable to unreachable and back, and for the invalidation.
+4. (low) tui/src/Agentic/Tui/App.hs near lines 129-130 and 719-720: stale Haddock comments describe the old ServiceWorkflowsReady payload and the old startServiceWorkflows behavior above the new comments. Fix: delete the two old comment blocks.
+5. (low) tui/src/Agentic/Tui/App.hs near line 1442: the guard 'Just received <- fresh' is redundant because receiptSettlement returns Just only for a Right receipt, and the reason text that receiptSettlement returns is discarded. Fix: simplify the guard, or let receiptSettlement return the receipt.
+6. (low) manager/test/service_http.py tui_failure_checks step 3: after the restart the fixture requires only 'delivery (live|polling)' and does not show whether the worker resumed from its last complete event identifier or resnapshotted after a 410 (PC17 covers both paths separately). One comment in the mode was edited after the last run and checked only by a syntax parse. Fix: optionally assert the Last-Event-ID or the 410 resnapshot in the manager log or the worker trace.
+
+Implementer limitations also recorded: an identity row (and so the unreachable text) is absent below 72x16; the pure Uncertain passed to C.reconcile uses unit placeholders for command and target; the profile-browser catalogue path after a restart was not exercised.
+
 * TODO [#D] Resolve the non-blocking fess findings of subtask PC26    :review:
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -19156,7 +19181,7 @@ to an unapproved local launch.
 :LABELS:   ["p7","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-01 Thu 06:28]
+:MODIFIED: [2026-10-01 Thu 06:59]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-034
 :SOURCE_REPO: agent-cat
@@ -19368,6 +19393,13 @@ Local-mode behavior remains intact without a duplicated service runtime model.
     "author": "johnw",
     "text": "Subtask PC28 (2026-10-01): the service TUI offers lineage from a run. l on the live monitor or on the history detail of a managed run reads the first page of /v1/runs/{id}/lineage-requests and opens a lineage menu with restart (r), resume (s) and fork (f) from its eligible list, and shows the page refusal when the list is empty. Fork edits are drop or replace for each completed or reused occurrence; a replacement answer is typed with personAnswerValue by occurrence code, and verdict and structured replacements are JSON text checked natively. The Lineage mutation carries the strong ETag of the first collection page as If-Match. An ineligible operation is refused locally before any send (model test, empty and partial eligible lists). The TUI follows the command receipt to the child request, checks its parent, operation and profile, and opens the child by phase; the review shows the parent run, operation and edits, and the child goes through the ordinary approval. A 412 is shown on the lineage line and nothing is resent. tui-history now restarts a completed run from the history detail and approves the child run to success, and forks with one replace edit that the child review shows with its SHA-256. Resume is proven in the model test only. Evidence: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/PC/PC28 (Werror build, tui-model-test N8, tui-history N8, Phase A journey N8, make -C doc check, all exit 0). Fess: fess/pc-PC28-r1.md, not blocking; findings filed as acat-23gh.\n",
     "created_at": "2026-10-01T13:28:03Z"
+  },
+  {
+    "id": 504,
+    "issue_id": "acat-wm-034-3vqz",
+    "author": "johnw",
+    "text": "Subtask PC29 (2026-10-01): the service TUI handles a manager loss and restart. A read that fails with TransportUnavailable or 503 storage-unavailable makes the header show 'manager unreachable since HH:MM:SSZ' in place of the delivery state; every retained observation is marked stale, pending decisions stay visible, no cancellation is invented and no mutation is sent. A read that reaches the manager again restores reachability and invalidates every live-delivery read, so each view is read again and the PC16 worker reconnects without a key press. A run of the earlier lifetime shows as the manager reports it, for example 'Runtime: Running; supervision lost', never as completed. An uncertain command across a restart keeps its retained pending command and receipt location, shows the PC12 reconciliation state from its receipt (for example 'receipt unresolved; reconciliation uncertain'), refuses new mutations, and offers only the explicit exact resend (x and y) (model test managerLossTests). The catalogue load now reads the current profile first, which fixes the stale cached profile after a restart publishes new profile revisions. The new service_http.py mode tui-failures (executionReservations 1) holds a run open in the TUI with a second request queued, SIGKILLs the manager, requires the unreachable state, starts a new lifetime on the same root, requires the reconnected state and the run shown as lost, releases the quarantined reservation through check-store, check-quarantine and release-quarantine, and requires that the queued request reaches review and, after the TUI approval, completes visibly. Evidence: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/PC/PC29 (Werror build, tui-model-test N8, tui-failures N8, Phase A journey N8, make -C doc check, all exit 0). Fess: fess/pc-PC29-r1.md, not blocking; findings filed as acat-w8t0.\n",
+    "created_at": "2026-10-01T13:59:12Z"
   }
 ]
 #+end_src

@@ -178,6 +178,7 @@ serviceTests render = do
   lineageTests render selectedWorkflowRow request preparation (metadata,items)
   draftTests profile request0
   liveDeliveryTests render profile
+  managerLossTests render profile row snapshot receiptValue
   where
     profileValue = object ["version" .= (1 :: Int), "id" .= ("profile_main" :: T.Text),
       "revision" .= ("profile_rev_4" :: T.Text), "workspaceLabel" .= ("Café 雪 λ" :: T.Text),
@@ -1322,15 +1323,16 @@ compositeTests render profile row request0 preparation snapshot absentRuntime (m
   let absentLines = S.observationLines False Nothing True (Just absentRuntime)
   checks
     [ ("a null runtime yields no status", S.runtimeStatus absentRuntime == Nothing),
-      ("a null runtime is shown as not yet observed, not as a status", absentLines == ["Observation: current", "Runtime: not yet observed"]),
-      ("a published runtime status is shown", S.observationLines False Nothing True (Just snapshot) == ["Observation: current", "Runtime: Running"]),
+      ("a null runtime is shown as not yet observed, not as a status", absentLines == ["Observation: current", "Runtime: not yet observed; supervision lost"]),
+      ("a published runtime status is shown with the supervision of the fixture run, which is lost",
+        S.observationLines False Nothing True (Just snapshot) == ["Observation: current", "Runtime: Running; supervision lost"]),
       ("a stale mark names its refusal code and the retained observation",
         S.observationLines False (Just "503 storage-unavailable") True Nothing == ["Observation: stale (503 storage-unavailable); the last complete observation is retained"]),
       ("a refusal without an installed observation claims no retained observation",
         S.observationLines False (Just "503 storage-unavailable") False Nothing == ["Observation: refused (503 storage-unavailable); no complete observation is installed"]),
       ("no observation lines precede the first read", null (S.observationLines False Nothing False Nothing)),
       ("a paused refresh replaces the current-observation line and keeps the runtime line",
-        S.observationLines True Nothing True (Just snapshot) == ["Observation: automatic refresh paused after a deferred key", "Runtime: Running"]),
+        S.observationLines True Nothing True (Just snapshot) == ["Observation: automatic refresh paused after a deferred key", "Runtime: Running; supervision lost"]),
       ("a paused refresh does not hide a stale observation",
         S.observationLines True (Just "503 storage-unavailable") True Nothing == ["Observation: stale (503 storage-unavailable); the last complete observation is retained"]),
       ("a refusal code carries the status and problem code", L.refusalCode (C.Refused 429 "storage-quota") == "429 storage-quota")
@@ -2817,6 +2819,104 @@ approvalTests render profile row request preparation expiry = do
   check ("the longest notice does not clip the review at the smallest admissible height " <> show smallest)
     (all (`T.isInfixOf` tight) (concatMap (wrapDisplayLines 80) (serviceReviewRows preparation tag))
       && noticeShown (100,smallest) tight (A.KeyNotice maxBound longest))
+
+-- | Manager loss and restart: the reachability of the manager that each
+-- completed read decides, the unreachable state in the shell header, the
+-- stale mark of every retained observation while the manager is
+-- unreachable, the supervision of a run of an earlier manager lifetime, and
+-- an accepted command whose receipt a restart left unresolved.
+managerLossTests :: ((Int,Int) -> Presentation -> T.Text) -> S.Profile -> S.Workflow -> S.RunObservation -> Value -> IO ()
+managerLossTests render profile row snapshot receiptValue = do
+  now <- maybe (die "time") pure (iso8601ParseM "2026-10-01T12:00:00Z" :: Maybe UTCTime)
+  unresolvedReceipt <- either (die . show) pure (C.decodeObservation (put "state" (String "unresolved") receiptValue))
+  acceptedReceipt <- either (die . show) pure (C.decodeObservation receiptValue)
+  let at seconds = addUTCTime seconds now
+      lost1 = L.readReachability now (Left C.TransportUnavailable) L.Reachable
+      lost2 = L.readReachability (at 3) (Left (C.Refused 503 "storage-unavailable")) lost1
+      back = L.readReachability (at 9) (Right ()) lost2
+      answered = L.readReachability (at 4) (Left (C.Refused 404 "not-found")) lost1
+      invalid = L.readReachability (at 4) (Left C.InvalidResponse) lost1
+      live = S.Endpoint "127.0.0.1" 54321 "stream_A" "epoch_A" ["observe", "submit", "control"]
+      shell size reach = render size ((emptyPresentation (initialServiceModel [profile])) {presentationService = True, presentationNoColor = True,
+        presentationServiceEndpoint = Just live, presentationServiceDelivery = L.DeliveryDisconnected now "TransportUnavailable",
+        presentationServiceReach = reach})
+      -- A screen context longer than the header row gives way to the
+      -- unreachable state.
+      longContext = render (80,24) ((emptyPresentation ((initialServiceModel [profile]) {modelScreen = InputScreen 0,
+          modelWorkflow = Just ((S.workflowDisplay row) {workflowName = T.replicate 90 "w"})}))
+        {presentationService = True, presentationNoColor = True, presentationServiceEndpoint = Just live, presentationServiceReach = lost2})
+      contextRow frame = case T.lines frame of
+        _ : context : _ -> context
+        _ -> ""
+      owned = snapshot {S.runSupervision = "owned"}
+      lostRun = snapshot {S.runSupervision = "lost"}
+      -- An accepted create whose receipt the manager owes. The manager is
+      -- lost while the composite read with ticket 4 is in flight.
+      create = S.Create row
+      original = "pending-original" :: T.Text
+      location = "/v1/commands/cmd_original" :: T.Text
+      awaiting = L.Lane Nothing (L.MutationAwaiting create original location) False False :: L.Lane T.Text T.Text
+      reading = awaiting {L.laneReadTicket = Just (L.ReadTicket 4 L.PageSetRead)}
+      (lossStep, afterLoss) = L.readStep 4 (L.Declared (Left C.TransportUnavailable) :: L.CallOutcome Int) reading
+      -- After the restart, the receipt at the receipt location reports the
+      -- command unresolved, and the lane leaves the attempt unresolved.
+      attempt = L.Attempt create original (Just location)
+      reason = L.receiptReconciliation attempt (C.receiptState unresolvedReceipt)
+      settled = L.settleUncertain attempt (L.DeclaredUncertainty reason) afterLoss
+      notice = fromMaybe "" (L.unresolvedNotice settled)
+      commandFrame = render (100,30) ((emptyPresentation ((initialServiceModel [profile]) {modelScreen = ServiceCommandScreen notice}))
+        {presentationService = True, presentationNoColor = True, presentationServiceMutation = L.mutationNotice settled,
+          presentationServiceEndpoint = Just live, presentationServiceReach = back})
+  checks
+    [ ("a transport failure of a read makes the manager unreachable at its time", lost1 == L.Unreachable now),
+      ("a 503 storage-unavailable keeps the time of the first failure", lost2 == L.Unreachable now),
+      ("a delivered read reaches the manager again", back == L.Reachable),
+      ("any other manager refusal shows that the manager answers", answered == L.Reachable),
+      ("an invalid response leaves the reachability unchanged", invalid == lost1),
+      ("only a transport failure and 503 storage-unavailable show an unreachable manager",
+        map L.managerUnreachable [C.TransportUnavailable, C.Refused 503 "storage-unavailable", C.Refused 503 "draining",
+          C.Refused 401 "unauthenticated", C.InvalidResponse, C.ClientClosed] == [True, True, False, False, False, False]),
+      ("the unreachable text names the UTC time of the first failure",
+        L.reachabilityText lost2 == Just "manager unreachable since 12:00:00Z" && isNothing (L.reachabilityText back)),
+      ("the header row shows the unreachable manager in place of the delivery state",
+        "manager unreachable since 12:00:00Z" `T.isInfixOf` contextRow (shell (140,36) lost2)
+          && not ("delivery" `T.isInfixOf` contextRow (shell (140,36) lost2))
+          && "manager unreachable since 12:00:00Z" `T.isInfixOf` contextRow (shell (80,24) lost2)
+          && "manager unreachable since 12:00:00Z" `T.isInfixOf` contextRow longContext && "workflow www" `T.isInfixOf` contextRow longContext),
+      ("the header row shows the delivery state again once a read reaches the manager",
+        "delivery disconnected since 12:00:00Z (TransportUnavailable)" `T.isInfixOf` contextRow (shell (140,36) back)
+          && not ("unreachable" `T.isInfixOf` shell (140,36) back)),
+      ("while the manager is unreachable every retained observation is shown as stale",
+        L.shownStale lost1 Nothing == Just "manager unreachable" && L.shownStale lost1 (Just "TransportUnavailable") == Just "TransportUnavailable"
+          && isNothing (L.shownStale back Nothing)
+          && "Overview: stale (manager unreachable); the last complete overview is retained" `T.isPrefixOf` S.overviewStatus (L.shownStale lost1 Nothing) (Just [])
+          && "Decisions: stale (manager unreachable); the last complete heads are retained" `T.isPrefixOf` S.decisionsStatus (L.shownStale lost1 Nothing) (Just [])),
+      ("an owned run shows only its runtime status", S.observationLines False Nothing True (Just owned) == ["Observation: current", "Runtime: Running"]),
+      ("a run of an earlier manager lifetime shows its lost supervision with the runtime status of its snapshot and is not terminal",
+        S.observationLines False Nothing True (Just lostRun) == ["Observation: current", "Runtime: Running; supervision lost"]
+          && isNothing (S.runTerminal lostRun) && null (S.resultLines lostRun Nothing)),
+      ("the last observation of a held run stays installed and stale while the manager is unreachable",
+        S.observationLines False (L.shownStale lost1 (Just "TransportUnavailable")) True (Just owned)
+          == ["Observation: stale (TransportUnavailable); the last complete observation is retained", "Runtime: Running"]),
+      ("a read refused by the manager loss keeps the accepted command and its receipt location, and sends nothing",
+        case lossStep of
+          L.ReadRefused C.TransportUnavailable -> laneShape afterLoss == laneShape awaiting && not (L.resendOffered afterLoss)
+          _ -> False),
+      ("the receipt state decides the reconciliation of an attempt with a receipt location",
+        reason == "receipt unresolved; reconciliation uncertain"
+          && L.receiptReconciliation attempt (C.receiptState acceptedReceipt) == "receipt accepted; reconciliation uncertain"),
+      ("an attempt that the restart left unresolved keeps its original pending command and receipt location",
+        fmap L.attemptPending (L.resendAttempt settled) == Just original && fmap L.attemptLocation (L.resendAttempt settled) == Just (Just location)),
+      ("an unresolved attempt starts no new mutation and offers only the explicit exact resend of the original command",
+        L.mutationAdmission settled == L.KeyBusy
+          && case L.resendAdmission settled of
+            L.ResendStart retained -> L.attemptPending retained == original && L.attemptLocation retained == Just location
+            _ -> False),
+      ("the command notice names the reconciliation and offers x for the exact resend",
+        all (`T.isInfixOf` notice) ["Outcome unresolved: receipt unresolved; reconciliation uncertain", "Original create attempt retained.",
+          "x requests an exact resend"]
+          && all (`T.isInfixOf` commandFrame) ["receipt unresolved; reconciliation uncertain", "x EXACT RESEND"])
+    ]
 
 -- | Live delivery: the bounded set of invalidated resources, the routing of
 -- invalidations to the overview and the composite read, the coordination of

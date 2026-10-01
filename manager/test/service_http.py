@@ -554,11 +554,43 @@ TUI_DECISIONS = "tui-decisions"
 # Each step prints its own PASS line. It runs one manager lifetime.
 TUI_HISTORY = "tui-history"
 HISTORY_LEGACY_ENTRIES = 300
+# The tui-failures mode follows a manager loss and restart through the
+# service TUI with the mixed fixture, one profile and one execution
+# reservation. The harness runs one mixed-controls request to its person
+# question with its own credential, and the TUI opens that held run from the
+# Manager overview. The harness then enqueues a second request, which stays
+# queued with the blocking reason capacity.
+# 1. The live monitor of the held run shows its question and the current
+# observation, and the overview lists the queued request.
+# 2. The harness kills the manager with SIGKILL. Without a key press, the
+# header must show "manager unreachable since T", and the live monitor must
+# keep the question of the run and its last observation, marked stale, with
+# no terminal status.
+# 3. The harness starts a new lifetime on the same root and configuration.
+# Without a key press, the unreachable state must end, the observation must
+# become current, and the header must show the delivery state live or
+# polling. The live monitor must show the run of the earlier lifetime with
+# lost supervision and the runtime status of its snapshot, never a
+# succeeded or cancelled run. No command was added to the coordination
+# database between the kill and this step, so the TUI sent no mutation by
+# itself.
+# 4. The harness releases the quarantined reservation of the lost run with
+# check-store, check-quarantine and release-quarantine through the live
+# channel. Esc returns the TUI to the overview, which must list the queued
+# request in review without g or another refresh key. The arrow keys move the
+# focus to its row, Enter opens its exact review, and y
+# approves it. The harness answers the question and retries the recovery of
+# the new run with its own credential, and the live monitor must show the
+# runtime status Succeeded and the verified result whose SHA-256 the harness
+# download agrees with.
+# Each step prints its own PASS line. It runs two manager lifetimes.
+TUI_FAILURES = "tui-failures"
 TUI_MODES = {OVERVIEW: (["profile_1", "profile_2"], ["observe", "submit"]), INPUTS: (["profile_1"], ["observe", "submit", "control"]),
              TUI_CONTROLS: (["profile_1", "profile_steer", "profile_route"], ["observe", "submit", "control"]),
              TUI_REDIRECT: (["profile_live", "profile_live_effect", "profile_live_stale"], ["observe", "submit", "control"]),
              TUI_DECISIONS: (["profile_1", "profile_2"], ["observe", "submit", "control"]),
-             TUI_HISTORY: (["profile_1"], ["observe", "submit", "control", "export"])}
+             TUI_HISTORY: (["profile_1"], ["observe", "submit", "control", "export"]),
+             TUI_FAILURES: (["profile_1"], ["observe", "submit", "control"])}
 tui_mode = sys.argv[5] if len(sys.argv) == 6 and sys.argv[5] in TUI_MODES else None
 # The tui-controls and tui-redirect modes configure the control fixture
 # profiles.
@@ -654,8 +686,9 @@ if tui_mode == TUI_HISTORY:
 if pages_mode or tui_mode == TUI_HISTORY:
     LEGACY_ROOT.mkdir(mode=0o700)
     configuration["localRetentionRoots"] = [str(LEGACY_ROOT)]
-# The tui-overview mode also runs one request through the mixed fixture.
-if mixed or tui_mode == OVERVIEW:
+# The tui-overview and tui-failures modes also run requests through the
+# mixed fixture.
+if mixed or tui_mode in (OVERVIEW, TUI_FAILURES):
     adapters = work / "adapters"
     adapters.mkdir(mode=0o700)
     launcher = adapters / "mixed-adapter"
@@ -683,7 +716,7 @@ if tui_mode in (INPUTS, TUI_CONTROLS, TUI_REDIRECT, TUI_DECISIONS):
 # releases it with cleanup evidence. The failures-manager mode keeps one
 # profile and one execution reservation, so that a quarantined reservation
 # holds all capacity, and gives the profile its own resource key.
-if manager_failure_mode:
+if manager_failure_mode or tui_mode == TUI_FAILURES:
     configuration["limits"]["executionReservations"] = 1
     configuration["profiles"][0]["resourceKeys"] = ["fixture_one"]
 if control_profiles:
@@ -7949,6 +7982,208 @@ if manager_failure_mode:
     raise SystemExit(0)
 
 
+def tui_failure_checks():
+    """The tui-failures mode. See TUI_FAILURES for the steps."""
+    import sqlite3
+    harness = tui_fixture.harness
+
+    def save(session, name):
+        (work / ("tui-failures-" + name + ".screen.txt")).write_text(session.screen.text())
+
+    def serve(index):
+        """Start one foreground manager lifetime on the same root and
+        configuration and wait for HTTPS readiness."""
+        with (work / f"server-{index}.stdout").open("wb") as output, (work / f"server-{index}.stderr").open("wb") as errors:
+            process = subprocess.Popen([str(runner), "--manager", "serve", "--config", str(config),
+                                        "+RTS", "-N" + native, "-RTS"], stdout=output, stderr=errors)
+        wait_ready(process)
+        return process
+
+    def command_ids():
+        """The identifiers of every command row of the coordination database."""
+        found = sorted((work / "manager").rglob("coordination.sqlite3"))
+        assert len(found) == 1, ("coordination database", found)
+        connection = sqlite3.connect(found[0].as_uri() + "?mode=ro", uri=True)
+        try:
+            return {ident for (ident,) in connection.execute("SELECT id FROM commands")}
+        finally:
+            connection.close()
+
+    def header(session):
+        return " ".join(session.screen.lines()[:3])
+
+    def details(screen):
+        return "".join(line.split("\u2502", 1)[1].strip() for line in screen.splitlines() if "\u2502" in line)
+
+    def focus_row(session, label, value, timeout):
+        """Move the overview focus to the row whose list label starts with
+        label and whose details contain value, until the overview lists it."""
+        deadline = time.monotonic() + timeout
+        while True:
+            session.send(b"\x1b[A" * 16)
+            session.settle()
+            for _ in range(16):
+                screen = session.screen.text()
+                if "> " + label in screen and value in details(screen).replace(" ", ""):
+                    return screen
+                session.send(b"\x1b[B")
+                session.settle()
+            assert time.monotonic() < deadline, ("no overview row has the label and the value", label, value, session.screen.text())
+            session.pump(0.5)
+
+    def mutation_key(session, key, expected, timeout):
+        """Send a mutation key until the screen shows the expected text. A
+        key that a page-set read deferred shows a numbered outcome and sends
+        nothing, so the key is sent again, as an operator does."""
+        deferred = re.compile(r"(Key|Approval key) (\d+): (\S+ deferred during a page-set read|Approval did not start: "
+                              r"(a manager command is in progress|the displayed review is stale))")
+        seen = {match.group(2) for match in deferred.finditer(session.screen.text())}
+        deadline = time.monotonic() + timeout
+        session.send(key)
+        while squeeze(expected) not in squeeze(session.screen.text()):
+            assert time.monotonic() < deadline, ("the TUI did not show", expected, session.screen.text())
+            fresh = {match.group(2) for match in deferred.finditer(session.screen.text())} - seen
+            if fresh:
+                seen |= fresh
+                session.send(key)
+            session.pump(0.1)
+        return session.screen.text()
+
+    def create_draft():
+        key = capabilities["authorityEpoch"] + "." + secrets.token_urlsafe(16)
+        body = {"workflowId": workflow["id"], "descriptorRevision": workflow["revision"],
+                "profileId": workflow["profileId"], "profileRevision": workflow["profileRevision"]}
+        status, created, raw = request("/v1/requests", harness | {"Content-Type": "application/json", "Idempotency-Key": key},
+                                       method="POST", payload=json.dumps(body, separators=(",", ":")).encode())
+        assert status == 201, ("request creation", status, created.get("code"))
+        validate("Request", created, raw)
+        return created
+
+    lifetimes = [serve(0)]
+    try:
+        status, capabilities, _ = request("/v1/capabilities", harness)
+        assert status == 200
+        status, catalogue, _ = request("/v1/workflows?profileId=profile_1", harness)
+        assert status == 200
+        workflow = next(item for item in catalogue["items"] if item["name"] == "mixed-controls")
+        client = mixed_client(capabilities, harness)
+        observed, wait_for, _, _ = client
+        # The complete exact review of the mixed workflow fits at 140x36.
+        with tui_fixture.session(rows=36, columns=140) as session:
+            # 1. A held run is open in the TUI, and a second request waits
+            # for the one execution reservation.
+            held = create_draft()
+            _, run = approve_mixed(held, workflow, client)
+            head, _, _ = drive_mixed(run, client, stop_at_question=True, overview=False)
+            queued = create_draft()
+            enqueue_mixed(queued, workflow, client)
+            wait_for(queued["links"]["self"], "Request", lambda value: value["phase"] == "queued" and value["admission"]["reasons"] == ["capacity"])
+            session.wait_screen("Manager profiles")
+            session.wait_screen("profile_1")
+            session.send(b"\r")
+            session.wait_screen("Manager workflows")
+            session.send(b"O")
+            session.wait_screen("Manager overview")
+            focus_row(session, "request queued 1 of 1", "Request:" + queued["id"], 20)
+            focus_row(session, "run Running", "Run:" + run, 20)
+            session.send(b"\r")
+            session.wait_screen("Your answer", timeout=20)
+            screen = session.wait_screen("Observation: current", timeout=20)
+            save(session, "held")
+            assert "Runtime: Running" in screen and "supervision" not in screen, "the held run is not shown running under owned supervision"
+            print("PASS tui-failures 1: the TUI shows run", run, "at its question", head, "with the current observation, and request",
+                  queued["id"], "is queued with capacity behind it", flush=True)
+            # 2. SIGKILL of the manager.
+            commands_before = command_ids()
+            lifetimes[0].kill()
+            lifetimes[0].wait(timeout=25)
+            assert lifetimes[0].returncode == -signal.SIGKILL, ("the first lifetime did not end by SIGKILL", lifetimes[0].returncode)
+            killed_at = time.monotonic()
+            session.wait_screen("manager unreachable since", timeout=20)
+            elapsed = time.monotonic() - killed_at
+            screen = session.wait_screen("Observation: stale (", timeout=10)
+            save(session, "unreachable")
+            assert "manager unreachable since" in header(session), ("the header lacks the unreachable state", header(session))
+            for line in ("Your answer", "Runtime: Running", "the last complete observation is retained"):
+                assert squeeze(line) in squeeze(screen), ("the unreachable TUI lost a line of the held run", line)
+            assert not any(word in screen for word in ("Succeeded", "Cancelled", "Terminal:")), "the unreachable TUI invented an ending"
+            print("PASS tui-failures 2: after SIGKILL of the manager the header shows the unreachable state after", f"{elapsed:.2f}",
+                  "seconds, and the live monitor keeps the question and the last observation of run", run, "marked stale", flush=True)
+            # 3. A new lifetime on the same root. The TUI reconnects without
+            # a key press and shows the run of the earlier lifetime as lost.
+            time.sleep(2)
+            lifetimes.append(serve(1))
+            started_at = time.monotonic()
+            while True:
+                screen = session.screen.text()
+                if "manager unreachable" not in screen and "Observation: current" in screen and "supervision lost" in screen:
+                    break
+                assert time.monotonic() < started_at + 30, ("the TUI did not reconnect", screen)
+                session.pump(0.1)
+            reconnected = time.monotonic() - started_at
+            while not re.search(r"delivery (live|polling)", header(session)):
+                assert time.monotonic() < started_at + 60, ("the event worker did not reconnect", header(session))
+                session.pump(0.1)
+            screen = session.screen.text()
+            save(session, "reconnected")
+            lost, _, raw = observed("/v1/runs/" + run + "/snapshot", "RunSnapshot")
+            (work / "tui-failures-lost-snapshot.json").write_bytes(raw)
+            run_view, _, _ = observed("/v1/runs/" + run, "Run")
+            assert run_view["supervision"] == "lost", ("the run of the earlier lifetime", run_view["supervision"])
+            published = lost["runtime"]["status"] if lost["runtime"] is not None else None
+            shown = RUNTIME_LINE.search(screen)
+            assert published != "succeeded" and "Succeeded" not in screen, "the run of the earlier lifetime is shown as completed"
+            assert (shown is None and published is None and "Runtime: not yet observed; supervision lost" in screen) or (
+                shown is not None and LABEL_STATUS[shown.group(1)] == published and squeeze(shown.group(0) + "; supervision lost") in squeeze(screen)), (
+                "the live monitor does not show the runtime status of the snapshot", published, screen)
+            assert command_ids() == commands_before, "a command was added while the manager was lost or after its restart"
+            print("PASS tui-failures 3: without a key press the TUI left the unreachable state", f"{reconnected:.2f}",
+                  "seconds after the restart, the header shows", re.search(r"delivery (live|polling)", header(session)).group(0),
+                  ", run", run, "shows lost supervision with the runtime status", published, "of its snapshot,",
+                  "and no command was added", flush=True)
+            # 4. The operator releases the quarantined reservation. The queued
+            # request reaches review, the TUI approves it, and its run
+            # completes in the live monitor.
+            checked = administration({"version": 1, "operation": "check-store"})["result"]
+            assert checked["integrity"] == "valid" and len(checked["quarantineIds"]) == 1, ("check-store", checked)
+            quarantine = checked["quarantineIds"][0]
+            evidence = administration({"version": 1, "operation": "check-quarantine", "quarantineId": quarantine})["result"]
+            assert evidence["state"] == "clean", ("check-quarantine", evidence)
+            released = administration({"version": 1, "operation": "release-quarantine", "quarantineId": quarantine,
+                                       "cleanupEvidenceId": evidence["cleanupEvidenceId"],
+                                       "cleanupEvidenceDigest": evidence["cleanupEvidenceDigest"]})["result"]
+            assert released == {"quarantineId": quarantine, "state": "released"}, ("release-quarantine", released)
+            session.send(b"\x1b")
+            session.wait_screen("Manager overview", timeout=10)
+            focus_row(session, "request review", "Request:" + queued["id"], 30)
+            save(session, "review-row")
+            session.send(b"\r")
+            session.wait_screen("Approve exact manager review", timeout=45)
+            save(session, "review")
+            mutation_key(session, b"y", "Approval receipt:", 60)
+            associated, _, _ = wait_for(queued["links"]["self"], "Request", lambda value: value["runId"] is not None)
+            second_run = associated["runId"]
+            _, answered, recovered = drive_mixed(second_run, client, overview=False)
+            assert answered and recovered, ("decisions of the new run", answered, recovered)
+            artifact = verified_download(second_run, client, harness)
+            screen = session.wait_screen("Result: verified", timeout=60)
+            save(session, "completed")
+            assert "Runtime: Succeeded" in screen and squeeze("Run: " + second_run) in squeeze(screen), "the live monitor does not show the completed run"
+            assert squeeze("Result SHA-256: " + artifact["sha256"]) in squeeze(screen), "the TUI result digest differs from the harness download"
+            print("PASS tui-failures 4: after release-quarantine of", quarantine, "request", queued["id"], "reached review without a",
+                  "client command, the TUI approved it, and run", second_run, "succeeded in the live monitor with verified result", artifact["id"], flush=True)
+            session.send(b"q")
+            assert session.wait_exit(20) == 0
+            session.assert_restored()
+        assert not tui_fixture.client_state.exists(), "the service TUI created local runner state"
+        print("PASS tui-failures: the service TUI followed a manager loss and restart", flush=True)
+    finally:
+        for process in lifetimes:
+            if process.poll() is None:
+                process.terminate()
+            process.wait(timeout=25)
+
+
 def storage_checks():
     """The storage-error endings through four lifetimes of the real HTTPS
     manager. Each numbered case prints one PASS line."""
@@ -8341,6 +8576,11 @@ if tui_mode == TUI_DECISIONS:
 
 if tui_mode == TUI_HISTORY:
     history_checks()
+    raise SystemExit(0)
+
+
+if tui_mode == TUI_FAILURES:
+    tui_failure_checks()
     raise SystemExit(0)
 
 

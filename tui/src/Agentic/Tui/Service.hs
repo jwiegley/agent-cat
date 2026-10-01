@@ -5,7 +5,7 @@
 -- These records carry no local launch, process, filesystem or control authority.
 module Agentic.Tui.Service
   ( Endpoint (..), decodeEndpoint, clientIdentity, connectEndpoint, missingScope,
-    Profile (..), Workflow (..), loadProfiles, loadWorkflows,
+    Profile (..), Workflow (..), loadProfiles, loadWorkflows, loadProfileWorkflows,
     decodeProfile, decodeWorkflow, createBody,
     Mutation (..), mutationOperation, mutationURI, mutationProfile, prepareMutation,
     observeDraft, observePreparation, observeReceipt, requestMatches, reviewMatches, reviewLive,
@@ -141,6 +141,20 @@ loadWorkflows client profile
       unless (all (\row -> workflowProfile row == profileId profile &&
         workflowProfileRevision row == profileRevision profile) rows) (fail "profile binding")
       pure rows
+
+-- | The current profile with this identifier and its workflow catalogue.
+-- The profiles are read first, so the catalogue binds to the profile
+-- revision that the manager publishes now, also after a manager restart
+-- published new profile revisions. A profile that the manager no longer
+-- lists gives 'C.InvalidResponse'.
+loadProfileWorkflows :: C.Client -> Text -> IO (Either C.ClientFailure (Profile, [Workflow]))
+loadProfileWorkflows client ident = do
+  listed <- loadProfiles client
+  case listed of
+    Left failure -> pure (Left failure)
+    Right profiles -> case filter ((== ident) . profileId) profiles of
+      [profile] -> fmap ((,) profile) <$> loadWorkflows client profile
+      _ -> pure (Left C.InvalidResponse)
 
 collection :: C.Client -> Text -> ([Value] -> Parser a) -> IO (Either C.ClientFailure a)
 collection client uri parser = case C.reference client uri of
@@ -2656,7 +2670,10 @@ runtimeStatus = fmap snapshotRunStatus . runSnapshot
 -- refresh is paused after a deferred key, the refusal code of the latest read
 -- when that read was refused, whether a complete read is installed, and the
 -- installed run snapshot. A paused refresh replaces the current-observation
--- line. A null runtime is shown as not yet observed, without a status.
+-- line. A null runtime is shown as not yet observed, without a status. A
+-- supervision other than @owned@ follows the runtime status as the manager
+-- reports it, for example @Runtime: Running; supervision lost@ for a run
+-- whose manager lifetime ended, so such a run is never shown as completed.
 observationLines :: Bool -> Maybe Text -> Bool -> Maybe RunObservation -> [Text]
 observationLines paused stale installed run = case (stale, installed) of
   (Nothing, False) -> []
@@ -2665,7 +2682,10 @@ observationLines paused stale installed run = case (stale, installed) of
     | otherwise -> "Observation: current" : runtime
   (Just code, True) -> ("Observation: stale (" <> code <> "); the last complete observation is retained") : runtime
   (Just code, False) -> ["Observation: refused (" <> code <> "); no complete observation is installed"]
-  where runtime = maybe [] (\observed -> ["Runtime: " <> maybe "not yet observed" runStatusLabel (runtimeStatus observed)]) run
+  where
+    runtime = maybe [] (\observed -> ["Runtime: " <> maybe "not yet observed" runStatusLabel (runtimeStatus observed)
+      <> supervised (runSupervision observed)]) run
+    supervised supervision = if supervision == "owned" then "" else "; supervision " <> supervision
 
 -- | The displayed approval receipt status after one request read, given the
 -- retained approval, the receipt read of this read with the mutation whose
