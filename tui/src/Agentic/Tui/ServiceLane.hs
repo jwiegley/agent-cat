@@ -42,6 +42,17 @@
 -- retrieval without a verified result is a retryable failure: an automatic
 -- refresh retries it after the next installed composite read, and an
 -- explicit refresh retries it at once ('retrievalDue').
+--
+-- The service frontend holds 1 to 8 explicitly supplied client profiles
+-- ('Endpoints'). Exactly one session is active. A switch connects the other
+-- profile first ('beginSwitch'), and only a successful connection replaces
+-- the active session ('switchStep'). That replacement advances the
+-- generation of the refresh coordinator of the session, and every worker
+-- result carries the generation of the session that started the worker
+-- ('Stamped'), so no result of an earlier session is admitted
+-- ('admitStamped'). The command that a switch leaves unresolved stays listed
+-- for its own profile, and no later session sends it. A failed connection
+-- keeps the active session and records its fixed reason.
 module Agentic.Tui.ServiceLane
   ( CallOutcome (..),
     serviceCall,
@@ -73,6 +84,22 @@ module Agentic.Tui.ServiceLane
     scopeText,
     mutationKeyOutcome,
     startupFailureText,
+    connectionFailureText,
+    EndpointState (..),
+    EndpointSlot (..),
+    Endpoints (..),
+    newEndpoints,
+    endpointsGeneration,
+    activeIdentity,
+    Stamped (..),
+    admitStamped,
+    moveEndpoint,
+    SwitchStart (..),
+    beginSwitch,
+    SwitchStep (..),
+    switchStep,
+    sessionLane,
+    unresolvedCommands,
     resendDeferredText,
     resendUnofferedText,
     keyHelpText,
@@ -109,8 +136,9 @@ module Agentic.Tui.ServiceLane
 where
 
 import qualified Agentic.Manager.Client as C
-import Agentic.Tui.Service (Mutation, ReadVerdict (..), missingScope, mutationOperation, mutationURI)
+import Agentic.Tui.Service (Endpoint, Mutation, ReadVerdict (..), missingScope, mutationOperation, mutationURI)
 import Control.Exception (SomeAsyncException, SomeException, evaluate, fromException, throwIO, try)
+import Data.List (findIndex)
 import Data.Maybe (isJust)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -434,7 +462,12 @@ mutationKeyOutcome scopes operation lane = case missingScope scopes operation of
 -- | The one fixed line that the service frontend prints for a declared
 -- failure of its connection at startup, before it exits with status 1.
 startupFailureText :: C.ClientFailure -> Text
-startupFailureText failure = "--tui --service: " <> case failure of
+startupFailureText failure = "--tui --service: " <> connectionFailureText failure
+
+-- | The fixed reason of a declared connection failure. The startup line and
+-- the Endpoints view both show it.
+connectionFailureText :: C.ClientFailure -> Text
+connectionFailureText failure = case failure of
   C.InvalidClientProfile -> "invalid client profile"
   C.ClientFileUnavailable -> "client profile, credential or CA file unavailable"
   C.InvalidEndpoint -> "invalid manager endpoint"
@@ -450,6 +483,171 @@ startupFailureText failure = "--tui --service: " <> case failure of
   C.Refused 401 _ -> "credential refused"
   C.Refused 403 "insufficient-scope" -> "credential lacks the observe scope"
   C.Refused status code -> "manager refused the connection: " <> T.pack (show status) <> " " <> code
+
+-- | The connection state of one client profile.
+data EndpointState
+  = -- | No session of the profile is open. It was never connected, or a
+    -- switch to another profile closed its session.
+    EndpointIdle
+  | -- | The connection with this ticket is in flight.
+    EndpointConnecting !Int
+  | -- | The session of the profile is the active session.
+    EndpointActive
+  | -- | The latest connection failed with this fixed reason.
+    EndpointFailed !Text
+  deriving (Eq, Show)
+
+-- | One explicitly supplied client profile.
+data EndpointSlot = EndpointSlot
+  { slotProfile :: !FilePath,
+    slotState :: !EndpointState,
+    -- | The endpoint identity of the latest session of the profile.
+    slotIdentity :: !(Maybe Endpoint),
+    -- | The operation and URI of each command whose outcome was unresolved
+    -- when a switch closed a session of the profile. No later session sends
+    -- these commands.
+    slotUnresolved :: ![Text]
+  }
+  deriving (Eq, Show)
+
+-- | The client profiles of one service frontend in the given order, the
+-- index of the active profile, the selection of the Endpoints view and the
+-- refresh coordinator of the active session. The generation of that
+-- coordinator fences every worker result. A switch advances it.
+data Endpoints = Endpoints
+  { endpointsSlots :: ![EndpointSlot],
+    endpointsActive :: !Int,
+    endpointsCursor :: !Int,
+    endpointsRefresh :: !(C.Refresh Text)
+  }
+  deriving (Eq, Show)
+
+-- | The profiles at startup: the connected first profile with its identity
+-- and the other profiles without a session.
+newEndpoints :: FilePath -> Endpoint -> [FilePath] -> Endpoints
+newEndpoints first identity rest =
+  Endpoints
+    (EndpointSlot first EndpointActive (Just identity) [] : [EndpointSlot path EndpointIdle Nothing [] | path <- rest])
+    0
+    0
+    C.newRefresh
+
+-- | The generation of the active session.
+endpointsGeneration :: Endpoints -> C.FetchGeneration
+endpointsGeneration = C.refreshGeneration . endpointsRefresh
+
+-- | The endpoint identity of the active session.
+activeIdentity :: Endpoints -> Maybe Endpoint
+activeIdentity endpoints = case drop (endpointsActive endpoints) (endpointsSlots endpoints) of
+  slot : _ -> slotIdentity slot
+  [] -> Nothing
+
+-- | One worker result with the generation of the session that started the
+-- worker.
+data Stamped a = Stamped !C.FetchGeneration !a
+
+-- | The result when the session that started its worker is still the active
+-- session. A result of an earlier session gives 'Nothing' and changes
+-- nothing.
+admitStamped :: Endpoints -> Stamped a -> Maybe a
+admitStamped endpoints (Stamped generation value)
+  | generation == endpointsGeneration endpoints = Just value
+  | otherwise = Nothing
+
+-- | Move the selection of the Endpoints view, within the profiles.
+moveEndpoint :: Int -> Endpoints -> Endpoints
+moveEndpoint delta endpoints =
+  endpoints {endpointsCursor = max 0 (min (length (endpointsSlots endpoints) - 1) (endpointsCursor endpoints + delta))}
+
+-- | The outcome of the key that selects the profile under the selection.
+data SwitchStart
+  = -- | Connect this profile in a worker.
+    SwitchStart !FilePath
+  | -- | Nothing starts, for this fixed reason.
+    SwitchRefused !Text
+  deriving (Eq, Show)
+
+-- | Select the profile under the selection with this connection ticket. The
+-- active profile and a second connection while one is in flight are
+-- refused. The active session stays active until the connection succeeds.
+beginSwitch :: Int -> Endpoints -> (SwitchStart, Endpoints)
+beginSwitch ticket endpoints
+  | any (connecting . slotState) slots = (SwitchRefused "endpoint switch did not start: a connection is in progress.", endpoints)
+  | cursor == endpointsActive endpoints = (SwitchRefused ("endpoint " <> number cursor <> " is already active."), endpoints)
+  | otherwise = case drop cursor slots of
+      slot : _ -> (SwitchStart (slotProfile slot), replaceSlot cursor slot {slotState = EndpointConnecting ticket} endpoints)
+      [] -> (SwitchRefused "endpoint switch did not start: no endpoint is selected.", endpoints)
+  where
+    slots = endpointsSlots endpoints
+    cursor = endpointsCursor endpoints
+    connecting state = case state of EndpointConnecting _ -> True; _ -> False
+
+-- | The meaning of one completed connection.
+data SwitchStep session
+  = -- | No connection holds this ticket. A session that it opened is closed
+    -- unused.
+    SwitchStale !(Maybe session)
+  | -- | The connection failed with this fixed reason. The active session
+    -- continues unchanged.
+    SwitchFailed !Text
+  | -- | This session replaces the active session. The caller cancels the
+    -- workers of the earlier session, closes it and clears every
+    -- observation, selection, retained result and settled command.
+    SwitchConnected !session
+  deriving (Eq, Show)
+
+-- | Complete the connection that holds this ticket, given the commands that
+-- the active session leaves unresolved ('unresolvedCommands'). A success
+-- makes the connected profile active, lists those commands for the earlier
+-- profile and advances the generation, so no result of the earlier session
+-- is admitted later.
+switchStep :: Int -> CallOutcome (session, Endpoint) -> [Text] -> Endpoints -> (SwitchStep session, Endpoints)
+switchStep ticket outcome unresolved endpoints =
+  case findIndex ((== EndpointConnecting ticket) . slotState) slots of
+    Nothing -> (SwitchStale (either (const Nothing) (Just . fst) declared), endpoints)
+    Just index -> case declared of
+      Right (session, identity) ->
+        let earlier = endpointsActive endpoints
+            update position slot
+              | position == index = slot {slotState = EndpointActive, slotIdentity = Just identity}
+              | position == earlier = slot {slotState = EndpointIdle, slotUnresolved = slotUnresolved slot <> unresolved}
+              | otherwise = slot
+         in ( SwitchConnected session,
+              endpoints
+                { endpointsSlots = zipWith update [0 ..] slots,
+                  endpointsActive = index,
+                  endpointsRefresh = C.advanceGeneration (endpointsRefresh endpoints)
+                } )
+      Left reason -> (SwitchFailed reason, replaceSlot index (slots !! index) {slotState = EndpointFailed reason} endpoints)
+  where
+    slots = endpointsSlots endpoints
+    declared = case outcome of
+      Declared (Right value) -> Right value
+      Declared (Left failure) -> Left (connectionFailureText failure)
+      InternalFault -> Left "internal frontend fault during the connection"
+
+replaceSlot :: Int -> EndpointSlot -> Endpoints -> Endpoints
+replaceSlot index slot endpoints =
+  endpoints {endpointsSlots = [if position == index then slot else other | (position, other) <- zip [0 ..] (endpointsSlots endpoints)]}
+
+number :: Int -> Text
+number index = T.pack (show (index + 1))
+
+-- | The lane of a new session: no read, an idle command lane, no fault and
+-- no resend confirmation.
+sessionLane :: Lane pending location
+sessionLane = Lane Nothing MutationIdle False False
+
+-- | The operation and URI of the command whose outcome is unresolved when
+-- the session closes: an unresolved attempt, or a send in flight, whose
+-- cancellation leaves its outcome unknown.
+unresolvedCommands :: Lane pending location -> [Text]
+unresolvedCommands lane = case laneMutation lane of
+  MutationSending _ attempt -> [entry attempt]
+  MutationUncertain attempt _ -> [entry attempt]
+  _ -> []
+  where
+    entry attempt = mutationOperation (attemptMutation attempt) <> " " <> mutationURI (attemptMutation attempt)
 
 -- | The fixed status text of a deferred resend confirmation.
 resendDeferredText :: Text

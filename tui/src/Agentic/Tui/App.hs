@@ -109,7 +109,16 @@ data AppEvent
   | ChildStopped !Int !MachineExit
   | PersonPromptReady !MandatoryDecision !Int !(Either Text PersonPrompt)
   | FinalResultReady !RunId !(Either Text Value)
-  | ServiceProfilesReady !Int !(Lane.CallOutcome [Service.Profile])
+    -- | One result of a service worker, stamped with the generation of the
+    -- session that started the worker. Only a result of the active session
+    -- is handled.
+  | ServiceResult !(Lane.Stamped ServiceEvent)
+    -- | The connection with this ticket to another client profile.
+  | EndpointConnected !Int !(Lane.CallOutcome (Manager.Client, Service.Endpoint))
+
+-- | The results of the service workers of one session.
+data ServiceEvent
+  = ServiceProfilesReady !Int !(Lane.CallOutcome [Service.Profile])
   | ServiceWorkflowsReady !Int !Service.Profile !(Lane.CallOutcome [Service.Workflow])
   | ServicePrepared !Int !(Lane.CallOutcome Manager.PendingCommand)
   | ServiceSent !Int !(Lane.CallOutcome Manager.ClientResponse)
@@ -119,14 +128,14 @@ data AppEvent
 
 -- | Bounded frontend IO slots, each retaining at most one cancellable task.
 data Work = InitialWork | PreviewWork | HelpWork | RunsWork | RoutingWork | MachineWork | PersonWork | ResultWork
-  | ServiceReadWork | ServicePrepareWork | ServiceSendWork
+  | ServiceReadWork | ServicePrepareWork | ServiceSendWork | ServiceConnectWork
   deriving (Eq, Ord)
 
 -- | Disjoint original local and manager-client owners.
--- | The local runner backend, or the service backend: the client session and
--- the endpoint identity that the shell shows and that decides the credential
--- scopes.
-data Backend = LocalBackend !TuiConfig !PrivateRoot | ServiceBackend !Manager.Client !Service.Endpoint
+-- | The local runner backend, or the service backend: the active client
+-- session and the client profiles. The identity of the active profile is the
+-- one that the shell shows and that decides the credential scopes.
+data Backend = LocalBackend !TuiConfig !PrivateRoot | ServiceBackend !Manager.Client !Lane.Endpoints
 
 -- Each attempted mutation retains the original immutable pending command.
 type MutationState = Lane.MutationState Manager.PendingCommand Manager.Reference
@@ -216,6 +225,10 @@ data AppState = AppState
     stateServiceKeyOutcome :: !(Maybe Lane.KeyOutcome),
     stateServiceOutcomeSerial :: !Int,
     stateServiceUncertainExit :: !(IORef Bool),
+    -- | The active client session, which the shutdown closes.
+    stateServiceSession :: !(IORef (Maybe Manager.Client)),
+    -- | Whether the Endpoints view is open over the service screen.
+    stateEndpointsView :: !Bool,
     stateServiceFaultExit :: !(IORef Bool),
     -- | The retrieval of the verified result of the named run: the exact
     -- verified bytes, or a retryable failure. Only 'Lane.retrievalStep' and
@@ -229,8 +242,8 @@ data AppState = AppState
 runApp :: TuiConfig -> PrivateRoot -> IO ()
 runApp config root = runAppWith (LocalBackend config root)
 
-runServiceApp :: Manager.Client -> Service.Endpoint -> IO ()
-runServiceApp client endpoint = runAppWith (ServiceBackend client endpoint)
+runServiceApp :: Manager.Client -> Lane.Endpoints -> IO ()
+runServiceApp client endpoints = runAppWith (ServiceBackend client endpoints)
 
 runAppWith :: Backend -> IO ()
 runAppWith backend = mask $ \restore -> do
@@ -243,6 +256,7 @@ runAppWith backend = mask $ \restore -> do
   workers <- newMVar Map.empty
   uncertainExit <- newIORef False
   faultExit <- newIORef False
+  session <- newIORef (case backend of ServiceBackend client _ -> Just client; LocalBackend {} -> Nothing)
   let buildVty = do
         value <- mkVty Vty.defaultConfig
         enableBracketedPaste value `onException` Vty.shutdown value
@@ -325,6 +339,8 @@ runAppWith backend = mask $ \restore -> do
             stateServiceKeyOutcome = Nothing,
             stateServiceOutcomeSerial = 0,
             stateServiceUncertainExit = uncertainExit,
+            stateServiceSession = session,
+            stateEndpointsView = False,
             stateServiceFaultExit = faultExit,
             stateServiceResult = Nothing,
             stateServiceSaved = Nothing
@@ -338,8 +354,8 @@ runAppWith backend = mask $ \restore -> do
               (uninterruptibleMask_ (cancel ticker >> (readMVar workers >>= mapM_ cancel))
                 `finally` (readIORef owned >>= mapM_ terminateMachine))
                 `finally` writeIORef owned Nothing
-            ServiceBackend client _ -> mask_ $
-              (Manager.closeClient client `finally`
+            ServiceBackend {} -> mask_ $
+              ((readIORef session >>= mapM_ Manager.closeClient) `finally`
                 (readMVar workers >>= stopAll . (ticker :) . Map.elems)) `finally` do
                   unresolved <- readIORef uncertainExit
                   faulted <- readIORef faultExit
@@ -373,7 +389,7 @@ localReviewAllowed state preview size = case stateBackend state of
 -- One read slot owns the actual HTTP operation, not a detached wrapper task.
 -- No read starts while another holds the ticket. The status line names what
 -- the started read reads.
-startServiceRead :: Lane.ReadKind -> Text -> (Int -> IO AppEvent) -> EventM Name AppState ()
+startServiceRead :: Lane.ReadKind -> Text -> (Int -> IO ServiceEvent) -> EventM Name AppState ()
 startServiceRead kind status action = do
   state <- get
   let ticket = stateRequestSerial state + 1
@@ -382,7 +398,7 @@ startServiceRead kind status action = do
     Just lane -> do
       put state {stateServiceLane = lane, stateRequestSerial = ticket,
         stateModel = (stateModel state) {modelStatus = status}}
-      liftIO . startWorker state ServiceReadWork $ action ticket >>= writeBChan (stateChannel state)
+      liftIO . startServiceWorker state ServiceReadWork $ action ticket
 
 startServiceProfiles :: Manager.Client -> EventM Name AppState ()
 startServiceProfiles client = startServiceRead Lane.PageSetRead "loading manager catalogue" $ \ticket ->
@@ -549,7 +565,7 @@ serviceMutationKey operation start = do
 -- The local backend has no manager credential.
 serviceScopes :: AppState -> [Text]
 serviceScopes state = case stateBackend state of
-  ServiceBackend _ endpoint -> Service.endpointScopes endpoint
+  ServiceBackend _ endpoints -> maybe [] Service.endpointScopes (Lane.activeIdentity endpoints)
   LocalBackend {} -> []
 
 -- | Show the fixed text of a mutation key that started nothing as the next
@@ -575,8 +591,8 @@ beginServiceMutation client mutation observation = do
     put (onLane (Lane.beginMutation ticket mutation) state) {stateRequestSerial = ticket, stateServiceLastReceipt = Nothing,
       stateModel = (stateModel state) {modelStatus = "preparing explicit " <> Service.mutationOperation mutation}}
     liftIO (cancelWorker state ServiceReadWork)
-    liftIO . startWorker state ServicePrepareWork $
-      Lane.serviceCall (Service.prepareMutation client now mutation observation) >>= writeBChan (stateChannel state) . ServicePrepared ticket
+    liftIO . startServiceWorker state ServicePrepareWork $
+      ServicePrepared ticket <$> Lane.serviceCall (Service.prepareMutation client now mutation observation)
 
 -- | Send one original attempt once. A resend passes the retained attempt unchanged.
 sendServicePending :: Manager.Client -> Int -> Attempt -> EventM Name AppState ()
@@ -585,8 +601,8 @@ sendServicePending client ticket attempt = do
   put (onLane (\lane -> lane {Lane.laneMutation = Lane.MutationSending ticket attempt, Lane.laneResendConfirm = False}) state) {
     stateModel = (stateModel state) {modelStatus = "sending one " <> Service.mutationOperation (Lane.attemptMutation attempt) <> " attempt"}}
   liftIO (writeIORef (stateServiceUncertainExit state) True)
-  liftIO . startWorker state ServiceSendWork $
-    Lane.serviceCall (Manager.sendCommand client (Lane.attemptPending attempt)) >>= writeBChan (stateChannel state) . ServiceSent ticket
+  liftIO . startServiceWorker state ServiceSendWork $
+    ServiceSent ticket <$> Lane.serviceCall (Manager.sendCommand client (Lane.attemptPending attempt))
 
 -- | Install a lane that holds an unresolved attempt and show its notice.
 uncertainService :: AppState -> ServiceLane -> EventM Name AppState ()
@@ -760,35 +776,36 @@ serviceReviewCheck state displayed tag =
   Approval.checkReview Manager.observedETag (stateNow state) (serviceReviewAllowed displayed tag (stateTerminalSize state))
     (stateServiceWorkflow state) (serviceRequest state) (servicePreparation state) (modelInputs (stateModel state)) displayed tag
 
-handleServiceEventCore :: Manager.Client -> BrickEvent Name AppEvent -> EventM Name AppState ()
-handleServiceEventCore client event = do
+-- | Handle one worker result of the active session.
+handleServiceResult :: Manager.Client -> ServiceEvent -> EventM Name AppState ()
+handleServiceResult client serviceEvent = do
   state <- get
   -- A refused catalogue read has no earlier observation to keep.
   let failed lane problem = state {stateServiceLane = lane, stateModel = refuseCatalogueRead (T.pack (show problem)) (stateModel state)}
-  case event of
-    AppEvent (ServiceProfilesReady ticket result) -> case Lane.readStep ticket result (stateServiceLane state) of
+  case serviceEvent of
+    ServiceProfilesReady ticket result -> case Lane.readStep ticket result (stateServiceLane state) of
       (Lane.ReadStale,_) -> pure ()
       (Lane.ReadFaulted,lane) -> faultService state lane
       (Lane.ReadRefused problem,lane) -> put (failed lane problem)
       (Lane.ReadDelivered profiles,lane) -> put state {stateServiceLane = lane, stateServiceProfiles = profiles,
         stateServiceWorkflows = [], stateModel = initialServiceModel profiles, statePaneFocus = PrimaryPane}
-    AppEvent (ServiceWorkflowsReady ticket profile result) -> case Lane.readStep ticket result (stateServiceLane state) of
+    ServiceWorkflowsReady ticket profile result -> case Lane.readStep ticket result (stateServiceLane state) of
       (Lane.ReadStale,_) -> pure ()
       (Lane.ReadFaulted,lane) -> faultService state lane
       (Lane.ReadRefused problem,lane) -> put (failed lane problem)
       (Lane.ReadDelivered workflows,lane) -> put state {stateServiceLane = lane, stateServiceWorkflows = workflows,
         stateModel = (initialModel (map Service.workflowDisplay workflows) [] (Left "manager owns routing"))
           {modelStatus = "manager catalogue: " <> Service.profileId profile}, statePaneFocus = PrimaryPane}
-    AppEvent (ServicePrepared ticket result) -> case Lane.prepareStep ticket result (stateServiceLane state) of
+    ServicePrepared ticket result -> case Lane.prepareStep ticket result (stateServiceLane state) of
       (Lane.PrepareStale,_) -> pure ()
       (Lane.PrepareFaulted,lane) -> faultService state lane
       (Lane.PrepareRefused failure,lane) -> put state {stateServiceLane = lane,
         stateModel = (stateModel state) {modelStatus = "preflight refused before send: " <> T.pack (show failure)}}
       (Lane.PrepareSend attempt,_) -> sendServicePending client ticket attempt
-    AppEvent (ServiceSent ticket result) -> handleServiceSent client ticket result
+    ServiceSent ticket result -> handleServiceSent client ticket result
     -- A refused request read keeps the screen, the command lane and the last
     -- complete observation, and marks that observation stale.
-    AppEvent (ServiceRequestReady ticket result) ->
+    ServiceRequestReady ticket result ->
       let verdict = maybe (const Service.ReadForeign) (Service.readVerdict Service.observedBinding) (serviceSelection state)
       in case Lane.requestStep verdict ticket result (stateServiceLane state) (stateServiceObservation state) of
         (Lane.RequestStale,lane,_) -> put state {stateServiceLane = lane}
@@ -802,7 +819,7 @@ handleServiceEventCore client event = do
     -- Only retrieved verified bytes are retained for their run. A declared
     -- refusal and a retrieval without a verified result are retryable
     -- failures that the status line and the result lines show.
-    AppEvent (ServiceResultReady ticket run result) ->
+    ServiceResultReady ticket run result ->
       let retrieved :: ServiceLane -> Lane.Retrieval Service.VerifiedResult -> EventM Name AppState ()
           retrieved lane retrieval = put state {stateServiceLane = lane, stateServiceResult = Just retrieval,
                 stateModel = (stateModel state) {modelStatus = Lane.retrievalStatus retrieval}}
@@ -811,6 +828,16 @@ handleServiceEventCore client event = do
         (Lane.ReadFaulted,lane) -> faultService state lane
         (Lane.ReadRefused problem,lane) -> retrieved lane (Lane.retrievalStep run (Left problem))
         (Lane.ReadDelivered value,lane) -> retrieved lane (Lane.retrievalStep run (Right value))
+
+handleServiceEventCore :: Manager.Client -> BrickEvent Name AppEvent -> EventM Name AppState ()
+handleServiceEventCore client event = do
+  state <- get
+  case event of
+    -- A result of an earlier session changes nothing.
+    AppEvent (ServiceResult stamped) -> case stateBackend state of
+      ServiceBackend _ endpoints -> mapM_ (handleServiceResult client) (Lane.admitStamped endpoints stamped)
+      LocalBackend {} -> pure ()
+    AppEvent (EndpointConnected ticket outcome) -> handleEndpointConnected ticket outcome
     AppEvent (Tick now) -> do
       put state {stateNow = now}
       -- After an internal fault, observations refresh only on an explicit g.
@@ -820,6 +847,8 @@ handleServiceEventCore client event = do
         (refreshServiceRequest client Lane.AutomaticRefresh)
     VtyEvent (Vty.EvResize width height) -> put state {stateTerminalSize = (width,height)}
     VtyEvent (Vty.EvKey (Vty.KChar 'c') [Vty.MCtrl]) -> halt
+    -- The Endpoints view takes every key while it is open.
+    VtyEvent (Vty.EvKey key modifiers) | stateEndpointsView state -> handleEndpointsKey key modifiers
     -- A question head takes the text entry keys. Ctrl-D sends one answer for
     -- the displayed head. Text keys edit the answer, so q does not detach
     -- here, and Ctrl-C detaches. No key sends while an answer to this
@@ -943,6 +972,10 @@ handleServiceEventCore client event = do
           Vty.KChar 'g' -> refreshServiceRequest client Lane.ExplicitRefresh
           Vty.KChar 'x' | Lane.resendOffered (stateServiceLane state) -> put (onLane (\lane -> lane {Lane.laneResendConfirm = True}) state)
           Vty.KChar 'r' | ServiceProfilesScreen {} <- modelScreen (stateModel state) -> startServiceProfiles client
+          -- E opens the Endpoints view from every service screen without
+          -- text entry, the browser screens and the request screen included.
+          -- Tab and the other browser keys keep their behavior.
+          Vty.KChar 'E' -> openEndpoints
           _ -> pure ()
     _ -> pure ()
   where
@@ -1010,6 +1043,110 @@ handleServiceEventCore client event = do
 blankEditor :: Edit.Editor Text Name
 blankEditor = Edit.editorText InputEditor Nothing ""
 
+-- | Change only the client profiles of the service backend.
+onEndpoints :: (Lane.Endpoints -> Lane.Endpoints) -> AppState -> AppState
+onEndpoints change state = case stateBackend state of
+  ServiceBackend client endpoints -> state {stateBackend = ServiceBackend client (change endpoints)}
+  LocalBackend {} -> state
+
+-- | Open the Endpoints view with the active profile selected.
+openEndpoints :: EventM Name AppState ()
+openEndpoints = modify $ \state ->
+  (onEndpoints (\endpoints -> endpoints {Lane.endpointsCursor = Lane.endpointsActive endpoints}) state)
+    {stateEndpointsView = True, stateModel = (stateModel state) {modelStatus = "manager endpoints: Enter connects the selected profile"}}
+
+-- | One key in the Endpoints view. Esc returns to the screen below, Up and
+-- Down select a profile, and Enter connects the selected profile in a worker.
+-- The active session continues until that connection succeeds.
+handleEndpointsKey :: Vty.Key -> [Vty.Modifier] -> EventM Name AppState ()
+handleEndpointsKey key modifiers = do
+  state <- get
+  case (key, modifiers, stateBackend state) of
+    (Vty.KEsc, [], _) -> put state {stateEndpointsView = False}
+    (Vty.KChar 'q', [], _) -> halt
+    (Vty.KUp, [], _) -> put (onEndpoints (Lane.moveEndpoint (-1)) state)
+    (Vty.KDown, [], _) -> put (onEndpoints (Lane.moveEndpoint 1) state)
+    (Vty.KEnter, [], ServiceBackend client endpoints) -> do
+      let ticket = stateRequestSerial state + 1
+      case Lane.beginSwitch ticket endpoints of
+        (Lane.SwitchRefused reason, _) -> put state {stateModel = (stateModel state) {modelStatus = reason}}
+        (Lane.SwitchStart profile, next) -> do
+          put state {stateBackend = ServiceBackend client next, stateRequestSerial = ticket,
+            stateModel = (stateModel state) {modelStatus = "connecting endpoint " <> T.pack (show (Lane.endpointsCursor next + 1))}}
+          liftIO . startWorker state ServiceConnectWork $
+            Lane.serviceCall (Service.connectEndpoint profile) >>= writeBChan (stateChannel state) . EndpointConnected ticket
+    _ -> pure ()
+
+-- | Complete the connection with this ticket. A failure keeps the active
+-- session and shows the fixed reason. A success cancels the read, send and
+-- preparation workers of the earlier session, closes it and clears every
+-- observation, selection, retained result and settled command. The command
+-- that the earlier session leaves unresolved stays listed for its profile,
+-- and the new session never sends it. The new session then loads the
+-- manager profiles.
+handleEndpointConnected :: Int -> Lane.CallOutcome (Manager.Client, Service.Endpoint) -> EventM Name AppState ()
+handleEndpointConnected ticket outcome = do
+  state <- get
+  case stateBackend state of
+    LocalBackend {} -> pure ()
+    ServiceBackend earlier endpoints ->
+      case Lane.switchStep ticket outcome (Lane.unresolvedCommands (stateServiceLane state)) endpoints of
+        (Lane.SwitchStale session, _) -> liftIO (mapM_ Manager.closeClient session)
+        (Lane.SwitchFailed reason, next) -> put state {stateBackend = ServiceBackend earlier next,
+          stateModel = (stateModel state) {modelStatus = "endpoint switch failed: " <> reason <> "; the active endpoint is unchanged"}}
+        (Lane.SwitchConnected client, next) -> do
+          liftIO $ do
+            mapM_ (cancelWorker state) [ServiceReadWork, ServicePrepareWork, ServiceSendWork]
+            Manager.closeClient earlier
+            writeIORef (stateServiceSession state) (Just client)
+            writeIORef (stateServiceUncertainExit state) (any (not . null . Lane.slotUnresolved) (Lane.endpointsSlots next))
+          put (clearServiceSession state) {stateBackend = ServiceBackend client next}
+          startServiceProfiles client
+          modify $ \current -> current {stateModel = (stateModel current)
+            {modelStatus = "endpoint " <> T.pack (show (Lane.endpointsActive next + 1)) <> " active; the earlier selection and observations are cleared"}}
+
+-- | The state of a new service session: no read, command, observation,
+-- selection, approval, receipt, retained result or saved result, and the
+-- loading screen.
+clearServiceSession :: AppState -> AppState
+clearServiceSession state =
+  state
+    { stateServiceLane = Lane.sessionLane,
+      stateServiceProfiles = [],
+      stateServiceWorkflows = [],
+      stateServiceWorkflow = Nothing,
+      stateServiceRequestId = Nothing,
+      stateServiceObservation = Lane.noObservation,
+      stateServiceApproval = Nothing,
+      stateServiceApprovalStatus = Nothing,
+      stateServiceLastReceipt = Nothing,
+      stateServiceApprovalPress = Nothing,
+      stateServiceNotice = Nothing,
+      stateServiceKeyOutcome = Nothing,
+      stateServiceResult = Nothing,
+      stateServiceSaved = Nothing,
+      stateConfirmDetails = False,
+      stateRunDetails = False,
+      stateKeyHelp = False,
+      stateSaveResult = False,
+      stateSaveError = Nothing,
+      stateRunView = emptyRunView,
+      statePaneFocus = PrimaryPane,
+      stateOutputFollow = True,
+      stateEditor = blankEditor,
+      statePersonEditor = blankEditor,
+      stateSaveEditor = blankEditor,
+      stateModel = (initialModel [] [] (Left "catalogue is loading")) {modelScreen = InitialLoading, modelStatus = "loading manager profiles"}
+    }
+
+-- | Start a service worker whose result carries the generation of the
+-- active session, so a result that arrives after a switch is not handled.
+startServiceWorker :: AppState -> Work -> IO ServiceEvent -> IO ()
+startServiceWorker state work action = case stateBackend state of
+  ServiceBackend _ endpoints ->
+    startWorker state work (action >>= writeBChan (stateChannel state) . ServiceResult . Lane.Stamped (Lane.endpointsGeneration endpoints))
+  LocalBackend {} -> pure ()
+
 startWorker :: AppState -> Work -> IO () -> IO ()
 startWorker state work action =
   modifyMVarMasked_ (stateWorkers state) $ \workers -> do
@@ -1059,7 +1196,8 @@ toPresentation state =
   (emptyPresentation (stateModel state))
     { presentationConfig = case stateBackend state of LocalBackend config _ -> Just config; ServiceBackend {} -> Nothing,
       presentationService = case stateBackend state of ServiceBackend {} -> True; LocalBackend {} -> False,
-      presentationServiceEndpoint = case stateBackend state of ServiceBackend _ endpoint -> Just endpoint; LocalBackend {} -> Nothing,
+      presentationServiceEndpoint = case stateBackend state of ServiceBackend _ endpoints -> Lane.activeIdentity endpoints; LocalBackend {} -> Nothing,
+      presentationServiceEndpoints = case stateBackend state of ServiceBackend _ endpoints -> Just endpoints; LocalBackend {} -> Nothing,
       presentationServiceMutation = Lane.mutationNotice (stateServiceLane state),
       presentationServiceResendConfirm = serviceResendConfirm state,
       presentationServiceApproval = stateServiceApprovalStatus state,
@@ -1123,6 +1261,7 @@ currentEditor state = case activeLayer state of
 
 activeLayer :: AppState -> ActiveLayer
 activeLayer state
+  | stateEndpointsView state = EndpointsLayer
   | stateKeyHelp state = KeyHelpLayer
   | Just decision <- serviceHead state = case decision of
       Service.QuestionHead {} -> PersonLayer
@@ -1185,11 +1324,8 @@ handleEventCore event = do
 
 handleLocalEvent :: BrickEvent Name AppEvent -> EventM Name AppState ()
 handleLocalEvent event = case event of
-  AppEvent (ServiceProfilesReady _ _) -> pure ()
-  AppEvent (ServiceWorkflowsReady _ _ _) -> pure ()
-  AppEvent (ServicePrepared _ _) -> pure ()
-  AppEvent (ServiceSent _ _) -> pure ()
-  AppEvent (ServiceRequestReady _ _) -> pure ()
+  AppEvent (ServiceResult _) -> pure ()
+  AppEvent (EndpointConnected _ _) -> pure ()
   AppEvent FrameReady -> handleFrame
   AppEvent (InitialReady result) -> do
     state <- get
@@ -1360,6 +1496,7 @@ handleKey :: BrickEvent Name AppEvent -> Vty.Event -> EventM Name AppState ()
 handleKey original key = do
   state <- get
   case activeLayer state of
+    EndpointsLayer -> pure ()
     KeyHelpLayer -> handleKeyHelp key
     CancelLayer -> handleCancelKey key
     PersonLayer -> handlePersonKey original key

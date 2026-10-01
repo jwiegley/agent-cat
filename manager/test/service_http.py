@@ -298,8 +298,20 @@ storage_mode = len(sys.argv) == 6 and sys.argv[5] == STORAGE
 # configures profile_route, and the live-redirect mode also configures
 # profile_live and profile_live_effect. Other modes keep their profiles.
 control_profiles = controls_mode or routing_mode or live_mode
-assert len(sys.argv) == 5 or mixed or boundary or pages_mode or events_mode or captures_mode or discard_mode or exports_mode or lineage_mode or control_profiles or person_mode
+# The tui-endpoints mode starts the service TUI with three client profiles:
+# two profiles of the one manager with their own credentials and a profile
+# whose endpoint refuses connections. The harness reads with its own separate
+# credential. Through endpoint one the TUI creates a request. The TUI then
+# switches to endpoint two, which must show the identity of the second
+# credential and no earlier selection. A switch to the unreachable profile
+# must fail with its fixed reason and keep endpoint two working. A switch
+# back to endpoint one opens a new session. Each step prints its own PASS
+# line. It runs one manager lifetime.
+ENDPOINTS = "tui-endpoints"
+endpoints_mode = len(sys.argv) == 6 and sys.argv[5] == ENDPOINTS
+assert len(sys.argv) == 5 or mixed or boundary or pages_mode or events_mode or captures_mode or discard_mode or exports_mode or lineage_mode or control_profiles or person_mode or endpoints_mode
 assert not tui_approval or os.environ.get("TUI_CHECK")
+assert not endpoints_mode or os.environ.get("TUI_CHECK")
 assert native in ("1", "8")
 print(f"work={work}", flush=True)
 sys.path.insert(0, str(source / "test"))
@@ -527,6 +539,13 @@ if control_profiles:
     administration({"version": 1, "operation": "issue-credential", "label": "HTTPS control peer",
                     "scopes": ["observe", "submit", "control"], "profileIds": CONTROL_PROFILES,
                     "expiresAt": "2999-01-01T00:00:00Z", "outputFile": str(work / "credential-peer")})
+# The endpoints mode issues one credential for each of its two client
+# profiles. The second one also holds control, so its identity row differs.
+if endpoints_mode:
+    for name, scopes in (("ep1", ["observe", "submit"]), ("ep2", ["observe", "submit", "control"])):
+        administration({"version": 1, "operation": "issue-credential", "label": "HTTPS endpoint " + name,
+                        "scopes": scopes, "profileIds": ["profile_1"],
+                        "expiresAt": "2999-01-01T00:00:00Z", "outputFile": str(work / ("credential-" + name))})
 configuration["administrationRoot"] = str(work / "admin")
 config.write_text(json.dumps(configuration))
 context = ssl.create_default_context(cafile=str(cert))
@@ -3514,6 +3533,146 @@ def route_checks():
     print("PASS routes: every run-route and manager-route case held against the running TLS 1.3 manager", flush=True)
 
 
+def endpoint_checks():
+    """The tui-endpoints mode. See ENDPOINTS for the steps."""
+    from tui_probe import TuiSession
+    authorized = {"Authorization": "Bearer " + bearer}
+    with socket.socket() as unused:
+        unused.bind(("127.0.0.1", 0))
+        closed_port = unused.getsockname()[1]
+    profiles = []
+    for name, endpoint in (("ep1", f"https://127.0.0.1:{port}/v1"), ("ep2", f"https://127.0.0.1:{port}/v1"),
+                           ("unreachable", f"https://127.0.0.1:{closed_port}/v1")):
+        path = work / ("client-profile-" + name + ".json")
+        path.write_text(json.dumps({"version": 1, "endpoint": endpoint,
+                                    "credentialFile": str(work / ("credential-" + ("ep1" if name == "unreachable" else name))),
+                                    "caFile": str(cert)}))
+        path.chmod(0o600)
+        profiles.append(path)
+
+    def identity_row(session):
+        """The endpoint identity row of the shell header."""
+        rows = [row for row in session.screen.lines()[:3] if f"manager 127.0.0.1:{port}" in row]
+        assert len(rows) == 1, ("the shell header has no single identity row", session.screen.lines()[:3])
+        return rows[0]
+
+    def save(session, name):
+        (work / ("tui-endpoints-" + name + ".screen.txt")).write_text(session.screen.text())
+
+    def switch(session, moves, number, scopes, absent):
+        """Open the Endpoints view, select the profile and require its active session and identity."""
+        session.send(b"E")
+        session.wait_screen("Manager endpoints")
+        session.send(moves + b"\r")
+        screen = session.wait_screen(f"> {number}. active  {profiles[number - 1]}")
+        save(session, f"switch-{number}")
+        row = identity_row(session)
+        assert "scopes " + scopes in row and (absent is None or "scopes " + absent not in row), (
+            "the identity row does not show the credential of the new endpoint", number, row)
+        return screen
+
+    with (work / "server-0.stdout").open("wb") as output, (work / "server-0.stderr").open("wb") as errors:
+        process = subprocess.Popen([str(runner), "--manager", "serve", "--config", str(config),
+                                    "+RTS", "-N" + native, "-RTS"], stdout=output, stderr=errors)
+        try:
+            wait_ready(process)
+            status, overview, raw = request("/v1/snapshot", authorized)
+            assert status == 200 and overview["items"] == [], "the endpoints mode does not start from an empty manager"
+            command = [os.environ["TUI_CHECK"], "--tui", "--service"] + [str(path) for path in profiles] + ["+RTS", "-N" + native, "-RTS"]
+            client_state = work / "unused-client-state"
+            with harness_reads_only(), TuiSession(runner, client_state, command=command, explicit_state=False) as session:
+                # 1. Endpoint one is active with the identity of its credential.
+                session.wait_screen("Manager profiles")
+                session.wait_screen("profile_1")
+                session.send(b"\r")
+                session.wait_screen("Manager workflows")
+                row = identity_row(session)
+                assert "scopes observe submit" in row and "scopes observe submit control" not in row, row
+                session.send(b"E")
+                screen = session.wait_screen("Manager endpoints")
+                save(session, "initial")
+                for line in (f"> 1. active  {profiles[0]}", f"  2. not connected  {profiles[1]}", f"  3. not connected  {profiles[2]}"):
+                    assert line in screen, ("the Endpoints view lacks a profile line", line)
+                session.send(b"\x1b")
+                session.wait_screen("Manager workflows")
+                print("PASS tui-endpoints 1: the Endpoints view lists the three profiles with endpoint one active, and Esc returns to the workflows browser", flush=True)
+                # 2. A request created through endpoint one.
+                session.send(b"\r")
+                deadline = time.monotonic() + 30
+                while True:
+                    status, overview, raw = request("/v1/snapshot", authorized)
+                    assert status == 200
+                    requests = [item["request"] for item in overview["items"] if item["kind"] == "request"]
+                    if requests:
+                        break
+                    assert time.monotonic() < deadline, "JOURNEY-DEADLINE the request of endpoint one did not appear"
+                    session.pump(0.2)
+                assert len(requests) == 1, requests
+                created = requests[0]
+                deadline = time.monotonic() + 30
+                while "request validator current" not in session.screen.text() and "manager request: draft" not in session.screen.text():
+                    assert time.monotonic() < deadline, ("JOURNEY-DEADLINE the created request was not observed", session.screen.text())
+                    session.pump(0.1)
+                if "request validator current" in session.screen.text():
+                    session.send(b"\x1b")
+                session.wait_screen(created["id"])
+                save(session, "created")
+                print("PASS tui-endpoints 2: endpoint one created request", created["id"], "and shows it", flush=True)
+                # 3. The switch to endpoint two shows its identity and no earlier selection.
+                screen = switch(session, b"\x1b[B", 2, "observe submit control", None)
+                assert f"  1. not connected  {profiles[0]}" in screen, "endpoint one is not closed after the switch"
+                session.send(b"\x1b")
+                screen = session.wait_screen("Manager profiles")
+                save(session, "after-switch")
+                assert created["id"] not in screen, "the selection of endpoint one remains after the switch"
+                assert "Request: " not in screen and "request validator" not in screen, "an observation of endpoint one remains"
+                session.send(b"\r")
+                session.wait_screen("Manager workflows")
+                print("PASS tui-endpoints 3: the switch to endpoint two shows its credential scopes, clears the selection and observations, and its session reads the catalogue", flush=True)
+                # 4. A failed switch keeps endpoint two working.
+                session.send(b"E")
+                session.wait_screen("Manager endpoints")
+                session.send(b"\x1b[B\r")
+                screen = session.wait_screen(f"3. failed: manager unreachable  {profiles[2]}")
+                save(session, "failed")
+                assert f"  2. active  {profiles[1]}" in screen, "a failed switch changed the active endpoint"
+                assert "scopes observe submit control" in identity_row(session), "a failed switch changed the identity"
+                session.wait_screen("endpoint switch failed: manager unreachable")
+                session.send(b"\x1b")
+                session.wait_screen("Manager workflows")
+                session.send(b"h")
+                session.wait_screen("Esc BACK")
+                session.send(b"\x1b")
+                session.wait_screen("Manager workflows")
+                session.send(b"\x1b")
+                session.wait_screen("Manager profiles")
+                print("PASS tui-endpoints 4: a switch to the unreachable profile fails with its fixed reason and endpoint two keeps its identity and reads", flush=True)
+                # 5. The switch back opens a new session of endpoint one.
+                screen = switch(session, b"\x1b[A", 1, "observe submit", "observe submit control")
+                assert f"  2. not connected  {profiles[1]}" in screen
+                session.send(b"\x1b")
+                session.wait_screen("Manager profiles")
+                session.send(b"\r")
+                session.wait_screen("Manager workflows")
+                print("PASS tui-endpoints 5: the switch back to endpoint one opens a new session with its identity and catalogue", flush=True)
+                session.send(b"q")
+                assert session.wait_exit(20) == 0
+                session.assert_restored()
+            assert not client_state.exists(), "the service TUI created local runner state"
+            status, overview, raw = request("/v1/snapshot", authorized)
+            assert status == 200
+            requests = [item["request"] for item in overview["items"] if item["kind"] == "request"]
+            assert [item["id"] for item in requests] == [created["id"]] and requests[0]["phase"] == "draft", (
+                "the switches changed the manager requests", requests)
+            (work / "tui-endpoints-overview.json").write_bytes(raw)
+            print("PASS tui-endpoints 6: the manager holds only the one draft request of endpoint one after the switches and the detach", flush=True)
+        finally:
+            if process.poll() is None:
+                process.terminate()
+            process.wait(timeout=25)
+            (work / "server-0.exit").write_text(str(process.returncode) + "\n")
+
+
 def capture_checks():
     """POST /v1/captures through the real HTTPS manager. Each numbered case
     prints one PASS line."""
@@ -5998,6 +6157,11 @@ if routes_mode:
 
 if events_mode:
     event_checks()
+    raise SystemExit(0)
+
+
+if endpoints_mode:
+    endpoint_checks()
     raise SystemExit(0)
 
 

@@ -16,6 +16,7 @@ module Agentic.Tui.Presentation
     serviceReviewAllowed,
     serviceReviewRows,
     endpointLine,
+    endpointsLines,
     serviceRequestLines,
     serviceSaveRefusal,
     serviceSavedLine,
@@ -54,7 +55,7 @@ import Agentic.Tui.RunModel
 import Agentic.Tui.Save (SaveRefusal (..), Saved (..))
 import Agentic.Tui.Types
 import qualified Agentic.Tui.Service as Service
-import Agentic.Tui.ServiceLane (KeyOutcome, internalFaultStatus, keyOutcomeLine)
+import Agentic.Tui.ServiceLane (EndpointSlot (..), EndpointState (..), Endpoints (..), KeyOutcome, internalFaultStatus, keyOutcomeLine)
 import qualified Agentic.Manager.Client as Manager
 import Brick
 import Brick.Widgets.Border (borderWithLabel, hBorder, hBorderWithLabel, vBorder)
@@ -94,7 +95,9 @@ data PaneFocus = PrimaryPane | SecondaryPane
 
 -- | The one visible and input-active layer.
 data ActiveLayer
-  = KeyHelpLayer
+  = -- | The Endpoints view of the service frontend.
+    EndpointsLayer
+  | KeyHelpLayer
   | CancelLayer
   | PersonLayer
   | RecoveryLayer
@@ -122,6 +125,9 @@ data Presentation = Presentation
     -- | The endpoint identity of the service session. The service shell shows
     -- it in its own header row when the terminal has room for that row.
     presentationServiceEndpoint :: !(Maybe Service.Endpoint),
+    -- | The client profiles of the service frontend, their connection
+    -- states and identities, which the Endpoints view lists.
+    presentationServiceEndpoints :: !(Maybe Endpoints),
     -- | Operation, URI, and whether an explicit exact resend is offered.
     presentationServiceMutation :: !(Maybe (Text,Text,Bool)),
     presentationServiceResendConfirm :: !Bool,
@@ -196,6 +202,7 @@ emptyPresentation model =
       presentationNoColor = False,
       presentationService = False,
       presentationServiceEndpoint = Nothing,
+      presentationServiceEndpoints = Nothing,
       presentationServiceMutation = Nothing,
       presentationServiceResendConfirm = False,
       presentationServiceApproval = Nothing,
@@ -316,6 +323,23 @@ endpointLine endpoint =
     authority = if T.length epoch > 18 then T.take 18 epoch <> "…" else epoch
     scopes = Service.endpointScopes endpoint
 
+-- | The lines of the Endpoints view: for each client profile its number,
+-- connection state and path, the identity of its latest session, and each
+-- command that a switch left unresolved for it. The selected profile is
+-- marked with @>@.
+endpointsLines :: Endpoints -> [Text]
+endpointsLines endpoints = concat (zipWith entry [0 :: Int ..] (endpointsSlots endpoints))
+  where
+    entry index slot =
+      [ (if index == endpointsCursor endpoints then "> " else "  ") <> shown (index + 1) <> ". " <> state (slotState slot) <> "  " <> T.pack (slotProfile slot),
+        "     " <> maybe "identity not observed" endpointLine (slotIdentity slot) ]
+        <> [ "     unresolved " <> command <> " (not sent through another endpoint)" | command <- slotUnresolved slot ]
+    state current = case current of
+      EndpointActive -> "active"
+      EndpointIdle -> "not connected"
+      EndpointConnecting _ -> "connecting"
+      EndpointFailed reason -> "failed: " <> reason
+
 bar :: Int -> Widget n -> Widget n
 bar width widget = hLimit width (padRight Max widget)
 
@@ -365,6 +389,7 @@ layerView presentation width _ mainHeight
           "The original body, idempotency key and If-Match stay unchanged.",
           "Its previous outcome may be uncertain. No fresh attempt is created.", "y RESEND EXACT ATTEMPT   n BACK" ]))
 layerView presentation width totalHeight mainHeight = case presentationLayer presentation of
+  EndpointsLayer -> pane "Manager endpoints [focus]" (vBox (map displayTextWrap (maybe [] endpointsLines (presentationServiceEndpoints presentation))))
   KeyHelpLayer -> keyHelpView presentation width mainHeight
   CancelLayer -> cancelView width mainHeight
   PersonLayer -> headView personView
@@ -960,7 +985,7 @@ keyHelpLines :: Presentation -> [Text]
 keyHelpLines presentation = case modelScreen model of
   BrowserScreen | presentationService presentation ->
     ["Up/Down select"] <> ["Enter creates a manager request" | not faulted]
-      <> ["Right/Left focus details/list", "h workflow help", "Esc profiles", "q detach", "? or Esc close this help"]
+      <> ["Right/Left focus details/list", "h workflow help", "Esc profiles", "E manager endpoints", "q detach", "? or Esc close this help"]
   BrowserScreen ->
     [ "Up/Down       select",
       "Right/Left    focus details/list",
@@ -969,9 +994,9 @@ keyHelpLines presentation = case modelScreen model of
       <> browserKeys
       <> ownershipKeys
       <> ["? or Esc      close this help"]
-  ServiceProfilesScreen _ _ -> ["Up/Down select profile", "Right/Left focus details/list", "Enter select ready profile", "r refresh profiles", "q detach", "? or Esc close this help"]
+  ServiceProfilesScreen _ _ -> ["Up/Down select profile", "Right/Left focus details/list", "Enter select ready profile", "r refresh profiles", "E manager endpoints", "q detach", "? or Esc close this help"]
   ServiceRequestScreen _ -> ["Enter requests review when the draft is ready" | not faulted] <> ["e edits draft inputs" | not faulted]
-    <> ["g refreshes observations", "q detaches without cancelling the manager run"]
+    <> ["g refreshes observations", "E manager endpoints", "q detaches without cancelling the manager run"]
   ServiceReviewScreen {} -> ["y approves the exact visible selectors" | not faulted]
     <> ["Enter does not approve", "d toggles complete review details", "Up/Down scroll details", "q detaches"]
   ServiceCommandScreen _ -> ["g refreshes observations without sending a mutation"]
@@ -1111,6 +1136,7 @@ billText snapshot = case (snapshotBillFresh snapshot, snapshotBillMemo snapshot)
 
 footerItems :: Presentation -> Int -> Int -> [Text]
 footerItems presentation width height = case presentationLayer presentation of
+  EndpointsLayer -> ["Up/Down SELECT", "Enter CONNECT", "Esc BACK", "q DETACH"]
   KeyHelpLayer -> ["Esc CLOSE", "Up/Down SCROLL", "PgUp/PgDn", "Home/End"]
   CancelLayer -> ["n/Esc KEEP RUNNING", "y CANCEL RUN"]
   PersonLayer
@@ -1147,7 +1173,7 @@ footerItems presentation width height = case presentationLayer presentation of
     model = presentationModel presentation
     screenItems = case modelScreen model of
       InitialLoading -> ["q/Esc QUIT"]
-      ServiceProfilesScreen _ _ -> ["Enter SELECT", "r REFRESH", browserPaneHint, "? KEYS", "q DETACH"]
+      ServiceProfilesScreen _ _ -> ["Enter SELECT", "r REFRESH", browserPaneHint, "? KEYS", "q DETACH", "E ENDPOINTS"]
       ServiceRequestScreen request ->
         ["g REFRESH", "q DETACH"]
           <> (if Manager.draftPhase request == "draft" && presentationServiceMutation presentation == Nothing
@@ -1161,6 +1187,7 @@ footerItems presentation width height = case presentationLayer presentation of
       BrowserScreen
         | presentationService presentation -> ["h HELP", "Esc PROFILES", browserPaneHint, "? KEYS", "q DETACH"]
             <> ["Enter NEW REQUEST" | presentationServiceMutation presentation == Nothing, not (presentationServiceFault presentation)]
+            <> ["E ENDPOINTS"]
         | presentationRunning presentation -> ["Esc REATTACH", "c CANCEL RUN", "Tab SECTION", "? KEYS", browserPaneHint]
         | compact -> ["Enter OPEN", browserPaneHint, "? KEYS", "Tab SECTION", "q QUIT"] <> case modelTab model of WorkflowsTab -> ["/ FILTER"]; RunsTab -> ["r/m/f LINEAGE"]; RoutingTab -> ["p PERSONA"]
         | modelTab model == RunsTab -> ["Enter INSPECT", "r RESTART", "m RESUME", "f FORK", "Tab SECTION", "? KEYS", "q QUIT"]

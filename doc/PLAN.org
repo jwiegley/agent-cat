@@ -10244,6 +10244,32 @@ Non-blocking findings of fess audit fess/pc-PC13-r1.md (2026-09-30) on subtask P
 
 Limitations recorded by the implementer: service mode has no keys yet for withdraw, discard, capture, remove-input, export or the run controls (the gate covers them by operation name once they exist); at 140 columns the identity row cuts the streamId with an ellipsis; refusals other than 401 or 403 insufficient-scope print the status and problem code; cli/test/PolicyProbe.hs has the new parse case but policies.sh did not run (operator exclusion); the journey ran only at N=8, and the broken-answer and consent controls did not run.
 
+* TODO [#D] Resolve the non-blocking fess findings of subtask PC14    :review:
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pc14-endpoint-switch-fess-2oup
+:LABELS:   ["review","workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-01 Thu 00:18]
+:MODIFIED: [2026-10-01 Thu 00:18]
+:OWNER:    johnw
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess audit fess/pc-PC14-r1.md (2026-10-01) on subtask PC14 (WM-033 endpoint switching with generation fencing and no retargeting).
+
+1. (medium) tui/src/Agentic/Tui/App.hs near line 1102 against lines 603, 638, 683, 691, 697 and 700: handleEndpointConnected sets stateServiceUncertainExit from the unresolved commands of the endpoint slots, but later settlements in the new session overwrite the flag. After an uncertain send on endpoint 1, a switch to endpoint 2, a create there and a detach, the shutdown omits "Manager command outcome may be uncertain" while the Endpoints view still lists the endpoint-1 command. OR every write with "any slot has unresolved commands", or read the slots when shutdownNotices is computed.
+2. (medium) tui/src/Agentic/Tui/ServiceLane.hs unresolvedCommands and App.hs clearServiceSession: a switch lists only MutationSending and MutationUncertain. A retained approval and a MutationAwaiting command are dropped, and neither the Endpoints view nor the shutdown notice shows them. Record them in the old slot as awaiting effect, or count them in the exit flag.
+3. (medium) tui/test/ServiceTests.hs switchTests and manager/test/service_http.py endpoint_checks: only the pure model and the render test cover acceptance item 3 (an uncertain command of the old endpoint is not resent and stays visible). No App-level or integration test drives the lane's unresolved commands into switchStep or triggers the WrongEndpoint refusal. Add an integration step that leaves a send unresolved before a switch and asserts the unresolved line and that the manager receives no second send.
+4. (low) App.hs handleEndpointsKey (Enter) and ServiceLane.hs beginSwitch: a switch can start while a command is preparing or sending, so a send that might have resolved becomes uncertain. Refuse beginSwitch in MutationPreparing or MutationSending with a fixed reason.
+5. (low) manager/test/service_http.py endpoint_checks step 2: after the create the harness accepts either "request validator current" or "manager request: draft". Wait for one deterministic screen, or document why both are valid.
+6. (low) doc/workflow-manager-handoff.md: the current-state section does not mention PC14. The dated record near line 1002 keeps the single-profile synopsis and stays unchanged as a record.
+
+Limitations recorded by the implementer: the tui-endpoints harness uses one manager with two credentials, and the identity change is checked through the credential scopes and the stream identifier; on a narrow terminal the Endpoints identity line wraps without its indentation; the journey ran only at N=8, and bash tui/ci/tui.sh and ALLBUILD did not run.
+
 * TODO [#C] Resolve PC5 fess findings in legacy history windows    :review:
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -18165,7 +18191,7 @@ public or production deployment.
 :LABELS:   ["p6","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-30 Wed 23:57]
+:MODIFIED: [2026-10-01 Thu 00:18]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-029
 :SOURCE_REPO: agent-cat
@@ -18340,6 +18366,13 @@ coordination or SQL into the TUI.
     "author": "johnw",
     "text": "PC13 (2026-09-30): the facade gains clientEndpoint and re-exports parseOperation, Scope, scopeName and requiredScopes (additive only). The TUI service shell consumes them for the endpoint identity row and the scope gate. Evidence as recorded on acat-wm-033-4g77.",
     "created_at": "2026-10-01T06:57:11Z"
+  },
+  {
+    "id": 480,
+    "issue_id": "acat-wm-029-nlmg",
+    "author": "johnw",
+    "text": "PC14 (2026-10-01): the TUI now calls the PC12 coordinator advanceGeneration on an endpoint switch and fences every service worker result by generation. A pending command of a closed Client is refused by Reference binding (WrongEndpoint) and is never sent through the new Client. Checks and evidence as recorded on acat-wm-033-4g77. WM-029 stays open for closeout.",
+    "created_at": "2026-10-01T07:18:35Z"
   }
 ]
 #+end_src
@@ -18582,7 +18615,7 @@ until WM-039 supplies it.
 :LABELS:   ["p7","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-30 Wed 23:57]
+:MODIFIED: [2026-10-01 Thu 00:18]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-033
 :SOURCE_REPO: agent-cat
@@ -18705,6 +18738,13 @@ to an unapproved local launch.
     "author": "johnw",
     "text": "PC13 (2026-09-30): explicit backend selection (agentic-run --tui --local, same as --tui; --tui --service PROFILE unchanged), service-shell endpoint identity row (manager HOST:PORT from the new additive facade accessor clientEndpoint, authority epoch prefix, scopes, streamId), a numbered scope refusal that sends no request (gate uses the manager's requiredScopes, re-exported by the facade), and a total fixed-line startup failure table with exit 1 and no local process. Evidence: Werror BUILD of agentic-run, routing-fixed-point-probe, tui-model-test, tui-test-driver with -ftui-tests; tui-model-test; source-boundaries; JOURNEY-ONCE(8) including the bad-profile startup check and a no-child-process check at three points; bash tui/ci/tui.sh including test_explicit_local; make -C doc check. All exit 0. Remaining for WM-033: keys for withdraw, discard, capture, remove-input, export and run controls do not exist yet. Fess non-blocking, filed as acat-pc13-backend-identity-fess-1k0y. Package stays open for closeout.",
     "created_at": "2026-10-01T06:57:10Z"
+  },
+  {
+    "id": 479,
+    "issue_id": "acat-wm-033-4g77",
+    "author": "johnw",
+    "text": "PC14 (2026-10-01): endpoint switching with generation fencing and no retargeting. agentic-run accepts --tui --service PROFILE [PROFILE ...] with 1 to 8 absolute profiles. E opens an Endpoints view from any service screen (Tab and s, l, m, f, c, i, 1 keep their browser behavior, Esc returns). Enter connects the selected profile in a worker through connectEndpoint. On success the TUI cancels the read, prepare and send workers of the old Client, closes it, advances the PC12 coordinator generation, clears observations, selection, retained results and settled commands, and lists the old session's sending or uncertain commands as unresolved under the old profile. Every worker result is stamped with the active generation and an older stamp is dropped. A failed connection keeps the active endpoint and shows the fixed reason. New service_http.py mode tui-endpoints (two client profiles, two credentials, one manager). Checks passed: Werror build with -ftui-tests of agentic-run, routing-fixed-point-probe, tui-model-test; tui-model-test (17 new switch checks); tui-endpoints at N=8; the Phase A journey at N=8; make -C doc check. Evidence: resume-20260923/PC/PC14; fess/pc-PC14-r1.md (non-blocking), findings filed as a follow-up. Package stays open.",
+    "created_at": "2026-10-01T07:18:34Z"
   }
 ]
 #+end_src

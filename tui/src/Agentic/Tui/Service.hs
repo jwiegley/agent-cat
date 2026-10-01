@@ -3,7 +3,7 @@
 -- | Public manager observations used by the existing terminal presentation.
 -- These records carry no local launch, process, filesystem or control authority.
 module Agentic.Tui.Service
-  ( Endpoint (..), decodeEndpoint, clientIdentity, missingScope,
+  ( Endpoint (..), decodeEndpoint, clientIdentity, connectEndpoint, missingScope,
     Profile (..), Workflow (..), loadProfiles, loadWorkflows,
     decodeProfile, decodeWorkflow, createBody,
     Mutation (..), mutationOperation, mutationURI, mutationProfile, prepareMutation,
@@ -70,6 +70,16 @@ decodeEndpoint (host, port) = decode $ withObject "capabilities" $ \fields ->
 -- | The endpoint identity of a connected session.
 clientIdentity :: C.Client -> Either C.ClientFailure Endpoint
 clientIdentity client = decodeEndpoint (C.clientEndpoint client) (C.clientCapabilities client)
+
+-- | Connect one explicitly supplied client profile and take the endpoint
+-- identity of the new session. A session whose capabilities give no
+-- identity is closed before the failure returns.
+connectEndpoint :: FilePath -> IO (Either C.ClientFailure (C.Client, Endpoint))
+connectEndpoint profile = C.connectClientProfile profile >>= \connected -> case connected of
+  Left failure -> pure (Left failure)
+  Right client -> case clientIdentity client of
+    Left failure -> Left failure <$ C.closeClient client
+    Right identity -> pure (Right (client, identity))
 
 -- | The first scope that the manager requires for the named operation and
 -- that the given credential scopes do not list. The manager rule

@@ -15,6 +15,7 @@ import Control.Exception (bracket)
 import Agentic.Tui.Root (withPrivateRoot)
 import Agentic.Tui.Types (TuiConfig (..))
 import Control.Monad (unless)
+import Data.List.NonEmpty (NonEmpty ((:|)))
 import qualified Data.Text as T
 import System.FilePath (isAbsolute)
 import System.Exit (ExitCode (ExitFailure), exitWith)
@@ -33,20 +34,23 @@ runTui config = withTerminationHandlers $ do
     ioError (userError "--tui requires terminal input and output; use list, plan, run, or machine mode for pipes")
   withPrivateRoot (tuiStateDir config) (runApp config)
 
--- | A terminal client session using only the explicitly supplied client profile.
--- A declared connection failure prints its one fixed line from
+-- | A terminal client session using only the explicitly supplied client
+-- profiles, 1 to 8 of them. The first profile is connected at startup. A
+-- declared connection failure prints its one fixed line from
 -- 'Lane.startupFailureText' and exits with status 1 before the terminal
--- interface starts. Service mode starts no local machine or helper process.
-runServiceTui :: FilePath -> IO ()
-runServiceTui profile = withTerminationHandlers $ do
+-- interface starts. The other profiles connect only when the operator selects
+-- them in the Endpoints view. Service mode starts no local machine or helper
+-- process.
+runServiceTui :: NonEmpty FilePath -> IO ()
+runServiceTui (profile :| others) = withTerminationHandlers $ do
   inputTerminal <- hIsTerminalDevice stdin
   outputTerminal <- hIsTerminalDevice stdout
   unless (inputTerminal && outputTerminal) $
     ioError (userError "--tui --service requires terminal input and output")
   bracket
-    (Client.connectClientProfile profile >>= either startupFailure pure)
-    Client.closeClient
-    (\client -> either startupFailure (runServiceApp client) (Service.clientIdentity client))
+    (Service.connectEndpoint profile >>= either startupFailure pure)
+    (Client.closeClient . fst)
+    (\(client, identity) -> runServiceApp client (Lane.newEndpoints profile identity others))
   where
     startupFailure :: Client.ClientFailure -> IO a
     startupFailure failure = do

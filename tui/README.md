@@ -110,8 +110,10 @@ in [`../doc/tui-release-evidence.md`](../doc/tui-release-evidence.md).
 
 ## Service mode
 
-`agentic-run --tui --service CLIENT_PROFILE` connects the same frontend to a
-running workflow manager through the public `Agentic.Manager.Client` facade.
+`agentic-run --tui --service CLIENT_PROFILE [CLIENT_PROFILE ...]` connects the
+same frontend to a running workflow manager through the public
+`Agentic.Manager.Client` facade. It takes 1 to 8 absolute client-profile paths
+and connects the first one at startup.
 It performs one workflow journey. It browses the manager catalogue, creates one
 request with literal inputs, and shows the exact manager review. Only `y` in the
 summary view approves that review. The frontend then follows the run in the
@@ -131,6 +133,30 @@ first 18 characters of the authority epoch, the credential scopes, and the
 stream identifier of the capabilities. The stream identifier comes last, so a
 narrow terminal shows only its leading characters. A smaller terminal keeps its
 one-row header without the identity row.
+
+`E` opens the Endpoints view from every service screen without text entry,
+the profile and workflow browsers and the request screen included. Tab and the
+other browser keys keep their behavior. The view lists each client profile in
+the order of the command line with its number, its connection state (`active`,
+`not connected`, `connecting` or `failed:` with the fixed reason), its path, and
+the identity row of its latest session. Up and Down select a profile, `Enter`
+connects it, and `Esc` returns to the screen below the view.
+`Agentic.Tui.ServiceLane` owns this model (`Endpoints`, `beginSwitch` and
+`switchStep`). The connection runs in a worker through
+`Agentic.Tui.Service.connectEndpoint`, and the active session continues to
+work while it runs. A failed connection keeps the active session and shows its
+fixed reason, the same text as the startup line without the `--tui --service:`
+prefix. A successful connection cancels the read, preparation and send workers
+of the earlier session, closes that session, and clears every observation,
+selection, retained result and settled command. The new session then loads
+the manager profiles. The switch also advances the generation of the refresh
+coordinator of the session, and every worker result carries the generation of
+the session that started the worker, so a late result of an earlier session is
+never handled. A command whose outcome is unresolved at the switch, or whose
+send was in flight, stays listed under its own profile as `unresolved
+OPERATION URI`. No later session sends it, and its pending command is bound to
+the closed session, so the client refuses it with `WrongEndpoint`. Selecting an
+earlier profile again opens a new session with new references.
 
 A key whose operation needs a scope that the capabilities do not list starts
 nothing and shows the numbered key outcome `OPERATION did not start: this
@@ -207,7 +233,7 @@ Service mode does not support cancellation, steering, redirect, failover or
 abandon, the structured answer editor, captured and other non-literal inputs,
 withdrawal or discarding of a request, more than one concurrent run, run history,
 lineage, export, event-driven refresh, reconnection after a manager restart or a
-credential revocation, endpoint switching, observation of earlier runs after a
+credential revocation, observation of earlier runs after a
 frontend restart, Overview bootstrap, or acceptance at 40x12 and 80x24. The
 [manual](../doc/agent-cat.texi) entry for `--service` states the complete key
 behavior. Service mode is not an accepted milestone.

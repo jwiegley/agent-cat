@@ -858,7 +858,7 @@ Existing `RUNNER --tui` and native frontend commands remain unchanged.
 ```text
 RUNNER --manager serve --config ABSOLUTE_FILE [--legacy-history ROOT=PROFILE]...
 RUNNER --manager admin --config ABSOLUTE_FILE
-RUNNER --tui --service CLIENT_PROFILE
+RUNNER --tui --service CLIENT_PROFILE [CLIENT_PROFILE ...]
 RUNNER --tui --local
 ```
 

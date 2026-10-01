@@ -210,6 +210,7 @@ import Data.Bits ((.&.))
 import Control.Monad (foldM, forM_, void, when)
 import Data.IORef
 import Data.List (nub, sort)
+import Data.Foldable (toList)
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -536,7 +537,7 @@ collidingRegistry =
 parsedAs :: [Text] -> String
 parsedAs args = case parseCommand collidingRegistry args of
   Right Tui -> "tui"
-  Right (TuiService profile) -> "tui-service " <> profile
+  Right (TuiService profiles) -> "tui-service " <> unwords (toList profiles)
   Right FrontendCapabilities -> "frontend-capabilities"
   Right FrontendIo -> "frontend-io"
   Right (FrontendExport _) -> "frontend-export"
@@ -2690,6 +2691,11 @@ main = do
       ("--tui --local is the explicit local mode of --tui", parsedAs ["--tui", "--local"] == "tui"),
       ("--tui --service takes an absolute client-profile path", parsedAs ["--tui", "--service", "/tmp/client-profile.json"] == "tui-service /tmp/client-profile.json"),
       ("--tui --service refuses a relative client-profile path", parsedAs ["--tui", "--service", "client-profile.json"] == "no-verb"),
+      ("--tui --service takes up to eight absolute client-profile paths in order",
+        parsedAs (["--tui", "--service"] <> ["/tmp/p" <> T.pack (show n) | n <- [1 .. 8 :: Int]])
+          == "tui-service " <> unwords ["/tmp/p" <> show n | n <- [1 .. 8 :: Int]]),
+      ("--tui --service refuses nine client-profile paths", parsedAs (["--tui", "--service"] <> ["/tmp/p" <> T.pack (show n) | n <- [1 .. 9 :: Int]]) == "no-verb"),
+      ("--tui --service refuses a relative path among several", parsedAs ["--tui", "--service", "/tmp/a.json", "b.json"] == "no-verb"),
       ("frontend is the prepared-session verb", parsedAs ["frontend"] == "frontend"),
       ("frontend capabilities are a distinct discovery command", parsedAs ["frontend", "--capabilities"] == "frontend-capabilities"),
       ("frontend-io is the read-only query verb", parsedAs ["frontend-io"] == "frontend-io"),

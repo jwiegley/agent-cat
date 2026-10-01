@@ -10,7 +10,7 @@ import Agentic.Runtime (DescriptorCapabilities (..), WorkflowDescriptor (..), Wo
 import Agentic.Tui.Person (PersonPrompt (..))
 import Agentic.Tui.Model
 import qualified Agentic.Tui.Approval as A
-import Agentic.Tui.Presentation (ActiveLayer (..), Presentation (..), emptyPresentation, endpointLine, serviceRequestLines, serviceReviewAllowed, serviceReviewRows,
+import Agentic.Tui.Presentation (ActiveLayer (..), Presentation (..), emptyPresentation, endpointLine, endpointsLines, serviceRequestLines, serviceReviewAllowed, serviceReviewRows,
   savedLeftoverNote, serviceSaveRefusal, serviceSavedLine, wrapDisplayLines)
 import Agentic.Tui.RunModel (emptyRunView, reconcileRunView)
 import Agentic.Tui.Save (SaveRefusal (..), Saved (..), saveExact, saveExactUsing)
@@ -20,6 +20,7 @@ import Control.Concurrent (forkIO, newEmptyMVar, putMVar, takeMVar, threadDelay,
 import Control.Exception (AsyncException (ThreadKilled), ErrorCall (ErrorCall), SomeException, finally, fromException, throwIO, try)
 import Data.Bits ((.&.))
 import Data.Char (isSpace)
+import Data.Maybe (isNothing)
 import qualified Data.Set as Set
 import GHC.Clock (getMonotonicTimeNSec)
 import System.Directory (createDirectory, doesPathExist, getTemporaryDirectory, listDirectory, removePathForcibly)
@@ -165,6 +166,7 @@ serviceTests render = do
   laneTests render row profile
   resourceVectorTests
   endpointTests render profile
+  switchTests render row profile
   where
     profileValue = object ["version" .= (1 :: Int), "id" .= ("profile_main" :: T.Text),
       "revision" .= ("profile_rev_4" :: T.Text), "workspaceLabel" .= ("Café 雪 λ" :: T.Text),
@@ -268,6 +270,89 @@ endpointTests render profile = do
       ("the startup failure lines are distinct single lines",
         let lines' = map (L.startupFailureText . fst) failures
          in length (Set.fromList lines') == length lines' && not (any (T.any (== '\n')) lines'))
+    ]
+
+-- | Endpoint switching: the selection, the connection of another profile,
+-- generation fencing of late results, the unresolved command of the earlier
+-- session, a failed connection, the switch back and the Endpoints view.
+switchTests :: ((Int,Int) -> Presentation -> T.Text) -> S.Workflow -> S.Profile -> IO ()
+switchTests render row profile = do
+  let first = S.Endpoint "127.0.0.1" 8443 "stream_A" "epoch_A" ["observe", "submit"]
+      second = S.Endpoint "127.0.0.1" 8443 "stream_A" "epoch_A" ["observe", "submit", "control"]
+      start = L.newEndpoints "/p/one.json" first ["/p/two.json", "/p/three.json"]
+      generation = L.endpointsGeneration
+      states endpoints = map L.slotState (L.endpointsSlots endpoints)
+      create = S.Create row
+      retained = L.Attempt create ("pending-original" :: T.Text) (Nothing :: Maybe T.Text)
+      uncertain = L.Lane (Just (L.ReadTicket 7 L.PageSetRead)) (L.MutationUncertain retained (L.DeclaredUncertainty "TransportUnavailable")) False False
+      unresolved = L.unresolvedCommands uncertain
+      (activeRefusal, _) = L.beginSwitch 10 start
+      selected = L.moveEndpoint 1 start
+      (switchStart, connecting) = L.beginSwitch 10 selected
+      (secondRefusal, _) = L.beginSwitch 11 (L.moveEndpoint 1 connecting)
+      (staleStep, staleAfter) = L.switchStep 9 (L.Declared (Right ("late session" :: T.Text, second))) unresolved connecting
+      (failedStep, failed) = L.switchStep 10 (L.Declared (Left C.TransportUnavailable) :: L.CallOutcome (T.Text, S.Endpoint)) unresolved connecting
+      (faultStep, _) = L.switchStep 10 (L.InternalFault :: L.CallOutcome (T.Text, S.Endpoint)) unresolved connecting
+      (_, retrying) = L.beginSwitch 12 failed
+      (connectedStep, switched) = L.switchStep 12 (L.Declared (Right ("second session" :: T.Text, second))) unresolved retrying
+      -- A read of the earlier session that was in flight with ticket 7.
+      late = L.Stamped (generation start) (7 :: Int, L.Declared (Right ("old observation" :: T.Text)) :: L.CallOutcome T.Text)
+      current = L.Stamped (generation switched) (1 :: Int)
+      (backStart, back) = L.beginSwitch 13 (L.moveEndpoint (-1) switched)
+      (backStep, returned) = L.switchStep 13 (L.Declared (Right ("first again" :: T.Text, first))) [] back
+      view endpoints = render (100, 30) ((emptyPresentation (initialServiceModel [profile])) {presentationService = True, presentationNoColor = True,
+        presentationLayer = EndpointsLayer, presentationServiceEndpoint = L.activeIdentity endpoints, presentationServiceEndpoints = Just endpoints})
+      switchedLines = endpointsLines switched
+  checks
+    [ ("the first profile is active with its identity at generation zero and the others have no session",
+        L.activeIdentity start == Just first && states start == [L.EndpointActive, L.EndpointIdle, L.EndpointIdle]
+          && generation start == C.FetchGeneration 0),
+      ("selecting the active endpoint starts nothing", activeRefusal == L.SwitchRefused "endpoint 1 is already active."),
+      ("selecting another endpoint connects its profile and keeps the active session",
+        switchStart == L.SwitchStart "/p/two.json" && L.endpointsActive connecting == 0
+          && states connecting == [L.EndpointActive, L.EndpointConnecting 10, L.EndpointIdle] && generation connecting == generation start),
+      ("a second connection while one is in flight starts nothing",
+        secondRefusal == L.SwitchRefused "endpoint switch did not start: a connection is in progress."),
+      ("a completion with a stale ticket changes nothing and closes the session that it opened",
+        staleStep == L.SwitchStale (Just "late session") && staleAfter == connecting),
+      ("a failed connection keeps the active endpoint, its identity and the generation, and shows the fixed reason",
+        failedStep == L.SwitchFailed "manager unreachable" && L.endpointsActive failed == 0 && L.activeIdentity failed == Just first
+          && generation failed == generation start && states failed == [L.EndpointActive, L.EndpointFailed "manager unreachable", L.EndpointIdle]),
+      ("an internal fault during the connection is a failed connection",
+        faultStep == L.SwitchFailed "internal frontend fault during the connection"),
+      ("a successful connection makes the new identity active and advances the generation",
+        connectedStep == L.SwitchConnected "second session" && L.endpointsActive switched == 1 && L.activeIdentity switched == Just second
+          && generation switched == C.FetchGeneration 1 && states switched == [L.EndpointIdle, L.EndpointActive, L.EndpointIdle]),
+      ("a late result of the earlier session is not admitted, so it never reaches the new session",
+        isNothing (L.admitStamped switched late) && L.admitStamped switched current == Just 1),
+      ("the stale read ticket of the earlier session is stale for the lane of the new session",
+        case L.readStep 7 (L.Declared (Right ("old observation" :: T.Text))) (L.sessionLane :: L.Lane T.Text T.Text) of
+          (L.ReadStale, lane) -> laneShape lane == laneShape L.sessionLane
+          _ -> False),
+      ("the new session has no read, no command, no fault and no exact resend",
+        laneShape (L.sessionLane :: L.Lane T.Text T.Text) == (Nothing, False, False, "idle")
+          && isNothing (L.resendAttempt (L.sessionLane :: L.Lane T.Text T.Text))),
+      ("the unresolved command of the earlier session stays listed for its own profile",
+        unresolved == ["create " <> S.mutationURI create]
+          && map L.slotUnresolved (L.endpointsSlots switched) == [unresolved, [], []]),
+      ("a send in flight is unresolved at a switch and a preparation or an accepted intent is not",
+        L.unresolvedCommands (L.Lane Nothing (L.MutationSending 3 retained) False False) == unresolved
+          && null (L.unresolvedCommands (L.Lane Nothing (L.MutationPreparing 3 create) False False :: L.Lane T.Text T.Text))
+          && null (L.unresolvedCommands (L.Lane Nothing (L.MutationAwaiting create "pending" "/v1/commands/c") False False :: L.Lane T.Text T.Text))),
+      ("selecting the earlier endpoint again opens a new session at a new generation and keeps its unresolved command listed",
+        backStart == L.SwitchStart "/p/one.json" && backStep == L.SwitchConnected "first again" && L.endpointsActive returned == 0
+          && L.activeIdentity returned == Just first && generation returned == C.FetchGeneration 2
+          && map L.slotUnresolved (L.endpointsSlots returned) == [unresolved, [], []]
+          && isNothing (L.admitStamped returned current)),
+      ("the Endpoints view lists each profile with its state, path and identity, and marks the selection",
+        switchedLines!!0 == "  1. not connected  /p/one.json" && switchedLines!!2 == "     unresolved create " <> S.mutationURI create <> " (not sent through another endpoint)"
+          && switchedLines!!3 == "> 2. active  /p/two.json" && switchedLines!!4 == "     " <> endpointLine second
+          && switchedLines!!5 == "  3. not connected  /p/three.json" && switchedLines!!6 == "     identity not observed"),
+      ("the Endpoints view shows a failed connection with its fixed reason",
+        "> 2. failed: manager unreachable  /p/two.json" `elem` endpointsLines failed),
+      ("the rendered Endpoints view shows the new identity, the unresolved command and its keys",
+        all (`T.isInfixOf` view switched) ["Manager endpoints", "active  /p/two.json", "scopes observe submit control",
+          "unresolved create", "Enter CONNECT", "Esc BACK"])
     ]
 
 -- | The decision, answer, control, request and run sections of the resources

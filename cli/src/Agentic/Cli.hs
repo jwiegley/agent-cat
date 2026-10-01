@@ -298,6 +298,7 @@ import qualified Data.ByteString as BS
 import Data.Char (isAlphaNum)
 import qualified Data.ByteString.Lazy as BL
 import Data.List (find, nub, sort, sortOn, tails)
+import Data.List.NonEmpty (NonEmpty ((:|)))
 import Data.Maybe (fromMaybe, isJust, isNothing, listToMaybe, mapMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -735,8 +736,9 @@ data Command
   = -- | Explicit full-screen terminal frontend in local mode, which
     -- @--tui@ and @--tui --local@ both select.
     Tui
-  | -- | A terminal client using an explicit manager client-profile file.
-    TuiService !FilePath
+  | -- | A terminal client using 1 to 8 explicit manager client-profile
+    -- files. The first one connects at startup.
+    TuiService !(NonEmpty FilePath)
   | -- | Workflow-independent process-interface discovery.
     FrontendCapabilities
   | -- | Read-only, versioned private-store queries for native frontends.
@@ -3812,10 +3814,11 @@ parseCommand reg = \case
   ["--help"] -> Right Usage
   ["--tui"] -> Right Tui
   ["--tui", "--local"] -> Right Tui
-  ["--tui", "--service", profile]
-    | isAbsolute (T.unpack profile),
-      BS.length (encodeUtf8 profile) <= 4096,
-      not (T.any (`elem` ['\NUL','\n','\r']) profile) -> Right (TuiService (T.unpack profile))
+  ("--tui" : "--service" : profile : others)
+    | length others <= 7,
+      all (\path -> isAbsolute (T.unpack path) && BS.length (encodeUtf8 path) <= 4096
+        && not (T.any (`elem` ['\NUL','\n','\r']) path)) (profile : others) ->
+        Right (TuiService (T.unpack profile :| map T.unpack others))
   ["frontend"] -> Right FrontendSession
   ["frontend", "--capabilities"] -> Right FrontendCapabilities
   ["frontend", "--help"] -> Right Usage
@@ -4383,7 +4386,7 @@ usage reg =
     [ bin <> " — " <> regBanner reg,
       "",
       "  " <> bin <> " --tui [--local]",
-      "  " <> bin <> " --tui --service ABS_CLIENT_PROFILE",
+      "  " <> bin <> " --tui --service ABS_CLIENT_PROFILE [ABS_CLIENT_PROFILE ...]",
       "  " <> bin <> " frontend --capabilities",
       "  " <> bin <> " frontend",
       "  " <> bin <> " frontend-io < request.json",
