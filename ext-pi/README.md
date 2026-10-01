@@ -61,9 +61,11 @@ fork is built for this extension and is not edited by agent-cat work.
 
 `src/manager/` holds the TypeScript manager client. It states the behavior of
 the Haskell client modules `Agentic.Manager.Client.Events`,
-`Agentic.Manager.Client.Failure` and `Agentic.Manager.Client.Refresh`, and it
-imports no Haskell code. Its modules
-perform no I/O and hold no session.
+`Agentic.Manager.Client.Failure` and `Agentic.Manager.Client.Refresh`, of the
+shared protocol codecs `Agentic.Manager.Protocol.Draft`,
+`Agentic.Manager.Protocol.Preparation` and `Agentic.Manager.Protocol.Command`,
+and of the service parsers of `Agentic.Tui.Service`. It imports no Haskell
+code. Its modules perform no I/O and hold no session.
 
 `src/manager/json.ts` parses JSON text without loss. `parseJson` uses the
 source text that `JSON.parse` of Node 22 gives to a reviver, and it keeps the
@@ -97,6 +99,38 @@ duplicate member or deep nesting. The Haskell strict decoder refuses both.
 - `problemFailure(status, body)` gives `Refused` with the status and the code
   of a problem body, or `InvalidResponse`.
 
+`src/manager/resources.ts` holds the decoders of the public resources and
+the typed answer of a decision. Each decoder gives the decoded value, or
+`InvalidResponse` when the value does not agree with the frozen
+representation. A decoded value grants no ownership, approval, supervision or
+control authority.
+
+- `decodeDraftView`, `decodeReadiness`, `decodeInputDeclaration`,
+  `decodeSuppliedInput` and `decodeInputError` decode a request and its
+  readiness. `decodePreparation`, `decodeReview`, `decodeReviewInput`,
+  `decodeReviewLineage` and `decodeReviewEdit` decode a preparation and its
+  review. `decodeCommandReceipt` decodes a command receipt. Each `encode`
+  function gives the canonical encoding of the decoded value, which is the
+  encoding of the Haskell codec. A review keeps its policy and its result
+  code as validated JSON values, and a root review has no lineage member.
+- `decodeDecision`, `decodeControl`, `decodeRunItem` and
+  `decodeOverviewMember` decode a decision, the controls of a run, one run
+  item and one overview member `{"kind":K,K:member}`. A decision view and a
+  control view keep the exact JSON value that they decode.
+  `decisionProjection`, `controlProjection`, `runProjection` and
+  `memberProjection` give the decoded fields. A UInt64 or UInt32 value is
+  canonical decimal text, and an absent optional value is null.
+- `answerValue(decision, input)` gives the typed JSON answer of the editor
+  input. A flag takes `yes`, `no`, `true` or `false` in any letter case, so
+  the input `no` gives JSON `false`. An empty receipt gives `null`, a text
+  answer is the input itself, and a verdict takes JSON text. A structured
+  question takes JSON text that agrees with the editor schema of the
+  decision. Every other input, a structured question without an editor
+  schema, and a recovery decision give the refusal `InvalidAnswer` with a
+  reason. `answerBody(decision, value)` gives the closed answer body with
+  the occurrence and the generation of the decision. A caller builds the
+  body only from an accepted value, so a refused answer builds no command.
+
 `src/manager/refresh.ts` holds the refresh coordinator of one client session.
 Its functions return a new state and the actions that the caller performs.
 They do not change the state that they receive, and no action is a send.
@@ -128,13 +162,17 @@ They do not change the state that they receive, and no action is a send.
   the same `Uncertain` value unchanged, and the client resends nothing.
 
 `test/manager-vectors.test.ts` reads `../test/manager_client_vectors.json` and
-runs every case of its `events` and `refresh` sections with the pass criteria
-of the `vectors` mode of `manager-client-check`. It feeds each `sse` stream
+runs every case of its `events`, `resources` and `refresh` sections with the
+pass criteria of the `vectors` mode of `manager-client-check` and of the
+resource vector tests of the TUI service. Each resource case decodes to its
+stated projection or refuses with `InvalidResponse`, and each answer case
+gives its stated answer body or refuses with `InvalidAnswer`. It feeds each `sse` stream
 whole, at each listed split, at every single split point of a stream of at
 most 2048 bytes, and one byte at a time. It runs each refresh sequence step
 by step and checks the exact actions and the coordinator rules of each step.
 It fails when a subsection is empty, and it asserts the number of cases of
-each subsection.
+each subsection. For each resources subsection it also asserts the number of
+cases that decode and the number that refuse.
 
 ## Configuration
 

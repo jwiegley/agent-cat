@@ -50,12 +50,49 @@ import {
   type RefreshStep,
   type Uncertain,
 } from "../src/manager/refresh.ts";
+import {
+  answerBody,
+  answerValue,
+  controlProjection,
+  decisionProjection,
+  decodeCommandReceipt,
+  decodeControl,
+  decodeDecision,
+  decodeDraftView,
+  decodeInputDeclaration,
+  decodeInputError,
+  decodeOverviewMember,
+  decodePreparation,
+  decodeReadiness,
+  decodeReview,
+  decodeReviewEdit,
+  decodeReviewInput,
+  decodeReviewLineage,
+  decodeRunItem,
+  decodeSuppliedInput,
+  encodeCommandReceipt,
+  encodeDraftView,
+  encodeInputDeclaration,
+  encodeInputError,
+  encodePreparation,
+  encodeReadiness,
+  encodeReview,
+  encodeReviewEdit,
+  encodeReviewInput,
+  encodeReviewLineage,
+  encodeSuppliedInput,
+  memberProjection,
+  runProjection,
+  type DecisionView,
+} from "../src/manager/resources.ts";
 
 /**
- * The events and refresh sections of `test/manager_client_vectors.json`, run
- * with the pass criteria of `eventVectors` and `refreshVectors` in
- * `manager/test/ClientCheck.hs`. The file is read with the lossless parser,
- * so that numbers such as `410.0` reach the decoders as written.
+ * The events, resources and refresh sections of
+ * `test/manager_client_vectors.json`, run with the pass criteria of
+ * `eventVectors`, `resourceVectors` and `refreshVectors` in
+ * `manager/test/ClientCheck.hs` and of `resourceVectorTests` in
+ * `tui/test/ServiceTests.hs`. The file is read with the lossless parser, so
+ * that numbers such as `410.0` reach the decoders as written.
  */
 const VECTORS = parseJson(readFileSync(new URL("../../test/manager_client_vectors.json", import.meta.url), "utf8"));
 
@@ -565,5 +602,224 @@ describe("manager client vectors: refresh", () => {
 
   it("counts a fraction that is not a number as zero", () => {
     expect(jitteredMicroseconds(4, Number.NaN)).toBe(2000000);
+  });
+});
+
+/** The number of cases of each subsection of the resources section. */
+const RESOURCE_COUNTS = {
+  drafts: 39,
+  preparations: 40,
+  receipts: 36,
+  decisions: 20,
+  answers: 22,
+  controls: 16,
+  requests: 11,
+  runs: 24,
+} as const;
+
+/** The number of cases of each subsection that state a projection and that state a refusal. */
+const RESOURCE_OUTCOMES = {
+  drafts: { projected: 12, refused: 27 },
+  preparations: { projected: 13, refused: 27 },
+  receipts: { projected: 19, refused: 17 },
+  decisions: { projected: 6, refused: 14 },
+  answers: { projected: 12, refused: 10 },
+  controls: { projected: 3, refused: 13 },
+  requests: { projected: 4, refused: 7 },
+  runs: { projected: 6, refused: 18 },
+} as const;
+
+type ResourceSection = keyof typeof RESOURCE_COUNTS;
+
+/** The cases of one resources subsection, refused when the subsection is empty. */
+function resourceCases(name: ResourceSection): readonly JsonValue[] {
+  const items = list(member(member(VECTORS, "resources"), name));
+  if (items.length === 0) throw new Error(`vector section resources.${name} is empty`);
+  return items;
+}
+
+/** A decoder whose accepted value is given as its projection. */
+type Projecting = (value: JsonValue) => Outcome<JsonValue>;
+
+function projected<Decoded>(decode: (value: JsonValue) => Outcome<Decoded>, project: (decoded: Decoded) => JsonValue): Projecting {
+  return (value) => {
+    const decoded = decode(value);
+    return decoded.ok ? { ok: true, value: project(decoded.value) } : decoded;
+  };
+}
+
+/**
+ * A view keeps its JSON value. When that value is not the input itself, the
+ * projection is a fixed text that matches no expected projection.
+ */
+function retained<View extends { readonly value: JsonValue }>(
+  decode: (value: JsonValue) => Outcome<View>,
+  project: (view: View) => JsonValue,
+): Projecting {
+  return (value) => {
+    const decoded = decode(value);
+    if (!decoded.ok) return decoded;
+    return { ok: true, value: decoded.value.value === value ? project(decoded.value) : "the retained value differs from the input" };
+  };
+}
+
+/** The decoders of the typed subsections, by the public type that each case names. */
+const TYPED_DECODERS: Readonly<Record<"drafts" | "preparations" | "receipts", Readonly<Record<string, Projecting>>>> = {
+  drafts: {
+    DraftView: projected(decodeDraftView, encodeDraftView),
+    Readiness: projected(decodeReadiness, encodeReadiness),
+    InputDeclaration: projected(decodeInputDeclaration, encodeInputDeclaration),
+    SuppliedInput: projected(decodeSuppliedInput, encodeSuppliedInput),
+    InputError: projected(decodeInputError, encodeInputError),
+  },
+  preparations: {
+    Preparation: projected(decodePreparation, encodePreparation),
+    Review: projected(decodeReview, encodeReview),
+    ReviewInput: projected(decodeReviewInput, encodeReviewInput),
+    ReviewLineage: projected(decodeReviewLineage, encodeReviewLineage),
+    ReviewEdit: projected(decodeReviewEdit, encodeReviewEdit),
+  },
+  receipts: { CommandReceipt: projected(decodeCommandReceipt, encodeCommandReceipt) },
+};
+
+const overviewMember = projected(decodeOverviewMember, memberProjection);
+
+/** The JSON text of one vector field, parsed without loss. */
+function vectorJson(vector: JsonValue, name: string): JsonValue {
+  const source = textOf(member(vector, name));
+  if (source === undefined) throw new Error(`${label("resource", vector)} has no ${name}`);
+  return parseJson(source);
+}
+
+/** The stated outcome of a vector: its projection, or the named refusal. */
+function statedOutcome(vector: JsonValue, refusal: string): { projection: JsonValue } | { refusal: true } {
+  const projection = member(vector, "projection");
+  const stated = member(vector, "refusal");
+  if (typeof projection === "string" && stated === undefined) return { projection: vectorJson(vector, "projection") };
+  if (projection === undefined && stated === refusal) return { refusal: true };
+  throw new Error(`${label("resource", vector)} states neither one projection nor one refusal`);
+}
+
+type Tally = { projected: number; refused: number };
+
+/**
+ * One resource vector: the JSON text decodes to the projection, or refuses
+ * with `InvalidResponse`. The tally counts the outcome that the decoder gave.
+ */
+function runResourceVector(vector: JsonValue, decode: Projecting, tally: Tally): void {
+  const expected = statedOutcome(vector, "InvalidResponse");
+  const outcome = decode(vectorJson(vector, "json"));
+  const name = label("resource", vector);
+  if ("projection" in expected) {
+    expect(outcome.ok ? encodeJson(outcome.value) : outcome.failure, name).toEqual(encodeJson(expected.projection));
+    expect(outcome.ok && jsonEqual(outcome.value, expected.projection), name).toBe(true);
+  } else {
+    expect(outcome.ok ? encodeJson(outcome.value) : outcome.failure, name).toEqual({ kind: "InvalidResponse" });
+  }
+  if (outcome.ok) tally.projected += 1;
+  else tally.refused += 1;
+}
+
+/** The decoder of a vector by its origin: one collection item, or one overview member. */
+function byOrigin(vector: JsonValue, item: Projecting): Projecting {
+  const origin = member(vector, "from");
+  if (origin === "item") return item;
+  if (origin === "overview") return overviewMember;
+  throw new Error(`${label("resource", vector)} names no origin`);
+}
+
+function runSection(name: ResourceSection, decoderOf: (vector: JsonValue) => Projecting): Tally {
+  const tally = { projected: 0, refused: 0 };
+  for (const vector of resourceCases(name)) runResourceVector(vector, decoderOf(vector), tally);
+  return tally;
+}
+
+function runTypedSection(name: "drafts" | "preparations" | "receipts"): Tally {
+  return runSection(name, (vector) => {
+    const type = textOf(member(vector, "type"));
+    const decode = type === undefined ? undefined : TYPED_DECODERS[name][type];
+    if (decode === undefined) throw new Error(`${label(name, vector)} names no type of its section`);
+    return decode;
+  });
+}
+
+describe("manager client vectors: resources", () => {
+  it("has the stated number of cases in every subsection", () => {
+    const counts = Object.fromEntries(Object.keys(RESOURCE_COUNTS).map((name) =>
+      [name, resourceCases(name as ResourceSection).length]));
+    expect(counts).toEqual(RESOURCE_COUNTS);
+  });
+
+  it("decodes requests, readiness and inputs to their canonical encoding and refuses the invalid ones", () => {
+    expect(runTypedSection("drafts")).toEqual(RESOURCE_OUTCOMES.drafts);
+  });
+
+  it("decodes preparations, reviews, inputs, lineages and edits to their canonical encoding and refuses the invalid ones", () => {
+    expect(runTypedSection("preparations")).toEqual(RESOURCE_OUTCOMES.preparations);
+  });
+
+  it("decodes command receipts to their canonical encoding and refuses the invalid ones", () => {
+    expect(runTypedSection("receipts")).toEqual(RESOURCE_OUTCOMES.receipts);
+  });
+
+  it("decodes decision items and overview members, and each decision keeps its exact JSON value", () => {
+    const item = retained(decodeDecision, decisionProjection);
+    expect(runSection("decisions", (vector) => byOrigin(vector, item))).toEqual(RESOURCE_OUTCOMES.decisions);
+  });
+
+  it("decodes run controls, and each control view keeps its exact JSON value", () => {
+    expect(runSection("controls", () => retained(decodeControl, controlProjection))).toEqual(RESOURCE_OUTCOMES.controls);
+  });
+
+  it("decodes request items and overview members", () => {
+    const item = projected(decodeDraftView, encodeDraftView);
+    expect(runSection("requests", (vector) => byOrigin(vector, item))).toEqual(RESOURCE_OUTCOMES.requests);
+  });
+
+  it("decodes run items and overview members", () => {
+    const item = projected(decodeRunItem, runProjection);
+    expect(runSection("runs", (vector) => byOrigin(vector, item))).toEqual(RESOURCE_OUTCOMES.runs);
+  });
+
+  it("gives the typed answer body, or refuses the answer before any command is built", () => {
+    const tally = { projected: 0, refused: 0 };
+    let built = 0;
+    const build = (decision: DecisionView, value: JsonValue) => {
+      built += 1;
+      return answerBody(decision, value);
+    };
+    for (const vector of resourceCases("answers")) {
+      const name = label("answer", vector);
+      const decision = decodeDecision(vectorJson(vector, "decision"));
+      if (!decision.ok) throw new Error(`${name}: the decision does not decode`);
+      const input = textOf(member(vector, "input"));
+      if (input === undefined) throw new Error(`${name} has no input`);
+      const expected = statedOutcome(vector, "InvalidAnswer");
+      const answer = answerValue(decision.value, input);
+      if ("projection" in expected) {
+        if (!answer.ok) throw new Error(`${name}: ${answer.failure.reason}`);
+        const body = build(decision.value, answer.value);
+        expect(encodeJson(body), name).toBe(encodeJson(expected.projection));
+        expect(jsonEqual(body, expected.projection), name).toBe(true);
+        tally.projected += 1;
+      } else {
+        expect(answer.ok ? encodeJson(answer.value) : answer.failure.kind, name).toBe("InvalidAnswer");
+        tally.refused += 1;
+      }
+    }
+    expect(tally).toEqual(RESOURCE_OUTCOMES.answers);
+    expect(built).toBe(RESOURCE_OUTCOMES.answers.projected);
+  });
+
+  it("gives JSON false, not null or text, for the boolean input no", () => {
+    const vector = resourceCases("answers").find((item) => member(item, "name") === "flag no is false");
+    if (vector === undefined) throw new Error("the vector flag no is false is missing");
+    const decision = decodeDecision(vectorJson(vector, "decision"));
+    if (!decision.ok) throw new Error("the decision does not decode");
+    const answer = answerValue(decision.value, "no");
+    expect(answer).toEqual({ ok: true, value: false });
+    expect(answer.ok && member(answerBody(decision.value, answer.value), "value")).toBe(false);
+    expect(answerValue(decision.value, " FALSE\t")).toEqual({ ok: true, value: false });
+    expect(answerValue(decision.value, "maybe").ok).toBe(false);
   });
 });
