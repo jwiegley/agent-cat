@@ -114,6 +114,16 @@ serviceTests render = do
   check "review selectors fit the acceptance terminal in full" (serviceReviewAllowed preparation "\"preprev_1\"" (140,36))
   check "clipped selectors disable approval" (not (serviceReviewAllowed preparation "\"preprev_1\"" (40,8)))
   check "all five exact selectors are rendered" (all (`elem` serviceReviewRows preparation "\"preprev_1\"") (S.approvalSelectors preparation))
+  -- The identifiers have the lengths that the manager issues. The tui-sizes
+  -- journey approves such a review at 80x24 and is refused at 40x12.
+  let hex count = T.replicate count "a"
+      issued = preparation {C.preparationId = "preparation_" <> hex 48, C.preparationRequest = "request_" <> hex 48,
+        C.preparationRequestRevision = "request_revision_" <> hex 48, C.preparationProfile = "profile_1",
+        C.preparationProfileRevision = hex 32 <> "_1", C.preparationDescriptorRevision = hex 32,
+        C.preparationExpiresAt = "2026-10-01T14:38:33.464Z", C.preparationDigest = hex 64, C.preparationGeneration = "generation_" <> hex 64}
+      issuedTag = "\"preparation_revision_" <> hex 48 <> "\""
+  check "a review with manager-issued identifiers fits 80x24 and not 40x12"
+    (serviceReviewAllowed issued issuedTag (80,24) && not (serviceReviewAllowed issued issuedTag (40,12)))
   check "approval body preserves the complete binding" (S.approvalBody preparation == object
     ["operation" .= ("approve" :: T.Text), "reviewDigest" .= C.preparationDigest preparation,
      "requestRevision" .= C.preparationRequestRevision preparation, "profileRevision" .= C.preparationProfileRevision preparation,
@@ -2915,6 +2925,11 @@ managerLossTests render profile row snapshot receiptValue = do
       longContext = render (80,24) ((emptyPresentation ((initialServiceModel [profile]) {modelScreen = InputScreen 0,
           modelWorkflow = Just ((S.workflowDisplay row) {workflowName = T.replicate 90 "w"})}))
         {presentationService = True, presentationNoColor = True, presentationServiceEndpoint = Just live, presentationServiceReach = lost2})
+      -- A screen context longer than the header row also gives way to the
+      -- delivery state, which follows at least one space.
+      longDelivery = render (80,24) ((emptyPresentation ((initialServiceModel [profile]) {modelScreen = InputScreen 0,
+          modelWorkflow = Just ((S.workflowDisplay row) {workflowName = T.replicate 90 "w"})}))
+        {presentationService = True, presentationNoColor = True, presentationServiceEndpoint = Just live, presentationServiceDelivery = L.DeliveryLive})
       contextRow frame = case T.lines frame of
         _ : context : _ -> context
         _ -> ""
@@ -2953,6 +2968,8 @@ managerLossTests render profile row snapshot receiptValue = do
           && not ("delivery" `T.isInfixOf` contextRow (shell (140,36) lost2))
           && "manager unreachable since 12:00:00Z" `T.isInfixOf` contextRow (shell (80,24) lost2)
           && "manager unreachable since 12:00:00Z" `T.isInfixOf` contextRow longContext && "workflow www" `T.isInfixOf` contextRow longContext),
+      ("a long screen context gives way to the complete delivery state after a space",
+        "w delivery live" `T.isInfixOf` contextRow longDelivery && "workflow www" `T.isInfixOf` contextRow longDelivery),
       ("the header row shows the delivery state again once a read reaches the manager",
         "delivery disconnected since 12:00:00Z (TransportUnavailable)" `T.isInfixOf` contextRow (shell (140,36) back)
           && not ("unreachable" `T.isInfixOf` shell (140,36) back)),

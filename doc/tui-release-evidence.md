@@ -41,9 +41,47 @@ publication was performed.
 | TUI/runtime import boundary and agent-cat as sole interpreter | Shared GHC header-parser gate; Runtime facade and source-owned TUI allowlist | Both CLI/TUI gates run 25 explicit syntax/TUI fixtures and 233 generated forbidden-edge fixtures; isolated executable rejects real forbidden imports |
 | Opt-in frontend state sharing and runner-specific defaults | `tuiCmd` state-root selection and frontend-manifest v2 | Default-state PTY assertion; TUI/ext-pi shared manifest/restore tests |
 | macOS/Linux support and terminal restoration | POSIX fd/process-group implementation; three-system flake | Darwin PTY normal/exception/signal tests; Darwin and Linux builds below |
+| Service-mode journey at 40x12, 80x24 and 140x36 with resizes | `Tui.Presentation.serviceReviewRows`, `serviceReviewAllowed` and the header row; drafts kept by identity in `Tui.App` | The tui-sizes mode and its `tui-sizes-broken-draft` control in `manager/test/service_http.py`; `tui-model-test` review-fit and header-row checks |
 | Downstream `wf --tui` uses its own 74-workflow registry | Public `Agentic.Tui` facade reached through `cliMain` | Downstream gates and a scripted `wf --tui` `hello-world` PTY launch |
 
 ## Fresh validation record
+
+### Service-mode size journey (2026-10-01)
+
+The tui-sizes mode of `manager/test/service_http.py` starts the service TUI
+through `test/tui_probe.py` at 40 by 12 cells with the mixed fixture, one
+profile and one execution reservation. The harness only reads, and every
+mutation comes from a key of the TUI. Each resize waits for the redraw of the
+TUI at the new size.
+
+1. At 40 by 12 the TUI selects the profile, opens `mixed-controls`, and
+   pastes the literal into the input editor. A resize to 80 by 24 and back to
+   40 by 12 keeps the draft. `Ctrl-D` sends it, and the request supplies
+   exactly the typed literal.
+2. At 40 by 12 `Enter` prepares the exact review. The approval selectors do
+   not fit, so `y` shows the clipped-review notice, and the request stays in
+   review with its preparation live and unchanged.
+3. A resize to 80 by 24 keeps the same review with the five selectors
+   unclipped, and `y` approves it.
+4. At the question head the TUI types `false`, and a resize to 140 by 36 keeps
+   the typed answer. `Ctrl-D` answers, and `r` retries the recovery head.
+5. The live monitor shows terminal success and the verified result, whose
+   size and SHA-256 equal the download of the harness. `s` saves the exact
+   bytes with mode 0600, and the run store records the answer as JSON false.
+6. The live monitor, the Manager overview, the Manager decisions view and the
+   History view each redraw at all three sizes. `q` exits with status 0, and
+   the terminal is restored.
+
+The control `tui-sizes-broken-draft` clears the input editor with Backspace
+before the first resize and fails with `JOURNEY-ASSERT draft survives
+resize`. The journey found two rendering defects, which are corrected. The
+summary review needed 19 rows at 80 by 24, where 16 rows are available, so
+`y` could not approve at that size. The summary now merges the profile and
+expiry rows and the consent rows, and it leaves the pointer to the complete
+review to the `d` key of the footer. The header row of the live monitor showed
+a long context and the delivery state without a space between them. The
+header now reserves the width of the delivery state. The Phase A journey
+(`tui-journey`) passes with these changes.
 
 ### Name-only workflow rows
 

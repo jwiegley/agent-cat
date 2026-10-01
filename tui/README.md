@@ -851,6 +851,32 @@ the answer conversion against the `resources` section of
 `test/manager_client_vectors.json`, which [the protocol
 description](../doc/api/README.md#pages-and-live-delivery) describes.
 
-Service mode does not support acceptance at 40x12 and 80x24. The
-[manual](../doc/agent-cat.texi) entry for `--service` states the complete key
-behavior. Service mode is not an accepted milestone.
+The summary view of the exact review (`serviceReviewRows`) shows the request,
+the preparation, the profile with the expiry, the `If-Match` value and the
+five approval selectors. `d` in the footer opens the complete exact review.
+`serviceReviewAllowed` reserves the rows of the longest approval-key notice
+and permits approval only when every row fits. With the identifiers that the
+manager issues, a review without lineage fits 80x24, and at 40x12 a summary
+`y` shows `Approval did not start: the complete review does not fit. Resize
+the terminal.` The header row above the identity row always shows the
+delivery state, or the state that replaces it, complete after at least one
+space, and a long screen context gives way to it. At 40x12 the service lines
+of the live monitor fill the main area, so the terminal and result lines
+appear from 80x24 on, and `d` shows the run details at every size.
+
+The tui-sizes mode of `manager/test/service_http.py` drives the service
+journey through the keyboard at 40x12, 80x24 and 140x36. At 40x12 the TUI
+opens the catalogue, pastes the literal into the input editor, and keeps the
+draft across a resize to 80x24 and back. It sends the literal and prepares the
+review, and a summary `y` is refused because the selectors do not fit. A
+resize to 80x24 keeps the review with all five selectors, and `y` approves
+there. At the question head the TUI types the answer, and a resize to 140x36
+keeps it in the editor. The TUI answers, retries the recovery, shows terminal
+success and the verified result, and saves it with `s`. The live monitor, the
+Manager overview, the Manager decisions view and the History view are each
+resized to all three sizes, and the mode requires the restored terminal after
+`q`. The control mode `tui-sizes-broken-draft` clears the input editor before
+the first resize and must fail with `JOURNEY-ASSERT draft survives resize`.
+
+The [manual](../doc/agent-cat.texi) entry for `--service` states the complete
+key behavior. Service mode is not an accepted milestone.

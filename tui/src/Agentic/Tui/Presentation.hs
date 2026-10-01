@@ -355,15 +355,17 @@ layout presentation width height
     -- The header row of the screen context. Above the identity row it also
     -- shows the delivery state of the event stream at its right end, or the
     -- refused credential, or the time since when the manager is unreachable.
-    -- Such a state is shown complete, and the screen context gives way to it.
+    -- Such a state is shown complete after at least one space, and a long
+    -- screen context, such as the live context with its bill, gives way to it.
     unreachable
       | presentationServiceCredentialRefused presentation = Just credentialRefusedText
       | otherwise = reachabilityText (presentationServiceReach presentation)
-    contextWidth = case unreachable of
-      Just text | identity -> max 0 (width - T.length text - 2)
-      _ -> width
+    stateText = fromMaybe (deliveryText (presentationServiceDelivery presentation)) unreachable
+    contextWidth
+      | identity = max 0 (width - T.length stateText - 2)
+      | otherwise = width
     contextRow = bar width (hBox ([hLimit contextWidth (padLeft (Pad 1) (headerContext presentation))]
-      <> [padLeft Max (muted (displayText (fromMaybe (deliveryText (presentationServiceDelivery presentation)) unreachable <> " "))) | identity]))
+      <> [padLeft Max (muted (displayText (stateText <> " "))) | identity]))
     headerWidgets = case headerRows of
       0 -> []
       1 -> [bar width (hBox [withAttr (attrName "title") (displayText "agent-cat"), displayText " / ", headerContext presentation])]
@@ -601,15 +603,18 @@ serviceRequestView presentation request = pane "Manager request" $ viewport Fail
     Manager.Readiness _ supplied missing _ = Manager.draftReadiness request
     captured = [name <> ": capture " <> ident | Manager.CapturedValue name ident <- supplied]
 
+-- | The rows of the summary review. The footer offers d for the complete
+-- exact review. With the identifiers that the manager issues and a short
+-- profile identifier, the rows of a review without lineage fit an 80x24
+-- terminal beside the reserved notice rows, so the operator can approve at
+-- that size.
 serviceReviewRows :: Manager.Preparation -> Text -> [Text]
 serviceReviewRows preparation tag =
-  [ "Explicit approval starts execution through the manager.",
+  [ "y approves and starts execution through the manager. Enter does not.",
     "Request: " <> Manager.preparationRequest preparation,
     "Preparation: " <> Manager.preparationId preparation,
-    "Profile: " <> Manager.preparationProfile preparation,
-    "Expires: " <> Manager.preparationExpiresAt preparation,
+    "Profile: " <> Manager.preparationProfile preparation <> " · Expires: " <> Manager.preparationExpiresAt preparation,
     "If-Match: " <> tag ] <> lineageRows <> Service.approvalSelectors preparation
-      <> ["d shows the complete exact review.", "Only y approves. Enter does not approve."]
   where
     -- A lineage review names its parent run, its operation and its fork
     -- edits. A replacement shows the SHA-256 of its answer, as the review

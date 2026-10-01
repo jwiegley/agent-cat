@@ -600,12 +600,49 @@ HISTORY_LEGACY_ENTRIES = 300
 # still runs at its question under owned supervision.
 # Each step prints its own PASS line. It runs two manager lifetimes.
 TUI_FAILURES = "tui-failures"
+# The tui-sizes mode drives the service journey of the mixed fixture through
+# the keyboard at three terminal sizes, 40x12, 80x24 and 140x36, with one
+# profile and one execution reservation. Each resize waits for the redraw of
+# the TUI at the new size. The harness only reads, and every mutation belongs
+# to the TUI.
+# 1. At 40x12 the TUI selects profile_1, opens mixed-controls from the
+# workflows browser and pastes the literal into the input editor. A resize
+# to 80x24 and back to 40x12 must keep the draft in the editor, or the mode
+# fails with DRAFT_SURVIVES. Ctrl-D then sends the literal, and through HTTP
+# the request must supply exactly the typed literal.
+# 2. Still at 40x12, Enter prepares the exact review. The approval selectors
+# do not all fit, so a summary y must show the notice of the existing consent
+# rule, "Approval did not start: the complete review does not fit. Resize the
+# terminal.", and through HTTP the request must stay in review with its
+# preparation live and unchanged.
+# 3. A resize to 80x24 must keep the same review and show the five approval
+# selectors unclipped. y approves it there, and the request must name a run.
+# 4. At the question head the TUI types false into the answer editor. A
+# resize to 140x36 must keep the typed answer in the editor. Ctrl-D sends it,
+# and the TUI retries the recovery head with r. The heads appear in the order
+# that the manager presents them.
+# 5. The live monitor must show terminal success and the verified result
+# whose size and SHA-256 equal the harness download. s saves the result to a
+# fresh absolute path, and the saved file must hold mode 0600 and the exact
+# downloaded bytes. The run store must record the answer as JSON false.
+# 6. The live monitor, the Manager overview, the Manager decisions view and
+# the History view are each resized to 40x12, 80x24 and 140x36, and each
+# redraw must show its view. At 140x36 the History view must list the run.
+# q then quits with status 0, and the terminal must be restored.
+# The tui-sizes-broken-draft control clears the input editor with Backspace
+# before the first resize, so it must fail with DRAFT_SURVIVES. Each step
+# prints its own PASS line. It runs one manager lifetime.
+TUI_SIZES = "tui-sizes"
+TUI_SIZES_BROKEN = "tui-sizes-broken-draft"
+DRAFT_SURVIVES = "JOURNEY-ASSERT draft survives resize"
 TUI_MODES = {OVERVIEW: (["profile_1", "profile_2"], ["observe", "submit"]), INPUTS: (["profile_1"], ["observe", "submit", "control"]),
              TUI_CONTROLS: (["profile_1", "profile_steer", "profile_route"], ["observe", "submit", "control"]),
              TUI_REDIRECT: (["profile_live", "profile_live_effect", "profile_live_stale"], ["observe", "submit", "control"]),
              TUI_DECISIONS: (["profile_1", "profile_2"], ["observe", "submit", "control"]),
              TUI_HISTORY: (["profile_1"], ["observe", "submit", "control", "export"]),
-             TUI_FAILURES: (["profile_1"], ["observe", "submit", "control"])}
+             TUI_FAILURES: (["profile_1"], ["observe", "submit", "control"]),
+             TUI_SIZES: (["profile_1"], ["observe", "submit", "control"]),
+             TUI_SIZES_BROKEN: (["profile_1"], ["observe", "submit", "control"])}
 tui_mode = sys.argv[5] if len(sys.argv) == 6 and sys.argv[5] in TUI_MODES else None
 # The tui-controls and tui-redirect modes configure the control fixture
 # profiles.
@@ -701,9 +738,9 @@ if tui_mode == TUI_HISTORY:
 if pages_mode or tui_mode == TUI_HISTORY:
     LEGACY_ROOT.mkdir(mode=0o700)
     configuration["localRetentionRoots"] = [str(LEGACY_ROOT)]
-# The tui-overview and tui-failures modes also run requests through the
-# mixed fixture.
-if mixed or tui_mode in (OVERVIEW, TUI_FAILURES):
+# The tui-overview, tui-failures and tui-sizes modes also run requests
+# through the mixed fixture.
+if mixed or tui_mode in (OVERVIEW, TUI_FAILURES, TUI_SIZES, TUI_SIZES_BROKEN):
     adapters = work / "adapters"
     adapters.mkdir(mode=0o700)
     launcher = adapters / "mixed-adapter"
@@ -8319,6 +8356,294 @@ def tui_failure_checks():
             process.wait(timeout=25)
 
 
+def size_checks():
+    """The tui-sizes mode and its broken-draft control. See TUI_SIZES for
+    the steps."""
+    harness = tui_fixture.harness
+    small, standard, large = (12, 40), (24, 80), (36, 140)
+    selectors = ("reviewDigest", "requestRevision", "profileRevision", "descriptorRevision", "processGeneration")
+    # The numbered outcome of a key that a read deferred, or that met a stale
+    # observation or a command in progress. It sends nothing, so the
+    # operator presses the key again.
+    deferred = re.compile(r"(Key|Approval key) (\d+): (\S+ deferred during a page-set read|\S+ did not start: (a command is in progress"
+                          r"|the decision observation is stale|the control observation is stale)|Approval did not start: "
+                          r"(a manager command is in progress|the displayed review is stale|a manager page-set read is in progress))")
+    read_deferred = "Approval did not start: a manager page-set read is in progress. Press y again."
+
+    def save(session, name):
+        (work / ("tui-sizes-" + name + ".screen.txt")).write_text(session.screen.text())
+
+    def resize(session, size, marker, name):
+        """Resize the terminal, wait for the redraw of the TUI at the new
+        size, and require the marker on the redrawn screen. Returns the
+        screen."""
+        rows, columns = size
+        start = len(session.output)
+        session.resize(rows, columns)
+        deadline = time.monotonic() + 15
+        while len(session.output) == start:
+            assert time.monotonic() < deadline and session.process.poll() is None, ("the TUI did not redraw after the resize", name, size)
+            session.pump()
+        session.settle()
+        while squeeze(marker) not in squeeze(session.screen.text()):
+            if time.monotonic() >= deadline or session.process.poll() is not None:
+                save(session, f"{name}-{columns}x{rows}-missing")
+                raise AssertionError(("the redrawn screen lacks its view", name, size, marker, session.screen.text()))
+            session.pump()
+        session.settle()
+        save(session, f"{name}-{columns}x{rows}")
+        return session.screen.text()
+
+    def boxed(screen, label):
+        """The text of the first row inside the editor box whose top border
+        carries the label, without box drawing and white space, or None."""
+        lines = screen.splitlines()
+        for index, line in enumerate(lines[:-1]):
+            if label in line:
+                return squeeze(lines[index + 1])
+        return None
+
+    def mutation_key(session, key, expected, timeout):
+        """Send a mutation key until the screen shows one of the expected
+        texts. A deferred key sends nothing and shows a numbered outcome, so
+        the key is sent again, as an operator does."""
+        seen = {match.group(2) for match in deferred.finditer(session.screen.text())}
+        deadline = time.monotonic() + timeout
+        session.send(key)
+        while not any(squeeze(text) in squeeze(session.screen.text()) for text in expected):
+            assert time.monotonic() < deadline and session.process.poll() is None, ("the TUI did not show", expected, session.screen.text())
+            fresh = {match.group(2) for match in deferred.finditer(session.screen.text())} - seen
+            if fresh:
+                seen |= fresh
+                session.pump(1.0)
+                session.send(key)
+            session.pump(0.1)
+        return session.screen.text()
+
+    def approval_key(session, last, expected):
+        """Press y on the summary review until its notice is other than a
+        deferral, and require the expected notice. Returns the number of the
+        press and the screen."""
+        def shown(number, line, compact, text):
+            # An approval-start notice lasts only until the TUI observes the
+            # association, so the first row from the PTY output also counts.
+            # A narrow terminal wraps the notice, so the screen counts too.
+            return notice_is(line, number, text) or squeeze(f"Approval key {number}: {text}") in compact
+
+        for _ in range(5):
+            _, (last, line) = key_notice(session, b"y", last, "the TUI showed no approval-key notice")
+            session.settle()
+            screen = session.screen.text()
+            compact = squeeze(screen)
+            if shown(last, line, compact, expected):
+                return last, screen
+            assert any(shown(last, line, compact, text) for text in APPROVAL_DEFERRED + (read_deferred,)), (
+                "the approval key showed another outcome", expected, line, screen)
+            session.pump(1.0)
+        raise AssertionError(("the approval key was deferred five times", expected))
+
+    def review_state(submitted, preparation, tag):
+        """Read through HTTP that the request is in review and that its
+        preparation is live and unchanged."""
+        current, _, _ = observed(submitted["links"]["self"], "Request")
+        assert current["runId"] is None and current["phase"] == "review" and current["preparationId"] == preparation["id"], (
+            "the request left its review", current["phase"], current["runId"])
+        still, still_tag, _ = observed("/v1/preparations/" + preparation["id"], "Preparation")
+        assert still["state"] == "live" and still["revision"] == preparation["revision"] and still_tag == tag, (
+            "the preparation changed", still["state"])
+
+    def supplied(value):
+        """Whether the overview holds one request, and that request
+        supplies every input."""
+        drafts = [item["request"] for item in value["items"] if item["kind"] == "request"]
+        return len(drafts) == 1 and bool(drafts[0]["readiness"]["supplied"]) and not drafts[0]["readiness"]["missing"]
+
+    with (work / "server-0.stdout").open("wb") as output, (work / "server-0.stderr").open("wb") as errors:
+        process = subprocess.Popen([str(runner), "--manager", "serve", "--config", str(config),
+                                    "+RTS", "-N" + native, "-RTS"], stdout=output, stderr=errors)
+    try:
+        wait_ready(process)
+        status, capabilities, _ = request("/v1/capabilities", harness)
+        assert status == 200
+        status, catalogue, _ = request("/v1/workflows?profileId=profile_1", harness)
+        assert status == 200
+        index = next(i for i, item in enumerate(catalogue["items"]) if item["name"] == "mixed-controls")
+        workflow = catalogue["items"][index]
+        client = mixed_client(capabilities, harness)
+        observed, wait_for, _, _ = client
+        literal = MIXED_TEXT
+        draft = squeeze(literal)
+        answer = JOURNEY_ANSWER.decode()
+        with harness_reads_only(), tui_fixture.session(rows=small[0], columns=small[1]) as session:
+            # 1. The setup draft survives the resizes.
+            session.wait_screen("profile_1")
+            session.send(b"\r")
+            session.wait_screen("Manager workflows")
+            save(session, "catalogue-40x12")
+            session.send(b"\x1b[B" * index + b"\r")
+            session.wait_screen("request validator current", timeout=20)
+            session.send(b"\x1b[200~" + literal.encode() + b"\x1b[201~")
+            deadline = time.monotonic() + 10
+            while draft not in squeeze(session.screen.text()):
+                assert time.monotonic() < deadline and session.process.poll() is None, ("the pasted literal is not shown at 40x12", session.screen.text())
+                session.pump()
+            save(session, "setup-draft-40x12")
+            if tui_mode == TUI_SIZES_BROKEN:
+                session.send(b"\x7f" * len(literal))
+                session.settle()
+                print("CONTROL cleared the input editor with Backspace before the resize", flush=True)
+            for size in (standard, small):
+                screen = resize(session, size, "Input •", "setup")
+                assert draft in squeeze(screen), DRAFT_SURVIVES
+            session.send(b"\x04")
+            snapshot, _, _ = wait_for("/v1/snapshot", "OverviewSnapshot", supplied)
+            submitted = next(item["request"] for item in snapshot["items"] if item["kind"] == "request")
+            assert submitted["readiness"]["supplied"] == [{"name": "input", "source": "literal", "value": literal}], (
+                DRAFT_SURVIVES, submitted["readiness"]["supplied"])
+            print("PASS tui-sizes 1: the setup draft survived the resizes to 80x24 and back to 40x12, and Ctrl-D supplied exactly",
+                  "the typed literal to request", submitted["id"], flush=True)
+            # 2. At 40x12 the selectors do not all fit, and y is refused.
+            session.wait_screen("REQUEST REVIEW", timeout=20)
+            save(session, "request-40x12")
+            session.send(b"\r")
+            deadline = time.monotonic() + 45
+            while "Approve exact manager review" not in session.screen.text():
+                assert time.monotonic() < deadline and session.process.poll() is None, ("the TUI showed no review", session.screen.text())
+                session.pump()
+            session.settle()
+            save(session, "review-40x12")
+            current, _, _ = wait_for(submitted["links"]["self"], "Request", lambda value: value["preparationId"] is not None)
+            preparation, preparation_tag, _ = observed("/v1/preparations/" + current["preparationId"], "Preparation")
+            fitting = [name for name in selectors if squeeze(name + preparation[name]) in squeeze(session.screen.text())]
+            assert len(fitting) < len(selectors), ("every selector fits at 40x12, so the consent rule permits approval", fitting)
+            last, _ = approval_key(session, 0, "Approval did not start: the complete review does not fit. Resize the terminal.")
+            save(session, "review-refused-40x12")
+            review_state(submitted, preparation, preparation_tag)
+            print("PASS tui-sizes 2: at 40x12", len(fitting), "of", len(selectors), "selectors fit, y showed the notice that the",
+                  "complete review does not fit, and request", submitted["id"], "stayed in review with preparation", preparation["id"],
+                  "live and unchanged", flush=True)
+            # 3. The review survives the resize, and y approves at 80x24.
+            screen = resize(session, standard, "Approve exact manager review", "review")
+            compact = squeeze(screen)
+            assert squeeze("Preparation: " + preparation["id"]) in compact, ("the review did not survive the resize", screen)
+            for name in selectors:
+                assert squeeze(name + preparation[name]) in compact, ("a displayed review selector is clipped at 80x24", name)
+            review_state(submitted, preparation, preparation_tag)
+            last, _ = approval_key(session, last, APPROVAL_STARTED)
+            associated, _, _ = wait_for(submitted["links"]["self"], "Request", lambda value: value["runId"] is not None)
+            run = associated["runId"]
+            base = "/v1/runs/" + run
+            print("PASS tui-sizes 3: the review of preparation", preparation["id"], "survived the resize to 80x24 with the five",
+                  "selectors unclipped, and y approved it: request", submitted["id"], "names run", run, flush=True)
+            # 4. The typed answer survives the resize. The TUI answers and
+            # retries in the order that the manager presents the heads.
+            order = []
+            deadline = time.monotonic() + 150
+            while len(order) < 2:
+                assert time.monotonic() < deadline and session.process.poll() is None, ("the decision heads did not appear", order)
+                snapshot, _, _ = observed(base + "/snapshot", "RunSnapshot")
+                assert snapshot["runtime"] is None or snapshot["runtime"]["status"] not in ("succeeded", "failed", "cancelled"), (
+                    "the run ended before both heads", snapshot["runtime"])
+                control, _, _ = observed(base + "/control", "RunControl")
+                head = control["decisionHeadId"]
+                decision = observed("/v1/decisions/" + head, "Decision")[0] if head is not None else None
+                if decision is None or decision["kind"] in order:
+                    session.pump(0.2)
+                    continue
+                if decision["kind"] == "question":
+                    question_occurrence = decision["address"]["occurrenceId"]
+                    session.wait_screen("Answer •", timeout=30)
+                    save(session, "question")
+                    session.send(JOURNEY_ANSWER)
+                    typed_deadline = time.monotonic() + 10
+                    while boxed(session.screen.text(), "Answer •") != answer:
+                        assert time.monotonic() < typed_deadline, ("the typed answer is not shown", session.screen.text())
+                        session.pump()
+                    screen = resize(session, large, "Answer •", "answer")
+                    assert boxed(screen, "Answer •") == answer, ("JOURNEY-ASSERT the typed answer survives resize", screen)
+                    print("PASS tui-sizes 4a: the typed answer", answer, "of question", head, "survived the resize to 140x36", flush=True)
+                    mutation_key(session, b"\x04", ("Answer sent to the manager", "Recovery required", "Terminal: "), 45)
+                else:
+                    session.wait_screen("r RETRY", timeout=30)
+                    save(session, "recovery")
+                    mutation_key(session, b"r", ("preparing explicit retry", "sending one retry attempt", "manager intent accepted",
+                                                  "Answer •", "Terminal: "), 45)
+                # A resolved decision may leave the observable queue, so the
+                # harness waits until the run controls name another head.
+                wait_for(base + "/control", "RunControl", lambda value: value["decisionHeadId"] != head)
+                order.append(decision["kind"])
+            print("PASS tui-sizes 4b: the TUI answered the question and retried the recovery in the manager order",
+                  " then ".join(order), flush=True)
+            # 5. Terminal success, the verified result and the save.
+            wait_for(base + "/snapshot", "RunSnapshot", lambda value: value["runtime"] is not None and value["runtime"]["status"] == "succeeded")
+            deadline = time.monotonic() + 45
+            while not ("Terminal: succeeded" in session.screen.text() and "Result SHA-256: " in session.screen.text()):
+                assert time.monotonic() < deadline and session.process.poll() is None, ("the TUI showed no verified result", session.screen.text())
+                session.pump(0.2)
+            session.settle()
+            save(session, "result")
+            artifact = verified_download(run, client, harness)
+            screen = session.screen.text()
+            for row in ("Result: verified " + str(int(artifact["bytes"])) + " bytes", "Result SHA-256: " + artifact["sha256"]):
+                assert row in screen, ("the result size or digest differs from the verified artifact", row)
+            answer_files = sorted(work.glob("manager/runs/runs/*/runtime/answers.json"))
+            assert len(answer_files) == 1, ("run store answers", answer_files)
+            recorded = [entry["answer"] for entry in json.loads(answer_files[0].read_bytes())["answers"]
+                        if entry["occurrenceId"] == question_occurrence]
+            assert len(recorded) == 1 and recorded[0] is False, ("JOURNEY-ASSERT typed answer is not JSON false", recorded)
+            saved_path = work / "tui-sizes-saved-result.bin"
+            session.send(b"s")
+            session.wait_screen("Save verified result", timeout=15)
+            session.send(str(saved_path).encode())
+            session.send(b"\x04")
+            session.wait_screen("Saved the verified", timeout=15)
+            save(session, "saved")
+            saved = saved_path.read_bytes()
+            assert stat.S_IMODE(os.lstat(saved_path).st_mode) == 0o600, ("the saved file mode", oct(os.lstat(saved_path).st_mode))
+            assert saved == (work / "verified-result.json").read_bytes() and hashlib.sha256(saved).hexdigest() == artifact["sha256"], (
+                "the saved bytes differ from the verified download")
+            # The save closes its dialog and returns to the live monitor.
+            session.wait_screen("s SAVE RESULT", timeout=15)
+            print("PASS tui-sizes 5: the live monitor shows terminal success and verified result", artifact["id"], "of", artifact["bytes"],
+                  "bytes, the run store records JSON false, and s saved the exact bytes with mode 0600", flush=True)
+            # 6. Every view redraws at every size.
+            # At 40x12 the service lines fill the main area, so the runtime
+            # line is the last row of the live monitor that fits.
+            for size, marker in ((small, "Runtime: Succeeded"), (standard, "Result SHA-256: " + artifact["sha256"]),
+                                 (large, "Result SHA-256: " + artifact["sha256"])):
+                resize(session, size, marker, "live")
+            session.send(b"\x1b")
+            session.wait_screen("Manager overview", timeout=10)
+            views = ((b"", "Manager overview", "overview"), (b"D", "Manager decisions", "decisions"), (b"H", "Manager history", "history"))
+            for key, title, name in views:
+                if key:
+                    session.send(key)
+                    session.wait_screen(title, timeout=10)
+                for size in (small, standard, large):
+                    resize(session, size, title, name)
+                if name == "history":
+                    session.send(b"\x1b[H")
+                    deadline = time.monotonic() + 20
+                    while run not in squeeze(session.screen.text()):
+                        assert time.monotonic() < deadline and session.process.poll() is None, ("the History view does not list the run", run)
+                        session.pump(0.2)
+                    save(session, "history-run")
+                session.send(b"\x1b")
+                session.wait_screen("Manager workflows", timeout=10)
+            print("PASS tui-sizes 6: the live monitor, the Manager overview, the Manager decisions view and the History view redrew",
+                  "at 40x12, 80x24 and 140x36, and the History view lists run", run, flush=True)
+            session.send(b"q")
+            assert session.wait_exit(20) == 0, "the service TUI did not exit with status 0"
+            session.assert_restored()
+        assert not tui_fixture.client_state.exists(), "the service TUI created local runner state"
+        print("PASS tui-sizes: the service journey completed through the keyboard at 40x12, 80x24 and 140x36, the drafts and the",
+              "review survived every resize, and q restored the terminal", flush=True)
+    finally:
+        if process.poll() is None:
+            process.terminate()
+        process.wait(timeout=25)
+
+
 def storage_checks():
     """The storage-error endings through four lifetimes of the real HTTPS
     manager. Each numbered case prints one PASS line."""
@@ -8716,6 +9041,11 @@ if tui_mode == TUI_HISTORY:
 
 if tui_mode == TUI_FAILURES:
     tui_failure_checks()
+    raise SystemExit(0)
+
+
+if tui_mode in (TUI_SIZES, TUI_SIZES_BROKEN):
+    size_checks()
     raise SystemExit(0)
 
 

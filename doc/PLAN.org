@@ -8289,6 +8289,29 @@ Pi integration identified two missing shared contracts. Workflow descriptor v3 d
 ]
 #+end_src
 
+* TODO [#D] Resolve the non-blocking fess findings of subtask PC31    :review:
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-jdmd
+:LABELS:   ["review","workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-01 Thu 07:48]
+:MODIFIED: [2026-10-01 Thu 07:48]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess audit fess/pc-PC31-r1.md (2026-10-01) on subtask PC31 (WM-035 PTY journey at 40x12, 80x24 and 140x36 with resize).
+
+1. (medium) tui/README.md near lines 863-865 and manager/test/service_http.py near lines 8614-8617: at 40x12 the live monitor's service lines (request, run, observation, runtime) fill the main area, so the Terminal and Result lines never appear at that size. The journey checks 'Runtime: Succeeded' instead. This is an open rendering defect, not accepted behavior. Reproduction: the tui-sizes mode, screen capture tui-sizes-live-40x12.screen.txt in the PC31 evidence. The README also claims that d shows the run details at every size, but the journey never presses d at 40x12. Fix: let the live monitor reach the Terminal and Result rows at 40x12, and test d at 40x12 or remove the claim.
+2. (low) tui/src/Agentic/Tui/Presentation.hs near lines 606-617 and tui/test/ServiceTests.hs near lines 117-126: the summary review fits 80x24 with no spare row (16 of 16). A profile id longer than about 31 characters, or any lineage review, is refused at 80x24. Fix: for example, put each selector and its value on one row at 80 columns.
+3. (low) manager/test/service_http.py near lines 8487-8490 and 8618-8634: the journey does not resize every view. The Manager workflows browser appears only at 40x12 and is never resized, the history detail is not resized, and the decisions view is resized only while it is empty. Fix: add the workflows browser and the history detail to the step-6 resize loop.
+4. (low) manager/test/service_http.py near lines 8376-8395: resize() treats any new PTY output as the redraw. Its markers 'Input •' and 'Answer •' appear at both sizes, so the draft and answer checks depend on settle(). Fix: wait for a marker that appears only at the new size, such as a border of the new width.
+5. (low) manager/test/service_http.py near lines 5835, 8108 and 8406: a third copy of the mutation_key helper and its deferred-notice regex. Fix: move them into one shared helper.
+6. (low) doc/workflow-manager-handoff.md line 1038: a dated Phase A section still says service mode has no accepted layout at 40x12 or 80x24. The record stays, but the current-state section must describe the 80x24 review fit and the 40x12 refusal. Fix: the Phase C closeout adds this to the current-state section.
+
 * DONE [#C] Use the /wf namespace for every Pi extension command
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -19440,7 +19463,7 @@ Local-mode behavior remains intact without a duplicated service runtime model.
 :LABELS:   ["p7","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-29 Tue 14:27]
+:MODIFIED: [2026-10-01 Thu 07:48]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-035
 :SOURCE_REPO: agent-cat
@@ -19553,6 +19576,13 @@ check fail.
     "author": "johnw",
     "text": "Fast Phase A run of 2026-09-29 closed: the handoff (doc/workflow-manager-handoff.md, section 'Phase A TUI service journey of 2026-09-29') records the stopping point at head b944407e. All five subtasks and the end-of-phase review finished. Open review findings (stuck failed retrieval, stacked Store allowances, saveExact publish/sync, stale ArtifactCheck check name) and the file-slot allowance decision await operator confirmation before filing. Issue stays open.",
     "created_at": "2026-09-29T21:27:18Z"
+  },
+  {
+    "id": 506,
+    "issue_id": "acat-wm-035-9uqq",
+    "author": "johnw",
+    "text": "PC31 (2026-10-01): service_http.py mode tui-sizes drives the service TUI from the keyboard at 40x12, 80x24 and 140x36 in a PTY (test/tui_probe.py): catalogue, setup with a pasted literal, review, approval, answer editing, completion, retrieval and save of the verified result. Resizes during setup and review keep the input draft and the review; at 40x12 y is refused with 'Approval did not start: the complete review does not fit. Resize the terminal.'; at 80x24 the harness approves; a resize to 140x36 during answer editing keeps the typed answer. The live monitor, overview, decisions and history views are each resized to all three sizes, and assert_restored passes at exit. Negative control tui-sizes-broken-draft fails with 'JOURNEY-ASSERT draft survives resize'. Two rendering fixes in Presentation.hs: the summary review now fits 80x24 (merged rows), and the header context reserves the width of the delivery state. Two new model checks in tui/test/ServiceTests.hs. Checks passed: Werror build with -ftui-tests of agentic-run, routing-fixed-point-probe, tui-model-test; tui-model-test at N8; tui-sizes at N8; tui-sizes-broken-draft (expected nonzero with its literal); Phase A journey at N8; make -C doc check. Evidence: resume-20260923/PC/PC31/impl-r1; fess/pc-PC31-r1.md (non-blocking), follow-up acat-jdmd (includes the open 40x12 live-monitor defect). Slow event stream, expired pages, control-sequence payloads and the other WM-035 items are not covered by this subtask. Package stays open.",
+    "created_at": "2026-10-01T14:48:45Z"
   }
 ]
 #+end_src

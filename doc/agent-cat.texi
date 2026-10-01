@@ -3737,7 +3737,14 @@ changes the screen or the view, or until the review leaves the screen, and
 observation refreshes that keep the review do not remove it.  When the
 preflight check refuses an approval before any send, the notice of that press
 changes to state that the approval was not sent.  The approval hint appears
-exactly when @kbd{y} would approve.
+exactly when @kbd{y} would approve.  The summary view shows the request, the
+preparation, the profile with the expiry, the @code{If-Match} value, and the
+five approval selectors, and it reserves the rows of the longest notice.  A
+review without lineage fits a terminal of 80 columns by 24 rows, so the
+operator can approve at that size.  At 40 columns by 12 rows the selectors do
+not fit, and @kbd{y} shows @samp{Approval did not start: the complete review
+does not fit.  Resize the terminal.}  A resize keeps the review, the input
+drafts, and the answer drafts.
 
 A declared client failure keeps its declared meaning.  Any other failure of a
 manager call inside the frontend is an internal frontend fault, and the
@@ -3887,9 +3894,8 @@ A declared client failure keeps its declared meaning, and the internal-fault
 rules above apply to every step of the journey.
 
 Service mode does not support these features.  It does not reconnect after a
-credential revocation.  It has no accepted layout at 40
-columns by 12 rows or at 80 columns by 24 rows.  Service mode is not an
-accepted milestone, and it closes no workflow-manager package or gate.
+credential revocation.  Service mode is not an accepted milestone, and it
+closes no workflow-manager package or gate.
 @end table
 
 In local mode, the application enters its Brick screen before runner discovery
