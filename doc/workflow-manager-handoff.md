@@ -15,11 +15,19 @@ selection and endpoint identity of WM-033. PC15 to PC30 complete the
 service views, editors and controls of WM-034. PC31 to PC33 add the PTY
 acceptance journeys of WM-035. PC1 to PC33 landed, from `843ebc10` to
 `b698073e`. Subtask PC34 ran the Phase C gate on `b698073e` and wrote this
-section. This section describes the current state. Where any section
-below differs, this section supersedes it, and the sections below remain
-as chronology. The evidence of each subtask is under `PC/<subtask>/impl-r1`
-in the resume directory, and the gate evidence is under
-`PC/PC34/impl-r1`.
+section, and the Integrator committed it as `cb62e35e`. Two end-of-phase
+review lenses then read `cc29f51a..cb62e35e`, and the closeout of
+2026-10-01 completed this section with their findings, the package status
+and the next step. This section describes the current state. Where any
+section below differs, this section supersedes it, and the sections below
+remain as chronology. The evidence of each subtask is under
+`PC/<subtask>/impl-r1` in the resume directory, its audit is
+`fess/pc-<subtask>-r1.md` (and `-r2.md` for PC11 and PC16), and the gate
+evidence is under `PC/PC34/impl-r1`.
+
+The run did not stop early, and no authorization is pending. Phase C
+closes no gate. Accepted state is unchanged at WM-001 to WM-022 and G0 and
+G1.
 
 | Subtask | Commit | Result |
 | --- | --- | --- |
@@ -56,7 +64,8 @@ in the resume directory, and the gate evidence is under
 | PC31 | `b393be5e` | The PTY journey `tui-sizes` runs at 40x12, 80x24 and 140x36 with resize. |
 | PC32 | `540d3ee2` | The six lifecycle journeys run at 80x24 and assert manager facts and terminal restoration. |
 | PC33 | `b698073e` | `tui-failures` adds a stale-answer step and a delayed-response endpoint switch. |
-| PC34 | This commit | The Phase C gate below and this section. |
+| PC34 | `cb62e35e` | The Phase C gate below and this section. |
+| Closeout | Uncommitted | The end-of-phase review, the package status and the next step in this section, and the corrected statement of the 410 overview fence in `doc/tui-design.md`, `tui/README.md` and `doc/agent-cat.texi`. |
 
 ### Delivered behavior
 
@@ -203,6 +212,99 @@ negative control failed with its literal message as intended.
     the source boundaries, `tui-model-test` and the TUI probes.
 15. `make -C doc check` passed after this section (`15-doc-check-final`).
 
+The closeout ran `make -C doc check` once more after its edits to this
+section and to the three documents above.
+
+### End-of-phase review
+
+Two lenses read `cc29f51a..cb62e35e`, one for the packages and one for
+working behavior. Both returned "approve with notes" with no critical or
+high finding, and no fix round ran. Both read the gate evidence under
+`PC/PC34/impl-r1`. The working lens also rebuilt `agentic-run` and
+`routing-fixed-point-probe` with `-ftui-tests` and ran `tui-journey` at N1
+and then N8 on that tree, and both runs passed. The medium findings are
+these:
+
+1. PC8 delivered three of the five Phase A polish items. The early 503
+   `StoreBusy` refusal on the answer route (finding 2 of
+   `acat-a6a7-fess-followup-1exm`) is not diagnosed. Each stacked lock (the
+   file slot, the reader, the configuration guard, the gate and the timed
+   wait in `Drafts`) still takes a fresh five-second allowance, against a
+   client timeout of 7 seconds (finding 3 of
+   `acat-a10a11-fess-followup-33k1`, finding 1 of
+   `acat-a5s2b-fess-followup-s9rl`). The bounded wait of `fe7a2f20` can
+   cover the early refusal, and no check has shown that.
+2. `release-quarantine` releases only with terminal-record or no-launch
+   evidence. A reservation whose run was launched and wrote no runtime
+   terminal record, for example when the runtime died with the manager,
+   reads cleanup-required and cannot be released. With the default
+   `executionReservations` of 1, such a crash still blocks every later run.
+3. After a 410, the fetch generation fences only the overview reads that
+   the refresh coordinator started. An overview read that `g` or the
+   startup bootstrap started before the 410 still installs its rows,
+   because the `RequestInstalled` branch of `ServiceOverviewReady` in
+   `tui/src/Agentic/Tui/App.hs` does not compare the generations
+   (`acat-pc17-follow-fess-jd40`). The stream restart is fenced. The
+   closeout corrected `doc/tui-design.md`, `tui/README.md` and
+   `doc/agent-cat.texi`, which stated that no result of the earlier
+   generation installs.
+4. The restart reconciliation in `manager/src/Agentic/Manager/Store.hs`
+   marks every start command with a dispatch attempt as unresolved, the
+   approve of a run that already succeeded included (`acat-70ll`). Case 9
+   of `failures-manager` expects one unresolved command for this reason. A
+   client after a restart can therefore read an unresolved approve for a
+   completed run.
+5. At 40x12 the live monitor does not show the Terminal and Result lines,
+   so an operator at that size cannot read the terminal outcome or the
+   verified result (`acat-jdmd`). `tui-sizes` checks the terminal success
+   at 140x36 only.
+6. At 80x24 the summary review has no spare row, so a restart, resume or
+   fork review and a review with a long profile identifier are refused with
+   "does not fit". The lineage path needs a resize before an approval, and
+   `tui-history` approves the restart child at 100x30.
+
+The low findings are these:
+
+- The automatic retrieval retry of PC8 has no limit or backoff, so a
+  permanent refusal sends one retrieval about every two seconds for the
+  rest of the session. The bounded refresh pause changes only the
+  observation line (`acat-pc8-tui-polish-fess-y3yt`, `acat-ftw9`).
+- The overview lists a run with lost supervision, and its request, as live,
+  because its filters test only `terminal_observed=0`, while the pruner now
+  treats such a run as terminal. After a crash and a release the lost run
+  stays in the Manager overview as an active run.
+- After `cancelOnStop` the engine drops every `session/update` and refuses
+  every permission on that connection until the reply to the cancelled
+  prompt arrives. An adapter that never replies to a cancelled prompt
+  would empty the answers of every later turn on that connection. ACP
+  requires the reply.
+- A refused receipt still offers the exact resend with a contradictory
+  notice (`acat-w8t0`). An endpoint switch is not refused while a command
+  is being prepared, and a retained approval or a command in the state
+  `MutationAwaiting` is dropped at a switch without a listing
+  (`acat-pc14-endpoint-switch-fess-2oup`).
+- The result of a legacy history entry cannot be retrieved, and a request
+  whose input an earlier TUI session captured cannot be approved after a
+  TUI restart until the input is captured again (`acat-w92x`).
+- The low items of section 4 of the remaining-scope report outside the
+  Phase C scope stay open: the page-set paragraph of `doc/api/README.md`,
+  the redirect after an answer, the pruner age timer, the synthetic
+  dispatch of a live redirect and the additive comparison rule.
+- The manager owners that changed (`answerOrphanedAsks`, the pruner, the
+  `currentReceipt` refactor in `Commands.hs` and the run windowing in
+  `Overview.hs`) were not checked by the earlier `service_http.py` modes
+  and manager checks that also use them. "Checks not run" below lists
+  them.
+
+| Package | Package lens | Working lens |
+| --- | --- | --- |
+| Phase B part 2 functional findings | Met | Met |
+| Phase A TUI polish findings | Partial | Partial |
+| WM-029 | Met | Met |
+| WM-033 | Met | Met |
+| WM-034 | Met | Met |
+| WM-035 | Met | Partial (40x12 monitor, 80x24 lineage review) |
+
 ### Checks not run
 
 - `cli/ci/policies.sh`, `manager/ci/approval.sh`, `manager/ci/controls.sh`,
@@ -232,6 +334,18 @@ negative control failed with its literal message as intended.
 - The revalidation of `broker-api-default` (`678326b`) and the measurement
   of the append latency in the journey, which `acat-62j0` names.
 - `engine/acp/ci/route-live.sh`, which needs a paid provider.
+- The Emacs and TypeScript consumers of `test/manager_client_vectors.json`.
+  They come with WM-030 and WM-036.
+- Page-set expiry through the client or the PTY, `cursor-expired` in a
+  journey, per-request scripted delays, two separate managers for an
+  endpoint change, an uncertain command across a manager restart in a
+  journey, and a manager without SSE. The pages mode, the client vectors,
+  the refresh vectors and the TUI model tests cover these instead.
+- One combined lifecycle journey, which would exceed 900 seconds. The six
+  lifecycle modes cover it. Local mode at all three sizes, which only
+  `bash tui/ci/tui.sh` covers at its existing sizes.
+- An instrumented duty-cycle measurement for `acat-ftw9`. The journeys
+  count the deferred-key outcomes from the screens.
 
 ### Deferred security items
 
@@ -251,6 +365,29 @@ adds these:
   scope beyond the scope refusals that PC13 added.
 - The hostile-input negatives of the quarantine administration operations
   and of the legacy handle retention.
+- Revocation matrices for the client and the TUI during an open SSE or
+  route stream, a retained response and a page set.
+- Hostile SSE and polling input: malformed blocks, oversized fields,
+  injected event names, duplicate JSON fields and slow-drip streams beyond
+  the bounded parser and the PC9 vectors.
+- The hardening of quarantine release evidence: forged or replayed
+  evidence identifiers, races between check and release beyond the
+  recomputation under one admission, cleanup proof for escaped process
+  groups, the enforcement of `expiresAt`, and the authority fencing and
+  release of `restoration_quarantine` claims after an older-backup restore.
+- Secret-marker and redaction-marker scans of TUI screens, notices, client
+  errors, endpoint labels, profile handling, the administration responses
+  of PC1 to PC3 and the manager-log replies of PC4.
+- Authorization negative matrices for every route that the client and the
+  TUI now use: captures, remove-input, withdraw, discard, exports, lineage,
+  controls, redirect and decisions.
+- Credential storage for several client profiles, such as an operating
+  system credential store.
+- Slow-reader and header-flood attacks against the client beyond the
+  existing header, body and idle bounds.
+- The hardening of local file capture in the path editor: symbolic links,
+  special files and races between check and read.
+- Every item of section 8 of the remaining-scope report.
 
 ### Remaining limits
 
@@ -284,6 +421,14 @@ adds these:
   notice. Some App wiring, such as the stop of automatic refresh on a
   refused credential and the reachability display, has model-test or
   fixture evidence only.
+- The medium and low findings of the end-of-phase review above stay open.
+  The early `StoreBusy` on the answer route and the stacked five-second
+  allowances of the Store locks are the open Phase A polish items.
+- `release-quarantine` releases only reservations that a restart
+  quarantined, with terminal-record or no-launch evidence. A launched run
+  with no terminal record reads cleanup-required, and a
+  `restoration_quarantine` claim reads unverifiable and is refused with
+  `cleanup-unverified`.
 - `release-quarantine` does not enforce the `expiresAt` of its evidence.
   `committed-receipt-lost` detects the effect, not the command that caused
   it, so a duplicate release reads as committed.
@@ -313,26 +458,42 @@ Phase C.
 
 | Package or item | Status | Evidence | Tracker |
 | --- | --- | --- | --- |
-| WM-029 (`acat-wm-029-nlmg`) | Met for function, with its security items deferred | PC9 to PC12, PC16, PC17, gate steps 4, 9 and 11 | Open for the Integrator |
-| WM-033 (`acat-wm-033-4g77`) | Met for function. The `policy-probe` case did not run. | PC13, PC14, gate steps 3, 9 (`tui-endpoints`, `tui-failures`) and 14 | Open for the Integrator |
-| WM-034 (`acat-wm-034-3vqz`) | Met for function. The legacy result retrieval and the stale-draft rule wait for operator decisions. | PC8, PC15 to PC30, gate steps 3, 9 and 11 | Open for the Integrator |
-| WM-035 (`acat-wm-035-9uqq`) | Met for function, with the open 40x12 defect and the 80x24 review fit above | PC31 to PC33, gate steps 9, 10, 11 and 14 | Open for the Integrator |
+| WM-029 (`acat-wm-029-nlmg`) | Met for function, with its security items deferred | PC9 to PC12, PC16, PC17, gate steps 4, 9 and 11 | Closed for function. The security items are in `acat-phase-c-deferred-security-5eso`. |
+| WM-033 (`acat-wm-033-4g77`) | Met for function. The `policy-probe` case did not run. | PC13, PC14, gate steps 3, 9 (`tui-endpoints`, `tui-failures`) and 14 | Open until its dependency WM-032 closes |
+| WM-034 (`acat-wm-034-3vqz`) | Met for function. The legacy result retrieval and the stale-draft rule wait for operator decisions. | PC8, PC15 to PC30, gate steps 3, 9 and 11 | Open for the two operator decisions and the Emacs parity |
+| WM-035 (`acat-wm-035-9uqq`) | Met for function by the package lens. The working lens rates it partial for the 40x12 monitor (`acat-jdmd`) and the 80x24 lineage review fit. | PC31 to PC33, gate steps 9, 10, 11 and 14 | Open for `acat-jdmd` and item 2 of `acat-phase-c-review-findings-hwxy` |
+| Phase A TUI polish findings | Partial. The retrieval retry, the bounded refresh pause and `saveExact` after publication are delivered. The early `StoreBusy` on the answer route and the single deadline through the stacked Store locks remain. | PC8, gate steps 3 and 11 | `acat-a6a7-fess-followup-1exm`, `acat-a10a11-fess-followup-33k1`, `acat-a5s2b-fess-followup-s9rl` open |
 | Quarantine inspection and release (WM-042, `acat-wm-042-sdg9`) | Met for the quarantine finding. WM-042 stays partial, because `reload-profiles`, `drain` and `shutdown` still answer `state-conflict`. | PC1 to PC3, gate steps 5 and 8 (`failures-manager`) | Open |
-| Floor stop (`acat-phase-b2-review-findings-x8fv`) | Met | PC4, gate steps 5 and 8 | Open for the Integrator |
-| Legacy windowing (`acat-phase-b2-review-findings-x8fv`) | Met | PC5, PC6, gate step 8 (`pages`) and step 9 (`tui-history`) | Open for the Integrator |
-| Adapter cancel (`acat-phase-b2-review-findings-x8fv`) | Met | PC7, gate step 7 | Open for the Integrator |
+| Floor stop (`acat-phase-b2-review-findings-x8fv`) | Met | PC4, gate steps 5 and 8 | Open for the low findings 5 to 11 |
+| Legacy windowing (`acat-phase-b2-review-findings-x8fv`) | Met | PC5, PC6, gate step 8 (`pages`) and step 9 (`tui-history`) | Open for the low findings 5 to 11 |
+| Adapter cancel (`acat-phase-b2-review-findings-x8fv`) | Met | PC7, gate step 7 | Open for the low findings 5 to 11 |
 
 ### Next action
 
-1. The Integrator commits PC34, records the package state in the tracker
-   and files the remaining limits above.
-2. A short two-lens end-of-phase review reads `cc29f51a..` the PC34
-   commit.
-3. The operator decides the three open questions: the retrieval of a
+1. The Integrator commits this closeout, records the package state above
+   in the tracker and files the findings of the end-of-phase review that no
+   tracker item holds yet: the launched quarantine claim with no terminal
+   record, the lost runs that the overview lists as live, and the wait for
+   the reply to a cancelled ACP prompt.
+2. The next run starts with Phase E, Pi service mode (WM-036 to WM-038),
+   under the functionality-first direction of 2026-09-30 and the fast
+   validation direction of 2026-09-29. It works on the built Pi fork at
+   `~/src/fork/pi` through linked packages and edits no fork source. The
+   functional findings of the end-of-phase review can land at their owners
+   inside that run, the medium ones first: the quarantine claim with no
+   terminal record, the unresolved approve after a restart, the overview
+   fence after a 410, the 40x12 monitor, the 80x24 lineage review and the
+   two open Phase A polish items.
+3. Phase D, Emacs service mode (WM-030 to WM-032), follows when the
+   operator settles the supported versions and the integration ownership of
+   the Emacs repository.
+4. Phase F (cross-client, conformance, capacity and faults) and Phase G
+   (operations, packaging, rollback and closure) follow, under the same
+   directions.
+5. The operator decides the three open questions: the retrieval of a
    legacy result, the move of a stale draft to the new head, and the read
-   rule during the bounded refresh pause.
-4. Phase D (Emacs service mode) follows under the same directions. The
-   deferred security items wait for the security stage.
+   rule during the bounded refresh pause. The deferred security items wait
+   for the security stage, when the operator schedules it.
 
 Accepted state is unchanged at WM-001 to WM-022 and G0 and G1. Phase C
 closes no gate.

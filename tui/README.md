@@ -622,8 +622,11 @@ overview is fetched while its view is shown, the decision heads are
 fetched while the Manager decisions view is shown, and the History view is
 fetched while it or its run detail is shown. An invalidation of one of these
 reads while its view is hidden leaves its fetch waiting until the view opens. A fetch of the composite read
-without a selected request reads nothing. A result of an earlier generation
-does not install. The header row above the identity row shows the delivery
+without a selected request reads nothing. A result of a fetch that the
+refresh coordinator started in an earlier generation does not install. An
+overview read that `g` or the startup bootstrap started before a 410 is not
+fenced by the fetch generation, so it can still install its rows until a
+later overview read replaces them. The header row above the identity row shows the delivery
 state at its right end: `delivery connecting`, `delivery live`, `delivery
 polling`, `delivery disconnected since HH:MM:SSZ (CODE)`, `delivery
 resnapshot`, `delivery stopped (REASON)` or `delivery not started`. The time
