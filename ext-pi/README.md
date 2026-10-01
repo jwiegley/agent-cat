@@ -60,8 +60,9 @@ fork is built for this extension and is not edited by agent-cat work.
 ## Manager client
 
 `src/manager/` holds the TypeScript manager client. It states the behavior of
-the Haskell client modules `Agentic.Manager.Client.Events` and
-`Agentic.Manager.Client.Failure`, and it imports no Haskell code. Its modules
+the Haskell client modules `Agentic.Manager.Client.Events`,
+`Agentic.Manager.Client.Failure` and `Agentic.Manager.Client.Refresh`, and it
+imports no Haskell code. Its modules
 perform no I/O and hold no session.
 
 `src/manager/json.ts` parses JSON text without loss. `parseJson` uses the
@@ -96,12 +97,44 @@ duplicate member or deep nesting. The Haskell strict decoder refuses both.
 - `problemFailure(status, body)` gives `Refused` with the status and the code
   of a problem body, or `InvalidResponse`.
 
+`src/manager/refresh.ts` holds the refresh coordinator of one client session.
+Its functions return a new state and the actions that the caller performs.
+They do not change the state that they receive, and no action is a send.
+
+- `newRefresh`, `invalidateResource`, `completeFetch` and `advanceGeneration`
+  coordinate the fetches of each resource key. An invalidation of an idle
+  resource gives a `fetch` action for the current generation. An
+  invalidation of a resource with a fetch in flight only marks it dirty, so
+  any number of invalidations during one fetch give one later fetch. Only
+  the completion of the fetch in flight of the current generation gives an
+  `install` action, followed by one `fetch` action when the resource is
+  dirty. Every other completion gives a `discard` action and changes
+  nothing. `advanceGeneration`, for a resnapshot or an endpoint switch,
+  advances the generation and makes every resource idle.
+- `INITIAL_BACKOFF` and `reconnectDelay` give the reconnection delay: 1, 2,
+  4, 8 and 16 seconds, and then `RECONNECT_BACKOFF_MAX_SECONDS` (30
+  seconds). The caller resets the backoff to `INITIAL_BACKOFF` after a
+  connection delivers an event. `jitteredMicroseconds(seconds, fraction)`
+  gives a wait between half the delay and the whole delay. It clamps the
+  fraction to the range from zero to one.
+- An `Uncertain` value keeps a sent command whose outcome is uncertain, with
+  its exact bytes, key and precondition, its target, the precondition entity
+  tag and the receipt location when one is known. `reconcileRead` gives the
+  one read: the receipt when its location is known, and otherwise the
+  target. `reconcile` gives `effect-observed`, `refused` or `uncertain`. With
+  a receipt location, only the receipt state decides. Without one, the
+  target observes the effect only when the caller sees the effect and the
+  entity tag differs from the precondition. An `uncertain` report carries
+  the same `Uncertain` value unchanged, and the client resends nothing.
+
 `test/manager-vectors.test.ts` reads `../test/manager_client_vectors.json` and
-runs every case of its `events` section with the pass criteria of the
-`vectors` mode of `manager-client-check`. It feeds each `sse` stream whole, at
-each listed split, at every single split point of a stream of at most 2048
-bytes, and one byte at a time. It fails when a subsection is empty, and it
-asserts the number of cases of each subsection.
+runs every case of its `events` and `refresh` sections with the pass criteria
+of the `vectors` mode of `manager-client-check`. It feeds each `sse` stream
+whole, at each listed split, at every single split point of a stream of at
+most 2048 bytes, and one byte at a time. It runs each refresh sequence step
+by step and checks the exact actions and the coordinator rules of each step.
+It fails when a subsection is empty, and it asserts the number of cases of
+each subsection.
 
 ## Configuration
 

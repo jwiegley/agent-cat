@@ -31,12 +31,31 @@ import {
   parseJson,
   type JsonValue,
 } from "../src/manager/json.ts";
+import {
+  INITIAL_BACKOFF,
+  RECONNECT_BACKOFF_MAX_SECONDS,
+  advanceGeneration,
+  completeFetch,
+  invalidateResource,
+  jitteredMicroseconds,
+  newRefresh,
+  parseCommandState,
+  reconcile,
+  reconcileRead,
+  reconnectDelay,
+  type Backoff,
+  type ReconcileObservation,
+  type Refresh,
+  type RefreshAction,
+  type RefreshStep,
+  type Uncertain,
+} from "../src/manager/refresh.ts";
 
 /**
- * The events section of `test/manager_client_vectors.json`, run with the pass
- * criteria of `eventVectors` in `manager/test/ClientCheck.hs`. The file is
- * read with the lossless parser, so that numbers such as `410.0` reach the
- * decoders as written.
+ * The events and refresh sections of `test/manager_client_vectors.json`, run
+ * with the pass criteria of `eventVectors` and `refreshVectors` in
+ * `manager/test/ClientCheck.hs`. The file is read with the lossless parser,
+ * so that numbers such as `410.0` reach the decoders as written.
  */
 const VECTORS = parseJson(readFileSync(new URL("../../test/manager_client_vectors.json", import.meta.url), "utf8"));
 
@@ -322,5 +341,229 @@ describe("lossless JSON", () => {
   it("refuses text that is not JSON", () => {
     expect(() => parseJson("{\"a\":1,}")).toThrow(SyntaxError);
     expect(() => parseJson("1 2")).toThrow(SyntaxError);
+  });
+});
+
+/** The number of cases of each subsection of the refresh section. */
+const REFRESH_COUNTS = {
+  sequences: 13,
+  backoff: 4,
+  jitter: 5,
+  reconciliation: 17,
+} as const;
+
+/** The cases of one refresh subsection, refused when the subsection is empty. */
+function refreshCases(name: keyof typeof REFRESH_COUNTS): readonly JsonValue[] {
+  const items = list(member(member(VECTORS, "refresh"), name));
+  if (items.length === 0) throw new Error(`vector section refresh.${name} is empty`);
+  return items;
+}
+
+/** One action of a sequence step: kind, resource key and generation. */
+function expectedAction(stepLabel: string, value: JsonValue): RefreshAction<string> {
+  const [kind, key, generation] = list(value);
+  if (list(value).length !== 3 || typeof key !== "string" || generation === undefined) {
+    throw new Error(`${stepLabel} has a malformed action`);
+  }
+  if (kind !== "fetch" && kind !== "install" && kind !== "discard") throw new Error(`${stepLabel} names an unknown action`);
+  return { kind, key, generation: integerOf(generation) };
+}
+
+/**
+ * Run a coordinator sequence. Each step states its exact actions. Every step
+ * also keeps the coordinator rules: an install has the current generation, a
+ * completion of another generation never installs, an invalidation of a
+ * resource in flight starts nothing, a completion starts at most one fetch,
+ * and an advance leaves every resource idle. The result is the number of
+ * steps that ran.
+ */
+function runSequence(vector: JsonValue): number {
+  const name = label("refresh sequence", vector);
+  let state: Refresh<string> = newRefresh();
+  const steps = list(member(vector, "steps"));
+  steps.forEach((step, index) => {
+    const stepLabel = `${name} step ${index + 1}`;
+    const current = state.generation;
+    const expected = list(member(step, "actions")).map((action) => expectedAction(stepLabel, action));
+    const invalidated = textOf(member(step, "invalidate"));
+    const completed = textOf(member(step, "complete"));
+    let next: RefreshStep<string>;
+    let rule: boolean;
+    if (invalidated !== undefined && completed === undefined) {
+      const inFlight = state.flights.has(invalidated);
+      next = invalidateResource(invalidated, state);
+      rule = inFlight
+        ? next.actions.length === 0
+        : JSON.stringify(next.actions) === JSON.stringify([{ kind: "fetch", key: invalidated, generation: current }]);
+    } else if (completed !== undefined && invalidated === undefined) {
+      const generation = integerOf(member(step, "generation"));
+      next = completeFetch(completed, generation, state);
+      const installs = next.actions.filter((action) => action.kind === "install");
+      const fetches = next.actions.filter((action) => action.kind === "fetch");
+      rule = installs.every((action) => action.generation === current)
+        && (generation === current || installs.length === 0) && fetches.length <= 1;
+    } else if (invalidated === undefined && completed === undefined
+      && (member(step, "resnapshot") === true || member(step, "endpointSwitch") === true)) {
+      next = { state: advanceGeneration(state), actions: [] };
+      rule = next.state.flights.size === 0 && integerOf(member(step, "generation")) === current + 1
+        && next.state.generation === current + 1;
+    } else {
+      throw new Error(`${stepLabel} names no single step kind`);
+    }
+    expect(next.actions, stepLabel).toEqual(expected);
+    expect(rule, `${stepLabel} keeps the coordinator rules`).toBe(true);
+    state = next.state;
+  });
+  return steps.length;
+}
+
+/**
+ * Run a backoff vector: the delay of each failure in order, every delay
+ * within one second and the cap, and a delivered event resets the next delay
+ * to one second.
+ */
+function runBackoff(vector: JsonValue): number[] {
+  const name = label("backoff", vector);
+  let backoff: Backoff = INITIAL_BACKOFF;
+  let delivered = false;
+  const delays: number[] = [];
+  for (const step of list(member(vector, "steps"))) {
+    if (step === "failure") {
+      const { delay, next } = reconnectDelay(backoff);
+      expect(delivered && delay !== 1, `${name}: no reset after delivery`).toBe(false);
+      delays.push(delay);
+      backoff = next;
+      delivered = false;
+    } else if (step === "delivered") {
+      backoff = INITIAL_BACKOFF;
+      delivered = true;
+    } else {
+      throw new Error(`${name} has an unknown step`);
+    }
+  }
+  expect(delays, name).toEqual(list(member(vector, "delays")).map(integerOf));
+  expect(delays.every((delay) => delay >= 1 && delay <= RECONNECT_BACKOFF_MAX_SECONDS), name).toBe(true);
+  return delays;
+}
+
+/** The fraction of a jitter vector as a double, as the Haskell checker reads it. */
+function fractionOf(value: JsonValue | undefined): number {
+  if (!(value instanceof JsonNumber)) throw new Error("jitter vector without a fraction");
+  return Number(value.source);
+}
+
+/** The observation of a reconciliation vector. */
+function observationOf(name: string, observation: JsonValue | undefined): ReconcileObservation {
+  const state = member(observation, "receiptState");
+  const etag = member(observation, "targetETag");
+  const failure = member(observation, "failure");
+  if (typeof state === "string" && etag === undefined && failure === undefined) {
+    const parsed = parseCommandState(state);
+    if (parsed === undefined) throw new Error(`${name} names an unknown receipt state`);
+    return { kind: "receipt", state: parsed };
+  }
+  if (state === undefined && typeof etag === "string" && failure === undefined) {
+    return { kind: "target", etag, effectVisible: member(observation, "effectVisible") === true };
+  }
+  if (state === undefined && etag === undefined && failure !== undefined) {
+    if (failure === "InvalidResponse" || failure === "TransportUnavailable") return { kind: "failure", failure: { kind: failure } };
+    const refused = list(member(failure, "refused"));
+    const [status, code] = refused;
+    if (refused.length === 2 && status !== undefined && typeof code === "string") {
+      return { kind: "failure", failure: { kind: "Refused", status: integerOf(status), code } };
+    }
+    throw new Error(`${name} names an unknown failure`);
+  }
+  throw new Error(`${name} has a malformed observation`);
+}
+
+/**
+ * Run a reconciliation vector. The read is the receipt location when one is
+ * known and otherwise the target. A command that stays uncertain comes back
+ * unchanged with its exact bytes, key and precondition, and no report sends.
+ * The result is the report.
+ */
+function runReconciliation(vector: JsonValue): string {
+  const name = label("reconciliation", vector);
+  const target = textOf(member(vector, "target"));
+  if (target === undefined) throw new Error(`${name} has no target`);
+  const command = member(vector, "command");
+  if (command === undefined) throw new Error(`${name} has no command`);
+  const receipt = textOf(member(vector, "receipt")) ?? null;
+  const uncertain: Uncertain<JsonValue, string> = {
+    command,
+    target,
+    precondition: textOf(member(vector, "precondition")) ?? null,
+    receipt,
+  };
+  const read = reconcileRead(uncertain);
+  expect(read, `${name} read`).toEqual(receipt === null ? { kind: "target", location: target } : { kind: "receipt", location: receipt });
+  expect(read.kind, `${name} read`).toBe(textOf(member(vector, "read")));
+  const outcome = reconcile(uncertain, observationOf(name, member(vector, "observation")));
+  expect(Object.keys(outcome).sort(), `${name} carries no send`).toEqual(outcome.kind === "uncertain" ? ["kind", "uncertain"] : ["kind"]);
+  expect(outcome.kind, `${name} report`).toBe(textOf(member(vector, "report")));
+  if (outcome.kind === "uncertain") {
+    expect(outcome.uncertain, `${name} keeps the uncertain command`).toBe(uncertain);
+    expect(outcome.uncertain, `${name} keeps the uncertain command`).toEqual(uncertain);
+    expect(jsonEqual(outcome.uncertain.command, command), `${name} keeps the exact command`).toBe(true);
+    expect(encodeJson(outcome.uncertain.command), `${name} keeps the exact bytes, key and precondition`).toBe(encodeJson(command));
+  }
+  return outcome.kind;
+}
+
+describe("manager client vectors: refresh", () => {
+  it("has the stated number of cases in every subsection", () => {
+    const counts = Object.fromEntries(Object.keys(REFRESH_COUNTS).map((name) =>
+      [name, refreshCases(name as keyof typeof REFRESH_COUNTS).length]));
+    expect(counts).toEqual(REFRESH_COUNTS);
+  });
+
+  it("runs every coordinator sequence with its exact actions and the coordinator rules", () => {
+    const steps = refreshCases("sequences").map(runSequence);
+    expect(steps.length).toBe(REFRESH_COUNTS.sequences);
+    expect(steps.reduce((total, count) => total + count, 0)).toBe(87);
+  });
+
+  it("doubles the reconnection delay up to the cap and resets it after a delivered event", () => {
+    const delays = refreshCases("backoff").map(runBackoff);
+    expect(delays.length).toBe(REFRESH_COUNTS.backoff);
+    expect(delays.flat().length).toBe(24);
+  });
+
+  it("jitters each wait between half the delay and the whole delay", () => {
+    const ran = refreshCases("jitter").filter((vector) => {
+      const seconds = integerOf(member(vector, "seconds"));
+      const waited = jitteredMicroseconds(seconds, fractionOf(member(vector, "fraction")));
+      expect(waited, label("jitter", vector)).toBe(integerOf(member(vector, "microseconds")));
+      expect(waited <= 1000000 * RECONNECT_BACKOFF_MAX_SECONDS && 2 * waited >= 1000000 * seconds, label("jitter", vector)).toBe(true);
+      return true;
+    }).length;
+    expect(ran).toBe(REFRESH_COUNTS.jitter);
+  });
+
+  it("reconciles each uncertain command by one read and keeps an uncertain one unchanged", () => {
+    const reports = refreshCases("reconciliation").map(runReconciliation);
+    expect(reports.length).toBe(REFRESH_COUNTS.reconciliation);
+    const tally = Object.fromEntries(["effect-observed", "refused", "uncertain"].map((report) =>
+      [report, reports.filter((kind) => kind === report).length]));
+    expect(tally).toEqual({ "effect-observed": 3, refused: 1, uncertain: 13 });
+  });
+
+  it("returns new states and never changes the state that it receives", () => {
+    const start = newRefresh<string>();
+    const fetched = invalidateResource("/v1/runs/run_1", start);
+    expect(start.flights.size).toBe(0);
+    const dirty = invalidateResource("/v1/runs/run_1", fetched.state);
+    expect(fetched.state.flights.get("/v1/runs/run_1")).toEqual({ generation: 0, dirty: false });
+    const completed = completeFetch("/v1/runs/run_1", 0, dirty.state);
+    expect(dirty.state.flights.get("/v1/runs/run_1")).toEqual({ generation: 0, dirty: true });
+    expect(completed.state.flights.get("/v1/runs/run_1")).toEqual({ generation: 0, dirty: false });
+    const advanced = advanceGeneration(completed.state);
+    expect(completed.state.generation).toBe(0);
+    expect(advanced).toEqual({ generation: 1, flights: new Map() });
+  });
+
+  it("counts a fraction that is not a number as zero", () => {
+    expect(jitteredMicroseconds(4, Number.NaN)).toBe(2000000);
   });
 });
