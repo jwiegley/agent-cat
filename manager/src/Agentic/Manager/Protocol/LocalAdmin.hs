@@ -33,11 +33,18 @@ data LocalAdminRequest
   | Status
   | CheckStore
   | CheckQuarantine !Text
+  | -- | The quarantine identity, the cleanup evidence identity and the
+    -- cleanup evidence digest that a @check-quarantine@ answer returned.
+    ReleaseQuarantine !Text !Text !Text
   | OtherAdmin !Text
 
 -- | Fixed refusals. Storage failure makes no assertion about publication or COMMIT.
+-- 'CleanupUnverified' refuses a quarantine release whose cleanup evidence,
+-- computed again at the release, is not clean or differs from the supplied
+-- evidence.
 data AdminFailure = MalformedRequest | UnknownOperation | UnsupportedVersion
   | UnknownField | DuplicateField | SizeLimit | StateConflict | StorageUnavailable | OutputConflict
+  | CleanupUnverified
   deriving (Eq, Show, Generic, NFData, Exception)
 
 adminFailureCode :: AdminFailure -> Text
@@ -51,6 +58,7 @@ adminFailureCode failure = case failure of
   StateConflict -> "state-conflict"
   StorageUnavailable -> "storage-unavailable"
   OutputConflict -> "output-conflict"
+  CleanupUnverified -> "cleanup-unverified"
 
 adminOperation :: LocalAdminRequest -> Text
 adminOperation request = case request of
@@ -61,11 +69,12 @@ adminOperation request = case request of
   Status -> "status"
   CheckStore -> "check-store"
   CheckQuarantine _ -> "check-quarantine"
+  ReleaseQuarantine {} -> "release-quarantine"
   OtherAdmin name -> name
 
 otherOperations :: [Text]
 otherOperations = ["reload-profiles", "drain", "shutdown",
-  "backup", "restore", "release-quarantine"]
+  "backup", "restore"]
 
 validLocalFile :: FilePath -> Bool
 validLocalFile path = let value = T.pack path in T.length value >= 2 && T.length value <= 8192
@@ -73,6 +82,10 @@ validLocalFile path = let value = T.pack path in T.length value >= 2 && T.length
 
 unique :: Ord a => [a] -> Bool
 unique values = Set.size (Set.fromList values) == length values
+
+-- | A lowercase hexadecimal SHA-256 digest.
+validDigest :: Text -> Bool
+validDigest digest = T.length digest == 64 && T.all (`elem` ("0123456789abcdef" :: String)) digest
 
 validExpiry :: Text -> Bool
 validExpiry value = T.length value <= 40 && validTimestamp value
@@ -89,6 +102,7 @@ validAdminRequest request = case request of
   Status -> True
   CheckStore -> True
   CheckQuarantine ident -> validId ident
+  ReleaseQuarantine ident evidence digest -> validId ident && validId evidence && validDigest digest
   OtherAdmin name -> name `elem` otherOperations
 
 decodeLocalAdminRequest :: BS.ByteString -> Either AdminFailure LocalAdminRequest
@@ -98,7 +112,7 @@ decodeLocalAdminRequest bytes
       value <- either (\failure -> Left (if failure == "duplicate-field" then DuplicateField else MalformedRequest)) Right (decodeStrictValue bytes)
       fields <- case value of Object fields -> Right fields; _ -> Left MalformedRequest
       operation <- case KM.lookup "operation" fields of Just (String name) -> Right name; _ -> Left MalformedRequest
-      unless (operation `elem` (["issue-credential","rotate-credential","revoke-credential","list-credentials","status","check-store","check-quarantine"] <> otherOperations)) (Left UnknownOperation)
+      unless (operation `elem` (["issue-credential","rotate-credential","revoke-credential","list-credentials","status","check-store","check-quarantine","release-quarantine"] <> otherOperations)) (Left UnknownOperation)
       case KM.lookup "version" fields of
         Just (Number 1) -> Right ()
         Just (Number _) -> Left UnsupportedVersion
@@ -131,20 +145,15 @@ parseRequest operation fields = case operation of
   "status" -> pure Status
   "check-store" -> pure CheckStore
   "check-quarantine" -> CheckQuarantine <$> fields .: "quarantineId"
+  "release-quarantine" -> ReleaseQuarantine <$> fields .: "quarantineId" <*> fields .: "cleanupEvidenceId" <*> fields .: "cleanupEvidenceDigest"
   _ -> do
     case operation of
       "backup" -> localFile "outputFile"
       "restore" -> localFile "backupFile" >> localFile "fencingEvidenceFile"
-      "release-quarantine" -> do
-        identifier "quarantineId"
-        identifier "cleanupEvidenceId"
-        digest <- fields .: "cleanupEvidenceDigest"
-        unless (T.length digest == 64 && T.all (`elem` ("0123456789abcdef" :: String)) digest) (fail "digest")
       _ -> pure ()
     pure (OtherAdmin operation)
   where
     localFile key = fields .: key >>= \path -> unless (validLocalFile path) (fail "path")
-    identifier key = fields .: key >>= \ident -> unless (validId ident) (fail "identity")
     parseScope name = case lookup name [(scopeName s,s) | s <- [Observe,Submit,Control,ExportScope]] of
       Just scope -> pure scope
       Nothing -> fail "scope"

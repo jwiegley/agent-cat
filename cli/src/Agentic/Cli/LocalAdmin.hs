@@ -62,7 +62,7 @@ runLocalAdmin load path = do
 offline :: LocalAdminRequest -> ((CoordinationStore -> IO BS.ByteString) -> IO BS.ByteString) -> IO BS.ByteString
 offline request open = do
   entered <- newIORef False
-  result <- try @StoreFailure (open (\store -> writeIORef entered True >> administerLocally StoreStopped store request))
+  result <- try @StoreFailure (open (\store -> writeIORef entered True >> administerLocally StoreStopped (pure ()) store request))
   opened <- readIORef entered
   case (request, result) of
     (_, Right response) -> pure response

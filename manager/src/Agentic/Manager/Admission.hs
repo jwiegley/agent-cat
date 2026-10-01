@@ -9,7 +9,7 @@ module Agentic.Manager.Admission
     withAdmission, withAdmissionClock, enqueueRequest, admitOldest, AdmissionPoll (..), pollAdmission,
     editRequestInput, withdrawRequest, awaitReview, withReviewAcceptance,
     retryAdmissionCleanup, awaitAdmissionCleanup, closeAdmission, ShutdownMode (..), ShutdownResult (..), shutdownAdmission, reservationIdentity, observeLivePreparation, ownsHistoryRun,
-    awaitAdmissionWork, preparationRequestIdentity, awaitAcceptedStart, requestPreparationStop,
+    awaitAdmissionWork, notifyAdmission, preparationRequestIdentity, awaitAcceptedStart, requestPreparationStop,
     acceptControlCommand, acceptAndDeliverControlCommand, deliverAcceptedControl, acceptedControlContext,
     AcceptedStart, acceptStartCommand, acceptAndDeliverStartCommand, deliverAcceptedStart, stopAcceptedStart, observeAcceptedStart, acceptedStartRun, acceptedTimerRetired, invalidateLivePreparation, discardLivePreparation, consumeAcceptedStart
   ) where

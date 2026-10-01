@@ -49,4 +49,4 @@ serveManager configuration legacy = do
         let listen = Transport.runHttps https limits closing application
         case configurationAdministrationRoot configuration of
           Nothing -> listen
-          Just _ -> withLocalAdministration store listen
+          Just _ -> withLocalAdministration store (Service.wakeAdmission service) listen

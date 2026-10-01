@@ -3,7 +3,7 @@
 
 -- | One live coordinator and bounded indexes of its original owned associations.
 module Agentic.Manager.Service
-  ( Service, withService, serviceStore, serviceFault,
+  ( Service, withService, serviceStore, serviceFault, wakeAdmission,
     enqueue, editInput, withdraw, approve, discard, submitExport, submitLineage, controlRun, controlDecision, readControl, withControl,
     withSnapshot, withSnapshotSource, withOverviewSource, Overview.Collection (..), withCollectionSource,
     withRun, withOutputs, withOutputsSource, withExportsSource, withExport, withLineageSource, download
@@ -62,6 +62,12 @@ data Service = Service
 
 serviceFault :: Service -> IO (Maybe FaultClass)
 serviceFault = readTVarIO . faultCell
+
+-- | Tell the admission controller of this service that a released
+-- reservation freed capacity, as the release of a terminal run does, so that
+-- the scheduler polls admission again without another client command.
+wakeAdmission :: Service -> IO ()
+wakeAdmission = atomically . A.notifyAdmission . admission
 
 -- | The service of one Store lifetime. The legacy bindings come from
 -- 'History.bindLegacyHistory' and are never controllable.

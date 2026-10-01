@@ -290,8 +290,9 @@ preparations become invalidated, unresolved reservations remain quarantined,
 and owned runs become lost supervision without changing their Runtime evidence.
 Uncertain starts and controls remain unresolved with their original request and
 receipt bytes. No stored identifier becomes a dispatch or cleanup handle.
-A quarantined reservation keeps its execution slot and its resource keys, as
-the [worker contract](WORKERS.md#manager-loss-and-restart) describes.
+A quarantined reservation keeps its execution slot and its resource keys until
+the operator releases it with cleanup evidence, as the
+[worker contract](WORKERS.md#manager-loss-and-restart) describes.
 Reconciliation pages at most 100 changed resources per transaction and publishes
 their matching preparation, request, run, control and command invalidations in
 that transaction. Each page has at most 200 events within the existing limit of
@@ -544,9 +545,12 @@ a missing field and any value that its encoder does not write.
   capture by identifier, SHA-256 and size. The capture bytes are not copied.
   The `command` body of a credential operation of the local administration
   channel is the operation, the client, the credential, the superseded
-  credential of a rotation, and the label, scopes, profiles and expiry.
+  credential of a rotation, and the label, scopes, profiles and expiry. The
+  `command` body of a quarantine release is the operation
+  `release-quarantine`, the quarantine identity, the request, and the cleanup
+  evidence identity and digest.
 - A `receipt` body is the frozen `CommandReceipt` JSON. The `receipt` body of a
-  credential operation is the frozen local administration response.
+  local administration operation is the frozen local administration response.
 - A `review` body is the preparation identifier, the public review bytes and
   their SHA-256, the private binding bytes and their digest, the expiry and the
   five approval selectors. The decoder verifies both digests against their
@@ -602,8 +606,8 @@ and then reports the configuration failure. Both notices are reserved records
 from the manager to the manager, and a failed append of either becomes a gap
 entry. The [command acceptance contract](COMMANDS.md#manager-log-records)
 describes the `command`, `receipt` and `failure` records of a fresh command
-and of a credential operation of the local administration channel, and its
-command notices. The [approval contract](APPROVAL.md#review-record) describes
+and of a credential operation or a quarantine release of the local
+administration channel, and its command notices. The [approval contract](APPROVAL.md#review-record) describes
 the `review` record. The [admission contract](ADMISSION.md#manager-log-relays)
 and the [controls contract](CONTROLS.md#manager-log-relays) describe the
 `relay` records. The [admission contract](ADMISSION.md#manager-log-endings)

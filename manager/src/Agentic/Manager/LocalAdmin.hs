@@ -8,7 +8,7 @@ import Agentic.Manager.Configuration (Configuration, configurationAdministration
 import Agentic.Manager.Credentials (administerCredentials)
 import Agentic.Manager.Protocol.Json (decodeStrictValue)
 import Agentic.Manager.Protocol.LocalAdmin
-import Agentic.Manager.Quarantine (StoreState (..), checkQuarantine, reportStatus, reportStoreCheck)
+import Agentic.Manager.Quarantine (StoreState (..), checkQuarantine, releaseQuarantine, reportStatus, reportStoreCheck)
 import Agentic.Manager.Store (CoordinationStore, withStoreAdministration)
 import Agentic.Runtime (PrivateRoot, assertPrivateRoot, closePrivateRoot, openPrivateRoot, privateRootPath)
 import Control.Concurrent.Async (link, withAsync)
@@ -32,8 +32,10 @@ import System.Timeout (timeout)
 
 -- | Serve the frozen requests while retaining the original Store configuration
 -- and endpoint lease. The configuration guard is released before any request.
-withLocalAdministration :: CoordinationStore -> IO a -> IO a
-withLocalAdministration store action = do
+-- The wake action tells the running admission controller that a committed
+-- quarantine release freed its execution slot and resource keys.
+withLocalAdministration :: CoordinationStore -> IO () -> IO a -> IO a
+withLocalAdministration store wake action = do
   result <- withStoreAdministration store $ \root -> do
     -- Exclusive directory ownership, not process absence, permits stale-name removal.
     previous <- try @IOException (checkedSocket root)
@@ -61,18 +63,21 @@ withLocalAdministration store action = do
             Left _ -> pure (adminError Nothing MalformedRequest)
             Right bytes -> case decodeLocalAdminRequest bytes of
               Left failure -> pure (adminError Nothing failure)
-              Right request -> administerLocally StoreServing store request
+              Right request -> administerLocally StoreServing wake store request
           -- Only connection IO has an outer deadline. An admitted mutation is
           -- neither interrupted by this timer nor retried after a lost reply.
           void (try @IOException (boundedIO 5000000 (Net.sendAll connection response)))
 
 -- | Dispatch one decoded request to its owner on the original Store. The live
--- channel passes 'StoreServing' and offline administration 'StoreStopped'.
-administerLocally :: StoreState -> CoordinationStore -> LocalAdminRequest -> IO BS.ByteString
-administerLocally state store request = case request of
+-- channel passes 'StoreServing' and the wake of its admission controller.
+-- Offline administration passes 'StoreStopped' and no wake, since no
+-- controller runs.
+administerLocally :: StoreState -> IO () -> CoordinationStore -> LocalAdminRequest -> IO BS.ByteString
+administerLocally state wake store request = case request of
   Status -> reportStatus state store
   CheckStore -> reportStoreCheck store
   CheckQuarantine ident -> checkQuarantine store ident
+  ReleaseQuarantine ident evidence digest -> releaseQuarantine store wake ident evidence digest
   IssueCredential {} -> administerCredentials store request
   RotateCredential {} -> administerCredentials store request
   RevokeCredential {} -> administerCredentials store request

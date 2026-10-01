@@ -115,8 +115,8 @@ serveCredentialChecks path = do
     (\args -> if args == ["--scripted"] then Right () else error "unexpected live fixture target")
     exactPreparedTarget (const False) path >>= right
   bracket (installConfiguration configuration >>= right) closeConfiguration $ \installed ->
-    withCoordinationStore installed $ \store -> withLocalAdministration store $ do
-      conflict <- try @Diagnostic (withLocalAdministration store (pure ()))
+    withCoordinationStore installed $ \store -> withLocalAdministration store (pure ()) $ do
+      conflict <- try @Diagnostic (withLocalAdministration store (pure ()) (pure ()))
       requireCheck "second live endpoint refuses without replacing the original"
         (case conflict of Left _ -> True; Right _ -> False)
       putStrLn "ready"
@@ -1045,24 +1045,43 @@ credentialParserChecks source = do
   oversized <- adminValue (Admin.adminSuccess "list-credentials" (String (T.replicate 1048576 "x")))
   check "whole oversized response refuses within newline-inclusive byte ceiling" (adminField "code" (adminField "error" oversized) == String "size-limit")
 
--- check-quarantine on claims that the fixture writes directly: an unknown
--- identity, a reservation that is held, a quarantined reservation that never
--- launched a run, and a claim that a restoration carried forward. A separate
--- connection writes the rows and removes them afterwards, so the later checks
--- see the original Store.
+-- check-quarantine and release-quarantine on claims that the fixture writes
+-- directly: an unknown identity, a reservation that is held, a quarantined
+-- reservation that never launched a run, and a claim that a restoration
+-- carried forward. A separate connection writes the rows and removes them
+-- afterwards, so the later checks see the original Store. A refused release
+-- changes no row and calls no wake. The released reservation keeps its row
+-- in state released with no slot and no resource keys.
 quarantineChecks :: FilePath -> CoordinationStore -> IO ()
 quarantineChecks root store = do
+  wakes <- newIORef (0 :: Int)
   let write statements = withRaw root (\db -> mapM_ (SQL.exec db) statements)
-      answer ident = administerLocally StoreStopped store (Admin.CheckQuarantine ident) >>= adminValue
-      refusedConflict label value = check label (adminField "ok" value == Bool False
-        && adminField "operation" value == String "check-quarantine"
-        && adminField "code" (adminField "error" value) == String "state-conflict")
+      answer ident = administerLocally StoreStopped (pure ()) store (Admin.CheckQuarantine ident) >>= adminValue
+      release ident evidence digest =
+        administerLocally StoreStopped (modifyIORef' wakes (+ 1)) store (Admin.ReleaseQuarantine ident evidence digest) >>= adminValue
+      refusedWith operation code label value = check label (adminField "ok" value == Bool False
+        && adminField "operation" value == String operation
+        && adminField "code" (adminField "error" value) == String code)
+      refusedConflict = refusedWith "check-quarantine" "state-conflict"
+      releaseRefused code = refusedWith "release-quarantine" code
+      cells = map (map (\value -> case value of
+        SQL.SQLText text -> Just text
+        SQL.SQLInteger number -> Just (T.pack (show number))
+        _ -> Nothing))
+      claimRows = runRead store $ (,,)
+        <$> (cells <$> query "SELECT state,slot FROM reservations WHERE id='reservation_pc2'" [])
+        <*> (cells <$> query "SELECT kind,resource_key FROM reservation_resources WHERE reservation_id='reservation_pc2'" [])
+        <*> (cells <$> query "SELECT revision,admission FROM requests WHERE id='request_pc2'" [])
+      zeros = T.replicate 64 "0"
   adminRefused "credential owner leaves quarantine checks to their owner" Admin.StateConflict store (Admin.CheckQuarantine "reservation_pc2")
+  adminRefused "credential owner leaves quarantine release to its owner" Admin.StateConflict store (Admin.ReleaseQuarantine "reservation_pc2" "cleanup_pc2" zeros)
   answer "reservation_unknown" >>= refusedConflict "check-quarantine refuses an unknown identity with state-conflict"
+  release "reservation_unknown" "cleanup_pc2" zeros >>= releaseRefused "state-conflict" "release-quarantine refuses an unknown identity with state-conflict"
   write ["INSERT INTO requests (id,revision,client_id,workflow_id,descriptor_revision,profile_id,profile_revision,phase,admission,blocking_reasons,validation_errors) VALUES ('request_pc2','r0','client_1','workflow_1','descriptor_1','profile_1','profile_revision','refused','refused',X'5b5d',X'5b5d')",
          "INSERT INTO reservations (id,request_id,slot,process_generation,state) VALUES ('reservation_pc2','request_pc2',14,'process_old','held')",
          "INSERT INTO reservation_resources (kind,resource_key,reservation_id) VALUES ('operator','key_pc2','reservation_pc2')"]
   answer "reservation_pc2" >>= refusedConflict "check-quarantine refuses a held reservation with state-conflict"
+  release "reservation_pc2" "cleanup_pc2" zeros >>= releaseRefused "state-conflict" "release-quarantine refuses a held reservation with state-conflict"
   write ["UPDATE reservations SET state='quarantined' WHERE id='reservation_pc2'"]
   generation <- storeProcessGeneration <$> storeIdentity store
   let facts = "{\"admissionObservationState\":null,\"evidence\":\"no-launch\",\"preparationStates\":[],\"processGeneration\":\""
@@ -1080,6 +1099,24 @@ quarantineChecks root store = do
       && (case adminField "expiresAt" result of String _ -> True; _ -> False))
   check "two checks in one lifetime return the same evidence"
     (all (\key -> adminField key (adminField "result" second) == adminField key result) ["state", "cleanupEvidenceId", "cleanupEvidenceDigest"])
+  before <- claimRows
+  let evidenceId = "cleanup_" <> T.take 32 digest
+  release "reservation_pc2" evidenceId zeros >>= releaseRefused "cleanup-unverified" "release-quarantine refuses a wrong evidence digest with cleanup-unverified"
+  release "reservation_pc2" "cleanup_other" digest >>= releaseRefused "cleanup-unverified" "release-quarantine refuses a wrong evidence identity with cleanup-unverified"
+  claimRows >>= check "a refused release changes no reservation, resource key or request" . (== before)
+  readIORef wakes >>= check "a refused release wakes no admission controller" . (== 0)
+  released <- release "reservation_pc2" evidenceId digest
+  check "release-quarantine with the current clean evidence returns the frozen released result"
+    (adminField "ok" released == Bool True && adminField "result" released
+      == object ["quarantineId" .= ("reservation_pc2" :: Text), "state" .= ("released" :: Text)])
+  (reservation, resources, requestRow) <- claimRows
+  check "the released reservation has no slot and no resource keys, and its request has a new revision"
+    (reservation == [[Just "released", Nothing]] && null resources
+      && case requestRow of [[Just revision, Just "refused"]] -> revision /= "r0"; _ -> False)
+  readIORef wakes >>= check "a committed release wakes the admission controller once" . (== 1)
+  release "reservation_pc2" evidenceId digest >>= releaseRefused "state-conflict" "a second release of a released reservation refuses with state-conflict"
+  answer "reservation_pc2" >>= refusedConflict "check-quarantine refuses a released reservation with state-conflict"
+  readIORef wakes >>= check "a refused second release wakes no admission controller" . (== 1)
   write ["DELETE FROM reservation_resources WHERE reservation_id='reservation_pc2'",
          "DELETE FROM reservations WHERE id='reservation_pc2'",
          "DELETE FROM requests WHERE id='request_pc2'",
@@ -1088,6 +1125,7 @@ quarantineChecks root store = do
   check "check-quarantine reports a restoration claim as unverifiable without evidence"
     (restored == object ["quarantineId" .= ("restored_pc2" :: Text), "state" .= ("unverifiable" :: Text),
       "cleanupEvidenceId" .= Null, "cleanupEvidenceDigest" .= Null, "processGeneration" .= generation, "expiresAt" .= Null])
+  release "restored_pc2" evidenceId digest >>= releaseRefused "cleanup-unverified" "release-quarantine refuses a restoration claim with cleanup-unverified"
   write ["DELETE FROM restoration_quarantine WHERE id='restored_pc2'"]
 
 credentialAdministrationChecks :: FilePath -> IO ()
@@ -1120,16 +1158,16 @@ credentialAdministrationChecks work = withFixture work "credentials" (64*command
   adminRefused "credential owner leaves store status to its owner" Admin.StateConflict store Admin.Status
   identity <- storeIdentity store
   held <- scalarInt store "SELECT count(*) FROM reservations WHERE state!='released'"
-  stopped <- administerLocally StoreStopped store Admin.Status >>= adminValue
+  stopped <- administerLocally StoreStopped (pure ()) store Admin.Status >>= adminValue
   check "offline status reports the stopped Store identity and its active reservations"
     (adminField "ok" stopped == Bool True && adminField "result" stopped == object
       ["state" .= ("stopped" :: Text), "authorityEpoch" .= storeAuthorityEpoch identity,
        "streamId" .= storeStreamId identity, "processGeneration" .= storeProcessGeneration identity,
        "activeReservations" .= held])
-  serving <- administerLocally StoreServing store Admin.Status >>= adminValue
+  serving <- administerLocally StoreServing (pure ()) store Admin.Status >>= adminValue
   check "live status reports a serving Store" (adminField "state" (adminField "result" serving) == String "serving")
   quarantined <- runRead store ((\rows -> [claim | [SQL.SQLText claim] <- rows]) <$> query "SELECT id FROM reservations WHERE state='quarantined' UNION SELECT id FROM restoration_quarantine ORDER BY id" [])
-  checked <- administerLocally StoreStopped store Admin.CheckStore >>= adminValue
+  checked <- administerLocally StoreStopped (pure ()) store Admin.CheckStore >>= adminValue
   check "check-store reports a valid quick check and the quarantined claims"
     (adminField "ok" checked == Bool True && adminField "result" checked == object
       ["integrity" .= ("valid" :: Text), "quarantineIds" .= quarantined])
@@ -1774,9 +1812,13 @@ flowAdministrationChecks work = do
   let sample = AdministrationBody AdministerRotate "client_1" "credential_2" (Just "credential_1") "Terminal \10003" ["observe", "submit"] ["profile_1"] "2999-01-01T00:00:00Z"
       withField (Object fields) = Object (KM.insert "extra" (Bool False) fields)
       withField other = other
+      releaseSample = ReleaseAdministration "reservation_1" "request_1" "cleanup_1" (T.replicate 64 "a")
   check "manager log administration bodies round-trip and refuse an unknown field or the shape of another command" $
     administrationFromFlowBody (administrationFlowBody sample) == Right sample
+      && administrationFromFlowBody (administrationFlowBody releaseSample) == Right releaseSample
       && isLeftEither (administrationFromFlowBody (withField (administrationFlowBody sample)))
+      && isLeftEither (administrationFromFlowBody (withField (administrationFlowBody releaseSample)))
+      && isLeftEither (administrationFromFlowBody (administrationFlowBody (AdministrationBody AdministerRelease "client_1" "credential_2" Nothing "Terminal" ["observe"] ["profile_1"] "2999-01-01T00:00:00Z")))
       && isLeftEither (commandFromFlowBody (administrationFlowBody sample))
       && isLeftEither (administrationFromFlowBody (commandFlowBody (firstFlow flowCommands)))
   CUid uid <- getEffectiveUserID

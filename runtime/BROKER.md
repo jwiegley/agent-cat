@@ -350,11 +350,11 @@ the Store pruner left, or 0 before the first seal. The summary object of
 `agentic-run flow` names the floor of each manager log as `floor`, and the
 position of each reply whose ask lies below the floor as `prunedReplies`. It
 then decodes each body with the manager codec of its
-schema. A command body with an `administration` field decodes as a credential
-operation, and a receipt decodes with the receipt codec of the command that it
+schema. A command body with an `administration` field decodes as a local
+administration operation, a credential operation or a quarantine release, and a receipt decodes with the receipt codec of the command that it
 answers and must name the identifier of that command. A receipt whose command
 lies below the floor decodes as a command receipt when it names the command
-identifier of its record, and otherwise as a credential receipt. A body that does not
+identifier of its record, and otherwise as a local administration receipt. A body that does not
 decode is a failure of its entry.
 
 `readManagerWindow` reads one positioned window of the manager log of a stream

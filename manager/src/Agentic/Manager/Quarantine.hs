@@ -2,15 +2,18 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE TypeApplications #-}
 
--- | Read-only Store status, quarantine discovery and cleanup evidence for
--- local administration. No operation changes a Store row, appends to the
--- manager log, reads or signals a stored process identity, or adopts a
--- worker.
+-- | Store status, quarantine discovery, cleanup evidence and quarantine
+-- release for local administration. Only the release changes Store rows and
+-- appends to the manager log. No operation reads or signals a stored process
+-- identity, or adopts a worker.
 module Agentic.Manager.Quarantine
   ( StoreState (..), reportStatus, reportStoreCheck, unavailableStoreCheck,
-    QuarantineState (..), CleanupEvidence (..), inspectQuarantine, checkQuarantine, cleanupEvidenceLifetime
+    QuarantineState (..), CleanupEvidence (..), inspectQuarantine, checkQuarantine, cleanupEvidenceLifetime,
+    releaseQuarantine
   ) where
 
+import Agentic.Manager.Administration (localAdministrator, recordAdministration, recordAdministrationReceipt)
+import Agentic.Manager.Flow (AdministrationBody (ReleaseAdministration))
 import Agentic.Manager.Protocol.Command (encoded, validId)
 import Agentic.Manager.Protocol.LocalAdmin (AdminFailure (..), adminError, adminSuccess)
 import Agentic.Manager.Store
@@ -21,10 +24,13 @@ import Control.DeepSeq (NFData (rnf))
 import Control.Exception (IOException, bracket, throwIO, try)
 import Control.Monad (forM, unless)
 import Crypto.Hash (Digest, SHA256, hash)
+import Crypto.Random (getRandomBytes)
 import Data.Aeson (Value (Null), object, (.=))
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Key as Key
+import Data.ByteArray.Encoding (Base (Base16), convertToBase)
 import qualified Data.ByteString as BS
+import qualified Data.Text.Encoding as TE
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Time.Clock (NominalDiffTime, addUTCTime, getCurrentTime)
@@ -120,13 +126,14 @@ data Claim
   = ClaimAbsent
   | ClaimNotQuarantined
   | ClaimRestored
-  | ClaimUnlaunched ![(Text, Value)]
-  | ClaimLaunched !Text !Text !RunId
+  | ClaimUnlaunched !Text ![(Text, Value)]
+  | ClaimLaunched !Text !Text !Text !RunId
+  deriving (Eq)
 
 instance NFData Claim where
   rnf claim = case claim of
-    ClaimUnlaunched facts -> rnf facts
-    ClaimLaunched run recorded native -> rnf (run, recorded, runIdText native)
+    ClaimUnlaunched request facts -> rnf (request, facts)
+    ClaimLaunched request run recorded native -> rnf (request, run, recorded, runIdText native)
     _ -> ()
 
 -- | Inspect one quarantine identity with the current process generation. An
@@ -139,13 +146,19 @@ inspectQuarantine :: CoordinationStore -> Text -> IO (QuarantineState, Maybe Cle
 inspectQuarantine store ident = withStoreFiles store $ \root -> do
   generation <- storeProcessGeneration <$> storeIdentity store
   claim <- runRead store (readClaim ident)
+  classify root generation ident claim
+
+-- | The state and cleanup evidence of a claim that the Store records, under
+-- the held file slot, with the given process generation.
+classify :: PrivateRoot -> Text -> Text -> Claim -> IO (QuarantineState, Maybe CleanupEvidence)
+classify root generation ident claim =
   case claim of
     ClaimAbsent -> throwIO StateConflict
     ClaimNotQuarantined -> throwIO StateConflict
     ClaimRestored -> pure (QuarantineUnverifiable, Nothing)
-    ClaimUnlaunched facts ->
+    ClaimUnlaunched _ facts ->
       pure (QuarantineClean, Just (evidence (("evidence", "no-launch") : ("processGeneration", toValue generation) : facts)))
-    ClaimLaunched run recorded native -> do
+    ClaimLaunched _ run recorded native -> do
       found <- try @IOException (try @StoreFailure (terminalRecord root recorded native))
       pure $ case found of
         Right (Right (Just (Position position, bytes))) ->
@@ -174,6 +187,62 @@ checkQuarantine store ident = answered "check-quarantine" $ do
      "cleanupEvidenceId" .= fmap evidenceId found, "cleanupEvidenceDigest" .= fmap evidenceDigest found,
      "processGeneration" .= generation, "expiresAt" .= expiry]
 
+-- | Release one quarantined reservation for reuse. The wake action runs after
+-- the COMMIT and after the receipt: the live channel passes the wake of its
+-- admission controller, and offline administration passes nothing.
+--
+-- The Store file slot, the configuration guard and the database are taken in
+-- that lock order, each within its five-second allowance. Under the held file
+-- slot and configuration guard the release reads the claim, computes its
+-- cleanup evidence again with the current process generation, as
+-- @check-quarantine@ does, and then commits one transaction. An unknown
+-- identity and a reservation that is not quarantined, a released one
+-- included, refuse with 'StateConflict'. Evidence that is not clean, or whose
+-- identity or digest differs from the supplied values, refuses with
+-- 'CleanupUnverified'. So does a claim whose Store facts changed between the
+-- read and the transaction. A refusal changes nothing.
+--
+-- The transaction deletes the resource keys of the reservation, sets it
+-- @released@ with no slot, advances the revision of its request, sets a
+-- @reserved@ request admission to @released@, appends the @request.changed@
+-- invalidation of the request, and appends the command record of the release
+-- to the manager log as its last step. After the COMMIT the receipt follows.
+-- The run of the reservation keeps its supervision, and no run store changes.
+releaseQuarantine :: CoordinationStore -> IO () -> Text -> Text -> Text -> IO BS.ByteString
+releaseQuarantine store wake ident suppliedId suppliedDigest = do
+  principal <- localAdministrator
+  attempted <- attempt operation $ withStoreFiles store $ \root -> do
+    revision <- ("request_revision_" <>) . TE.decodeUtf8 . convertToBase Base16 <$> (getRandomBytes 24 :: IO BS.ByteString)
+    configured <- withStoreConfiguration store $ \_ _ -> do
+      generation <- storeProcessGeneration <$> storeIdentity store
+      claim <- runRead store (readClaim ident)
+      found <- classify root generation ident claim
+      request <- case (found, claim) of
+        ((QuarantineClean, Just current), ClaimUnlaunched request _)
+          | matches current -> pure request
+        ((QuarantineClean, Just current), ClaimLaunched request _ _ _)
+          | matches current -> pure request
+        _ -> throwIO CleanupUnverified
+      runTransaction store $ do
+        unchanged <- (== claim) <$> readClaim ident
+        unless unchanged (refuseTransaction CleanupUnverified)
+        execute "DELETE FROM reservation_resources WHERE reservation_id=?" [SQL.SQLText ident]
+        execute "UPDATE reservations SET state='released',slot=NULL,request_revision=? WHERE id=? AND state='quarantined'" [SQL.SQLText revision, SQL.SQLText ident]
+        execute "UPDATE requests SET admission=CASE WHEN admission='reserved' THEN 'released' ELSE admission END,revision=? WHERE id=?" [SQL.SQLText revision, SQL.SQLText request]
+        logged <- recordAdministration store principal (ReleaseAdministration ident request suppliedId suppliedDigest)
+        pure (logged, [Invalidation "request.changed" ("/v1/requests/" <> request) revision])
+    either (const (throwIO StorageUnavailable)) pure configured
+  case attempted of
+    Left refusal -> pure refusal
+    Right logged -> do
+      response <- recordAdministrationReceipt store principal logged
+        (adminSuccess operation (object ["quarantineId" .= ident, "state" .= ("released" :: Text)]))
+      wake
+      pure response
+  where
+    operation = "release-quarantine"
+    matches current = evidenceId current == suppliedId && evidenceDigest current == suppliedDigest
+
 -- The claim that the identity names. A reservation launched a run when a
 -- start intent or a run row names it, directly or through one of its
 -- preparations. The facts of an unlaunched reservation are its identity, its
@@ -191,7 +260,7 @@ readClaim ident = do
       intents <- query "SELECT count(*) FROM start_intents WHERE reservation_id=?" [SQL.SQLText ident]
       case (runs, intents) of
         ([[SQL.SQLText run, SQL.SQLText recorded, SQL.SQLText native]], _) ->
-          either (const (refuseTransaction StoreIntegrity)) (pure . ClaimLaunched run recorded) (mkRunId native)
+          either (const (refuseTransaction StoreIntegrity)) (pure . ClaimLaunched request run recorded) (mkRunId native)
         ([], [[SQL.SQLInteger 0]]) -> do
           phases <- query "SELECT phase FROM requests WHERE id=?" [SQL.SQLText request]
           phase <- case phases of
@@ -212,7 +281,7 @@ readClaim ident = do
           resources <- forM keys $ \row -> case row of
             [SQL.SQLText kind, SQL.SQLText key] -> pure [kind, key]
             _ -> refuseTransaction StoreIntegrity
-          pure (ClaimUnlaunched
+          pure (ClaimUnlaunched request
             [("reservationId", Aeson.toJSON ident), ("requestId", Aeson.toJSON request), ("requestPhase", Aeson.toJSON phase),
              ("preparationStates", Aeson.toJSON prepared), ("admissionObservationState", Aeson.toJSON observed),
              ("resourceKeys", Aeson.toJSON resources)])
@@ -245,15 +314,19 @@ evidence facts =
 sha256 :: BS.ByteString -> Text
 sha256 bytes = T.pack (show (hash bytes :: Digest SHA256))
 
--- The refusals of 'Agentic.Manager.Credentials.administerCredentials'. A read
--- records nothing, so no receipt follows. 'StateConflict' names an identity
--- that is not a quarantined claim.
+-- The answer of a read. A read records nothing, so no receipt follows.
 answered :: Text -> IO Value -> IO BS.ByteString
-answered operation action = do
+answered operation action = either id (adminSuccess operation) <$> attempt operation action
+
+-- The refusals of 'Agentic.Manager.Credentials.administerCredentials', or the
+-- result of the action. 'StateConflict' names an identity that is not a
+-- quarantined claim.
+attempt :: Text -> IO a -> IO (Either BS.ByteString a)
+attempt operation action = do
   result <- try @IOException (try @AdminFailure (try @StoreFailure action))
   pure $ case result of
-    Left _ -> adminError (Just operation) StorageUnavailable
-    Right (Left failure) -> adminError (Just operation) failure
-    Right (Right (Left StoreLimit)) -> adminError (Just operation) SizeLimit
-    Right (Right (Left _)) -> adminError (Just operation) StorageUnavailable
-    Right (Right (Right value)) -> adminSuccess operation value
+    Left _ -> Left (adminError (Just operation) StorageUnavailable)
+    Right (Left failure) -> Left (adminError (Just operation) failure)
+    Right (Right (Left StoreLimit)) -> Left (adminError (Just operation) SizeLimit)
+    Right (Right (Left _)) -> Left (adminError (Just operation) StorageUnavailable)
+    Right (Right (Right value)) -> Right value

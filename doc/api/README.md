@@ -628,8 +628,9 @@ storage failures are not converted into successful receipts.
 
 `RUNNER` denotes the configured registry executable. The following forms define
 the command boundary. Offline administration and a configured same-user local
-channel implement credential listing, issuance, rotation and revocation, and the
-read-only `status`, `check-store` and `check-quarantine` operations.
+channel implement credential listing, issuance, rotation and revocation, the
+read-only `status`, `check-store` and `check-quarantine` operations, and
+`release-quarantine`.
 `check-quarantine` answers `clean` with cleanup evidence when the reservation
 never launched a run or when the run log of its run holds the terminal record
 of the runtime, `cleanup-required` when that run has no terminal record, and
@@ -640,9 +641,16 @@ evidence identity is `cleanup_` followed by its first 32 hexadecimal digits.
 Clean evidence expires 600 seconds after the check. An unknown identity and a
 reservation that is not quarantined receive `state-conflict`.
 [`manager/WORKERS.md`](../../manager/WORKERS.md#manager-loss-and-restart)
-states the facts of each rule. The operations `reload-profiles`, `drain`,
-`shutdown`, `backup`, `restore`, and `release-quarantine` receive
-`state-conflict`.
+states the facts of each rule. `release-quarantine` computes the evidence
+again and refuses with `cleanup-unverified` when it is not clean or its
+identity or digest differs from the supplied values. An unknown identity and a
+reservation that is not quarantined receive `state-conflict`. A release frees
+the execution slot and resource keys of the reservation, records the release
+and its receipt in the manager log, and returns `quarantineId` with `state`
+`released`. The run of the reservation keeps `lost` supervision. A request
+that waits for capacity on a serving manager is then prepared without another
+client command. The operations `reload-profiles`, `drain`, `shutdown`,
+`backup`, and `restore` receive `state-conflict`.
 Existing `RUNNER --tui` and native frontend commands remain unchanged.
 
 ```text

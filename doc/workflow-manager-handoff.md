@@ -270,8 +270,9 @@ not done:
   it stays refused after an ordinary restart. A cancel still proceeds
   through the cancel reserve. The `storage` mode shows this behavior. Only
   the manager log is pruned.
-- A restart quarantines the reservation of a lost run with its execution
-  slot and resource keys, and no operation releases it yet. With one
+- A restart quarantines the reservation of a lost run or of a lost review
+  with its execution slot and resource keys. Only the operator releases it,
+  with `check-quarantine` and `release-quarantine`. Until then, with one
   reservation, no new run starts after a manager crash (WM-020 and WM-042).
 - The manager offers a redirect target from the route names of the
   approved policy. After an automatic fail-over the offer can list a target

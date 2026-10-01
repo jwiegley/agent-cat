@@ -198,6 +198,7 @@ library
   other-modules:
     Agentic.Chains
     Agentic.Cli.LocalAdmin
+    Agentic.Manager.Administration
     Agentic.Manager.Credentials
     Agentic.Manager.LocalAdmin
     Agentic.Manager.Quarantine
@@ -550,6 +551,7 @@ executable manager-command-check
     Agentic.Manager.Test.FlowReader
     Agentic.Manager.Test.StoreAdmissionCheck
     Agentic.Manager.Test.AcceptanceAudit
+    Agentic.Manager.Administration
     Agentic.Manager.Credentials
     Agentic.Manager.LocalAdmin
     Agentic.Manager.Quarantine
@@ -738,6 +740,7 @@ executable manager-artifact-check
     Agentic.Manager.Test.PrivateLog
     Agentic.Manager.Transport
     Agentic.Manager.Pages
+    Agentic.Manager.Administration
     Agentic.Manager.Credentials
     Agentic.Manager.Protocol.LocalAdmin
     Agentic.Manager.Artifacts

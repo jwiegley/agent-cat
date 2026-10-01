@@ -4,18 +4,13 @@
 -- | Local administration on the original Store. Possession proofs grant no access here.
 module Agentic.Manager.Credentials (administerCredentials) where
 
-import Agentic.Manager.Flow
-  (AdministrationBody (..), AdministrationOperation (..), FlowRecordClass (Refusing, Following),
-   administrationFlowBody, administrationFromFlowBody, administrationReceiptFromFlowBody,
-   appendManagerReply, managerFlowCeiling, managerFlowContent)
+import Agentic.Manager.Administration (Logged, localAdministrator, recordAdministration, recordAdministrationReceipt)
+import Agentic.Manager.Flow (AdministrationBody (..), AdministrationOperation (..))
 import Agentic.Manager.Profile (publicId, publicRevision)
 import Agentic.Manager.Protocol.Command (Scope (..), scopeName, encoded)
-import Agentic.Manager.Protocol.Json (decodeStrictValue)
 import Agentic.Manager.Protocol.LocalAdmin
 import Agentic.Manager.Store
-import Agentic.Runtime
-  (openPrivateRoot, closePrivateRoot, publishPrivateCaptureAt, CapturePublication (..),
-   Actor (Manager, Principal), Authority (LocalAccount), Address (To), Position (..), Record (..), Schema (FlowReceipt), noAbout)
+import Agentic.Runtime (openPrivateRoot, closePrivateRoot, publishPrivateCaptureAt, CapturePublication (..), Actor)
 import Control.Exception (IOException, bracket, throwIO, try)
 import Control.Monad (unless)
 import Crypto.Hash (Digest, SHA256, hash)
@@ -24,17 +19,13 @@ import Data.Aeson (Value, eitherDecodeStrict', object, toJSON, (.=))
 import Data.ByteArray (convert)
 import Data.ByteArray.Encoding (Base (Base16), convertToBase)
 import qualified Data.ByteString as BS
-import Data.Int (Int64)
 import Data.IORef (newIORef, atomicModifyIORef')
 import Data.Text (Text)
-import Data.Word (Word64)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
 import qualified Database.SQLite3 as SQL
 import System.FilePath (takeDirectory, takeFileName)
 import System.IO.Error (isAlreadyExistsError)
-import System.Posix.Types (CUid (..))
-import System.Posix.User (getEffectiveUserID)
 
 -- | Trusted local composition supplies the Store, never a bearer or stored ID.
 -- Offline callers acquire the existing exclusive lease. The live local channel
@@ -54,58 +45,6 @@ administerCredentials store request = do
   where
     operation = adminOperation request
     failure = adminError (Just operation)
-
--- | The sender of an administration record: the local account whose user
--- identifier the channel verified, since 'withLocalAdministration' admits only
--- a peer with the effective user identifier of the manager. The channel
--- declares no owner.
-localAdministrator :: IO Actor
-localAdministrator = do
-  CUid uid <- getEffectiveUserID
-  pure (Principal (LocalAccount uid Nothing))
-
--- | The position of an appended administration command record and the ceiling
--- of its log, which the receipt after COMMIT answers.
-type Logged = Maybe (Word64, Int64)
-
--- | Append the synchronized @command@ record of an admitted credential
--- operation from the local account, as the last step before COMMIT. The
--- ceiling is that of the lifetime's log, so the operation takes no
--- configuration lock that it does not already hold. A failed append, or an
--- appended record whose decoded body, sender or address differs from the
--- operation, refuses the operation with 'StorageUnavailable', and the
--- transaction answers the record with a @failure@ record when it rolls back. A
--- lifetime without a manager log, such as offline administration, appends
--- nothing.
-recordAdministration :: CoordinationStore -> Actor -> AdministrationBody -> Transaction Logged
-recordAdministration store principal command = do
-  let total = maybe 0 managerFlowCeiling (storeManagerFlow store)
-  appended <- appendCommandRecord total Refusing principal noAbout (administrationFlowBody command)
-  case appended of
-    Nothing -> pure Nothing
-    Just (Left _) -> refuseTransaction StorageUnavailable
-    Just (Right (Position position, record, content)) -> do
-      unless ((content >>= administrationFromFlowBody) == Right command && recFrom record == principal && recTo record == To Manager)
-        (refuseTransaction StorageUnavailable)
-      pure (Just (position, total))
-
--- | After COMMIT, append the response that the operator receives as the
--- receipt that replies to the command record, and return the response decoded
--- from the appended bytes. When the append fails, or the decoded response
--- differs, the original response is returned, and a failed append leaves a gap
--- entry.
-recordAdministrationReceipt :: CoordinationStore -> Actor -> Logged -> BS.ByteString -> IO BS.ByteString
-recordAdministrationReceipt store principal logged response = case (storeManagerFlow store, logged, decodeStrictValue response) of
-  (Just manager, Just (position, total), Right value) -> do
-    appended <- appendManagerReply manager total Following FlowReceipt (Position position) Manager (To principal) noAbout value
-    case appended of
-      Left _ -> pure response
-      Right (_, record) -> do
-        decoded <- (>>= administrationReceiptFromFlowBody) <$> managerFlowContent manager record
-        pure $ case decoded of
-          Right carried | carried == value -> encoded carried
-          _ -> response
-  _ -> pure response
 
 perform :: CoordinationStore -> Actor -> LocalAdminRequest -> IO (Value, Logged)
 perform store principal request = case request of
@@ -181,12 +120,13 @@ perform store principal request = case request of
         logged <- recordAdministration store principal (administered AdministerRotate (Just previous) value)
         pure ((value, logged), changed revision)
     pure (object ["credential" .= fst metadata, "previousCredentialId" .= previous, "secretWritten" .= True], snd metadata)
-  -- Store status, inspection and quarantine checks belong to
-  -- "Agentic.Manager.Quarantine". The other recognized operations have no
-  -- implementation yet.
+  -- Store status, inspection, quarantine checks and quarantine release
+  -- belong to "Agentic.Manager.Quarantine". The other recognized operations
+  -- have no implementation yet.
   Status -> throwIO StateConflict
   CheckStore -> throwIO StateConflict
   CheckQuarantine _ -> throwIO StateConflict
+  ReleaseQuarantine {} -> throwIO StateConflict
   OtherAdmin _ -> throwIO StateConflict
 
 -- | The command body of a credential operation, from the metadata of the

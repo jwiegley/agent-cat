@@ -560,8 +560,9 @@ commandFromFlowBody value = do
 -- Administration bodies
 -- ---------------------------------------------------------------------------
 
--- | A credential operation of the local administration channel.
-data AdministrationOperation = AdministerIssue | AdministerRotate | AdministerRevoke
+-- | A recorded operation of the local administration channel: a credential
+-- operation, or the release of a quarantined reservation.
+data AdministrationOperation = AdministerIssue | AdministerRotate | AdministerRevoke | AdministerRelease
   deriving (Eq, Show, Enum, Bounded)
 
 administrationOperationName :: AdministrationOperation -> Text
@@ -569,58 +570,92 @@ administrationOperationName = \case
   AdministerIssue -> "issue-credential"
   AdministerRotate -> "rotate-credential"
   AdministerRevoke -> "revoke-credential"
+  AdministerRelease -> "release-quarantine"
 
--- | An admitted credential operation of the local administration channel: the
--- client, the credential that the operation issues, rotates to or revokes, the
--- credential that a rotation supersedes, and the label, scopes, profiles and
--- expiry of the credential. The bearer, its verifier and the output file never
--- appear.
-data AdministrationBody = AdministrationBody
-  { administrationOperation :: !AdministrationOperation,
-    administrationClient :: !Text,
-    administrationCredential :: !Text,
-    administrationPrevious :: !(Maybe Text),
-    administrationLabel :: !Text,
-    administrationScopes :: ![Text],
-    administrationProfiles :: ![Text],
-    administrationExpires :: !Text
-  }
+-- | An admitted operation of the local administration channel.
+--
+-- 'AdministrationBody' is a credential operation: the client, the credential
+-- that the operation issues, rotates to or revokes, the credential that a
+-- rotation supersedes, and the label, scopes, profiles and expiry of the
+-- credential. Its operation is never 'AdministerRelease'. The bearer, its
+-- verifier and the output file never appear.
+--
+-- 'ReleaseAdministration' is the release of a quarantined reservation: the
+-- reservation, its request, and the cleanup evidence identity and digest that
+-- the release verified.
+data AdministrationBody
+  = AdministrationBody
+      { administrationOperation :: !AdministrationOperation,
+        administrationClient :: !Text,
+        administrationCredential :: !Text,
+        administrationPrevious :: !(Maybe Text),
+        administrationLabel :: !Text,
+        administrationScopes :: ![Text],
+        administrationProfiles :: ![Text],
+        administrationExpires :: !Text
+      }
+  | ReleaseAdministration !Text !Text !Text !Text
   deriving (Eq, Show)
 
 administrationFlowBody :: AdministrationBody -> Value
-administrationFlowBody command =
-  object
-    [ "administration" .= administrationOperationName (administrationOperation command),
-      "client" .= administrationClient command,
-      "credential" .= administrationCredential command,
-      "previousCredential" .= administrationPrevious command,
-      "label" .= administrationLabel command,
-      "scopes" .= administrationScopes command,
-      "profiles" .= administrationProfiles command,
-      "expiresAt" .= administrationExpires command
-    ]
+administrationFlowBody = \case
+  command@AdministrationBody {} ->
+    object
+      [ "administration" .= administrationOperationName (administrationOperation command),
+        "client" .= administrationClient command,
+        "credential" .= administrationCredential command,
+        "previousCredential" .= administrationPrevious command,
+        "label" .= administrationLabel command,
+        "scopes" .= administrationScopes command,
+        "profiles" .= administrationProfiles command,
+        "expiresAt" .= administrationExpires command
+      ]
+  ReleaseAdministration quarantine request evidence digest ->
+    object
+      [ "administration" .= administrationOperationName AdministerRelease,
+        "quarantineId" .= quarantine,
+        "request" .= request,
+        "cleanupEvidenceId" .= evidence,
+        "cleanupEvidenceDigest" .= digest
+      ]
 
 administrationFromFlowBody :: Value -> Either Text AdministrationBody
 administrationFromFlowBody value = do
   fields <- flowObject "administration body" value
-  flowExactKeys "administration body" ["administration", "client", "credential", "previousCredential", "label", "scopes", "profiles", "expiresAt"] fields
   operation <- flowTextField "administration body" fields "administration" >>= named "administration operation" administrationOperationName
-  previous <- flowField "administration body" fields "previousCredential" >>= flowOptionalText "administration previousCredential"
-  scopes <- flowField "administration body" fields "scopes" >>= array "administration scopes" >>= traverse (textValue "administration scope")
-  unless (all (`elem` ["observe", "submit", "control", "export"]) scopes && nub scopes == scopes) (Left "administration body has an invalid scope list")
-  profiles <- flowField "administration body" fields "profiles" >>= array "administration profiles" >>= traverse (textValue "administration profile")
-  command <-
-    AdministrationBody operation
-      <$> flowTextField "administration body" fields "client"
-      <*> flowTextField "administration body" fields "credential"
-      <*> pure previous
-      <*> flowTextField "administration body" fields "label"
-      <*> pure scopes
-      <*> pure profiles
-      <*> flowTextField "administration body" fields "expiresAt"
-  exact "administration body" administrationFlowBody command value
+  case operation of
+    AdministerRelease -> releaseFromFlowBody fields
+    _ -> credentialFromFlowBody operation fields
+  where
+    releaseFromFlowBody fields = do
+      flowExactKeys "administration body" ["administration", "quarantineId", "request", "cleanupEvidenceId", "cleanupEvidenceDigest"] fields
+      digest <- flowTextField "administration body" fields "cleanupEvidenceDigest"
+      unless (isFlowSha256 digest) (Left "administration cleanupEvidenceDigest is not a lowercase SHA-256")
+      command <-
+        ReleaseAdministration
+          <$> flowTextField "administration body" fields "quarantineId"
+          <*> flowTextField "administration body" fields "request"
+          <*> flowTextField "administration body" fields "cleanupEvidenceId"
+          <*> pure digest
+      exact "administration body" administrationFlowBody command value
+    credentialFromFlowBody operation fields = do
+      flowExactKeys "administration body" ["administration", "client", "credential", "previousCredential", "label", "scopes", "profiles", "expiresAt"] fields
+      previous <- flowField "administration body" fields "previousCredential" >>= flowOptionalText "administration previousCredential"
+      scopes <- flowField "administration body" fields "scopes" >>= array "administration scopes" >>= traverse (textValue "administration scope")
+      unless (all (`elem` ["observe", "submit", "control", "export"]) scopes && nub scopes == scopes) (Left "administration body has an invalid scope list")
+      profiles <- flowField "administration body" fields "profiles" >>= array "administration profiles" >>= traverse (textValue "administration profile")
+      command <-
+        AdministrationBody operation
+          <$> flowTextField "administration body" fields "client"
+          <*> flowTextField "administration body" fields "credential"
+          <*> pure previous
+          <*> flowTextField "administration body" fields "label"
+          <*> pure scopes
+          <*> pure profiles
+          <*> flowTextField "administration body" fields "expiresAt"
+      exact "administration body" administrationFlowBody command value
 
--- | The receipt of a credential operation is the frozen local administration
+-- | The receipt of an administration operation is the frozen local administration
 -- response that the operator receives: its version, its operation, and either
 -- its metadata-only result or its error.
 administrationReceiptFromFlowBody :: Value -> Either Text Value

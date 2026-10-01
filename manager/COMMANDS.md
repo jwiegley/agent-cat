@@ -55,10 +55,9 @@ fields, unknown fields, unknown operations, malformed input, and oversized input
 refuse before dispatch with `operation: null`. Errors do not reflect input or
 parser diagnostics. The implemented operations are `issue-credential`,
 `rotate-credential`, `revoke-credential`, `list-credentials`, `status`,
-`check-store`, and `check-quarantine`. The other recognized operations,
-`reload-profiles`, `drain`, `shutdown`, `backup`, `restore`, and
-`release-quarantine`, receive `state-conflict` before the CLI reads the
-configuration.
+`check-store`, `check-quarantine`, and `release-quarantine`. The other
+recognized operations, `reload-profiles`, `drain`, `shutdown`, `backup`, and
+`restore`, receive `state-conflict` before the CLI reads the configuration.
 
 `status` and `check-store` are read-only. They change no Store row and append
 nothing to the manager log. `status` returns the authority epoch and stream
@@ -91,6 +90,29 @@ with `state-conflict`. The check is read-only like `status`, and it reads or
 signals no stored process identity. The
 [manager-loss section of WORKERS.md](WORKERS.md#manager-loss-and-restart)
 states the evidence rules and the facts of each rule.
+
+`release-quarantine` takes a `quarantineId` and the `cleanupEvidenceId` and
+`cleanupEvidenceDigest` that `check-quarantine` returned for it, and releases
+the reservation for reuse. It takes the Store file slot, the configuration
+guard and the database in that lock order, each within its five-second
+allowance. Under the held file slot and configuration guard it computes the
+cleanup evidence again with the current process generation, as
+`check-quarantine` does. An unknown identity and a reservation that is not
+quarantined, a reservation that a release already released included, refuse
+with `state-conflict`. Evidence that is not `clean`, or whose identity or
+digest differs from the supplied values, refuses with `cleanup-unverified`. A
+claim that a restoration carried forward is `unverifiable`, so its release
+refuses with `cleanup-unverified`. A refusal changes no Store row and appends
+nothing to the manager log. Otherwise one transaction deletes the resource
+keys of the reservation, sets the reservation `released` with no slot,
+advances the revision of its request, sets a `reserved` request admission to
+`released` and appends the `request.changed` invalidation of the request, as
+the release of a terminal run does. The result is the frozen `quarantineId`
+with `state` `released`. The run of the reservation keeps its `lost`
+supervision, and no run store changes. After COMMIT on the live channel, the
+manager notifies its admission controller, so a request that waits for
+capacity is prepared without another client command. Offline administration
+has no running controller to notify.
 
 When `administrationRoot` is omitted from the trusted operator configuration,
 the CLI acquires the existing configuration lease and original Store. It refuses
@@ -428,16 +450,20 @@ a request ending or a review ending, and `recordReceipt` appends them after the
 receipt or after the gap entry of a failed receipt. A replay appends none.
 
 The local administration channel of a serving manager records its credential
-operations in the same log. `administerCredentials` appends the `command`
-record of `issue-credential`, `rotate-credential` and `revoke-credential` as
-the last step of the operation transaction, after its final checks and before
-COMMIT. The sender is `Principal (LocalAccount uid Nothing)`, with the
+operations and its quarantine releases in the same log, through the shared
+helper `Agentic.Manager.Administration`. `administerCredentials` appends the
+`command` record of `issue-credential`, `rotate-credential` and
+`revoke-credential`, and `releaseQuarantine` appends the `command` record of
+`release-quarantine`, as the last step of the operation transaction, after its
+final checks and before COMMIT. The sender is `Principal (LocalAccount uid Nothing)`, with the
 effective user identifier of the manager, which the channel requires of its
 peer. The channel declares no owner. The receiver is the manager. The body
 names the operation, the client, the credential that the operation issues,
 rotates to or revokes, the credential that a rotation supersedes, and the label,
 scopes, profiles and expiry of that credential. The bearer, its verifier and the
-output file never enter a record. The appends use the ceiling with which the
+output file never enter a record. The body of a release names the
+reservation, its request, and the cleanup evidence identity and digest that
+the release verified. The appends use the ceiling with which the
 lifetime opened its log, so a revocation still takes no configuration lock. The
 writer synchronizes the record. A failed append, or a decoded record that
 differs from the operation, refuses the operation with `storage-unavailable`,
@@ -445,9 +471,9 @@ and a rollback after the append adds a `failure` reply as it does for a
 command. After COMMIT, the manager appends the response that the operator
 receives as the `receipt` reply, from the manager to the local account, and
 returns the response decoded from the appended bytes when it equals the
-original. A failed receipt append leaves a gap entry. `list-credentials`, a
-refused operation and every operation of an offline administration lifetime
-append nothing.
+original. A failed receipt append leaves a gap entry. `list-credentials`, the
+read-only operations, a refused operation and every operation of an offline
+administration lifetime append nothing.
 
 ## Dispatch and observations
 

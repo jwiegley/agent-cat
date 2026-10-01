@@ -35,6 +35,18 @@ and its maximum is sixteen. The transaction reserves the slot and every resource
 key before any file wait or native construction, and failed insertion rolls back
 all claims. Queue position and blocking reasons remain visible through Drafts.
 
+After a manager loss, a restart quarantines each reservation that the lost
+lifetime held, with its slot and resource keys. A quarantined reservation
+counts against the execution reservation limit and blocks its resource keys,
+so with the default limit of one a new request waits with `capacity` until
+the operator releases the quarantine through the local administration
+operation `release-quarantine`. The release commits the freed slot and keys,
+and the live channel then notifies the controller through `notifyAdmission`,
+as the final release of a terminal run does. The scheduler polls again and
+prepares the oldest eligible request without another client command. The
+[worker contract](WORKERS.md#manager-loss-and-restart) states the cleanup
+evidence that a release requires.
+
 Classified resource keys declare the complete exclusive footprint. Equal operator
 keys conflict, while disjoint keys do not. An empty key list denotes one shared
 unclassified cohort, distinct from every operator string. Unclassified work is

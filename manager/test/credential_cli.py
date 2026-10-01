@@ -67,6 +67,11 @@ assert checked["ok"] and checked["result"] == {"integrity": "valid", "quarantine
 unknown = call({"version": 1, "operation": "check-quarantine", "quarantineId": "reservation_unknown"})
 assert not unknown["ok"] and unknown["operation"] == "check-quarantine", unknown
 assert unknown["error"]["code"] == "state-conflict", unknown
+# Offline release-quarantine refuses the same identity before any change.
+release_unknown = call({"version": 1, "operation": "release-quarantine", "quarantineId": "reservation_unknown",
+                        "cleanupEvidenceId": "cleanup_unknown", "cleanupEvidenceDigest": "0" * 64})
+assert not release_unknown["ok"] and release_unknown["operation"] == "release-quarantine", release_unknown
+assert release_unknown["error"]["code"] == "state-conflict", release_unknown
 
 holding = subprocess.Popen([str(owner), "hold-credentials", str(original)],
                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
@@ -96,7 +101,7 @@ assert rotated["ok"] and rotated["result"]["credential"]["clientId"] == issued["
 revoked = call({"version": 1, "operation": "revoke-credential",
                 "credentialId": rotated["result"]["credential"]["credentialId"]})
 assert revoked["ok"]
-print("PASS frozen stdin CLI, offline status, check-store and check-quarantine, exclusive offline ownership, private issuance and revocation")
+print("PASS frozen stdin CLI, offline status, check-store, check-quarantine and release-quarantine, exclusive offline ownership, private issuance and revocation")
 
 # A separate, short private namespace avoids Unix socket path limits on the data root.
 admin_root = Path(tempfile.mkdtemp(prefix="admin.", dir=os.environ["TMPDIR"]))
@@ -148,6 +153,9 @@ try:
     assert live_checked["ok"] and live_checked["result"] == {"integrity": "valid", "quarantineIds": []}, live_checked
     live_unknown = call({"version": 1, "operation": "check-quarantine", "quarantineId": "reservation_unknown"})
     assert not live_unknown["ok"] and live_unknown["error"]["code"] == "state-conflict", live_unknown
+    live_release = call({"version": 1, "operation": "release-quarantine", "quarantineId": "reservation_unknown",
+                         "cleanupEvidenceId": "cleanup_unknown", "cleanupEvidenceDigest": "0" * 64})
+    assert not live_release["ok"] and live_release["error"]["code"] == "state-conflict", live_release
     for payload, code, eof in [
         (b'{', "malformed-request", True),
         (b'{', "malformed-request", False),

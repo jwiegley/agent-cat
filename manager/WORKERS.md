@@ -192,8 +192,10 @@ and sends nothing.
 `GET /v1/runs/{id}` shows `lost` supervision, the `lost-supervision` limitation
 and the last validated runtime status, and the run control resource offers no
 cancel. The quarantined reservation keeps its execution slot and its resource
-keys until cleanup evidence permits their reuse. A request of a profile whose
-resource keys meet those keys waits in the queue with `profile-busy`. A profile
+keys until the operator releases it with cleanup evidence. While every
+execution slot is held, a new request waits in the queue with `capacity`. A
+request of a profile whose resource keys meet those keys waits with
+`profile-busy`. A profile
 without resource keys has the unclassified resource, which every other such
 profile shares. Requests with other resource keys are admitted while an
 execution slot remains.
@@ -234,15 +236,35 @@ identity and a reservation that is not quarantined refuse with
 
 The check is read-only. It changes no Store row, appends nothing to the
 manager log, reads or signals no stored process identity and adopts no worker.
-The operation `release-quarantine` refuses with `state-conflict`, so at present
-no operation releases a quarantined reservation.
+
+The local administration operation `release-quarantine` releases one
+quarantined reservation with the evidence identity and digest of a `clean`
+check. It computes the evidence again under the held Store file slot and
+configuration guard, and refuses with `cleanup-unverified` when the evidence
+is not `clean` or differs from the supplied values. Because the process
+generation is a fact, evidence from an earlier lifetime never matches. An
+unknown identity and a reservation that is not quarantined refuse with
+`state-conflict`. A release frees the execution slot and the resource keys of
+the reservation in one transaction and records the release and its receipt in
+the manager log. The run of the reservation stays `lost`, and no run store
+changes. On the live channel the release then notifies the admission
+controller, so a request that waits with `capacity` is prepared without
+another client command, as after the release of a terminal run. The
+[command contract](COMMANDS.md#local-credential-administration) states the
+transaction.
 
 The pruning round at open keeps each sealed segment that names the lost run,
-because the run is not observed terminal. The flow verb reports the earlier
+because the run is not observed terminal. The flow verb reports each earlier
 lifetime under `lifetimeWithoutShutdown`, verifies the consent of the start
-relay of the lost run and exits with status 2. The `failures-manager` mode of
-`manager/test/service_http.py` checks these facts across two lifetimes of the
-running protected manager.
+relay of the lost run, decodes each release command and its receipt, and
+exits with status 2. The `failures-manager` mode of
+`manager/test/service_http.py` checks these facts across three lifetimes of
+the running protected manager with one profile and one execution reservation.
+The first SIGKILL loses a run in flight, and the second loses a request in
+review. After each restart a new request waits with `capacity`, a release
+with a wrong digest refuses with `cleanup-unverified`, and the release with
+the evidence of `check-quarantine` lets the request reach review without
+another client command. Its approved run then completes.
 
 ## Verification and remaining owners
 
