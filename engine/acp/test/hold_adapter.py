@@ -4,17 +4,29 @@
 The first argument is the hold in seconds. A prompt that is still open when the
 hold ends is answered "yes". A session/cancel notification ends the open prompt
 at once with stopReason "cancelled", as a real adapter ends a cancelled turn.
+
+When the environment variable HOLD_ADAPTER_LOG names a file, the fixture appends
+one JSON line to it for each method that it receives and for each stopReason
+that it sends, in order.
 """
 
 import json
+import os
 import selectors
 import sys
 import time
 
 hold = float(sys.argv[1]) if len(sys.argv) > 1 else 3600.0
 session_id = "00000000-0000-0000-0000-000000000126"
+log_path = os.environ.get("HOLD_ADAPTER_LOG")
 pending = None
 deadline = None
+
+
+def log(entry):
+    if log_path:
+        with open(log_path, "a", encoding="utf-8") as handle:
+            handle.write(json.dumps(entry, separators=(",", ":")) + "\n")
 
 
 def send(value):
@@ -22,6 +34,8 @@ def send(value):
 
 
 def result(request_id, value):
+    if "stopReason" in value:
+        log({"stopReason": value["stopReason"], "id": request_id})
     send({"jsonrpc": "2.0", "id": request_id, "result": value})
 
 
@@ -37,6 +51,8 @@ def handle(message):
     global pending, deadline
     method = message.get("method")
     request_id = message.get("id")
+    if method is not None:
+        log({"method": method, "id": request_id})
     if method == "initialize":
         result(request_id, {"protocolVersion": 1, "agentCapabilities": {"loadSession": False}})
     elif method == "session/new":

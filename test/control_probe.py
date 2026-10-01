@@ -310,15 +310,22 @@ def routed_control_probe(choice):
 
 def live_redirect_probe(case):
     """Redirect an in-flight attempt: accepted for a question that is not an
-    effect and a target in its chain, refused otherwise."""
+    effect and a target in its chain, refused otherwise. An accepted redirect
+    cancels the held turn at its adapter, and a refused one sends no cancel."""
     root = tempfile.mkdtemp(prefix=f"agentic-{case}-")
     control_read, control_write = os.pipe()
     hold = os.path.join(ADAPTER_DIR, "hold_adapter.py")
-    stub = os.path.join(ADAPTER_DIR, "stub_adapter.py")
+    held_log = os.path.join(root, "held.ndjson")
+    spare_log = os.path.join(root, "spare.ndjson")
+    # The spare candidate holds its own turn for three seconds before it
+    # answers, so the run is still open while the probe reads the log of the
+    # first candidate. A cancel that only the end of the run sends cannot
+    # reach that log in time.
     spare = os.path.join(root, "spare-adapter")
     with open(spare, "w", encoding="utf-8") as wrapper:
         wrapper.write(f"#!{sys.executable}\nimport os\n"
-                      f"os.execv({sys.executable!r}, [{sys.executable!r}, {stub!r}])\n")
+                      f"os.environ['HOLD_ADAPTER_LOG'] = {spare_log!r}\n"
+                      f"os.execv({sys.executable!r}, [{sys.executable!r}, {hold!r}, '3'])\n")
     os.chmod(spare, 0o700)
     workflow = "controlled-effect" if case == "live-redirect-effect" else "controlled"
     # The redirected attempt holds its turn until it is stopped. A refused
@@ -331,6 +338,7 @@ def live_redirect_probe(case):
         env.update({
             "AGENT_CAT_CONTROL_FD": str(control_read),
             "AGENT_CAT_RUN_STORE": os.path.join(root, "run"),
+            "HOLD_ADAPTER_LOG": held_log,
         })
         process = subprocess.Popen(
             [
@@ -351,6 +359,7 @@ def live_redirect_probe(case):
         events = []
         targets = None
         sent = False
+        held_while_spare = None
         deadline = time.monotonic() + 60
 
         def send(control):
@@ -380,6 +389,10 @@ def live_redirect_probe(case):
                     "expectedAttemptId": None,
                     "command": {"type": "redirectOccurrence", "target": targets[0]},
                 })
+            elif event["type"] == "attempt.started" and sent and held_while_spare is None:
+                # The spare candidate holds for three seconds. Within two, the
+                # first candidate must have ended its prompt as cancelled.
+                held_while_spare = wait_for_hold_log(held_log, 2.0)
             elif event["type"] == "attempt.started" and not sent:
                 assert targets is not None and len(targets) == 2, events
                 time.sleep(0.2)
@@ -423,6 +436,15 @@ def live_redirect_probe(case):
                             and record["event"]["line"]["event"]["controlId"] == "live-redirect"]
             assert len(acknowledged) == 2, flow_records
             assert questions[0][0] < flow_records.index(failures[0]) < questions[1][0], flow_records
+            # The adapter of the stopped attempt received session/cancel for
+            # the held prompt while the run still ran, and the prompt ended
+            # with stopReason cancelled.
+            assert held_while_spare is not None, (case, read_hold_log(held_log))
+            prompt = next(entry["id"] for entry in held_while_spare if entry.get("method") == "session/prompt")
+            cancel = held_while_spare.index({"method": "session/cancel", "id": None})
+            ended = held_while_spare.index({"stopReason": "cancelled", "id": prompt})
+            assert held_while_spare.index({"method": "session/prompt", "id": prompt}) < cancel < ended, held_while_spare
+            assert sum(1 for entry in read_hold_log(spare_log) if entry.get("stopReason") == "end_turn") == 1, read_hold_log(spare_log)
         else:
             reason = "no live re-route of an effect" if case == "live-redirect-effect" else "not a live candidate"
             messages = [event["message"] for event in events if event["type"] == "control.ack" and event["controlId"] == "live-redirect"]
@@ -430,6 +452,12 @@ def live_redirect_probe(case):
             assert not any(event["type"] == "occurrence.redirected" and event["controlId"] == "live-redirect" for event in events), events
             assert [event["type"] for event in attempts] == ["attempt.started", "attempt.completed"], attempts
             assert completed["source"] == f"asked:{targets[0]}", events
+            # A refused redirect leaves the turn alone: the held prompt ends
+            # with end_turn, and no session/cancel arrives before it ends.
+            held = read_hold_log(held_log)
+            prompt = next(entry["id"] for entry in held if entry.get("method") == "session/prompt")
+            ended = held.index({"stopReason": "end_turn", "id": prompt})
+            assert {"method": "session/cancel", "id": None} not in held[:ended], held
     finally:
         if controls is not None:
             controls.close()
@@ -439,6 +467,25 @@ def live_redirect_probe(case):
             process.kill()
             process.wait()
         shutil.rmtree(root, ignore_errors=True)
+
+
+def read_hold_log(path):
+    """The entries that hold_adapter.py appended to its HOLD_ADAPTER_LOG."""
+    if not os.path.exists(path):
+        return []
+    with open(path, encoding="utf-8") as handle:
+        return [json.loads(line) for line in handle if line.strip()]
+
+
+def wait_for_hold_log(path, seconds):
+    """The hold log once it records a cancelled prompt, or None after seconds."""
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        entries = read_hold_log(path)
+        if any(entry.get("stopReason") == "cancelled" for entry in entries):
+            return entries
+        time.sleep(0.02)
+    return None
 
 
 def live_redirect_flow(root):

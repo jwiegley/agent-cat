@@ -32,6 +32,21 @@ answer. A stale or out-of-turn request is refused and reports nothing. In a
 store-backed machine run, the runtime writes each reported decision to the run
 log as a `permission` record from the adapter, and the gate checks that record
 for the granted request of the flagship.
+
+An asynchronous exception that stops a prompt in flight cancels its turn at
+the adapter. A live re-route of the attempt, a run cancel and the end of a
+sibling branch are such stops. Before the exception leaves the prompt, the
+engine sends `session/cancel` for the session and records the request id of
+the prompt as cancelled. The notification does not wait, and the exception
+keeps its meaning. When the connection is used again, the engine drops the
+reply to the cancelled prompt and the session updates that arrive before it,
+and it refuses each permission request in that interval as stale. A turn that
+exceeds its timeout sends no cancel, because that path kills the adapter.
+The case `live-redirect` of `test/control_probe.py` checks that the held prompt
+of `test/hold_adapter.py` receives `session/cancel` and ends with the stop
+reason `cancelled` while the run continues, and that a refused redirect sends
+no cancel.
+
 The commands and pins for Claude, Codex, and Droid belong to the three child
 directories.
 

@@ -276,8 +276,7 @@ not done:
   reservation, no new run starts after a manager crash (WM-020 and WM-042).
 - The manager offers a redirect target from the route names of the
   approved policy. After an automatic fail-over the offer can list a target
-  that the runtime then rejects, and the stopped ACP turn of a live
-  re-route is not cancelled at the adapter while the run continues.
+  that the runtime then rejects.
 - The pruner uses the wall clock and a fixed age of 604800 seconds, and it
   evaluates the age only at the open and after a seal. A run that a restart
   left with lost supervision, or a command whose receipt reply was never

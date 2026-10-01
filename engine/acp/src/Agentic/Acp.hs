@@ -206,7 +206,9 @@
 --   it and kept pumping. This client has at most one request outstanding and
 --   answers the agent's requests with the agent's own ids, so a @result@ whose
 --   id is not the one in flight is a desynchronized stream, and continuing to
---   read one is how a reply gets attributed to the wrong question.
+--   read one is how a reply gets attributed to the wrong question. The one
+--   exception is the reply to a prompt that 'cancelOnStop' cancelled, which
+--   ends that turn and is dropped.
 -- * __No @session\/load@, no @session\/fork@ and no mode call.__ v1 opens
 --   sessions of its own. Symbolic model and mode axes remain request metadata.
 --   When routing policy names a concrete model or generation setting,
@@ -295,8 +297,10 @@ import Control.Concurrent.MVar (MVar, modifyMVar, modifyMVar_, newEmptyMVar, new
 import Control.Exception
   ( Exception (displayException),
     IOException,
+    SomeAsyncException,
     SomeException,
     bracket,
+    catch,
     finally,
     onException,
     throwIO,
@@ -976,7 +980,13 @@ data Acp = Acp
     -- | Dynamic sink for optional public progress on the active prompt.
     acpUpdateSink :: !(IORef EngineUpdateSink),
     -- | Plan-ordered turns on this one JSON-RPC pipe.
-    acpTurnLane :: !TurnLane
+    acpTurnLane :: !TurnLane,
+    -- | The ids of prompts that an asynchronous exception stopped and that
+    -- 'cancelTurn' cancelled, whose replies have not yet arrived. Until each
+    -- reply arrives, everything that the adapter says about a session belongs
+    -- to the cancelled turn. 'pump' drops those updates and the reply, and
+    -- 'answerAgentRequest' grants no permission.
+    acpAbandoned :: !(IORef [Int])
   }
 
 -- | What the agent advertised at @initialize@, as the handshake read it.
@@ -1072,6 +1082,7 @@ connectAcp cfg = do
       <*> newIORef Nothing
       <*> newIORef (const (pure ()))
       <*> newTurnLaneIO
+      <*> newIORef []
   flip onException (closeAcp acp) $ do
     handshake acp
     void (newSession acp)
@@ -1238,22 +1249,38 @@ pump acp wantId what onChunk answering = go
           Left why -> throwIO (AcpNotJson prog why line)
           Right (MsgResponse i payload)
             | intOf i == Just wantId -> pure payload
-            | otherwise -> throwIO (AcpIdMismatch prog (tshow wantId) (compact i))
+            | otherwise ->
+                maybe (pure False) (settleAbandoned acp) (intOf i) >>= \case
+                  True -> go
+                  False -> throwIO (AcpIdMismatch prog (tshow wantId) (compact i))
           Right (MsgRequest i method ps) -> answerAgentRequest acp i method ps >> go
           Right (MsgNotification method ps)
             | method == "session/steer_ack" -> recordSteerAck acp ps >> go
             | method /= "session/update" -> go
             | not answering -> go
-            | otherwise ->
-                readIORef (acpSession acp) >>= \case
-                  Nothing -> throwIO (AcpProtocol prog "a session/update arrived while no session was current")
-                  Just sid -> case chunkTextForSession sid ps of
-                    Left why -> throwIO (AcpProtocol prog (why <> "; line: " <> clipText line))
-                    Right Nothing -> case progressUpdateForSession sid ps of
-                      Left why -> throwIO (AcpProtocol prog (why <> "; line: " <> clipText line))
-                      Right Nothing -> go
-                      Right (Just update) -> readIORef (acpUpdateSink acp) >>= (\sink -> sink update) >> go
-                    Right (Just txt) -> onChunk txt >> go
+            | otherwise -> do
+                stale <- not . null <$> readIORef (acpAbandoned acp)
+                if stale then go else currentUpdate ps line
+
+    -- An update of the prompt in flight, once no cancelled turn is pending.
+    currentUpdate :: Value -> Text -> IO (Either Value Value)
+    currentUpdate ps line =
+      readIORef (acpSession acp) >>= \case
+        Nothing -> throwIO (AcpProtocol prog "a session/update arrived while no session was current")
+        Just sid -> case chunkTextForSession sid ps of
+          Left why -> throwIO (AcpProtocol prog (why <> "; line: " <> clipText line))
+          Right Nothing -> case progressUpdateForSession sid ps of
+            Left why -> throwIO (AcpProtocol prog (why <> "; line: " <> clipText line))
+            Right Nothing -> go
+            Right (Just update) -> readIORef (acpUpdateSink acp) >>= (\sink -> sink update) >> go
+          Right (Just txt) -> onChunk txt >> go
+
+-- | Whether @i@ is the id of a cancelled prompt whose reply was pending. The
+-- reply ends that turn, so the id leaves the pending list.
+settleAbandoned :: Acp -> Int -> IO Bool
+settleAbandoned acp i =
+  atomicModifyIORef' (acpAbandoned acp) $ \pending ->
+    if i `elem` pending then (filter (/= i) pending, True) else (pending, False)
 
 recordSteerAck :: Acp -> Value -> IO ()
 recordSteerAck acp params = case (field "steerId" params >>= textOf, field "accepted" params) of
@@ -1266,7 +1293,8 @@ recordSteerAck acp params = case (field "steerId" params >>= textOf, field "acce
 --
 -- @session\/request_permission@ is granted only when it matches an active
 -- prompt's @sessionId@ and intent policy; stale or out-of-turn requests are
--- cancelled, and every decision is announced. A decision on a request that
+-- cancelled, and every decision is announced. A request that arrives before the
+-- reply to a cancelled prompt belongs to that turn and is stale. A decision on a request that
 -- matches the active prompt is also reported to that prompt's update sink as
 -- 'EnginePermission', after the agent has its answer. A stale or out-of-turn
 -- request has no turn to report through and reports nothing. Everything else — every @fs\/*@ and @terminal\/*@
@@ -1276,10 +1304,11 @@ answerAgentRequest :: Acp -> Value -> Text -> Value -> IO ()
 answerAgentRequest acp i method params
   | method == "session/request_permission" = do
       active <- readIORef (acpAsked acp)
+      cancelledPending <- not . null <$> readIORef (acpAbandoned acp)
       let requestSession = field "sessionId" params >>= textOf
           activePrompt = case (active, requestSession) of
             (Just (expected, question, policy), Just actual)
-              | expected == actual -> Just (question, policy)
+              | expected == actual && not cancelledPending -> Just (question, policy)
             _ -> Nothing
           choice = activePrompt >>= \(_, policy) -> permissionChoice policy params
           decision =
@@ -1318,19 +1347,28 @@ answerAgentRequest acp i method params
 -- The whole request is bounded by 'acpTurnTimeoutMs'; on expiry the child is
 -- killed, because a read abandoned mid-line has desynchronized the stream and
 -- ending the conversation is the only honest thing left to do.
-tryRequest :: Acp -> Text -> Text -> Value -> (Text -> IO ()) -> Bool -> IO (Either Value Value)
-tryRequest acp what method params onChunk answering = do
-  i <- atomicModifyIORef' (acpNextId acp) (\n -> (n + 1, n))
+tryRequest :: Acp -> Int -> Text -> Text -> Value -> (Text -> IO ()) -> Bool -> IO (Either Value Value)
+tryRequest acp i what method params onChunk answering =
   withTurnBudget acp what $ do
     writeJson acp (rpcRequest i method params)
     pump acp i what onChunk answering
 
--- | 'tryRequest', raising the agent's error if it sent one.
+-- | 'tryRequest' under a fresh id, raising the agent's error if it sent one.
 request :: Acp -> Text -> Text -> Value -> (Text -> IO ()) -> Bool -> IO Value
-request acp what method params onChunk answering =
-  tryRequest acp what method params onChunk answering >>= \case
+request acp what method params onChunk answering = do
+  i <- nextRequestId acp
+  requestWithId acp i what method params onChunk answering
+
+-- | 'request' under an id that the caller took from 'nextRequestId'.
+requestWithId :: Acp -> Int -> Text -> Text -> Value -> (Text -> IO ()) -> Bool -> IO Value
+requestWithId acp i what method params onChunk answering =
+  tryRequest acp i what method params onChunk answering >>= \case
     Right result -> pure result
     Left e -> throwIO (AcpRefused (T.pack (acpProgram acp)) method (compact e))
+
+-- | The next id of the connection's private monotone supply.
+nextRequestId :: Acp -> IO Int
+nextRequestId acp = atomicModifyIORef' (acpNextId acp) (\n -> (n + 1, n))
 
 -- | Bound one request by the turn budget, killing the child on expiry.
 withTurnBudget :: Acp -> Text -> IO a -> IO a
@@ -1547,18 +1585,21 @@ promptTurnWith onChunk acp what text = do
       Nothing ->
         throwIO (AcpProtocol (T.pack (acpProgram acp)) "no session; nothing was opened to prompt")
   acc <- newIORef []
+  i <- nextRequestId acp
   res <-
-    request
-      acp
-      what
-      "session/prompt"
-      ( object
-          [ "sessionId" .= sid,
-            "prompt" .= [object ["type" .= ("text" :: Text), "text" .= text]]
-          ]
-      )
-      (\chunk -> onChunk chunk >> atomicModifyIORef' acc (\cs -> (chunk : cs, ())))
-      True
+    cancelOnStop acp i $
+      requestWithId
+        acp
+        i
+        what
+        "session/prompt"
+        ( object
+            [ "sessionId" .= sid,
+              "prompt" .= [object ["type" .= ("text" :: Text), "text" .= text]]
+            ]
+        )
+        (\chunk -> onChunk chunk >> atomicModifyIORef' acc (\cs -> (chunk : cs, ())))
+        True
   said <- T.concat . reverse <$> readIORef acc
   let (narration, answer) = splitTransportNarration said
   case field "stopReason" res >>= textOf of
@@ -1566,6 +1607,26 @@ promptTurnWith onChunk acp what text = do
     Nothing ->
       throwIO . AcpProtocol (T.pack (acpProgram acp)) $
         "session/prompt returned no stopReason: " <> clipText (compact res)
+
+-- | Run the @session\/prompt@ request @i@, and cancel its turn at the adapter
+-- when an asynchronous exception stops it.
+--
+-- The stops are a live re-route ('Agentic.Exec.withPhysicalAttempt' throws its
+-- redirect to the owner of the attempt), a run cancel, and the end of a sibling
+-- branch. Each one leaves the adapter with a turn that nobody reads. The
+-- handler records @i@ as cancelled, sends @session\/cancel@ through
+-- 'cancelTurn' and re-raises the same exception, so the stop keeps its
+-- meaning. The notification does not wait for the reply. 'pump' drops that
+-- reply and the updates before it when the connection is used again. A failed
+-- write of the notification is the adapter already gone, and the handler
+-- ignores it in favour of the stop. A synchronous failure, such as the
+-- 'AcpTimedOut' of the turn budget, sends nothing: that path kills the child.
+cancelOnStop :: Acp -> Int -> IO a -> IO a
+cancelOnStop acp i act =
+  act `catch` \(stop :: SomeAsyncException) -> do
+    atomicModifyIORef' (acpAbandoned acp) (\pending -> (i : pending, ()))
+    void (try (cancelTurn acp) :: IO (Either AcpError ()))
+    throwIO stop
 
 -- | Cancel the turn in flight, if there is a session at all. A notification,
 -- so it does not wait.

@@ -10194,6 +10194,27 @@ after the build. Record correction only, no code change.
 The long unwrapped line in manager/README.md that the fess also named was reflowed in the PC6
 commit.
 
+* TODO [#D] PC7 ACP cancel-on-stop fess findings    :review:
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pc7-acp-cancel-fess-3lb2
+:LABELS:   ["review","workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-30 Wed 22:09]
+:MODIFIED: [2026-09-30 Wed 22:09]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of the fess audit of Phase C subtask PC7 (session/cancel for the stopped ACP turn of a live re-route). Report: resume-20260923 fess/pc-PC7-r1.md.
+
+1. (medium) engine/acp/src/Agentic/Acp.hs acpAbandoned, settleAbandoned, pump, answerAgentRequest. No check runs the stale-turn path. If a cancelled prompt id is never settled, every later prompt on that connection drops all its session/update chunks and returns its own reply with an empty answer as if it succeeded. Two causes: an adapter that never answers the cancelled prompt, or an asynchronous exception that lands after pump has already read the reply for that id but before control leaves the catch frame of cancelOnStop. Fix: in the pump branch where the reply id equals wantId, raise AcpProtocol when acpAbandoned is still non-empty. Add an acp.sh or control-probe scenario that sends a second prompt on the same connection after a cancelled turn.
+2. (low) A run cancel now writes session/cancel twice, once from cancelOnStop and once from closeAcp. Adapters ignore the second. No document states it. Fix: state it in engine/acp/README.md, or skip the cancelTurn in closeAcp when the connection already has a cancelled prompt pending.
+3. (low) doc/workflow-manager-handoff.md, the dated end-of-part review table still lists the adapter-cancel finding as open. PC7 closed item 4 of acat-phase-b2-review-findings-x8fv (recorded there). The closeout can correct the current-state text.
+4. (low) engine/acp/README.md and runtime/BROKER.md say that a run cancel and the end of a sibling branch also send the cancel through cancelOnStop. Only the live re-route stop is proven. Fix: assert in a cancel scenario that session/cancel arrives before the connection closes, or record this as a verification gap.
+
 * TODO [#C] Phase B part 1 review follow-ups: download quota, id row bound, legacy history, precision gaps
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -10291,7 +10312,7 @@ Deferred security stage for Phase B part 2 (operator direction of 2026-09-30: fu
 :LABELS:   ["review","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-30 Wed 19:20]
-:MODIFIED: [2026-09-30 Wed 21:55]
+:MODIFIED: [2026-09-30 Wed 22:09]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -10355,6 +10376,13 @@ The closeout corrected the documentation that findings 1 to 3 name (manager/STOR
     "author": "johnw",
     "text": "Item 3 resolved by Phase C subtasks PC5 and PC6: legacy history is windowed (retention bound 65536 entry names per bound root, per-window bound 256 entries and 1 MiB). PC6 adds the pages fixture with 300 legacy entries (one real run and 299 copies): following every window and page of /v1/runs lists each legacy entry and the managed run once in identifier order, and GET /v1/runs/{id} reads a copied entry. doc/api/README.md and manager/README.md state both bounds. The handoff current-state text is still stale (filed as acat-pc6-legacy-pages-fess-38yy). Other items stay open. Evidence: resume-20260923 PC/PC6/impl-r1 logs (build of agentic-run and routing-fixed-point-probe with -ftui-tests; pages mode at N8; make -C doc check; all exit 0). Fess: non-blocking, findings filed as acat-pc6-legacy-pages-fess-38yy.",
     "created_at": "2026-10-01T04:55:40Z"
+  },
+  {
+    "id": 468,
+    "issue_id": "acat-phase-b2-review-findings-x8fv",
+    "author": "johnw",
+    "text": "Item 4 resolved by Phase C subtask PC7: when an asynchronous exception (a live re-route AttemptRerouted, a run cancel, or a killed sibling branch) stops an ACP prompt in flight, the engine sends session/cancel through cancelTurn before the exception propagates. The live-redirect probe asserts that the held prompt receives session/cancel and ends with stopReason cancelled while the spare answers, and the refused redirect cases assert no cancel before end_turn. Other items stay open. Evidence: resume-20260923 PC/PC7/impl-r1 logs (fail-first against the old binary exit 1; build of agentic-run and routing-fixed-point-probe; test/control_probe.py; service_http.py live-redirect at N8; JOURNEY-ONCE at N8; engine/acp/ci/acp.sh; make -C doc check; all exit 0). Fess: non-blocking, findings filed as acat-pc7-acp-cancel-fess-3lb2.",
+    "created_at": "2026-10-01T05:09:31Z"
   }
 ]
 #+end_src

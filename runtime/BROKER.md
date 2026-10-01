@@ -553,9 +553,11 @@ nothing, so its ask stays without a reply.
   message "no live re-route of an effect", and it rejects every other target.
   Each rejection is `rejected-stale`, and the run continues. An accepted
   redirect stops the attempt through its owner, as a run cancel stops it, so
-  the engine operations inside the attempt append nothing. The event
-  `occurrence.redirected` names the target, and the stopped attempt then ends
-  with `attempt.failed`. `brokerRequest` then fails synchronously with a message
+  the engine operations inside the attempt append nothing. The ACP engine
+  sends `session/cancel` for the stopped turn before the stop leaves the
+  prompt, and the adapter ends that turn with the stop reason `cancelled`.
+  The event `occurrence.redirected` names the target, and the stopped attempt
+  then ends with `attempt.failed`. `brokerRequest` then fails synchronously with a message
   that names the control, so the question has a `failure` reply. The runtime
   memoizes nothing from the stopped attempt and ignores its late result. The
   stopped candidate counts against the chain, and the runtime asks the chosen
@@ -563,7 +565,8 @@ nothing, so its ask stays without a reply.
   the `control`, its acknowledgement events, the `failure` of the first
   question and the new `question` to the chosen target. A run without a live
   redirect writes the same `events.ndjson` as before. The case `live-redirect`
-  of `test/control_probe.py` checks the redirect and its two refusals.
+  of `test/control_probe.py` checks the redirect, the cancel of the stopped
+  turn at its adapter and the two refusals, which send no cancel.
 
 `runPlanScoped` takes the broker of the run and a function from a `FlowScope`
 to the broker of one occurrence, and `runPlanBrokered` is `runPlanScoped` with

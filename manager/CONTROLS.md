@@ -126,7 +126,9 @@ After the window, the Runtime also accepts a redirect of the attempt in flight
 when the question is not an effect and the target is a live candidate that
 remains after the current candidate in its approved chain. It stops the attempt
 as a run cancel stops it, and the stopped attempt ends with `attempt.failed`
-after `occurrence.redirected`. The run log holds a `failure` reply for the
+after `occurrence.redirected`. The ACP engine of the stopped attempt sends
+`session/cancel` for its turn, so the adapter ends the turn with the stop reason
+`cancelled`. A rejected redirect sends no cancel. The run log holds a `failure` reply for the
 question that names the control, and a new `question` with a new attempt to the
 chosen target. The stopped candidate counts against the chain. The Runtime
 rejects a redirect of an effect in flight and a redirect to any other target,
