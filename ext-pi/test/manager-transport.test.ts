@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { createServer, type Server } from "node:https";
@@ -10,6 +10,7 @@ import type { TLSSocket } from "node:tls";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { encodeJson, JsonNumber, jsonMember, isJsonObject, parseJson } from "../src/manager/json.ts";
 import { ClientProfile } from "../src/manager/profile.ts";
+import { ManagerSession } from "../src/manager/session.ts";
 import { commandKey, ManagerTransport, RESPONSE_BYTES, type Delivery, type StreamItem } from "../src/manager/transport.ts";
 
 /** One request that the local manager received. */
@@ -356,5 +357,175 @@ describe("event delivery", () => {
     expect(await client.get("/v1/requests/after")).toEqual({ ok: false, failure: { kind: "ClientClosed" } });
     expect(seen.map((entry) => entry.url)).toEqual(["/v1/events", "/v1/requests/slow"]);
     expect(items).toEqual([{ kind: "heartbeat" }]);
+  });
+});
+
+/** Capabilities that the session accepts, with the given authority epoch. */
+function capabilities(epoch: string): string {
+  const fixed = {
+    requestTargetBytes: 8192, headerBytes: 16384, headerFields: 100, jsonBodyBytes: 2097152, jsonDepth: 64,
+    nativeControlBytes: 1048576, captureBytes: 67108864, aggregateInputBytes: 67108864, artifactBytes: 67108864,
+    sseBlockBytes: 16384, pageBytes: 1048576, pageSetBytes: 67108864, pageSetsPerClient: 2, pageSetLifetimeSeconds: 60,
+    queuedRequests: 100, maxReservations: 16, reviewLifetimeSeconds: 600, sseReadersPerClient: 2,
+    ssePendingBytesPerReader: 1048576, replaySeconds: 604800, replayBytes: 268435456, heartbeatSeconds: 15,
+    reconnectIdleSeconds: 45, reconnectBackoffMaxSeconds: 30, ordinaryMutationsPerMinute: 30,
+  };
+  const configured = {
+    drafts: 100, globalDrafts: 100, globalCaptureBytes: 67108864, globalPageSets: 2, globalConnections: 8,
+    globalDatabaseReaders: 2, globalMutationLedgerBytes: 16777216, safetyControlsPerMinute: 100, executionReservations: 1,
+  };
+  return JSON.stringify({
+    version: 1, authorityEpoch: epoch, streamId: "s", scopes: ["observe", "submit"], profileIds: ["profile_1"],
+    transports: ["sse", "polling"], limits: { ...fixed, ...configured },
+    versions: {
+      api: [1], snapshot: [1], event: [1], descriptor: [2, 3], frontendSession: [1, 2], control: [1, 2], runtimeProtocol: [1, 2, 3],
+      runtimeStore: [1, 2], managerStore: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], invocation: [1], frontendManifest: ["legacy", "2", "3"],
+    },
+  });
+}
+
+/** An empty overview page set of one page at the cursor. */
+function emptyOverview(cursor: string): string {
+  return JSON.stringify({
+    version: 1, snapshotVersion: 1, cursor, oldestCursor: "s.0", items: [],
+    page: { setId: "set_1", revision: "rev_1", expiresAt: new Date(Date.now() + 60000).toISOString(), index: 0, totalItems: 0, next: null },
+  });
+}
+
+/** The number of an event cursor `s.N`. */
+function cursorNumber(cursor: string | string[] | undefined): number {
+  return Number(String(cursor).split(".")[1]);
+}
+
+async function session(options: Parameters<typeof ManagerSession.connect>[1] = {}): Promise<ManagerSession> {
+  const profile = await ClientProfile.load(profileFile(fields()));
+  if (!profile.ok) throw new Error(`profile refused: ${profile.failure.kind}`);
+  const connected = await ManagerSession.connect(profile.value, { random: () => 0, pollIntervalMs: 50, ...options });
+  if (!connected.ok) throw new Error(`session refused: ${connected.failure.kind}`);
+  return connected.value;
+}
+
+describe("manager session", () => {
+  it("refuses unsupported capabilities when it connects", async () => {
+    handler = (_request, response) => json(response, 200, capabilities("epoch-1").replace('"managerStore":[1,', '"managerStore":[13,1,'));
+    const profile = await ClientProfile.load(profileFile(fields()));
+    if (!profile.ok) throw new Error("profile refused");
+    expect(await ManagerSession.connect(profile.value)).toEqual({ ok: false, failure: { kind: "UnsupportedVersion" } });
+  });
+
+  it("binds each reference to its endpoint identity and never retargets it after a switch", async () => {
+    let epoch = 0;
+    handler = (request, response) => {
+      if (request.url === "/v1/capabilities") json(response, 200, capabilities(`epoch-${(epoch += 1)}`));
+      else if (request.url === "/v1/snapshot") json(response, 200, emptyOverview("s.0"));
+      else json(response, 200, '{"version":1}', { ETag: '"rev-1"' });
+    };
+    const client = await session();
+    const reference = client.reference("/v1/requests/r1");
+    if (!reference.ok) throw new Error("reference refused");
+    expect((await client.get(reference.value)).ok).toBe(true);
+    const before = { identity: client.identity, generation: client.generation, epoch: client.epoch };
+    const profile = await ClientProfile.load(profileFile(fields()));
+    if (!profile.ok) throw new Error("profile refused");
+    const switched = await client.switchEndpoint(profile.value);
+    expect(switched.ok && switched.value.cursor).toBe("s.0");
+    expect(client.identity).not.toBe(before.identity);
+    expect(client.generation).toBe(before.generation + 1);
+    expect([before.epoch, client.epoch]).toEqual(["epoch-1", "epoch-2"]);
+    expect(await client.get(reference.value)).toEqual({ ok: false, failure: { kind: "WrongEndpoint" } });
+    expect(client.prepare(reference.value, { operation: "enqueue" }, null)).toEqual({ ok: false, failure: { kind: "WrongEndpoint" } });
+    expect(seen.filter((entry) => entry.url === "/v1/requests/r1")).toHaveLength(1);
+    await client.close();
+  });
+
+  it("keeps an uncertain command and reconciles it without a resend", async () => {
+    let tag = '"rev-1"';
+    handler = (request, response) => {
+      if (request.url === "/v1/capabilities") json(response, 200, capabilities("epoch-1"));
+      else if (request.method === "POST") response.socket?.destroy();
+      else json(response, 200, '{"version":1}', { ETag: tag });
+    };
+    const client = await session();
+    const target = client.reference("/v1/requests/r1");
+    if (!target.ok) throw new Error("reference refused");
+    const pending = client.prepare(target.value, { operation: "enqueue" }, '"rev-1"');
+    if (!pending.ok) throw new Error("prepare refused");
+    const sent = await client.send(pending.value);
+    expect(sent.kind).toBe("uncertain");
+    if (sent.kind !== "uncertain") return;
+    expect(sent.uncertain).toEqual({ command: pending.value, target: target.value, precondition: '"rev-1"', receipt: null });
+    const unchanged = await client.reconcileCommand(sent.uncertain, () => true);
+    expect(unchanged).toEqual({ kind: "uncertain", uncertain: sent.uncertain });
+    tag = '"rev-2"';
+    expect(await client.reconcileCommand(sent.uncertain, () => false)).toEqual({ kind: "uncertain", uncertain: sent.uncertain });
+    expect(await client.reconcileCommand(sent.uncertain, () => true)).toEqual({ kind: "effect-observed" });
+    expect(seen.filter((entry) => entry.method === "POST")).toHaveLength(1);
+    await client.close();
+  });
+
+  it("verifies a download against the size and SHA-256 that the manager states", async () => {
+    const bytes = Buffer.from("Café λ result\n", "utf8");
+    const digest = createHash("sha256").update(bytes).digest("hex");
+    handler = (request, response) => {
+      if (request.url === "/v1/capabilities") json(response, 200, capabilities("epoch-1"));
+      else response.writeHead(200, {
+        "Content-Type": "application/octet-stream", "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff",
+        "Content-Disposition": "attachment",
+      }).end(bytes);
+    };
+    const client = await session();
+    const artifact = client.reference("/v1/artifacts/a1/content");
+    if (!artifact.ok) throw new Error("reference refused");
+    const size = BigInt(bytes.length);
+    const verified = await client.download(artifact.value, size, digest);
+    expect(verified.ok && verified.value.equals(bytes)).toBe(true);
+    const otherDigest = createHash("sha256").update("other").digest("hex");
+    expect(await client.download(artifact.value, size, otherDigest)).toEqual({ ok: false, failure: { kind: "InvalidResponse" } });
+    expect(await client.download(artifact.value, size + 1n, digest)).toEqual({ ok: false, failure: { kind: "InvalidResponse" } });
+    await client.close();
+  });
+
+  it("resumes after a forced drop from the last delivered event and polls while poll delivery is preferred", async () => {
+    let reads = 0;
+    handler = (request, response) => {
+      const next = cursorNumber(request.headers["last-event-id"]) + 1;
+      const event = { id: `s.${next}`, event: "request.changed", data: { version: 1, resource: "/v1/requests/r1", revision: `v${next}` } };
+      if (request.url === "/v1/capabilities") json(response, 200, capabilities("epoch-1"));
+      else if (request.url === "/v1/snapshot") json(response, 200, emptyOverview("s.0"));
+      else if (request.url === "/v1/requests/r1") json(response, 200, '{"version":1}', { ETag: `"rev-${(reads += 1)}"` });
+      else if (request.headers.accept === "text/event-stream") {
+        eventStream(response);
+        response.write(invalidation(event.id, event.data.resource, event.data.revision));
+      } else {
+        json(response, 200, JSON.stringify({ version: 1, cursor: event.id, oldestCursor: "s.0", events: [event], hasMore: false }));
+      }
+    };
+    const delivered: [string, Delivery][] = [];
+    const connections: [Delivery, string][] = [];
+    const client = await session({ onEvent: (event, via) => delivered.push([event.id, via]), onConnect: (via, cursor) => connections.push([via, cursor]) });
+    const started = await client.start();
+    expect(started.ok && started.value.cursor).toBe("s.0");
+    await waitFor(() => delivered.length === 1);
+    client.forceReconnect();
+    await waitFor(() => delivered.length === 2);
+    expect(delivered).toEqual([["s.1", "stream"], ["s.2", "stream"]]);
+    expect(connections).toEqual([["stream", "s.0"], ["stream", "s.1"]]);
+    client.setDelivery("poll");
+    await waitFor(() => delivered.length >= 4);
+    expect(delivered.slice(2, 4)).toEqual([["s.3", "poll"], ["s.4", "poll"]]);
+    expect(connections.slice(2, 4)).toEqual([["poll", "s.2"], ["poll", "s.3"]]);
+    client.setDelivery("sse");
+    await waitFor(() => delivered.some(([, via], index) => index > 3 && via === "stream"));
+    const ids = delivered.map(([id]) => cursorNumber(id));
+    expect(ids).toEqual(ids.map((_, index) => index + 1));
+    const reference = client.reference("/v1/requests/r1");
+    if (!reference.ok) throw new Error("reference refused");
+    const watched = await client.waitFor(reference.value, () => true, 5000);
+    const first = watched.ok ? watched.value.etag : null;
+    client.forceReconnect();
+    const reread = await client.waitFor(reference.value, (observed) => observed.etag !== first, 5000);
+    expect(reread.ok).toBe(true);
+    await client.close();
+    expect(client.followEnd).toEqual({ kind: "closed" });
   });
 });

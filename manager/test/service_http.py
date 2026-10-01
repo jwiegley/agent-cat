@@ -74,7 +74,7 @@ consent_control = len(sys.argv) == 6 and sys.argv[5] == "tui-consent-control"
 # runs one manager lifetime and does not enter the restart loop.
 LIFECYCLE = "credential-lifecycle"
 lifecycle = len(sys.argv) == 6 and sys.argv[5] == LIFECYCLE
-mixed = len(sys.argv) == 6 and sys.argv[5] in ("mixed", "mixed-confirm", "tui-approval", "tui-consent-control", APPROVE_FAULT, LIFECYCLE, "pages", "routes", "failures-worker", "failures-manager", "failures-launched", "storage") + JOURNEYS
+mixed = len(sys.argv) == 6 and sys.argv[5] in ("mixed", "mixed-confirm", "tui-approval", "tui-consent-control", APPROVE_FAULT, LIFECYCLE, "pages", "routes", "failures-worker", "failures-manager", "failures-launched", "storage", "pi-client") + JOURNEYS
 confirm_uncertain = mixed and sys.argv[5] == "mixed-confirm"
 # The boundary mode checks WM-024 through the running protected manager with
 # raw socket and ssl connections: plaintext and TLS 1.2 refusal, request
@@ -332,6 +332,36 @@ control_profiles = controls_mode or routing_mode or live_mode
 # line. It runs one manager lifetime.
 ENDPOINTS = "tui-endpoints"
 endpoints_mode = len(sys.argv) == 6 and sys.argv[5] == ENDPOINTS
+# The pi-client mode runs the live check of the ext-pi manager session,
+# ext-pi/test/manager-live.test.ts, against the running protected manager
+# with the mixed fixture, one profile and one execution reservation. It
+# reuses the credential issuance of TuiModeFixture: one client credential
+# with its client profile for ext-pi and a separate credential for the
+# harness. The harness starts the manager and reads the overview cursor.
+# It then runs vitest with node from PATH in ext-pi, with
+# AGENT_CAT_MANAGER_PROFILE set to the client profile and
+# AGENT_CAT_MANAGER_REPORT set to a report file. Through the session of
+# src/manager/session.ts, the check connects, bootstraps the overview,
+# creates a mixed-controls request, sets its input to the exact Unicode
+# literal MIXED_TEXT, enqueues it, reads the live preparation, approves the
+# exact review with the preparation ETag as If-Match and the review digest,
+# follows the run through SSE, drops the stream once with forceReconnect and
+# requires the next connection to send the last delivered event identifier
+# in Last-Event-ID, answers the Bool question with JSON false, follows one
+# phase through polling delivery and returns to SSE, sends the offered
+# retry, waits for terminal success, downloads the result and verifies its
+# size and SHA-256, and requires that the delivered events equal a prefix of
+# the polling listing of the bootstrap cursor, with no event lost or
+# repeated. vitest must report all six steps passed, and the report must
+# exist. The harness then reads with its own credential that the request
+# supplied exactly the literal and names the run, that the run store records
+# the answer as JSON false, that one answer command and one retry command of
+# the report reached their effects, that the run succeeded, and that the
+# size and SHA-256 of the report equal the harness download. The harness
+# performs no mutation, and the mode does not require TUI_CHECK. Each step
+# prints its own PASS line. It runs one manager lifetime.
+PI_CLIENT = "pi-client"
+pi_client_mode = len(sys.argv) == 6 and sys.argv[5] == PI_CLIENT
 # The TUI modes share one fixture, TuiModeFixture. TUI_MODES names the
 # configured profiles of each mode and the scopes of its TUI credential.
 #
@@ -1119,22 +1149,23 @@ class TuiModeFixture:
     credential for the client profile of the TUI and a separate credential
     for the harness through local administration, so that the requests of the
     harness spend nothing of the per-client bounds of the TUI credential
-    (sseReadersPerClient 2 and ordinaryMutationsPerMinute 30). session()
+    (sseReadersPerClient 2 and ordinaryMutationsPerMinute 30). The pi-client
+    mode names its client credential pi instead of tui. session()
     starts the TUI through TuiSession, at 80x24 by default. credential_ids
     holds the credential identifier of each issued credential, and renew()
     issues a new TUI credential with its own client profile."""
 
-    def __init__(self, profiles, scopes):
+    def __init__(self, profiles, scopes, client="tui"):
         configuration["profiles"] = [profile for profile in configuration["profiles"] if profile["id"] in profiles]
         assert [profile["id"] for profile in configuration["profiles"]] == profiles, ("unknown TUI mode profile", profiles)
         config.write_text(json.dumps(configuration))
         self.profiles, self.scopes = profiles, scopes
         harness_scopes = ["observe", "submit", "control"] + (["export"] if "export" in scopes else [])
         self.credential_ids = {}
-        for name, granted in (("tui", scopes), ("harness", harness_scopes)):
+        for name, granted in ((client, scopes), ("harness", harness_scopes)):
             self.issue(name, granted)
         self.harness = {"Authorization": "Bearer " + (work / "credential-harness").read_bytes().decode("ascii")}
-        self.client_profile = self.write_profile("tui")
+        self.client_profile = self.write_profile(client)
         self.client_state = work / "unused-client-state"
 
     def issue(self, name, granted):
@@ -1201,7 +1232,8 @@ if endpoints_mode:
         administration({"version": 1, "operation": "issue-credential", "label": "HTTPS endpoint " + name,
                         "scopes": scopes, "profileIds": ["profile_1"],
                         "expiresAt": "2999-01-01T00:00:00Z", "outputFile": str(work / ("credential-" + name))})
-tui_fixture = TuiModeFixture(*TUI_MODES[tui_mode]) if tui_mode else None
+tui_fixture = (TuiModeFixture(*TUI_MODES[tui_mode]) if tui_mode else
+               TuiModeFixture(["profile_1"], ["observe", "submit", "control"], client="pi") if pi_client_mode else None)
 configuration["administrationRoot"] = str(work / "admin")
 config.write_text(json.dumps(configuration))
 context = ssl.create_default_context(cafile=str(cert))
@@ -9313,6 +9345,86 @@ def size_checks():
         process.wait(timeout=25)
 
 
+def pi_client_checks():
+    """The pi-client mode. See PI_CLIENT for the steps."""
+    harness = tui_fixture.harness
+    report_path = work / "pi-client-report.json"
+    log_path = work / "pi-client-vitest.log"
+    with (work / "server-0.stdout").open("wb") as output, (work / "server-0.stderr").open("wb") as errors:
+        process = subprocess.Popen([str(runner), "--manager", "serve", "--config", str(config),
+                                    "+RTS", "-N" + native, "-RTS"], stdout=output, stderr=errors)
+    try:
+        with harness_reads_only():
+            wait_ready(process)
+            status, capabilities, _ = request("/v1/capabilities", harness)
+            assert status == 200, ("capabilities", status)
+            status, catalogue, _ = request("/v1/workflows?profileId=profile_1", harness)
+            assert status == 200, ("catalogue", status)
+            workflow = next(item for item in catalogue["items"] if item["name"] == "mixed-controls")
+            status, overview, _ = request("/v1/snapshot", harness)
+            assert status == 200 and not overview["items"], ("the overview is not empty before the check", status)
+            cursor = overview["cursor"]
+            environment = dict(os.environ, AGENT_CAT_MANAGER_PROFILE=str(tui_fixture.client_profile),
+                               AGENT_CAT_MANAGER_REPORT=str(report_path))
+            with log_path.open("wb") as log:
+                completed = subprocess.run(["node", "node_modules/vitest/vitest.mjs", "run", "test/manager-live.test.ts"],
+                                           cwd=source / "ext-pi", env=environment, stdout=log, stderr=subprocess.STDOUT, timeout=720)
+            output_text = re.sub(r"\x1b\[[0-9;]*m", "", log_path.read_text(errors="replace"))
+            assert completed.returncode == 0, ("the ext-pi live session check failed", completed.returncode, output_text[-4000:])
+            assert re.search(r"Tests\s+6 passed \(6\)", output_text) and report_path.is_file(), (
+                "the ext-pi live session check did not run its six steps", output_text[-4000:])
+            report = json.loads(report_path.read_bytes())
+            assert report["reconnectLastEventId"] == report["reconnectCursor"] and report["pollEvents"] > 0, ("report delivery", report)
+            print("PASS pi-client 1: the ext-pi session ran its six steps against the protected endpoint, the forced SSE drop",
+                  "resumed with Last-Event-ID", report["reconnectCursor"], "and", report["events"], "delivered events, of which",
+                  report["pollEvents"], "came through polling, equal the polling listing", flush=True)
+            client = mixed_client(capabilities, harness)
+            observed = client[0]
+            status, requests, _ = request("/v1/requests", harness)
+            assert status == 200 and [item["id"] for item in requests["items"]] == [report["requestId"]], (
+                "the manager holds other than the one request of the check", status)
+            submitted, _, _ = observed("/v1/requests/" + report["requestId"], "Request")
+            expected = [{"name": declaration["name"], "source": "literal", "value": MIXED_TEXT} for declaration in workflow["inputs"]]
+            assert submitted["readiness"]["supplied"] == expected, ("the request did not supply exactly the literal", submitted["readiness"])
+            assert submitted["runId"] == report["runId"] and submitted["phase"] == "associated", (
+                "the request does not name the run", submitted["runId"], submitted["phase"])
+            print("PASS pi-client 2: request", report["requestId"], "supplied exactly the Unicode literal and names run", report["runId"],
+                  flush=True)
+            receipts = command_receipts(cursor, harness)
+            answers = [(uri, receipt) for uri, receipt in receipts if receipt["operation"] == "answer"]
+            retries = [(uri, receipt) for uri, receipt in receipts if receipt["operation"] == "retry"]
+            assert [uri for uri, _ in answers] == [report["answerCommand"]] and [uri for uri, _ in retries] == [report["retryCommand"]], (
+                "the answer and retry commands differ from the report", [uri for uri, _ in answers], [uri for uri, _ in retries])
+            assert all(receipt["state"] == "effect-observed" for _, receipt in answers + retries), ("a command did not reach its effect",)
+            answer_files = sorted(work.glob("manager/runs/runs/*/runtime/answers.json"))
+            assert len(answer_files) == 1, ("run store answers", answer_files)
+            # The run store also records the model answers of the run, so
+            # only the entry of the occurrence that the answer command
+            # addressed counts.
+            answer_receipt = answers[0][1]
+            occurrence = (((answer_receipt["effect"] or {}).get("address") or {}).get("occurrenceId")
+                          or (answer_receipt["acknowledgement"] or {}).get("occurrenceId"))
+            assert occurrence is not None, ("the answer receipt names no occurrence", answer_receipt)
+            recorded = [entry["answer"] for entry in json.loads(answer_files[0].read_bytes())["answers"]
+                        if entry["occurrenceId"] == occurrence]
+            assert recorded == [False], ("the run store does not record the answer as JSON false", occurrence, recorded)
+            print("PASS pi-client 3: the run store records the answer as JSON false, and answer command", report["answerCommand"],
+                  "and retry command", report["retryCommand"], "reached their effects", flush=True)
+            snapshot, _, _ = observed("/v1/runs/" + report["runId"] + "/snapshot", "RunSnapshot")
+            assert snapshot["runtime"] is not None and snapshot["runtime"]["status"] == "succeeded", ("run status", snapshot["runtime"])
+            artifact = verified_download(report["runId"], client, harness)
+            assert int(artifact["bytes"]) == report["resultBytes"] and artifact["sha256"] == report["resultSha256"], (
+                "the ext-pi result differs from the harness download", artifact["bytes"], artifact["sha256"], report)
+            print("PASS pi-client 4: run", report["runId"], "succeeded, and the verified result of", artifact["bytes"],
+                  "bytes has the SHA-256", artifact["sha256"], "of the ext-pi download", flush=True)
+        print("PASS pi-client: the ext-pi manager session completed the mixed journey through the protected HTTPS endpoint,",
+              "and the harness confirmed each step from manager facts without a mutation", flush=True)
+    finally:
+        if process.poll() is None:
+            process.terminate()
+        process.wait(timeout=25)
+
+
 def storage_checks():
     """The storage-error endings through four lifetimes of the real HTTPS
     manager. Each numbered case prints one PASS line."""
@@ -9715,6 +9827,11 @@ if tui_mode == TUI_FAILURES:
 
 if tui_mode in (TUI_SIZES, TUI_SIZES_BROKEN):
     size_checks()
+    raise SystemExit(0)
+
+
+if pi_client_mode:
+    pi_client_checks()
     raise SystemExit(0)
 
 

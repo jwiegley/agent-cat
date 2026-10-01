@@ -14,12 +14,12 @@
  *
  * `close` aborts every open request, the open event stream and every wait.
  * Every result that arrives after `close` is discarded and gives
- * `ClientClosed`.
+ * `ClientClosed`. `dropStream` closes only the open event stream.
  *
  * @packageDocumentation
  */
 
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import type { ClientRequest, IncomingMessage } from "node:http";
 import { request as httpsRequest } from "node:https";
 import { isIP } from "node:net";
@@ -52,6 +52,9 @@ export const RESPONSE_BYTES = 1048576;
 
 /** The largest command body, in bytes. */
 export const COMMAND_BYTES = 2097152;
+
+/** The largest artifact download, in bytes: the `artifactBytes` limit of `/capabilities`. */
+export const ARTIFACT_BYTES = 67108864;
 
 /** The `reconnectIdleSeconds` limit of `/capabilities`, in milliseconds. */
 export const RECONNECT_IDLE_MS = 45000;
@@ -115,6 +118,28 @@ export type StreamItem = { readonly kind: "invalidation"; readonly event: Invali
 export type Delivery = "stream" | "poll";
 
 /**
+ * The delivery that a follow loop prefers. `sse` follows the event stream
+ * and polls only as its fallback. `poll` reads JSON polling batches and
+ * connects no stream.
+ *
+ * @public
+ */
+export type DeliveryPreference = "sse" | "poll";
+
+/**
+ * Options of `followEvents`. `prefer` is read before each stream connection
+ * and after each polling batch, so a change takes effect at the next
+ * connection or batch. `connected` receives the delivery and the cursor that
+ * each stream connection and each polling batch sends in `Last-Event-ID`.
+ *
+ * @public
+ */
+export type FollowOptions = {
+  readonly prefer?: () => DeliveryPreference;
+  readonly connected?: (via: Delivery, cursor: string) => void;
+};
+
+/**
  * The end of `followEvents`. `closed` follows `close`. `resnapshot` follows a
  * 410 refusal, after which the caller reads a new overview. `refused` follows
  * a credential refusal. `cursor` is the last complete event identifier.
@@ -144,6 +169,7 @@ export type TransportOptions = { readonly random?: () => number; readonly pollIn
 
 /** One open response and the means to end its exchange. */
 type Opened = {
+  readonly request: ClientRequest;
   readonly response: IncomingMessage;
   readonly status: number;
   readonly headers: ReadonlyMap<string, string>;
@@ -202,6 +228,7 @@ export class ManagerTransport {
   readonly #random: () => number;
   readonly #pollIntervalMs: number;
   readonly #active = new Set<ClientRequest>();
+  readonly #streams = new Set<ClientRequest>();
   readonly #sleepers = new Set<() => void>();
   #closed = false;
 
@@ -227,6 +254,16 @@ export class ManagerTransport {
     for (const wake of this.#sleepers) wake();
   }
 
+  /**
+   * Close the open event stream as a dropped connection does, and keep the
+   * transport open. The open `streamEvents` call gives
+   * `TransportUnavailable`, so `followEvents` reconnects with the last
+   * complete event identifier.
+   */
+  dropStream(): void {
+    for (const request of this.#streams) request.destroy();
+  }
+
   /** One GET of a resource below `/v1/`, with the `ETag` of the response. */
   get(resource: string): Promise<Outcome<ClientResponse>> {
     return this.#exchangeJson("GET", resource, {}, null);
@@ -243,6 +280,31 @@ export class ManagerTransport {
     const headers: Record<string, string> = { "Content-Type": "application/json", "Idempotency-Key": command.idempotencyKey };
     if (command.ifMatch !== null) headers["If-Match"] = command.ifMatch;
     return this.#exchangeJson("POST", resource, headers, bytes);
+  }
+
+  /**
+   * One GET of an artifact download, verified as `downloadVerified` of
+   * `Agentic.Manager.Client` verifies it. The size is at most
+   * `ARTIFACT_BYTES` and the digest is 64 lowercase hexadecimal digits, or
+   * the call gives `InvalidResponse` before any request. A response other
+   * than 200 gives the failure of its problem response. A 200 response must
+   * have `application/octet-stream`, `Cache-Control: no-store`,
+   * `X-Content-Type-Options: nosniff` and an `attachment` disposition, and
+   * its exact bytes must have the stated size and SHA-256, or the call gives
+   * `InvalidResponse`. The bytes are never decoded or reserialized.
+   */
+  async downloadVerified(resource: string, size: bigint, sha256: string): Promise<Outcome<Buffer>> {
+    if (size < 0n || size > BigInt(ARTIFACT_BYTES) || !/^[0-9a-f]{64}$/.test(sha256)) return INVALID;
+    const opened = await this.#open("GET", resource, { Accept: "application/octet-stream" }, null);
+    if (!opened.ok) return opened;
+    const { status, headers } = opened.value;
+    const bytes = await this.#consume(opened.value, status === 200 ? ARTIFACT_BYTES : RESPONSE_BYTES);
+    if (!bytes.ok) return bytes;
+    if (status !== 200) return this.#problem(status, headers, bytes.value);
+    if (mediaType(headers) !== "application/octet-stream" || headers.get("cache-control") !== "no-store"
+      || headers.get("x-content-type-options") !== "nosniff" || !(headers.get("content-disposition") ?? "").startsWith("attachment")
+      || BigInt(bytes.value.length) !== size || createHash("sha256").update(bytes.value).digest("hex") !== sha256) return INVALID;
+    return { ok: true, value: bytes.value };
   }
 
   /** One JSON polling batch of `/v1/events` after the cursor, sent in `Last-Event-ID`. */
@@ -266,9 +328,14 @@ export class ManagerTransport {
     if (!validCursor(cursor) || !(idleMs > 0 && idleMs <= RECONNECT_IDLE_MS)) return INVALID;
     const opened = await this.#open("GET", "/v1/events", { Accept: "text/event-stream", "Last-Event-ID": cursor }, null);
     if (!opened.ok) return opened;
-    const { response, status, headers, stopTimer, release } = opened.value;
+    const { response, status, headers, stopTimer, request } = opened.value;
+    this.#streams.add(request);
+    const release = () => {
+      this.#streams.delete(request);
+      opened.value.release();
+    };
     if (status !== 200) {
-      const body = await this.#consume(opened.value, RESPONSE_BYTES);
+      const body = await this.#consume({ ...opened.value, release }, RESPONSE_BYTES);
       return body.ok ? this.#problem(status, headers, body.value) : body;
     }
     if (mediaType(headers) !== "text/event-stream" || headers.get("cache-control") !== "no-store") {
@@ -330,14 +397,27 @@ export class ManagerTransport {
    * consecutive ends without a delivery, or after another refusal of the
    * stream, it polls the same resource every `pollIntervalMs` from the
    * cursor, and it connects the stream again when the backoff has passed.
+   * While `prefer` gives `poll`, it polls from the cursor and connects no
+   * stream, and it connects the stream again after `prefer` gives `sse`.
    */
-  async followEvents(start: string, deliver: (item: StreamItem, via: Delivery) => void): Promise<FollowEnd> {
+  async followEvents(start: string, deliver: (item: StreamItem, via: Delivery) => void, options: FollowOptions = {}): Promise<FollowEnd> {
+    const prefer = options.prefer ?? (() => "sse");
+    const connected = options.connected ?? (() => undefined);
     let cursor = start;
     let backoff: Backoff = INITIAL_BACKOFF;
     let failures = 0;
     for (;;) {
+      if (prefer() === "poll") {
+        const polled = await this.#pollUntil(cursor, () => prefer() !== "poll", deliver, connected);
+        if (typeof polled !== "string") return polled;
+        cursor = polled;
+        backoff = INITIAL_BACKOFF;
+        failures = 0;
+        continue;
+      }
       let delivered = false;
       let latest = cursor;
+      connected("stream", cursor);
       const outcome = await this.streamEvents(cursor, (item) => {
         delivered = true;
         if (item.kind === "invalidation") latest = item.event.id;
@@ -352,7 +432,8 @@ export class ManagerTransport {
       backoff = next;
       const wait = jitteredMicroseconds(delay, this.#random()) / 1000;
       if (failure?.kind === "Refused" || failures >= STREAM_FAILURE_LIMIT) {
-        const polled = await this.#pollUntil(cursor, Date.now() + wait, deliver);
+        const due = Date.now() + wait;
+        const polled = await this.#pollUntil(cursor, () => Date.now() >= due || prefer() === "poll", deliver, connected);
         if (typeof polled !== "string") return polled;
         cursor = polled;
       } else {
@@ -362,10 +443,12 @@ export class ManagerTransport {
     }
   }
 
-  /** Poll from the cursor until the given time, and give the cursor reached, or the end. */
-  async #pollUntil(start: string, due: number, deliver: (item: StreamItem, via: Delivery) => void): Promise<string | FollowEnd> {
+  /** Poll from the cursor until `done` holds after a batch, and give the cursor reached, or the end. */
+  async #pollUntil(start: string, done: () => boolean, deliver: (item: StreamItem, via: Delivery) => void,
+    connected: (via: Delivery, cursor: string) => void): Promise<string | FollowEnd> {
     let cursor = start;
     for (;;) {
+      connected("poll", cursor);
       const batch = await this.pollEvents(cursor);
       if (batch.ok) {
         for (const event of batch.value.events) {
@@ -380,7 +463,7 @@ export class ManagerTransport {
       }
       await this.#sleep(this.#pollIntervalMs);
       if (this.#closed) return { kind: "closed" };
-      if (Date.now() >= due) return cursor;
+      if (done()) return cursor;
     }
   }
 
@@ -526,7 +609,7 @@ export class ManagerTransport {
           || (received.has("transfer-encoding") && received.has("content-length"))) return settle(INVALID);
         if (status >= 300 && status < 400) return settle(failed("RedirectRefused"));
         if (received.has("content-encoding")) return settle(INVALID);
-        settle({ ok: true, value: { response, status, headers: received, stopTimer: () => clearTimeout(timer), release } });
+        settle({ ok: true, value: { request, response, status, headers: received, stopTimer: () => clearTimeout(timer), release } });
       });
       request.end(body ?? undefined);
     });

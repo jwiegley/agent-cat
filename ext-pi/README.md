@@ -69,8 +69,9 @@ shared protocol codecs `Agentic.Manager.Protocol.Draft`,
 `Agentic.Manager.Protocol.Preparation` and `Agentic.Manager.Protocol.Command`,
 and of the service parsers of `Agentic.Tui.Service`. It imports no Haskell
 code. `src/manager/profile.ts` and `src/manager/transport.ts` load a client
-profile and perform the HTTPS requests of one session. The other modules
-perform no I/O and hold no session.
+profile and perform the HTTPS requests of one session, and
+`src/manager/session.ts` holds that session. The other modules perform no
+I/O and hold no session.
 
 `src/manager/json.ts` parses JSON text without loss. `parseJson` uses the
 source text that `JSON.parse` of Node 22 gives to a reviver, and it keeps the
@@ -232,10 +233,73 @@ one loaded profile:
   stream, it polls every second from the cursor and connects the stream
   again when the backoff has passed. A 410 refusal ends it with
   `resnapshot`, a credential refusal ends it with `refused`, and `close`
-  ends it with `closed`.
+  ends it with `closed`. Its `prefer` option gives the delivery preference
+  before each connection and after each polling batch. While it gives
+  `poll`, the loop reads polling batches from the cursor and connects no
+  stream. Its `connected` option receives the delivery and the
+  `Last-Event-ID` cursor of each stream connection and each polling batch.
+- `dropStream` closes the open event stream as a dropped connection does,
+  and the transport stays open.
+- `downloadVerified` reads an artifact download of at most 64 MiB with
+  `Accept: application/octet-stream`. It requires status 200,
+  `application/octet-stream`, `Cache-Control: no-store`,
+  `X-Content-Type-Options: nosniff` and an `attachment` disposition, and it
+  gives the exact bytes only when their size and lowercase SHA-256 equal the
+  values that the caller states. Every other response gives
+  `InvalidResponse`, and a problem response gives its refusal.
 - `close` aborts every open request, the open stream and every wait. Every
   later call and every result that arrives after `close` gives
   `ClientClosed`.
+
+`src/manager/session.ts` holds `ManagerSession`, one session bound to the
+endpoint of a loaded profile:
+
+- `ManagerSession.connect` reads `/v1/capabilities` once and refuses the
+  versions, scopes, transports and limits that this client does not
+  support, as `requireCapabilities` of `Agentic.Manager.Client` does. The
+  session keeps the authority epoch of that read for the idempotency keys of
+  its commands. The binding gets a new random endpoint identity.
+- `reference` gives a `Reference`, which carries the endpoint identity and a
+  resource below `/v1/`. Every read, command and download checks that
+  identity, and a reference of another binding gives `WrongEndpoint`.
+  `switchEndpoint` binds the session to the endpoint of another profile with
+  a new identity and new capabilities, advances the refresh generation,
+  clears the watched resources and reads the overview again. A reference of
+  the earlier binding is never sent to the new endpoint.
+- `pageSet` assembles one complete page set, as `getPageSet` does, and
+  `loadOverview` assembles the overview of `/v1/snapshot` with its `cursor`,
+  its `oldestCursor` and its decoded members, as `loadOverview` does.
+  `start` installs the overview and follows `/v1/events` from its cursor
+  with `followEvents`. A 410 refusal reads the overview again in a new
+  generation and follows from its cursor.
+- `watch` reads a resource and reads it again after each related
+  invalidation, through the refresh coordinator of `src/manager/refresh.ts`.
+  An invalidation is related when its resource equals the watched resource
+  or one of the two lies below the other. An invalidation of a request,
+  preparation, run or decision, or of a resource below one, also reads the
+  overview again. The session reads the watched resources one at a time,
+  coalesces the invalidations that arrive during a read into one later read,
+  and installs no read of an earlier generation. A read refused with 429
+  `storage-quota` or 503 `storage-unavailable` is read again after 100
+  milliseconds. `waitFor` waits until the installed read of a watched
+  resource satisfies a predicate.
+- `prepare` gives a `PendingCommand` with the exact JSON body, a new
+  idempotency key and the optional `If-Match` tag. `send` sends it once.
+  A 2xx response that names its location is `delivered`, with the decoded
+  receipt of a 202 response. A 412 `stale-revision` refusal is `refused`.
+  Every other failure, and a 2xx response that does not agree with the
+  command, is `uncertain` and keeps the command unchanged.
+  `reconcileCommand` makes the one read of `reconcileRead` and gives the
+  report of `reconcile`. The session never sends a command again by itself.
+- `download` gives the bytes of `downloadVerified` for a reference of the
+  binding.
+- The `delivery` option and `setDelivery` select `sse` or `poll` delivery. A
+  change to `poll` closes the open stream, and the follow loop continues
+  from its last complete event identifier with polling batches.
+  `forceReconnect` is a test hook that closes the open stream, so the loop
+  reconnects with `Last-Event-ID` set to the last delivered event
+  identifier. The `onEvent` and `onConnect` options receive each delivered
+  invalidation and each connection.
 
 `test/manager-transport.test.ts` runs the transport against a local
 `node:https` server on `127.0.0.1`. The test generates an EC P-256 CA and a
@@ -245,6 +309,30 @@ their headers over TLS 1.3, a refused redirect, an oversized body, a server
 certificate of another CA, the reconnection of a dropped stream with
 `Last-Event-ID`, the polling fallback, a 410 refusal, `close` during an open
 stream with a late response, and the profile refusals before any request.
+For the session it covers the refusal of unsupported capabilities,
+`WrongEndpoint` for a reference after `switchEndpoint`, an uncertain command
+whose reconciliation sends nothing, a download whose digest or size differs,
+the resumption after `forceReconnect` with the last delivered event
+identifier, polling delivery and its end, and the read of a watched resource
+after an invalidation.
+
+`test/manager-live.test.ts` runs only when `AGENT_CAT_MANAGER_PROFILE`
+names a client profile. It drives one session against a running protected
+manager whose profile runs the mixed-controls workflow of the
+`engine/acp/test/retry_adapter.py` fixture. In six ordered steps, each with
+a timeout of 600 seconds, it connects and bootstraps the overview, creates a
+request with an exact Unicode literal, sets the input and enqueues it,
+approves the exact review with the preparation entity tag as `If-Match` and
+the review selectors, follows the run through SSE with one `forceReconnect`
+and requires that the next connection sends the last delivered event
+identifier, answers the Bool question with JSON `false`, follows one phase
+through polling delivery and returns to SSE, sends the offered retry, waits
+for terminal success, downloads and verifies the result, and requires that
+the delivered events equal a prefix of the polling listing of the bootstrap
+cursor. When `AGENT_CAT_MANAGER_REPORT` names a file, it writes the
+identifiers and digests of the journey there. The `pi-client` mode of
+`manager/test/service_http.py` runs it and checks the report against
+manager facts that it reads with its own credential.
 
 `test/manager-vectors.test.ts` reads `../test/manager_client_vectors.json` and
 runs every case of its `events`, `resources` and `refresh` sections with the
@@ -287,7 +375,8 @@ export AGENT_CAT_MANAGER_PROFILES='["/absolute/first.json","/absolute/second.jso
 
 `AGENT_CAT_MANAGER_PROFILE` names one client profile.
 `AGENT_CAT_MANAGER_PROFILES` is a JSON array of 1 to 8 distinct absolute
-client-profile paths. The extension refuses to start when both variables are
+client-profile paths. The section "Service configuration" states how to
+obtain a profile. The extension refuses to start when both variables are
 set, when a path is relative, or when the array is empty, holds more than 8
 entries, or repeats a path. `/wf-status` states the active mode. The
 current-session, owned-child, deck, ACP, and remote Pi targets stay local in
@@ -324,6 +413,34 @@ summaries and are ignored. Engines that report no optional progress acquire none
 `/wf` requires Pi to run inside Agent Deck. It reads the inherited
 `AGENTDECK_INSTANCE_ID`, and it never scans for another Agent Deck session or
 asks the user to name one.
+
+## Service configuration
+
+Service mode needs a running agent-cat manager with HTTPS, a client
+credential for each client and a client profile for each credential. The
+manager configuration names the HTTPS address, the certificate and key, the
+allowed hosts and peers, and the profiles, as `manager/CONFIGURATION.md`
+states. The operator starts the manager with this command:
+
+```sh
+agentic-run --manager serve --config /absolute/path/to/configuration.json
+```
+
+The operator issues a client credential through local administration. The
+request names the scopes and the profile identifiers of the credential, and
+the manager writes the bearer into the private output file:
+
+```sh
+echo '{"version":1,"operation":"issue-credential","label":"Pi","scopes":["observe","submit","control"],"profileIds":["profile_1"],"expiresAt":"2999-01-01T00:00:00Z","outputFile":"/absolute/path/to/credential"}' \
+  | agentic-run --manager admin --config /absolute/path/to/configuration.json
+```
+
+The client profile names the endpoint, that credential file and the CA file
+that signed the certificate of the manager, as the section "Manager client"
+states. The profile file and the credential file are private to the user.
+Set `AGENT_CAT_MANAGER_PROFILE` to the absolute path of the profile. The
+`observe` scope reads, `submit` creates, edits, enqueues and approves
+requests, and `control` answers decisions and sends run controls.
 
 ## Source-aware inputs
 
@@ -537,6 +654,14 @@ those links with the registry pins of `package-lock.json`.
 npm run check
 npm test
 AGENT_CAT_E2E_RUNNER="$(cd .. && nix develop path:. -c cabal list-bin agentic-run)" npm run test:integration
+```
+
+The live check of the manager session runs through the `pi-client` mode of
+the HTTPS harness. From the repository root, with a built
+`routing-fixed-point-probe` as the runner and `node` on `PATH`:
+
+```sh
+python3 -B manager/test/service_http.py "$PWD" "$(mktemp -d)" "$(bash test/cabal.sh list-bin -ftui-tests routing-fixed-point-probe)" 8 pi-client
 ```
 
 Remote discovery and control use Pi's Chord `SessionDirectory`,
