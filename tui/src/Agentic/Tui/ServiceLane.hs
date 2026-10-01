@@ -118,6 +118,11 @@ module Agentic.Tui.ServiceLane
     resendUnofferedText,
     keyHelpText,
     unobservedText,
+    Confirmation (..),
+    confirmationOperation,
+    confirmationLines,
+    confirmCancelledText,
+    confirmChangedText,
     KeyOutcome (..),
     Deferral (..),
     deferral,
@@ -743,6 +748,46 @@ keyHelpText operation = operation <> " did not start: the key help is open. Esc 
 -- yet observed.
 unobservedText :: Text -> Text
 unobservedText operation = operation <> " did not start: the request validator is not yet observed."
+
+-- | A mutation that starts only after an explicit confirmation, with the
+-- identifier of the resource that its key named: the withdrawal of a
+-- request, and the discard of the review of a preparation. The key opens the
+-- confirmation only when 'mutationKeyOutcome' would start the mutation. The
+-- confirming key decides again with 'mutationKeyOutcome', and the mutation
+-- starts only for the resource that the key named.
+data Confirmation
+  = ConfirmWithdraw !Text
+  | ConfirmDiscard !Text
+  deriving (Eq, Show)
+
+-- | The manager operation of a confirmation.
+confirmationOperation :: Confirmation -> Text
+confirmationOperation confirmation = case confirmation of
+  ConfirmWithdraw _ -> "withdraw"
+  ConfirmDiscard _ -> "discard"
+
+-- | The title and the lines of the dialog of a confirmation.
+confirmationLines :: Confirmation -> (Text, [Text])
+confirmationLines confirmation = case confirmation of
+  ConfirmWithdraw ident ->
+    ( " Confirm withdrawal ",
+      [ "Withdraw request " <> ident <> "?",
+        "The request moves to the withdrawn phase and cannot be prepared again.",
+        "y WITHDRAW REQUEST   n BACK" ] )
+  ConfirmDiscard ident ->
+    ( " Confirm discard ",
+      [ "Discard the review of preparation " <> ident <> "?",
+        "The request returns to the draft phase, and Enter prepares a new review.",
+        "y DISCARD REVIEW   n BACK" ] )
+
+-- | The fixed status text of a confirmation that n or Esc closed.
+confirmCancelledText :: Text -> Text
+confirmCancelledText operation = operation <> " was not sent: the confirmation was closed."
+
+-- | The fixed status text of a confirmation whose resource is no longer the
+-- displayed and installed one.
+confirmChangedText :: Text -> Text
+confirmChangedText operation = operation <> " did not start: the confirmed resource is no longer displayed."
 
 -- | The visible outcome of one mutation-key press that started nothing: the
 -- sequence number of the press among such presses of the session, its fixed

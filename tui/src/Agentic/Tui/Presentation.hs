@@ -137,6 +137,9 @@ data Presentation = Presentation
     -- | Operation, URI, and whether an explicit exact resend is offered.
     presentationServiceMutation :: !(Maybe (Text,Text,Bool)),
     presentationServiceResendConfirm :: !Bool,
+    -- | The title and lines of the open confirmation of a withdrawal or a
+    -- discard, which the dialog over the screen shows.
+    presentationServiceConfirm :: !(Maybe (Text, [Text])),
     presentationServiceApproval :: !(Maybe Text),
     -- | Whether y would approve the exact summary review now, as
     -- 'Agentic.Tui.Approval.approvalOffered' decides. The approval hint is
@@ -221,6 +224,7 @@ emptyPresentation model =
       presentationServiceEndpoints = Nothing,
       presentationServiceMutation = Nothing,
       presentationServiceResendConfirm = False,
+      presentationServiceConfirm = Nothing,
       presentationServiceApproval = Nothing,
       presentationServiceApprovalOffered = False,
       presentationServiceNotice = Nothing,
@@ -411,6 +415,8 @@ layerView presentation width _ mainHeight
         [ "Resend the retained " <> operation <> " attempt?", uri,
           "The original body, idempotency key and If-Match stay unchanged.",
           "Its previous outcome may be uncertain. No fresh attempt is created.", "y RESEND EXACT ATTEMPT   n BACK" ]))
+  | Just (title, rows) <- presentationServiceConfirm presentation =
+      dialog width mainHeight title (vBox (map displayTextWrap rows))
 layerView presentation width totalHeight mainHeight = case presentationLayer presentation of
   EndpointsLayer -> pane "Manager endpoints [focus]" (vBox (map displayTextWrap (maybe [] endpointsLines (presentationServiceEndpoints presentation))))
   KeyHelpLayer -> keyHelpView presentation width mainHeight
@@ -485,6 +491,7 @@ serviceRequestView presentation request = pane "Manager request" $ viewport Fail
     "Phase: " <> Manager.draftPhase request, "Admission: " <> Manager.draftAdmission request,
     "Position: " <> maybe "none" shown (Manager.draftPosition request),
     "Blocking reasons: " <> T.intercalate ", " (Manager.draftReasons request),
+    "Missing inputs: " <> (if null missing then "none" else T.intercalate ", " missing),
     "Run: " <> fromMaybe "none" (Manager.draftRun request) ]
   <> presentationServiceObservation presentation
   <> [ "Approval receipt: " <> fromMaybe "none" (presentationServiceApproval presentation),
@@ -492,7 +499,7 @@ serviceRequestView presentation request = pane "Manager request" $ viewport Fail
   <> concat [[name, value] | (name,value) <- Map.toList (modelInputs (presentationModel presentation))]
   <> (if null captured then [] else "" : "Captured inputs:" : captured)
   where
-    Manager.Readiness _ supplied _ _ = Manager.draftReadiness request
+    Manager.Readiness _ supplied missing _ = Manager.draftReadiness request
     captured = [name <> ": capture " <> ident | Manager.CapturedValue name ident <- supplied]
 
 serviceReviewRows :: Manager.Preparation -> Text -> [Text]
@@ -1066,8 +1073,10 @@ keyHelpLines presentation = case modelScreen model of
       <> ["? or Esc      close this help"]
   ServiceProfilesScreen _ _ -> ["Up/Down select profile", "Right/Left focus details/list", "Enter select ready profile", "r refresh profiles", "E manager endpoints", "q detach", "? or Esc close this help"]
   ServiceRequestScreen _ -> ["Enter requests review when the draft is ready" | not faulted] <> ["e edits draft inputs" | not faulted]
+    <> ["W withdraws a draft or queued request after a confirmation" | not faulted]
     <> ["g refreshes observations", "Esc returns to the manager overview", "E manager endpoints", "q detaches without cancelling the manager run"]
   ServiceReviewScreen {} -> ["y approves the exact visible selectors" | not faulted]
+    <> ["X discards the review after a confirmation" | not faulted]
     <> ["Enter does not approve", "d toggles complete review details", "Up/Down scroll details", "q detaches"]
   ServiceCommandScreen _ -> ["g refreshes observations without sending a mutation"]
     <> ["x requests confirmation of an exact resend" | Just (_,_,True) <- [presentationServiceMutation presentation]] <> ["q detaches"]
@@ -1205,7 +1214,9 @@ billText snapshot = case (snapshotBillFresh snapshot, snapshotBillMemo snapshot)
   (fresh, memo) -> " | bill " <> maybe "?" shown fresh <> " fresh / " <> maybe "?" shown memo <> " memo"
 
 footerItems :: Presentation -> Int -> Int -> [Text]
-footerItems presentation width height = case presentationLayer presentation of
+footerItems presentation width height
+  | Just _ <- presentationServiceConfirm presentation = ["y CONFIRM", "n/Esc BACK", "q DETACH"]
+  | otherwise = case presentationLayer presentation of
   EndpointsLayer -> ["Up/Down SELECT", "Enter CONNECT", "Esc BACK", "q DETACH"]
   KeyHelpLayer -> ["Esc CLOSE", "Up/Down SCROLL", "PgUp/PgDn", "Home/End"]
   CancelLayer -> ["n/Esc KEEP RUNNING", "y CANCEL RUN"]
@@ -1251,8 +1262,11 @@ footerItems presentation width height = case presentationLayer presentation of
           <> (if Manager.draftPhase request == "draft" && presentationServiceMutation presentation == Nothing
                 && not (presentationServiceFault presentation)
               then ["e EDIT INPUTS"] <> ["Enter REQUEST REVIEW" | Service.requestReady request] else [])
+          <> ["W WITHDRAW" | Manager.draftPhase request `elem` ["draft","queued"], presentationServiceMutation presentation == Nothing,
+                not (presentationServiceFault presentation)]
       ServiceReviewScreen preparation tag -> ["d EXACT DETAILS", "q DETACH"] <>
         ["y APPROVE EXACT REVIEW" | presentationServiceApprovalOffered presentation]
+        <> ["X DISCARD" | presentationServiceMutation presentation == Nothing, not (presentationServiceFault presentation)]
         <> ["RESIZE TO REVIEW" | not (serviceReviewAllowed preparation tag (width,height))]
       ServiceCommandScreen _ -> ["g REFRESH", "q DETACH"] <>
         ["x EXACT RESEND" | Just (_,_,True) <- [presentationServiceMutation presentation]]
@@ -1266,7 +1280,7 @@ footerItems presentation width height = case presentationLayer presentation of
         | modelTab model == RoutingTab -> ["p PERSONA", "Tab SECTION", browserPaneHint, "? KEYS", "q QUIT"]
         | otherwise -> ["Enter CONFIGURE", "/ FILTER", "Tab SECTION", browserPaneHint, "? KEYS", "q QUIT"]
       InputScreen index -> [if index == 0 then "Esc CANCEL" else "Esc PREVIOUS", "Ctrl-D CONTINUE", "Enter newline"]
-        <> (if presentationService presentation then ["Ctrl-T CAPTURE TEXT", "Ctrl-O CAPTURE FILE"] else [])
+        <> (if presentationService presentation then ["Ctrl-T CAPTURE TEXT", "Ctrl-O CAPTURE FILE", "Ctrl-R REMOVE INPUT"] else [])
       TargetScreen -> ["Esc BACK", "s SCRIPTED", "l/Enter ROUTING", "Up/Down SCROLL", "p PERSONA", "? KEYS"]
       HelpLoading -> ["Esc CANCEL"]
       HelpScreen _ -> ["Esc BACK", "Up/Down SCROLL", "PgUp/PgDn", "Home/End", "? KEYS"]

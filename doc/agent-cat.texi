@@ -3447,8 +3447,9 @@ approval hint is absent.
 Service mode follows one selected request or run at a time through a running
 manager.  It browses the manager's profiles, workflows, and help, creates a
 request, opens an existing request or run from the Manager overview view,
-submits literal or captured inputs, and displays the exact manager review
-before explicit approval.  After approval it follows the run in the live monitor, answers the
+submits literal or captured inputs, removes a supplied input, withdraws a
+request, discards a review, and displays the exact manager review before
+explicit approval.  After approval it follows the run in the live monitor, answers the
 questions that the manager routes to the person, invokes an offered recovery
 retry, recognizes the terminal state, retrieves the verified result, and saves
 its bytes.  Receipt status is separate from request association and runtime
@@ -3471,6 +3472,24 @@ effect.  The request screen lists the captured inputs.  A captured input
 agrees with the exact review only when the review repeats the size and digest
 of a capture receipt that this session received, so the review of a capture
 made by another session cannot be approved here.
+
+In the input editor, @kbd{C-r} removes the supplied value of the displayed
+input with a @code{remove-input} command.  When the request supplies no value
+for that input, a key outcome states this and nothing is sent.  The request
+screen lists the missing inputs of the request.  On the request screen of a
+request in the @code{draft} or @code{queued} phase, @kbd{W} opens the
+confirmation of a withdrawal.  On the exact review, @kbd{X} opens the
+confirmation of a discard of the review.  A key that cannot start its command
+shows its key outcome and opens no confirmation.  In a confirmation, @kbd{y}
+sends the @code{withdraw} or @code{discard} command once, for the request or
+preparation that the key named, and only while that resource is still
+displayed.  @kbd{n} or @key{ESC} closes the confirmation with a key outcome
+that states that nothing was sent.  Each of these commands completes only on
+its own observed effect: @code{input-changed} for a removal,
+@code{withdrawn} for a withdrawal, and @code{discarded} for a discard.  A
+withdrawn request shows the phase @code{withdrawn}.  After a discard the
+request is a draft without a preparation, and @key{RET} prepares a new
+review.
 
 Every manager command is sent once.  The client retains the original pending
 command and its receipt location, and it never rebuilds or retargets them.
@@ -3504,7 +3523,8 @@ Exiting the frontend with @kbd{C-c}, or with @kbd{q} while no answer editor has
 the keys, closes its transport without cancelling manager-owned work.  The run
 continues in the manager.
 
-On the exact review, only @kbd{y} in the summary view approves.  @key{RET}
+On the exact review, only @kbd{y} in the summary view approves, and while the
+discard confirmation is open, @kbd{y} confirms the discard instead.  @key{RET}
 never approves, @kbd{y} never approves in the detail view that @kbd{d} opens,
 and no key approves while the key help is open.  A summary @kbd{y} starts an
 approval only when no manager command is in progress or unresolved, no internal
@@ -3616,8 +3636,8 @@ rules above apply to every step of the journey.
 Service mode does not support these features.  The frontend offers no
 cancellation, steering, redirect, failover, or abandon of a run.  It has no
 structured answer editor, so a question with the @code{structured} code or with
-a code that is not a name shows its prompt and accepts no answer.  A request cannot be withdrawn or
-discarded.  The frontend offers no run history, lineage, or export.  Except
+a code that is not a name shows its prompt and accepts no answer.  The
+frontend offers no run history, lineage, or export.  Except
 for its event stream, it does not reconnect after a manager restart or a
 credential revocation.  It has no accepted layout at 40
 columns by 12 rows or at 80 columns by 24 rows.  Service mode is not an

@@ -10426,6 +10426,29 @@ Non-blocking findings of fess audit fess/pc-PC20-r1.md (2026-10-01) on subtask P
 4. (low) tui/src/Agentic/Tui/Service.hs near lines 432 and 369: Service.captureLimit parses captureBytes a second time beside the parser in prepareCapture, and its fallback of 0 is unreachable. The local suppliedName duplicates Agentic.Manager.Protocol.Draft.suppliedName. Fix: expose the limit from the client facade once and reuse the suppliedName of Protocol.Draft.
 5. (low) manager/src/Agentic/Manager/Client.hs near lines 497 and 514: no unit test checks the refusals of captureResponse (a non-202 response, a missing or malformed Location) or the headers of prepareCapture (octet-stream media type, no If-Match, a new key). manager-client-check does not call either function. Fix: add cases to manager-client-check or to the vectors.
 
+* TODO [#D] Resolve the non-blocking fess findings of subtask PC21    :review:
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pc21-withdraw-fess-ip98
+:LABELS:   ["review","workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-01 Thu 03:10]
+:MODIFIED: [2026-10-01 Thu 03:10]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess audit fess/pc-PC21-r1.md (2026-10-01) on subtask PC21 (WM-034 remove-input, withdrawal and preparation discard).
+
+1. (medium) tui/test/ServiceTests.hs near lines 2328 to 2390 and tui/src/Agentic/Tui/Service.hs near lines 249 to 278: the new prepareMutation branches have no unit tests for their refusals. Nothing tests that RemoveInput refuses an input that is not supplied, that Withdraw refuses the review or preparing phase, or that Discard refuses a preparation that is not live, a request that is not in review, or a mismatched draftPreparation. Fix: add requestEndTests cases that call prepareMutation and assert Left InvalidResponse for each refused precondition.
+2. (low) tui/test/ServiceTests.hs near lines 2378 to 2380: the test "a confirmation opens only when the lane would start its mutation" tests only L.mutationKeyOutcome with operation strings, not the App path that sets stateServiceConfirm, and no end-to-end step presses W or X while the lane is busy. Fix: rename the test, or add a check that W or X on a busy lane opens no confirmation and shows a key outcome.
+3. (low) tui/test/ServiceTests.hs near lines 2371, 2372 and 2381 to 2383: two tests compare constant strings (confirmationOperation, confirmCancelledText, confirmChangedText) with their own definitions. Fix: drop or merge them.
+4. (low) tui/src/Agentic/Tui/App.hs near lines 1466 to 1475 and 1762: only y, n, Esc and clearServiceSession clear stateServiceConfirm, and leaveServiceSelection does not. An event-driven screen change leaves the dialog open over a different screen until a key closes it. y then refuses with confirmChangedText, so nothing wrong is sent. Fix: clear the confirmation when the displayed resource no longer matches the confirmation identifier.
+5. (low) doc/workflow-manager-handoff.md near line 1034: the dated Phase A section of 2026-09-29 still lists "no withdrawal or discarding of a request". That section is a record, but the current-state section at the top must state the new behavior. Fix: the closeout of this run updates the current-state section.
+6. (low) manager/test/service_http.py near lines 4366 to 4380: the withdrawal of a queued request has no end-to-end evidence. The queued path is the same manager branch and TUI code path as the draft path. Fix (optional): hold a request in the queued phase in a fixture and withdraw it.
+
 * TODO [#C] Resolve PC5 fess findings in legacy history windows    :review:
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -18940,7 +18963,7 @@ to an unapproved local launch.
 :LABELS:   ["p7","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-01 Thu 02:51]
+:MODIFIED: [2026-10-01 Thu 03:10]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-034
 :SOURCE_REPO: agent-cat
@@ -19096,6 +19119,13 @@ Local-mode behavior remains intact without a duplicated service runtime model.
     "author": "johnw",
     "text": "PC20 (captured inputs from the editor and from a local file): in the input editor Ctrl-T captures the editor text and Ctrl-O opens a path editor that reads a local UTF-8 file within captureBytes and captures its bytes. The manager never sees a path. New mutations Capture and SaveCapture (set-input with source capture and the capture id), each with one lane outcome and an exact resend after an uncertain send. The tui-inputs mode shows a 50-byte editor capture and a 100004-byte file capture in the exact review with source capture and the exact SHA-256. Evidence scope (/Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/PC/PC20/impl-r1): Werror build (build-6), tui-model-test at N8, tui-inputs at N8 (attempt 1 failed because a profile holds one review at a time; the harness now discards the first review; rerun exit 0), Phase A journey at N8, make -C doc check, all exit 0. Limitations: only the model test covers an uncertain capture send; a capture from an earlier TUI session is not approvable after a restart; tui/ci/tui.sh, ALLBUILD and the N=1 journey were not run. Fess r1 non-blocking; findings in acat-pc20-captures-fess-4twb. Package stays open.",
     "created_at": "2026-10-01T09:51:45Z"
+  },
+  {
+    "id": 493,
+    "issue_id": "acat-wm-034-3vqz",
+    "author": "johnw",
+    "text": "PC21 (remove-input, withdrawal and preparation discard): the Mutation type gains RemoveInput (remove-input with the request ETag), Withdraw (withdraw with the request ETag, draft or queued only) and Discard (preparation discard with the preparation ETag, live preparation of a request in review), each with receiptMatches and its effect kind (input-changed, withdrawn, discarded). In the input editor Ctrl-R removes the supplied input. W on a draft or queued request and X on the review open a confirmation; y sends once after a second admission check for the same resource, n or Esc closes it without sending. Every key has one lane outcome. tui-inputs shows a removed input leaving the draft with readiness naming it as missing, a discard returning the request to draft with a null preparationId after which Enter prepares a new review, and a withdrawal showing phase withdrawn; the database holds exactly one remove-input, two discards and one withdraw. Evidence scope (/Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/PC/PC21/impl-r1): Werror build (build-1), tui-model-test at N8 (attempt 1 failed on wrong receipts in the new test; fixed, model-test-2 exit 0), tui-inputs at N8, Phase A journey at N8, make -C doc check, all exit 0. Limitations: the TUI withdraws only draft or queued requests; queued withdrawal has no end-to-end check; tui/ci/tui.sh, ALLBUILD and the N=1 journey were not run. Fess r1 non-blocking; findings in acat-pc21-withdraw-fess-ip98. Package stays open.",
+    "created_at": "2026-10-01T10:10:11Z"
   }
 ]
 #+end_src

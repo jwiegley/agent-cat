@@ -287,6 +287,9 @@ data AppState = AppState
     -- and 'Lane.retainKeyOutcome' alone ends or replaces it.
     stateServiceKeyOutcome :: !(Maybe Lane.KeyOutcome),
     stateServiceOutcomeSerial :: !Int,
+    -- | The open confirmation of a withdrawal or a discard. Only its
+    -- confirming key starts the mutation.
+    stateServiceConfirm :: !(Maybe Lane.Confirmation),
     stateServiceUncertainExit :: !(IORef Bool),
     -- | The active client session, which the shutdown closes.
     stateServiceSession :: !(IORef (Maybe Manager.Client)),
@@ -414,6 +417,7 @@ runAppWith backend = mask $ \restore -> do
             stateServiceNotice = Nothing,
             stateServiceKeyOutcome = Nothing,
             stateServiceOutcomeSerial = 0,
+            stateServiceConfirm = Nothing,
             stateServiceUncertainExit = uncertainExit,
             stateServiceSession = session,
             stateEndpointsView = False,
@@ -1130,6 +1134,24 @@ applyServiceObservation client (Service.RequestRead requestRead preparation rece
     (Just (Service.Retry _ _ offer _,_,_), _) | confirmed (Service.retryEffect offer) -> do
       put (idleService state) {stateModel = (stateModel state) {modelStatus = "retry effect observed"}}
       liftIO (writeIORef (stateServiceUncertainExit state) (isJust (stateServiceApproval state)))
+    -- A removal, a withdrawal and a discard complete on their own
+    -- effect-observed receipt of their effect kind, which names the request.
+    -- The request screen then shows the request of this read: its readiness
+    -- without the removed input, the withdrawn phase, or the draft phase
+    -- without a preparation. A removal also ends the draft of its input.
+    (Just (Service.RemoveInput _ name _,_,_), Just request) | confirmed "input-changed" -> do
+      put (idleService state) {stateModel = (stateModel state) {modelInputs = Map.delete name (modelInputs (stateModel state)),
+          modelScreen = shownScreen state (ServiceRequestScreen request), modelStatus = "input removal observed"},
+        stateServiceDrafts = Lane.dropDraft (Lane.InputDraft (Manager.draftId request) name) (stateServiceDrafts state)}
+      liftIO (writeIORef (stateServiceUncertainExit state) (isJust (stateServiceApproval state)))
+    (Just (Service.Withdraw _,_,_), Just request) | confirmed "withdrawn" -> do
+      put (idleService state) {stateModel = (stateModel state) {modelScreen = shownScreen state (ServiceRequestScreen request),
+        modelStatus = "withdrawal effect observed"}}
+      liftIO (writeIORef (stateServiceUncertainExit state) (isJust (stateServiceApproval state)))
+    (Just (Service.Discard {},_,_), Just request) | confirmed "discarded" -> do
+      put (idleService state) {stateModel = (stateModel state) {modelScreen = shownScreen state (ServiceRequestScreen request),
+        modelStatus = "discard effect observed; Enter prepares a new review"}}
+      liftIO (writeIORef (stateServiceUncertainExit state) (isJust (stateServiceApproval state)))
     (Just (Service.Enqueue _,_,_), Just request) | confirmed "enqueued" -> do
       put (idleService state) {stateModel = (stateModel state) {modelScreen = shownScreen state (ServiceRequestScreen request)}}
       liftIO (writeIORef (stateServiceUncertainExit state) (isJust (stateServiceApproval state)))
@@ -1177,7 +1199,7 @@ handleServiceEvent client event = do
   pumpServiceFetches client
   modify (showServiceDraft (serviceDraftKey before))
   after <- get
-  let view current = (modelScreen (stateModel current), stateConfirmDetails current, stateKeyHelp current, serviceResendConfirm current)
+  let view current = (modelScreen (stateModel current), stateConfirmDetails current, stateKeyHelp current, serviceResendConfirm current, stateServiceConfirm current)
       noticeEvent = Approval.NoticeEvent
         { Approval.eventKeyPress = case event of VtyEvent Vty.EvKey {} -> True; _ -> False,
           Approval.eventViewBefore = view before,
@@ -1417,6 +1439,17 @@ handleServiceEventCore client event = do
       -- Ctrl-T captures the exact editor text as raw UTF-8 bytes instead of
       -- sending it as a literal.
       Vty.EvKey (Vty.KChar 't') [Vty.MCtrl] -> captureServiceInput client (TE.encodeUtf8 (editorContents (stateEditor state)))
+      -- Ctrl-R removes the supplied value of this input.
+      Vty.EvKey (Vty.KChar 'r') [Vty.MCtrl] ->
+        case (serviceRequest state,modelWorkflow (stateModel state)) of
+          (Just (observed,request),Just descriptor) | Just input <- atMay (workflowInputs descriptor) index ->
+            let name = workflowInputName input
+                Manager.Readiness _ supplied _ _ = Manager.draftReadiness request
+             in serviceMutationKey "remove-input" $
+                  if name `elem` map Service.suppliedName supplied
+                    then beginServiceMutation client (Service.RemoveInput request name index) (Just observed)
+                    else serviceKeyOutcome False ("remove-input did not start: the request supplies no value for " <> name <> ".")
+          _ -> serviceKeyOutcome False (Lane.unobservedText "remove-input")
       -- Ctrl-O opens the path editor of a file capture.
       Vty.EvKey (Vty.KChar 'o') [Vty.MCtrl] ->
         put state {stateCaptureFile = True, stateCaptureError = Nothing, stateCaptureEditor = Edit.editorText InputEditor (Just 1) ""}
@@ -1433,6 +1466,8 @@ handleServiceEventCore client event = do
         | otherwise -> pure ()
     VtyEvent (Vty.EvKey key modifiers)
       | key == Vty.KChar 'q' && null modifiers -> halt
+      -- An open confirmation of a withdrawal or a discard takes the keys.
+      | Just confirmation <- stateServiceConfirm state -> handleServiceConfirm client confirmation key modifiers
       | key == Vty.KChar '?' && null modifiers && not (serviceResendConfirm state) -> put state {stateKeyHelp = not (stateKeyHelp state)}
       -- Under the key help, an approval key on the review still has one
       -- visible outcome, and only Esc closes the help.
@@ -1542,6 +1577,12 @@ handleServiceEventCore client event = do
           beginServiceMutation client (Service.Create workflow) Nothing)
       (ServiceRequestScreen request, Vty.KEnter, []) | Service.requestReady request, Manager.draftPhase request == "draft" ->
         Just ("enqueue", beginServiceMutation client (Service.Enqueue request) (fst <$> serviceRequest state))
+      -- W on a draft or queued request and X on the review open a
+      -- confirmation. Only its y starts the withdrawal or the discard.
+      (ServiceRequestScreen request, Vty.KChar 'W', []) | Manager.draftPhase request `elem` ["draft","queued"] ->
+        Just ("withdraw", modify (\current -> current {stateServiceConfirm = Just (Lane.ConfirmWithdraw (Manager.draftId request))}))
+      (ServiceReviewScreen preparation _, Vty.KChar 'X', []) ->
+        Just ("discard", modify (\current -> current {stateServiceConfirm = Just (Lane.ConfirmDiscard (Manager.preparationId preparation))}))
       -- r at a recovery head retries only through the offer that the
       -- installed control observation presents for that head.
       (LiveScreen _, Vty.KChar 'r', []) | Just (Service.RecoveryHead {}) <- serviceHead state ->
@@ -1599,6 +1640,33 @@ handleServiceEventCore client event = do
 
 blankEditor :: Edit.Editor Text Name
 blankEditor = Edit.editorText InputEditor Nothing ""
+
+-- | One key while a confirmation of a withdrawal or a discard is open. y
+-- closes it and decides the mutation once with 'serviceMutationKey'. The
+-- mutation starts only for the resource that the key named, while that
+-- resource is still displayed and installed, with the installed observation
+-- as its precondition. n and Esc close the confirmation with a key outcome,
+-- and every other key does nothing.
+handleServiceConfirm :: Manager.Client -> Lane.Confirmation -> Vty.Key -> [Vty.Modifier] -> EventM Name AppState ()
+handleServiceConfirm client confirmation key modifiers = case key of
+  Vty.KChar 'y' | null modifiers -> do
+    modify (\state -> state {stateServiceConfirm = Nothing})
+    serviceMutationKey operation $ do
+      state <- get
+      case (confirmation, modelScreen (stateModel state), serviceRequest state, servicePreparation state) of
+        (Lane.ConfirmWithdraw ident, ServiceRequestScreen shown, Just (observed,request), _)
+          | Manager.draftId shown == ident, Manager.draftId request == ident, Manager.draftPhase request `elem` ["draft","queued"] ->
+              beginServiceMutation client (Service.Withdraw request) (Just observed)
+        (Lane.ConfirmDiscard ident, ServiceReviewScreen displayed _, Just (_,request), Just (observed,preparation))
+          | Manager.preparationId displayed == ident, Manager.preparationId preparation == ident ->
+              beginServiceMutation client (Service.Discard request preparation) (Just observed)
+        _ -> serviceKeyOutcome False (Lane.confirmChangedText operation)
+  Vty.KChar 'n' | null modifiers -> closed
+  Vty.KEsc -> closed
+  _ -> pure ()
+  where
+    operation = Lane.confirmationOperation confirmation
+    closed = modify (\state -> state {stateServiceConfirm = Nothing}) >> serviceKeyOutcome False (Lane.confirmCancelledText operation)
 
 -- | Change only the client profiles of the service backend.
 onEndpoints :: (Lane.Endpoints -> Lane.Endpoints) -> AppState -> AppState
@@ -1691,6 +1759,7 @@ clearServiceSession state =
       stateServiceApprovalPress = Nothing,
       stateServiceNotice = Nothing,
       stateServiceKeyOutcome = Nothing,
+      stateServiceConfirm = Nothing,
       stateServiceResult = Nothing,
       stateServiceSaved = Nothing,
       stateConfirmDetails = False,
@@ -1772,6 +1841,7 @@ toPresentation state =
       presentationServiceEndpoints = case stateBackend state of ServiceBackend _ endpoints -> Just endpoints; LocalBackend {} -> Nothing,
       presentationServiceMutation = Lane.mutationNotice (stateServiceLane state),
       presentationServiceResendConfirm = serviceResendConfirm state,
+      presentationServiceConfirm = Lane.confirmationLines <$> stateServiceConfirm state,
       presentationServiceApproval = case stateServiceApproval state of
         Just (Service.Approve approved _,_,_) | fmap (Manager.draftId . snd) (serviceRequest state) /= Just (Manager.draftId approved) -> Nothing
         _ -> stateServiceApprovalStatus state,

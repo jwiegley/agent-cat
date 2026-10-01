@@ -243,9 +243,40 @@ keeps the capture receipts of the session, and a captured input agrees with
 the exact review only when the review repeats the size and SHA-256 of such a
 receipt. A request whose capture this session did not make therefore shows
 its request screen and not an approvable review. The request screen lists
-the captured inputs with their capture identifiers. The tui-inputs mode of
-`manager/test/service_http.py` captures editor text and a local file through
-the actual frontend and checks both exact reviews.
+the captured inputs with their capture identifiers, and it lists the missing
+inputs that the readiness of the request names.
+
+Three more request mutations complete the setup of a request. In the input
+editor, `Ctrl-R` removes the supplied value of the displayed input
+(`Agentic.Tui.Service.RemoveInput`): a `remove-input` command with the name of
+the input and the request entity tag as `If-Match`. A request that supplies no
+value for the input shows a key outcome and sends nothing. On the request
+screen of a request in the `draft` or `queued` phase, `W` opens the
+confirmation of a withdrawal (`Withdraw`): a `withdraw` command with the
+request entity tag. On the exact review, `X` opens the confirmation of a
+discard (`Discard`): a `discard` command of the preparation with the
+preparation entity tag, which also requires the `control` scope. A key opens
+its confirmation (`Agentic.Tui.ServiceLane.Confirmation`) only when
+`mutationKeyOutcome` would start the mutation, and otherwise it shows that key
+outcome. In the confirmation, `y` decides the mutation once more with
+`mutationKeyOutcome` and starts it only for the request or preparation that
+the key named, while that resource is still displayed and installed. `n` or
+`Esc` closes the confirmation with a key outcome that states that nothing was
+sent, and the confirmation takes every other key without an action. Each
+command is sent once and completes only on its own effect-observed receipt
+whose effect names the request (`receiptMatches`): `input-changed` for a
+removal, `withdrawn` for a withdrawal, and `discarded` for a discard. The
+request screen then shows the request of that read. A removal shows the input
+as missing and ends the draft of the input. A withdrawal shows the phase
+`withdrawn`. A discard shows the phase `draft` without a preparation, and
+`Enter` then prepares a new review.
+
+The tui-inputs mode of `manager/test/service_http.py` captures editor text
+and a local file through the actual frontend and checks both exact reviews.
+It also removes a captured input, discards a review twice, prepares a new
+review after the first discard, closes a withdrawal confirmation without a
+send, and withdraws the request. It then checks that the coordination
+database holds one command of each removal, discard and withdrawal.
 
 The application state keeps the text drafts by identity
 (`Agentic.Tui.ServiceLane.Drafts`): the input editor text of each request and
@@ -406,7 +437,7 @@ the answer conversion against the `resources` section of
 description](../doc/api/README.md#pages-and-live-delivery) describes.
 
 Service mode does not support cancellation, steering, redirect, failover or
-abandon, the structured answer editor, withdrawal or discarding of a request, run history, lineage, export,
+abandon, the structured answer editor, run history, lineage, export,
 reconnection of the session after a manager restart or a credential
 revocation, or acceptance at 40x12 and 80x24. The
 [manual](../doc/agent-cat.texi) entry for `--service` states the complete key

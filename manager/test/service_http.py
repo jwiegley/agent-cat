@@ -365,16 +365,26 @@ endpoints_mode = len(sys.argv) == 6 and sys.argv[5] == ENDPOINTS
 # mark the overview stale with the refusal code. Each step prints its own
 # PASS line. It runs one manager lifetime.
 OVERVIEW = "tui-overview"
-# The tui-inputs mode supplies captured inputs through the service TUI with
-# the scripted captured-input workflow. The TUI creates a request from the
-# workflows browser, pastes two lines of Unicode text into the input editor and
-# captures it with Ctrl-T instead of sending it as a literal. The TUI must
-# then show the captured input on the request screen and, after Enter, the
-# exact review. Through HTTP the request must name the input as source
-# capture, and the review must name it as capture with the size and SHA-256
-# of the editor bytes. The harness then quits the TUI, discards that review,
-# because a profile holds one review at a time, and starts the TUI again.
-# The TUI creates a second request, Ctrl-O opens the path editor, and the TUI
+# The tui-inputs mode supplies, removes and ends inputs through the service
+# TUI with the scripted captured-input workflow. The TUI creates a request
+# from the workflows browser, pastes two lines of Unicode text into the input
+# editor and captures it with Ctrl-T instead of sending it as a literal. The
+# TUI must then show the captured input on the request screen. e opens the
+# input editor again, and Ctrl-R removes the supplied input: the request
+# screen must show the input as missing, and through HTTP the request must
+# supply no input and name it as missing. The TUI captures the text again and,
+# after Enter, must show the exact review. Through HTTP the request must name
+# the input as source capture, and the review must name it as capture with
+# the size and SHA-256 of the editor bytes. X on the review opens the discard
+# confirmation, and y discards the review: the request screen must show the
+# draft phase, and through HTTP the request must be a draft with a null
+# preparationId. Enter then prepares a new review of another preparation. The
+# TUI discards that review too. W on the draft opens the withdrawal
+# confirmation, n closes it with a key outcome that names no send, and W
+# with y withdraws the request: the request screen and HTTP must show the
+# phase withdrawn. The coordination database must hold exactly one command
+# of each removal, discard and withdrawal. The harness then starts the TUI
+# again. The TUI creates a second request, Ctrl-O opens the path editor, and the TUI
 # captures a local UTF-8 file of more than one upload chunk that the harness
 # wrote. The review must name the exact size and SHA-256 of the file bytes.
 # No file of the manager root may contain the path of that file. The manager
@@ -382,7 +392,7 @@ OVERVIEW = "tui-overview"
 # cannot delay the second review. Each step prints its own PASS line. It runs
 # one manager lifetime.
 INPUTS = "tui-inputs"
-TUI_MODES = {OVERVIEW: (["profile_1", "profile_2"], ["observe", "submit"]), INPUTS: (["profile_1"], ["observe", "submit"])}
+TUI_MODES = {OVERVIEW: (["profile_1", "profile_2"], ["observe", "submit"]), INPUTS: (["profile_1"], ["observe", "submit", "control"])}
 tui_mode = sys.argv[5] if len(sys.argv) == 6 and sys.argv[5] in TUI_MODES else None
 assert len(sys.argv) == 5 or mixed or boundary or pages_mode or events_mode or captures_mode or discard_mode or exports_mode or lineage_mode or control_profiles or person_mode or endpoints_mode or tui_mode
 assert not tui_approval or os.environ.get("TUI_CHECK")
@@ -4214,6 +4224,23 @@ def input_checks():
     def save(session, name):
         (work / ("tui-inputs-" + name + ".screen.txt")).write_text(session.screen.text())
 
+    def database_commands(request_id, preparations):
+        """The number of removal, discard and withdrawal commands of the
+        request and of these preparations of it in the coordination
+        database, read through a read-only connection."""
+        import sqlite3
+        found = sorted((work / "manager").rglob("coordination.sqlite3"))
+        assert len(found) == 1, ("coordination database", found)
+        connection = sqlite3.connect(found[0].as_uri() + "?mode=ro", uri=True)
+        try:
+            resources = ["/v1/requests/" + request_id] + ["/v1/preparations/" + ident for ident in preparations]
+            marks = ",".join("?" * len(resources))
+            rows = connection.execute("SELECT operation, count(*) FROM commands WHERE operation IN ('remove-input','discard','withdraw')"
+                                      " AND resource_uri IN (" + marks + ") GROUP BY operation", resources).fetchall()
+            return dict(rows)
+        finally:
+            connection.close()
+
     def new_request(session, index):
         """Select profile_1 and create a request of the captured-input
         workflow from the workflows browser. Returns the input screen."""
@@ -4257,7 +4284,7 @@ def input_checks():
             index = next(i for i, item in enumerate(catalogue["items"]) if item["name"] == "captured-input")
             assert [item["name"] for item in catalogue["items"][index]["inputs"]] == ["input"]
             with tui_fixture.session(rows=40, columns=140) as session:
-                # 1. Ctrl-T captures the editor text.
+                # 1. Ctrl-T captures the editor text, and Ctrl-R removes it.
                 new_request(session, index)
                 session.send(b"\x1b[200~" + editor_text.encode() + b"\x1b[201~")
                 session.settle()
@@ -4265,22 +4292,84 @@ def input_checks():
                 screen = session.wait_screen("Captured inputs:", timeout=30)
                 session.wait_screen("Enter REQUEST REVIEW", timeout=30)
                 save(session, "editor-request")
+                session.send(b"e")
+                session.wait_screen("Ctrl-R REMOVE INPUT", timeout=10)
+                session.send(b"\x12")
+                removed_screen = session.wait_screen("Missing inputs: input", timeout=30)
+                save(session, "removed-request")
+                assert "Captured inputs:" not in removed_screen and "Enter REQUEST REVIEW" not in removed_screen, (
+                    "the request screen still shows the removed input")
+                status, overview, _ = request("/v1/snapshot", harness)
+                assert status == 200
+                drafts = [item["request"] for item in overview["items"] if item["kind"] == "request"]
+                assert len(drafts) == 1, ("the TUI request", drafts)
+                status, removed, raw = request("/v1/requests/" + drafts[0]["id"], harness)
+                assert status == 200
+                validate("Request", removed, raw)
+                assert removed["phase"] == "draft" and removed["readiness"]["supplied"] == [] and removed["readiness"]["missing"] == ["input"], (
+                    "the removed input is still supplied", removed["readiness"])
+                print("PASS tui-inputs 1: Ctrl-R removed the captured input of request", removed["id"],
+                      "and the request screen and the request readiness name the input as missing", flush=True)
+                session.send(b"e")
+                session.wait_screen("Ctrl-R REMOVE INPUT", timeout=10)
+                session.send(b"\x1b[200~" + editor_text.encode() + b"\x1b[201~")
+                session.settle()
+                session.send(b"\x14")
+                screen = session.wait_screen("Captured inputs:", timeout=30)
+                session.wait_screen("Enter REQUEST REVIEW", timeout=30)
                 session.send(b"\r")
                 session.wait_screen("Approve exact manager review", timeout=45)
                 save(session, "editor-review")
                 first, capture_id, raw = reviewed((), editor_bytes)
                 (work / "tui-inputs-editor-review.json").write_bytes(raw)
                 assert "input: capture " + capture_id in screen.replace("\n", ""), "the request screen does not name the capture"
-                print("PASS tui-inputs 1: Ctrl-T captured the editor text of request", first["id"], "as capture", capture_id,
+                print("PASS tui-inputs 2: Ctrl-T captured the editor text of request", first["id"], "as capture", capture_id,
                       "and the TUI showed the exact review, which names the input as capture with", len(editor_bytes),
                       "bytes and SHA-256", hashlib.sha256(editor_bytes).hexdigest(), flush=True)
+                # 2. X and y discard the review, and Enter prepares a new one.
+                discarded_reviews = []
+                for _ in range(2):
+                    preparation_id = reviewed((), editor_bytes)[0]["preparationId"]
+                    discarded_reviews.append(preparation_id)
+                    session.send(b"X")
+                    session.wait_screen("Confirm discard", timeout=10)
+                    save(session, "discard-confirmation")
+                    session.send(b"y")
+                    session.wait_screen("Phase: draft", timeout=45)
+                    session.wait_screen("Enter REQUEST REVIEW", timeout=30)
+                    status, draft, raw = request("/v1/requests/" + first["id"], harness)
+                    assert status == 200
+                    validate("Request", draft, raw)
+                    assert draft["phase"] == "draft" and draft["preparationId"] is None, ("the discarded request", draft["phase"], draft["preparationId"])
+                    if len(discarded_reviews) == 1:
+                        session.send(b"\r")
+                        session.wait_screen("Approve exact manager review", timeout=45)
+                        again = reviewed((), editor_bytes)[0]
+                        assert again["id"] == first["id"] and again["preparationId"] != preparation_id, (
+                            "the review after the discard", again["preparationId"], preparation_id)
+                print("PASS tui-inputs 3: X and y discarded the review", discarded_reviews[0], "the request returned to draft with a null",
+                      "preparationId, and Enter prepared the new review", discarded_reviews[1], flush=True)
+                # 3. W opens the withdrawal confirmation, n closes it, and W with y withdraws.
+                session.send(b"W")
+                session.wait_screen("Confirm withdrawal", timeout=10)
+                session.send(b"n")
+                session.wait_screen("withdraw was not sent: the confirmation was closed.", timeout=10)
+                session.send(b"W")
+                session.wait_screen("Confirm withdrawal", timeout=10)
+                session.send(b"y")
+                session.wait_screen("Phase: withdrawn", timeout=30)
+                save(session, "withdrawn-request")
+                status, withdrawn, raw = request("/v1/requests/" + first["id"], harness)
+                assert status == 200
+                validate("Request", withdrawn, raw)
+                assert withdrawn["phase"] == "withdrawn", ("the withdrawn request", withdrawn["phase"])
+                counts = database_commands(first["id"], discarded_reviews)
+                assert counts == {"remove-input": 1, "discard": 2, "withdraw": 1}, ("each confirmed operation is sent once", counts)
+                print("PASS tui-inputs 4: n closed the withdrawal confirmation without a send, W and y withdrew request", first["id"],
+                      "and the database holds one command of each removal, discard and withdrawal:", counts, flush=True)
                 session.send(b"q")
                 assert session.wait_exit(20) == 0
                 session.assert_restored()
-            observed, wait_for, mutate, _ = mixed_client(capabilities, harness)
-            _, tag, _ = observed("/v1/preparations/" + first["preparationId"], "Preparation")
-            mutate("/v1/preparations/" + first["preparationId"], {"operation": "discard"}, tag)
-            wait_for(first["links"]["self"], "Request", lambda value: value["phase"] == "draft")
             with tui_fixture.session(rows=40, columns=140) as session:
                 # 2. Ctrl-O opens the path editor, and Ctrl-D captures the file.
                 new_request(session, index)
@@ -4303,7 +4392,7 @@ def input_checks():
                 save(session, "file-review")
                 second, file_capture, raw = reviewed((first["id"],), file_bytes)
                 (work / "tui-inputs-file-review.json").write_bytes(raw)
-                print("PASS tui-inputs 2: a missing path kept the path editor open with its read failure, and Ctrl-O captured the local file of",
+                print("PASS tui-inputs 5: a missing path kept the path editor open with its read failure, and Ctrl-O captured the local file of",
                       len(file_bytes), "bytes for request", second["id"], "as capture", file_capture,
                       "with its exact SHA-256 in the review the TUI showed", flush=True)
                 session.send(b"q")
@@ -4312,9 +4401,10 @@ def input_checks():
             # 3. The manager received the bytes and never the path.
             leaked = [str(path) for path in (work / "manager").rglob("*") if path.is_file() and marker.encode() in path.read_bytes()]
             assert leaked == [], ("a manager file names the captured file path", leaked)
-            print("PASS tui-inputs 3: no file of the manager root contains the path of the captured file", flush=True)
+            print("PASS tui-inputs 6: no file of the manager root contains the path of the captured file", flush=True)
             assert not tui_fixture.client_state.exists(), "the service TUI created local runner state"
-            print("PASS tui-inputs: the editor and file captures reached the exact review through the actual service TUI", flush=True)
+            print("PASS tui-inputs: the editor and file captures reached the exact review, and the removal, the discards and the withdrawal",
+                  "completed once each through the actual service TUI", flush=True)
         finally:
             if process.poll() is None:
                 process.terminate()

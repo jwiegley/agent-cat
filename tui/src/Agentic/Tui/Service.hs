@@ -9,7 +9,7 @@ module Agentic.Tui.Service
     decodeProfile, decodeWorkflow, createBody,
     Mutation (..), mutationOperation, mutationURI, mutationProfile, prepareMutation,
     observeDraft, observePreparation, observeReceipt, requestMatches, reviewMatches, reviewLive,
-    requestReady, literalInputs, receiptMatches, receiptEffectKind, captureMatches, capturedReceipt, captureLimit, readCaptureFile,
+    requestReady, literalInputs, suppliedName, receiptMatches, receiptEffectKind, captureMatches, capturedReceipt, captureLimit, readCaptureFile,
     approvalBody, approvalSelectors,
     RunObservation (..), ResultReference (..), Verification (..), Artifact (..),
     ControlView (..), ControlOffer (..), DecisionView (..), DecisionContent (..),
@@ -157,8 +157,16 @@ data Mutation
     -- | The set-input of the named input with source capture and the
     -- identifier of this capture receipt, at this input index.
   | SaveCapture !C.DraftView !Text !C.CaptureReceipt !Int
+    -- | The remove-input of the named supplied input of the request, at this
+    -- input index.
+  | RemoveInput !C.DraftView !Text !Int
   | Enqueue !C.DraftView
+    -- | The withdrawal of a request in the draft or queued phase.
+  | Withdraw !C.DraftView
   | Approve !C.DraftView !C.Preparation
+    -- | The discard of the live review of the request. The request returns
+    -- to the draft phase when the manager has discarded the prepared worker.
+  | Discard !C.DraftView !C.Preparation
     -- | The typed answer to the question that this decision observation
     -- names. The command stays bound to this decision when the head changes.
   | Answer !DecisionView !Value
@@ -175,8 +183,11 @@ mutationOperation mutation = case mutation of
   SaveLiteral {} -> "set-input"
   Capture {} -> "capture"
   SaveCapture {} -> "set-input"
+  RemoveInput {} -> "remove-input"
   Enqueue _ -> "enqueue"
+  Withdraw _ -> "withdraw"
   Approve {} -> "approve"
+  Discard {} -> "discard"
   Answer {} -> "answer"
   Retry _ _ offer _ -> offerOperation offer
 
@@ -186,8 +197,11 @@ mutationURI mutation = case mutation of
   SaveLiteral request _ _ _ -> requestURI request
   Capture request _ _ _ -> "/v1/captures?requestId=" <> C.draftId request
   SaveCapture request _ _ _ -> requestURI request
+  RemoveInput request _ _ -> requestURI request
   Enqueue request -> requestURI request
+  Withdraw request -> requestURI request
   Approve _ preparation -> "/v1/preparations/" <> C.preparationId preparation
+  Discard _ preparation -> "/v1/preparations/" <> C.preparationId preparation
   Answer decision _ -> "/v1/decisions/" <> decisionId decision
   Retry control _ _ _ -> "/v1/runs/" <> controlRun control <> "/control"
 
@@ -197,8 +211,11 @@ mutationProfile mutation = case mutation of
   SaveLiteral request _ _ _ -> C.draftProfile request
   Capture request _ _ _ -> C.draftProfile request
   SaveCapture request _ _ _ -> C.draftProfile request
+  RemoveInput request _ _ -> C.draftProfile request
   Enqueue request -> C.draftProfile request
+  Withdraw request -> C.draftProfile request
   Approve _ preparation -> C.preparationProfile preparation
+  Discard _ preparation -> C.preparationProfile preparation
   Answer decision _ -> decisionProfile decision
   Retry _ decision _ _ -> decisionProfile decision
 
@@ -229,9 +246,18 @@ prepareMutation client now mutation observed
         unless (C.captureRequest receipt == C.draftId request && C.captureProfile receipt == C.draftProfile request) (Left C.InvalidResponse)
         Right (object ["operation" .= ("set-input" :: Text), "input" .= object
           ["name" .= name, "source" .= ("capture" :: Text), "captureId" .= C.captureId receipt]])
+      -- A removal names an input that the request supplies.
+      RemoveInput request name _ -> fromDraft request $ do
+        editableInput request name
+        let C.Readiness _ supplied _ _ = C.draftReadiness request
+        unless (name `elem` map suppliedName supplied) (Left C.InvalidResponse)
+        Right (object ["operation" .= ("remove-input" :: Text), "name" .= name])
       Enqueue request -> fromDraft request $
         if C.draftPhase request == "draft" && requestReady request
         then Right (object ["operation" .= ("enqueue" :: Text)]) else Left C.InvalidResponse
+      Withdraw request -> fromDraft request $
+        if C.draftPhase request `elem` ["draft","queued"]
+        then Right (object ["operation" .= ("withdraw" :: Text)]) else Left C.InvalidResponse
       Approve request preparation -> case observed of
         Just current | owned current (mutationURI mutation) (C.preparationRevision preparation),
           C.decodeObservation (C.observedValue current) == Right preparation,
@@ -239,6 +265,16 @@ prepareMutation client now mutation observed
           C.preparationRequestRevision preparation == C.draftRevision request,
           C.draftPreparation request == Just (C.preparationId preparation),
           reviewLive now preparation -> C.prepareObserved client current (approvalBody preparation)
+        _ -> pure (Left C.InvalidResponse)
+      -- The discard precondition is the exact observation of the live
+      -- preparation of the request, with its entity tag as If-Match.
+      Discard request preparation -> case observed of
+        Just current | owned current (mutationURI mutation) (C.preparationRevision preparation),
+          C.decodeObservation (C.observedValue current) == Right preparation,
+          C.preparationRequest preparation == C.draftId request,
+          C.draftPhase request == "review",
+          C.draftPreparation request == Just (C.preparationId preparation),
+          C.preparationState preparation == "live" -> C.prepareObserved client current (object ["operation" .= ("discard" :: Text)])
         _ -> pure (Left C.InvalidResponse)
       -- The answer precondition is the exact decision observation that the
       -- answer was built from, with its entity tag as If-Match.
@@ -256,6 +292,7 @@ prepareMutation client now mutation observed
   where
     needed = case mutation of
       Approve {} -> ["observe","submit","control"]
+      Discard {} -> ["observe","submit","control"]
       Answer {} -> ["observe","control"]
       Retry {} -> ["observe","control"]
       _ -> ["observe","submit"]
@@ -366,7 +403,10 @@ reviewMatches captures row request preparation = requestMatches row request && r
           && C.captureProfile receipt == C.draftProfile request) Nothing
         Just (C.ReviewInput name "capture" (T.pack (show (C.captureBytes receipt))) (C.captureDigest receipt))
       _ -> Nothing
-    suppliedName value = case value of C.LiteralValue name _ -> name; C.CapturedValue name _ -> name
+
+-- | The name of one supplied input of a request.
+suppliedName :: C.SuppliedInput -> Text
+suppliedName value = case value of C.LiteralValue name _ -> name; C.CapturedValue name _ -> name
 
 reviewLive :: UTCTime -> C.Preparation -> Bool
 reviewLive now preparation = C.preparationState preparation == "live" && C.preparationReason preparation == Nothing
@@ -390,7 +430,7 @@ approvalSelectors preparation =
     "processGeneration  " <> C.preparationGeneration preparation ]
 
 -- | Whether a receipt is the receipt of this mutation. An effect of an input
--- change or an enqueue names the request. An effect of an answer names the
+-- change, an enqueue, a withdrawal or a discard names the request. An effect of an answer names the
 -- run controls and the occurrence of the answered decision. An effect of a
 -- retry names the run controls, the recovering occurrence and the attempt
 -- that the retry follows.
@@ -407,9 +447,11 @@ receiptMatches mutation receipt = C.operationName (C.receiptOperation receipt) =
            && KM.lookup "address" fields == Just (object (["occurrenceId" .= occurrenceText (decisionOccurrence decision)]
                 <> ["attemptId" .= T.pack (show number) | Just number <- [attempt]]))
        (Retry {}, Just _) -> False
-       (_, Just (Object fields)) | mutationOperation mutation `elem` ["set-input","enqueue"] ->
+       (Discard request _, Just (Object fields)) -> KM.lookup "resource" fields == Just (String (requestURI request))
+       (_, Just (Object fields)) | mutationOperation mutation `elem` requestEffects ->
          KM.lookup "resource" fields == Just (String (mutationURI mutation))
-       (_, Just _) -> mutationOperation mutation `notElem` ["set-input","enqueue","answer"]
+       (_, Just _) -> mutationOperation mutation `notElem` ("answer" : "discard" : requestEffects)
+  where requestEffects = ["set-input","remove-input","enqueue","withdraw"]
 
 -- | Whether a capture receipt names the exact bytes of this capture: its
 -- request, its profile, their size and their SHA-256. No other mutation has

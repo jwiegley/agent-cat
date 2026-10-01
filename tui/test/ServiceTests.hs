@@ -132,6 +132,7 @@ serviceTests render = do
   unrelated <- either (die . show) pure (C.decodeObservation (put "state" (String "effect-observed") (put "effect" unrelatedEffect receiptValue)))
   check "effect for another resource cannot advance the input editor" (not (S.receiptMatches mutation unrelated))
   captureTests selectedWorkflowRow request preparation receiptValue unrelated
+  requestEndTests request preparation receiptValue
   snapshotValue <- BS.readFile "test/fixtures/manager/v1/valid/run-snapshot.json" >>= either die pure . eitherDecodeStrict'
   (metadata,items) <- case snapshotValue of
     Object fields | Just (Array values) <- KM.lookup "items" fields -> pure (Object (KM.delete "page" (KM.delete "items" fields)),V.toList values)
@@ -2323,6 +2324,70 @@ followTests now = do
         (\(_, _, step) -> step) (stream (L.StreamEnd False "c_10" (Just C.ClientClosed)) L.DeliveryLive start) == L.FollowClosed
           && (\(_, _, step) -> step) (L.afterPoll now (Left C.ClientClosed) L.DeliveryPolling start) == L.PollClosed)
     ]
+
+-- | The removal of a supplied input, the withdrawal of a request and the
+-- discard of a review: their operations, resources and scopes, the receipts
+-- that complete them, and the confirmation that the withdrawal and the
+-- discard require.
+requestEndTests :: C.DraftView -> C.Preparation -> Value -> IO ()
+requestEndTests reviewed preparation receiptValue = do
+  let draft = reviewed {C.draftPhase = "draft", C.draftPreparation = Nothing}
+      requestURI = "/v1/requests/" <> C.draftId draft
+      preparationURI = "/v1/preparations/" <> C.preparationId preparation
+      removal = S.RemoveInput draft "subject" 0
+      withdrawal = S.Withdraw draft
+      discard = S.Discard reviewed preparation
+      effect kind resource = object ["kind" .= (kind :: T.Text), "runtimeSequence" .= Null, "address" .= Null, "resource" .= (resource :: T.Text)]
+      receiptOf operation resource effectValue = either (die . show) pure . C.decodeObservation $
+        maybe id (\value -> put "state" (String "effect-observed") . put "effect" value) effectValue
+          (put "operation" (String operation) (put "resource" (String resource)
+            (put "requiredScopes" (toJSON (if operation == "discard" then ["submit","control"] else ["submit" :: T.Text]))
+              (put "links" (object ["self" .= ("/v1/commands/cmd_11" :: T.Text), "resource" .= resource]) receiptValue))))
+  removed <- receiptOf "remove-input" requestURI (Just (effect "input-changed" requestURI))
+  withdrawn <- receiptOf "withdraw" requestURI (Just (effect "withdrawn" requestURI))
+  discarded <- receiptOf "discard" preparationURI (Just (effect "discarded" requestURI))
+  accepted <- receiptOf "discard" preparationURI Nothing
+  misplaced <- receiptOf "discard" preparationURI (Just (effect "discarded" preparationURI))
+  otherRequest <- receiptOf "withdraw" requestURI (Just (effect "withdrawn" "/v1/requests/other"))
+  let opened confirmation = L.mutationKeyOutcome ["observe","submit","control"] (L.confirmationOperation confirmation)
+      idle = L.Lane Nothing L.MutationIdle False False :: L.Lane T.Text T.Text
+      busy = L.Lane Nothing (L.MutationAwaiting removal ("pending" :: T.Text) ("/v1/commands/cmd_12" :: T.Text)) False False
+  checks
+    [ ("a removal is a remove-input of the request", S.mutationOperation removal == "remove-input" && S.mutationURI removal == requestURI
+          && S.mutationProfile removal == C.draftProfile draft),
+      ("a withdrawal is a withdraw of the request", S.mutationOperation withdrawal == "withdraw" && S.mutationURI withdrawal == requestURI),
+      ("a discard is a discard of the preparation in its profile", S.mutationOperation discard == "discard" && S.mutationURI discard == preparationURI
+          && S.mutationProfile discard == C.preparationProfile preparation),
+      ("a removal and a withdrawal require submit, and a discard also requires control",
+        S.missingScope ["observe","submit"] "remove-input" == Nothing && S.missingScope ["observe","submit"] "withdraw" == Nothing
+          && S.missingScope ["observe","submit"] "discard" == Just "control" && S.missingScope ["observe"] "withdraw" == Just "submit"),
+      ("a removal completes on its own input-changed effect", S.receiptMatches removal removed && S.receiptEffectKind removed == Just "input-changed"),
+      ("a withdrawal completes on its own withdrawn effect", S.receiptMatches withdrawal withdrawn && S.receiptEffectKind withdrawn == Just "withdrawn"),
+      ("a discard completes on its discarded effect, which names the request",
+        S.receiptMatches discard discarded && S.receiptEffectKind discarded == Just "discarded"),
+      ("an accepted discard is bound to the discard and is not an observed effect",
+        S.receiptMatches discard accepted && S.receiptEffectKind accepted == Nothing),
+      ("a discarded effect that names the preparation does not complete the discard", not (S.receiptMatches discard misplaced)),
+      ("an effect for another request does not complete a withdrawal", not (S.receiptMatches withdrawal otherRequest)),
+      ("no receipt of one of these operations completes another",
+        not (any (uncurry S.receiptMatches) [(withdrawal, removed), (removal, withdrawn), (S.Enqueue draft, withdrawn),
+          (withdrawal, discarded), (S.Approve reviewed preparation, discarded), (discard, withdrawn), (S.SaveLiteral draft "subject" "x" 0, removed)])),
+      ("the withdrawal and the discard name their operations",
+        L.confirmationOperation (L.ConfirmWithdraw "req_1") == "withdraw" && L.confirmationOperation (L.ConfirmDiscard "prep_1") == "discard"),
+      ("each confirmation dialog names its resource and its confirming key",
+        let (_, withdrawRows) = L.confirmationLines (L.ConfirmWithdraw "req_1")
+            (_, discardRows) = L.confirmationLines (L.ConfirmDiscard "prep_1")
+         in any ("req_1" `T.isInfixOf`) withdrawRows && any ("y WITHDRAW" `T.isInfixOf`) withdrawRows
+              && any ("prep_1" `T.isInfixOf`) discardRows && any ("y DISCARD" `T.isInfixOf`) discardRows),
+      ("a confirmation opens only when the lane would start its mutation",
+        opened (L.ConfirmWithdraw "req_1") idle == Nothing && opened (L.ConfirmDiscard "prep_1") idle == Nothing
+          && isJustText (opened (L.ConfirmWithdraw "req_1") busy) && isJustText (opened (L.ConfirmDiscard "prep_1") busy)),
+      ("a closed or changed confirmation states that nothing was sent",
+        L.confirmCancelledText "withdraw" == "withdraw was not sent: the confirmation was closed."
+          && L.confirmChangedText "discard" == "discard did not start: the confirmed resource is no longer displayed.")
+    ]
+  where
+    isJustText = maybe False (not . T.null . fst)
 
 -- | The capture of editor text or local file bytes, the set-input that binds
 -- it, the exact review of a captured input, the send-once lane rule of a
