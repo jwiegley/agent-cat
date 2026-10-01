@@ -55,6 +55,16 @@ private paths, stored values or provider diagnostics. Actual verification
 transitions receive fresh revisions, including a return to a previous status.
 Unchanged observations do not rewrite revisions or emit invalidations.
 
+Through the service, a result file that is removed or changed after a
+successful run ends as follows. `GET /v1/runs/{id}` keeps the runtime status
+`succeeded`. `GET /v1/artifacts/{id}` refuses with 404 `unavailable-resource`
+and sends no content bytes. A refused download does not change the recorded
+verification. The next read of `GET /v1/runs/{id}/outputs` records the result
+as `unavailable` with the reason `missing` for a removed file or `corrupt` for
+changed bytes, and gives no artifact metadata. The verification of the run
+then shows `unavailable`. The `storage` mode of `manager/test/service_http.py`
+checks both endings after two runs of the mixed fixture.
+
 The adapter refuses more than 256 items or an encoded item array above 1 MiB.
 `withRunExportsSource` supplies the receipt items of one run under the same
 bounds for the `/v1/runs/{id}/exports` page set. Receipts need no file, so it

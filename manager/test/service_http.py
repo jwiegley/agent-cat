@@ -72,7 +72,7 @@ consent_control = len(sys.argv) == 6 and sys.argv[5] == "tui-consent-control"
 # runs one manager lifetime and does not enter the restart loop.
 LIFECYCLE = "credential-lifecycle"
 lifecycle = len(sys.argv) == 6 and sys.argv[5] == LIFECYCLE
-mixed = len(sys.argv) == 6 and sys.argv[5] in ("mixed", "mixed-confirm", "tui-approval", "tui-consent-control", APPROVE_FAULT, LIFECYCLE, "pages", "routes", "failures-worker", "failures-manager") + JOURNEYS
+mixed = len(sys.argv) == 6 and sys.argv[5] in ("mixed", "mixed-confirm", "tui-approval", "tui-consent-control", APPROVE_FAULT, LIFECYCLE, "pages", "routes", "failures-worker", "failures-manager", "storage") + JOURNEYS
 confirm_uncertain = mixed and sys.argv[5] == "mixed-confirm"
 # The boundary mode checks WM-024 through the running protected manager with
 # raw socket and ssl connections: plaintext and TLS 1.2 refusal, request
@@ -250,6 +250,27 @@ worker_failure_mode = len(sys.argv) == 6 and sys.argv[5] == WORKER_FAILURE
 # lifetimes.
 MANAGER_FAILURE = "failures-manager"
 manager_failure_mode = len(sys.argv) == 6 and sys.argv[5] == MANAGER_FAILURE
+# The storage mode checks the storage-error endings through four lifetimes of
+# the protected manager with the mixed fixture. Case 1 configures the
+# smallest globalMutationLedgerBytes that admits the four commands of one
+# run, R + 4 * C. A mixed-controls run waits at its person question, the
+# next ordinary command is refused with storage-quota by the command-ledger
+# check, and a cancel of the run is still accepted and ends the run
+# cancelled. After an ordinary restart, ordinary commands are still refused,
+# because the command ledger is not pruned, the manager-log positions
+# continue and the flow verb reports the floor. Case 2 raises the ceiling,
+# as the operator does, and renames the active manager log away while a run
+# waits at its question, so that every manager-log append fails. An ordinary
+# command is then refused with storage-unavailable and leaves no command row,
+# and a cancel still ends the run cancelled. The operator moves the rest of
+# the log out, and the next lifetime begins a new log at position 0 with its
+# lifetime notice and no gap notice. Case 3 removes the result file of a
+# succeeded run and corrupts the result file of a second one. The run stays
+# succeeded, its result becomes unavailable with the reason missing or
+# corrupt, and the artifact download refuses with unavailable-resource and
+# serves no bytes. Each numbered case prints its own PASS line.
+STORAGE = "storage"
+storage_mode = len(sys.argv) == 6 and sys.argv[5] == STORAGE
 # The modes that configure the control fixture profiles in place of the
 # scripted profile: profile_1 runs the recovery-offering retry adapter and
 # profile_steer runs the steerable adapter. The controls-routing mode also
@@ -322,6 +343,15 @@ if pages_mode:
 MANAGER_FAILURE_LEDGER = 4 * 1024 * 1024
 if manager_failure_mode:
     configuration["limits"]["globalMutationLedgerBytes"] = 16 * 131072 + MANAGER_FAILURE_LEDGER
+# The storage mode first sets L to the reserve R = 16 * C and four command
+# capacities C = 131072. The command ledger then admits exactly the four
+# ordinary commands of one run: create, set-input, enqueue and approve.
+# Case 2 raises L to STORAGE_RAISED_LEDGER, as the operator does.
+STORAGE_COMMAND_CAPACITY = 131072
+STORAGE_LEDGER = 16 * STORAGE_COMMAND_CAPACITY + 4 * STORAGE_COMMAND_CAPACITY
+STORAGE_RAISED_LEDGER = 16777216
+if storage_mode:
+    configuration["limits"]["globalMutationLedgerBytes"] = STORAGE_LEDGER
 # The pages mode also configures one local retention root. A local frontend
 # run writes one completed run into it before the manager starts, and the
 # manager serves it through --legacy-history as a read-only legacy entry.
@@ -950,10 +980,11 @@ def command_receipts(cursor, authorized):
     return receipts
 
 
-def read_flow(name, paths):
-    """Run the flow verb of the TUI_CHECK binary on the paths and return its
-    exit status, its records and its summary. The output is kept in work."""
-    completed = subprocess.run([os.environ["TUI_CHECK"], "flow"] + [str(path) for path in paths],
+def read_flow(name, paths, binary=None):
+    """Run the flow verb of the given binary, or else of the TUI_CHECK binary,
+    on the paths and return its exit status, its records and its summary. The
+    output is kept in work."""
+    completed = subprocess.run([str(binary or os.environ["TUI_CHECK"]), "flow"] + [str(path) for path in paths],
                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60)
     (work / (name + ".ndjson")).write_bytes(completed.stdout)
     (work / (name + ".stderr")).write_bytes(completed.stderr)
@@ -5210,6 +5241,333 @@ def manager_failure_checks():
 
 if manager_failure_mode:
     manager_failure_checks()
+    raise SystemExit(0)
+
+
+def storage_checks():
+    """The storage-error endings through four lifetimes of the real HTTPS
+    manager. Each numbered case prints one PASS line."""
+    import sqlite3
+    authorized = {"Authorization": "Bearer " + bearer}
+    flow_dir = work / "manager" / "flow"
+    capacity = STORAGE_COMMAND_CAPACITY
+    reserve = 16 * capacity
+    ordinary_ceiling = STORAGE_LEDGER - reserve - capacity
+    terminal = ("succeeded", "failed", "cancelled")
+
+    def serve(index):
+        """Start one foreground manager lifetime on the same root and wait
+        for HTTPS readiness."""
+        with (work / f"server-{index}.stdout").open("wb") as output, (work / f"server-{index}.stderr").open("wb") as errors:
+            process = subprocess.Popen([str(runner), "--manager", "serve", "--config", str(config),
+                                        "+RTS", "-N" + native, "-RTS"], stdout=output, stderr=errors)
+        wait_ready(process)
+        return process
+
+    def stop(process, index):
+        """End one lifetime as the operator stops it and keep its exit status."""
+        if process.poll() is None:
+            process.terminate()
+        process.wait(timeout=25)
+        (work / f"server-{index}.exit").write_text(str(process.returncode) + "\n")
+
+    def database(statement, parameters=()):
+        """The rows of one query through a read-only connection to the
+        coordination database."""
+        found = sorted((work / "manager").rglob("coordination.sqlite3"))
+        assert len(found) == 1, ("coordination database", found)
+        connection = sqlite3.connect(found[0].as_uri() + "?mode=ro", uri=True)
+        try:
+            return connection.execute(statement, parameters).fetchall()
+        finally:
+            connection.close()
+
+    def ledger():
+        """The charge of the command ledger, as Commands.checkCapacity reads it."""
+        rows = database("SELECT bytes FROM command_ledger_usage WHERE singleton=1")
+        assert len(rows) == 1, ("command ledger usage", rows)
+        return rows[0][0]
+
+    def commands():
+        return database("SELECT count(*) FROM commands")[0][0]
+
+    def setup():
+        """The capabilities, the mixed client, the mixed-controls workflow and
+        its creation body for the current lifetime."""
+        status, capabilities, raw = request("/v1/capabilities", authorized)
+        assert status == 200
+        validate("Capabilities", capabilities, raw)
+        client = mixed_client(capabilities, authorized)
+        status, catalogue, _ = request("/v1/workflows?profileId=profile_1", authorized)
+        assert status == 200
+        workflow = next(item for item in catalogue["items"] if item["name"] == "mixed-controls")
+        create = json.dumps({"workflowId": workflow["id"], "descriptorRevision": workflow["revision"],
+                             "profileId": workflow["profileId"], "profileRevision": workflow["profileRevision"]},
+                            separators=(",", ":")).encode()
+        return capabilities, client, workflow, create
+
+    def create_attempt(capabilities, create):
+        """One ordinary command, a request creation. Returns the status, the
+        decoded body and the idempotency key."""
+        key = capabilities["authorityEpoch"] + "." + secrets.token_urlsafe(16)
+        status, value, raw, _ = exchange("/v1/requests", authorized | {"Content-Type": "application/json", "Idempotency-Key": key},
+                                         method="POST", payload=create)
+        if status == 201:
+            validate("Request", value, raw)
+        return status, value, key
+
+    def created_request(capabilities, create):
+        status, value, _ = create_attempt(capabilities, create)
+        assert status == 201, ("request creation", status, value.get("code"))
+        return value
+
+    def unknown_key(key):
+        return not database("SELECT id FROM commands WHERE idempotency_key=?", (key,))
+
+    def cancel(capabilities, client, run, name):
+        """Cancel the running run through its control and wait for the run to
+        end. Returns the receipt and the acknowledged command."""
+        observed, wait_for, _, _ = client
+        base = "/v1/runs/" + run
+        control, tag, _ = observed(base + "/control", "RunControl")
+        assert control["cancelAllowed"] and control["supervision"] == "owned", ("cancel not allowed", control["cancelAllowed"], control["supervision"])
+        key = capabilities["authorityEpoch"] + "." + secrets.token_urlsafe(16)
+        status, receipt, raw, _ = exchange(base + "/control", authorized | {"Content-Type": "application/json", "Idempotency-Key": key,
+                                           "If-Match": tag}, method="POST", payload=b'{"operation":"cancel"}')
+        assert status == 202, (name + " cancel", status, receipt.get("code"))
+        validate("CommandReceipt", receipt, raw)
+        command, _, raw = wait_for(receipt["links"]["self"], "CommandReceipt",
+            lambda value: value["acknowledgement"] is not None or value["state"] in ("refused", "unresolved"))
+        (work / (name + "-cancel-command.json")).write_bytes(raw)
+        assert command["state"] in ("acknowledged", "effect-observed"), (name + " cancel state", command["state"])
+        snapshot, _, raw = wait_for(base + "/snapshot", "RunSnapshot",
+            lambda value: value["runtime"] is not None and value["runtime"]["status"] in terminal)
+        (work / (name + "-cancel-terminal.json")).write_bytes(raw)
+        assert snapshot["runtime"]["status"] == "cancelled", (name + " run terminal status", snapshot["runtime"]["status"])
+        return receipt, command
+
+    def refused_download(artifact, name):
+        """Request the content of the artifact and require a refusal. Returns
+        the status and the frozen problem code."""
+        connection = http.client.HTTPSConnection("127.0.0.1", port, context=context, timeout=7)
+        try:
+            connection.request("GET", artifact["download"], headers=authorized | {"Accept": "application/octet-stream"})
+            response = connection.getresponse()
+            body = response.read(1048577)
+            status = response.status
+            media = response.getheader("Content-Type")
+        finally:
+            connection.close()
+        (work / (name + "-download.body")).write_bytes(body)
+        assert status != 200 and media != "application/octet-stream", (name + " download served bytes", status, media, len(body))
+        value = frozen.parse_json(body)
+        validate("Problem", value, body)
+        return status, value["code"]
+
+    def result_ending(client, run, name):
+        """The result item of the run from a fresh outputs read, and then the run."""
+        observed = client[0]
+        base = "/v1/runs/" + run
+        outputs, _, raw = observed(base + "/outputs", "OutputPage")
+        (work / (name + "-outputs.json")).write_bytes(raw)
+        result = next(item for item in outputs["items"] if item["kind"] == "result")
+        value, _, raw = observed(base, "Run")
+        (work / (name + "-run.json")).write_bytes(raw)
+        return value, result
+
+    # Case 1. At the command-ledger ceiling, an ordinary command is refused
+    # with storage-quota while a run waits at its person question.
+    first = serve(0)
+    try:
+        capabilities, client, workflow, create = setup()
+        observed, wait_for, _, _ = client
+        assert ledger() == 0, ("the command ledger is not empty before the first command", ledger())
+        _, ceiling_run = approve_mixed(created_request(capabilities, create), workflow, client)
+        head, _, _ = drive_mixed(ceiling_run, client, stop_at_question=True, overview=False)
+        run_charge = ledger()
+        assert run_charge == 4 * capacity, ("the commands of one run", run_charge)
+        accepted = []
+        for _ in range(8):
+            used = ledger()
+            status, value, key = create_attempt(capabilities, create)
+            if used <= ordinary_ceiling:
+                assert status == 201, ("ordinary command below the ledger ceiling", used, status, value.get("code"))
+                accepted.append(value["id"])
+                continue
+            assert status == 429 and value["code"] == "storage-quota", ("ordinary command at the ledger ceiling", used, status, value.get("code"))
+            assert unknown_key(key), "the refused command left a command row"
+            break
+        else:
+            raise AssertionError("no ordinary command reached the command-ledger ceiling")
+        print("PASS storage case 1: with globalMutationLedgerBytes", STORAGE_LEDGER, "the four commands of run", ceiling_run,
+              "charge", run_charge, "bytes, run", ceiling_run, "waits at question", head, "and the next ordinary command after",
+              len(accepted), "more is refused with 429 storage-quota at charge", used, "above", ordinary_ceiling, "with no command row", flush=True)
+
+        # Case 2. A cancel uses the reserve and still ends the run cancelled.
+        receipt, command = cancel(capabilities, client, ceiling_run, "ceiling")
+        after_cancel = ledger()
+        assert after_cancel == run_charge + (len(accepted) + 1) * capacity, ("the charge of the cancel", after_cancel)
+        print("PASS storage case 2: cancel", receipt["id"], "was accepted at the ceiling and", command["state"], "and run", ceiling_run,
+              "ended cancelled; the command ledger charge is", after_cancel, "of", STORAGE_LEDGER, flush=True)
+    finally:
+        stop(first, 0)
+
+    # Case 3. After an ordinary restart, ordinary commands are still refused,
+    # because the command ledger is not pruned.
+    restarted = serve(1)
+    try:
+        capabilities, client, workflow, create = setup()
+        status, value, key = create_attempt(capabilities, create)
+        assert status == 429 and value["code"] == "storage-quota", ("ordinary command after the restart", status, value.get("code"))
+        assert unknown_key(key), "the refused command left a command row after the restart"
+        assert ledger() == after_cancel, ("the command ledger changed across the restart", ledger(), after_cancel)
+        snapshot, _, _ = client[0]("/v1/runs/" + ceiling_run + "/snapshot", "RunSnapshot")
+        assert snapshot["runtime"]["status"] == "cancelled", ("the cancelled run after the restart", snapshot["runtime"]["status"])
+        print("PASS storage case 3: after an ordinary restart an ordinary command is still refused with 429 storage-quota, the command",
+              "ledger keeps its charge", after_cancel, "and run", ceiling_run, "stays cancelled", flush=True)
+    finally:
+        stop(restarted, 1)
+
+    # Case 4. The manager-log positions continue across the restart, and the
+    # flow verb reports the floor.
+    sealed = sorted((flow_dir / "sealed").glob("*/*.ndjson"))
+    expected_floor = int(sealed[0].name[:20]) if sealed else 0
+    stores = sorted(work.glob("manager/runs/runs/*/runtime"))
+    flow_status, flowed, summary = read_flow("storage-ledger-flow", [flow_dir] + stores, runner)
+    manager_summary = next(item for item in summary["logs"] if item["kind"] == "manager")
+    lifetimes = summary["joins"]["lifetimes"]
+    assert summary["verified"] and not summary["problems"], ("the flow verb does not verify the ledger lifetimes", flow_status, summary["problems"])
+    assert manager_summary["floor"] == expected_floor, ("manager log floor", manager_summary["floor"], expected_floor)
+    assert len(lifetimes) == 2 and all(item["shutdown"] is not None for item in lifetimes), ("lifetimes", lifetimes)
+    assert lifetimes[1]["lifetime"]["position"] == lifetimes[0]["shutdown"] + 1, ("the positions do not continue", lifetimes)
+    print("PASS storage case 4: the flow verb exits", flow_status, "and verifies both lifetimes; the second lifetime notice at",
+          lifetimes[1]["lifetime"]["position"], "follows the shutdown notice at", lifetimes[0]["shutdown"], "and the floor is",
+          manager_summary["floor"], "with", len(sealed), "sealed segments", flush=True)
+
+    # Case 5. The operator raises the ceiling. While a run waits at its
+    # question, the active manager log is renamed away, so that every append
+    # fails, and an ordinary command is refused with storage-unavailable.
+    configuration["limits"]["globalMutationLedgerBytes"] = STORAGE_RAISED_LEDGER
+    config.write_text(json.dumps(configuration))
+    archive = work / "storage-fault-flow"
+    faulted = serve(2)
+    try:
+        capabilities, client, workflow, create = setup()
+        _, fault_run = approve_mixed(created_request(capabilities, create), workflow, client)
+        head, _, _ = drive_mixed(fault_run, client, stop_at_question=True, overview=False)
+        actives = sorted(flow_dir.glob("*.ndjson"))
+        assert len(actives) == 1, ("manager logs before the fault", actives)
+        stream = actives[0].name[:-len(".ndjson")]
+        archive.mkdir(mode=0o700)
+        archived = archive / actives[0].name
+        os.rename(actives[0], archived)
+        rows = commands()
+        status, value, key = create_attempt(capabilities, create)
+        assert status == 503 and value["code"] == "storage-unavailable", ("ordinary command with every append failing", status, value.get("code"))
+        assert commands() == rows and unknown_key(key), ("the refused command left a command row", rows, commands())
+        print("PASS storage case 5: with the active manager log renamed away while run", fault_run, "waits at question", head,
+              "an ordinary command is refused with 503 storage-unavailable and the ledger keeps its", rows, "command rows", flush=True)
+
+        # Case 6. A cancel still ends the running run cancelled, and the
+        # writer creates no new log at the renamed path.
+        receipt, command = cancel(capabilities, client, fault_run, "fault")
+        assert commands() == rows + 1, ("the cancel row", rows, commands())
+        assert not sorted(flow_dir.glob("*.ndjson")), "the broken writer created a new manager log"
+        print("PASS storage case 6: cancel", receipt["id"], "was accepted and", command["state"], "and run", fault_run,
+              "ended cancelled while every manager-log append failed; the writer created no new log", flush=True)
+    finally:
+        stop(faulted, 2)
+    assert not sorted(flow_dir.glob("*.ndjson")), "the broken writer created a new manager log at shutdown"
+
+    # Case 7. The archived log ends without the cancel and without the
+    # shutdown notice of the faulted lifetime. After the operator moves the
+    # rest of the log out, the next lifetime begins a new log at position 0
+    # with its lifetime notice and no gap notice.
+    for part in ("sealed", "claims"):
+        if (flow_dir / part / stream).exists():
+            (archive / part).mkdir(mode=0o700)
+            os.rename(flow_dir / part / stream, archive / part / stream)
+    fault_stores = sorted(work.glob("manager/runs/runs/*/runtime"))
+    flow_status, flowed, summary = read_flow("storage-fault-flow", [archived] + fault_stores, runner)
+    lifetimes = summary["joins"]["lifetimes"]
+    assert summary["verified"] and not summary["problems"], ("the flow verb does not verify the archived log", flow_status, summary["problems"])
+    assert len(lifetimes) == 3 and lifetimes[2]["shutdown"] is None, ("archived lifetimes", lifetimes)
+    assert summary["states"]["lifetimeWithoutShutdown"] == [lifetimes[2]["lifetime"]], ("archived lost lifetimes", summary["states"]["lifetimeWithoutShutdown"])
+    assert not [record for record in flowed if record["schema"] == "command" and record["body"].get("operation") == "cancel"
+                and record["position"] > lifetimes[2]["lifetime"]["position"]], "the archived log holds the cancel of the faulted lifetime"
+    assert not [record for record in flowed if record["schema"] == "notice" and record["body"].get("notice") == "gap"], "the archived log holds a gap notice"
+    recovered = serve(3)
+    try:
+        actives = sorted(flow_dir.glob("*.ndjson"))
+        assert actives == [flow_dir / (stream + ".ndjson")], ("manager logs after the recovery", actives)
+        opening = [json.loads(line) for line in actives[0].read_bytes().splitlines()]
+        assert opening and opening[0]["schema"] == "notice" and opening[0]["body"]["inline"]["notice"] == "lifetime", ("first record of the new log", opening[:1])
+        assert not [record for record in opening if record["schema"] == "notice" and record["body"]["inline"]["notice"] == "gap"], "the new log holds a gap notice"
+        print("PASS storage case 7: the flow verb verifies the archived log with", len(lifetimes), "lifetimes, the last without its shutdown notice, and no cancel",
+              "command and no gap notice of the faulted lifetime; the new log begins with lifetime notice",
+              opening[0]["body"]["inline"]["processGeneration"], "and reconciliation counts", opening[0]["body"]["inline"]["reconciliation"],
+              "and holds no gap notice", flush=True)
+
+        # Case 8. A removed result keeps the run succeeded, and the result
+        # and its download become unavailable.
+        capabilities, client, workflow, create = setup()
+        observed = client[0]
+        result_stores = []
+        for name, damage in (("removed", "missing"), ("corrupted", "corrupt")):
+            before = set(work.glob("manager/runs/runs/*/runtime"))
+            _, run = approve_mixed(created_request(capabilities, create), workflow, client)
+            _, answered, retried = drive_mixed(run, client, overview=False)
+            assert answered and retried, ("result run decisions", answered, retried)
+            artifact = verified_download(run, client, authorized)
+            store = sorted(set(work.glob("manager/runs/runs/*/runtime")) - before)
+            assert len(store) == 1, ("run store of the result run", store)
+            result_stores += store
+            result_file = store[0] / "result.json"
+            original = result_file.read_bytes()
+            assert len(original) == int(artifact["bytes"]), ("result file length", len(original), artifact["bytes"])
+            if damage == "missing":
+                result_file.unlink()
+            else:
+                # One changed byte keeps the length and breaks the digest.
+                mode = stat.S_IMODE(result_file.stat().st_mode)
+                result_file.chmod(mode | stat.S_IWUSR)
+                middle = len(original) // 2
+                result_file.write_bytes(original[:middle] + bytes([original[middle] ^ 0x01]) + original[middle + 1:])
+                result_file.chmod(mode)
+            status, code = refused_download(artifact, name)
+            assert (status, code) == (404, "unavailable-resource"), (name + " download", status, code)
+            value, _, _ = observed("/v1/runs/" + run, "Run")
+            assert value["runtime"]["status"] == "succeeded" and value["verification"]["state"] == "verified", (
+                name + " run after the refused download", value["runtime"], value["verification"])
+            value, result = result_ending(client, run, name)
+            assert value["runtime"]["status"] == "succeeded", (name + " run runtime", value["runtime"])
+            assert result["verification"] == {"state": "unavailable", "artifactId": artifact["id"], "reason": damage} and result["artifact"] is None, (
+                name + " result item", result)
+            assert value["verification"]["state"] == "unavailable", (name + " run verification", value["verification"])
+            status, code = refused_download(artifact, name + "-again")
+            assert (status, code) == (404, "unavailable-resource"), (name + " second download", status, code)
+            print(f"PASS storage case {8 if damage == 'missing' else 9}: the", name, "result of run", run, "keeps runtime succeeded",
+                  "with verification unavailable and reason", damage, "and GET", artifact["download"], "refuses with", status, code,
+                  "and serves no bytes", flush=True)
+    finally:
+        stop(recovered, 3)
+
+    # Case 10. The flow verb reads the new log from position 0 with one
+    # lifetime and its shutdown notice.
+    flow_status, flowed, summary = read_flow("storage-new-flow", [flow_dir] + result_stores, runner)
+    lifetimes = summary["joins"]["lifetimes"]
+    assert flow_status == 0 and summary["verified"] and not summary["problems"], ("the flow verb does not verify the new log", flow_status, summary["problems"])
+    assert flowed and flowed[0]["position"] == 0 and flowed[0]["schema"] == "notice" and flowed[0]["body"].get("notice") == "lifetime", (
+        "the new log does not begin with its lifetime notice at 0", flowed[:1])
+    assert len(lifetimes) == 1 and lifetimes[0]["shutdown"] is not None, ("new log lifetimes", lifetimes)
+    assert not [record for record in flowed if record["schema"] == "notice" and record["body"].get("notice") == "gap"], "the new log holds a gap notice"
+    print("PASS storage case 10: the flow verb exits", flow_status, "and reads the new log from position 0 with one lifetime and its",
+          "shutdown notice at", lifetimes[0]["shutdown"], "and no gap notice", flush=True)
+    print("PASS storage: every storage-error ending held across four lifetimes of the TLS 1.3 manager", flush=True)
+
+
+if storage_mode:
+    storage_checks()
     raise SystemExit(0)
 
 

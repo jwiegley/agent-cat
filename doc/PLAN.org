@@ -4485,6 +4485,29 @@ Non-blocking findings of the fess audit of Phase B part 2 subtask C24 (WM-028 fu
 
 Other C24 limitations recorded with the commit: the restarted manager does not ingest the on-disk evidence of the lost run (GET /v1/runs/{id} keeps runtime status running with lost supervision, as documented), and only N8 was run for the new mode.
 
+* TODO [#D] Resolve C25 fess findings on storage-error endings
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-c25-storage-endings-fess-findings-r5lr
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-30 Wed 18:18]
+:MODIFIED: [2026-09-30 Wed 18:18]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of the fess audit of Phase B part 2 subtask C25 (WM-028 functional, storage-error endings, mode storage of manager/test/service_http.py). Report: fess/b2-C25-r1.md in the private evidence directory.
+
+1. (medium, functional) manager/test/service_http.py (storage case 8/9 loop, the assertion that verification stays 'verified' after a refused download) and manager/ARTIFACTS.md (about line 61). After GET /v1/artifacts/{id} refuses a missing or corrupt result, GET /v1/runs/{id} still reports verification 'verified' until a client reads /outputs. Fix: record the unavailable observation (reason missing or corrupt) when a download refuses for a verification failure, so that the run verification turns unavailable at once, or have the operator confirm that lazy observation is intended. Then adjust the assertion and the ARTIFACTS.md sentence.
+2. (low) manager/STORAGE.md (about lines 773-776). The claim that the next lifetime creates the active file after the last sealed record when sealed segments remain is not tested by the storage mode, which moves sealed/ out. Fix: add a restart case with sealed segments in place, or cite the native check that covers it.
+3. (low) manager/test/service_http.py storage case 4. The floor is checked only at 0 with no sealed segments. Fix: accept, or configure small segments so that the case sees a nonzero floor.
+4. (low, runtime, predates C25) Fixture server-0.stderr logs 'admission preparation ... WorkerUnexpectedExit erased=command StorageUnavailable' with no storage fault (also seen in the C16, C17 and C23 fixtures). server-3.stderr logs GET /v1/runs/<id>/control 503 StoreBusy, meaning a read waited out the five-second allowance in case 8. Fix: investigate both.
+5. (low) manager/test/service_http.py storage_checks stop(). Every lifetime exits -2 after SIGTERM, and the mode does not assert the exit code. Fix: assert the expected exit status of an operator stop, or document why -2 is expected.
+6. (low) manager/STORAGE.md (about lines 752-753). One paragraph line is not reflowed. Fix: reflow the paragraph.
+
 * TODO [#D] Resolve C4 fess findings on the pruned flow reader
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -17287,7 +17310,7 @@ Network mutation remains behind G3 until the required evidence is complete.
 :LABELS:   ["p5","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-30 Wed 18:00]
+:MODIFIED: [2026-09-30 Wed 18:18]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-028
 :SOURCE_REPO: agent-cat
@@ -17437,6 +17460,13 @@ public or production deployment.
     "author": "johnw",
     "text": "Phase B part 2 C24 (functional, manager death and restart): new mode failures-manager of manager/test/service_http.py. A manager killed with SIGKILL while a run waits at its question leaves no worker of that run after a bounded wait (the worker reads the end of its control input and the runtime cancels the run). A restart on the same root and configuration records a new lifetime notice with reconciliation counts, the reader reports the earlier lifetime as lost (no shutdown notice), the run shows lost supervision, nothing is dispatched again (one start relay, one run store), exact replays of the enqueue and the approval return the original 202 receipts, the pruning round at open keeps the non-terminal lost run's segment, and a fresh request completes with a verified result. No production code changed. manager/WORKERS.md gains the section 'Manager loss and restart' and manager/STORAGE.md a cross-reference. Checks passed: the -ftui-tests build, failures-manager at N8, make -C doc check, the Phase A journey at N8. Fess not blocking, findings in acat-c24-manager-loss-fess-findings-g5xr. Evidence: B2/C24 in the private resume-20260923 directory. Security-only parts of WM-028 stay deferred.",
     "created_at": "2026-10-01T01:00:35Z"
+  },
+  {
+    "id": 437,
+    "issue_id": "acat-wm-028-g1n0",
+    "author": "johnw",
+    "text": "Phase B part 2 C25 (functional, storage-error endings): new mode storage of manager/test/service_http.py, four manager lifetimes. Case 1: with globalMutationLedgerBytes 2621440 (R plus four command capacities), the next ordinary command is refused with 429 storage-quota and leaves no row, a cancel of the waiting run is still accepted and the run ends cancelled (cancel reserve), ordinary commands stay refused after an ordinary restart because the command ledger is not pruned, and the flow verb reports continuing positions (lifetime notice 18 after shutdown 17) and floor 0. Case 2: with the active manager log renamed away while a run waits, an ordinary command is refused with 503 storage-unavailable and no ledger row, a cancel still ends the run cancelled, and the next lifetime starts a new log with its lifetime notice after the documented recovery step. Case 3 (scenario A11): a removed and a corrupted result.json are each refused by GET /v1/artifacts/{id} with 404 unavailable-resource and no bytes, while GET /v1/runs/{id} keeps runtime status succeeded. No production code changed. manager/STORAGE.md and manager/ARTIFACTS.md describe these endings. Checks passed: the -ftui-tests build, storage at N8, make -C doc check, the Phase A journey at N8. Fess not blocking, findings in acat-c25-storage-endings-fess-findings-r5lr. Evidence: B2/C25 in the private resume-20260923 directory. Security-only parts of WM-028 stay deferred.",
+    "created_at": "2026-10-01T01:18:29Z"
   }
 ]
 #+end_src

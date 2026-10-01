@@ -712,7 +712,11 @@ and retirement shrinks a row to its tombstone charge, which stays charged.
 the charge exceeds L minus R minus one command capacity, and a cancel when it
 exceeds L minus one command capacity. So the ledger, and not the manager log,
 still bounds steady-state admission, under the same `globalMutationLedgerBytes`
-ceiling.
+ceiling. No serving lifetime runs `retainReceipts`, so the charge does not
+fall, and an ordinary restart does not change it. When the charge reaches the
+ceiling, ordinary commands therefore stay refused with `storage-quota` across
+restarts, while a cancel can still use the reserve R. The operator raises
+`globalMutationLedgerBytes` to admit ordinary commands again.
 
 A crash leaves a log that the next open accepts:
 
@@ -738,10 +742,15 @@ A crash leaves a log that the next open accepts:
   last record of the segment before it.
 
 In both cases, and after any other failure of the open, the writer of the
-lifetime refuses every append. Each ordinary command and each review
+lifetime refuses every append. A writer that breaks during a lifetime, because
+the path no longer names the file that it opened, refuses every later append
+of that lifetime in the same way. Each ordinary command and each review
 publication is then refused with `storage-unavailable`, because its
-`Refusing` record cannot be appended. A cancel still commits, and it has no
-record in the log. The serving lifetime records the reason once in the private
+`Refusing` record cannot be appended, and the command leaves no row in the
+ledger. A cancel still commits, it still stops the run, and it has no record
+in the log. The shutdown notice of such a lifetime is not appended either, so
+its log ends without its stop. The next lifetime appends no gap notice for
+the entries of the broken lifetime. The serving lifetime records the reason once in the private
 fault log at open, as one of three fixed words: `oversized`, `undecodable` or
 `io-failure`. The line has the form
 `manager-fault <time> manager-log open class=flow <word>`. It holds no path,
@@ -761,7 +770,10 @@ The operator recovers as follows:
 4. Read the archived log with `agentic-run flow`.
 
 The positions of the new log start again at 0, and a reply in it never names
-a record of the archived log.
+a record of the archived log. When the active file was moved away during a
+lifetime, step 2 moves the remaining directories. While sealed segments of the
+stream remain in `flow/sealed/<stream>/`, the next lifetime instead creates
+the active file at the position after the last sealed record.
 
 The `manager-command-check flow` mode checks both refusals and the recovery.
 It also measures the synchronized `command` record. On 2026-09-29, on the local
@@ -770,6 +782,30 @@ command records took a median of 5.511 ms and a maximum of 7.523 ms. The
 admission of an ordinary command with its synchronized record took a median of
 7.817 ms and a maximum of 235.933 ms over 60 commands. The mode prints both
 series on each run and asserts no threshold.
+
+The `storage` mode of `manager/test/service_http.py` checks these endings
+through four lifetimes of the running manager with the mixed fixture:
+
+1. With `globalMutationLedgerBytes` set to R plus four command capacities,
+   the smallest value that admits the four commands of one run, a run waits
+   at its person question. The next ordinary command is refused with
+   `storage-quota` and leaves no ledger row. A cancel of the run is accepted
+   and ends the run cancelled.
+2. After an ordinary restart, an ordinary command is still refused with
+   `storage-quota`, and the ledger keeps its charge. The flow verb verifies
+   both lifetimes, the second lifetime notice follows the shutdown notice of
+   the first, and the verb reports the floor.
+3. With the ceiling raised, the fixture renames the active manager log away
+   while a run waits at its person question. An ordinary command is refused
+   with `storage-unavailable` and leaves no ledger row, a cancel ends the run
+   cancelled, and the writer creates no new log.
+4. After the operator moves the rest of the log out, the flow verb verifies
+   the archived log, whose last lifetime has no shutdown notice and no record
+   of the cancel. The next lifetime begins a new log at position 0 with its
+   lifetime notice and no gap notice.
+
+The same mode checks a removed and a corrupted result, as the
+[artifact contract](ARTIFACTS.md#outputs-and-verification) describes.
 
 ## Worker cleanup ownership
 
