@@ -2,6 +2,300 @@
 
 <!-- handoff-id: wm023-20260923; status: paused-unaccepted-wip; accepted: WM-001..WM-022,G0,G1; resume-branch: workflow-manager-checkpoint-20260923; fess: every-subtask -->
 
+## Phase B part 2 of 2026-09-30
+
+The resume workflow delivered Phase B part 2 under the operator directions
+of 2026-09-29 for fast validation and of 2026-09-30 for functionality
+first, as subtasks C1 to C26 after `5e8bbf9f`. Part 2 holds the ext-pi
+checks on the built Pi fork, the retention and pruning of the manager log,
+the functional review findings of part 1, actor-flow increment 2 (the route
+resources), the remaining mutation routes and controls of WM-027,
+actor-flow increment 3 (the live re-route and the asks that people answer),
+and the functional failure endings of WM-028. Subtasks C1 to C25 landed.
+Subtask C26 ran the part 2 gate on `9f1ae979` with the C26 repair of the
+`pages` assertion and wrote this section. This section describes the
+current state. Where any section below differs, this section supersedes
+it, and the sections below remain as chronology. The evidence of each
+subtask is under `B2/<subtask>/impl-r1` in the resume directory.
+
+| Subtask | Commit | Result |
+| --- | --- | --- |
+| C1 | `7ec954f8` | The ext-pi checks pass on the built Pi fork 0.99.1. `test/owned-child-e2e.test.ts` asserts that the run log of an ext-pi launch names the owner that the ext-pi manifest declares. |
+| C2 | `f8b87dbc` | The manager-log writer seals the active file into segments under `flow/sealed/<stream>/`, with global positions across segments and a reply index for retained records. |
+| C3 | `a0d2065e` | A Store-owned pruner removes the oldest sealed segments below a protected floor by age or size, and it keeps every segment that names live work. |
+| C4 | `5f219722` | `agentic-run flow` reports the floor and treats a reply or a consent chain that crosses it as pruned. `manager/STORAGE.md` states the layout and the rules. |
+| C5 | `0b4bf489` | Two artifact downloads run at the same time. A third waits up to five seconds for a place, and each download has a total deadline of 300 seconds. |
+| C6 | `fbe05a8a` | `GET /v1/requests` and `GET /v1/runs` read their members in keyset windows of at most 1024 identifiers. |
+| C7 | `724f04a2` | `--manager serve --legacy-history ROOT=PROFILE` binds legacy history read-only, and `GET /v1/runs` and `GET /v1/runs/{id}` serve its entries. |
+| C8 | `73a47ac6` | A bounded, positioned window reader for run logs and for the segments of a manager log. |
+| C9 | `edd5da53` | `GET /v1/runs/{id}/routes` serves the run log as JSON batches. |
+| C10 | `27f2f6c0` | `GET /v1/routes` serves the manager log of the current Store stream as JSON batches. |
+| C11 | `e4b9e5c9` | Both route resources also serve server-sent events, with append wakeups, the shared reader quota and resumption by cursor. |
+| C12 | `004eef20` | `POST /v1/captures` reaches the Drafts capture owner. |
+| C13 | `14b795c0` | Preparation discard through `POST /v1/preparations/{id}` is a retained command. |
+| C14 | `768de34b` | `POST /v1/runs/{id}/exports` reaches the export owner. |
+| C15 | `a3a8720c` | `POST /v1/runs/{id}/lineage-requests` reaches the lineage owners, and a lineage review carries the optional field `lineage`. |
+| C16 | `3f919fc8` | Cancel, steer, retry, abandon and two concurrent answers reach their runtime effects through `/v1`. No production code changed. |
+| C17 | `890dec08` | A `/v1` fail-over and a `/v1` redirect inside the dispatch window each show in the run log. A runtime ordering race of steer and redirect events is repaired. |
+| C18 | `7c0a9b94` | The runtime re-routes an in-flight attempt that is not an effect to a live candidate in its approved fail-over chain (difference D6). |
+| C19 | `dd240c43` | The ext-pi reducer and monitor accept the event order of a live re-route. |
+| C20 | `e7810632` | The manager offers and admits a live redirect through `POST /v1/runs/{id}/control`. |
+| C21 | `04ef9db0` | The target option `--person-answer model:NAME` or `tool:NAME` names asks that a person answers through the person gate. The policy field `personAnswers` is part of the review. |
+| C22 | `cd2198c6` | Asks answered by people work end to end through the running manager. No production code changed. |
+| C23 | `76e65633` | A lost worker ends with lost supervision and no second start. `manager/ci/supervision.sh` is repaired. |
+| C24 | `de22ba49` | A manager killed with SIGKILL ends its runs honestly, and a restart dispatches nothing again. No production code changed. |
+| C25 | `9f1ae979` | Storage errors end honestly: the command-ledger ceiling, a missing manager log and a removed or corrupted result. No production code changed. |
+| C26 | this section | The part 2 gate below, a repair of one pages-mode assertion, and this section. |
+
+### Delivered behavior
+
+- The manager log `flow/<stream>.ndjson` seals into segments with global
+  positions, and the Store pruner removes old segments below a protected
+  floor. A segment that names a request that is not terminal, a run that is
+  not observed terminal, the parent run of a live request or an ask without
+  a reply stays. `agentic-run flow` reports the floor and reads across it.
+- The manager serves the route resources of actor-flow increment 2.
+  `GET /v1/runs/{id}/routes` serves the run log of a run, and
+  `GET /v1/routes` serves the manager log of the current Store stream. Each
+  serves JSON batches and server-sent events, with a cursor bound to the
+  stream, 410 `view-expired` after a restore and 410 `cursor-expired` below
+  the floor. The existing scope checks select the records. Observe gives
+  public-class records, observe with control adds actor-class records, and
+  restricted records are never served. A route stream holds no Store loan
+  while it writes.
+- Two artifact downloads run at the same time, a third waits within the
+  five-second allowance, and a total deadline of 300 seconds ends a slow
+  download at its next write. The request and run collections read keyset
+  windows of at most 1024 identifiers. Configured legacy history roots are
+  served read-only through `/v1/runs`.
+- The frozen mutation routes of WM-027 reach their existing owners:
+  captures, preparation discard, exports and lineage requests (restart,
+  resume and fork). Cancel, steer, retry, abandon, concurrent answers,
+  fail-over and the redirect inside the dispatch window reach their runtime
+  effects through `/v1`, and the run log shows the fail-over and the
+  redirect.
+- The runtime re-routes an in-flight attempt that is not an effect, when a
+  service principal or a local controller sends a redirect to a live
+  candidate in the approved fail-over chain. It stops the attempt through
+  its original owner, appends a failure for the current question and asks
+  the chosen candidate in a new question. A redirect of an effect or to a
+  target outside the chain is rejected, and the run continues. No effect is
+  re-routed in flight.
+- A reviewed policy field `personAnswers` names the asks that a person
+  answers through the person gate instead of the routed backend. The review
+  shows the field, so exact approval covers it.
+- A lost worker, a lost manager and the storage errors of WM-028 end
+  honestly. A lost run shows lost supervision with no verified result, it
+  starts once, and new work proceeds. At the command-ledger ceiling an
+  ordinary command is refused with 429 `storage-quota`, and a cancel still
+  ends a run through the cancel reserve.
+- The `/v1` contract changes only by additions since `5e8bbf9f`: the paths
+  `GET /v1/runs/{id}/routes` and `GET /v1/routes`, the schemas
+  `RouteBatch`, `RouteCursor`, `RouteRecord`, `ManagerRouteBatch`,
+  `ManagerRouteCursor` and `ManagerRouteRecord`, and two optional fields.
+  The field `lineage` of `Review` (with the schemas `ReviewLineage` and
+  `ReviewEdit`) came with C15, and the field `personAnswers` of the routed
+  `PublicPolicy` came with C21. A root review and a policy without person
+  answers keep their bytes. `Capabilities` keeps its bytes, and
+  `DataBroker` keeps its nine fields.
+
+### Gate of Phase B part 2
+
+Subtask C26 ran the gate once on the tree of `9f1ae979`, in this order. Each
+step has a `.log` and an `.exit` file under `B2/C26/impl-r1`. The first
+failure of each step is under `B2/C26/impl-r1/failed-r0`. Every step listed
+here passed, and each control failed with its literal message as intended.
+
+1. `make -C doc check` passed (`01-doc-check`). Its contract check reported
+   107 schemas, 31 operations, 341 payload cases, 20 SSE cases, 4 route SSE
+   cases and 3 byte-bound downloads.
+2. The incremental Werror build of all targets with `-ftui-tests` and
+   `tui-model-test` passed (`02-allbuild`).
+3. `make -C doc check-haskell` passed (`03-doc-check-haskell`).
+4. The second incremental build after that reconfiguration passed
+   (`04-allbuild-incremental`).
+5. The comparison of `doc/api/openapi.yaml` with `5e8bbf9f` found no removed
+   or changed path, the two route paths and eight schemas as additions, the
+   two optional fields named above as the only changes to existing schemas,
+   and identical `Capabilities` bytes (`05a-api-additive`). Its first run
+   used the comparison of part 1, which refuses any change to an existing
+   schema, and it named `PublicPolicy` and `Review`
+   (`failed-r0/05a-api-additive`). The repair accepts a change that only adds
+   an optional property and lists each one. `DataBroker` has nine fields
+   (`05b-broker-fields`).
+6. `runtime-contract-test` passed at N8 (`06-runtime-contract-N8`).
+7. `test/flow_probe.py` passed (`07a-flow-probe`). `test/progress_probe.py`
+   passed with the golden `test/fixtures/flow/hello-events.ndjson` and the
+   reference trace. Its five cases reported storage ratios of 1.577, 1.277,
+   0.959, 1.321 and 1.332, the last for the broker-injected case
+   (`07b-progress-probe`).
+   `test/control_probe.py` passed at N8 with the live-redirect cases
+   (`07c-control-probe-N8`). `test/person_control_probe.py` passed at N8
+   with the person-answer cases (`07d-person-control-probe-N8`).
+8. `manager-command-check flow` passed at N8 (`08a-command-flow-N8`). It
+   reported a median synchronized command-record append of 6.715 ms (maximum
+   10.471 ms) and a median ordinary admission with its record of 8.604 ms
+   (maximum 11.960 ms) over 60 commands. The main form with
+   `command_contract.py` and `credential_cli.py` passed at N8
+   (`08b-command-main-N8`).
+9. `manager-artifact-check` passed its modes `response-order`,
+   `response-ingestion` and `collections` at N8 (`09-artifact-*`). Its main
+   form with `manager-history-check` and `artifact_contract.py` passed at N8
+   (`09d-artifact-main-history-N8`).
+10. The main mode of `manager-store-check` passed at N8
+    (`10-store-main-N8`).
+11. `manager/test/client_native.py` passed at N8 with 28 PASS lines
+    (`11-client-native-N8`).
+12. `manager/test/service_http.py` passed at N8 once in each mode, with a
+    fresh fixture for each: base with `CLIENT_CHECK`, `mixed`, `pages`,
+    `events-lifecycle`, `routes`, `mutations-captures`, `mutations-discard`,
+    `mutations-exports`, `mutations-lineage`, `controls`,
+    `controls-routing`, `live-redirect`, `person-answers`,
+    `failures-worker`, `failures-manager` and `storage` (`12a` to `12p`).
+    The first run of `pages` failed in case 8, because its ETag assertion
+    expected a representation tag on the first page of
+    `/v1/runs/{id}/lineage-requests`. Since C15 that page carries the parent
+    run revision as its strong ETag, as `doc/api/README.md` states. The
+    failure is under `failed-r0/12c-service-pages-N8`, with the fixture root
+    `/Users/johnw/Products/k.M0a5ItPm/tmp/c26-pages.vdBAyX4C`. The repair
+    gives the lineage collection the same expectation as the export
+    collection, and the rerun passed.
+13. `tui-journey` passed at N1 and then N8 with every `FLOW-ASSERT` and a
+    verified consent chain (`13-journey-pair`, fixture root
+    `/Users/johnw/Products/k.M0a5ItPm/tmp/c26-gate-journey.EKdYGEXp`). In
+    both runs the chain was review 7, approve 8, receipt 9, start relay 10
+    and run start 0. The manager logs held 26 records in 22193 and 22192
+    bytes, and the run-log storage ratio was 1.408 at N1 and 1.407 at N8.
+14. The control `tui-journey-broken-answer` failed with "JOURNEY-ASSERT
+    typed answer is not JSON false", `tui-consent-control` failed with
+    "detail-view key approved a review", and `tui-flow-approve-fault`
+    failed with "FLOW-FAULT the approve append failed and the manager
+    refused the approval with storage-unavailable", each at N8 (`14a` to
+    `14c`).
+15. In `ext-pi`, `npm run check` passed (`15a-ext-pi-check`), `npm test`
+    passed with 92 tests and 5 skipped (`15b-ext-pi-test`), and
+    `npm run test:integration` passed its 8 Vitest cases and
+    `test/pi-remote-current.mjs` with `AGENT_CAT_E2E_RUNNER` set to the
+    `-ftui-tests` build of `agentic-run` (`15c-ext-pi-integration`).
+16. `bash tui/ci/tui.sh` passed (`16-tui-ci`). It covers TUI local mode,
+    the source boundaries, `tui-model-test` and the TUI probes.
+17. `make -C doc check` passed after this section (`17-doc-check-final`).
+
+### Design gates of increment 1
+
+Section 6.1 of the design record names eleven gates. The table maps each to
+its current evidence. Item 2 of `acat-62j0` asked for this table.
+
+| Gate | Evidence | Not run |
+| --- | --- | --- |
+| 1, the whole journey | Steps 13 and 14 of this gate. | None. |
+| 2, carriage | `runtime-contract-test` and the carriage check of `test/flow_probe.py`, steps 6 and 7. | None. |
+| 3, round trips | The codec checks of the seventeen schemas in `runtime-contract-test`, step 6. | None. |
+| 4, public bytes and the reference trace | `test/progress_probe.py` with the golden file and the reference trace, step 7. | `cli/ci/examples.sh` did not run in part 2. It last passed in step 31 of the increment 1 gate. |
+| 5, attribution | The attribution cases of `test/flow_probe.py` and the person cases of `test/person_control_probe.py`, step 7. The ext-pi launch owner from C1, run again in step 15. | The ACP permission scenario of `engine/acp/ci/acp.sh` did not run in part 2. It last passed in step 29 of the increment 1 gate. |
+| 6, re-routing | C17: a `/v1` fail-over and a `/v1` redirect inside the dispatch window, each shown in the run log, step 12 (`controls-routing`). C18: the live re-route of `test/control_probe.py`, step 7, and through `/v1` in step 12 (`live-redirect`). | No check sends the redirect from a TUI key. The redirect travels through `/v1` and through the local control channel of `test/control_probe.py`. |
+| 7, failures, restarts and runs that never start | C25: the `storage` mode, step 12. Also the modes `failures-worker`, `failures-manager` and `mutations-discard`, step 12, and the open refusals, recovery and ceiling of `manager-command-check flow`, step 8. | `manager-approval-check flow-review` and the modes of `manager-admission-check`, which carry withdraw, review expiry and admission refusal, did not run in part 2. They last passed in steps 15 to 17 of the increment 1 gate. |
+| 8, stop and uncertainty | The uncertainty cases of `test/flow_probe.py`, step 7, the run-log states of the reader checks of `runtime-contract-test`, step 6, and the uncertain open ask of `failures-worker`, step 12. | None. |
+| 9, storage and cost | The storage ratios of steps 7 and 13, the manager-log size of step 13, and the in-process append latency of step 8. | The latency of each synchronized append is not measured in the journey (item 4 of `acat-62j0`). |
+| 10, bypass | The `inProcessBroker` allowlist check of `test/flow_probe.py` and its negative line, step 7. | None. |
+| 11, regression | ext-pi from C1 and C19, run again in step 15. The runtime broker checks, step 6. TUI local mode, step 16. The admission, approval, control, worker and ingestion owners through the service modes of step 12. | The revalidation of `broker-api-default` (`678326b`) at N1 and N8. `cli/ci/policies.sh`, `cli/ci/routing-config.sh`, `engine/acp/ci/acp.sh`, `engine/agent-deck/ci/deck.sh` and `bisim/ci/tier0.sh`. |
+
+### Checks not run
+
+- The revalidation of `broker-api-default` (`678326b`) that gate 11 names,
+  and the measurement of the append latency in the journey that gate 9
+  names.
+- `cli/ci/policies.sh`, `manager/ci/approval.sh`, `manager/ci/controls.sh`,
+  the `admission_audit.py` mutation audits, mutant suites, stability samples
+  of more than a few starts and `-fforce-recomp` builds. The operator
+  direction of 2026-09-29 removes them from routine validation.
+- `bisim/ci/tier0.sh` and every Lean or oracle check. The operator
+  direction forbids them for this run.
+- The N1 runs of the runtime and manager checks. Each ran once at N8, and
+  only the journey ran at N1 and N8.
+- The checks of the increment 1 gate that the part 2 gate list does not
+  name: `engine-api-test`, `test/lineage_probe.py`,
+  `manager-approval-check`, `manager-admission-check`,
+  `manager-worker-check`, the store modes other than main,
+  `manager-draft-check`, `engine/acp/ci/acp.sh`,
+  `cli/ci/routing-config.sh`, `cli/ci/examples.sh`,
+  `engine/agent-deck/ci/deck.sh`, `manager/ci/supervision.sh` (C23 ran it)
+  and `manager/ci/vertical.sh`. The modes `credential-lifecycle` and
+  `boundary` of `service_http.py` did not run, because they are security
+  checks of part 1.
+- `engine/acp/ci/route-live.sh`, which needs a paid provider.
+
+### Deferred security items
+
+The operator direction of 2026-09-30 defers security work to a later stage.
+The existing authentication, scope checks, exact consent and bounds stay in
+place, and the gate above exercised them. These items are deferred and
+not done:
+
+- The hostile-input and transport negatives of WM-024 and WM-028,
+  including those of the route resources, the new mutation routes and the
+  live redirect.
+- The binding of a route cursor to the authorization revision, a
+  per-credential projection of route records, route-class projection
+  design beyond the existing scopes, and revocation-during-stream matrices.
+- The redaction of run-log bodies and of the output of `agentic-run flow`.
+- The G2 witness of protected observation with mutations unavailable.
+- The remaining Name Constraints work, including the optional patch B18 of
+  `crypton-x509-validation`, and the scenarios of item 1 of `acat-3iof`.
+- Scans for synthetic secret markers beyond those of the existing modes.
+- The threat model of increment 2 stays a design reference, and no review
+  of it gates serving.
+
+### Remaining limits
+
+- The SQLite command ledger is not pruned. `command_ledger_usage` keeps
+  every admitted command charged, and `Commands.checkCapacity` bounds
+  admission under `globalMutationLedgerBytes`. When the ledger reaches that
+  ceiling, every ordinary command is refused with 429 `storage-quota`, and
+  it stays refused after an ordinary restart. A cancel still proceeds
+  through the cancel reserve. The `storage` mode shows this behavior. Only
+  the manager log is pruned.
+- A restart quarantines the reservation of a lost run with its execution
+  slot and resource keys, and no operation releases it yet. With one
+  reservation, no new run starts after a manager crash (WM-020 and WM-042).
+- The manager offers a redirect target from the route names of the
+  approved policy. After an automatic fail-over the offer can list a target
+  that the runtime then rejects, and the stopped ACP turn of a live
+  re-route is not cancelled at the adapter while the run continues.
+- The pruner uses the wall clock and a fixed age of 604800 seconds, and an
+  uncertain command or a lost run holds the floor until an operator acts.
+- A SIGKILL of the frontend proxy group alone leaves the inner worker group
+  alive, so that run stays under owned supervision (WM-019 containment).
+- The open fess findings of each subtask are in the tracker items that the
+  commit messages of C1 to C25 name.
+
+### Package status
+
+| Package or item | Status | Evidence |
+| --- | --- | --- |
+| Manager-log retention (`acat-3mgw`) | Met and closed | C2, C3, C4, gate steps 8 and 12 |
+| Increment 2 (`acat-en4g`) | Met for function, with its security items deferred | C8 to C11, gate steps 1 and 12 |
+| Increment 3 (`acat-c18n`) | Met for function | C18 to C22, gate steps 7, 12 and 15 |
+| WM-025 (`acat-wm-025-3utw`) | Met for function, with its security items deferred | C6, C7, C9, C10, gate steps 9 and 12 |
+| WM-026 (`acat-wm-026-qo1e`) | Met for function, with route SSE added | C11, gate step 12 |
+| WM-027 (`acat-wm-027-gcu6`) | Met for function | C12 to C17, C20, gate step 12 |
+| WM-028 (`acat-wm-028-g1n0`) | The functional failure endings are met, and the security negatives are deferred | C23, C24, C25, gate step 12 |
+| `acat-62j0` | Gates 5, 6 and 11 ext-pi have evidence, and the table above maps gates 1 to 11. The broker-api-default revalidation, the journey latency and the `policy-probe` expectation remain. | C1, C17, C18, C19, this gate |
+| Part 1 review findings of C5, C6 and C7 | Met | C5, C6, C7, gate steps 9 and 12 |
+
+### Next action
+
+1. The Integrator commits C26 and decides the tracker state of the packages
+   in the table above.
+2. Phase C follows: the shared client and the full TUI service mode, which
+   can use the route resources, the new mutation routes and the live
+   redirect.
+3. A later security stage takes the deferred items above, the negatives
+   of WM-024 and WM-028 and the G2 witness.
+
+Accepted state is unchanged at WM-001 to WM-022 and G0 and G1. Part 2
+closes no gate.
+
 ## Phase B part 1 of 2026-09-30
 
 The resume workflow delivered Phase B part 1 under the operator direction of

@@ -2020,9 +2020,11 @@ def page_checks():
             time.sleep(0.05)
         if status == 200:
             validate(schema, value, raw)
-            # The first page of an export collection carries the strong
-            # collection revision, which an export POST supplies as If-Match.
-            expected = ('"' + value["page"]["revision"] + '"' if re.fullmatch(r"/v1/runs/[A-Za-z0-9_-]+/exports", target)
+            # The first page of an export or lineage collection carries the
+            # strong collection revision, which an export or lineage POST
+            # supplies as If-Match.
+            expected = ('"' + value["page"]["revision"] + '"'
+                        if re.fullmatch(r"/v1/runs/[A-Za-z0-9_-]+/(exports|lineage-requests)", target)
                         else representation_tag(target, raw))
             assert received.get("etag") == expected, ("page ETag", target, received.get("etag"))
             bodies.append((target, raw))
