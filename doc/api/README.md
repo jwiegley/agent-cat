@@ -736,6 +736,12 @@ records. The `invalidations`, `batches` and `routeRecords` vectors hold JSON
 text that decodes and encodes back to the same value, or that refuses with
 `InvalidResponse`. The `cursors`, `etags` and `problems` vectors cover the
 cursor syntax, entity-tag equality and the mapping of problem bodies.
+The TypeScript manager client of `ext-pi`, in `ext-pi/src/manager/`, is a
+second consumer of the `events` section. `ext-pi/test/manager-vectors.test.ts`
+runs every case of that section in vitest with the same pass criteria and
+the same splits, and it asserts the number of cases of each subsection. It
+reads the file with a lossless JSON parser, so that each number reaches the
+decoders with its exact value.
 
 The `resources` section of the same file holds the vectors of the public
 resource types. Each case gives the resource as JSON text in `json`, and

@@ -57,6 +57,52 @@ missing.
 agent-cat owns `ext-pi` and its manager client. The Pi owner owns the host. The
 fork is built for this extension and is not edited by agent-cat work.
 
+## Manager client
+
+`src/manager/` holds the TypeScript manager client. It states the behavior of
+the Haskell client modules `Agentic.Manager.Client.Events` and
+`Agentic.Manager.Client.Failure`, and it imports no Haskell code. Its modules
+perform no I/O and hold no session.
+
+`src/manager/json.ts` parses JSON text without loss. `parseJson` uses the
+source text that `JSON.parse` of Node 22 gives to a reviver, and it keeps the
+text of each number in a `JsonNumber`. Thus `123456789012345678901234567890`,
+`1e400` and integers above 2^53 keep their exact value. `encodeJson` writes
+compact JSON text. It writes the members of each object in code-unit order of
+their names, and it writes each number as its source text. `jsonEqual`
+compares two values as the manager compares them: numbers by exact decimal
+value, so `1.0` equals `1`, and objects without regard to member order.
+`boundedInteger` and `word64` give the integer of a number only when the
+number is integral and inside the range. `parseJson` does not refuse a
+duplicate member or deep nesting. The Haskell strict decoder refuses both.
+
+`src/manager/events.ts` holds the live-delivery decoders:
+
+- `newSseParser`, `feedSse` and `closeSse` parse a server-sent-event stream
+  incrementally. A line ends at LF or CRLF, and a carriage return elsewhere
+  refuses. A comment-only block is a heartbeat. An `id` advances the last
+  event identifier, and an `id` that is not a cursor refuses. A block above
+  `SSE_BLOCK_BYTES` (16384 bytes, the terminating blank line included) and a
+  block that is not UTF-8 refuse. A refusal is `InvalidResponse`. `feedSse`
+  does not change the parser that it receives.
+- `decodeEventBlock` and `decodeRouteBlock` decode one dispatched block as an
+  invalidation of `/v1/events` or as a route record.
+- `decodeInvalidation`, `decodeInvalidationEvent`, `decodeEventBatch` and
+  `decodeRouteRecord` decode the JSON records. Each `encode` function gives
+  back a JSON value that `jsonEqual` finds equal to the decoded value. A
+  route-record body stays a lossless JSON value. Positions, sequence numbers
+  and claim sizes are `bigint` values in the unsigned 64-bit range.
+- `validCursor` and `validETag` check cursor and entity-tag syntax.
+- `problemFailure(status, body)` gives `Refused` with the status and the code
+  of a problem body, or `InvalidResponse`.
+
+`test/manager-vectors.test.ts` reads `../test/manager_client_vectors.json` and
+runs every case of its `events` section with the pass criteria of the
+`vectors` mode of `manager-client-check`. It feeds each `sse` stream whole, at
+each listed split, at every single split point of a stream of at most 2048
+bytes, and one byte at a time. It fails when a subsection is empty, and it
+asserts the number of cases of each subsection.
+
 ## Configuration
 
 Set the user-owned environment variables before you start Pi:
