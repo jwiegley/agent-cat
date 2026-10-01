@@ -276,6 +276,7 @@ describe("Pi extension lifecycle", () => {
       expect([...commands.keys()].sort()).toEqual([
         "wf", "wf-cancel", "wf-diff", "wf-fork", "wf-grant", "wf-help", "wf-launch", "wf-monitor",
         "wf-plan", "wf-recover", "wf-redirect", "wf-restart", "wf-resume", "wf-retry", "wf-status", "wf-steer",
+        "wfm-endpoints", "wfm-status",
       ]);
       await commands.get("wf")!.handler("fixture", ctx);
       expect(notices.at(-1)).toContain("requires interactive approval");

@@ -1899,6 +1899,43 @@ Actor-flow increment 1, delta 1b (at most 8 engineering days). Add the manager l
 ]
 #+end_src
 
+* TODO [#D] Resolve the non-blocking fess findings of subtask PE11
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-5snc
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-01 Thu 14:05]
+:MODIFIED: [2026-10-01 Thu 14:13]
+:OWNER:    johnw
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess audit fess/pe-PE11-r1.md (2026-10-01) on subtask PE11 (WM-036 shared-vector consumer, part 1: lossless JSON and SSE events in ext-pi/src/manager).
+
+1. (low) decodeEventBlock and decodeRouteBlock in ext-pi/src/manager/events.ts (near 551-553) parse block data with JSON.parse through tryParseJson. It keeps the last duplicate member and has no 64-level depth limit, while Haskell blockData uses decodeStrictValue (manager/src/Agentic/Manager/Protocol/Json.hs near 37-62), which refuses both. No vector covers this. It is documented in ext-pi/README.md and deferred to the security stage under the 2026-09-30 functionality-first direction. Fix: add duplicate-member and depth refusal for SSE block data (for example a small token checker before JSON.parse), together with a vector.
+2. (low) The PE11 task text asks for "CR line ends", but the parser refuses a lone carriage return (ext-pi/src/manager/events.ts near 171-172). The code is correct: it matches Events.hs lineOf and the vector "lone carriage return refuses". Fix: correct the WM-036 consumer task wording to "LF and CRLF line ends, a lone CR refuses". No code change.
+3. (low) integerOf in ext-pi/test/manager-vectors.test.ts (near 66-71) throws on a non-integral status or repeat count, while ClientCheck.hs rounds these values. The test is only stricter, and no current vector is affected. Optional fix: note the stricter reading in a test comment.
+
+Implementer limitations also recorded: the resources and refresh sections of the vector file have no TypeScript consumer yet, the client has no transport or session, and npm run test:integration was not run.
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 550,
+    "issue_id": "acat-5snc",
+    "author": "johnw",
+    "text": "PE12 resolves the PE11 limitation that the refresh section had no TypeScript consumer. The three PE11 findings stay open.",
+    "created_at": "2026-10-01T21:13:08Z"
+  }
+]
+#+end_src
+
 * DONE [#B] Concurrent equal failover asks can abort nondeterministically
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -2961,7 +2998,7 @@ Agent-deck 1.15 falsely reports delivery=typed for fast Pi/DeepSeek turns after 
 :LABELS:   ["workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-29 Tue 13:46]
-:MODIFIED: [2026-10-01 Thu 09:52]
+:MODIFIED: [2026-10-01 Thu 13:44]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -3012,6 +3049,13 @@ Non-blocking findings of fess audit fess/fast-A10A11-r1.md (2026-09-29) on subta
     "author": "johnw",
     "text": "Phase C closeout: both end-of-phase review lenses rate the Phase A TUI polish findings partial. PC8 delivered the retrieval retry, the bounded refresh pause and saveExact after publication (gate steps 3 and 11, PC/PC34/impl-r1 in the private resume-20260923 directory). Still open: the early 503 StoreBusy refusal on the answer route is not diagnosed, and each stacked Store lock (file slot, reader, configuration guard, gate, the timed wait in Drafts) still takes a fresh five-second allowance against a client timeout of 7 seconds. This issue stays open.",
     "created_at": "2026-10-01T16:52:41Z"
+  },
+  {
+    "id": 544,
+    "issue_id": "acat-a10a11-fess-followup-33k1",
+    "author": "johnw",
+    "text": "PE9: finding 3 is addressed. One five-second admission deadline (Store/Admission.hs Deadline) now covers the file slot, the configuration guard and the Store gate of one Store request; the Drafts 'timed 5000000' stays an operation bound. manager-store-check gains stacked cases that refuse after about five seconds without running the action, and a case that is admitted within the deadline and runs once. Finding 2: the false 'fail-fast' name was already renamed in 6e63a8b1, and the remaining contention check names state what they check. Checks passed: build, manager-store-check N8, manager-command-check N8 with command_contract.py, manager-draft-check N8 with draft_contract.py, manager-artifact-check (capabilities 8), journey N8 with no StoreBusy line, make -C doc check. Evidence: PE/PE9/impl-r2 in the private resume-20260923 directory. Open remainder of PE9 is acat-pe9-fess-followup-k551. Findings 1 and 4-8 stay open.",
+    "created_at": "2026-10-01T20:44:08Z"
   }
 ]
 #+end_src
@@ -3099,7 +3143,7 @@ Acceptance: the four corrections are made and make -C doc check passes.
 :LABELS:   ["workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-29 Tue 11:50]
-:MODIFIED: [2026-10-01 Thu 09:52]
+:MODIFIED: [2026-10-01 Thu 13:44]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -3143,6 +3187,13 @@ Acceptance: each item is fixed with a check, or recorded as not needed with a re
     "author": "johnw",
     "text": "Phase C closeout: both end-of-phase review lenses rate the Phase A TUI polish findings partial. PC8 delivered the retrieval retry, the bounded refresh pause and saveExact after publication (gate steps 3 and 11, PC/PC34/impl-r1 in the private resume-20260923 directory). Still open: the early 503 StoreBusy refusal on the answer route is not diagnosed, and each stacked Store lock (file slot, reader, configuration guard, gate, the timed wait in Drafts) still takes a fresh five-second allowance against a client timeout of 7 seconds. This issue stays open.",
     "created_at": "2026-10-01T16:52:41Z"
+  },
+  {
+    "id": 545,
+    "issue_id": "acat-a5s2b-fess-followup-s9rl",
+    "author": "johnw",
+    "text": "PE9: finding 1 is addressed. The first observation of a protected view (withAuthorizationRequestReadObservation) uses the rest of the request deadline, and the credential read, configuration watch and first observation run under one withStoreRequest. Later revalidations still start a fresh deadline. Evidence: PE/PE9/impl-r2 in the private resume-20260923 directory. Findings 2-6 stay open; the PE9 remainder is acat-pe9-fess-followup-k551.",
+    "created_at": "2026-10-01T20:44:08Z"
   }
 ]
 #+end_src
@@ -3154,7 +3205,7 @@ Acceptance: each item is fixed with a check, or recorded as not needed with a re
 :LABELS:   ["workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-29 Tue 12:34]
-:MODIFIED: [2026-10-01 Thu 09:52]
+:MODIFIED: [2026-10-01 Thu 12:45]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -3205,6 +3256,13 @@ Non-blocking findings of fess audit fess/fast-A6A7-r1.md (2026-09-29) on subtask
     "author": "johnw",
     "text": "Phase C closeout: both end-of-phase review lenses rate the Phase A TUI polish findings partial. PC8 delivered the retrieval retry, the bounded refresh pause and saveExact after publication (gate steps 3 and 11, PC/PC34/impl-r1 in the private resume-20260923 directory). Still open: the early 503 StoreBusy refusal on the answer route is not diagnosed, and each stacked Store lock (file slot, reader, configuration guard, gate, the timed wait in Drafts) still takes a fresh five-second allowance against a client timeout of 7 seconds. This issue stays open.",
     "created_at": "2026-10-01T16:52:41Z"
+  },
+  {
+    "id": 542,
+    "issue_id": "acat-a6a7-fess-followup-1exm",
+    "author": "johnw",
+    "text": "Finding 2 is addressed by subtask PE8 (2026-10-01), outcome (a). Every StoreBusy site on the command and read paths now writes a private fault line naming the site, the elapsed wait and the remaining allowance. Before the fix, the journey pair plus one N8 start showed five busy lines, all on GET /v1/runs/{id}/control at state-control-revision (4 in N1) and state-control-boundary (1 in N8), elapsed=0ms remaining=4999ms: an ingestion commit fell between the parts of State.controlSurfaceBorrowed. The new Store helper repeatChangedRead repeats that read, the decision read and the availability read within one five-second allowance. After the fix, JOURNEY-PAIR showed no fault lines. The original answer POST and GET /v1/requests/{id} refusals did not reproduce; their remaining immediate site, state-control-validation inside the command transaction, still refuses and now records its line. Checks: build, manager-store-check N8, manager-command-check N8 with command_contract.py (409 PASS), journeys, make -C doc check. Evidence: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/PE/PE8/impl-r1. Stacked allowances remain with PE9.",
+    "created_at": "2026-10-01T19:45:17Z"
   }
 ]
 #+end_src
@@ -5798,7 +5856,7 @@ Actor-flow increment 2, service subscription (4 to 6 engineering days, inside WM
 :LABELS:   ["workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-10-01 Thu 11:00]
-:MODIFIED: [2026-10-01 Thu 11:00]
+:MODIFIED: [2026-10-01 Thu 11:16]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -5808,6 +5866,20 @@ Actor-flow increment 2, service subscription (4 to 6 engineering days, inside WM
 Later work under the PE2 owner decision of 2026-10-01 (option C). The run owner lock runs/<run>/owner.lock covers the inner frontend worker, plus any engine session that starts through Runtime ProcessGroup spawnSession (createProcessGroup), which inherits the lock through posix_spawn_file_actions_addinherit_np on macOS. The inner worker starts no engine that way today. ACP starts through System.Process.createProcess in connectAcp (engine/acp/src/Agentic/Acp.hs), agent-deck through withCreateProcess (engine/agent-deck/src/Agentic/AgentDeck.hs), and shell steps through readCreateProcessWithExitCode (runtime/src/Agentic/Runtime/Shell.hs). These processes do not hold the lock, so its absence proves only that the inner worker has ended.
 
 Work: start the ACP and agent-deck engines through Runtime ProcessGroup sessions by way of a neutral spawn hook in engine/api (engine/acp/AGENTS.md forbids a runtime import), so that each engine session leader holds the owner lock. This changes engine signalling to session groups. Keep FD_CLOEXEC on owner.lock. Update manager/WORKERS.md ("Run directory owner lock") and runtime/README.md when the coverage changes.
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 535,
+    "issue_id": "acat-engine-owner-lock-coverage-9snr",
+    "author": "johnw",
+    "text": "PE3 landed the reader: owner-released evidence shows only that the inner worker and session leaders holding the inherited lock have ended. Process-library engines stay uncovered until this item.",
+    "created_at": "2026-10-01T18:16:05Z"
+  }
+]
+#+end_src
 
 * DONE [#B] Engine: party→backend routing, so one run can span adapters (PAL-consensus parity)
 :PROPERTIES:
@@ -8370,7 +8442,7 @@ Pi integration identified two missing shared contracts. Workflow descriptor v3 d
 :LABELS:   ["review","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-10-01 Thu 07:48]
-:MODIFIED: [2026-10-01 Thu 09:41]
+:MODIFIED: [2026-10-01 Thu 11:51]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -8396,6 +8468,13 @@ Non-blocking findings of fess audit fess/pc-PC31-r1.md (2026-10-01) on subtask P
     "author": "johnw",
     "text": "Still open at the Phase C gate (PC34, b698073e); recorded in the handoff section 'Phase C of 2026-10' under Remaining limits.",
     "created_at": "2026-10-01T16:41:29Z"
+  },
+  {
+    "id": 539,
+    "issue_id": "acat-jdmd",
+    "author": "johnw",
+    "text": "PE6 (2026-10-01): item 1 rendering defect fixed. At 40x12 the live monitor of a terminal run shows the Terminal and Result lines first (serviceMonitorLines in tui/src/Agentic/Tui/Presentation.hs; outcomeLines and previewLines in tui/src/Agentic/Tui/Service.hs). New 40x12 model test in tui/test/ServiceTests.hs (failed before the fix). tui-sizes step 6 now asserts 'Terminal: succeeded' and the verified size and SHA-256 against the harness download at 40x12, 80x24 and 140x36. Checks passed: Werror -ftui-tests build of agentic-run, routing-fixed-point-probe, tui-model-test; tui-model-test at N8; tui-sizes at N8; tui-sizes-broken-draft (nonzero with its literal); Phase A journey at N8; make -C doc check. Evidence: resume-20260923 PE6 stage directory; fess/pe-PE6-r1.md (non-blocking). The d-at-40x12 part of item 1 and items 2 to 6 are not addressed by PE6, so the issue stays open.",
+    "created_at": "2026-10-01T18:51:51Z"
   }
 ]
 #+end_src
@@ -10594,7 +10673,7 @@ Non-blocking findings of fess audit fess/pc-PC16-r2.md (2026-10-01) on subtask P
 :LABELS:   ["review","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-10-01 Thu 01:39]
-:MODIFIED: [2026-10-01 Thu 01:39]
+:MODIFIED: [2026-10-01 Thu 11:39]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -10609,6 +10688,20 @@ Non-blocking findings of fess audit fess/pc-PC17-r1.md (2026-10-01) on subtask P
 4. (low) tui/src/Agentic/Tui/ServiceLane.hs near lines 1048 and 1085: afterStream and afterPoll match `Refused 410 _` and ignore the code, so the view-expired and cursor-expired tests are one check. Merge the test names or note this in the test comment.
 5. (low) tui/src/Agentic/Tui/ServiceLane.hs near lines 1053-1060: a stream that delivered and then ended normally counts as SSE failure 1, so one later transport failure starts polling. Two normal ends with no delivery show "disconnected (TransportUnavailable)" although no transport failure occurred. Do not count a normal end as a failure, or document the rule and use a distinct code.
 6. (low) manager/test/__pycache__/ was left untracked by the tui-overview run and no ignore rule covers it. The Integrator deleted it. Add an ignore rule or run the harness with python3 -B.
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 537,
+    "issue_id": "acat-pc17-follow-fess-jd40",
+    "author": "johnw",
+    "text": "Items 1 and 2 resolved by Phase E subtask PE5. The ServiceOverviewReady handler in tui/src/Agentic/Tui/App.hs now calls Lane.overviewStep (tui/src/Agentic/Tui/ServiceLane.hs) for every overview origin (ExplicitOverview, BootstrapOverview, LiveOverview). A result of an earlier refresh generation frees the read lane, installs no rows, changes no model and starts no event worker. The queued resnapshot OverviewFetch then starts through pumpServiceFetches at the new generation and installs and starts the worker from its cursor. Two new model tests in tui/test/ServiceTests.hs (followTests) fail with the fence disabled and pass with it. doc/tui-design.md, tui/README.md and doc/agent-cat.texi state the fence. Evidence: resume-20260923 PE/PE5 logs (-ftui-tests build of agentic-run, routing-fixed-point-probe and tui-model-test; tui-model-test at N8 with 962 PASS; tui-overview and tui-endpoints at N8; JOURNEY-ONCE at N8; make -C doc check; all exit 0; integrator rerun of make -C doc check exit 0). Fess non-blocking (fess/pe-PE5-r1.md), findings filed as acat-pe5-overview-fence-fess-zd0c. Items 3 to 6 stay open, so the issue stays open.",
+    "created_at": "2026-10-01T18:39:46Z"
+  }
+]
+#+end_src
 
 * TODO [#D] Resolve the non-blocking fess findings of subtask PC18    :review:
 :PROPERTIES:
@@ -10982,6 +11075,168 @@ Non-blocking findings of fess audit fess/pc-PC9-r1.md (2026-09-30) on subtask PC
 6. (low) The vectors command in doc/api/README.md (near 798) calls list-bin without a build step. Add the BUILD command for manager-client-check before it.
 7. (low) The implementer summary said 102 named vectors. The file has 105 vectors, 83 of them named, and the 117 PASS lines are 105 vector checks plus 12 SSE decode checks. The integration record uses the corrected count.
 
+* TODO [#D] Resolve the non-blocking fess findings of subtask PE10
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pe10-fess-followup-l4o0
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-01 Thu 13:55]
+:MODIFIED: [2026-10-01 Thu 13:55]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess audit fess/pe-PE10-r1.md (2026-10-01) on subtask PE10 (WM-036 boundary: supported versions, explicit service mode and local root exclusion in ext-pi).
+
+1. (medium) The root-role check runs only in RunSupervisor.restore (ext-pi/src/index.ts near 108-115). prepareLaunch, previewPlan and preflightLineage in ext-pi/src/launch.ts do not run it. After a refused session_start, a later /wf against a manager-root state directory can still create runs/ or previews/ entries there. Fix: call assertLocalStateRoot(stateDirectory()) in the three paths and add one test per path.
+2. (low) The walk checks only the state directory and its ancestors (ext-pi/src/root-role.ts near 63-77, ext-pi/src/supervisor.ts near 83). A manager root nested at STATE/runs/<name> without a manifest is still removed by age retention. This matches the runtime contract. Optional fix: check readStateRootRole on each directory without a manifest before the age deletion.
+3. (low) ext-pi/README.md names fork commit 7857926ee, but no test checks the commit. ext-pi/test/host-versions.test.ts uses findPackageJSON plus realpath instead of import.meta.resolve. Both use the same resolver. Optional fix: assert the fork commit, or record that the commit is documentation only.
+4. (low) The both-set refusal in ext-pi/src/config.ts near 41 uses truthiness, so an empty AGENT_CAT_MANAGER_PROFILE together with AGENT_CAT_MANAGER_PROFILES is accepted as the array. Fix: compare both variables with undefined if empty values must refuse.
+5. (low) session_start validates the mode and discards the result, and /wf-status reads the environment again (ext-pi/src/index.ts near 111 and 376). Fix: keep the ClientMode from session_start and use it in /wf-status and the later client subtasks.
+
+Implementer limitations also recorded: the marker file mode is not checked (deferred to the security stage under the 2026-09-30 direction), the integration suite was not run, and the README does not describe how to provision node_modules for the non-Pi dependencies (PE27 would need operator authorization).
+
+* TODO [#D] Resolve the non-blocking fess findings of subtask PE12
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pe12-fess-followup-ukto
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-01 Thu 14:13]
+:MODIFIED: [2026-10-01 Thu 14:13]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess audit fess/pe-PE12-r1.md (2026-10-01) on subtask PE12 (WM-036
+shared-vector consumer, part 2: refresh coordinator, backoff and reconciliation in
+ext-pi/src/manager/refresh.ts).
+
+1. (low) doc/api/README.md near 741 says that the events and refresh sections run "with the same
+pass criteria and the same splits". Splits apply only to the SSE streams of the events section.
+Fix: say that the events streams are fed at the same splits, and the refresh section has none.
+2. (low) The backoff test in ext-pi/test/manager-vectors.test.ts uses
+RECONNECT_BACKOFF_MAX_SECONDS only as an upper bound. Haskell backoffVector asserts that it equals
+30 (manager/test/ClientCheck.hs near 482). Fix: add expect(RECONNECT_BACKOFF_MAX_SECONDS).toBe(30).
+3. (low) The reflow of the edited paragraphs in doc/api/README.md near 743 and ext-pi/README.md
+near 65 leaves short orphan lines. Fix: reflow both paragraphs.
+4. (low) The jitter test uses .filter(() => { ...expects...; return true }).length as a loop
+counter. Fix: use forEach or map and assert the length of the result.
+
+Implementer limitation also recorded: FetchGeneration is a JavaScript number, exact up to 2^53
+advances.
+
+* TODO [#D] Resolve the non-blocking fess findings of subtask PE13
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pe13-fess-followup-ly8y
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-01 Thu 14:26]
+:MODIFIED: [2026-10-01 Thu 14:26]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess audit fess/pe-PE13-r1.md (2026-10-01) on subtask PE13 (WM-036
+shared-vector consumer, part 3: resource DTOs, service projections and typed answers in
+ext-pi/src/manager/resources.ts).
+
+1. (low) ext-pi/README.md near 124 and ext-pi/src/manager/resources.ts near 1703 say that a flag
+takes yes, no, true or false. The code also accepts y and n, as the Haskell owner does
+(tui/src/Agentic/Tui/Person.hs near 72 and 75). Fix: name y and n in the flag sentence of both
+places.
+2. (low) In ext-pi/test/manager-vectors.test.ts near 788 and 811 the built counter increases only
+in the branch that also increases tally.projected, so expect(built).toBe(projected) holds by
+construction. Fix: remove the counter, or replace it with an assertion that fails if a refused
+answer reaches answerBody.
+3. (low) One added line of ext-pi/README.md near 169 is longer than the wrapped paragraph around
+it. Fix: rewrap the paragraph.
+
+Implementer limitations also recorded: the 32768-byte acknowledgement and 16384-byte effect limits
+are measured on the UTF-8 size of encodeJson, which can differ from Aeson by a few bytes near the
+limit (no vector is that close). parseJson does not refuse duplicate members or deep nesting in a
+verdict or structured answer, which matches the Haskell answer decoder. Flag case folding is
+toUpperCase().toLowerCase(), equal to Data.Text.toCaseFold for the six accepted words only.
+
+* TODO [#D] Resolve the non-blocking fess findings of subtask PE14
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pe14-fess-followup-vm3a
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-01 Thu 14:41]
+:MODIFIED: [2026-10-01 Thu 14:41]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess audit fess/pe-PE14-r1.md (2026-10-01) on subtask PE14 (WM-036 transport, part 1: client profile and HTTPS transport in ext-pi/src/manager/profile.ts and transport.ts).
+
+1. (low) ext-pi/test/manager-transport.test.ts near 355: the "discards a late response" case writes the late reply only when the held request is not destroyed, and close() aborts the client request first. The test proves an abort to ClientClosed, not that #fence discards a result that arrives after close(). Fix: deliver the response bytes before close() resolves the body read, or delay authorization(), so that the fence path in #consume, #open or the authorization check after the await (transport.ts near 471) runs.
+2. (low) ext-pi/test/manager-transport.test.ts near 112: the test server sets minVersion TLSv1.3, so the protocol assertion near 198 passes without the client minVersion and maxVersion settings (transport.ts near 481-482). Fix: let the test server accept TLS 1.2, or add a TLS 1.2-only server and assert that the client refuses it.
+3. (low) ext-pi/test/manager-transport.test.ts near 164: expect(seen).toEqual([]) after ClientProfile.load cannot fail, because load never sends a request. Fix: drop the assertion, or state the ordering through the type.
+4. (low) ext-pi/src/manager/transport.ts near 354: no test covers the switch to polling after STREAM_FAILURE_LIMIT consecutive stream ends without a delivery, the 45-second idle end, the 15-second response timeout, or the refused end of followEvents after a 401 or a credential change. Fix: add short tests for a stream that ends at once twice (expect a poll), a 401 on the stream (expect refused), and a small idleMs for the idle end.
+5. (low) ext-pi/src/manager/profile.ts near 259 and transport.ts near 176 both define a utf8 helper. Fix: export one utf8 decoder from json.ts and import it in both modules.
+
+Deferred under the 2026-09-30 functionality-first direction (record only): the per-response and per-SSE-batch credential fingerprint check (checkSession) and the Name Constraints refusal (nameConstraintsRefused) of the Haskell client are not ported.
+
+* TODO [#D] Resolve the non-blocking fess findings of subtask PE15
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pe15-fess-followup-lsd3
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-01 Thu 15:10]
+:MODIFIED: [2026-10-01 Thu 15:10]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess audit fess/pe-PE15-r1.md (2026-10-01) on subtask PE15 (WM-036 session: endpoint-bound ManagerSession in ext-pi/src/manager/session.ts, the pi-client live check in ext-pi/test/manager-live.test.ts and the pi-client mode of manager/test/service_http.py).
+
+1. (medium) ext-pi/src/manager/session.ts near 572 and 583 (#perform, #fetch), with switchEndpoint near 760-776: each lane closure holds only the key string and its generation, and #fetch builds the reference from the current identity. A watched read that is still queued when switchEndpoint runs therefore sends a GET for a resource of the earlier binding to the new endpoint. completeFetch discards the result only after the request has gone out (refresh.ts near 111). This contradicts the requirement that a stored reference is never retargeted, and session.ts near 12-15 and the README state the contrary. Fix: in #fetch, return before the read when the generation differs from the current refresh generation, or queue the full Reference and check its endpoint against the current identity. Add a unit case that switches while a watched read is in flight and asserts that the second endpoint receives no read of the old resource.
+2. (medium) manager/test/service_http.py pi_client_checks: the JSON false check uses list equality (recorded == [False]), which also accepts 0 and 0.0. The existing checks of the same fact use identity (service_http.py near 9288, 10338 and 10508). Fix: assert len(recorded) == 1 and recorded[0] is False.
+3. (low) ext-pi/src/manager/session.ts near 684-685: send classifies every refusal except a 412 stale-revision as uncertain, including definite 403, 409 and 422 problem responses. Nothing is resent, but the caller sees a definite refusal as an unknown outcome. Fix: classify the problem responses that prove no admission as refused, or record the simplification in the README.
+4. (low) manager/test/service_http.py PASS pi-client line and the final step of ext-pi/test/manager-live.test.ts: the PASS line says the delivered events equal the polling listing, but the test checks only a prefix. Fix: correct the wording, or require equality of the delivered ids with the listing up to the cursor of the last delivered event.
+5. (low) ext-pi/README.md, Service configuration section: it says that submit approves requests, but doc/api/README.md near 335 says that approve requires submit and control. Fix: state that approve requires submit and control.
+6. (low) ext-pi/src/manager/session.ts near 622-628: waitFor ignores installed read failures, so a persistent 403 or 404 appears as TransportUnavailable only after the 120-second timeout. Fix: end the wait on a non-transient read failure and return that failure.
+
+* TODO [#D] Resolve the non-blocking fess findings of subtask PE16
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pe16-fess-followup-ugfy
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-01 Thu 15:31]
+:MODIFIED: [2026-10-01 Thu 15:31]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess audit fess/pe-PE16-r1.md (2026-10-01) on subtask PE16 (WM-036 service mode lifecycle: ext-pi/src/service-mode.ts, the /wfm-status and /wfm-endpoints commands in ext-pi/src/index.ts, ext-pi/test/service-mode.test.ts, and the second-run close check of the pi-client mode).
+
+1. (medium) ext-pi/src/service-mode.ts near 256-261, with ext-pi/src/manager/session.ts near 573-583 and 810-828: a switch can report success with no event follow. When the bind succeeds and the overview read fails, switchEndpoint has already installed the new transport and identity and closed the earlier transport. The follow loop records followEnd closed and stops, #select returns connected, and /wfm-status shows "connected ... delivery connecting, overview unavailable" while no stream runs. Fix: treat a failed switch overview as failed or unreachable in #select, report a closed follow end as unreachable while service mode is open in #install, and add a test whose capabilities read passes and whose snapshot read fails.
+2. (medium) ext-pi/src/manager/transport.ts near 455-463 and 485-486: the polling and unreachable paths of FollowOptions.state have no test. Only live is exercised. Fix: add a ManagerTransport.followEvents test that drives a stream that does not open (unreachable) and a polling batch (polling, then unreachable on a failed batch).
+3. (low) ext-pi/src/service-mode.ts near 255-259: #active changes only after switchEndpoint returns, so during the switch the connection names the new endpoint with the earlier profile path. Fix: set the pending profile index before switchEndpoint and restore it on the kept path, or skip #install while a switch is in flight.
+4. (low) ext-pi/src/index.ts near 95 and ext-pi/README.md: /wfm-endpoints accepts a profile path as well as a number, but the README documents only /wfm-endpoints [NUMBER]. Fix: document the path argument or drop the path match.
+5. (low) ext-pi/test/service-mode.test.ts near 333-341: no test shows an active local run and an active service run in the widget together. Fix: assert the widget while a local run is active alongside a running service run.
+6. (low) manager/test/service_http.py near 9406: two pi-client assertions were loosened for the second run (1 <= len(answer_files) <= 2 and a two-request check). Fix (optional): tighten to the exact count if the second run is deterministic.
+7. (low, not caused by PE16) ext-pi/test/supervisor.test.ts near 546: execFileAsync('ps', ['-axo','command=']) uses the default 1 MiB maxBuffer and failed once with "stdout maxBuffer length exceeded" on a large host process list. Fix: pass a larger maxBuffer or match the marker with pgrep -f.
+
 * TODO [#D] Resolve PE2 fess findings in the run owner lock
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -10989,7 +11244,7 @@ Non-blocking findings of fess audit fess/pc-PC9-r1.md (2026-09-30) on subtask PC
 :LABELS:   ["workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-10-01 Thu 11:00]
-:MODIFIED: [2026-10-01 Thu 11:00]
+:MODIFIED: [2026-10-01 Thu 11:16]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -11001,6 +11256,206 @@ Non-blocking findings of the fess audit of Phase E subtask PE2 (run owner lock, 
 1. (medium) Verification gap on acceptance item 3. ext-pi (ext-pi/src/supervisor.ts about lines 430 and 527) and the local TUI launcher (tui/src/Agentic/Tui/Process.hs about lines 204-223) write their own run directories and do not call runFrontendSession, so their runs never contain owner.lock. Only runs started by the frontend worker (the service path) carry it, as the retained N=8 journey fixture shows. Fix: record in doc/workflow-manager-handoff.md that only frontend-worker runs carry owner.lock, and optionally add a restore or prune case over a directory that contains owner.lock.
 2. (low) The implementer limitation that the new ProcessGroupTests case was never shown failing is wrong: PE/PE2/impl-r1/fail-first.log (exit 1) records "FAIL spawned session leader holds the inherited owner lock after the parent closes its descriptor". Fix: correct the hand-off record.
 3. (low) The implementer limitation that the run directory has no prune or deletion path is wrong: ext-pi restore prunes run directories by age and by count with a recursive removal (ext-pi/src/supervisor.ts about lines 81 and 128). The manager/WORKERS.md text is correct. Fix: correct the hand-off record and cite the ext-pi retention pruning.
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 534,
+    "issue_id": "acat-pe2-owner-lock-fess-mnwp",
+    "author": "johnw",
+    "text": "PE3 now reads owner.lock in check-quarantine. ext-pi and local TUI runs without owner.lock therefore stay cleanup-required after a crash; this item is still the place to fix that.",
+    "created_at": "2026-10-01T18:16:05Z"
+  }
+]
+#+end_src
+
+* TODO [#D] Resolve PE3 fess findings in owner-released quarantine evidence
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pe3-owner-released-fess-par3
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-01 Thu 11:15]
+:MODIFIED: [2026-10-01 Thu 11:15]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of the fess audit of Phase E subtask PE3 (owner-released evidence for a
+launched quarantine, second part of acat-phase-c-review-findings-hwxy item 1). Report:
+fess/pe-PE3-r1.md in the private resume-20260923 evidence directory.
+
+1. (medium) Build hazard left over from PE2. manager/test/draft_sync_fault.c includes
+runtime/cbits/private_sync.c, and Cabal does not track that include (agentic.cabal about lines 550
+and 587). An incremental build directory that compiled the shim before PE2 links a stale shim
+without agentic_lock_private_descriptor, the linker also pulls the library private_sync.o
+(duplicate agentic_sync_private_descriptor), the fault injection stops working, and "file sync
+failure refuses activation" fails. The PE3 implementer reset only the manager-command-check and
+manager-draft-check objects and monitors of the shared build directory. manager-draft-check was not
+rebuilt. Fix: declare the dependency (for example, move the shared symbols into a header listed in
+includes or extra-source-files) or document a clean step, then rebuild manager-draft-check.
+2. (low) doc/api/README.md about line 851: the cleanup-required condition says only that the lock
+is held or the file is absent. Add "or is not a private regular file" to match manager/COMMANDS.md.
+3. (low) The edited paragraphs of manager/COMMANDS.md (line 86 is 121 characters) and
+manager/WORKERS.md (evidence-kind list, release paragraph) and the ownerReleased comment in
+manager/src/Agentic/Manager/Quarantine.hs are not rewrapped.
+4. (low) manager/WORKERS.md, owner-not-released bullet, says "Another process holds the lock".
+The code comment and the test say "another open description", which can belong to the same
+process. Use the same words.
+5. (low) The comment of ownerReleased in Quarantine.hs changed after the last build. The next
+incremental build covers it.
+
+* TODO [#D] Resolve PE4 fess findings in the failures-launched mode
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pe4-failures-launched-fess-y1gf
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-01 Thu 11:25]
+:MODIFIED: [2026-10-01 Thu 11:25]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of the fess audit of Phase E subtask PE4 (the failures-launched mode of manager/test/service_http.py, end-to-end case of acat-phase-c-review-findings-hwxy item 1). Report: fess/pe-PE4-r1.md in the private resume-20260923 evidence directory.
+
+1. (low) manager/test/service_http.py, launched_release (SIGSTOP about line 8080, finally blocks about lines 8092 and 8167, SIGKILL about line 8152). If an assertion fails after the SIGSTOP and before the case-4 SIGKILL, the finally blocks end only the manager. The stopped worker groups stay stopped, hold owner.lock and keep the fixture busy. Fix: add an outer try/finally in launched_release that sends SIGKILL to the target groups (ignoring ProcessLookupError) on every exit path once SIGSTOP has been sent.
+2. (low) doc/workflow-manager-handoff.md about line 147 still lists failures-launched among the Phase E modes that did not run. The current-state section also still describes PE2 as uncommitted and PE3 as not started. Fix: the Phase E closeout rewrites the current-state section, including PE2 to PE4.
+3. (low) Verification gap: the mode never ran against the tree from before PE3, so no run shows it failing first. Case 3 is the in-tree negative for the held-lock path. Optional fix: run the mode once against the PE2 tree (06c0c0db) and record that case 5 fails there with cleanup-required.
+
+* TODO [#D] Resolve the non-blocking fess findings of subtask PE5    :review:
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pe5-overview-fence-fess-zd0c
+:LABELS:   ["review","workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-01 Thu 11:39]
+:MODIFIED: [2026-10-01 Thu 11:39]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess audit fess/pe-PE5-r1.md (2026-10-01) on Phase E subtask PE5 (fence every overview origin by the refresh generation).
+
+1. (medium, fixed at integration) doc/agent-cat.texi near lines 3585-3586: the PE5 diff removed the qualifier "that its refresh coordinator started", so the text claimed that a 410 discards every read in progress. The Integrator restored the qualifier before the commit. The reads of the decision heads, the run list and the selected request that g starts still use Lane.requestStep with no generation check. Decide whether they also need the fence.
+2. (low) tui/src/Agentic/Tui/App.hs near lines 571, 1672 and 1690: after a stale g (ExplicitOverview) read is discarded, the status line stays at "reading the manager overview". The resnapshot read that installs afterwards has origin LiveOverview and does not update the status. Fix: on the stale branch for ExplicitOverview, clear the status or set a resnapshot status.
+3. (low) tui/src/Agentic/Tui/App.hs near lines 1662-1664 and 1672: a discarded BootstrapOverview read skips the "shown" step (initialServiceModel and PrimaryPane focus), and the live resnapshot install does not call it either. The case is argued to be unreachable, but no test proves it. Fix: add a check that proves it unreachable, or apply "shown" for a stale bootstrap read without installing rows.
+4. (low, fixed at integration) doc/workflow-manager-handoff.md still said the overview fence after a 410 was missing. The Integrator updated the package status table and Phase C review item 3 in the PE5 commit.
+
+* TODO [#D] Resolve the non-blocking fess findings of subtask PE6    :review:
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pe6-fess-followup-noxj
+:LABELS:   ["review","workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-01 Thu 11:51]
+:MODIFIED: [2026-10-01 Thu 11:51]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess audit fess/pe-PE6-r1.md (2026-10-01) on subtask PE6 (40x12 live monitor, acat-jdmd).
+
+1. (low) tui/src/Agentic/Tui/Presentation.hs near lines 629-632: when the service lines do not fit, serviceMonitorLines skips a lower-priority line that does not fit and keeps later lines that fit. At 40x12 the Run line is hidden while the 3-row Request line shows (tui-sizes-live-40x12.screen.txt). Non-terminal runs at small sizes are affected too. tui/README.md documents it. Fix: rank the Run line above the Request line at small heights, or accept the documented behavior.
+2. (low) tui/src/Agentic/Tui/Presentation.hs near lines 558-562: headView (decision-head layers PersonLayer and RecoveryLayer) still renders the full serviceLiveLines without priority fitting. These layers never show a terminal outcome. Fix: use serviceMonitorLines in headView if small decision heads need it.
+
+Resolved in the PE6 commit: the stale handoff rows for acat-jdmd and the overlong tui/README.md line.
+
+* TODO [#D] Resolve the non-blocking fess findings of subtask PE7    :review:
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pe7-fess-followup-uqv7
+:LABELS:   ["review","workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-01 Thu 12:16]
+:MODIFIED: [2026-10-01 Thu 12:16]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess audit fess/pe-PE7-r1.md (2026-10-01) on subtask PE7 (80x24 lineage review fit, item 2 of acat-phase-c-review-findings-hwxy).
+
+1. (low) tui/src/Agentic/Tui/Presentation.hs near lines 1512-1515 and 662-668, doc/tui-design.md:250: in a compact terminal where the review still fits (width below 72 or height below 16, for example 70x40), the key bar shows only "y APPROVE EXACT REVIEW". Nothing on screen says that Enter does not approve or that y starts the run. Enter is still refused. doc/tui-design.md and the serviceReviewRows comment say without condition that the footer states both facts. Fix: make the documents state the condition, or keep "Enter DOES NOT APPROVE" in the compact key bar.
+2. (low) tui/test/ServiceTests.hs near lines 2588-2642, manager/test/service_http.py near lines 6287-6291: only model tests show that y approves the resume review, the fork review and the 128-character profile review at 80x24. The journeys approve only the restart child at 80x24. tui-history step 9 checks that the fork review fits with y offered but does not press y. No journey covers a resume review. Fix: press y on a fork or resume child at 80x24 in a journey, or accept the model evidence.
+3. (low) tui/test/ServiceTests.hs near lines 2632-2636: shownInFull matches each wrapped row as a substring of the whole rendered frame, so a row could match text elsewhere on the screen. The test failed against the old layout, so it is not vacuous. Fix: match each row against the main-area frame lines in order.
+4. (low) doc/workflow-manager-handoff.md near lines 650-653: a fork review with more than one replacement, and a lineage review whose profile identifier is about 70 characters or longer, still exceed 80x24 and keep the refusal. Fix: only if such reviews must fit at 80x24 (for example a scrolling summary with the displayed-every-row rule).
+5. (low) tui/src/Agentic/Tui/Presentation.hs near lines 1512-1517: at 80x24, when a key outcome wider than the terminal takes one footer row while y is offered, the second key-bar row (q DETACH, X DISCARD) is hidden until the outcome clears. The y, Enter and d hints stay visible. Fix: accept as documented behavior or reflow the key bar.
+
+Also: doc/tui-release-evidence.md (dated record) keeps its 2026-10-01 entry stating that tui-history approves the restart child after a resize to 100x30. It stays as chronology.
+
+* TODO [#D] Resolve the non-blocking fess findings of subtask PE8    :review:
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pe8-fess-followup-70rq
+:LABELS:   ["review","workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-01 Thu 12:45]
+:MODIFIED: [2026-10-01 Thu 12:45]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess audit fess/pe-PE8-r1.md (2026-10-01) on subtask PE8 (early StoreBusy on the answer route, finding 2 of acat-a6a7-fess-followup-1exm).
+
+1. (medium) manager/test/CommandCheck.hs:951-975, manager/src/Agentic/Manager/State.hs:217,284,509: the new tests cover only the repeatChangedRead helper through requests.revision. Removing the helper from controlSurfaceBorrowed, decisionBorrowed or the submitControl availability read would pass every deterministic check. Add a CommandCheck case that commits a projection-boundary or control_revision change between the parts of those reads and asserts the stable value and no busy line.
+2. (medium) manager/src/Agentic/Manager/Store.hs:1398-1403: repeatChangedRead starts a fresh five-second allowance, and the Store actions of each attempt keep their own fresh allowances, so GET control, GET decision and control prepare can exceed 5 s. In PE9, pass the request-level deadline into repeatChangedRead and the Store actions of each attempt.
+3. (low) manager/src/Agentic/Manager/Admission.hs:1023-1024,1032-1033, State.hs:284: the availability-read repeat in submitControl runs while holding the per-run entryControlGate, so a concurrent control on the same run waits up to the whole repeat allowance. Document the wait in manager/STORAGE.md or move the repeated read before the gate (PE9).
+4. (low) The original A6A7 refusals (POST /v1/decisions/{id}, GET /v1/requests/{id}) did not reproduce. Outcome (a) is proven only for GET /v1/runs/{id}/control. The remaining immediate site state-control-validation now records a fault line; keep the fault lines and revisit on a reproduction.
+5. (low) manager/src/Agentic/Manager/Store.hs:352,375,422,576,592,666,692,741,1470: only runWithAdmission has a SQLite-busy record. The other bounded sites (open, restore, maintenance, checkpointStore) are off the command and read paths. Instrument them only if a later busy refusal points to them.
+
+* TODO [#D] Resolve the non-blocking fess findings of subtask PE9
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pe9-fess-followup-k551
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-01 Thu 13:43]
+:MODIFIED: [2026-10-01 Thu 13:43]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess audit fess/pe-PE9-r2.md (2026-10-01) on subtask PE9 (one admission deadline through the stacked Store locks).
+
+1. (medium) The deadline covers one Store request, not one HTTP route (manager/src/Agentic/Manager/Commands.hs near 944, Drafts.hs near 391 and 464, Admission.hs near 270 and 920). Authentication, commandPreflight and the submission are separate requests, and each has its own five-second allowance. One answer or decision route can still wait more than the seven-second client timeout under contention. Fix: carry one deadline across the Store requests of one HTTP route, or document the route-level bound against the client timeout.
+2. (medium) Inside a protected view, a route owner that reads through its own unscoped store starts a fresh gate allowance (about 29 call sites in 11 modules, for example Commands.withCommand runRead store; Authorization.hs near 136-145). A protected GET can wait up to five seconds for its first observation and up to five more for the owner read. Fix: thread the scoped store of the view into the route callbacks, or pass it through AuthorizedView.
+3. (low) The deadline is wall-clock from scope entry, not from the first wait, so admitted work between waits uses it up (Store.hs near 136-142, Drafts.hs near 189-226, for example a slow readParent in createLineageDraft). Fix: state this in manager/STORAGE.md, or start the deadline at the first wait.
+4. (low) The negative controls of the stacked cases failed by an uncaught StoreDeadline from the holder's own operation bound, not by a labelled FAIL line (PE/PE9/impl-r2/control-store.log, control-command.log). Fix: have the holder catch its own StoreDeadline so a regression fails on the labelled elapsed-time check.
+5. (low, done in the PE9 commit) The handoff current-state text described the stacked allowances as open. The Integrator updated it.
+
+Also disclosed by the implementer and still open: effect-first owners (capture upload, collectCaptures, changeDraftInputGuarded, export publication and completeExport, dispatch effect recording, reconcileDrafts), Configuration.withActive (unbounded withMVar), artifactResponseWait, the attempts of repeatChangedRead and the ingestion-head retry keep fresh allowances.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-pe9-fess-followup-k551",
+    "depends_on_id": "acat-phase-c-review-findings-hwxy",
+    "type": "discovered-from",
+    "created_at": "2026-10-01T20:43:59.267919Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
 
 * TODO [#C] Phase B part 1 review follow-ups: download quota, id row bound, legacy history, precision gaps
 :PROPERTIES:
@@ -11254,7 +11709,7 @@ Deferred security stage for Phase C (operator direction of 2026-09-30: functiona
 :LABELS:   ["review","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-10-01 Thu 09:51]
-:MODIFIED: [2026-10-01 Thu 11:00]
+:MODIFIED: [2026-10-01 Thu 13:44]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -11287,6 +11742,48 @@ The other review findings are held by acat-70ll (unresolved approve after a rest
     "author": "johnw",
     "text": "Item 1, first part, landed by Phase E subtask PE2 under the owner decision of 2026-10-01 (option C). The inner frontend worker creates runs/<run>/owner.lock (mode 0600, exclusive create, O_NOFOLLOW, FD_CLOEXEC kept) before supervisor-manifest.json and the first heartbeat, takes LOCK_EX|LOCK_NB through the one flock binding (now runtime/cbits/private_sync.c, lockPrivateDescriptor), and holds it until it exits. Engine sessions started through Runtime ProcessGroup spawnSession inherit it on macOS (posix_spawn_file_actions_addinherit_np). Process-library engine starts (ACP connectAcp, agent-deck withCreateProcess, shell steps) are not covered, so the absence of the lock proves that the inner worker has ended; engine coverage is filed as acat-engine-owner-lock-coverage-9snr. Nothing reads the lock yet: PE3 (owner-released evidence for a launched quarantine) remains, so item 1 stays open. Evidence: resume-20260923 PE/PE2/impl-r1 (build, runtime-contract-test at N8 with the new ownerLockCheck case, control_probe, tui-model-test at N8, ext-pi integration 8 of 8, frontend_session_probe, JOURNEY-ONCE at N8 with owner.lock in the fixture, make -C doc check; all exit 0; fail-first.log shows the new case failing without the inherit call). Fess: non-blocking (fess/pe-PE2-r1.md), findings filed as acat-pe2-owner-lock-fess-mnwp.",
     "created_at": "2026-10-01T18:00:20Z"
+  },
+  {
+    "id": 533,
+    "issue_id": "acat-phase-c-review-findings-hwxy",
+    "author": "johnw",
+    "text": "Item 1, second part, landed by Phase E subtask PE3 (option C). check-quarantine for a launched claim with no terminal record now probes runs/<run>/owner.lock in the recorded run root (read-only, nofollow, private regular file, one link) with LOCK_EX|LOCK_NB through the new runtime probePrivateLockAt. A free lock gives clean with evidence owner-released (reservationId, runId, processGeneration), and release-quarantine with that evidence frees the reservation. A held, absent or non-private lock gives cleanup-required, and release refuses with cleanup-unverified. No-launch, terminal-record and unverifiable paths are unchanged. Item 1 is resolved for runs that create owner.lock. Runs from before PE2, ext-pi and local TUI runs (acat-pe2-owner-lock-fess-mnwp) and process-library engines (acat-engine-owner-lock-coverage-9snr) stay outside it. Evidence: resume-20260923 PE/PE3/impl-r1 (build, manager-command-check at N8 with launchedQuarantineChecks plus command_contract.py and credential_cli.py after a stale-shim reset, failures-manager at N8, JOURNEY-ONCE at N8, make -C doc check; all exit 0). Fess: non-blocking (fess/pe-PE3-r1.md), findings filed as acat-pe3-owner-released-fess-par3. Items 2 to 4 remain open.",
+    "created_at": "2026-10-01T18:16:05Z"
+  },
+  {
+    "id": 536,
+    "issue_id": "acat-phase-c-review-findings-hwxy",
+    "author": "johnw",
+    "text": "Item 1, third part (end-to-end case), landed by Phase E subtask PE4. manager/test/service_http.py has a new mode, failures-launched: with one profile and executionReservations 1, a run waits at its person question, the harness stops the worker groups, kills the manager and restarts it on the same root. While the stopped processes hold owner.lock, check-quarantine reports cleanup-required and release-quarantine refuses with cleanup-unverified (owner-released and zero digests) without changing the database or the manager log. After the stopped groups are killed and gone, the run log holds no terminal record, check-quarantine reports clean with owner-released evidence, the release frees the slot, and the request queued before the release reaches review, is approved and completes. manager/WORKERS.md gives the operator procedure. With PE1 to PE4, item 1 is repaired for the inner worker under option C; engine coverage stays with acat-engine-owner-lock-coverage-9snr. Other items of this issue remain open, so it stays open. Evidence: resume-20260923 PE/PE4/impl-r1 (build, failures-launched at N8 with 6 PASS lines, failures-manager at N8 with 13 PASS lines unchanged, make -C doc check; all exit 0). Fess reran the build and failures-launched at N8 (pass). Fess: non-blocking (fess/pe-PE4-r1.md), findings filed as acat-pe4-failures-launched-fess-y1gf. Limitation: no fail-first run against the pre-PE3 tree.",
+    "created_at": "2026-10-01T18:25:30Z"
+  },
+  {
+    "id": 538,
+    "issue_id": "acat-phase-c-review-findings-hwxy",
+    "author": "johnw",
+    "text": "Item 3 (overview fence after a 410) met by Phase E subtask PE5: every overview origin (g, startup bootstrap, live delivery) is fenced by the refresh generation, with model tests in tui/test/ServiceTests.hs and the statement restored in doc/tui-design.md, tui/README.md and doc/agent-cat.texi. Evidence: resume-20260923 PE/PE5 logs, all checks exit 0. Fess non-blocking, follow-up acat-pe5-overview-fence-fess-zd0c. Other items stay open, so the issue stays open.",
+    "created_at": "2026-10-01T18:39:47Z"
+  },
+  {
+    "id": 540,
+    "issue_id": "acat-phase-c-review-findings-hwxy",
+    "author": "johnw",
+    "text": "PE7 meets item 2 (80x24 lineage review). The summary review has no frame and the approval instruction is in the key bar. At 80x24 a restart, resume and fork review with one replacement and a review with a 128-character profile identifier fit and can be approved (model tests reviewFitTests). tui-history at N8 approves the restart child at 80x24 and the child run succeeds. tui-sizes at N8 still refuses at 40x12. The consent control still fails with its literal. Evidence: PE/PE7/impl-r1. Items 3 and 4 stay open. Fess lows: acat-pe7-fess-followup-uqv7.",
+    "created_at": "2026-10-01T19:16:58Z"
+  },
+  {
+    "id": 543,
+    "issue_id": "acat-phase-c-review-findings-hwxy",
+    "author": "johnw",
+    "text": "Subtask PE8 (2026-10-01) diagnosed the early StoreBusy of tui-journey (A6A7 finding 2) from fault-line evidence and fixed it at State.controlSurfaceBorrowed through Store.repeatChangedRead. Evidence: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/PE/PE8/impl-r1. Fess non-blocking; follow-up filed for its findings.",
+    "created_at": "2026-10-01T19:45:18Z"
+  },
+  {
+    "id": 546,
+    "issue_id": "acat-phase-c-review-findings-hwxy",
+    "author": "johnw",
+    "text": "PE9: the stacked Store admission allowances now share one five-second deadline per Store request (command submission, preflight, first observation of a protected view). Journey N8 passed with no StoreBusy line. Evidence: PE/PE9/impl-r2 in the private resume-20260923 directory. Remainder: acat-pe9-fess-followup-k551.",
+    "created_at": "2026-10-01T20:44:09Z"
   }
 ]
 #+end_src
@@ -19853,7 +20350,7 @@ Local-mode behavior remains intact without a duplicated service runtime model.
 :LABELS:   ["p7","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-01 Thu 09:52]
+:MODIFIED: [2026-10-01 Thu 12:16]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-035
 :SOURCE_REPO: agent-cat
@@ -20001,6 +20498,13 @@ check fail.
     "author": "johnw",
     "text": "Phase C closeout: the package lens rates WM-035 met and the working lens rates it partial (range cc29f51a..cb62e35e). Evidence: PC31 (tui-sizes at 40x12, 80x24 and 140x36 with resize), PC32 (six lifecycle journeys at N8 with manager facts and restoration), PC33 (tui-failures with stale answer and endpoint delay), and Phase C gate steps 9, 10, 11 and 14 (PC/PC34/impl-r1 in the private resume-20260923 directory). Open: at 40x12 the live monitor hides the Terminal and Result lines (acat-jdmd), and at 80x24 a lineage review does not fit (acat-phase-c-review-findings-hwxy item 2). The terminal-escape and hostile-text negatives are deferred in acat-phase-c-deferred-security-5eso.",
     "created_at": "2026-10-01T16:52:40Z"
+  },
+  {
+    "id": 541,
+    "issue_id": "acat-wm-035-9uqq",
+    "author": "johnw",
+    "text": "PE7 met the 80x24 lineage review fit (item 2 of acat-phase-c-review-findings-hwxy): restart, resume and fork with one replacement and a 128-character profile review fit 80x24, tui-history approves the restart child at 80x24. Evidence: PE/PE7/impl-r1. Fess lows: acat-pe7-fess-followup-uqv7.",
+    "created_at": "2026-10-01T19:16:58Z"
   }
 ]
 #+end_src
@@ -20012,7 +20516,7 @@ check fail.
 :LABELS:   ["p8","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-01 Thu 10:50]
+:MODIFIED: [2026-10-01 Thu 15:31]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-036
 :SOURCE_REPO: agent-cat
@@ -20109,6 +20613,55 @@ invocation tuples or exposing secrets.
     "author": "johnw",
     "text": "Status at the Phase E stopping point of 2026-10-01 (closeout commit 5a3d3f4f): not started. The run stopped at PE2 before PE10 to PE28. The deferred Phase E security items are listed in the handoff section 'Phase E stopping point of 2026-10-01'. The package stays open.",
     "created_at": "2026-10-01T17:50:27Z"
+  },
+  {
+    "id": 547,
+    "issue_id": "acat-wm-036-5ndj",
+    "author": "johnw",
+    "text": "PE10 (first part of WM-036, ext-pi only) is in place. ext-pi/README.md names the supported host (built Pi fork at ~/src/fork/pi, commit 7857926ee, eight linked @earendil-works packages and pi-agent-core at 0.99.1, Node 22.23.3, TypeScript 5.9.3, vitest 4.1.9), and test/host-versions.test.ts checks the linked set. config.ts configuredManagerProfiles selects service mode only through AGENT_CAT_MANAGER_PROFILES (JSON array of 1 to 8 absolute paths) or AGENT_CAT_MANAGER_PROFILE, and refuses both together. src/root-role.ts implements the local-use check of the runtime State-root roles section, and RunSupervisor.restore refuses a manager root or a directory beneath one before any reconstruction or pruning. Checks passed: npm run check, npm test (109 passed, 5 skipped), make -C doc check. Fess non-blocking; findings filed as acat-pe10-fess-followup-l4o0. Not yet done in WM-036: the manager client, profile loading, transport and service resources (later Phase E subtasks), and the root-role check in launch, preview and lineage. WM-036 stays open.",
+    "created_at": "2026-10-01T20:55:10Z"
+  },
+  {
+    "id": 548,
+    "issue_id": "acat-wm-036-5ndj",
+    "author": "johnw",
+    "text": "PE11 (WM-036 shared-vector consumer, part 1): ext-pi/src/manager/json.ts (lossless JSON through the Node 22 reviver source context, canonical encode, aeson-style equality) and ext-pi/src/manager/events.ts (SSE parser with feed and close, block decoders, Invalidation, EventBatch and RouteRecord codecs, validCursor, validETag, problemFailure), mirroring Events.hs and Failure.hs. ext-pi/test/manager-vectors.test.ts runs every events case of test/manager_client_vectors.json with the eventVectors pass criteria and asserts the counts (sse 27, invalidations 16, batches 13, routeRecords 17, cursors 16, etags 6, problems 10). Checks passed: npm run check, npm test, manager-client-check vectors on the unchanged file (271 PASS, 0 FAIL), make -C doc check. Evidence: resume-20260923/PE/PE11. Fess non-blocking, filed as acat-5snc. Remaining for WM-036: resources and refresh consumers, transport and session. Package stays open.",
+    "created_at": "2026-10-01T21:05:55Z"
+  },
+  {
+    "id": 549,
+    "issue_id": "acat-wm-036-5ndj",
+    "author": "johnw",
+    "text": "PE12 (WM-036 shared-vector consumer, part 2): ext-pi/src/manager/refresh.ts mirrors Client/Refresh.hs (refresh coordinator, reconnection backoff capped at 30 seconds with reset after a delivered event, jitteredMicroseconds, reconcileRead and reconcile). ext-pi/test/manager-vectors.test.ts runs every case of the refresh section of test/manager_client_vectors.json with the ClientCheck.hs refreshVectors pass criteria and per-subsection counts (sequences 13, backoff 4, jitter 5, reconciliation 17). npm run check and npm test passed (127 passed, 5 skipped e2e tests gated on AGENT_CAT_E2E_RUNNER). Fess: non-blocking, four low findings (/Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/fess/pe-PE12-r1.md). The resources section still has no TypeScript consumer, and the package stays open.",
+    "created_at": "2026-10-01T21:13:08Z"
+  },
+  {
+    "id": 551,
+    "issue_id": "acat-wm-036-5ndj",
+    "author": "johnw",
+    "text": "PE13 (WM-036 shared-vector consumer, part 3) is committed: ext-pi/src/manager/resources.ts decodes the public resource DTOs (drafts, preparations, reviews, command receipts) with canonical re-encoding, the decision, control, request, run and overview projections of tui/test/ServiceTests.hs, and answerValue/answerBody for typed answers (boolean 'no' gives JSON false, invalid answers refuse with InvalidAnswer before a command is built). ext-pi/test/manager-vectors.test.ts runs every case of the resources section with per-subsection counts. Evidence: npm run check and npm test passed on the first run (2 integration files skipped, gated on AGENT_CAT_E2E_RUNNER). Fess not blocking; three low findings filed as acat-pe13-fess-followup-ly8y. The WM package stays open for closeout.",
+    "created_at": "2026-10-01T21:26:41Z"
+  },
+  {
+    "id": 552,
+    "issue_id": "acat-wm-036-5ndj",
+    "author": "johnw",
+    "text": "PE14 (WM-036 transport, part 1): ext-pi/src/manager/profile.ts loads a client profile with the rules of parseClientProfile, checkedEndpoint and readCredential, and ext-pi/src/manager/transport.ts sends GET, POST, the SSE stream with Last-Event-ID reconnect and the polling fallback over node:https with the profile CA only and TLS 1.3 only, no redirects and bounded bodies. ext-pi/AGENTS.md states the /v1 boundary and ext-pi/README.md documents the profile format. Checks: npm run check, npm test (14 files, 150 tests passed) and make -C doc check passed on the first run. Evidence: resume-20260923/PE/PE14/impl-r1. Fess not blocking, five low findings in acat-pe14-fess-followup-vm3a. Remaining for WM-036: /v1/capabilities and authority epoch at connect, page-set assembly, downloads and captures, index.ts service-mode wiring.",
+    "created_at": "2026-10-01T21:42:05Z"
+  },
+  {
+    "id": 553,
+    "issue_id": "acat-wm-036-5ndj",
+    "author": "johnw",
+    "text": "PE15 (WM-036 session) integrated: ext-pi/src/manager/session.ts adds ManagerSession, bound to one endpoint identity and the capability epoch of /v1/capabilities, with the overview bootstrap, PE12 refresh coordination, endpoint switch, uncertain-command reconciliation without resend, verified download, sse/poll delivery and forceReconnect(). ext-pi/test/manager-live.test.ts and the pi-client mode of manager/test/service_http.py drive a real manager run through the protected HTTPS endpoint to terminal success (create, set-input with a Unicode literal, enqueue, exact approval, SSE with one forced drop resumed by Last-Event-ID, a poll phase, JSON false answer, retry, verified download). The harness confirmed each fact with its own credential. Evidence: PE/PE15/impl-r1 (npm run check, npm test, build, pi-client, N8 tui-journey, make -C doc check, all exit 0). Fess not blocking; findings filed as acat-pe15-fess-followup-lsd3. Package stays open for the closeout.",
+    "created_at": "2026-10-01T22:10:57Z"
+  },
+  {
+    "id": 554,
+    "issue_id": "acat-wm-036-5ndj",
+    "author": "johnw",
+    "text": "PE16 (service mode lifecycle) integrated. ext-pi/src/service-mode.ts holds manager runs, requests and decision heads as ServiceRunView, ServiceRequestView and ServiceDecisionView keyed by endpoint identity, separate from OwnedRun and RestoredRun. session_start restores only the local state directory and then connects one ManagerSession. session_shutdown and reload close the transport and send no POST. /wfm-status and /wfm-endpoints are added, the widget lists local and service runs separately, and pageSet now fences a late page of the earlier endpoint. Checks passed: npm run check, npm test, npm run test:integration, the pi-client mode of manager/test/service_http.py (a second run stays running under owned supervision after the session closes, confirmed over HTTP), make -C doc check. Evidence: PE/PE16/impl-r1 in the private resume-20260923 directory. Fess not blocking; findings filed as acat-pe16-fess-followup-ugfy. Pi-side commands (WM-037) are not yet in place, so WM-036 stays open.",
+    "created_at": "2026-10-01T22:31:44Z"
   }
 ]
 #+end_src

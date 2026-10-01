@@ -11,19 +11,28 @@ import { assertNoCredentialArgs, prepareLaunch, preflightLineage, previewPlan, t
 import { formatMonitor } from "./monitor.ts";
 import { WorkflowMonitorComponent } from "./monitor-ui.ts";
 import { openRemotePi } from "./pi-remote-runtime.mjs";
+import type { SessionOptions } from "./manager/session.ts";
+import { ServiceMode, type ServiceSelection } from "./service-mode.ts";
 import { RunSupervisor } from "./supervisor.ts";
 import type { ClientMode, ControlAckSnapshot, RoutingInspection, RunnerConfig, RunSnapshot, TargetKind, WorkflowDescriptor } from "./types.ts";
 
-export default function agentCatExtension(pi: ExtensionAPI): void {
+/**
+ * Options of the extension that Pi does not give. `manager` holds the
+ * session options of service mode, for example a test transport.
+ */
+export type ExtensionHooks = { readonly manager?: SessionOptions };
+
+export default function agentCatExtension(pi: ExtensionAPI, hooks: ExtensionHooks = {}): void {
   const supervisor = new RunSupervisor();
   let lastContext: ExtensionContext | undefined;
+  let service: ServiceMode | undefined;
   const currentBridge = new CurrentSessionBridge(pi, () => lastContext);
   const grants = new MutationGrants();
   const supervise = (prepared: PreparedLaunch, ctx: ExtensionContext, workflow: string) => {
     const run = supervisor.start(prepared);
     let recorded = false;
     run.subscribe((snapshot) => {
-      updateWidget(ctx, supervisor);
+      updateWidget(ctx, supervisor, service);
       if (!recorded && ["succeeded", "failed", "cancelled", "orphaned"].includes(snapshot.status)) {
         recorded = true;
         pi.appendEntry("agent-cat-run", {
@@ -108,10 +117,25 @@ export default function agentCatExtension(pi: ExtensionAPI): void {
 
   pi.on("session_start", async (_event, ctx) => {
     lastContext = ctx;
-    configuredManagerProfiles();
+    const mode = configuredManagerProfiles();
+    // Local restore and retention apply only to the local state directory,
+    // after the root-role check of RunSupervisor.restore. Service mode never
+    // restores, prunes or reconstructs manager runs.
     await supervisor.restore(stateDirectory(), retentionPolicy());
     await currentBridge.start(stateDirectory());
-    updateWidget(ctx, supervisor);
+    await service?.close();
+    service = undefined;
+    if (mode.kind === "service") {
+      const started: ServiceMode = new ServiceMode(mode.profiles, {
+        session: hooks.manager,
+        onChange: () => {
+          if (lastContext !== undefined && service === started) updateWidget(lastContext, supervisor, started);
+        },
+      });
+      service = started;
+      void started.start().then((selection) => notifySelection(ctx, selection));
+    }
+    updateWidget(ctx, supervisor, service);
   });
   pi.on("input", async (event, ctx) => {
     if (currentBridge.busy && event.source !== "extension") {
@@ -121,6 +145,9 @@ export default function agentCatExtension(pi: ExtensionAPI): void {
     return { action: "continue" };
   });
   pi.on("session_shutdown", async () => {
+    // Closing service mode closes the manager transport and sends no
+    // command, so every manager run continues under manager supervision.
+    await service?.close();
     await supervisor.shutdown();
     await currentBridge.close();
   });
@@ -376,6 +403,35 @@ export default function agentCatExtension(pi: ExtensionAPI): void {
       const mode = configuredManagerProfiles();
       const rows = supervisor.snapshots().map((snapshot) => `${snapshot.runId}  ${snapshot.status}  ${snapshot.workflow ?? "starting"}`);
       ctx.ui.notify([modeLine(mode), rows.join("\n") || "No active workflow runs"].join("\n"), "info");
+    },
+  });
+
+  pi.registerCommand("wfm-status", {
+    description: "Show the manager endpoint, its delivery state, and its service runs, requests and decision heads",
+    handler: async (_args, ctx) => {
+      if (service === undefined) return ctx.ui.notify(SERVICE_UNCONFIGURED, "warning");
+      ctx.ui.notify(formatServiceStatus(service), service.connection.kind === "connected" ? "info" : "warning");
+    },
+  });
+
+  pi.registerCommand("wfm-endpoints", {
+    description: "Choose the active manager client profile",
+    handler: async (args, ctx) => {
+      if (service === undefined) return ctx.ui.notify(SERVICE_UNCONFIGURED, "warning");
+      const current = service;
+      const labels = current.profiles.map((path, index) => `${index + 1}  ${path}${index === current.active ? "  (active)" : ""}`);
+      let index: number;
+      const chosen = args.trim();
+      if (chosen) {
+        index = /^[1-9][0-9]*$/.test(chosen) ? Number(chosen) - 1 : current.profiles.indexOf(chosen);
+        if (index < 0 || index >= current.profiles.length) return ctx.ui.notify(`Unknown manager profile ${chosen}`, "error");
+      } else {
+        if (!ctx.hasUI) return ctx.ui.notify("Usage: /wfm-endpoints PROFILE_NUMBER\n" + labels.join("\n"), "warning");
+        const selected = await ctx.ui.select("Manager profile", labels);
+        if (!selected) return;
+        index = labels.indexOf(selected);
+      }
+      notifySelection(ctx, await current.select(index));
     },
   });
 
@@ -729,6 +785,55 @@ function grantError(scope: string) {
   });
 }
 
+const SERVICE_UNCONFIGURED = "Service mode is not configured. Set AGENT_CAT_MANAGER_PROFILE or AGENT_CAT_MANAGER_PROFILES.";
+
+const SERVICE_TERMINAL = ["succeeded", "failed", "cancelled", "orphaned"];
+
+function connectionLine(service: ServiceMode): string {
+  const connection = service.connection;
+  switch (connection.kind) {
+    case "connecting": return `Connection: connecting to ${connection.profile}`;
+    case "connected":
+      return `Connection: connected to ${connection.endpoint} (endpoint identity ${connection.identity}), delivery ${connection.delivery}`
+        + (connection.overview === "loaded" ? "" : ", overview unavailable");
+    case "refused": return `Connection: refused for ${connection.profile}: ${connection.reason}. No manager command is sent.`;
+    case "unreachable": return `Connection: unreachable for ${connection.profile}: ${connection.reason}. No manager command is sent. /wfm-endpoints connects again.`;
+    case "closed": return "Connection: closed. The manager keeps its runs under its own supervision.";
+  }
+}
+
+/** The text of `/wfm-status`: the profile, the connection, the capabilities, and the service observations. */
+export function formatServiceStatus(service: ServiceMode): string {
+  const lines = [
+    `Service mode: profile ${service.active + 1} of ${service.profiles.length}, ${service.profiles[service.active]}`,
+    connectionLine(service),
+  ];
+  const capabilities = service.capabilities;
+  if (capabilities !== undefined && service.connection.kind === "connected") lines.push(`Manager capabilities: ${capabilities}`);
+  const runs = service.runs();
+  const requests = service.requests();
+  const decisions = service.decisions();
+  lines.push(runs.length ? "Service runs:" : "Service runs: none");
+  for (const run of runs) lines.push(`  ${run.runId}  ${run.status}  ${run.supervision ?? "unknown"} supervision  ${run.workflowId ?? "unreadable manifest"}`);
+  lines.push(requests.length ? "Requests:" : "Requests: none");
+  for (const request of requests) lines.push(`  ${request.requestId}  ${request.phase}  ${request.workflowId}${request.runId ? `  run ${request.runId}` : ""}`);
+  lines.push(decisions.length ? "Decision heads:" : "Decision heads: none");
+  for (const decision of decisions) lines.push(`  ${decision.decisionId}  ${decision.state} ${decision.kind}  run ${decision.runId}`);
+  return lines.join("\n");
+}
+
+function notifySelection(ctx: ExtensionContext, selection: ServiceSelection): void {
+  if (selection.kind === "closed") return;
+  if (selection.kind === "kept") {
+    return ctx.ui.notify(`Manager profile ${selection.profile} refused: ${selection.reason}. The earlier endpoint stays active.`, "error");
+  }
+  const connection = selection.connection;
+  if (connection.kind === "connected") return ctx.ui.notify(`Manager connected: ${connection.endpoint}`, "info");
+  if (connection.kind === "refused" || connection.kind === "unreachable") {
+    return ctx.ui.notify(`Manager ${connection.kind}: ${connection.reason}`, connection.kind === "refused" ? "error" : "warning");
+  }
+}
+
 function modeLine(mode: ClientMode): string {
   if (mode.kind === "local") return "Mode: local";
   return `Mode: service with ${mode.profiles.length} manager profile${mode.profiles.length === 1 ? "" : "s"}. Current-session, owned-child, deck, ACP, and remote Pi targets stay local.`;
@@ -898,9 +1003,25 @@ function knownRemoteTarget(remote: { socket: string; sessionId: string }): { arg
 }
 
 
-function updateWidget(ctx: ExtensionContext, supervisor: RunSupervisor): void {
+/**
+ * The status line and the widget of the extension. Local runs and service
+ * runs have separate sections, and only active runs are listed.
+ */
+function updateWidget(ctx: ExtensionContext, supervisor: RunSupervisor, service: ServiceMode | undefined): void {
   const snapshots = supervisor.activeSnapshots();
-  ctx.ui.setStatus("agent-cat", snapshots.length ? `${snapshots.length} active workflow${snapshots.length === 1 ? "" : "s"}` : undefined);
-  if (snapshots.length === 0) return ctx.ui.setWidget("agent-cat-runs", undefined);
-  ctx.ui.setWidget("agent-cat-runs", (_tui, theme) => new Text(snapshots.map((run) => `${theme.fg(run.status === "failed" ? "error" : "accent", run.status)} ${run.runId} ${run.workflow ?? "starting"}`).join("\n"), 0, 0));
+  const remote = service?.runs().filter((run) => !SERVICE_TERMINAL.includes(run.status)) ?? [];
+  const counts = [
+    snapshots.length ? `${snapshots.length} active workflow${snapshots.length === 1 ? "" : "s"}` : undefined,
+    remote.length ? `${remote.length} service run${remote.length === 1 ? "" : "s"}` : undefined,
+  ].filter((part): part is string => part !== undefined);
+  ctx.ui.setStatus("agent-cat", counts.length ? counts.join(", ") : undefined);
+  if (snapshots.length === 0 && remote.length === 0) return ctx.ui.setWidget("agent-cat-runs", undefined);
+  const connection = service?.connection;
+  const endpoint = connection?.kind === "connected" ? connection.endpoint : "manager";
+  ctx.ui.setWidget("agent-cat-runs", (_tui, theme) => new Text([
+    ...(snapshots.length ? [theme.fg("muted", "Local runs")] : []),
+    ...snapshots.map((run) => `${theme.fg(run.status === "failed" ? "error" : "accent", run.status)} ${run.runId} ${run.workflow ?? "starting"}`),
+    ...(remote.length ? [theme.fg("muted", `Service runs (${endpoint})`)] : []),
+    ...remote.map((run) => `${theme.fg("accent", run.status)} ${run.runId} ${run.workflowId ?? "unreadable manifest"}`),
+  ].join("\n"), 0, 0));
 }

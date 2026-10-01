@@ -127,16 +127,29 @@ export type Delivery = "stream" | "poll";
 export type DeliveryPreference = "sse" | "poll";
 
 /**
+ * The delivery state of a follow loop. `live` follows an open event stream,
+ * `polling` follows successful JSON polling batches, and `unreachable`
+ * follows a stream connection that did not open or a polling batch that
+ * failed.
+ *
+ * @public
+ */
+export type FollowState = "live" | "polling" | "unreachable";
+
+/**
  * Options of `followEvents`. `prefer` is read before each stream connection
  * and after each polling batch, so a change takes effect at the next
  * connection or batch. `connected` receives the delivery and the cursor that
  * each stream connection and each polling batch sends in `Last-Event-ID`.
+ * `state` receives the delivery state after each stream connection opens or
+ * fails to open and after each polling batch.
  *
  * @public
  */
 export type FollowOptions = {
   readonly prefer?: () => DeliveryPreference;
   readonly connected?: (via: Delivery, cursor: string) => void;
+  readonly state?: (state: FollowState) => void;
 };
 
 /**
@@ -324,7 +337,12 @@ export class ManagerTransport {
    * byte, and it then gives the last complete event identifier. A refusal
    * gives the failure of its problem response. It never reconnects by itself.
    */
-  async streamEvents(cursor: string, deliver: (item: StreamItem) => void, idleMs: number = RECONNECT_IDLE_MS): Promise<Outcome<string>> {
+  streamEvents(cursor: string, deliver: (item: StreamItem) => void, idleMs: number = RECONNECT_IDLE_MS): Promise<Outcome<string>> {
+    return this.#streamEvents(cursor, deliver, idleMs, () => undefined);
+  }
+
+  /** `streamEvents`, with `accepted` called once when the stream response is accepted. */
+  async #streamEvents(cursor: string, deliver: (item: StreamItem) => void, idleMs: number, accepted: () => void): Promise<Outcome<string>> {
     if (!validCursor(cursor) || !(idleMs > 0 && idleMs <= RECONNECT_IDLE_MS)) return INVALID;
     const opened = await this.#open("GET", "/v1/events", { Accept: "text/event-stream", "Last-Event-ID": cursor }, null);
     if (!opened.ok) return opened;
@@ -343,6 +361,7 @@ export class ManagerTransport {
       return INVALID;
     }
     stopTimer();
+    accepted();
     return new Promise((resolve) => {
       let parser = newSseParser(cursor);
       let settled = false;
@@ -403,12 +422,13 @@ export class ManagerTransport {
   async followEvents(start: string, deliver: (item: StreamItem, via: Delivery) => void, options: FollowOptions = {}): Promise<FollowEnd> {
     const prefer = options.prefer ?? (() => "sse");
     const connected = options.connected ?? (() => undefined);
+    const state = options.state ?? (() => undefined);
     let cursor = start;
     let backoff: Backoff = INITIAL_BACKOFF;
     let failures = 0;
     for (;;) {
       if (prefer() === "poll") {
-        const polled = await this.#pollUntil(cursor, () => prefer() !== "poll", deliver, connected);
+        const polled = await this.#pollUntil(cursor, () => prefer() !== "poll", deliver, connected, state);
         if (typeof polled !== "string") return polled;
         cursor = polled;
         backoff = INITIAL_BACKOFF;
@@ -416,24 +436,29 @@ export class ManagerTransport {
         continue;
       }
       let delivered = false;
+      let opened = false;
       let latest = cursor;
       connected("stream", cursor);
-      const outcome = await this.streamEvents(cursor, (item) => {
+      const outcome = await this.#streamEvents(cursor, (item) => {
         delivered = true;
         if (item.kind === "invalidation") latest = item.event.id;
         deliver(item, "stream");
+      }, RECONNECT_IDLE_MS, () => {
+        opened = true;
+        state("live");
       });
       cursor = outcome.ok ? outcome.value : latest;
       const failure = outcome.ok ? null : outcome.failure;
       const ended = failure === null ? null : followEnd(failure, cursor);
       if (ended !== null) return ended;
+      if (!opened) state("unreachable");
       failures = (delivered ? 0 : failures) + 1;
       const { delay, next } = reconnectDelay(delivered ? INITIAL_BACKOFF : backoff);
       backoff = next;
       const wait = jitteredMicroseconds(delay, this.#random()) / 1000;
       if (failure?.kind === "Refused" || failures >= STREAM_FAILURE_LIMIT) {
         const due = Date.now() + wait;
-        const polled = await this.#pollUntil(cursor, () => Date.now() >= due || prefer() === "poll", deliver, connected);
+        const polled = await this.#pollUntil(cursor, () => Date.now() >= due || prefer() === "poll", deliver, connected, state);
         if (typeof polled !== "string") return polled;
         cursor = polled;
       } else {
@@ -445,11 +470,13 @@ export class ManagerTransport {
 
   /** Poll from the cursor until `done` holds after a batch, and give the cursor reached, or the end. */
   async #pollUntil(start: string, done: () => boolean, deliver: (item: StreamItem, via: Delivery) => void,
-    connected: (via: Delivery, cursor: string) => void): Promise<string | FollowEnd> {
+    connected: (via: Delivery, cursor: string) => void, state: (state: FollowState) => void): Promise<string | FollowEnd> {
     let cursor = start;
     for (;;) {
       connected("poll", cursor);
       const batch = await this.pollEvents(cursor);
+      if (this.#closed) return { kind: "closed" };
+      state(batch.ok ? "polling" : "unreachable");
       if (batch.ok) {
         for (const event of batch.value.events) {
           if (this.#closed) return { kind: "closed" };

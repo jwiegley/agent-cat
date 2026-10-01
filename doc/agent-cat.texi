@@ -2392,6 +2392,30 @@ built @command{agentic-run} and the accompanying local Pi packages.  They
 exercise the scripted, native ACP, native deck, current-session, owned-child,
 and remote targets, and they make no paid call.
 
+@cindex ext-pi service mode
+The extension has an explicit service mode.  It is active only when
+@env{AGENT_CAT_MANAGER_PROFILE} or @env{AGENT_CAT_MANAGER_PROFILES} names
+manager client profiles.  At session start the extension restores only the
+local runs of its local state directory, after the check that refuses a
+manager state root.  It then opens one manager session for the first profile,
+reads the overview and follows the event stream.  The runs, requests and
+decision heads of the overview are service observations, keyed by the
+endpoint identity of the binding.  They have no local reducer, no file-system
+monitor and no local process, and they grant no control authority.
+@code{/wfm-status} shows the endpoint, its delivery state (@code{live},
+@code{polling} or @code{unreachable}) and the observations.
+@code{/wfm-endpoints} chooses among the configured profiles.  A switch
+advances the refresh generation, discards a late read of the earlier
+endpoint, and refuses a stored reference of the earlier endpoint.  An
+unsupported profile, an unsupported capability version, a refused credential
+and an unreachable manager show a refusal state, and none of them sends a
+command.  Session shutdown and an extension reload close the transport and
+send no command, so the manager keeps every run under its own supervision.
+The local commands work in both modes.  @file{test/service-mode.test.ts}
+checks this lifecycle with a fake transport, and the @code{pi-client} mode of
+@file{manager/test/service_http.py} confirms over HTTP that a run continues
+after the extension closes during its live stream.
+
 @node Haskell Authoring Reference
 @chapter Haskell Authoring Reference
 

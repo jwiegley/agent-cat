@@ -10,7 +10,8 @@ to runs. It never searches the file system or `PATH` for a runner.
 ## Boundary
 
 Pi loads `src/index.ts`, which registers the `/wf` command, the
-`/wf-...` commands, and the `agent_cat_workflow` tool. The extension
+`/wf-...` commands, the `/wfm-...` commands of service mode, and the
+`agent_cat_workflow` tool. The extension
 imports no Haskell code and never interprets a `RawProgram` or a `Plan`. It
 speaks three versioned process protocols of `agentic-run`: the descriptor that
 `list --json` publishes (version 3, while versions 1 and 2 remain accepted), the
@@ -238,6 +239,10 @@ one loaded profile:
   `poll`, the loop reads polling batches from the cursor and connects no
   stream. Its `connected` option receives the delivery and the
   `Last-Event-ID` cursor of each stream connection and each polling batch.
+  Its `state` option receives the delivery state: `live` when a stream
+  connection opens, `polling` after a successful polling batch, and
+  `unreachable` when a stream connection does not open or a polling batch
+  fails.
 - `dropStream` closes the open event stream as a dropped connection does,
   and the transport stays open.
 - `downloadVerified` reads an artifact download of at most 64 MiB with
@@ -254,6 +259,13 @@ one loaded profile:
 `src/manager/session.ts` holds `ManagerSession`, one session bound to the
 endpoint of a loaded profile:
 
+- The `transport` option makes the transport of each binding. It defaults
+  to `ManagerTransport`, and a test can give another `SessionTransport`.
+  The `onChange` option is called after each installed read or overview,
+  each change of `deliveryState`, the end of the follow loop, a switch and
+  `close`. `deliveryState` is `connecting` until the follow loop of the
+  binding reports a state, and then `live`, `polling` or `unreachable`.
+
 - `ManagerSession.connect` reads `/v1/capabilities` once and refuses the
   versions, scopes, transports and limits that this client does not
   support, as `requireCapabilities` of `Agentic.Manager.Client` does. The
@@ -265,7 +277,9 @@ endpoint of a loaded profile:
   `switchEndpoint` binds the session to the endpoint of another profile with
   a new identity and new capabilities, advances the refresh generation,
   clears the watched resources and reads the overview again. A reference of
-  the earlier binding is never sent to the new endpoint.
+  the earlier binding is never sent to the new endpoint. A read or a page
+  that arrives from the earlier transport after the switch gives
+  `WrongEndpoint`.
 - `pageSet` assembles one complete page set, as `getPageSet` does, and
   `loadOverview` assembles the overview of `/v1/snapshot` with its `cursor`,
   its `oldestCursor` and its decoded members, as `loadOverview` does.
@@ -319,7 +333,7 @@ after an invalidation.
 `test/manager-live.test.ts` runs only when `AGENT_CAT_MANAGER_PROFILE`
 names a client profile. It drives one session against a running protected
 manager whose profile runs the mixed-controls workflow of the
-`engine/acp/test/retry_adapter.py` fixture. In six ordered steps, each with
+`engine/acp/test/retry_adapter.py` fixture. In seven ordered steps, each with
 a timeout of 600 seconds, it connects and bootstraps the overview, creates a
 request with an exact Unicode literal, sets the input and enqueues it,
 approves the exact review with the preparation entity tag as `If-Match` and
@@ -329,10 +343,16 @@ identifier, answers the Bool question with JSON `false`, follows one phase
 through polling delivery and returns to SSE, sends the offered retry, waits
 for terminal success, downloads and verifies the result, and requires that
 the delivered events equal a prefix of the polling listing of the bootstrap
-cursor. When `AGENT_CAT_MANAGER_REPORT` names a file, it writes the
+cursor. The seventh step starts a second run, which waits at its person
+question, opens the extension in service mode with a fake Pi host, requires
+that `/wfm-status` shows the run running under owned supervision with live
+delivery, and closes the extension and then the session during their live
+streams. When `AGENT_CAT_MANAGER_REPORT` names a file, it writes the
 identifiers and digests of the journey there. The `pi-client` mode of
 `manager/test/service_http.py` runs it and checks the report against
-manager facts that it reads with its own credential.
+manager facts that it reads with its own credential. After every client
+connection has closed, the harness also reads that the second run is still
+running under owned supervision and that its question is pending.
 
 `test/manager-vectors.test.ts` reads `../test/manager_client_vectors.json` and
 runs every case of its `events`, `resources` and `refresh` sections with the
@@ -378,9 +398,11 @@ export AGENT_CAT_MANAGER_PROFILES='["/absolute/first.json","/absolute/second.jso
 client-profile paths. The section "Service configuration" states how to
 obtain a profile. The extension refuses to start when both variables are
 set, when a path is relative, or when the array is empty, holds more than 8
-entries, or repeats a path. `/wf-status` states the active mode. The
-current-session, owned-child, deck, ACP, and remote Pi targets stay local in
-both modes. The extension never advertises them as manager capabilities.
+entries, or repeats a path. `/wf-status` states the active mode, and
+`/wfm-status` states the service connection, as the section "Service mode"
+states. The current-session, owned-child, deck, ACP, and remote Pi targets
+stay local in both modes. The extension never advertises them as manager
+capabilities.
 
 A remote Pi server requires a private transport in addition. The session
 identifier is optional. When it is omitted, the extension uses the
@@ -441,6 +463,79 @@ states. The profile file and the credential file are private to the user.
 Set `AGENT_CAT_MANAGER_PROFILE` to the absolute path of the profile. The
 `observe` scope reads, `submit` creates, edits, enqueues and approves
 requests, and `control` answers decisions and sends run controls.
+
+## Service mode
+
+When `AGENT_CAT_MANAGER_PROFILE` or `AGENT_CAT_MANAGER_PROFILES` names
+client profiles, `session_start` does these steps in order:
+
+1. It restores the local runs of `AGENT_CAT_STATE_DIR` through
+   `RunSupervisor.restore`, which first refuses a manager state root or a
+   directory beneath one. Restore and retention never read, prune or
+   reconstruct manager storage.
+2. It starts the current-session bridge, as in local mode.
+3. It creates one `ServiceMode` of `src/service-mode.ts` for the configured
+   profiles. Service mode loads the first profile, connects one
+   `ManagerSession`, reads the overview and follows `/v1/events`. Pi does not
+   wait for the connection.
+
+Service mode holds the runs, requests and decision heads of the overview as
+service observations: `ServiceRunView`, `ServiceRequestView` and
+`ServiceDecisionView`. Each observation is keyed by the endpoint identity of
+the binding and its resource. An observation is not an `OwnedRun` or a
+`RestoredRun`. It has no local reducer, no file-system monitor, no local
+process and no local run store, and it grants no supervision or control
+authority. A decision head is the decision at position 0 of the queue of its
+run. Service mode sends no manager command.
+
+| Command | Purpose |
+|---|---|
+| `/wfm-status` | The active profile, the endpoint and its endpoint identity, the delivery state (`connecting`, `live`, `polling` or `unreachable`), the scopes, profiles and transports that the manager grants, and the service runs, requests and decision heads. |
+| `/wfm-endpoints [NUMBER]` | Choose among the configured profiles, by number or from a list. |
+
+The status widget lists active local runs and active service runs in
+separate sections, and the status line counts each kind.
+
+A switch with `/wfm-endpoints` uses `ManagerSession.switchEndpoint`. The new
+binding gets a new endpoint identity, the refresh generation advances, and
+the observations of the earlier endpoint are cleared. A read of the earlier
+endpoint that arrives after the switch is never installed, and a stored
+reference of the earlier endpoint gives `WrongEndpoint` and is never sent to
+the new endpoint. When the new profile refuses, the earlier endpoint stays
+active, and the extension reports the reason.
+
+These conditions give a refusal state, which `/wfm-status` and a
+notification show. No refusal state sends a command:
+
+| State | Cause |
+|---|---|
+| `refused` | An unsupported profile, which `ClientProfile.load` refuses. |
+| `refused` | Capabilities whose versions the client does not support. |
+| `refused` | A refused credential (401 or 403), at connection or during the event stream. |
+| `unreachable` | A manager that does not answer, or a 5xx refusal at connection. `/wfm-endpoints` connects again. |
+
+`session_shutdown`, which Pi also emits before an extension reload, closes
+service mode. Service mode closes the transport and the event stream of its
+session and sends no command. The manager keeps every run, request and
+decision under its own supervision, and a later session start reads them
+again from the overview. A connection that completes after the close is
+closed at once.
+
+The local commands, `/wf`, `/wf-launch`, the other `/wf-...` commands and the
+actions of the `agent_cat_workflow` tool, work in both modes and act only on
+local runs.
+
+`test/service-mode.test.ts` drives the extension with a fake Pi host, a fake
+UI and an injected fake transport. It requires that restore reaches only the
+local state directory, that the manager capabilities offer no local target,
+that shutdown and reload close the transport without a POST, that a late
+overview of the earlier endpoint is never installed after a switch and a
+stored reference of that endpoint is refused, and that a 401, an unsupported
+profile, an unsupported capability version and an unreachable manager show
+their refusal states. The last step of `test/manager-live.test.ts` starts a
+second run, closes the extension and the session during their live
+streams, and the `pi-client` mode of `manager/test/service_http.py` then
+confirms over HTTP that the run is still running under owned supervision.
 
 ## Source-aware inputs
 
@@ -506,6 +601,8 @@ for the control descriptor.
 | `/wf-fork PARENT_RUN_ID` | Fork a workflow immutably, with drops or replacements of persisted answers. This is distinct from a Pi conversation fork. |
 | `/wf-diff CHILD_RUN_ID` | Compare lineage, identity, answer edits, and outcomes with the immutable parent. |
 | `/wf-cancel RUN_ID` | Cancel an owned live run after approval. |
+| `/wfm-status` | Service mode: the manager connection and the service runs, requests and decision heads. |
+| `/wfm-endpoints [NUMBER]` | Service mode: choose the active client profile. |
 
 The `agent_cat_workflow` tool lets a model discover, start, inspect, control,
 restart, resume, or fork runs. Starts from the tool are limited to the

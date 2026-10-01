@@ -44,6 +44,7 @@ import {
   type Delivery,
   type DeliveryPreference,
   type FollowEnd,
+  type FollowState,
   type TransportOptions,
 } from "./transport.ts";
 
@@ -116,10 +117,30 @@ export type SendOutcome =
   | { readonly kind: "uncertain"; readonly failure: ClientFailure | null; readonly uncertain: Uncertain<PendingCommand, Reference> };
 
 /**
+ * The requests of a session to its transport. `ManagerTransport` is the
+ * transport of every session, and a test can give another implementation.
+ *
+ * @public
+ */
+export type SessionTransport = Pick<ManagerTransport, "get" | "post" | "followEvents" | "pollEvents" | "downloadVerified" | "dropStream" | "close">;
+
+/**
+ * The delivery state of a session: `connecting` until its follow loop first
+ * reports a state, and then the last state of the follow loop of its current
+ * binding.
+ *
+ * @public
+ */
+export type DeliveryState = "connecting" | FollowState;
+
+/**
  * Options of a session. `delivery` is the initial delivery preference.
  * `onEvent` receives each delivered invalidation with its delivery, and
  * `onConnect` receives the delivery and the `Last-Event-ID` cursor of each
- * stream connection and each polling batch.
+ * stream connection and each polling batch. `onChange` is called after each
+ * install of a read or of the overview, each change of the delivery state,
+ * the end of the follow loop, a switch and `close`. `transport` makes the
+ * transport of each binding, and it defaults to `ManagerTransport`.
  *
  * @public
  */
@@ -127,6 +148,8 @@ export type SessionOptions = TransportOptions & {
   readonly delivery?: DeliveryPreference;
   readonly onEvent?: (event: InvalidationEvent, via: Delivery) => void;
   readonly onConnect?: (via: Delivery, cursor: string) => void;
+  readonly onChange?: () => void;
+  readonly transport?: (profile: ClientProfile, options: TransportOptions) => SessionTransport;
 };
 
 /** The refresh key of the overview. */
@@ -298,7 +321,8 @@ const PAGE_SET_BYTES = 67108864;
  * @public
  */
 export class ManagerSession {
-  #transport: ManagerTransport;
+  #transport: SessionTransport;
+  #endpoint: string;
   #identity: string;
   #capabilities: Capabilities;
   readonly #options: SessionOptions;
@@ -312,10 +336,12 @@ export class ManagerSession {
   #lane: Promise<void> = Promise.resolve();
   #following: Promise<FollowEnd> | undefined;
   #followEnd: FollowEnd | undefined;
+  #deliveryState: DeliveryState = "connecting";
   #closed = false;
 
-  private constructor(transport: ManagerTransport, identity: string, capabilities: Capabilities, options: SessionOptions) {
+  private constructor(transport: SessionTransport, endpoint: string, identity: string, capabilities: Capabilities, options: SessionOptions) {
     this.#transport = transport;
+    this.#endpoint = endpoint;
     this.#identity = identity;
     this.#capabilities = capabilities;
     this.#options = options;
@@ -331,12 +357,12 @@ export class ManagerSession {
     const bound = await ManagerSession.#bind(profile, options);
     if (!bound.ok) return bound;
     const { transport, identity, capabilities } = bound.value;
-    return { ok: true, value: new ManagerSession(transport, identity, capabilities, options) };
+    return { ok: true, value: new ManagerSession(transport, profile.endpoint.url, identity, capabilities, options) };
   }
 
   static async #bind(profile: ClientProfile, options: SessionOptions)
-    : Promise<Outcome<{ transport: ManagerTransport; identity: string; capabilities: Capabilities }>> {
-    const transport = new ManagerTransport(profile, options);
+    : Promise<Outcome<{ transport: SessionTransport; identity: string; capabilities: Capabilities }>> {
+    const transport = options.transport?.(profile, options) ?? new ManagerTransport(profile, options);
     const response = await transport.get("/v1/capabilities");
     const capabilities = !response.ok ? response : response.value.status === 200 ? checkCapabilities(response.value.value) : INVALID;
     if (!capabilities.ok) {
@@ -344,6 +370,11 @@ export class ManagerSession {
       return capabilities;
     }
     return { ok: true, value: { transport, identity: randomBytes(16).toString("hex"), capabilities: capabilities.value } };
+  }
+
+  /** The endpoint URL of the current binding. */
+  get endpoint(): string {
+    return this.#endpoint;
   }
 
   /** The endpoint identity of the current binding. */
@@ -369,6 +400,16 @@ export class ManagerSession {
   /** The current delivery preference. */
   get delivery(): DeliveryPreference {
     return this.#delivery;
+  }
+
+  /** The delivery state of the follow loop of the current binding. */
+  get deliveryState(): DeliveryState {
+    return this.#deliveryState;
+  }
+
+  /** Whether `close` was called. */
+  get closed(): boolean {
+    return this.#closed;
   }
 
   /** The end of the follow loop, once it has ended. */
@@ -403,7 +444,8 @@ export class ManagerSession {
    * set identity, revision, expiry, total and metadata, the indexes follow
    * each other, each page has at most 256 items, the set holds at most 64
    * MiB, and every page arrives before the expiry. Any other page refuses
-   * the whole set with `InvalidResponse`, and no partial set is given.
+   * the whole set with `InvalidResponse`, and no partial set is given. A
+   * page that arrives after `switchEndpoint` gives `WrongEndpoint`.
    */
   async pageSet(first: Reference): Promise<Outcome<{ metadata: JsonObject; items: JsonValue[] }>> {
     const scope = pageScope(first.uri);
@@ -417,7 +459,9 @@ export class ManagerSession {
       if (pageScope(location.uri) !== scope) return INVALID;
       const checked = this.#check(location);
       if (!checked.ok) return checked;
-      const response = await this.#transport.get(location.uri);
+      const transport = this.#transport;
+      const response = await transport.get(location.uri);
+      if (transport !== this.#transport) return failed("WrongEndpoint");
       if (!response.ok) return response;
       const { status, value, bytes } = response.value;
       if (status !== 200 || !isJsonObject(value)) return INVALID;
@@ -511,6 +555,11 @@ export class ManagerSession {
       }, {
         prefer: () => this.#delivery,
         connected: (via, at) => this.#options.onConnect?.(via, at),
+        state: (state) => {
+          if (transport !== this.#transport || this.#closed || state === this.#deliveryState) return;
+          this.#deliveryState = state;
+          this.#wake();
+        },
       });
       if (end.kind === "resnapshot" && !this.#closed && transport === this.#transport) {
         this.#refresh = advanceGeneration(this.#refresh);
@@ -610,6 +659,7 @@ export class ManagerSession {
 
   #wake(): void {
     for (const wake of [...this.#waiters]) wake();
+    this.#options.onChange?.();
   }
 
   /**
@@ -763,8 +813,10 @@ export class ManagerSession {
     if (!bound.ok) return bound;
     const earlier = this.#transport;
     this.#transport = bound.value.transport;
+    this.#endpoint = profile.endpoint.url;
     this.#identity = bound.value.identity;
     this.#capabilities = bound.value.capabilities;
+    this.#deliveryState = "connecting";
     this.#refresh = advanceGeneration(this.#refresh);
     this.#watched.clear();
     this.#installed.clear();

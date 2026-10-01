@@ -352,14 +352,20 @@ endpoints_mode = len(sys.argv) == 6 and sys.argv[5] == ENDPOINTS
 # retry, waits for terminal success, downloads the result and verifies its
 # size and SHA-256, and requires that the delivered events equal a prefix of
 # the polling listing of the bootstrap cursor, with no event lost or
-# repeated. vitest must report all six steps passed, and the report must
-# exist. The harness then reads with its own credential that the request
-# supplied exactly the literal and names the run, that the run store records
-# the answer as JSON false, that one answer command and one retry command of
-# the report reached their effects, that the run succeeded, and that the
-# size and SHA-256 of the report equal the harness download. The harness
-# performs no mutation, and the mode does not require TUI_CHECK. Each step
-# prints its own PASS line. It runs one manager lifetime.
+# repeated. Its last step starts a second run that waits at its person
+# question, opens the extension in service mode with a fake Pi host, requires
+# that /wfm-status shows the second run running under owned supervision with
+# live delivery, closes the extension and then the session during their live
+# streams, and writes the report. vitest must report all seven steps passed,
+# and the report must exist. The harness then reads with its own credential
+# that the first request supplied exactly the literal and names the run, that
+# the run store records the answer as JSON false, that one answer command and
+# one retry command of the report reached their effects, that the run
+# succeeded, and that the size and SHA-256 of the report equal the harness
+# download. It also reads that the second run is still running under owned
+# supervision with its question pending, after every client connection
+# closed. The harness performs no mutation, and the mode does not require
+# TUI_CHECK. Each step prints its own PASS line. It runs one manager lifetime.
 PI_CLIENT = "pi-client"
 pi_client_mode = len(sys.argv) == 6 and sys.argv[5] == PI_CLIENT
 # The TUI modes share one fixture, TuiModeFixture. TUI_MODES names the
@@ -9371,18 +9377,18 @@ def pi_client_checks():
                                            cwd=source / "ext-pi", env=environment, stdout=log, stderr=subprocess.STDOUT, timeout=720)
             output_text = re.sub(r"\x1b\[[0-9;]*m", "", log_path.read_text(errors="replace"))
             assert completed.returncode == 0, ("the ext-pi live session check failed", completed.returncode, output_text[-4000:])
-            assert re.search(r"Tests\s+6 passed \(6\)", output_text) and report_path.is_file(), (
-                "the ext-pi live session check did not run its six steps", output_text[-4000:])
+            assert re.search(r"Tests\s+7 passed \(7\)", output_text) and report_path.is_file(), (
+                "the ext-pi live session check did not run its seven steps", output_text[-4000:])
             report = json.loads(report_path.read_bytes())
             assert report["reconnectLastEventId"] == report["reconnectCursor"] and report["pollEvents"] > 0, ("report delivery", report)
-            print("PASS pi-client 1: the ext-pi session ran its six steps against the protected endpoint, the forced SSE drop",
+            print("PASS pi-client 1: the ext-pi session ran its seven steps against the protected endpoint, the forced SSE drop",
                   "resumed with Last-Event-ID", report["reconnectCursor"], "and", report["events"], "delivered events, of which",
                   report["pollEvents"], "came through polling, equal the polling listing", flush=True)
             client = mixed_client(capabilities, harness)
             observed = client[0]
             status, requests, _ = request("/v1/requests", harness)
-            assert status == 200 and [item["id"] for item in requests["items"]] == [report["requestId"]], (
-                "the manager holds other than the one request of the check", status)
+            assert status == 200 and sorted(item["id"] for item in requests["items"]) == sorted(
+                [report["requestId"], report["secondRequestId"]]), ("the manager holds other than the two requests of the check", status)
             submitted, _, _ = observed("/v1/requests/" + report["requestId"], "Request")
             expected = [{"name": declaration["name"], "source": "literal", "value": MIXED_TEXT} for declaration in workflow["inputs"]]
             assert submitted["readiness"]["supplied"] == expected, ("the request did not supply exactly the literal", submitted["readiness"])
@@ -9397,15 +9403,16 @@ def pi_client_checks():
                 "the answer and retry commands differ from the report", [uri for uri, _ in answers], [uri for uri, _ in retries])
             assert all(receipt["state"] == "effect-observed" for _, receipt in answers + retries), ("a command did not reach its effect",)
             answer_files = sorted(work.glob("manager/runs/runs/*/runtime/answers.json"))
-            assert len(answer_files) == 1, ("run store answers", answer_files)
-            # The run store also records the model answers of the run, so
-            # only the entry of the occurrence that the answer command
-            # addressed counts.
+            assert 1 <= len(answer_files) <= 2, ("run store answers", answer_files)
+            # The run stores also record the model answers of the runs, so
+            # only the entries of the occurrence that the answer command
+            # addressed count. The second run waits at that occurrence, so it
+            # has no entry for it.
             answer_receipt = answers[0][1]
             occurrence = (((answer_receipt["effect"] or {}).get("address") or {}).get("occurrenceId")
                           or (answer_receipt["acknowledgement"] or {}).get("occurrenceId"))
             assert occurrence is not None, ("the answer receipt names no occurrence", answer_receipt)
-            recorded = [entry["answer"] for entry in json.loads(answer_files[0].read_bytes())["answers"]
+            recorded = [entry["answer"] for path in answer_files for entry in json.loads(path.read_bytes())["answers"]
                         if entry["occurrenceId"] == occurrence]
             assert recorded == [False], ("the run store does not record the answer as JSON false", occurrence, recorded)
             print("PASS pi-client 3: the run store records the answer as JSON false, and answer command", report["answerCommand"],
@@ -9417,6 +9424,20 @@ def pi_client_checks():
                 "the ext-pi result differs from the harness download", artifact["bytes"], artifact["sha256"], report)
             print("PASS pi-client 4: run", report["runId"], "succeeded, and the verified result of", artifact["bytes"],
                   "bytes has the SHA-256", artifact["sha256"], "of the ext-pi download", flush=True)
+            second = report["secondRunId"]
+            secondary, _, _ = observed("/v1/requests/" + report["secondRequestId"], "Request")
+            assert secondary["runId"] == second and secondary["phase"] == "associated", (
+                "the second request does not name the second run", secondary["runId"], secondary["phase"])
+            snapshot, _, _ = observed("/v1/runs/" + second + "/snapshot", "RunSnapshot")
+            assert snapshot["runtime"] is not None and snapshot["runtime"]["status"] == "running" and snapshot["supervision"] == "owned", (
+                "the second run does not keep running under owned supervision after the extension closed",
+                snapshot["runtime"], snapshot["supervision"])
+            control, _, _ = observed("/v1/runs/" + second + "/control", "RunControl")
+            assert control["decisionHeadId"] is not None, ("the second run has no pending decision head", control)
+            head, _, _ = observed("/v1/decisions/" + control["decisionHeadId"], "Decision")
+            assert head["state"] == "pending" and head["kind"] == "question", ("the question of the second run is not pending", head["state"])
+            print("PASS pi-client 5: after the extension and the session closed during their live streams, run", second,
+                  "is still running under owned supervision, and its question", control["decisionHeadId"], "is pending", flush=True)
         print("PASS pi-client: the ext-pi manager session completed the mixed journey through the protected HTTPS endpoint,",
               "and the harness confirmed each step from manager facts without a mutation", flush=True)
     finally:

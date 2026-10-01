@@ -13,12 +13,19 @@
  * one forced drop of the stream, answer the Bool question with JSON false,
  * observe one phase through polling delivery, send the offered retry, wait
  * for terminal success, download and verify the result, and compare every
- * delivered event with the polling listing of the same cursor.
+ * delivered event with the polling listing of the same cursor. The last step
+ * starts a second run, which waits at its person question, opens the
+ * extension in service mode with a fake Pi host, and closes the extension
+ * and the session during their live streams. The harness then confirms over
+ * HTTP that the second run is still running under owned supervision.
  */
 
 import { createHash } from "node:crypto";
-import { writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
+import extension from "../src/index.ts";
 import { validCursor, type InvalidationEvent, type Outcome } from "../src/manager/events.ts";
 import { isJsonArray, isJsonObject, jsonMember, JsonNumber, type JsonObject, type JsonValue } from "../src/manager/json.ts";
 import { ClientProfile } from "../src/manager/profile.ts";
@@ -95,6 +102,7 @@ describe.runIf(PROFILE)("manager session against a live manager", () => {
   let polledFrom = 0;
   let pollConnections = 0;
   let result = { bytes: 0, sha256: "" };
+  let report: Record<string, unknown> = {};
 
   const ref = (uri: string): Reference => must(session.reference(uri), `reference ${uri}`);
 
@@ -307,11 +315,101 @@ describe.runIf(PROFILE)("manager session against a live manager", () => {
     expect(new Set(ids).size).toBe(ids.length);
     expect(listing.length).toBeGreaterThanOrEqual(ids.length);
     expect(ids).toEqual(listing.slice(0, ids.length));
+    report = {
+      requestId: request.id, runId: run, answerCommand, retryCommand, resultBytes: result.bytes, resultSha256: result.sha256,
+      events: ids.length, pollEvents: polled, reconnectCursor: reconnect.cursor, reconnectLastEventId: reconnect.connection,
+    };
+  }, STEP_MS);
+
+  it("starts a second run and closes the extension and the session during their live streams", async () => {
+    // The second run of the same workflow waits at its person question.
+    const created = await session.send(must(session.prepare(ref("/v1/requests"), {
+      workflowId: text(jsonMember(workflow, "id"), "workflow id"),
+      descriptorRevision: text(jsonMember(workflow, "revision"), "descriptor revision"),
+      profileId: text(jsonMember(workflow, "profileId"), "profile"),
+      profileRevision: text(jsonMember(workflow, "profileRevision"), "profile revision"),
+    }, null), "prepare second create"));
+    if (created.kind !== "delivered") throw new Error(`second create: ${JSON.stringify(created)}`);
+    const second = must(decodeDraftView(created.response.value), "second request");
+    const secondRef = created.location;
+    for (const declaration of items(jsonMember(workflow, "inputs"), "inputs")) {
+      const name = text(jsonMember(object(declaration, "input"), "name"), "input name");
+      const current = must(await session.get(secondRef), "second request read");
+      const set = await command(secondRef.uri, { operation: "set-input", input: { name, source: "literal", value: LITERAL } }, current.etag);
+      await effected(set.location, `second set-input ${name}`);
+    }
+    const supplied = must(await session.get(secondRef), "second supplied request");
+    await effected((await command(secondRef.uri, { operation: "enqueue" }, supplied.etag)).location, "second enqueue");
+    const prepared = must(await session.waitFor(secondRef, (observed) => {
+      const draft = decodeDraftView(observed.value);
+      return draft.ok && draft.value.preparationId !== null;
+    }, WAIT_MS), "second preparation");
+    const preparationRef = ref(`/v1/preparations/${must(decodeDraftView(prepared.value), "second prepared").preparationId ?? ""}`);
+    const live = must(await session.waitFor(preparationRef, (observed) => {
+      const preparation = decodePreparation(observed.value);
+      return preparation.ok && preparation.value.state === "live";
+    }, WAIT_MS), "second live preparation");
+    const selectors = object(live.value, "second preparation value");
+    await command(preparationRef.uri,
+      { operation: "approve", ...Object.fromEntries(SELECTORS.map((name) => [name, text(jsonMember(selectors, name), name)])) }, live.etag);
+    const associated = must(await session.waitFor(secondRef, (observed) => {
+      const draft = decodeDraftView(observed.value);
+      return draft.ok && draft.value.runId !== null;
+    }, WAIT_MS), "second run");
+    const secondRun = must(decodeDraftView(associated.value), "second associated").runId ?? "";
+    must(await session.waitFor(ref(`/v1/runs/${secondRun}/control`), (observed) => {
+      const view = decodeControl(observed.value);
+      return view.ok && view.value.decisionHeadId !== null;
+    }, WAIT_MS), "second question");
+
+    // The extension opens one manager session on the same profile and shows the run live.
+    const state = mkdtempSync(join(tmpdir(), "agent-cat-pi-client-state-"));
+    const previousState = process.env.AGENT_CAT_STATE_DIR;
+    process.env.AGENT_CAT_STATE_DIR = state;
+    try {
+      const commands = new Map<string, { handler: (args: string, ctx: unknown) => Promise<void> }>();
+      const events = new Map<string, Array<(event: unknown, ctx: unknown) => Promise<unknown>>>();
+      const notices: string[] = [];
+      extension({
+        registerEntryRenderer: () => {}, registerTool: () => {}, appendEntry: () => {}, sendUserMessage: () => {},
+        registerCommand: (name: string, value: unknown) => commands.set(name, value as never),
+        on: (name: string, handler: (event: unknown, ctx: unknown) => Promise<unknown>) => events.set(name, [...(events.get(name) ?? []), handler]),
+      } as never);
+      const ctx = {
+        cwd: state, mode: "tui", hasUI: true, isProjectTrusted: () => true,
+        ui: { notify: (message: string) => notices.push(message), setWidget: () => {}, setStatus: () => {} },
+      };
+      const fire = async (name: string) => {
+        for (const handler of events.get(name) ?? []) await handler({ type: name }, ctx);
+      };
+      const status = async (): Promise<string> => {
+        await commands.get("wfm-status")!.handler("", ctx);
+        return notices.at(-1) ?? "";
+      };
+      await fire("session_start");
+      const deadline = Date.now() + WAIT_MS;
+      let shown = await status();
+      while (!(shown.includes("delivery live") && shown.includes(`  ${secondRun}  running  owned supervision`))) {
+        if (Date.now() > deadline) throw new Error(`the extension did not show the second run live: ${shown}`);
+        await new Promise((wake) => setTimeout(wake, 100));
+        shown = await status();
+      }
+      expect(shown).toContain("Decision heads:\n  ");
+      expect(shown).toContain(`run ${secondRun}`);
+      await fire("session_shutdown");
+      expect(await status()).toContain("Connection: closed. The manager keeps its runs under its own supervision.");
+    } finally {
+      if (previousState === undefined) delete process.env.AGENT_CAT_STATE_DIR;
+      else process.env.AGENT_CAT_STATE_DIR = previousState;
+      rmSync(state, { recursive: true, force: true });
+    }
+
+    // The session of the check closes during its live stream as well.
+    expect(session.deliveryState).toBe("live");
+    await session.close();
+    expect(session.closed).toBe(true);
     if (REPORT !== undefined) {
-      writeFileSync(REPORT, `${JSON.stringify({
-        requestId: request.id, runId: run, answerCommand, retryCommand, resultBytes: result.bytes, resultSha256: result.sha256,
-        events: ids.length, pollEvents: polled, reconnectCursor: reconnect.cursor, reconnectLastEventId: reconnect.connection,
-      })}\n`, { mode: 0o600 });
+      writeFileSync(REPORT, `${JSON.stringify({ ...report, secondRequestId: second.id, secondRunId: secondRun })}\n`, { mode: 0o600 });
     }
   }, STEP_MS);
 });
