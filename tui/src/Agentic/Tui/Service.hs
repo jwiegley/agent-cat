@@ -20,6 +20,7 @@ module Agentic.Tui.Service
     DecisionHead (..), decisionHead, answerMutation, answerBody,
     retryMutation, retryBody, retryEffect,
     cancelOffered, cancelMutation, steerOffer, steerMutation, steerBody, recoveryOffer, chooseRecoveryMutation, chooseRecoveryBody,
+    redirectOffer, redirectMutation, redirectBody, redirectLines,
     controlMutation, controlMutationRun, controlOutcome, controlLines,
     runTerminal, resultWanted, resultReferenced, decodeOutputs, VerifiedResult (..), retrieveResult, resultLines,
     observedBinding, RunRead (..), RequestRead (..), Selection (..), selectedRun, compositeResources, ReadVerdict (..), readVerdict, runReadValid,
@@ -192,6 +193,13 @@ data Mutation
     -- publishes for the occurrence, and the manager names it in the effect
     -- address.
   | ChooseRecovery !ControlView !DecisionView !ControlOffer !Text !(Maybe Word32)
+    -- | The redirect of the occurrence of this redirect offer to one of its
+    -- targets, for the request profile. The control observation that offered
+    -- it is the precondition. The attempt is the attempt in flight that a
+    -- live redirect stops, as the snapshot publishes it. It is absent for a
+    -- redirect inside the dispatch window. The redirect body names no
+    -- attempt, so the attempt is shown only.
+  | Redirect !Text !ControlView !ControlOffer !Text !(Maybe Word32)
   deriving (Eq, Show)
 
 mutationOperation :: Mutation -> Text
@@ -210,6 +218,7 @@ mutationOperation mutation = case mutation of
   Cancel {} -> "cancel"
   Steer {} -> "steer"
   ChooseRecovery {} -> "choose-recovery"
+  Redirect {} -> "redirect"
 
 mutationURI :: Mutation -> Text
 mutationURI mutation = case mutation of
@@ -227,6 +236,7 @@ mutationURI mutation = case mutation of
   Cancel _ control -> "/v1/runs/" <> controlRun control <> "/control"
   Steer _ control _ _ _ -> "/v1/runs/" <> controlRun control <> "/control"
   ChooseRecovery _ decision _ _ _ -> "/v1/decisions/" <> decisionId decision
+  Redirect _ control _ _ _ -> "/v1/runs/" <> controlRun control <> "/control"
 
 mutationProfile :: Mutation -> Text
 mutationProfile mutation = case mutation of
@@ -244,6 +254,7 @@ mutationProfile mutation = case mutation of
   Cancel profile _ -> profile
   Steer profile _ _ _ _ -> profile
   ChooseRecovery _ decision _ _ _ -> decisionProfile decision
+  Redirect profile _ _ _ _ -> profile
 
 requestURI :: C.DraftView -> Text
 requestURI request = "/v1/requests/" <> C.draftId request
@@ -338,6 +349,14 @@ prepareMutation client now mutation observed
           decodeDecision (C.observedValue current) == Right decision,
           recoveryOffer control decision choice == Just offer -> C.prepareObserved client current (chooseRecoveryBody decision choice)
         _ -> pure (Left C.InvalidResponse)
+      -- The redirect precondition is the exact control observation that
+      -- offered the redirect of the occurrence to this target.
+      Redirect _ control offer target _ -> case observed of
+        Just current | owned current (mutationURI mutation) (controlRevision control),
+          decodeControl (C.observedValue current) == Right control,
+          redirectOffer control (Just (offerOccurrence offer)) == Just offer,
+          target `elem` offerTargets offer -> C.prepareObserved client current (redirectBody offer target)
+        _ -> pure (Left C.InvalidResponse)
   where
     needed = case mutation of
       Approve {} -> ["observe","submit","control"]
@@ -347,6 +366,7 @@ prepareMutation client now mutation observed
       Cancel {} -> ["observe","control"]
       Steer {} -> ["observe","control"]
       ChooseRecovery {} -> ["observe","control"]
+      Redirect {} -> ["observe","control"]
       _ -> ["observe","submit"]
     permitted = case C.clientCapabilities client of
       Object fields -> case (KM.lookup "scopes" fields, KM.lookup "profileIds" fields) of
@@ -486,8 +506,9 @@ approvalSelectors preparation =
 -- run controls and the occurrence of the answered decision. An effect of a
 -- retry or of a recovery choice names the run controls, the recovering
 -- occurrence and the attempt that it follows. An effect of a steer names the
--- run controls and the steered attempt, and an effect of a cancel names the
--- run controls.
+-- run controls and the steered attempt, an effect of a redirect names the
+-- run controls and the redirected occurrence, and an effect of a cancel
+-- names the run controls.
 receiptMatches :: Mutation -> C.CommandReceipt -> Bool
 receiptMatches mutation receipt = C.operationName (C.receiptOperation receipt) == mutationOperation mutation
   && C.receiptProfile receipt == mutationProfile mutation && C.receiptResource receipt == mutationURI mutation
@@ -510,6 +531,9 @@ receiptMatches mutation receipt = C.operationName (C.receiptOperation receipt) =
          KM.lookup "resource" fields == Just (String ("/v1/runs/" <> controlRun control <> "/control"))
            && KM.lookup "address" fields == Just (object (["occurrenceId" .= occurrenceText (decisionOccurrence decision)]
                 <> ["attemptId" .= T.pack (show number) | Just number <- [attempt]]))
+       (Redirect _ _ offer _ _, Just (Object fields)) ->
+         KM.lookup "resource" fields == Just (String (mutationURI mutation))
+           && KM.lookup "address" fields == Just (object ["occurrenceId" .= occurrenceText (offerOccurrence offer)])
        (_, Just _) | controlMutation mutation -> False
        (Discard request _, Just (Object fields)) -> KM.lookup "resource" fields == Just (String (requestURI request))
        (_, Just (Object fields)) | mutationOperation mutation `elem` requestEffects ->
@@ -1598,36 +1622,115 @@ chooseRecoveryBody decision choice = object
   [ "operation" .= ("choose-recovery" :: Text), "occurrenceId" .= occurrenceText (decisionOccurrence decision),
     "generation" .= decisionGeneration decision, "choice" .= choice ]
 
--- | Whether a mutation is a cancel, a steer or a recovery choice of a run.
+-- | The redirect offer of an owned control observation. An offer for the
+-- given occurrence comes first, and the first redirect offer otherwise. The
+-- run monitor lists the targets of this offer, and the digit keys choose
+-- among them, so both use this one selection. An offer exists inside the
+-- dispatch window of an occurrence and, after the window, for the attempt in
+-- flight of an occurrence that is not an effect.
+redirectOffer :: ControlView -> Maybe OccurrenceId -> Maybe ControlOffer
+redirectOffer control selected
+  | controlSupervision control /= "owned" = Nothing
+  | otherwise = listToMaybe ([offer | offer <- offers, Just (offerOccurrence offer) == selected] <> offers)
+  where offers = [offer | offer <- controlOffers control, offerOperation offer == "redirect", not (null (offerTargets offer))]
+
+-- | Whether the snapshot publishes an open dispatch window for the
+-- occurrence of the offer, and the attempt in flight of that occurrence when
+-- exactly one attempt runs.
+redirectPlace :: RunObservation -> ControlOffer -> (Bool, Maybe Word32)
+redirectPlace snapshot offer = case runSnapshot snapshot >>= Map.lookup (offerOccurrence offer) . snapshotOccurrences of
+  Nothing -> (False, Nothing)
+  Just occurrence
+    | maybe False dispatchOpen (snapshotOccurrenceDispatch occurrence) -> (True, Nothing)
+    | otherwise -> (False, case [attemptNumber ident | (ident, attempt) <- Map.toList (snapshotOccurrenceAttempts occurrence),
+        snapshotAttemptState attempt == AttemptRunning] of
+          [number] -> Just number
+          _ -> Nothing)
+
+-- | The redirect mutation for the request profile, one composite read of the
+-- run components, the selected occurrence and the zero-based index of a
+-- digit key, with the control observation that becomes its precondition.
+-- Only 'redirectOffer' selects the offer, and a target that the offer does
+-- not hold is refused before any send. The attempt of a live redirect is the
+-- attempt in flight that the snapshot publishes.
+redirectMutation :: Text -> RunRead observed -> Maybe OccurrenceId -> Int -> Either Text (Mutation, observed)
+redirectMutation profile (RunRead snapshot (observed, control) _) selected index = do
+  unless (controlRun control == runIdText (runIdentity snapshot)) (Left "the controls belong to another run")
+  offer <- maybe (Left "the manager offers no redirect for this run") Right (redirectOffer control selected)
+  target <- maybe (Left ("the manager offers no target " <> T.pack (show (index + 1)) <> " for occurrence " <> occurrenceText (offerOccurrence offer)))
+    Right (if index < 0 then Nothing else listToMaybe (drop index (offerTargets offer)))
+  Right (Redirect profile control offer target (snd (redirectPlace snapshot offer)), observed)
+
+-- | The closed redirect body for the occurrence of the offer and one target.
+redirectBody :: ControlOffer -> Text -> Value
+redirectBody offer target = object
+  [ "operation" .= ("redirect" :: Text), "occurrenceId" .= occurrenceText (offerOccurrence offer), "target" .= target ]
+
+-- | The redirect line of the live monitor: the occurrence that the digit
+-- keys redirect, whether its dispatch window is open or which attempt is in
+-- flight, and each offered target with its digit. It is empty when the
+-- installed control observation offers no redirect.
+redirectLines :: ControlView -> RunObservation -> Maybe OccurrenceId -> [Text]
+redirectLines control snapshot selected = case redirectOffer control selected of
+  Nothing -> []
+  Just offer ->
+    let place = case redirectPlace snapshot offer of
+          (True, _) -> " in its dispatch window"
+          (False, Just number) -> ", attempt " <> T.pack (show number) <> " in flight"
+          (False, Nothing) -> ""
+     in ["Redirect occurrence " <> occurrenceText (offerOccurrence offer) <> place <> ": "
+          <> T.intercalate "   " [T.pack (show digit) <> " " <> target | (digit, target) <- zip [1 :: Int .. 9] (offerTargets offer)]]
+
+-- | Whether a mutation is a cancel, a steer, a recovery choice or a redirect
+-- of a run.
 controlMutation :: Mutation -> Bool
 controlMutation = isJust . controlMutationRun
 
--- | The run of a cancel, a steer or a recovery choice. No other mutation has
--- one.
+-- | The run of a cancel, a steer, a recovery choice or a redirect. No other
+-- mutation has one.
 controlMutationRun :: Mutation -> Maybe Text
 controlMutationRun mutation = case mutation of
   Cancel _ control -> Just (controlRun control)
   Steer _ control _ _ _ -> Just (controlRun control)
   ChooseRecovery control _ _ _ _ -> Just (controlRun control)
+  Redirect _ control _ _ _ -> Just (controlRun control)
   _ -> Nothing
 
--- | The displayed outcome of a cancel, a steer or a recovery choice that its
--- own receipt shows. A cancel is accepted when the runtime acknowledgement
+-- | The displayed outcome of a cancel, a steer, a recovery choice or a
+-- redirect that its own receipt shows. A runtime acknowledgement that
+-- rejects the control (@rejected-stale@, @unsupported@ or @failed@) is the
+-- outcome of every control: the control ends without an effect, and nothing
+-- is sent again. A cancel is accepted when the runtime acknowledgement
 -- accepts, queues or delivers it. The runtime cancellation names no control,
 -- so the receipt records no cancel effect, and only the snapshot shows the
--- cancelled run. A steer completes on the effect steered, and a recovery
--- choice on the effect recovery-chosen. No other receipt has an outcome.
+-- cancelled run. A steer completes on the effect steered, a recovery choice
+-- on the effect recovery-chosen, and a redirect on the effect redirected. No
+-- other receipt has an outcome.
 controlOutcome :: Mutation -> C.CommandReceipt -> Maybe Text
 controlOutcome mutation receipt
-  | not (receiptMatches mutation receipt) = Nothing
+  | not (receiptMatches mutation receipt) || not (controlMutation mutation) = Nothing
+  | Just rejected <- acknowledgementState receipt, rejected `elem` ["rejected-stale","unsupported","failed"] =
+      Just (label <> ": runtime acknowledgement " <> rejected)
   | otherwise = case (mutation, C.stateName (C.receiptState receipt), receiptEffectKind receipt) of
       (Cancel {}, state, _) | state `elem` ["acknowledged","effect-observed"],
-        Just (Object fields) <- toJSON <$> C.receiptAcknowledgement receipt,
-        Just (String accepted) <- KM.lookup "state" fields, accepted `elem` ["accepted","queued","delivered"] -> Just "cancel accepted"
+        Just accepted <- acknowledgementState receipt, accepted `elem` ["accepted","queued","delivered"] -> Just "cancel accepted"
       (Steer {}, "effect-observed", Just "steered") -> Just "steered"
       (ChooseRecovery _ _ _ "failover" _, "effect-observed", Just "recovery-chosen") -> Just "failed over"
       (ChooseRecovery _ _ _ "abandon" _, "effect-observed", Just "recovery-chosen") -> Just "abandoned"
+      (Redirect _ _ offer target attempt, "effect-observed", Just "redirected") ->
+        Just ("redirected occurrence " <> occurrenceText (offerOccurrence offer)
+          <> maybe "" (\number -> " from attempt " <> T.pack (show number)) attempt <> " to " <> target)
       _ -> Nothing
+  where
+    label = case mutation of
+      Redirect _ _ _ target _ -> "redirect to " <> target
+      _ -> mutationOperation mutation
+
+-- | The state of the runtime acknowledgement that a receipt records.
+acknowledgementState :: C.CommandReceipt -> Maybe Text
+acknowledgementState receipt = case toJSON <$> C.receiptAcknowledgement receipt of
+  Just (Object fields) | Just (String state) <- KM.lookup "state" fields -> Just state
+  _ -> Nothing
 
 -- | The control line of the live monitor, given the run and the outcome of
 -- its latest completed control and the installed run observation. An
@@ -1821,20 +1924,14 @@ approvalStatus approval result before = case result of
 
 -- | The declared reason to leave a pending attempt unresolved, taken from the
 -- receipt read of this read. Only a readable receipt of that attempt that the
--- manager reports as refused or unresolved settles it, and so does a
--- readable receipt of a cancel, a steer or a recovery choice whose runtime
--- acknowledgement rejects the control. An unreadable receipt
+-- manager reports as refused or unresolved settles it. A runtime
+-- acknowledgement that rejects a run control is an outcome of the control,
+-- as 'controlOutcome' shows it, and not a settlement. An unreadable receipt
 -- settles nothing, so it never offers an exact resend.
 receiptSettlement :: Mutation -> Maybe (Mutation, Either C.ClientFailure C.CommandReceipt) -> Maybe Text
 receiptSettlement mutation result = case result of
   Just (_, Right received) | receiptMatches mutation received, C.stateName (C.receiptState received) `elem` ["refused","unresolved"] ->
     Just (C.stateName (C.receiptState received))
-  -- A runtime acknowledgement that rejects the control ends it without an
-  -- effect.
-  Just (_, Right received) | receiptMatches mutation received, controlMutation mutation,
-    Just (Object fields) <- toJSON <$> C.receiptAcknowledgement received,
-    Just (String rejected) <- KM.lookup "state" fields, rejected `elem` ["rejected-stale","unsupported","failed"] ->
-      Just ("runtime acknowledgement " <> rejected)
   _ -> Nothing
 
 parseOutput :: Value -> Parser (Maybe Artifact)

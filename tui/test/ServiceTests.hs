@@ -6,6 +6,7 @@ module ServiceTests (serviceTests) where
 import qualified Agentic.Manager.Client as C
 import Agentic.Runtime (DescriptorCapabilities (..), WorkflowDescriptor (..), WorkflowInputDescriptor (..), WorkflowInputSource (..),
   OccurrenceId (..), AttemptId (..), RunSnapshot (..), OccurrenceSnapshot (..), AttemptSnapshot (..), ControlAckSnapshot (..),
+  AttemptState (..), DispatchSnapshot (..),
   PersonAnswering (..), RecoverySnapshot (..), RecoveryOption (..), RunStatus (..), mkRunId, runIdText)
 import Agentic.Tui.Person (PersonPrompt (..))
 import Agentic.Tui.Model
@@ -1682,12 +1683,65 @@ controlTests render base receiptValue (controlObs,owned) (decisionObs,recoveryDe
           && refused (choose (recoveryRead [fullOffer {S.offerGeneration = Just "generation_9"}] decision) "failover")),
       ("no recovery choice starts for another profile", refused (S.chooseRecoveryMutation "profile_other" (recoveryRead [fullOffer] decision) "failover"))
     ]
+  -- Redirect, inside the dispatch window and for the attempt in flight.
+  runningNative <- maybe (die "FAIL missing running runtime") pure (S.runSnapshot runningSnapshot)
+  recoveryNative <- maybe (die "FAIL missing recovery runtime") pure (S.runSnapshot recoverySnapshot)
+  occurrence0 <- maybe (die "FAIL missing occurrence 0") pure (Map.lookup (OccurrenceId 0) (snapshotOccurrences runningNative))
+  let primary = "model controlled@primary"
+      spare = "model controlled@spare"
+      extra = "model controlled@extra"
+      inFlight = Map.map (\attempt -> attempt {snapshotAttemptState = AttemptRunning})
+        (maybe Map.empty snapshotOccurrenceAttempts (Map.lookup (OccurrenceId 0) (snapshotOccurrences recoveryNative)))
+      withOccurrence changed = runningSnapshot {S.runSnapshot = Just runningNative {snapshotOccurrences = Map.insert (OccurrenceId 0) changed (snapshotOccurrences runningNative)}}
+      windowSnapshot = withOccurrence occurrence0 {snapshotOccurrenceDispatch = Just (DispatchSnapshot [primary, spare] True Nothing),
+        snapshotOccurrenceAttempts = Map.empty}
+      liveSnapshot = withOccurrence occurrence0 {snapshotOccurrenceDispatch = Just (DispatchSnapshot [primary, spare] False (Just ("cmd_7", primary))),
+        snapshotOccurrenceAttempts = inFlight}
+      redirectAt occurrence targets = S.ControlOffer "redirect" (OccurrenceId occurrence) Nothing Nothing [] [] targets
+      windowOffer = redirectAt 0 [primary, spare]
+      liveOffer = redirectAt 0 [spare, extra]
+      redirecting snapshot' offers = S.RunRead snapshot' (controlObs,owned {S.controlOffers = offers, S.controlHead = Nothing}) Nothing
+      redirect read' selected index = S.redirectMutation "profile_main" read' selected index
+      refusedWith text result = result == Left text
+  (windowRedirect,windowObserved) <- either (die . ("FAIL the fixture window redirect was refused: " <>) . T.unpack) pure
+    (redirect (redirecting windowSnapshot [windowOffer]) Nothing 1)
+  (liveRedirect,_) <- either (die . ("FAIL the fixture live redirect was refused: " <>) . T.unpack) pure
+    (redirect (redirecting liveSnapshot [liveOffer]) Nothing 0)
+  checks
+    [ ("a digit inside the dispatch window is the redirect to that offered target with the control observation as its precondition and no attempt",
+        windowRedirect == S.Redirect "profile_main" owned {S.controlOffers = [windowOffer], S.controlHead = Nothing} windowOffer spare Nothing
+          && windowObserved == controlObs),
+      ("a digit after the window is the live redirect of the attempt in flight to that offered target",
+        liveRedirect == S.Redirect "profile_main" owned {S.controlOffers = [liveOffer], S.controlHead = Nothing} liveOffer spare (Just 2)),
+      ("the redirect is sent to the run controls with the closed redirect body, which names no attempt",
+        S.mutationOperation liveRedirect == "redirect" && S.mutationURI liveRedirect == "/v1/runs/run_21/control"
+          && S.mutationProfile liveRedirect == "profile_main"
+          && encodedBody (S.redirectBody liveOffer spare) == "{\"occurrenceId\":\"0\",\"operation\":\"redirect\",\"target\":\"model controlled@spare\"}"),
+      ("a digit without an offered target is refused before any send with fixed text",
+        refusedWith "the manager offers no target 3 for occurrence 0" (redirect (redirecting liveSnapshot [liveOffer]) Nothing 2)
+          && refusedWith "the manager offers no redirect for this run" (redirect (redirecting liveSnapshot []) Nothing 0)
+          && refusedWith "the manager offers no redirect for this run" (redirect (redirecting liveSnapshot [redirectAt 0 []]) Nothing 0)),
+      ("no redirect starts for controls that are not owned or for another run",
+        refused (redirect (withControl owned {S.controlOffers = [liveOffer], S.controlSupervision = "lost"}) Nothing 0)
+          && refused (redirect (redirecting liveSnapshot {S.runIdentity = otherRunId} [liveOffer]) Nothing 0)),
+      ("the redirect offer of the selected occurrence comes first, and the first offer otherwise",
+        S.redirectOffer owned {S.controlOffers = [redirectAt 1 [spare], liveOffer]} (Just (OccurrenceId 0)) == Just liveOffer
+          && S.redirectOffer owned {S.controlOffers = [redirectAt 1 [spare], liveOffer]} Nothing == Just (redirectAt 1 [spare])),
+      ("the redirect line names the occurrence, the open window and each target with its digit",
+        S.redirectLines owned {S.controlOffers = [windowOffer]} windowSnapshot Nothing
+          == ["Redirect occurrence 0 in its dispatch window: 1 model controlled@primary   2 model controlled@spare"]),
+      ("the redirect line of a live redirect names the attempt in flight",
+        S.redirectLines owned {S.controlOffers = [liveOffer]} liveSnapshot Nothing
+          == ["Redirect occurrence 0, attempt 2 in flight: 1 model controlled@spare   2 model controlled@extra"]),
+      ("no redirect line is shown without a redirect offer", S.redirectLines owned {S.controlOffers = []} liveSnapshot Nothing == [])
+    ]
   -- Receipts and outcomes.
   let effect kind place = object ["kind" .= (kind :: T.Text), "runtimeSequence" .= ("12" :: T.Text), "address" .= place,
         "resource" .= ("/v1/runs/run_21/control" :: T.Text)]
       address occurrence attempt = object (["occurrenceId" .= (occurrence :: T.Text)] <> ["attemptId" .= (value :: T.Text) | Just value <- [attempt]])
-      acknowledgement state = object ["commandId" .= ("cmd_11" :: T.Text), "state" .= (state :: T.Text), "message" .= ("Runtime acknowledgement" :: T.Text),
-        "command" .= ("cancel" :: T.Text), "occurrenceId" .= Null, "attemptId" .= Null]
+      acknowledgementOf command occurrence state = object ["commandId" .= ("cmd_11" :: T.Text), "state" .= (state :: T.Text),
+        "message" .= ("Runtime acknowledgement" :: T.Text), "command" .= (command :: T.Text), "occurrenceId" .= occurrence, "attemptId" .= Null]
+      acknowledgement = acknowledgementOf "cancel" Null
       receipt operation resource state ack value = put "operation" (String operation) (put "requiredScopes" (toJSON ["control" :: T.Text])
         (put "resource" (String resource) (put "links" (object ["self" .= ("/v1/commands/cmd_11" :: T.Text), "resource" .= resource])
           (put "state" (String state) (put "acknowledgement" ack (put "effect" value
@@ -1699,21 +1753,34 @@ controlTests render base receiptValue (controlObs,owned) (decisionObs,recoveryDe
   steerReceipt <- decoded (receipt "steer" "/v1/runs/run_21/control" "effect-observed" Null (effect "steered" (address "0" (Just "2"))))
   otherSteer <- decoded (receipt "steer" "/v1/runs/run_21/control" "effect-observed" Null (effect "steered" (address "0" (Just "1"))))
   chosenReceipt <- decoded (receipt "choose-recovery" "/v1/decisions/decision_3" "effect-observed" Null (effect "recovery-chosen" (address "0" (Just "2"))))
+  redirectedReceipt <- decoded (receipt "redirect" "/v1/runs/run_21/control" "effect-observed" Null (effect "redirected" (address "0" Nothing)))
+  attemptRedirected <- decoded (receipt "redirect" "/v1/runs/run_21/control" "effect-observed" Null (effect "redirected" (address "0" (Just "2"))))
+  staleRedirect <- decoded (receipt "redirect" "/v1/runs/run_21/control" "acknowledged" (acknowledgementOf "redirect" (String "0") "rejected-stale") Null)
+  acceptedRedirect <- decoded (receipt "redirect" "/v1/runs/run_21/control" "acknowledged" (acknowledgementOf "redirect" (String "0") "accepted") Null)
   checks
     [ ("an accepting runtime acknowledgement of a cancel shows cancel accepted",
         S.controlOutcome cancel acceptedCancel == Just "cancel accepted" && S.receiptSettlement cancel (Just (cancel,Right acceptedCancel)) == Nothing),
       ("a cancel without an acknowledgement has no outcome yet", S.controlOutcome cancel attemptedCancel == Nothing),
-      ("a rejecting runtime acknowledgement settles the cancel without an outcome",
-        S.controlOutcome cancel rejectedCancel == Nothing
-          && S.receiptSettlement cancel (Just (cancel,Right rejectedCancel)) == Just "runtime acknowledgement rejected-stale"),
+      ("a rejecting runtime acknowledgement is the outcome of the cancel, not a settlement that offers a resend",
+        S.controlOutcome cancel rejectedCancel == Just "cancel: runtime acknowledgement rejected-stale"
+          && S.receiptSettlement cancel (Just (cancel,Right rejectedCancel)) == Nothing),
+      ("a redirected effect of the occurrence shows the redirect with its target, and the stopped attempt of a live redirect",
+        S.controlOutcome liveRedirect redirectedReceipt == Just "redirected occurrence 0 from attempt 2 to model controlled@spare"
+          && S.controlOutcome windowRedirect redirectedReceipt == Just "redirected occurrence 0 to model controlled@spare"),
+      ("a redirected effect that names an attempt does not complete the redirect",
+        not (S.receiptMatches liveRedirect attemptRedirected) && S.controlOutcome liveRedirect attemptRedirected == Nothing),
+      ("a rejected-stale redirect shows its acknowledgement as the outcome, with no settlement and no resend",
+        S.controlOutcome liveRedirect staleRedirect == Just "redirect to model controlled@spare: runtime acknowledgement rejected-stale"
+          && S.receiptSettlement liveRedirect (Just (liveRedirect,Right staleRedirect)) == Nothing),
+      ("an accepting acknowledgement of a redirect waits for the effect redirected", S.controlOutcome liveRedirect acceptedRedirect == Nothing),
       ("a steered effect of the steered attempt shows steered", S.controlOutcome steered steerReceipt == Just "steered"),
       ("a steered effect of another attempt does not complete the steer", S.controlOutcome steered otherSteer == Nothing),
       ("a recovery-chosen effect shows failed over for a failover and abandoned for an abandon",
         S.controlOutcome failover chosenReceipt == Just "failed over" && S.controlOutcome abandon chosenReceipt == Just "abandoned"),
       ("a receipt of one control does not complete another control",
         S.controlOutcome cancel steerReceipt == Nothing && S.controlOutcome steered chosenReceipt == Nothing && S.controlOutcome failover acceptedCancel == Nothing),
-      ("only cancels, steers and recovery choices are control mutations with a run",
-        map S.controlMutationRun [cancel, steered, failover] == replicate 3 (Just "run_21") && not (S.controlMutation (S.Answer recoveryDecision (Bool False))))
+      ("only cancels, steers, recovery choices and redirects are control mutations with a run",
+        map S.controlMutationRun [cancel, steered, failover, liveRedirect] == replicate 4 (Just "run_21") && not (S.controlMutation (S.Answer recoveryDecision (Bool False))))
     ]
   -- The live monitor shows the offered run keys and the control line.
   native <- maybe (die "FAIL missing running runtime") pure (S.runSnapshot runningSnapshot)
@@ -1721,10 +1788,19 @@ controlTests render base receiptValue (controlObs,owned) (decisionObs,recoveryDe
       live = render (140,36) base {presentationLayer = ScreenLayer, presentationModel = liveModel, presentationRecovery = Nothing,
         presentationServiceRun = Just runningSnapshot, presentationServiceRunKeys = ["c CANCEL", "i/b STEER"],
         presentationServiceControlLines = S.controlLines (Just ("run_21","cancel accepted")) (Just runningSnapshot)}
+      redirectFrame = render (140,36) base {presentationLayer = ScreenLayer, presentationModel = liveModel, presentationRecovery = Nothing,
+        presentationServiceRun = Just liveSnapshot, presentationServiceRunKeys = ["c CANCEL", "1-9 REDIRECT"],
+        presentationServiceControlLines = S.controlLines (Just ("run_21","redirect to model controlled@extra: runtime acknowledgement rejected-stale")) (Just liveSnapshot)
+          <> S.redirectLines owned {S.controlOffers = [liveOffer]} liveSnapshot Nothing}
   putStrLn "RENDER service live monitor with run keys and an accepted cancel at (140,36):" >> putStr (T.unpack live)
+  putStrLn "RENDER service live monitor with a redirect offer and a rejected-stale redirect at (140,36):" >> putStr (T.unpack redirectFrame)
   checks
     [ ("the live monitor offers c and i/b and shows the accepted cancel without a finished state",
         all (`T.isInfixOf` live) ["c CANCEL", "i/b STEER", "Control: cancel accepted"] && not (any (`T.isInfixOf` live) ["Succeeded", "Finished"])),
+      ("the live monitor lists the offered redirect targets with 1-9 REDIRECT and shows a rejected-stale redirect without a resend",
+        all (`T.isInfixOf` redirectFrame) ["1-9 REDIRECT", "Redirect occurrence 0, attempt 2 in flight: 1 model controlled@spare",
+          "Control: redirect to model controlled@extra: runtime acknowledgement rejected-stale"]
+          && not (any (`T.isInfixOf` redirectFrame) ["x requests an exact resend", "Outcome unresolved"])),
       ("the control line belongs only to its run", S.controlLines (Just ("run_other","steered")) (Just runningSnapshot) == [])
     ]
 

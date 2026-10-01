@@ -156,6 +156,31 @@ A4 fess finding (low, correctness). notice_is in manager/test/service_http.py (n
 ]
 #+end_src
 
+* TODO [#D] Resolve the non-blocking fess findings of subtask PC23    :review:
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-0vo1
+:LABELS:   ["review","workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-01 Thu 04:27]
+:MODIFIED: [2026-10-01 Thu 04:27]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess audit fess/pc-PC23-r1.md (2026-10-01) on subtask PC23 (WM-034 origination of a dispatch-window and live redirect).
+
+1. (medium) tui/src/Agentic/Tui/App.hs (redirect line and the 1-9 REDIRECT footer key, near lines 1644 and 1975-1978) and manager/test/service_http.py (about line 4736): the redirect line shows on every live monitor, but the digit keys are bound only in serviceNewMutationKey, and an open person answer editor takes the digits first. While a person question is pending, the monitor lists "1 model controlled@spare", but 1 goes into the answer text. The harness answers the person question over HTTP before each redirect, which hides the gap. No document states that a redirect is unavailable while the answer editor is open. Fix: hide the redirect line and the 1-9 REDIRECT key while the answer editor takes the digits and document this, or give the redirect a binding that the editor does not consume; then add a tui-redirect step that redirects while a person question is pending.
+2. (low) tui/src/Agentic/Tui/Service.hs (about lines 1709-1722 and 1931-1935): a rejecting runtime acknowledgement of cancel, steer, fail-over or abandon is now a final outcome with an idle lane instead of an unresolved command with an explicit exact-resend offer. The documents describe the change, but only model tests cover it for these controls, because tui-controls never produces a rejected acknowledgement. Fix: accept and record the change, or add an end-to-end rejected acknowledgement for at least one PC22 control.
+3. (low) tui/src/Agentic/Tui/App.hs (about lines 277-279 and 1143-1147): the comments on stateServiceControlOutcome and on the control-completion branch name only cancel, steer and recovery choice, not the redirect or the rejected-acknowledgement outcome. Fix: update both comments.
+4. (low) manager/test/service_http.py (about line 4765): the step 1 comment says the step covers a rejected-stale redirect, but that case is step 4. Fix: correct the comment.
+5. (low) doc/PLAN.org: the tracker said that the TUI does not originate a live redirect. Disposition: the Integrator updated finding 10 of acat-phase-b2-review-findings-x8fv and commented on C20 finding 2 in acat-c20-v1-live-redirect-fess-findings-6n9y with the PC23 commit.
+6. (low) tui/test/ServiceTests.hs, the render check "shows a rejected-stale redirect without a resend": the no-resend part reads a Presentation that the test builds itself without lane state, so it cannot fail. Only tui-redirect step 4 proves that there is no resend. Fix: build the frame from a lane state after a rejected receipt, or remove the claim from the check name.
+
+Also from the implementer limitations: a 409 unsupported-operation on a send race (the offer disappears between render and send) still declares the command unresolved and offers an explicit exact resend, with no end-to-end check; the live-redirect and controls-routing modes, tui/ci/tui.sh, ALLBUILD and the N=1 journey were not run; the new model tests were not shown failing first.
+
 * DONE [#C] shareT under retryT/fanT: iteration and fan indices in the site key, or ask-once semantics
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -4483,7 +4508,7 @@ Also deferred from the implementer limitations: ext-pi does not originate a live
 :LABELS:   ["workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-30 Wed 16:51]
-:MODIFIED: [2026-09-30 Wed 16:51]
+:MODIFIED: [2026-10-01 Thu 04:27]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -4501,6 +4526,20 @@ Non-blocking findings of the fess audit of Phase B part 2 subtask C20 (increment
 7. (low) manager/src/Agentic/Manager/State.hs (about line 756). T.breakOnEnd "@" gives wrong labels when an addressee or route name contains '@'. The runtime would reject those labels. Fix: derive the labels with the frontend candidate-label parser, or reject route names that contain '@' at policy validation.
 
 Also deferred from the implementer limitations: the manager never offers a live redirect back to the default candidate, because the default route has no name in the policy. The new mode was not shown failing before the production change. Each check ran once, at N8 only.
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 496,
+    "issue_id": "acat-c20-v1-live-redirect-fess-findings-6n9y",
+    "author": "johnw",
+    "text": "Finding 2 is addressed by PC23: tui-redirect step 4 (manager/test/service_http.py) drives a live redirect through /v1 that the runtime rejects (profile_live_stale, both candidates on the hold adapter), and asserts the rejected-stale acknowledgement and no resend. Evidence: PC/PC23/impl-r1 in the private evidence directory. The other findings stay open.",
+    "created_at": "2026-10-01T11:27:44Z"
+  }
+]
+#+end_src
 
 * TODO [#D] Resolve C21 fess findings in person-answered asks
 :PROPERTIES:
@@ -10717,7 +10756,7 @@ Deferred security stage for Phase B part 2 (operator direction of 2026-09-30: fu
 :LABELS:   ["review","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-30 Wed 19:20]
-:MODIFIED: [2026-09-30 Wed 22:09]
+:MODIFIED: [2026-10-01 Thu 04:27]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -10738,7 +10777,7 @@ Low:
 7. The fold of an in-flight redirect without a dispatch builds a dispatch with one target, so a second live redirect of the same occurrence would fail the fold. No current path reaches it. (Snapshot.hs, ext-pi/src/reducer.ts)
 8. doc/api/README.md "Pages and live delivery": the general paragraph says a page set holds one revision, and the next paragraph says each window of /requests and /runs reads its own database boundary.
 9. The part 2 openapi comparison in the stage directory accepts added optional properties, and the gate list named only the route paths. The rule is not a repository check. (B2/C26/impl-r1/api_additive_v2.py)
-10. The ext-pi supervisor and the TUI do not originate a live redirect. Only /v1 and the local control channel of test/control_probe.py send one. (ext-pi/src/supervisor.ts)
+10. The ext-pi supervisor does not originate a live redirect. The service TUI sends one through /v1 since PC23 (digit keys in the run monitor). The local TUI mode still redirects only inside the dispatch window. (ext-pi/src/supervisor.ts)
 11. The functional low gaps of part 1 stay open (tracked in acat-phase-b1-review-followups-dk1v).
 
 The closeout corrected the documentation that findings 1 to 3 name (manager/STORAGE.md, doc/api/README.md, the handoff). Findings 1 and 2 are the functional repairs that Phase C needs first.
@@ -10788,6 +10827,13 @@ The closeout corrected the documentation that findings 1 to 3 name (manager/STOR
     "author": "johnw",
     "text": "Item 4 resolved by Phase C subtask PC7: when an asynchronous exception (a live re-route AttemptRerouted, a run cancel, or a killed sibling branch) stops an ACP prompt in flight, the engine sends session/cancel through cancelTurn before the exception propagates. The live-redirect probe asserts that the held prompt receives session/cancel and ends with stopReason cancelled while the spare answers, and the refused redirect cases assert no cancel before end_turn. Other items stay open. Evidence: resume-20260923 PC/PC7/impl-r1 logs (fail-first against the old binary exit 1; build of agentic-run and routing-fixed-point-probe; test/control_probe.py; service_http.py live-redirect at N8; JOURNEY-ONCE at N8; engine/acp/ci/acp.sh; make -C doc check; all exit 0). Fess: non-blocking, findings filed as acat-pc7-acp-cancel-fess-3lb2.",
     "created_at": "2026-10-01T05:09:31Z"
+  },
+  {
+    "id": 497,
+    "issue_id": "acat-phase-b2-review-findings-x8fv",
+    "author": "johnw",
+    "text": "Finding 10 narrowed by PC23: the service TUI now originates a dispatch-window and live redirect through /v1. The ext-pi supervisor and the local TUI live redirect remain as stated.",
+    "created_at": "2026-10-01T11:27:44Z"
   }
 ]
 #+end_src
@@ -18987,7 +19033,7 @@ to an unapproved local launch.
 :LABELS:   ["p7","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-01 Thu 03:59]
+:MODIFIED: [2026-10-01 Thu 04:27]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-034
 :SOURCE_REPO: agent-cat
@@ -19157,6 +19203,13 @@ Local-mode behavior remains intact without a duplicated service runtime model.
     "author": "johnw",
     "text": "PC22 (run controls: cancel, steer, fail-over and abandon): the TUI Mutation type gains Cancel and Steer (POST /v1/runs/{id}/control with the displayed control observation as If-Match) and ChooseRecovery (failover or abandon, POST /v1/decisions/{id} with the decision observation as If-Match). Each is built only from an offer of the installed control observation. In the run monitor c opens a cancel confirmation and y sends it; i and b open the steer editor below the monitor (Ctrl-D sends); f and a sit beside r at a recovery head, and the old 'f and a refuse' rule is removed. A key for an operation that is not offered sends nothing and shows a numbered key outcome. An accepted cancel shows 'cancel accepted' until the snapshot shows Cancelled and is never shown as finished. Receipt effects (steered, failed over, abandoned) come from the command receipts. The new tui-controls mode shows a held run cancelled, a steer with effect steered, a fail-over that asks controlled@spare, and an abandon that ends the decision, with i and b refused locally at the recovery head. Evidence scope (/Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/PC/PC22/impl-r1): Werror build, tui-model-test at N8, tui-controls at N8, Phase A journey at N8, make -C doc check, all exit 0; the fess audit reran BUILD and tui-controls (exit 0). Limitations: the end-to-end check accepts the combined cancel line, so only the model tests enforce the waiting line before Cancelled; a rejected runtime acknowledgement is covered only by model tests; only single-offer steers ran end to end; tui/ci/tui.sh, ALLBUILD and the N=1 journey were not run. Fess r1 non-blocking. Package stays open.",
     "created_at": "2026-10-01T10:59:35Z"
+  },
+  {
+    "id": 495,
+    "issue_id": "acat-wm-034-3vqz",
+    "author": "johnw",
+    "text": "PC23 (dispatch-window and live redirect from the service TUI): digit keys 1 to 9 in the run monitor send a Redirect mutation to POST /v1/runs/{id}/control with the displayed control ETag and the occurrence and target of a redirect offer. A target that is not offered is refused locally with fixed text. The monitor shows the redirected effect or the runtime acknowledgement; a rejecting acknowledgement (rejected-stale, unsupported, failed) is now a final outcome of every run control with no resend offer, which changes the PC22 behavior. New mode tui-redirect: a live redirect of the held attempt reaches the spare candidate and the run completes, a dispatch-window redirect puts the chosen target first, a redirect during an effect is refused, and a rejected-stale redirect shows without a resend. Evidence scope (/Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/PC/PC23/impl-r1): Werror build, tui-model-test at N8, tui-redirect at N8, Phase A journey at N8, make -C doc check, all exit 0. Limitations: the frozen redirect body has no attempt field; tui/ci/tui.sh, ALLBUILD, the N=1 journey and the live-redirect and controls-routing modes were not run. Fess r1 non-blocking; findings in acat-0vo1. Package stays open.",
+    "created_at": "2026-10-01T11:27:43Z"
   }
 ]
 #+end_src

@@ -322,7 +322,7 @@ first three medium findings name, and the behavior of each stays as stated.
 | Low | The fold of an in-flight redirect without a dispatch builds a dispatch with one target, so a second live redirect of the same occurrence would fail the fold. No current path reaches it, because a control runtime opens a dispatch for every question with two or more candidates. | `Snapshot.hs`, `ext-pi/src/reducer.ts` |
 | Low | The general paragraph on page sets says that a set holds one revision, and the next paragraph says that each window of `/requests` and `/runs` reads its own database boundary. | `doc/api/README.md`, "Pages and live delivery" |
 | Low | The part 2 openapi comparison in the stage directory accepts added optional properties, and the gate list named only the route paths. The rule is not a repository check. | `B2/C26/impl-r1/api_additive_v2.py` |
-| Low | The ext-pi supervisor and the TUI do not originate a live redirect. Only `/v1` and the local control channel of `test/control_probe.py` send one. | `ext-pi/src/supervisor.ts` |
+| Low | The ext-pi supervisor and the local mode of the TUI do not originate a live redirect. Only `/v1`, which the service mode of the TUI uses, and the local control channel of `test/control_probe.py` send one. | `ext-pi/src/supervisor.ts` |
 | Low | The functional low gaps of part 1 stay open: a held preflight control without an acknowledgement when a run fails before carriage, a failed failure-reply append without a gap entry, and a review record that a later pre-commit step rolls back without an ending. | `acat-phase-b1-review-followups-dk1v` |
 
 ### Package status

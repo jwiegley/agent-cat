@@ -419,11 +419,51 @@ INPUTS = "tui-inputs"
 # decision must leave the queue of the run, and the run must end failed.
 # Each step prints its own PASS line. It runs one manager lifetime.
 TUI_CONTROLS = "tui-controls"
+# The tui-redirect mode sends the redirects of WM-034 through the service TUI
+# with the profiles of the live-redirect mode: profile_live, whose first
+# candidate is the ACP hold fixture and whose spare candidate is the ACP stub
+# fixture, and profile_live_effect, whose first candidate holds its effect
+# for eight seconds. This mode also configures profile_live_stale, whose
+# approved policy routes both candidates to the hold fixture, so that the
+# spare candidate also holds its turn after a live redirect. The manager then
+# offers a live redirect back to the first target, and the runtime rejects it,
+# because that target does not remain after the spare candidate in the chain.
+# The harness creates, approves and settles each run with its own credential.
+# The person question of a mixed-controls run is pending beside its engine
+# question, so the harness answers it first, and the TUI then opens the run
+# from the Manager overview by its identifier. The live monitor must list the
+# offered targets of the occurrence with their digits, and a digit sends the
+# redirect to that target.
+# 1. Inside the dispatch window of a profile_live run, the digit of the first
+# target closes the window, and the monitor must show the redirect to it.
+# While the first candidate then holds its turn, 9 is refused locally with a
+# fixed key outcome and sends nothing. The digit of the spare target then
+# sends the live redirect: the monitor must show the redirect from the held
+# attempt to the spare target, the held attempt must end attempt.failed, and
+# the run must succeed with the answer of the spare candidate.
+# 2. Inside the dispatch window of a second profile_live run, the digit of the
+# spare target puts that target first: the run log must hold one question,
+# to the spare target, and the run must succeed with its answer.
+# 3. Inside the dispatch window of a profile_live_effect run, the digit of the
+# first target closes the window. While the effect is in flight, the monitor
+# must list no redirect target, 1 must be refused locally with a fixed key
+# outcome and send nothing, and the run must succeed with the answer of the
+# first candidate.
+# 4. In a profile_live_stale run, the TUI closes the dispatch window with the
+# first target and redirects the held attempt to the spare target. While the
+# spare candidate holds its turn, the digit of the offered first target sends
+# a redirect that the runtime rejects: the monitor must show its rejected-stale
+# acknowledgement, the TUI sends nothing again, and the attempt of the spare
+# candidate keeps running. c and y then cancel the run.
+# Each step prints its own PASS line. It runs one manager lifetime.
+TUI_REDIRECT = "tui-redirect"
 TUI_MODES = {OVERVIEW: (["profile_1", "profile_2"], ["observe", "submit"]), INPUTS: (["profile_1"], ["observe", "submit", "control"]),
-             TUI_CONTROLS: (["profile_1", "profile_steer", "profile_route"], ["observe", "submit", "control"])}
+             TUI_CONTROLS: (["profile_1", "profile_steer", "profile_route"], ["observe", "submit", "control"]),
+             TUI_REDIRECT: (["profile_live", "profile_live_effect", "profile_live_stale"], ["observe", "submit", "control"])}
 tui_mode = sys.argv[5] if len(sys.argv) == 6 and sys.argv[5] in TUI_MODES else None
-# The tui-controls mode configures the control fixture profiles.
-control_profiles = control_profiles or tui_mode == TUI_CONTROLS
+# The tui-controls and tui-redirect modes configure the control fixture
+# profiles.
+control_profiles = control_profiles or tui_mode in (TUI_CONTROLS, TUI_REDIRECT)
 assert len(sys.argv) == 5 or mixed or boundary or pages_mode or events_mode or captures_mode or discard_mode or exports_mode or lineage_mode or control_profiles or person_mode or endpoints_mode or tui_mode
 assert not tui_approval or os.environ.get("TUI_CHECK")
 assert not (endpoints_mode or tui_mode) or os.environ.get("TUI_CHECK")
@@ -532,7 +572,7 @@ if tui_mode == OVERVIEW:
     configuration["profiles"][0]["resourceKeys"] = ["overview_one"]
     configuration["profiles"].append(dict(configuration["profiles"][0], id="profile_2",
                                           workspaceLabel="HTTPS second fixture", resourceKeys=["overview_two"]))
-if tui_mode in (INPUTS, TUI_CONTROLS):
+if tui_mode in (INPUTS, TUI_CONTROLS, TUI_REDIRECT):
     configuration["limits"]["executionReservations"] = 2
 # The restart quarantines the reservation of the lost run, or of a request
 # in review, with its execution slot and resource keys, until the operator
@@ -571,7 +611,7 @@ if control_profiles:
             dict(scripted, id="profile_route", workspaceLabel="HTTPS route fixture", targetLabel="Deterministic ACP route",
                  targetArguments=["--engine", "acp", "--adapter", "retry-adapter", "--route", "spare=acp:spare-adapter"],
                  environment=fixture_path))
-    if live_mode:
+    if live_mode or tui_mode == TUI_REDIRECT:
         # The route named spare answers the spare candidate. The first
         # candidate of profile_live holds its turn until a redirect stops it.
         # The first candidate of profile_live_effect answers after eight
@@ -582,6 +622,14 @@ if control_profiles:
                 dict(scripted, id=profile_id, workspaceLabel=label, targetLabel="Deterministic ACP hold",
                      targetArguments=["--engine", "acp", "--adapter", adapter, "--route", "spare=acp:spare-adapter"],
                      environment=fixture_path))
+        # The tui-redirect mode keeps only the live profiles and adds
+        # profile_live_stale, whose approved policy routes both candidates
+        # to the hold fixture.
+        if tui_mode == TUI_REDIRECT:
+            configuration["profiles"] = configuration["profiles"][2:] + [
+                dict(scripted, id="profile_live_stale", workspaceLabel="HTTPS live stale fixture", targetLabel="Deterministic ACP hold",
+                     targetArguments=["--engine", "acp", "--adapter", "hold-adapter", "--route", "primary=acp:hold-adapter",
+                                      "--route", "spare=acp:hold-adapter"], environment=fixture_path)]
 if person_mode:
     # The launcher relays its input to the stub adapter. It records its
     # launch and the method of each JSON-RPC request that it relays, so that
@@ -4442,21 +4490,54 @@ def input_checks():
             (work / "server-0.exit").write_text(str(process.returncode) + "\n")
 
 
+def model_questions(records, occurrence):
+    """The run-log questions of the occurrence to a model, in log order.
+    The control modes and the tui-redirect mode share it."""
+    return [record for record in records if record["schema"] == "question" and str(record["about"].get("occurrence")) == occurrence
+            and isinstance(record["to"].get("to"), dict) and "model" in record["to"]["to"]]
+
+
+def occurrence_of(snapshot, occurrence):
+    """The occurrence of a run snapshot with the identifier."""
+    assert snapshot["page"]["next"] is None, "the run snapshot has more than one page"
+    found = [item for item in snapshot["items"] if item["occurrenceId"] == occurrence]
+    assert len(found) == 1, ("snapshot occurrence", occurrence, len(found))
+    return found[0]
+
+def running_attempts(snapshot, occurrence):
+    """The running attempts of the occurrence in a run snapshot, or none
+    when the snapshot does not hold the occurrence yet."""
+    found = [item for item in snapshot["items"] if item["occurrenceId"] == occurrence]
+    return [attempt for item in found for attempt in item.get("attempts", []) if attempt["state"] == "running"]
+
+
+def attempt_events(store, occurrence):
+    """The attempt start and end events and the occurrence.redirected
+    events of the occurrence in events.ndjson of the run store."""
+    events = [json.loads(line) for line in (store / "events.ndjson").read_bytes().splitlines()]
+    events = [event.get("event", event) for event in events]
+    mine = lambda event: str(event.get("occurrenceId", (event.get("attemptId") or {}).get("occurrenceId"))) == occurrence
+    attempts = [event for event in events if event["type"] in ("attempt.started", "attempt.completed", "attempt.failed") and mine(event)]
+    redirected = [event for event in events if event["type"] == "occurrence.redirected" and mine(event)]
+    return attempts, redirected
+
+
 def tui_control_checks():
-    """The tui-controls mode. See TUI_CONTROLS for the steps."""
+    """The tui-controls and tui-redirect modes. See TUI_CONTROLS and
+    TUI_REDIRECT for the steps. Both share the helpers below."""
     harness = tui_fixture.harness
     terminal = ("succeeded", "failed", "cancelled")
 
     def save(session, name):
-        (work / ("tui-controls-" + name + ".screen.txt")).write_text(session.screen.text())
+        (work / (tui_mode + "-" + name + ".screen.txt")).write_text(session.screen.text())
 
-    def start(profile):
-        """Create, enqueue and approve one mixed-controls request of the
-        profile through HTTP with the credential of the harness. Returns
+    def start(profile, name="mixed-controls"):
+        """Create, enqueue and approve one request of the named workflow of
+        the profile through HTTP with the credential of the harness. Returns
         the run."""
         status, catalogue, _ = request("/v1/workflows?profileId=" + profile, harness)
         assert status == 200, ("control catalogue", profile, status)
-        workflow = next(item for item in catalogue["items"] if item["name"] == "mixed-controls")
+        workflow = next(item for item in catalogue["items"] if item["name"] == name)
         body = {"workflowId": workflow["id"], "descriptorRevision": workflow["revision"],
                 "profileId": workflow["profileId"], "profileRevision": workflow["profileRevision"]}
         key = capabilities["authorityEpoch"] + "." + secrets.token_urlsafe(16)
@@ -4500,7 +4581,7 @@ def tui_control_checks():
     def ended(run, expected):
         value, _, raw = client[1]("/v1/runs/" + run + "/snapshot", "RunSnapshot",
             lambda value: value["runtime"] is not None and value["runtime"]["status"] in terminal)
-        (work / ("tui-controls-" + run + "-terminal.json")).write_bytes(raw)
+        (work / (tui_mode + "-" + run + "-terminal.json")).write_bytes(raw)
         assert value["runtime"]["status"] == expected, ("control run terminal status", run, value["runtime"]["status"], expected)
 
     def offered(run, ready):
@@ -4570,19 +4651,25 @@ def tui_control_checks():
                 return records
         raise AssertionError(("run route pages did not end", run))
 
-    def commands(run_resources):
-        """The operations of the commands of these resources in the
-        coordination database, read through a read-only connection."""
+    def command_rows(run_resources):
+        """The identifier, operation, state and runtime acknowledgement of
+        each command of these resources in the coordination database, in
+        acceptance order, read through a read-only connection."""
         import sqlite3
         found = sorted((work / "manager").rglob("coordination.sqlite3"))
         assert len(found) == 1, ("coordination database", found)
         connection = sqlite3.connect(found[0].as_uri() + "?mode=ro", uri=True)
         try:
             marks = ",".join("?" * len(run_resources))
-            return [row[0] for row in connection.execute(
-                "SELECT operation FROM commands WHERE resource_uri IN (" + marks + ")", run_resources).fetchall()]
+            return [(row[0], row[1], row[2], None if row[3] is None else json.loads(row[3])) for row in connection.execute(
+                "SELECT id, operation, state, acknowledgement FROM commands WHERE resource_uri IN (" + marks + ") ORDER BY rowid",
+                run_resources).fetchall()]
         finally:
             connection.close()
+
+    def commands(run_resources):
+        """The operations of the commands of these resources."""
+        return [row[1] for row in command_rows(run_resources)]
 
     def runtime_labels(start):
         """The runtime labels that the TUI wrote to the PTY after the byte offset start."""
@@ -4592,13 +4679,15 @@ def tui_control_checks():
     def press(keys, expect, operation, timeout=30):
         """Send the keys and wait for the expected screen text. A mutation
         key is deferred while a page-set read is in flight, and a deferred
-        key is never replayed, so a key outcome that names the deferral of
-        the operation sends the keys again, as the operator does. Returns
-        the screen and the number of deferrals."""
+        key is never replayed, so a new numbered key outcome that names the
+        deferral of the operation sends the keys again, as the operator does.
+        A redraw of an earlier key outcome is not a new deferral. Returns the
+        screen and the number of deferrals."""
         deadline = time.monotonic() + timeout
         deferred = 0
+        deferral = re.compile(r"Key (\d+): " + re.escape(operation) + r" deferred during a page-set read\.")
+        seen = max([int(number) for number in re.findall(r"Key (\d+):", session.screen.text())], default=0)
         while True:
-            start = len(session.output)
             for key in keys:
                 session.send(key)
                 if key != keys[-1]:
@@ -4609,7 +4698,9 @@ def tui_control_checks():
                 if expect in screen:
                     session.settle()
                     return session.screen.text(), deferred
-                if operation + " deferred during a page-set read." in bytes(session.output[start:]).decode("utf-8", "replace"):
+                found = deferral.search(screen)
+                if found and int(found.group(1)) > seen:
+                    seen = int(found.group(1))
                     deferred += 1
                     break
                 assert time.monotonic() < deadline and session.process.poll() is None, (
@@ -4634,6 +4725,211 @@ def tui_control_checks():
             "the flow verb did not verify the ended run log", name, completed.returncode, completed.stderr[-2000:])
         return lines[:-1]
 
+    def redirect_window(run):
+        """The redirect offer of the open dispatch window of the
+        two-candidate question of the run, as the harness reads it."""
+        control = offered(run, lambda value: any(offer["operation"] == "redirect" and len(offer["targets"]) == 2 for offer in value["offers"]))
+        window = next(offer for offer in control["offers"] if offer["operation"] == "redirect")
+        assert window["targets"][0].endswith("@primary") and window["targets"][1].endswith("@spare"), ("dispatch targets", window["targets"])
+        return window
+
+    def answer_question(run):
+        """Answer the person question of a mixed-controls run with typed
+        false. It is pending beside the engine question, and its question
+        head would take the digit keys of the live monitor."""
+        control = offered(run, lambda value: value["decisionHeadId"] is not None)
+        decision, tag, _ = client[0]("/v1/decisions/" + control["decisionHeadId"], "Decision")
+        assert decision["kind"] == "question", ("mixed-controls head", decision["kind"])
+        client[2]("/v1/decisions/" + decision["id"], {"operation": "answer", "occurrenceId": decision["address"]["occurrenceId"],
+                                                     "generation": decision["generation"], "value": False}, tag)
+
+    def listing(occurrence, place, targets):
+        """The redirect line of the live monitor for these offered targets."""
+        return "Redirect occurrence " + occurrence + place + ": " + "   ".join(str(index + 1) + " " + target for index, target in enumerate(targets))
+
+    def digit(offer, target):
+        """The digit key of the target in the offer."""
+        return str(offer["targets"].index(target) + 1).encode()
+
+    def redirects(run):
+        """The redirect commands of the run in acceptance order."""
+        return [row for row in command_rows(["/v1/runs/" + run + "/control"]) if row[1] == "redirect"]
+
+    def held(run, occurrence):
+        """The one running attempt of the occurrence."""
+        value, _, _ = client[1]("/v1/runs/" + run + "/snapshot", "RunSnapshot", lambda value: len(running_attempts(value, occurrence)) == 1)
+        return running_attempts(value, occurrence)[0]
+
+    def redirect_steps(session):
+        """The steps of the tui-redirect mode. See TUI_REDIRECT."""
+        # 1. A window redirect, a local refusal, a rejected-stale redirect
+        # and a live redirect of the held attempt.
+        before = set(work.glob("manager/runs/runs/*/runtime"))
+        run = start("profile_live")
+        store = new_store(before)
+        window = redirect_window(run)
+        occurrence = window["address"]["occurrenceId"]
+        first, spare = window["targets"]
+        answer_question(run)
+        open_run(session, run)
+        session.wait_screen(listing(occurrence, " in its dispatch window", window["targets"]), timeout=20)
+        save(session, "live-window")
+        _, deferrals = press([digit(window, first)], "Control: redirected occurrence " + occurrence + " to " + first, "redirect")
+        control = offered(run, lambda value: any(offer["operation"] == "redirect" and spare in offer["targets"] and first not in offer["targets"]
+                                                 for offer in value["offers"]))
+        live = next(offer for offer in control["offers"] if offer["operation"] == "redirect")
+        assert live["targets"] == [spare], ("live redirect targets", live["targets"])
+        attempt = held(run, occurrence)
+        number = attempt["address"]["attemptId"]
+        shown = listing(occurrence, ", attempt " + number + " in flight", live["targets"])
+        session.wait_screen(shown, timeout=20)
+        save(session, "live-offer")
+        screen, deferred = press([b"9"], "redirect did not start: the manager offers no target 9 for occurrence " + occurrence + ".", "redirect")
+        deferrals += deferred
+        refusal = re.search(r"Key (\d+): redirect did not start: the manager offers no target 9", screen)
+        assert refusal and len(redirects(run)) == 1, ("the digit without a target was not refused locally", refusal and refusal.group(0), redirects(run))
+        _, deferred = press([digit(live, spare)], "Control: redirected occurrence " + occurrence + " from attempt " + number + " to " + spare, "redirect")
+        deferrals += deferred
+        save(session, "live-redirected")
+        rows = redirects(run)
+        assert len(rows) == 2 and rows[1][2] == "effect-observed", ("the live redirect command", rows)
+        assert commands(["/v1/runs/" + run + "/control"]) == ["redirect"] * 2, "the TUI sent a command other than the two redirects"
+        settle(run, "succeeded")
+        completed = occurrence_of(snapshot_of(run), occurrence)
+        assert completed["state"] == "completed" and completed["source"] == "asked:" + spare, (
+            "live redirect answer source", completed["state"], completed["source"])
+        attempts, redirected = attempt_events(store, occurrence)
+        assert [event["type"] for event in attempts] == ["attempt.started", "attempt.failed", "attempt.started", "attempt.completed"], (
+            "live redirect attempts", attempts)
+        assert [(event["controlId"], event["target"]) for event in redirected] == [(rows[0][0], first), (rows[1][0], spare)], (
+            "occurrence.redirected events", redirected)
+        records = store_flow(tui_mode + "-live-flow", store)
+        questions = model_questions(records, occurrence)
+        assert [record["to"] for record in questions] == [{"to": {"model": first}}, {"to": {"model": spare}}], (
+            "live redirect questions", [record["to"] for record in questions])
+        failures = [record for record in records if record["schema"] == "failure" and record.get("replyTo") == questions[0]["position"]]
+        assert len(failures) == 1, ("the failure of the held question", failures)
+        print("PASS tui-redirect 1: in the dispatch window of run", run, "digit", digit(window, first).decode(), "redirected occurrence", occurrence,
+              "to", first, "; while attempt", number, "held its turn, the monitor listed", live["targets"], ", 9 was refused locally as key outcome",
+              refusal.group(1), "without a command, and the redirect to", spare, "showed the redirect from attempt", number, "; the stopped attempt ended",
+              "attempt.failed, the run log holds the failure of question", questions[0]["position"], "and question", questions[1]["position"],
+              "to", spare, ", and the run succeeded with its answer", "; deferred key presses:", deferrals, flush=True)
+        leave(session)
+
+        # 2. A dispatch-window redirect puts the chosen target first.
+        before = set(work.glob("manager/runs/runs/*/runtime"))
+        run = start("profile_live")
+        store = new_store(before)
+        window = redirect_window(run)
+        occurrence = window["address"]["occurrenceId"]
+        first, spare = window["targets"]
+        answer_question(run)
+        open_run(session, run)
+        session.wait_screen(listing(occurrence, " in its dispatch window", window["targets"]), timeout=20)
+        _, deferrals = press([digit(window, spare)], "Control: redirected occurrence " + occurrence + " to " + spare, "redirect")
+        save(session, "window-redirected")
+        rows = redirects(run)
+        assert len(rows) == 1 and rows[0][2] == "effect-observed", ("the window redirect command", rows)
+        settle(run, "succeeded")
+        completed = occurrence_of(snapshot_of(run), occurrence)
+        assert completed["state"] == "completed" and completed["source"] == "asked:" + spare, (
+            "window redirect answer source", completed["state"], completed["source"])
+        attempts, redirected = attempt_events(store, occurrence)
+        assert [event["type"] for event in attempts] == ["attempt.started", "attempt.completed"], ("window redirect attempts", attempts)
+        assert [(event["controlId"], event["target"]) for event in redirected] == [(rows[0][0], spare)], ("occurrence.redirected events", redirected)
+        records = store_flow(tui_mode + "-window-flow", store)
+        questions = model_questions(records, occurrence)
+        assert [record["to"] for record in questions] == [{"to": {"model": spare}}], ("window redirect questions", [record["to"] for record in questions])
+        print("PASS tui-redirect 2: in the dispatch window of run", run, "digit", digit(window, spare).decode(), "redirected occurrence", occurrence,
+              "to", spare, "; the monitor showed the redirect, the run log holds one question, question", questions[0]["position"], "to", spare,
+              ", and the run succeeded with its answer", "; deferred key presses:", deferrals, flush=True)
+        leave(session)
+
+        # 3. No redirect of an effect in flight.
+        before = set(work.glob("manager/runs/runs/*/runtime"))
+        run = start("profile_live_effect", "controlled-effect")
+        store = new_store(before)
+        window = redirect_window(run)
+        occurrence = window["address"]["occurrenceId"]
+        first, spare = window["targets"]
+        open_run(session, run)
+        session.wait_screen(listing(occurrence, " in its dispatch window", window["targets"]), timeout=20)
+        _, deferrals = press([digit(window, first)], "Control: redirected occurrence " + occurrence + " to " + first, "redirect")
+        attempt = held(run, occurrence)
+        control, _, _ = client[0]("/v1/runs/" + run + "/control", "RunControl")
+        assert not any(offer["operation"] == "redirect" for offer in control["offers"]), ("effect redirect offered", control["offers"])
+        deadline = time.monotonic() + 5
+        while "Redirect occurrence" in session.screen.text():
+            assert time.monotonic() < deadline, ("the monitor still lists a redirect of the effect", session.screen.text())
+            session.pump(0.1)
+        save(session, "effect-in-flight")
+        screen, deferred = press([b"1"], "redirect did not start: the manager offers no redirect for this run.", "redirect")
+        deferrals += deferred
+        refusal = re.search(r"Key (\d+): redirect did not start: the manager offers no redirect", screen)
+        still = running_attempts(snapshot_of(run), occurrence)
+        assert [item["address"] for item in still] == [attempt["address"]], ("the effect attempt ended before the refusal was checked", still)
+        rows = redirects(run)
+        assert refusal and len(rows) == 1, ("the redirect of the effect was not refused locally", refusal and refusal.group(0), rows)
+        settle(run, "succeeded")
+        completed = occurrence_of(snapshot_of(run), occurrence)
+        assert completed["source"] == "asked:" + first, ("effect answer source", completed["source"])
+        attempts, redirected = attempt_events(store, occurrence)
+        assert [event["type"] for event in attempts] == ["attempt.started", "attempt.completed"], ("effect attempts", attempts)
+        assert [(event["controlId"], event["target"]) for event in redirected] == [(rows[0][0], first)], ("effect occurrence.redirected events", redirected)
+        print("PASS tui-redirect 3: while effect attempt", attempt["address"]["attemptId"], "of run", run, "was in flight, the monitor listed no",
+              "redirect target, 1 was refused locally as key outcome", refusal.group(1), "without a command, and the run succeeded with the",
+              "answer of", first, "; deferred key presses:", deferrals, flush=True)
+        leave(session)
+
+        # 4. A rejected-stale redirect shows its acknowledgement and is not sent again.
+        run = start("profile_live_stale")
+        window = redirect_window(run)
+        occurrence = window["address"]["occurrenceId"]
+        first, spare = window["targets"]
+        answer_question(run)
+        open_run(session, run)
+        session.wait_screen(listing(occurrence, " in its dispatch window", window["targets"]), timeout=20)
+        _, deferrals = press([digit(window, first)], "Control: redirected occurrence " + occurrence + " to " + first, "redirect")
+        attempt = held(run, occurrence)
+        number = attempt["address"]["attemptId"]
+        session.wait_screen(listing(occurrence, ", attempt " + number + " in flight", [spare]), timeout=20)
+        _, deferred = press([b"1"], "Control: redirected occurrence " + occurrence + " from attempt " + number + " to " + spare, "redirect")
+        deferrals += deferred
+        control = offered(run, lambda value: any(offer["operation"] == "redirect" and offer["targets"] == [first] for offer in value["offers"]))
+        attempt = held(run, occurrence)
+        assert attempt["address"]["attemptId"] != number, ("the spare candidate holds no new attempt", attempt["address"])
+        session.wait_screen(listing(occurrence, ", attempt " + attempt["address"]["attemptId"] + " in flight", [first]), timeout=20)
+        save(session, "stale-offer")
+        _, deferred = press([b"1"], "Control: redirect to " + first + ": runtime acknowledgement rejected-stale", "redirect")
+        deferrals += deferred
+        save(session, "rejected-stale")
+        screen = session.screen.text()
+        assert "Outcome unresolved" not in screen and "x requests an exact resend" not in screen, "the rejected redirect offered a resend"
+        rows = redirects(run)
+        assert len(rows) == 3 and rows[2][3] is not None and rows[2][3]["state"] == "rejected-stale" and rows[2][2] != "effect-observed", (
+            "the rejected redirect command", rows)
+        still = held(run, occurrence)
+        assert still["address"] == attempt["address"], ("the rejected redirect stopped the attempt of the spare candidate", attempt["address"], still["address"])
+        session.pump(1.0)
+        assert len(redirects(run)) == 3, "the TUI sent the rejected redirect again"
+        while True:
+            _, deferred = press([b"c"], "Confirm cancel", "cancel")
+            deferrals += deferred
+            screen, deferred = press([b"y"], "Control: cancel accepted", "cancel")
+            deferrals += deferred
+            if "Control: cancel accepted" in screen:
+                break
+        ended(run, "cancelled")
+        assert commands(["/v1/runs/" + run + "/control"]) == ["redirect"] * 3 + ["cancel"], "the TUI sent a command other than three redirects and one cancel"
+        print("PASS tui-redirect 4: after the redirects of run", run, "to", first, "and then to", spare, ", the redirect of attempt",
+              attempt["address"]["attemptId"], "back to", first, "showed its rejected-stale acknowledgement", rows[2][3]["state"],
+              "without a resend offer or a second send while the attempt kept running, and c and y cancelled the run",
+              "; deferred key presses:", deferrals, flush=True)
+        leave(session)
+        assert not tui_fixture.client_state.exists(), "the service TUI created local runner state"
+        print("PASS tui-redirect: the dispatch-window and live redirects, the rejected-stale acknowledgement and the local refusals ran",
+              "through the actual service TUI", flush=True)
+
     with (work / "server-0.stdout").open("wb") as output, (work / "server-0.stderr").open("wb") as errors:
         process = subprocess.Popen([str(runner), "--manager", "serve", "--config", str(config),
                                     "+RTS", "-N" + native, "-RTS"], stdout=output, stderr=errors)
@@ -4644,11 +4940,17 @@ def tui_control_checks():
             client = mixed_client(capabilities, harness)
             with tui_fixture.session(rows=40, columns=140) as session:
                 session.wait_screen("Manager profiles")
-                session.wait_screen("profile_1")
+                session.wait_screen(TUI_MODES[tui_mode][0][0])
                 session.send(b"\r")
                 session.wait_screen("Manager workflows")
                 session.send(b"O")
                 session.wait_screen("Manager overview")
+                if tui_mode == TUI_REDIRECT:
+                    redirect_steps(session)
+                    session.send(b"q")
+                    assert session.wait_exit(20) == 0
+                    session.assert_restored()
+                    return
 
                 # 1. c and y cancel a held run.
                 run = start("profile_steer")
@@ -5532,11 +5834,6 @@ def control_checks():
         assert acknowledgements, ("run-log control acknowledgement", identity)
         return control, acknowledgements[0]
 
-    def model_questions(records, occurrence):
-        """The run-log questions of the occurrence to a model, in log order."""
-        return [record for record in records if record["schema"] == "question" and str(record["about"].get("occurrence")) == occurrence
-                and isinstance(record["to"].get("to"), dict) and "model" in record["to"]["to"]]
-
     def settle(client, capabilities, run, choice):
         """Act on each head decision of the run until it ends: typed false
         for a question and choose-recovery with the choice for a recovery.
@@ -5627,19 +5924,6 @@ def control_checks():
               control["position"], "from the manager with acknowledgement event", acknowledgement, "and question", questions[0]["position"],
               "to", target, "with its answer, events.ndjson holds occurrence.redirected, and the run succeeded", flush=True)
 
-    def occurrence_of(snapshot, occurrence):
-        """The occurrence of a run snapshot with the identifier."""
-        assert snapshot["page"]["next"] is None, "the run snapshot has more than one page"
-        found = [item for item in snapshot["items"] if item["occurrenceId"] == occurrence]
-        assert len(found) == 1, ("snapshot occurrence", occurrence, len(found))
-        return found[0]
-
-    def running_attempts(snapshot, occurrence):
-        """The running attempts of the occurrence in a run snapshot, or none
-        when the snapshot does not hold the occurrence yet."""
-        found = [item for item in snapshot["items"] if item["occurrenceId"] == occurrence]
-        return [attempt for item in found for attempt in item.get("attempts", []) if attempt["state"] == "running"]
-
     def close_window(client, run):
         """Close the dispatch window of the two-candidate question of the run
         at once by a redirect to its first target. Returns the occurrence,
@@ -5653,16 +5937,6 @@ def control_checks():
         assert first_target.endswith("@primary") and spare_target.endswith("@spare"), ("dispatch targets", window["targets"])
         uri = client[2](base + "/control", {"operation": "redirect", "occurrenceId": occurrence, "target": first_target}, tag)
         return occurrence, first_target, spare_target, effect(client, uri, "redirected")
-
-    def attempt_events(store, occurrence):
-        """The attempt start and end events and the occurrence.redirected
-        events of the occurrence in events.ndjson of the run store."""
-        events = [json.loads(line) for line in (store / "events.ndjson").read_bytes().splitlines()]
-        events = [event.get("event", event) for event in events]
-        mine = lambda event: str(event.get("occurrenceId", (event.get("attemptId") or {}).get("occurrenceId"))) == occurrence
-        attempts = [event for event in events if event["type"] in ("attempt.started", "attempt.completed", "attempt.failed") and mine(event)]
-        redirected = [event for event in events if event["type"] == "occurrence.redirected" and mine(event)]
-        return attempts, redirected
 
     def live_cases(first, first_capabilities):
         """Live redirect of an in-flight attempt through /v1, and its refusal
@@ -7231,7 +7505,7 @@ if person_mode:
     raise SystemExit(0)
 
 
-if control_profiles and tui_mode != TUI_CONTROLS:
+if control_profiles and tui_mode not in (TUI_CONTROLS, TUI_REDIRECT):
     facts = control_checks()
     if live_mode:
         live_flow_checks(facts)
@@ -7279,7 +7553,7 @@ if tui_mode == INPUTS:
     raise SystemExit(0)
 
 
-if tui_mode == TUI_CONTROLS:
+if tui_mode in (TUI_CONTROLS, TUI_REDIRECT):
     tui_control_checks()
     raise SystemExit(0)
 

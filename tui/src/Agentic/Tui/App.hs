@@ -1552,9 +1552,9 @@ handleServiceEventCore client event = do
           Vty.KChar 'd' | ServiceReviewScreen {} <- modelScreen (stateModel state) -> do
             put state {stateConfirmDetails = not (stateConfirmDetails state)}
             vScrollToBeginning (viewportScroll ConfirmDetailsViewport)
-          -- In service mode the live monitor sends the run controls only
-          -- through 'serviceNewMutationKey'. Local redirect and result keys
-          -- have no binding here.
+          -- In service mode the live monitor sends the run controls, the
+          -- redirect digits included, only through 'serviceNewMutationKey'.
+          -- Local result keys have no binding here.
           Vty.KChar 'd' | LiveScreen _ <- modelScreen (stateModel state) -> do
             put state {stateRunDetails = not (stateRunDetails state)}
             vScrollToBeginning (viewportScroll FailureViewport)
@@ -1637,6 +1637,19 @@ handleServiceEventCore client event = do
                     modify (\current -> current {stateSteerTiming = Just timing, stateControlError = Nothing, stateControlEditor = blankEditor})
                 | otherwise -> serviceKeyOutcome False ("steer did not start: the manager offers no " <> steeringTimingText timing <> " steer for this run.")
               Nothing -> serviceKeyOutcome False "steer did not start: the run controls are not observed.")
+      -- A digit key 1 to 9 redirects the occurrence that the redirect line
+      -- of the live monitor names to the offered target of that digit,
+      -- inside the dispatch window or for the attempt in flight. A digit
+      -- without an offered target sends nothing and shows a fixed refusal.
+      (LiveScreen _, Vty.KChar digit, []) | digit >= '1' && digit <= '9' ->
+        Just ("redirect", case (serviceRunRead state, serviceProfile state) of
+          (Just components, Just profile)
+            | isJust (Lane.installedStale (stateServiceObservation state)) ->
+                serviceKeyOutcome False "redirect did not start: the control observation is stale."
+            | otherwise -> case Service.redirectMutation profile components (serviceSelectedOccurrence state) (fromEnum digit - fromEnum '1') of
+                Left failure -> serviceKeyOutcome False ("redirect did not start: " <> failure <> ".")
+                Right (mutation,observed) -> beginServiceMutation client mutation (Just observed)
+          _ -> serviceKeyOutcome False "redirect did not start: the run controls are not observed.")
       _ -> Nothing
     -- Start a control of the displayed run from the installed composite
     -- read, or show why it did not start.
@@ -1957,8 +1970,12 @@ toPresentation state =
         (LiveScreen _, Just (Service.RunRead _ (_,control) _)) ->
           ["c CANCEL" | Service.cancelOffered control]
             <> ["i/b STEER" | any (isJust . Service.steerOffer control Nothing) ["interrupt-now","next-boundary"]]
+            <> ["1-9 REDIRECT" | isJust (Service.redirectOffer control Nothing)]
         _ -> [],
-      presentationServiceControlLines = Service.controlLines (stateServiceControlOutcome state) (serviceRun state),
+      presentationServiceControlLines = Service.controlLines (stateServiceControlOutcome state) (serviceRun state)
+        <> case (modelScreen (stateModel state), serviceRunRead state) of
+          (LiveScreen _, Just (Service.RunRead snapshot (_,control) _)) -> Service.redirectLines control snapshot (serviceSelectedOccurrence state)
+          _ -> [],
       presentationServiceResultLines = case serviceRun state of
         Just run -> Service.resultLines run (Lane.retrievalShown (runIdText (Service.runIdentity run)) (stateServiceResult state))
           <> [line | Just (ident, line) <- [stateServiceSaved state], ident == runIdText (Service.runIdentity run)]

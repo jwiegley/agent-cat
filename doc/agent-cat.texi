@@ -3557,8 +3557,9 @@ manager's run snapshot, which the observation lane supplies.  The monitor shows
 the published runtime status, or states that the runtime is not yet observed,
 and it shows the approval receipt status and any stale observation on separate
 lines.  It shows the occurrences and their published output as the snapshot
-reports them.  Elapsed time remains unknown, and the monitor offers no local
-cancel, steering, redirect, or result action.
+reports them.  Elapsed time remains unknown.  The monitor offers no key of the
+local mode for a cancel, a steer, a redirect, or a result.  It sends only the
+run controls that the manager offers, as the following paragraphs describe.
 
 The run is terminal only when the snapshot runtime status is succeeded,
 failed, cancelled, or orphaned.  A null, starting, running, or cancelling
@@ -3648,12 +3649,36 @@ tag of the displayed control observation, and @kbd{ESC} closes the editor.  The
 steer completes only when the command receipt reports the observed
 @code{steered} effect for the steered attempt.  The line @samp{Control:} shows
 @samp{steered}, @samp{failed over}, or @samp{abandoned} from the receipt of the
-latest completed control of the run.  A runtime acknowledgement that rejects a
-control leaves the command unresolved with that reason.  The footer shows
-@samp{c CANCEL} and @samp{i/b STEER} only while the controls offer them.
+latest completed control of the run.  The footer shows @samp{c CANCEL},
+@samp{i/b STEER}, and @samp{1-9 REDIRECT} only while the controls offer them.
 
-Every @kbd{C-d}, @kbd{r}, @kbd{f}, @kbd{a}, @kbd{c}, @kbd{i}, or @kbd{b} that
-sends nothing, for example for an operation that the run controls do not
+The run controls offer a @code{redirect} for an occurrence inside its dispatch
+window, and after the window for the one attempt in flight of an occurrence
+that is not an effect.  The live monitor shows the redirect offer of the
+selected occurrence, or else the first redirect offer, on the line
+@samp{Redirect occurrence}, which states the open dispatch window or the
+attempt in flight and lists each offered target with its digit.  A digit key
+from @kbd{1} to @kbd{9} sends the redirect of that occurrence to the target of
+that digit once to the run controls, with the entity tag of the displayed
+control observation as its precondition.  The body names the occurrence and
+the target, and not the attempt in flight.  A digit without an offered target
+sends nothing and shows a numbered key outcome with fixed text, such as
+@samp{redirect did not start: the manager offers no target 9 for occurrence
+0.}, or @samp{redirect did not start: the manager offers no redirect for this
+run.} while no redirect is offered, for example while an effect is in flight.
+The redirect completes only when the command receipt reports the observed
+@code{redirected} effect for the occurrence.  The line @samp{Control:} then
+shows @samp{redirected occurrence 0 to @var{target}}, or @samp{redirected
+occurrence 0 from attempt 1 to @var{target}} for a live redirect.
+
+A runtime acknowledgement that rejects a control, with the state
+@code{rejected-stale}, @code{unsupported}, or @code{failed}, is the outcome of
+that control.  The line @samp{Control:} shows the operation and the state, for
+example @samp{redirect to @var{target}: runtime acknowledgement
+rejected-stale}, the command lane becomes idle, and nothing is sent again.
+
+Every @kbd{C-d}, @kbd{r}, @kbd{f}, @kbd{a}, @kbd{c}, @kbd{i}, @kbd{b}, or digit
+key that sends nothing, for example for an operation that the run controls do not
 offer, shows a numbered key outcome that states the reason.  When an observation read in flight defers a mutation key,
 automatic refresh pauses until that read completes or for at most three
 seconds from the key outcome, whichever comes first.  While the pause holds,
@@ -3663,8 +3688,7 @@ the observation line states that automatic refresh is paused instead of
 A declared client failure keeps its declared meaning, and the internal-fault
 rules above apply to every step of the journey.
 
-Service mode does not support these features.  The frontend offers no
-redirect of a run.  It has no
+Service mode does not support these features.  It has no
 structured answer editor, so a question with the @code{structured} code or with
 a code that is not a name shows its prompt and accepts no answer.  The
 frontend offers no run history, lineage, or export.  Except

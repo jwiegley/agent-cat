@@ -168,10 +168,12 @@ data Presentation = Presentation
     -- 'Agentic.Tui.Service.recoveryOffer' decide.
     presentationServiceRecoveryOffers :: ![Text],
     -- | The run keys that the installed control observation offers on the
-    -- live monitor: @c CANCEL@ and @i/b STEER@.
+    -- live monitor: @c CANCEL@, @i/b STEER@ and @1-9 REDIRECT@.
     presentationServiceRunKeys :: ![Text],
     -- | The control line of the installed run, as
-    -- 'Agentic.Tui.Service.controlLines' produces it.
+    -- 'Agentic.Tui.Service.controlLines' produces it, and on the live
+    -- monitor the redirect line, as 'Agentic.Tui.Service.redirectLines'
+    -- produces it.
     presentationServiceControlLines :: ![Text],
     -- | The terminal status and verified result lines of the installed run,
     -- as 'Agentic.Tui.Service.resultLines' produces them.
@@ -482,7 +484,8 @@ screenView presentation width totalHeight mainHeight = case modelScreen model of
 -- | The lines above the live monitor in service mode: the request and its
 -- run, the installed observation with its stale mark and published runtime,
 -- the approval receipt status, which stays separate from the runtime, the
--- outcome of the latest control of the run, and the result lines.
+-- outcome of the latest control of the run, the redirect line, and the
+-- result lines.
 serviceLiveLines :: Presentation -> [Text]
 serviceLiveLines presentation =
   presentationServiceRequestLines presentation
@@ -1114,6 +1117,7 @@ keyHelpLines presentation = case modelScreen model of
           <> ["a abandons the recovery that the manager offers" | "abandon" `elem` presentationServiceRecoveryOffers presentation]
           <> ["c cancels the run after a confirmation" | "c CANCEL" `elem` presentationServiceRunKeys presentation]
           <> ["i or b opens the steer editor for interrupt-now or next-boundary" | "i/b STEER" `elem` presentationServiceRunKeys presentation]
+          <> ["1 to 9 redirect the occurrence of the redirect line to that offered target" | "1-9 REDIRECT" `elem` presentationServiceRunKeys presentation]
           <> ["s saves the verified result bytes to a new file" | presentationServiceSavable presentation]
           <> ["Esc returns to the manager overview; the manager run continues", "q detaches; the manager run continues", "? or Esc close this help"]
   LiveScreen _ ->

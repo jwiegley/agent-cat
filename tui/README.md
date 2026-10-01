@@ -290,6 +290,21 @@ refused locally with numbered key outcomes and send nothing, and an abandon
 then ends the decision and the run fails. The mode checks that the
 coordination database holds exactly one command for each control.
 
+The tui-redirect mode of `manager/test/service_http.py` sends redirects
+through the actual frontend with the profiles of the live-redirect mode: a
+first candidate that holds its turn and a spare candidate that answers at
+once. A digit inside the dispatch window closes it. A digit then redirects the
+held attempt to the spare candidate, the stopped attempt ends
+`attempt.failed`, and the run succeeds with the answer of the spare candidate.
+A second run shows that a redirect inside the dispatch window puts the chosen
+target first. While an effect is in flight, the monitor lists no redirect
+target, and `1` is refused locally. A third profile routes both candidates to
+the hold fixture, so that the manager offers a live redirect back to the
+first target after a redirect to the spare candidate. The runtime rejects it,
+and the monitor shows the `rejected-stale` acknowledgement without a resend
+offer or a second send. A digit without an offered target is refused locally,
+and the mode checks the redirect commands in the coordination database.
+
 The application state keeps the text drafts by identity
 (`Agentic.Tui.ServiceLane.Drafts`): the input editor text of each request and
 input, and the answer text of each decision of each run. An editor shows the
@@ -433,8 +448,26 @@ observation. The recovery dialog and the footer show the key of each offered
 choice and list the published choices that the controls do not offer. A key
 for an operation that the controls do not offer sends nothing and shows a
 numbered key outcome, for example `steer did not start: the manager offers no
-interrupt-now steer for this run.` The footer shows `c CANCEL` and `i/b STEER`
-only while the controls offer them.
+interrupt-now steer for this run.` The footer shows `c CANCEL`, `i/b STEER`
+and `1-9 REDIRECT` only while the controls offer them.
+
+The controls offer `redirect` for an occurrence inside its dispatch window,
+and after the window for the one attempt in flight of an occurrence that is
+not an effect ([the control contract](../manager/CONTROLS.md#fail-over-and-redirect)).
+`Agentic.Tui.Service.redirectOffer` selects the redirect offer of the selected
+occurrence, or else the first redirect offer. The live monitor shows it on
+the line `Redirect occurrence N`, which states the open dispatch window or the
+attempt in flight and lists each offered target with its digit, for example
+`Redirect occurrence 0, attempt 0 in flight: 1 model controlled@spare`. A
+digit key from `1` to `9` sends the redirect of that occurrence to the target
+of that digit to `POST /v1/runs/{id}/control`, with the entity tag of the
+displayed control observation. The body names the occurrence and the target.
+The attempt in flight is shown only, because the redirect body names no
+attempt. A digit without an offered target sends nothing and shows a numbered
+key outcome with fixed text: `redirect did not start: the manager offers no
+target 9 for occurrence 0.`, or `redirect did not start: the manager offers no
+redirect for this run.` when no redirect is offered, for example while an
+effect is in flight.
 
 `Agentic.Tui.Service.controlOutcome` reads the outcome of a control from its
 own receipt, and the live monitor shows it on the line `Control:`. A cancel
@@ -446,8 +479,13 @@ and `cancel accepted; the runtime status is Cancelled` after it. An accepted
 cancel is never shown as a finished or succeeded run. A steer completes on
 the effect `steered`, and a fail-over or an abandon on the effect
 `recovery-chosen`, which the line shows as `steered`, `failed over` and
-`abandoned`. A runtime acknowledgement that rejects a control leaves the
-command unresolved with that reason.
+`abandoned`. A redirect completes on the effect `redirected` for its
+occurrence, which the line shows as `redirected occurrence 0 to TARGET`, or as
+`redirected occurrence 0 from attempt 1 to TARGET` for a live redirect. A
+runtime acknowledgement that rejects a control (`rejected-stale`,
+`unsupported` or `failed`) is the outcome of that control: the line shows, for
+example, `redirect to TARGET: runtime acknowledgement rejected-stale`, the
+command lane becomes idle, and nothing is sent again.
 
 A run is terminal only when the snapshot runtime status is succeeded, failed,
 cancelled or orphaned. For a succeeded run with a verified result reference,
@@ -478,8 +516,8 @@ the answer conversion against the `resources` section of
 `test/manager_client_vectors.json`, which [the protocol
 description](../doc/api/README.md#pages-and-live-delivery) describes.
 
-Service mode does not support redirect, the structured answer editor, run
-history, lineage, export,
+Service mode does not support the structured answer editor, run history,
+lineage, export,
 reconnection of the session after a manager restart or a credential
 revocation, or acceptance at 40x12 and 80x24. The
 [manual](../doc/agent-cat.texi) entry for `--service` states the complete key
