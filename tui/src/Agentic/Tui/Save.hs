@@ -4,11 +4,15 @@
 -- | Exclusive publication of exact bytes to one absolute path.
 --
 -- The bytes go to a new private file in the destination directory first.
--- A hard link then publishes that file at the destination. A link never
+-- A hard link then publishes that file at the destination, so the file
+-- system of the destination directory must support hard links. A link never
 -- replaces an existing entry, so an existing file, directory, symbolic link
 -- or dangling symbolic link stays as it is. The new file has mode 0600. A
--- failure removes the private file, so it leaves no new file.
-module Agentic.Tui.Save (SaveRefusal (..), saveExact, saveRefusalText) where
+-- failure before the link removes the private file, so it leaves no new
+-- file. After the link, the destination holds the exact bytes and the save
+-- succeeds. When the private file cannot then be removed, the success names
+-- that leftover file.
+module Agentic.Tui.Save (SaveRefusal (..), Saved (..), saveExact, saveExactUsing, saveRefusalText) where
 
 import Control.Exception (IOException, onException, try)
 import Crypto.Random (getRandomBytes)
@@ -35,9 +39,19 @@ saveRefusalText refusal = case refusal of
   InvalidDestination -> "the destination must be one absolute single-line file path"
   SaveIOFailure failure -> T.pack (show failure)
 
+-- | A save that published the exact bytes at the destination: the private
+-- file was removed, or it remains at this path because its removal failed.
+data Saved = Saved | SavedLeftover !FilePath
+  deriving (Eq, Show)
+
 -- | Write exactly these bytes to a new file at this absolute path.
-saveExact :: FilePath -> BS.ByteString -> IO (Either SaveRefusal ())
-saveExact path bytes
+saveExact :: FilePath -> BS.ByteString -> IO (Either SaveRefusal Saved)
+saveExact = saveExactUsing removeLink
+
+-- | 'saveExact' with this removal of the private file. A removal that fails
+-- after the link leaves the private file, and the save still succeeds.
+saveExactUsing :: (FilePath -> IO ()) -> FilePath -> BS.ByteString -> IO (Either SaveRefusal Saved)
+saveExactUsing remove path bytes
   | not (isAbsolute path) || hasTrailingPathSeparator path || null (takeFileName path)
       || any (`elem` ['\NUL', '\n', '\r']) path =
       pure (Left InvalidDestination)
@@ -51,10 +65,13 @@ saveExact path bytes
               handle <- fdToHandle descriptor `onException` closeFd descriptor
               (BS.hPut handle bytes `onException` hClose handle) >> hClose handle
               createLink private path
-        publish `onException` removeLink private
-        removeLink private
-      pure $ case outcome of
-        Left (failure :: IOException) -> Left (SaveIOFailure failure)
-        Right () -> Right ()
+        publish `onException` remove private
+      case outcome of
+        Left (failure :: IOException) -> pure (Left (SaveIOFailure failure))
+        Right () -> do
+          removed <- try (remove private)
+          pure . Right $ case removed of
+            Left (_ :: IOException) -> SavedLeftover private
+            Right () -> Saved
   where
     hex byte = let digits = showHex byte "" in if length digits == 1 then '0' : digits else digits

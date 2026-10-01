@@ -18,6 +18,7 @@ module Agentic.Tui.Presentation
     serviceRequestLines,
     serviceSaveRefusal,
     serviceSavedLine,
+    savedLeftoverNote,
     wrapDisplayLines,
   )
 where
@@ -49,7 +50,7 @@ import Agentic.Tui.Highlight
 import Agentic.Tui.Model
 import Agentic.Tui.Person
 import Agentic.Tui.RunModel
-import Agentic.Tui.Save (SaveRefusal (..))
+import Agentic.Tui.Save (SaveRefusal (..), Saved (..))
 import Agentic.Tui.Types
 import qualified Agentic.Tui.Service as Service
 import Agentic.Tui.ServiceLane (KeyOutcome, internalFaultStatus, keyOutcomeLine)
@@ -835,9 +836,16 @@ serviceSaveRefusal path refusal = case refusal of
     | isAlreadyExistsError failure -> "Save refused: an entry already exists at the destination. Nothing was written. Path: " <> shownPath path
     | otherwise -> "Save failed: nothing was written (" <> T.pack (show (ioeGetErrorType failure)) <> "). Path: " <> shownPath path
 
--- | The result line after a service save of this many verified bytes.
-serviceSavedLine :: Text -> Int -> Text
-serviceSavedLine path size = "Saved the verified " <> shown size <> " bytes to " <> shownPath path
+-- | The result line after a service save of this many verified bytes. A
+-- private file that remains after the link is named.
+serviceSavedLine :: Text -> Int -> Saved -> Text
+serviceSavedLine path size saved = "Saved the verified " <> shown size <> " bytes to " <> shownPath path <> savedLeftoverNote saved
+
+-- | The note that names a private file that remains after a save, if any.
+savedLeftoverNote :: Saved -> Text
+savedLeftoverNote saved = case saved of
+  Saved -> ""
+  SavedLeftover private -> "; the temporary file " <> shownPath (T.pack private) <> " was not removed"
 
 shownPath :: Text -> Text
 shownPath = T.replace "\n" "\xfffd" . safeDisplay

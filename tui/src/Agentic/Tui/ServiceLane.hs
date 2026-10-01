@@ -31,9 +31,16 @@
 -- instead, and a deferred key is never replayed. A key during a
 -- single-resource read ends and cancels that read and starts. A refusal or a
 -- deferral is a numbered 'KeyOutcome', and 'retainKeyOutcome' keeps it on
--- the status line until the next key press or until the view changes. While
--- a deferral is shown, automatic refresh pauses ('refreshPaused'), so the
--- page-set read in flight ends and the repeated key finds no read in flight.
+-- the status line until the next key press or until the view changes. A
+-- deferral pauses automatic refresh ('refreshPaused'). The pause ends when the
+-- deferring page-set read completes or 'refreshPauseLimit' after the key
+-- outcome, whichever comes first.
+--
+-- The verified result of a run is retrieved through the same lane. Only
+-- retrieved verified bytes are retained ('Retrieval'). A refusal or a
+-- retrieval without a verified result is a retryable failure: an automatic
+-- refresh retries it after the next installed composite read, and an
+-- explicit refresh retries it at once ('retrievalDue').
 module Agentic.Tui.ServiceLane
   ( CallOutcome (..),
     serviceCall,
@@ -67,9 +74,21 @@ module Agentic.Tui.ServiceLane
     keyHelpText,
     unobservedText,
     KeyOutcome (..),
+    Deferral (..),
+    deferral,
     keyOutcomeLine,
     retainKeyOutcome,
+    refreshPauseLimit,
     refreshPaused,
+    RefreshCause (..),
+    Retrieval (..),
+    RetrievalState (..),
+    retrievalDue,
+    retrievalStep,
+    retrievalObserved,
+    retrievedResult,
+    retrievalShown,
+    retrievalStatus,
     PrepareStep (..),
     prepareStep,
     SendStep (..),
@@ -91,6 +110,7 @@ import Control.Exception (SomeAsyncException, SomeException, evaluate, fromExcep
 import Data.Maybe (isJust)
 import Data.Text (Text)
 import qualified Data.Text as T
+import Data.Time.Clock (NominalDiffTime, UTCTime, diffUTCTime)
 
 -- | The outcome of one call into the manager client facade.
 data CallOutcome a
@@ -409,20 +429,117 @@ unobservedText operation = operation <> " did not start: the request validator i
 
 -- | The visible outcome of one mutation-key press that started nothing: the
 -- sequence number of the press among such presses of the session, its fixed
--- text, and whether a page-set read in flight deferred the key.
+-- text, and the deferral when a page-set read in flight deferred the key.
 data KeyOutcome = KeyOutcome
   { outcomeKey :: !Int,
     outcomeText :: !Text,
-    outcomeDeferred :: !Bool
+    outcomeDeferral :: !(Maybe Deferral)
   }
   deriving (Eq, Show)
 
--- | Whether automatic refresh pauses after one service event, given the key
--- outcome that remains. Refresh pauses exactly while a deferral is shown. The
--- next key press or a view change ends the outcome, and refresh resumes. An
+-- | The page-set read that deferred a key, by its ticket number, and the
+-- time of the key outcome.
+data Deferral = Deferral
+  { deferralTicket :: !Int,
+    deferralAt :: !UTCTime
+  }
+  deriving (Eq, Show)
+
+-- | The deferral of a key at this time, given the lane when the key arrived:
+-- the page-set read in flight, if one holds the ticket.
+deferral :: UTCTime -> Lane pending location -> Maybe Deferral
+deferral now lane = case laneReadTicket lane of
+  Just (ReadTicket ticket PageSetRead) -> Just (Deferral ticket now)
+  _ -> Nothing
+
+-- | The longest pause of automatic refresh after a deferred key, measured
+-- from the key outcome.
+refreshPauseLimit :: NominalDiffTime
+refreshPauseLimit = 3
+
+-- | Whether automatic refresh pauses at this time, given the lane and the key
+-- outcome that remains. Only a deferral pauses refresh. The pause ends when
+-- the deferring page-set read no longer holds the read ticket or
+-- 'refreshPauseLimit' after the key outcome, whichever comes first. The next
+-- key press or a view change ends the outcome, and with it the pause. An
 -- explicit refresh key still reads.
-refreshPaused :: Maybe KeyOutcome -> Bool
-refreshPaused = maybe False outcomeDeferred
+refreshPaused :: UTCTime -> Lane pending location -> Maybe KeyOutcome -> Bool
+refreshPaused now lane outcome = case outcome >>= outcomeDeferral of
+  Nothing -> False
+  Just (Deferral ticket at) ->
+    fmap ticketNumber (laneReadTicket lane) == Just ticket && diffUTCTime now at < refreshPauseLimit
+
+-- | What asked for a refresh: the one-second timer and the completion of a
+-- command, or the explicit refresh key.
+data RefreshCause = AutomaticRefresh | ExplicitRefresh
+  deriving (Eq, Show, Enum, Bounded)
+
+-- | The retrieval of the verified result of one run, by its run identifier.
+data Retrieval result = Retrieval
+  { retrievalRun :: !Text,
+    retrievalState :: !(RetrievalState result)
+  }
+  deriving (Eq, Show)
+
+-- | The latest retrieval of the verified result of a run.
+data RetrievalState result
+  = -- | The exact verified bytes. They are never retrieved again.
+    Retrieved !result
+  | -- | The latest retrieval was refused with this code, or it found no
+    -- verified result. The flag records whether a composite read was
+    -- installed after that retrieval, which makes an automatic retry due.
+    RetrievalFailed !Text !Bool
+  deriving (Eq, Show)
+
+-- | Whether a refresh for this cause retrieves the verified result of this
+-- run now, given the retained retrieval. A run without a retrieval is
+-- retrieved. Retrieved bytes are never retrieved again. After a failure, an
+-- explicit refresh retries at once, and an automatic refresh retries only
+-- after the next installed composite read, so each automatic refresh starts
+-- at most one retrieval and the observation keeps its refresh.
+retrievalDue :: RefreshCause -> Text -> Maybe (Retrieval result) -> Bool
+retrievalDue cause run retrieval = case retrieval of
+  Just (Retrieval ident state) | ident == run -> case state of
+    Retrieved _ -> False
+    RetrievalFailed _ observed -> observed || cause == ExplicitRefresh
+  _ -> True
+
+-- | The retrieval after one completed retrieval of this run: the verified
+-- bytes, or a retryable failure with the refusal code or the fixed text
+-- @no verified result@.
+retrievalStep :: Text -> Either C.ClientFailure (Maybe result) -> Retrieval result
+retrievalStep run outcome = Retrieval run $ case outcome of
+  Right (Just result) -> Retrieved result
+  Right Nothing -> RetrievalFailed "no verified result" False
+  Left failure -> RetrievalFailed (refusalCode failure) False
+
+-- | The retrieval after an installed composite read. A failed retrieval
+-- becomes due for an automatic retry. Retrieved bytes stay.
+retrievalObserved :: Maybe (Retrieval result) -> Maybe (Retrieval result)
+retrievalObserved retrieval = case retrieval of
+  Just (Retrieval run (RetrievalFailed code _)) -> Just (Retrieval run (RetrievalFailed code True))
+  _ -> retrieval
+
+-- | The retained verified bytes of this run.
+retrievedResult :: Text -> Maybe (Retrieval result) -> Maybe result
+retrievedResult run retrieval = case retrieval of
+  Just (Retrieval ident (Retrieved result)) | ident == run -> Just result
+  _ -> Nothing
+
+-- | The retrieval of this run for display: none yet, the failure code of the
+-- latest retrieval, or the verified bytes.
+retrievalShown :: Text -> Maybe (Retrieval result) -> Maybe (Either Text result)
+retrievalShown run retrieval = case retrieval of
+  Just (Retrieval ident state) | ident == run -> Just $ case state of
+    Retrieved result -> Right result
+    RetrievalFailed code _ -> Left code
+  _ -> Nothing
+
+-- | The status line after one completed retrieval.
+retrievalStatus :: Retrieval result -> Text
+retrievalStatus retrieval = case retrievalState retrieval of
+  Retrieved _ -> "verified result retrieved"
+  RetrievalFailed code _ -> "verified result not retrieved: " <> code <> "; the next refresh retries"
 
 -- | The status line of a key outcome.
 keyOutcomeLine :: KeyOutcome -> Text

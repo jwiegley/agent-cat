@@ -128,6 +128,10 @@ stale with the refusal code. Every mutation key has one visible outcome: a
 start, a refusal or a deferral. A refusal or a deferral is a numbered key
 outcome that remains until the next key or view change. A key never cancels a
 page-set read and is deferred instead, and a deferred key is never replayed.
+A deferral pauses automatic refresh until the deferring page-set read completes
+or for at most three seconds from the key outcome, whichever comes first.
+While the pause holds, the observation line states that automatic refresh is
+paused instead of `Observation: current`.
 
 Every command is sent once. The lane retains the original pending command and
 receipt location. An uncertain send is never repeated automatically. When the
@@ -148,11 +152,20 @@ observation. `f` and `a` refuse failover and abandon.
 
 A run is terminal only when the snapshot runtime status is succeeded, failed,
 cancelled or orphaned. For a succeeded run with a verified result reference,
-the frontend reads the run outputs and downloads the artifact once through
+the frontend reads the run outputs and downloads the artifact through
 `Agentic.Manager.Client.downloadVerified`, which checks the size and SHA-256
-digest. It retains up to 64 MiB of unchanged bytes. `Agentic.Tui.Save.saveExact`
-publishes those bytes at a new absolute path with mode 0600 and refuses an
-existing entry, a symbolic link, or an invalid path.
+digest. It retains up to 64 MiB of unchanged bytes and does not retrieve them
+again. A declared refusal, or a retrieval that finds no verified result, retains
+no bytes. The status line and the result lines show it as a failure that the
+next refresh retries. An automatic refresh retries after the next installed
+composite read, so each one-second refresh starts at most one retrieval, and
+`g` retries at once. `Agentic.Tui.Save.saveExact` publishes those bytes at a
+new absolute path with mode 0600 and refuses an existing entry, a symbolic
+link, or an invalid path. It writes a private file in the destination
+directory and publishes it with a hard link, so the destination file system
+must support hard links. When the private file cannot be removed after the
+link, the save succeeds, the destination holds the exact bytes, and the saved
+line names the private file that remains.
 
 Service mode does not support cancellation, steering, redirect, failover or
 abandon, the structured answer editor, captured and other non-literal inputs,

@@ -6137,6 +6137,9 @@ for iteration in range(2):
                                         assert item["sha256"] == hashlib.sha256(expected).hexdigest(), "JOURNEY-ASSERT request bytes differ from the typed literal"
                                     print("PASS actual TUI request carries the exact Unicode literal and the native prompt bytes", flush=True)
                                 last_key = 0
+                                # The number of deferred-key outcomes that the journey sees. A page-set
+                                # read in flight defers a mutation key, and the journey presses it again.
+                                deferred_keys = [0]
 
                                 def refused(key, text, failure, name):
                                     """Press a forbidden key and require its refusal and an unapproved manager state.
@@ -6339,12 +6342,15 @@ for iteration in range(2):
                                             (work / ("tui-" + name + "-refused.screen.txt")).write_text(session.screen.text())
                                             assert started is False, operation + " key showed no outcome before the deadline"
                                             print("KEY OUTCOME:", refusal, flush=True)
+                                            if refusal.startswith(operation + " deferred during a page-set read"):
+                                                deferred_keys[0] += 1
                                             assert refusal.startswith((operation + " deferred", operation + " did not start: the decision observation",
                                                                        operation + " did not start: the control observation",
                                                                        operation + " did not start: a command is in progress")), ("TUI did not start the " + operation, refusal)
-                                            # Refresh pauses while a deferral is shown, so the read in flight
-                                            # ends before the next explicit press. After a stale refusal the
-                                            # next current read installs first.
+                                            # A deferral pauses automatic refresh until the deferring read
+                                            # completes, for at most 3 seconds, and the next explicit press
+                                            # follows. After a stale refusal the next current read installs
+                                            # first.
                                             session.pump(1.5)
                                         raise AssertionError("TUI " + operation + " did not start after ten presses")
 
@@ -6376,7 +6382,7 @@ for iteration in range(2):
                                                 session.send(b"x")
                                                 session.wait_screen(prompt)
                                                 # The confirmation stays open while a page-set read defers the
-                                                # y, and refresh pauses, so a later y finds no read in flight.
+                                                # y, and a later y follows the bounded refresh pause.
                                                 for _ in range(10):
                                                     before_y = key_outcome(session.screen.text())[0]
                                                     session.send(b"y")
@@ -6390,6 +6396,8 @@ for iteration in range(2):
                                                     if prompt not in visible:
                                                         break
                                                     assert key_outcome(visible)[1].startswith("exact resend deferred"), ("exact resend refused", key_outcome(visible))
+                                                    print("KEY OUTCOME:", key_outcome(visible)[1], flush=True)
+                                                    deferred_keys[0] += 1
                                                     session.pump(1.5)
                                                 else:
                                                     raise AssertionError("exact resend deferred ten times")
@@ -6688,6 +6696,8 @@ for iteration in range(2):
                                 status, final, raw = request("/v1/runs/" + associated["runId"] + "/snapshot", authorized)
                                 assert status == 200 and final["runtime"]["status"] == "succeeded", "the run is not succeeded after the detach"
                                 (work / "tui-detached-snapshot.json").write_bytes(raw)
+                                (work / "journey-deferred-keys.txt").write_text(str(deferred_keys[0]) + "\n")
+                                print("JOURNEY deferred-key outcomes:", deferred_keys[0], flush=True)
                                 print("PASS tui-journey: Unicode submission with exact request bytes, explicit approval, live runtime progress from the snapshot, "
                                       "the question and recovery heads each once in the recorded order with the typed false answer and the TUI retry, terminal "
                                       "success from the snapshot, the verified result size and digest on screen, the refused and the fresh TUI save of the "

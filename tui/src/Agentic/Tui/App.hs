@@ -51,7 +51,7 @@ import Agentic.Tui.Presentation
 import Agentic.Tui.Process
 import Agentic.Tui.RunModel
 import Agentic.Tui.Root
-import Agentic.Tui.Save (saveExact, saveRefusalText)
+import Agentic.Tui.Save (Saved, saveExact, saveRefusalText)
 import Agentic.Tui.Types
 import Brick
 import Brick.BChan (BChan, newBChan, writeBChan, writeBChanNonBlocking)
@@ -214,9 +214,10 @@ data AppState = AppState
     stateServiceOutcomeSerial :: !Int,
     stateServiceUncertainExit :: !(IORef Bool),
     stateServiceFaultExit :: !(IORef Bool),
-    -- | The retrieval of the verified result of the named run: a refusal
-    -- code or the exact verified bytes. It is retrieved once for each run.
-    stateServiceResult :: !(Maybe (Text, Either Text Service.VerifiedResult)),
+    -- | The retrieval of the verified result of the named run: the exact
+    -- verified bytes, or a retryable failure. Only 'Lane.retrievalStep' and
+    -- 'Lane.retrievalObserved' change it.
+    stateServiceResult :: !(Maybe (Lane.Retrieval Service.VerifiedResult)),
     -- | The result line of the latest successful save of the verified bytes
     -- of the named run.
     stateServiceSaved :: !(Maybe (Text, Text))
@@ -416,9 +417,7 @@ serviceHead state = case (stateBackend state, modelScreen (stateModel state)) of
 serviceVerifiedResult :: AppState -> Maybe (Text, Service.VerifiedResult)
 serviceVerifiedResult state = do
   run <- runIdText . Service.runIdentity <$> serviceRun state
-  (ident, retrieval) <- stateServiceResult state
-  result <- either (const Nothing) Just retrieval
-  if ident == run then Just (run, result) else Nothing
+  (,) run <$> Lane.retrievedResult run (stateServiceResult state)
 
 -- | Whether s opens the save dialog: the live monitor shows no decision head
 -- and no run details, and the verified result bytes of its run are retained.
@@ -487,17 +486,21 @@ faultService state lane = do
     stateModel = (stateModel state) {modelScreen = ServiceCommandScreen (Lane.faultScreen lane),
       modelStatus = Lane.internalFaultStatus}}
 
-refreshServiceRequest :: Manager.Client -> EventM Name AppState ()
-refreshServiceRequest client = do
+-- | Refresh the observation of the selected request for this cause.
+refreshServiceRequest :: Manager.Client -> Lane.RefreshCause -> EventM Name AppState ()
+refreshServiceRequest client cause = do
   state <- get
   case (stateServiceWorkflow state,stateServiceRequestId state) of
     -- A succeeded run with a verified or referenced result is retrieved
-    -- once, through the same single-flight read lane, before the next
-    -- composite read. 'Service.retrieveResult' downloads only for a snapshot
-    -- that publishes the verified state.
+    -- through the same single-flight read lane, in place of the composite
+    -- read, when 'Lane.retrievalDue' holds: once per run until its verified
+    -- bytes are retained. After a failed retrieval, an automatic refresh
+    -- retries only after the next installed composite read, and g retries at
+    -- once. 'Service.retrieveResult' downloads only for a snapshot that
+    -- publishes the verified state.
     (Just _,Just _) | not (serviceSending state), Just run <- serviceRun state,
       Service.resultWanted run || Service.resultReferenced run,
-      fmap fst (stateServiceResult state) /= Just (runIdText (Service.runIdentity run)) ->
+      Lane.retrievalDue cause (runIdText (Service.runIdentity run)) (stateServiceResult state) ->
         startServiceRead Lane.PageSetRead "retrieving the verified result" $ \ticket ->
           ServiceResultReady ticket (runIdText (Service.runIdentity run)) <$> Lane.serviceCall (Service.retrieveResult client run)
     (Just workflow,Just ident) | not (serviceSending state) -> do
@@ -540,11 +543,16 @@ serviceMutationKey operation start = do
     Just refusal -> serviceKeyOutcome (admission == Lane.KeyDeferred) refusal
 
 -- | Show the fixed text of a mutation key that started nothing as the next
--- numbered key outcome, given whether a page-set read deferred the key.
+-- numbered key outcome, given whether a page-set read deferred the key. A
+-- deferral records the deferring read and the time of the outcome, which
+-- bound the pause of automatic refresh.
 serviceKeyOutcome :: Bool -> Text -> EventM Name AppState ()
-serviceKeyOutcome deferred text = modify $ \state ->
-  let serial = stateServiceOutcomeSerial state + 1
-   in state {stateServiceOutcomeSerial = serial, stateServiceKeyOutcome = Just (Lane.KeyOutcome serial text deferred)}
+serviceKeyOutcome deferred text = do
+  now <- liftIO getCurrentTime
+  modify $ \state ->
+    let serial = stateServiceOutcomeSerial state + 1
+        deferral = if deferred then Lane.deferral now (stateServiceLane state) else Nothing
+     in state {stateServiceOutcomeSerial = serial, stateServiceKeyOutcome = Just (Lane.KeyOutcome serial text deferral)}
 
 -- | Begin a mutation that 'Lane.mutationAdmission' started. Any
 -- single-resource read ends and is cancelled, so it delivers nothing.
@@ -602,14 +610,14 @@ handleServiceSent client ticket result = do
               put (idleService state) {stateServiceRequestId = Just (Manager.draftId request),
                 stateServiceObservation = Lane.noObservation, stateServiceWorkflow = Just workflow, stateModel = model, stateEditor = blankEditor}
               liftIO (writeIORef (stateServiceUncertainExit state) False)
-              refreshServiceRequest client
+              refreshServiceRequest client Lane.AutomaticRefresh
           _ -> uncertainService state (Lane.declaredSendUncertain attempt "invalid creation response" (stateServiceLane state))
         _ -> case (Manager.decodeObservation (Manager.responseValue response),Manager.responseLocation response) of
           (Right receipt,Just location) | Manager.responseStatus response == 202, Service.receiptMatches mutation receipt,
             Manager.referenceURI location == "/v1/commands/" <> Manager.receiptId receipt -> do
               put (onLane (\lane -> lane {Lane.laneMutation = Lane.MutationAwaiting mutation pending location}) state) {stateServiceLastReceipt = Just receipt,
                 stateModel = (stateModel state) {modelStatus = "manager intent accepted; awaiting independent effect"}}
-              refreshServiceRequest client
+              refreshServiceRequest client Lane.AutomaticRefresh
           _ -> uncertainService state (Lane.declaredSendUncertain attempt "invalid command response" (stateServiceLane state))
 
 -- | Apply one installed composite read. 'Lane.requestStep' has already
@@ -776,24 +784,29 @@ handleServiceEventCore client event = do
         (Lane.RequestFaulted,lane,_) -> faultService state lane
         (Lane.RequestRefused problem,lane,installed) -> put state {stateServiceLane = lane, stateServiceObservation = installed,
           stateModel = refuseRequestRead (Lane.refusalCode problem) (isJust (Lane.installedRead installed)) (stateModel state)}
+        -- An installed composite read makes a failed retrieval due again.
         (Lane.RequestInstalled observation,lane,installed) ->
-          put state {stateServiceLane = lane, stateServiceObservation = installed} >> applyServiceObservation observation
-    -- A retrieval is kept for its run. A declared refusal is kept as its
-    -- code, and the run is not retrieved again automatically.
-    AppEvent (ServiceResultReady ticket run result) -> case Lane.readStep ticket result (stateServiceLane state) of
-      (Lane.ReadStale,_) -> pure ()
-      (Lane.ReadFaulted,lane) -> faultService state lane
-      (Lane.ReadRefused problem,lane) -> put state {stateServiceLane = lane, stateServiceResult = Just (run, Left (Lane.refusalCode problem)),
-        stateModel = (stateModel state) {modelStatus = "verified result retrieval refused: " <> Lane.refusalCode problem}}
-      (Lane.ReadDelivered retrieved,lane) -> put state {stateServiceLane = lane,
-        stateServiceResult = Just (run, maybe (Left "no verified result") Right retrieved),
-        stateModel = (stateModel state) {modelStatus = maybe "no verified result" (const "verified result retrieved") retrieved}}
+          put state {stateServiceLane = lane, stateServiceObservation = installed,
+            stateServiceResult = Lane.retrievalObserved (stateServiceResult state)} >> applyServiceObservation observation
+    -- Only retrieved verified bytes are retained for their run. A declared
+    -- refusal and a retrieval without a verified result are retryable
+    -- failures that the status line and the result lines show.
+    AppEvent (ServiceResultReady ticket run result) ->
+      let retrieved :: ServiceLane -> Lane.Retrieval Service.VerifiedResult -> EventM Name AppState ()
+          retrieved lane retrieval = put state {stateServiceLane = lane, stateServiceResult = Just retrieval,
+                stateModel = (stateModel state) {modelStatus = Lane.retrievalStatus retrieval}}
+      in case Lane.readStep ticket result (stateServiceLane state) of
+        (Lane.ReadStale,_) -> pure ()
+        (Lane.ReadFaulted,lane) -> faultService state lane
+        (Lane.ReadRefused problem,lane) -> retrieved lane (Lane.retrievalStep run (Left problem))
+        (Lane.ReadDelivered value,lane) -> retrieved lane (Lane.retrievalStep run (Right value))
     AppEvent (Tick now) -> do
       put state {stateNow = now}
       -- After an internal fault, observations refresh only on an explicit g.
-      -- While a deferral is shown, automatic refresh pauses, so the repeated
-      -- key finds no page-set read in flight.
-      unless (serviceFaulted state || Lane.refreshPaused (stateServiceKeyOutcome state)) (refreshServiceRequest client)
+      -- After a deferred key, automatic refresh pauses until the deferring
+      -- page-set read completes or for at most 'Lane.refreshPauseLimit'.
+      unless (serviceFaulted state || Lane.refreshPaused now (stateServiceLane state) (stateServiceKeyOutcome state))
+        (refreshServiceRequest client Lane.AutomaticRefresh)
     VtyEvent (Vty.EvResize width height) -> put state {stateTerminalSize = (width,height)}
     VtyEvent (Vty.EvKey (Vty.KChar 'c') [Vty.MCtrl]) -> halt
     -- A question head takes the text entry keys. Ctrl-D sends one answer for
@@ -916,7 +929,7 @@ handleServiceEventCore client event = do
             case atMay (stateServiceWorkflows state) (modelWorkflowIndex (stateModel state)) of
               Just workflow -> put state {stateModel = (stateModel state) {modelScreen = HelpScreen (Service.workflowHelp workflow)}}
               Nothing -> pure ()
-          Vty.KChar 'g' -> refreshServiceRequest client
+          Vty.KChar 'g' -> refreshServiceRequest client Lane.ExplicitRefresh
           Vty.KChar 'x' | Lane.resendOffered (stateServiceLane state) -> put (onLane (\lane -> lane {Lane.laneResendConfirm = True}) state)
           Vty.KChar 'r' | ServiceProfilesScreen {} <- modelScreen (stateModel state) -> startServiceProfiles client
           _ -> pure ()
@@ -1041,15 +1054,14 @@ toPresentation state =
       presentationServiceFault = serviceFaulted state,
       presentationServiceKeyOutcome = stateServiceKeyOutcome state,
       presentationServiceObservation = let installed = stateServiceObservation state in
-        Service.observationLines (Lane.installedStale installed) (isJust (Lane.installedRead installed)) (serviceRun state),
+        Service.observationLines (Lane.refreshPaused (stateNow state) (stateServiceLane state) (stateServiceKeyOutcome state))
+          (Lane.installedStale installed) (isJust (Lane.installedRead installed)) (serviceRun state),
       presentationServiceRun = serviceRun state,
       presentationServiceRetry = case (serviceHead state, serviceRunRead state) of
         (Just (Service.RecoveryHead view _ _), Just (Service.RunRead _ (_,control) _)) -> isJust (Service.retryOffer control view)
         _ -> False,
       presentationServiceResultLines = case serviceRun state of
-        Just run -> Service.resultLines run (case stateServiceResult state of
-          Just (ident, retrieval) | ident == runIdText (Service.runIdentity run) -> Just retrieval
-          _ -> Nothing)
+        Just run -> Service.resultLines run (Lane.retrievalShown (runIdText (Service.runIdentity run)) (stateServiceResult state))
           <> [line | Just (ident, line) <- [stateServiceSaved state], ident == runIdText (Service.runIdentity run)]
         Nothing -> [],
       presentationServiceSavable = serviceSavable state,
@@ -1663,8 +1675,8 @@ saveServiceResult pathText = do
       outcome <- liftIO (saveExact (T.unpack pathText) (Service.verifiedBytes result))
       case outcome of
         Left refusal -> put state {stateSaveError = Just (serviceSaveRefusal pathText refusal)}
-        Right () -> put state {stateSaveResult = False, stateSaveError = Nothing,
-          stateServiceSaved = Just (run, serviceSavedLine pathText (BS.length (Service.verifiedBytes result)))}
+        Right saved -> put state {stateSaveResult = False, stateSaveError = Nothing,
+          stateServiceSaved = Just (run, serviceSavedLine pathText (BS.length (Service.verifiedBytes result)) saved)}
 
 saveLocalResult :: Text -> EventM Name AppState ()
 saveLocalResult pathText = do
@@ -1675,18 +1687,18 @@ saveLocalResult pathText = do
       case result of
         Left failure | Just _ <- fromException @SomeAsyncException failure -> liftIO (throwIO failure)
         Left failure -> put state {stateSaveError = Just (T.pack (displayException failure))}
-        Right () ->
+        Right saved ->
           put
             state
               { stateSaveResult = False,
                 stateSaveError = Nothing,
-                stateModel = (stateModel state) {modelStatus = "saved verified final result to " <> pathText}
+                stateModel = (stateModel state) {modelStatus = "saved verified final result to " <> pathText <> savedLeftoverNote saved}
               }
     _ -> put state {stateSaveError = Just "verified final result is not available"}
 
 -- | Publish the verified final JSON result and a final LF exclusively
 -- through 'saveExact'.
-saveResultFile :: FilePath -> Value -> IO ()
+saveResultFile :: FilePath -> Value -> IO Saved
 saveResultFile path value =
   saveExact path (BL.toStrict (encode value <> "\n")) >>= either (ioError . userError . T.unpack . saveRefusalText) pure
 

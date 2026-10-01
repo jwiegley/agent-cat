@@ -11,9 +11,9 @@ import Agentic.Tui.Person (PersonPrompt (..))
 import Agentic.Tui.Model
 import qualified Agentic.Tui.Approval as A
 import Agentic.Tui.Presentation (ActiveLayer (..), Presentation (..), emptyPresentation, serviceRequestLines, serviceReviewAllowed, serviceReviewRows,
-  serviceSaveRefusal, serviceSavedLine, wrapDisplayLines)
+  savedLeftoverNote, serviceSaveRefusal, serviceSavedLine, wrapDisplayLines)
 import Agentic.Tui.RunModel (emptyRunView, reconcileRunView)
-import Agentic.Tui.Save (SaveRefusal (..), saveExact)
+import Agentic.Tui.Save (SaveRefusal (..), Saved (..), saveExact, saveExactUsing)
 import qualified Agentic.Tui.Service as S
 import qualified Agentic.Tui.ServiceLane as L
 import Control.Concurrent (forkIO, newEmptyMVar, putMVar, takeMVar, threadDelay, throwTo)
@@ -40,7 +40,7 @@ import qualified Data.Vector as V
 import qualified Data.Map.Strict as Map
 import qualified Graphics.Vty as Vty
 import System.Exit (die)
-import System.IO.Error (alreadyExistsErrorType, mkIOError)
+import System.IO.Error (alreadyExistsErrorType, mkIOError, permissionErrorType)
 import System.Timeout (timeout)
 
 -- | The argument renders one presentation at a fixed terminal size.
@@ -433,16 +433,20 @@ compositeTests render profile row request0 preparation snapshot absentRuntime (m
           (L.RequestInstalled _,_,after) -> after == L.Installed (Just firstAssociation) Nothing; _ -> False)
     ]
   -- Runtime status, retention of public fields and the observation lines.
-  let absentLines = S.observationLines Nothing True (Just absentRuntime)
+  let absentLines = S.observationLines False Nothing True (Just absentRuntime)
   checks
     [ ("a null runtime yields no status", S.runtimeStatus absentRuntime == Nothing),
       ("a null runtime is shown as not yet observed, not as a status", absentLines == ["Observation: current", "Runtime: not yet observed"]),
-      ("a published runtime status is shown", S.observationLines Nothing True (Just snapshot) == ["Observation: current", "Runtime: Running"]),
+      ("a published runtime status is shown", S.observationLines False Nothing True (Just snapshot) == ["Observation: current", "Runtime: Running"]),
       ("a stale mark names its refusal code and the retained observation",
-        S.observationLines (Just "503 storage-unavailable") True Nothing == ["Observation: stale (503 storage-unavailable); the last complete observation is retained"]),
+        S.observationLines False (Just "503 storage-unavailable") True Nothing == ["Observation: stale (503 storage-unavailable); the last complete observation is retained"]),
       ("a refusal without an installed observation claims no retained observation",
-        S.observationLines (Just "503 storage-unavailable") False Nothing == ["Observation: refused (503 storage-unavailable); no complete observation is installed"]),
-      ("no observation lines precede the first read", null (S.observationLines Nothing False Nothing)),
+        S.observationLines False (Just "503 storage-unavailable") False Nothing == ["Observation: refused (503 storage-unavailable); no complete observation is installed"]),
+      ("no observation lines precede the first read", null (S.observationLines False Nothing False Nothing)),
+      ("a paused refresh replaces the current-observation line and keeps the runtime line",
+        S.observationLines True Nothing True (Just snapshot) == ["Observation: automatic refresh paused after a deferred key", "Runtime: Running"]),
+      ("a paused refresh does not hide a stale observation",
+        S.observationLines True (Just "503 storage-unavailable") True Nothing == ["Observation: stale (503 storage-unavailable); the last complete observation is retained"]),
       ("a refusal code carries the status and problem code", L.refusalCode (C.Refused 429 "storage-quota") == "429 storage-quota")
     ]
   let acknowledgement = object ["commandId" .= ("cmd_4" :: T.Text), "state" .= ("delivered" :: T.Text), "message" .= ("answered" :: T.Text),
@@ -561,7 +565,9 @@ compositeTests render profile row request0 preparation snapshot absentRuntime (m
   -- The visible outcome of a mutation key that starts nothing lasts until the
   -- next key press or until the view changes. Reads, installs and ticks that
   -- keep the view do not remove it.
-  let outcome serial = Just (L.KeyOutcome serial "enqueue deferred during a page-set read. Press the key again." True)
+  let deferredAt = read "2026-09-30 12:00:00 UTC" :: UTCTime
+      deferredBy = Just (L.Deferral 4 deferredAt)
+      outcome serial = Just (L.KeyOutcome serial "enqueue deferred during a page-set read. Press the key again." deferredBy)
       screenA = "request screen" :: String
       screenB = "command screen" :: String
       pressed = L.retainKeyOutcome True screenA screenA Nothing (outcome 1)
@@ -573,6 +579,11 @@ compositeTests render profile row request0 preparation snapshot absentRuntime (m
       operations = ["create", "set-input", "enqueue", "answer"]
       outcomeTexts = [text | operation <- operations, Just text <- map (L.admissionText operation) [minBound .. maxBound]]
         <> map L.keyHelpText operations <> map L.unobservedText operations <> [L.resendDeferredText, L.resendUnofferedText]
+      -- The deferring page-set read holds ticket 4. A later read holds ticket 5.
+      reading = L.Lane (Just (L.ReadTicket 4 L.PageSetRead)) L.MutationIdle False False :: L.Lane T.Text T.Text
+      completed = reading {L.laneReadTicket = Nothing}
+      nextRead = reading {L.laneReadTicket = Just (L.ReadTicket 5 L.PageSetRead)}
+      after seconds = addUTCTime seconds deferredAt
   checks
     [ ("a key outcome is shown after the press that produced it", pressed == outcome 1),
       ("a key outcome survives a read start and an install that keep the view", afterRead == outcome 1 && afterInstall == outcome 1),
@@ -580,25 +591,69 @@ compositeTests render profile row request0 preparation snapshot absentRuntime (m
       ("a repeated press that is refused again shows its own numbered outcome", repeated == outcome 2),
       ("an event that changes the view ends the key outcome", moved == Nothing),
       ("every key outcome line fits an 80-column status line with a three-digit key number",
-        all (\text -> T.length (L.keyOutcomeLine (L.KeyOutcome 999 text False)) <= 80) outcomeTexts && length outcomeTexts == 22),
-      -- Automatic refresh pauses exactly while a deferral is shown, so the
-      -- page-set read in flight ends and the repeated key starts.
-      ("automatic refresh pauses while a deferral is shown, through reads and installs that keep the view",
-        L.refreshPaused pressed && L.refreshPaused afterRead && L.refreshPaused afterInstall),
+        all (\text -> T.length (L.keyOutcomeLine (L.KeyOutcome 999 text Nothing)) <= 80) outcomeTexts && length outcomeTexts == 22),
+      ("a deferral records the page-set read in flight and the time of the key outcome",
+        L.deferral deferredAt reading == deferredBy
+          && L.deferral deferredAt completed == Nothing
+          && L.deferral deferredAt reading {L.laneReadTicket = Just (L.ReadTicket 4 L.SingleResourceRead)} == Nothing),
+      ("automatic refresh pauses while the deferring page-set read is in flight, through events that keep the view",
+        all (L.refreshPaused (after 1) reading) [pressed, afterRead, afterInstall]),
+      ("the pause ends when the deferring page-set read completes, before the limit",
+        not (L.refreshPaused (after 1) completed afterInstall) && not (L.refreshPaused (after 1) nextRead afterInstall)),
+      ("the pause ends 3 seconds after the key outcome while the deferring read is still in flight",
+        L.refreshPauseLimit == 3 && L.refreshPaused (after 2.999) reading afterInstall
+          && not (L.refreshPaused (after 3) reading afterInstall) && not (L.refreshPaused (after 60) reading afterInstall)),
       ("automatic refresh resumes after the next key press or a view change ends the deferral",
-        not (L.refreshPaused nextKey) && not (L.refreshPaused moved)),
+        not (L.refreshPaused (after 1) reading nextKey) && not (L.refreshPaused (after 1) reading moved)),
       ("a key outcome that is not a deferral does not pause refresh",
-        not (L.refreshPaused (Just (L.KeyOutcome 3 "enqueue did not start: a command is in progress or unresolved." False)))
-          && not (L.refreshPaused Nothing))
+        not (L.refreshPaused (after 1) reading (Just (L.KeyOutcome 3 "enqueue did not start: a command is in progress or unresolved." Nothing)))
+          && not (L.refreshPaused (after 1) reading Nothing))
+    ]
+  -- The retrieval of the verified result retries a failure. An automatic
+  -- refresh retries after the next installed composite read, and g retries
+  -- at once. Only retrieved bytes are retained, and they are never retrieved
+  -- again.
+  let bytesOf = "verified bytes" :: T.Text
+      refusedOnce = L.retrievalStep "run_21" (Left (C.Refused 503 "storage-unavailable") :: Either C.ClientFailure (Maybe T.Text))
+      noneYet = L.retrievalStep "run_21" (Right Nothing :: Either C.ClientFailure (Maybe T.Text))
+      retrievedOnce = L.retrievalStep "run_21" (Right (Just bytesOf))
+      due cause retrieval = L.retrievalDue cause "run_21" retrieval
+  checks
+    [ ("a run without a retrieval is retrieved on an automatic and an explicit refresh",
+        due L.AutomaticRefresh Nothing && due L.ExplicitRefresh Nothing
+          && due L.AutomaticRefresh (Just (L.Retrieval "run_other" (L.Retrieved bytesOf)))),
+      ("a refusal and a retrieval without a verified result are retryable failures, not retained bytes",
+        refusedOnce == L.Retrieval "run_21" (L.RetrievalFailed "503 storage-unavailable" False)
+          && noneYet == L.Retrieval "run_21" (L.RetrievalFailed "no verified result" False)
+          && L.retrievedResult "run_21" (Just refusedOnce) == Nothing && L.retrievedResult "run_21" (Just noneYet) == Nothing),
+      ("after a failure an automatic refresh reads the observation first and does not retrieve",
+        not (due L.AutomaticRefresh (Just noneYet)) && not (due L.AutomaticRefresh (Just refusedOnce))),
+      ("after a failure g retries the retrieval at once",
+        due L.ExplicitRefresh (Just noneYet) && due L.ExplicitRefresh (Just refusedOnce)),
+      ("an installed composite read makes the failed retrieval due for the next automatic refresh",
+        due L.AutomaticRefresh (L.retrievalObserved (Just noneYet)) && due L.AutomaticRefresh (L.retrievalObserved (Just refusedOnce))),
+      ("a retry that finds the verified state retains the bytes, and they are not retrieved again",
+        L.retrievedResult "run_21" (Just retrievedOnce) == Just bytesOf
+          && not (due L.AutomaticRefresh (Just retrievedOnce)) && not (due L.ExplicitRefresh (Just retrievedOnce))
+          && L.retrievalObserved (Just retrievedOnce) == Just retrievedOnce),
+      ("the retained bytes belong to their run only", L.retrievedResult "run_other" (Just retrievedOnce) == Nothing
+          && L.retrievalShown "run_other" (Just retrievedOnce) == Nothing),
+      ("the result lines show a failure as retried and the bytes as retrieved",
+        L.retrievalShown "run_21" (Just noneYet) == Just (Left "no verified result")
+          && L.retrievalShown "run_21" (Just retrievedOnce) == Just (Right bytesOf)),
+      ("golden: the status line states the failure and the retry",
+        L.retrievalStatus noneYet == "verified result not retrieved: no verified result; the next refresh retries"
+          && L.retrievalStatus refusedOnce == "verified result not retrieved: 503 storage-unavailable; the next refresh retries"
+          && L.retrievalStatus retrievedOnce == "verified result retrieved")
     ]
   let busyText = maybe "" id (L.admissionText "enqueue" L.KeyBusy)
       loadingModel = (initialServiceModel [profile]) {modelScreen = ServiceRequestScreen associated, modelStatus = "loading manager catalogue"}
       outcomePresentation = (emptyPresentation loadingModel) {presentationService = True, presentationNoColor = True,
-        presentationServiceKeyOutcome = Just (L.KeyOutcome 3 busyText False)}
+        presentationServiceKeyOutcome = Just (L.KeyOutcome 3 busyText Nothing)}
   mapM_ (\size -> do
       let frame = render size outcomePresentation
       check ("the status line at " <> show size <> " shows the key outcome while a read replaces the status text")
-        (L.keyOutcomeLine (L.KeyOutcome 3 busyText False) `T.isInfixOf` frame && not ("loading manager catalogue" `T.isInfixOf` frame)))
+        (L.keyOutcomeLine (L.KeyOutcome 3 busyText Nothing) `T.isInfixOf` frame && not ("loading manager catalogue" `T.isInfixOf` frame)))
     [(100,30),(80,24)]
   -- A refused request read keeps the request screen and states the refusal.
   -- App applies 'refuseRequestRead' to a refused request read and
@@ -616,7 +671,7 @@ compositeTests render profile row request0 preparation snapshot absentRuntime (m
         modelScreen catalogueModel == ServiceCommandScreen "Observation refused: Refused 503 \"storage-unavailable\"")
     ]
   let presentationOf model kept = (emptyPresentation model) {presentationService = True, presentationNoColor = True,
-        presentationServiceObservation = S.observationLines (Just "503 storage-unavailable") kept (if kept then Just snapshot else Nothing)}
+        presentationServiceObservation = S.observationLines False (Just "503 storage-unavailable") kept (if kept then Just snapshot else Nothing)}
       stalePresentation = presentationOf staleModel True
       refusedPresentation = presentationOf refusedModel False
   mapM_ (\size -> do
@@ -690,7 +745,7 @@ liveTests render profile request0 (metadata,items) = do
           presentationRunView = maybe emptyRunView (`reconcileRunView` emptyRunView) (modelSnapshot model),
           presentationServiceApproval = Just "dispatch-attempted",
           presentationServiceRun = Just observed,
-          presentationServiceObservation = S.observationLines stale True (Just observed) }
+          presentationServiceObservation = S.observationLines False stale True (Just observed) }
       frame = render (140,36) (livePresentation liveModel observation Nothing ScreenLayer)
       details = render (140,36) (livePresentation liveModel observation Nothing RunDetailsLayer)
       staleFrame = render (140,36) (livePresentation liveModel observation (Just "503 storage-unavailable") ScreenLayer)
@@ -914,7 +969,7 @@ decisionTests render profile request0 receiptValue (metadata,items) (decisionVal
           presentationRunView = reconcileRunView native emptyRunView,
           presentationServiceApproval = Just "dispatch-attempted",
           presentationServiceRun = Just snapshot,
-          presentationServiceObservation = S.observationLines Nothing True (Just snapshot) }
+          presentationServiceObservation = S.observationLines False Nothing True (Just snapshot) }
       question = render (140,36) (headPresentation PersonLayer) {presentationPersonPrompt = Just prompt}
       submitted = render (140,36) (headPresentation PersonLayer) {presentationPersonPrompt = Just prompt, presentationPersonSubmitted = True}
       recoveryFrame = render (140,36) (headPresentation RecoveryLayer) {presentationRecovery = Just recoveryHead}
@@ -1116,7 +1171,7 @@ resultTests render profile = do
           "Result SHA-256: 9294065bba4452375bfdc9a35d8126ce26a9d6f8fb720a22cccb3cb706651fcd", "Result preview: " <> T.replicate 80 "A" <> " "]),
       ("a pending or refused retrieval is shown as such",
         S.resultLines verified Nothing == ["Terminal: succeeded", "Result: retrieving the verified bytes"]
-          && S.resultLines verified (Just (Left "503 storage-unavailable")) == ["Terminal: succeeded", "Result: retrieval refused (503 storage-unavailable)"]),
+          && S.resultLines verified (Just (Left "503 storage-unavailable")) == ["Terminal: succeeded", "Result: not retrieved (503 storage-unavailable); the next refresh retries"]),
       ("a long preview is bounded to 120 characters",
         T.length (last (S.resultLines verified (Just (Right result {S.verifiedBytes = BS.replicate 100000 66})))) == T.length "Result preview: " + 120)
     ]
@@ -1125,7 +1180,7 @@ resultTests render profile = do
       frame = render (140,36) (emptyPresentation model)
         { presentationService = True, presentationNoColor = True, presentationRunView = reconcileRunView native emptyRunView,
           presentationServiceRun = Just verified, presentationServiceResultLines = successLines,
-          presentationServiceObservation = S.observationLines Nothing True (Just verified) }
+          presentationServiceObservation = S.observationLines False Nothing True (Just verified) }
   putStrLn "RENDER service terminal result at (140,36):" >> putStr (T.unpack frame)
   check "the live monitor at (140,36) shows the terminal status, the verified size and the digest"
     (all (`T.isInfixOf` frame) ["Runtime: Succeeded", "Terminal: succeeded", "Result: verified 81 bytes",
@@ -1133,7 +1188,7 @@ resultTests render profile = do
   -- The service save dialog, its fixed refusal and the saved result line.
   let savable = (emptyPresentation model)
         { presentationService = True, presentationNoColor = True, presentationRunView = reconcileRunView native emptyRunView,
-          presentationServiceRun = Just verified, presentationServiceObservation = S.observationLines Nothing True (Just verified),
+          presentationServiceRun = Just verified, presentationServiceObservation = S.observationLines False Nothing True (Just verified),
           presentationServiceResultLines = successLines, presentationServiceSavable = True }
       existingPath = "/tmp/caf\233/existing.bin"
       existing = mkIOError alreadyExistsErrorType "createLink" Nothing (Just (T.unpack existingPath))
@@ -1141,7 +1196,7 @@ resultTests render profile = do
       dialogFrame = render (140,36) savable {presentationLayer = SaveLayer}
       refusedFrame = render (140,36) savable {presentationLayer = SaveLayer, presentationSaveError = Just (serviceSaveRefusal existingPath (SaveIOFailure existing))}
       invalidFrame = render (140,36) savable {presentationLayer = SaveLayer, presentationSaveError = Just (serviceSaveRefusal "relative.bin" InvalidDestination)}
-      savedFrame = render (140,36) savable {presentationServiceResultLines = successLines <> [serviceSavedLine "/tmp/saved.bin" 81]}
+      savedFrame = render (140,36) savable {presentationServiceResultLines = successLines <> [serviceSavedLine "/tmp/saved.bin" 81 Saved]}
       -- A wrapped row continues after the dialog border and its padding.
       compact = T.filter (\c -> not (isSpace c) && not ('\x2500' <= c && c <= '\x257f'))
   putStrLn "RENDER service save refusal at (140,36):" >> putStr (T.unpack refusedFrame)
@@ -1192,9 +1247,9 @@ saveTests = do
     refusedRelative <- saveExact "relative.bin" bytes
     refusedParent <- saveExact (directory </> "absent" </> "result.bin") bytes
     entries <- listDirectory directory
-    let failed result = case result of Left _ -> True; Right () -> False
+    let failed result = case result of Left _ -> True; Right _ -> False
     checks
-      [ ("the save function writes exactly the given bytes without a trailing newline", saved == Right () && written == bytes),
+      [ ("the save function writes exactly the given bytes without a trailing newline", saved == Right Saved && written == bytes),
         ("the saved file has mode 0600", fileMode status .&. 0o777 == 0o600),
         ("the save function refuses an existing file without modifying it", failed refusedExisting && keptExisting == "keep"
             && failed refusedAgain && keptTarget == bytes),
@@ -1219,8 +1274,37 @@ saveTests = do
         ("a refusal shows control characters and line breaks of the path as replacement characters",
           serviceSaveRefusal "/tmp/a\ESC[31m\nb" InvalidDestination
             == "Save refused: the destination must be one absolute single-line file path. Path: /tmp/a\xfffd[31m\xfffd\&b"),
-        ("a successful save names the verified size and the path", serviceSavedLine (T.pack target) (BS.length bytes)
+        ("a successful save names the verified size and the path", serviceSavedLine (T.pack target) (BS.length bytes) Saved
             == "Saved the verified " <> T.pack (show (BS.length bytes)) <> " bytes to " <> T.pack target)
+      ]
+    -- The removal of the private file fails after the link has published the
+    -- bytes. The save succeeds and names the leftover private file.
+    let leftoverTarget = directory </> "leftover.bin"
+        removalRefused file = ioError (mkIOError permissionErrorType "removeLink" Nothing (Just file))
+    leftover <- saveExactUsing removalRefused leftoverTarget bytes
+    published <- BS.readFile leftoverTarget
+    publishedStatus <- getFileStatus leftoverTarget
+    privateEntries <- filter (\entry -> entry `notElem` ["result.bin", "existing.bin", "link.bin", "dangling.bin", "leftover.bin"]) <$> listDirectory directory
+    let privatePath = case leftover of Right (SavedLeftover file) -> file; _ -> ""
+    privateBytes <- if null privatePath then pure "" else BS.readFile privatePath
+    -- A removal that fails before the link still refuses the save and the
+    -- destination is not created.
+    refusedWithoutRemoval <- saveExactUsing removalRefused existing bytes
+    keptAfterRefusal <- BS.readFile existing
+    checks
+      [ ("a save whose private-file removal fails after the link succeeds and names the leftover private file",
+          case (leftover, privateEntries) of
+            (Right (SavedLeftover file), [entry]) -> file == directory </> entry
+              && T.isPrefixOf ".leftover.bin." (T.pack entry) && T.isSuffixOf ".partial" (T.pack entry)
+            _ -> False),
+        ("the destination of a save with a leftover private file holds the exact bytes with mode 0600",
+          published == bytes && fileMode publishedStatus .&. 0o777 == 0o600 && privateBytes == bytes),
+        ("a refused save stays a refusal when the removal of the private file fails",
+          case refusedWithoutRemoval of Left (SaveIOFailure _) -> keptAfterRefusal == "keep"; _ -> False),
+        ("golden: the saved line names the leftover private file",
+          serviceSavedLine "/tmp/saved.bin" 81 (SavedLeftover "/tmp/.saved.bin.00.partial")
+            == "Saved the verified 81 bytes to /tmp/saved.bin; the temporary file /tmp/.saved.bin.00.partial was not removed"
+            && savedLeftoverNote Saved == "")
       ]) `finally` removePathForcibly directory
 
 -- | A comparable summary of a lane whose pending commands and locations are

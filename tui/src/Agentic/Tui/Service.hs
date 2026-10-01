@@ -684,7 +684,8 @@ retrieveResult client run
         <$> C.downloadVerified client location (artifactBytes artifact) (artifactDigest artifact)
 
 -- | Display lines for a terminal run, given the retrieval of its result: no
--- retrieval yet, a refusal code, or the verified bytes. A run that is not
+-- retrieval yet, the failure code of a retrieval that the next refresh
+-- retries, or the verified bytes. A run that is not
 -- terminal has no lines. The preview is bounded and is decoded leniently for
 -- display only.
 resultLines :: RunObservation -> Maybe (Either Text VerifiedResult) -> [Text]
@@ -698,7 +699,7 @@ resultLines run retrieval = case runTerminal run of
     (RunSucceeded, _) | not (resultWanted run || resultReferenced run) ->
       ["Result: no download; verification is " <> verificationName (runVerification run)]
     (RunSucceeded, Nothing) -> ["Result: retrieving the verified bytes"]
-    (RunSucceeded, Just (Left code)) -> ["Result: retrieval refused (" <> code <> ")"]
+    (RunSucceeded, Just (Left code)) -> ["Result: not retrieved (" <> code <> "); the next refresh retries"]
     _ -> ["Result: no download for a run that did not succeed"]
   where
     statusName status = case status of
@@ -1172,14 +1173,17 @@ runReadValid binding profile run (RunRead snapshot (controlObserved, control) de
 runtimeStatus :: RunObservation -> Maybe RunStatus
 runtimeStatus = fmap snapshotRunStatus . runSnapshot
 
--- | Display lines for the installed observation, given the refusal code of
--- the latest read when that read was refused, whether a complete read is
--- installed, and the installed run snapshot. A null runtime is shown as not
--- yet observed, without a status.
-observationLines :: Maybe Text -> Bool -> Maybe RunObservation -> [Text]
-observationLines stale installed run = case (stale, installed) of
+-- | Display lines for the installed observation, given whether automatic
+-- refresh is paused after a deferred key, the refusal code of the latest read
+-- when that read was refused, whether a complete read is installed, and the
+-- installed run snapshot. A paused refresh replaces the current-observation
+-- line. A null runtime is shown as not yet observed, without a status.
+observationLines :: Bool -> Maybe Text -> Bool -> Maybe RunObservation -> [Text]
+observationLines paused stale installed run = case (stale, installed) of
   (Nothing, False) -> []
-  (Nothing, True) -> "Observation: current" : runtime
+  (Nothing, True)
+    | paused -> "Observation: automatic refresh paused after a deferred key" : runtime
+    | otherwise -> "Observation: current" : runtime
   (Just code, True) -> ("Observation: stale (" <> code <> "); the last complete observation is retained") : runtime
   (Just code, False) -> ["Observation: refused (" <> code <> "); no complete observation is installed"]
   where runtime = maybe [] (\observed -> ["Runtime: " <> maybe "not yet observed" runStatusLabel (runtimeStatus observed)]) run

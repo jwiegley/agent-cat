@@ -3390,8 +3390,12 @@ manager records the verification of a result reference when the run outputs
 are read.  When the snapshot publishes a referenced result, the frontend reads
 the run outputs, reads the snapshot again, and downloads only when that
 snapshot publishes the verified state for the same result reference.  It
-retrieves the result of each run once, and a refused retrieval shows its
-refusal code.  Any other terminal status or verification state downloads
+keeps the verified bytes of a run and does not retrieve them again.  A refused
+retrieval, or a retrieval that finds no verified result, keeps no bytes, and
+the status line and the result lines show its code as a failure that the next
+refresh retries.  An automatic refresh retries after the next installed
+composite read, so each automatic refresh starts at most one retrieval, and
+@kbd{g} retries at once.  Any other terminal status or verification state downloads
 nothing.  Service mode never reads a local result artifact.  After the
 retrieval, and while no decision head and no run details are shown, @kbd{s}
 opens the save dialog.  @kbd{C-d} publishes the retained verified bytes
@@ -3401,7 +3405,10 @@ path, an existing entry at the destination, including a symbolic link, and any
 other input or output failure are refused.  The dialog then stays open with a
 fixed message and the path, and the destination is left as it was.  A
 successful save closes the dialog and adds a result line with the saved size
-and the path.
+and the path.  The save publishes a private file with a hard link, so the
+destination file system must support hard links.  When the private file cannot
+be removed after the link, the save succeeds, and the result line names the
+private file that remains.
 
 The frontend also shows the decision head that the manager presents in the
 same observation.  A head is shown only when the run controls are owned and
@@ -3433,8 +3440,10 @@ occurrence and attempt of the run.  Failover and abandon are not supported
 here, and @kbd{f} and @kbd{a} show a refusal.  Without a retry offer, the
 choices are read-only.  Every @kbd{C-d} or @kbd{r} that sends nothing shows a
 numbered key outcome that states the reason.  When an observation read in flight defers a mutation key,
-automatic refresh pauses while that outcome is shown, so the next press of the
-key finds no read in flight.
+automatic refresh pauses until that read completes or for at most three
+seconds from the key outcome, whichever comes first.  While the pause holds,
+the observation line states that automatic refresh is paused instead of
+@samp{Observation: current}.
 
 A declared client failure keeps its declared meaning, and the internal-fault
 rules above apply to every step of the journey.
@@ -3543,7 +3552,8 @@ explicit absolute-path prompt which copies the JSON value and a final line feed
 to a new mode-0600 file.  The frontend writes the bytes to a private file in
 the destination directory and publishes it with a hard link, so an existing
 entry, including a symbolic link or a dangling symbolic link, is never replaced
-and a failed save leaves no new file.  @kbd{PGUP} and @kbd{PGDN} scroll save errors.
+and a failed save leaves no new file.  When the private file cannot be removed
+after the link, the save succeeds and the status line names that file.  @kbd{PGUP} and @kbd{PGDN} scroll save errors.
 
 The monitor renders answer output separately from bounded public message, tool,
 todo, context-usage, and explicit reasoning-summary updates.  ACP thought chunks

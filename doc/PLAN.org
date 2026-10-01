@@ -3036,7 +3036,7 @@ Acceptance: each item is fixed with a check, or recorded as not needed with a re
 :LABELS:   ["workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-29 Tue 12:34]
-:MODIFIED: [2026-09-29 Tue 12:34]
+:MODIFIED: [2026-09-30 Wed 22:24]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -3055,6 +3055,20 @@ Non-blocking findings of fess audit fess/fast-A6A7-r1.md (2026-09-29) on subtask
 8. (low) On the service recovery layer, PgUp and PgDn scroll the hidden output pane and not the recovery dialog. Route them to RecoveryViewport.
 9. (low) No test covers the Answer branch of prepareMutation (exact decision observation as If-Match, refusal of a mismatched ETag or value).
 10. (low) doc/workflow-manager-handoff.md is not updated for A6A7.
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 470,
+    "issue_id": "acat-a6a7-fess-followup-1exm",
+    "author": "johnw",
+    "text": "Finding 1 is addressed by subtask PC8 (2026-09-30): the pause is bounded by the deferring read and a 3-second limit, and the observation line shows the pause instead of 'Observation: current'. Whether the pause should keep an effect on refresh is open in acat-pc8-tui-polish-fess-y3yt. The other findings are unchanged. Evidence: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/PC/PC8/impl-r1 (build.exit, model.exit, journey.exit and doc-check.exit all 0). Fess: fess/pc-PC8-r1.md, not blocking; its findings are filed as acat-pc8-tui-polish-fess-y3yt.",
+    "created_at": "2026-10-01T05:24:38Z"
+  }
+]
+#+end_src
 
 * DONE [#B] DSL: caseVerdict arm mapping is unproved and untested — permuting arms passes the whole package
 :PROPERTIES:
@@ -3081,7 +3095,7 @@ alexey pass, high. Check.lean:422-423 is the only place the approve/object/decli
 :LABELS:   ["workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-29 Tue 13:08]
-:MODIFIED: [2026-09-29 Tue 13:08]
+:MODIFIED: [2026-09-30 Wed 22:24]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -3109,6 +3123,20 @@ Non-blocking findings of fess audit fess/fast-A8A9-r1.md (2026-09-29) on subtask
 Additional limitations from the implementer: the recovery-first path of the journey was not exercised; no negative-control journey was run for retry or result retrieval; service mode has no key that saves the retained verified bytes to a file.
 
 Acceptance: each item is fixed with a check, or recorded as not needed with a reason.
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 471,
+    "issue_id": "acat-a8a9-fess-followup-6d1e",
+    "author": "johnw",
+    "text": "Subtask PC8 (2026-09-30) addresses findings 1 and 4. Finding 1: a declared refusal or 'no verified result' now keeps no bytes and is a retryable failure; the next automatic refresh retries after an installed composite read, g retries at once, and only retrieved verified bytes are kept. Finding 4: saveExact returns success with a leftover note when the private-file removal fails after createLink, and tui/README.md and doc/agent-cat.texi state the hard-link requirement. Model tests cover both. The other findings are unchanged. Evidence: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/PC/PC8/impl-r1 (build.exit, model.exit, journey.exit and doc-check.exit all 0). Fess: fess/pc-PC8-r1.md, not blocking; its findings are filed as acat-pc8-tui-polish-fess-y3yt.",
+    "created_at": "2026-10-01T05:24:38Z"
+  }
+]
+#+end_src
 
 * DONE [#E] conv_comm converse: needs a Nontrivial fence and delta_injective
 :PROPERTIES:
@@ -6034,7 +6062,7 @@ Design question from acat-444: sumT is symmetric in muS (matAdd_comm) but leftmo
 :LABELS:   ["workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-24 Thu 09:19]
-:MODIFIED: [2026-09-29 Tue 12:34]
+:MODIFIED: [2026-09-30 Wed 22:24]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -6071,6 +6099,13 @@ Acceptance: before A7 starts, a recorded specification decision states either th
     "author": "johnw",
     "text": "Subtask A6A7 records a decision: automatic refresh pauses while a deferral outcome is shown (option 1), through Lane.refreshPaused, and KeyOutcome records whether a key was deferred. A model test covers the rule. The journey showed Ctrl-D deferred ten times in a row before the pause, but it recorded no duty-cycle measurement. The fess audit found that the pause is unbounded and can hide a stale monitor (acat-a6a7-fess-followup-1exm, finding 1). This issue stays open until the pause is bounded and the measurement exists. Evidence: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A6A7/fast-impl-r1.",
     "created_at": "2026-09-29T19:34:31Z"
+  },
+  {
+    "id": 469,
+    "issue_id": "acat-ftw9",
+    "author": "johnw",
+    "text": "Subtask PC8 (2026-09-30) bounds the pause: Lane.refreshPaused holds only while the deferring page-set read holds the read ticket and for at most refreshPauseLimit (3 seconds) from the key outcome. While the pause holds, the observation line says that automatic refresh is paused. A model test covers the bound. The journey counts deferred-key outcomes and writes journey-deferred-keys.txt; the N8 run recorded 0. The issue stays open: the fess audit found that the bounded pause no longer affects refresh, because the single-flight lane already starts no read while the ticket is held, so the pause changes only the display. The operator decision on that rule is tracked in acat-pc8-tui-polish-fess-y3yt finding 1. Evidence: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/PC/PC8/impl-r1 (build.exit, model.exit, journey.exit and doc-check.exit all 0). Fess: fess/pc-PC8-r1.md, not blocking; its findings are filed as acat-pc8-tui-polish-fess-y3yt.",
+    "created_at": "2026-10-01T05:24:37Z"
   }
 ]
 #+end_src
@@ -10214,6 +10249,30 @@ Non-blocking findings of the fess audit of Phase C subtask PC7 (session/cancel f
 2. (low) A run cancel now writes session/cancel twice, once from cancelOnStop and once from closeAcp. Adapters ignore the second. No document states it. Fix: state it in engine/acp/README.md, or skip the cancelTurn in closeAcp when the connection already has a cancelled prompt pending.
 3. (low) doc/workflow-manager-handoff.md, the dated end-of-part review table still lists the adapter-cancel finding as open. PC7 closed item 4 of acat-phase-b2-review-findings-x8fv (recorded there). The closeout can correct the current-state text.
 4. (low) engine/acp/README.md and runtime/BROKER.md say that a run cancel and the end of a sibling branch also send the cancel through cancelOnStop. Only the live re-route stop is proven. Fix: assert in a cancel scenario that session/cancel arrives before the connection closes, or record this as a verification gap.
+
+* TODO [#E] Resolve the non-blocking fess findings of subtask PC8    :review:
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pc8-tui-polish-fess-y3yt
+:LABELS:   ["review","workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-30 Wed 22:24]
+:MODIFIED: [2026-09-30 Wed 22:24]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess audit fess/pc-PC8-r1.md (2026-09-30) on subtask PC8 (Phase A TUI polish: retrieval retry, bounded refresh pause, saveExact after publication).
+
+1. (medium) The bounded pause has no effect on refresh (tui/src/Agentic/Tui/ServiceLane.hs refreshPaused near 522-526 and startRead near 214-217, tui/src/Agentic/Tui/App.hs near 204). refreshPaused holds only while the deferring page-set read still holds the read ticket, and while any read holds the ticket startRead already does nothing. The pause changes only the observation line, and the earlier guarantee that a repeated key finds no read in flight no longer holds. The specification asked for this rule. Operator decision needed: keep a refresh effect (for example, suppress automatic refresh after the deferring read completes until the three-second limit ends), or record that the pause only changes the display. The PC8 journey saw 0 deferred keys.
+2. (low) The retry rule has only pure model coverage. No test covers the App wiring: the retrievalDue guard in refreshServiceRequest, retrievalObserved on an installed composite read, or ExplicitRefresh on g. No journey takes a "no verified result" retrieval through to retrieved bytes. Add an App-level test or a journey step.
+3. (low) The status line text "verified result not retrieved: CODE; the next refresh retries" is replaced on the next tick by the read status (tui/src/Agentic/Tui/App.hs near 189-190 and 380-381). The result line keeps it. tui/README.md near 160-161 and doc/agent-cat.texi say the status line shows it. Keep it on the status line until a retrieval succeeds, or correct the documentation.
+4. (low, pre-existing) When createLink fails and the cleanup removal also fails, the removal error replaces the original cause and the private file stays (tui/src/Agentic/Tui/Save.hs near 65). The test (tui/test/ServiceTests.hs near 1302-1303) checks only Left (SaveIOFailure _). Keep the original link failure and check the leftover file.
+5. (low) The retry has no limit (tui/src/Agentic/Tui/ServiceLane.hs near 556-561). After a permanent failure the TUI alternates a retrieval and a composite read about every two seconds while the run is shown. Decide whether to add a backoff or a limit.
+
+Implementer limitations: the new tests were written after the production change and were not shown failing first.
 
 * TODO [#C] Phase B part 1 review follow-ups: download quota, id row bound, legacy history, precision gaps
 :PROPERTIES:
@@ -18498,7 +18557,7 @@ to an unapproved local launch.
 :LABELS:   ["p7","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-29 Tue 14:18]
+:MODIFIED: [2026-09-30 Wed 22:24]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-034
 :SOURCE_REPO: agent-cat
@@ -18605,6 +18664,13 @@ Local-mode behavior remains intact without a duplicated service runtime model.
     "author": "johnw",
     "text": "Subtask A13A14 (2026-09-29) documents the Phase A TUI service journey in doc/agent-cat.texi, tui/README.md and a new dated top section of doc/workflow-manager-handoff.md, and lists the unsupported TUI service features. The final Phase A gate passed on the final tree: make -C doc check and check-haskell, the Werror ALLBUILD, manager/ci/contract.sh, tui-model-test at N1 and N8, the source-boundary check, tui-journey at N1 and N8, the broken-answer and consent controls with their literal messages, and tui/ci/tui.sh. This milestone closes no package or gate, so WM-034 stays open. Evidence: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A13A14/fast-impl-r1.",
     "created_at": "2026-09-29T21:18:49Z"
+  },
+  {
+    "id": 472,
+    "issue_id": "acat-wm-034-3vqz",
+    "author": "johnw",
+    "text": "Subtask PC8 (2026-09-30) advances this package with Phase A TUI polish: retrieval retry, bounded refresh pause after a deferred key, and saveExact success with a leftover note after publication. It does not complete the package. Checks: Werror build of agentic-run, routing-fixed-point-probe and tui-model-test with -ftui-tests; tui-model-test at N8 (525 PASS); tui-journey at N8 (PASS, 0 deferred keys); make -C doc check. Evidence: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/PC/PC8/impl-r1 (build.exit, model.exit, journey.exit and doc-check.exit all 0). Fess: fess/pc-PC8-r1.md, not blocking; its findings are filed as acat-pc8-tui-polish-fess-y3yt.",
+    "created_at": "2026-10-01T05:24:39Z"
   }
 ]
 #+end_src
