@@ -116,7 +116,10 @@ control authority.
   `decodeSuppliedInput` and `decodeInputError` decode a request and its
   readiness. `decodePreparation`, `decodeReview`, `decodeReviewInput`,
   `decodeReviewLineage` and `decodeReviewEdit` decode a preparation and its
-  review. `decodeCommandReceipt` decodes a command receipt. Each `encode`
+  review. `decodeCommandReceipt` decodes a command receipt, and
+  `decodeCaptureReceipt` decodes a capture receipt: its identifier, its
+  request and profile, its byte count as canonical decimal text of at most
+  67108864, and its SHA-256. Each `encode`
   function gives the canonical encoding of the decoded value, which is the
   encoding of the Haskell codec. A review keeps its policy and its result
   code as validated JSON values, and a root review has no lineage member.
@@ -219,6 +222,8 @@ one loaded profile:
   `Location` of a response with `version` 1. `post` sends a JSON body of at
   most 2 MiB once with `Content-Type: application/json`, an
   `Idempotency-Key` and an optional `If-Match`. It never resends.
+  `postBytes` sends raw bytes of at most 64 MiB once in the same way, with
+  `Content-Type: application/octet-stream`, as a capture sends them.
   `commandKey` gives a new idempotency key of an authority epoch. A problem
   response gives `Refused` with its status and code.
 - `streamEvents` opens one SSE connection to `/v1/events` with the cursor in
@@ -244,7 +249,8 @@ one loaded profile:
   `unreachable` when a stream connection does not open or a polling batch
   fails.
 - `dropStream` closes the open event stream as a dropped connection does,
-  and the transport stays open.
+  and the transport stays open. A stream that is still opening at the call
+  is closed when its response arrives, before it delivers anything.
 - `downloadVerified` reads an artifact download of at most 64 MiB with
   `Accept: application/octet-stream`. It requires status 200,
   `application/octet-stream`, `Cache-Control: no-store`,
@@ -305,6 +311,16 @@ endpoint of a loaded profile:
   command, is `uncertain` and keeps the command unchanged.
   `reconcileCommand` makes the one read of `reconcileRead` and gives the
   report of `reconcile`. The session never sends a command again by itself.
+- `prepareCapture` gives the `PendingCommand` of a capture of exact raw
+  bytes for a request, as `prepareCapture` of `Agentic.Manager.Client`
+  does: a POST of `/v1/captures?requestId=ID` with a new idempotency key
+  and no `If-Match`. Bytes above the `captureBytes` limit of the
+  capabilities give `ResponseTooLarge`, and bytes that are not UTF-8 give
+  `InvalidResponse`. `send` sends the bytes with `postBytes`. A capture is
+  `delivered` only for a 202 response whose body is a capture receipt and
+  whose `Location` names `/v1/commands/{id}`, and the outcome then carries
+  the decoded capture receipt. Every other response is `uncertain`. The
+  manager receives the bytes and never a path.
 - `download` gives the bytes of `downloadVerified` for a reference of the
   binding.
 - The `delivery` option and `setDelivery` select `sse` or `poll` delivery. A
@@ -321,11 +337,15 @@ leaf certificate with the subject alternative name `IP:127.0.0.1` in a
 temporary directory with `openssl` from `PATH`. It covers GET and POST with
 their headers over TLS 1.3, a refused redirect, an oversized body, a server
 certificate of another CA, the reconnection of a dropped stream with
-`Last-Event-ID`, the polling fallback, a 410 refusal, `close` during an open
+`Last-Event-ID`, a drop during the opening of a stream, which delivers
+nothing from that stream, the polling fallback, a 410 refusal, `close` during an open
 stream with a late response, and the profile refusals before any request.
 For the session it covers the refusal of unsupported capabilities,
 `WrongEndpoint` for a reference after `switchEndpoint`, an uncertain command
-whose reconciliation sends nothing, a download whose digest or size differs,
+whose reconciliation sends nothing, a capture of exact bytes with
+`application/octet-stream` and its decoded receipt, a capture response
+without a capture receipt, which is uncertain, and the refusal of bytes that
+are not UTF-8 before any request, a download whose digest or size differs,
 the resumption after `forceReconnect` with the last delivered event
 identifier, polling delivery and its end, and the read of a watched resource
 after an invalidation.
@@ -486,12 +506,18 @@ the binding and its resource. An observation is not an `OwnedRun` or a
 `RestoredRun`. It has no local reducer, no file-system monitor, no local
 process and no local run store, and it grants no supervision or control
 authority. A decision head is the decision at position 0 of the queue of its
-run. Service mode sends no manager command.
+run. `ServiceMode` itself sends no manager command. Only the commands of the
+section "Requests and review in service mode" send commands, through the
+session of the active binding.
 
 | Command | Purpose |
 |---|---|
-| `/wfm-status` | The active profile, the endpoint and its endpoint identity, the delivery state (`connecting`, `live`, `polling` or `unreachable`), the scopes, profiles and transports that the manager grants, and the service runs, requests and decision heads. |
+| `/wfm-status` | The active profile, the endpoint and its endpoint identity, the delivery state (`connecting`, `live`, `polling` or `unreachable`), the scopes, profiles and transports that the manager grants, the service runs, requests and decision heads, and, in a separate list, the command receipts of the active binding. |
 | `/wfm-endpoints [NUMBER]` | Choose among the configured profiles, by number or from a list. |
+| `/wfm [WORKFLOW]` | Create a request, collect its exact inputs, enqueue it, and show its exact review, as the section "Requests and review in service mode" states. |
+| `/wfm-review [REQUEST_ID]` | Continue a request: collect its missing inputs and enqueue it, follow its admission, or show its exact review. |
+| `/wfm-withdraw [REQUEST_ID]` | Withdraw a request before its start. |
+| `/wfm-discard [REQUEST_ID]` | Discard the live preparation of a request in review. |
 
 The status widget lists active local runs and active service runs in
 separate sections, and the status line counts each kind.
@@ -524,6 +550,95 @@ closed at once.
 The local commands, `/wf`, `/wf-launch`, the other `/wf-...` commands and the
 actions of the `agent_cat_workflow` tool, work in both modes and act only on
 local runs.
+
+## Requests and review in service mode
+
+`src/manager-ui.ts` holds `ManagerRequests`, the human path of service mode.
+It uses the native Pi dialogs `ctx.ui.select`, `ctx.ui.editor`,
+`ctx.ui.input` and `ctx.ui.confirm`, and a `ReviewComponent` of `pi-tui`
+through `ctx.ui.custom`. Each command acts through the session of the active
+binding and refuses while the manager is not connected.
+
+`/wfm [WORKFLOW]` does these steps in order:
+
+1. It reads `/v1/profiles` and the catalogue `/v1/workflows?profileId=ID`
+   as complete page sets. With more than one ready profile, the user selects
+   one. The user selects the workflow, or `WORKFLOW` names it.
+2. It creates the request with `POST /v1/requests`, bound to the revisions
+   of the catalogue entry.
+3. For each missing declared input, the user selects `Literal text`,
+   `Captured text` or `Captured file`. A literal is the exact editor text,
+   with its Unicode and its whitespace. The leading-whitespace rule of the
+   local `/wf` does not apply. A capture sends the exact bytes of the editor
+   text, or of a local file that the user names, with `POST
+   /v1/captures?requestId=ID` and a new idempotency key. The notification of
+   the capture names the capture identifier, the byte count and the SHA-256
+   of its receipt. A `set-input` with source `capture` then binds the
+   capture identifier. The manager receives the bytes and never the path.
+4. Each `set-input` carries the entity tag of the request as it was read
+   before the editor opened. When the request changed during editing, the
+   manager refuses the command with 412. The editor text stays a draft, and
+   the editor opens again for the same input with the draft. A draft is
+   removed when its `set-input` reaches its effect.
+5. It enqueues the request and follows it. Each change of the phase, the
+   admission state, the queue position or the blocking reasons gives one
+   notification, until the request is in `review` with a live preparation.
+6. It shows the review component. The component lists the complete exact
+   review: the five approval selectors (`reviewDigest`, `requestRevision`,
+   `profileRevision`, `descriptorRevision` and `processGeneration`), the
+   entity tag that the approval binds as `If-Match`, the program SHA-256,
+   the person answering, the workflow, the profile, the workspace, the
+   target, the policy, the result code, each input with its source, size and
+   SHA-256, the plan, the run facts, the pins, the warnings, and the lineage
+   when the review has one. It wraps long lines and scrolls with `j`, `k` and
+   the arrow keys. Outside the Pi TUI, the review is a notification, and a
+   select gives the choice.
+7. `a` asks for an explicit confirmation that names the preparation, the
+   review digest and the entity tag. Only that confirmation sends `approve`,
+   with the displayed selectors and the displayed entity tag as `If-Match`.
+   The command then waits until the request names its run. Escape, `q`, `n`
+   or a refused confirmation declines the review and sends nothing, so the
+   request stays in review. `d` discards the preparation, and `w` withdraws
+   the request.
+
+Each send is one command, and nothing is sent again by itself. Each send
+gives one notification that begins with `Command OPERATION` and states its
+outcome: `accepted` with the receipt identifier and the receipt state,
+`refused` with the status and code, or `uncertain`. For each command except
+`approve`, the command waits until its receipt settles, and the notification
+names the settled state and the effect. An approval names the state of its
+receipt at acceptance, and the run that the request then names is its
+execution fact. Execution
+facts are separate notifications: the admission of a request, and `Execution:
+the manager started run RUN for request REQUEST`. `/wfm-status` lists the
+command records of the active binding under `Command receipts:`, after the
+service runs, requests and decision heads. A command whose required scopes
+the credential lacks is not sent.
+
+`/wfm-review` continues a request from its phase: a draft collects its
+missing inputs and is enqueued, a queued or preparing request is followed,
+and a request in review shows its review. `/wfm-withdraw` sends `withdraw`
+with the entity tag of the request. `/wfm-discard` sends `discard` with the
+entity tag of the live preparation. The manager then returns the request to
+`draft`, and `/wfm-review` prepares a new review. Each of the three commands
+takes a request identifier, or offers the open requests of the overview.
+
+`test/manager-ui.test.ts` checks that the review lists every selector and
+consent fact, that the component wraps the review within the width and
+reaches every line by scrolling, and the choice of each key.
+`test/manager-ui-live.test.ts` runs only when `AGENT_CAT_MANAGER_PROFILE`
+names a client profile. It drives the extension with a fake Pi host, a fake
+UI and a transport that records each POST, against a running manager with the
+mixed fixture, in four ordered steps, each with a timeout of 600 seconds. It
+enters an exact Unicode literal for `prompt-source` while the check changes
+the request through its own session, so the first `set-input` is refused
+with 412 and the editor opens again with the draft. It approves the displayed
+review and requires that the approve body names the selectors of the
+preparation. It captures exact editor text for `captured-input`. It declines
+a review, requires that nothing was sent to the preparation and that the
+request is still in review, and then discards the preparation and withdraws
+the request. The `pi-client` mode of `manager/test/service_http.py` runs it
+before the session check and confirms each step against manager facts.
 
 `test/service-mode.test.ts` drives the extension with a fake Pi host, a fake
 UI and an injected fake transport. It requires that restore reaches only the
@@ -601,8 +716,12 @@ for the control descriptor.
 | `/wf-fork PARENT_RUN_ID` | Fork a workflow immutably, with drops or replacements of persisted answers. This is distinct from a Pi conversation fork. |
 | `/wf-diff CHILD_RUN_ID` | Compare lineage, identity, answer edits, and outcomes with the immutable parent. |
 | `/wf-cancel RUN_ID` | Cancel an owned live run after approval. |
-| `/wfm-status` | Service mode: the manager connection and the service runs, requests and decision heads. |
+| `/wfm-status` | Service mode: the manager connection, the service runs, requests and decision heads, and the command receipts. |
 | `/wfm-endpoints [NUMBER]` | Service mode: choose the active client profile. |
+| `/wfm [WORKFLOW]` | Service mode: create a manager request, enter its exact inputs, enqueue it, and review and approve it. |
+| `/wfm-review [REQUEST_ID]` | Service mode: continue a manager request or show its exact review. |
+| `/wfm-withdraw [REQUEST_ID]` | Service mode: withdraw a manager request before its start. |
+| `/wfm-discard [REQUEST_ID]` | Service mode: discard the live preparation of a manager request in review. |
 
 The `agent_cat_workflow` tool lets a model discover, start, inspect, control,
 restart, resume, or fork runs. Starts from the tool are limited to the

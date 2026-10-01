@@ -491,6 +491,50 @@ export function encodeDraftView(draft: DraftView): JsonValue {
   };
 }
 
+/**
+ * The receipt of one capture: its opaque identifier, the request and the
+ * profile that it is bound to, and the size and SHA-256 of the exact
+ * captured bytes. A capture supplies no input until a `set-input` names its
+ * identifier.
+ *
+ * @public
+ */
+export type CaptureReceipt = {
+  readonly id: string;
+  readonly requestId: string;
+  readonly profileId: string;
+  readonly bytes: bigint;
+  readonly sha256: string;
+};
+
+/** The largest capture, in bytes, as `CaptureReceipt` of `Agentic.Manager.Protocol.Draft` bounds it. */
+const CAPTURE_BYTES = 67108864n;
+
+function parseCaptureReceipt(value: JsonValue): CaptureReceipt | undefined {
+  const fields = exact(value, ["version", "id", "requestId", "profileId", "bytes", "sha256"]);
+  if (fields === undefined || !versionOne(fields)) return undefined;
+  const id = textOf(jsonMember(fields, "id"));
+  const requestId = textOf(jsonMember(fields, "requestId"));
+  const profileId = textOf(jsonMember(fields, "profileId"));
+  const size = textOf(jsonMember(fields, "bytes"));
+  const bytes = size === undefined ? undefined : canonicalDecimal(size, 8, CAPTURE_BYTES);
+  const sha256 = textOf(jsonMember(fields, "sha256"));
+  return id === undefined || !validId(id) || requestId === undefined || !validId(requestId) || profileId === undefined
+    || !validId(profileId) || bytes === undefined || sha256 === undefined || !validDigest(sha256)
+    ? undefined : { id, requestId, profileId, bytes, sha256 };
+}
+
+/**
+ * Decode a capture receipt, or refuse with `InvalidResponse`. The byte
+ * count is canonical decimal text of at most 67108864, and the digest is 64
+ * lowercase hexadecimal digits.
+ *
+ * @public
+ */
+export function decodeCaptureReceipt(value: JsonValue): Outcome<CaptureReceipt> {
+  return decided(parseCaptureReceipt(value));
+}
+
 // ---------------------------------------------------------------------------
 // Preparations and reviews (Agentic.Manager.Protocol.Preparation).
 

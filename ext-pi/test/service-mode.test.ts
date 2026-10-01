@@ -63,6 +63,11 @@ class FakeTransport implements SessionTransport {
     return UNREACHABLE;
   }
 
+  async postBytes(resource: string): Promise<Reply> {
+    this.posts.push(resource);
+    return UNREACHABLE;
+  }
+
   followEvents(_start: string, deliver: (item: StreamItem, via: Delivery) => void, options: FollowOptions = {}): Promise<FollowEnd> {
     if (this.closed) return Promise.resolve({ kind: "closed" });
     this.#deliver = deliver;

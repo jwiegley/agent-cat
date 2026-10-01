@@ -12,6 +12,7 @@ import { formatMonitor } from "./monitor.ts";
 import { WorkflowMonitorComponent } from "./monitor-ui.ts";
 import { openRemotePi } from "./pi-remote-runtime.mjs";
 import type { SessionOptions } from "./manager/session.ts";
+import { ManagerRequests, type CommandRecord } from "./manager-ui.ts";
 import { ServiceMode, type ServiceSelection } from "./service-mode.ts";
 import { RunSupervisor } from "./supervisor.ts";
 import type { ClientMode, ControlAckSnapshot, RoutingInspection, RunnerConfig, RunSnapshot, TargetKind, WorkflowDescriptor } from "./types.ts";
@@ -26,6 +27,7 @@ export default function agentCatExtension(pi: ExtensionAPI, hooks: ExtensionHook
   const supervisor = new RunSupervisor();
   let lastContext: ExtensionContext | undefined;
   let service: ServiceMode | undefined;
+  const requests = new ManagerRequests(() => service);
   const currentBridge = new CurrentSessionBridge(pi, () => lastContext);
   const grants = new MutationGrants();
   const supervise = (prepared: PreparedLaunch, ctx: ExtensionContext, workflow: string) => {
@@ -410,8 +412,28 @@ export default function agentCatExtension(pi: ExtensionAPI, hooks: ExtensionHook
     description: "Show the manager endpoint, its delivery state, and its service runs, requests and decision heads",
     handler: async (_args, ctx) => {
       if (service === undefined) return ctx.ui.notify(SERVICE_UNCONFIGURED, "warning");
-      ctx.ui.notify(formatServiceStatus(service), service.connection.kind === "connected" ? "info" : "warning");
+      ctx.ui.notify(formatServiceStatus(service, requests.records()), service.connection.kind === "connected" ? "info" : "warning");
     },
+  });
+
+  pi.registerCommand("wfm", {
+    description: "Create a manager request: select a workflow, enter its exact inputs, enqueue it, and review and approve it",
+    handler: async (args, ctx) => requests.start(ctx, args),
+  });
+
+  pi.registerCommand("wfm-review", {
+    description: "Continue a manager request: collect its missing inputs, follow its admission, or show its exact review",
+    handler: async (args, ctx) => requests.review(ctx, args),
+  });
+
+  pi.registerCommand("wfm-withdraw", {
+    description: "Withdraw a manager request before its start",
+    handler: async (args, ctx) => requests.withdraw(ctx, args),
+  });
+
+  pi.registerCommand("wfm-discard", {
+    description: "Discard the live preparation of a manager request in review",
+    handler: async (args, ctx) => requests.discard(ctx, args),
   });
 
   pi.registerCommand("wfm-endpoints", {
@@ -802,8 +824,13 @@ function connectionLine(service: ServiceMode): string {
   }
 }
 
-/** The text of `/wfm-status`: the profile, the connection, the capabilities, and the service observations. */
-export function formatServiceStatus(service: ServiceMode): string {
+/**
+ * The text of `/wfm-status`: the profile, the connection, the capabilities,
+ * the service observations, and the command records of the active binding.
+ * The command records state command outcomes, and the observations state
+ * execution, so the two are listed separately.
+ */
+export function formatServiceStatus(service: ServiceMode, commands: readonly CommandRecord[] = []): string {
   const lines = [
     `Service mode: profile ${service.active + 1} of ${service.profiles.length}, ${service.profiles[service.active]}`,
     connectionLine(service),
@@ -819,6 +846,10 @@ export function formatServiceStatus(service: ServiceMode): string {
   for (const request of requests) lines.push(`  ${request.requestId}  ${request.phase}  ${request.workflowId}${request.runId ? `  run ${request.runId}` : ""}`);
   lines.push(decisions.length ? "Decision heads:" : "Decision heads: none");
   for (const decision of decisions) lines.push(`  ${decision.decisionId}  ${decision.state} ${decision.kind}  run ${decision.runId}`);
+  if (commands.length > 0) {
+    lines.push("Command receipts:");
+    for (const command of commands) lines.push(`  ${command.operation}  ${command.outcome}  ${command.detail}  ${command.target}`);
+  }
   return lines.join("\n");
 }
 

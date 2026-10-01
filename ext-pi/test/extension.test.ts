@@ -276,10 +276,14 @@ describe("Pi extension lifecycle", () => {
       expect([...commands.keys()].sort()).toEqual([
         "wf", "wf-cancel", "wf-diff", "wf-fork", "wf-grant", "wf-help", "wf-launch", "wf-monitor",
         "wf-plan", "wf-recover", "wf-redirect", "wf-restart", "wf-resume", "wf-retry", "wf-status", "wf-steer",
-        "wfm-endpoints", "wfm-status",
+        "wfm", "wfm-discard", "wfm-endpoints", "wfm-review", "wfm-status", "wfm-withdraw",
       ]);
       await commands.get("wf")!.handler("fixture", ctx);
       expect(notices.at(-1)).toContain("requires interactive approval");
+      for (const name of ["wfm", "wfm-review", "wfm-withdraw", "wfm-discard"]) {
+        await commands.get(name)!.handler("", ctx);
+        expect(notices.at(-1)).toContain("Service mode is not configured");
+      }
       await commands.get("wf-status")!.handler("", ctx);
       expect(notices.at(-1)).toBe("Mode: local\nNo active workflow runs");
       process.env.AGENT_CAT_MANAGER_PROFILES = '["/profiles/first.json","/profiles/second.json"]';

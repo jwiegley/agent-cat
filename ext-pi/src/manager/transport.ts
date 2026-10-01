@@ -53,6 +53,9 @@ export const RESPONSE_BYTES = 1048576;
 /** The largest command body, in bytes. */
 export const COMMAND_BYTES = 2097152;
 
+/** The largest capture body, in bytes: the `captureBytes` limit of `/capabilities`. */
+export const CAPTURE_BYTES = 67108864;
+
 /** The largest artifact download, in bytes: the `artifactBytes` limit of `/capabilities`. */
 export const ARTIFACT_BYTES = 67108864;
 
@@ -242,6 +245,8 @@ export class ManagerTransport {
   readonly #pollIntervalMs: number;
   readonly #active = new Set<ClientRequest>();
   readonly #streams = new Set<ClientRequest>();
+  /** The number of `dropStream` calls, so that a stream that was opening during a drop is dropped too. */
+  #drops = 0;
   readonly #sleepers = new Set<() => void>();
   #closed = false;
 
@@ -269,11 +274,14 @@ export class ManagerTransport {
 
   /**
    * Close the open event stream as a dropped connection does, and keep the
-   * transport open. The open `streamEvents` call gives
-   * `TransportUnavailable`, so `followEvents` reconnects with the last
-   * complete event identifier.
+   * transport open. A stream that is still opening at the call is closed
+   * when its response arrives, before it delivers anything. The open
+   * `streamEvents` call gives `TransportUnavailable`, so `followEvents`
+   * reconnects with the last complete event identifier, or polls when its
+   * preference is `poll`.
    */
   dropStream(): void {
+    this.#drops += 1;
     for (const request of this.#streams) request.destroy();
   }
 
@@ -293,6 +301,20 @@ export class ManagerTransport {
     const headers: Record<string, string> = { "Content-Type": "application/json", "Idempotency-Key": command.idempotencyKey };
     if (command.ifMatch !== null) headers["If-Match"] = command.ifMatch;
     return this.#exchangeJson("POST", resource, headers, bytes);
+  }
+
+  /**
+   * One POST of raw bytes with `Content-Type: application/octet-stream`, its
+   * idempotency key and, when given, its `If-Match` entity tag, as a capture
+   * sends them. The body is at most `CAPTURE_BYTES`. The response is JSON,
+   * and the transport sends the bytes once and never resends them.
+   */
+  async postBytes(resource: string, bytes: Uint8Array, command: CommandHeaders): Promise<Outcome<ClientResponse>> {
+    if (bytes.length > CAPTURE_BYTES) return TOO_LARGE;
+    if (!validKey(command.idempotencyKey) || (command.ifMatch !== null && !validETag(command.ifMatch))) return INVALID;
+    const headers: Record<string, string> = { "Content-Type": "application/octet-stream", "Idempotency-Key": command.idempotencyKey };
+    if (command.ifMatch !== null) headers["If-Match"] = command.ifMatch;
+    return this.#exchangeJson("POST", resource, headers, Buffer.from(bytes));
   }
 
   /**
@@ -344,8 +366,14 @@ export class ManagerTransport {
   /** `streamEvents`, with `accepted` called once when the stream response is accepted. */
   async #streamEvents(cursor: string, deliver: (item: StreamItem) => void, idleMs: number, accepted: () => void): Promise<Outcome<string>> {
     if (!validCursor(cursor) || !(idleMs > 0 && idleMs <= RECONNECT_IDLE_MS)) return INVALID;
+    const drops = this.#drops;
     const opened = await this.#open("GET", "/v1/events", { Accept: "text/event-stream", "Last-Event-ID": cursor }, null);
     if (!opened.ok) return opened;
+    if (drops !== this.#drops) {
+      // A drop while the stream was opening drops this stream as well.
+      opened.value.release();
+      return TRANSPORT;
+    }
     const { response, status, headers, stopTimer, request } = opened.value;
     this.#streams.add(request);
     const release = () => {

@@ -11,7 +11,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { encodeJson, JsonNumber, jsonMember, isJsonObject, parseJson } from "../src/manager/json.ts";
 import { ClientProfile } from "../src/manager/profile.ts";
 import { ManagerSession } from "../src/manager/session.ts";
-import { commandKey, ManagerTransport, RESPONSE_BYTES, type Delivery, type StreamItem } from "../src/manager/transport.ts";
+import { commandKey, ManagerTransport, RESPONSE_BYTES, type Delivery, type DeliveryPreference, type StreamItem } from "../src/manager/transport.ts";
 
 /** One request that the local manager received. */
 type Seen = { method: string; url: string; headers: IncomingMessage["headers"]; protocol: string | null; body: string };
@@ -326,6 +326,38 @@ describe("event delivery", () => {
     ]);
   });
 
+  it("drops a stream that is still opening when the stream is dropped", async () => {
+    handler = (request, response) => {
+      if (request.headers.accept === "text/event-stream") {
+        // The stream answers after the drop, as a slow connection does.
+        setTimeout(() => {
+          eventStream(response);
+          response.write(invalidation("s.5", "/v1/requests/r1", "v5"));
+        }, 300);
+      } else {
+        json(response, 200, JSON.stringify({
+          version: 1, cursor: "s.4", oldestCursor: "s.0",
+          events: [{ id: "s.4", event: "run.changed", data: { version: 1, resource: "/v1/runs/u1", revision: "v4" } }], hasMore: false,
+        }));
+      }
+    };
+    const client = await transport();
+    let prefer: DeliveryPreference = "sse";
+    const delivered: [string, Delivery][] = [];
+    const following = client.followEvents("s.3", (item, via) => {
+      if (item.kind === "invalidation") delivered.push([item.event.data.resource, via]);
+    }, { prefer: () => prefer });
+    await waitFor(() => seen.some((entry) => entry.headers.accept === "text/event-stream"));
+    prefer = "poll";
+    client.dropStream();
+    await waitFor(() => delivered.length > 0);
+    await new Promise((wake) => setTimeout(wake, 600));
+    expect(delivered.filter(([, via]) => via === "stream")).toEqual([]);
+    expect(delivered[0]).toEqual(["/v1/runs/u1", "poll"]);
+    client.close();
+    expect(await following).toEqual({ kind: "closed" });
+  });
+
   it("ends with a resnapshot after a 410 refusal", async () => {
     handler = (_request, response) => json(response, 410, '{"status":410,"code":"cursor-expired"}');
     const client = await transport();
@@ -460,6 +492,39 @@ describe("manager session", () => {
     expect(await client.reconcileCommand(sent.uncertain, () => false)).toEqual({ kind: "uncertain", uncertain: sent.uncertain });
     expect(await client.reconcileCommand(sent.uncertain, () => true)).toEqual({ kind: "effect-observed" });
     expect(seen.filter((entry) => entry.method === "POST")).toHaveLength(1);
+    await client.close();
+  });
+
+  it("captures exact raw bytes with application/octet-stream and decodes the capture receipt", async () => {
+    const bytes = Buffer.from("  Café λ captured\r\nline two\n", "utf8");
+    const digest = createHash("sha256").update(bytes).digest("hex");
+    let answer = "receipt";
+    handler = (request, response) => {
+      if (request.url === "/v1/capabilities") json(response, 200, capabilities("epoch-1"));
+      else if (answer === "receipt") {
+        json(response, 202, JSON.stringify({ version: 1, id: "cap_1", requestId: "req_1", profileId: "profile_1", bytes: String(bytes.length), sha256: digest }),
+          { Location: "/v1/commands/cmd_1" });
+      } else json(response, 202, '{"version":1,"id":"cap_1"}', { Location: "/v1/commands/cmd_1" });
+    };
+    const client = await session();
+    const pending = client.prepareCapture("req_1", bytes);
+    if (!pending.ok) throw new Error(`capture refused: ${pending.failure.kind}`);
+    expect([pending.value.reference.uri, pending.value.ifMatch]).toEqual(["/v1/captures?requestId=req_1", null]);
+    const sent = await client.send(pending.value);
+    expect(sent.kind === "delivered" && [sent.receipt, sent.capture, sent.location.uri]).toEqual([
+      null, { id: "cap_1", requestId: "req_1", profileId: "profile_1", bytes: BigInt(bytes.length), sha256: digest }, "/v1/commands/cmd_1"]);
+    const post = seen.find((entry) => entry.method === "POST");
+    expect(post?.url).toBe("/v1/captures?requestId=req_1");
+    expect(Buffer.from(post?.body ?? "", "utf8").equals(bytes)).toBe(true);
+    expect(post?.headers).toMatchObject({ "content-type": "application/octet-stream", "idempotency-key": pending.value.idempotencyKey });
+    expect(post?.headers["if-match"]).toBeUndefined();
+    answer = "other";
+    const second = client.prepareCapture("req_1", bytes);
+    if (!second.ok) throw new Error("capture refused");
+    expect((await client.send(second.value)).kind).toBe("uncertain");
+    expect(client.prepareCapture("req_1", Buffer.from([0xc3, 0x28]))).toEqual({ ok: false, failure: { kind: "InvalidResponse" } });
+    expect(client.prepareCapture("req 1", bytes)).toEqual({ ok: false, failure: { kind: "InvalidEndpoint" } });
+    expect(seen.filter((entry) => entry.method === "POST")).toHaveLength(2);
     await client.close();
   });
 

@@ -332,15 +332,31 @@ control_profiles = controls_mode or routing_mode or live_mode
 # line. It runs one manager lifetime.
 ENDPOINTS = "tui-endpoints"
 endpoints_mode = len(sys.argv) == 6 and sys.argv[5] == ENDPOINTS
-# The pi-client mode runs the live check of the ext-pi manager session,
-# ext-pi/test/manager-live.test.ts, against the running protected manager
-# with the mixed fixture, one profile and one execution reservation. It
-# reuses the credential issuance of TuiModeFixture: one client credential
-# with its client profile for ext-pi and a separate credential for the
-# harness. The harness starts the manager and reads the overview cursor.
-# It then runs vitest with node from PATH in ext-pi, with
-# AGENT_CAT_MANAGER_PROFILE set to the client profile and
-# AGENT_CAT_MANAGER_REPORT set to a report file. Through the session of
+# The pi-client mode runs the live checks of ext-pi against the running
+# protected manager with the mixed fixture, one profile and one execution
+# reservation. It reuses the credential issuance of TuiModeFixture: one
+# client credential with its client profile for the ext-pi session check, a
+# second client credential pi-ui with its own client profile for the check
+# of the human path, and a separate credential for the harness. The harness
+# starts the manager and reads the overview cursor. It then runs vitest with
+# node from PATH in ext-pi twice, each time with AGENT_CAT_MANAGER_PROFILE
+# set to a client profile and AGENT_CAT_MANAGER_REPORT set to a report file.
+# The first run, ext-pi/test/manager-ui-live.test.ts with the pi-ui
+# profile, drives /wfm, /wfm-review and /wfm-withdraw of the extension with
+# a fake Pi UI. vitest must report its four steps passed. The harness then
+# reads with its own credential that the prompt-source request supplied
+# exactly the literal PI_UI_LITERAL and names a succeeded run whose program
+# received the literal, that its preparation is consumed and the single
+# approve command of the preparation is not refused and carries the review
+# selectors that the report names and that the preparation states,
+# that the captured-input request supplied a capture whose run succeeded
+# and whose program received the SHA-256 of PI_UI_CAPTURED, and that the
+# declined preparation has no approve command, while its discard command
+# reached the effect discarded and the request is withdrawn. A discard
+# reaches that effect only for a live preparation of a request in review,
+# so this confirms that the declined review left the request in review.
+# The second run, ext-pi/test/manager-live.test.ts with the first client
+# profile, runs the session check. Through the session of
 # src/manager/session.ts, the check connects, bootstraps the overview,
 # creates a mixed-controls request, sets its input to the exact Unicode
 # literal MIXED_TEXT, enqueues it, reads the live preparation, approves the
@@ -358,7 +374,8 @@ endpoints_mode = len(sys.argv) == 6 and sys.argv[5] == ENDPOINTS
 # live delivery, closes the extension and then the session during their live
 # streams, and writes the report. vitest must report all seven steps passed,
 # and the report must exist. The harness then reads with its own credential
-# that the first request supplied exactly the literal and names the run, that
+# that the manager holds only the requests of the two checks, that the first
+# request of the session check supplied exactly the literal and names the run, that
 # the run store records the answer as JSON false, that one answer command and
 # one retry command of the report reached their effects, that the run
 # succeeded, and that the size and SHA-256 of the report equal the harness
@@ -1394,6 +1411,10 @@ def key_notice(session, key, after, failure):
 
 
 MIXED_TEXT = "Café λ — explicit false.\nSecond line."
+# The exact literal and the exact captured text of
+# ext-pi/test/manager-ui-live.test.ts, as LITERAL and CAPTURED state them.
+PI_UI_LITERAL = "  Café λ — exact literal.\n\tSecond line ✓"
+PI_UI_CAPTURED = "  Captured Ünïcode λ\r\nsecond line\n"
 
 
 def mixed_client(capabilities, authorized, attempts=None):
@@ -9356,6 +9377,8 @@ def pi_client_checks():
     harness = tui_fixture.harness
     report_path = work / "pi-client-report.json"
     log_path = work / "pi-client-vitest.log"
+    ui_report_path = work / "pi-client-ui-report.json"
+    ui_log_path = work / "pi-client-ui-vitest.log"
     with (work / "server-0.stdout").open("wb") as output, (work / "server-0.stderr").open("wb") as errors:
         process = subprocess.Popen([str(runner), "--manager", "serve", "--config", str(config),
                                     "+RTS", "-N" + native, "-RTS"], stdout=output, stderr=errors)
@@ -9370,31 +9393,93 @@ def pi_client_checks():
             status, overview, _ = request("/v1/snapshot", harness)
             assert status == 200 and not overview["items"], ("the overview is not empty before the check", status)
             cursor = overview["cursor"]
-            environment = dict(os.environ, AGENT_CAT_MANAGER_PROFILE=str(tui_fixture.client_profile),
-                               AGENT_CAT_MANAGER_REPORT=str(report_path))
-            with log_path.open("wb") as log:
-                completed = subprocess.run(["node", "node_modules/vitest/vitest.mjs", "run", "test/manager-live.test.ts"],
-                                           cwd=source / "ext-pi", env=environment, stdout=log, stderr=subprocess.STDOUT, timeout=720)
-            output_text = re.sub(r"\x1b\[[0-9;]*m", "", log_path.read_text(errors="replace"))
-            assert completed.returncode == 0, ("the ext-pi live session check failed", completed.returncode, output_text[-4000:])
-            assert re.search(r"Tests\s+7 passed \(7\)", output_text) and report_path.is_file(), (
-                "the ext-pi live session check did not run its seven steps", output_text[-4000:])
-            report = json.loads(report_path.read_bytes())
-            assert report["reconnectLastEventId"] == report["reconnectCursor"] and report["pollEvents"] > 0, ("report delivery", report)
-            print("PASS pi-client 1: the ext-pi session ran its seven steps against the protected endpoint, the forced SSE drop",
-                  "resumed with Last-Event-ID", report["reconnectCursor"], "and", report["events"], "delivered events, of which",
-                  report["pollEvents"], "came through polling, equal the polling listing", flush=True)
+            # The running manager issues the credential of the human-path
+            # check through its administration root.
+            ui_profile = tui_fixture.renew("pi-ui")
             client = mixed_client(capabilities, harness)
             observed = client[0]
+
+            def vitest(test_file, profile, report_file, log_file, steps):
+                """Run one live check of ext-pi with the client profile and give its report."""
+                environment = dict(os.environ, AGENT_CAT_MANAGER_PROFILE=str(profile), AGENT_CAT_MANAGER_REPORT=str(report_file))
+                with log_file.open("wb") as log:
+                    completed = subprocess.run(["node", "node_modules/vitest/vitest.mjs", "run", test_file],
+                                               cwd=source / "ext-pi", env=environment, stdout=log, stderr=subprocess.STDOUT, timeout=720)
+                text = re.sub(r"\x1b\[[0-9;]*m", "", log_file.read_text(errors="replace"))
+                assert completed.returncode == 0, ("the ext-pi live check failed", test_file, completed.returncode, text[-4000:])
+                assert re.search(r"Tests\s+%d passed \(%d\)" % (steps, steps), text) and report_file.is_file(), (
+                    "the ext-pi live check did not run its steps", test_file, text[-4000:])
+                return json.loads(report_file.read_bytes())
+
+            def prompts():
+                """The question prompt of every answer of every run store, by run store."""
+                return {path: [entry["question"].get("prompt") or "" for entry in json.loads(path.read_bytes())["answers"]]
+                        for path in work.glob("manager/runs/runs/*/runtime/answers.json")}
+
+            def succeeded(run_id):
+                snapshot, _, _ = observed("/v1/runs/" + run_id + "/snapshot", "RunSnapshot")
+                assert snapshot["runtime"] is not None and snapshot["runtime"]["status"] == "succeeded", ("run status", run_id, snapshot["runtime"])
+
+            ui = vitest("test/manager-ui-live.test.ts", ui_profile, ui_report_path, ui_log_path, 4)
+            ui_receipts = command_receipts(cursor, harness)
+            literal, _, _ = observed("/v1/requests/" + ui["literalRequestId"], "Request")
+            assert literal["readiness"]["supplied"] == [{"name": "input", "source": "literal", "value": PI_UI_LITERAL}], (
+                "the request did not supply exactly the literal", literal["readiness"]["supplied"])
+            assert literal["runId"] == ui["literalRunId"] and literal["phase"] == "associated", ("literal request", literal["runId"], literal["phase"])
+            succeeded(ui["literalRunId"])
+            run_prompts = prompts()
+            assert any(prompt.startswith("fixed-point source: " + PI_UI_LITERAL) for values in run_prompts.values() for prompt in values), (
+                "the program did not receive the literal", run_prompts)
+            print("PASS pi-client 1: /wfm request", ui["literalRequestId"], "supplied exactly the literal with its leading spaces,",
+                  "and run", ui["literalRunId"], "succeeded with the literal as the input of its program", flush=True)
+            preparation, _, _ = observed("/v1/preparations/" + ui["literalPreparationId"], "Preparation")
+            approvals = [receipt for _, receipt in ui_receipts
+                         if receipt["operation"] == "approve" and receipt["resource"] == "/v1/preparations/" + ui["literalPreparationId"]]
+            assert len(approvals) == 1 and approvals[0]["state"] not in ("refused", "unresolved"), (
+                "the approve command of the displayed review", approvals)
+            selectors = ("reviewDigest", "requestRevision", "profileRevision", "descriptorRevision", "processGeneration")
+            assert preparation["state"] == "consumed" and ui["approveBody"] == {"operation": "approve", **{name: preparation[name] for name in selectors}}, (
+                "the approve command does not name the exact review selectors", preparation["state"], ui["approveBody"])
+            print("PASS pi-client 2: the one approve command of preparation", ui["literalPreparationId"], "named its exact review selectors,",
+                  "review digest", preparation["reviewDigest"], "and the approval consumed the preparation and started the run", flush=True)
+            captured, _, _ = observed("/v1/requests/" + ui["capturedRequestId"], "Request")
+            captured_bytes = PI_UI_CAPTURED.encode("utf-8")
+            captured_digest = hashlib.sha256(captured_bytes).hexdigest()
+            assert captured["readiness"]["supplied"] == [{"name": "input", "source": "capture", "captureId": ui["captureId"]}], (
+                "the captured-input request does not supply the capture", captured["readiness"]["supplied"])
+            assert ui["captureSha256"] == captured_digest and ui["captureBytes"] == len(captured_bytes), ("capture report", ui)
+            assert captured["runId"] == ui["capturedRunId"], ("captured request run", captured["runId"])
+            succeeded(ui["capturedRunId"])
+            assert any("fixed-point source: " + captured_digest in values for values in run_prompts.values()), (
+                "the program did not receive the captured bytes", run_prompts)
+            print("PASS pi-client 3: the captured-input request supplied capture", ui["captureId"], "of", len(captured_bytes),
+                  "bytes, and run", ui["capturedRunId"], "succeeded with the SHA-256 of the captured bytes as the input of its program", flush=True)
+            declined = "/v1/preparations/" + ui["declinedPreparationId"]
+            commands = [(receipt["operation"], receipt["state"], (receipt["effect"] or {}).get("kind"))
+                        for _, receipt in ui_receipts if receipt["resource"] == declined]
+            assert commands == [("discard", "effect-observed", "discarded")], ("the commands of the declined preparation", commands)
+            withdrawn, _, _ = observed("/v1/requests/" + ui["declinedRequestId"], "Request")
+            discarded, _, _ = observed(declined, "Preparation")
+            assert withdrawn["phase"] == "withdrawn" and withdrawn["runId"] is None and discarded["state"] == "invalidated" and discarded["reason"] == "discarded", (
+                "the declined request", withdrawn["phase"], discarded["state"], discarded["reason"])
+            print("PASS pi-client 4: the declined review of preparation", ui["declinedPreparationId"], "has no approve command, the later",
+                  "discard reached the effect discarded from review, and request", ui["declinedRequestId"], "is withdrawn", flush=True)
+            ui_stores = set(run_prompts)
+            report = vitest("test/manager-live.test.ts", tui_fixture.client_profile, report_path, log_path, 7)
+            assert report["reconnectLastEventId"] == report["reconnectCursor"] and report["pollEvents"] > 0, ("report delivery", report)
+            print("PASS pi-client 5: the ext-pi session ran its seven steps against the protected endpoint, the forced SSE drop",
+                  "resumed with Last-Event-ID", report["reconnectCursor"], "and", report["events"], "delivered events, of which",
+                  report["pollEvents"], "came through polling, equal the polling listing", flush=True)
             status, requests, _ = request("/v1/requests", harness)
             assert status == 200 and sorted(item["id"] for item in requests["items"]) == sorted(
-                [report["requestId"], report["secondRequestId"]]), ("the manager holds other than the two requests of the check", status)
+                [report["requestId"], report["secondRequestId"], ui["literalRequestId"], ui["capturedRequestId"], ui["declinedRequestId"]]), (
+                "the manager holds other than the requests of the two checks", status)
             submitted, _, _ = observed("/v1/requests/" + report["requestId"], "Request")
             expected = [{"name": declaration["name"], "source": "literal", "value": MIXED_TEXT} for declaration in workflow["inputs"]]
             assert submitted["readiness"]["supplied"] == expected, ("the request did not supply exactly the literal", submitted["readiness"])
             assert submitted["runId"] == report["runId"] and submitted["phase"] == "associated", (
                 "the request does not name the run", submitted["runId"], submitted["phase"])
-            print("PASS pi-client 2: request", report["requestId"], "supplied exactly the Unicode literal and names run", report["runId"],
+            print("PASS pi-client 6: request", report["requestId"], "supplied exactly the Unicode literal and names run", report["runId"],
                   flush=True)
             receipts = command_receipts(cursor, harness)
             answers = [(uri, receipt) for uri, receipt in receipts if receipt["operation"] == "answer"]
@@ -9402,7 +9487,8 @@ def pi_client_checks():
             assert [uri for uri, _ in answers] == [report["answerCommand"]] and [uri for uri, _ in retries] == [report["retryCommand"]], (
                 "the answer and retry commands differ from the report", [uri for uri, _ in answers], [uri for uri, _ in retries])
             assert all(receipt["state"] == "effect-observed" for _, receipt in answers + retries), ("a command did not reach its effect",)
-            answer_files = sorted(work.glob("manager/runs/runs/*/runtime/answers.json"))
+            # Only the run stores of the session check count here.
+            answer_files = sorted(set(work.glob("manager/runs/runs/*/runtime/answers.json")) - ui_stores)
             assert 1 <= len(answer_files) <= 2, ("run store answers", answer_files)
             # The run stores also record the model answers of the runs, so
             # only the entries of the occurrence that the answer command
@@ -9415,14 +9501,14 @@ def pi_client_checks():
             recorded = [entry["answer"] for path in answer_files for entry in json.loads(path.read_bytes())["answers"]
                         if entry["occurrenceId"] == occurrence]
             assert recorded == [False], ("the run store does not record the answer as JSON false", occurrence, recorded)
-            print("PASS pi-client 3: the run store records the answer as JSON false, and answer command", report["answerCommand"],
+            print("PASS pi-client 7: the run store records the answer as JSON false, and answer command", report["answerCommand"],
                   "and retry command", report["retryCommand"], "reached their effects", flush=True)
             snapshot, _, _ = observed("/v1/runs/" + report["runId"] + "/snapshot", "RunSnapshot")
             assert snapshot["runtime"] is not None and snapshot["runtime"]["status"] == "succeeded", ("run status", snapshot["runtime"])
             artifact = verified_download(report["runId"], client, harness)
             assert int(artifact["bytes"]) == report["resultBytes"] and artifact["sha256"] == report["resultSha256"], (
                 "the ext-pi result differs from the harness download", artifact["bytes"], artifact["sha256"], report)
-            print("PASS pi-client 4: run", report["runId"], "succeeded, and the verified result of", artifact["bytes"],
+            print("PASS pi-client 8: run", report["runId"], "succeeded, and the verified result of", artifact["bytes"],
                   "bytes has the SHA-256", artifact["sha256"], "of the ext-pi download", flush=True)
             second = report["secondRunId"]
             secondary, _, _ = observed("/v1/requests/" + report["secondRequestId"], "Request")
@@ -9436,10 +9522,10 @@ def pi_client_checks():
             assert control["decisionHeadId"] is not None, ("the second run has no pending decision head", control)
             head, _, _ = observed("/v1/decisions/" + control["decisionHeadId"], "Decision")
             assert head["state"] == "pending" and head["kind"] == "question", ("the question of the second run is not pending", head["state"])
-            print("PASS pi-client 5: after the extension and the session closed during their live streams, run", second,
+            print("PASS pi-client 9: after the extension and the session closed during their live streams, run", second,
                   "is still running under owned supervision, and its question", control["decisionHeadId"], "is pending", flush=True)
-        print("PASS pi-client: the ext-pi manager session completed the mixed journey through the protected HTTPS endpoint,",
-              "and the harness confirmed each step from manager facts without a mutation", flush=True)
+        print("PASS pi-client: the /wfm human path and the ext-pi manager session completed their journeys through the protected",
+              "HTTPS endpoint, and the harness confirmed each step from manager facts without a mutation", flush=True)
     finally:
         if process.poll() is None:
             process.terminate()

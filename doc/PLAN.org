@@ -11237,6 +11237,32 @@ Non-blocking findings of fess audit fess/pe-PE16-r1.md (2026-10-01) on subtask P
 6. (low) manager/test/service_http.py near 9406: two pi-client assertions were loosened for the second run (1 <= len(answer_files) <= 2 and a two-request check). Fix (optional): tighten to the exact count if the second run is deterministic.
 7. (low, not caused by PE16) ext-pi/test/supervisor.test.ts near 546: execFileAsync('ps', ['-axo','command=']) uses the default 1 MiB maxBuffer and failed once with "stdout maxBuffer length exceeded" on a large host process list. Fix: pass a larger maxBuffer or match the marker with pgrep -f.
 
+* TODO [#D] Resolve the non-blocking fess findings of subtask PE17
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pe17-fess-followup-o8qx
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-01 Thu 16:06]
+:MODIFIED: [2026-10-01 Thu 16:06]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess audit fess/pe-PE17-r1.md (2026-10-01) on subtask PE17 (WM-037 human path, part 1: ext-pi/src/manager-ui.ts, the /wfm, /wfm-review, /wfm-withdraw and /wfm-discard commands, the capture support in the TypeScript client, and the /wfm steps of the pi-client mode).
+
+1. (medium) ext-pi/src/manager-ui.ts near 584-595: the notices for queue position and blocking reasons while a request waits are tested only through the pure formatter admissionLine (test/manager-ui.test.ts near 57-63). No test drives a request that waits, because the live fixture admits each request at once. Fix: add a unit test of #awaitReview with a fake session whose request reads go from queued, with a position and reasons, to review, and require one notice for each change.
+2. (low) ext-pi/src/manager-ui.ts near 538-550, 621-626 and 448-461: no test exercises the Captured file source, the review fallback outside the TUI, or the /wfm-discard handler with its own preparation read. Fix: add fake-UI unit tests for the Captured file source and for the select fallback when ctx.mode is not tui, and drive /wfm-discard REQUEST_ID once in the live test.
+3. (low) ext-pi/src/manager-ui.ts near 417, 457, 502, 600 and 637: these lines return without a notice when session.reference fails, and when the enqueue receipt has not settled within EFFECT_WAIT_MS. Fix: give each return a notice that names the reason and the next command, for example /wfm-review.
+4. (low) ext-pi/src/manager-ui.ts near 360-370: a page-set read is retried 50 times at 200 ms on 429 storage-quota, and the cause is not recorded. The likely cause is the limit of two open page sets for each client, filled by the overview refresh of the extension. Fix: find which page sets hold the limit, make the extension's own sets retire or serialize the reads, and record the reason in a comment.
+5. (low) ext-pi/src/manager-ui.ts near 556-569: after a 412 refusal for Captured text, the loop captures the same bytes again, and the first capture is left without a set-input that names it. Fix: keep the capture id with the draft and reuse it when the bytes have not changed.
+6. (low) ext-pi/src/manager-ui.ts near 310: for a missing scope, #command returns a local Refused 403 insufficient-scope value that the manager never sent, and records no command. Fix: return a distinct local kind such as not-permitted.
+7. (low, recorded only) ext-pi/src/manager/transport.ts near 304-359: the dropStream race fix (a #drops counter) and its test are outside the PE17 list. The fix is justified by pi-client-fourth-failure.log and is named in the PE17 commit message. No action is required.
+
+Deferred under the 2026-09-30 functionality-first direction (not in scope of this issue): hardening of the capture file path, a review redaction projection and hostile-input negatives.
+
 * TODO [#D] Resolve PE2 fess findings in the run owner lock
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -20673,7 +20699,7 @@ invocation tuples or exposing secrets.
 :LABELS:   ["p8","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-01 Thu 10:50]
+:MODIFIED: [2026-10-01 Thu 16:06]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-037
 :SOURCE_REPO: agent-cat
@@ -20751,6 +20777,13 @@ verified output, and lineage behave consistently with the other clients.
     "author": "johnw",
     "text": "Status at the Phase E stopping point of 2026-10-01 (closeout commit 5a3d3f4f): not started. The run stopped at PE2 before PE10 to PE28. The deferred Phase E security items are listed in the handoff section 'Phase E stopping point of 2026-10-01'. The package stays open.",
     "created_at": "2026-10-01T17:50:28Z"
+  },
+  {
+    "id": 555,
+    "issue_id": "acat-wm-037-dz3v",
+    "author": "johnw",
+    "text": "PE17 (WM-037 human path, part 1) integrated. ext-pi/src/manager-ui.ts adds /wfm [WORKFLOW] with native Pi selection of profile and workflow from the manager catalogue, exact literal inputs (Unicode kept, no leading-whitespace rule), captured inputs through POST /v1/captures with the CaptureReceipt shown, request creation, set-input with the request ETag, enqueue, and admission notices for phase, queue position and blocking reasons. A ctx.ui.custom review component shows the complete exact review. Approve is sent only after an explicit ctx.ui.confirm of the displayed review and binds the preparation ETag as If-Match and the review selectors. Declining sends nothing. /wfm-review, /wfm-withdraw and /wfm-discard are added. Command receipts (accepted, refused, uncertain) are reported separately from execution facts. Input-editor drafts survive a refresh and a 412 refusal. Checks passed: npm run check, npm test (168 passed, 16 live-gated skips), the pi-client mode of manager/test/service_http.py (PASS 1 to 9: the literal reached the request, the captured bytes reached the run program and the run succeeded, the approve command named the exact selectors, a declined review left the request in review with no approve command), make -C doc check. Evidence: PE/PE17/impl-r1 in the private resume-20260923 directory. Fess not blocking; findings filed as acat-pe17-fess-followup-o8qx. The model tool path, run browser, output views, person and recovery editors, history, lineage and export of WM-037 are not yet in place, so WM-037 stays open.",
+    "created_at": "2026-10-01T23:06:43Z"
   }
 ]
 #+end_src

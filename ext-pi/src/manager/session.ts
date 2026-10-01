@@ -36,7 +36,14 @@ import {
   type RefreshAction,
   type Uncertain,
 } from "./refresh.ts";
-import { decodeCommandReceipt, decodeOverviewMember, type CommandReceipt, type OverviewMember } from "./resources.ts";
+import {
+  decodeCaptureReceipt,
+  decodeCommandReceipt,
+  decodeOverviewMember,
+  type CaptureReceipt,
+  type CommandReceipt,
+  type OverviewMember,
+} from "./resources.ts";
 import {
   commandKey,
   ManagerTransport,
@@ -88,22 +95,24 @@ export type OverviewItem = { readonly member: OverviewMember; readonly reference
 export type Overview = { readonly cursor: string; readonly oldestCursor: string; readonly items: readonly OverviewItem[] };
 
 /**
- * A prepared command: its target, the exact JSON body, the idempotency key
- * of the authority epoch, and the optional `If-Match` entity tag. Sending it
- * again sends the same bytes under the same key and precondition.
+ * A prepared command: its target, the exact JSON body or, for a capture,
+ * the exact raw bytes, the idempotency key of the authority epoch, and the
+ * optional `If-Match` entity tag. Sending it again sends the same bytes
+ * under the same key and precondition.
  *
  * @public
  */
 export type PendingCommand = {
   readonly reference: Reference;
-  readonly body: JsonValue;
+  readonly body: JsonValue | Uint8Array;
   readonly idempotencyKey: string;
   readonly ifMatch: string | null;
 };
 
 /**
  * The outcome of one send. `delivered` is a 2xx response with the location
- * that the manager names, and for a 202 response the decoded receipt.
+ * that the manager names, and for a 202 response the decoded command
+ * receipt, or for a capture the decoded capture receipt.
  * `refused` is a 412 `stale-revision` refusal, which proves that the manager
  * holds no command under the key. Every other failure and every 2xx
  * response that does not agree with the command is `uncertain`, and the
@@ -112,7 +121,13 @@ export type PendingCommand = {
  * @public
  */
 export type SendOutcome =
-  | { readonly kind: "delivered"; readonly response: ClientResponse; readonly location: Reference; readonly receipt: CommandReceipt | null }
+  | {
+    readonly kind: "delivered";
+    readonly response: ClientResponse;
+    readonly location: Reference;
+    readonly receipt: CommandReceipt | null;
+    readonly capture: CaptureReceipt | null;
+  }
   | { readonly kind: "refused"; readonly failure: ClientFailure }
   | { readonly kind: "uncertain"; readonly failure: ClientFailure | null; readonly uncertain: Uncertain<PendingCommand, Reference> };
 
@@ -122,7 +137,7 @@ export type SendOutcome =
  *
  * @public
  */
-export type SessionTransport = Pick<ManagerTransport, "get" | "post" | "followEvents" | "pollEvents" | "downloadVerified" | "dropStream" | "close">;
+export type SessionTransport = Pick<ManagerTransport, "get" | "post" | "postBytes" | "followEvents" | "pollEvents" | "downloadVerified" | "dropStream" | "close">;
 
 /**
  * The delivery state of a session: `connecting` until its follow loop first
@@ -710,11 +725,39 @@ export class ManagerSession {
    * the authority epoch.
    */
   prepare(reference: Reference, body: JsonValue, ifMatch: string | null): Outcome<PendingCommand> {
+    return this.#pending(reference, body, ifMatch);
+  }
+
+  #pending(reference: Reference, body: JsonValue | Uint8Array, ifMatch: string | null): Outcome<PendingCommand> {
     const checked = this.#check(reference);
     if (!checked.ok) return checked;
     const key = commandKey(this.#capabilities.epoch);
     if (!key.ok) return key;
     return { ok: true, value: { reference, body, idempotencyKey: key.value, ifMatch } };
+  }
+
+  /**
+   * Prepare the capture of exact raw bytes for a request of the current
+   * binding, as `prepareCapture` of `Agentic.Manager.Client` does: a POST of
+   * `/v1/captures?requestId=ID` with a new idempotency key and no
+   * `If-Match`. Bytes above the `captureBytes` limit of the capabilities
+   * give `ResponseTooLarge`, and bytes that are not UTF-8 give
+   * `InvalidResponse`. The manager receives the bytes and never a path.
+   */
+  prepareCapture(requestId: string, bytes: Uint8Array): Outcome<PendingCommand> {
+    if (!validId(requestId)) return failed("InvalidEndpoint");
+    const reference = this.reference(`/v1/captures?requestId=${requestId}`);
+    if (!reference.ok) return reference;
+    const limits = jsonMember(this.#capabilities.fields, "limits");
+    const limit = limits !== undefined && isJsonObject(limits) ? limitOf(limits, "captureBytes") : undefined;
+    if (limit === undefined) return INVALID;
+    if (BigInt(bytes.length) > limit) return { ok: false, failure: { kind: "ResponseTooLarge" } };
+    try {
+      new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    } catch {
+      return INVALID;
+    }
+    return this.#pending(reference.value, Uint8Array.from(bytes), null);
   }
 
   /**
@@ -727,8 +770,11 @@ export class ManagerSession {
     if (!checked.ok) return { kind: "refused", failure: checked.failure };
     const uncertain = (failure: ClientFailure | null): SendOutcome =>
       ({ kind: "uncertain", failure, uncertain: { command: pending, target: pending.reference, precondition: pending.ifMatch, receipt: null } });
-    const response = await this.#transport.post(pending.reference.uri, pending.body,
-      { idempotencyKey: pending.idempotencyKey, ifMatch: pending.ifMatch });
+    const headers = { idempotencyKey: pending.idempotencyKey, ifMatch: pending.ifMatch };
+    const capture = pending.body instanceof Uint8Array;
+    const response = pending.body instanceof Uint8Array
+      ? await this.#transport.postBytes(pending.reference.uri, pending.body, headers)
+      : await this.#transport.post(pending.reference.uri, pending.body, headers);
     if (!response.ok) {
       const failure = response.failure;
       return failure.kind === "Refused" && failure.status === 412 && failure.code === "stale-revision"
@@ -737,10 +783,18 @@ export class ManagerSession {
     const location = response.value.location;
     if (location === null) return uncertain(null);
     const reference: Reference = { endpoint: pending.reference.endpoint, uri: location };
-    if (response.value.status !== 202) return { kind: "delivered", response: response.value, location: reference, receipt: null };
+    if (capture) {
+      // A capture answers 202 with its capture receipt, and its location
+      // names the capture command, as `captureResponse` requires.
+      const received = decodeCaptureReceipt(response.value.value);
+      return response.value.status === 202 && received.ok && location.startsWith("/v1/commands/") && validId(location.slice(13))
+        ? { kind: "delivered", response: response.value, location: reference, receipt: null, capture: received.value }
+        : uncertain(null);
+    }
+    if (response.value.status !== 202) return { kind: "delivered", response: response.value, location: reference, receipt: null, capture: null };
     const receipt = decodeCommandReceipt(response.value.value);
     if (!receipt.ok || location !== `/v1/commands/${receipt.value.id}`) return uncertain(null);
-    return { kind: "delivered", response: response.value, location: reference, receipt: receipt.value };
+    return { kind: "delivered", response: response.value, location: reference, receipt: receipt.value, capture: null };
   }
 
   /**

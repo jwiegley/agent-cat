@@ -11,8 +11,10 @@
  * monitor, no local process and no local run store, and it grants no
  * supervision or control authority.
  *
- * Service mode sends no manager command. `close` closes the transport, and
- * the work of the manager continues under its own supervision. A switch
+ * `ServiceMode` sends no manager command. The commands of
+ * `src/manager-ui.ts` send commands through its session. `close` closes
+ * the transport, and the work of the manager continues under its own
+ * supervision. A switch
  * between profiles uses `ManagerSession.switchEndpoint`, which advances the
  * refresh generation, discards every read of the earlier binding that is in
  * flight, and refuses every reference of the earlier binding with
