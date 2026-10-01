@@ -182,8 +182,11 @@ slot and the service lease again and reconciles the Store, as the
 manager log of the new lifetime continues with a lifetime notice whose
 reconciliation counts name the changed rows. Each owned run becomes `lost`, the
 reservation of each such run becomes quarantined, and each dispatch-attempted
-start or control becomes `unresolved`. The manager reads no run store to recover
-a worker and dispatches no start again. The catalogue of the new lifetime
+start or control becomes `unresolved`. A start command whose run has a terminal
+observation is not reclassified. It keeps its state, its revision and its
+receipt, and the reconciliation publishes no `command.changed` event for it.
+The manager reads no run store to recover a worker and dispatches no start
+again. The catalogue of the new lifetime
 publishes new profile revisions, so a client reads the catalogue again before it
 creates a request. An exact replay of an earlier command returns the receipt of
 its first response. The replay of an unresolved approval returns that receipt

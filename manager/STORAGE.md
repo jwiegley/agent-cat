@@ -289,7 +289,12 @@ fresh process generation. Epoch and stream identity survive. Old live
 preparations become invalidated, unresolved reservations remain quarantined,
 and owned runs become lost supervision without changing their Runtime evidence.
 Uncertain starts and controls remain unresolved with their original request and
-receipt bytes. No stored identifier becomes a dispatch or cleanup handle.
+receipt bytes. A start command is uncertain when it is accepted or
+dispatch-attempted and its run has no terminal observation
+(`runs.terminal_observed`). A start command whose run has a terminal
+observation is not reclassified, and it acquires no new revision and no
+`command.changed` event. A control command that is accepted or
+dispatch-attempted is always uncertain. No stored identifier becomes a dispatch or cleanup handle.
 A quarantined reservation keeps its execution slot and its resource keys until
 the operator releases it with cleanup evidence, as the
 [worker contract](WORKERS.md#manager-loss-and-restart) describes.
@@ -444,7 +449,7 @@ the ask and names the position of the ask:
 
 | Ask | Reply |
 | --- | --- |
-| An ordinary command whose ledger row exists. | A `receipt` reply with the current receipt of the command, which `GET /v1/commands/{id}` returns after the reconciliation. A start or control that was dispatch-attempted reads `unresolved`. |
+| An ordinary command whose ledger row exists. | A `receipt` reply with the current receipt of the command, which `GET /v1/commands/{id}` returns after the reconciliation. A start or control that was dispatch-attempted reads `unresolved`, except a start whose run has a terminal observation, which keeps its state. |
 | An ordinary command whose ledger row exists with a retired receipt. | A `failure` reply with the reason `receipt-expired`. |
 | An ordinary command without a ledger row. Its transaction never committed. | A `failure` reply with the reason `lifetime-ended`. |
 | A credential administration or a release of a quarantined reservation whose committed effect the Store holds. | A `failure` reply with the reason `committed-receipt-lost`. |

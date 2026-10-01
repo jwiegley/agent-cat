@@ -8258,6 +8258,14 @@ def manager_failure_checks():
           "worker processes in process groups", targets, "; after SIGKILL of the manager none remained after",
           round(review_stopped, 2), "seconds ; the release asks at", [committed_at, committed_at + 1], "have no reply", flush=True)
 
+    # The approval of the completed run of the second lifetime has a
+    # terminal observation of its run.
+    (second_approval, second_terminal), = read_store(
+        "SELECT s.command_id,u.terminal_observed FROM start_intents s JOIN runs u ON u.id=s.run_id WHERE s.run_id=?", (second_run,))
+    assert second_terminal == 1, ("the completed run of the second lifetime has no terminal observation", second_run)
+    ledger_before = {ident: (state, revision) for ident, state, revision in read_store("SELECT id,state,revision FROM commands")}
+    assert ledger_before[second_approval][0] == "dispatch-attempted", ("the approval of the completed run", ledger_before[second_approval])
+
     # The third lifetime.
     third = serve(2)
     try:
@@ -8265,9 +8273,10 @@ def manager_failure_checks():
         # prepared admission observation of the request in review, refuses
         # the request and quarantines its reservation, which never launched a
         # run. The approval of the completed run of the second lifetime stays
-        # dispatch-attempted, as every approval does, so it becomes
-        # unresolved. The operator releases the quarantine with its
-        # no-launch evidence, and a new request runs.
+        # dispatch-attempted: a start command whose run has a terminal
+        # observation is not reclassified, so the restart changes no command.
+        # The operator releases the quarantine with its no-launch evidence,
+        # and a new request runs.
         status, capabilities, raw = request("/v1/capabilities", authorized)
         assert status == 200
         validate("Capabilities", capabilities, raw)
@@ -8275,8 +8284,10 @@ def manager_failure_checks():
         observed, _, _, _ = client
         body = lifetime_notice()
         generation = body["processGeneration"]
-        assert body["reconciliation"] == {"preparations": 1, "requests": 1, "runs": 0, "commands": 1, "reservations": 1,
+        assert body["reconciliation"] == {"preparations": 1, "requests": 1, "runs": 0, "commands": 0, "reservations": 1,
                                           "observations": 1, "uploads": 0}, ("the reconciliation counts of the third lifetime", body["reconciliation"])
+        ledger_after = {ident: (state, revision) for ident, state, revision in read_store("SELECT id,state,revision FROM commands")}
+        assert ledger_after == ledger_before, ("the restart of the third lifetime changed a command", ledger_before, ledger_after)
         # The open answers the orphaned release asks: the committed release
         # with committed-receipt-lost and the other with outcome-uncertain.
         # Neither releases a reservation.

@@ -531,15 +531,21 @@ readCredentialList db = do
 -- The result counts the rows that the reconciliation changed.
 reconcileRestart :: SQL.Database -> Text -> IO Reconciliation
 reconcileRestart db generation = do
-  affected <- scalar db "SELECT EXISTS(SELECT 1 FROM preparations WHERE state='live') OR EXISTS(SELECT 1 FROM reservations WHERE state NOT IN ('released','quarantined')) OR EXISTS(SELECT 1 FROM admission_observations WHERE state='prepared') OR EXISTS(SELECT 1 FROM requests WHERE phase IN ('preparing','review')) OR EXISTS(SELECT 1 FROM runs WHERE supervision IN ('owned','cleanup-pending')) OR EXISTS(SELECT 1 FROM commands WHERE state IN ('accepted','dispatch-attempted') AND (id IN (SELECT command_id FROM start_intents) OR id IN (SELECT command_id FROM control_intents))) OR EXISTS(SELECT 1 FROM capture_uploads WHERE state='pending')"
+  affected <- scalar db $ "SELECT EXISTS(SELECT 1 FROM preparations WHERE state='live') OR EXISTS(SELECT 1 FROM reservations WHERE state NOT IN ('released','quarantined')) OR EXISTS(SELECT 1 FROM admission_observations WHERE state='prepared') OR EXISTS(SELECT 1 FROM requests WHERE phase IN ('preparing','review')) OR EXISTS(SELECT 1 FROM runs WHERE supervision IN ('owned','cleanup-pending')) OR EXISTS(SELECT 1 FROM commands WHERE "<>uncertainCommands<>") OR EXISTS(SELECT 1 FROM capture_uploads WHERE state='pending')"
   if affected/=SQL.SQLInteger 0 then reconcileChanged db generation else pure noReconciliation
+
+-- | The commands that a restart makes unresolved: a start or control that was
+-- accepted or dispatch-attempted. A start command whose run has a terminal
+-- observation keeps its state, because its outcome is known.
+uncertainCommands :: Text
+uncertainCommands = "state IN ('accepted','dispatch-attempted') AND (id IN (SELECT command_id FROM start_intents) OR id IN (SELECT command_id FROM control_intents)) AND NOT EXISTS (SELECT 1 FROM start_intents s JOIN runs u ON u.id=s.run_id WHERE s.command_id=commands.id AND u.terminal_observed=1)"
 
 reconcileChanged :: SQL.Database -> Text -> IO Reconciliation
 reconcileChanged db generation = do
   preparations <- change "preparations" "state='live'" "state='invalidated',reason='worker-lost',revision=?" [revision] "preparation.changed" [""]
   requests <- change "requests" "phase IN ('preparing','review')" "phase='refused',admission='refused',revision=?,blocking_reasons=X'5B2271756172616E74696E6564225D'" [revision] "request.changed" [""]
   runs <- change "runs" "supervision IN ('owned','cleanup-pending')" "supervision='lost',revision=?,control_revision=?" [revision,revision] "run.changed" ["","/control"]
-  commands <- change "commands" "state IN ('accepted','dispatch-attempted') AND (id IN (SELECT command_id FROM start_intents) OR id IN (SELECT command_id FROM control_intents))" "state='unresolved',revision=?" [revision] "command.changed" [""]
+  commands <- change "commands" uncertainCommands "state='unresolved',revision=?" [revision] "command.changed" [""]
   (reservations, observations, uploads) <- transaction $ do
     let changed statement = SQL.exec db statement >> (toInteger <$> SQL.changes db)
     (,,) <$> changed "UPDATE reservations SET state='quarantined' WHERE state NOT IN ('released','quarantined')"
