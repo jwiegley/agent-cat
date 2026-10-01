@@ -1164,5 +1164,1213 @@
     "expected": "InvalidResponse"
    }
   ]
+ },
+ "resources": {
+  "drafts": [
+   {
+    "name": "draft request with missing input",
+    "type": "DraftView",
+    "json": "{\"version\":1,\"id\":\"req_8\",\"revision\":\"request_rev_1\",\"workflowId\":\"wf_review\",\"descriptorRevision\":\"catalogue_17\",\"profileId\":\"profile_main\",\"profileRevision\":\"profile_rev_4\",\"phase\":\"draft\",\"readiness\":{\"declarations\":[{\"name\":\"subject\",\"source\":\"command-tail\",\"description\":null,\"required\":true,\"schema\":{\"type\":\"string\"}}],\"supplied\":[],\"missing\":[\"subject\"],\"errors\":[]},\"admission\":{\"state\":\"not-queued\",\"position\":null,\"reasons\":[\"missing-inputs\"]},\"preparationId\":null,\"runId\":null,\"parentRunId\":null,\"lineage\":null,\"links\":{\"self\":\"/v1/requests/req_8\"}}",
+    "projection": "{\"version\":1,\"id\":\"req_8\",\"revision\":\"request_rev_1\",\"workflowId\":\"wf_review\",\"descriptorRevision\":\"catalogue_17\",\"profileId\":\"profile_main\",\"profileRevision\":\"profile_rev_4\",\"phase\":\"draft\",\"readiness\":{\"declarations\":[{\"name\":\"subject\",\"source\":\"command-tail\",\"description\":null,\"required\":true,\"schema\":{\"type\":\"string\"}}],\"supplied\":[],\"missing\":[\"subject\"],\"errors\":[]},\"admission\":{\"state\":\"not-queued\",\"position\":null,\"reasons\":[\"missing-inputs\"]},\"preparationId\":null,\"runId\":null,\"parentRunId\":null,\"lineage\":null,\"links\":{\"self\":\"/v1/requests/req_8\"}}"
+   },
+   {
+    "name": "review request keeps Unicode, NUL and newline literal text and a capture",
+    "type": "DraftView",
+    "json": "{\"version\":1,\"id\":\"req_8\",\"revision\":\"request_rev_1\",\"workflowId\":\"wf_review\",\"descriptorRevision\":\"catalogue_17\",\"profileId\":\"profile_main\",\"profileRevision\":\"profile_rev_4\",\"phase\":\"review\",\"readiness\":{\"declarations\":[{\"name\":\"subject\",\"source\":\"command-tail\",\"description\":null,\"required\":true,\"schema\":{\"type\":\"string\"}},{\"name\":\"body\",\"source\":\"stdin\",\"description\":null,\"required\":true,\"schema\":{\"type\":\"string\"}}],\"supplied\":[{\"name\":\"subject\",\"source\":\"literal\",\"value\":\"雪😀 \\u0000 first line\\nsecond line\"},{\"name\":\"body\",\"source\":\"capture\",\"captureId\":\"capture_7\"}],\"missing\":[],\"errors\":[]},\"admission\":{\"state\":\"waiting\",\"position\":100,\"reasons\":[\"profile-busy\",\"capacity\"]},\"preparationId\":\"prep_9\",\"runId\":null,\"parentRunId\":null,\"lineage\":null,\"links\":{\"self\":\"/v1/requests/req_8\"}}",
+    "projection": "{\"version\":1,\"id\":\"req_8\",\"revision\":\"request_rev_1\",\"workflowId\":\"wf_review\",\"descriptorRevision\":\"catalogue_17\",\"profileId\":\"profile_main\",\"profileRevision\":\"profile_rev_4\",\"phase\":\"review\",\"readiness\":{\"declarations\":[{\"name\":\"subject\",\"source\":\"command-tail\",\"description\":null,\"required\":true,\"schema\":{\"type\":\"string\"}},{\"name\":\"body\",\"source\":\"stdin\",\"description\":null,\"required\":true,\"schema\":{\"type\":\"string\"}}],\"supplied\":[{\"name\":\"subject\",\"source\":\"literal\",\"value\":\"雪😀 \\u0000 first line\\nsecond line\"},{\"name\":\"body\",\"source\":\"capture\",\"captureId\":\"capture_7\"}],\"missing\":[],\"errors\":[]},\"admission\":{\"state\":\"waiting\",\"position\":100,\"reasons\":[\"profile-busy\",\"capacity\"]},\"preparationId\":\"prep_9\",\"runId\":null,\"parentRunId\":null,\"lineage\":null,\"links\":{\"self\":\"/v1/requests/req_8\"}}"
+   },
+   {
+    "name": "associated lineage request keeps empty literal text",
+    "type": "DraftView",
+    "json": "{\"version\":1,\"id\":\"req_8\",\"revision\":\"request_rev_1\",\"workflowId\":\"wf_review\",\"descriptorRevision\":\"catalogue_17\",\"profileId\":\"profile_main\",\"profileRevision\":\"profile_rev_4\",\"phase\":\"associated\",\"readiness\":{\"declarations\":[{\"name\":\"subject\",\"source\":\"command-tail\",\"description\":null,\"required\":true,\"schema\":{\"type\":\"string\"}}],\"supplied\":[{\"name\":\"subject\",\"source\":\"literal\",\"value\":\"\"}],\"missing\":[],\"errors\":[]},\"admission\":{\"state\":\"reserved\",\"position\":null,\"reasons\":[]},\"preparationId\":\"prep_9\",\"runId\":\"run_22\",\"parentRunId\":\"run_21\",\"lineage\":\"fork\",\"links\":{\"self\":\"/v1/requests/req_8\"}}",
+    "projection": "{\"version\":1,\"id\":\"req_8\",\"revision\":\"request_rev_1\",\"workflowId\":\"wf_review\",\"descriptorRevision\":\"catalogue_17\",\"profileId\":\"profile_main\",\"profileRevision\":\"profile_rev_4\",\"phase\":\"associated\",\"readiness\":{\"declarations\":[{\"name\":\"subject\",\"source\":\"command-tail\",\"description\":null,\"required\":true,\"schema\":{\"type\":\"string\"}}],\"supplied\":[{\"name\":\"subject\",\"source\":\"literal\",\"value\":\"\"}],\"missing\":[],\"errors\":[]},\"admission\":{\"state\":\"reserved\",\"position\":null,\"reasons\":[]},\"preparationId\":\"prep_9\",\"runId\":\"run_22\",\"parentRunId\":\"run_21\",\"lineage\":\"fork\",\"links\":{\"self\":\"/v1/requests/req_8\"}}"
+   },
+   {
+    "name": "admission position beyond 2^53 refuses",
+    "type": "DraftView",
+    "json": "{\"version\":1,\"id\":\"req_8\",\"revision\":\"request_rev_1\",\"workflowId\":\"wf_review\",\"descriptorRevision\":\"catalogue_17\",\"profileId\":\"profile_main\",\"profileRevision\":\"profile_rev_4\",\"phase\":\"draft\",\"readiness\":{\"declarations\":[{\"name\":\"subject\",\"source\":\"command-tail\",\"description\":null,\"required\":true,\"schema\":{\"type\":\"string\"}}],\"supplied\":[],\"missing\":[\"subject\"],\"errors\":[]},\"admission\":{\"state\":\"not-queued\",\"position\":9007199254740993,\"reasons\":[\"missing-inputs\"]},\"preparationId\":null,\"runId\":null,\"parentRunId\":null,\"lineage\":null,\"links\":{\"self\":\"/v1/requests/req_8\"}}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "admission position zero refuses",
+    "type": "DraftView",
+    "json": "{\"version\":1,\"id\":\"req_8\",\"revision\":\"request_rev_1\",\"workflowId\":\"wf_review\",\"descriptorRevision\":\"catalogue_17\",\"profileId\":\"profile_main\",\"profileRevision\":\"profile_rev_4\",\"phase\":\"draft\",\"readiness\":{\"declarations\":[{\"name\":\"subject\",\"source\":\"command-tail\",\"description\":null,\"required\":true,\"schema\":{\"type\":\"string\"}}],\"supplied\":[],\"missing\":[\"subject\"],\"errors\":[]},\"admission\":{\"state\":\"not-queued\",\"position\":0,\"reasons\":[\"missing-inputs\"]},\"preparationId\":null,\"runId\":null,\"parentRunId\":null,\"lineage\":null,\"links\":{\"self\":\"/v1/requests/req_8\"}}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "fractional admission position refuses",
+    "type": "DraftView",
+    "json": "{\"version\":1,\"id\":\"req_8\",\"revision\":\"request_rev_1\",\"workflowId\":\"wf_review\",\"descriptorRevision\":\"catalogue_17\",\"profileId\":\"profile_main\",\"profileRevision\":\"profile_rev_4\",\"phase\":\"draft\",\"readiness\":{\"declarations\":[{\"name\":\"subject\",\"source\":\"command-tail\",\"description\":null,\"required\":true,\"schema\":{\"type\":\"string\"}}],\"supplied\":[],\"missing\":[\"subject\"],\"errors\":[]},\"admission\":{\"state\":\"not-queued\",\"position\":1.5,\"reasons\":[\"missing-inputs\"]},\"preparationId\":null,\"runId\":null,\"parentRunId\":null,\"lineage\":null,\"links\":{\"self\":\"/v1/requests/req_8\"}}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "unknown request version refuses",
+    "type": "DraftView",
+    "json": "{\"version\":2,\"id\":\"req_8\",\"revision\":\"request_rev_1\",\"workflowId\":\"wf_review\",\"descriptorRevision\":\"catalogue_17\",\"profileId\":\"profile_main\",\"profileRevision\":\"profile_rev_4\",\"phase\":\"draft\",\"readiness\":{\"declarations\":[{\"name\":\"subject\",\"source\":\"command-tail\",\"description\":null,\"required\":true,\"schema\":{\"type\":\"string\"}}],\"supplied\":[],\"missing\":[\"subject\"],\"errors\":[]},\"admission\":{\"state\":\"not-queued\",\"position\":null,\"reasons\":[\"missing-inputs\"]},\"preparationId\":null,\"runId\":null,\"parentRunId\":null,\"lineage\":null,\"links\":{\"self\":\"/v1/requests/req_8\"}}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "missing nullable lineage refuses",
+    "type": "DraftView",
+    "json": "{\"version\":1,\"id\":\"req_8\",\"revision\":\"request_rev_1\",\"workflowId\":\"wf_review\",\"descriptorRevision\":\"catalogue_17\",\"profileId\":\"profile_main\",\"profileRevision\":\"profile_rev_4\",\"phase\":\"draft\",\"readiness\":{\"declarations\":[{\"name\":\"subject\",\"source\":\"command-tail\",\"description\":null,\"required\":true,\"schema\":{\"type\":\"string\"}}],\"supplied\":[],\"missing\":[\"subject\"],\"errors\":[]},\"admission\":{\"state\":\"not-queued\",\"position\":null,\"reasons\":[\"missing-inputs\"]},\"preparationId\":null,\"runId\":null,\"parentRunId\":null,\"links\":{\"self\":\"/v1/requests/req_8\"}}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "extra request field refuses",
+    "type": "DraftView",
+    "json": "{\"version\":1,\"id\":\"req_8\",\"revision\":\"request_rev_1\",\"workflowId\":\"wf_review\",\"descriptorRevision\":\"catalogue_17\",\"profileId\":\"profile_main\",\"profileRevision\":\"profile_rev_4\",\"phase\":\"draft\",\"readiness\":{\"declarations\":[{\"name\":\"subject\",\"source\":\"command-tail\",\"description\":null,\"required\":true,\"schema\":{\"type\":\"string\"}}],\"supplied\":[],\"missing\":[\"subject\"],\"errors\":[]},\"admission\":{\"state\":\"not-queued\",\"position\":null,\"reasons\":[\"missing-inputs\"]},\"preparationId\":null,\"runId\":null,\"parentRunId\":null,\"lineage\":null,\"links\":{\"self\":\"/v1/requests/req_8\"},\"worker\":null}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "extra admission field refuses",
+    "type": "DraftView",
+    "json": "{\"version\":1,\"id\":\"req_8\",\"revision\":\"request_rev_1\",\"workflowId\":\"wf_review\",\"descriptorRevision\":\"catalogue_17\",\"profileId\":\"profile_main\",\"profileRevision\":\"profile_rev_4\",\"phase\":\"draft\",\"readiness\":{\"declarations\":[{\"name\":\"subject\",\"source\":\"command-tail\",\"description\":null,\"required\":true,\"schema\":{\"type\":\"string\"}}],\"supplied\":[],\"missing\":[\"subject\"],\"errors\":[]},\"admission\":{\"state\":\"not-queued\",\"position\":null,\"reasons\":[\"missing-inputs\"],\"pid\":7},\"preparationId\":null,\"runId\":null,\"parentRunId\":null,\"lineage\":null,\"links\":{\"self\":\"/v1/requests/req_8\"}}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "self link of another request refuses",
+    "type": "DraftView",
+    "json": "{\"version\":1,\"id\":\"req_8\",\"revision\":\"request_rev_1\",\"workflowId\":\"wf_review\",\"descriptorRevision\":\"catalogue_17\",\"profileId\":\"profile_main\",\"profileRevision\":\"profile_rev_4\",\"phase\":\"draft\",\"readiness\":{\"declarations\":[{\"name\":\"subject\",\"source\":\"command-tail\",\"description\":null,\"required\":true,\"schema\":{\"type\":\"string\"}}],\"supplied\":[],\"missing\":[\"subject\"],\"errors\":[]},\"admission\":{\"state\":\"not-queued\",\"position\":null,\"reasons\":[\"missing-inputs\"]},\"preparationId\":null,\"runId\":null,\"parentRunId\":null,\"lineage\":null,\"links\":{\"self\":\"/v1/requests/req_9\"}}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "unknown phase refuses",
+    "type": "DraftView",
+    "json": "{\"version\":1,\"id\":\"req_8\",\"revision\":\"request_rev_1\",\"workflowId\":\"wf_review\",\"descriptorRevision\":\"catalogue_17\",\"profileId\":\"profile_main\",\"profileRevision\":\"profile_rev_4\",\"phase\":\"running\",\"readiness\":{\"declarations\":[{\"name\":\"subject\",\"source\":\"command-tail\",\"description\":null,\"required\":true,\"schema\":{\"type\":\"string\"}}],\"supplied\":[],\"missing\":[\"subject\"],\"errors\":[]},\"admission\":{\"state\":\"not-queued\",\"position\":null,\"reasons\":[\"missing-inputs\"]},\"preparationId\":null,\"runId\":null,\"parentRunId\":null,\"lineage\":null,\"links\":{\"self\":\"/v1/requests/req_8\"}}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "false run identity refuses",
+    "type": "DraftView",
+    "json": "{\"version\":1,\"id\":\"req_8\",\"revision\":\"request_rev_1\",\"workflowId\":\"wf_review\",\"descriptorRevision\":\"catalogue_17\",\"profileId\":\"profile_main\",\"profileRevision\":\"profile_rev_4\",\"phase\":\"draft\",\"readiness\":{\"declarations\":[{\"name\":\"subject\",\"source\":\"command-tail\",\"description\":null,\"required\":true,\"schema\":{\"type\":\"string\"}}],\"supplied\":[],\"missing\":[\"subject\"],\"errors\":[]},\"admission\":{\"state\":\"not-queued\",\"position\":null,\"reasons\":[\"missing-inputs\"]},\"preparationId\":null,\"runId\":false,\"parentRunId\":null,\"lineage\":null,\"links\":{\"self\":\"/v1/requests/req_8\"}}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "readiness keeps Unicode input names and authoring order",
+    "type": "Readiness",
+    "json": "{\"declarations\":[{\"name\":\"名前\",\"source\":\"prompt\",\"description\":null,\"required\":true,\"schema\":{\"type\":\"string\"}},{\"name\":\"subject\",\"source\":\"command-tail\",\"description\":null,\"required\":true,\"schema\":{\"type\":\"string\"}}],\"supplied\":[{\"name\":\"名前\",\"source\":\"literal\",\"value\":\"値\"}],\"missing\":[\"subject\"],\"errors\":[{\"name\":\"名前\",\"code\":\"size-limit\"}]}",
+    "projection": "{\"declarations\":[{\"name\":\"名前\",\"source\":\"prompt\",\"description\":null,\"required\":true,\"schema\":{\"type\":\"string\"}},{\"name\":\"subject\",\"source\":\"command-tail\",\"description\":null,\"required\":true,\"schema\":{\"type\":\"string\"}}],\"supplied\":[{\"name\":\"名前\",\"source\":\"literal\",\"value\":\"値\"}],\"missing\":[\"subject\"],\"errors\":[{\"name\":\"名前\",\"code\":\"size-limit\"}]}"
+   },
+   {
+    "name": "missing names out of authoring order refuse",
+    "type": "Readiness",
+    "json": "{\"declarations\":[{\"name\":\"subject\",\"source\":\"command-tail\",\"description\":null,\"required\":true,\"schema\":{\"type\":\"string\"}},{\"name\":\"body\",\"source\":\"stdin\",\"description\":null,\"required\":true,\"schema\":{\"type\":\"string\"}}],\"supplied\":[],\"missing\":[\"body\",\"subject\"],\"errors\":[]}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "supplied input without declaration refuses",
+    "type": "Readiness",
+    "json": "{\"declarations\":[{\"name\":\"subject\",\"source\":\"command-tail\",\"description\":null,\"required\":true,\"schema\":{\"type\":\"string\"}}],\"supplied\":[{\"name\":\"body\",\"source\":\"capture\",\"captureId\":\"capture_7\"}],\"missing\":[\"subject\"],\"errors\":[]}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "missing errors field refuses",
+    "type": "Readiness",
+    "json": "{\"declarations\":[],\"supplied\":[],\"missing\":[]}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "extra readiness field refuses",
+    "type": "Readiness",
+    "json": "{\"declarations\":[],\"supplied\":[],\"missing\":[],\"errors\":[],\"optional\":[]}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "prompt declaration",
+    "type": "InputDeclaration",
+    "json": "{\"name\":\"topic\",\"source\":\"prompt\",\"description\":null,\"required\":true,\"schema\":{\"type\":\"string\"}}",
+    "projection": "{\"name\":\"topic\",\"source\":\"prompt\",\"description\":null,\"required\":true,\"schema\":{\"type\":\"string\"}}"
+   },
+   {
+    "name": "required false refuses",
+    "type": "InputDeclaration",
+    "json": "{\"name\":\"subject\",\"source\":\"command-tail\",\"description\":null,\"required\":false,\"schema\":{\"type\":\"string\"}}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "text description refuses",
+    "type": "InputDeclaration",
+    "json": "{\"name\":\"subject\",\"source\":\"command-tail\",\"description\":\"Subject\",\"required\":true,\"schema\":{\"type\":\"string\"}}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "missing null description refuses",
+    "type": "InputDeclaration",
+    "json": "{\"name\":\"subject\",\"source\":\"command-tail\",\"required\":true,\"schema\":{\"type\":\"string\"}}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "file source refuses",
+    "type": "InputDeclaration",
+    "json": "{\"name\":\"subject\",\"source\":\"file\",\"description\":null,\"required\":true,\"schema\":{\"type\":\"string\"}}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "integer schema refuses",
+    "type": "InputDeclaration",
+    "json": "{\"name\":\"subject\",\"source\":\"command-tail\",\"description\":null,\"required\":true,\"schema\":{\"type\":\"integer\"}}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "literal keeps Unicode text",
+    "type": "SuppliedInput",
+    "json": "{\"name\":\"名前\",\"source\":\"literal\",\"value\":\"雪😀\"}",
+    "projection": "{\"name\":\"名前\",\"source\":\"literal\",\"value\":\"雪😀\"}"
+   },
+   {
+    "name": "empty literal is supplied text",
+    "type": "SuppliedInput",
+    "json": "{\"name\":\"subject\",\"source\":\"literal\",\"value\":\"\"}",
+    "projection": "{\"name\":\"subject\",\"source\":\"literal\",\"value\":\"\"}"
+   },
+   {
+    "name": "capture selector",
+    "type": "SuppliedInput",
+    "json": "{\"name\":\"body\",\"source\":\"capture\",\"captureId\":\"capture_7\"}",
+    "projection": "{\"name\":\"body\",\"source\":\"capture\",\"captureId\":\"capture_7\"}"
+   },
+   {
+    "name": "null literal is not text",
+    "type": "SuppliedInput",
+    "json": "{\"name\":\"subject\",\"source\":\"literal\",\"value\":null}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "false literal is not text",
+    "type": "SuppliedInput",
+    "json": "{\"name\":\"subject\",\"source\":\"literal\",\"value\":false}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "capture with a value refuses",
+    "type": "SuppliedInput",
+    "json": "{\"name\":\"body\",\"source\":\"capture\",\"captureId\":\"capture_7\",\"value\":\"x\"}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "URL source refuses",
+    "type": "SuppliedInput",
+    "json": "{\"name\":\"body\",\"source\":\"url\",\"value\":\"https://example.invalid\"}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "empty input name refuses",
+    "type": "SuppliedInput",
+    "json": "{\"name\":\"\",\"source\":\"literal\",\"value\":\"x\"}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "input name with NUL refuses",
+    "type": "SuppliedInput",
+    "json": "{\"name\":\"a\\u0000b\",\"source\":\"literal\",\"value\":\"x\"}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "input error unknown-input",
+    "type": "InputError",
+    "json": "{\"name\":\"subject\",\"code\":\"unknown-input\"}",
+    "projection": "{\"name\":\"subject\",\"code\":\"unknown-input\"}"
+   },
+   {
+    "name": "input error invalid-input",
+    "type": "InputError",
+    "json": "{\"name\":\"subject\",\"code\":\"invalid-input\"}",
+    "projection": "{\"name\":\"subject\",\"code\":\"invalid-input\"}"
+   },
+   {
+    "name": "input error capture-unavailable",
+    "type": "InputError",
+    "json": "{\"name\":\"subject\",\"code\":\"capture-unavailable\"}",
+    "projection": "{\"name\":\"subject\",\"code\":\"capture-unavailable\"}"
+   },
+   {
+    "name": "input error size-limit",
+    "type": "InputError",
+    "json": "{\"name\":\"subject\",\"code\":\"size-limit\"}",
+    "projection": "{\"name\":\"subject\",\"code\":\"size-limit\"}"
+   },
+   {
+    "name": "unknown input error code refuses",
+    "type": "InputError",
+    "json": "{\"name\":\"subject\",\"code\":\"other\"}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "extra input error field refuses",
+    "type": "InputError",
+    "json": "{\"name\":\"subject\",\"code\":\"invalid-input\",\"detail\":\"x\"}",
+    "refusal": "InvalidResponse"
+   }
+  ],
+  "preparations": [
+   {
+    "name": "live preparation with scripted policy",
+    "type": "Preparation",
+    "json": "{\"version\":1,\"id\":\"prep_9\",\"revision\":\"preprev_1\",\"requestId\":\"req_8\",\"requestRevision\":\"request_rev_2\",\"profileId\":\"profile_main\",\"profileRevision\":\"profile_rev_4\",\"descriptorRevision\":\"catalogue_17\",\"state\":\"live\",\"expiresAt\":\"2026-09-03T00:10:00Z\",\"reviewDigest\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"processGeneration\":\"process_A\",\"review\":{\"programHash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"personAnswering\":\"local-control\",\"policy\":{\"kind\":\"scripted\"},\"workflowId\":\"wf_review\",\"profileId\":\"profile_main\",\"workspaceLabel\":\"Review workspace\",\"targetLabel\":\"Deterministic worker\",\"inputs\":[{\"name\":\"subject\",\"source\":\"capture\",\"bytes\":\"10\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}],\"plan\":\"Review the supplied subject.\",\"runFacts\":[\"run.engine\"],\"pins\":[\"deep\"],\"warnings\":[],\"resultCode\":\"receipt\"},\"reason\":null}",
+    "projection": "{\"version\":1,\"id\":\"prep_9\",\"revision\":\"preprev_1\",\"requestId\":\"req_8\",\"requestRevision\":\"request_rev_2\",\"profileId\":\"profile_main\",\"profileRevision\":\"profile_rev_4\",\"descriptorRevision\":\"catalogue_17\",\"state\":\"live\",\"expiresAt\":\"2026-09-03T00:10:00Z\",\"reviewDigest\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"processGeneration\":\"process_A\",\"review\":{\"programHash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"personAnswering\":\"local-control\",\"policy\":{\"kind\":\"scripted\"},\"workflowId\":\"wf_review\",\"profileId\":\"profile_main\",\"workspaceLabel\":\"Review workspace\",\"targetLabel\":\"Deterministic worker\",\"inputs\":[{\"name\":\"subject\",\"source\":\"capture\",\"bytes\":\"10\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}],\"plan\":\"Review the supplied subject.\",\"runFacts\":[\"run.engine\"],\"pins\":[\"deep\"],\"warnings\":[],\"resultCode\":\"receipt\"},\"reason\":null}"
+   },
+   {
+    "name": "routed policy keeps false verbose and null poll interval",
+    "type": "Preparation",
+    "json": "{\"version\":1,\"id\":\"prep_9\",\"revision\":\"preprev_1\",\"requestId\":\"req_8\",\"requestRevision\":\"request_rev_2\",\"profileId\":\"profile_main\",\"profileRevision\":\"profile_rev_4\",\"descriptorRevision\":\"catalogue_17\",\"state\":\"live\",\"expiresAt\":\"2026-09-03T00:10:00Z\",\"reviewDigest\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"processGeneration\":\"process_A\",\"review\":{\"programHash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"personAnswering\":\"local-control\",\"policy\":{\"kind\":\"routed\",\"default\":\"acp:reviewer\",\"routes\":[{\"name\":\"deep\",\"backend\":\"acp:reviewer\"}],\"pollMs\":null,\"timeoutMs\":120000,\"verbose\":false,\"realizations\":[{\"profile\":\"deep\",\"axis\":\"model\",\"rung\":0,\"backend\":\"acp:reviewer\",\"router\":\"review-router\",\"provider\":\"fixture-provider\",\"model\":\"fixture-model\",\"thinking\":\"high\",\"maxOutput\":4096,\"executionFingerprint\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"modelAlias\":\"deep\",\"engine\":\"acp\"}],\"routingVersion\":2,\"persona\":\"reviewer\",\"personaSource\":\"project\",\"policyDigest\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"},\"workflowId\":\"wf_review\",\"profileId\":\"profile_main\",\"workspaceLabel\":\"Review workspace\",\"targetLabel\":\"Deterministic worker\",\"inputs\":[{\"name\":\"subject\",\"source\":\"capture\",\"bytes\":\"10\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}],\"plan\":\"Review the supplied subject.\",\"runFacts\":[\"run.engine\"],\"pins\":[\"deep\"],\"warnings\":[],\"resultCode\":\"receipt\"},\"reason\":null}",
+    "projection": "{\"version\":1,\"id\":\"prep_9\",\"revision\":\"preprev_1\",\"requestId\":\"req_8\",\"requestRevision\":\"request_rev_2\",\"profileId\":\"profile_main\",\"profileRevision\":\"profile_rev_4\",\"descriptorRevision\":\"catalogue_17\",\"state\":\"live\",\"expiresAt\":\"2026-09-03T00:10:00Z\",\"reviewDigest\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"processGeneration\":\"process_A\",\"review\":{\"programHash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"personAnswering\":\"local-control\",\"policy\":{\"kind\":\"routed\",\"default\":\"acp:reviewer\",\"routes\":[{\"name\":\"deep\",\"backend\":\"acp:reviewer\"}],\"pollMs\":null,\"timeoutMs\":120000,\"verbose\":false,\"realizations\":[{\"profile\":\"deep\",\"axis\":\"model\",\"rung\":0,\"backend\":\"acp:reviewer\",\"router\":\"review-router\",\"provider\":\"fixture-provider\",\"model\":\"fixture-model\",\"thinking\":\"high\",\"maxOutput\":4096,\"executionFingerprint\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"modelAlias\":\"deep\",\"engine\":\"acp\"}],\"routingVersion\":2,\"persona\":\"reviewer\",\"personaSource\":\"project\",\"policyDigest\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"},\"workflowId\":\"wf_review\",\"profileId\":\"profile_main\",\"workspaceLabel\":\"Review workspace\",\"targetLabel\":\"Deterministic worker\",\"inputs\":[{\"name\":\"subject\",\"source\":\"capture\",\"bytes\":\"10\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}],\"plan\":\"Review the supplied subject.\",\"runFacts\":[\"run.engine\"],\"pins\":[\"deep\"],\"warnings\":[],\"resultCode\":\"receipt\"},\"reason\":null}"
+   },
+   {
+    "name": "fork preparation keeps lineage edits and Unicode labels",
+    "type": "Preparation",
+    "json": "{\"version\":1,\"id\":\"prep_9\",\"revision\":\"preprev_1\",\"requestId\":\"req_8\",\"requestRevision\":\"request_rev_2\",\"profileId\":\"profile_main\",\"profileRevision\":\"profile_rev_4\",\"descriptorRevision\":\"catalogue_17\",\"state\":\"live\",\"expiresAt\":\"2026-09-03T00:10:00Z\",\"reviewDigest\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"processGeneration\":\"process_A\",\"review\":{\"programHash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"personAnswering\":\"local-control\",\"policy\":{\"kind\":\"scripted\"},\"workflowId\":\"wf_review\",\"profileId\":\"profile_main\",\"workspaceLabel\":\"作業 雪😀\",\"targetLabel\":\"Deterministic worker\",\"inputs\":[{\"name\":\"subject\",\"source\":\"capture\",\"bytes\":\"10\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}],\"plan\":\"Plan line one\\nPlan 雪😀 line two\",\"runFacts\":[\"run.engine\"],\"pins\":[\"deep\"],\"warnings\":[],\"resultCode\":\"receipt\",\"lineage\":{\"parentRunId\":\"run_21\",\"operation\":\"fork\",\"edits\":[{\"operation\":\"drop\",\"occurrenceId\":\"0\"},{\"operation\":\"replace\",\"occurrenceId\":\"18446744073709551615\",\"sha256\":\"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\"}]}},\"reason\":null}",
+    "projection": "{\"version\":1,\"id\":\"prep_9\",\"revision\":\"preprev_1\",\"requestId\":\"req_8\",\"requestRevision\":\"request_rev_2\",\"profileId\":\"profile_main\",\"profileRevision\":\"profile_rev_4\",\"descriptorRevision\":\"catalogue_17\",\"state\":\"live\",\"expiresAt\":\"2026-09-03T00:10:00Z\",\"reviewDigest\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"processGeneration\":\"process_A\",\"review\":{\"programHash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"personAnswering\":\"local-control\",\"policy\":{\"kind\":\"scripted\"},\"workflowId\":\"wf_review\",\"profileId\":\"profile_main\",\"workspaceLabel\":\"作業 雪😀\",\"targetLabel\":\"Deterministic worker\",\"inputs\":[{\"name\":\"subject\",\"source\":\"capture\",\"bytes\":\"10\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}],\"plan\":\"Plan line one\\nPlan 雪😀 line two\",\"runFacts\":[\"run.engine\"],\"pins\":[\"deep\"],\"warnings\":[],\"resultCode\":\"receipt\",\"lineage\":{\"parentRunId\":\"run_21\",\"operation\":\"fork\",\"edits\":[{\"operation\":\"drop\",\"occurrenceId\":\"0\"},{\"operation\":\"replace\",\"occurrenceId\":\"18446744073709551615\",\"sha256\":\"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\"}]}},\"reason\":null}"
+   },
+   {
+    "name": "invalidated preparation with reason",
+    "type": "Preparation",
+    "json": "{\"version\":1,\"id\":\"prep_9\",\"revision\":\"preprev_1\",\"requestId\":\"req_8\",\"requestRevision\":\"request_rev_2\",\"profileId\":\"profile_main\",\"profileRevision\":\"profile_rev_4\",\"descriptorRevision\":\"catalogue_17\",\"state\":\"invalidated\",\"expiresAt\":\"2026-09-03T00:10:00Z\",\"reviewDigest\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"processGeneration\":\"process_A\",\"review\":{\"programHash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"personAnswering\":\"local-control\",\"policy\":{\"kind\":\"scripted\"},\"workflowId\":\"wf_review\",\"profileId\":\"profile_main\",\"workspaceLabel\":\"Review workspace\",\"targetLabel\":\"Deterministic worker\",\"inputs\":[{\"name\":\"subject\",\"source\":\"capture\",\"bytes\":\"10\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}],\"plan\":\"Review the supplied subject.\",\"runFacts\":[\"run.engine\"],\"pins\":[\"deep\"],\"warnings\":[],\"resultCode\":\"receipt\"},\"reason\":\"input-changed\"}",
+    "projection": "{\"version\":1,\"id\":\"prep_9\",\"revision\":\"preprev_1\",\"requestId\":\"req_8\",\"requestRevision\":\"request_rev_2\",\"profileId\":\"profile_main\",\"profileRevision\":\"profile_rev_4\",\"descriptorRevision\":\"catalogue_17\",\"state\":\"invalidated\",\"expiresAt\":\"2026-09-03T00:10:00Z\",\"reviewDigest\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"processGeneration\":\"process_A\",\"review\":{\"programHash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"personAnswering\":\"local-control\",\"policy\":{\"kind\":\"scripted\"},\"workflowId\":\"wf_review\",\"profileId\":\"profile_main\",\"workspaceLabel\":\"Review workspace\",\"targetLabel\":\"Deterministic worker\",\"inputs\":[{\"name\":\"subject\",\"source\":\"capture\",\"bytes\":\"10\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}],\"plan\":\"Review the supplied subject.\",\"runFacts\":[\"run.engine\"],\"pins\":[\"deep\"],\"warnings\":[],\"resultCode\":\"receipt\"},\"reason\":\"input-changed\"}"
+   },
+   {
+    "name": "consumed preparation",
+    "type": "Preparation",
+    "json": "{\"version\":1,\"id\":\"prep_9\",\"revision\":\"preprev_1\",\"requestId\":\"req_8\",\"requestRevision\":\"request_rev_2\",\"profileId\":\"profile_main\",\"profileRevision\":\"profile_rev_4\",\"descriptorRevision\":\"catalogue_17\",\"state\":\"consumed\",\"expiresAt\":\"2026-09-03T00:10:00Z\",\"reviewDigest\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"processGeneration\":\"process_A\",\"review\":{\"programHash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"personAnswering\":\"local-control\",\"policy\":{\"kind\":\"scripted\"},\"workflowId\":\"wf_review\",\"profileId\":\"profile_main\",\"workspaceLabel\":\"Review workspace\",\"targetLabel\":\"Deterministic worker\",\"inputs\":[{\"name\":\"subject\",\"source\":\"capture\",\"bytes\":\"10\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}],\"plan\":\"Review the supplied subject.\",\"runFacts\":[\"run.engine\"],\"pins\":[\"deep\"],\"warnings\":[],\"resultCode\":\"receipt\"},\"reason\":\"consumed\"}",
+    "projection": "{\"version\":1,\"id\":\"prep_9\",\"revision\":\"preprev_1\",\"requestId\":\"req_8\",\"requestRevision\":\"request_rev_2\",\"profileId\":\"profile_main\",\"profileRevision\":\"profile_rev_4\",\"descriptorRevision\":\"catalogue_17\",\"state\":\"consumed\",\"expiresAt\":\"2026-09-03T00:10:00Z\",\"reviewDigest\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"processGeneration\":\"process_A\",\"review\":{\"programHash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"personAnswering\":\"local-control\",\"policy\":{\"kind\":\"scripted\"},\"workflowId\":\"wf_review\",\"profileId\":\"profile_main\",\"workspaceLabel\":\"Review workspace\",\"targetLabel\":\"Deterministic worker\",\"inputs\":[{\"name\":\"subject\",\"source\":\"capture\",\"bytes\":\"10\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}],\"plan\":\"Review the supplied subject.\",\"runFacts\":[\"run.engine\"],\"pins\":[\"deep\"],\"warnings\":[],\"resultCode\":\"receipt\"},\"reason\":\"consumed\"}"
+   },
+   {
+    "name": "unknown invalidation reason refuses",
+    "type": "Preparation",
+    "json": "{\"version\":1,\"id\":\"prep_9\",\"revision\":\"preprev_1\",\"requestId\":\"req_8\",\"requestRevision\":\"request_rev_2\",\"profileId\":\"profile_main\",\"profileRevision\":\"profile_rev_4\",\"descriptorRevision\":\"catalogue_17\",\"state\":\"live\",\"expiresAt\":\"2026-09-03T00:10:00Z\",\"reviewDigest\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"processGeneration\":\"process_A\",\"review\":{\"programHash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"personAnswering\":\"local-control\",\"policy\":{\"kind\":\"scripted\"},\"workflowId\":\"wf_review\",\"profileId\":\"profile_main\",\"workspaceLabel\":\"Review workspace\",\"targetLabel\":\"Deterministic worker\",\"inputs\":[{\"name\":\"subject\",\"source\":\"capture\",\"bytes\":\"10\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}],\"plan\":\"Review the supplied subject.\",\"runFacts\":[\"run.engine\"],\"pins\":[\"deep\"],\"warnings\":[],\"resultCode\":\"receipt\"},\"reason\":\"bored\"}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "unknown preparation state refuses",
+    "type": "Preparation",
+    "json": "{\"version\":1,\"id\":\"prep_9\",\"revision\":\"preprev_1\",\"requestId\":\"req_8\",\"requestRevision\":\"request_rev_2\",\"profileId\":\"profile_main\",\"profileRevision\":\"profile_rev_4\",\"descriptorRevision\":\"catalogue_17\",\"state\":\"running\",\"expiresAt\":\"2026-09-03T00:10:00Z\",\"reviewDigest\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"processGeneration\":\"process_A\",\"review\":{\"programHash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"personAnswering\":\"local-control\",\"policy\":{\"kind\":\"scripted\"},\"workflowId\":\"wf_review\",\"profileId\":\"profile_main\",\"workspaceLabel\":\"Review workspace\",\"targetLabel\":\"Deterministic worker\",\"inputs\":[{\"name\":\"subject\",\"source\":\"capture\",\"bytes\":\"10\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}],\"plan\":\"Review the supplied subject.\",\"runFacts\":[\"run.engine\"],\"pins\":[\"deep\"],\"warnings\":[],\"resultCode\":\"receipt\"},\"reason\":null}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "impossible expiry refuses",
+    "type": "Preparation",
+    "json": "{\"version\":1,\"id\":\"prep_9\",\"revision\":\"preprev_1\",\"requestId\":\"req_8\",\"requestRevision\":\"request_rev_2\",\"profileId\":\"profile_main\",\"profileRevision\":\"profile_rev_4\",\"descriptorRevision\":\"catalogue_17\",\"state\":\"live\",\"expiresAt\":\"2026-13-03T00:10:00Z\",\"reviewDigest\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"processGeneration\":\"process_A\",\"review\":{\"programHash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"personAnswering\":\"local-control\",\"policy\":{\"kind\":\"scripted\"},\"workflowId\":\"wf_review\",\"profileId\":\"profile_main\",\"workspaceLabel\":\"Review workspace\",\"targetLabel\":\"Deterministic worker\",\"inputs\":[{\"name\":\"subject\",\"source\":\"capture\",\"bytes\":\"10\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}],\"plan\":\"Review the supplied subject.\",\"runFacts\":[\"run.engine\"],\"pins\":[\"deep\"],\"warnings\":[],\"resultCode\":\"receipt\"},\"reason\":null}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "uppercase review digest refuses",
+    "type": "Preparation",
+    "json": "{\"version\":1,\"id\":\"prep_9\",\"revision\":\"preprev_1\",\"requestId\":\"req_8\",\"requestRevision\":\"request_rev_2\",\"profileId\":\"profile_main\",\"profileRevision\":\"profile_rev_4\",\"descriptorRevision\":\"catalogue_17\",\"state\":\"live\",\"expiresAt\":\"2026-09-03T00:10:00Z\",\"reviewDigest\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\"processGeneration\":\"process_A\",\"review\":{\"programHash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"personAnswering\":\"local-control\",\"policy\":{\"kind\":\"scripted\"},\"workflowId\":\"wf_review\",\"profileId\":\"profile_main\",\"workspaceLabel\":\"Review workspace\",\"targetLabel\":\"Deterministic worker\",\"inputs\":[{\"name\":\"subject\",\"source\":\"capture\",\"bytes\":\"10\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}],\"plan\":\"Review the supplied subject.\",\"runFacts\":[\"run.engine\"],\"pins\":[\"deep\"],\"warnings\":[],\"resultCode\":\"receipt\"},\"reason\":null}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "unknown preparation version refuses",
+    "type": "Preparation",
+    "json": "{\"version\":2,\"id\":\"prep_9\",\"revision\":\"preprev_1\",\"requestId\":\"req_8\",\"requestRevision\":\"request_rev_2\",\"profileId\":\"profile_main\",\"profileRevision\":\"profile_rev_4\",\"descriptorRevision\":\"catalogue_17\",\"state\":\"live\",\"expiresAt\":\"2026-09-03T00:10:00Z\",\"reviewDigest\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"processGeneration\":\"process_A\",\"review\":{\"programHash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"personAnswering\":\"local-control\",\"policy\":{\"kind\":\"scripted\"},\"workflowId\":\"wf_review\",\"profileId\":\"profile_main\",\"workspaceLabel\":\"Review workspace\",\"targetLabel\":\"Deterministic worker\",\"inputs\":[{\"name\":\"subject\",\"source\":\"capture\",\"bytes\":\"10\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}],\"plan\":\"Review the supplied subject.\",\"runFacts\":[\"run.engine\"],\"pins\":[\"deep\"],\"warnings\":[],\"resultCode\":\"receipt\"},\"reason\":null}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "missing nullable reason refuses",
+    "type": "Preparation",
+    "json": "{\"version\":1,\"id\":\"prep_9\",\"revision\":\"preprev_1\",\"requestId\":\"req_8\",\"requestRevision\":\"request_rev_2\",\"profileId\":\"profile_main\",\"profileRevision\":\"profile_rev_4\",\"descriptorRevision\":\"catalogue_17\",\"state\":\"live\",\"expiresAt\":\"2026-09-03T00:10:00Z\",\"reviewDigest\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"processGeneration\":\"process_A\",\"review\":{\"programHash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"personAnswering\":\"local-control\",\"policy\":{\"kind\":\"scripted\"},\"workflowId\":\"wf_review\",\"profileId\":\"profile_main\",\"workspaceLabel\":\"Review workspace\",\"targetLabel\":\"Deterministic worker\",\"inputs\":[{\"name\":\"subject\",\"source\":\"capture\",\"bytes\":\"10\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}],\"plan\":\"Review the supplied subject.\",\"runFacts\":[\"run.engine\"],\"pins\":[\"deep\"],\"warnings\":[],\"resultCode\":\"receipt\"}}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "extra preparation field refuses",
+    "type": "Preparation",
+    "json": "{\"version\":1,\"id\":\"prep_9\",\"revision\":\"preprev_1\",\"requestId\":\"req_8\",\"requestRevision\":\"request_rev_2\",\"profileId\":\"profile_main\",\"profileRevision\":\"profile_rev_4\",\"descriptorRevision\":\"catalogue_17\",\"state\":\"live\",\"expiresAt\":\"2026-09-03T00:10:00Z\",\"reviewDigest\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"processGeneration\":\"process_A\",\"review\":{\"programHash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"personAnswering\":\"local-control\",\"policy\":{\"kind\":\"scripted\"},\"workflowId\":\"wf_review\",\"profileId\":\"profile_main\",\"workspaceLabel\":\"Review workspace\",\"targetLabel\":\"Deterministic worker\",\"inputs\":[{\"name\":\"subject\",\"source\":\"capture\",\"bytes\":\"10\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}],\"plan\":\"Review the supplied subject.\",\"runFacts\":[\"run.engine\"],\"pins\":[\"deep\"],\"warnings\":[],\"resultCode\":\"receipt\"},\"reason\":null,\"worker\":\"pid_1\"}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "root review",
+    "type": "Review",
+    "json": "{\"programHash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"personAnswering\":\"local-control\",\"policy\":{\"kind\":\"scripted\"},\"workflowId\":\"wf_review\",\"profileId\":\"profile_main\",\"workspaceLabel\":\"Review workspace\",\"targetLabel\":\"Deterministic worker\",\"inputs\":[{\"name\":\"subject\",\"source\":\"capture\",\"bytes\":\"10\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}],\"plan\":\"Review the supplied subject.\",\"runFacts\":[\"run.engine\"],\"pins\":[\"deep\"],\"warnings\":[],\"resultCode\":\"receipt\"}",
+    "projection": "{\"programHash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"personAnswering\":\"local-control\",\"policy\":{\"kind\":\"scripted\"},\"workflowId\":\"wf_review\",\"profileId\":\"profile_main\",\"workspaceLabel\":\"Review workspace\",\"targetLabel\":\"Deterministic worker\",\"inputs\":[{\"name\":\"subject\",\"source\":\"capture\",\"bytes\":\"10\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}],\"plan\":\"Review the supplied subject.\",\"runFacts\":[\"run.engine\"],\"pins\":[\"deep\"],\"warnings\":[],\"resultCode\":\"receipt\"}"
+   },
+   {
+    "name": "structured result code",
+    "type": "Review",
+    "json": "{\"programHash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"personAnswering\":\"local-control\",\"policy\":{\"kind\":\"scripted\"},\"workflowId\":\"wf_review\",\"profileId\":\"profile_main\",\"workspaceLabel\":\"Review workspace\",\"targetLabel\":\"Deterministic worker\",\"inputs\":[{\"name\":\"subject\",\"source\":\"capture\",\"bytes\":\"10\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}],\"plan\":\"Review the supplied subject.\",\"runFacts\":[\"run.engine\"],\"pins\":[\"deep\"],\"warnings\":[],\"resultCode\":{\"json\":{\"schema\":{\"property\":{\"name\":\"ok\",\"schema\":\"boolean\",\"rest\":\"object\"}}}}}",
+    "projection": "{\"programHash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"personAnswering\":\"local-control\",\"policy\":{\"kind\":\"scripted\"},\"workflowId\":\"wf_review\",\"profileId\":\"profile_main\",\"workspaceLabel\":\"Review workspace\",\"targetLabel\":\"Deterministic worker\",\"inputs\":[{\"name\":\"subject\",\"source\":\"capture\",\"bytes\":\"10\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}],\"plan\":\"Review the supplied subject.\",\"runFacts\":[\"run.engine\"],\"pins\":[\"deep\"],\"warnings\":[],\"resultCode\":{\"json\":{\"schema\":{\"property\":{\"name\":\"ok\",\"schema\":\"boolean\",\"rest\":\"object\"}}}}}"
+   },
+   {
+    "name": "person answer addresses",
+    "type": "Review",
+    "json": "{\"programHash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"personAnswering\":\"local-control\",\"policy\":{\"kind\":\"routed\",\"default\":\"acp:reviewer\",\"routes\":[{\"name\":\"deep\",\"backend\":\"acp:reviewer\"}],\"pollMs\":null,\"timeoutMs\":120000,\"verbose\":false,\"realizations\":[{\"profile\":\"deep\",\"axis\":\"model\",\"rung\":0,\"backend\":\"acp:reviewer\",\"router\":\"review-router\",\"provider\":\"fixture-provider\",\"model\":\"fixture-model\",\"thinking\":\"high\",\"maxOutput\":4096,\"executionFingerprint\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"modelAlias\":\"deep\",\"engine\":\"acp\"}],\"routingVersion\":2,\"persona\":\"reviewer\",\"personaSource\":\"project\",\"policyDigest\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"personAnswers\":[\"model:deep\",\"tool:shell\"]},\"workflowId\":\"wf_review\",\"profileId\":\"profile_main\",\"workspaceLabel\":\"Review workspace\",\"targetLabel\":\"Deterministic worker\",\"inputs\":[{\"name\":\"subject\",\"source\":\"capture\",\"bytes\":\"10\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}],\"plan\":\"Review the supplied subject.\",\"runFacts\":[\"run.engine\"],\"pins\":[\"deep\"],\"warnings\":[],\"resultCode\":\"receipt\"}",
+    "projection": "{\"programHash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"personAnswering\":\"local-control\",\"policy\":{\"kind\":\"routed\",\"default\":\"acp:reviewer\",\"routes\":[{\"name\":\"deep\",\"backend\":\"acp:reviewer\"}],\"pollMs\":null,\"timeoutMs\":120000,\"verbose\":false,\"realizations\":[{\"profile\":\"deep\",\"axis\":\"model\",\"rung\":0,\"backend\":\"acp:reviewer\",\"router\":\"review-router\",\"provider\":\"fixture-provider\",\"model\":\"fixture-model\",\"thinking\":\"high\",\"maxOutput\":4096,\"executionFingerprint\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"modelAlias\":\"deep\",\"engine\":\"acp\"}],\"routingVersion\":2,\"persona\":\"reviewer\",\"personaSource\":\"project\",\"policyDigest\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"personAnswers\":[\"model:deep\",\"tool:shell\"]},\"workflowId\":\"wf_review\",\"profileId\":\"profile_main\",\"workspaceLabel\":\"Review workspace\",\"targetLabel\":\"Deterministic worker\",\"inputs\":[{\"name\":\"subject\",\"source\":\"capture\",\"bytes\":\"10\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}],\"plan\":\"Review the supplied subject.\",\"runFacts\":[\"run.engine\"],\"pins\":[\"deep\"],\"warnings\":[],\"resultCode\":\"receipt\"}"
+   },
+   {
+    "name": "native ack result code refuses",
+    "type": "Review",
+    "json": "{\"programHash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"personAnswering\":\"local-control\",\"policy\":{\"kind\":\"scripted\"},\"workflowId\":\"wf_review\",\"profileId\":\"profile_main\",\"workspaceLabel\":\"Review workspace\",\"targetLabel\":\"Deterministic worker\",\"inputs\":[{\"name\":\"subject\",\"source\":\"capture\",\"bytes\":\"10\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}],\"plan\":\"Review the supplied subject.\",\"runFacts\":[\"run.engine\"],\"pins\":[\"deep\"],\"warnings\":[],\"resultCode\":\"ack\"}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "null lineage is not a root review",
+    "type": "Review",
+    "json": "{\"programHash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"personAnswering\":\"local-control\",\"policy\":{\"kind\":\"scripted\"},\"workflowId\":\"wf_review\",\"profileId\":\"profile_main\",\"workspaceLabel\":\"Review workspace\",\"targetLabel\":\"Deterministic worker\",\"inputs\":[{\"name\":\"subject\",\"source\":\"capture\",\"bytes\":\"10\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}],\"plan\":\"Review the supplied subject.\",\"runFacts\":[\"run.engine\"],\"pins\":[\"deep\"],\"warnings\":[],\"resultCode\":\"receipt\",\"lineage\":null}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "unknown person answering refuses",
+    "type": "Review",
+    "json": "{\"programHash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"personAnswering\":\"model\",\"policy\":{\"kind\":\"scripted\"},\"workflowId\":\"wf_review\",\"profileId\":\"profile_main\",\"workspaceLabel\":\"Review workspace\",\"targetLabel\":\"Deterministic worker\",\"inputs\":[{\"name\":\"subject\",\"source\":\"capture\",\"bytes\":\"10\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}],\"plan\":\"Review the supplied subject.\",\"runFacts\":[\"run.engine\"],\"pins\":[\"deep\"],\"warnings\":[],\"resultCode\":\"receipt\"}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "realization rung beyond 2^53 refuses",
+    "type": "Review",
+    "json": "{\"programHash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"personAnswering\":\"local-control\",\"policy\":{\"kind\":\"routed\",\"default\":\"acp:reviewer\",\"routes\":[{\"name\":\"deep\",\"backend\":\"acp:reviewer\"}],\"pollMs\":null,\"timeoutMs\":120000,\"verbose\":false,\"realizations\":[{\"profile\":\"deep\",\"axis\":\"model\",\"rung\":9007199254740993,\"backend\":\"acp:reviewer\",\"router\":\"review-router\",\"provider\":\"fixture-provider\",\"model\":\"fixture-model\",\"thinking\":\"high\",\"maxOutput\":4096,\"executionFingerprint\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"modelAlias\":\"deep\",\"engine\":\"acp\"}],\"routingVersion\":2,\"persona\":\"reviewer\",\"personaSource\":\"project\",\"policyDigest\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"},\"workflowId\":\"wf_review\",\"profileId\":\"profile_main\",\"workspaceLabel\":\"Review workspace\",\"targetLabel\":\"Deterministic worker\",\"inputs\":[{\"name\":\"subject\",\"source\":\"capture\",\"bytes\":\"10\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}],\"plan\":\"Review the supplied subject.\",\"runFacts\":[\"run.engine\"],\"pins\":[\"deep\"],\"warnings\":[],\"resultCode\":\"receipt\"}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "maximum output beyond 32 bits refuses",
+    "type": "Review",
+    "json": "{\"programHash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"personAnswering\":\"local-control\",\"policy\":{\"kind\":\"routed\",\"default\":\"acp:reviewer\",\"routes\":[{\"name\":\"deep\",\"backend\":\"acp:reviewer\"}],\"pollMs\":null,\"timeoutMs\":120000,\"verbose\":false,\"realizations\":[{\"profile\":\"deep\",\"axis\":\"model\",\"rung\":0,\"backend\":\"acp:reviewer\",\"router\":\"review-router\",\"provider\":\"fixture-provider\",\"model\":\"fixture-model\",\"thinking\":\"high\",\"maxOutput\":2147483648,\"executionFingerprint\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"modelAlias\":\"deep\",\"engine\":\"acp\"}],\"routingVersion\":2,\"persona\":\"reviewer\",\"personaSource\":\"project\",\"policyDigest\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"},\"workflowId\":\"wf_review\",\"profileId\":\"profile_main\",\"workspaceLabel\":\"Review workspace\",\"targetLabel\":\"Deterministic worker\",\"inputs\":[{\"name\":\"subject\",\"source\":\"capture\",\"bytes\":\"10\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}],\"plan\":\"Review the supplied subject.\",\"runFacts\":[\"run.engine\"],\"pins\":[\"deep\"],\"warnings\":[],\"resultCode\":\"receipt\"}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "unknown policy field refuses",
+    "type": "Review",
+    "json": "{\"programHash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"personAnswering\":\"local-control\",\"policy\":{\"kind\":\"scripted\",\"seed\":1},\"workflowId\":\"wf_review\",\"profileId\":\"profile_main\",\"workspaceLabel\":\"Review workspace\",\"targetLabel\":\"Deterministic worker\",\"inputs\":[{\"name\":\"subject\",\"source\":\"capture\",\"bytes\":\"10\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}],\"plan\":\"Review the supplied subject.\",\"runFacts\":[\"run.engine\"],\"pins\":[\"deep\"],\"warnings\":[],\"resultCode\":\"receipt\"}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "extra review field refuses",
+    "type": "Review",
+    "json": "{\"programHash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"personAnswering\":\"local-control\",\"policy\":{\"kind\":\"scripted\"},\"workflowId\":\"wf_review\",\"profileId\":\"profile_main\",\"workspaceLabel\":\"Review workspace\",\"targetLabel\":\"Deterministic worker\",\"inputs\":[{\"name\":\"subject\",\"source\":\"capture\",\"bytes\":\"10\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}],\"plan\":\"Review the supplied subject.\",\"runFacts\":[\"run.engine\"],\"pins\":[\"deep\"],\"warnings\":[],\"resultCode\":\"receipt\",\"command\":\"agentic-run\"}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "input byte count at 2^64-1 stays exact",
+    "type": "ReviewInput",
+    "json": "{\"name\":\"名前\",\"source\":\"capture\",\"bytes\":\"18446744073709551615\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}",
+    "projection": "{\"name\":\"名前\",\"source\":\"capture\",\"bytes\":\"18446744073709551615\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}"
+   },
+   {
+    "name": "input byte count at 2^64 refuses",
+    "type": "ReviewInput",
+    "json": "{\"name\":\"subject\",\"source\":\"capture\",\"bytes\":\"18446744073709551616\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "numeric input byte count refuses",
+    "type": "ReviewInput",
+    "json": "{\"name\":\"subject\",\"source\":\"capture\",\"bytes\":10,\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "noncanonical input byte count refuses",
+    "type": "ReviewInput",
+    "json": "{\"name\":\"subject\",\"source\":\"capture\",\"bytes\":\"010\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "file input source refuses",
+    "type": "ReviewInput",
+    "json": "{\"name\":\"subject\",\"source\":\"file\",\"bytes\":\"1\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "extra review input field refuses",
+    "type": "ReviewInput",
+    "json": "{\"name\":\"subject\",\"source\":\"literal\",\"bytes\":\"1\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"value\":\"x\"}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "restart lineage without edits",
+    "type": "ReviewLineage",
+    "json": "{\"parentRunId\":\"run_21\",\"operation\":\"restart\",\"edits\":[]}",
+    "projection": "{\"parentRunId\":\"run_21\",\"operation\":\"restart\",\"edits\":[]}"
+   },
+   {
+    "name": "fork lineage with edits",
+    "type": "ReviewLineage",
+    "json": "{\"parentRunId\":\"run_21\",\"operation\":\"fork\",\"edits\":[{\"operation\":\"drop\",\"occurrenceId\":\"0\"},{\"operation\":\"replace\",\"occurrenceId\":\"18446744073709551615\",\"sha256\":\"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\"}]}",
+    "projection": "{\"parentRunId\":\"run_21\",\"operation\":\"fork\",\"edits\":[{\"operation\":\"drop\",\"occurrenceId\":\"0\"},{\"operation\":\"replace\",\"occurrenceId\":\"18446744073709551615\",\"sha256\":\"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\"}]}"
+   },
+   {
+    "name": "restart lineage with edits refuses",
+    "type": "ReviewLineage",
+    "json": "{\"parentRunId\":\"run_21\",\"operation\":\"restart\",\"edits\":[{\"operation\":\"drop\",\"occurrenceId\":\"0\"},{\"operation\":\"replace\",\"occurrenceId\":\"18446744073709551615\",\"sha256\":\"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\"}]}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "invalid parent identity refuses",
+    "type": "ReviewLineage",
+    "json": "{\"parentRunId\":\"run 21\",\"operation\":\"fork\",\"edits\":[{\"operation\":\"drop\",\"occurrenceId\":\"0\"},{\"operation\":\"replace\",\"occurrenceId\":\"18446744073709551615\",\"sha256\":\"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\"}]}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "unknown lineage operation refuses",
+    "type": "ReviewLineage",
+    "json": "{\"parentRunId\":\"run_21\",\"operation\":\"rewind\",\"edits\":[{\"operation\":\"drop\",\"occurrenceId\":\"0\"},{\"operation\":\"replace\",\"occurrenceId\":\"18446744073709551615\",\"sha256\":\"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\"}]}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "drop edit",
+    "type": "ReviewEdit",
+    "json": "{\"operation\":\"drop\",\"occurrenceId\":\"0\"}",
+    "projection": "{\"operation\":\"drop\",\"occurrenceId\":\"0\"}"
+   },
+   {
+    "name": "replace edit at occurrence 2^64-1",
+    "type": "ReviewEdit",
+    "json": "{\"operation\":\"replace\",\"occurrenceId\":\"18446744073709551615\",\"sha256\":\"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\"}",
+    "projection": "{\"operation\":\"replace\",\"occurrenceId\":\"18446744073709551615\",\"sha256\":\"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\"}"
+   },
+   {
+    "name": "replace edit without digest refuses",
+    "type": "ReviewEdit",
+    "json": "{\"operation\":\"replace\",\"occurrenceId\":\"1\"}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "replace edit with an answer refuses",
+    "type": "ReviewEdit",
+    "json": "{\"operation\":\"replace\",\"occurrenceId\":\"1\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"answer\":false}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "drop edit with digest refuses",
+    "type": "ReviewEdit",
+    "json": "{\"operation\":\"drop\",\"occurrenceId\":\"1\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "edit occurrence at 2^64 refuses",
+    "type": "ReviewEdit",
+    "json": "{\"operation\":\"drop\",\"occurrenceId\":\"18446744073709551616\"}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "numeric edit occurrence refuses",
+    "type": "ReviewEdit",
+    "json": "{\"operation\":\"drop\",\"occurrenceId\":1}",
+    "refusal": "InvalidResponse"
+   }
+  ],
+  "receipts": [
+   {
+    "name": "accepted create receipt",
+    "type": "CommandReceipt",
+    "json": "{\"version\":1,\"id\":\"cmd_11\",\"profileId\":\"profile_main\",\"operation\":\"create\",\"requiredScopes\":[\"submit\"],\"resource\":\"/v1/requests\",\"state\":\"accepted\",\"acceptedAt\":\"2026-09-03T00:00:00Z\",\"dispatchAttemptedAt\":null,\"acknowledgement\":null,\"effect\":null,\"refusal\":null,\"links\":{\"self\":\"/v1/commands/cmd_11\",\"resource\":\"/v1/requests\"}}",
+    "projection": "{\"version\":1,\"id\":\"cmd_11\",\"profileId\":\"profile_main\",\"operation\":\"create\",\"requiredScopes\":[\"submit\"],\"resource\":\"/v1/requests\",\"state\":\"accepted\",\"acceptedAt\":\"2026-09-03T00:00:00Z\",\"dispatchAttemptedAt\":null,\"acknowledgement\":null,\"effect\":null,\"refusal\":null,\"links\":{\"self\":\"/v1/commands/cmd_11\",\"resource\":\"/v1/requests\"}}"
+   },
+   {
+    "name": "dispatch-attempted cancel receipt",
+    "type": "CommandReceipt",
+    "json": "{\"version\":1,\"id\":\"cmd_11\",\"profileId\":\"profile_main\",\"operation\":\"cancel\",\"requiredScopes\":[\"control\"],\"resource\":\"/v1/runs/run_21/control\",\"state\":\"dispatch-attempted\",\"acceptedAt\":\"2026-09-03T00:00:00Z\",\"dispatchAttemptedAt\":\"2026-09-03T00:00:00Z\",\"acknowledgement\":null,\"effect\":null,\"refusal\":null,\"links\":{\"self\":\"/v1/commands/cmd_11\",\"resource\":\"/v1/runs/run_21/control\"}}",
+    "projection": "{\"version\":1,\"id\":\"cmd_11\",\"profileId\":\"profile_main\",\"operation\":\"cancel\",\"requiredScopes\":[\"control\"],\"resource\":\"/v1/runs/run_21/control\",\"state\":\"dispatch-attempted\",\"acceptedAt\":\"2026-09-03T00:00:00Z\",\"dispatchAttemptedAt\":\"2026-09-03T00:00:00Z\",\"acknowledgement\":null,\"effect\":null,\"refusal\":null,\"links\":{\"self\":\"/v1/commands/cmd_11\",\"resource\":\"/v1/runs/run_21/control\"}}"
+   },
+   {
+    "name": "acknowledged steer receipt keeps maximum addresses",
+    "type": "CommandReceipt",
+    "json": "{\"version\":1,\"id\":\"cmd_11\",\"profileId\":\"profile_main\",\"operation\":\"steer\",\"requiredScopes\":[\"control\"],\"resource\":\"/v1/runs/run_21/control\",\"state\":\"acknowledged\",\"acceptedAt\":\"2026-09-03T00:00:00Z\",\"dispatchAttemptedAt\":\"2026-09-03T00:00:00Z\",\"acknowledgement\":{\"commandId\":\"cmd_11\",\"state\":\"delivered\",\"message\":\"Delivered 雪😀\",\"command\":\"steer\",\"occurrenceId\":\"18446744073709551615\",\"attemptId\":\"4294967295\"},\"effect\":null,\"refusal\":null,\"links\":{\"self\":\"/v1/commands/cmd_11\",\"resource\":\"/v1/runs/run_21/control\"}}",
+    "projection": "{\"version\":1,\"id\":\"cmd_11\",\"profileId\":\"profile_main\",\"operation\":\"steer\",\"requiredScopes\":[\"control\"],\"resource\":\"/v1/runs/run_21/control\",\"state\":\"acknowledged\",\"acceptedAt\":\"2026-09-03T00:00:00Z\",\"dispatchAttemptedAt\":\"2026-09-03T00:00:00Z\",\"acknowledgement\":{\"commandId\":\"cmd_11\",\"state\":\"delivered\",\"message\":\"Delivered 雪😀\",\"command\":\"steer\",\"occurrenceId\":\"18446744073709551615\",\"attemptId\":\"4294967295\"},\"effect\":null,\"refusal\":null,\"links\":{\"self\":\"/v1/commands/cmd_11\",\"resource\":\"/v1/runs/run_21/control\"}}"
+   },
+   {
+    "name": "refused answer receipt",
+    "type": "CommandReceipt",
+    "json": "{\"version\":1,\"id\":\"cmd_11\",\"profileId\":\"profile_main\",\"operation\":\"answer\",\"requiredScopes\":[\"control\"],\"resource\":\"/v1/decisions/decision_3\",\"state\":\"refused\",\"acceptedAt\":\"2026-09-03T00:00:00Z\",\"dispatchAttemptedAt\":\"2026-09-03T00:00:00Z\",\"acknowledgement\":{\"commandId\":\"cmd_11\",\"state\":\"rejected-stale\",\"message\":\"stale\",\"command\":\"answer\",\"occurrenceId\":\"0\",\"attemptId\":null},\"effect\":null,\"refusal\":\"invalid-answer\",\"links\":{\"self\":\"/v1/commands/cmd_11\",\"resource\":\"/v1/decisions/decision_3\"}}",
+    "projection": "{\"version\":1,\"id\":\"cmd_11\",\"profileId\":\"profile_main\",\"operation\":\"answer\",\"requiredScopes\":[\"control\"],\"resource\":\"/v1/decisions/decision_3\",\"state\":\"refused\",\"acceptedAt\":\"2026-09-03T00:00:00Z\",\"dispatchAttemptedAt\":\"2026-09-03T00:00:00Z\",\"acknowledgement\":{\"commandId\":\"cmd_11\",\"state\":\"rejected-stale\",\"message\":\"stale\",\"command\":\"answer\",\"occurrenceId\":\"0\",\"attemptId\":null},\"effect\":null,\"refusal\":\"invalid-answer\",\"links\":{\"self\":\"/v1/commands/cmd_11\",\"resource\":\"/v1/decisions/decision_3\"}}"
+   },
+   {
+    "name": "unresolved approve receipt",
+    "type": "CommandReceipt",
+    "json": "{\"version\":1,\"id\":\"cmd_11\",\"profileId\":\"profile_main\",\"operation\":\"approve\",\"requiredScopes\":[\"submit\",\"control\"],\"resource\":\"/v1/preparations/prep_9\",\"state\":\"unresolved\",\"acceptedAt\":\"2026-09-03T00:00:00Z\",\"dispatchAttemptedAt\":\"2026-09-03T00:00:00Z\",\"acknowledgement\":null,\"effect\":null,\"refusal\":null,\"links\":{\"self\":\"/v1/commands/cmd_11\",\"resource\":\"/v1/preparations/prep_9\"}}",
+    "projection": "{\"version\":1,\"id\":\"cmd_11\",\"profileId\":\"profile_main\",\"operation\":\"approve\",\"requiredScopes\":[\"submit\",\"control\"],\"resource\":\"/v1/preparations/prep_9\",\"state\":\"unresolved\",\"acceptedAt\":\"2026-09-03T00:00:00Z\",\"dispatchAttemptedAt\":\"2026-09-03T00:00:00Z\",\"acknowledgement\":null,\"effect\":null,\"refusal\":null,\"links\":{\"self\":\"/v1/commands/cmd_11\",\"resource\":\"/v1/preparations/prep_9\"}}"
+   },
+   {
+    "name": "refused export receipt without attempt",
+    "type": "CommandReceipt",
+    "json": "{\"version\":1,\"id\":\"cmd_11\",\"profileId\":\"profile_main\",\"operation\":\"export\",\"requiredScopes\":[\"observe\",\"export\"],\"resource\":\"/v1/runs/run_21/exports\",\"state\":\"refused\",\"acceptedAt\":\"2026-09-03T00:00:00Z\",\"dispatchAttemptedAt\":null,\"acknowledgement\":null,\"effect\":null,\"refusal\":\"export-conflict\",\"links\":{\"self\":\"/v1/commands/cmd_11\",\"resource\":\"/v1/runs/run_21/exports\"}}",
+    "projection": "{\"version\":1,\"id\":\"cmd_11\",\"profileId\":\"profile_main\",\"operation\":\"export\",\"requiredScopes\":[\"observe\",\"export\"],\"resource\":\"/v1/runs/run_21/exports\",\"state\":\"refused\",\"acceptedAt\":\"2026-09-03T00:00:00Z\",\"dispatchAttemptedAt\":null,\"acknowledgement\":null,\"effect\":null,\"refusal\":\"export-conflict\",\"links\":{\"self\":\"/v1/commands/cmd_11\",\"resource\":\"/v1/runs/run_21/exports\"}}"
+   },
+   {
+    "name": "effect-observed started receipt",
+    "type": "CommandReceipt",
+    "json": "{\"version\":1,\"id\":\"cmd_11\",\"profileId\":\"profile_main\",\"operation\":\"approve\",\"requiredScopes\":[\"submit\",\"control\"],\"resource\":\"/v1/preparations/prep_9\",\"state\":\"effect-observed\",\"acceptedAt\":\"2026-09-03T00:00:00Z\",\"dispatchAttemptedAt\":\"2026-09-03T00:00:00Z\",\"acknowledgement\":null,\"effect\":{\"kind\":\"started\",\"runtimeSequence\":null,\"address\":null,\"resource\":\"/v1/runs/run_21\"},\"refusal\":null,\"links\":{\"self\":\"/v1/commands/cmd_11\",\"resource\":\"/v1/preparations/prep_9\"}}",
+    "projection": "{\"version\":1,\"id\":\"cmd_11\",\"profileId\":\"profile_main\",\"operation\":\"approve\",\"requiredScopes\":[\"submit\",\"control\"],\"resource\":\"/v1/preparations/prep_9\",\"state\":\"effect-observed\",\"acceptedAt\":\"2026-09-03T00:00:00Z\",\"dispatchAttemptedAt\":\"2026-09-03T00:00:00Z\",\"acknowledgement\":null,\"effect\":{\"kind\":\"started\",\"runtimeSequence\":null,\"address\":null,\"resource\":\"/v1/runs/run_21\"},\"refusal\":null,\"links\":{\"self\":\"/v1/commands/cmd_11\",\"resource\":\"/v1/preparations/prep_9\"}}"
+   },
+   {
+    "name": "effect-observed cancelled receipt",
+    "type": "CommandReceipt",
+    "json": "{\"version\":1,\"id\":\"cmd_11\",\"profileId\":\"profile_main\",\"operation\":\"cancel\",\"requiredScopes\":[\"control\"],\"resource\":\"/v1/runs/run_21/control\",\"state\":\"effect-observed\",\"acceptedAt\":\"2026-09-03T00:00:00Z\",\"dispatchAttemptedAt\":\"2026-09-03T00:00:00Z\",\"acknowledgement\":null,\"effect\":{\"kind\":\"cancelled\",\"runtimeSequence\":\"9007199254740993\",\"address\":null,\"resource\":\"/v1/runs/run_21/snapshot\"},\"refusal\":null,\"links\":{\"self\":\"/v1/commands/cmd_11\",\"resource\":\"/v1/runs/run_21/control\"}}",
+    "projection": "{\"version\":1,\"id\":\"cmd_11\",\"profileId\":\"profile_main\",\"operation\":\"cancel\",\"requiredScopes\":[\"control\"],\"resource\":\"/v1/runs/run_21/control\",\"state\":\"effect-observed\",\"acceptedAt\":\"2026-09-03T00:00:00Z\",\"dispatchAttemptedAt\":\"2026-09-03T00:00:00Z\",\"acknowledgement\":null,\"effect\":{\"kind\":\"cancelled\",\"runtimeSequence\":\"9007199254740993\",\"address\":null,\"resource\":\"/v1/runs/run_21/snapshot\"},\"refusal\":null,\"links\":{\"self\":\"/v1/commands/cmd_11\",\"resource\":\"/v1/runs/run_21/control\"}}"
+   },
+   {
+    "name": "effect-observed steered receipt",
+    "type": "CommandReceipt",
+    "json": "{\"version\":1,\"id\":\"cmd_11\",\"profileId\":\"profile_main\",\"operation\":\"steer\",\"requiredScopes\":[\"control\"],\"resource\":\"/v1/runs/run_21/control\",\"state\":\"effect-observed\",\"acceptedAt\":\"2026-09-03T00:00:00Z\",\"dispatchAttemptedAt\":\"2026-09-03T00:00:00Z\",\"acknowledgement\":null,\"effect\":{\"kind\":\"steered\",\"runtimeSequence\":\"9007199254740995\",\"address\":{\"occurrenceId\":\"18446744073709551615\",\"attemptId\":\"4294967295\"},\"resource\":\"/v1/runs/run_21/snapshot\"},\"refusal\":null,\"links\":{\"self\":\"/v1/commands/cmd_11\",\"resource\":\"/v1/runs/run_21/control\"}}",
+    "projection": "{\"version\":1,\"id\":\"cmd_11\",\"profileId\":\"profile_main\",\"operation\":\"steer\",\"requiredScopes\":[\"control\"],\"resource\":\"/v1/runs/run_21/control\",\"state\":\"effect-observed\",\"acceptedAt\":\"2026-09-03T00:00:00Z\",\"dispatchAttemptedAt\":\"2026-09-03T00:00:00Z\",\"acknowledgement\":null,\"effect\":{\"kind\":\"steered\",\"runtimeSequence\":\"9007199254740995\",\"address\":{\"occurrenceId\":\"18446744073709551615\",\"attemptId\":\"4294967295\"},\"resource\":\"/v1/runs/run_21/snapshot\"},\"refusal\":null,\"links\":{\"self\":\"/v1/commands/cmd_11\",\"resource\":\"/v1/runs/run_21/control\"}}"
+   },
+   {
+    "name": "effect-observed retried receipt",
+    "type": "CommandReceipt",
+    "json": "{\"version\":1,\"id\":\"cmd_11\",\"profileId\":\"profile_main\",\"operation\":\"retry\",\"requiredScopes\":[\"control\"],\"resource\":\"/v1/runs/run_21/control\",\"state\":\"effect-observed\",\"acceptedAt\":\"2026-09-03T00:00:00Z\",\"dispatchAttemptedAt\":\"2026-09-03T00:00:00Z\",\"acknowledgement\":null,\"effect\":{\"kind\":\"retried\",\"runtimeSequence\":\"12\",\"address\":{\"occurrenceId\":\"3\",\"attemptId\":\"0\"},\"resource\":\"/v1/runs/run_21/snapshot\"},\"refusal\":null,\"links\":{\"self\":\"/v1/commands/cmd_11\",\"resource\":\"/v1/runs/run_21/control\"}}",
+    "projection": "{\"version\":1,\"id\":\"cmd_11\",\"profileId\":\"profile_main\",\"operation\":\"retry\",\"requiredScopes\":[\"control\"],\"resource\":\"/v1/runs/run_21/control\",\"state\":\"effect-observed\",\"acceptedAt\":\"2026-09-03T00:00:00Z\",\"dispatchAttemptedAt\":\"2026-09-03T00:00:00Z\",\"acknowledgement\":null,\"effect\":{\"kind\":\"retried\",\"runtimeSequence\":\"12\",\"address\":{\"occurrenceId\":\"3\",\"attemptId\":\"0\"},\"resource\":\"/v1/runs/run_21/snapshot\"},\"refusal\":null,\"links\":{\"self\":\"/v1/commands/cmd_11\",\"resource\":\"/v1/runs/run_21/control\"}}"
+   },
+   {
+    "name": "effect-observed recovery-chosen receipt",
+    "type": "CommandReceipt",
+    "json": "{\"version\":1,\"id\":\"cmd_11\",\"profileId\":\"profile_main\",\"operation\":\"choose-recovery\",\"requiredScopes\":[\"control\"],\"resource\":\"/v1/decisions/decision_3\",\"state\":\"effect-observed\",\"acceptedAt\":\"2026-09-03T00:00:00Z\",\"dispatchAttemptedAt\":\"2026-09-03T00:00:00Z\",\"acknowledgement\":null,\"effect\":{\"kind\":\"recovery-chosen\",\"runtimeSequence\":\"13\",\"address\":{\"occurrenceId\":\"3\"},\"resource\":\"/v1/runs/run_21/snapshot\"},\"refusal\":null,\"links\":{\"self\":\"/v1/commands/cmd_11\",\"resource\":\"/v1/decisions/decision_3\"}}",
+    "projection": "{\"version\":1,\"id\":\"cmd_11\",\"profileId\":\"profile_main\",\"operation\":\"choose-recovery\",\"requiredScopes\":[\"control\"],\"resource\":\"/v1/decisions/decision_3\",\"state\":\"effect-observed\",\"acceptedAt\":\"2026-09-03T00:00:00Z\",\"dispatchAttemptedAt\":\"2026-09-03T00:00:00Z\",\"acknowledgement\":null,\"effect\":{\"kind\":\"recovery-chosen\",\"runtimeSequence\":\"13\",\"address\":{\"occurrenceId\":\"3\"},\"resource\":\"/v1/runs/run_21/snapshot\"},\"refusal\":null,\"links\":{\"self\":\"/v1/commands/cmd_11\",\"resource\":\"/v1/decisions/decision_3\"}}"
+   },
+   {
+    "name": "effect-observed redirected receipt",
+    "type": "CommandReceipt",
+    "json": "{\"version\":1,\"id\":\"cmd_11\",\"profileId\":\"profile_main\",\"operation\":\"redirect\",\"requiredScopes\":[\"control\"],\"resource\":\"/v1/runs/run_21/control\",\"state\":\"effect-observed\",\"acceptedAt\":\"2026-09-03T00:00:00Z\",\"dispatchAttemptedAt\":\"2026-09-03T00:00:00Z\",\"acknowledgement\":null,\"effect\":{\"kind\":\"redirected\",\"runtimeSequence\":\"14\",\"address\":{\"occurrenceId\":\"4\"},\"resource\":\"/v1/runs/run_21/snapshot\"},\"refusal\":null,\"links\":{\"self\":\"/v1/commands/cmd_11\",\"resource\":\"/v1/runs/run_21/control\"}}",
+    "projection": "{\"version\":1,\"id\":\"cmd_11\",\"profileId\":\"profile_main\",\"operation\":\"redirect\",\"requiredScopes\":[\"control\"],\"resource\":\"/v1/runs/run_21/control\",\"state\":\"effect-observed\",\"acceptedAt\":\"2026-09-03T00:00:00Z\",\"dispatchAttemptedAt\":\"2026-09-03T00:00:00Z\",\"acknowledgement\":null,\"effect\":{\"kind\":\"redirected\",\"runtimeSequence\":\"14\",\"address\":{\"occurrenceId\":\"4\"},\"resource\":\"/v1/runs/run_21/snapshot\"},\"refusal\":null,\"links\":{\"self\":\"/v1/commands/cmd_11\",\"resource\":\"/v1/runs/run_21/control\"}}"
+   },
+   {
+    "name": "effect-observed answer-accepted receipt",
+    "type": "CommandReceipt",
+    "json": "{\"version\":1,\"id\":\"cmd_11\",\"profileId\":\"profile_main\",\"operation\":\"answer\",\"requiredScopes\":[\"control\"],\"resource\":\"/v1/runs/run_21/control\",\"state\":\"effect-observed\",\"acceptedAt\":\"2026-09-03T00:00:00Z\",\"dispatchAttemptedAt\":\"2026-09-03T00:00:00Z\",\"acknowledgement\":null,\"effect\":{\"kind\":\"answer-accepted\",\"runtimeSequence\":\"18446744073709551615\",\"address\":{\"occurrenceId\":\"0\"},\"resource\":\"/v1/runs/run_21/control\"},\"refusal\":null,\"links\":{\"self\":\"/v1/commands/cmd_11\",\"resource\":\"/v1/runs/run_21/control\"}}",
+    "projection": "{\"version\":1,\"id\":\"cmd_11\",\"profileId\":\"profile_main\",\"operation\":\"answer\",\"requiredScopes\":[\"control\"],\"resource\":\"/v1/runs/run_21/control\",\"state\":\"effect-observed\",\"acceptedAt\":\"2026-09-03T00:00:00Z\",\"dispatchAttemptedAt\":\"2026-09-03T00:00:00Z\",\"acknowledgement\":null,\"effect\":{\"kind\":\"answer-accepted\",\"runtimeSequence\":\"18446744073709551615\",\"address\":{\"occurrenceId\":\"0\"},\"resource\":\"/v1/runs/run_21/control\"},\"refusal\":null,\"links\":{\"self\":\"/v1/commands/cmd_11\",\"resource\":\"/v1/runs/run_21/control\"}}"
+   },
+   {
+    "name": "effect-observed input-changed receipt",
+    "type": "CommandReceipt",
+    "json": "{\"version\":1,\"id\":\"cmd_11\",\"profileId\":\"profile_main\",\"operation\":\"set-input\",\"requiredScopes\":[\"submit\"],\"resource\":\"/v1/requests/req_8\",\"state\":\"effect-observed\",\"acceptedAt\":\"2026-09-03T00:00:00Z\",\"dispatchAttemptedAt\":\"2026-09-03T00:00:00Z\",\"acknowledgement\":null,\"effect\":{\"kind\":\"input-changed\",\"runtimeSequence\":null,\"address\":null,\"resource\":\"/v1/requests/req_8\"},\"refusal\":null,\"links\":{\"self\":\"/v1/commands/cmd_11\",\"resource\":\"/v1/requests/req_8\"}}",
+    "projection": "{\"version\":1,\"id\":\"cmd_11\",\"profileId\":\"profile_main\",\"operation\":\"set-input\",\"requiredScopes\":[\"submit\"],\"resource\":\"/v1/requests/req_8\",\"state\":\"effect-observed\",\"acceptedAt\":\"2026-09-03T00:00:00Z\",\"dispatchAttemptedAt\":\"2026-09-03T00:00:00Z\",\"acknowledgement\":null,\"effect\":{\"kind\":\"input-changed\",\"runtimeSequence\":null,\"address\":null,\"resource\":\"/v1/requests/req_8\"},\"refusal\":null,\"links\":{\"self\":\"/v1/commands/cmd_11\",\"resource\":\"/v1/requests/req_8\"}}"
+   },
+   {
+    "name": "effect-observed enqueued receipt",
+    "type": "CommandReceipt",
+    "json": "{\"version\":1,\"id\":\"cmd_11\",\"profileId\":\"profile_main\",\"operation\":\"enqueue\",\"requiredScopes\":[\"submit\"],\"resource\":\"/v1/requests/req_8\",\"state\":\"effect-observed\",\"acceptedAt\":\"2026-09-03T00:00:00Z\",\"dispatchAttemptedAt\":\"2026-09-03T00:00:00Z\",\"acknowledgement\":null,\"effect\":{\"kind\":\"enqueued\",\"runtimeSequence\":null,\"address\":null,\"resource\":\"/v1/requests/req_8\"},\"refusal\":null,\"links\":{\"self\":\"/v1/commands/cmd_11\",\"resource\":\"/v1/requests/req_8\"}}",
+    "projection": "{\"version\":1,\"id\":\"cmd_11\",\"profileId\":\"profile_main\",\"operation\":\"enqueue\",\"requiredScopes\":[\"submit\"],\"resource\":\"/v1/requests/req_8\",\"state\":\"effect-observed\",\"acceptedAt\":\"2026-09-03T00:00:00Z\",\"dispatchAttemptedAt\":\"2026-09-03T00:00:00Z\",\"acknowledgement\":null,\"effect\":{\"kind\":\"enqueued\",\"runtimeSequence\":null,\"address\":null,\"resource\":\"/v1/requests/req_8\"},\"refusal\":null,\"links\":{\"self\":\"/v1/commands/cmd_11\",\"resource\":\"/v1/requests/req_8\"}}"
+   },
+   {
+    "name": "effect-observed withdrawn receipt",
+    "type": "CommandReceipt",
+    "json": "{\"version\":1,\"id\":\"cmd_11\",\"profileId\":\"profile_main\",\"operation\":\"withdraw\",\"requiredScopes\":[\"submit\"],\"resource\":\"/v1/requests/req_8\",\"state\":\"effect-observed\",\"acceptedAt\":\"2026-09-03T00:00:00Z\",\"dispatchAttemptedAt\":\"2026-09-03T00:00:00Z\",\"acknowledgement\":null,\"effect\":{\"kind\":\"withdrawn\",\"runtimeSequence\":null,\"address\":null,\"resource\":\"/v1/requests/req_8\"},\"refusal\":null,\"links\":{\"self\":\"/v1/commands/cmd_11\",\"resource\":\"/v1/requests/req_8\"}}",
+    "projection": "{\"version\":1,\"id\":\"cmd_11\",\"profileId\":\"profile_main\",\"operation\":\"withdraw\",\"requiredScopes\":[\"submit\"],\"resource\":\"/v1/requests/req_8\",\"state\":\"effect-observed\",\"acceptedAt\":\"2026-09-03T00:00:00Z\",\"dispatchAttemptedAt\":\"2026-09-03T00:00:00Z\",\"acknowledgement\":null,\"effect\":{\"kind\":\"withdrawn\",\"runtimeSequence\":null,\"address\":null,\"resource\":\"/v1/requests/req_8\"},\"refusal\":null,\"links\":{\"self\":\"/v1/commands/cmd_11\",\"resource\":\"/v1/requests/req_8\"}}"
+   },
+   {
+    "name": "effect-observed discarded receipt",
+    "type": "CommandReceipt",
+    "json": "{\"version\":1,\"id\":\"cmd_11\",\"profileId\":\"profile_main\",\"operation\":\"discard\",\"requiredScopes\":[\"submit\",\"control\"],\"resource\":\"/v1/preparations/prep_9\",\"state\":\"effect-observed\",\"acceptedAt\":\"2026-09-03T00:00:00Z\",\"dispatchAttemptedAt\":\"2026-09-03T00:00:00Z\",\"acknowledgement\":null,\"effect\":{\"kind\":\"discarded\",\"runtimeSequence\":null,\"address\":null,\"resource\":\"/v1/requests/req_8\"},\"refusal\":null,\"links\":{\"self\":\"/v1/commands/cmd_11\",\"resource\":\"/v1/preparations/prep_9\"}}",
+    "projection": "{\"version\":1,\"id\":\"cmd_11\",\"profileId\":\"profile_main\",\"operation\":\"discard\",\"requiredScopes\":[\"submit\",\"control\"],\"resource\":\"/v1/preparations/prep_9\",\"state\":\"effect-observed\",\"acceptedAt\":\"2026-09-03T00:00:00Z\",\"dispatchAttemptedAt\":\"2026-09-03T00:00:00Z\",\"acknowledgement\":null,\"effect\":{\"kind\":\"discarded\",\"runtimeSequence\":null,\"address\":null,\"resource\":\"/v1/requests/req_8\"},\"refusal\":null,\"links\":{\"self\":\"/v1/commands/cmd_11\",\"resource\":\"/v1/preparations/prep_9\"}}"
+   },
+   {
+    "name": "effect-observed exported receipt",
+    "type": "CommandReceipt",
+    "json": "{\"version\":1,\"id\":\"cmd_11\",\"profileId\":\"profile_main\",\"operation\":\"export\",\"requiredScopes\":[\"observe\",\"export\"],\"resource\":\"/v1/runs/run_21/exports\",\"state\":\"effect-observed\",\"acceptedAt\":\"2026-09-03T00:00:00Z\",\"dispatchAttemptedAt\":\"2026-09-03T00:00:00Z\",\"acknowledgement\":null,\"effect\":{\"kind\":\"exported\",\"runtimeSequence\":null,\"address\":null,\"resource\":\"/v1/exports/export_cmd_11\"},\"refusal\":null,\"links\":{\"self\":\"/v1/commands/cmd_11\",\"resource\":\"/v1/runs/run_21/exports\"}}",
+    "projection": "{\"version\":1,\"id\":\"cmd_11\",\"profileId\":\"profile_main\",\"operation\":\"export\",\"requiredScopes\":[\"observe\",\"export\"],\"resource\":\"/v1/runs/run_21/exports\",\"state\":\"effect-observed\",\"acceptedAt\":\"2026-09-03T00:00:00Z\",\"dispatchAttemptedAt\":\"2026-09-03T00:00:00Z\",\"acknowledgement\":null,\"effect\":{\"kind\":\"exported\",\"runtimeSequence\":null,\"address\":null,\"resource\":\"/v1/exports/export_cmd_11\"},\"refusal\":null,\"links\":{\"self\":\"/v1/commands/cmd_11\",\"resource\":\"/v1/runs/run_21/exports\"}}"
+   },
+   {
+    "name": "effect-observed lineage-created receipt",
+    "type": "CommandReceipt",
+    "json": "{\"version\":1,\"id\":\"cmd_11\",\"profileId\":\"profile_main\",\"operation\":\"fork\",\"requiredScopes\":[\"observe\",\"submit\"],\"resource\":\"/v1/runs/run_21/lineage-requests\",\"state\":\"effect-observed\",\"acceptedAt\":\"2026-09-03T00:00:00Z\",\"dispatchAttemptedAt\":\"2026-09-03T00:00:00Z\",\"acknowledgement\":null,\"effect\":{\"kind\":\"lineage-created\",\"runtimeSequence\":null,\"address\":null,\"resource\":\"/v1/requests/req_9\"},\"refusal\":null,\"links\":{\"self\":\"/v1/commands/cmd_11\",\"resource\":\"/v1/runs/run_21/lineage-requests\"}}",
+    "projection": "{\"version\":1,\"id\":\"cmd_11\",\"profileId\":\"profile_main\",\"operation\":\"fork\",\"requiredScopes\":[\"observe\",\"submit\"],\"resource\":\"/v1/runs/run_21/lineage-requests\",\"state\":\"effect-observed\",\"acceptedAt\":\"2026-09-03T00:00:00Z\",\"dispatchAttemptedAt\":\"2026-09-03T00:00:00Z\",\"acknowledgement\":null,\"effect\":{\"kind\":\"lineage-created\",\"runtimeSequence\":null,\"address\":null,\"resource\":\"/v1/requests/req_9\"},\"refusal\":null,\"links\":{\"self\":\"/v1/commands/cmd_11\",\"resource\":\"/v1/runs/run_21/lineage-requests\"}}"
+   },
+   {
+    "name": "acknowledged receipt with an effect refuses",
+    "type": "CommandReceipt",
+    "json": "{\"version\":1,\"id\":\"cmd_11\",\"profileId\":\"profile_main\",\"operation\":\"steer\",\"requiredScopes\":[\"control\"],\"resource\":\"/v1/runs/run_21/control\",\"state\":\"acknowledged\",\"acceptedAt\":\"2026-09-03T00:00:00Z\",\"dispatchAttemptedAt\":\"2026-09-03T00:00:00Z\",\"acknowledgement\":null,\"effect\":{\"kind\":\"steered\",\"runtimeSequence\":\"1\",\"address\":{\"occurrenceId\":\"1\",\"attemptId\":\"0\"},\"resource\":\"/v1/runs/run_21/snapshot\"},\"refusal\":null,\"links\":{\"self\":\"/v1/commands/cmd_11\",\"resource\":\"/v1/runs/run_21/control\"}}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "accepted receipt with an attempt refuses",
+    "type": "CommandReceipt",
+    "json": "{\"version\":1,\"id\":\"cmd_11\",\"profileId\":\"profile_main\",\"operation\":\"create\",\"requiredScopes\":[\"submit\"],\"resource\":\"/v1/requests\",\"state\":\"accepted\",\"acceptedAt\":\"2026-09-03T00:00:00Z\",\"dispatchAttemptedAt\":\"2026-09-03T00:00:00Z\",\"acknowledgement\":null,\"effect\":null,\"refusal\":null,\"links\":{\"self\":\"/v1/commands/cmd_11\",\"resource\":\"/v1/requests\"}}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "refused receipt without refusal refuses",
+    "type": "CommandReceipt",
+    "json": "{\"version\":1,\"id\":\"cmd_11\",\"profileId\":\"profile_main\",\"operation\":\"answer\",\"requiredScopes\":[\"control\"],\"resource\":\"/v1/runs/run_21/control\",\"state\":\"refused\",\"acceptedAt\":\"2026-09-03T00:00:00Z\",\"dispatchAttemptedAt\":\"2026-09-03T00:00:00Z\",\"acknowledgement\":null,\"effect\":null,\"refusal\":null,\"links\":{\"self\":\"/v1/commands/cmd_11\",\"resource\":\"/v1/runs/run_21/control\"}}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "unknown refusal code refuses",
+    "type": "CommandReceipt",
+    "json": "{\"version\":1,\"id\":\"cmd_11\",\"profileId\":\"profile_main\",\"operation\":\"answer\",\"requiredScopes\":[\"control\"],\"resource\":\"/v1/runs/run_21/control\",\"state\":\"refused\",\"acceptedAt\":\"2026-09-03T00:00:00Z\",\"dispatchAttemptedAt\":null,\"acknowledgement\":null,\"effect\":null,\"refusal\":\"secret\",\"links\":{\"self\":\"/v1/commands/cmd_11\",\"resource\":\"/v1/runs/run_21/control\"}}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "scopes of another operation refuse",
+    "type": "CommandReceipt",
+    "json": "{\"version\":1,\"id\":\"cmd_11\",\"profileId\":\"profile_main\",\"operation\":\"steer\",\"requiredScopes\":[\"submit\"],\"resource\":\"/v1/runs/run_21/control\",\"state\":\"effect-observed\",\"acceptedAt\":\"2026-09-03T00:00:00Z\",\"dispatchAttemptedAt\":\"2026-09-03T00:00:00Z\",\"acknowledgement\":null,\"effect\":{\"kind\":\"steered\",\"runtimeSequence\":\"1\",\"address\":{\"occurrenceId\":\"1\",\"attemptId\":\"0\"},\"resource\":\"/v1/runs/run_21/snapshot\"},\"refusal\":null,\"links\":{\"self\":\"/v1/commands/cmd_11\",\"resource\":\"/v1/runs/run_21/control\"}}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "self link of another command refuses",
+    "type": "CommandReceipt",
+    "json": "{\"version\":1,\"id\":\"cmd_11\",\"profileId\":\"profile_main\",\"operation\":\"steer\",\"requiredScopes\":[\"control\"],\"resource\":\"/v1/runs/run_21/control\",\"state\":\"effect-observed\",\"acceptedAt\":\"2026-09-03T00:00:00Z\",\"dispatchAttemptedAt\":\"2026-09-03T00:00:00Z\",\"acknowledgement\":null,\"effect\":{\"kind\":\"steered\",\"runtimeSequence\":\"1\",\"address\":{\"occurrenceId\":\"1\",\"attemptId\":\"0\"},\"resource\":\"/v1/runs/run_21/snapshot\"},\"refusal\":null,\"links\":{\"self\":\"/v1/commands/cmd_12\",\"resource\":\"/v1/runs/run_21/control\"}}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "runtime sequence at 2^64 refuses",
+    "type": "CommandReceipt",
+    "json": "{\"version\":1,\"id\":\"cmd_11\",\"profileId\":\"profile_main\",\"operation\":\"steer\",\"requiredScopes\":[\"control\"],\"resource\":\"/v1/runs/run_21/control\",\"state\":\"effect-observed\",\"acceptedAt\":\"2026-09-03T00:00:00Z\",\"dispatchAttemptedAt\":\"2026-09-03T00:00:00Z\",\"acknowledgement\":null,\"effect\":{\"kind\":\"steered\",\"runtimeSequence\":\"18446744073709551616\",\"address\":{\"occurrenceId\":\"1\",\"attemptId\":\"0\"},\"resource\":\"/v1/runs/run_21/snapshot\"},\"refusal\":null,\"links\":{\"self\":\"/v1/commands/cmd_11\",\"resource\":\"/v1/runs/run_21/control\"}}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "numeric runtime sequence refuses",
+    "type": "CommandReceipt",
+    "json": "{\"version\":1,\"id\":\"cmd_11\",\"profileId\":\"profile_main\",\"operation\":\"steer\",\"requiredScopes\":[\"control\"],\"resource\":\"/v1/runs/run_21/control\",\"state\":\"effect-observed\",\"acceptedAt\":\"2026-09-03T00:00:00Z\",\"dispatchAttemptedAt\":\"2026-09-03T00:00:00Z\",\"acknowledgement\":null,\"effect\":{\"kind\":\"steered\",\"runtimeSequence\":9007199254740993,\"address\":{\"occurrenceId\":\"1\",\"attemptId\":\"0\"},\"resource\":\"/v1/runs/run_21/snapshot\"},\"refusal\":null,\"links\":{\"self\":\"/v1/commands/cmd_11\",\"resource\":\"/v1/runs/run_21/control\"}}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "attempt beyond 32 bits refuses",
+    "type": "CommandReceipt",
+    "json": "{\"version\":1,\"id\":\"cmd_11\",\"profileId\":\"profile_main\",\"operation\":\"steer\",\"requiredScopes\":[\"control\"],\"resource\":\"/v1/runs/run_21/control\",\"state\":\"effect-observed\",\"acceptedAt\":\"2026-09-03T00:00:00Z\",\"dispatchAttemptedAt\":\"2026-09-03T00:00:00Z\",\"acknowledgement\":null,\"effect\":{\"kind\":\"steered\",\"runtimeSequence\":\"1\",\"address\":{\"occurrenceId\":\"1\",\"attemptId\":\"4294967296\"},\"resource\":\"/v1/runs/run_21/snapshot\"},\"refusal\":null,\"links\":{\"self\":\"/v1/commands/cmd_11\",\"resource\":\"/v1/runs/run_21/control\"}}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "unknown effect kind refuses",
+    "type": "CommandReceipt",
+    "json": "{\"version\":1,\"id\":\"cmd_11\",\"profileId\":\"profile_main\",\"operation\":\"steer\",\"requiredScopes\":[\"control\"],\"resource\":\"/v1/runs/run_21/control\",\"state\":\"effect-observed\",\"acceptedAt\":\"2026-09-03T00:00:00Z\",\"dispatchAttemptedAt\":\"2026-09-03T00:00:00Z\",\"acknowledgement\":null,\"effect\":{\"kind\":\"paused\",\"runtimeSequence\":\"1\",\"address\":{\"occurrenceId\":\"1\",\"attemptId\":\"0\"},\"resource\":\"/v1/runs/run_21/snapshot\"},\"refusal\":null,\"links\":{\"self\":\"/v1/commands/cmd_11\",\"resource\":\"/v1/runs/run_21/control\"}}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "non-ASCII effect resource refuses",
+    "type": "CommandReceipt",
+    "json": "{\"version\":1,\"id\":\"cmd_11\",\"profileId\":\"profile_main\",\"operation\":\"steer\",\"requiredScopes\":[\"control\"],\"resource\":\"/v1/runs/run_21/control\",\"state\":\"effect-observed\",\"acceptedAt\":\"2026-09-03T00:00:00Z\",\"dispatchAttemptedAt\":\"2026-09-03T00:00:00Z\",\"acknowledgement\":null,\"effect\":{\"kind\":\"steered\",\"runtimeSequence\":\"1\",\"address\":{\"occurrenceId\":\"1\",\"attemptId\":\"0\"},\"resource\":\"/v1/runs/雪\"},\"refusal\":null,\"links\":{\"self\":\"/v1/commands/cmd_11\",\"resource\":\"/v1/runs/run_21/control\"}}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "answer acknowledgement with an attempt refuses",
+    "type": "CommandReceipt",
+    "json": "{\"version\":1,\"id\":\"cmd_11\",\"profileId\":\"profile_main\",\"operation\":\"answer\",\"requiredScopes\":[\"control\"],\"resource\":\"/v1/runs/run_21/control\",\"state\":\"acknowledged\",\"acceptedAt\":\"2026-09-03T00:00:00Z\",\"dispatchAttemptedAt\":\"2026-09-03T00:00:00Z\",\"acknowledgement\":{\"commandId\":\"cmd_11\",\"state\":\"delivered\",\"message\":\"Delivered by native runtime.\",\"command\":\"answer\",\"occurrenceId\":\"0\",\"attemptId\":\"1\"},\"effect\":null,\"refusal\":null,\"links\":{\"self\":\"/v1/commands/cmd_11\",\"resource\":\"/v1/runs/run_21/control\"}}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "unknown operation refuses",
+    "type": "CommandReceipt",
+    "json": "{\"version\":1,\"id\":\"cmd_11\",\"profileId\":\"profile_main\",\"operation\":\"pause\",\"requiredScopes\":[\"control\"],\"resource\":\"/v1/runs/run_21/control\",\"state\":\"accepted\",\"acceptedAt\":\"2026-09-03T00:00:00Z\",\"dispatchAttemptedAt\":null,\"acknowledgement\":null,\"effect\":null,\"refusal\":null,\"links\":{\"self\":\"/v1/commands/cmd_11\",\"resource\":\"/v1/runs/run_21/control\"}}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "invalid acceptance time refuses",
+    "type": "CommandReceipt",
+    "json": "{\"version\":1,\"id\":\"cmd_11\",\"profileId\":\"profile_main\",\"operation\":\"steer\",\"requiredScopes\":[\"control\"],\"resource\":\"/v1/runs/run_21/control\",\"state\":\"effect-observed\",\"acceptedAt\":\"yesterday\",\"dispatchAttemptedAt\":\"2026-09-03T00:00:00Z\",\"acknowledgement\":null,\"effect\":{\"kind\":\"steered\",\"runtimeSequence\":\"1\",\"address\":{\"occurrenceId\":\"1\",\"attemptId\":\"0\"},\"resource\":\"/v1/runs/run_21/snapshot\"},\"refusal\":null,\"links\":{\"self\":\"/v1/commands/cmd_11\",\"resource\":\"/v1/runs/run_21/control\"}}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "extra receipt field refuses",
+    "type": "CommandReceipt",
+    "json": "{\"version\":1,\"id\":\"cmd_11\",\"profileId\":\"profile_main\",\"operation\":\"steer\",\"requiredScopes\":[\"control\"],\"resource\":\"/v1/runs/run_21/control\",\"state\":\"effect-observed\",\"acceptedAt\":\"2026-09-03T00:00:00Z\",\"dispatchAttemptedAt\":\"2026-09-03T00:00:00Z\",\"acknowledgement\":null,\"effect\":{\"kind\":\"steered\",\"runtimeSequence\":\"1\",\"address\":{\"occurrenceId\":\"1\",\"attemptId\":\"0\"},\"resource\":\"/v1/runs/run_21/snapshot\"},\"refusal\":null,\"links\":{\"self\":\"/v1/commands/cmd_11\",\"resource\":\"/v1/runs/run_21/control\"},\"requestBytes\":\"e30=\"}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "missing nullable refusal refuses",
+    "type": "CommandReceipt",
+    "json": "{\"version\":1,\"id\":\"cmd_11\",\"profileId\":\"profile_main\",\"operation\":\"steer\",\"requiredScopes\":[\"control\"],\"resource\":\"/v1/runs/run_21/control\",\"state\":\"effect-observed\",\"acceptedAt\":\"2026-09-03T00:00:00Z\",\"dispatchAttemptedAt\":\"2026-09-03T00:00:00Z\",\"acknowledgement\":null,\"effect\":{\"kind\":\"steered\",\"runtimeSequence\":\"1\",\"address\":{\"occurrenceId\":\"1\",\"attemptId\":\"0\"},\"resource\":\"/v1/runs/run_21/snapshot\"},\"links\":{\"self\":\"/v1/commands/cmd_11\",\"resource\":\"/v1/runs/run_21/control\"}}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "false acknowledgement refuses",
+    "type": "CommandReceipt",
+    "json": "{\"version\":1,\"id\":\"cmd_11\",\"profileId\":\"profile_main\",\"operation\":\"cancel\",\"requiredScopes\":[\"control\"],\"resource\":\"/v1/runs/run_21/control\",\"state\":\"acknowledged\",\"acceptedAt\":\"2026-09-03T00:00:00Z\",\"dispatchAttemptedAt\":\"2026-09-03T00:00:00Z\",\"acknowledgement\":false,\"effect\":null,\"refusal\":null,\"links\":{\"self\":\"/v1/commands/cmd_11\",\"resource\":\"/v1/runs/run_21/control\"}}",
+    "refusal": "InvalidResponse"
+   }
+  ],
+  "decisions": [
+   {
+    "name": "flag question keeps null scope and Unicode prompt",
+    "from": "item",
+    "json": "{\"version\":1,\"id\":\"decision_3\",\"revision\":\"decisionrev_1\",\"runId\":\"run_21\",\"profileId\":\"profile_main\",\"generation\":\"generation_3\",\"address\":{\"occurrenceId\":\"0\"},\"state\":\"pending\",\"position\":0,\"observedSequence\":\"9007199254740994\",\"queue\":\"/v1/decisions?runId=run_21\",\"kind\":\"question\",\"question\":{\"code\":\"flag\",\"semanticSchema\":\"boolean\",\"editorSchema\":null,\"addressee\":\"person owner\",\"scope\":{\"model\":null,\"mode\":null},\"draw\":\"0\",\"prompt\":\"Proceed with 雪😀?\"}}",
+    "projection": "{\"id\":\"decision_3\",\"revision\":\"decisionrev_1\",\"runId\":\"run_21\",\"profileId\":\"profile_main\",\"generation\":\"generation_3\",\"occurrenceId\":\"0\",\"state\":\"pending\",\"position\":0,\"observedSequence\":\"9007199254740994\",\"content\":{\"kind\":\"question\",\"code\":\"flag\",\"prompt\":\"Proceed with 雪😀?\"}}"
+   },
+   {
+    "name": "structured question keeps its schema code, false and null",
+    "from": "item",
+    "json": "{\"version\":1,\"id\":\"decision_3\",\"revision\":\"decisionrev_1\",\"runId\":\"run_21\",\"profileId\":\"profile_main\",\"generation\":\"generation_3\",\"address\":{\"occurrenceId\":\"0\"},\"state\":\"pending\",\"position\":0,\"observedSequence\":\"9007199254740994\",\"queue\":\"/v1/decisions?runId=run_21\",\"kind\":\"question\",\"question\":{\"code\":{\"json\":{\"schema\":{\"property\":{\"name\":\"ok\",\"schema\":\"boolean\",\"rest\":\"object\"}}}},\"semanticSchema\":{\"property\":{\"name\":\"ok\",\"schema\":\"boolean\",\"rest\":\"object\"}},\"editorSchema\":{\"type\":\"object\",\"properties\":{\"ok\":{\"type\":\"boolean\"}},\"required\":[\"ok\"],\"additionalProperties\":false},\"addressee\":\"person 雪\",\"scope\":{\"model\":\"deep\",\"mode\":null},\"draw\":\"184467440737095516160\",\"prompt\":\"Answer\\u0000 雪😀\"}}",
+    "projection": "{\"id\":\"decision_3\",\"revision\":\"decisionrev_1\",\"runId\":\"run_21\",\"profileId\":\"profile_main\",\"generation\":\"generation_3\",\"occurrenceId\":\"0\",\"state\":\"pending\",\"position\":0,\"observedSequence\":\"9007199254740994\",\"content\":{\"kind\":\"question\",\"code\":{\"json\":{\"schema\":{\"property\":{\"name\":\"ok\",\"schema\":\"boolean\",\"rest\":\"object\"}}}},\"prompt\":\"Answer\\u0000 雪😀\"}}"
+   },
+   {
+    "name": "recovery decision keeps null and named targets",
+    "from": "item",
+    "json": "{\"version\":1,\"id\":\"decision_3\",\"revision\":\"decisionrev_1\",\"runId\":\"run_21\",\"profileId\":\"profile_main\",\"generation\":\"generation_3\",\"address\":{\"occurrenceId\":\"0\"},\"state\":\"pending\",\"position\":0,\"observedSequence\":\"9007199254740994\",\"queue\":\"/v1/decisions?runId=run_21\",\"kind\":\"recovery\",\"gap\":\"transport\",\"message\":\"Recovery needs an operator choice.\",\"choices\":[{\"choice\":\"retry\",\"target\":null},{\"choice\":\"failover\",\"target\":\"scripted-backup\"},{\"choice\":\"abandon\",\"target\":null}]}",
+    "projection": "{\"id\":\"decision_3\",\"revision\":\"decisionrev_1\",\"runId\":\"run_21\",\"profileId\":\"profile_main\",\"generation\":\"generation_3\",\"occurrenceId\":\"0\",\"state\":\"pending\",\"position\":0,\"observedSequence\":\"9007199254740994\",\"content\":{\"kind\":\"recovery\",\"gap\":\"transport\",\"message\":\"Recovery needs an operator choice.\",\"choices\":[{\"choice\":\"retry\",\"target\":null},{\"choice\":\"failover\",\"target\":\"scripted-backup\"},{\"choice\":\"abandon\",\"target\":null}]}}"
+   },
+   {
+    "name": "occurrence and sequence at 2^64-1 stay exact",
+    "from": "item",
+    "json": "{\"version\":1,\"id\":\"decision_3\",\"revision\":\"decisionrev_1\",\"runId\":\"run_21\",\"profileId\":\"profile_main\",\"generation\":\"generation_3\",\"address\":{\"occurrenceId\":\"18446744073709551615\"},\"state\":\"pending\",\"position\":0,\"observedSequence\":\"18446744073709551615\",\"queue\":\"/v1/decisions?runId=run_21\",\"kind\":\"question\",\"question\":{\"code\":\"flag\",\"semanticSchema\":\"boolean\",\"editorSchema\":null,\"addressee\":\"person owner\",\"scope\":{\"model\":null,\"mode\":null},\"draw\":\"0\",\"prompt\":\"Proceed with 雪😀?\"}}",
+    "projection": "{\"id\":\"decision_3\",\"revision\":\"decisionrev_1\",\"runId\":\"run_21\",\"profileId\":\"profile_main\",\"generation\":\"generation_3\",\"occurrenceId\":\"18446744073709551615\",\"state\":\"pending\",\"position\":0,\"observedSequence\":\"18446744073709551615\",\"content\":{\"kind\":\"question\",\"code\":\"flag\",\"prompt\":\"Proceed with 雪😀?\"}}"
+   },
+   {
+    "name": "submitting decision behind the head",
+    "from": "item",
+    "json": "{\"version\":1,\"id\":\"decision_3\",\"revision\":\"decisionrev_1\",\"runId\":\"run_21\",\"profileId\":\"profile_main\",\"generation\":\"generation_3\",\"address\":{\"occurrenceId\":\"0\"},\"state\":\"submitting\",\"position\":3,\"observedSequence\":\"9007199254740994\",\"queue\":\"/v1/decisions?runId=run_21\",\"kind\":\"question\",\"question\":{\"code\":\"flag\",\"semanticSchema\":\"boolean\",\"editorSchema\":null,\"addressee\":\"person owner\",\"scope\":{\"model\":null,\"mode\":null},\"draw\":\"0\",\"prompt\":\"Proceed with 雪😀?\"}}",
+    "projection": "{\"id\":\"decision_3\",\"revision\":\"decisionrev_1\",\"runId\":\"run_21\",\"profileId\":\"profile_main\",\"generation\":\"generation_3\",\"occurrenceId\":\"0\",\"state\":\"submitting\",\"position\":3,\"observedSequence\":\"9007199254740994\",\"content\":{\"kind\":\"question\",\"code\":\"flag\",\"prompt\":\"Proceed with 雪😀?\"}}"
+   },
+   {
+    "name": "sequence at 2^64 refuses",
+    "from": "item",
+    "json": "{\"version\":1,\"id\":\"decision_3\",\"revision\":\"decisionrev_1\",\"runId\":\"run_21\",\"profileId\":\"profile_main\",\"generation\":\"generation_3\",\"address\":{\"occurrenceId\":\"0\"},\"state\":\"pending\",\"position\":0,\"observedSequence\":\"18446744073709551616\",\"queue\":\"/v1/decisions?runId=run_21\",\"kind\":\"question\",\"question\":{\"code\":\"flag\",\"semanticSchema\":\"boolean\",\"editorSchema\":null,\"addressee\":\"person owner\",\"scope\":{\"model\":null,\"mode\":null},\"draw\":\"0\",\"prompt\":\"Proceed with 雪😀?\"}}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "numeric sequence refuses",
+    "from": "item",
+    "json": "{\"version\":1,\"id\":\"decision_3\",\"revision\":\"decisionrev_1\",\"runId\":\"run_21\",\"profileId\":\"profile_main\",\"generation\":\"generation_3\",\"address\":{\"occurrenceId\":\"0\"},\"state\":\"pending\",\"position\":0,\"observedSequence\":9007199254740994,\"queue\":\"/v1/decisions?runId=run_21\",\"kind\":\"question\",\"question\":{\"code\":\"flag\",\"semanticSchema\":\"boolean\",\"editorSchema\":null,\"addressee\":\"person owner\",\"scope\":{\"model\":null,\"mode\":null},\"draw\":\"0\",\"prompt\":\"Proceed with 雪😀?\"}}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "position 2048 refuses",
+    "from": "item",
+    "json": "{\"version\":1,\"id\":\"decision_3\",\"revision\":\"decisionrev_1\",\"runId\":\"run_21\",\"profileId\":\"profile_main\",\"generation\":\"generation_3\",\"address\":{\"occurrenceId\":\"0\"},\"state\":\"pending\",\"position\":2048,\"observedSequence\":\"9007199254740994\",\"queue\":\"/v1/decisions?runId=run_21\",\"kind\":\"question\",\"question\":{\"code\":\"flag\",\"semanticSchema\":\"boolean\",\"editorSchema\":null,\"addressee\":\"person owner\",\"scope\":{\"model\":null,\"mode\":null},\"draw\":\"0\",\"prompt\":\"Proceed with 雪😀?\"}}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "queue of another run refuses",
+    "from": "item",
+    "json": "{\"version\":1,\"id\":\"decision_3\",\"revision\":\"decisionrev_1\",\"runId\":\"run_21\",\"profileId\":\"profile_main\",\"generation\":\"generation_3\",\"address\":{\"occurrenceId\":\"0\"},\"state\":\"pending\",\"position\":0,\"observedSequence\":\"9007199254740994\",\"queue\":\"/v1/decisions?runId=run_22\",\"kind\":\"question\",\"question\":{\"code\":\"flag\",\"semanticSchema\":\"boolean\",\"editorSchema\":null,\"addressee\":\"person owner\",\"scope\":{\"model\":null,\"mode\":null},\"draw\":\"0\",\"prompt\":\"Proceed with 雪😀?\"}}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "extra answer field refuses",
+    "from": "item",
+    "json": "{\"version\":1,\"id\":\"decision_3\",\"revision\":\"decisionrev_1\",\"runId\":\"run_21\",\"profileId\":\"profile_main\",\"generation\":\"generation_3\",\"address\":{\"occurrenceId\":\"0\"},\"state\":\"pending\",\"position\":0,\"observedSequence\":\"9007199254740994\",\"queue\":\"/v1/decisions?runId=run_21\",\"kind\":\"question\",\"question\":{\"code\":\"flag\",\"semanticSchema\":\"boolean\",\"editorSchema\":null,\"addressee\":\"person owner\",\"scope\":{\"model\":null,\"mode\":null},\"draw\":\"0\",\"prompt\":\"Proceed with 雪😀?\"},\"answer\":false}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "question without question body refuses",
+    "from": "item",
+    "json": "{\"version\":1,\"id\":\"decision_3\",\"revision\":\"decisionrev_1\",\"runId\":\"run_21\",\"profileId\":\"profile_main\",\"generation\":\"generation_3\",\"address\":{\"occurrenceId\":\"0\"},\"state\":\"pending\",\"position\":0,\"observedSequence\":\"9007199254740994\",\"queue\":\"/v1/decisions?runId=run_21\",\"kind\":\"question\"}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "recovery with a question body refuses",
+    "from": "item",
+    "json": "{\"version\":1,\"id\":\"decision_3\",\"revision\":\"decisionrev_1\",\"runId\":\"run_21\",\"profileId\":\"profile_main\",\"generation\":\"generation_3\",\"address\":{\"occurrenceId\":\"0\"},\"state\":\"pending\",\"position\":0,\"observedSequence\":\"9007199254740994\",\"queue\":\"/v1/decisions?runId=run_21\",\"kind\":\"recovery\",\"gap\":\"transport\",\"message\":\"Recovery needs an operator choice.\",\"choices\":[{\"choice\":\"retry\",\"target\":null},{\"choice\":\"failover\",\"target\":\"scripted-backup\"},{\"choice\":\"abandon\",\"target\":null}],\"question\":{\"code\":\"flag\",\"semanticSchema\":\"boolean\",\"editorSchema\":null,\"addressee\":\"person owner\",\"scope\":{\"model\":null,\"mode\":null},\"draw\":\"0\",\"prompt\":\"Proceed with 雪😀?\"}}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "missing null scope model refuses",
+    "from": "item",
+    "json": "{\"version\":1,\"id\":\"decision_3\",\"revision\":\"decisionrev_1\",\"runId\":\"run_21\",\"profileId\":\"profile_main\",\"generation\":\"generation_3\",\"address\":{\"occurrenceId\":\"0\"},\"state\":\"pending\",\"position\":0,\"observedSequence\":\"9007199254740994\",\"queue\":\"/v1/decisions?runId=run_21\",\"kind\":\"question\",\"question\":{\"code\":\"flag\",\"semanticSchema\":\"boolean\",\"editorSchema\":null,\"addressee\":\"person owner\",\"scope\":{\"mode\":null},\"draw\":\"0\",\"prompt\":\"Proceed with 雪😀?\"}}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "native ack code refuses",
+    "from": "item",
+    "json": "{\"version\":1,\"id\":\"decision_3\",\"revision\":\"decisionrev_1\",\"runId\":\"run_21\",\"profileId\":\"profile_main\",\"generation\":\"generation_3\",\"address\":{\"occurrenceId\":\"0\"},\"state\":\"pending\",\"position\":0,\"observedSequence\":\"9007199254740994\",\"queue\":\"/v1/decisions?runId=run_21\",\"kind\":\"question\",\"question\":{\"code\":\"ack\",\"semanticSchema\":\"boolean\",\"editorSchema\":null,\"addressee\":\"person owner\",\"scope\":{\"model\":null,\"mode\":null},\"draw\":\"0\",\"prompt\":\"Proceed with 雪😀?\"}}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "schema code that disagrees with its semantic schema refuses",
+    "from": "item",
+    "json": "{\"version\":1,\"id\":\"decision_3\",\"revision\":\"decisionrev_1\",\"runId\":\"run_21\",\"profileId\":\"profile_main\",\"generation\":\"generation_3\",\"address\":{\"occurrenceId\":\"0\"},\"state\":\"pending\",\"position\":0,\"observedSequence\":\"9007199254740994\",\"queue\":\"/v1/decisions?runId=run_21\",\"kind\":\"question\",\"question\":{\"code\":{\"json\":{\"schema\":{\"property\":{\"name\":\"ok\",\"schema\":\"boolean\",\"rest\":\"object\"}}}},\"semanticSchema\":\"boolean\",\"editorSchema\":{\"type\":\"object\",\"properties\":{\"ok\":{\"type\":\"boolean\"}},\"required\":[\"ok\"],\"additionalProperties\":false},\"addressee\":\"person 雪\",\"scope\":{\"model\":\"deep\",\"mode\":null},\"draw\":\"184467440737095516160\",\"prompt\":\"Answer\\u0000 雪😀\"}}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "retry choice with a target refuses",
+    "from": "item",
+    "json": "{\"version\":1,\"id\":\"decision_3\",\"revision\":\"decisionrev_1\",\"runId\":\"run_21\",\"profileId\":\"profile_main\",\"generation\":\"generation_3\",\"address\":{\"occurrenceId\":\"0\"},\"state\":\"pending\",\"position\":0,\"observedSequence\":\"9007199254740994\",\"queue\":\"/v1/decisions?runId=run_21\",\"kind\":\"recovery\",\"gap\":\"transport\",\"message\":\"Recovery needs an operator choice.\",\"choices\":[{\"choice\":\"retry\",\"target\":\"backup\"},{\"choice\":\"failover\",\"target\":\"scripted-backup\"},{\"choice\":\"abandon\",\"target\":null}]}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "unknown decision state refuses",
+    "from": "item",
+    "json": "{\"version\":1,\"id\":\"decision_3\",\"revision\":\"decisionrev_1\",\"runId\":\"run_21\",\"profileId\":\"profile_main\",\"generation\":\"generation_3\",\"address\":{\"occurrenceId\":\"0\"},\"state\":\"answered\",\"position\":0,\"observedSequence\":\"9007199254740994\",\"queue\":\"/v1/decisions?runId=run_21\",\"kind\":\"question\",\"question\":{\"code\":\"flag\",\"semanticSchema\":\"boolean\",\"editorSchema\":null,\"addressee\":\"person owner\",\"scope\":{\"model\":null,\"mode\":null},\"draw\":\"0\",\"prompt\":\"Proceed with 雪😀?\"}}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "false generation refuses",
+    "from": "item",
+    "json": "{\"version\":1,\"id\":\"decision_3\",\"revision\":\"decisionrev_1\",\"runId\":\"run_21\",\"profileId\":\"profile_main\",\"generation\":false,\"address\":{\"occurrenceId\":\"0\"},\"state\":\"pending\",\"position\":0,\"observedSequence\":\"9007199254740994\",\"queue\":\"/v1/decisions?runId=run_21\",\"kind\":\"question\",\"question\":{\"code\":\"flag\",\"semanticSchema\":\"boolean\",\"editorSchema\":null,\"addressee\":\"person owner\",\"scope\":{\"model\":null,\"mode\":null},\"draw\":\"0\",\"prompt\":\"Proceed with 雪😀?\"}}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "overview decision member",
+    "from": "overview",
+    "json": "{\"kind\":\"decision\",\"decision\":{\"version\":1,\"id\":\"decision_3\",\"revision\":\"decisionrev_1\",\"runId\":\"run_21\",\"profileId\":\"profile_main\",\"generation\":\"generation_3\",\"address\":{\"occurrenceId\":\"0\"},\"state\":\"pending\",\"position\":0,\"observedSequence\":\"9007199254740994\",\"queue\":\"/v1/decisions?runId=run_21\",\"kind\":\"question\",\"question\":{\"code\":\"flag\",\"semanticSchema\":\"boolean\",\"editorSchema\":null,\"addressee\":\"person owner\",\"scope\":{\"model\":null,\"mode\":null},\"draw\":\"0\",\"prompt\":\"Proceed with 雪😀?\"}}}",
+    "projection": "{\"kind\":\"decision\",\"decision\":{\"id\":\"decision_3\",\"revision\":\"decisionrev_1\",\"runId\":\"run_21\",\"profileId\":\"profile_main\",\"generation\":\"generation_3\",\"occurrenceId\":\"0\",\"state\":\"pending\",\"position\":0,\"observedSequence\":\"9007199254740994\",\"content\":{\"kind\":\"question\",\"code\":\"flag\",\"prompt\":\"Proceed with 雪😀?\"}}}"
+   },
+   {
+    "name": "overview decision member with a request key refuses",
+    "from": "overview",
+    "json": "{\"kind\":\"decision\",\"request\":{\"version\":1,\"id\":\"decision_3\",\"revision\":\"decisionrev_1\",\"runId\":\"run_21\",\"profileId\":\"profile_main\",\"generation\":\"generation_3\",\"address\":{\"occurrenceId\":\"0\"},\"state\":\"pending\",\"position\":0,\"observedSequence\":\"9007199254740994\",\"queue\":\"/v1/decisions?runId=run_21\",\"kind\":\"question\",\"question\":{\"code\":\"flag\",\"semanticSchema\":\"boolean\",\"editorSchema\":null,\"addressee\":\"person owner\",\"scope\":{\"model\":null,\"mode\":null},\"draw\":\"0\",\"prompt\":\"Proceed with 雪😀?\"}}}",
+    "refusal": "InvalidResponse"
+   }
+  ],
+  "answers": [
+   {
+    "name": "flag no is false",
+    "decision": "{\"version\":1,\"id\":\"decision_3\",\"revision\":\"decisionrev_1\",\"runId\":\"run_21\",\"profileId\":\"profile_main\",\"generation\":\"generation_3\",\"address\":{\"occurrenceId\":\"0\"},\"state\":\"pending\",\"position\":0,\"observedSequence\":\"9007199254740994\",\"queue\":\"/v1/decisions?runId=run_21\",\"kind\":\"question\",\"question\":{\"code\":\"flag\",\"semanticSchema\":\"boolean\",\"editorSchema\":null,\"addressee\":\"person owner\",\"scope\":{\"model\":null,\"mode\":null},\"draw\":\"0\",\"prompt\":\"Proceed with 雪😀?\"}}",
+    "input": "no",
+    "projection": "{\"operation\":\"answer\",\"occurrenceId\":\"0\",\"generation\":\"generation_3\",\"value\":false}"
+   },
+   {
+    "name": "flag YES is true",
+    "decision": "{\"version\":1,\"id\":\"decision_3\",\"revision\":\"decisionrev_1\",\"runId\":\"run_21\",\"profileId\":\"profile_main\",\"generation\":\"generation_3\",\"address\":{\"occurrenceId\":\"0\"},\"state\":\"pending\",\"position\":0,\"observedSequence\":\"9007199254740994\",\"queue\":\"/v1/decisions?runId=run_21\",\"kind\":\"question\",\"question\":{\"code\":\"flag\",\"semanticSchema\":\"boolean\",\"editorSchema\":null,\"addressee\":\"person owner\",\"scope\":{\"model\":null,\"mode\":null},\"draw\":\"0\",\"prompt\":\"Proceed with 雪😀?\"}}",
+    "input": " YES ",
+    "projection": "{\"operation\":\"answer\",\"occurrenceId\":\"0\",\"generation\":\"generation_3\",\"value\":true}"
+   },
+   {
+    "name": "flag false at occurrence 2^64-1",
+    "decision": "{\"version\":1,\"id\":\"decision_3\",\"revision\":\"decisionrev_1\",\"runId\":\"run_21\",\"profileId\":\"profile_main\",\"generation\":\"generation_3\",\"address\":{\"occurrenceId\":\"18446744073709551615\"},\"state\":\"pending\",\"position\":0,\"observedSequence\":\"18446744073709551615\",\"queue\":\"/v1/decisions?runId=run_21\",\"kind\":\"question\",\"question\":{\"code\":\"flag\",\"semanticSchema\":\"boolean\",\"editorSchema\":null,\"addressee\":\"person owner\",\"scope\":{\"model\":null,\"mode\":null},\"draw\":\"0\",\"prompt\":\"Proceed with 雪😀?\"}}",
+    "input": "false",
+    "projection": "{\"operation\":\"answer\",\"occurrenceId\":\"18446744073709551615\",\"generation\":\"generation_3\",\"value\":false}"
+   },
+   {
+    "name": "flag maybe refuses",
+    "decision": "{\"version\":1,\"id\":\"decision_3\",\"revision\":\"decisionrev_1\",\"runId\":\"run_21\",\"profileId\":\"profile_main\",\"generation\":\"generation_3\",\"address\":{\"occurrenceId\":\"0\"},\"state\":\"pending\",\"position\":0,\"observedSequence\":\"9007199254740994\",\"queue\":\"/v1/decisions?runId=run_21\",\"kind\":\"question\",\"question\":{\"code\":\"flag\",\"semanticSchema\":\"boolean\",\"editorSchema\":null,\"addressee\":\"person owner\",\"scope\":{\"model\":null,\"mode\":null},\"draw\":\"0\",\"prompt\":\"Proceed with 雪😀?\"}}",
+    "input": "maybe",
+    "refusal": "InvalidAnswer"
+   },
+   {
+    "name": "empty receipt is null",
+    "decision": "{\"version\":1,\"id\":\"decision_3\",\"revision\":\"decisionrev_1\",\"runId\":\"run_21\",\"profileId\":\"profile_main\",\"generation\":\"generation_3\",\"address\":{\"occurrenceId\":\"0\"},\"state\":\"pending\",\"position\":0,\"observedSequence\":\"9007199254740994\",\"queue\":\"/v1/decisions?runId=run_21\",\"kind\":\"question\",\"question\":{\"code\":\"receipt\",\"semanticSchema\":null,\"editorSchema\":null,\"addressee\":\"person owner\",\"scope\":{\"model\":null,\"mode\":null},\"draw\":\"0\",\"prompt\":\"Proceed with 雪😀?\"}}",
+    "input": "",
+    "projection": "{\"operation\":\"answer\",\"occurrenceId\":\"0\",\"generation\":\"generation_3\",\"value\":null}"
+   },
+   {
+    "name": "blank receipt is null",
+    "decision": "{\"version\":1,\"id\":\"decision_3\",\"revision\":\"decisionrev_1\",\"runId\":\"run_21\",\"profileId\":\"profile_main\",\"generation\":\"generation_3\",\"address\":{\"occurrenceId\":\"0\"},\"state\":\"pending\",\"position\":0,\"observedSequence\":\"9007199254740994\",\"queue\":\"/v1/decisions?runId=run_21\",\"kind\":\"question\",\"question\":{\"code\":\"receipt\",\"semanticSchema\":null,\"editorSchema\":null,\"addressee\":\"person owner\",\"scope\":{\"model\":null,\"mode\":null},\"draw\":\"0\",\"prompt\":\"Proceed with 雪😀?\"}}",
+    "input": "  ",
+    "projection": "{\"operation\":\"answer\",\"occurrenceId\":\"0\",\"generation\":\"generation_3\",\"value\":null}"
+   },
+   {
+    "name": "receipt with text refuses",
+    "decision": "{\"version\":1,\"id\":\"decision_3\",\"revision\":\"decisionrev_1\",\"runId\":\"run_21\",\"profileId\":\"profile_main\",\"generation\":\"generation_3\",\"address\":{\"occurrenceId\":\"0\"},\"state\":\"pending\",\"position\":0,\"observedSequence\":\"9007199254740994\",\"queue\":\"/v1/decisions?runId=run_21\",\"kind\":\"question\",\"question\":{\"code\":\"receipt\",\"semanticSchema\":null,\"editorSchema\":null,\"addressee\":\"person owner\",\"scope\":{\"model\":null,\"mode\":null},\"draw\":\"0\",\"prompt\":\"Proceed with 雪😀?\"}}",
+    "input": "x",
+    "refusal": "InvalidAnswer"
+   },
+   {
+    "name": "empty text stays empty text",
+    "decision": "{\"version\":1,\"id\":\"decision_3\",\"revision\":\"decisionrev_1\",\"runId\":\"run_21\",\"profileId\":\"profile_main\",\"generation\":\"generation_3\",\"address\":{\"occurrenceId\":\"0\"},\"state\":\"pending\",\"position\":0,\"observedSequence\":\"9007199254740994\",\"queue\":\"/v1/decisions?runId=run_21\",\"kind\":\"question\",\"question\":{\"code\":\"text\",\"semanticSchema\":\"string\",\"editorSchema\":null,\"addressee\":\"person owner\",\"scope\":{\"model\":null,\"mode\":null},\"draw\":\"0\",\"prompt\":\"Proceed with 雪😀?\"}}",
+    "input": "",
+    "projection": "{\"operation\":\"answer\",\"occurrenceId\":\"0\",\"generation\":\"generation_3\",\"value\":\"\"}"
+   },
+   {
+    "name": "text keeps Unicode and newline",
+    "decision": "{\"version\":1,\"id\":\"decision_3\",\"revision\":\"decisionrev_1\",\"runId\":\"run_21\",\"profileId\":\"profile_main\",\"generation\":\"generation_3\",\"address\":{\"occurrenceId\":\"0\"},\"state\":\"pending\",\"position\":0,\"observedSequence\":\"9007199254740994\",\"queue\":\"/v1/decisions?runId=run_21\",\"kind\":\"question\",\"question\":{\"code\":\"text\",\"semanticSchema\":\"string\",\"editorSchema\":null,\"addressee\":\"person owner\",\"scope\":{\"model\":null,\"mode\":null},\"draw\":\"0\",\"prompt\":\"Proceed with 雪😀?\"}}",
+    "input": "雪😀\nline",
+    "projection": "{\"operation\":\"answer\",\"occurrenceId\":\"0\",\"generation\":\"generation_3\",\"value\":\"雪😀\\nline\"}"
+   },
+   {
+    "name": "verdict keeps false, null, Unicode and a number beyond 2^64",
+    "decision": "{\"version\":1,\"id\":\"decision_3\",\"revision\":\"decisionrev_1\",\"runId\":\"run_21\",\"profileId\":\"profile_main\",\"generation\":\"generation_3\",\"address\":{\"occurrenceId\":\"0\"},\"state\":\"pending\",\"position\":0,\"observedSequence\":\"9007199254740994\",\"queue\":\"/v1/decisions?runId=run_21\",\"kind\":\"question\",\"question\":{\"code\":\"verdict\",\"semanticSchema\":null,\"editorSchema\":null,\"addressee\":\"person owner\",\"scope\":{\"model\":null,\"mode\":null},\"draw\":\"0\",\"prompt\":\"Proceed with 雪😀?\"}}",
+    "input": "{\"verdict\":\"approve\",\"f\":false,\"z\":null,\"u\":\"雪\",\"n\":18446744073709551617}",
+    "projection": "{\"operation\":\"answer\",\"occurrenceId\":\"0\",\"generation\":\"generation_3\",\"value\":{\"verdict\":\"approve\",\"f\":false,\"z\":null,\"u\":\"雪\",\"n\":18446744073709551617}}"
+   },
+   {
+    "name": "verdict keeps a precise decimal",
+    "decision": "{\"version\":1,\"id\":\"decision_3\",\"revision\":\"decisionrev_1\",\"runId\":\"run_21\",\"profileId\":\"profile_main\",\"generation\":\"generation_3\",\"address\":{\"occurrenceId\":\"0\"},\"state\":\"pending\",\"position\":0,\"observedSequence\":\"9007199254740994\",\"queue\":\"/v1/decisions?runId=run_21\",\"kind\":\"question\",\"question\":{\"code\":\"verdict\",\"semanticSchema\":null,\"editorSchema\":null,\"addressee\":\"person owner\",\"scope\":{\"model\":null,\"mode\":null},\"draw\":\"0\",\"prompt\":\"Proceed with 雪😀?\"}}",
+    "input": "0.1000000000000000055511151231257827",
+    "projection": "{\"operation\":\"answer\",\"occurrenceId\":\"0\",\"generation\":\"generation_3\",\"value\":0.1000000000000000055511151231257827}"
+   },
+   {
+    "name": "verdict keeps an empty array",
+    "decision": "{\"version\":1,\"id\":\"decision_3\",\"revision\":\"decisionrev_1\",\"runId\":\"run_21\",\"profileId\":\"profile_main\",\"generation\":\"generation_3\",\"address\":{\"occurrenceId\":\"0\"},\"state\":\"pending\",\"position\":0,\"observedSequence\":\"9007199254740994\",\"queue\":\"/v1/decisions?runId=run_21\",\"kind\":\"question\",\"question\":{\"code\":\"verdict\",\"semanticSchema\":null,\"editorSchema\":null,\"addressee\":\"person owner\",\"scope\":{\"model\":null,\"mode\":null},\"draw\":\"0\",\"prompt\":\"Proceed with 雪😀?\"}}",
+    "input": "[]",
+    "projection": "{\"operation\":\"answer\",\"occurrenceId\":\"0\",\"generation\":\"generation_3\",\"value\":[]}"
+   },
+   {
+    "name": "verdict that is not JSON refuses",
+    "decision": "{\"version\":1,\"id\":\"decision_3\",\"revision\":\"decisionrev_1\",\"runId\":\"run_21\",\"profileId\":\"profile_main\",\"generation\":\"generation_3\",\"address\":{\"occurrenceId\":\"0\"},\"state\":\"pending\",\"position\":0,\"observedSequence\":\"9007199254740994\",\"queue\":\"/v1/decisions?runId=run_21\",\"kind\":\"question\",\"question\":{\"code\":\"verdict\",\"semanticSchema\":null,\"editorSchema\":null,\"addressee\":\"person owner\",\"scope\":{\"model\":null,\"mode\":null},\"draw\":\"0\",\"prompt\":\"Proceed with 雪😀?\"}}",
+    "input": "{bad",
+    "refusal": "InvalidAnswer"
+   },
+   {
+    "name": "structured question has no text editor",
+    "decision": "{\"version\":1,\"id\":\"decision_3\",\"revision\":\"decisionrev_1\",\"runId\":\"run_21\",\"profileId\":\"profile_main\",\"generation\":\"generation_3\",\"address\":{\"occurrenceId\":\"0\"},\"state\":\"pending\",\"position\":0,\"observedSequence\":\"9007199254740994\",\"queue\":\"/v1/decisions?runId=run_21\",\"kind\":\"question\",\"question\":{\"code\":{\"json\":{\"schema\":{\"property\":{\"name\":\"ok\",\"schema\":\"boolean\",\"rest\":\"object\"}}}},\"semanticSchema\":{\"property\":{\"name\":\"ok\",\"schema\":\"boolean\",\"rest\":\"object\"}},\"editorSchema\":{\"type\":\"object\",\"properties\":{\"ok\":{\"type\":\"boolean\"}},\"required\":[\"ok\"],\"additionalProperties\":false},\"addressee\":\"person 雪\",\"scope\":{\"model\":\"deep\",\"mode\":null},\"draw\":\"184467440737095516160\",\"prompt\":\"Answer\\u0000 雪😀\"}}",
+    "input": "{\"ok\":true}",
+    "refusal": "InvalidAnswer"
+   },
+   {
+    "name": "recovery decision takes no answer",
+    "decision": "{\"version\":1,\"id\":\"decision_3\",\"revision\":\"decisionrev_1\",\"runId\":\"run_21\",\"profileId\":\"profile_main\",\"generation\":\"generation_3\",\"address\":{\"occurrenceId\":\"0\"},\"state\":\"pending\",\"position\":0,\"observedSequence\":\"9007199254740994\",\"queue\":\"/v1/decisions?runId=run_21\",\"kind\":\"recovery\",\"gap\":\"transport\",\"message\":\"Recovery needs an operator choice.\",\"choices\":[{\"choice\":\"retry\",\"target\":null},{\"choice\":\"failover\",\"target\":\"scripted-backup\"},{\"choice\":\"abandon\",\"target\":null}]}",
+    "input": "retry",
+    "refusal": "InvalidAnswer"
+   }
+  ],
+  "controls": [
+   {
+    "name": "owned controls with an answer offer",
+    "json": "{\"version\":1,\"runId\":\"run_21\",\"revision\":\"controlrev_2\",\"supervision\":\"owned\",\"cancelAllowed\":true,\"offers\":[{\"operation\":\"answer\",\"address\":{\"occurrenceId\":\"0\"},\"generation\":\"generation_3\",\"timings\":[],\"choices\":[],\"targets\":[]}],\"decisionHeadId\":\"decision_3\"}",
+    "projection": "{\"runId\":\"run_21\",\"revision\":\"controlrev_2\",\"supervision\":\"owned\",\"cancelAllowed\":true,\"decisionHeadId\":\"decision_3\",\"offers\":[{\"operation\":\"answer\",\"occurrenceId\":\"0\",\"attemptId\":null,\"generation\":\"generation_3\",\"timings\":[],\"choices\":[],\"targets\":[]}]}"
+   },
+   {
+    "name": "steer, redirect, recovery and retry offers keep maximum addresses and Unicode targets",
+    "json": "{\"version\":1,\"runId\":\"run_21\",\"revision\":\"controlrev_2\",\"supervision\":\"owned\",\"cancelAllowed\":true,\"offers\":[{\"operation\":\"steer\",\"address\":{\"occurrenceId\":\"18446744073709551615\",\"attemptId\":\"4294967295\"},\"generation\":null,\"timings\":[\"interrupt-now\",\"next-boundary\"],\"choices\":[],\"targets\":[]},{\"operation\":\"redirect\",\"address\":{\"occurrenceId\":\"4\"},\"generation\":null,\"timings\":[],\"choices\":[],\"targets\":[\"agent 雪 [model:alt]\",\"\"]},{\"operation\":\"choose-recovery\",\"address\":{\"occurrenceId\":\"3\"},\"generation\":\"generation_4\",\"timings\":[],\"choices\":[{\"choice\":\"retry\",\"target\":null},{\"choice\":\"failover\",\"target\":\"backup\"}],\"targets\":[]},{\"operation\":\"retry\",\"address\":{\"occurrenceId\":\"3\"},\"generation\":\"generation_4\",\"timings\":[],\"choices\":[],\"targets\":[]}],\"decisionHeadId\":\"decision_3\"}",
+    "projection": "{\"runId\":\"run_21\",\"revision\":\"controlrev_2\",\"supervision\":\"owned\",\"cancelAllowed\":true,\"decisionHeadId\":\"decision_3\",\"offers\":[{\"operation\":\"steer\",\"occurrenceId\":\"18446744073709551615\",\"attemptId\":\"4294967295\",\"generation\":null,\"timings\":[\"interrupt-now\",\"next-boundary\"],\"choices\":[],\"targets\":[]},{\"operation\":\"redirect\",\"occurrenceId\":\"4\",\"attemptId\":null,\"generation\":null,\"timings\":[],\"choices\":[],\"targets\":[\"agent 雪 [model:alt]\",\"\"]},{\"operation\":\"choose-recovery\",\"occurrenceId\":\"3\",\"attemptId\":null,\"generation\":\"generation_4\",\"timings\":[],\"choices\":[{\"choice\":\"retry\",\"target\":null},{\"choice\":\"failover\",\"target\":\"backup\"}],\"targets\":[]},{\"operation\":\"retry\",\"occurrenceId\":\"3\",\"attemptId\":null,\"generation\":\"generation_4\",\"timings\":[],\"choices\":[],\"targets\":[]}]}"
+   },
+   {
+    "name": "lost controls keep false cancellation and a null head",
+    "json": "{\"version\":1,\"runId\":\"run_21\",\"revision\":\"controlrev_2\",\"supervision\":\"lost\",\"cancelAllowed\":false,\"offers\":[],\"decisionHeadId\":null}",
+    "projection": "{\"runId\":\"run_21\",\"revision\":\"controlrev_2\",\"supervision\":\"lost\",\"cancelAllowed\":false,\"decisionHeadId\":null,\"offers\":[]}"
+   },
+   {
+    "name": "null cancellation refuses",
+    "json": "{\"version\":1,\"runId\":\"run_21\",\"revision\":\"controlrev_2\",\"supervision\":\"owned\",\"cancelAllowed\":null,\"offers\":[{\"operation\":\"answer\",\"address\":{\"occurrenceId\":\"0\"},\"generation\":\"generation_3\",\"timings\":[],\"choices\":[],\"targets\":[]}],\"decisionHeadId\":\"decision_3\"}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "text cancellation refuses",
+    "json": "{\"version\":1,\"runId\":\"run_21\",\"revision\":\"controlrev_2\",\"supervision\":\"owned\",\"cancelAllowed\":\"false\",\"offers\":[{\"operation\":\"answer\",\"address\":{\"occurrenceId\":\"0\"},\"generation\":\"generation_3\",\"timings\":[],\"choices\":[],\"targets\":[]}],\"decisionHeadId\":\"decision_3\"}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "steer offer without attempt refuses",
+    "json": "{\"version\":1,\"runId\":\"run_21\",\"revision\":\"controlrev_2\",\"supervision\":\"owned\",\"cancelAllowed\":true,\"offers\":[{\"operation\":\"steer\",\"address\":{\"occurrenceId\":\"1\"},\"generation\":null,\"timings\":[\"interrupt-now\",\"next-boundary\"],\"choices\":[],\"targets\":[]}],\"decisionHeadId\":\"decision_3\"}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "answer offer with attempt refuses",
+    "json": "{\"version\":1,\"runId\":\"run_21\",\"revision\":\"controlrev_2\",\"supervision\":\"owned\",\"cancelAllowed\":true,\"offers\":[{\"operation\":\"answer\",\"address\":{\"occurrenceId\":\"0\",\"attemptId\":\"0\"},\"generation\":\"generation_3\",\"timings\":[],\"choices\":[],\"targets\":[]}],\"decisionHeadId\":\"decision_3\"}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "attempt beyond 32 bits refuses",
+    "json": "{\"version\":1,\"runId\":\"run_21\",\"revision\":\"controlrev_2\",\"supervision\":\"owned\",\"cancelAllowed\":true,\"offers\":[{\"operation\":\"steer\",\"address\":{\"occurrenceId\":\"18446744073709551615\",\"attemptId\":\"4294967296\"},\"generation\":null,\"timings\":[\"interrupt-now\",\"next-boundary\"],\"choices\":[],\"targets\":[]}],\"decisionHeadId\":\"decision_3\"}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "occurrence with a leading zero refuses",
+    "json": "{\"version\":1,\"runId\":\"run_21\",\"revision\":\"controlrev_2\",\"supervision\":\"owned\",\"cancelAllowed\":true,\"offers\":[{\"operation\":\"answer\",\"address\":{\"occurrenceId\":\"01\"},\"generation\":\"generation_3\",\"timings\":[],\"choices\":[],\"targets\":[]}],\"decisionHeadId\":\"decision_3\"}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "occurrence at 2^64 refuses",
+    "json": "{\"version\":1,\"runId\":\"run_21\",\"revision\":\"controlrev_2\",\"supervision\":\"owned\",\"cancelAllowed\":true,\"offers\":[{\"operation\":\"answer\",\"address\":{\"occurrenceId\":\"18446744073709551616\"},\"generation\":\"generation_3\",\"timings\":[],\"choices\":[],\"targets\":[]}],\"decisionHeadId\":\"decision_3\"}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "cancel is not an offer",
+    "json": "{\"version\":1,\"runId\":\"run_21\",\"revision\":\"controlrev_2\",\"supervision\":\"owned\",\"cancelAllowed\":true,\"offers\":[{\"operation\":\"cancel\",\"address\":{\"occurrenceId\":\"0\"},\"generation\":\"generation_3\",\"timings\":[],\"choices\":[],\"targets\":[]}],\"decisionHeadId\":\"decision_3\"}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "duplicate timings refuse",
+    "json": "{\"version\":1,\"runId\":\"run_21\",\"revision\":\"controlrev_2\",\"supervision\":\"owned\",\"cancelAllowed\":true,\"offers\":[{\"operation\":\"steer\",\"address\":{\"occurrenceId\":\"18446744073709551615\",\"attemptId\":\"4294967295\"},\"generation\":null,\"timings\":[\"next-boundary\",\"next-boundary\"],\"choices\":[],\"targets\":[]}],\"decisionHeadId\":\"decision_3\"}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "extra control field refuses",
+    "json": "{\"version\":1,\"runId\":\"run_21\",\"revision\":\"controlrev_2\",\"supervision\":\"owned\",\"cancelAllowed\":true,\"offers\":[{\"operation\":\"answer\",\"address\":{\"occurrenceId\":\"0\"},\"generation\":\"generation_3\",\"timings\":[],\"choices\":[],\"targets\":[]}],\"decisionHeadId\":\"decision_3\",\"pid\":7}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "missing null head refuses",
+    "json": "{\"version\":1,\"runId\":\"run_21\",\"revision\":\"controlrev_2\",\"supervision\":\"lost\",\"cancelAllowed\":false,\"offers\":[]}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "unknown supervision refuses",
+    "json": "{\"version\":1,\"runId\":\"run_21\",\"revision\":\"controlrev_2\",\"supervision\":\"zombie\",\"cancelAllowed\":true,\"offers\":[{\"operation\":\"answer\",\"address\":{\"occurrenceId\":\"0\"},\"generation\":\"generation_3\",\"timings\":[],\"choices\":[],\"targets\":[]}],\"decisionHeadId\":\"decision_3\"}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "unknown control version refuses",
+    "json": "{\"version\":2,\"runId\":\"run_21\",\"revision\":\"controlrev_2\",\"supervision\":\"owned\",\"cancelAllowed\":true,\"offers\":[{\"operation\":\"answer\",\"address\":{\"occurrenceId\":\"0\"},\"generation\":\"generation_3\",\"timings\":[],\"choices\":[],\"targets\":[]}],\"decisionHeadId\":\"decision_3\"}",
+    "refusal": "InvalidResponse"
+   }
+  ],
+  "requests": [
+   {
+    "name": "request collection item",
+    "from": "item",
+    "json": "{\"version\":1,\"id\":\"req_8\",\"revision\":\"request_rev_1\",\"workflowId\":\"wf_review\",\"descriptorRevision\":\"catalogue_17\",\"profileId\":\"profile_main\",\"profileRevision\":\"profile_rev_4\",\"phase\":\"draft\",\"readiness\":{\"declarations\":[{\"name\":\"subject\",\"source\":\"command-tail\",\"description\":null,\"required\":true,\"schema\":{\"type\":\"string\"}}],\"supplied\":[],\"missing\":[\"subject\"],\"errors\":[]},\"admission\":{\"state\":\"not-queued\",\"position\":null,\"reasons\":[\"missing-inputs\"]},\"preparationId\":null,\"runId\":null,\"parentRunId\":null,\"lineage\":null,\"links\":{\"self\":\"/v1/requests/req_8\"}}",
+    "projection": "{\"version\":1,\"id\":\"req_8\",\"revision\":\"request_rev_1\",\"workflowId\":\"wf_review\",\"descriptorRevision\":\"catalogue_17\",\"profileId\":\"profile_main\",\"profileRevision\":\"profile_rev_4\",\"phase\":\"draft\",\"readiness\":{\"declarations\":[{\"name\":\"subject\",\"source\":\"command-tail\",\"description\":null,\"required\":true,\"schema\":{\"type\":\"string\"}}],\"supplied\":[],\"missing\":[\"subject\"],\"errors\":[]},\"admission\":{\"state\":\"not-queued\",\"position\":null,\"reasons\":[\"missing-inputs\"]},\"preparationId\":null,\"runId\":null,\"parentRunId\":null,\"lineage\":null,\"links\":{\"self\":\"/v1/requests/req_8\"}}"
+   },
+   {
+    "name": "request collection item keeps literal Unicode and NUL text",
+    "from": "item",
+    "json": "{\"version\":1,\"id\":\"req_8\",\"revision\":\"request_rev_1\",\"workflowId\":\"wf_review\",\"descriptorRevision\":\"catalogue_17\",\"profileId\":\"profile_main\",\"profileRevision\":\"profile_rev_4\",\"phase\":\"review\",\"readiness\":{\"declarations\":[{\"name\":\"subject\",\"source\":\"command-tail\",\"description\":null,\"required\":true,\"schema\":{\"type\":\"string\"}},{\"name\":\"body\",\"source\":\"stdin\",\"description\":null,\"required\":true,\"schema\":{\"type\":\"string\"}}],\"supplied\":[{\"name\":\"subject\",\"source\":\"literal\",\"value\":\"雪😀 \\u0000 first line\\nsecond line\"},{\"name\":\"body\",\"source\":\"capture\",\"captureId\":\"capture_7\"}],\"missing\":[],\"errors\":[]},\"admission\":{\"state\":\"waiting\",\"position\":100,\"reasons\":[\"profile-busy\",\"capacity\"]},\"preparationId\":\"prep_9\",\"runId\":null,\"parentRunId\":null,\"lineage\":null,\"links\":{\"self\":\"/v1/requests/req_8\"}}",
+    "projection": "{\"version\":1,\"id\":\"req_8\",\"revision\":\"request_rev_1\",\"workflowId\":\"wf_review\",\"descriptorRevision\":\"catalogue_17\",\"profileId\":\"profile_main\",\"profileRevision\":\"profile_rev_4\",\"phase\":\"review\",\"readiness\":{\"declarations\":[{\"name\":\"subject\",\"source\":\"command-tail\",\"description\":null,\"required\":true,\"schema\":{\"type\":\"string\"}},{\"name\":\"body\",\"source\":\"stdin\",\"description\":null,\"required\":true,\"schema\":{\"type\":\"string\"}}],\"supplied\":[{\"name\":\"subject\",\"source\":\"literal\",\"value\":\"雪😀 \\u0000 first line\\nsecond line\"},{\"name\":\"body\",\"source\":\"capture\",\"captureId\":\"capture_7\"}],\"missing\":[],\"errors\":[]},\"admission\":{\"state\":\"waiting\",\"position\":100,\"reasons\":[\"profile-busy\",\"capacity\"]},\"preparationId\":\"prep_9\",\"runId\":null,\"parentRunId\":null,\"lineage\":null,\"links\":{\"self\":\"/v1/requests/req_8\"}}"
+   },
+   {
+    "name": "request item with an extra field refuses",
+    "from": "item",
+    "json": "{\"version\":1,\"id\":\"req_8\",\"revision\":\"request_rev_1\",\"workflowId\":\"wf_review\",\"descriptorRevision\":\"catalogue_17\",\"profileId\":\"profile_main\",\"profileRevision\":\"profile_rev_4\",\"phase\":\"draft\",\"readiness\":{\"declarations\":[{\"name\":\"subject\",\"source\":\"command-tail\",\"description\":null,\"required\":true,\"schema\":{\"type\":\"string\"}}],\"supplied\":[],\"missing\":[\"subject\"],\"errors\":[]},\"admission\":{\"state\":\"not-queued\",\"position\":null,\"reasons\":[\"missing-inputs\"]},\"preparationId\":null,\"runId\":null,\"parentRunId\":null,\"lineage\":null,\"links\":{\"self\":\"/v1/requests/req_8\"},\"worker\":null}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "request item with position beyond 2^53 refuses",
+    "from": "item",
+    "json": "{\"version\":1,\"id\":\"req_8\",\"revision\":\"request_rev_1\",\"workflowId\":\"wf_review\",\"descriptorRevision\":\"catalogue_17\",\"profileId\":\"profile_main\",\"profileRevision\":\"profile_rev_4\",\"phase\":\"draft\",\"readiness\":{\"declarations\":[{\"name\":\"subject\",\"source\":\"command-tail\",\"description\":null,\"required\":true,\"schema\":{\"type\":\"string\"}}],\"supplied\":[],\"missing\":[\"subject\"],\"errors\":[]},\"admission\":{\"state\":\"not-queued\",\"position\":9007199254740993,\"reasons\":[\"missing-inputs\"]},\"preparationId\":null,\"runId\":null,\"parentRunId\":null,\"lineage\":null,\"links\":{\"self\":\"/v1/requests/req_8\"}}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "overview request member",
+    "from": "overview",
+    "json": "{\"kind\":\"request\",\"request\":{\"version\":1,\"id\":\"req_8\",\"revision\":\"request_rev_1\",\"workflowId\":\"wf_review\",\"descriptorRevision\":\"catalogue_17\",\"profileId\":\"profile_main\",\"profileRevision\":\"profile_rev_4\",\"phase\":\"draft\",\"readiness\":{\"declarations\":[{\"name\":\"subject\",\"source\":\"command-tail\",\"description\":null,\"required\":true,\"schema\":{\"type\":\"string\"}}],\"supplied\":[],\"missing\":[\"subject\"],\"errors\":[]},\"admission\":{\"state\":\"not-queued\",\"position\":null,\"reasons\":[\"missing-inputs\"]},\"preparationId\":null,\"runId\":null,\"parentRunId\":null,\"lineage\":null,\"links\":{\"self\":\"/v1/requests/req_8\"}}}",
+    "projection": "{\"kind\":\"request\",\"request\":{\"version\":1,\"id\":\"req_8\",\"revision\":\"request_rev_1\",\"workflowId\":\"wf_review\",\"descriptorRevision\":\"catalogue_17\",\"profileId\":\"profile_main\",\"profileRevision\":\"profile_rev_4\",\"phase\":\"draft\",\"readiness\":{\"declarations\":[{\"name\":\"subject\",\"source\":\"command-tail\",\"description\":null,\"required\":true,\"schema\":{\"type\":\"string\"}}],\"supplied\":[],\"missing\":[\"subject\"],\"errors\":[]},\"admission\":{\"state\":\"not-queued\",\"position\":null,\"reasons\":[\"missing-inputs\"]},\"preparationId\":null,\"runId\":null,\"parentRunId\":null,\"lineage\":null,\"links\":{\"self\":\"/v1/requests/req_8\"}}}"
+   },
+   {
+    "name": "overview preparation member keeps false and null policy fields",
+    "from": "overview",
+    "json": "{\"kind\":\"preparation\",\"preparation\":{\"version\":1,\"id\":\"prep_9\",\"revision\":\"preprev_1\",\"requestId\":\"req_8\",\"requestRevision\":\"request_rev_2\",\"profileId\":\"profile_main\",\"profileRevision\":\"profile_rev_4\",\"descriptorRevision\":\"catalogue_17\",\"state\":\"live\",\"expiresAt\":\"2026-09-03T00:10:00Z\",\"reviewDigest\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"processGeneration\":\"process_A\",\"review\":{\"programHash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"personAnswering\":\"local-control\",\"policy\":{\"kind\":\"routed\",\"default\":\"acp:reviewer\",\"routes\":[{\"name\":\"deep\",\"backend\":\"acp:reviewer\"}],\"pollMs\":null,\"timeoutMs\":120000,\"verbose\":false,\"realizations\":[{\"profile\":\"deep\",\"axis\":\"model\",\"rung\":0,\"backend\":\"acp:reviewer\",\"router\":\"review-router\",\"provider\":\"fixture-provider\",\"model\":\"fixture-model\",\"thinking\":\"high\",\"maxOutput\":4096,\"executionFingerprint\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"modelAlias\":\"deep\",\"engine\":\"acp\"}],\"routingVersion\":2,\"persona\":\"reviewer\",\"personaSource\":\"project\",\"policyDigest\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"},\"workflowId\":\"wf_review\",\"profileId\":\"profile_main\",\"workspaceLabel\":\"Review workspace\",\"targetLabel\":\"Deterministic worker\",\"inputs\":[{\"name\":\"subject\",\"source\":\"capture\",\"bytes\":\"10\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}],\"plan\":\"Review the supplied subject.\",\"runFacts\":[\"run.engine\"],\"pins\":[\"deep\"],\"warnings\":[],\"resultCode\":\"receipt\"},\"reason\":null}}",
+    "projection": "{\"kind\":\"preparation\",\"preparation\":{\"version\":1,\"id\":\"prep_9\",\"revision\":\"preprev_1\",\"requestId\":\"req_8\",\"requestRevision\":\"request_rev_2\",\"profileId\":\"profile_main\",\"profileRevision\":\"profile_rev_4\",\"descriptorRevision\":\"catalogue_17\",\"state\":\"live\",\"expiresAt\":\"2026-09-03T00:10:00Z\",\"reviewDigest\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"processGeneration\":\"process_A\",\"review\":{\"programHash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"personAnswering\":\"local-control\",\"policy\":{\"kind\":\"routed\",\"default\":\"acp:reviewer\",\"routes\":[{\"name\":\"deep\",\"backend\":\"acp:reviewer\"}],\"pollMs\":null,\"timeoutMs\":120000,\"verbose\":false,\"realizations\":[{\"profile\":\"deep\",\"axis\":\"model\",\"rung\":0,\"backend\":\"acp:reviewer\",\"router\":\"review-router\",\"provider\":\"fixture-provider\",\"model\":\"fixture-model\",\"thinking\":\"high\",\"maxOutput\":4096,\"executionFingerprint\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"modelAlias\":\"deep\",\"engine\":\"acp\"}],\"routingVersion\":2,\"persona\":\"reviewer\",\"personaSource\":\"project\",\"policyDigest\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"},\"workflowId\":\"wf_review\",\"profileId\":\"profile_main\",\"workspaceLabel\":\"Review workspace\",\"targetLabel\":\"Deterministic worker\",\"inputs\":[{\"name\":\"subject\",\"source\":\"capture\",\"bytes\":\"10\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}],\"plan\":\"Review the supplied subject.\",\"runFacts\":[\"run.engine\"],\"pins\":[\"deep\"],\"warnings\":[],\"resultCode\":\"receipt\"},\"reason\":null}}"
+   },
+   {
+    "name": "overview request member under the run key refuses",
+    "from": "overview",
+    "json": "{\"kind\":\"request\",\"run\":{\"version\":1,\"id\":\"req_8\",\"revision\":\"request_rev_1\",\"workflowId\":\"wf_review\",\"descriptorRevision\":\"catalogue_17\",\"profileId\":\"profile_main\",\"profileRevision\":\"profile_rev_4\",\"phase\":\"draft\",\"readiness\":{\"declarations\":[{\"name\":\"subject\",\"source\":\"command-tail\",\"description\":null,\"required\":true,\"schema\":{\"type\":\"string\"}}],\"supplied\":[],\"missing\":[\"subject\"],\"errors\":[]},\"admission\":{\"state\":\"not-queued\",\"position\":null,\"reasons\":[\"missing-inputs\"]},\"preparationId\":null,\"runId\":null,\"parentRunId\":null,\"lineage\":null,\"links\":{\"self\":\"/v1/requests/req_8\"}}}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "overview member with an extra key refuses",
+    "from": "overview",
+    "json": "{\"kind\":\"request\",\"request\":{\"version\":1,\"id\":\"req_8\",\"revision\":\"request_rev_1\",\"workflowId\":\"wf_review\",\"descriptorRevision\":\"catalogue_17\",\"profileId\":\"profile_main\",\"profileRevision\":\"profile_rev_4\",\"phase\":\"draft\",\"readiness\":{\"declarations\":[{\"name\":\"subject\",\"source\":\"command-tail\",\"description\":null,\"required\":true,\"schema\":{\"type\":\"string\"}}],\"supplied\":[],\"missing\":[\"subject\"],\"errors\":[]},\"admission\":{\"state\":\"not-queued\",\"position\":null,\"reasons\":[\"missing-inputs\"]},\"preparationId\":null,\"runId\":null,\"parentRunId\":null,\"lineage\":null,\"links\":{\"self\":\"/v1/requests/req_8\"}},\"run\":null}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "unknown overview kind refuses",
+    "from": "overview",
+    "json": "{\"kind\":\"draft\",\"draft\":{\"version\":1,\"id\":\"req_8\",\"revision\":\"request_rev_1\",\"workflowId\":\"wf_review\",\"descriptorRevision\":\"catalogue_17\",\"profileId\":\"profile_main\",\"profileRevision\":\"profile_rev_4\",\"phase\":\"draft\",\"readiness\":{\"declarations\":[{\"name\":\"subject\",\"source\":\"command-tail\",\"description\":null,\"required\":true,\"schema\":{\"type\":\"string\"}}],\"supplied\":[],\"missing\":[\"subject\"],\"errors\":[]},\"admission\":{\"state\":\"not-queued\",\"position\":null,\"reasons\":[\"missing-inputs\"]},\"preparationId\":null,\"runId\":null,\"parentRunId\":null,\"lineage\":null,\"links\":{\"self\":\"/v1/requests/req_8\"}}}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "overview member without kind refuses",
+    "from": "overview",
+    "json": "{\"request\":{\"version\":1,\"id\":\"req_8\",\"revision\":\"request_rev_1\",\"workflowId\":\"wf_review\",\"descriptorRevision\":\"catalogue_17\",\"profileId\":\"profile_main\",\"profileRevision\":\"profile_rev_4\",\"phase\":\"draft\",\"readiness\":{\"declarations\":[{\"name\":\"subject\",\"source\":\"command-tail\",\"description\":null,\"required\":true,\"schema\":{\"type\":\"string\"}}],\"supplied\":[],\"missing\":[\"subject\"],\"errors\":[]},\"admission\":{\"state\":\"not-queued\",\"position\":null,\"reasons\":[\"missing-inputs\"]},\"preparationId\":null,\"runId\":null,\"parentRunId\":null,\"lineage\":null,\"links\":{\"self\":\"/v1/requests/req_8\"}}}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "overview request member with an invalid request refuses",
+    "from": "overview",
+    "json": "{\"kind\":\"request\",\"request\":{\"version\":1,\"id\":\"req_8\",\"revision\":\"request_rev_1\",\"workflowId\":\"wf_review\",\"descriptorRevision\":\"catalogue_17\",\"profileId\":\"profile_main\",\"profileRevision\":\"profile_rev_4\",\"phase\":\"draft\",\"readiness\":{\"declarations\":[{\"name\":\"subject\",\"source\":\"command-tail\",\"description\":null,\"required\":true,\"schema\":{\"type\":\"string\"}}],\"supplied\":[],\"missing\":[\"subject\"],\"errors\":[]},\"admission\":{\"state\":\"not-queued\",\"position\":null,\"reasons\":[\"missing-inputs\"]},\"preparationId\":null,\"runId\":null,\"parentRunId\":null,\"links\":{\"self\":\"/v1/requests/req_8\"}}}",
+    "refusal": "InvalidResponse"
+   }
+  ],
+  "runs": [
+   {
+    "name": "managed run with lost supervision keeps a sequence beyond 2^53",
+    "from": "item",
+    "json": "{\"version\":1,\"id\":\"run_21\",\"revision\":\"runrev_18\",\"profileId\":\"profile_main\",\"workflowId\":\"wf_review\",\"requestId\":\"req_8\",\"parentRunId\":null,\"lineage\":null,\"manifest\":{\"kind\":\"versioned\",\"frontendManifestVersion\":3},\"runtime\":{\"status\":\"running\",\"lastSequence\":\"9007199254740993\",\"protocolVersion\":2},\"supervision\":\"lost\",\"integrity\":\"valid\",\"verification\":{\"state\":\"absent\"},\"limitations\":[\"lost-supervision\"],\"links\":{\"self\":\"/v1/runs/run_21\",\"snapshot\":\"/v1/runs/run_21/snapshot\",\"control\":\"/v1/runs/run_21/control\",\"outputs\":\"/v1/runs/run_21/outputs\",\"exports\":\"/v1/runs/run_21/exports\",\"lineageRequests\":\"/v1/runs/run_21/lineage-requests\"}}",
+    "projection": "{\"id\":\"run_21\",\"revision\":\"runrev_18\",\"profileId\":\"profile_main\",\"content\":{\"kind\":\"known\",\"workflowId\":\"wf_review\",\"requestId\":\"req_8\",\"parentRunId\":null,\"lineage\":null,\"manifestVersion\":3,\"runtime\":{\"status\":\"running\",\"lastSequence\":\"9007199254740993\",\"protocolVersion\":2},\"supervision\":\"lost\",\"integrity\":\"valid\",\"verification\":{\"state\":\"absent\"},\"limitations\":[\"lost-supervision\"]}}"
+   },
+   {
+    "name": "legacy entry keeps null runtime and request",
+    "from": "item",
+    "json": "{\"version\":1,\"id\":\"run_21\",\"revision\":\"runrev_18\",\"profileId\":\"profile_main\",\"workflowId\":\"wf_review\",\"requestId\":null,\"parentRunId\":null,\"lineage\":null,\"manifest\":{\"kind\":\"legacy\"},\"runtime\":null,\"supervision\":\"observer\",\"integrity\":\"corrupt\",\"verification\":{\"state\":\"verified\",\"artifactId\":\"artifact_4\"},\"limitations\":[\"legacy\",\"corrupt-journal\"],\"links\":{\"self\":\"/v1/runs/run_21\",\"snapshot\":\"/v1/runs/run_21/snapshot\",\"control\":\"/v1/runs/run_21/control\",\"outputs\":\"/v1/runs/run_21/outputs\",\"exports\":\"/v1/runs/run_21/exports\",\"lineageRequests\":\"/v1/runs/run_21/lineage-requests\"}}",
+    "projection": "{\"id\":\"run_21\",\"revision\":\"runrev_18\",\"profileId\":\"profile_main\",\"content\":{\"kind\":\"known\",\"workflowId\":\"wf_review\",\"requestId\":null,\"parentRunId\":null,\"lineage\":null,\"manifestVersion\":null,\"runtime\":null,\"supervision\":\"observer\",\"integrity\":\"corrupt\",\"verification\":{\"state\":\"verified\",\"artifactId\":\"artifact_4\"},\"limitations\":[\"legacy\",\"corrupt-journal\"]}}"
+   },
+   {
+    "name": "fork run keeps sequence 2^64-1 and an unavailable result",
+    "from": "item",
+    "json": "{\"version\":1,\"id\":\"run_21\",\"revision\":\"runrev_18\",\"profileId\":\"profile_main\",\"workflowId\":\"wf_review\",\"requestId\":\"req_8\",\"parentRunId\":\"run_20\",\"lineage\":\"fork\",\"manifest\":{\"kind\":\"versioned\",\"frontendManifestVersion\":3},\"runtime\":{\"status\":\"succeeded\",\"lastSequence\":\"18446744073709551615\",\"protocolVersion\":3},\"supervision\":\"cleanup-pending\",\"integrity\":\"valid\",\"verification\":{\"state\":\"unavailable\",\"artifactId\":null,\"reason\":\"missing\"},\"limitations\":[\"quarantined\"],\"links\":{\"self\":\"/v1/runs/run_21\",\"snapshot\":\"/v1/runs/run_21/snapshot\",\"control\":\"/v1/runs/run_21/control\",\"outputs\":\"/v1/runs/run_21/outputs\",\"exports\":\"/v1/runs/run_21/exports\",\"lineageRequests\":\"/v1/runs/run_21/lineage-requests\"}}",
+    "projection": "{\"id\":\"run_21\",\"revision\":\"runrev_18\",\"profileId\":\"profile_main\",\"content\":{\"kind\":\"known\",\"workflowId\":\"wf_review\",\"requestId\":\"req_8\",\"parentRunId\":\"run_20\",\"lineage\":\"fork\",\"manifestVersion\":3,\"runtime\":{\"status\":\"succeeded\",\"lastSequence\":\"18446744073709551615\",\"protocolVersion\":3},\"supervision\":\"cleanup-pending\",\"integrity\":\"valid\",\"verification\":{\"state\":\"unavailable\",\"artifactId\":null,\"reason\":\"missing\"},\"limitations\":[\"quarantined\"]}}"
+   },
+   {
+    "name": "unreadable manifest entry",
+    "from": "item",
+    "json": "{\"version\":1,\"kind\":\"unreadable-manifest\",\"id\":\"run_unreadable\",\"revision\":\"catalogue_bad_1\",\"profileId\":\"profile_main\",\"category\":\"malformed-manifest\",\"links\":{\"self\":\"/v1/runs/run_unreadable\"}}",
+    "projection": "{\"id\":\"run_unreadable\",\"revision\":\"catalogue_bad_1\",\"profileId\":\"profile_main\",\"content\":{\"kind\":\"unreadable\",\"category\":\"malformed-manifest\"}}"
+   },
+   {
+    "name": "sequence at 2^64 refuses",
+    "from": "item",
+    "json": "{\"version\":1,\"id\":\"run_21\",\"revision\":\"runrev_18\",\"profileId\":\"profile_main\",\"workflowId\":\"wf_review\",\"requestId\":\"req_8\",\"parentRunId\":null,\"lineage\":null,\"manifest\":{\"kind\":\"versioned\",\"frontendManifestVersion\":3},\"runtime\":{\"status\":\"running\",\"lastSequence\":\"18446744073709551616\",\"protocolVersion\":2},\"supervision\":\"lost\",\"integrity\":\"valid\",\"verification\":{\"state\":\"absent\"},\"limitations\":[\"lost-supervision\"],\"links\":{\"self\":\"/v1/runs/run_21\",\"snapshot\":\"/v1/runs/run_21/snapshot\",\"control\":\"/v1/runs/run_21/control\",\"outputs\":\"/v1/runs/run_21/outputs\",\"exports\":\"/v1/runs/run_21/exports\",\"lineageRequests\":\"/v1/runs/run_21/lineage-requests\"}}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "numeric sequence refuses",
+    "from": "item",
+    "json": "{\"version\":1,\"id\":\"run_21\",\"revision\":\"runrev_18\",\"profileId\":\"profile_main\",\"workflowId\":\"wf_review\",\"requestId\":\"req_8\",\"parentRunId\":null,\"lineage\":null,\"manifest\":{\"kind\":\"versioned\",\"frontendManifestVersion\":3},\"runtime\":{\"status\":\"running\",\"lastSequence\":9007199254740993,\"protocolVersion\":2},\"supervision\":\"lost\",\"integrity\":\"valid\",\"verification\":{\"state\":\"absent\"},\"limitations\":[\"lost-supervision\"],\"links\":{\"self\":\"/v1/runs/run_21\",\"snapshot\":\"/v1/runs/run_21/snapshot\",\"control\":\"/v1/runs/run_21/control\",\"outputs\":\"/v1/runs/run_21/outputs\",\"exports\":\"/v1/runs/run_21/exports\",\"lineageRequests\":\"/v1/runs/run_21/lineage-requests\"}}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "unknown manifest category refuses",
+    "from": "item",
+    "json": "{\"version\":1,\"kind\":\"unreadable-manifest\",\"id\":\"run_unreadable\",\"revision\":\"catalogue_bad_1\",\"profileId\":\"profile_main\",\"category\":\"parse-error\",\"links\":{\"self\":\"/v1/runs/run_unreadable\"}}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "unreadable entry with a workflow refuses",
+    "from": "item",
+    "json": "{\"version\":1,\"kind\":\"unreadable-manifest\",\"id\":\"run_unreadable\",\"revision\":\"catalogue_bad_1\",\"profileId\":\"profile_main\",\"category\":\"malformed-manifest\",\"links\":{\"self\":\"/v1/runs/run_unreadable\"},\"workflowId\":\"wf_review\"}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "versioned manifest 1 refuses",
+    "from": "item",
+    "json": "{\"version\":1,\"id\":\"run_21\",\"revision\":\"runrev_18\",\"profileId\":\"profile_main\",\"workflowId\":\"wf_review\",\"requestId\":\"req_8\",\"parentRunId\":null,\"lineage\":null,\"manifest\":{\"kind\":\"versioned\",\"frontendManifestVersion\":1},\"runtime\":{\"status\":\"running\",\"lastSequence\":\"9007199254740993\",\"protocolVersion\":2},\"supervision\":\"lost\",\"integrity\":\"valid\",\"verification\":{\"state\":\"absent\"},\"limitations\":[\"lost-supervision\"],\"links\":{\"self\":\"/v1/runs/run_21\",\"snapshot\":\"/v1/runs/run_21/snapshot\",\"control\":\"/v1/runs/run_21/control\",\"outputs\":\"/v1/runs/run_21/outputs\",\"exports\":\"/v1/runs/run_21/exports\",\"lineageRequests\":\"/v1/runs/run_21/lineage-requests\"}}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "versioned manifest without version refuses",
+    "from": "item",
+    "json": "{\"version\":1,\"id\":\"run_21\",\"revision\":\"runrev_18\",\"profileId\":\"profile_main\",\"workflowId\":\"wf_review\",\"requestId\":\"req_8\",\"parentRunId\":null,\"lineage\":null,\"manifest\":{\"kind\":\"versioned\"},\"runtime\":{\"status\":\"running\",\"lastSequence\":\"9007199254740993\",\"protocolVersion\":2},\"supervision\":\"lost\",\"integrity\":\"valid\",\"verification\":{\"state\":\"absent\"},\"limitations\":[\"lost-supervision\"],\"links\":{\"self\":\"/v1/runs/run_21\",\"snapshot\":\"/v1/runs/run_21/snapshot\",\"control\":\"/v1/runs/run_21/control\",\"outputs\":\"/v1/runs/run_21/outputs\",\"exports\":\"/v1/runs/run_21/exports\",\"lineageRequests\":\"/v1/runs/run_21/lineage-requests\"}}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "legacy manifest with version refuses",
+    "from": "item",
+    "json": "{\"version\":1,\"id\":\"run_21\",\"revision\":\"runrev_18\",\"profileId\":\"profile_main\",\"workflowId\":\"wf_review\",\"requestId\":\"req_8\",\"parentRunId\":null,\"lineage\":null,\"manifest\":{\"kind\":\"legacy\",\"frontendManifestVersion\":2},\"runtime\":{\"status\":\"running\",\"lastSequence\":\"9007199254740993\",\"protocolVersion\":2},\"supervision\":\"lost\",\"integrity\":\"valid\",\"verification\":{\"state\":\"absent\"},\"limitations\":[\"lost-supervision\"],\"links\":{\"self\":\"/v1/runs/run_21\",\"snapshot\":\"/v1/runs/run_21/snapshot\",\"control\":\"/v1/runs/run_21/control\",\"outputs\":\"/v1/runs/run_21/outputs\",\"exports\":\"/v1/runs/run_21/exports\",\"lineageRequests\":\"/v1/runs/run_21/lineage-requests\"}}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "duplicate limitations refuse",
+    "from": "item",
+    "json": "{\"version\":1,\"id\":\"run_21\",\"revision\":\"runrev_18\",\"profileId\":\"profile_main\",\"workflowId\":\"wf_review\",\"requestId\":\"req_8\",\"parentRunId\":null,\"lineage\":null,\"manifest\":{\"kind\":\"versioned\",\"frontendManifestVersion\":3},\"runtime\":{\"status\":\"running\",\"lastSequence\":\"9007199254740993\",\"protocolVersion\":2},\"supervision\":\"lost\",\"integrity\":\"valid\",\"verification\":{\"state\":\"absent\"},\"limitations\":[\"legacy\",\"legacy\"],\"links\":{\"self\":\"/v1/runs/run_21\",\"snapshot\":\"/v1/runs/run_21/snapshot\",\"control\":\"/v1/runs/run_21/control\",\"outputs\":\"/v1/runs/run_21/outputs\",\"exports\":\"/v1/runs/run_21/exports\",\"lineageRequests\":\"/v1/runs/run_21/lineage-requests\"}}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "unknown limitation refuses",
+    "from": "item",
+    "json": "{\"version\":1,\"id\":\"run_21\",\"revision\":\"runrev_18\",\"profileId\":\"profile_main\",\"workflowId\":\"wf_review\",\"requestId\":\"req_8\",\"parentRunId\":null,\"lineage\":null,\"manifest\":{\"kind\":\"versioned\",\"frontendManifestVersion\":3},\"runtime\":{\"status\":\"running\",\"lastSequence\":\"9007199254740993\",\"protocolVersion\":2},\"supervision\":\"lost\",\"integrity\":\"valid\",\"verification\":{\"state\":\"absent\"},\"limitations\":[\"slow\"],\"links\":{\"self\":\"/v1/runs/run_21\",\"snapshot\":\"/v1/runs/run_21/snapshot\",\"control\":\"/v1/runs/run_21/control\",\"outputs\":\"/v1/runs/run_21/outputs\",\"exports\":\"/v1/runs/run_21/exports\",\"lineageRequests\":\"/v1/runs/run_21/lineage-requests\"}}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "snapshot link of another run refuses",
+    "from": "item",
+    "json": "{\"version\":1,\"id\":\"run_21\",\"revision\":\"runrev_18\",\"profileId\":\"profile_main\",\"workflowId\":\"wf_review\",\"requestId\":\"req_8\",\"parentRunId\":null,\"lineage\":null,\"manifest\":{\"kind\":\"versioned\",\"frontendManifestVersion\":3},\"runtime\":{\"status\":\"running\",\"lastSequence\":\"9007199254740993\",\"protocolVersion\":2},\"supervision\":\"lost\",\"integrity\":\"valid\",\"verification\":{\"state\":\"absent\"},\"limitations\":[\"lost-supervision\"],\"links\":{\"self\":\"/v1/runs/run_21\",\"snapshot\":\"/v1/runs/run_22/snapshot\",\"control\":\"/v1/runs/run_21/control\",\"outputs\":\"/v1/runs/run_21/outputs\",\"exports\":\"/v1/runs/run_21/exports\",\"lineageRequests\":\"/v1/runs/run_21/lineage-requests\"}}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "missing exports link refuses",
+    "from": "item",
+    "json": "{\"version\":1,\"id\":\"run_21\",\"revision\":\"runrev_18\",\"profileId\":\"profile_main\",\"workflowId\":\"wf_review\",\"requestId\":\"req_8\",\"parentRunId\":null,\"lineage\":null,\"manifest\":{\"kind\":\"versioned\",\"frontendManifestVersion\":3},\"runtime\":{\"status\":\"running\",\"lastSequence\":\"9007199254740993\",\"protocolVersion\":2},\"supervision\":\"lost\",\"integrity\":\"valid\",\"verification\":{\"state\":\"absent\"},\"limitations\":[\"lost-supervision\"],\"links\":{\"self\":\"/v1/runs/run_21\",\"snapshot\":\"/v1/runs/run_21/snapshot\",\"control\":\"/v1/runs/run_21/control\",\"outputs\":\"/v1/runs/run_21/outputs\",\"lineageRequests\":\"/v1/runs/run_21/lineage-requests\"}}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "unknown integrity refuses",
+    "from": "item",
+    "json": "{\"version\":1,\"id\":\"run_21\",\"revision\":\"runrev_18\",\"profileId\":\"profile_main\",\"workflowId\":\"wf_review\",\"requestId\":\"req_8\",\"parentRunId\":null,\"lineage\":null,\"manifest\":{\"kind\":\"versioned\",\"frontendManifestVersion\":3},\"runtime\":{\"status\":\"running\",\"lastSequence\":\"9007199254740993\",\"protocolVersion\":2},\"supervision\":\"lost\",\"integrity\":\"broken\",\"verification\":{\"state\":\"absent\"},\"limitations\":[\"lost-supervision\"],\"links\":{\"self\":\"/v1/runs/run_21\",\"snapshot\":\"/v1/runs/run_21/snapshot\",\"control\":\"/v1/runs/run_21/control\",\"outputs\":\"/v1/runs/run_21/outputs\",\"exports\":\"/v1/runs/run_21/exports\",\"lineageRequests\":\"/v1/runs/run_21/lineage-requests\"}}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "runtime protocol 4 refuses",
+    "from": "item",
+    "json": "{\"version\":1,\"id\":\"run_21\",\"revision\":\"runrev_18\",\"profileId\":\"profile_main\",\"workflowId\":\"wf_review\",\"requestId\":\"req_8\",\"parentRunId\":null,\"lineage\":null,\"manifest\":{\"kind\":\"versioned\",\"frontendManifestVersion\":3},\"runtime\":{\"status\":\"running\",\"lastSequence\":\"9007199254740993\",\"protocolVersion\":4},\"supervision\":\"lost\",\"integrity\":\"valid\",\"verification\":{\"state\":\"absent\"},\"limitations\":[\"lost-supervision\"],\"links\":{\"self\":\"/v1/runs/run_21\",\"snapshot\":\"/v1/runs/run_21/snapshot\",\"control\":\"/v1/runs/run_21/control\",\"outputs\":\"/v1/runs/run_21/outputs\",\"exports\":\"/v1/runs/run_21/exports\",\"lineageRequests\":\"/v1/runs/run_21/lineage-requests\"}}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "unknown runtime status refuses",
+    "from": "item",
+    "json": "{\"version\":1,\"id\":\"run_21\",\"revision\":\"runrev_18\",\"profileId\":\"profile_main\",\"workflowId\":\"wf_review\",\"requestId\":\"req_8\",\"parentRunId\":null,\"lineage\":null,\"manifest\":{\"kind\":\"versioned\",\"frontendManifestVersion\":3},\"runtime\":{\"status\":\"paused\",\"lastSequence\":\"9007199254740993\",\"protocolVersion\":2},\"supervision\":\"lost\",\"integrity\":\"valid\",\"verification\":{\"state\":\"absent\"},\"limitations\":[\"lost-supervision\"],\"links\":{\"self\":\"/v1/runs/run_21\",\"snapshot\":\"/v1/runs/run_21/snapshot\",\"control\":\"/v1/runs/run_21/control\",\"outputs\":\"/v1/runs/run_21/outputs\",\"exports\":\"/v1/runs/run_21/exports\",\"lineageRequests\":\"/v1/runs/run_21/lineage-requests\"}}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "non-ASCII workflow identity refuses",
+    "from": "item",
+    "json": "{\"version\":1,\"id\":\"run_21\",\"revision\":\"runrev_18\",\"profileId\":\"profile_main\",\"workflowId\":\"雪\",\"requestId\":\"req_8\",\"parentRunId\":null,\"lineage\":null,\"manifest\":{\"kind\":\"versioned\",\"frontendManifestVersion\":3},\"runtime\":{\"status\":\"running\",\"lastSequence\":\"9007199254740993\",\"protocolVersion\":2},\"supervision\":\"lost\",\"integrity\":\"valid\",\"verification\":{\"state\":\"absent\"},\"limitations\":[\"lost-supervision\"],\"links\":{\"self\":\"/v1/runs/run_21\",\"snapshot\":\"/v1/runs/run_21/snapshot\",\"control\":\"/v1/runs/run_21/control\",\"outputs\":\"/v1/runs/run_21/outputs\",\"exports\":\"/v1/runs/run_21/exports\",\"lineageRequests\":\"/v1/runs/run_21/lineage-requests\"}}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "missing null lineage refuses",
+    "from": "item",
+    "json": "{\"version\":1,\"id\":\"run_21\",\"revision\":\"runrev_18\",\"profileId\":\"profile_main\",\"workflowId\":\"wf_review\",\"requestId\":\"req_8\",\"parentRunId\":null,\"manifest\":{\"kind\":\"versioned\",\"frontendManifestVersion\":3},\"runtime\":{\"status\":\"running\",\"lastSequence\":\"9007199254740993\",\"protocolVersion\":2},\"supervision\":\"lost\",\"integrity\":\"valid\",\"verification\":{\"state\":\"absent\"},\"limitations\":[\"lost-supervision\"],\"links\":{\"self\":\"/v1/runs/run_21\",\"snapshot\":\"/v1/runs/run_21/snapshot\",\"control\":\"/v1/runs/run_21/control\",\"outputs\":\"/v1/runs/run_21/outputs\",\"exports\":\"/v1/runs/run_21/exports\",\"lineageRequests\":\"/v1/runs/run_21/lineage-requests\"}}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "extra run field refuses",
+    "from": "item",
+    "json": "{\"version\":1,\"id\":\"run_21\",\"revision\":\"runrev_18\",\"profileId\":\"profile_main\",\"workflowId\":\"wf_review\",\"requestId\":\"req_8\",\"parentRunId\":null,\"lineage\":null,\"manifest\":{\"kind\":\"versioned\",\"frontendManifestVersion\":3},\"runtime\":{\"status\":\"running\",\"lastSequence\":\"9007199254740993\",\"protocolVersion\":2},\"supervision\":\"lost\",\"integrity\":\"valid\",\"verification\":{\"state\":\"absent\"},\"limitations\":[\"lost-supervision\"],\"links\":{\"self\":\"/v1/runs/run_21\",\"snapshot\":\"/v1/runs/run_21/snapshot\",\"control\":\"/v1/runs/run_21/control\",\"outputs\":\"/v1/runs/run_21/outputs\",\"exports\":\"/v1/runs/run_21/exports\",\"lineageRequests\":\"/v1/runs/run_21/lineage-requests\"},\"pid\":4242}",
+    "refusal": "InvalidResponse"
+   },
+   {
+    "name": "overview run member",
+    "from": "overview",
+    "json": "{\"kind\":\"run\",\"run\":{\"version\":1,\"id\":\"run_21\",\"revision\":\"runrev_18\",\"profileId\":\"profile_main\",\"workflowId\":\"wf_review\",\"requestId\":\"req_8\",\"parentRunId\":null,\"lineage\":null,\"manifest\":{\"kind\":\"versioned\",\"frontendManifestVersion\":3},\"runtime\":{\"status\":\"running\",\"lastSequence\":\"9007199254740993\",\"protocolVersion\":2},\"supervision\":\"lost\",\"integrity\":\"valid\",\"verification\":{\"state\":\"absent\"},\"limitations\":[\"lost-supervision\"],\"links\":{\"self\":\"/v1/runs/run_21\",\"snapshot\":\"/v1/runs/run_21/snapshot\",\"control\":\"/v1/runs/run_21/control\",\"outputs\":\"/v1/runs/run_21/outputs\",\"exports\":\"/v1/runs/run_21/exports\",\"lineageRequests\":\"/v1/runs/run_21/lineage-requests\"}}}",
+    "projection": "{\"kind\":\"run\",\"run\":{\"id\":\"run_21\",\"revision\":\"runrev_18\",\"profileId\":\"profile_main\",\"content\":{\"kind\":\"known\",\"workflowId\":\"wf_review\",\"requestId\":\"req_8\",\"parentRunId\":null,\"lineage\":null,\"manifestVersion\":3,\"runtime\":{\"status\":\"running\",\"lastSequence\":\"9007199254740993\",\"protocolVersion\":2},\"supervision\":\"lost\",\"integrity\":\"valid\",\"verification\":{\"state\":\"absent\"},\"limitations\":[\"lost-supervision\"]}}}"
+   },
+   {
+    "name": "overview unreadable run member",
+    "from": "overview",
+    "json": "{\"kind\":\"run\",\"run\":{\"version\":1,\"kind\":\"unreadable-manifest\",\"id\":\"run_unreadable\",\"revision\":\"catalogue_bad_1\",\"profileId\":\"profile_main\",\"category\":\"malformed-manifest\",\"links\":{\"self\":\"/v1/runs/run_unreadable\"}}}",
+    "projection": "{\"kind\":\"run\",\"run\":{\"id\":\"run_unreadable\",\"revision\":\"catalogue_bad_1\",\"profileId\":\"profile_main\",\"content\":{\"kind\":\"unreadable\",\"category\":\"malformed-manifest\"}}}"
+   },
+   {
+    "name": "overview run member with an invalid run refuses",
+    "from": "overview",
+    "json": "{\"kind\":\"run\",\"run\":{\"version\":1,\"id\":\"run_21\",\"revision\":\"runrev_18\",\"profileId\":\"profile_main\",\"workflowId\":\"wf_review\",\"requestId\":\"req_8\",\"parentRunId\":null,\"lineage\":null,\"manifest\":{\"kind\":\"versioned\",\"frontendManifestVersion\":3},\"runtime\":{\"status\":\"running\",\"lastSequence\":\"9007199254740993\",\"protocolVersion\":2},\"supervision\":\"lost\",\"integrity\":\"broken\",\"verification\":{\"state\":\"absent\"},\"limitations\":[\"lost-supervision\"],\"links\":{\"self\":\"/v1/runs/run_21\",\"snapshot\":\"/v1/runs/run_21/snapshot\",\"control\":\"/v1/runs/run_21/control\",\"outputs\":\"/v1/runs/run_21/outputs\",\"exports\":\"/v1/runs/run_21/exports\",\"lineageRequests\":\"/v1/runs/run_21/lineage-requests\"}}}",
+    "refusal": "InvalidResponse"
+   }
+  ]
  }
 }

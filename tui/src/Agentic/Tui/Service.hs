@@ -11,6 +11,7 @@ module Agentic.Tui.Service
     RunObservation (..), ResultReference (..), Verification (..), Artifact (..),
     ControlView (..), ControlOffer (..), DecisionView (..), DecisionContent (..),
     observeSnapshot, observeControl, observeDecision, observeResult, decodeSnapshot, decodeControl, decodeDecision,
+    RunItem (..), RunContent (..), KnownRun (..), OverviewMember (..), decodeRequestItem, decodeRunItem, decodeOverviewMember,
     decisionPrompt, answerValue, answerOffered, retryOffer, headMatches,
     DecisionHead (..), decisionHead, answerMutation, answerBody,
     retryMutation, retryBody, retryEffect,
@@ -723,6 +724,94 @@ decodeControl = decode parseControl
 
 decodeDecision :: Value -> Either C.ClientFailure DecisionView
 decodeDecision = decode parseDecision
+
+-- | One item of the request collection, which is the representation of its
+-- request resource and decodes with the shared protocol codec.
+decodeRequestItem :: Value -> Either C.ClientFailure C.DraftView
+decodeRequestItem = C.decodeObservation
+
+-- | One item of the run collection, or the run of one overview member. It is
+-- display data. It grants no supervision, control or signalling authority.
+data RunItem = RunItem
+  { runItemId :: !Text, runItemRevision :: !Text, runItemProfile :: !Text, runItemContent :: !RunContent
+  } deriving (Eq, Show)
+
+-- | A run whose manifest the manager read, or a retained catalogue entry
+-- whose manifest it could not read, with only its public category.
+data RunContent = KnownContent !KnownRun | UnreadableContent !Text
+  deriving (Eq, Show)
+
+-- | The public summary of a known run. A null manifest version is a legacy
+-- manifest. The runtime is the status, the last sequence and the protocol
+-- version, and it is absent without validated native evidence.
+data KnownRun = KnownRun
+  { knownWorkflow :: !Text, knownRequest :: !(Maybe Text), knownParent :: !(Maybe Text),
+    knownLineage :: !(Maybe Text), knownManifest :: !(Maybe Int),
+    knownRuntime :: !(Maybe (RunStatus,Word64,Int)), knownSupervision :: !Text, knownIntegrity :: !Text,
+    knownVerification :: !Verification, knownLimitations :: ![Text]
+  } deriving (Eq, Show)
+
+-- | One member of the overview page set, tagged by its kind. A request and a
+-- preparation decode with the shared protocol codec.
+data OverviewMember
+  = RequestMember !C.DraftView
+  | PreparationMember !C.Preparation
+  | RunMember !RunItem
+  | DecisionMember !DecisionView
+  deriving (Eq, Show)
+
+decodeRunItem :: Value -> Either C.ClientFailure RunItem
+decodeRunItem = decode parseRunItem
+
+decodeOverviewMember :: Value -> Either C.ClientFailure OverviewMember
+decodeOverviewMember value = do
+  (kind,member) <- decode (withObject "overview member" $ \fields -> do
+    kind <- at (oneOf ["request","preparation","run","decision"]) fields "kind"
+    closed ["kind",Key.fromText kind] fields
+    (,) kind <$> fields .: Key.fromText kind) value
+  case kind of
+    "request" -> RequestMember <$> decodeRequestItem member
+    "preparation" -> PreparationMember <$> C.decodeObservation member
+    "run" -> RunMember <$> decodeRunItem member
+    _ -> DecisionMember <$> decodeDecision member
+
+parseRunItem :: Value -> Parser RunItem
+parseRunItem = withObject "run" $ \fields -> do
+  versionOne fields
+  ident <- at identifier fields "id"
+  let self = "/v1/runs/" <> ident
+  content <- if KM.member "kind" fields
+    then do
+      closed ["version","kind","id","revision","profileId","category","links"] fields
+      _ <- at (oneOf ["unreadable-manifest"]) fields "kind"
+      links fields [("self",self)]
+      UnreadableContent <$> at (oneOf ["manifest-unavailable","malformed-manifest","unsupported-manifest"]) fields "category"
+    else do
+      closed ["version","id","revision","profileId","workflowId","requestId","parentRunId","lineage","manifest",
+        "runtime","supervision","integrity","verification","limitations","links"] fields
+      links fields [("self",self),("snapshot",self <> "/snapshot"),("control",self <> "/control"),
+        ("outputs",self <> "/outputs"),("exports",self <> "/exports"),("lineageRequests",self <> "/lineage-requests")]
+      fmap KnownContent $ KnownRun <$> at identifier fields "workflowId" <*> at (nullable identifier) fields "requestId"
+        <*> at (nullable identifier) fields "parentRunId" <*> at (nullable (oneOf ["restart","resume","fork"])) fields "lineage"
+        <*> at manifest fields "manifest" <*> at (nullable parseRuntime) fields "runtime" <*> at supervisionState fields "supervision"
+        <*> at (oneOf ["valid","corrupt","incomplete","unknown"]) fields "integrity" <*> at parseVerification fields "verification"
+        <*> (at (list 6 (oneOf ["legacy","foreign-owner","corrupt-journal","incompatible-invocation","quarantined","lost-supervision"])) fields "limitations"
+          >>= uniqueBy id)
+  RunItem ident <$> at identifier fields "revision" <*> at identifier fields "profileId" <*> pure content
+  where
+    links fields expected = at (withObject "run links" $ \present -> do
+      closed (map fst expected) present
+      mapM_ (\(key,uri) -> do
+        actual <- at resourceLink present key
+        unless (actual == uri) (fail "run link")) expected) fields "links"
+    manifest = withObject "manifest compatibility" $ \fields -> do
+      kind <- at (oneOf ["legacy","versioned"]) fields "kind"
+      if kind == "legacy" then closed ["kind"] fields >> pure Nothing
+        else do
+          closed ["kind","frontendManifestVersion"] fields
+          version <- fields .: "frontendManifestVersion"
+          unless (version `elem` [2,3 :: Int]) (fail "frontend manifest version")
+          pure (Just version)
 
 decodeSnapshot :: Value -> [Value] -> Either C.ClientFailure RunObservation
 decodeSnapshot metadata items = decode (withObject "run snapshot" $ \fields -> do

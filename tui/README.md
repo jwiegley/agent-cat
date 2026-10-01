@@ -167,6 +167,16 @@ must support hard links. When the private file cannot be removed after the
 link, the save succeeds, the destination holds the exact bytes, and the saved
 line names the private file that remains.
 
+`Agentic.Tui.Service` also decodes the items of the `/requests` and `/runs`
+collections and the members of the `/snapshot` overview, with
+`decodeRequestItem`, `decodeRunItem` and `decodeOverviewMember`. A run item
+is a known run with its public summary or a catalogue entry with an
+unreadable manifest. Service mode does not read these resources yet.
+`tui-model-test` checks these decoders, the decision and control decoders and
+the answer conversion against the `resources` section of
+`test/manager_client_vectors.json`, which [the protocol
+description](../doc/api/README.md#pages-and-live-delivery) describes.
+
 Service mode does not support cancellation, steering, redirect, failover or
 abandon, the structured answer editor, captured and other non-literal inputs,
 withdrawal or discarding of a request, more than one concurrent run, run history,

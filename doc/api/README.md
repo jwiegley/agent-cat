@@ -650,6 +650,64 @@ text that decodes and encodes back to the same value, or that refuses with
 `InvalidResponse`. The `cursors`, `etags` and `problems` vectors cover the
 cursor syntax, entity-tag equality and the mapping of problem bodies.
 
+The `resources` section of the same file holds the vectors of the public
+resource types. Each case gives the resource as JSON text in `json`, and
+either the expected decoded projection as JSON text in `projection` or the
+refusal in `refusal`. The JSON text keeps numbers beyond 2^53 exact for
+every consumer. The cases cover `false`, `null`, numbers and decimal text
+beyond 2^53, Unicode, missing fields and extra fields. A field that the
+contract states as nullable must be present, and an absent field refuses.
+
+The `drafts`, `preparations` and `receipts` sections hold the types that the
+`Agentic.Manager.Client` facade decodes with `decodeObservation`. A case
+names its type in `type`. The `drafts` types are `DraftView`, `Readiness`,
+`InputDeclaration`, `SuppliedInput` and `InputError`. The `preparations`
+types are `Preparation`, `Review`, `ReviewInput`, `ReviewLineage` and
+`ReviewEdit`. The `receipts` section holds `CommandReceipt` cases for each
+command state and for each effect kind. The projection of these types is the
+encoding of the decoded value by the shared protocol codec, and the refusal
+is `InvalidResponse`. The `vectors` mode of `manager-client-check` runs
+these sections and the `events` section.
+
+The `decisions`, `answers`, `controls`, `requests` and `runs` sections hold
+the cases that `tui-model-test` runs with the parsers of
+`Agentic.Tui.Service`. A case of the `decisions`, `requests` and `runs`
+sections names its origin in `from`. The origin `item` is the
+representation of a detail resource, which is also the item of its
+collection. The origin `overview` is a member of the `/snapshot` overview,
+`{"kind": KIND, KIND: VALUE}`, where KIND is `request`, `preparation`,
+`run` or `decision`. Its projection is `{"kind": KIND, KIND: PROJECTION}`.
+The overview cases of the `requests` section include preparation members.
+The projections of these sections name the decoded fields. A UInt64 or
+UInt32 value is canonical decimal text, and an absent optional value is
+`null`.
+
+- A request or a preparation projects to its encoding by the shared
+  protocol codec.
+- A decision projects to `id`, `revision`, `runId`, `profileId`,
+  `generation`, `occurrenceId`, `state`, `position`, `observedSequence` and
+  `content`. The content of a question is `kind` `question`, `code` and
+  `prompt`. The content of a recovery is `kind` `recovery`, `gap`,
+  `message` and `choices`, each choice with `choice` and `target`.
+- A control view projects to `runId`, `revision`, `supervision`,
+  `cancelAllowed`, `decisionHeadId` and `offers`. Each offer projects to
+  `operation`, `occurrenceId`, `attemptId`, `generation`, `timings`,
+  `choices` and `targets`.
+- A run projects to `id`, `revision`, `profileId` and `content`. The
+  content of a known run is `kind` `known`, `workflowId`, `requestId`,
+  `parentRunId`, `lineage`, `manifestVersion`, `runtime`, `supervision`,
+  `integrity`, `verification` and `limitations`. `manifestVersion` is null
+  for a legacy manifest, and `runtime` is null or holds `status`,
+  `lastSequence` and `protocolVersion`. The content of an entry with an
+  unreadable manifest is `kind` `unreadable` and `category`.
+
+The TUI check also requires that each decision and control view that it
+accepts keeps its input JSON value unchanged. A refusal in these sections is
+`InvalidResponse`. An `answers` case gives a decision in `decision` and the
+editor text in `input`. Its projection is the answer body that the TUI sends
+for the typed value of that text, and the refusal `InvalidAnswer` states that
+the TUI refuses the answer before it prepares a command.
+
 ## Refusals
 
 Problems use `application/problem+json`, with a bounded stable `code`, status,

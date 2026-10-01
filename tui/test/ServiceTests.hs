@@ -163,6 +163,7 @@ serviceTests render = do
   resultTests render profile
   saveTests
   laneTests render row profile
+  resourceVectorTests
   where
     profileValue = object ["version" .= (1 :: Int), "id" .= ("profile_main" :: T.Text),
       "revision" .= ("profile_rev_4" :: T.Text), "workspaceLabel" .= ("Café 雪 λ" :: T.Text),
@@ -172,6 +173,129 @@ serviceTests render = do
     duplicateSchema = object ["json" .= object ["schema" .= property (property (String "object"))]]
     duplicate (Array values) = Array (values V.++ values)
     duplicate other = other
+
+-- | The decision, answer, control, request and run sections of the resources
+-- section of the shared client vectors, run with the TUI service parsers. The
+-- file path is relative to the repository root, as the fixture paths are. Each
+-- accepted decision and control view also retains its exact JSON value.
+resourceVectorTests :: IO ()
+resourceVectorTests = do
+  root <- BS.readFile "test/manager_client_vectors.json" >>= either die pure . eitherDecodeStrict'
+  let section name = case lookupKey "resources" root >>= lookupKey name of
+        Just (Array items) | not (V.null items) -> pure (V.toList items)
+        _ -> die ("FAIL vector section resources." <> T.unpack (Key.toText name) <> " is empty")
+      origin vector = lookupKey "from" vector
+      byOrigin item overview vector = case origin vector of
+        Just (String "item") -> pure item
+        Just (String "overview") -> pure overview
+        _ -> die ("FAIL " <> vectorName vector <> " names no origin")
+  decisions <- section "decisions"
+  mapM_ (\vector -> byOrigin (retained S.decodeDecision S.decisionValue decisionProjection) member vector
+    >>= \decode -> resourceVector decode vector) decisions
+  section "answers" >>= mapM_ answerVector
+  section "controls" >>= mapM_ (resourceVector (retained S.decodeControl S.controlValue controlProjection))
+  requests <- section "requests"
+  mapM_ (\vector -> byOrigin (fmap toJSON . S.decodeRequestItem) member vector >>= \decode -> resourceVector decode vector) requests
+  runs <- section "runs"
+  mapM_ (\vector -> byOrigin (fmap runProjection . S.decodeRunItem) member vector >>= \decode -> resourceVector decode vector) runs
+  where
+    member value = memberProjection <$> S.decodeOverviewMember value
+    -- A view keeps its JSON value. When that value is not the input itself,
+    -- the projection is a fixed text that matches no expected projection.
+    retained decodeView raw projection value = decodeView value >>= \view -> Right
+      (if raw view == value then projection view else String "the retained value differs from the input")
+    -- The projections name the decoded fields. UInt64 and UInt32 values are
+    -- canonical decimal text, and an absent optional value is null.
+    decisionProjection view = object
+      [ "id" .= S.decisionId view, "revision" .= S.decisionRevision view, "runId" .= S.decisionRun view,
+        "profileId" .= S.decisionProfile view, "generation" .= S.decisionGeneration view,
+        "occurrenceId" .= occurrenceText (S.decisionOccurrence view), "state" .= S.decisionState view,
+        "position" .= S.decisionPosition view, "observedSequence" .= T.pack (show (S.decisionSequence view)),
+        "content" .= case S.decisionContent view of
+          S.QuestionContent code prompt -> object ["kind" .= ("question" :: T.Text), "code" .= code, "prompt" .= prompt]
+          S.RecoveryContent gap message choices -> object ["kind" .= ("recovery" :: T.Text), "gap" .= gap,
+            "message" .= message, "choices" .= map choiceProjection choices] ]
+    choiceProjection option = object ["choice" .= recoveryChoice option, "target" .= recoveryTarget option]
+    controlProjection view = object
+      [ "runId" .= S.controlRun view, "revision" .= S.controlRevision view, "supervision" .= S.controlSupervision view,
+        "cancelAllowed" .= S.controlCancel view, "decisionHeadId" .= S.controlHead view,
+        "offers" .= map offerProjection (S.controlOffers view) ]
+    offerProjection offer = object
+      [ "operation" .= S.offerOperation offer, "occurrenceId" .= occurrenceText (S.offerOccurrence offer),
+        "attemptId" .= fmap (T.pack . show) (S.offerAttempt offer), "generation" .= S.offerGeneration offer,
+        "timings" .= S.offerTimings offer, "choices" .= map choiceProjection (S.offerChoices offer), "targets" .= S.offerTargets offer ]
+    runProjection item = object
+      [ "id" .= S.runItemId item, "revision" .= S.runItemRevision item, "profileId" .= S.runItemProfile item,
+        "content" .= case S.runItemContent item of
+          S.UnreadableContent category -> object ["kind" .= ("unreadable" :: T.Text), "category" .= category]
+          S.KnownContent known -> object
+            [ "kind" .= ("known" :: T.Text), "workflowId" .= S.knownWorkflow known, "requestId" .= S.knownRequest known,
+              "parentRunId" .= S.knownParent known, "lineage" .= S.knownLineage known, "manifestVersion" .= S.knownManifest known,
+              "runtime" .= fmap (\(status,sequenceNumber,protocol) -> object ["status" .= statusText status,
+                "lastSequence" .= T.pack (show sequenceNumber), "protocolVersion" .= protocol]) (S.knownRuntime known),
+              "supervision" .= S.knownSupervision known, "integrity" .= S.knownIntegrity known,
+              "verification" .= verificationProjection (S.knownVerification known), "limitations" .= S.knownLimitations known ] ]
+    verificationProjection verification = case verification of
+      S.Absent -> object ["state" .= ("absent" :: T.Text)]
+      S.Referenced artifact -> object ["state" .= ("referenced" :: T.Text), "artifactId" .= artifact]
+      S.Verified artifact -> object ["state" .= ("verified" :: T.Text), "artifactId" .= artifact]
+      S.Unavailable artifact reason -> object ["state" .= ("unavailable" :: T.Text), "artifactId" .= artifact, "reason" .= reason]
+    statusText :: RunStatus -> T.Text
+    statusText status = case status of
+      RunStarting -> "starting"
+      RunRunning -> "running"
+      RunCancelling -> "cancelling"
+      RunSucceeded -> "succeeded"
+      RunFailedStatus -> "failed"
+      RunCancelledStatus -> "cancelled"
+      RunOrphaned -> "orphaned"
+    memberProjection overviewMember = case overviewMember of
+      S.RequestMember request -> tagged "request" (toJSON request)
+      S.PreparationMember preparation -> tagged "preparation" (toJSON preparation)
+      S.RunMember item -> tagged "run" (runProjection item)
+      S.DecisionMember view -> tagged "decision" (decisionProjection view)
+    tagged kind value = object ["kind" .= (kind :: T.Text), Key.fromText kind .= value]
+    occurrenceText = T.pack . show . occurrenceNumber
+
+vectorName :: Value -> String
+vectorName vector = case lookupKey "name" vector of
+  Just (String name) -> T.unpack name
+  _ -> "unnamed vector"
+
+-- | The JSON text of one vector field, decoded.
+vectorJson :: Value -> Key.Key -> IO Value
+vectorJson vector key = case lookupKey key vector of
+  Just (String source) -> either (\problem -> die ("FAIL " <> vectorName vector <> ": " <> problem)) pure
+    (eitherDecodeStrict' (TE.encodeUtf8 source))
+  _ -> die ("FAIL " <> vectorName vector <> " has no " <> T.unpack (Key.toText key))
+
+-- | A resource vector decodes to its projection or refuses with InvalidResponse.
+resourceVector :: (Value -> Either C.ClientFailure Value) -> Value -> IO ()
+resourceVector decode vector = do
+  value <- vectorJson vector "json"
+  expected <- case (lookupKey "projection" vector, lookupKey "refusal" vector) of
+    (Just (String _), Nothing) -> Right <$> vectorJson vector "projection"
+    (Nothing, Just (String "InvalidResponse")) -> pure (Left C.InvalidResponse)
+    _ -> die ("FAIL " <> vectorName vector <> " states neither one projection nor one refusal")
+  let outcome = decode value
+  unless (outcome == expected) (die ("FAIL resource vector " <> vectorName vector <> ": " <> show outcome))
+  check ("resource vector " <> vectorName vector) True
+
+-- | An answer vector: the typed value of the input for the decision gives the
+-- projected answer body, or the answer is refused before any command.
+answerVector :: Value -> IO ()
+answerVector vector = do
+  decision <- vectorJson vector "decision" >>= either (\failure -> die ("FAIL " <> vectorName vector <> ": " <> show failure)) pure . S.decodeDecision
+  input <- case lookupKey "input" vector of
+    Just (String given) -> pure given
+    _ -> die ("FAIL " <> vectorName vector <> " has no input")
+  let outcome = S.answerBody decision <$> S.answerValue decision input
+  passed <- case (lookupKey "projection" vector, lookupKey "refusal" vector) of
+    (Just (String _), Nothing) -> (\expected -> outcome == Right expected) <$> vectorJson vector "projection"
+    (Nothing, Just (String "InvalidAnswer")) -> pure (either (const True) (const False) outcome)
+    _ -> die ("FAIL " <> vectorName vector <> " states neither one projection nor one refusal")
+  unless passed (die ("FAIL answer vector " <> vectorName vector <> ": " <> show outcome))
+  check ("answer vector " <> vectorName vector) True
 
 put :: Key.Key -> Value -> Value -> Value
 put key value (Object fields) = Object (KM.insert key value fields)

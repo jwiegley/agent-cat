@@ -10151,6 +10151,30 @@ HIGH (deep/alexey): SqZero has no CompleteCSemiring and no PMod P M beyond the d
 ]
 #+end_src
 
+* TODO [#E] Resolve the non-blocking fess findings of subtask PC10    :review:
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pc10-resource-vectors-fess-54zn
+:LABELS:   ["review","workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-30 Wed 22:55]
+:MODIFIED: [2026-09-30 Wed 22:55]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess audit fess/pc-PC10-r1.md (2026-09-30) on subtask PC10 (WM-029 DTO vectors for the public resource types).
+
+1. (medium) The new production decoders decodeRequestItem, decodeRunItem and decodeOverviewMember, with the types RunItem, RunContent, KnownRun and OverviewMember (tui/src/Agentic/Tui/Service.hs near 728-814), are not called by service mode. Only tui/test/ServiceTests.hs uses them. tui/README.md documents this. The WM-029/WM-033 Overview bootstrap must use these decoders and must not add a second parser.
+2. (low) In all 44 accepted facade cases the projection equals the input JSON, and the check compares toJSON of the decoded value (manager/test/ClientCheck.hs near 180-203). This round trip cannot detect a symmetric codec defect, for example a field that the decoder drops and the encoder restores with a default. Add facade cases whose projection differs from the input, or project named fields as the TUI side does.
+3. (low) A TUI refusal vector passes on any InvalidResponse, and an answer refusal passes on any Left (tui/test/ServiceTests.hs near 281 and 296). Check the answerValue refusal message, or keep each refusal vector a single-field mutation of an accepted vector.
+4. (low) decodeRunItem and decodeOverviewMember are not run on the shared v1 fixtures overview.json, runs.json and runs-with-unreadable-manifest.json (tui/test/ServiceTests.hs near 181-205). Add a short TUI test that decodes the items of these fixtures.
+5. (low) The tampered negative ran only on the facade side. No recorded run shows that resourceVectorTests fails on a wrong TUI projection. Run tui-model-test once with one wrong TUI projection and record the failure.
+
+Limitations recorded by the implementer: the generator script for the vector file is not committed (the JSON file is the artifact); the vectors use aeson's ordinary decoder, so there are no duplicate-key cases; the server writes the unreadable-manifest category manifest-unavailable while the v1 fixtures use malformed-manifest (both are in the openapi list); answer refusals use the vector code InvalidAnswer.
+
 * TODO [#C] Resolve PC5 fess findings in legacy history windows    :review:
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -18072,7 +18096,7 @@ public or production deployment.
 :LABELS:   ["p6","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-30 Wed 22:40]
+:MODIFIED: [2026-09-30 Wed 22:55]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-029
 :SOURCE_REPO: agent-cat
@@ -18219,6 +18243,13 @@ coordination or SQL into the TUI.
     "author": "johnw",
     "text": "Subtask PC9 (2026-09-30) adds the pure live-delivery decoding of the shared client: an incremental SSE block parser (manager/src/Agentic/Manager/Client/Events.hs: newSseParser, feedSse, closeSse; LF and CRLF, id, event, multi-line data, comment-only blocks as heartbeats, refusal of blocks above sseBlockBytes 16384, invalid UTF-8 and invalid ids with InvalidResponse, a partial final block discarded at close), strict event DTOs (Invalidation for the seven event names, EventBatch, RouteRecord), problemFailure (manager/src/Agentic/Manager/Client/Failure.hs: 410 view-expired and cursor-expired give Refused 410 code), validETag, and the vectors mode of manager-client-check with test/manager_client_vectors.json (105 vectors, 117 PASS checks). All of it is re-exported from Agentic.Manager.Client, and the TUI still imports only the facade. Not yet done in WM-029: the HTTP streaming reader, reconnect, and decoding a polling response as an EventBatch. Evidence: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/PC/PC9/impl-r1 (build.exit, vectors.exit, source-boundaries.exit and doc-check.exit all 0). Fess: fess/pc-PC9-r1.md, not blocking; its findings are filed as acat-pc9-sse-events-fess-bjzi.",
     "created_at": "2026-10-01T05:40:59Z"
+  },
+  {
+    "id": 474,
+    "issue_id": "acat-wm-029-nlmg",
+    "author": "johnw",
+    "text": "PC10 (DTO vectors for the public resource types): test/manager_client_vectors.json gains a resources section with 201 cases (drafts, preparations, receipts for the facade; decisions, answers, controls, requests, runs for the TUI). manager-client-check vectors mode runs the facade cases; tui-model-test runs the TUI cases through new Service.hs decoders (decodeRequestItem, decodeRunItem, decodeOverviewMember, not yet used by service mode). Checks passed: Werror build with -ftui-tests, vectors mode, tui-model-test +RTS -N8, make -C doc check. Evidence: resume-20260923/PC/PC10/impl-r1, fess/pc-PC10-r1.md (non-blocking). Follow-up: acat-pc10-resource-vectors-fess-54zn. Package stays open.",
+    "created_at": "2026-10-01T05:55:28Z"
   }
 ]
 #+end_src

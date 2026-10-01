@@ -108,7 +108,8 @@ main = do
         Left C.RedirectRefused -> kind == "redirect"
         _ -> False
       either (const (pure ())) (void . C.closeClient) result
-    ["vectors",path] -> BS.readFile path >>= either (die . ("vector file: " <>)) eventVectors . eitherDecodeStrict
+    ["vectors",path] -> BS.readFile path >>= either (die . ("vector file: " <>)) (\root -> eventVectors root >> resourceVectors root)
+      . eitherDecodeStrict
     _ -> die "usage: manager-client-check MODE ABS_CLIENT_PROFILE [FAILURE_KIND] | manager-client-check vectors PATH"
 
 -- The fields of one vector object, or a failure that names the vector.
@@ -157,6 +158,49 @@ eventVectors root = do
       Object _ | [Number code, String name] <- members "refused" (field "expected" vector) -> pure (C.Refused (round code) name)
       _ -> die ("FAIL " <> vectorLabel "problem" vector <> " has no expected failure")
     check (vectorLabel "problem" vector) (C.problemFailure status (field "body" vector) == expected))
+
+-- | The sections of the resources section of test/manager_client_vectors.json
+-- that the facade decodes. Each case names its public type.
+resourceVectors :: Value -> IO ()
+resourceVectors root = do
+  let section = field "resources" root
+      projected :: ToJSON a => (Value -> Either C.ClientFailure a) -> Value -> Either C.ClientFailure Value
+      projected decode = fmap toJSON . decode
+      sections =
+        [ ("drafts", [("DraftView", projected (C.decodeObservation :: Value -> Either C.ClientFailure C.DraftView)),
+            ("Readiness", projected (C.decodeObservation :: Value -> Either C.ClientFailure C.Readiness)),
+            ("InputDeclaration", projected (C.decodeObservation :: Value -> Either C.ClientFailure C.InputDeclaration)),
+            ("SuppliedInput", projected (C.decodeObservation :: Value -> Either C.ClientFailure C.SuppliedInput)),
+            ("InputError", projected (C.decodeObservation :: Value -> Either C.ClientFailure C.InputError))]),
+          ("preparations", [("Preparation", projected (C.decodeObservation :: Value -> Either C.ClientFailure C.Preparation)),
+            ("Review", projected (C.decodeObservation :: Value -> Either C.ClientFailure C.Review)),
+            ("ReviewInput", projected (C.decodeObservation :: Value -> Either C.ClientFailure C.ReviewInput)),
+            ("ReviewLineage", projected (C.decodeObservation :: Value -> Either C.ClientFailure C.ReviewLineage)),
+            ("ReviewEdit", projected (C.decodeObservation :: Value -> Either C.ClientFailure C.ReviewEdit))]),
+          ("receipts", [("CommandReceipt", projected (C.decodeObservation :: Value -> Either C.ClientFailure C.CommandReceipt))]) ]
+  forM_ sections $ \(name, decoders) -> do
+    let items = members name section
+    when (null items) (die ("FAIL vector section resources." <> T.unpack name <> " is empty"))
+    forM_ items $ \vector -> case text (field "type" vector) >>= (`lookup` decoders) of
+      Just decode -> resourceVector decode name vector
+      Nothing -> die ("FAIL " <> vectorLabel name vector <> " names no type of its section")
+
+-- A resource vector: the JSON text decodes to the projection, which is the
+-- canonical encoding of the decoded value, or refuses with InvalidResponse.
+resourceVector :: (Value -> Either C.ClientFailure Value) -> Text -> Value -> IO ()
+resourceVector decode section vector = do
+  let label = vectorLabel section vector
+      parsed key = case text (field key vector) of
+        Just source -> either (\problem -> die ("FAIL " <> label <> ": " <> problem)) pure (eitherDecodeStrict (TE.encodeUtf8 source))
+        Nothing -> die ("FAIL " <> label <> " has no " <> T.unpack key)
+  value <- parsed "json"
+  expected <- case (field "projection" vector, field "refusal" vector) of
+    (String _, Null) -> Right <$> parsed "projection"
+    (Null, String "InvalidResponse") -> pure (Left C.InvalidResponse)
+    _ -> die ("FAIL " <> label <> " states neither one projection nor one refusal")
+  let outcome = decode value
+  unless (outcome == expected) (die ("FAIL " <> label <> ": " <> show outcome))
+  check label True
 
 -- A JSON vector: a valid one decodes and encodes back to the identical value,
 -- and an invalid one refuses with InvalidResponse.
