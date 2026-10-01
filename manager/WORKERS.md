@@ -138,6 +138,34 @@ an explicit truncation flag, while draining continues. A long-running process is
 not killed merely for exceeding a lifetime diagnostics byte count. Stderr is not
 the lossless Runtime event channel and is not copied into public protocol DTOs.
 
+## Worker loss after start
+
+When the worker processes of a started run end before the run ends, for example
+through SIGKILL, the reader reaches the end of the worker pipes and the worker
+records its exit. Admission then ends the entry as `closed`. The run moves from
+`owned` to `cleanup-pending` supervision, Admission closes the worker and
+confirms its cleanup, the reservation is released, and the run moves to `lost`
+supervision. Admission does not start, resume or re-dispatch the run.
+
+`GET /v1/runs/{id}` shows `lost` supervision and the `lost-supervision`
+limitation as soon as Admission no longer holds a live worker for the run. The
+runtime status stays the last validated status, such as `running`, and the run
+shows no verified result. The run control resource shows `lost` supervision and
+no cancel. A later answer or control for the run is refused with 409
+`ownership-unavailable` and nothing is delivered. The run log ends without its
+stop. The flow verb reports it with `lostSupervision`, with each open ask under
+`uncertain`, and with exit status 2. The released reservation lets the manager
+admit, approve and complete new requests. The `failures-worker` mode of
+`manager/test/service_http.py` checks these facts through the running protected
+manager.
+
+The frontend proxy and the inner frontend worker run in two process groups, and
+the inner worker inherits the pipes of the manager. When only the proxy ends,
+the inner worker keeps those pipes open and the run continues under `owned`
+supervision. The manager does not observe the loss of the proxy alone, and the
+cleanup of the proxy group does not signal the inner group. This is an instance
+of the escaped-descendant limit that the next section states.
+
 ## Verification and remaining owners
 
 `manager/ci/workers.sh` builds actual Cabal targets with warnings as errors and runs

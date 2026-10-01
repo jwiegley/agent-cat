@@ -4440,6 +4440,28 @@ Non-blocking findings of the fess audit of Phase B part 2 subtask C22 (increment
 2. (low) runtime. The Runtime starts the ACP adapter (initialize, session/new, session/cancel) at run start even when every ask of the run is answered by a person. The mode therefore asserts only that no turn happens. Fix: decide whether the adapter should start lazily for fully person-answered runs. This is a runtime design change.
 3. (low) manager/CONTROLS.md (about line 171). The section "Asks answered by people" states that no attempt, engine turn or tool call occurs for the ask, but only the model:NAME form runs through the manager. The tool:NAME form has no manager-level test. This overlaps finding 1 of acat-c21-person-answers-fess-findings-nmvb. Fix: add a tool:NAME case to the person-answers mode, or close this item together with that one.
 
+* TODO [#D] Resolve C23 fess findings on worker loss after start
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-c23-worker-loss-fess-findings-p34r
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-30 Wed 17:36]
+:MODIFIED: [2026-09-30 Wed 17:36]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of the fess audit of Phase B part 2 subtask C23 (WM-028 functional, worker death and manager/ci/supervision.sh, mode failures-worker of manager/test/service_http.py). Report: fess/b2-C23-r1.md in the private evidence directory.
+
+1. (medium, functional) manager/test/service_http.py (about lines 4764-4783) and cli/src/Agentic/Cli/Frontend.hs (about line 129). The frontend proxy starts the inner frontend worker with inherited standard streams in a second process group. A SIGKILL of the proxy group alone leaves the inner group alive with the manager pipes open, so the manager does not observe the loss and the run stays under owned supervision. The failures-worker mode kills every descendant group, so it does not cover this case. Nobody checked whether a cancel, timeout or answer still reaches the inner worker after a proxy-only loss, or whether the inner group is orphaned after the proxy group cleanup. manager/WORKERS.md records the case as an instance of the escaped-descendant limit (WM-019 containment). Fix: reproduce by killing only the proxy group, then cancel the run and check for an orphaned inner group. Decide whether the proxy cleanup must signal the inner group, or whether the manager must watch the exit of its direct child.
+2. (low) manager/test/service_http.py (about lines 4806 and 4809). Case 3 accepts any status other than 202 as a refusal, so a 400 or 500 would pass. The observed result was 409 ownership-unavailable for both commands. Fix: assert status 409 and code ownership-unavailable for the answer and the cancel.
+3. (low) manager/test/service_http.py (about lines 4801-4805). If GET /v1/decisions/{id} does not return 200, the test does not send the answer and still passes. Fix: require status 200 for the decision read, or assert the specific expected code.
+4. (low) manager/test/service_http.py (about line 4707). The variable terminal is defined and not used. Fix: remove it.
+5. (low) manager/WORKERS.md (about lines 146-148). The section states the sequence owned, then cleanup-pending, then lost. The test observes only lost, 0.01 seconds after SIGKILL. Fix: observe cleanup-pending in a check, or state only what the check shows.
+
 * TODO [#D] Resolve C4 fess findings on the pruned flow reader
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -17242,7 +17264,7 @@ Network mutation remains behind G3 until the required evidence is complete.
 :LABELS:   ["p5","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-30 Wed 12:00]
+:MODIFIED: [2026-09-30 Wed 17:36]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-028
 :SOURCE_REPO: agent-cat
@@ -17378,6 +17400,13 @@ public or production deployment.
     "author": "johnw",
     "text": "Phase B part 2 subtask C5 adds the two-client artifact download case to the pages mode of manager/test/service_http.py and the native wait and deadline checks in manager-artifact-check. Evidence: build of manager-artifact-check, agentic-run and routing-fixed-point-probe with -ftui-tests; manager-artifact-check response-order and response-ingestion at -N8; service_http.py pages at N8 with the new two-client case 9; make -C doc check; the Phase A journey at N8 (logs in the private resume-20260923 evidence directory; fess report fess/b2-C5-r1.md, non-blocking, findings filed as acat-c5-download-places-fess-findings-zmog). The package stays open for the closeout review.",
     "created_at": "2026-09-30T19:00:57Z"
+  },
+  {
+    "id": 434,
+    "issue_id": "acat-wm-028-g1n0",
+    "author": "johnw",
+    "text": "C23 (functional part of the worker-death boundary): new mode failures-worker of manager/test/service_http.py passed at N8. After SIGKILL of every worker process group of a run waiting at its person question, GET /v1/runs/{id} shows lost supervision with no verified result, an answer and a cancel are each refused with 409 ownership-unavailable, the run is not re-dispatched (one run.started), a new request on the same manager completes, and agentic-run flow exits 2 with lostSupervision and the open ask under uncertain. manager/ci/supervision.sh passed after a test-harness fix in manager/test/supervision/case.py (the copied run() read the undefined global mode). make -C doc check and the Phase A journey at N8 passed. No production code changed. Security-only parts of WM-028 stay deferred under the 2026-09-30 operator direction. Proxy-only loss stays open as a containment item. Follow-up: acat-c23-worker-loss-fess-findings-p34r. Evidence: B2/C23 in the private evidence directory.",
+    "created_at": "2026-10-01T00:36:08Z"
   }
 ]
 #+end_src

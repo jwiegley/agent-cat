@@ -49,7 +49,8 @@ def create_original(command,**kwargs):
     event('readiness-observed-before-constructor-hook-return',handleIdentity=hex(id(process)))
     ready.set()
     return process
-namespace={'work':work,'copy':work,'environment':environment,'results':[], 'json':json,'signal':signal,'time':time,
+# The helper's run() reads the audit mode global. No audit mode applies here.
+namespace={'mode':'supervision','work':work,'copy':work,'environment':environment,'results':[], 'json':json,'signal':signal,'time':time,
            'subprocess':types.SimpleNamespace(Popen=create_original,STDOUT=subprocess.STDOUT,TimeoutExpired=subprocess.TimeoutExpired)}
 exec(compile(ast.Module(body=nodes,type_ignores=[]),str(helper),'exec'),namespace)
 actual_run=namespace['run'];run_code=actual_run.__code__

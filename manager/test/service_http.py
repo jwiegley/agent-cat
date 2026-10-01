@@ -9,6 +9,7 @@ import json
 import os
 import re
 import secrets
+import signal
 import socket
 import ssl
 import stat
@@ -71,7 +72,7 @@ consent_control = len(sys.argv) == 6 and sys.argv[5] == "tui-consent-control"
 # runs one manager lifetime and does not enter the restart loop.
 LIFECYCLE = "credential-lifecycle"
 lifecycle = len(sys.argv) == 6 and sys.argv[5] == LIFECYCLE
-mixed = len(sys.argv) == 6 and sys.argv[5] in ("mixed", "mixed-confirm", "tui-approval", "tui-consent-control", APPROVE_FAULT, LIFECYCLE, "pages", "routes") + JOURNEYS
+mixed = len(sys.argv) == 6 and sys.argv[5] in ("mixed", "mixed-confirm", "tui-approval", "tui-consent-control", APPROVE_FAULT, LIFECYCLE, "pages", "routes", "failures-worker") + JOURNEYS
 confirm_uncertain = mixed and sys.argv[5] == "mixed-confirm"
 # The boundary mode checks WM-024 through the running protected manager with
 # raw socket and ssl connections: plaintext and TLS 1.2 refusal, request
@@ -216,6 +217,19 @@ live_mode = len(sys.argv) == 6 and sys.argv[5] == LIVE
 # prints its own PASS line. It runs one manager lifetime.
 PERSON = "person-answers"
 person_mode = len(sys.argv) == 6 and sys.argv[5] == PERSON
+# The failures-worker mode checks the failure ending of a lost worker through
+# the running protected manager with the mixed fixture. A mixed-controls run
+# waits at its person question, and the harness kills the process groups of
+# the worker with SIGKILL. The run must then show lost supervision and no
+# successful result, an answer and a cancel for it must be refused or end
+# unresolved and never effect-observed, and no worker process may remain or
+# start for it. A new mixed-controls request on the same manager must then
+# be reviewed, approved and completed with a verified result. After the
+# manager exits, the flow verb must report the run log of the lost run as
+# ended without its stop, with lost supervision and the question uncertain.
+# Each numbered case prints its own PASS line. It runs one manager lifetime.
+WORKER_FAILURE = "failures-worker"
+worker_failure_mode = len(sys.argv) == 6 and sys.argv[5] == WORKER_FAILURE
 # The modes that configure the control fixture profiles in place of the
 # scripted profile: profile_1 runs the recovery-offering retry adapter and
 # profile_steer runs the steerable adapter. The controls-routing mode also
@@ -4684,6 +4698,175 @@ def person_checks():
           "and to answer command", answer_command, "at manager position", command["position"], "from credential", credential["credentialId"],
           "and the run log has no engine start or turn", flush=True)
     print("PASS person-answers: every person-answer case held against the running TLS 1.3 manager", flush=True)
+
+
+def worker_failure_checks():
+    """The failure ending of a lost worker through the real HTTPS manager.
+    Each numbered case prints one PASS line."""
+    authorized = {"Authorization": "Bearer " + bearer}
+    terminal = ("succeeded", "failed", "cancelled")
+
+    def groups(pids):
+        """The process group of each live process in pids, with its command."""
+        listing = subprocess.run(["ps", "-o", "pid=,pgid=,command="] + sum((["-p", str(pid)] for pid in pids), []),
+                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=10).stdout
+        return [(int(pid), int(pgid), command) for pid, pgid, command in
+                (line.strip().split(None, 2) for line in listing.splitlines() if line.strip())]
+
+    def attempt(path, body, tag):
+        """Send one command and return its status and its final receipt
+        state, or the refusal code. A receipt that stays accepted or
+        dispatch-attempted past the bound fails."""
+        key = capabilities["authorityEpoch"] + "." + secrets.token_urlsafe(16)
+        payload = json.dumps(body, separators=(",", ":")).encode()
+        headers = authorized | {"Content-Type": "application/json", "Idempotency-Key": key, "If-Match": tag}
+        status, receipt, raw, _ = exchange(path, headers, method="POST", payload=payload)
+        if status != 202:
+            return status, receipt["code"], None
+        validate("CommandReceipt", receipt, raw)
+        value, _, raw = wait_for(receipt["links"]["self"], "CommandReceipt",
+            lambda value: value["state"] in ("effect-observed", "refused", "unresolved"))
+        (work / ("lost-" + body["operation"] + "-receipt.json")).write_bytes(raw)
+        return status, value["state"], value
+
+    with (work / "server-0.stdout").open("wb") as output, (work / "server-0.stderr").open("wb") as errors:
+        process = subprocess.Popen([str(runner), "--manager", "serve", "--config", str(config),
+                                    "+RTS", "-N" + native, "-RTS"], stdout=output, stderr=errors)
+        try:
+            wait_ready(process)
+            status, capabilities, raw = request("/v1/capabilities", authorized)
+            assert status == 200
+            validate("Capabilities", capabilities, raw)
+            client = mixed_client(capabilities, authorized)
+            observed, wait_for, _, _ = client
+            status, catalogue, _ = request("/v1/workflows?profileId=profile_1", authorized)
+            assert status == 200
+            workflow = next(item for item in catalogue["items"] if item["name"] == "mixed-controls")
+            create = json.dumps({"workflowId": workflow["id"], "descriptorRevision": workflow["revision"],
+                                 "profileId": workflow["profileId"], "profileRevision": workflow["profileRevision"]},
+                                separators=(",", ":")).encode()
+
+            def create_request():
+                key = capabilities["authorityEpoch"] + "." + secrets.token_urlsafe(16)
+                status, created, raw = request("/v1/requests", authorized | {
+                    "Content-Type": "application/json", "Idempotency-Key": key}, method="POST", payload=create)
+                assert status == 201, ("request creation", status, created.get("code"))
+                validate("Request", created, raw)
+                return created
+
+            # Case 1. A run waits at its person question with a live worker.
+            _, run = approve_mixed(create_request(), workflow, client)
+            base = "/v1/runs/" + run
+            head, _, _ = drive_mixed(run, client, stop_at_question=True, overview=False)
+            control, _, _ = observed(base + "/control", "RunControl")
+            assert control["supervision"] == "owned" and control["decisionHeadId"] == head, (control["supervision"], control["decisionHeadId"])
+            decision, _, _ = observed("/v1/decisions/" + head, "Decision")
+            # The worker is the frontend proxy that the manager starts, in its
+            # own process group, and the inner frontend worker that the proxy
+            # starts in a second process group with the engine adapter. Both
+            # groups are read from the live processes, never from a stored
+            # PID. The proxy alone is not the worker: the inner worker
+            # inherits the pipes of the manager and continues the run when
+            # only the proxy dies.
+            manager_group = os.getpgid(process.pid)
+            tree = groups(descendants(process.pid))
+            (work / "worker-processes.txt").write_text("".join(f"{pid} {pgid} {command}\n" for pid, pgid, command in tree))
+            targets = sorted({pgid for _, pgid, _ in tree})
+            assert targets and manager_group not in targets, ("worker process groups", targets, manager_group)
+            print("PASS failures-worker case 1: run", run, "waits at person question", head, "under owned supervision, with",
+                  len(tree), "worker processes in process groups", targets, flush=True)
+
+            # Case 2. SIGKILL of the worker process groups ends in lost
+            # supervision and never in a successful result.
+            for group in targets:
+                os.killpg(group, signal.SIGKILL)
+            killed = time.monotonic()
+            value, _, raw = wait_for(base, "Run", lambda value: value["supervision"] == "lost")
+            lost_after = time.monotonic() - killed
+            (work / "lost-run.json").write_bytes(raw)
+            assert value["runtime"] is None or value["runtime"]["status"] != "succeeded", ("lost run runtime", value["runtime"])
+            assert value["verification"]["state"] != "verified", ("lost run verification", value["verification"])
+            assert "lost-supervision" in value["limitations"], ("lost run limitations", value["limitations"])
+            control, control_tag, raw = observed(base + "/control", "RunControl")
+            (work / "lost-control.json").write_bytes(raw)
+            assert control["supervision"] == "lost" and not control["cancelAllowed"], ("lost run control", control["supervision"], control["cancelAllowed"])
+            snapshot, _, _ = observed(base + "/snapshot", "RunSnapshot")
+            assert snapshot["runtime"] is None or snapshot["runtime"]["status"] != "succeeded", ("lost run snapshot", snapshot["runtime"])
+            outputs, _, _ = observed(base + "/outputs", "OutputPage")
+            assert not [item for item in outputs["items"] if item["kind"] == "result" and item["verification"]["state"] == "verified"], (
+                "the lost run shows a verified result", outputs["items"])
+            print("PASS failures-worker case 2: after SIGKILL of the worker process groups, run", run, "shows lost supervision after",
+                  round(lost_after, 2), "seconds with runtime", value["runtime"] and value["runtime"]["status"], "verification",
+                  value["verification"]["state"], "and limitations", value["limitations"], flush=True)
+
+            # Case 3. An answer and a cancel for the lost run are refused or
+            # end unresolved, and neither is effect-observed.
+            status, decision_now, raw, headers = exchange("/v1/decisions/" + head, authorized)
+            (work / "lost-decision.json").write_bytes(raw)
+            if status == 200:
+                answer = {"operation": "answer", "occurrenceId": decision["address"]["occurrenceId"],
+                          "generation": decision["generation"], "value": False}
+                outcome = attempt("/v1/decisions/" + head, answer, headers["etag"])
+            else:
+                outcome = (status, decision_now["code"], None)
+            assert outcome[0] != 202 or outcome[1] in ("refused", "unresolved"), ("lost run answer", outcome[:2])
+            assert outcome[2] is None or outcome[2]["effect"] is None, ("lost run answer effect", outcome[2]["effect"])
+            cancel = attempt(base + "/control", {"operation": "cancel"}, control_tag)
+            assert cancel[0] != 202 or cancel[1] in ("refused", "unresolved"), ("lost run cancel", cancel[:2])
+            assert cancel[2] is None or cancel[2]["effect"] is None, ("lost run cancel effect", cancel[2]["effect"])
+            value, _, _ = observed(base, "Run")
+            assert value["supervision"] == "lost" and (value["runtime"] is None or value["runtime"]["status"] != "succeeded")
+            print("PASS failures-worker case 3: the answer of decision", head, "ended as", outcome[:2], "and the cancel ended as",
+                  cancel[:2], "with no effect, and the run stays lost", flush=True)
+
+            # Case 4. No worker process remains or starts for the lost run.
+            remaining = descendants(process.pid)
+            assert not remaining, ("processes remain after the worker loss", groups(remaining))
+            stores = sorted(work.glob("manager/runs/runs/*/runtime"))
+            assert len(stores) == 1, ("run stores after the worker loss", stores)
+            lost_store = stores[0]
+            starts = [line for line in (lost_store / "events.ndjson").read_bytes().splitlines()
+                      if json.loads(line)["event"]["type"] == "run.started"]
+            assert len(starts) == 1, ("the lost run started again", len(starts))
+            print("PASS failures-worker case 4: no manager descendant remains and the run store of", run,
+                  "holds one run start", flush=True)
+
+            # Case 5. A new request on the same manager is reviewed,
+            # approved and completes with a verified result.
+            _, fresh = approve_mixed(create_request(), workflow, client)
+            _, answered, recovered = drive_mixed(fresh, client, overview=False)
+            assert answered and recovered, ("new run decisions", answered, recovered)
+            artifact = verified_download(fresh, client, authorized)
+            value, _, _ = observed(base, "Run")
+            assert value["supervision"] == "lost", ("lost run after the new run", value["supervision"])
+            print("PASS failures-worker case 5: new run", fresh, "on the same manager was reviewed, approved, answered and",
+                  "retried, and succeeded with verified result", artifact["id"], flush=True)
+        finally:
+            if process.poll() is None:
+                process.terminate()
+            process.wait(timeout=25)
+            (work / "server-0.exit").write_text(str(process.returncode) + "\n")
+
+    # Case 6. The flow verb reports the run log of the lost run as ended
+    # without its stop, never as complete.
+    completed = subprocess.run([str(runner), "flow", str(lost_store)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=120)
+    (work / "lost-flow.ndjson").write_bytes(completed.stdout)
+    (work / "lost-flow.stderr").write_bytes(completed.stderr)
+    lines = [json.loads(line) for line in completed.stdout.splitlines()]
+    assert lines and "summary" in lines[-1], ("flow verb", completed.returncode, completed.stderr[-2000:])
+    summary = lines[-1]["summary"]
+    questions = [line["position"] for line in lines[:-1] if line.get("schema") == "question" and line["to"] == {"to": "manager"}]
+    assert completed.returncode == 2 and summary["stop"] is None and summary["states"]["lostSupervision"], (
+        "the flow verb does not report lost supervision", completed.returncode, summary["stop"], summary["states"])
+    assert questions and set(questions) <= set(summary["states"]["uncertain"]), ("the person question is not uncertain", questions, summary["states"]["uncertain"])
+    print("PASS failures-worker case 6: the flow verb exits 2 for the lost run log, with no stop, lost supervision and",
+          "uncertain asks", summary["states"]["uncertain"], flush=True)
+    print("PASS failures-worker: every worker-loss case held against the running TLS 1.3 manager", flush=True)
+
+
+if worker_failure_mode:
+    worker_failure_checks()
+    raise SystemExit(0)
 
 
 if person_mode:
