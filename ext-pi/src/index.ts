@@ -8,7 +8,7 @@ import { configuredManagerProfiles, configuredRemote, configuredRunners, retenti
 import { CurrentSessionBridge } from "./current-bridge.ts";
 import { MutationGrants, type GrantScope } from "./grants.ts";
 import { assertNoCredentialArgs, prepareLaunch, preflightLineage, previewPlan, type LineageEdit, type PreparedLaunch } from "./launch.ts";
-import { formatMonitor } from "./monitor.ts";
+import { formatControl, formatMonitor } from "./monitor.ts";
 import { WorkflowMonitorComponent } from "./monitor-ui.ts";
 import { openRemotePi } from "./pi-remote-runtime.mjs";
 import type { SessionOptions } from "./manager/session.ts";
@@ -446,6 +446,21 @@ export default function agentCatExtension(pi: ExtensionAPI, hooks: ExtensionHook
     handler: async (args, ctx) => requests.answer(ctx, args),
   });
 
+  pi.registerCommand("wfm-cancel", {
+    description: "Cancel a manager run after confirmation when its controls allow the cancel, and report the receipt and the runtime acknowledgement",
+    handler: async (args, ctx) => requests.cancel(ctx, args),
+  });
+
+  pi.registerCommand("wfm-steer", {
+    description: "Steer the attempt of a manager run that its controls offer, and report the receipt and the runtime acknowledgement",
+    handler: async (args, ctx) => requests.steer(ctx, args),
+  });
+
+  pi.registerCommand("wfm-redirect", {
+    description: "Redirect an occurrence of a manager run to an offered target, in its dispatch window or for its attempt in flight, and report the receipt and the runtime acknowledgement",
+    handler: async (args, ctx) => requests.redirect(ctx, args),
+  });
+
   pi.registerCommand("wfm-endpoints", {
     description: "Choose the active manager client profile",
     handler: async (args, ctx) => {
@@ -577,16 +592,19 @@ export default function agentCatExtension(pi: ExtensionAPI, hooks: ExtensionHook
   });
 
   pi.registerCommand("wf-redirect", {
-    description: "Redirect one dispatch-pending occurrence to a reserved target",
+    description: "Redirect one occurrence: to a reserved target in its dispatch window, or to a live candidate of its fail-over chain while its attempt runs",
     handler: async (args, ctx) => {
       if (!ctx.hasUI) return ctx.ui.notify("workflow redirect requires interactive approval", "error");
       if (!ctx.isProjectTrusted()) return ctx.ui.notify("workflow redirect requires a trusted project", "error");
-      const [runId, occurrenceId, target] = args.trim().split(/\s+/, 3);
-      if (!runId || !occurrenceId || !target) return ctx.ui.notify("Usage: /wf-redirect RUN_ID OCCURRENCE_ID RESERVED_TARGET", "warning");
+      const trimmed = args.trim();
+      const [runId, occurrenceId] = trimmed.split(/\s+/, 2);
+      const target = trimmed.split(/\s+/).slice(2).join(" ");
+      if (!runId || !occurrenceId || !target) return ctx.ui.notify("Usage: /wf-redirect RUN_ID OCCURRENCE_ID TARGET", "warning");
       const run = supervisor.get(runId);
       if (!run) return ctx.ui.notify(`Unknown run ${runId}`, "error");
       try {
-        notifyControl(ctx, "redirect", await run.redirect(occurrenceId, target));
+        const ack = await run.redirect(occurrenceId, target);
+        notifyControl(ctx, "redirect", ack, run.snapshot, occurrenceId);
       } catch (error) {
         ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");
       }
@@ -780,7 +798,8 @@ function grantError(scope: string) {
       if (params.action === "redirect") {
         if (!params.occurrenceId || !params.target) return { content: [{ type: "text", text: "redirect requires occurrenceId and target" }], details: {}, isError: true };
         try {
-          return controlToolResult("redirect", await run.redirect(params.occurrenceId, params.target));
+          const ack = await run.redirect(params.occurrenceId, params.target);
+          return controlToolResult("redirect", ack, run.snapshot, params.occurrenceId);
         } catch (error) {
           return { content: [{ type: "text", text: error instanceof Error ? error.message : String(error) }], details: {}, isError: true };
         }
@@ -880,13 +899,13 @@ function modeLine(mode: ClientMode): string {
   return `Mode: service with ${mode.profiles.length} manager profile${mode.profiles.length === 1 ? "" : "s"}. Current-session, owned-child, deck, ACP, and remote Pi targets stay local.`;
 }
 
-function notifyControl(ctx: ExtensionContext, action: string, ack: ControlAckSnapshot): void {
-  ctx.ui.notify(`${action} ${ack.state} (${ack.controlId}): ${ack.message}`, ack.state === "delivered" ? "info" : "error");
+function notifyControl(ctx: ExtensionContext, action: string, ack: ControlAckSnapshot, snapshot?: RunSnapshot, occurrenceId?: string): void {
+  ctx.ui.notify(formatControl(action, ack, snapshot, occurrenceId), ack.state === "delivered" ? "info" : "error");
 }
 
-function controlToolResult(action: string, ack: ControlAckSnapshot) {
+function controlToolResult(action: string, ack: ControlAckSnapshot, snapshot?: RunSnapshot, occurrenceId?: string) {
   return {
-    content: [{ type: "text" as const, text: `${action} ${ack.state} (${ack.controlId}): ${ack.message}` }],
+    content: [{ type: "text" as const, text: formatControl(action, ack, snapshot, occurrenceId) }],
     details: {},
     ...(ack.state === "delivered" ? {} : { isError: true }),
   };

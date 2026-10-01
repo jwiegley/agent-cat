@@ -15,7 +15,7 @@ import { join, resolve } from "node:path";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import extension from "../src/index.ts";
 import type { Outcome } from "../src/manager/events.ts";
-import { encodeJson, parseJson, type JsonValue } from "../src/manager/json.ts";
+import { encodeJson, isJsonObject, jsonMember, parseJson, type JsonValue } from "../src/manager/json.ts";
 import type { ClientProfile } from "../src/manager/profile.ts";
 import type { SessionTransport } from "../src/manager/session.ts";
 import type { ClientResponse, CommandHeaders, Delivery, FollowEnd, FollowOptions, StreamItem } from "../src/manager/transport.ts";
@@ -25,6 +25,7 @@ import { RunSupervisor } from "../src/supervisor.ts";
 
 type Reply = Outcome<ClientResponse>;
 type Route = (resource: string, count: number) => Reply | Promise<Reply>;
+type PostRoute = (resource: string, body: JsonValue) => Reply | undefined;
 
 const CLOSED: Reply = { ok: false, failure: { kind: "ClientClosed" } };
 const UNREACHABLE: Reply = { ok: false, failure: { kind: "TransportUnavailable" } };
@@ -43,7 +44,7 @@ class FakeTransport implements SessionTransport {
    * `ManagerTransport` does. An unfenced transport gives the late reply, so
    * only the fences of the session and of service mode remain.
    */
-  constructor(readonly host: string, readonly route: Route, readonly fenced: boolean) {}
+  constructor(readonly host: string, readonly route: Route, readonly fenced: boolean, readonly postRoute?: PostRoute) {}
 
   async get(resource: string): Promise<Reply> {
     this.gets.push(resource);
@@ -64,7 +65,7 @@ class FakeTransport implements SessionTransport {
   async post(resource: string, body: JsonValue, command: CommandHeaders): Promise<Reply> {
     this.posts.push(resource);
     this.bodies.push({ body: encodeJson(body), ifMatch: command.ifMatch });
-    return UNREACHABLE;
+    return this.postRoute?.(resource, body) ?? UNREACHABLE;
   }
 
   async postBytes(resource: string): Promise<Reply> {
@@ -239,7 +240,7 @@ afterEach(() => {
 });
 
 /** A fake transport factory over the routes of each host. */
-function transports(routes: Record<string, Route>, unfenced: readonly string[] = [])
+function transports(routes: Record<string, Route>, unfenced: readonly string[] = [], postRoutes: Record<string, PostRoute> = {})
   : { made: FakeTransport[]; transport: (profile: ClientProfile) => FakeTransport } {
   const made: FakeTransport[] = [];
   return {
@@ -247,7 +248,7 @@ function transports(routes: Record<string, Route>, unfenced: readonly string[] =
     transport: (loaded) => {
       const route = routes[loaded.endpoint.host];
       if (route === undefined) throw new Error(`no route for ${loaded.endpoint.host}`);
-      const made1 = new FakeTransport(loaded.endpoint.host, route, !unfenced.includes(loaded.endpoint.host));
+      const made1 = new FakeTransport(loaded.endpoint.host, route, !unfenced.includes(loaded.endpoint.host), postRoutes[loaded.endpoint.host]);
       made.push(made1);
       return made1;
     },
@@ -520,6 +521,152 @@ describe("service mode of the extension", () => {
       await pi.fire("session_shutdown");
       expect(made.posts).toEqual(["/v1/decisions/decision_a1"]);
     });
+
+  describe("run controls of /wfm-cancel, /wfm-steer and /wfm-redirect", () => {
+    const ACCEPTED_AT = "2026-10-01T12:00:00Z";
+
+    /** A command receipt of run_a1 with its acknowledgement and effect. */
+    function receipt(operation: string, state: string, ack: [string, string] | null, effect: string | null): unknown {
+      return {
+        version: 1, id: "cmd_1", profileId: "profile_1", operation, requiredScopes: ["control"], resource: "/v1/runs/run_a1/control", state,
+        acceptedAt: ACCEPTED_AT, dispatchAttemptedAt: state === "accepted" ? null : ACCEPTED_AT,
+        acknowledgement: ack === null ? null : {
+          commandId: "cmd_1", state: ack[0], message: ack[1], command: operation,
+          occurrenceId: operation === "cancel" ? null : "0", attemptId: operation === "steer" ? "0" : null,
+        },
+        effect: effect === null ? null : {
+          kind: effect, runtimeSequence: "12", address: operation === "steer" ? { occurrenceId: "0", attemptId: "0" } : { occurrenceId: "0" },
+          resource: "/v1/runs/run_a1",
+        },
+        refusal: null, links: { self: "/v1/commands/cmd_1", resource: "/v1/runs/run_a1/control" },
+      };
+    }
+
+    function controls(offers: unknown[], fields: Record<string, unknown> = {}): unknown {
+      return { version: 1, runId: "run_a1", revision: "run_a1_control", supervision: "owned", cancelAllowed: true, decisionHeadId: null, offers, ...fields };
+    }
+
+    const REDIRECT = { operation: "redirect", address: { occurrenceId: "0" }, generation: null, timings: [], choices: [], targets: ["model controlled@spare"] };
+    const STEER = { operation: "steer", address: { occurrenceId: "0", attemptId: "0" }, generation: null, timings: ["interrupt-now", "next-boundary"], choices: [], targets: [] };
+
+    /** The extension over one manager whose controls and settled receipt the case gives. */
+    async function controlled(control: unknown, settled: unknown, snapshot: unknown) {
+      const { local } = await localState();
+      process.env.AGENT_CAT_STATE_DIR = local;
+      process.env.AGENT_CAT_MANAGER_PROFILE = profile("controls", "alpha.test");
+      const base = manager([run("run_a1", "running")]);
+      const fake = transports({
+        "alpha.test": (resource, count) => {
+          if (resource === "/v1/capabilities") return ok(capabilities({}, ["observe", "submit", "control"]));
+          if (resource === "/v1/runs/run_a1/control") return ok(control, '"control_rev"');
+          if (resource === "/v1/runs/run_a1/snapshot") return ok(snapshot, '"snapshot_rev"');
+          if (resource === "/v1/commands/cmd_1") return ok(settled);
+          return base(resource, count);
+        },
+      }, [], {
+        "alpha.test": (resource, body) => {
+          const operation = isJsonObject(body) ? jsonMember(body, "operation") : undefined;
+          const accepted = JSON.stringify(receipt(String(operation), "accepted", null, null));
+          return resource === "/v1/runs/run_a1/control"
+            ? { ok: true, value: { status: 202, value: parseJson(accepted) as JsonValue, etag: null, location: "/v1/commands/cmd_1", bytes: accepted.length } }
+            : undefined;
+        },
+      });
+      const pi = host({ manager: { transport: fake.transport } });
+      await pi.fire("session_start");
+      await until(async () => (await pi.status()).includes("delivery live"));
+      return { pi, made: () => fake.made[0] };
+    }
+
+    const running = { items: [{ occurrenceId: "0", dispatch: null, attempts: [{ address: { occurrenceId: "0", attemptId: "0" }, state: "running" }] }] };
+    const windowOpen = { items: [{ occurrenceId: "0", dispatch: { targets: ["model controlled@spare"], open: true, redirect: null }, attempts: [] }] };
+
+    it("sends the live redirect of the attempt in flight and reports the receipt, then the delivered acknowledgement", async () => {
+      const { pi, made } = await controlled(controls([REDIRECT]),
+        receipt("redirect", "effect-observed", ["delivered", "redirect delivered to the in-flight attempt"], "redirected"), running);
+      const titles: string[][] = [];
+      Object.assign(pi.ctx.ui, { select: async (_title: string, choices: string[]) => (titles.push(choices), choices[0]) });
+      const before = pi.notices.length;
+      await pi.commands.get("wfm-redirect")!.handler("run_a1", pi.ctx);
+      expect(titles).toEqual([["model controlled@spare  occurrence 0, attempt 0 in flight"]]);
+      expect(made().posts).toEqual(["/v1/runs/run_a1/control"]);
+      expect(made().bodies).toEqual([{ body: '{"occurrenceId":"0","operation":"redirect","target":"model controlled@spare"}', ifMatch: '"control_rev"' }]);
+      expect(pi.notices.slice(before).map((notice) => notice.message)).toEqual([
+        "Command redirect accepted: command cmd_1, receipt effect-observed (redirected)",
+        "Acknowledgement of command cmd_1: delivered: redirect delivered to the in-flight attempt",
+        "Redirected occurrence 0 of run run_a1 from attempt 0 to model controlled@spare.",
+      ]);
+      await pi.fire("session_shutdown");
+    });
+
+    it("reports a rejected-stale acknowledgement of a redirect verbatim and states no redirect", async () => {
+      const { pi, made } = await controlled(controls([REDIRECT]),
+        receipt("redirect", "acknowledged", ["rejected-stale", "redirect target is not a live candidate that remains in the approved fail-over chain"], null), windowOpen);
+      const titles: string[][] = [];
+      Object.assign(pi.ctx.ui, { select: async (_title: string, choices: string[]) => (titles.push(choices), choices[0]) });
+      const before = pi.notices.length;
+      await pi.commands.get("wfm-redirect")!.handler("run_a1", pi.ctx);
+      expect(titles).toEqual([["model controlled@spare  occurrence 0, dispatch window open"]]);
+      expect(made().posts).toEqual(["/v1/runs/run_a1/control"]);
+      expect(pi.notices.slice(before)).toEqual([
+        { message: "Command redirect accepted: command cmd_1, receipt acknowledged", level: "info" },
+        { message: "Acknowledgement of command cmd_1: rejected-stale: redirect target is not a live candidate that remains in the approved fail-over chain", level: "warning" },
+      ]);
+      await pi.fire("session_shutdown");
+    });
+
+    it("steers the offered attempt with the editor text and timing and reports the receipt and the acknowledgement", async () => {
+      const { pi, made } = await controlled(controls([STEER]),
+        receipt("steer", "effect-observed", ["delivered", "steer delivered"], "steered"), running);
+      const titles: string[] = [];
+      Object.assign(pi.ctx.ui, {
+        select: async (title: string, choices: string[]) => (titles.push(`${title}: ${choices.join(", ")}`), choices[1]),
+        editor: async (title: string) => (titles.push(title), "Focus on the tests"),
+      });
+      const before = pi.notices.length;
+      await pi.commands.get("wfm-steer")!.handler("run_a1", pi.ctx);
+      expect(titles).toEqual(["Steering text for occurrence 0 attempt 0 of run run_a1", "Steering timing: interrupt-now, next-boundary"]);
+      expect(made().bodies).toEqual([{
+        body: '{"attemptId":"0","occurrenceId":"0","operation":"steer","text":"Focus on the tests","timing":"next-boundary"}', ifMatch: '"control_rev"',
+      }]);
+      expect(pi.notices.slice(before).map((notice) => notice.message)).toEqual([
+        "Command steer accepted: command cmd_1, receipt effect-observed (steered)",
+        "Acknowledgement of command cmd_1: delivered: steer delivered",
+        "Steer next-boundary reached occurrence 0 attempt 0 of run run_a1.",
+      ]);
+      await pi.fire("session_shutdown");
+    });
+
+    it("cancels after confirmation, reports the receipt and the accepting acknowledgement, and then the cancelled run", async () => {
+      const { pi, made } = await controlled(controls([]), receipt("cancel", "acknowledged", ["accepted", "cancellation accepted"], null),
+        { items: [], runtime: { status: "cancelled", lastSequence: "9", protocolVersion: 2 } });
+      const confirmations: string[] = [];
+      Object.assign(pi.ctx.ui, { confirm: async (title: string, message: string) => (confirmations.push(`${title} ${message}`), true) });
+      const before = pi.notices.length;
+      await pi.commands.get("wfm-cancel")!.handler("run_a1", pi.ctx);
+      expect(confirmations).toEqual(["Cancel manager run? run_a1"]);
+      expect(made().bodies).toEqual([{ body: '{"operation":"cancel"}', ifMatch: '"control_rev"' }]);
+      expect(pi.notices.slice(before).map((notice) => notice.message)).toEqual([
+        "Command cancel accepted: command cmd_1, receipt acknowledged",
+        "Acknowledgement of command cmd_1: accepted: cancellation accepted",
+        "Execution: run run_a1 is cancelled.",
+      ]);
+      await pi.fire("session_shutdown");
+    });
+
+    it.each([
+      ["no offers", controls([], { cancelAllowed: false })],
+      ["controls that the manager does not own", controls([REDIRECT, STEER], { supervision: "lost" })],
+    ])("sends no control for %s", async (_name, control) => {
+      const { pi, made } = await controlled(control, receipt("cancel", "accepted", null, null), running);
+      for (const [command, operation] of [["wfm-cancel", "cancel"], ["wfm-steer", "steer"], ["wfm-redirect", "redirect"]] as const) {
+        await pi.commands.get(command)!.handler("run_a1", pi.ctx);
+        expect(pi.notices.at(-1)).toEqual({ message: `The manager offers no ${operation} for run run_a1. Nothing was sent.`, level: "warning" });
+      }
+      expect(made().posts).toEqual([]);
+      await pi.fire("session_shutdown");
+    });
+  });
 
   it("closes a connection that completes after close", async () => {
     let release: (reply: Reply) => void = () => {};

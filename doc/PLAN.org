@@ -2877,6 +2877,28 @@ Ignore workflow/control stream errors only after cancellation has begun so Linux
 ]
 #+end_src
 
+* TODO [#D] Resolve the non-blocking fess findings of subtask PE19
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-9fbh
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-01 Thu 16:49]
+:MODIFIED: [2026-10-01 Thu 16:49]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess audit fess/pe-PE19-r1.md (2026-10-01) on subtask PE19 (WM-037 human path, part 3: /wfm-cancel, /wfm-steer and /wfm-redirect in ext-pi/src/manager-ui.ts, and the local live redirect of OwnedRun.redirect in ext-pi/src/supervisor.ts).
+
+1. (low) doc/tui-design.md section 7.4 (about line 417) said that redirection appears only in the pre-dispatch window and only for reserved targets. Disposition: the Integrator restated the line in the PE19 commit, updated the C19 deferral in doc/PLAN.org (acat-c19-extpi-reroute-fess-findings-25ht) and the low entry of the gate table in doc/workflow-manager-handoff.md.
+2. (low) ext-pi/test/service-mode.test.ts: /wfm-steer and both forms of /wfm-redirect have no live-manager evidence, because the mixed-controls fixture of manager/test/service_http.py offers neither control. Only fake-transport and helper unit cases cover them. Fix: when a manager fixture can offer steer or redirect, extend ext-pi/test/manager-ui-live.test.ts and the pi-client mode with one steer step and one redirect step.
+3. (low) ext-pi/test/service-mode.test.ts (rejected-stale /wfm-redirect case): the case pairs a snapshot with an open dispatch window with the rejection message of a live redirect. The case still checks verbatim reporting. Fix: use the running snapshot in this case, or a dispatch-window rejection message.
+
+Also recorded from the implementer limitations: the ext-pi integration suite does not exercise the local live redirect, because the agentic-run fixture cannot host a live candidate chain. test/control_probe.py and the supervisor.test.ts unit cases cover it.
+
 * DONE [#C] Decide CsumAdditive's status: fenced hypothesis vs class axiom
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -4650,7 +4672,7 @@ Actor-flow increment 3, live re-route and asks answered by people (6 to 9 engine
 :LABELS:   ["workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-30 Wed 16:34]
-:MODIFIED: [2026-09-30 Wed 16:34]
+:MODIFIED: [2026-10-01 Thu 16:50]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -4664,7 +4686,21 @@ Non-blocking findings of the fess audit of Phase B part 2 subtask C19 (increment
 3. (low) ext-pi/src/supervisor.ts (about line 243). The changed local refusal text has no test. It can run only when the dispatch is open and an attempt is running. Fix: add a supervisor test that reaches the refusal, or record that the message is untested.
 4. (low) ext-pi/src/monitor.ts (about line 75). The "unknown" fallback for a missing stopped attempt cannot run in normal operation, because the reducer sets stoppedAttempt only from an existing running attempt. Fix: leave it, or drop the fallback and read the state directly.
 
-Also deferred from the implementer limitations: ext-pi does not originate a live redirect. OwnedRun.redirect keeps its refusal for a running attempt, and /wf-redirect works only in the dispatch window.
+Also deferred from the implementer limitations: ext-pi did not originate a live redirect. Disposition: PE19 (2026-10-01) resolved it. OwnedRun.redirect sends a live redirect for a running attempt, the runtime decides it, and /wf-redirect reports the acknowledgement verbatim.
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 558,
+    "issue_id": "acat-c19-extpi-reroute-fess-findings-25ht",
+    "author": "johnw",
+    "text": "The deferred implementer limitation of C19 (ext-pi does not originate a live redirect) is resolved by PE19: OwnedRun.redirect sends a live redirect for a running attempt and the runtime decides it. The supervisor.test.ts cases of PE19 also reach the local refusal text (finding 3). The doc/PLAN.org deferral line is updated in the PE19 commit.",
+    "created_at": "2026-10-01T23:49:48Z"
+  }
+]
+#+end_src
 
 * TODO [#D] Resolve C20 fess findings in the /v1 live redirect
 :PROPERTIES:
@@ -11262,6 +11298,45 @@ Non-blocking findings of fess audit fess/pe-PE17-r1.md (2026-10-01) on subtask P
 7. (low, recorded only) ext-pi/src/manager/transport.ts near 304-359: the dropStream race fix (a #drops counter) and its test are outside the PE17 list. The fix is justified by pi-client-fourth-failure.log and is named in the PE17 commit message. No action is required.
 
 Deferred under the 2026-09-30 functionality-first direction (not in scope of this issue): hardening of the capture file path, a review redaction projection and hostile-input negatives.
+
+* TODO [#D] Resolve the non-blocking fess findings of subtask PE18
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pe18-fess-followup-3ykw
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-01 Thu 16:33]
+:MODIFIED: [2026-10-01 Thu 16:33]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess audit fess/pe-PE18-r1.md (2026-10-01) on subtask PE18 (WM-037 human
+path, part 2: the /wfm-monitor live monitor, the /wfm-answer typed answer and recovery path in
+ext-pi/src/manager-ui.ts, uncertain-command reconciliation, and steps 4 and 5 of the pi-client mode).
+
+1. (medium) ext-pi/src/manager-ui.ts near 1086 and 1131, test/service-mode.test.ts near 482,
+README.md near 615-618 and 746: the effectVisible predicates for answer and choose-recovery need a
+200 read of /v1/decisions/ID with a state other than pending. The manager serves only pending
+decisions and answers 404 otherwise, and ManagerSession.reconcileCommand maps a failed read to
+uncertain. Live, an uncertain answer whose effect landed therefore always stays uncertain, and the
+effect-observed branch is unreachable. The unit test serves a 200 resolved decision that the manager
+never produces, and the README states the same wrong rule. Nothing is resent. Fix: reconcile
+against a resource that the manager serves after the effect (the run controls or the decision
+queue), change the fixture to give 404 for the decision, and correct the README.
+2. (low) ext-pi/src/manager-ui.ts near 963 and 1095: the public method answerDraft has no caller,
+and no test covers the path where a 412 leaves the decision pending at the head and the editor
+opens again with the kept draft. Fix: remove answerDraft or use it in tests to assert the kept
+draft, and add that unit test.
+3. (low) ext-pi/src/manager-ui.ts near 1039: #head returns without a notice when session.reference
+refuses the decision or the control reference. Fix: show a notice that names the failure.
+4. (low) ServiceMonitor start, close and refresh: the watches of the monitor are never removed
+after close (ManagerSession has no unwatch), fail-over is covered only by a unit test, the non-TUI
+/wfm-monitor path has no test, and a failed result retrieval is never tried again when the
+snapshot entity tag is null. Fix: add an unwatch to ManagerSession, a live fail-over step, a test of
+the non-TUI monitor, and a retry of a failed retrieval when a new snapshot read is installed.
 
 * TODO [#D] Resolve PE2 fess findings in the run owner lock
 :PROPERTIES:
@@ -20699,7 +20774,7 @@ invocation tuples or exposing secrets.
 :LABELS:   ["p8","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-01 Thu 16:06]
+:MODIFIED: [2026-10-01 Thu 16:49]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-037
 :SOURCE_REPO: agent-cat
@@ -20784,6 +20859,20 @@ verified output, and lineage behave consistently with the other clients.
     "author": "johnw",
     "text": "PE17 (WM-037 human path, part 1) integrated. ext-pi/src/manager-ui.ts adds /wfm [WORKFLOW] with native Pi selection of profile and workflow from the manager catalogue, exact literal inputs (Unicode kept, no leading-whitespace rule), captured inputs through POST /v1/captures with the CaptureReceipt shown, request creation, set-input with the request ETag, enqueue, and admission notices for phase, queue position and blocking reasons. A ctx.ui.custom review component shows the complete exact review. Approve is sent only after an explicit ctx.ui.confirm of the displayed review and binds the preparation ETag as If-Match and the review selectors. Declining sends nothing. /wfm-review, /wfm-withdraw and /wfm-discard are added. Command receipts (accepted, refused, uncertain) are reported separately from execution facts. Input-editor drafts survive a refresh and a 412 refusal. Checks passed: npm run check, npm test (168 passed, 16 live-gated skips), the pi-client mode of manager/test/service_http.py (PASS 1 to 9: the literal reached the request, the captured bytes reached the run program and the run succeeded, the approve command named the exact selectors, a declined review left the request in review with no approve command), make -C doc check. Evidence: PE/PE17/impl-r1 in the private resume-20260923 directory. Fess not blocking; findings filed as acat-pe17-fess-followup-o8qx. The model tool path, run browser, output views, person and recovery editors, history, lineage and export of WM-037 are not yet in place, so WM-037 stays open.",
     "created_at": "2026-10-01T23:06:43Z"
+  },
+  {
+    "id": 556,
+    "issue_id": "acat-wm-037-dz3v",
+    "author": "johnw",
+    "text": "PE18 (WM-037 human path, part 2): /wfm-monitor live monitor (runtime status, observation freshness, decision heads, Terminal and Result lines), /wfm-answer typed answer (Bool 'no' sent as JSON false with the decision ETag; a 412 keeps the draft and sends nothing), recovery choices limited to the manager offers, and one-read reconciliation of an uncertain command with no resend. Evidence: npm run check, npm test (174 passed, 18 live-gated skips), the pi-client mode of manager/test/service_http.py (PASS 1 to 11: the run store records JSON false, the retried run succeeds, the stale answer gets 412) and make -C doc check passed. Fess not blocking; findings filed as acat-pe18-fess-followup-3ykw. The package stays open for the model tool path and the closeout review.",
+    "created_at": "2026-10-01T23:33:14Z"
+  },
+  {
+    "id": 557,
+    "issue_id": "acat-wm-037-dz3v",
+    "author": "johnw",
+    "text": "PE19 (WM-037 human path, part 3) integrated. Service mode: ext-pi/src/manager-ui.ts adds /wfm-cancel, /wfm-steer (interrupt-now or next-boundary) and /wfm-redirect (dispatch-window redirect and live redirect of the attempt in flight). Each reads /v1/runs/RUN/control once, sends only what the control resource offers with the control ETag as If-Match, and reports the receipt and then the acknowledgement verbatim. Cancel then waits for the terminal snapshot. Local mode: OwnedRun.redirect in ext-pi/src/supervisor.ts sends a live redirect for a running attempt with expectedAttemptId null, lets the runtime decide, and reports the acknowledgement verbatim (rejected-stale with its message, the stopped attempt after occurrence.redirected). Outside the dispatch window and without a running attempt it refuses before any send. Checks passed: npm run check, npm test (186 passed, 19 live-gated skips), npm run test:integration (4 files, 8 tests), the pi-client mode of manager/test/service_http.py (PASS 1 to 12, step 7: /wfm-cancel sent one cancel command, the receipt records an accepting acknowledgement and the run ended cancelled), make -C doc check. Evidence: PE/PE19 in the private resume-20260923 directory. Fess not blocking; findings filed as acat-9fbh. /wfm-steer and /wfm-redirect have unit evidence only. WM-037 stays open.",
+    "created_at": "2026-10-01T23:49:48Z"
   }
 ]
 #+end_src

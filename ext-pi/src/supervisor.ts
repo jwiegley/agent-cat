@@ -237,12 +237,26 @@ export class OwnedRun {
     });
   }
 
+  /**
+   * Redirect an occurrence in one of two places. In the dispatch window the
+   * target must be one that the scheduler reserved. While an attempt of the
+   * occurrence runs, the target need only be non-empty text: the runtime
+   * accepts it only for a question that is not an effect and a live
+   * candidate after the current candidate in the approved fail-over chain,
+   * and it answers `rejected-stale` with its message otherwise. Elsewhere the
+   * redirect is refused before any send. The control names no attempt in
+   * either place, because the runtime decides the redirect from the
+   * occurrence and its active attempts.
+   */
   redirect(occurrenceId: string, target: string): Promise<ControlAckSnapshot> {
     if (this.#terminal || isTerminal(this.#snapshot.status)) throw new Error("run is terminal");
     const occurrence = this.#snapshot.occurrences.get(occurrenceId);
-    if (!occurrence?.dispatch?.open) throw new Error(`occurrence ${occurrenceId} is not waiting for redirect`);
-    if (!occurrence.dispatch.targets.includes(target)) throw new Error(`target ${target} was not reserved`);
-    if ([...occurrence.attempts.values()].some((attempt) => attempt.state === "running")) throw new Error("the extension redirects only in the dispatch window, not an active attempt");
+    if (!occurrence) throw new Error(`occurrence ${occurrenceId} is unknown`);
+    if (occurrence.dispatch?.open) {
+      if (!occurrence.dispatch.targets.includes(target)) throw new Error(`target ${target} was not reserved`);
+    } else if ([...occurrence.attempts.values()].some((attempt) => attempt.state === "running")) {
+      if (!target.trim()) throw new Error("redirect target is empty");
+    } else throw new Error(`occurrence ${occurrenceId} is neither in its dispatch window nor running an attempt`);
     const controlId = `redirect-${randomUUID()}`;
     return this.#sendControlAwait(controlId, {
       controlId,

@@ -414,7 +414,7 @@ Protocol version 2 extends the existing command protocol without changing versio
 
 - interrupt-now and next-boundary steering target the exact active attempt;
 - retry, failover, and abandon appear only when offered by `occurrence.recovery-pending`;
-- redirection appears only during the scheduler's bounded pre-dispatch window and only for reserved targets;
+- redirection appears during the scheduler's bounded pre-dispatch window for reserved targets, and for an attempt in flight of an occurrence that is not an effect, where the runtime accepts only a live candidate after the current candidate in the approved fail-over chain;
 - `answerPerson` targets the exact pending person occurrence, carries the existing typed `answerJson` representation, and has no attempt id;
 - cancellation first sends `cancelRun`, waits for the terminal event, and then uses process-group TERM/KILL with the same bounded fallback as ext-pi; and
 - the UI reports `delivered`, `rejected-stale`, `unsupported`, or `failed` from the terminal acknowledgement. “Requested” is not success.

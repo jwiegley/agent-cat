@@ -7,6 +7,7 @@ import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
 import { discoverRunner } from "../src/catalogue.ts";
 import { prepareLaunch } from "../src/launch.ts";
+import { formatControl } from "../src/monitor.ts";
 import { MANAGER_ROLE_MARKER, ROOT_ROLE_FILE } from "../src/root-role.ts";
 import { parseLaunchManifest, RunSupervisor, type OwnedRun } from "../src/supervisor.ts";
 import type { RunnerConfig, RunSnapshot } from "../src/types.ts";
@@ -568,6 +569,61 @@ describe("run supervisor", () => {
     expect(result.status).toBe("succeeded");
     expect(result.occurrences.get("0")?.dispatch?.redirect).toEqual({ controlId, target: "model@spare" });
     expect(result.occurrences.get("0")?.attempts.get("0:0")?.target).toBe("model@spare");
+  });
+
+  it("sends a live redirect for the running attempt and reports the delivered acknowledgement verbatim", async () => {
+    const launch = await prepared();
+    const frames = join(dirname(launch.storeDir), "controls.ndjson");
+    launch.env.FIXTURE_LIVE_REDIRECT = "1";
+    launch.env.FIXTURE_CONTROL_LOG = frames;
+    const run = new RunSupervisor().start(launch);
+    await until(() => run.snapshot.occurrences.get("0")?.attempts.get("0:0")?.state === "running");
+    expect(run.snapshot.occurrences.get("0")?.dispatch).toBeUndefined();
+    expect(() => run.redirect("0", "  ")).toThrow("redirect target is empty");
+    const ack = await run.redirect("0", "model@spare");
+    expect(ack).toMatchObject({ state: "delivered", message: "redirect delivered to the in-flight attempt" });
+    const [frame] = (await readFile(frames, "utf8")).trimEnd().split("\n").map((line) => JSON.parse(line));
+    expect(frame).toEqual({
+      controlId: ack.controlId, expectedOccurrenceId: "0", expectedAttemptId: null,
+      command: { type: "redirectOccurrence", target: "model@spare" },
+    });
+    expect(run.snapshot.occurrences.get("0")?.dispatch?.redirect).toEqual({ controlId: ack.controlId, target: "model@spare", stoppedAttempt: "0:0" });
+    expect(formatControl("redirect", ack, run.snapshot, "0"))
+      .toBe(`redirect delivered (${ack.controlId}): redirect delivered to the in-flight attempt; stopped attempt 0:0`);
+    const result = await run.finished;
+    expect(result.status).toBe("succeeded");
+    expect(result.occurrences.get("0")?.attempts.get("0:1")?.target).toBe("model@spare");
+  });
+
+  it("reports the rejected-stale acknowledgement of a live redirect verbatim and keeps the run", async () => {
+    const launch = await prepared();
+    launch.env.FIXTURE_LIVE_REDIRECT = "1";
+    const run = new RunSupervisor().start(launch);
+    await until(() => run.snapshot.occurrences.get("0")?.attempts.get("0:0")?.state === "running");
+    const ack = await run.redirect("0", "model@elsewhere");
+    expect(ack).toMatchObject({ state: "rejected-stale", message: "redirect target is not a live candidate that remains in the approved fail-over chain" });
+    expect(formatControl("redirect", ack, run.snapshot, "0"))
+      .toBe(`redirect rejected-stale (${ack.controlId}): redirect target is not a live candidate that remains in the approved fail-over chain`);
+    expect(run.snapshot.occurrences.get("0")?.dispatch).toBeUndefined();
+    expect(run.snapshot.status).toBe("running");
+    await run.cancel();
+    expect((await run.finished).status).toBe("cancelled");
+  });
+
+  it("refuses a redirect outside the dispatch window and without a running attempt before any send", async () => {
+    const launch = await prepared();
+    launch.env.FIXTURE_RECOVER = "1";
+    const run = new RunSupervisor().start(launch);
+    await until(() => run.snapshot.occurrences.get("0")?.state === "recovering");
+    expect(() => run.redirect("0", "model@spare")).toThrow("occurrence 0 is neither in its dispatch window nor running an attempt");
+    expect(() => run.redirect("9", "model@spare")).toThrow("occurrence 9 is unknown");
+    // The fixture acts on the first control that it reads. Abandon is that control, so no redirect was sent.
+    const ack = await run.recover("0", "abandon");
+    const result = await run.finished;
+    expect(result.status).toBe("failed");
+    expect(result.occurrences.get("0")?.recovery?.chosen).toEqual({ controlId: ack.controlId, choice: "abandon", target: undefined });
+    expect([...result.controlAcks.keys()]).toEqual([ack.controlId]);
+    expect(() => run.redirect("0", "model@spare")).toThrow("run is terminal");
   });
 
   it("rejects a recovery choice the runner did not offer", async () => {

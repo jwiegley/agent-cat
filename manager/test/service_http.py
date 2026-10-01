@@ -343,8 +343,8 @@ endpoints_mode = len(sys.argv) == 6 and sys.argv[5] == ENDPOINTS
 # set to a client profile and AGENT_CAT_MANAGER_REPORT set to a report file.
 # The first run, ext-pi/test/manager-ui-live.test.ts with the pi-ui
 # profile, drives /wfm, /wfm-review, /wfm-withdraw, /wfm-monitor and
-# /wfm-answer of the extension with a fake Pi UI. vitest must report its six
-# steps passed. During its stale-answer step the check writes the decision
+# /wfm-answer and /wfm-cancel of the extension with a fake Pi UI. vitest must
+# report its seven steps passed. During its stale-answer step the check writes the decision
 # that it is about to answer to the handshake file that
 # AGENT_CAT_MANAGER_HARNESS_ANSWER names. The harness then answers that
 # decision first with JSON false through HTTP with its own credential, waits
@@ -371,7 +371,10 @@ endpoints_mode = len(sys.argv) == 6 and sys.argv[5] == ENDPOINTS
 # decision is the answer of the harness, which reached its effect, so the
 # 412 answer of the extension left no command, that the decision is no
 # longer served or queued, that the run store records JSON false, and that the run ended
-# succeeded after a retry or failed after an abandon. The harness then takes
+# succeeded after a retry or failed after an abandon. For the run of
+# PI_UI_CANCELLED it reads that the one cancel command of the report is the
+# only cancel command of the controls of the run, that its receipt records an
+# accepting runtime acknowledgement, and that the run ended cancelled. The harness then takes
 # a new cursor, and the reads of the session check count only the commands
 # after it.
 # The second run, ext-pi/test/manager-live.test.ts with the first client
@@ -1438,6 +1441,7 @@ PI_UI_CAPTURED = "  Captured Ünïcode λ\r\nsecond line\n"
 # of ext-pi/test/manager-ui-live.test.ts, as ANSWERED and STALE state them.
 PI_UI_ANSWERED = "Pi answer λ: explicit false."
 PI_UI_STALE = "Pi stale λ: the harness answers first."
+PI_UI_CANCELLED = "Pi cancel λ: the run ends cancelled."
 
 
 def mixed_client(capabilities, authorized, attempts=None):
@@ -9493,7 +9497,7 @@ def pi_client_checks():
                 snapshot, _, _ = observed("/v1/runs/" + run_id + "/snapshot", "RunSnapshot")
                 assert snapshot["runtime"] is not None and snapshot["runtime"]["status"] == "succeeded", ("run status", run_id, snapshot["runtime"])
 
-            ui = vitest("test/manager-ui-live.test.ts", ui_profile, ui_report_path, ui_log_path, 6, work / "pi-client-harness-answer.json")
+            ui = vitest("test/manager-ui-live.test.ts", ui_profile, ui_report_path, ui_log_path, 7, work / "pi-client-harness-answer.json")
             ui_receipts = command_receipts(cursor, harness)
             # The reads of the session check count only the commands after this cursor.
             status, middle, _ = request("/v1/snapshot", harness)
@@ -9583,23 +9587,37 @@ def pi_client_checks():
             print("PASS pi-client 6: the harness answered decision", ui["staleDecisionId"], "first with command", ui["harnessAnswerCommand"],
                   "while the editor of /wfm-answer was open, the 412 answer of the extension left no command and the draft was kept,",
                   "and run", ui["staleRunId"], "ended", expected_ending, "after the offered", ui["staleRecovery"], flush=True)
+            cancelled = ui["cancelledRunId"]
+            cancelled_request, _, _ = observed("/v1/requests/" + ui["cancelledRequestId"], "Request")
+            assert cancelled_request["runId"] == cancelled and cancelled_request["readiness"]["supplied"] == [
+                {"name": "input", "source": "literal", "value": PI_UI_CANCELLED}], ("the cancelled request", cancelled_request["runId"])
+            cancels = receipts_of("cancel", "/v1/runs/" + cancelled + "/control")
+            assert [uri for uri, _ in cancels] == [ui["cancelCommand"]], ("the cancel commands of the cancelled run", [uri for uri, _ in cancels], ui)
+            cancel_receipt = cancels[0][1]
+            assert cancel_receipt["state"] in ("acknowledged", "effect-observed") and cancel_receipt["acknowledgement"] is not None \
+                and cancel_receipt["acknowledgement"]["state"] in ("accepted", "queued", "delivered"), ("the cancel receipt", cancel_receipt)
+            ending, _, _ = observed("/v1/runs/" + cancelled + "/snapshot", "RunSnapshot")
+            assert ending["runtime"] is not None and ending["runtime"]["status"] == "cancelled", ("the cancelled run", ending["runtime"])
+            print("PASS pi-client 7: /wfm-cancel sent the one cancel command", ui["cancelCommand"], "of run", cancelled,
+                  "whose receipt records the runtime acknowledgement", cancel_receipt["acknowledgement"]["state"],
+                  repr(cancel_receipt["acknowledgement"]["message"]), "and the run ended cancelled", flush=True)
             ui_stores = set(run_prompts)
             report = vitest("test/manager-live.test.ts", tui_fixture.client_profile, report_path, log_path, 7)
             assert report["reconnectLastEventId"] == report["reconnectCursor"] and report["pollEvents"] > 0, ("report delivery", report)
-            print("PASS pi-client 7: the ext-pi session ran its seven steps against the protected endpoint, the forced SSE drop",
+            print("PASS pi-client 8: the ext-pi session ran its seven steps against the protected endpoint, the forced SSE drop",
                   "resumed with Last-Event-ID", report["reconnectCursor"], "and", report["events"], "delivered events, of which",
                   report["pollEvents"], "came through polling, equal the polling listing", flush=True)
             status, requests, _ = request("/v1/requests", harness)
             assert status == 200 and sorted(item["id"] for item in requests["items"]) == sorted(
                 [report["requestId"], report["secondRequestId"], ui["literalRequestId"], ui["capturedRequestId"], ui["declinedRequestId"],
-                 ui["monitoredRequestId"], ui["staleRequestId"]]), (
+                 ui["monitoredRequestId"], ui["staleRequestId"], ui["cancelledRequestId"]]), (
                 "the manager holds other than the requests of the two checks", status)
             submitted, _, _ = observed("/v1/requests/" + report["requestId"], "Request")
             expected = [{"name": declaration["name"], "source": "literal", "value": MIXED_TEXT} for declaration in workflow["inputs"]]
             assert submitted["readiness"]["supplied"] == expected, ("the request did not supply exactly the literal", submitted["readiness"])
             assert submitted["runId"] == report["runId"] and submitted["phase"] == "associated", (
                 "the request does not name the run", submitted["runId"], submitted["phase"])
-            print("PASS pi-client 8: request", report["requestId"], "supplied exactly the Unicode literal and names run", report["runId"],
+            print("PASS pi-client 9: request", report["requestId"], "supplied exactly the Unicode literal and names run", report["runId"],
                   flush=True)
             receipts = command_receipts(session_cursor, harness)
             answers = [(uri, receipt) for uri, receipt in receipts if receipt["operation"] == "answer"]
@@ -9621,14 +9639,14 @@ def pi_client_checks():
             recorded = [entry["answer"] for path in answer_files for entry in json.loads(path.read_bytes())["answers"]
                         if entry["occurrenceId"] == occurrence]
             assert recorded == [False], ("the run store does not record the answer as JSON false", occurrence, recorded)
-            print("PASS pi-client 9: the run store records the answer as JSON false, and answer command", report["answerCommand"],
+            print("PASS pi-client 10: the run store records the answer as JSON false, and answer command", report["answerCommand"],
                   "and retry command", report["retryCommand"], "reached their effects", flush=True)
             snapshot, _, _ = observed("/v1/runs/" + report["runId"] + "/snapshot", "RunSnapshot")
             assert snapshot["runtime"] is not None and snapshot["runtime"]["status"] == "succeeded", ("run status", snapshot["runtime"])
             artifact = verified_download(report["runId"], client, harness)
             assert int(artifact["bytes"]) == report["resultBytes"] and artifact["sha256"] == report["resultSha256"], (
                 "the ext-pi result differs from the harness download", artifact["bytes"], artifact["sha256"], report)
-            print("PASS pi-client 10: run", report["runId"], "succeeded, and the verified result of", artifact["bytes"],
+            print("PASS pi-client 11: run", report["runId"], "succeeded, and the verified result of", artifact["bytes"],
                   "bytes has the SHA-256", artifact["sha256"], "of the ext-pi download", flush=True)
             second = report["secondRunId"]
             secondary, _, _ = observed("/v1/requests/" + report["secondRequestId"], "Request")
@@ -9642,7 +9660,7 @@ def pi_client_checks():
             assert control["decisionHeadId"] is not None, ("the second run has no pending decision head", control)
             head, _, _ = observed("/v1/decisions/" + control["decisionHeadId"], "Decision")
             assert head["state"] == "pending" and head["kind"] == "question", ("the question of the second run is not pending", head["state"])
-            print("PASS pi-client 11: after the extension and the session closed during their live streams, run", second,
+            print("PASS pi-client 12: after the extension and the session closed during their live streams, run", second,
                   "is still running under owned supervision, and its question", control["decisionHeadId"], "is pending", flush=True)
         print("PASS pi-client: the /wfm human path and the ext-pi manager session completed their journeys through the protected",
               "HTTPS endpoint, and the harness confirmed each step from manager facts, with no mutation except its first answer of the stale-answer step",

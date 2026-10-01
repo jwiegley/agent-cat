@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import readline from "node:readline";
 import { createHash } from "node:crypto";
-import { createReadStream, mkdirSync, writeFileSync } from "node:fs";
+import { appendFileSync, createReadStream, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 const args = process.argv.slice(2);
@@ -181,6 +181,38 @@ if (args[0] === "--routing" && args[1] === "--json") {
       completed();
       rl.close();
       process.exit(0);
+    });
+  } else if (process.env.FIXTURE_LIVE_REDIRECT === "1") {
+    // An attempt in flight without a dispatch window. As the runtime does,
+    // the fixture accepts a redirect to model@spare, the live candidate after
+    // the current one, and rejects every other target as stale. Each control
+    // frame is appended to FIXTURE_CONTROL_LOG.
+    emit({ type: "occurrence.started", occurrenceId: "0", code: "text", intent: "consult", addressee: "model", prompt: "subject" });
+    emit({ type: "attempt.started", occurrenceId: "0", attempt: "0", target: "model@primary" });
+    const rl = readline.createInterface({ input: controlInput() });
+    rl.on("line", (line) => {
+      if (process.env.FIXTURE_CONTROL_LOG) appendFileSync(process.env.FIXTURE_CONTROL_LOG, `${line}\n`);
+      const control = JSON.parse(line);
+      if (control.command.type === "redirectOccurrence" && control.command.target !== "model@spare") {
+        acknowledge(control, "rejected-stale", "redirect target is not a live candidate that remains in the approved fail-over chain");
+      } else if (control.command.type === "redirectOccurrence") {
+        acknowledge(control, "accepted", "redirect accepted for the in-flight attempt");
+        emit({ type: "occurrence.redirected", occurrenceId: "0", controlId: control.controlId, target: control.command.target });
+        acknowledge(control, "delivered", "redirect delivered to the in-flight attempt");
+        emit({ type: "attempt.failed", occurrenceId: "0", attempt: "0", failure: "cancelled", message: `redirected by control ${control.controlId} to ${control.command.target}` });
+        emit({ type: "attempt.started", occurrenceId: "0", attempt: "1", target: control.command.target });
+        emit({ type: "attempt.completed", occurrenceId: "0", attempt: "1", source: control.command.target });
+        emit({ type: "occurrence.completed", occurrenceId: "0", source: `asked:${control.command.target}`, answer: "done" });
+        emit({ type: "trace.ordered", occurrenceIds: ["0"] });
+        completed();
+        rl.close();
+        process.exit(0);
+      } else {
+        acknowledge(control, "accepted", "cancellation accepted");
+        emit({ type: "run.cancelled", message: "cancelled" });
+        rl.close();
+        process.exit(130);
+      }
     });
   } else if (process.env.FIXTURE_RECOVER === "1") {
     emit({ type: "occurrence.started", occurrenceId: "0", code: "text", intent: "consult", addressee: "model", prompt: "subject" });

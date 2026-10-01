@@ -16,6 +16,9 @@
  * verified result. `/wfm-answer` acts on the head of the decision queue of a
  * run: a typed answer through `answerValue` and `answerBody`, or one of the
  * recovery choices that `recoveryActions` finds in the offers of the run.
+ * `/wfm-cancel`, `/wfm-steer` and `/wfm-redirect` send a run control only
+ * when the controls of the run offer it, and each reports the command
+ * receipt and then the runtime acknowledgement verbatim.
  *
  * Every command goes through the `ManagerSession` of the active service
  * binding, and each send is recorded as a `CommandRecord`. A record states
@@ -42,6 +45,7 @@ import {
   decodeInputDeclaration,
   decodePreparation,
   requiredScopes,
+  type CommandReceipt,
   type ControlOffer,
   type ControlView,
   type DecisionView,
@@ -307,6 +311,124 @@ export function recoveryActions(control: ControlView, decision: DecisionView): R
     if (retry || chosen) actions.push({ label: recoveryLabel(option), option, operation: retry ? "retry" : "choose-recovery" });
   }
   return actions;
+}
+
+/** The acknowledgement states that accept, queue or deliver a control. */
+const ACCEPTING = ["accepted", "queued", "delivered"];
+
+/** The acknowledgement states that end a control without an effect. */
+const REJECTING = ["rejected-stale", "unsupported", "failed"];
+
+/**
+ * Whether the controls of a run allow the cancel: they are owned and allow
+ * it. The manager allows a cancel while it owns the live run and the run is
+ * running.
+ *
+ * @public
+ */
+export function cancelOffered(control: ControlView): boolean {
+  return control.supervision === "owned" && control.cancelAllowed;
+}
+
+/**
+ * The steer offers of owned controls. Each names one attempt and at least
+ * one timing.
+ *
+ * @public
+ */
+export function steerOffers(control: ControlView): ControlOffer[] {
+  return control.supervision !== "owned" ? []
+    : control.offers.filter((offer) => offer.operation === "steer" && offer.attemptId !== null && offer.timings.length > 0);
+}
+
+/**
+ * The redirect offers of owned controls that name at least one target: the
+ * dispatch-window redirect and the live redirect of an attempt in flight.
+ *
+ * @public
+ */
+export function redirectOffers(control: ControlView): ControlOffer[] {
+  return control.supervision !== "owned" ? []
+    : control.offers.filter((offer) => offer.operation === "redirect" && offer.targets.length > 0);
+}
+
+/**
+ * The place of a redirect offer in the run snapshot: the open dispatch
+ * window of the occurrence, its one attempt in flight, or neither.
+ *
+ * @public
+ */
+export type RedirectPlace =
+  | { readonly kind: "dispatch" }
+  | { readonly kind: "attempt"; readonly attemptId: string }
+  | { readonly kind: "unknown" };
+
+/**
+ * The place of the occurrence of a redirect offer in a run snapshot.
+ *
+ * @public
+ */
+export function redirectPlace(snapshot: JsonObject, occurrenceId: bigint): RedirectPlace {
+  const items = jsonMember(snapshot, "items");
+  const occurrence = items !== undefined && isJsonArray(items)
+    ? items.find((item) => memberOf(item, "occurrenceId") === occurrenceId.toString()) : undefined;
+  if (occurrence === undefined) return { kind: "unknown" };
+  if (memberOf(memberOf(occurrence, "dispatch"), "open") === true) return { kind: "dispatch" };
+  const attempts = memberOf(occurrence, "attempts");
+  const running = attempts !== undefined && isJsonArray(attempts)
+    ? attempts.filter((attempt) => memberOf(attempt, "state") === "running").map((attempt) => text(memberOf(memberOf(attempt, "address"), "attemptId")))
+    : [];
+  return running.length === 1 && running[0] !== undefined ? { kind: "attempt", attemptId: running[0] } : { kind: "unknown" };
+}
+
+function placeText(place: RedirectPlace): string {
+  if (place.kind === "dispatch") return "dispatch window open";
+  if (place.kind === "attempt") return `attempt ${place.attemptId} in flight`;
+  return "place not published";
+}
+
+/** The runtime acknowledgement of a receipt: its state and its message. */
+function acknowledgementOf(receipt: CommandReceipt): { state: string; message: string } | undefined {
+  const ack = receipt.acknowledgement;
+  if (ack === null || !isJsonObject(ack)) return undefined;
+  const state = text(jsonMember(ack, "state"));
+  const message = text(jsonMember(ack, "message"));
+  return state === undefined || message === undefined ? undefined : { state, message };
+}
+
+/** The effect kind of a receipt. */
+function effectKind(receipt: CommandReceipt): string | undefined {
+  return receipt.effect !== null && isJsonObject(receipt.effect) ? text(jsonMember(receipt.effect, "kind")) : undefined;
+}
+
+/**
+ * Whether the receipt of a run control has settled for the report. Every
+ * receipt settles at `effect-observed`, `refused` or `unresolved`. An
+ * acknowledgement that rejects the control (`rejected-stale`,
+ * `unsupported` or `failed`) settles it without an effect. A cancel also
+ * settles on an accepting acknowledgement, because the runtime cancellation
+ * names no control, so its receipt records no effect.
+ *
+ * @public
+ */
+export function controlSettled(operation: Operation, receipt: CommandReceipt): boolean {
+  if (SETTLED.includes(receipt.state)) return true;
+  const ack = acknowledgementOf(receipt);
+  if (receipt.state !== "acknowledged" || ack === undefined) return false;
+  return REJECTING.includes(ack.state) || (operation === "cancel" && ACCEPTING.includes(ack.state));
+}
+
+/**
+ * The report of the runtime acknowledgement of a receipt, with its state
+ * and its message verbatim.
+ *
+ * @public
+ */
+export function acknowledgementLine(receipt: CommandReceipt): string {
+  const ack = acknowledgementOf(receipt);
+  return ack === undefined
+    ? `Command ${receipt.id} has no runtime acknowledgement (receipt ${receipt.state}).`
+    : `Acknowledgement of command ${receipt.id}: ${ack.state}: ${ack.message}`;
 }
 
 /** A prompt on one line: each line end becomes one space. */
@@ -749,8 +871,9 @@ export class ManagerRequests {
    * never sent again.
    */
   async #command(ctx: ExtensionContext, session: ManagerSession, operation: Operation, target: string,
-    prepared: Outcome<PendingCommand>, settle = true, effectVisible: (value: JsonValue) => boolean = () => false): Promise<
-    | { kind: "receipt"; state: string }
+    prepared: Outcome<PendingCommand>, settle = true, effectVisible: (value: JsonValue) => boolean = () => false,
+    settledWhen: (receipt: CommandReceipt) => boolean = (receipt) => SETTLED.includes(receipt.state)): Promise<
+    | { kind: "receipt"; state: string; receipt?: CommandReceipt }
     | { kind: "created"; request: DraftView; location: Reference }
     | { kind: "captured"; captureId: string }
     | { kind: "refused"; failure: ClientFailure }
@@ -803,16 +926,160 @@ export class ManagerRequests {
     }
     const settled = await session.waitFor(sent.location, (observed) => {
       const decoded = decodeCommandReceipt(observed.value);
-      return decoded.ok && SETTLED.includes(decoded.value.state);
+      return decoded.ok && settledWhen(decoded.value);
     }, EFFECT_WAIT_MS);
-    const final = settled.ok ? decodeCommandReceipt(settled.value.value) : undefined;
-    const state = final !== undefined && final.ok ? final.value.state : receipt.state;
-    const effect = final !== undefined && final.ok ? final.value.effect : null;
-    const refusal = final !== undefined && final.ok && final.value.refusal !== null ? `, refusal ${final.value.refusal}` : "";
-    const kind = effect !== null && isJsonObject(effect) ? text(jsonMember(effect, "kind")) : undefined;
+    const decoded = settled.ok ? decodeCommandReceipt(settled.value.value) : undefined;
+    const final = decoded !== undefined && decoded.ok ? decoded.value : receipt;
+    const refusal = final.refusal !== null ? `, refusal ${final.refusal}` : "";
+    const kind = effectKind(final);
     this.#record(ctx, session, operation, target, "accepted",
-      `command ${receipt.id}, receipt ${state}${kind === undefined ? "" : ` (${kind})`}${refusal}`);
-    return { kind: "receipt", state };
+      `command ${receipt.id}, receipt ${final.state}${kind === undefined ? "" : ` (${kind})`}${refusal}`);
+    return { kind: "receipt", state: final.state, receipt: final };
+  }
+
+  /**
+   * Send one run control to the controls of the run with the control entity
+   * tag as `If-Match`, wait until `controlSettled` holds for its receipt, and
+   * report the receipt and then the runtime acknowledgement verbatim. Gives
+   * the settled receipt, or `undefined` when the send gave none.
+   */
+  async #runControl(ctx: ExtensionContext, session: ManagerSession, operation: "cancel" | "steer" | "redirect", controls: Observed,
+    body: JsonValue): Promise<CommandReceipt | undefined> {
+    const sent = await this.#command(ctx, session, operation, controls.reference.uri, session.prepare(controls.reference, body, controls.etag),
+      true, () => false, (receipt) => controlSettled(operation, receipt));
+    if (sent.kind !== "receipt" || sent.receipt === undefined) return undefined;
+    const ack = acknowledgementOf(sent.receipt);
+    ctx.ui.notify(acknowledgementLine(sent.receipt), ack !== undefined && ACCEPTING.includes(ack.state) ? "info" : "warning");
+    return sent.receipt;
+  }
+
+  /** One read of the controls of a run, or `undefined` after a notification. */
+  async #controls(ctx: ExtensionContext, session: ManagerSession, runId: string): Promise<{ observed: Observed; control: ControlView } | undefined> {
+    const reference = session.reference(`/v1/runs/${runId}/control`);
+    if (!reference.ok) return undefined;
+    const observed = await session.get(reference.value);
+    const control = observed.ok ? decodeControl(observed.value.value) : observed;
+    if (!observed.ok || !control.ok) {
+      ctx.ui.notify(`The controls of run ${runId} could not be read: ${failureText(control.ok ? null : control.failure)}`, "error");
+      return undefined;
+    }
+    if (control.value.runId !== runId) {
+      ctx.ui.notify(`The controls of run ${runId} name run ${control.value.runId}. Nothing was sent.`, "error");
+      return undefined;
+    }
+    return { observed: observed.value, control: control.value };
+  }
+
+  /** The running service runs of the active binding, for the selection of a run control. */
+  #liveRuns(service: ServiceMode): { runId: string; label: string }[] {
+    return service.runs().filter((run) => run.status === "running")
+      .map((run) => ({ runId: run.runId, label: `${run.runId}  ${run.status}  ${run.workflowId ?? "unreadable manifest"}` }));
+  }
+
+  /**
+   * `/wfm-cancel [RUN_ID]`: cancel a service run after a confirmation, only
+   * when its controls allow the cancel. The receipt records the runtime
+   * acknowledgement, and the snapshot of the run then states its terminal
+   * status, which the command reports.
+   */
+  async cancel(ctx: ExtensionContext, args: string): Promise<void> {
+    const session = this.#session(ctx);
+    const service = this.#service();
+    if (session === undefined || service === undefined) return;
+    if (!ctx.hasUI) return ctx.ui.notify("/wfm-cancel requires the interactive Pi interface", "error");
+    const runId = await this.#chooseRun(ctx, args, this.#liveRuns(service), "Run to cancel");
+    if (runId === undefined) return;
+    const read = await this.#controls(ctx, session, runId);
+    if (read === undefined) return;
+    if (!cancelOffered(read.control)) return ctx.ui.notify(`The manager offers no cancel for run ${runId}. Nothing was sent.`, "warning");
+    if (!(await ctx.ui.confirm("Cancel manager run?", runId))) return ctx.ui.notify(`No cancel was sent for run ${runId}.`, "info");
+    const receipt = await this.#runControl(ctx, session, "cancel", read.observed, { operation: "cancel" });
+    const ack = receipt === undefined ? undefined : acknowledgementOf(receipt);
+    if (ack === undefined || !ACCEPTING.includes(ack.state)) return;
+    const snapshot = session.reference(`/v1/runs/${runId}/snapshot`);
+    if (!snapshot.ok) return;
+    const ended = await session.waitFor(snapshot.value, (observed) => {
+      const status = isJsonObject(observed.value) ? snapshotStatus(observed.value) : undefined;
+      return status !== undefined && TERMINAL_STATUSES.includes(status);
+    }, EFFECT_WAIT_MS);
+    const status = ended.ok && isJsonObject(ended.value.value) ? snapshotStatus(ended.value.value) : undefined;
+    ctx.ui.notify(status === undefined
+      ? `Execution: run ${runId} has not reached a terminal status yet. /wfm-monitor ${runId} shows the run.`
+      : `Execution: run ${runId} is ${status}.`, status === "cancelled" ? "info" : "warning");
+  }
+
+  /**
+   * `/wfm-steer [RUN_ID]`: steer the attempt of a steer offer of the run
+   * with text from the editor and one of the timings of the offer. Empty
+   * text sends nothing. The steer completes on the effect `steered`.
+   */
+  async steer(ctx: ExtensionContext, args: string): Promise<void> {
+    const session = this.#session(ctx);
+    const service = this.#service();
+    if (session === undefined || service === undefined) return;
+    if (!ctx.hasUI) return ctx.ui.notify("/wfm-steer requires the interactive Pi interface", "error");
+    const runId = await this.#chooseRun(ctx, args, this.#liveRuns(service), "Run to steer");
+    if (runId === undefined) return;
+    const read = await this.#controls(ctx, session, runId);
+    if (read === undefined) return;
+    const offers = steerOffers(read.control);
+    if (offers.length === 0) return ctx.ui.notify(`The manager offers no steer for run ${runId}. Nothing was sent.`, "warning");
+    const labels = offers.map((offer) => `occurrence ${offer.occurrenceId} attempt ${offer.attemptId}`);
+    const chosen = labels.length === 1 ? labels[0] : await ctx.ui.select("Attempt to steer", labels);
+    if (chosen === undefined) return ctx.ui.notify(`No steer was sent for run ${runId}.`, "info");
+    const offer = offers[labels.indexOf(chosen)];
+    const message = await ctx.ui.editor(`Steering text for ${chosen} of run ${runId}`);
+    if (message === undefined || !message.trim()) return ctx.ui.notify(`The steering text is empty. No steer was sent for run ${runId}.`, "info");
+    const timing = offer.timings.length === 1 ? offer.timings[0] : await ctx.ui.select("Steering timing", [...offer.timings]);
+    if (timing !== "interrupt-now" && timing !== "next-boundary") return ctx.ui.notify(`No steer was sent for run ${runId}.`, "info");
+    const receipt = await this.#runControl(ctx, session, "steer", read.observed, {
+      operation: "steer", occurrenceId: offer.occurrenceId.toString(), attemptId: String(offer.attemptId), timing, text: message,
+    });
+    if (receipt !== undefined && effectKind(receipt) === "steered") {
+      ctx.ui.notify(`Steer ${timing} reached ${chosen} of run ${runId}.`, "info");
+    }
+  }
+
+  /**
+   * `/wfm-redirect [RUN_ID]`: redirect an occurrence to a target of a
+   * redirect offer of the run. The manager offers the dispatch-window
+   * redirect while the dispatch window of the occurrence is open, and the
+   * live redirect for the attempt in flight of an occurrence that is not an
+   * effect. One read of the run snapshot names the place of each offer. The
+   * redirect completes on the effect `redirected`.
+   */
+  async redirect(ctx: ExtensionContext, args: string): Promise<void> {
+    const session = this.#session(ctx);
+    const service = this.#service();
+    if (session === undefined || service === undefined) return;
+    if (!ctx.hasUI) return ctx.ui.notify("/wfm-redirect requires the interactive Pi interface", "error");
+    const runId = await this.#chooseRun(ctx, args, this.#liveRuns(service), "Run to redirect");
+    if (runId === undefined) return;
+    const read = await this.#controls(ctx, session, runId);
+    if (read === undefined) return;
+    const offers = redirectOffers(read.control);
+    if (offers.length === 0) return ctx.ui.notify(`The manager offers no redirect for run ${runId}. Nothing was sent.`, "warning");
+    const snapshotRef = session.reference(`/v1/runs/${runId}/snapshot`);
+    if (!snapshotRef.ok) return;
+    const snapshot = await session.get(snapshotRef.value);
+    if (!snapshot.ok || !isJsonObject(snapshot.value.value)) {
+      return ctx.ui.notify(`The snapshot of run ${runId} could not be read: ${failureText(snapshot.ok ? null : snapshot.failure)}. Nothing was sent.`, "error");
+    }
+    const snapshotValue = snapshot.value.value;
+    const choices = offers.flatMap((offer) => {
+      const place = redirectPlace(snapshotValue, offer.occurrenceId);
+      return offer.targets.map((target) => ({ offer, target, place, label: `${target}  occurrence ${offer.occurrenceId}, ${placeText(place)}` }));
+    });
+    const labels = choices.map((choice) => choice.label);
+    const selected = await ctx.ui.select(`Redirect target of run ${runId}`, labels);
+    if (selected === undefined) return ctx.ui.notify(`No redirect was sent for run ${runId}.`, "info");
+    const choice = choices[labels.indexOf(selected)];
+    const receipt = await this.#runControl(ctx, session, "redirect", read.observed,
+      { operation: "redirect", occurrenceId: choice.offer.occurrenceId.toString(), target: choice.target });
+    if (receipt !== undefined && effectKind(receipt) === "redirected") {
+      const from = choice.place.kind === "attempt" ? ` from attempt ${choice.place.attemptId}` : "";
+      ctx.ui.notify(`Redirected occurrence ${choice.offer.occurrenceId} of run ${runId}${from} to ${choice.target}.`, "info");
+    }
   }
 
   /** The complete page set of a collection, read again after a transient page-set refusal. */

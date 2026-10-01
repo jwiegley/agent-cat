@@ -507,9 +507,9 @@ the binding and its resource. An observation is not an `OwnedRun` or a
 process and no local run store, and it grants no supervision or control
 authority. A decision head is the decision at position 0 of the queue of its
 run. `ServiceMode` itself sends no manager command. Only the commands of the
-sections "Requests and review in service mode" and "Live monitor and
-decisions in service mode" send commands, through the session of the active
-binding. `ServiceMode.subscribe` calls a listener after each change of the
+sections "Requests and review in service mode", "Live monitor and
+decisions in service mode" and "Run controls in service mode" send
+commands, through the session of the active binding. `ServiceMode.subscribe` calls a listener after each change of the
 connection or of the observations, and the live monitor uses it.
 
 | Command | Purpose |
@@ -522,6 +522,9 @@ connection or of the observations, and the live monitor uses it.
 | `/wfm-discard [REQUEST_ID]` | Discard the live preparation of a request in review. |
 | `/wfm-monitor [RUN_ID]` | Show the live monitor of a service run, as the section "Live monitor and decisions in service mode" states. |
 | `/wfm-answer [RUN_ID]` | Answer the head decision of a run with a typed answer, or send a recovery choice that the manager offers. |
+| `/wfm-cancel [RUN_ID]` | Cancel a run after a confirmation, when its controls allow the cancel, as the section "Run controls in service mode" states. |
+| `/wfm-steer [RUN_ID]` | Steer an attempt that the controls of the run offer for steering. |
+| `/wfm-redirect [RUN_ID]` | Redirect an occurrence to a target that the controls of the run offer, in its dispatch window or for its attempt in flight. |
 
 The status widget lists active local runs and active service runs in
 separate sections, and the status line counts each kind.
@@ -697,17 +700,59 @@ Each send follows the rules of the section "Requests and review in service
 mode", and the answer or the choice that reaches its effect gives one
 notification, for example `Answer false reached decision ID of run RUN_ID.`
 
+## Run controls in service mode
+
+`/wfm-cancel [RUN_ID]`, `/wfm-steer [RUN_ID]` and `/wfm-redirect [RUN_ID]`
+act on a run, or offer the running service runs of the overview. Each
+command reads `/v1/runs/RUN_ID/control` once. It sends a control only when
+those controls are owned and offer it, and otherwise it states that the
+manager offers no such control and sends nothing. The control goes to
+`/v1/runs/RUN_ID/control` with the control entity tag as `If-Match`.
+
+- `/wfm-cancel` needs `cancelAllowed`. After a confirmation it sends
+  `{"operation":"cancel"}`.
+- `/wfm-steer` needs a `steer` offer, which names one attempt and its
+  timings. The command asks for the attempt when the controls offer more
+  than one, for the steering text, and for the timing when the offer has
+  more than one. Empty text sends nothing. The body names the operation, the
+  occurrence, the attempt, the timing and the text.
+- `/wfm-redirect` needs a `redirect` offer with targets. The manager offers
+  the dispatch-window redirect while the dispatch window of the occurrence
+  is open, and the live redirect for the attempt in flight of an occurrence
+  that is not an effect. The command reads `/v1/runs/RUN_ID/snapshot` once
+  and labels each offered target with its occurrence and its place:
+  `dispatch window open` or `attempt N in flight`. The body names the
+  operation, the occurrence and the target. It names no attempt, because the
+  runtime decides the redirect from the occurrence and its active attempts.
+
+Each command follows the send rules of the section "Requests and review in
+service mode". It waits until the receipt settles: at `effect-observed`,
+`refused` or `unresolved`, at an acknowledgement that rejects the control
+(`rejected-stale`, `unsupported` or `failed`), or, for a cancel, at an
+acknowledgement that accepts, queues or delivers it, because the runtime
+cancellation names no control and the receipt records no cancel effect.
+The command then gives the receipt notification and after it the runtime
+acknowledgement with its state and its message verbatim, for example
+`Acknowledgement of command ID: rejected-stale: redirect target is not a live
+candidate that remains in the approved fail-over chain`. A steer that reaches
+the effect `steered` and a redirect that reaches the effect `redirected` each
+give one more notification. After an accepting cancel acknowledgement, the
+command waits for the terminal status of the run snapshot and states it, for
+example `Execution: run RUN_ID is cancelled.`
+
 `test/manager-ui.test.ts` checks that the review lists every selector and
 consent fact, that the component wraps the review within the width and
 reaches every line by scrolling, and the choice of each key. It also checks
 that `recoveryActions` lists only offered choices for the head of owned
 controls, the lines of a running and a terminal run, the stale and refused
 observation lines, and that the monitor component keeps the Terminal and
-Result lines in view at 12 rows.
+Result lines in view at 12 rows. It also checks that cancel, steer and
+redirect are offered only from owned controls that offer them, the place of
+a redirect offer in a snapshot, and when a control receipt settles.
 `test/manager-ui-live.test.ts` runs only when `AGENT_CAT_MANAGER_PROFILE`
 names a client profile. It drives the extension with a fake Pi host, a fake
 UI and a transport that records each POST, against a running manager with the
-mixed fixture, in four ordered steps, each with a timeout of 600 seconds. It
+mixed fixture, in seven ordered steps, each with a timeout of 600 seconds. It
 enters an exact Unicode literal for `prompt-source` while the check changes
 the request through its own session, so the first `set-input` is refused
 with 412 and the editor opens again with the draft. It approves the displayed
@@ -726,12 +771,18 @@ decision to the handshake file that `AGENT_CAT_MANAGER_HARNESS_ANSWER`
 names, and the harness answers first through HTTP with its own credential.
 The answer of the extension receives 412, the draft is kept, and the
 extension sends nothing more to the decision. The check then abandons the
-recovery, or retries it when no abandon is offered. The six steps each have a
-timeout of 600 seconds. The `pi-client` mode of
+recovery, or retries it when no abandon is offered. It then starts a third
+mixed-controls run, which waits at its question, cancels it through
+`/wfm-cancel`, requires that the one cancel POST is `{"operation":"cancel"}`,
+that the receipt notification comes before the notification of the runtime
+acknowledgement, which names the state and the message of the receipt, and
+that the run ends cancelled. The last step closes the extension. The `pi-client` mode of
 `manager/test/service_http.py` runs it before the session check and confirms
 each step against manager facts: the answer commands, the retry command, the
-answers of the run stores as JSON `false`, the verified result, and that the
-preempted decision has only the answer command of the harness.
+answers of the run stores as JSON `false`, the verified result, that the
+preempted decision has only the answer command of the harness, and that the
+cancelled run has only the cancel command of the report, whose receipt
+records an accepting acknowledgement, and ended cancelled.
 
 `test/service-mode.test.ts` drives the extension with a fake Pi host, a fake
 UI and an injected fake transport. It requires that restore reaches only the
@@ -740,7 +791,14 @@ that shutdown and reload close the transport without a POST, that a late
 overview of the earlier endpoint is never installed after a switch and a
 stored reference of that endpoint is refused, and that a 401, an unsupported
 profile, an unsupported capability version and an unreachable manager show
-their refusal states. It also requires that `/wfm-answer` sends the flag input
+their refusal states. It requires that `/wfm-redirect` sends the live
+redirect of an attempt in flight with the control entity tag and reports
+the receipt and then the delivered acknowledgement, that a rejected-stale
+acknowledgement of a dispatch-window redirect is reported verbatim, that
+`/wfm-steer` sends the editor text with the chosen timing, that
+`/wfm-cancel` reports the accepting acknowledgement and then the cancelled
+run, and that no control is sent when the controls offer none or the manager
+does not own them. It also requires that `/wfm-answer` sends the flag input
 `No` as JSON `false` with the decision entity tag, and that an uncertain send
 is reconciled with one read of the decision and never sent again, both while
 the decision stays pending and after it changed. The last step of `test/manager-live.test.ts` starts a
@@ -805,7 +863,7 @@ for the control descriptor.
 | `/wf-steer [RUN_ID]` | Steer one exact attempt. |
 | `/wf-retry [RUN_ID]` | Retry an occurrence that waits after automatic recovery is spent. |
 | `/wf-recover [RUN_ID]` | Choose one runner-offered retry, fail-over, or abandon action. |
-| `/wf-redirect RUN_ID OCCURRENCE_ID RESERVED_TARGET` | Redirect a scheduler-reserved occurrence during the thirty-second decision window. |
+| `/wf-redirect RUN_ID OCCURRENCE_ID TARGET` | Redirect an occurrence, as the section "Local redirect" states: to a scheduler-reserved target during the thirty-second dispatch window, or to a live candidate of its fail-over chain while its attempt runs. |
 | `/wf-grant` | Issue a one-time scoped grant for model-initiated starts, lineage, or controls. |
 | `/wf-restart PARENT_RUN_ID` | Start a new run from scratch with immutable lineage. |
 | `/wf-resume PARENT_RUN_ID` | Resume a compatible run semantically. |
@@ -820,6 +878,9 @@ for the control descriptor.
 | `/wfm-discard [REQUEST_ID]` | Service mode: discard the live preparation of a manager request in review. |
 | `/wfm-monitor [RUN_ID]` | Service mode: the live monitor of a manager run, with its Terminal and Result lines. |
 | `/wfm-answer [RUN_ID]` | Service mode: answer the head decision of a manager run, or send an offered recovery choice. |
+| `/wfm-cancel [RUN_ID]` | Service mode: cancel a manager run when its controls allow it. |
+| `/wfm-steer [RUN_ID]` | Service mode: steer an attempt that the controls of a manager run offer. |
+| `/wfm-redirect [RUN_ID]` | Service mode: redirect an occurrence of a manager run to an offered target. |
 
 The `agent_cat_workflow` tool lets a model discover, start, inspect, control,
 restart, resume, or fork runs. Starts from the tool are limited to the
@@ -828,6 +889,40 @@ unused matching grant from `/wf-grant`, and an unresolved or expired grant
 refuses before anything is spent. Controls wait for the terminal acknowledgement
 of agent-cat, and they report `delivered`, `rejected-stale`, `unsupported`, or
 `failed` verbatim. A request is never presented as a success.
+
+## Local redirect
+
+`OwnedRun.redirect` of `src/supervisor.ts` sends `redirectOccurrence` in one
+of two places. It refuses a terminal run and an unknown occurrence first.
+
+- While the dispatch window of the occurrence is open, the target must be one
+  of the targets that the scheduler reserved.
+- While an attempt of the occurrence runs, the extension checks only that the
+  target is non-empty text. The runtime accepts the redirect only for a
+  question that is not an effect and a live candidate after the current
+  candidate in the approved fail-over chain. It answers `rejected-stale` with
+  its message otherwise, and the run continues.
+- Elsewhere the redirect is refused before any send with `occurrence ID is
+  neither in its dispatch window nor running an attempt`.
+
+`expectedAttemptId` is null in both places, because the runtime decides the
+redirect from `expectedOccurrenceId` and its active attempts. `/wf-redirect`
+and the `redirect` action of the tool report the acknowledgement state and
+message verbatim. After `occurrence.redirected` of a live redirect, the
+report also names the stopped attempt, for example `redirect delivered
+(redirect-ID): redirect delivered to the in-flight attempt; stopped attempt
+0:0`. A target can contain spaces, so `/wf-redirect` takes the rest of its
+arguments after the occurrence as the target.
+
+`test/supervisor.test.ts` checks these cases with the fake runner: the
+control frame of a live redirect names the occurrence, a null
+`expectedAttemptId` and the given target, the delivered and the
+`rejected-stale` acknowledgements are reported verbatim, and a redirect
+outside both places is refused before any send. The ext-pi integration suite
+cannot host a live candidate chain, because the `controlled` workflow and
+the holding ACP adapter of the live redirect case of `test/control_probe.py`
+belong to `routing-fixed-point-probe` and not to `agentic-run`. That case of
+`test/control_probe.py` checks the live redirect against the runtime.
 
 ## Routing selection
 

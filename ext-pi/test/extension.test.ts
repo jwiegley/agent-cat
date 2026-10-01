@@ -276,11 +276,12 @@ describe("Pi extension lifecycle", () => {
       expect([...commands.keys()].sort()).toEqual([
         "wf", "wf-cancel", "wf-diff", "wf-fork", "wf-grant", "wf-help", "wf-launch", "wf-monitor",
         "wf-plan", "wf-recover", "wf-redirect", "wf-restart", "wf-resume", "wf-retry", "wf-status", "wf-steer",
-        "wfm", "wfm-answer", "wfm-discard", "wfm-endpoints", "wfm-monitor", "wfm-review", "wfm-status", "wfm-withdraw",
+        "wfm", "wfm-answer", "wfm-cancel", "wfm-discard", "wfm-endpoints", "wfm-monitor", "wfm-redirect", "wfm-review", "wfm-status",
+        "wfm-steer", "wfm-withdraw",
       ]);
       await commands.get("wf")!.handler("fixture", ctx);
       expect(notices.at(-1)).toContain("requires interactive approval");
-      for (const name of ["wfm", "wfm-review", "wfm-withdraw", "wfm-discard", "wfm-monitor", "wfm-answer"]) {
+      for (const name of ["wfm", "wfm-review", "wfm-withdraw", "wfm-discard", "wfm-monitor", "wfm-answer", "wfm-cancel", "wfm-steer", "wfm-redirect"]) {
         await commands.get(name)!.handler("", ctx);
         expect(notices.at(-1)).toContain("Service mode is not configured");
       }

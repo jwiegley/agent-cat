@@ -39,7 +39,11 @@
  *    receives 412 `stale-revision`, the draft is kept, and nothing is sent
  *    again. The recovery head is then abandoned, or retried when the
  *    manager offers no abandon.
- * 6. The extension closes.
+ * 6. `/wfm mixed-controls` starts a third run, which waits at its question.
+ *    `/wfm-cancel` sends one cancel to the controls of the run after the
+ *    confirmation, reports the receipt and then the runtime acknowledgement
+ *    verbatim, and the run ends cancelled.
+ * 7. The extension closes.
  */
 
 import { createHash } from "node:crypto";
@@ -83,6 +87,9 @@ const ANSWERED = "Pi answer λ: explicit false.";
 
 /** The literal of the run whose question the harness answers first. `PI_UI_STALE` of the harness states it. */
 const STALE = "Pi stale λ: the harness answers first.";
+
+/** The literal of the run that `/wfm-cancel` cancels. `PI_UI_CANCELLED` of the harness states it. */
+const CANCELLED = "Pi cancel λ: the run ends cancelled.";
 
 const STEP_MS = 600_000;
 const WAIT_MS = 120_000;
@@ -630,6 +637,44 @@ describe.runIf(PROFILE)("the human path of service mode against a live manager",
     const listed = jsonMember(queue.value as JsonObject, "items");
     expect(Array.isArray(listed) && listed.some((item) => isJsonObject(item) && jsonMember(item, "id") === staleDecision)).toBe(false);
     Object.assign(report, { staleRequestId: requestId, staleRunId: runId, staleDecisionId: staleDecision, harnessAnswerCommand: harnessCommand, staleRecovery: recovery });
+  }, STEP_MS);
+
+  it("cancels a run that waits at its question and reports the receipt and then the runtime acknowledgement", async () => {
+    const { requestId, runId } = await startMixed(CANCELLED);
+    // The run waits at its person question.
+    await nextHead(runId, new Set());
+    const control = `/v1/runs/${runId}/control`;
+    const before = posts.length;
+    const noticed = notices.length;
+    const asked: string[] = [];
+    script = {
+      confirm: (title, message) => {
+        asked.push(`${title} ${message}`);
+        return true;
+      },
+    };
+    await run("wfm-cancel", runId);
+    expect(asked).toEqual([`Cancel manager run? ${runId}`]);
+    const sent = postsTo(control, before);
+    expect(sent).toHaveLength(1);
+    expect(JSON.parse(String(sent[0].body))).toEqual({ operation: "cancel" });
+    const cancelCommand = acceptedCommand("cancel");
+    const settled = must(decodeCommandReceipt(must(await session.get(ref(cancelCommand)), "cancel receipt").value), "cancel receipt decode");
+    const ack = settled.acknowledgement as JsonObject;
+    const reported = notices.slice(noticed);
+    // The receipt line comes first, and the acknowledgement line follows with the state and the message of the receipt.
+    const receiptLine = reported.findIndex((line) => line.startsWith(`Command cancel accepted: command ${settled.id}, receipt `));
+    const ackLine = reported.indexOf(`Acknowledgement of command ${settled.id}: ${String(jsonMember(ack, "state"))}: ${String(jsonMember(ack, "message"))}`);
+    expect(receiptLine, reported.join("\n")).toBeGreaterThanOrEqual(0);
+    expect(ackLine, reported.join("\n")).toBeGreaterThan(receiptLine);
+    expect(["accepted", "queued", "delivered"]).toContain(jsonMember(ack, "state"));
+    expect(reported.at(-1)).toBe(`Execution: run ${runId} is cancelled.`);
+    const terminal = await until(`/v1/runs/${runId}/snapshot`, (observed) => {
+      const runtime = isJsonObject(observed.value) ? jsonMember(observed.value, "runtime") : undefined;
+      return runtime !== undefined && runtime !== null && isJsonObject(runtime) && jsonMember(runtime, "status") === "cancelled";
+    }, `cancelled run ${runId}`);
+    expect(jsonMember(jsonMember(terminal.value as JsonObject, "runtime") as JsonObject, "status")).toBe("cancelled");
+    Object.assign(report, { cancelledRequestId: requestId, cancelledRunId: runId, cancelCommand });
   }, STEP_MS);
 
   it("closes the extension and writes the report", async () => {

@@ -1,4 +1,4 @@
-import type { OccurrenceSnapshot, RunSnapshot } from "./types.ts";
+import type { ControlAckSnapshot, OccurrenceSnapshot, RunSnapshot } from "./types.ts";
 
 export class MonitorModel {
   #snapshot: RunSnapshot;
@@ -104,6 +104,19 @@ export function occurrenceIds(snapshot: RunSnapshot): string[] {
 
 export function formatMonitor(snapshot: RunSnapshot): string {
   return new MonitorModel(snapshot).render(120, 200).join("\n").slice(0, 24_000);
+}
+
+/**
+ * The report of one runtime acknowledgement of a local control: the action,
+ * the acknowledgement state, the control identifier and the message, all
+ * verbatim. A redirect that the runtime recorded as `occurrence.redirected`
+ * for the attempt in flight also names the stopped attempt.
+ */
+export function formatControl(action: string, ack: ControlAckSnapshot, snapshot?: RunSnapshot, occurrenceId?: string): string {
+  const report = `${action} ${ack.state} (${ack.controlId}): ${ack.message}`;
+  const redirect = occurrenceId === undefined ? undefined : snapshot?.occurrences.get(occurrenceId)?.dispatch?.redirect;
+  return redirect?.controlId === ack.controlId && redirect.stoppedAttempt !== undefined
+    ? `${report}; stopped attempt ${redirect.stoppedAttempt}` : report;
 }
 
 function appendWrapped(lines: string[], prefix: string, value: string | undefined, width: number): void {

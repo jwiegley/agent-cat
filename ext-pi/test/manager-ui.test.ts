@@ -1,8 +1,14 @@
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { describe, expect, it, vi } from "vitest";
 import {
+  acknowledgementLine,
   admissionLine,
+  cancelOffered,
+  controlSettled,
   recoveryActions,
+  redirectOffers,
+  redirectPlace,
+  steerOffers,
   ReviewComponent,
   reviewLines,
   serviceMonitorLines,
@@ -12,7 +18,7 @@ import {
   type ServiceMonitor,
 } from "../src/manager-ui.ts";
 import { parseJson, type JsonObject } from "../src/manager/json.ts";
-import { decodeControl, decodeDecision, type ControlView, type DecisionView, type DraftView, type Preparation } from "../src/manager/resources.ts";
+import { decodeCommandReceipt, decodeControl, decodeDecision, type CommandReceipt, type ControlView, type DecisionView, type DraftView, type Preparation } from "../src/manager/resources.ts";
 
 const DIGEST = "a".repeat(64);
 
@@ -200,5 +206,55 @@ describe("manager decisions and the live monitor", () => {
     expect(requestRender).toHaveBeenCalled();
     component.handleInput("q");
     expect(closed).toBe(1);
+  });
+});
+
+/** A command receipt of run_21 from its wire JSON. */
+function receiptOf(operation: string, state: string, ack: string | null): CommandReceipt {
+  const decoded = decodeCommandReceipt(parseJson(JSON.stringify({
+    version: 1, id: "cmd_4", profileId: "profile_main", operation, requiredScopes: ["control"], resource: "/v1/runs/run_21/control", state,
+    acceptedAt: "2026-10-01T12:00:00Z", dispatchAttemptedAt: state === "accepted" ? null : "2026-10-01T12:00:01Z",
+    acknowledgement: ack === null ? null : { commandId: "cmd_4", state: ack, message: `runtime says ${ack}`, command: operation, occurrenceId: "0", attemptId: null },
+    effect: state === "effect-observed" ? { kind: "redirected", runtimeSequence: "3", address: { occurrenceId: "0" }, resource: "/v1/runs/run_21" } : null,
+    refusal: null, links: { self: "/v1/commands/cmd_4", resource: "/v1/runs/run_21/control" },
+  })));
+  if (!decoded.ok) throw new Error(JSON.stringify(decoded.failure));
+  return decoded.value;
+}
+
+describe("manager run controls", () => {
+  const steer = { operation: "steer", address: { occurrenceId: "0", attemptId: "1" }, generation: null, timings: ["next-boundary"], choices: [], targets: [] };
+  const redirect = { operation: "redirect", address: { occurrenceId: "0" }, generation: null, timings: [], choices: [], targets: ["model@spare"] };
+
+  it("offers cancel, steer and redirect only from owned controls that offer them", () => {
+    const owned = controlOf([steer, redirect, { ...redirect, targets: [] }]);
+    expect(cancelOffered(owned)).toBe(true);
+    expect(steerOffers(owned).map((offer) => [offer.occurrenceId, offer.attemptId, offer.timings])).toEqual([[0n, 1n, ["next-boundary"]]]);
+    expect(redirectOffers(owned).map((offer) => offer.targets)).toEqual([["model@spare"]]);
+    const lost = controlOf([steer, redirect], { supervision: "lost" });
+    expect([cancelOffered(lost), steerOffers(lost), redirectOffers(lost)]).toEqual([false, [], []]);
+    expect(cancelOffered(controlOf([], { cancelAllowed: false }))).toBe(false);
+  });
+
+  it("names the dispatch window or the one attempt in flight as the place of a redirect", () => {
+    const snapshot = (occurrence: unknown) => parseJson(JSON.stringify({ items: [occurrence] })) as JsonObject;
+    expect(redirectPlace(snapshot({ occurrenceId: "0", dispatch: { targets: [], open: true, redirect: null }, attempts: [] }), 0n)).toEqual({ kind: "dispatch" });
+    const attempt = (number: string, state: string) => ({ address: { occurrenceId: "0", attemptId: number }, state });
+    expect(redirectPlace(snapshot({ occurrenceId: "0", dispatch: null, attempts: [attempt("0", "failed"), attempt("1", "running")] }), 0n))
+      .toEqual({ kind: "attempt", attemptId: "1" });
+    expect(redirectPlace(snapshot({ occurrenceId: "0", dispatch: null, attempts: [] }), 0n)).toEqual({ kind: "unknown" });
+    expect(redirectPlace(snapshot({ occurrenceId: "1", dispatch: null, attempts: [] }), 0n)).toEqual({ kind: "unknown" });
+  });
+
+  it("settles a control receipt on its effect, a rejecting acknowledgement, or the accepting acknowledgement of a cancel", () => {
+    expect(controlSettled("redirect", receiptOf("redirect", "effect-observed", "delivered"))).toBe(true);
+    expect(controlSettled("redirect", receiptOf("redirect", "acknowledged", "accepted"))).toBe(false);
+    for (const rejected of ["rejected-stale", "unsupported", "failed"]) {
+      expect(controlSettled("steer", receiptOf("steer", "acknowledged", rejected))).toBe(true);
+    }
+    expect(controlSettled("cancel", receiptOf("cancel", "acknowledged", "accepted"))).toBe(true);
+    expect(controlSettled("cancel", receiptOf("cancel", "dispatch-attempted", null))).toBe(false);
+    expect(acknowledgementLine(receiptOf("redirect", "acknowledged", "rejected-stale"))).toBe("Acknowledgement of command cmd_4: rejected-stale: runtime says rejected-stale");
+    expect(acknowledgementLine(receiptOf("cancel", "dispatch-attempted", null))).toBe("Command cmd_4 has no runtime acknowledgement (receipt dispatch-attempted).");
   });
 });
