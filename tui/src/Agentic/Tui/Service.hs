@@ -28,7 +28,9 @@ module Agentic.Tui.Service
     runTerminal, resultWanted, resultReferenced, decodeOutputs, VerifiedResult (..), retrieveResult, resultLines,
     observedBinding, RunRead (..), RequestRead (..), Selection (..), selectedRun, compositeResources, ReadVerdict (..), readVerdict, runReadValid,
     readRequestId, readRequestRun, runtimeStatus, observationLines,
-    approvalStatus, receiptSettlement
+    approvalStatus, receiptSettlement,
+    ExportReceipt (..), ExportCollection (..), ExportProgress (..), ExportOutcome (..), exportsURI, exportNameValid,
+    exportSource, exportMutation, observeExports, decodeExportCollection, decodeExportReceipt, observeExport, exportLines
   ) where
 
 import qualified Agentic.Manager.Client as C
@@ -43,7 +45,7 @@ import Agentic.Runtime
 import Agentic.Tui.Person (PersonPrompt (..), personAnswerValue)
 import Agentic.Tui.RunModel (runStatusLabel)
 import Control.Exception (IOException, finally, onException, try)
-import Control.Monad (unless, when)
+import Control.Monad (unless, when, (>=>))
 import Data.Scientific (toBoundedInteger)
 import System.FilePath (isAbsolute)
 import System.IO (hClose)
@@ -219,6 +221,11 @@ data Mutation
     -- redirect inside the dispatch window. The redirect body names no
     -- attempt, so the attempt is shown only.
   | Redirect !Text !ControlView !ControlOffer !Text !(Maybe Word32)
+    -- | The export of the verified result of the run under the name, for
+    -- the run profile: profile, run identifier and name. Its precondition is
+    -- the first page of the export collection of the run, which the
+    -- preparation observes ('prepareMutation').
+  | Export !Text !Text !Text
   deriving (Eq, Show)
 
 mutationOperation :: Mutation -> Text
@@ -238,6 +245,7 @@ mutationOperation mutation = case mutation of
   Steer {} -> "steer"
   ChooseRecovery {} -> "choose-recovery"
   Redirect {} -> "redirect"
+  Export {} -> "export"
 
 mutationURI :: Mutation -> Text
 mutationURI mutation = case mutation of
@@ -256,6 +264,7 @@ mutationURI mutation = case mutation of
   Steer _ control _ _ _ -> "/v1/runs/" <> controlRun control <> "/control"
   ChooseRecovery _ decision _ _ _ -> "/v1/decisions/" <> decisionId decision
   Redirect _ control _ _ _ -> "/v1/runs/" <> controlRun control <> "/control"
+  Export _ run _ -> exportsURI run
 
 mutationProfile :: Mutation -> Text
 mutationProfile mutation = case mutation of
@@ -274,6 +283,7 @@ mutationProfile mutation = case mutation of
   Steer profile _ _ _ _ -> profile
   ChooseRecovery _ decision _ _ _ -> decisionProfile decision
   Redirect profile _ _ _ _ -> profile
+  Export profile _ _ -> profile
 
 requestURI :: C.DraftView -> Text
 requestURI request = "/v1/requests/" <> C.draftId request
@@ -376,6 +386,18 @@ prepareMutation client now mutation observed
           redirectOffer control (Just (offerOccurrence offer)) == Just offer,
           target `elem` offerTargets offer -> C.prepareObserved client current (redirectBody offer target)
         _ -> pure (Left C.InvalidResponse)
+      -- The export precondition is the strong entity tag of the first page
+      -- of the export collection of the run. No displayed view holds that
+      -- page, so the preparation observes it at once ('observeExports') and
+      -- sends its entity tag as If-Match. A collection that changes before
+      -- the send refuses the export with 412 stale-revision.
+      Export _ run name
+        | not (exportNameValid name) -> pure (Left C.InvalidResponse)
+        | otherwise -> do
+            exports <- observeExports client run
+            case exports of
+              Left failure -> pure (Left failure)
+              Right (current, _) -> C.prepareObserved client current (object ["name" .= name])
   where
     needed = case mutation of
       Approve {} -> ["observe","submit","control"]
@@ -386,6 +408,7 @@ prepareMutation client now mutation observed
       Steer {} -> ["observe","control"]
       ChooseRecovery {} -> ["observe","control"]
       Redirect {} -> ["observe","control"]
+      Export {} -> ["observe","export"]
       _ -> ["observe","submit"]
     permitted = case C.clientCapabilities client of
       Object fields -> case (KM.lookup "scopes" fields, KM.lookup "profileIds" fields) of
@@ -527,7 +550,8 @@ approvalSelectors preparation =
 -- occurrence and the attempt that it follows. An effect of a steer names the
 -- run controls and the steered attempt, an effect of a redirect names the
 -- run controls and the redirected occurrence, and an effect of a cancel
--- names the run controls.
+-- names the run controls. An effect of an export names the export receipt of
+-- the command, @/v1/exports/export_{commandId}@.
 receiptMatches :: Mutation -> C.CommandReceipt -> Bool
 receiptMatches mutation receipt = C.operationName (C.receiptOperation receipt) == mutationOperation mutation
   && C.receiptProfile receipt == mutationProfile mutation && C.receiptResource receipt == mutationURI mutation
@@ -553,6 +577,9 @@ receiptMatches mutation receipt = C.operationName (C.receiptOperation receipt) =
        (Redirect _ _ offer _ _, Just (Object fields)) ->
          KM.lookup "resource" fields == Just (String (mutationURI mutation))
            && KM.lookup "address" fields == Just (object ["occurrenceId" .= occurrenceText (offerOccurrence offer)])
+       (Export {}, Just (Object fields)) ->
+         KM.lookup "resource" fields == Just (String ("/v1/exports/export_" <> C.receiptId receipt))
+       (Export {}, Just _) -> False
        (_, Just _) | controlMutation mutation -> False
        (Discard request _, Just (Object fields)) -> KM.lookup "resource" fields == Just (String (requestURI request))
        (_, Just (Object fields)) | mutationOperation mutation `elem` requestEffects ->
@@ -1025,6 +1052,156 @@ verificationName verification = case verification of
   Referenced _ -> "referenced"
   Verified _ -> "verified"
   Unavailable _ reason -> "unavailable (" <> reason <> ")"
+
+-- | One export receipt, as @/v1/exports/{id}@ and the export collection of
+-- its run represent it. A published receipt states the size, the SHA-256
+-- digest and the download link of the exported bytes: the compact code and
+-- value document of the verified result followed by one LF. It is metadata,
+-- not a download capability.
+data ExportReceipt = ExportReceipt
+  { exportId :: !Text, exportRun :: !Text, exportCommand :: !Text, exportName :: !Text,
+    exportCode :: !Value, exportState :: !Text, exportDigest :: !(Maybe Text),
+    exportBytes :: !(Maybe Int), exportDownload :: !(Maybe Text)
+  } deriving (Eq, Show)
+
+-- | The first page of the export collection of one run: its run, the
+-- collection revision that its strong entity tag carries, and its receipts.
+data ExportCollection = ExportCollection
+  { exportsRun :: !Text, exportsRevision :: !Text, exportsItems :: ![ExportReceipt]
+  } deriving (Eq, Show)
+
+-- | The progress of an accepted export: its command receipt before the
+-- effect @exported@, or the command receipt, the published export receipt
+-- and the exported bytes that 'C.downloadVerified' checked against that
+-- receipt.
+data ExportProgress
+  = ExportPending !C.CommandReceipt
+  | ExportPublished !C.CommandReceipt !ExportReceipt !BS.ByteString
+  deriving (Eq, Show)
+
+-- | The outcome of the latest export of a run, for display: a definite 412
+-- refusal of its send with the export name and the refusal code, or the
+-- published export receipt with its verified bytes.
+data ExportOutcome
+  = ExportRefused !Text !Text
+  | ExportVerified !ExportReceipt !BS.ByteString
+  deriving (Eq, Show)
+
+-- | The export collection of a run.
+exportsURI :: Text -> Text
+exportsURI run = "/v1/runs/" <> run <> "/exports"
+
+-- | Whether a name is a valid export name: one ASCII component of 1 to 128
+-- letters, digits, dots, underscores and hyphens that starts with a letter
+-- or a digit. The manager checks the name again.
+exportNameValid :: Text -> Bool
+exportNameValid name = case T.uncons name of
+  Just (first, rest) -> T.length name <= 128 && alphanumeric first && T.all (\c -> alphanumeric c || c `elem` ("._-" :: String)) rest
+  Nothing -> False
+  where alphanumeric c = c `elem` (['A'..'Z'] <> ['a'..'z'] <> ['0'..'9'])
+
+-- | Whether @e@ exports the result of this run, or the reason why it exports
+-- nothing. Only a succeeded run whose snapshot publishes a verified result
+-- is a source of an export, because the manager exports only a verified
+-- result.
+exportSource :: RunObservation -> Either Text ()
+exportSource run
+  | resultWanted run = Right ()
+  | isNothing (runTerminal run) = Left "the run is not terminal"
+  | runTerminal run /= Just RunSucceeded = Left "the run did not succeed"
+  | otherwise = Left ("the run has no verified result; verification is " <> verificationName (runVerification run))
+
+-- | The export of the verified result of this run under this name, for this
+-- profile, or the reason why it starts nothing.
+exportMutation :: Text -> RunObservation -> Text -> Either Text Mutation
+exportMutation profile run name = do
+  exportSource run
+  unless (exportNameValid name) (Left "the export name must be 1 to 128 ASCII letters, digits, dots, underscores or hyphens that start with a letter or a digit")
+  Right (Export profile (runIdText (runIdentity run)) name)
+
+-- | Observe the first page of the export collection of a run through
+-- 'C.observeResource'. Its strong entity tag must carry the collection
+-- revision, and every receipt must belong to the run.
+observeExports :: C.Client -> Text -> IO (Either C.ClientFailure (C.Observed, ExportCollection))
+observeExports client run = case C.reference client (exportsURI run) of
+  Left failure -> pure (Left failure)
+  Right location -> do
+    received <- C.observeResource client location
+    pure $ do
+      observed <- received
+      page <- decodeExportCollection (C.observedValue observed)
+      unless (exportsRun page == run && all ((== run) . exportRun) (exportsItems page)
+        && owned observed (exportsURI run) (exportsRevision page)) (Left C.InvalidResponse)
+      Right (observed, page)
+
+decodeExportCollection :: Value -> Either C.ClientFailure ExportCollection
+decodeExportCollection = decode $ withObject "export page" $ \fields -> do
+  closed ["version","page","items","runId"] fields
+  versionOne fields
+  revision <- at (withObject "page" (\page -> at (text 1 256) page "revision")) fields "page"
+  ExportCollection <$> at identifier fields "runId" <*> pure revision
+    <*> at (list 256 parseExportReceipt >=> uniqueBy exportId) fields "items"
+
+decodeExportReceipt :: Value -> Either C.ClientFailure ExportReceipt
+decodeExportReceipt = decode parseExportReceipt
+
+parseExportReceipt :: Value -> Parser ExportReceipt
+parseExportReceipt = withObject "export receipt" $ \fields -> do
+  closed ["version","id","runId","commandId","name","code","state","sha256","bytes","download"] fields
+  versionOne fields
+  size <- at (nullable uint64) fields "bytes"
+  unless (maybe True (<= 67108864) size) (fail "export bound")
+  name <- at (text 1 128) fields "name"
+  unless (exportNameValid name) (fail "export name")
+  ExportReceipt <$> at identifier fields "id" <*> at identifier fields "runId" <*> at identifier fields "commandId"
+    <*> pure name <*> at observationCode fields "code" <*> at (oneOf ["published","unresolved"]) fields "state"
+    <*> at (nullable digest) fields "sha256" <*> pure (fromIntegral <$> size) <*> at (nullable resourceLink) fields "download"
+
+-- | Read the progress of an accepted export from its own command receipt.
+-- Before the effect @exported@, the receipt is the progress. After it, the
+-- export receipt that the effect names is read. It must be the published
+-- receipt of this command, run and name, and 'C.downloadVerified' downloads
+-- its bytes and checks them against its size and SHA-256 digest. Any other
+-- receipt refuses the read.
+observeExport :: C.Client -> Mutation -> C.Reference -> IO (Either C.ClientFailure ExportProgress)
+observeExport client mutation location = do
+  received <- observeReceipt client mutation location
+  case (received, mutation) of
+    (Left failure, _) -> pure (Left failure)
+    (Right receipt, Export _ run name)
+      | C.stateName (C.receiptState receipt) == "effect-observed", receiptEffectKind receipt == Just "exported" ->
+          case C.reference client ("/v1/exports/export_" <> C.receiptId receipt) of
+            Left failure -> pure (Left failure)
+            Right detail -> do
+              response <- C.getResource client detail
+              case response >>= published receipt run name of
+                Left failure -> pure (Left failure)
+                Right (export, size, checksum, download) -> case C.reference client download of
+                  Left failure -> pure (Left failure)
+                  Right link -> fmap (ExportPublished receipt export) <$> C.downloadVerified client link size checksum
+    (Right receipt, _) -> pure (Right (ExportPending receipt))
+  where
+    published receipt run name response = do
+      unless (C.responseStatus response == 200) (Left C.InvalidResponse)
+      export <- decodeExportReceipt (C.responseValue response)
+      case (exportBytes export, exportDigest export, exportDownload export) of
+        (Just size, Just checksum, Just download)
+          | exportId export == "export_" <> C.receiptId receipt, exportCommand export == C.receiptId receipt,
+            exportRun export == run, exportName export == name, exportState export == "published" ->
+              Right (export, size, checksum, download)
+        _ -> Left C.InvalidResponse
+
+-- | The display lines of the latest export of a run. The preview of the
+-- exported bytes is bounded and is decoded leniently for display only.
+exportLines :: ExportOutcome -> [Text]
+exportLines outcome = case outcome of
+  ExportRefused name code ->
+    ["Export " <> name <> ": refused (" <> code <> "); the export collection changed and nothing was sent again; e exports again"]
+  ExportVerified export bytes ->
+    [ "Export " <> exportName export <> ": " <> exportId export <> " state " <> exportState export,
+      "Export download: verified " <> T.pack (show (BS.length bytes)) <> " bytes, SHA-256 " <> fromMaybe "none" (exportDigest export),
+      "Export preview: " <> T.map (\character -> if character == '\n' then ' ' else character)
+        (T.take 120 (TE.decodeUtf8With lenientDecode (BS.take 480 bytes))) ]
 
 decodeControl :: Value -> Either C.ClientFailure ControlView
 decodeControl = decode parseControl

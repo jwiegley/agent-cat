@@ -174,6 +174,7 @@ serviceTests render = do
   overviewTests render row request0 preparation
   decisionsViewTests render row decisionValue
   historyTests render row
+  exportTests render row receiptValue
   draftTests profile request0
   liveDeliveryTests render profile
   where
@@ -384,6 +385,102 @@ historyTests render row = do
           && not ("s SAVE RESULT" `T.isInfixOf` detailFrame False)),
       ("the service workflow browser names H HISTORY",
         "H HISTORY" `T.isInfixOf` render (120,30) ((emptyPresentation browser) {presentationService = True, presentationNoColor = True}))
+    ]
+
+-- | The export of a verified result: the export mutation and its refusals,
+-- the export collection and receipt decoders, the receipt of the export
+-- command, the definite 412 refusal of a stale collection entity tag, the
+-- export lines and fixed-size renders of the name editor and the run detail.
+exportTests :: ((Int,Int) -> Presentation -> T.Text) -> S.Workflow -> Value -> IO ()
+exportTests render row receiptValue = do
+  snapshotValue <- BS.readFile "test/fixtures/manager/v1/valid/snapshot-result-metadata.json" >>= either die pure . eitherDecodeStrict'
+  (metadata,items) <- case snapshotValue of
+    Object fields | Just (Array values) <- KM.lookup "items" fields -> pure (Object (KM.delete "page" (KM.delete "items" fields)),V.toList values)
+    _ -> die "invalid result snapshot fixture shape"
+  let verifiedMetadata = put "verification" (object ["state" .= ("verified" :: T.Text), "artifactId" .= ("artifact_1" :: T.Text)]) metadata
+      runtime status = put "runtime" (object ["status" .= (status :: T.Text), "lastSequence" .= ("7" :: T.Text), "protocolVersion" .= (2 :: Int)])
+      decoded value = either (die . show) pure (S.decodeSnapshot value items)
+  verified <- decoded verifiedMetadata
+  failed <- decoded (runtime "failed" verifiedMetadata)
+  running <- decoded (runtime "running" verifiedMetadata)
+  let exported = TE.encodeUtf8 "{\"code\":\"text\",\"value\":\"exported\"}\n"
+      checksum = T.pack (show (hash exported :: Digest SHA256))
+      receiptJson state = object ["version" .= (1 :: Int), "id" .= ("export_cmd_21" :: T.Text), "runId" .= ("run_21" :: T.Text),
+        "commandId" .= ("cmd_21" :: T.Text), "name" .= ("result.json" :: T.Text), "code" .= ("text" :: T.Text), "state" .= (state :: T.Text),
+        "sha256" .= checksum, "bytes" .= T.pack (show (BS.length exported)), "download" .= ("/v1/artifacts/artifact_export_21" :: T.Text)]
+      pageJson extra = object (["version" .= (1 :: Int), "runId" .= ("run_21" :: T.Text), "items" .= [receiptJson "published"],
+        "page" .= object ["setId" .= ("set_1" :: T.Text), "revision" .= ("exportsrev_2" :: T.Text), "expiresAt" .= ("2026-09-03T00:01:00Z" :: T.Text),
+          "index" .= (0 :: Int), "totalItems" .= (1 :: Int), "next" .= Null]] <> extra)
+      export = S.Export "profile_main" "run_21" "result.json"
+      commandJson effect = put "id" (String "cmd_21") $ put "operation" (String "export")
+        $ put "requiredScopes" (toJSON (["observe","export"] :: [T.Text])) $ put "resource" (String "/v1/runs/run_21/exports")
+        $ put "links" (object ["self" .= ("/v1/commands/cmd_21" :: T.Text), "resource" .= ("/v1/runs/run_21/exports" :: T.Text)])
+        $ maybe id (\resource -> put "state" (String "effect-observed") . put "effect" (object ["kind" .= ("exported" :: T.Text),
+            "runtimeSequence" .= Null, "address" .= Null, "resource" .= (resource :: T.Text)])) effect receiptValue
+  accepted <- either (die . show) pure (C.decodeObservation (commandJson Nothing))
+  published <- either (die . show) pure (C.decodeObservation (commandJson (Just "/v1/exports/export_cmd_21")))
+  elsewhere <- either (die . show) pure (C.decodeObservation (commandJson (Just "/v1/exports/export_cmd_99")))
+  collection <- either (die . show) pure (S.decodeExportCollection (pageJson []))
+  receipt <- either (die . show) pure (S.decodeExportReceipt (receiptJson "published"))
+  checks
+    [ ("an export is an observe and export scoped POST of the export collection of its run for the run profile",
+        S.mutationOperation export == "export" && S.mutationURI export == "/v1/runs/run_21/exports" && S.mutationProfile export == "profile_main"
+          && S.missingScope ["observe","submit","control"] "export" == Just "export" && S.missingScope ["observe","export"] "export" == Nothing),
+      ("e exports only a succeeded run whose snapshot publishes a verified result",
+        S.exportMutation "profile_main" verified "result.json" == Right export
+          && S.exportMutation "profile_main" failed "result.json" == Left "the run did not succeed"
+          && S.exportMutation "profile_main" running "result.json" == Left "the run is not terminal"),
+      ("an export name is one ASCII component that starts with a letter or a digit",
+        all S.exportNameValid ["result.json", "R_1-x", T.replicate 128 "a"]
+          && not (any S.exportNameValid ["", ".hidden", "..", "a/b", "a\\b", "caf\233", "a b", T.replicate 129 "a"])
+          && either (T.isInfixOf "export name") (const False) (S.exportMutation "profile_main" verified "../escape")),
+      ("the first page of the export collection keeps its run, its collection revision and its receipts",
+        S.exportsRun collection == "run_21" && S.exportsRevision collection == "exportsrev_2" && S.exportsItems collection == [receipt]
+          && S.exportsURI "run_21" == "/v1/runs/run_21/exports"),
+      ("an export page or receipt with an unknown field, another state or an invalid name refuses",
+        S.decodeExportCollection (pageJson ["extra" .= True]) == Left C.InvalidResponse
+          && S.decodeExportReceipt (receiptJson "deleted") == Left C.InvalidResponse
+          && S.decodeExportReceipt (put "name" (String "a/b") (receiptJson "published")) == Left C.InvalidResponse),
+      ("a published export receipt states its exact size, SHA-256 digest and download link",
+        S.exportState receipt == "published" && S.exportBytes receipt == Just (BS.length exported)
+          && S.exportDigest receipt == Just checksum && S.exportDownload receipt == Just "/v1/artifacts/artifact_export_21"),
+      ("the export command receipt is bound to the export, and only the effect exported of its own receipt completes it",
+        S.receiptMatches export accepted && S.receiptEffectKind accepted == Nothing
+          && S.receiptMatches export published && S.receiptEffectKind published == Just "exported"
+          && not (S.receiptMatches export elsewhere) && not (S.receiptMatches (S.Export "profile_main" "run_9" "result.json") accepted))
+    ]
+  -- A 412 stale-revision refusal of an export is definite: the lane becomes
+  -- idle, retains nothing to resend, and the export line shows the refusal.
+  let attempt = L.Attempt export ("pending-export" :: T.Text) Nothing
+      sending = L.Lane Nothing (L.MutationSending 7 attempt) False False :: L.Lane T.Text T.Text
+      (refusedStep, refusedLane) = L.sendStep 7 (L.Declared (Left (C.Refused 412 "stale-revision"))) sending
+      refusedLine = S.exportLines (S.ExportRefused "result.json" (L.refusalCode (C.Refused 412 "stale-revision")))
+      publishedLines = S.exportLines (S.ExportVerified receipt exported)
+      browser = (initialModel [S.workflowDisplay row] [] (Left "manager owns routing")) {modelStatus = "manager catalogue: profile_main"}
+      detail = (emptyPresentation browser {modelScreen = ServiceHistoryRunScreen "run_21"}) {presentationService = True, presentationNoColor = True,
+        presentationServiceHistoryDetail = ["Run detail: current", "Run: run_21"] <> publishedLines}
+      detailFrame exportable = render (100,30) detail {presentationServiceExportable = exportable}
+      editorFrame = render (100,30) detail {presentationLayer = ExportLayer, presentationExportRun = Just "run_21"}
+      refusedEditor = render (100,30) detail {presentationLayer = ExportLayer, presentationExportRun = Just "run_21",
+        presentationExportError = Just "the export name must be 1 to 128 ASCII letters"}
+  putStrLn "RENDER export name editor at (100,30):" >> putStr (T.unpack editorFrame)
+  checks
+    [ ("a 412 stale-revision refusal of an export returns the attempt and leaves the lane idle without a resend",
+        case (refusedStep, L.laneMutation refusedLane) of
+          (L.SendRefused refused (C.Refused 412 "stale-revision"), L.MutationIdle) ->
+            L.attemptMutation refused == export && not (L.resendOffered refusedLane) && L.mutationAdmission refusedLane == L.KeyStart
+          _ -> False),
+      ("golden: the export line shows the stale collection refusal and that nothing was sent again",
+        refusedLine == ["Export result.json: refused (412 stale-revision); the export collection changed and nothing was sent again; e exports again"]),
+      ("golden: the export lines show the published receipt and the verified download",
+        take 2 publishedLines == ["Export result.json: export_cmd_21 state published",
+          "Export download: verified " <> T.pack (show (BS.length exported)) <> " bytes, SHA-256 " <> checksum]),
+      ("the run detail at (100,30) names e only for an exportable run and shows the export lines",
+        all (`T.isInfixOf` detailFrame True) ["e EXPORT", "Export result.json: export_cmd_21 state published"]
+          && not ("e EXPORT" `T.isInfixOf` detailFrame False)),
+      ("the export name editor at (100,30) names its run, Ctrl-D and Esc, and shows a refusal",
+        all (`T.isInfixOf` editorFrame) ["Export verified result", "run run_21", "Ctrl-D EXPORT", "Esc CANCEL"]
+          && "ERROR: the export name must be 1 to 128 ASCII letters" `T.isInfixOf` refusedEditor)
     ]
 
 -- | The navigation keys of the service workflow browser, the projection of

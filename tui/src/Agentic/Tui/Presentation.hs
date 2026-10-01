@@ -105,6 +105,8 @@ data ActiveLayer
   | RecoveryLayer
   | SteerLayer
   | SaveLayer
+    -- | The export name editor of the service frontend.
+  | ExportLayer
     -- | The path editor of a file capture over the service input editor.
   | CaptureFileLayer
   | FilterLayer
@@ -181,6 +183,13 @@ data Presentation = Presentation
     -- | Whether s opens the save dialog for the retained verified result
     -- bytes of the installed run.
     presentationServiceSavable :: !Bool,
+    -- | Whether e opens the export name editor for the run that the screen
+    -- shows.
+    presentationServiceExportable :: !Bool,
+    -- | The run of the open export name editor, and the refusal of its
+    -- latest Ctrl-D.
+    presentationExportRun :: !(Maybe Text),
+    presentationExportError :: !(Maybe Text),
     -- | The outcome of the latest mutation key that started nothing. The
     -- status line shows it until the next key press or view change.
     presentationServiceKeyOutcome :: !(Maybe KeyOutcome),
@@ -261,6 +270,9 @@ emptyPresentation model =
       presentationServiceControlLines = [],
       presentationServiceResultLines = [],
       presentationServiceSavable = False,
+      presentationServiceExportable = False,
+      presentationExportRun = Nothing,
+      presentationExportError = Nothing,
       presentationServiceKeyOutcome = Nothing,
       presentationServiceOverview = OverviewView [] 0 (Service.overviewStatus Nothing Nothing),
       presentationServiceDecisions = OverviewView [] 0 (Service.decisionsStatus Nothing Nothing),
@@ -457,6 +469,7 @@ layerView presentation width totalHeight mainHeight = case presentationLayer pre
   RecoveryLayer -> headView recoveryView
   SteerLayer -> steerView presentation width mainHeight
   SaveLayer -> saveResultView presentation width mainHeight
+  ExportLayer -> exportNameView presentation width mainHeight
   CaptureFileLayer -> captureFileView presentation width mainHeight
   FilterLayer -> workflowFilterView presentation width mainHeight
   ConfirmDetailsLayer -> confirmDetailsView presentation width mainHeight
@@ -980,6 +993,19 @@ captureFileView presentation width mainHeight =
           Just failure -> withAttr (attrName "error") (displayTextWrap ("ERROR: " <> failure))
       ]
 
+-- | The export name editor over the live monitor or the run detail.
+exportNameView :: Presentation -> Int -> Int -> Widget Name
+exportNameView presentation width mainHeight =
+  dialog width mainHeight " Export verified result " $
+    vBox
+      [ displayTextWrap ("Export the verified result of run " <> fromMaybe "" (presentationExportRun presentation)
+          <> " under a new name. The manager publishes the export once."),
+        vLimit 3 (borderWithLabel (displayText " Name • ") (Edit.renderEditor (displayText . T.unlines) True (presentationEditor presentation))),
+        case presentationExportError presentation of
+          Nothing -> displayText "Ctrl-D exports. Esc cancels."
+          Just failure -> withAttr (attrName "error") (displayTextWrap ("ERROR: " <> failure))
+      ]
+
 saveResultView :: Presentation -> Int -> Int -> Widget Name
 saveResultView presentation width mainHeight =
   dialog width mainHeight " Save verified result " $
@@ -1112,6 +1138,7 @@ keyHelpLines presentation = case modelScreen model of
   ServiceHistoryScreen -> ["Up/Down select", "Home/End first or last run", "Enter opens the read-only detail of the selected run",
     "Right/Left focus details/list", "g reads the run list again", "Esc workflows", "E manager endpoints", "q detach", "? or Esc close this help"]
   ServiceHistoryRunScreen _ -> ["r retrieves the verified result of a succeeded run", "s saves the retrieved result to a new absolute path",
+    "e exports the verified result of a succeeded run under a new name",
     "g reads the run detail again", "Up/Down scroll", "Esc returns to the history", "E manager endpoints", "q detach", "? or Esc close this help"]
   BrowserScreen ->
     [ "Up/Down       select",
@@ -1150,6 +1177,7 @@ keyHelpLines presentation = case modelScreen model of
           <> ["i or b opens the steer editor for interrupt-now or next-boundary" | "i/b STEER" `elem` presentationServiceRunKeys presentation]
           <> ["1 to 9 redirect the occurrence of the redirect line to that offered target" | "1-9 REDIRECT" `elem` presentationServiceRunKeys presentation]
           <> ["s saves the verified result bytes to a new file" | presentationServiceSavable presentation]
+          <> ["e exports the verified result under a new name" | presentationServiceExportable presentation]
           <> ["Esc returns to the manager overview; the manager run continues", "q detaches; the manager run continues", "? or Esc close this help"]
   LiveScreen _ ->
     ["d full run details and error", "Tab focus pane", "Up/Down move or scroll", "j/k select occurrence", "G follow output"]
@@ -1290,6 +1318,7 @@ footerItems presentation width height
     | otherwise -> recoveryItems presentation <> ["c CANCEL RUN", "PgUp/PgDn scroll"]
   SteerLayer -> ["Esc CLOSE", "Ctrl-D SEND", "Enter newline"]
   SaveLayer -> ["Esc CANCEL", "Ctrl-D SAVE"] <> ["PgUp/PgDn ERROR" | Just _ <- [presentationSaveError presentation]]
+  ExportLayer -> ["Esc CANCEL", "Ctrl-D EXPORT"]
   CaptureFileLayer -> ["Esc CANCEL", "Ctrl-D CAPTURE FILE"]
   FilterLayer -> ["Enter APPLY", "Esc CANCEL"]
   ConfirmDetailsLayer -> confirmItems True
@@ -1317,7 +1346,7 @@ footerItems presentation width height
       ServiceOverviewScreen -> ["Enter OPEN", "g REFRESH", "Esc WORKFLOWS", browserPaneHint, "? KEYS", "q DETACH", "E ENDPOINTS"]
       ServiceDecisionsScreen -> ["Enter OPEN RUN", "g REFRESH", "Esc WORKFLOWS", browserPaneHint, "? KEYS", "q DETACH", "E ENDPOINTS"]
       ServiceHistoryScreen -> ["Enter OPEN RUN", "g REFRESH", "Home/End", "Esc WORKFLOWS", browserPaneHint, "? KEYS", "q DETACH", "E ENDPOINTS"]
-      ServiceHistoryRunScreen _ -> ["r RETRIEVE RESULT"] <> saveItem <> ["g REFRESH", "Esc HISTORY", "? KEYS", "q DETACH", "E ENDPOINTS"]
+      ServiceHistoryRunScreen _ -> ["r RETRIEVE RESULT"] <> saveItem <> exportItem <> ["g REFRESH", "Esc HISTORY", "? KEYS", "q DETACH", "E ENDPOINTS"]
       ServiceRequestScreen request ->
         ["g REFRESH", "q DETACH"] <> [serviceBackLabel presentation | presentationServiceMutation presentation == Nothing]
           <> (if Manager.draftPhase request == "draft" && presentationServiceMutation presentation == Nothing
@@ -1352,7 +1381,7 @@ footerItems presentation width height
       LiveScreen _ | presentationService presentation, compact -> ["q DETACH", serviceBackLabel presentation] <> presentationServiceRunKeys presentation
                        <> ["Tab PANE", "d DETAILS", "? KEYS"] <> saveItem
                    | presentationService presentation -> ["q DETACH", serviceBackLabel presentation] <> presentationServiceRunKeys presentation
-                       <> saveItem <> ["g REFRESH", "d DETAILS", compactNavigation, "? KEYS"]
+                       <> saveItem <> exportItem <> ["g REFRESH", "d DETAILS", compactNavigation, "? KEYS"]
       LiveScreen _ | compact ->
         ["Esc " <> if presentationRunning presentation then "DETACH" else "RUNS", "Tab PANE", "d DETAILS", "? KEYS"]
           <> ["c CANCEL" | presentationRunning presentation]
@@ -1364,6 +1393,7 @@ footerItems presentation width height
           <> ["d DETAILS", compactNavigation, "? KEYS"]
       FailureScreen _ -> ["Esc BACK", "Up/Down SCROLL", "PgUp/PgDn", "Home/End", "? KEYS"]
     saveItem = ["s SAVE RESULT" | presentationServiceSavable presentation]
+    exportItem = ["e EXPORT" | presentationServiceExportable presentation]
     browserPaneHint = case presentationPaneFocus presentation of
       PrimaryPane -> "Right DETAILS"
       SecondaryPane -> "Left LIST"

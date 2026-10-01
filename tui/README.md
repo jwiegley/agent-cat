@@ -308,6 +308,43 @@ retrieved. At most eight runs are kept. A retrieval of a new run beyond that
 bound removes the run whose retrieval completed first, so the retained bytes
 stay within 512 MiB.
 
+`e` on the live monitor or on the run detail of a managed run opens the
+export name editor when the snapshot of the run publishes a verified result
+of a succeeded run (`Agentic.Tui.Service.exportSource`). For any other run,
+and for a legacy entry, `e` starts nothing and shows a numbered key outcome,
+for example `export did not start: the run did not succeed.` The editor takes
+one export name: 1 to 128 ASCII letters, digits, dots, underscores and
+hyphens that start with a letter or a digit (`exportNameValid`). `Esc`
+closes it and sends nothing. `Ctrl-D` starts the export
+(`Agentic.Tui.Service.Export`) through the command lane, as every mutation
+key does, and a name that is not valid keeps the editor open with its reason.
+The preparation of the export observes the first page of the export
+collection `/v1/runs/{id}/exports` through
+`Agentic.Manager.Client.observeResource` (`observeExports`), because no
+displayed view holds that page. The POST body is `{"name": NAME}`, and the
+strong entity tag of that page is `If-Match`. The export is sent once. A 412
+`stale-revision` refusal, which the manager gives when the collection
+changed after that observation, leaves the command lane idle with nothing to
+resend, and the export line of the run states `Export NAME: refused (412
+stale-revision); the export collection changed and nothing was sent again; e
+exports again`. A new `e` and `Ctrl-D` start a new export with a new
+idempotency key. After the 202 receipt, the frontend reads the export
+command receipt with `Agentic.Tui.Service.observeExport` in place of the
+composite read, on the timer and after each invalidation of the receipt,
+also when no request or run is selected. When the command records the
+effect `exported`, it reads `/v1/exports/export_{commandId}`. That receipt
+must name the command, the run and the name and have the state `published`.
+`Agentic.Manager.Client.downloadVerified` then downloads the export through
+its `download` link and checks the size and the SHA-256 digest of the
+receipt. The command then completes, and the export lines of the run show
+the receipt and the verified download, for example `Export result.json:
+export_cmd_21 state published` and `Export download: verified 32 bytes,
+SHA-256 DIGEST`, with a bounded preview. The exported bytes are the code and
+value of the verified result as compact JSON followed by one LF, as [the
+protocol description](../doc/api/README.md) states, so they differ from the
+bytes of the source-result artifact. A refused or unresolved export receipt
+leaves the command unresolved, and nothing is sent again automatically.
+
 In the input editor of a request, `Ctrl-D` sends the editor text as a
 literal. `Ctrl-T` captures the exact editor text as raw UTF-8 bytes instead.
 `Ctrl-O` opens a path editor. There, `Ctrl-D` reads the named local file and
@@ -427,7 +464,13 @@ saves it with `s`, and the saved file holds mode 0600 and the exact bytes and
 SHA-256 digest of the artifact that the harness downloads. After a retrieval
 of the later run, the detail of the earlier run still shows its retained
 result. The detail of a legacy entry shows `observer` supervision, and `r`
-states that a legacy entry publishes no size and digest for its result.
+states that a legacy entry publishes no size and digest for its result. On
+the detail of the earlier run, `e` and `Ctrl-D` export its verified result
+once. The detail shows the export receipt with the state `published` and the
+verified size and SHA-256 digest. The export collection of the run holds that
+one receipt, and the harness download of the export and the published file
+hold the same bytes: the code and value of the verified result as compact
+JSON followed by one LF.
 
 The application state keeps the text drafts by identity
 (`Agentic.Tui.ServiceLane.Drafts`): the input editor text of each request and
@@ -669,7 +712,7 @@ the answer conversion against the `resources` section of
 `test/manager_client_vectors.json`, which [the protocol
 description](../doc/api/README.md#pages-and-live-delivery) describes.
 
-Service mode does not support lineage, export,
+Service mode does not support lineage,
 reconnection of the session after a manager restart or a credential
 revocation, or acceptance at 40x12 and 80x24. The
 [manual](../doc/agent-cat.texi) entry for `--service` states the complete key

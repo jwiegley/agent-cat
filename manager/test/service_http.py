@@ -529,6 +529,14 @@ TUI_DECISIONS = "tui-decisions"
 # 6. Enter on a legacy entry opens its detail representation, which shows
 # observer supervision, and r states that a legacy entry publishes no size
 # and digest for its result.
+# 7. On the detail of the earlier run, e opens the export name editor, and
+# Ctrl-D exports the verified result under a new name. The detail must show
+# the export receipt with the state published and the verified download with
+# the size and SHA-256 of the receipt. The export collection of the run must
+# hold that one receipt, the harness download of the export and the published
+# file must hold the same bytes, and those bytes must be the code and value
+# of the verified result as compact JSON followed by one LF, which is the
+# frozen export document.
 # Each step prints its own PASS line. It runs one manager lifetime.
 TUI_HISTORY = "tui-history"
 HISTORY_LEGACY_ENTRIES = 300
@@ -536,7 +544,7 @@ TUI_MODES = {OVERVIEW: (["profile_1", "profile_2"], ["observe", "submit"]), INPU
              TUI_CONTROLS: (["profile_1", "profile_steer", "profile_route"], ["observe", "submit", "control"]),
              TUI_REDIRECT: (["profile_live", "profile_live_effect", "profile_live_stale"], ["observe", "submit", "control"]),
              TUI_DECISIONS: (["profile_1", "profile_2"], ["observe", "submit", "control"]),
-             TUI_HISTORY: (["profile_1"], ["observe", "submit"])}
+             TUI_HISTORY: (["profile_1"], ["observe", "submit", "export"])}
 tui_mode = sys.argv[5] if len(sys.argv) == 6 and sys.argv[5] in TUI_MODES else None
 # The tui-controls and tui-redirect modes configure the control fixture
 # profiles.
@@ -793,7 +801,8 @@ class TuiModeFixture:
         configuration["profiles"] = [profile for profile in configuration["profiles"] if profile["id"] in profiles]
         assert [profile["id"] for profile in configuration["profiles"]] == profiles, ("unknown TUI mode profile", profiles)
         config.write_text(json.dumps(configuration))
-        for name, granted in (("tui", scopes), ("harness", ["observe", "submit", "control"])):
+        harness_scopes = ["observe", "submit", "control"] + (["export"] if "export" in scopes else [])
+        for name, granted in (("tui", scopes), ("harness", harness_scopes)):
             administration({"version": 1, "operation": "issue-credential", "label": "TUI mode " + name,
                             "scopes": granted, "profileIds": profiles,
                             "expiresAt": "2999-01-01T00:00:00Z", "outputFile": str(work / ("credential-" + name))})
@@ -5642,10 +5651,61 @@ def history_checks():
                 save(session, "legacy-detail")
                 print("PASS tui-history 6: the detail of legacy entry", legacy, "showed observer supervision, and r stated that a legacy entry",
                       "publishes no size and digest for its result", flush=True)
+
+                # 7. The earlier run is exported once, and its export download verifies.
+                back(session)
+                focus(session, order.index(earlier), earlier)
+                open_detail(session, earlier)
+                session.wait_screen("e EXPORT", timeout=10)
+                export_name = "tui-history-export.json"
+                session.send(b"e")
+                session.wait_screen("Export verified result", timeout=10)
+                session.send(export_name.encode())
+                session.send(b"\x04")
+                deadline = time.monotonic() + 30
+                while not all(squeeze(text) in squeeze(session.screen.text()) for text in ("Export " + export_name + ": export_", "state published",
+                                                                                           "Export download: verified ")):
+                    assert time.monotonic() < deadline, ("the TUI export outcome did not appear", session.screen.text())
+                    session.pump()
+                save(session, "export")
+                status, exports, raw = request("/v1/runs/" + earlier + "/exports", harness)
+                assert status == 200, ("history export collection", status, exports.get("code"))
+                validate("ExportPage", exports, raw)
+                (work / "tui-history-exports.json").write_bytes(raw)
+                assert len(exports["items"]) == 1, ("the export was not published once", exports["items"])
+                receipt = exports["items"][0]
+                assert receipt["name"] == export_name and receipt["state"] == "published" and receipt["runId"] == earlier, receipt
+                assert squeeze("Export " + export_name + ": " + receipt["id"] + " state published") in squeeze(session.screen.text()), (
+                    "the TUI does not show the published export receipt", receipt["id"])
+                assert squeeze("Export download: verified " + receipt["bytes"] + " bytes, SHA-256 " + receipt["sha256"]) in squeeze(
+                    session.screen.text()), ("the TUI does not show the verified size and SHA-256 of the export", receipt["bytes"], receipt["sha256"])
+                connection = http.client.HTTPSConnection("127.0.0.1", port, context=context, timeout=15)
+                try:
+                    connection.request("GET", receipt["download"], headers=harness | {"Accept": "application/octet-stream"})
+                    response = connection.getresponse()
+                    exported = response.read(int(receipt["bytes"]) + 1)
+                    assert response.status == 200 and response.getheader("Content-Type") == "application/octet-stream", (
+                        "history export download", response.status)
+                finally:
+                    connection.close()
+                (work / "tui-history-export.bin").write_bytes(exported)
+                published = work / "manager" / "runs" / "exports" / export_name
+                assert len(exported) == int(receipt["bytes"]) and hashlib.sha256(exported).hexdigest() == receipt["sha256"], (
+                    "the export download differs from its receipt")
+                assert published.read_bytes() == exported, "the export download differs from the published file"
+                result = frozen.parse_json(downloaded)["result"]
+                document = json.dumps(result, separators=(",", ":"), ensure_ascii=False).encode() + b"\n"
+                assert exported == document and frozen.parse_json(exported) == result, (
+                    "the exported bytes are not the code and value of the verified result", exported, document)
+                print("PASS tui-history 7: e on the detail of run", earlier, "exported its verified result once as", export_name,
+                      "; the TUI showed receipt", receipt["id"], "with the state published and the verified", receipt["bytes"],
+                      "bytes with SHA-256", receipt["sha256"], ", and the harness download and the published file hold the code and value",
+                      "of the verified result bytes as compact JSON followed by one LF", flush=True)
                 session.send(b"q")
                 assert session.wait_exit(20) == 0
                 session.assert_restored()
-            print("PASS tui-history: the History view of the actual service TUI listed every run across windows and saved a verified result", flush=True)
+            print("PASS tui-history: the History view of the actual service TUI listed every run across windows, saved a verified result",
+                  "and exported it once", flush=True)
         finally:
             if process.poll() is None:
                 process.terminate()

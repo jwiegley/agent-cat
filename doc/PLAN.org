@@ -8601,6 +8601,32 @@ A4 fess finding (low, loose-ends). OUTPUT_LIMIT in manager/test/service_http.py 
 :ORIGINAL_SIZE: 0
 :END:
 
+* TODO [#D] Resolve the non-blocking fess findings of subtask PC27    :review:
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-ki26
+:LABELS:   ["review","workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-01 Thu 06:00]
+:MODIFIED: [2026-10-01 Thu 06:00]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess audit fess/pc-PC27-r1.md (2026-10-01) on subtask PC27 (WM-034 export from a run).
+
+1. (medium) tui/test/ServiceTests.hs near line 468 (against tui/src/Agentic/Tui/App.hs near line 1244): the 412 model test exercises only the generic L.sendStep and an exportLines golden on an ExportRefused that the test builds itself. The App handleServiceSent branch that turns a 412 into the export line of the run is not exercised. Fix: extract the refusal-to-export-outcome mapping into a pure helper that App calls and test it, or drive a 412 through the App handler in a model test.
+2. (medium) tui/src/Agentic/Tui/App.hs near lines 1122 and 1677: while an export is awaiting or uncertain with a location, refreshServiceRequest reads only the export receipt and replaces every composite read and result retrieval. If that read is refused on each refresh (size or digest mismatch from downloadVerified, or a receipt that is not published after the exported effect), the command never settles, the selection is not read again, and no new mutation can start. Fix: after a refused export receipt read, keep the composite read running or settle the command as unresolved, with its reason on the export line.
+3. (low) tui/src/Agentic/Tui/App.hs near line 1699: the catch-all `_ -> put current` drops an ExportPublished whose command receipt fails receiptMatches, and each later refresh downloads the export again. Fix: show a mismatched published receipt as a refusal, or settle the command.
+4. (low) tui/src/Agentic/Tui/ServiceLane.hs near line 470: a 409 state-conflict for an export name that another export holds goes down the generic uncertain path and offers an exact resend, and the export line shows nothing. A command-level refusal settles only through the status line. Fix: show export refusals other than 412 on the export line, and handle a definite 409 in the lane.
+5. (low) tui/src/Agentic/Tui/Service.hs near line 400: the collection ETag is read inside the preparation step, immediately before the POST, not when the editor opens. The If-Match therefore carries no state that the operator saw, and a 412 is practically unreachable end to end. Fix: the operator decides whether the ETag must be read at editor open and kept with the editor state.
+6. (low) manager/test/service_http.py near line 5698: the requirement said the exported bytes equal the result bytes. Under the frozen contract (doc/api/README.md near lines 86-88, manager/ARTIFACTS.md near line 34) an export is the compact code-and-value document plus LF, and the fixture checks against that document built from the verified result bytes. Fix: none in code; the reinterpretation is recorded here and in the WM-034 comment.
+7. (low) doc/workflow-manager-handoff.md near line 1035: the handoff still lists "no history, lineage or export" and also denies cancel and steer. Fix: refresh that current-state paragraph when it is next touched.
+
+Disclosed limitations of the implementer: e is offered only when the snapshot shows a verified result; the TUI keeps the outcome of the latest export only and does not list the existing exports of a run; tui/ci/tui.sh, ALLBUILD and the N=1 journey were not run.
+
 * DONE [#D] Account for decreasing TUI notice key numbers in A4
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -19108,7 +19134,7 @@ to an unapproved local launch.
 :LABELS:   ["p7","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-01 Thu 05:41]
+:MODIFIED: [2026-10-01 Thu 06:00]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-034
 :SOURCE_REPO: agent-cat
@@ -19306,6 +19332,13 @@ Local-mode behavior remains intact without a duplicated service runtime model.
     "author": "johnw",
     "text": "Subtask PC26 (2026-10-01): the service TUI has a History view (H on the service browser, not Tab) over every window of the /v1/runs page set, with runtime status, supervision and verification, legacy entries marked. Enter opens a read-only run detail (snapshot for a managed run, /v1/runs/{id} for a legacy entry). r retrieves the verified result of a succeeded managed run through Service.retrieveResult and Client.downloadVerified, and s saves it with saveExact. Retrieved results are kept by run id in Lane.Retrievals (bound 8) with the PC8 retry rule per run. New service_http.py mode tui-history: 300 legacy entries plus two managed runs, row order across windows, the earlier result retrieved, verified and saved with equal bytes, size, SHA-256 and mode 0600. Evidence: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/PC/PC26 (Werror build, tui-model-test N8, tui-history N8, Phase A journey N8, make -C doc check, all exit 0). Fess: fess/pc-PC26-r1.md, not blocking; findings filed as acat-w92x. Open: the result of a legacy entry cannot be retrieved (no size or digest in the frozen run representation), which awaits an operator decision.",
     "created_at": "2026-10-01T12:41:13Z"
+  },
+  {
+    "id": 502,
+    "issue_id": "acat-wm-034-3vqz",
+    "author": "johnw",
+    "text": "Subtask PC27 (2026-10-01): the service TUI exports a run's verified result. e on the live monitor or on the history detail of a managed run opens a name editor; Ctrl-D sends one Export mutation to POST /v1/runs/{id}/exports with the strong ETag of the first export collection page (read through Client.observeResource in the preparation step, immediately before the POST) as If-Match. The TUI follows the command receipt to /v1/exports/export_{commandId}, requires state published with matching command, run and name, and verifies the download through Client.downloadVerified against the receipt size and SHA-256. A 412 stale collection ETag is shown on the export line and nothing is sent again (model test). tui-history step 7 exports a completed run once and checks one published receipt, the TUI receipt and digest lines, and that the exported bytes equal the frozen export document (compact code and value plus LF) built from the verified result bytes. Under the frozen contract (doc/api/README.md, manager/ARTIFACTS.md) the export bytes are that document, not the source-result artifact bytes; this reinterprets the requirement wording. Evidence: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/PC/PC27 (Werror build, tui-model-test N8, tui-history N8, Phase A journey N8, make -C doc check, all exit 0). Fess: fess/pc-PC27-r1.md, not blocking; findings filed as acat-ki26.\n",
+    "created_at": "2026-10-01T13:00:41Z"
   }
 ]
 #+end_src

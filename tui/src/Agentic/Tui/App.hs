@@ -148,6 +148,8 @@ data ServiceEvent
   | ServiceHistoryDetailReady !Int !Bool !Text !(Lane.CallOutcome Service.HistoryDetail)
     -- | The retrieval of the verified result of this run.
   | ServiceResultReady !Int !Text !(Lane.CallOutcome (Maybe Service.VerifiedResult))
+    -- | The read of the progress of the accepted export in the command lane.
+  | ServiceExportReady !Int !(Lane.CallOutcome Service.ExportProgress)
 
 -- | What started an overview read: the bootstrap of the session, which
 -- shows the profiles afterwards, the explicit g key, or live delivery.
@@ -214,6 +216,11 @@ data AppState = AppState
     stateCaptureFile :: !Bool,
     stateCaptureEditor :: !(Edit.Editor Text Name),
     stateCaptureError :: !(Maybe Text),
+    -- | The profile and run of the open export name editor, its name editor,
+    -- and the refusal of its latest Ctrl-D.
+    stateExportRun :: !(Maybe (Text, Text)),
+    stateExportEditor :: !(Edit.Editor Text Name),
+    stateExportError :: !(Maybe Text),
     stateNow :: !UTCTime,
     stateRunStartedAt :: !(Maybe UTCTime),
     stateRunPersona :: !(Maybe Text),
@@ -304,6 +311,9 @@ data AppState = AppState
     -- choice that completed, as 'Service.controlOutcome' reads it from the
     -- receipt of the command.
     stateServiceControlOutcome :: !(Maybe (Text, Text)),
+    -- | The run and the outcome of its latest export: a definite refusal of
+    -- the send, or the published export receipt with its verified bytes.
+    stateServiceExport :: !(Maybe (Text, Service.ExportOutcome)),
     -- | The sequence number of the latest approval-key press on the review.
     -- It counts approval-key presses only, not every key event.
     stateServiceKeySerial :: !Int,
@@ -398,6 +408,9 @@ runAppWith backend = mask $ \restore -> do
             stateCaptureFile = False,
             stateCaptureEditor = blankEditor,
             stateCaptureError = Nothing,
+            stateExportRun = Nothing,
+            stateExportEditor = blankEditor,
+            stateExportError = Nothing,
             stateNow = now,
             stateRunStartedAt = Nothing,
             stateRunPersona = Nothing,
@@ -449,6 +462,7 @@ runAppWith backend = mask $ \restore -> do
             stateServiceApprovalStatus = Nothing,
             stateServiceLastReceipt = Nothing,
             stateServiceControlOutcome = Nothing,
+            stateServiceExport = Nothing,
             stateServiceKeySerial = 0,
             stateServiceApprovalPress = Nothing,
             stateServiceNotice = Nothing,
@@ -848,6 +862,10 @@ serviceVerifiedResult state = do
     _ -> runIdText . Service.runIdentity <$> serviceRun state
   (,) run <$> Lane.retrievedResult run (stateServiceResults state)
 
+-- | The export line of this run: the outcome of its latest export.
+serviceExportLines :: AppState -> Text -> [Text]
+serviceExportLines state run = [line | Just (ident, outcome) <- [stateServiceExport state], ident == run, line <- Service.exportLines outcome]
+
 -- | Whether s opens the save dialog: the live monitor shows no decision head
 -- and no run details, or the run detail shows its run, and the verified
 -- result bytes of that run are retained.
@@ -1004,7 +1022,7 @@ serviceCompositeResources :: AppState -> [Text]
 serviceCompositeResources state = case serviceSelection state of
   Just selection -> Service.compositeResources selection (Lane.installedRead (stateServiceObservation state))
     (Manager.referenceURI . snd <$> servicePendingReceipt state)
-  Nothing -> []
+  Nothing -> [Manager.referenceURI location | Just (_, location) <- [servicePendingReceipt state]]
 
 -- | Apply invalidations of these reads to the refresh coordinator of the
 -- session and to the waiting fetches.
@@ -1097,7 +1115,13 @@ refreshServiceRequest client cause = do
         control <- ExceptT (Service.observeControl client runId)
         decision <- traverse (ExceptT . Service.observeDecision client profile runId) (Service.controlHead (snd control))
         pure (Service.RunRead snapshot control decision)
-  case serviceSelection state of
+  case (servicePendingReceipt state, serviceSelection state) of
+    -- The receipt of an accepted export is read with 'Service.observeExport'
+    -- in place of the composite read, with or without a selection, until the
+    -- export is published and its download verifies.
+    (Just (mutation@Service.Export {}, location), _) | not (serviceSending state) ->
+      startServiceRead Lane.SingleResourceRead "reading the export receipt" $ \ticket ->
+        ServiceExportReady ticket <$> Lane.serviceCall (Service.observeExport client mutation location)
     -- A succeeded run with a verified or referenced result is retrieved
     -- through the same single-flight read lane, in place of the composite
     -- read, when 'Lane.retrievalDue' holds: once per run until its verified
@@ -1105,14 +1129,14 @@ refreshServiceRequest client cause = do
     -- retries only after the next installed composite read, and g retries at
     -- once. 'Service.retrieveResult' downloads only for a snapshot that
     -- publishes the verified state.
-    Just _ | not (serviceSending state), Just run <- serviceRun state,
+    (_, Just _) | not (serviceSending state), Just run <- serviceRun state,
       Service.resultWanted run || Service.resultReferenced run,
       Lane.retrievalDue cause (runIdText (Service.runIdentity run)) (stateServiceResults state) ->
         startServiceRead Lane.PageSetRead "retrieving the verified result" $ \ticket ->
           ServiceResultReady ticket (runIdText (Service.runIdentity run)) <$> Lane.serviceCall (Service.retrieveResult client run)
     -- The run components are read only for the run that the installed
     -- request names, so the read kind is known before the read starts.
-    Just (Service.RequestSelection ident run) | Just workflow <- stateServiceWorkflow state, not (serviceSending state) ->
+    (_, Just (Service.RequestSelection ident run)) | Just workflow <- stateServiceWorkflow state, not (serviceSending state) ->
       startServiceRead (maybe Lane.SingleResourceRead (const Lane.PageSetRead) run)
         (maybe "reading manager request" (const "reading manager request and run") run) $ \ticket ->
         ServiceRequestReady ticket <$> Lane.serviceCall (runExceptT $ do
@@ -1124,7 +1148,7 @@ refreshServiceRequest client cause = do
           pure (Service.RequestRead (Just (observed,request)) preparation receipt components))
     -- A run opened by its identifier reads its snapshot, its controls and
     -- the decision at their head, with no request.
-    Just (Service.RunSelection run profile) | not (serviceSending state) ->
+    (_, Just (Service.RunSelection run profile)) | not (serviceSending state) ->
       startServiceRead Lane.PageSetRead "reading manager run" $ \ticket ->
         ServiceRequestReady ticket <$> Lane.serviceCall (runExceptT $ do
           receipt <- readReceipt
@@ -1208,7 +1232,8 @@ handleServiceSent client ticket result = do
     -- A 412 refusal proves that the manager holds no command under the key,
     -- so the lane is idle and nothing is sent again. A refused answer keeps
     -- its draft, the line @Control:@ states that the decision changed, and
-    -- the selection is read again.
+    -- the selection is read again. A refused export shows its refusal on
+    -- the export line of its run.
     (Lane.SendRefused attempt failure,lane) -> do
       let operation = Service.mutationOperation (Lane.attemptMutation attempt)
           refusal = operation <> " refused: " <> Lane.refusalCode failure
@@ -1216,7 +1241,10 @@ handleServiceSent client ticket result = do
             Service.Answer decision _ ->
               let text = refusal <> "; " <> Lane.draftKeptText in (text, Just (Service.decisionRun decision, text))
             _ -> (refusal <> "; the resource changed and nothing was sent again", stateServiceControlOutcome state)
-      put state {stateServiceLane = lane, stateServiceControlOutcome = outcome,
+          exported = case Lane.attemptMutation attempt of
+            Service.Export _ run name -> Just (run, Service.ExportRefused name (Lane.refusalCode failure))
+            _ -> stateServiceExport state
+      put state {stateServiceLane = lane, stateServiceControlOutcome = outcome, stateServiceExport = exported,
         stateModel = (stateModel state) {modelStatus = label}}
       liftIO (writeIORef (stateServiceUncertainExit state) (isJust (stateServiceApproval state)))
       refreshServiceRequest client Lane.AutomaticRefresh
@@ -1478,6 +1506,7 @@ serviceEventTicket serviceEvent = case serviceEvent of
   ServiceHistoryReady ticket _ _ -> ticket
   ServiceHistoryDetailReady ticket _ _ _ -> ticket
   ServiceResultReady ticket _ _ -> ticket
+  ServiceExportReady ticket _ -> ticket
 
 -- | The refresh coordinator of the session.
 serviceRefresh :: AppState -> Manager.Refresh Lane.FetchKey
@@ -1639,6 +1668,35 @@ handleServiceResultCore client serviceEvent = do
         (Lane.ReadFaulted,lane) -> faultService state lane
         (Lane.ReadRefused problem,lane) -> retrieved lane (Lane.retrievalStep run (Left problem) (stateServiceResults state))
         (Lane.ReadDelivered value,lane) -> retrieved lane (Lane.retrievalStep run (Right value) (stateServiceResults state))
+    -- The progress of the accepted export. A pending receipt is the latest
+    -- receipt, and a refused or unresolved receipt leaves the export
+    -- unresolved without a resend. A published export whose download
+    -- verified completes the command and shows its receipt and its bytes on
+    -- the export line of its run. A declared refusal of the read keeps the
+    -- command, and the next refresh reads its receipt again.
+    ServiceExportReady ticket result -> case Lane.readStep ticket result (stateServiceLane state) of
+      (Lane.ReadStale,_) -> pure ()
+      (Lane.ReadFaulted,lane) -> faultService state lane
+      (Lane.ReadRefused problem,lane) -> put state {stateServiceLane = lane,
+        stateModel = (stateModel state) {modelStatus = "export receipt not read: " <> Lane.refusalCode problem <> "; the next refresh reads it again"}}
+      (Lane.ReadDelivered progress,lane) -> do
+        let current = state {stateServiceLane = lane}
+            pending = case serviceMutation current of
+              Lane.MutationAwaiting mutation command location -> Just (mutation, command, Just location)
+              Lane.MutationUncertain (Lane.Attempt mutation command location) _ -> Just (mutation, command, location)
+              _ -> Nothing
+        case (pending, progress) of
+          (Just (mutation@(Service.Export _ run _), _, _), Service.ExportPublished receipt export bytes)
+            | Service.receiptMatches mutation receipt -> do
+                put (idleService current) {stateServiceLastReceipt = Just receipt,
+                  stateServiceExport = Just (run, Service.ExportVerified export bytes),
+                  stateModel = (stateModel current) {modelStatus = "export published; its download verified"}}
+                liftIO (writeIORef (stateServiceUncertainExit current) (isJust (stateServiceApproval current)))
+          (Just (mutation@Service.Export {}, command, location), Service.ExportPending receipt)
+            | Just reason <- Service.receiptSettlement mutation (Just (mutation, Right receipt)) ->
+                settleService current {stateServiceLastReceipt = Just receipt} (Lane.Attempt mutation command location) reason
+            | otherwise -> put current {stateServiceLastReceipt = Just receipt}
+          _ -> put current
 
 handleServiceEventCore :: Manager.Client -> BrickEvent Name AppEvent -> EventM Name AppState ()
 handleServiceEventCore client event = do
@@ -1705,6 +1763,8 @@ handleServiceEventCore client event = do
     VtyEvent key | activeLayer state == SaveLayer -> handleSaveResultKey event key
     -- The path editor of a file capture takes the text entry keys.
     VtyEvent key | activeLayer state == CaptureFileLayer -> handleCaptureFileKey client event key
+    -- The export name editor takes the text entry keys.
+    VtyEvent key | activeLayer state == ExportLayer -> handleServiceExportKey client event key
     VtyEvent key | InputScreen index <- modelScreen (stateModel state) -> case key of
       -- Ctrl-T captures the exact editor text as raw UTF-8 bytes instead of
       -- sending it as a literal.
@@ -1929,6 +1989,11 @@ handleServiceEventCore client event = do
                 Left failure -> serviceKeyOutcome False ("redirect did not start: " <> failure <> ".")
                 Right (mutation,observed) -> beginServiceMutation client mutation (Just observed)
           _ -> serviceKeyOutcome False "redirect did not start: the run controls are not observed.")
+      -- e on the live monitor or on a run detail opens the export name
+      -- editor for a run whose snapshot publishes a verified result. Only
+      -- Ctrl-D in the editor starts the export.
+      (LiveScreen _, Vty.KChar 'e', []) -> Just ("export", openServiceExport)
+      (ServiceHistoryRunScreen _, Vty.KChar 'e', []) -> Just ("export", openServiceExport)
       _ -> Nothing
     -- Start a control of the displayed run from the installed composite
     -- read, or show why it did not start.
@@ -2155,6 +2220,7 @@ clearServiceSession state =
       stateServiceApprovalStatus = Nothing,
       stateServiceLastReceipt = Nothing,
       stateServiceControlOutcome = Nothing,
+      stateServiceExport = Nothing,
       stateServiceApprovalPress = Nothing,
       stateServiceNotice = Nothing,
       stateServiceKeyOutcome = Nothing,
@@ -2169,6 +2235,9 @@ clearServiceSession state =
       stateCaptureFile = False,
       stateCaptureEditor = blankEditor,
       stateCaptureError = Nothing,
+      stateExportRun = Nothing,
+      stateExportEditor = blankEditor,
+      stateExportError = Nothing,
       stateRunView = emptyRunView,
       statePaneFocus = PrimaryPane,
       stateOutputFollow = True,
@@ -2266,6 +2335,7 @@ toPresentation state =
                 (Just code, Nothing) -> "Run detail: refused (" <> code <> "); no complete detail is installed"]
             <> maybe [] (\shown -> Service.historyDetailLines shown (Lane.retrievalShown run (stateServiceResults state))) detail
             <> [line | Just (ident, line) <- [stateServiceSaved state], ident == run]
+            <> serviceExportLines state run
         _ -> [],
       presentationServiceObservation = let installed = stateServiceObservation state in
         Service.observationLines (Lane.refreshPaused (stateNow state) (stateServiceLane state) (stateServiceKeyOutcome state))
@@ -2289,7 +2359,11 @@ toPresentation state =
       presentationServiceResultLines = case serviceRun state of
         Just run -> Service.resultLines run (Lane.retrievalShown (runIdText (Service.runIdentity run)) (stateServiceResults state))
           <> [line | Just (ident, line) <- [stateServiceSaved state], ident == runIdText (Service.runIdentity run)]
+          <> serviceExportLines state (runIdText (Service.runIdentity run))
         Nothing -> [],
+      presentationServiceExportable = either (const False) (const True) (serviceExportSource state),
+      presentationExportError = stateExportError state,
+      presentationExportRun = snd <$> stateExportRun state,
       presentationServiceSavable = serviceSavable state,
       presentationServiceRequestLines = maybe [] (serviceRequestLines . snd) (serviceRequest state),
       presentationServiceApprovalOffered = case modelScreen (stateModel state) of
@@ -2333,6 +2407,7 @@ currentEditor state = case activeLayer state of
   PersonLayer -> statePersonEditor state
   SteerLayer -> stateControlEditor state
   SaveLayer -> stateSaveEditor state
+  ExportLayer -> stateExportEditor state
   CaptureFileLayer -> stateCaptureEditor state
   FilterLayer -> stateFilterEditor state
   _ -> stateEditor state
@@ -2350,6 +2425,7 @@ activeLayer state
   | Just decision <- listToMaybe (stateMandatoryDecisions state), mandatoryKind decision == MandatoryRecovery = RecoveryLayer
   | isJust (stateSteerTiming state) = SteerLayer
   | stateSaveResult state = SaveLayer
+  | isJust (stateExportRun state) = ExportLayer
   | stateCaptureFile state = CaptureFileLayer
   | stateFilterEditing state = FilterLayer
   | ConfirmScreen _ <- screen, stateConfirmDetails state = ConfirmDetailsLayer
@@ -2583,8 +2659,10 @@ handleKey original key = do
     RecoveryLayer -> maybe (pure ()) (\decision -> handleRecoveryKey (mandatoryOccurrence decision) key) (listToMaybe (stateMandatoryDecisions state))
     SteerLayer -> handleSteerKey original key
     SaveLayer -> handleSaveResultKey original key
-    -- Only service mode opens the path editor of a file capture.
+    -- Only service mode opens the path editor of a file capture and the
+    -- export name editor.
     CaptureFileLayer -> pure ()
+    ExportLayer -> pure ()
     FilterLayer -> handleFilterKey original key
     ConfirmDetailsLayer -> handleConfirmDetailsKey key
     ConfirmLayer -> handleConfirmKey key
@@ -2892,6 +2970,58 @@ handleCaptureFileKey client original key = case key of
     if BS.length (TE.encodeUtf8 (editorContents editor)) <= 4096
       then put state {stateCaptureEditor = editor, stateCaptureError = Nothing}
       else put state {stateCaptureError = Just "the file path exceeds 4096 UTF-8 bytes"}
+
+-- | The profile and the run whose verified result @e@ exports from the
+-- shown screen, or the reason why it exports nothing: the installed run of
+-- the live monitor, or the managed run of the installed run detail with the
+-- profile that the installed run list names. A legacy entry has no export
+-- authority.
+serviceExportSource :: AppState -> Either Text (Text, Service.RunObservation)
+serviceExportSource state = case modelScreen (stateModel state) of
+  LiveScreen _ -> case (serviceRun state, serviceProfile state) of
+    (Just run, Just profile) -> (profile, run) <$ Service.exportSource run
+    _ -> Left "the run is not observed"
+  ServiceHistoryRunScreen shown ->
+    case (Lane.installedRead (stateServiceHistoryDetail state), find ((== shown) . Service.runItemId) (fromMaybe [] (Lane.installedRead (stateServiceHistory state)))) of
+      (Just (Service.ManagedDetail run), Just item) | runIdText (Service.runIdentity run) == shown ->
+        (Service.runItemProfile item, run) <$ Service.exportSource run
+      (Just (Service.LegacyDetail item), _) | Service.runItemId item == shown -> Left "a legacy entry has no export authority"
+      _ -> Left "the run detail is not observed"
+  _ -> Left "no run is shown"
+
+-- | Open the export name editor for the run that the screen shows, or show
+-- why @e@ exports nothing as a numbered key outcome.
+openServiceExport :: EventM Name AppState ()
+openServiceExport = do
+  state <- get
+  case serviceExportSource state of
+    Left reason -> serviceKeyOutcome False ("export did not start: " <> reason <> ".")
+    Right (profile, run) -> put state {stateExportRun = Just (profile, runIdText (Service.runIdentity run)), stateExportError = Nothing,
+      stateExportEditor = Edit.editorText InputEditor (Just 1) "", stateModel = (stateModel state) {modelStatus = "export: type a new export name"}}
+
+-- | The export name editor. Ctrl-D starts the export of the verified result
+-- of its run under the typed name ('Service.exportMutation') through the
+-- command lane. A refused name, or a screen that no longer shows that run,
+-- keeps the editor open with its reason and sends nothing. Esc closes the
+-- editor and sends nothing.
+handleServiceExportKey :: Manager.Client -> BrickEvent Name AppEvent -> Vty.Event -> EventM Name AppState ()
+handleServiceExportKey client original key = case key of
+  Vty.EvKey Vty.KEsc [] -> modify (\state -> state {stateExportRun = Nothing, stateExportError = Nothing})
+  Vty.EvKey (Vty.KChar 'd') [Vty.MCtrl] -> serviceMutationKey "export" $ do
+    state <- get
+    case serviceExportSource state of
+      Right (profile, run) | stateExportRun state == Just (profile, runIdText (Service.runIdentity run)) ->
+        case Service.exportMutation profile run (editorContents (stateExportEditor state)) of
+          Left reason -> put state {stateExportError = Just reason}
+          Right mutation -> do
+            put state {stateExportRun = Nothing, stateExportError = Nothing}
+            beginServiceMutation client mutation Nothing
+      Right _ -> put state {stateExportError = Just "the screen no longer shows the run of this export"}
+      Left reason -> put state {stateExportError = Just reason}
+  _ -> do
+    state <- get
+    (editor, ()) <- nestEventM (stateExportEditor state) (Edit.handleEditorEvent original)
+    put state {stateExportEditor = editor, stateExportError = Nothing}
 
 openSaveResult :: EventM Name AppState ()
 openSaveResult = do

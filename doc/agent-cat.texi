@@ -3469,6 +3469,29 @@ the result of one run stays retained while another run is retrieved.  At most
 eight runs are kept, and a retrieval of a new run beyond that bound removes
 the run whose retrieval completed first.
 
+@kbd{e} on the live monitor or on the run detail of a managed run opens the
+export name editor when the snapshot of the run publishes a verified result
+of a succeeded run.  For any other run, and for a legacy entry, @kbd{e}
+starts nothing and shows a numbered key outcome, for example
+@samp{export did not start: the run did not succeed.}  The editor takes one
+export name of 1 to 128 ASCII letters, digits, dots, underscores, and hyphens
+that starts with a letter or a digit.  @key{ESC} closes it and sends nothing.
+@kbd{C-d} sends the export once through the command lane.  The frontend first
+reads the first page of @code{/v1/runs/@var{id}/exports} and sends its
+strong entity tag as @code{If-Match} with the body
+@code{@{"name": @var{name}@}}.  A 412 @code{stale-revision} refusal, which the
+manager gives when the export collection changed after that read, leaves
+nothing to resend, and the export line of the run states
+@samp{Export @var{name}: refused (412 stale-revision); the export collection
+changed and nothing was sent again; e exports again}.  After the effect
+@code{exported} of the command, the frontend reads the export receipt.  It
+must have the state @code{published}, and the frontend downloads the export
+and checks its size and SHA-256 digest against that receipt.  The export
+lines of the run then show the receipt, the verified size and digest, and a
+bounded preview.  The exported bytes are the code and value of the verified
+result as compact JSON followed by one LF, so they differ from the bytes of
+the source-result artifact.
+
 The frontend keeps the text drafts by identity: the input text of each request
 and input, and the answer text of each decision.  A draft survives a refresh, a
 resize, a change of the selection, and leaving and reopening a run.  A
@@ -3790,7 +3813,7 @@ A declared client failure keeps its declared meaning, and the internal-fault
 rules above apply to every step of the journey.
 
 Service mode does not support these features.  The
-frontend offers no lineage or export.  Except
+frontend offers no lineage.  Except
 for its event stream, it does not reconnect after a manager restart or a
 credential revocation.  It has no accepted layout at 40
 columns by 12 rows or at 80 columns by 24 rows.  Service mode is not an
