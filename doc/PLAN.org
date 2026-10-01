@@ -4258,7 +4258,7 @@ Also deferred from the implementer limitations: the manager does not offer or ad
 :LABELS:   ["actor-flow","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-26 Sat 23:41]
-:MODIFIED: [2026-09-30 Wed 17:14]
+:MODIFIED: [2026-09-30 Wed 17:24]
 :CREATED_BY: johnw
 :SOURCE_REPO: .
 :ORIGINAL_SIZE: 0
@@ -4322,6 +4322,13 @@ Actor-flow increment 3, live re-route and asks answered by people (6 to 9 engine
     "author": "johnw",
     "text": "Subtask C21 (Phase B part 2) implements the second part of design record section 6.3: asks answered by people through a reviewed policy field. A repeatable target option --person-answer model:NAME|tool:NAME names plan addressees whose asks a person answers. targetPolicy adds personAnswers only when the set is non-empty, so the frontend preparation policy, the review and exact approval cover it, and policies without it keep their bytes and digest. The manager preparation validator accepts personAnswers in policyKeys, and doc/api/openapi.yaml adds it as an optional PublicPolicy field (additive). run, machine, lineage and frontend preparation refuse the option outside local-control person answering. The runtime rewrites a named ask in execIn, before reserveQuestion and runOccurrence, to AddrPerson \"model:NAME\" and removes its pin, so it takes the existing person path (OccurrencePersonAnswerPending, waitForRuntimePersonAnswer, answerFromJson) with no engine start or tool call, and the run log names the controlling principal as sender. Runs without the field are unchanged. Checks passed: Werror build of agentic-run, routing-fixed-point-probe and runtime-contract-test with -ftui-tests, person_control_probe at N8 (new cases), control_probe at N8, flow_probe, progress_probe, make -C doc check, doc/check-manual-cli.py and the Phase A journey at N8. Evidence: B2/C21/impl-r1 in the private resume-20260923 evidence directory. Fess: not blocking, findings in acat-c21-person-answers-fess-findings-nmvb. With C18 to C21 the increment 3 functionality is in place. This issue stays open for the closeout review.",
     "created_at": "2026-10-01T00:14:40Z"
+  },
+  {
+    "id": 433,
+    "issue_id": "acat-c18n",
+    "author": "johnw",
+    "text": "C22 (increment 3): person-answered asks through the service path. Mode person-answers of manager/test/service_http.py passed at N8, test/person_control_probe.py passed at -N8, make -C doc check passed, Phase A journey passed at N8. No production code changed. Follow-up: acat-c22-person-answers-fess-findings-nd9d. Evidence: B2/C22 in the private evidence directory.",
+    "created_at": "2026-10-01T00:24:25Z"
   }
 ]
 #+end_src
@@ -4382,7 +4389,7 @@ Also deferred from the implementer limitations: the manager never offers a live 
 :LABELS:   ["workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-30 Wed 17:14]
-:MODIFIED: [2026-09-30 Wed 17:14]
+:MODIFIED: [2026-09-30 Wed 17:24]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -4398,6 +4405,40 @@ Non-blocking findings of the fess audit of Phase B part 2 subtask C21 (increment
 5. (low) test/person_control_probe.py (model-answer-run case). The assertion on question["to"]["to"] checks only the shape. Fix: assert the exact recipient value.
 
 Also deferred from the implementer limitations: no manager service run with a profile carrying --person-answer was made, and manager/ci/approval.sh routedPolicyProjectionChecks were not extended (excluded by the speed direction). No failing-first run was recorded for the new probe cases.
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 432,
+    "issue_id": "acat-c21-person-answers-fess-findings-nmvb",
+    "author": "johnw",
+    "text": "C22: the deferred item 'no manager service run with a profile carrying --person-answer' is resolved. The new person-answers mode of manager/test/service_http.py runs a profile with --person-answer model:fixed-point through the running manager at N8: the review shows personAnswers, the ask becomes a question decision, a typed answer through POST /v1/decisions/{id} completes it without a session/prompt, and agentic-run flow joins the answer to the credential's command. Finding 1 (tool:NAME) stays open. Evidence: B2/C22 in the private evidence directory.",
+    "created_at": "2026-10-01T00:24:25Z"
+  }
+]
+#+end_src
+
+* TODO [#D] Resolve C22 fess findings in person-answered service asks
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-c22-person-answers-fess-findings-nd9d
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-30 Wed 17:24]
+:MODIFIED: [2026-09-30 Wed 17:24]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of the fess audit of Phase B part 2 subtask C22 (increment 3, person-answered asks through the service path, mode person-answers of manager/test/service_http.py). Report: fess/b2-C22-r1.md in the private evidence directory.
+
+1. (low) manager/test/service_http.py (about line 4621). Case 3 reads the adapter record with a silent fallback to an empty list when the file does not exist, so the no-session/prompt check would pass vacuously if the launcher never ran. Case 4 reads the file without a guard, so a full run cannot pass falsely. Fix: in case 3, assert that the record file exists and that its first line is "launch" before the session/prompt check.
+2. (low) runtime. The Runtime starts the ACP adapter (initialize, session/new, session/cancel) at run start even when every ask of the run is answered by a person. The mode therefore asserts only that no turn happens. Fix: decide whether the adapter should start lazily for fully person-answered runs. This is a runtime design change.
+3. (low) manager/CONTROLS.md (about line 171). The section "Asks answered by people" states that no attempt, engine turn or tool call occurs for the ask, but only the model:NAME form runs through the manager. The tool:NAME form has no manager-level test. This overlaps finding 1 of acat-c21-person-answers-fess-findings-nmvb. Fix: add a tool:NAME case to the person-answers mode, or close this item together with that one.
 
 * TODO [#D] Resolve C4 fess findings on the pruned flow reader
 :PROPERTIES:

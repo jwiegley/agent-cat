@@ -199,13 +199,30 @@ routing_mode = len(sys.argv) == 6 and sys.argv[5] == ROUTING
 # prints its own PASS line. It runs one manager lifetime.
 LIVE = "live-redirect"
 live_mode = len(sys.argv) == 6 and sys.argv[5] == LIVE
+# The person-answers mode checks the asks that a reviewed policy field names
+# through the running protected manager. Only this mode configures profile_1
+# with the stub adapter and --person-answer model:fixed-point, so that a
+# person answers the model ask of the scripted prompt-source workflow. The
+# review shows personAnswers in the target policy, the named ask is a pending
+# question decision after the approval, and a typed answer through POST
+# /v1/decisions/{id} completes it. The adapter launcher records each request
+# that it relays, and no attempt, engine start or turn occurs: the adapter
+# receives no session/prompt. The run succeeds with the answer as its result.
+# A second profile, profile_plain, has the same launcher without
+# --person-answer. Its review has no personAnswers, and its run relays a
+# session/prompt, so that the record can show a turn. After the manager
+# exits, the flow verb over the manager log and the run store joins the
+# run-log answer to the answer command of the credential. Each numbered case
+# prints its own PASS line. It runs one manager lifetime.
+PERSON = "person-answers"
+person_mode = len(sys.argv) == 6 and sys.argv[5] == PERSON
 # The modes that configure the control fixture profiles in place of the
 # scripted profile: profile_1 runs the recovery-offering retry adapter and
 # profile_steer runs the steerable adapter. The controls-routing mode also
 # configures profile_route, and the live-redirect mode also configures
 # profile_live and profile_live_effect. Other modes keep their profiles.
 control_profiles = controls_mode or routing_mode or live_mode
-assert len(sys.argv) == 5 or mixed or boundary or pages_mode or events_mode or captures_mode or discard_mode or exports_mode or lineage_mode or control_profiles
+assert len(sys.argv) == 5 or mixed or boundary or pages_mode or events_mode or captures_mode or discard_mode or exports_mode or lineage_mode or control_profiles or person_mode
 assert not tui_approval or os.environ.get("TUI_CHECK")
 assert native in ("1", "8")
 print(f"work={work}", flush=True)
@@ -323,6 +340,43 @@ if control_profiles:
                 dict(scripted, id=profile_id, workspaceLabel=label, targetLabel="Deterministic ACP hold",
                      targetArguments=["--engine", "acp", "--adapter", adapter, "--route", "spare=acp:spare-adapter"],
                      environment=fixture_path))
+if person_mode:
+    # The launcher relays its input to the stub adapter. It records its
+    # launch and the method of each JSON-RPC request that it relays, so that
+    # the record shows each engine turn as session/prompt.
+    adapters = work / "adapters"
+    adapters.mkdir(mode=0o700)
+    launcher = adapters / "person-adapter"
+    program = source / "engine/acp/test/stub_adapter.py"
+    record_path = work / "adapter-requests"
+    launcher.write_text("\n".join((
+        f"#!{sys.executable} -B",
+        "import json, subprocess, sys",
+        f"child = subprocess.Popen([{sys.executable!r}, '-B', {str(program)!r}], stdin=subprocess.PIPE)",
+        f"with open({str(record_path)!r}, 'a') as record:",
+        "    record.write('launch\\n')",
+        "    record.flush()",
+        "    for line in sys.stdin.buffer:",
+        "        try:",
+        "            method = json.loads(line).get('method')",
+        "        except ValueError:",
+        "            method = None",
+        "        if method:",
+        "            record.write(method + '\\n')",
+        "            record.flush()",
+        "        child.stdin.write(line)",
+        "        child.stdin.flush()",
+        "child.stdin.close()",
+        "sys.exit(child.wait())",
+        "")))
+    launcher.chmod(0o700)
+    configuration["profiles"][0].update(
+        targetLabel="Deterministic ACP person answers",
+        targetArguments=["--engine", "acp", "--adapter", "person-adapter", "--person-answer", "model:fixed-point"],
+        environment=[{"name": "PATH", "value": str(adapters)}])
+    configuration["profiles"].append(dict(
+        configuration["profiles"][0], id="profile_plain", workspaceLabel="HTTPS plain fixture", targetLabel="Deterministic ACP model answers",
+        targetArguments=["--engine", "acp", "--adapter", "person-adapter"]))
 CONTROL_PROFILES = [profile["id"] for profile in configuration["profiles"]] if control_profiles else []
 config = work / "configuration.json"
 config.write_text(json.dumps(configuration))
@@ -347,8 +401,8 @@ def administration(payload, refused=None):
 
 
 issued = administration({"version": 1, "operation": "issue-credential", "label": "HTTPS fixture",
-                         "scopes": ["observe", "submit"] + (["control", "export"] if mixed else ["control"] if captures_mode or discard_mode or lineage_mode or control_profiles else ["control", "export"] if exports_mode else []),
-                         "profileIds": CONTROL_PROFILES or ["profile_1"],
+                         "scopes": ["observe", "submit"] + (["control", "export"] if mixed else ["control"] if captures_mode or discard_mode or lineage_mode or control_profiles or person_mode else ["control", "export"] if exports_mode else []),
+                         "profileIds": CONTROL_PROFILES or (["profile_1", "profile_plain"] if person_mode else ["profile_1"]),
                          "expiresAt": "2999-01-01T00:00:00Z", "outputFile": str(work / "credential")})
 bearer = (work / "credential").read_bytes().decode("ascii")
 if collections:
@@ -4471,6 +4525,170 @@ def live_flow_checks(facts):
           "from the manager with acknowledgement", acknowledged[0], "and the run log holds failure", failures[0]["position"],
           "for question", asked["position"], "to", first_target, "and question", spare["position"], "to", spare_target,
           "with its answer", flush=True)
+
+
+def person_checks():
+    """Asks named by the personAnswers policy field through the real HTTPS
+    manager. Each numbered case prints one PASS line."""
+    authorized = {"Authorization": "Bearer " + bearer}
+    requests = work / "adapter-requests"
+    answer_text = "Answered by a person through the manager."
+    with (work / "server-0.stdout").open("wb") as output, (work / "server-0.stderr").open("wb") as errors:
+        process = subprocess.Popen([str(runner), "--manager", "serve", "--config", str(config),
+                                    "+RTS", "-N" + native, "-RTS"], stdout=output, stderr=errors)
+        try:
+            wait_ready(process)
+            status, capabilities, _ = request("/v1/capabilities", authorized)
+            assert status == 200
+            validate("Capabilities", capabilities)
+            observed, wait_for, mutate, _ = mixed_client(capabilities, authorized)
+            def prepare(profile):
+                """Create and enqueue one prompt-source request of the profile.
+                Returns the request URI, the live preparation and its ETag."""
+                status, catalogue, _ = request("/v1/workflows?profileId=" + profile, authorized)
+                assert status == 200, ("person-answers catalogue", profile, status)
+                workflow = next(item for item in catalogue["items"] if item["name"] == "prompt-source")
+                create = {"workflowId": workflow["id"], "descriptorRevision": workflow["revision"],
+                          "profileId": workflow["profileId"], "profileRevision": workflow["profileRevision"]}
+                key = capabilities["authorityEpoch"] + "." + secrets.token_urlsafe(16)
+                status, created, raw = request("/v1/requests", authorized | {"Content-Type": "application/json", "Idempotency-Key": key},
+                                               method="POST", payload=json.dumps(create, separators=(",", ":")).encode())
+                assert status == 201, ("request creation", profile, status, created.get("code"))
+                validate("Request", created, raw)
+                request_uri = created["links"]["self"]
+                current, tag, _ = observed(request_uri, "Request")
+                mutate(request_uri, {"operation": "set-input", "input": {"name": "input", "source": "literal", "value": "Person answers fixture input."}}, tag)
+                current, tag, _ = observed(request_uri, "Request")
+                mutate(request_uri, {"operation": "enqueue"}, tag)
+                current, _, _ = wait_for(request_uri, "Request", lambda value: value["preparationId"] is not None)
+                preparation, tag, raw = observed("/v1/preparations/" + current["preparationId"], "Preparation")
+                (work / ("person-review-" + profile + ".json")).write_bytes(raw)
+                assert preparation["state"] == "live", preparation["state"]
+                return request_uri, preparation, tag
+
+            def approve(request_uri, preparation, tag):
+                """Approve the exact review. Returns the run."""
+                selectors = ("reviewDigest", "requestRevision", "profileRevision", "descriptorRevision", "processGeneration")
+                mutate("/v1/preparations/" + preparation["id"], {"operation": "approve", **{name: preparation[name] for name in selectors}}, tag)
+                current, _, _ = wait_for(request_uri, "Request", lambda value: value["runId"] is not None)
+                return current["runId"]
+
+            # Case 1. The review shows personAnswers in the target policy.
+            request_uri, preparation, tag = prepare("profile_1")
+            review = preparation["review"]
+            assert review["personAnswering"] == "local-control", review["personAnswering"]
+            assert review["policy"]["kind"] == "routed" and review["policy"].get("personAnswers") == ["model:fixed-point"], (
+                "the review does not show personAnswers in the target policy", review["policy"])
+            print("PASS person-answers case 1: the review of preparation", preparation["id"], "shows personAnswers",
+                  review["policy"]["personAnswers"], "in the routed target policy under local-control", flush=True)
+
+            # Case 2. After the approval the named ask is a pending question decision.
+            run = approve(request_uri, preparation, tag)
+            base = "/v1/runs/" + run
+            control, _, _ = wait_for(base + "/control", "RunControl", lambda value: value["decisionHeadId"] is not None)
+            head = control["decisionHeadId"]
+            decision, decision_tag, raw = observed("/v1/decisions/" + head, "Decision")
+            (work / "person-decision.json").write_bytes(raw)
+            assert decision["kind"] == "question" and decision["state"] == "pending" and decision["runId"] == run, (
+                "the named ask is not a pending question decision", decision["kind"], decision["state"])
+            assert decision["question"]["code"] == "text" and decision["question"]["addressee"] == "person model:fixed-point", (
+                "the named ask has another answer type or addressee", decision["question"]["code"], decision["question"]["addressee"])
+            stores = sorted(work.glob("manager/runs/runs/*/runtime"))
+            assert len(stores) == 1, ("person-answers run stores", stores)
+            store = stores[0]
+            events = [json.loads(line)["event"] for line in (store / "events.ndjson").read_bytes().splitlines()]
+            started = [event for event in events if event["type"] == "occurrence.started"]
+            assert [event["addressee"] for event in started] == ["person model:fixed-point"], (
+                "the named ask did not start as a person ask", [event.get("addressee") for event in started])
+            assert any(event["type"] == "occurrence.person-answer-pending" for event in events), "no person answer is pending"
+            print("PASS person-answers case 2: after the approval run", run, "has the pending question decision", head,
+                  "of answer type", decision["question"]["code"], "addressed to", decision["question"]["addressee"], "as its ask started", flush=True)
+
+            # Case 3. A typed answer through the decision completes the ask
+            # without an engine turn, and the run succeeds.
+            body = {"operation": "answer", "occurrenceId": decision["address"]["occurrenceId"],
+                    "generation": decision["generation"], "value": answer_text}
+            answer_receipt = mutate("/v1/decisions/" + head, body, decision_tag)
+            answer_command = answer_receipt.rsplit("/", 1)[1]
+            snapshot, _, raw = wait_for(base + "/snapshot", "RunSnapshot",
+                lambda value: value["runtime"] is not None and value["runtime"]["status"] in ("succeeded", "failed", "cancelled"))
+            (work / "person-terminal-snapshot.json").write_bytes(raw)
+            assert snapshot["runtime"]["status"] == "succeeded", ("person-answers run terminal status", snapshot["runtime"]["status"])
+            answers = json.loads((store / "answers.json").read_bytes())["answers"]
+            assert [record["answer"] for record in answers] == [answer_text], ("recorded answers", [record["answer"] for record in answers])
+            events = [json.loads(line)["event"] for line in (store / "events.ndjson").read_bytes().splitlines()]
+            assert not any(event["type"].startswith("attempt.") for event in events), (
+                "an attempt happened for the named ask", [event["type"] for event in events if event["type"].startswith("attempt.")])
+            relayed = requests.read_text().splitlines() if requests.exists() else []
+            assert "session/prompt" not in relayed, ("the adapter received a turn for the named ask", relayed)
+            print("PASS person-answers case 3: answer command", answer_command, "of decision", head, "delivered the typed answer,",
+                  "the run succeeded with it as the only recorded answer, and no attempt happened and the adapter received no",
+                  "session/prompt among its requests", relayed, flush=True)
+
+            # Case 4. Without --person-answer the same launcher relays a turn,
+            # so that the record of case 3 can show one. The model answers
+            # and no decision is pending.
+            request_uri, plain, tag = prepare("profile_plain")
+            assert "personAnswers" not in plain["review"]["policy"], ("the plain review shows personAnswers", plain["review"]["policy"])
+            plain_run = approve(request_uri, plain, tag)
+            snapshot, _, _ = wait_for("/v1/runs/" + plain_run + "/snapshot", "RunSnapshot",
+                lambda value: value["runtime"] is not None and value["runtime"]["status"] in ("succeeded", "failed", "cancelled"))
+            assert snapshot["runtime"]["status"] == "succeeded", ("plain run terminal status", snapshot["runtime"]["status"])
+            later = requests.read_text().splitlines()[len(relayed):]
+            assert "session/prompt" in later, ("the plain run relayed no turn", later)
+            status, queue, _ = request("/v1/decisions?runId=" + plain_run, authorized)
+            assert status == 200 and queue["items"] == [], ("plain run decisions", status, queue.get("items"))
+            print("PASS person-answers case 4: without --person-answer the review of", plain["id"], "has no personAnswers,",
+                  "run", plain_run, "succeeded with no decision, and the same launcher relayed", later, flush=True)
+        finally:
+            if process.poll() is None:
+                process.terminate()
+            process.wait(timeout=25)
+            (work / "server-0.exit").write_text(str(process.returncode) + "\n")
+
+    # Case 5. The flow verb shows the answer from the answering principal.
+    flow_dir = work / "manager" / "flow"
+    stores = sorted(work.glob("manager/runs/runs/*/runtime"))
+    assert len(stores) == 2 and store in stores, ("person-answers run stores", stores)
+    completed = subprocess.run([str(runner), "flow", str(flow_dir)] + [str(path) for path in stores],
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=120)
+    (work / "person-answers-joined.ndjson").write_bytes(completed.stdout)
+    (work / "person-answers-joined.stderr").write_bytes(completed.stderr)
+    lines = [json.loads(line) for line in completed.stdout.splitlines()]
+    assert lines and "summary" in lines[-1], ("flow verb", completed.returncode, completed.stderr[-2000:])
+    summary = lines[-1]["summary"]
+    assert completed.returncode == 0 and summary["verified"] and not summary["problems"], ("flow verb", completed.returncode, summary["problems"])
+    at = lambda log, position: {"log": log, "position": position}
+    runlog = [line for line in lines[:-1] if line["log"] == str(store)]
+    manager = [line for line in lines[:-1] if line["log"] not in [str(path) for path in stores]]
+    credential = issued["result"]["credential"]
+    principal = {"principal": "credential", "credentialId": credential["credentialId"], "client": credential["clientId"]}
+    commands = [line for line in manager if line["schema"] == "command" and line["about"].get("command") == answer_command]
+    assert len(commands) == 1 and commands[0]["from"] == principal and commands[0]["body"]["operation"] == "answer", (
+        "person answer command record", [(line["from"], line["body"].get("operation")) for line in commands])
+    command = commands[0]
+    assert command["body"]["body"]["json"].get("value") == answer_text, ("person answer command value", command["body"]["body"]["json"])
+    questions = [line for line in runlog if line["schema"] == "question" and line["to"] == {"to": "manager"}]
+    assert len(questions) == 1, ("person questions in the run log", [line["about"] for line in questions])
+    question = questions[0]
+    replies = [line for line in runlog if line["schema"] == "answer" and line.get("replyTo") == question["position"]]
+    assert len(replies) == 1 and replies[0]["from"] == "manager" and replies[0]["about"].get("command") == answer_command and replies[0]["body"] == answer_text, (
+        "run-log person answer", [(line["from"], line["about"], line["body"]) for line in replies])
+    reply = replies[0]
+    joined = [item for item in summary["joins"]["answers"] if item["answer"] == at(str(store), reply["position"])]
+    assert joined == [{"answer": at(str(store), reply["position"]), "command": at(command["log"], command["position"]), "commandId": answer_command}], (
+        "the run-log answer is not joined to the answer command of the credential", joined)
+    engine = [line["position"] for line in runlog if line["schema"] in ("engine-start", "turn")]
+    assert not engine, ("the run log has an engine start or turn", engine)
+    print("PASS person-answers case 5: the flow verb joins run-log answer", reply["position"], "to question", question["position"],
+          "and to answer command", answer_command, "at manager position", command["position"], "from credential", credential["credentialId"],
+          "and the run log has no engine start or turn", flush=True)
+    print("PASS person-answers: every person-answer case held against the running TLS 1.3 manager", flush=True)
+
+
+if person_mode:
+    person_checks()
+    raise SystemExit(0)
 
 
 if control_profiles:

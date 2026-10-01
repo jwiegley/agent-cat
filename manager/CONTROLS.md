@@ -157,6 +157,22 @@ its terminal observation and any correlated cancellation acknowledgement, but do
 not manufacture a cancelled command effect from temporal proximity, EOF, text or
 a previous command. No generic pause, shell command or engine prompt API exists.
 
+## Asks answered by people
+
+A target option `--person-answer model:NAME` or `--person-answer tool:NAME`
+names the asks that a person answers. The reviewed policy holds these addresses
+in `personAnswers`, as [the approval contract](APPROVAL.md) describes. After
+the approval, the Runtime starts each named ask as a person ask. The manager
+derives a `question` decision from it in the same way as from any other person
+question. The decision names the ask in `question.addressee`, for example
+`person model:fixed-point`, and `question.code` and `question.editorSchema`
+give the answer type. An `answer` through `POST /v1/decisions/{id}` with a
+value of that type delivers the answer, and the occurrence completes with it.
+No attempt, engine turn or tool call occurs for the ask. The run log records
+the `answer` from the manager with the command identifier, and
+`agentic-run flow` joins it to the answer command of the credential in the
+manager log.
+
 ## Negotiated steering observations
 
 Frontend session version one retains Runtime protocol two and control protocol two.
@@ -211,6 +227,17 @@ After the manager exits, it reads the manager log and the run stores with
 receipt and its relay to the run-log `control` and its acknowledgement, and
 that the run log holds the `failure` of the first question and the new
 `question` to the spare target.
+The `person-answers` mode configures a profile with the ACP stub fixture and
+`--person-answer model:fixed-point`, and a second profile with the same
+fixture without the option. Both run the `prompt-source` workflow. For the
+first profile the mode checks that the review shows `personAnswers`, that the
+named ask is a pending `question` decision after the approval, that a typed
+answer through `/decisions/{id}` completes it, that the run succeeds and that
+the fixture receives no `session/prompt`. After the manager exits, it reads the
+manager log and the run stores with `agentic-run flow` and checks that the
+reader joins the run-log `answer` to the answer command of the credential. For
+the second profile it checks that the review has no `personAnswers` and that
+the fixture receives a `session/prompt`.
 Fixture barriers delay original work or original control delivery, never invent
 successful Runtime envelopes. The steering fixture completes its original prompt
 through its normal event loop, including when no steer is delivered. Every fixture
