@@ -16,6 +16,7 @@ module Agentic.Tui.Presentation
     launchReviewAllowed,
     serviceReviewAllowed,
     serviceReviewRows,
+    serviceSummaryWidth,
     endpointLine,
     endpointsLines,
     serviceRequestLines,
@@ -469,6 +470,7 @@ headerContext presentation = case modelScreen model of
   ServiceDecisionsScreen -> displayText "Manager decisions"
   ServiceHistoryScreen -> displayText "Manager history"
   ServiceHistoryRunScreen _ -> displayText "Manager run detail"
+  ServiceReviewScreen {} | not (presentationExactDetails presentation) -> displayText "Approve exact manager review"
   BrowserScreen -> tabs (modelTab model)
   LiveScreen _ -> hBox [withAttr (attrName "title") (displayText (liveContext presentation))]
   LaunchingScreen _ -> displayText "Starting runner…"
@@ -657,15 +659,16 @@ serviceRequestView presentation request = pane "Manager request" $ viewport Fail
     Manager.Readiness _ supplied missing _ = Manager.draftReadiness request
     captured = [name <> ": capture " <> ident | Manager.CapturedValue name ident <- supplied]
 
--- | The rows of the summary review. The footer offers d for the complete
--- exact review. With the identifiers that the manager issues and a short
--- profile identifier, the rows of a review without lineage fit an 80x24
--- terminal beside the reserved notice rows, so the operator can approve at
--- that size.
+-- | The rows of the summary review. The key bar states that y approves and
+-- starts the run and that Enter does not, and offers d for the complete exact
+-- review. With the identifiers that the manager issues, the rows of a
+-- restart, resume or fork review with one replacement, and the rows of a
+-- review whose profile identifier has the maximum length of 128 characters,
+-- fit an 80x24 terminal beside the reserved notice rows, so the operator can
+-- approve at that size.
 serviceReviewRows :: Manager.Preparation -> Text -> [Text]
 serviceReviewRows preparation tag =
-  [ "y approves and starts execution through the manager. Enter does not.",
-    "Request: " <> Manager.preparationRequest preparation,
+  [ "Request: " <> Manager.preparationRequest preparation,
     "Preparation: " <> Manager.preparationId preparation,
     "Profile: " <> Manager.preparationProfile preparation <> " · Expires: " <> Manager.preparationExpiresAt preparation,
     "If-Match: " <> tag ] <> lineageRows <> Service.approvalSelectors preparation
@@ -684,15 +687,25 @@ serviceReviewRows preparation tag =
       Manager.ReviewDrop occurrence -> "drop occurrence " <> occurrence
       Manager.ReviewReplace occurrence digest -> "replace occurrence " <> occurrence <> " (answer SHA-256 " <> digest <> ")"
 
--- | Whether the complete summary review fits in the service shell, whose
--- header includes the endpoint identity row where it fits. The rows of the
--- longest approval-key notice are always reserved, so a notice never clips the
--- review.
+-- | The width of the rows of the summary review at this terminal width. The
+-- summary has no frame: its rows take the whole main area with one column of
+-- padding at each side, up to 84 columns.
+serviceSummaryWidth :: Int -> Int
+serviceSummaryWidth width = max 1 (min 84 width - 2)
+
+-- | The width of the rows of a framed dialog at this terminal width.
+dialogWidth :: Int -> Int
+dialogWidth width = max 1 (min 84 width - 4)
+
+-- | Whether the complete summary review fits in the main area of the service
+-- shell, whose header includes the endpoint identity row where it fits. The
+-- rows of the longest approval-key notice are always reserved, so a notice
+-- never clips the review.
 serviceReviewAllowed :: Manager.Preparation -> Text -> (Int,Int) -> Bool
 serviceReviewAllowed preparation tag (width,height) = width >= 40 &&
   length (concatMap (wrapDisplayLines innerWidth) (serviceReviewRows preparation tag)) + serviceNoticeRows innerWidth
-    <= max 0 (shellMainRows True width height - 2)
-  where innerWidth = max 1 (min 84 width - 4)
+    <= shellMainRows True width height
+  where innerWidth = serviceSummaryWidth width
 
 -- | The rows that the longest approval-key notice needs at this inner width,
 -- with the widest possible key number.
@@ -700,24 +713,25 @@ serviceNoticeRows :: Int -> Int
 serviceNoticeRows innerWidth =
   maximum (0 : [length (wrapDisplayLines innerWidth (noticeLine (KeyNotice maxBound text))) | text <- noticeTexts])
 
--- | The lines of the approval-key notice in a dialog of this width. Each
+-- | The lines of the approval-key notice, wrapped at this inner width. Each
 -- view places them first, so a clipped review cannot hide them.
 serviceNoticeWidgets :: Presentation -> Int -> [Widget Name]
-serviceNoticeWidgets presentation width =
+serviceNoticeWidgets presentation innerWidth =
   [ withAttr (attrName "warning") (displayText line)
   | Just current <- [presentationServiceNotice presentation],
-    line <- wrapDisplayLines (max 1 (min 84 width - 4)) (noticeLine current)
+    line <- wrapDisplayLines innerWidth (noticeLine current)
   ]
 
 serviceReviewView :: Presentation -> Manager.Preparation -> Text -> Int -> Int -> Int -> Widget Name
 serviceReviewView presentation preparation tag width _ mainHeight
   | presentationExactDetails presentation = dialog width mainHeight " Exact manager review " $
-      vBox (notice <> [viewport ConfirmDetailsViewport Vertical $ vBox $ map displayTextWrap details])
-  | otherwise = dialog width mainHeight " Approve exact manager review " $
-      vBox (notice <> map displayText (concatMap (wrapDisplayLines innerWidth) (serviceReviewRows preparation tag)))
+      vBox (serviceNoticeWidgets presentation (dialogWidth width) <> [viewport ConfirmDetailsViewport Vertical $ vBox $ map displayTextWrap details])
+  | otherwise = hLimit (max 1 (min 84 width)) $ padLeftRight 1 $
+      vBox (serviceNoticeWidgets presentation innerWidth <> map displayText (concatMap (wrapDisplayLines innerWidth) (serviceReviewRows preparation tag)))
   where
-    innerWidth = max 1 (min 84 width - 4)
-    notice = serviceNoticeWidgets presentation width
+    -- The summary has no frame, so its rows use the whole main area. Its
+    -- title is the context row of the header.
+    innerWidth = serviceSummaryWidth width
     review = Manager.preparationReview preparation
     details = Service.approvalSelectors preparation <>
       [ "Program SHA-256: " <> Manager.reviewProgramHash review,
@@ -1255,7 +1269,7 @@ steerView presentation width mainHeight = case presentationSteerTiming presentat
 keyHelpView :: Presentation -> Int -> Int -> Widget Name
 keyHelpView presentation width mainHeight =
   dialog width mainHeight " Keyboard shortcuts " $
-    vBox (serviceNoticeWidgets presentation width <> [viewport KeyHelpViewport Vertical (vBox (map displayTextWrap (keyHelpLines presentation)))])
+    vBox (serviceNoticeWidgets presentation (dialogWidth width) <> [viewport KeyHelpViewport Vertical (vBox (map displayTextWrap (keyHelpLines presentation)))])
 
 keyHelpLines :: Presentation -> [Text]
 keyHelpLines presentation = case modelScreen model of
@@ -1495,8 +1509,11 @@ footerItems presentation width height
               then ["e EDIT INPUTS"] <> ["Enter REQUEST REVIEW" | Service.requestReady request] else [])
           <> ["W WITHDRAW" | Manager.draftPhase request `elem` ["draft","queued"], presentationServiceMutation presentation == Nothing,
                 not (serviceMutationsStopped presentation)]
-      ServiceReviewScreen preparation tag -> ["d EXACT DETAILS", "q DETACH"] <>
-        ["y APPROVE EXACT REVIEW" | presentationServiceApprovalOffered presentation]
+      ServiceReviewScreen preparation tag ->
+        (if not (presentationServiceApprovalOffered presentation) then []
+         else if compact then ["y APPROVE EXACT REVIEW"]
+         else ["y APPROVE EXACT REVIEW AND RUN", "Enter DOES NOT APPROVE"])
+        <> ["d EXACT DETAILS", "q DETACH"]
         <> ["X DISCARD" | presentationServiceMutation presentation == Nothing, not (serviceMutationsStopped presentation)]
         <> ["RESIZE TO REVIEW" | not (serviceReviewAllowed preparation tag (width,height))]
       ServiceCommandScreen _ -> ["g REFRESH", "q DETACH"] <>

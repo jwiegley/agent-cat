@@ -559,15 +559,16 @@ lineage menu with restart, resume and fork eligible, and `r` sends a
 restart. The frontend opens the child request, which names the parent run
 and the operation, and the lineage collection of the run holds that child.
 `Enter` prepares its review, which names the parent run, the operation
-restart and no edits. Its two lineage rows do not fit 80x24, so a summary `y`
-there shows the notice of the consent rule and the request stays in review.
-After a resize to 100x30, `y` approves it. The child run succeeds and names
-the earlier run as its parent and restart as its lineage. On the live
+restart and no edits. The complete summary review, with its two lineage rows
+and the five selectors, fits 80x24, and `y` approves it at that size. The
+child run succeeds and names the earlier run as its parent and restart as its
+lineage. On the live
 monitor of that child run, after the frontend retrieved its verified result,
 `l` and `f` open the fork edits, `Enter` and `Ctrl-D` replace the answer of
 occurrence 0 with typed text, and `Ctrl-D` sends the fork. The review of the
 fork child request shows the replacement of occurrence 0 with the SHA-256
-that the preparation states.
+that the preparation states, and that complete review also fits 80x24 with
+the approval hint offered.
 
 The application state keeps the text drafts by identity
 (`Agentic.Tui.ServiceLane.Drafts`): the input editor text of each request and
@@ -886,16 +887,28 @@ the answer conversion against the `resources` section of
 description](../doc/api/README.md#pages-and-live-delivery) describes.
 
 The summary view of the exact review (`serviceReviewRows`) shows the request,
-the preparation, the profile with the expiry, the `If-Match` value and the
-five approval selectors. `d` in the footer opens the complete exact review.
-`serviceReviewAllowed` reserves the rows of the longest approval-key notice
-and permits approval only when every row fits. With the identifiers that the
-manager issues, a review without lineage fits 80x24, and at 40x12 a summary
-`y` shows `Approval did not start: the complete review does not fit. Resize
-the terminal.` The header row above the identity row always shows the
-delivery state, or the state that replaces it, complete after at least one
-space, and a long screen context gives way to it. When the service lines of
-the live monitor do not all fit in the main area, `serviceMonitorLines` gives
+the preparation, the profile with the expiry, the `If-Match` value, the
+lineage rows of a lineage review and the five approval selectors. A lineage
+review shows its parent run and operation in one row and its edits in the
+next row. The summary has no frame: its rows take the whole main area below
+the header, with one column of padding at each side and at most 84 columns
+(`serviceSummaryWidth`). The context row of the header names it `Approve exact
+manager review`. The footer states what the approval keys do. When `y` would
+approve, the footer starts with `y APPROVE EXACT REVIEW AND RUN` and `Enter
+DOES NOT APPROVE`, and in a terminal narrower than 72 columns or lower than 16
+rows it starts with `y APPROVE EXACT REVIEW` only. `d` in the footer opens the
+complete exact review, which keeps its frame. `serviceReviewAllowed` reserves
+the rows of the longest approval-key notice and permits approval only when
+every row fits. With the identifiers that the manager issues, a review
+without lineage, a restart or resume review, a fork review with one
+replacement, and a review whose profile identifier has the maximum length of
+128 characters each fit 80x24. A review that does not fit keeps the refusal:
+at 40x12 a summary `y` shows `Approval did not start: the complete review
+does not fit. Resize the terminal.` The header row above the identity row
+always shows the delivery state, or the state that replaces it, complete
+after at least one space, and a long screen context gives way to it. When
+the service lines of the live monitor do not all fit in the main area,
+`serviceMonitorLines` gives
 the `Terminal:` line and the `Result:` lines (the verified size and SHA-256
 digest, or the state of the result) their rows first. Each other line, such
 as the request, run, observation, control, preview and saved lines, shows in

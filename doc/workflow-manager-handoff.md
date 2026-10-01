@@ -218,7 +218,7 @@ The governing goal records two operator decisions of 2026-10-01:
 | --- | --- | --- |
 | Unresolved approve after a restart (`acat-70ll`, item 4 of the Phase C review) | Met by PE1 | `acat-70ll` open for the Integrator. The PE1 audit lows are in `acat-vbze`. |
 | Launched quarantine claim with no terminal record (item 1 of `acat-phase-c-review-findings-hwxy`) | Open. PE2 and PE3 hold the repair, and PE2 waits for the owner. | `acat-phase-c-review-findings-hwxy` |
-| Overview fence after a 410, 40x12 monitor, 80x24 lineage review | Fence met by PE5. The 40x12 monitor met by PE6. PE7 not started. | `acat-pc17-follow-fess-jd40`, `acat-jdmd`, `acat-phase-c-review-findings-hwxy` |
+| Overview fence after a 410, 40x12 monitor, 80x24 lineage review | Fence met by PE5. The 40x12 monitor met by PE6. The 80x24 lineage review met by PE7. | `acat-pc17-follow-fess-jd40`, `acat-jdmd`, `acat-phase-c-review-findings-hwxy` |
 | Phase A polish remainder (early `StoreBusy`, one Store deadline) | Open (PE8 and PE9 not started) | `acat-a6a7-fess-followup-1exm`, `acat-a10a11-fess-followup-33k1`, `acat-a5s2b-fess-followup-s9rl` |
 | WM-036 (`acat-wm-036-5ndj`) | Not started | Open |
 | WM-037 (`acat-wm-037-dz3v`) | Not started | Open |
@@ -510,10 +510,11 @@ these:
    shows its Terminal and Result lines before the other service lines.
    `tui-sizes` checks the terminal success and the verified size and
    SHA-256 at 40x12, 80x24 and 140x36.
-6. At 80x24 the summary review has no spare row, so a restart, resume or
-   fork review and a review with a long profile identifier are refused with
-   "does not fit". The lineage path needs a resize before an approval, and
-   `tui-history` approves the restart child at 100x30.
+6. Met by PE7. The summary review has no frame, and the footer carries
+   the approval instruction. At 80x24 a restart, resume or fork review with
+   one replacement and a review with a 128-character profile identifier fit
+   and can be approved. `tui-history` approves the restart child at 80x24,
+   and at 40x12 `tui-sizes` still refuses the summary approval.
 
 The low findings are these:
 
@@ -646,11 +647,10 @@ adds these:
 - At small sizes the live monitor skips a service line that does not fit
   and keeps later lines that fit, so the Run line can be hidden while the
   Request line shows (`acat-jdmd` follow-up).
-- The summary review fits 80x24 with no spare row, so a long profile
-  identifier or a lineage review is refused at that size. The restart
-  child review of `tui-history` has two lineage rows, and the harness
-  approves it at 100x30. The workflows browser and the history detail are
-  not resized in `tui-sizes`.
+- A fork review with more than one replacement, and a lineage review with
+  a long profile identifier, do not fit 80x24 and are refused there. The
+  workflows browser and the history detail are not resized in
+  `tui-sizes`.
 - The session-generation fence after an endpoint switch has model-test
   evidence only, because the switch closes the earlier client and the
   delay forwarder of `tui-failures` then drops the late bytes.
@@ -714,7 +714,7 @@ Phase C.
 | WM-029 (`acat-wm-029-nlmg`) | Met for function, with its security items deferred | PC9 to PC12, PC16, PC17, gate steps 4, 9 and 11 | Closed for function. The security items are in `acat-phase-c-deferred-security-5eso`. |
 | WM-033 (`acat-wm-033-4g77`) | Met for function. The `policy-probe` case did not run. | PC13, PC14, gate steps 3, 9 (`tui-endpoints`, `tui-failures`) and 14 | Open until its dependency WM-032 closes |
 | WM-034 (`acat-wm-034-3vqz`) | Met for function. The legacy result retrieval and the stale-draft rule wait for operator decisions. | PC8, PC15 to PC30, gate steps 3, 9 and 11 | Open for the two operator decisions and the Emacs parity |
-| WM-035 (`acat-wm-035-9uqq`) | Met for function by the package lens. The working lens rates it partial for the 80x24 lineage review fit. PE6 met the 40x12 monitor (`acat-jdmd`). | PC31 to PC33, gate steps 9, 10, 11 and 14, PE6 | Open for item 2 of `acat-phase-c-review-findings-hwxy` |
+| WM-035 (`acat-wm-035-9uqq`) | Met for function by the package lens. The working lens rated it partial for the 40x12 monitor and the 80x24 lineage review fit. PE6 met the 40x12 monitor (`acat-jdmd`), and PE7 met the 80x24 lineage review fit. | PC31 to PC33, gate steps 9, 10, 11 and 14, PE6, PE7 | Open for item 2 of `acat-phase-c-review-findings-hwxy` |
 | Phase A TUI polish findings | Partial. The retrieval retry, the bounded refresh pause and `saveExact` after publication are delivered. The early `StoreBusy` on the answer route and the single deadline through the stacked Store locks remain. | PC8, gate steps 3 and 11 | `acat-a6a7-fess-followup-1exm`, `acat-a10a11-fess-followup-33k1`, `acat-a5s2b-fess-followup-s9rl` open |
 | Quarantine inspection and release (WM-042, `acat-wm-042-sdg9`) | Met for the quarantine finding. WM-042 stays partial, because `reload-profiles`, `drain` and `shutdown` still answer `state-conflict`. | PC1 to PC3, gate steps 5 and 8 (`failures-manager`) | Open |
 | Floor stop (`acat-phase-b2-review-findings-x8fv`) | Met | PC4, gate steps 5 and 8 | Open for the low findings 5 to 11 |

@@ -11,7 +11,7 @@ import Agentic.Runtime (DescriptorCapabilities (..), WorkflowDescriptor (..), Wo
 import Agentic.Tui.Person (PersonPrompt (..))
 import Agentic.Tui.Model
 import qualified Agentic.Tui.Approval as A
-import Agentic.Tui.Presentation (ActiveLayer (..), OverviewView (..), PaneFocus (..), Presentation (..), emptyPresentation, endpointLine, endpointsLines, serviceRequestLines, serviceReviewAllowed, serviceReviewRows,
+import Agentic.Tui.Presentation (ActiveLayer (..), OverviewView (..), PaneFocus (..), Presentation (..), emptyPresentation, endpointLine, endpointsLines, serviceRequestLines, serviceReviewAllowed, serviceReviewRows, serviceSummaryWidth,
   savedLeftoverNote, serviceSaveRefusal, serviceSavedLine, wrapDisplayLines)
 import Agentic.Tui.RunModel (emptyRunView, reconcileRunView)
 import Agentic.Tui.Save (SaveRefusal (..), Saved (..), saveExact, saveExactUsing)
@@ -132,6 +132,7 @@ serviceTests render = do
   check "review expiry is not extended by a frontend observation"
     (S.reviewLive (addUTCTime (-1) expiry) preparation && not (S.reviewLive expiry preparation))
   approvalTests render profile selectedWorkflowRow request preparation expiry
+  reviewFitTests render profile selectedWorkflowRow request issued issuedTag
   receiptValue <- BS.readFile "test/fixtures/manager/v1/valid/request-command.json" >>= either die pure . eitherDecodeStrict'
   receipt <- either (die . show) pure (C.decodeObservation receiptValue)
   let mutation = S.SaveLiteral request "subject" logical 0
@@ -2584,6 +2585,62 @@ checks group = do
   mapM_ (\(label,passed) -> putStrLn ((if passed then "PASS " else "FAIL ") <> label)) group
   unless (all snd group) (die ("FAIL " <> show (length (filter (not . snd) group)) <> " checks in the group"))
 
+-- | The fit of the summary review in the service shell, with the identifier
+-- lengths that the manager issues. At 80x24 a restart, a resume and a fork
+-- review with one replacement, and a review whose profile identifier has the
+-- maximum length of 128 characters that the manager accepts, show every row
+-- beside the longest approval-key notice, and y approves each of them. At
+-- 40x12 y refuses each of them as clipped.
+reviewFitTests :: ((Int,Int) -> Presentation -> T.Text) -> S.Profile -> S.Workflow -> C.DraftView -> C.Preparation -> T.Text -> IO ()
+reviewFitTests render profile row request issued tag = do
+  expiry <- maybe (die "invalid issued expiry") pure (iso8601ParseM (T.unpack (C.preparationExpiresAt issued)))
+  let hex count = T.replicate count "a"
+      parent = "run_" <> hex 48
+      longProfile = T.replicate 128 "p"
+      -- A catalogue row, a request and its preparation that agree, with the
+      -- given profile identifier and lineage. A lineage request declares no
+      -- input, and its review binds the captured parent input.
+      bound profileId lineage =
+        let review = (C.preparationReview issued) {C.reviewProfile = profileId, C.reviewLineage = lineage,
+              C.reviewInputs = maybe (C.reviewInputs (C.preparationReview issued)) (const [C.ReviewInput "subject" "capture" "6" (hex 64)]) lineage}
+            preparation = issued {C.preparationProfile = profileId, C.preparationReview = review}
+            draft = request {C.draftId = C.preparationRequest issued, C.draftRevision = C.preparationRequestRevision issued,
+              C.draftPreparation = Just (C.preparationId issued), C.draftProfile = profileId,
+              C.draftProfileRevision = C.preparationProfileRevision issued, C.draftDescriptorRevision = C.preparationDescriptorRevision issued,
+              C.draftParent = C.reviewLineageParent <$> lineage, C.draftLineage = C.reviewLineageOperation <$> lineage,
+              C.draftReadiness = maybe (C.draftReadiness request) (const (C.Readiness [] [] [] [])) lineage}
+            workflow = row {S.workflowProfile = profileId, S.workflowProfileRevision = C.preparationProfileRevision issued,
+              S.workflowRevision = C.preparationDescriptorRevision issued}
+         in (workflow, draft, preparation)
+      cases =
+        [ ("a restart review", bound "profile_1" (Just (C.ReviewLineage parent "restart" []))),
+          ("a resume review", bound "profile_1" (Just (C.ReviewLineage parent "resume" []))),
+          ("a fork review with one replacement", bound "profile_1" (Just (C.ReviewLineage parent "fork" [C.ReviewReplace "0" (hex 64)]))),
+          ("a review with a 128-character profile identifier", bound longProfile Nothing) ]
+      decision size (workflow, draft, preparation) =
+        A.approvalDecision allScopes A.ApproveKey A.SummaryView (L.sessionLane :: L.Lane T.Text T.Text)
+          (A.checkReview id (addUTCTime (-1) expiry) (serviceReviewAllowed preparation tag size) (Just workflow)
+             (Just ((), draft)) (Just (tag, preparation)) (S.literalInputs draft) Map.empty preparation tag)
+      approves size bound' = case decision size bound' of A.Approve _ -> True; _ -> False
+      clipped size bound' = case decision size bound' of A.Refuse A.ClippedReview -> True; _ -> False
+      longest = A.KeyNotice maxBound (snd (maximum [(T.length text, text) | text <- A.noticeTexts]))
+      screen preparation = (initialServiceModel [profile]) {modelScreen = ServiceReviewScreen preparation tag}
+      frame preparation = render (80,24) (emptyPresentation (screen preparation))
+        {presentationService = True, presentationServiceEndpoint = Just (S.Endpoint "127.0.0.1" 8443 "stream_A" "epoch_A" allScopes),
+          presentationServiceNotice = Just longest, presentationServiceApprovalOffered = True, presentationNoColor = True}
+      shownInFull preparation =
+        let shown = frame preparation
+         in all (`T.isInfixOf` shown) (concatMap (wrapDisplayLines (serviceSummaryWidth 80)) (A.noticeLine longest : serviceReviewRows preparation tag))
+              && all (`T.isInfixOf` shown) ["Approve exact manager review", "y APPROVE EXACT REVIEW AND RUN", "Enter DOES NOT APPROVE"]
+              && not ("RESIZE TO REVIEW" `T.isInfixOf` shown)
+  mapM_ (\(name, (_, _, preparation)) -> putStrLn ("RENDER " <> name <> " with the longest notice at (80,24):")
+      >> putStr (T.unpack (frame preparation))) cases
+  checks $ concat
+    [ [ (name <> " fits 80x24 beside the longest notice, and every row shows in full", serviceReviewAllowed preparation tag (80,24) && shownInFull preparation),
+        (name <> " is approved by y at 80x24", approves (80,24) bound'),
+        (name <> " does not fit 40x12, and y refuses it as clipped", not (serviceReviewAllowed preparation tag (40,12)) && clipped (40,12) bound') ]
+    | (name, bound'@(_, _, preparation)) <- cases ]
+
 -- | Model and fixed-size render tests for approval-key admissibility on the
 -- exact manager review. The expected notice texts are written out here, so a
 -- change to any fixed text fails a check.
@@ -2822,7 +2879,9 @@ approvalTests render profile row request preparation expiry = do
           presentationExactDetails = view == A.DetailView, presentationServiceNotice = notice,
           presentationServiceApprovalOffered = offered, presentationNoColor = True,
           presentationLayer = if view == A.KeyHelpView then KeyHelpLayer else presentationLayer (emptyPresentation serviceModel {modelScreen = screen})}
-      noticeShown size frame notice = all (`T.isInfixOf` frame) (wrapDisplayLines (min 84 (fst size) - 4) (A.noticeLine notice))
+      -- The summary has no frame, so its notice wraps at the summary width.
+      noticeShown view size frame notice = all (`T.isInfixOf` frame) (wrapDisplayLines (noticeWidth view (fst size)) (A.noticeLine notice))
+      noticeWidth view width = if view == A.SummaryView then serviceSummaryWidth width else min 84 width - 4
       notices = notSent : map (A.decisionNotice 9) (A.Approve () : map A.Refuse [minBound .. maxBound] :: [A.ApprovalDecision ()])
   mapM_ (\notice -> mapM_ (\(size,view) -> do
       let before = render size (reviewPresentation reviewScreen "exact manager review observed" view (Just notice) False)
@@ -2830,9 +2889,9 @@ approvalTests render profile row request preparation expiry = do
           after = render size (reviewPresentation renewedScreen "manager request: review" view kept False)
           viewName = case view of A.SummaryView -> "summary review"; A.DetailView -> "detail view"; A.KeyHelpView -> "key help"
       check ("the notice " <> show (A.noticeText notice) <> " renders in the " <> viewName <> " at " <> show size)
-        (noticeShown size before notice)
+        (noticeShown view size before notice)
       check ("the notice " <> show (A.noticeText notice) <> " survives an installed observation in the " <> viewName <> " at " <> show size)
-        (noticeShown size after notice && "manager request: review" `T.isInfixOf` after))
+        (noticeShown view size after notice && "manager request: review" `T.isInfixOf` after))
     [(size,view) | size <- [(140,36),(80,24)], view <- views]) notices
   let shownRefusal view = case view of
         A.SummaryView -> A.EnterRefused
@@ -2856,8 +2915,8 @@ approvalTests render profile row request preparation expiry = do
   let longest = snd (maximum [(T.length text,text) | text <- A.noticeTexts])
       tight = render (100,smallest) (reviewPresentation reviewScreen "review" A.SummaryView (Just (A.KeyNotice maxBound longest)) True)
   check ("the longest notice does not clip the review at the smallest admissible height " <> show smallest)
-    (all (`T.isInfixOf` tight) (concatMap (wrapDisplayLines 80) (serviceReviewRows preparation tag))
-      && noticeShown (100,smallest) tight (A.KeyNotice maxBound longest))
+    (all (`T.isInfixOf` tight) (concatMap (wrapDisplayLines (serviceSummaryWidth 100)) (serviceReviewRows preparation tag))
+      && noticeShown A.SummaryView (100,smallest) tight (A.KeyNotice maxBound longest))
 
 -- | A refused credential: which failures refuse it, the refused state of the
 -- lane that stops every mutation and exact resend, the reads that end the

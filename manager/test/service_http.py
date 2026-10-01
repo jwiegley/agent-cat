@@ -571,19 +571,18 @@ TUI_DECISIONS = "tui-decisions"
 # restart, resume and fork as eligible, and r sends a restart. The TUI opens
 # the child request, which names the parent run and the operation. The
 # lineage collection of the run must hold that one child. Enter prepares its
-# review, which names the parent run, the operation restart and no edits. Its
-# two lineage rows do not fit the main area of 80x24, so y must show the
-# notice of the consent rule, and the child request must stay in review with
-# the same preparation. After a resize to 100x30, y approves it, and the TUI
-# returns to 80x24. The child run must succeed, and its run representation must
-# name the earlier run as its parent and restart as its lineage.
+# review, which names the parent run, the operation restart and no edits.
+# The complete summary review, its two lineage rows included, fits 80x24, so
+# y approves it at 80x24. The child run must succeed, and its run
+# representation must name the earlier run as its parent and restart as its
+# lineage.
 # 9. On the live monitor of the restarted run, after its supervision ended
 # and the TUI retrieved its verified result, l opens the lineage menu and f opens the fork edits. Enter on occurrence 0
 # opens the replacement answer editor, Ctrl-D sets the typed text answer, and
 # Ctrl-D sends the fork with that one replacement. The TUI opens the child
 # request, Enter prepares its review, and the review must show the
 # replacement of occurrence 0 with the SHA-256 that the preparation of the
-# child states.
+# child states. The complete review fits 80x24, so the key bar offers y.
 # Each step prints its own PASS line. It runs one manager lifetime.
 TUI_HISTORY = "tui-history"
 HISTORY_LEGACY_ENTRIES = 300
@@ -6232,20 +6231,16 @@ def history_checks():
                 preparation = child_review(restart_child)
                 assert preparation["review"]["lineage"] == {"parentRunId": earlier, "operation": "restart", "edits": []}, (
                     "the restart review lineage", preparation["review"].get("lineage"))
-                # The two lineage rows take the summary review beyond the
-                # main area of 80x24, so the consent rule refuses y there.
-                session.send(b"y")
-                shown("Approval did not start: the complete review does not fit. Resize the terminal.", 10)
-                save(session, "restart-review-refused")
-                unchanged, _, _ = client[0]("/v1/requests/" + restart_child["id"], "Request")
-                assert unchanged["phase"] == "review" and unchanged["preparationId"] == preparation["id"] and unchanged["runId"] is None, (
-                    "the refused approval changed the restart child request", unchanged["phase"], unchanged["preparationId"], unchanged["runId"])
-                session.resize(30, 100)
-                shown("Lineage edits: none", 10)
-                session.settle()
+                # The complete summary review fits 80x24, its two lineage
+                # rows and all five selectors included, so y approves there.
+                # The key bar offers y only for a current review that fits.
+                shown("y APPROVE EXACT REVIEW AND RUN", 10)
+                shown("Preparation: " + preparation["id"], 10)
+                for name in ("reviewDigest", "requestRevision", "profileRevision", "descriptorRevision", "processGeneration"):
+                    shown(name + preparation[name], 10)
+                assert "RESIZE TO REVIEW" not in session.screen.text(), ("the restart review does not fit 80x24", session.screen.text())
+                save(session, "restart-review-80x24")
                 mutation_key(b"y", "Runtime: Succeeded", 90)
-                session.resize(24, 80)
-                shown("Runtime: Succeeded", 10)
                 save(session, "restart-run")
                 associated, _, _ = client[0]("/v1/requests/" + restart_child["id"], "Request")
                 restarted = associated["runId"]
@@ -6257,8 +6252,8 @@ def history_checks():
                 (work / "tui-history-restarted-snapshot.json").write_bytes(raw)
                 assert snapshot["runtime"]["status"] == "succeeded", ("the restarted run status", snapshot["runtime"]["status"])
                 print("PASS tui-history 8: l and r on the detail of run", earlier, "created the child request", restart_child["id"],
-                      "whose request screen and review named the parent and the operation restart; at 80x24 y was refused because the review",
-                      "does not fit and the request stayed in review, and after a resize to 100x30 y approved it, and its run", restarted,
+                      "whose request screen and review named the parent and the operation restart; the complete review fit 80x24, y",
+                      "approved it there, and its run", restarted,
                       "succeeded with parentRunId", earlier, "and lineage restart", flush=True)
 
                 # 9. l, f and one replacement fork the restarted run, and the child review shows the edit.
@@ -6289,10 +6284,16 @@ def history_checks():
                 assert lineage["parentRunId"] == restarted and lineage["operation"] == "fork" and [
                     (edit["operation"], edit["occurrenceId"]) for edit in lineage["edits"]] == [("replace", "0")], ("the fork review lineage", lineage)
                 shown("Lineage edits: replace occurrence 0 (answer SHA-256 " + lineage["edits"][0]["sha256"] + ")", 10)
+                # The complete fork review fits 80x24, so the key bar offers y.
+                shown("y APPROVE EXACT REVIEW AND RUN", 10)
+                for name in ("reviewDigest", "requestRevision", "profileRevision", "descriptorRevision", "processGeneration"):
+                    shown(name + preparation[name], 10)
+                assert "RESIZE TO REVIEW" not in session.screen.text(), ("the fork review does not fit 80x24", session.screen.text())
                 save(session, "fork-review")
                 print("PASS tui-history 9: l, f, Enter and Ctrl-D on the live monitor of run", restarted, "forked it with one replacement of",
                       "occurrence 0 as child request", fork_child["id"], "; the TUI review showed the replacement with SHA-256",
-                      lineage["edits"][0]["sha256"], "as the child preparation states it", flush=True)
+                      lineage["edits"][0]["sha256"], "as the child preparation states it, and the complete review fit 80x24 with y offered",
+                      flush=True)
                 session.send(b"q")
                 assert session.wait_exit(20) == 0
                 session.assert_restored()

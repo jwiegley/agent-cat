@@ -3744,14 +3744,20 @@ changes the screen or the view, or until the review leaves the screen, and
 observation refreshes that keep the review do not remove it.  When the
 preflight check refuses an approval before any send, the notice of that press
 changes to state that the approval was not sent.  The approval hint appears
-exactly when @kbd{y} would approve.  The summary view shows the request, the
-preparation, the profile with the expiry, the @code{If-Match} value, and the
-five approval selectors, and it reserves the rows of the longest notice.  A
-review without lineage fits a terminal of 80 columns by 24 rows, so the
-operator can approve at that size.  At 40 columns by 12 rows the selectors do
-not fit, and @kbd{y} shows @samp{Approval did not start: the complete review
-does not fit.  Resize the terminal.}  A resize keeps the review, the input
-drafts, and the answer drafts.
+exactly when @kbd{y} would approve, and it then states that @kbd{y} approves
+the exact review and starts the run and that @key{RET} does not approve.  The
+summary view shows the request, the preparation, the profile with the expiry,
+the @code{If-Match} value, the parent run, the operation, and the edits of a
+lineage review, and the five approval selectors, and it reserves the rows of
+the longest notice.  The summary has no frame, so its rows use the whole main
+area.  With the identifiers that the manager issues, a review without
+lineage, a restart or resume review, a fork review with one replacement, and
+a review whose profile identifier has the maximum length of 128 characters
+each fit a terminal of 80 columns by 24 rows, so the operator can approve at
+that size.  A review that does not fit is refused.  At 40 columns by 12 rows
+the selectors do not fit, and @kbd{y} shows @samp{Approval did not start: the
+complete review does not fit.  Resize the terminal.}  A resize keeps the
+review, the input drafts, and the answer drafts.
 
 A declared client failure keeps its declared meaning.  Any other failure of a
 manager call inside the frontend is an internal frontend fault, and the
