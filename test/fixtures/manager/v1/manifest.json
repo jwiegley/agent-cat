@@ -1949,6 +1949,18 @@
       "valid": true
     },
     {
+      "name": "preparation-person-answers",
+      "file": "valid/preparation-person-answers.json",
+      "schema": "Preparation",
+      "valid": true
+    },
+    {
+      "name": "preparation-person-answers-address",
+      "file": "invalid/preparation-person-answers-address.json",
+      "schema": "Preparation",
+      "valid": false
+    },
+    {
       "name": "preparation-default-and-coverage",
       "file": "invalid/preparation-default-and-coverage.json",
       "schema": "Preparation",

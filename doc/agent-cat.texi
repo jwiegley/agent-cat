@@ -4807,6 +4807,27 @@ has already expired, so a mixed run must use a positive value.
 @item --verbose
 Narrate live transport commands, polls, and protocol activity on standard error.
 It is refused under scripted execution.
+
+@c COVER CLI --person-answer author
+@item --person-answer model:NAME|tool:NAME
+Name a model or tool addressee whose questions a person answers instead of the
+routed backend.  The option is repeatable, and each address may appear once.  It
+is accepted only with a live target in a machine run or a frontend preparation
+whose person-answering mode is @code{local-control}.  The @code{run} verb, the
+@code{engine} mode and scripted execution refuse it before a run store exists.
+The route table must still cover a named model.
+
+The target policy carries the sorted addresses as the field
+@code{personAnswers}, so the review and exact approval cover them.  A target
+without the option has no such field, and its policy keeps the same bytes and
+digest.  Before an occurrence of a named question starts, the runtime
+addresses the question to the person @code{model:NAME} or @code{tool:NAME} and
+removes its model pin.  The occurrence therefore starts with the addressee
+@code{person model:NAME} and follows the local person path of
+@code{--person-answering local-control}: the private question reference, the
+pending event and the typed @code{answerPerson} control.  No engine start, turn
+or tool call occurs for it, and the run log records the answer from the intake
+with the control that supplied it.
 @end table
 
 @section Fork edit options

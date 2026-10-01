@@ -117,6 +117,8 @@ module Agentic.Exec
     noChains,
     chainsOf,
     candidates,
+    personAnswerAddress,
+    parsePersonAnswerAddress,
     TurnGapError (..),
     raiseGap,
     withTransportGaps,
@@ -196,7 +198,7 @@ import Agentic.Plan
     QScope (..),
     Request (..),
     RequestShape (..),
-    Shape (shAddressee),
+    Shape (..),
     SCode (SAck, SFlag, SStructured, SText, SVerdict),
     defaultEl,
     evalExpr,
@@ -825,7 +827,8 @@ execIn scheduler w ch y pl = case pl of
   PRet e -> do
     a <- awaitExpr scheduler e y
     pure (a, [])
-  PAskC c q k -> do
+  PAskC c q0 k -> do
+    let q = personAnsweredRequest ch q0
     occurrence <- freshOccurrence scheduler
     epoch <- occurrenceEpoch scheduler (intentIsEffect (reqIntent q))
     cell <-
@@ -833,7 +836,8 @@ execIn scheduler w ch y pl = case pl of
         runOccurrence scheduler w ch occurrence epoch c q
     (result, tickets) <- execIn scheduler w ch (PendingCons cell y) k
     pure (result, Ticket occurrence cell : tickets)
-  PAsk c shape prompt k -> do
+  PAsk c shape0 prompt k -> do
+    let shape = personAnsweredShape ch shape0
     occurrence <- freshOccurrence scheduler
     epoch <- occurrenceEpoch scheduler (intentIsEffect (rsIntent shape))
     cell <- spawn scheduler (reserveQuestion scheduler occurrence w ch c shape) $ do
@@ -1561,17 +1565,62 @@ data Chains = Chains
     -- | where a fail-over says what it is about to do. 'stderrLog' by default:
     -- the narration is a warning and not a consultation, which is the same
     -- split 'announcingWorld' and 'stderrLog' already make.
-    chainLog :: Text -> IO ()
+    chainLog :: Text -> IO (),
+    -- | The model and tool addressees whose asks a person answers instead of
+    -- the routed actor, from the approved policy field @personAnswers@. Empty
+    -- for a policy without the field. See 'personAnswered'.
+    chainPersonAnswers :: ![Addressee]
   }
 
 -- | No alternates anywhere, which is what 'runPlanIO' passes and what makes it
 -- the fold it always was.
 noChains :: Chains
-noChains = Chains Map.empty stderrLog
+noChains = Chains Map.empty stderrLog []
 
 -- | A chain table with an operator's log.
 chainsOf :: (Text -> IO ()) -> Map Text [Text] -> Chains
-chainsOf lg t = Chains t lg
+chainsOf lg t = Chains t lg []
+
+-- | The address of a model or tool addressee in the policy field
+-- @personAnswers@: @model:NAME@ or @tool:NAME@. Other addressees have none.
+personAnswerAddress :: Addressee -> Maybe Text
+personAnswerAddress = \case
+  AddrModel name -> Just ("model:" <> name)
+  AddrTool name -> Just ("tool:" <> name)
+  _ -> Nothing
+
+-- | Read one @personAnswers@ address, the inverse of 'personAnswerAddress'.
+parsePersonAnswerAddress :: Text -> Either Text Addressee
+parsePersonAnswerAddress address = case T.breakOn ":" address of
+  ("model", name) | Just rest <- named name -> Right (AddrModel rest)
+  ("tool", name) | Just rest <- named name -> Right (AddrTool rest)
+  _ -> Left ("a person-answer address is model:NAME or tool:NAME, not '" <> address <> "'")
+  where
+    named suffix = case T.stripPrefix ":" suffix of
+      Just rest | not (T.null (T.strip rest)) -> Just rest
+      _ -> Nothing
+
+-- | The request of a plan step as the runtime dispatches it. When the run's
+-- policy names the step's addressee in @personAnswers@, the question goes to
+-- the person @model:NAME@ or @tool:NAME@ instead, with its model pin removed,
+-- so the occurrence takes the person path and no engine or tool is asked.
+-- Every other request is unchanged.
+personAnswered :: Chains -> Shape c -> Shape c
+personAnswered ch shape
+  | shAddressee shape `elem` chainPersonAnswers ch,
+    Just address <- personAnswerAddress (shAddressee shape) =
+      shape
+        { shAddressee = AddrPerson address,
+          shScope = (shScope shape) {scopeModelAxis = Nothing}
+        }
+  | otherwise = shape
+
+personAnsweredRequest :: Chains -> Request c -> Request c
+personAnsweredRequest ch request =
+  withRequestPrompt (personAnsweredShape ch (requestShapeOf request)) (qPrompt (reqQuestion request))
+
+personAnsweredShape :: Chains -> RequestShape c -> RequestShape c
+personAnsweredShape ch shape = shape {rsQuestion = personAnswered ch (rsQuestion shape)}
 
 -- | Bare-Q key of a reusable annotated request. The memo stores a semantic
 -- answer event; each Plan occurrence constructs its own ExecEvent.

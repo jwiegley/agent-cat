@@ -16,6 +16,12 @@ code, and preserves program hash and policy from that same native response.
 
 The public plan is the exact native plan value encoded as JSON text. Policy is a
 fixed allowlist projection following PublicPolicy and PublicRealizationPolicy.
+The routed projection keeps `personAnswers`, the sorted model and tool
+addresses that `--person-answer` names, when the native policy has it. The
+review therefore shows which asks a person answers, and exact approval covers
+them. A policy without the field projects without it. The retained
+prepared-target relation also requires that the native policy carry the
+`personAnswers` value of the configured target arguments.
 Private scratch, binary, adapter arguments, routing sources, provider options,
 invocation and environment fields are omitted structurally. Unknown private fields
 are not copied. Required unsafe or oversized facts refuse rather than being

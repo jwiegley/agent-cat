@@ -3416,6 +3416,18 @@ components:
             - project
             - user-default
           policyDigest: *id011
+          personAnswers:
+            type: array
+            items:
+              type: string
+              minLength: 1
+              maxLength: 1024
+              pattern: ^(model|tool):.+$
+            minItems: 1
+            maxItems: 256
+            description: The model and tool addresses whose asks a person answers
+              through the person gate instead of the routed backend. Present only
+              when the target names at least one address.
         required:
         - kind
         - routes

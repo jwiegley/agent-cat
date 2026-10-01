@@ -489,6 +489,18 @@ question as a fixture. Otherwise an in-process tool is a registry tool, a
 command is a program command, and every other question, including a person
 question in engine mode, goes to the model that the runtime routed it to.
 
+A run whose policy has the field `personAnswers` carries its addresses in
+`chainPersonAnswers` of the run's `Chains`. Before the runtime reserves and
+starts an occurrence of a plan step, `execIn` rewrites the question of a step
+whose addressee is named there. The addressee becomes the person `model:NAME`
+or `tool:NAME`, and the model pin is removed. The occurrence then takes the
+local person path: `requestAnswerer` resolves the intake, the run log records
+the `question` to the intake and the `answer` from the intake with the control
+that supplied it, and no `engine-start` or `turn` record occurs for it. The
+command line admits the field only under the local-control person-answering
+mode with the control channel present. A run without the field has an empty
+list, and its requests, events and run log do not change.
+
 The operations append these records. The runtime of the run sends each ask and
 receives each reply.
 

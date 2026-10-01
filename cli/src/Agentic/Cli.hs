@@ -298,7 +298,7 @@ import qualified Data.ByteString as BS
 import Data.Char (isAlphaNum)
 import qualified Data.ByteString.Lazy as BL
 import Data.List (find, nub, sort, sortOn, tails)
-import Data.Maybe (fromMaybe, isJust, isNothing, listToMaybe)
+import Data.Maybe (fromMaybe, isJust, isNothing, listToMaybe, mapMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Read as TR
@@ -399,6 +399,9 @@ import Agentic.Runtime
     noChains,
     nullPersistenceHooks,
     runPlanScoped,
+    Chains (chainPersonAnswers),
+    parsePersonAnswerAddress,
+    personAnswerAddress,
     runFlowFor,
     scriptedWorld,
     sayEl,
@@ -574,7 +577,7 @@ import Agentic.Workflow
     inputSpecs,
     supply,
   )
-import Agentic.Planning (answerFromJson, answerJson, billExecFresh, billMemo)
+import Agentic.Planning (Addressee, answerFromJson, answerJson, billExecFresh, billMemo)
 
 -- | Keep the pre-RTS control bootstrap linked into each registry executable.
 -- Its constructor reserves fd 3 before an event manager can allocate it.
@@ -890,6 +893,10 @@ data RunRoutes = RunRoutes
     rrPollMs :: !(Maybe Int),
     rrTimeoutMs :: !(Maybe Int),
     rrVerbose :: !Bool,
+    -- | @--person-answer ADDRESS@, in the order given: the model and tool
+    -- addressees whose asks a person answers through the local control
+    -- channel instead of the routed actor.
+    rrPersonAnswers :: ![Addressee],
     -- | Whether @--adapter@ was /given/, as against left at its default. The
     -- name alone cannot say — @stub@ is both a thing to type and what a silent
     -- command line means — and the run announces the default rather than
@@ -1240,6 +1247,7 @@ frontendCmd broker reg = Frontend.runFrontendSession (regBinary reg) runnerVersi
         captured
       (initial, pinned, forbiddenInputs) <- require (parseTarget reg arguments)
       unless (null forbiddenInputs) (ioError (userError "frontend target arguments cannot contain workflow inputs"))
+      require (personAnswersAdmitted answering initial)
       case initial of
         Routed routes' | any credentialArgument (rrAdapterArgs routes') ->
           ioError (userError "frontend adapter arguments cannot carry credentials")
@@ -2490,7 +2498,7 @@ runCmdObserved broker observer output reg name target prog gs =
       gs
 
 runCmdControlled :: forall r. DataBroker -> (FlowScope -> DataBroker) -> PersonAnswering -> Maybe ControlRuntime -> PersistenceHooks -> EventSink -> (Text -> IO ()) -> Registry -> Text -> Target -> ProgramOf r -> [Given] -> IO (El r, ExecTrace)
-runCmdControlled broker scoped personAnswering runtimeControls persistence observer outputReceiver reg name target prog gs = case target of
+runCmdControlled broker scoped personAnswering runtimeControls persistence observer outputReceiver reg name target prog gs = admitted $ case target of
   Scripted -> do
     authored <- requiredChains
     output $
@@ -2589,6 +2597,15 @@ runCmdControlled broker scoped personAnswering runtimeControls persistence obser
     script = maybe [] rowScript (regLookup reg name)
     rowTools' = maybe [] rowTools (regLookup reg name)
     tools = map fst rowTools'
+    personAnswers = targetPersonAnswers target
+
+    -- A target with @personAnswers@ starts only under local control with the
+    -- machine control channel present.
+    admitted run = do
+      either refuse pure (personAnswersAdmitted personAnswering target)
+      when (not (null personAnswers) && isNothing runtimeControls) $
+        refuse "--person-answer requires the machine control channel"
+      run
 
     -- The backends' sentences say who answers every tool, so a run that
     -- answers some tools in process says which, and where they read and write.
@@ -2877,9 +2894,9 @@ runCmdControlled broker scoped personAnswering runtimeControls persistence obser
       -- first question: an operator reading a transcript must be able to see
       -- which subject it was about, and the value itself can be a whole diff.
       mapM_ (output . inputsLine) gs
-      let chains
-            | Map.null chainTable = noChains
-            | otherwise = chainsOf stderrLog chainTable
+      let chains =
+            (if Map.null chainTable then noChains else chainsOf stderrLog chainTable)
+              {chainPersonAnswers = personAnswers}
       mapM_ (output . chainLine) [entry | entry <- Map.toList chainTable, not (null (snd entry))]
       output ""
       (result, tr) <-
@@ -3253,6 +3270,7 @@ resolveRoutingOnly tools (RoutingLoaded options loaded selected) prog = do
         rrPollMs = roPollMs options,
         rrTimeoutMs = roTimeoutMs options,
         rrVerbose = roVerbose options,
+        rrPersonAnswers = roPersonAnswers options,
         rrAdapterGiven = False
       }
 
@@ -3435,9 +3453,34 @@ targetPolicy (Routed rr) = case rrSelectedRoutingV2 rr of
              "realizations" .= map resolvedRealizationPolicy (Map.elems (rrRealizations rr)),
              "verbose" .= rrVerbose rr
            ]
+        <> personAnswerFields (rrPersonAnswers rr)
     defaultFields = case routeDefault (rrRoutes rr) of
       Nothing -> ["coverage" .= ("full" :: Text)]
       Just defaultBackend -> ["default" .= backendSpelling defaultBackend]
+
+-- | The policy field @personAnswers@, present only when the target names at
+-- least one address, so a policy without it keeps its bytes and its digest.
+personAnswerFields :: [Addressee] -> [Pair]
+personAnswerFields [] = []
+personAnswerFields addresses =
+  ["personAnswers" .= sort (mapMaybe personAnswerAddress addresses)]
+
+-- | The addressees that the target's @personAnswers@ field names.
+targetPersonAnswers :: Target -> [Addressee]
+targetPersonAnswers = \case
+  Scripted -> []
+  Routing (RoutingUnloaded options) -> roPersonAnswers options
+  Routing (RoutingLoaded options _ _) -> roPersonAnswers options
+  Routed rr -> rrPersonAnswers rr
+
+-- | A target with @personAnswers@ needs a person to answer: the local-control
+-- person-answering mode. Preparation, the machine commands and @run@ refuse
+-- such a target in any other mode.
+personAnswersAdmitted :: PersonAnswering -> Target -> Either Text ()
+personAnswersAdmitted answering target
+  | null (targetPersonAnswers target) || answering == PersonAnswerLocalControl = Right ()
+  | otherwise = Left "--person-answer requires a machine run with --person-answering local-control"
+
 lineagePolicy :: Value -> Value
 lineagePolicy (Object policy) =
   Object
@@ -3806,11 +3849,15 @@ parseCommand reg = \case
   ("plan" : name : rest) -> planOpts name Human False False [] rest
   ("cost" : name : rest) -> costOpts name [] rest
   ["run", "--help"] -> Left ("run needs " <> article reg <> " before its options\n\n" <> usage reg)
-  ("run" : name : rest) -> (\(t, p, ins) -> Run name t p ins) <$> parseTarget reg rest
+  ("run" : name : rest) -> do
+    (target, pinned, inputs) <- parseTarget reg rest
+    personAnswersAdmitted PersonAnswerEngine target
+    pure (Run name target pinned inputs)
   ("machine" : runIdText : name : rest) -> do
     runId <- mkRunId runIdText
     (options, targetArgs) <- machineOptions rest
     (target, pinned, inputs) <- parseTarget reg targetArgs
+    personAnswersAdmitted (machinePersonAnswering options) target
     pure (Machine options runId name target pinned inputs)
   ("lineage-check" : operation : parent : name : rest) -> do
     lineage <- case operation of
@@ -3821,6 +3868,7 @@ parseCommand reg = \case
     (edits, remaining) <- lineageEdits lineage rest
     (options, targetArgs) <- machineOptions remaining
     (target, pinned, inputs) <- parseTarget reg targetArgs
+    personAnswersAdmitted (machinePersonAnswering options) target
     pure (LineageCheck options lineage (T.unpack parent) edits name target pinned inputs)
   ["flow", "--help"] -> Left "flow takes PATH... [--follow] [--route PREDICATE] [--from CURSOR]"
   ("flow" : path : rest) | not ("--" `T.isPrefixOf` path) ->
@@ -3880,6 +3928,7 @@ parseCommand reg = \case
       (edits, remaining) <- lineageEdits lineage rest
       (options, targetArgs) <- machineOptions remaining
       (target, pinned, inputs) <- parseTarget reg targetArgs
+      personAnswersAdmitted (machinePersonAnswering options) target
       pure (MachineLineage options lineage runId (T.unpack parent) edits name target pinned inputs)
 
     machineOptions = goMachineOptions defaultMachineOptions False False []
@@ -4014,6 +4063,8 @@ data RunOpts = RunOpts
     roDiscoveryMode :: !(Maybe DiscoveryMode),
     roExpectedRoutingFingerprint :: !(Maybe Text),
     roScratch :: !(Maybe Text),
+    -- | @--person-answer ADDRESS@, in the order given.
+    roPersonAnswers :: ![Addressee],
     -- | @--require-pinned@. Belongs to no engine — it is a question about the
     -- program's text, which is the same text whoever answers it — so it is the
     -- one flag 'chooseTarget' neither forbids nor consumes.
@@ -4043,6 +4094,7 @@ noRunOpts =
       roDiscoveryMode = Nothing,
       roExpectedRoutingFingerprint = Nothing,
       roScratch = Nothing,
+      roPersonAnswers = [],
       roRequirePinned = False,
       roInputs = []
     }
@@ -4092,8 +4144,8 @@ validateManagerPreparedTarget reg arguments prepared = do
         Routed original -> do
           let expected=targetPolicy(Routed original)
               same key=case expected of Object fields->KM.lookup key fields==field key;_->False
-          unless(all same ["default","coverage","routes","pollMs","timeoutMs","verbose"])(Left Manager.InvalidReply)
-        _ -> pure()
+          unless(all same ["default","coverage","routes","pollMs","timeoutMs","verbose","personAnswers"])(Left Manager.InvalidReply)
+        _ -> unless(field "personAnswers"==KM.lookup "personAnswers" (KM.fromList (personAnswerFields (targetPersonAnswers target))))(Left Manager.InvalidReply)
       case configuredScratch of
         Just explicit -> unless(preparedTargetArguments prepared==arguments && field "scratch"==Just(String(T.pack explicit)))(Left Manager.InvalidReply)
         Nothing -> case field "scratch" of
@@ -4158,11 +4210,17 @@ parseTarget reg args = do
         | T.null (T.strip v) -> Left "--persona takes a non-empty name"
         | otherwise -> go o {roPersona = Just v} rest
       ("--realize" : v : rest) -> go o {roRealizations = roRealizations o <> [v]} rest
+      ("--person-answer" : v : rest) -> case parsePersonAnswerAddress v of
+        Left why -> Left ("--person-answer: " <> why)
+        Right address
+          | address `elem` roPersonAnswers o -> Left ("--person-answer names '" <> v <> "' twice")
+          | otherwise -> go o {roPersonAnswers = roPersonAnswers o <> [address]} rest
       ("--offline" : rest) -> setDiscovery o DiscoveryOffline rest
       ("--refresh-models" : rest) -> setDiscovery o DiscoveryRefresh rest
       ["--expect-routing-fingerprint"] -> Left "--expect-routing-fingerprint takes a digest"
       [flag]
         | flag `elem` ["--persona", "--realize"] -> Left (flag <> " takes a value")
+        | flag == "--person-answer" -> Left "--person-answer takes model:NAME or tool:NAME"
       ("--scratch" : v : rest) -> go o {roScratch = Just v} rest
       -- Refused by name rather than by the fallthrough below, because the
       -- operator asking for it is asking a coherent question with a real
@@ -4224,7 +4282,7 @@ chooseTarget o = case (roScripted o, roEngine o, roSession o) of
         ("--refresh-models", roDiscoveryMode o == Just DiscoveryRefresh),
         ("--expect-routing-fingerprint", isJust (roExpectedRoutingFingerprint o))
       ]
-    liveFlags = acpFlags <> deckFlags <> (("--routing", roRouting o) : routingOptions) <> [("--timeout", isJust (roTimeoutMs o)), ("--verbose", roVerbose o)]
+    liveFlags = acpFlags <> deckFlags <> (("--routing", roRouting o) : routingOptions) <> [("--timeout", isJust (roTimeoutMs o)), ("--verbose", roVerbose o), ("--person-answer", not (null (roPersonAnswers o)))]
 
     onlyScripted
       | not (null (roRoutes o)) =
@@ -4270,6 +4328,7 @@ chooseTarget o = case (roScripted o, roEngine o, roSession o) of
             rrPollMs = roPollMs o,
             rrTimeoutMs = roTimeoutMs o,
             rrVerbose = roVerbose o,
+            rrPersonAnswers = roPersonAnswers o,
             rrAdapterGiven = isJust (roAdapter o)
           }
 

@@ -17,6 +17,7 @@
 @clindex --migrate-routing
 @clindex --offline
 @clindex --output
+@clindex --person-answer
 @clindex --person-answering
 @clindex --persona
 @clindex --poll

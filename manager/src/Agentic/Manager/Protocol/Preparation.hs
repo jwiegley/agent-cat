@@ -184,7 +184,7 @@ projectPolicy raw = either(const(Left InvalidInput))Right $ parseEither project 
       _->pure fields
 
 policyKeys,realizationKeys :: [Text]
-policyKeys=["kind","default","coverage","routes","pollMs","timeoutMs","verbose","realizations","routingVersion","persona","personaSource","policyDigest"]
+policyKeys=["kind","default","coverage","routes","pollMs","timeoutMs","verbose","realizations","routingVersion","persona","personaSource","policyDigest","personAnswers"]
 realizationKeys=["profile","axis","rung","backend","router","provider","model","thinking","maxOutput","executionFingerprint","modelAlias","engine"]
 validatePolicy :: Value -> Parser ()
 validatePolicy=withObject "public policy" $ \o->do
@@ -203,6 +203,11 @@ validatePolicy=withObject "public policy" $ \o->do
       values<-o .: "realizations"::Parser[Value]
       unless(length values<=256)(fail "realizations bound")
       mapM_ realization values
+      -- The model and tool addresses whose asks a person answers, present only when named.
+      forM_ (KM.lookup "personAnswers" o) $ \value->do
+        addresses<-parseJSON value::Parser[Text]
+        unless(not(null addresses) && length addresses<=256)(fail "person answers bound")
+        forM_ addresses $ \address->unless(bounded 1 1024 address && any (\prefix->maybe False (not . T.null) (T.stripPrefix prefix address)) ["model:","tool:"])(fail "person answer address")
       let present=filter (`KM.member` o)["routingVersion","persona","personaSource","policyDigest"]
       unless(null present || length present==4)(fail "persona completeness")
       when(not(null present)) $ do
