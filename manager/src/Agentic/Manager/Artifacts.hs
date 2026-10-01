@@ -416,7 +416,7 @@ withRunExportsSource store proof association action =
       runRead store $ do
         authorizeObservation proof association
         current <- exportVersion association
-        unless (revision == current) (refuseTransaction StoreBusy)
+        unless (revision == current) (refuseBusyTransaction "artifacts-collection-revision")
       revalidateAuthorizedView view >>= either throwIO pure
       collection <- maybe (throwIO StoreIntegrity) (\(_,_,value) -> pure value) revision
       pure (collection, reverse reversed)

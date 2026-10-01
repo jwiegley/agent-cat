@@ -947,6 +947,31 @@ ordinaryAdmissionChecks work = withFixture work "ordinary-admission" (64*command
     finished <- getMonotonicTimeNSec
     check "a protected read that meets commits for the whole allowance keeps the declared refusal" (refused == Left StoreBusy)
     check "that protected read spent its whole five-second allowance" (finished - started >= 5000000000)
+  -- A read in two parts meets one concurrent commit between its parts, as a
+  -- control-surface read meets an ingestion commit. The commit runs inside the
+  -- first attempt only to place it there. The second attempt is stable.
+  changedAttempts <- newIORef (0 :: Int)
+  (changed, changedLog) <- withPrivateStderr (work </> "changed-read-stderr.log") $ repeatChangedRead "check-changed-read" $ do
+    modifyIORef' changedAttempts (+1)
+    count <- readIORef changedAttempts
+    before <- scalarText store "SELECT revision FROM requests WHERE id='request_1'"
+    when (count == 1) (mutate store (execute "UPDATE requests SET revision='changed_read_commit' WHERE id='request_1'" []))
+    after <- scalarText store "SELECT revision FROM requests WHERE id='request_1'"
+    pure (if before == after then Just after else Nothing)
+  check "a read that meets a concurrent commit between its parts starts again and returns the stable value" (changed == "changed_read_commit")
+  readIORef changedAttempts >>= check "that read ran one attempt for each change and one stable attempt" . (== 2)
+  check "a read that became stable records no busy refusal" (T.count "busy site=" (TE.decodeUtf8 changedLog) == 0)
+  -- Every attempt meets a new commit, so the allowance ends with StoreBusy and
+  -- one busy record that names the site and the spent allowance.
+  churnStarted <- getMonotonicTimeNSec
+  (churn, churnLog) <- withPrivateStderr (work </> "churn-read-stderr.log") $ try @StoreFailure $ repeatChangedRead "check-churn-read" $ do
+    mutate store (execute "UPDATE requests SET revision='churn_read_' || hex(randomblob(4)) WHERE id='request_1'" [])
+    pure (Nothing :: Maybe ())
+  churnFinished <- getMonotonicTimeNSec
+  check "a read that meets commits for the whole allowance refuses with StoreBusy" (churn == Left StoreBusy)
+  check "that read spent its whole five-second allowance" (churnFinished - churnStarted >= 5000000000)
+  check "that refusal has one busy record naming the site and no remaining allowance"
+    (length [line | line <- T.lines (TE.decodeUtf8 churnLog), "busy site=check-churn-read class=store StoreBusy elapsed=" `T.isInfixOf` line, " remaining=0ms" `T.isSuffixOf` line] == 1)
 
 commandDeadlineChecks :: FilePath -> IO ()
 commandDeadlineChecks work=withFixture work "command-deadline" (64*commandCapacity) 10 $ \_ root _ store profile proof->do

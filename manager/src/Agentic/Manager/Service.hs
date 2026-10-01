@@ -25,7 +25,8 @@ import Agentic.Manager.Protocol.Command
 import qualified Agentic.Manager.Protocol.Preparation as P
 import qualified Agentic.Manager.State as State
 import qualified Agentic.Manager.Observation as Observation
-import Agentic.Manager.Store (CoordinationStore, StoreFailure (..), withStoreFileLoan)
+import Agentic.Manager.Store (CoordinationStore, StoreFailure (..), refuseBusy, withStoreFileLoan)
+import qualified Agentic.Manager.Store.Admission as SA
 import Agentic.Manager.Worker (WorkerObservation (..))
 import Agentic.Runtime (FrontendPrepared (..))
 import Control.Concurrent (threadDelay)
@@ -38,7 +39,6 @@ import qualified Data.ByteString as BS
 import qualified Data.Map.Strict as Map
 import Data.Maybe (listToMaybe)
 import Data.Text (Text)
-import GHC.Clock (getMonotonicTimeNSec)
 
 -- | The original preparation's current public handoff, never authority from an ID.
 data Phase = Preparing | Reviewing !Approval.ReviewedPreparation
@@ -192,12 +192,12 @@ ingest original = do
   when more (ingest original)
   where
     firstBusy failure = case failure of
-      StoreBusy -> getMonotonicTimeNSec >>= \now -> sameHead (now + 5000000000)
+      StoreBusy -> SA.newDeadline >>= sameHead
       _ -> throwIO failure
     sameHead deadline = do
       threadDelay 10000
-      now <- getMonotonicTimeNSec
-      when (now >= deadline) (throwIO StoreBusy)
+      left <- try @SA.AdmissionFailure (SA.remainingMicros deadline)
+      either (const (refuseBusy "service-ingestion-head" (Just deadline))) (const (pure ())) left
       State.ingestAcceptedStart original `catch` \failure -> case failure of
         StoreBusy -> sameHead deadline
         _ -> throwIO failure

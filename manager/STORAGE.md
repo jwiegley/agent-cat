@@ -281,6 +281,56 @@ shielded against further asynchronous exceptions. Cooperative budgets do not
 promise an absolute OS IO deadline or a hard total SQLite heap bound. A stalled
 filesystem can extend joining and cleanup beyond the nominal budget.
 
+### Busy refusals and their records
+
+Each site that refuses with `StoreBusy` on a command path or a read path
+first writes one private fault line. The line names the site, the elapsed wait
+of that site and the remaining allowance of its deadline:
+`manager-fault <time> busy site=<site> class=store StoreBusy elapsed=<n>ms remaining=<n>ms`.
+A site that does not wait writes `elapsed=0ms remaining=none`. A site inside
+a transaction measures from the start of the allowance of that transaction.
+The record adds no public field, and the refusal that follows it is unchanged.
+The command layer and the transport then record their own lines, such as
+`admission operation class=store StoreBusy` and the response line.
+
+| Site | Refusal |
+| --- | --- |
+| `store-file-slot` | The file slot stayed held for the whole allowance of an ordinary file operation. |
+| `store-reader-admission` | The configuration guard was not acquired during reader admission. |
+| `configuration-guard`, `configuration-administration` | The configuration guard stayed held for its whole allowance. These lines carry `class=configuration SupervisionUnavailable`, which the Store owner then refuses as `StoreBusy`. |
+| `store-gate` | A `FailFast` Store action found the Store gate held. A `WaitWithinBudget` action that is not admitted is `StoreDeadline`. |
+| `store-authorization-observation`, `store-authorization-read-observation` | A concurrent commit changed the authorization generation of an observation. |
+| `store-admission`, `store-worker-registry` | A second Store admission, or a seventeenth Store worker. |
+| `store-manager-log-prune` | The configuration guard was not acquired for a prune round. |
+| `state-*`, `drafts-*`, `history-*`, `artifacts-*`, `overview-*` | A concurrent commit changed a revision that the owner read before. |
+| `state-control-surface`, `state-decision`, `state-control-availability` | Concurrent commits kept changing a repeated read for its whole allowance. |
+| `service-ingestion-head` | Ingestion of the retained head met contention for its whole allowance. |
+
+SQLite reports busy after its 100 ms busy timeout. That refusal is
+`StoreUnavailable`, not `StoreBusy`. Its line names the site
+`store-sqlite-transaction` or `store-sqlite-read` with
+`class=sqlite ErrorBusy` and the elapsed time of the transaction.
+
+The control-surface read of `GET /v1/runs/{id}/control` has three parts: the
+control revision and supervision, the run projection, and a second read of the
+revision, the supervision and the projection boundary. The decision read of
+`GET /v1/decisions/{id}` reads the pending queue, the projection and the
+question, and then reads the queue again. Before a control or an answer
+reserves anything, the availability read takes the projection and then the
+projection boundary and the control revision. An ingestion commit can fall
+between the parts of each of these reads. Each of them is safe to repeat and
+changes no state, so `repeatChangedRead` starts it again after a pause of
+10 ms. A new attempt starts only while one five-second allowance lasts. The
+Store actions of each attempt keep their own allowances. When commits keep
+arriving for the whole allowance, the read refuses with `StoreBusy` and one
+line for its site.
+
+Inside the command transaction of a control or an answer, the validation
+checks that the control revision is still the revision of the availability
+read. A change refuses that transaction with `StoreBusy` at the site
+`state-control-validation`, and the transaction rolls back. The command is not
+repeated, because the command transaction is an admitted operation.
+
 ## Restart and offline restoration
 
 An ordinary Store open acquires the existing configuration storage slot and

@@ -187,7 +187,7 @@ legacyWindow store (LegacyRoots roots) invocations idents = do
   let addresses = Map.fromList rows
   ordered <- forM decodable $ \ident -> case Map.lookup ident addresses of
     Just (identity,profile,component) -> pure (ident,identity,profile,component)
-    Nothing -> throwIO StoreBusy
+    Nothing -> refuseBusy "history-address" Nothing
   decoded <- observeLegacy store roots (pure invocations) ordered >>= retainViews store . map snd
   runs <- mapM legacyRunOf decoded
   let fit _ [] = ([],Nothing)
@@ -358,7 +358,7 @@ retainViews store items = concat <$> mapM retainChunk (chunks 100 items)
           _ -> refuseTransaction StoreIntegrity) viewRows
         results <- forM sampled $ \(ident,fields,digest,revision) -> do
           let current = Map.lookup ident currents
-          unless (maybe True (\value -> KM.lookup "revision" fields == Just (String value)) current) (refuseTransaction StoreBusy)
+          unless (maybe True (\value -> KM.lookup "revision" fields == Just (String value)) current) (refuseBusyTransaction "history-revision")
           case Map.lookup ident views of
             Just (retained,previous) | previous == digest -> do
               let revisionNow = fromMaybe retained current

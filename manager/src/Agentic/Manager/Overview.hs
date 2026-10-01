@@ -236,7 +236,7 @@ withSourceWithin allowance window source store proof admission legacy action = w
             let decodedMap = Map.fromList [(legacyRunId entry, legacyRunValue entry) | entry <- decoded]
             outcome@(_,_,(_,_,_,complete)) <- boundary (identifiers decodedMap stop)
             if complete then pure (decodedMap,outcome)
-              else if tries < 3 then attempt (tries + 1) else throwIO StoreBusy
+              else if tries < 3 then attempt (tries + 1) else refuseBusy "overview-legacy-window" Nothing
       (legacyVisible,(cursor,oldest,(members,total,continuation,_))) <- attempt 1
       let present kind value = case source of
             Overview -> object ["kind" .= kindWord kind,Key.fromText (kindWord kind) .= value]
@@ -256,7 +256,7 @@ withSourceWithin allowance window source store proof admission legacy action = w
             pure (next,value:items)
       (_,reversed) <- foldM append (2 :: Int,[]) members
       (current,_,()) <- boundary (pure ())
-      unless (current == cursor) (throwIO StoreBusy)
+      unless (current == cursor) (refuseBusy "overview-cursor" Nothing)
       revalidateAuthorizedView view >>= either throwIO pure
       let digest = T.pack (show (hash (C.encoded (cursor,oldest)) :: Digest SHA256))
           items = reverse reversed

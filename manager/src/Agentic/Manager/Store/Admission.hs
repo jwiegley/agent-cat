@@ -1,12 +1,16 @@
+{-# LANGUAGE OverloadedStrings #-}
+
 -- | Admission to one Store operation, with no SQL activity while waiting.
 module Agentic.Manager.Store.Admission
   ( StoreAdmission (..), AdmissionFailure (..), Deadline,
-    withGate, newDeadline, takeWithin, remainingMicros, remainingAt, releaseOnce ) where
+    withGate, newDeadline, takeWithin, remainingMicros, remainingAt, waitDetail, releaseOnce ) where
 
 import Control.Concurrent.MVar (MVar, takeMVar, tryTakeMVar, putMVar)
 import Control.Exception (Exception, mask, mask_, finally, throwIO)
 import Control.Monad (void)
 import Data.IORef (atomicModifyIORef', newIORef)
+import Data.Text (Text)
+import qualified Data.Text as T
 import Data.Word (Word64)
 import GHC.Clock (getMonotonicTimeNSec)
 import System.Timeout (timeout)
@@ -27,6 +31,17 @@ remainingAt start now
 -- | The start of one fresh allowance at the current monotonic time.
 newDeadline :: IO Deadline
 newDeadline = Deadline <$> getMonotonicTimeNSec
+
+-- | The elapsed wait and the remaining allowance of one deadline, in whole
+-- milliseconds, as fixed words for a private record. A site that does not
+-- wait has no deadline, and its record names no allowance.
+waitDetail :: Maybe Deadline -> IO Text
+waitDetail Nothing = pure "elapsed=0ms remaining=none"
+waitDetail (Just (Deadline start)) = do
+  now <- getMonotonicTimeNSec
+  let elapsed = if now < start then 0 else (now - start) `div` 1000000
+      milliseconds value = T.pack (show value) <> "ms"
+  pure ("elapsed=" <> milliseconds elapsed <> " remaining=" <> milliseconds (remainingAt start now `div` 1000))
 
 -- | Take a lock before the allowance ends. Nothing proves that the lock was
 -- not taken. The caller masks asynchronous exceptions, so a taken value

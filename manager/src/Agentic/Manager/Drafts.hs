@@ -273,7 +273,7 @@ withLineageRequestsSource store proof parent action = withStoreFileLoan store $ 
       runRead store $ do
         _ <- authorizeProfile proof profile [Observe] >>= requireTransaction
         current <- parentRevision
-        unless (current == revision) (refuseTransaction StoreBusy)
+        unless (current == revision) (refuseBusyTransaction "drafts-lineage-revision")
       revalidateAuthorizedView view >>= requireEither
       pure (LineageRequests (maybe ["restart","resume","fork"] (const []) refusal) (parentRefusalCode <$> refusal) views revision)
   where

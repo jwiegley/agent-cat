@@ -14,6 +14,7 @@ module Agentic.Manager.Configuration
 import Agentic.Manager.Lease (acquireLease, duplicateLease)
 import Agentic.Manager.Profile
 import Agentic.Manager.Root (validateRootSeparation)
+import Agentic.Manager.Fault.Record (recordBusy)
 import Agentic.Manager.Store.Admission (newDeadline, releaseOnce, takeWithin)
 import Agentic.Runtime
   ( PrivateRoot, ProcessGroup, FrontendCapabilities, FrontendInvocation (..), StateRootRole (ManagerStateRoot), assertPrivateRoot,
@@ -142,9 +143,11 @@ releaseConfigurationStorage (InstalledConfiguration _ slot) =
 -- The guard is waited for within one five-second allowance.
 withConfigurationAdministration :: InstalledConfiguration -> (PrivateRoot -> IO a) -> IO (Either Diagnostic a)
 withConfigurationAdministration (InstalledConfiguration lock _) action = mask $ \restore -> do
-  available <- newDeadline >>= \end -> takeWithin end lock
+  end <- newDeadline
+  available <- takeWithin end lock
   acquired <- case available of
-    Nothing -> pure (Left SupervisionUnavailable)
+    Nothing -> recordBusy "configuration-administration" "configuration SupervisionUnavailable" (Just end)
+      >> pure (Left SupervisionUnavailable)
     Just current -> (case current of
       Nothing -> pure (Left InvalidConfiguration)
       Just active -> configurationIO (assertActive active >> acquire active)) `finally` putMVar lock current
@@ -196,9 +199,10 @@ tryConfigurationLoan :: InstalledConfiguration
   -> (IO () -> ConfigurationLimits -> [PublicProfile] -> [(Text, Discovery)] -> [(Text, FrontendInvocation)] -> IO a)
   -> IO (Maybe (Either Diagnostic a))
 tryConfigurationLoan (InstalledConfiguration lock _) action = mask $ \restore -> do
-  available <- newDeadline >>= \end -> takeWithin end lock
+  end <- newDeadline
+  available <- takeWithin end lock
   case available of
-    Nothing -> pure Nothing
+    Nothing -> recordBusy "configuration-guard" "configuration SupervisionUnavailable" (Just end) >> pure Nothing
     Just current -> do
       release <- releaseOnce (putMVar lock current)
       (Just <$> (case current of
