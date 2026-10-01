@@ -1595,6 +1595,28 @@ Owner 2026-08-12, verbatim: 'I need theorems in the mathematical space of ⟦har
 ]
 #+end_src
 
+* TODO [#D] Resolve the non-blocking fess findings of subtask PC30    :review:
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-4xtp
+:LABELS:   ["review","workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-01 Thu 07:22]
+:MODIFIED: [2026-10-01 Thu 07:22]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess audit fess/pc-PC30-r1.md (2026-10-01) on subtask PC30 (WM-034 refused credential and quitting with service work intact).
+
+1. (medium) manager/test/service_http.py near lines 8166-8176: after revocation, the assertion that no command was added cannot tell the client-side gate from a manager 401 refusal, because the manager refuses any send with a revoked bearer. Ctrl-D also accepts the stale-observation text. Only the exact Enter text 'create did not start: the credential was refused.' proves the client gate from outside. The stop of automatic refresh is not observed from outside (disclosed). Fix: count the requests of the TUI credential at the manager after the refusal (manager log or access counters), or require the credential-refused text on Ctrl-D.
+2. (low) tui/src/Agentic/Tui/App.hs near line 1755: a preparation in flight when a refusal is recorded (for example from the event stream) still goes on to sendServicePending. The manager refuses the send with 401, so no effect occurs, but this contradicts the documented rule that no mutation starts while the credential is refused. Fix: in the PrepareSend branch, check laneCredentialRefused and return the lane to idle without sending.
+3. (low) tui/src/Agentic/Tui/App.hs near line 613 and ServiceLane.hs near lines 1162-1182: when g clears the refusal on a screen other than the overview, stateServiceDelivery stays DeliveryRefused. The header shows 'delivery stopped (credential refused)' and the timer reads every second (safetyReadDue treats it as not live) until the next installed overview. Fix: invalidate OverviewFetch when credentialStep clears the flag, so that the stream restarts at once.
+4. (low) manager/test/__pycache__: an untracked bytecode file was created during the tui-failures run. Disposition: the Integrator deleted it before the commit; no further action unless a later run leaves it again.
+5. (low) tui/src/Agentic/Tui/ServiceLane.hs near line 14 and tui/README.md near line 710: edited lines were not reflowed and exceed the wrap width of the surrounding prose. Fix: reflow both paragraphs.
+
 * TODO [#C] Fix the B4 route threat model fess findings
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -19181,7 +19203,7 @@ to an unapproved local launch.
 :LABELS:   ["p7","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-01 Thu 06:59]
+:MODIFIED: [2026-10-01 Thu 07:22]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-034
 :SOURCE_REPO: agent-cat
@@ -19400,6 +19422,13 @@ Local-mode behavior remains intact without a duplicated service runtime model.
     "author": "johnw",
     "text": "Subtask PC29 (2026-10-01): the service TUI handles a manager loss and restart. A read that fails with TransportUnavailable or 503 storage-unavailable makes the header show 'manager unreachable since HH:MM:SSZ' in place of the delivery state; every retained observation is marked stale, pending decisions stay visible, no cancellation is invented and no mutation is sent. A read that reaches the manager again restores reachability and invalidates every live-delivery read, so each view is read again and the PC16 worker reconnects without a key press. A run of the earlier lifetime shows as the manager reports it, for example 'Runtime: Running; supervision lost', never as completed. An uncertain command across a restart keeps its retained pending command and receipt location, shows the PC12 reconciliation state from its receipt (for example 'receipt unresolved; reconciliation uncertain'), refuses new mutations, and offers only the explicit exact resend (x and y) (model test managerLossTests). The catalogue load now reads the current profile first, which fixes the stale cached profile after a restart publishes new profile revisions. The new service_http.py mode tui-failures (executionReservations 1) holds a run open in the TUI with a second request queued, SIGKILLs the manager, requires the unreachable state, starts a new lifetime on the same root, requires the reconnected state and the run shown as lost, releases the quarantined reservation through check-store, check-quarantine and release-quarantine, and requires that the queued request reaches review and, after the TUI approval, completes visibly. Evidence: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/PC/PC29 (Werror build, tui-model-test N8, tui-failures N8, Phase A journey N8, make -C doc check, all exit 0). Fess: fess/pc-PC29-r1.md, not blocking; findings filed as acat-w8t0.\n",
     "created_at": "2026-10-01T13:59:12Z"
+  },
+  {
+    "id": 505,
+    "issue_id": "acat-wm-034-3vqz",
+    "author": "johnw",
+    "text": "PC30 (refused credential and quitting with service work intact): a 401, CredentialUnavailable or CredentialChanged refusal now shows 'credential refused', stops mutations and automatic refresh (explicit g reads stay), and never falls back to a local launch. Quitting with q or Ctrl-C leaves service runs running and no TUI process remains. Evidence: Werror build of agentic-run, routing-fixed-point-probe and tui-model-test; tui-model-test at N8 (15 new credentialRefusalTests); tui-failures at N8 (steps 5 and 6: revocation shows the refused state while the held run continues; q and Ctrl-C quits leave the held run running with no process left); Phase A journey at N8; make -C doc check. Fess round 1 non-blocking; findings filed as acat-4xtp. Package stays open.",
+    "created_at": "2026-10-01T14:22:45Z"
   }
 ]
 #+end_src

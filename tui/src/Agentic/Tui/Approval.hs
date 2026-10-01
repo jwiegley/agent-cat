@@ -160,6 +160,8 @@ data Refusal
     HelpRefused
   | CommandBusy
   | FaultStopped
+  | -- | A summary y while the credential of the session is refused.
+    CredentialStopped
   | -- | A summary y while a page-set read is in flight.
     ReadDeferred
   | StaleReview
@@ -195,6 +197,7 @@ approvalDecision scopes key view lane review = case (view, key) of
   (SummaryView, ApproveKey) -> case mutationAdmission lane of
     KeyBusy -> Refuse CommandBusy
     KeyFaulted -> Refuse FaultStopped
+    KeyCredentialRefused -> Refuse CredentialStopped
     KeyDeferred -> Refuse ReadDeferred
     KeyStart -> case review of
       ReviewStale -> Refuse StaleReview
@@ -235,6 +238,7 @@ refusalText refusal = case refusal of
   HelpRefused -> "Approval did not start: the key help is open. Esc closes it."
   CommandBusy -> "Approval did not start: a manager command is in progress or unresolved."
   FaultStopped -> "Approval did not start: an internal frontend fault stopped all mutations."
+  CredentialStopped -> "Approval did not start: the credential was refused."
   ReadDeferred -> "Approval did not start: a manager page-set read is in progress. Press y again."
   StaleReview -> "Approval did not start: the displayed review is stale."
   ExpiredReview -> "Approval did not start: the displayed review has expired or is no longer live."

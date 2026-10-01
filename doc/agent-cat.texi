@@ -3606,6 +3606,23 @@ restart publishes new profile revisions, so the frontend reads the current
 profile before each workflow catalogue, and a request that the earlier
 lifetime queued opens from the overview.
 
+When the manager refuses the credential with status 401, when the client
+cannot read the credential file, or when the credential changes during the
+session, the frontend enters the refused-credential state.  A revocation of
+the credential through local administration has this effect.  The header row
+shows @samp{credential refused} in place of the delivery state, and the
+status line states that no mutation or automatic refresh starts.  Every key
+that asks for a mutation then shows the numbered key outcome
+@samp{@var{operation} did not start: the credential was refused.}, a summary
+@kbd{y} on the exact review shows @samp{Approval did not start: the
+credential was refused.}, and no exact resend is offered.  The event stream
+stops, and the frontend reads nothing by itself.  The last observations stay
+on the screen, marked stale with the refusal code, and the manager runs
+continue.  Only an explicit read, such as @kbd{g} on the overview, reads the
+manager again.  When such a read succeeds, the state ends, and the next
+overview starts the event stream again.  The frontend never starts a local
+run in place of the refused session.
+
 A key whose operation needs a credential scope that the capabilities do not
 list starts nothing.  It shows the numbered key outcome
 @samp{@var{operation} did not start: this credential lacks @var{scope}.} before
@@ -3701,7 +3718,8 @@ read of single resources cancels that read, and its mutation starts.
 
 Exiting the frontend with @kbd{C-c}, or with @kbd{q} while no answer editor has
 the keys, closes its transport without cancelling manager-owned work.  The run
-continues in the manager.
+continues in the manager.  Service mode starts no child process, so no process
+of the frontend remains after the exit.
 
 On the exact review, only @kbd{y} in the summary view approves, and while the
 discard confirmation is open, @kbd{y} confirms the discard instead.  @key{RET}

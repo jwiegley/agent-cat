@@ -668,6 +668,33 @@ reservation through `check-store`, `check-quarantine` and
 `release-quarantine`, and approves the queued request in the TUI, whose run
 then completes in the live monitor.
 
+A credential refusal (`Agentic.Tui.ServiceLane.credentialRefusal`: a 401
+refusal, `CredentialUnavailable` or `CredentialChanged`) of a read, a
+preparation, a send or the event stream sets the credential-refusal flag of
+the lane (`refuseCredential`). The flag records the number of the last read
+ticket that the frontend issued. While it is set, `mutationAdmission` gives
+`KeyCredentialRefused`, so every mutation key shows the numbered key outcome
+`OPERATION did not start: the credential was refused.`, a summary `y` shows
+`Approval did not start: the credential was refused.`, and no exact resend is
+offered. The footer and the key help offer no mutation key. The event worker
+ends with `DeliveryRefused`, and neither the timer read, the fetches of live
+delivery nor the overview retry starts. The header row shows `credential
+refused` in place of the delivery state, and the status line shows
+`credential refused: no mutation or automatic refresh starts; g reads again`.
+The installed observations stay, marked stale with the refusal code. Only a
+read that starts after the refusal, which in this state is an explicit read
+such as `g`, can end the state: its delivery clears the flag
+(`credentialStep`), and the next installed overview starts the event worker
+again. The delivery of a read that started before the refusal does not clear
+it. The frontend never falls back to a local launch. The tui-failures mode
+also revokes the TUI credential through local administration while the TUI
+shows a held run. It requires the refused state, a refused `Ctrl-D` and a
+refused `Enter` on the workflow browser with no command added, and a run that
+still runs at its question as the harness credential reads it. It then quits
+the TUI with `q`. In a second TUI session with a new credential it opens the
+held run and quits with `Ctrl-C`. After each quit no process of the TUI
+process group remains, and the run still runs at its question.
+
 A key whose operation needs a scope that the capabilities do not list starts
 nothing and shows the numbered key outcome `OPERATION did not start: this
 credential lacks SCOPE.` before any other admission is decided, so it never
@@ -680,7 +707,7 @@ shows the approval notice `Approval did not start: this credential lacks
 SCOPE.`, and the approval hint is absent.
 
 `Agentic.Tui.ServiceLane` owns the read ticket, the one command lane, the
-internal-fault flag and the resend confirmation. Every read of the manager
+internal-fault flag, the resend confirmation and the credential-refusal flag. Every read of the manager
 passes through that single-flight lane. One composite read covers the selected
 request, its review, the receipt of a retained command, and the run snapshot,
 run controls and pending decision, and a complete read is installed in one
@@ -720,7 +747,8 @@ changed; draft kept`. Any failure that the client does not declare is an
 internal fault. The frontend then shows fixed text without exception detail,
 stops automatic refresh and every further mutation, and keeps only read-only
 actions and detachment. `Ctrl-C`, or `q` while no answer editor has the keys,
-exits without cancelling manager-owned work.
+exits without cancelling manager-owned work. Service mode owns no child
+process, so the manager runs continue and no process of the frontend remains.
 
 A question head accepts the simple codes `text`, `verdict`, `flag` and
 `receipt`. `Agentic.Tui.Person.personAnswerValue` converts the editor input by
@@ -823,7 +851,6 @@ the answer conversion against the `resources` section of
 `test/manager_client_vectors.json`, which [the protocol
 description](../doc/api/README.md#pages-and-live-delivery) describes.
 
-Service mode does not support reconnection of the session after a credential
-revocation, or acceptance at 40x12 and 80x24. The
+Service mode does not support acceptance at 40x12 and 80x24. The
 [manual](../doc/agent-cat.texi) entry for `--service` states the complete key
 behavior. Service mode is not an accepted milestone.

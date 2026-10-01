@@ -583,6 +583,21 @@ HISTORY_LEGACY_ENTRIES = 300
 # the new run with its own credential, and the live monitor must show the
 # runtime status Succeeded and the verified result whose SHA-256 the harness
 # download agrees with.
+# 5. The harness runs a third request to its person question with its own
+# credential, and the TUI opens that held run from the Manager overview. The
+# harness revokes the TUI credential through local administration. Without a
+# key press, the header must show "credential refused" and the status line
+# must say that no mutation or automatic refresh starts. Ctrl-D on the
+# question and Enter on the workflow browser must start nothing, and no
+# command is added to the coordination database. The harness reads through
+# its own credential that the run still runs at its question under owned
+# supervision. q quits the TUI with status 0. The TUI never owned a child
+# process, no process of its process group remains, and the run still runs.
+# 6. The harness issues a new TUI credential with its own client profile. A
+# second TUI session opens the held run from the Manager overview, owns no
+# child process, and quits with Ctrl-C and status 0. No process of its
+# process group remains, and the harness reads through HTTP that the run
+# still runs at its question under owned supervision.
 # Each step prints its own PASS line. It runs two manager lifetimes.
 TUI_FAILURES = "tui-failures"
 TUI_MODES = {OVERVIEW: (["profile_1", "profile_2"], ["observe", "submit"]), INPUTS: (["profile_1"], ["observe", "submit", "control"]),
@@ -842,28 +857,50 @@ class TuiModeFixture:
     for the harness through local administration, so that the requests of the
     harness spend nothing of the per-client bounds of the TUI credential
     (sseReadersPerClient 2 and ordinaryMutationsPerMinute 30). session()
-    starts the TUI through TuiSession, at 80x24 by default."""
+    starts the TUI through TuiSession, at 80x24 by default. credential_ids
+    holds the credential identifier of each issued credential, and renew()
+    issues a new TUI credential with its own client profile."""
 
     def __init__(self, profiles, scopes):
         configuration["profiles"] = [profile for profile in configuration["profiles"] if profile["id"] in profiles]
         assert [profile["id"] for profile in configuration["profiles"]] == profiles, ("unknown TUI mode profile", profiles)
         config.write_text(json.dumps(configuration))
+        self.profiles, self.scopes = profiles, scopes
         harness_scopes = ["observe", "submit", "control"] + (["export"] if "export" in scopes else [])
+        self.credential_ids = {}
         for name, granted in (("tui", scopes), ("harness", harness_scopes)):
-            administration({"version": 1, "operation": "issue-credential", "label": "TUI mode " + name,
-                            "scopes": granted, "profileIds": profiles,
-                            "expiresAt": "2999-01-01T00:00:00Z", "outputFile": str(work / ("credential-" + name))})
+            self.issue(name, granted)
         self.harness = {"Authorization": "Bearer " + (work / "credential-harness").read_bytes().decode("ascii")}
-        self.client_profile = work / "client-profile-tui.json"
-        self.client_profile.write_text(json.dumps({"version": 1, "endpoint": f"https://127.0.0.1:{port}/v1",
-                                                   "credentialFile": str(work / "credential-tui"), "caFile": str(cert)}))
-        self.client_profile.chmod(0o600)
+        self.client_profile = self.write_profile("tui")
         self.client_state = work / "unused-client-state"
 
-    def session(self, rows=24, columns=80):
-        """The service TUI of the TUI credential in a new pseudo-terminal."""
+    def issue(self, name, granted):
+        """Issue one credential through local administration into
+        credential-NAME and record its identifier."""
+        issued = administration({"version": 1, "operation": "issue-credential", "label": "TUI mode " + name,
+                                 "scopes": granted, "profileIds": self.profiles,
+                                 "expiresAt": "2999-01-01T00:00:00Z", "outputFile": str(work / ("credential-" + name))})
+        self.credential_ids[name] = issued["result"]["credential"]["credentialId"]
+
+    def write_profile(self, name):
+        """The client profile of the credential credential-NAME."""
+        profile = work / ("client-profile-" + name + ".json")
+        profile.write_text(json.dumps({"version": 1, "endpoint": f"https://127.0.0.1:{port}/v1",
+                                       "credentialFile": str(work / ("credential-" + name)), "caFile": str(cert)}))
+        profile.chmod(0o600)
+        return profile
+
+    def renew(self, name):
+        """Issue a new TUI credential with the scopes of the mode as
+        credential-NAME, and return its client profile."""
+        self.issue(name, self.scopes)
+        return self.write_profile(name)
+
+    def session(self, rows=24, columns=80, client_profile=None):
+        """The service TUI of the TUI credential, or of the given client
+        profile, in a new pseudo-terminal."""
         from tui_probe import TuiSession
-        command = [os.environ["TUI_CHECK"], "--tui", "--service", str(self.client_profile), "+RTS", "-N" + native, "-RTS"]
+        command = [os.environ["TUI_CHECK"], "--tui", "--service", str(client_profile or self.client_profile), "+RTS", "-N" + native, "-RTS"]
         return TuiSession(runner, self.client_state, rows=rows, columns=columns, command=command, explicit_state=False)
 
 
@@ -8049,10 +8086,38 @@ def tui_failure_checks():
             session.pump(0.1)
         return session.screen.text()
 
-    def create_draft():
+    def own_processes(pid):
+        """The processes other than pid whose parent is pid or whose process
+        group is the group of pid. TuiSession starts the TUI as the leader of
+        its own session and process group."""
+        listed = subprocess.run(["ps", "-A", "-o", "pid=,ppid=,pgid="], stdout=subprocess.PIPE, check=True, timeout=10).stdout.decode()
+        rows = [tuple(map(int, line.split())) for line in listed.splitlines() if line.strip()]
+        return [row for row in rows if row[0] != pid and (row[1] == pid or row[2] == pid)]
+
+    def still_running(run, head):
+        """Read through the harness credential that the run still runs at its
+        pending question under owned supervision."""
+        snapshot, _, _ = observed("/v1/runs/" + run + "/snapshot", "RunSnapshot")
+        control, _, _ = observed("/v1/runs/" + run + "/control", "RunControl")
+        run_view, _, _ = observed("/v1/runs/" + run, "Run")
+        assert snapshot["runtime"] is not None and snapshot["runtime"]["status"] == "running", ("the held run does not run", snapshot["runtime"])
+        assert control["decisionHeadId"] == head and run_view["supervision"] == "owned", (
+            "the held run left its question or its supervision", control["decisionHeadId"], run_view["supervision"])
+
+    def open_run(session, run):
+        """Open the held run from the Manager overview at its question."""
+        focus_row(session, "run Running", "Run:" + run, 30)
+        session.send(b"\r")
+        session.wait_screen("Your answer", timeout=20)
+        return session.wait_screen("Observation: current", timeout=20)
+
+    def create_draft(chosen=None):
+        """Create a draft of the mixed workflow, or of the given catalogue
+        entry, through the harness credential."""
+        chosen = chosen or workflow
         key = capabilities["authorityEpoch"] + "." + secrets.token_urlsafe(16)
-        body = {"workflowId": workflow["id"], "descriptorRevision": workflow["revision"],
-                "profileId": workflow["profileId"], "profileRevision": workflow["profileRevision"]}
+        body = {"workflowId": chosen["id"], "descriptorRevision": chosen["revision"],
+                "profileId": chosen["profileId"], "profileRevision": chosen["profileRevision"]}
         status, created, raw = request("/v1/requests", harness | {"Content-Type": "application/json", "Idempotency-Key": key},
                                        method="POST", payload=json.dumps(body, separators=(",", ":")).encode())
         assert status == 201, ("request creation", status, created.get("code"))
@@ -8172,11 +8237,81 @@ def tui_failure_checks():
             assert squeeze("Result SHA-256: " + artifact["sha256"]) in squeeze(screen), "the TUI result digest differs from the harness download"
             print("PASS tui-failures 4: after release-quarantine of", quarantine, "request", queued["id"], "reached review without a",
                   "client command, the TUI approved it, and run", second_run, "succeeded in the live monitor with verified result", artifact["id"], flush=True)
+            # 5. A held run is open in the TUI when the harness revokes the
+            # TUI credential. The restart published a new profile revision,
+            # so the catalogue is read again.
+            status, catalogue, _ = request("/v1/workflows?profileId=profile_1", harness)
+            assert status == 200
+            current = next(item for item in catalogue["items"] if item["name"] == "mixed-controls")
+            third = create_draft(current)
+            _, held_run = approve_mixed(third, current, client)
+            held_head, _, _ = drive_mixed(held_run, client, stop_at_question=True, overview=False)
+            session.send(b"\x1b")
+            session.wait_screen("Manager overview", timeout=10)
+            open_run(session, held_run)
+            assert not own_processes(session.process.pid), ("the service TUI owns a process", own_processes(session.process.pid))
+            commands_before = command_ids()
+            administration({"version": 1, "operation": "revoke-credential", "credentialId": tui_fixture.credential_ids["tui"]})
+            revoked_at = time.monotonic()
+            while "credential refused" not in header(session):
+                assert time.monotonic() < revoked_at + 30, ("the TUI did not show the refused credential", session.screen.text())
+                session.pump(0.1)
+            refused_after = time.monotonic() - revoked_at
+            session.settle()
+            screen = session.screen.text()
+            save(session, "credential-refused")
+            assert squeeze("credential refused: no mutation or automatic refresh starts; g reads again") in squeeze(screen), (
+                "the status line does not name the refused credential", screen)
+            assert "Your answer" in screen and not any(word in screen for word in ("Succeeded", "Cancelled", "Terminal:")), (
+                "the refused TUI lost the held run or invented an ending", screen)
+            session.send(b"false")
+            session.settle()
+            session.send(b"\x04")
+            session.wait_screen("answer did not start:", timeout=10)
+            assert re.search(r"Key \d+: answer did not start: (the credential was refused|the decision observation is stale)\.", session.screen.text()), (
+                "Ctrl-D did not refuse the answer", session.screen.text())
+            session.send(b"\x1b")
+            session.wait_screen("Manager overview", timeout=10)
+            session.send(b"\x1b")
+            session.wait_screen("Manager workflows", timeout=10)
+            session.send(b"\r")
+            session.wait_screen("create did not start: the credential was refused.", timeout=10)
+            save(session, "credential-refused-create")
+            still_running(held_run, held_head)
+            assert command_ids() == commands_before, "the TUI sent a command after its credential was refused"
+            tui_pid = session.process.pid
+            assert not own_processes(tui_pid), ("the service TUI owns a process", own_processes(tui_pid))
             session.send(b"q")
             assert session.wait_exit(20) == 0
             session.assert_restored()
+            assert not own_processes(tui_pid), ("a process of the quit TUI remains", own_processes(tui_pid))
+            still_running(held_run, held_head)
+            print("PASS tui-failures 5: after revocation of the TUI credential the header showed credential refused after", f"{refused_after:.2f}",
+                  "seconds, Ctrl-D and Enter started nothing, no command was added, run", held_run, "still runs at question", held_head,
+                  "and q quit the TUI with no child process", flush=True)
+        # 6. A second TUI session with a new credential quits with Ctrl-C
+        # while the held run is open.
+        renewed = tui_fixture.renew("tui-renewed")
+        with tui_fixture.session(rows=36, columns=140, client_profile=renewed) as session:
+            session.wait_screen("Manager profiles")
+            session.wait_screen("profile_1")
+            session.send(b"\r")
+            session.wait_screen("Manager workflows")
+            session.send(b"O")
+            session.wait_screen("Manager overview")
+            open_run(session, held_run)
+            save(session, "renewed-held")
+            tui_pid = session.process.pid
+            assert not own_processes(tui_pid), ("the service TUI owns a process", own_processes(tui_pid))
+            session.send(b"\x03")
+            assert session.wait_exit(20) == 0
+            session.assert_restored()
+            assert not own_processes(tui_pid), ("a process of the quit TUI remains", own_processes(tui_pid))
+            still_running(held_run, held_head)
+            print("PASS tui-failures 6: a second TUI session with a new credential opened run", held_run, "and quit with Ctrl-C;",
+                  "no process of the TUI remains, and the run still runs at question", held_head, flush=True)
         assert not tui_fixture.client_state.exists(), "the service TUI created local runner state"
-        print("PASS tui-failures: the service TUI followed a manager loss and restart", flush=True)
+        print("PASS tui-failures: the service TUI followed a manager loss and restart, a refused credential and a quit during a held run", flush=True)
     finally:
         for process in lifetimes:
             if process.poll() is None:

@@ -11,7 +11,7 @@
 -- Asynchronous exceptions propagate unchanged.
 --
 -- The 'Lane' holds the read ticket, the one command lane, the internal-fault
--- flag and the resend confirmation. The completion of every read,
+-- flag, the resend confirmation and the credential-refusal flag. The completion of every read,
 -- preparation and send is a pure transition of the lane. Observations are not
 -- lane facts, so no lane transition can change them. The lane values are
 -- polymorphic in the pending command and receipt location. The lane only
@@ -67,6 +67,17 @@
 -- like any other read, so the mutation deferral rule is unchanged. While the
 -- stream is live, the timer refresh of the selected request is only a
 -- safety read ('safetyReadDue').
+--
+-- A credential refusal ('credentialRefusal': a 401 refusal, an unavailable
+-- credential or a credential that changed during the session) sets the
+-- credential-refusal flag of the lane ('refuseCredential'). While the flag is
+-- set, no mutation key starts ('KeyCredentialRefused'), no exact resend is
+-- offered, the event worker stops ('DeliveryRefused'), and no automatic
+-- refresh starts. Only a read that started after the refusal, which in this
+-- state is an explicit read such as g, can end the state: its delivery clears
+-- the flag ('credentialStep'). The delivery of a read that started before the
+-- refusal does not clear it. The frontend never starts a local run in its
+-- place.
 module Agentic.Tui.ServiceLane
   ( CallOutcome (..),
     serviceCall,
@@ -78,6 +89,11 @@ module Agentic.Tui.ServiceLane
     ReadTicket (..),
     Lane (..),
     faultLane,
+    credentialRefusal,
+    refuseCredential,
+    credentialStep,
+    credentialRefusedText,
+    credentialRefusedStatus,
     settleUncertain,
     declaredSendUncertain,
     startRead,
@@ -298,20 +314,63 @@ data ReadTicket = ReadTicket {ticketNumber :: !Int, ticketKind :: !ReadKind}
   deriving (Eq, Show)
 
 -- | The lane-owned facts of one service session: the read ticket, the one
--- command lane, whether an internal fault occurred in this session, and
--- whether an exact resend awaits confirmation. Observations, approvals and
+-- command lane, whether an internal fault occurred in this session, whether
+-- an exact resend awaits confirmation, and whether the manager or the client
+-- refused the credential of the session. Observations, approvals and
 -- receipts are not lane facts, so no lane transition can change them.
 data Lane pending location = Lane
   { laneReadTicket :: !(Maybe ReadTicket),
     laneMutation :: !(MutationState pending location),
     laneFault :: !Bool,
-    laneResendConfirm :: !Bool
+    laneResendConfirm :: !Bool,
+    -- | 'Just' the number of the last read ticket that the frontend had
+    -- issued when it recorded a credential refusal, or 'Nothing'.
+    laneCredentialRefused :: !(Maybe Int)
   }
 
 -- | Record an internal fault. The command lane stays as it is. The read
 -- ticket and any resend confirmation end.
 faultLane :: Lane pending location -> Lane pending location
 faultLane lane = lane {laneReadTicket = Nothing, laneFault = True, laneResendConfirm = False}
+
+-- | Whether a declared failure refuses the credential of the session: the
+-- manager refused it with 401, the client could not read it, or its
+-- fingerprint changed during the session.
+credentialRefusal :: C.ClientFailure -> Bool
+credentialRefusal failure = case failure of
+  C.Refused 401 _ -> True
+  C.CredentialUnavailable -> True
+  C.CredentialChanged -> True
+  _ -> False
+
+-- | Record a credential refusal, given the number of the last read ticket
+-- that the frontend issued. An earlier refusal keeps its number. The command
+-- lane and the read ticket stay as they are. Any resend confirmation ends.
+refuseCredential :: Int -> Lane pending location -> Lane pending location
+refuseCredential issued lane =
+  lane {laneCredentialRefused = Just (fromMaybe issued (laneCredentialRefused lane)), laneResendConfirm = False}
+
+-- | The lane after the read with this ticket number completed, given the
+-- number of the last read ticket that the frontend issued. The delivery of a
+-- read that started after the refusal shows that the manager accepts the
+-- credential and clears the refusal. The delivery of an earlier read changes
+-- nothing. A credential refusal records the refusal. Every other failure
+-- changes nothing.
+credentialStep :: Int -> Int -> Either C.ClientFailure () -> Lane pending location -> Lane pending location
+credentialStep issued ticket outcome lane = case outcome of
+  Right () | maybe True (< ticket) (laneCredentialRefused lane) -> lane {laneCredentialRefused = Nothing}
+  Right () -> lane
+  Left failure | credentialRefusal failure -> refuseCredential issued lane
+  Left _ -> lane
+
+-- | The text that the header row shows in place of the delivery state while
+-- the credential is refused.
+credentialRefusedText :: Text
+credentialRefusedText = "credential refused"
+
+-- | The status line while the credential is refused.
+credentialRefusedStatus :: Text
+credentialRefusedStatus = "credential refused: no mutation or automatic refresh starts; g reads again"
 
 -- | Leave an attempt unresolved. The read ticket and any resend confirmation
 -- end.
@@ -474,10 +533,10 @@ sendStep ticket outcome lane = case laneMutation lane of
   _ -> (SendStale, lane)
 
 -- | Whether a new mutation may start. No mutation starts after an internal
--- fault.
+-- fault or while the credential is refused.
 mutationAllowed :: Lane pending location -> Bool
 mutationAllowed lane = case laneMutation lane of
-  MutationIdle -> not (laneFault lane)
+  MutationIdle -> not (laneFault lane || isJust (laneCredentialRefused lane))
   _ -> False
 
 -- | The one visible outcome of a key that asks for a new mutation.
@@ -491,14 +550,18 @@ data KeyAdmission
     KeyBusy
   | -- | Nothing starts after an internal fault.
     KeyFaulted
+  | -- | Nothing starts while the credential of the session is refused.
+    KeyCredentialRefused
   deriving (Eq, Show, Enum, Bounded)
 
 -- | Decide a key that asks for a new mutation. The command lane decides
--- first, then the fault flag, then the read in flight.
+-- first, then the fault flag, then the credential-refusal flag, then the
+-- read in flight.
 mutationAdmission :: Lane pending location -> KeyAdmission
 mutationAdmission lane = case laneMutation lane of
   MutationIdle
     | laneFault lane -> KeyFaulted
+    | isJust (laneCredentialRefused lane) -> KeyCredentialRefused
     | pageSetRead lane -> KeyDeferred
     | otherwise -> KeyStart
   _ -> KeyBusy
@@ -534,6 +597,7 @@ admissionText operation admission = case admission of
   KeyDeferred -> Just (operation <> " deferred during a page-set read. Press the key again.")
   KeyBusy -> Just (operation <> " did not start: a command is in progress or unresolved.")
   KeyFaulted -> Just (operation <> " did not start: an internal fault stopped all mutations.")
+  KeyCredentialRefused -> Just (operation <> " did not start: the credential was refused.")
 
 -- | The fixed text of a key that asks for an operation whose scope the
 -- credential lacks, given the operation and the first missing scope.
@@ -738,10 +802,10 @@ replaceSlot index slot endpoints =
 number :: Int -> Text
 number index = T.pack (show (index + 1))
 
--- | The lane of a new session: no read, an idle command lane, no fault and
--- no resend confirmation.
+-- | The lane of a new session: no read, an idle command lane, no fault, no
+-- resend confirmation and no credential refusal.
 sessionLane :: Lane pending location
-sessionLane = Lane Nothing MutationIdle False False
+sessionLane = Lane Nothing MutationIdle False False Nothing
 
 -- | The operation and URI of the command whose outcome is unresolved when
 -- the session closes: an unresolved attempt, or a send in flight, whose
@@ -978,10 +1042,11 @@ retainKeyOutcome keyPress viewBefore viewAfter previous current
   | otherwise = current
 
 -- | The retained attempt that an explicit exact resend may send again.
--- Only a declared uncertainty offers one, and no fault may have occurred.
+-- Only a declared uncertainty offers one, no fault may have occurred, and
+-- the credential must not be refused.
 resendAttempt :: Lane pending location -> Maybe (Attempt pending location)
 resendAttempt lane = case laneMutation lane of
-  MutationUncertain attempt (DeclaredUncertainty _) | not (laneFault lane) -> Just attempt
+  MutationUncertain attempt (DeclaredUncertainty _) | not (laneFault lane || isJust (laneCredentialRefused lane)) -> Just attempt
   _ -> Nothing
 
 resendOffered :: Lane pending location -> Bool
@@ -1097,6 +1162,10 @@ data Delivery
     DeliveryResnapshot
   | -- | The stream stopped for this reason and does not reconnect.
     DeliveryStopped !Text
+  | -- | The manager or the client refused the credential. The stream does not
+    -- reconnect. The next installed overview, which only g reads in this
+    -- state, starts it again.
+    DeliveryRefused
   deriving (Eq, Show)
 
 -- | The delivery state as the shell shows it. The time of a disconnection
@@ -1110,6 +1179,7 @@ deliveryText delivery = "delivery " <> case delivery of
   DeliveryDisconnected since code -> "disconnected since " <> T.pack (formatTime defaultTimeLocale "%H:%M:%SZ" since) <> " (" <> code <> ")"
   DeliveryResnapshot -> "resnapshot"
   DeliveryStopped reason -> "stopped (" <> reason <> ")"
+  DeliveryRefused -> "stopped (" <> credentialRefusedText <> ")"
 
 -- | A failure of delivery at this time with this failure. A delivery that
 -- is already disconnected keeps the time of its first failure.
@@ -1208,7 +1278,8 @@ data FollowStep
     FollowPoll !Int
   | -- | The manager refused the cursor with 410. A new overview is needed.
     FollowResnapshot
-  | -- | The client is closed. The worker ends.
+  | -- | The client is closed, or the credential was refused. The worker
+    -- ends.
     FollowClosed
   deriving (Eq, Show)
 
@@ -1219,7 +1290,8 @@ data FollowStep
 -- of consecutive failures, and its end then counts as one failure. A 410
 -- refusal needs a resnapshot. Any other refusal, for example 429 when the
 -- credential has no free SSE reader, or 'streamFailureLimit' consecutive
--- failures change to polling. Otherwise the worker connects again after the
+-- failures change to polling. A credential refusal ('credentialRefusal')
+-- ends the worker with 'DeliveryRefused'. Otherwise the worker connects again after the
 -- backoff. The backoff doubles with each attempt that delivered nothing. An
 -- SSE attempt that fails while polling keeps the polling state, so the next
 -- batch decides the state.
@@ -1227,6 +1299,7 @@ afterStream :: UTCTime -> StreamEnd -> Delivery -> Follow -> (Follow, Delivery, 
 afterStream now (StreamEnd delivered cursor failure) delivery follow = case failure of
   Just C.ClientClosed -> (follow', delivery, FollowClosed)
   Just (C.Refused 410 _) -> (follow', DeliveryResnapshot, FollowResnapshot)
+  Just refusal | credentialRefusal refusal -> (follow', DeliveryRefused, FollowClosed)
   Just refusal@(C.Refused _ _) -> (backedOff, lost refusal, FollowPoll seconds)
   Just other | failures >= streamFailureLimit -> (backedOff, lost other, FollowPoll seconds)
   Just other -> (backedOff, disconnected now other delivery, FollowStream seconds)
@@ -1251,29 +1324,32 @@ data PollStep
     PollLater
   | -- | The manager refused the cursor with 410. A new overview is needed.
     PollResnapshot
-  | -- | The client is closed. The worker ends.
+  | -- | The client is closed, or the credential was refused. The worker
+    -- ends.
     PollClosed
   deriving (Eq, Show)
 
 -- | The step after one polling batch at this time, the next transport
 -- state and the next delivery state. A batch gives the cursor of the next
 -- poll and the polling state, and a batch with more events polls again at
--- once. A failed poll keeps the cursor and disconnects.
+-- once. A credential refusal ends the worker with 'DeliveryRefused'. A
+-- failed poll keeps the cursor and disconnects.
 afterPoll :: UTCTime -> Either C.ClientFailure (Text, Bool) -> Delivery -> Follow -> (Follow, Delivery, PollStep)
 afterPoll now outcome delivery follow = case outcome of
   Right (cursor, more) -> (follow {followCursor = cursor}, DeliveryPolling, if more then PollNow else PollLater)
   Left C.ClientClosed -> (follow, delivery, PollClosed)
   Left (C.Refused 410 _) -> (follow, DeliveryResnapshot, PollResnapshot)
+  Left failure | credentialRefusal failure -> (follow, DeliveryRefused, PollClosed)
   Left failure -> (follow, disconnected now failure delivery, PollLater)
 
 -- | Whether an installed overview starts the event worker from its cursor:
 -- only an overview read that started in the current fetch generation, and
--- only when no worker runs, before the first stream of the session or after
--- a 410 refusal. An overview read from before a resnapshot never starts the
--- stream from its earlier cursor.
+-- only when no worker runs, before the first stream of the session, after
+-- a 410 refusal or after a credential refusal. An overview read from before
+-- a resnapshot never starts the stream from its earlier cursor.
 overviewStartsStream :: C.FetchGeneration -> C.FetchGeneration -> Delivery -> Bool
 overviewStartsStream started current delivery =
-  started == current && delivery `elem` [DeliveryIdle, DeliveryResnapshot]
+  started == current && delivery `elem` [DeliveryIdle, DeliveryResnapshot, DeliveryRefused]
 
 -- | The resources that invalidations named since the frontend last took the
 -- set, at most 'invalidatedBound' of them. A further resource sets the

@@ -57,7 +57,7 @@ import Agentic.Tui.RunModel
 import Agentic.Tui.Save (SaveRefusal (..), Saved (..))
 import Agentic.Tui.Types
 import qualified Agentic.Tui.Service as Service
-import Agentic.Tui.ServiceLane (Delivery (..), EndpointSlot (..), EndpointState (..), Endpoints (..), KeyOutcome, Reachability (..), deliveryText, internalFaultStatus, keyOutcomeLine,
+import Agentic.Tui.ServiceLane (Delivery (..), EndpointSlot (..), EndpointState (..), Endpoints (..), KeyOutcome, Reachability (..), credentialRefusedStatus, credentialRefusedText, deliveryText, internalFaultStatus, keyOutcomeLine,
   reachabilityText)
 import qualified Agentic.Manager.Client as Manager
 import Brick
@@ -161,6 +161,11 @@ data Presentation = Presentation
     -- | An internal frontend fault occurred. No mutation starts, no exact
     -- resend is offered, and only read-only actions remain.
     presentationServiceFault :: !Bool,
+    -- | Whether the manager or the client refused the credential of the
+    -- service session. The header row then shows @credential refused@ in
+    -- place of the delivery state, and the status line says that no mutation
+    -- or automatic refresh starts.
+    presentationServiceCredentialRefused :: !Bool,
     -- | The lines that describe the installed request observation, its stale
     -- mark and the published runtime status.
     presentationServiceObservation :: ![Text],
@@ -280,6 +285,7 @@ emptyPresentation model =
       presentationServiceApprovalOffered = False,
       presentationServiceNotice = Nothing,
       presentationServiceFault = False,
+      presentationServiceCredentialRefused = False,
       presentationServiceObservation = [],
       presentationServiceRequestLines = [],
       presentationServiceRun = Nothing,
@@ -348,9 +354,11 @@ layout presentation width height
     identityRows = [bar width (muted (displayText (oneLine width (" " <> endpointLine endpoint)))) | Just endpoint <- [presentationServiceEndpoint presentation]]
     -- The header row of the screen context. Above the identity row it also
     -- shows the delivery state of the event stream at its right end, or the
-    -- time since when the manager is unreachable. The unreachable state is
-    -- shown complete, and the screen context gives way to it.
-    unreachable = reachabilityText (presentationServiceReach presentation)
+    -- refused credential, or the time since when the manager is unreachable.
+    -- Such a state is shown complete, and the screen context gives way to it.
+    unreachable
+      | presentationServiceCredentialRefused presentation = Just credentialRefusedText
+      | otherwise = reachabilityText (presentationServiceReach presentation)
     contextWidth = case unreachable of
       Just text | identity -> max 0 (width - T.length text - 2)
       _ -> width
@@ -455,6 +463,12 @@ headerContext presentation = case modelScreen model of
   where
     model = presentationModel presentation
 
+-- | Whether no service mutation starts: after an internal fault, or while
+-- the credential is refused. The key help and the footer then offer no
+-- mutation key.
+serviceMutationsStopped :: Presentation -> Bool
+serviceMutationsStopped presentation = presentationServiceFault presentation || presentationServiceCredentialRefused presentation
+
 statusView :: Presentation -> Int -> Widget Name
 statusView presentation width = withAttr attribute (displayText (oneLine width message))
   where
@@ -462,6 +476,7 @@ statusView presentation width = withAttr attribute (displayText (oneLine width m
     (attribute, message)
       | Just outcome <- presentationServiceKeyOutcome presentation = (attrName "warning", keyOutcomeLine outcome)
       | presentationServiceFault presentation = (attrName "error", internalFaultStatus)
+      | presentationServiceCredentialRefused presentation = (attrName "error", credentialRefusedStatus)
       | Just failure <- presentationControlError presentation = (attrName "error", "ERROR: " <> failure)
       | RecoveryLayer <- presentationLayer presentation = (attrName "warning", "Recovery required")
       | FilterLayer <- presentationLayer presentation = (attrName "status", browserStatus (setWorkflowFilter (T.unwords (T.words (T.intercalate "\n" (Edit.getEditContents (presentationEditor presentation))))) model))
@@ -1248,7 +1263,7 @@ keyHelpLines presentation = case modelScreen model of
   InputScreen _ -> []
   where
     model = presentationModel presentation
-    faulted = presentationServiceFault presentation
+    faulted = serviceMutationsStopped presentation
     browserKeys
       | presentationRunning presentation = []
       | otherwise = case modelTab model of
@@ -1416,19 +1431,19 @@ footerItems presentation width height
       ServiceRequestScreen request ->
         ["g REFRESH", "q DETACH"] <> [serviceBackLabel presentation | presentationServiceMutation presentation == Nothing]
           <> (if Manager.draftPhase request == "draft" && presentationServiceMutation presentation == Nothing
-                && not (presentationServiceFault presentation)
+                && not (serviceMutationsStopped presentation)
               then ["e EDIT INPUTS"] <> ["Enter REQUEST REVIEW" | Service.requestReady request] else [])
           <> ["W WITHDRAW" | Manager.draftPhase request `elem` ["draft","queued"], presentationServiceMutation presentation == Nothing,
-                not (presentationServiceFault presentation)]
+                not (serviceMutationsStopped presentation)]
       ServiceReviewScreen preparation tag -> ["d EXACT DETAILS", "q DETACH"] <>
         ["y APPROVE EXACT REVIEW" | presentationServiceApprovalOffered presentation]
-        <> ["X DISCARD" | presentationServiceMutation presentation == Nothing, not (presentationServiceFault presentation)]
+        <> ["X DISCARD" | presentationServiceMutation presentation == Nothing, not (serviceMutationsStopped presentation)]
         <> ["RESIZE TO REVIEW" | not (serviceReviewAllowed preparation tag (width,height))]
       ServiceCommandScreen _ -> ["g REFRESH", "q DETACH"] <>
         ["x EXACT RESEND" | Just (_,_,True) <- [presentationServiceMutation presentation]]
       BrowserScreen
         | presentationService presentation -> ["h HELP", "O OVERVIEW", "D DECISIONS", "H HISTORY", "Esc PROFILES", browserPaneHint, "? KEYS", "q DETACH"]
-            <> ["Enter NEW REQUEST" | presentationServiceMutation presentation == Nothing, not (presentationServiceFault presentation)]
+            <> ["Enter NEW REQUEST" | presentationServiceMutation presentation == Nothing, not (serviceMutationsStopped presentation)]
             <> ["E ENDPOINTS"]
         | presentationRunning presentation -> ["Esc REATTACH", "c CANCEL RUN", "Tab SECTION", "? KEYS", browserPaneHint]
         | compact -> ["Enter OPEN", browserPaneHint, "? KEYS", "Tab SECTION", "q QUIT"] <> case modelTab model of WorkflowsTab -> ["/ FILTER"]; RunsTab -> ["r/m/f LINEAGE"]; RoutingTab -> ["p PERSONA"]

@@ -459,7 +459,7 @@ runAppWith backend = mask $ \restore -> do
             stateTerminalSize = terminalSize,
             stateServer = Nothing,
             stateBackend = backend,
-            stateServiceLane = Lane.Lane Nothing Lane.MutationIdle False False,
+            stateServiceLane = Lane.sessionLane,
             stateServiceProfiles = [],
             stateServiceWorkflows = [],
             stateServiceWorkflow = Nothing,
@@ -1008,6 +1008,10 @@ serviceResendConfirm = Lane.laneResendConfirm . stateServiceLane
 serviceFaulted :: AppState -> Bool
 serviceFaulted = Lane.laneFault . stateServiceLane
 
+-- | Whether the manager or the client refused the credential of the session.
+serviceCredentialRefused :: AppState -> Bool
+serviceCredentialRefused = isJust . Lane.laneCredentialRefused . stateServiceLane
+
 -- | Change only the lane facts of the state.
 onLane :: (ServiceLane -> ServiceLane) -> AppState -> AppState
 onLane change state = state {stateServiceLane = change (stateServiceLane state)}
@@ -1073,7 +1077,8 @@ onEndpointsRefresh change state = case stateBackend state of
 -- clear the pending wakeup. A 410 refusal of the stream is a resnapshot
 -- ('Lane.resnapshotFetches'): the coordinator advances its generation, so
 -- a fetch in flight installs nothing, and every read is fetched again. The
--- next installed overview starts the stream again.
+-- next installed overview starts the stream again. A credential refusal of
+-- the stream records the refusal in the lane ('Lane.refuseCredential').
 handleServiceWakeup :: EventM Name AppState ()
 handleServiceWakeup = do
   state <- get
@@ -1082,7 +1087,8 @@ handleServiceWakeup = do
     writeTVar (sinkWakeup sink) False
     (,) <$> swapTVar (sinkInvalidated sink) Lane.noInvalidations <*> readTVar (sinkDelivery sink)
   let resnapshot = delivery == Lane.DeliveryResnapshot && stateServiceDelivery state /= Lane.DeliveryResnapshot
-  put state {stateServiceDelivery = delivery}
+      refused = delivery == Lane.DeliveryRefused && stateServiceDelivery state /= Lane.DeliveryRefused
+  put ((if refused then onLane (Lane.refuseCredential (stateRequestSerial state)) else id) state) {stateServiceDelivery = delivery}
   if resnapshot
     then modify (onEndpointsRefresh (\refresh -> Lane.resnapshotFetches refresh (stateServiceFetches state)))
     else invalidateServiceFetches (Lane.invalidatedFetches (serviceCompositeResources state) invalidated)
@@ -1090,10 +1096,11 @@ handleServiceWakeup = do
 -- | Start the next waiting fetch of live delivery when the read lane is
 -- free. A fetch whose read lost the read ticket without a completion waits
 -- again. Fetches follow the rule of automatic refresh: none starts during a
--- preparation or a send, after an internal fault, or while a deferred key
--- pauses refresh. The overview is fetched while its view is shown, or for
--- the cursor of a resnapshot. A fetch of the composite read without a
--- selected request reads nothing and completes at once.
+-- preparation or a send, after an internal fault, while the credential is
+-- refused, or while a deferred key pauses refresh. The overview is fetched
+-- while its view is shown, or for the cursor of a resnapshot. A fetch of the
+-- composite read without a selected request reads nothing and completes at
+-- once.
 pumpServiceFetches :: Manager.Client -> EventM Name AppState ()
 pumpServiceFetches client = do
   state <- get
@@ -1102,7 +1109,7 @@ pumpServiceFetches client = do
     ServiceBackend {} -> do
       let lane = stateServiceLane state
           fetches = Lane.fetchAbandoned lane (stateServiceFetches state)
-          allowed = not (serviceFaulted state || serviceSending state
+          allowed = not (serviceFaulted state || serviceCredentialRefused state || serviceSending state
             || Lane.refreshPaused (stateNow state) lane (stateServiceKeyOutcome state))
           startable key = allowed && case key of
             Lane.OverviewFetch -> modelScreen (stateModel state) == ServiceOverviewScreen || stateServiceDelivery state == Lane.DeliveryResnapshot
@@ -1519,21 +1526,40 @@ serviceReviewCheck state displayed tag =
 
 -- | Handle one worker result of the active session. The completion of the
 -- read that holds the read ticket also decides whether the manager answers
--- ('Lane.readReachability'). When a read reaches the manager again after it
+-- ('Lane.readReachability') and whether it accepts the credential
+-- ('Lane.credentialStep'). When a read reaches the manager again after it
 -- was unreachable, every read of live delivery is invalidated, so each
--- retained observation is read again when its view is shown.
+-- retained observation is read again when its view is shown. A credential
+-- refusal of any other result, a preparation and a send included, also
+-- records the refusal ('Lane.refuseCredential').
 handleServiceResult :: Manager.Client -> ServiceEvent -> EventM Name AppState ()
 handleServiceResult client serviceEvent = do
   before <- get
   let owned = fmap Lane.ticketNumber (Lane.laneReadTicket (stateServiceLane before)) == Just (serviceEventTicket serviceEvent)
   handleServiceResultFetch client serviceEvent
+  when (resultRefusesCredential serviceEvent) (modify (\current -> onLane (Lane.refuseCredential (stateRequestSerial current)) current))
   forM_ (if owned then serviceReadOutcome serviceEvent else Nothing) $ \outcome -> do
     now <- liftIO getCurrentTime
     current <- get
     let reach = Lane.readReachability now outcome (stateServiceReach current)
-    put current {stateServiceReach = reach}
+    put (onLane (Lane.credentialStep (stateRequestSerial current) (serviceEventTicket serviceEvent) outcome) current) {stateServiceReach = reach}
     when (stateServiceReach current /= Lane.Reachable && reach == Lane.Reachable) $
       invalidateServiceFetches [minBound .. maxBound]
+
+-- | Whether a worker result is a declared credential refusal
+-- ('Lane.credentialRefusal'): a read, a preparation or a send.
+resultRefusesCredential :: ServiceEvent -> Bool
+resultRefusesCredential serviceEvent = case serviceEvent of
+  ServicePrepared _ result -> refused result
+  ServiceSent _ result -> refused result
+  _ -> case serviceReadOutcome serviceEvent of
+    Just (Left failure) -> Lane.credentialRefusal failure
+    _ -> False
+  where
+    refused :: Lane.CallOutcome a -> Bool
+    refused result = case result of
+      Lane.Declared (Left failure) -> Lane.credentialRefusal failure
+      _ -> False
 
 -- | The outcome of a completed read for 'Lane.readReachability': a declared
 -- failure, or a delivered value. A preparation, a send and an internal fault
@@ -1859,7 +1885,8 @@ handleServiceEventCore client event = do
     AppEvent ServiceWakeup -> handleServiceWakeup
     AppEvent (Tick now) -> do
       put state {stateNow = now}
-      -- After an internal fault, observations refresh only on an explicit g.
+      -- After an internal fault, and while the credential is refused,
+      -- observations refresh only on an explicit g.
       -- After a deferred key, automatic refresh pauses until the deferring
       -- page-set read completes or for at most 'Lane.refreshPauseLimit'.
       -- While the stream is live, the timer read is a safety read at most
@@ -1867,13 +1894,13 @@ handleServiceEventCore client event = do
       -- The safety read counts only when it started a read. A refused
       -- overview read of live delivery or of a resnapshot is read again
       -- when its backoff ends.
-      unless (serviceFaulted state || Lane.refreshPaused now (stateServiceLane state) (stateServiceKeyOutcome state)
+      unless (serviceFaulted state || serviceCredentialRefused state || Lane.refreshPaused now (stateServiceLane state) (stateServiceKeyOutcome state)
           || not (Lane.safetyReadDue (stateServiceDelivery state) (stateServiceSafetyAt state) now)) $ do
         refreshServiceRequest client Lane.AutomaticRefresh
         after <- get
         when (stateRequestSerial after /= stateRequestSerial state) $
           put after {stateServiceSafetyAt = Just now}
-      when (Lane.overviewRetryDue (stateServiceOverviewRetry state) now) $ do
+      when (not (serviceCredentialRefused state) && Lane.overviewRetryDue (stateServiceOverviewRetry state) now) $ do
         modify (\current -> current {stateServiceOverviewRetry = Lane.overviewRetryStarted <$> stateServiceOverviewRetry current})
         invalidateServiceFetches [Lane.OverviewFetch]
     VtyEvent (Vty.EvResize width height) -> put state {stateTerminalSize = (width,height)}
@@ -2474,6 +2501,7 @@ toPresentation state =
         Just (Service.Approve approved _,_,_) | fmap (Manager.draftId . snd) (serviceRequest state) /= Just (Manager.draftId approved) -> Nothing
         _ -> stateServiceApprovalStatus state,
       presentationServiceFault = serviceFaulted state,
+      presentationServiceCredentialRefused = serviceCredentialRefused state,
       presentationServiceKeyOutcome = stateServiceKeyOutcome state,
       presentationServiceOverview = let installed = stateServiceOverview state in
         OverviewView (serviceOverviewRows state) (Lane.focusedIndex (map Service.overviewRowKey (serviceOverviewRows state)) (stateServiceOverviewFocus state))

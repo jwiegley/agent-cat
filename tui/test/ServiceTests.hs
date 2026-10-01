@@ -179,6 +179,7 @@ serviceTests render = do
   draftTests profile request0
   liveDeliveryTests render profile
   managerLossTests render profile row snapshot receiptValue
+  credentialRefusalTests render profile row
   where
     profileValue = object ["version" .= (1 :: Int), "id" .= ("profile_main" :: T.Text),
       "revision" .= ("profile_rev_4" :: T.Text), "workspaceLabel" .= ("Café 雪 λ" :: T.Text),
@@ -206,8 +207,8 @@ endpointTests render profile = do
         presentationServiceEndpoint = ident})
       catalogue = initialServiceModel [profile]
       -- A key outcome that starts nothing, with its text and whether it defers.
-      idle = L.Lane Nothing L.MutationIdle False False :: L.Lane T.Text T.Text
-      paging = L.Lane (Just (L.ReadTicket 3 L.PageSetRead)) L.MutationIdle False False :: L.Lane T.Text T.Text
+      idle = L.Lane Nothing L.MutationIdle False False Nothing :: L.Lane T.Text T.Text
+      paging = L.Lane (Just (L.ReadTicket 3 L.PageSetRead)) L.MutationIdle False False Nothing :: L.Lane T.Text T.Text
       outcome scopes operation lane = L.mutationKeyOutcome scopes operation lane
       submitOperations = ["create", "capture", "set-input", "remove-input", "enqueue", "withdraw"]
       controlOperations = ["cancel", "steer", "retry", "choose-recovery", "redirect", "answer"]
@@ -454,7 +455,7 @@ exportTests render row receiptValue = do
   -- A 412 stale-revision refusal of an export is definite: the lane becomes
   -- idle, retains nothing to resend, and the export line shows the refusal.
   let attempt = L.Attempt export ("pending-export" :: T.Text) Nothing
-      sending = L.Lane Nothing (L.MutationSending 7 attempt) False False :: L.Lane T.Text T.Text
+      sending = L.Lane Nothing (L.MutationSending 7 attempt) False False Nothing :: L.Lane T.Text T.Text
       (refusedStep, refusedLane) = L.sendStep 7 (L.Declared (Left (C.Refused 412 "stale-revision"))) sending
       refusedLine = S.exportLines (S.ExportRefused "result.json" (L.refusalCode (C.Refused 412 "stale-revision")))
       publishedLines = S.exportLines (S.ExportVerified receipt exported)
@@ -561,7 +562,7 @@ lineageTests render row request preparation (metadata,items) = do
     ]
   -- A 412 stale-revision refusal of a lineage request is definite.
   let attempt = L.Attempt restart ("pending-lineage" :: T.Text) Nothing
-      sending = L.Lane Nothing (L.MutationSending 9 attempt) False False :: L.Lane T.Text T.Text
+      sending = L.Lane Nothing (L.MutationSending 9 attempt) False False Nothing :: L.Lane T.Text T.Text
       (refusedStep, refusedLane) = L.sendStep 9 (L.Declared (Left (C.Refused 412 "stale-revision"))) sending
       child = request {C.draftId = "req_child", C.draftParent = Just "run_21", C.draftLineage = Just "fork",
         C.draftReadiness = C.Readiness [] [] [] []}
@@ -636,7 +637,7 @@ overviewTests render row request0 preparation = do
       detailsOf ident = maybe [] S.overviewRowDetails (listToMaybe [entry | entry <- rows, S.overviewRowId entry == ident])
       current = S.overviewStatus Nothing (Just rows)
       stale = S.overviewStatus (Just "TransportUnavailable") (Just rows)
-      lane = L.Lane (Just (L.ReadTicket 4 L.PageSetRead)) L.MutationIdle False False :: L.Lane T.Text T.Text
+      lane = L.Lane (Just (L.ReadTicket 4 L.PageSetRead)) L.MutationIdle False False Nothing :: L.Lane T.Text T.Text
       installed = L.Installed (Just members) Nothing
       (refusedStep, _, kept) = L.requestStep (const S.ReadCurrent) 4 (L.Declared (Left C.TransportUnavailable)) lane installed
       presentation model status cursor focus = (emptyPresentation model) {presentationService = True, presentationNoColor = True,
@@ -845,7 +846,7 @@ switchTests render row profile = do
       states endpoints = map L.slotState (L.endpointsSlots endpoints)
       create = S.Create row
       retained = L.Attempt create ("pending-original" :: T.Text) (Nothing :: Maybe T.Text)
-      uncertain = L.Lane (Just (L.ReadTicket 7 L.PageSetRead)) (L.MutationUncertain retained (L.DeclaredUncertainty "TransportUnavailable")) False False
+      uncertain = L.Lane (Just (L.ReadTicket 7 L.PageSetRead)) (L.MutationUncertain retained (L.DeclaredUncertainty "TransportUnavailable")) False False Nothing
       unresolved = L.unresolvedCommands uncertain
       (activeRefusal, _) = L.beginSwitch 10 start
       selected = L.moveEndpoint 1 start
@@ -898,9 +899,9 @@ switchTests render row profile = do
         unresolved == ["create " <> S.mutationURI create]
           && map L.slotUnresolved (L.endpointsSlots switched) == [unresolved, [], []]),
       ("a send in flight is unresolved at a switch and a preparation or an accepted intent is not",
-        L.unresolvedCommands (L.Lane Nothing (L.MutationSending 3 retained) False False) == unresolved
-          && null (L.unresolvedCommands (L.Lane Nothing (L.MutationPreparing 3 create) False False :: L.Lane T.Text T.Text))
-          && null (L.unresolvedCommands (L.Lane Nothing (L.MutationAwaiting create "pending" "/v1/commands/c") False False :: L.Lane T.Text T.Text))),
+        L.unresolvedCommands (L.Lane Nothing (L.MutationSending 3 retained) False False Nothing) == unresolved
+          && null (L.unresolvedCommands (L.Lane Nothing (L.MutationPreparing 3 create) False False Nothing :: L.Lane T.Text T.Text))
+          && null (L.unresolvedCommands (L.Lane Nothing (L.MutationAwaiting create "pending" "/v1/commands/c") False False Nothing :: L.Lane T.Text T.Text))),
       ("selecting the earlier endpoint again opens a new session at a new generation and keeps its unresolved command listed",
         backStart == L.SwitchStart "/p/one.json" && backStep == L.SwitchConnected "first again" && L.endpointsActive returned == 0
           && L.activeIdentity returned == Just first && generation returned == L.SessionGeneration 2
@@ -1093,7 +1094,7 @@ laneTests render row profile = do
       location = "/v1/commands/cmd_original" :: T.Text
       retained = L.Attempt create original (Just location)
       single number = Just (L.ReadTicket number L.SingleResourceRead)
-      laneWith ticket mutation = L.Lane (ticket >>= single) mutation False False :: L.Lane T.Text T.Text
+      laneWith ticket mutation = L.Lane (ticket >>= single) mutation False False Nothing :: L.Lane T.Text T.Text
       sendingLane = laneWith Nothing (L.MutationSending 7 retained)
       priorUncertain = L.MutationUncertain retained (L.DeclaredUncertainty "TransportUnavailable")
       awaiting = L.MutationAwaiting create original location
@@ -1267,10 +1268,10 @@ compositeTests render profile row request0 preparation snapshot absentRuntime (m
   -- The completion of the composite read over the lane and the installed observation.
   let create = S.Create row
       awaiting = L.MutationAwaiting create "pending" "/v1/commands/cmd_1" :: L.MutationState T.Text T.Text
-      readingLane kind = L.Lane (Just (L.ReadTicket 5 kind)) awaiting False False :: L.Lane T.Text T.Text
+      readingLane kind = L.Lane (Just (L.ReadTicket 5 kind)) awaiting False False Nothing :: L.Lane T.Text T.Text
       afterLane = readingLane L.PageSetRead
       beforeLane = readingLane L.SingleResourceRead
-      endedLane = L.Lane Nothing awaiting False False :: L.Lane T.Text T.Text
+      endedLane = L.Lane Nothing awaiting False False Nothing :: L.Lane T.Text T.Text
       priorAfter = L.Installed (Just composite) Nothing
       priorBefore = L.Installed (Just before) Nothing
       isStale step = case step of L.RequestStale -> True; _ -> False
@@ -1410,7 +1411,7 @@ compositeTests render profile row request0 preparation snapshot absentRuntime (m
           ("awaiting", awaiting), ("declared uncertainty", L.MutationUncertain attempt (L.DeclaredUncertainty "TransportUnavailable")),
           ("fault uncertainty", L.MutationUncertain attempt L.FaultUncertainty) ] :: [(String, L.MutationState T.Text T.Text)]
       tickets = [Nothing, Just (L.ReadTicket 4 L.SingleResourceRead), Just (L.ReadTicket 4 L.PageSetRead)]
-      lanes = [ (name, ticket, L.Lane ticket state faultedLane confirm)
+      lanes = [ (name, ticket, L.Lane ticket state faultedLane confirm Nothing)
               | (name,state) <- mutations, ticket <- tickets, faultedLane <- [False,True], confirm <- [False,True] ]
       pageSet ticket = fmap L.ticketKind ticket == Just L.PageSetRead
       resendStarts admission = case admission of L.ResendStart _ -> True; _ -> False
@@ -1423,7 +1424,7 @@ compositeTests render profile row request0 preparation snapshot absentRuntime (m
         and [L.mutationAdmission lane == L.KeyDeferred | (name,ticket,lane) <- lanes, name == "idle", not (L.laneFault lane), pageSet ticket]),
       ("a new-mutation key during a single-resource read on an idle lane starts after that read ends",
         and [L.mutationAdmission lane == L.KeyStart && L.laneReadTicket (L.beginMutation 9 create lane) == Nothing
-              && laneShape (L.beginMutation 9 create lane) == laneShape (L.Lane Nothing (L.MutationPreparing 9 create) (L.laneFault lane) False)
+              && laneShape (L.beginMutation 9 create lane) == laneShape (L.Lane Nothing (L.MutationPreparing 9 create) (L.laneFault lane) False Nothing)
             | (name,ticket,lane) <- lanes, name == "idle", not (L.laneFault lane), fmap L.ticketKind ticket == Just L.SingleResourceRead]),
       ("a new-mutation key during a command is refused as busy", and [L.mutationAdmission lane == L.KeyBusy | (name,_,lane) <- lanes, name /= "idle"]),
       ("a new-mutation key on an idle lane after a fault is refused", and [L.mutationAdmission lane == L.KeyFaulted | (name,_,lane) <- lanes, name == "idle", L.laneFault lane]),
@@ -1439,7 +1440,7 @@ compositeTests render profile row request0 preparation snapshot absentRuntime (m
                                                                   && L.attemptLocation retainedAttempt == Just "/v1/commands/cmd_1"; _ -> True | (_,_,lane) <- lanes]),
       ("no read starts while another read holds the ticket",
         and [null (L.startRead 8 L.SingleResourceRead lane) == (ticket /= Nothing) | (_,ticket,lane) <- lanes]
-          && fmap L.laneReadTicket (L.startRead 8 L.PageSetRead (L.Lane Nothing L.MutationIdle False False :: L.Lane T.Text T.Text))
+          && fmap L.laneReadTicket (L.startRead 8 L.PageSetRead (L.Lane Nothing L.MutationIdle False False Nothing :: L.Lane T.Text T.Text))
             == Just (Just (L.ReadTicket 8 L.PageSetRead))),
       ("golden: the deferral, busy, fault, help, validator and resend texts are fixed",
         L.admissionText "enqueue" L.KeyDeferred == Just "enqueue deferred during a page-set read. Press the key again."
@@ -1468,7 +1469,7 @@ compositeTests render profile row request0 preparation snapshot absentRuntime (m
       outcomeTexts = [text | operation <- operations, Just text <- map (L.admissionText operation) [minBound .. maxBound]]
         <> map L.keyHelpText operations <> map L.unobservedText operations <> [L.resendDeferredText, L.resendUnofferedText]
       -- The deferring page-set read holds ticket 4. A later read holds ticket 5.
-      reading = L.Lane (Just (L.ReadTicket 4 L.PageSetRead)) L.MutationIdle False False :: L.Lane T.Text T.Text
+      reading = L.Lane (Just (L.ReadTicket 4 L.PageSetRead)) L.MutationIdle False False Nothing :: L.Lane T.Text T.Text
       completed = reading {L.laneReadTicket = Nothing}
       nextRead = reading {L.laneReadTicket = Just (L.ReadTicket 5 L.PageSetRead)}
       after seconds = addUTCTime seconds deferredAt
@@ -1479,7 +1480,7 @@ compositeTests render profile row request0 preparation snapshot absentRuntime (m
       ("a repeated press that is refused again shows its own numbered outcome", repeated == outcome 2),
       ("an event that changes the view ends the key outcome", moved == Nothing),
       ("every key outcome line fits an 80-column status line with a three-digit key number",
-        all (\text -> T.length (L.keyOutcomeLine (L.KeyOutcome 999 text Nothing)) <= 80) outcomeTexts && length outcomeTexts == 22),
+        all (\text -> T.length (L.keyOutcomeLine (L.KeyOutcome 999 text Nothing)) <= 80) outcomeTexts && length outcomeTexts == 26),
       ("a deferral records the page-set read in flight and the time of the key outcome",
         L.deferral deferredAt reading == deferredBy
           && L.deferral deferredAt completed == Nothing
@@ -1836,7 +1837,7 @@ structuredAnswerTests (metadata,items) decisionValue control = do
   -- idle and retains nothing to resend. Any other declared refusal keeps the
   -- attempt unresolved.
   let attempt = L.Attempt (S.Answer structured typed) ("pending-answer" :: T.Text) Nothing
-      sending = L.Lane Nothing (L.MutationSending 4 attempt) False False :: L.Lane T.Text T.Text
+      sending = L.Lane Nothing (L.MutationSending 4 attempt) False False Nothing :: L.Lane T.Text T.Text
       (refusedStep, refusedLane) = L.sendStep 4 (L.Declared (Left (C.Refused 412 "stale-revision"))) sending
       (otherStep, otherLane) = L.sendStep 4 (L.Declared (Left (C.Refused 409 "decision-not-head"))) sending
   checks
@@ -2615,7 +2616,7 @@ approvalTests render profile row request preparation expiry = do
       cases = [ (screen,key,view,mutation,readTicket,faulted,checked)
               | screen <- screens, key <- keys, view <- views, mutation <- mutations,
                 readTicket <- [Nothing, singleRead, pageSetRead], faulted <- [False,True], checked <- reviews ]
-      laneOf (_,m) readTicket faulted = L.Lane readTicket m faulted False :: L.Lane T.Text T.Text
+      laneOf (_,m) readTicket faulted = L.Lane readTicket m faulted False Nothing :: L.Lane T.Text T.Text
       press ((_,screen),(_,key,modifiers),_,_,_,_,_) = A.reviewApprovalKey screen key modifiers
       -- The outcome of one case: Nothing when the press is not an approval
       -- press and keeps its other meaning, otherwise the decision.
@@ -2634,6 +2635,7 @@ approvalTests render profile row request preparation expiry = do
         A.HelpRefused -> "Approval did not start: the key help is open. Esc closes it."
         A.CommandBusy -> "Approval did not start: a manager command is in progress or unresolved."
         A.FaultStopped -> "Approval did not start: an internal frontend fault stopped all mutations."
+        A.CredentialStopped -> "Approval did not start: the credential was refused."
         A.ReadDeferred -> "Approval did not start: a manager page-set read is in progress. Press y again."
         A.StaleReview -> "Approval did not start: the displayed review is stale."
         A.ExpiredReview -> "Approval did not start: the displayed review has expired or is no longer live."
@@ -2820,6 +2822,74 @@ approvalTests render profile row request preparation expiry = do
     (all (`T.isInfixOf` tight) (concatMap (wrapDisplayLines 80) (serviceReviewRows preparation tag))
       && noticeShown (100,smallest) tight (A.KeyNotice maxBound longest))
 
+-- | A refused credential: which failures refuse it, the refused state of the
+-- lane that stops every mutation and exact resend, the reads that end the
+-- state, the end of the event worker, and the header row and status line.
+credentialRefusalTests :: ((Int,Int) -> Presentation -> T.Text) -> S.Profile -> S.Workflow -> IO ()
+credentialRefusalTests render profile row = do
+  now <- maybe (die "time") pure (iso8601ParseM "2026-10-01T12:00:00Z" :: Maybe UTCTime)
+  let idle = L.sessionLane :: L.Lane T.Text T.Text
+      -- The frontend had issued read ticket 7 when the read with ticket 7
+      -- was refused with 401.
+      refused = L.credentialStep 7 7 (Left (C.Refused 401 "unauthenticated")) idle
+      attempt = L.Attempt (S.Create row) ("pending" :: T.Text) (Just ("/v1/commands/cmd_1" :: T.Text))
+      uncertain = idle {L.laneMutation = L.MutationUncertain attempt (L.DeclaredUncertainty "TransportUnavailable")}
+      uncertainRefused = L.refuseCredential 7 uncertain {L.laneResendConfirm = True}
+      follow = L.newFollow "evt_1"
+      (_, streamShown, streamStep) = L.afterStream now (L.StreamEnd True "evt_2" (Just (C.Refused 401 "unauthenticated"))) L.DeliveryLive follow
+      (_, pollShown, pollStep) = L.afterPoll now (Left C.CredentialChanged) L.DeliveryPolling follow
+      live = S.Endpoint "127.0.0.1" 54321 "stream_A" "epoch_A" ["observe", "submit", "control"]
+      shell credential = render (140,36) ((emptyPresentation (initialServiceModel [profile])) {presentationService = True, presentationNoColor = True,
+        presentationServiceEndpoint = Just live, presentationServiceDelivery = L.DeliveryRefused, presentationServiceCredentialRefused = credential})
+      contextRow frame = case T.lines frame of
+        _ : context : _ -> context
+        _ -> ""
+      browser credential = render (140,36) ((emptyPresentation ((initialServiceModel [profile]) {modelScreen = BrowserScreen}))
+        {presentationService = True, presentationNoColor = True, presentationServiceEndpoint = Just live,
+          presentationServiceCredentialRefused = credential})
+  checks
+    [ ("a 401 refusal, an unavailable credential and a changed credential refuse the credential, and no other failure does",
+        map L.credentialRefusal [C.Refused 401 "unauthenticated", C.CredentialUnavailable, C.CredentialChanged, C.Refused 403 "insufficient-scope",
+          C.TransportUnavailable, C.Refused 503 "storage-unavailable", C.InvalidResponse, C.ClientClosed]
+          == [True, True, True, False, False, False, False, False]),
+      ("a refused read records the refusal with the last issued read ticket", L.laneCredentialRefused refused == Just 7),
+      ("no new mutation key starts while the credential is refused, and the key outcome names the refusal",
+        L.mutationAdmission refused == L.KeyCredentialRefused && not (L.mutationAllowed refused)
+          && L.mutationKeyOutcome allScopes "create" refused == Just ("create did not start: the credential was refused.", False)
+          && L.mutationKeyOutcome allScopes "answer" refused == Just ("answer did not start: the credential was refused.", False)),
+      ("a missing scope still decides before the refused credential",
+        L.mutationKeyOutcome ["observe"] "create" refused == Just (L.scopeText "create" "submit", False)),
+      ("a command in progress still refuses as busy while the credential is refused",
+        L.mutationAdmission uncertainRefused == L.KeyBusy),
+      ("a summary y refuses the approval while the credential is refused",
+        A.approvalDecision allScopes A.ApproveKey A.SummaryView refused (A.ReviewCurrent ()) == A.Refuse A.CredentialStopped
+          && not (A.approvalOffered allScopes A.SummaryView refused (A.ReviewCurrent ()))),
+      ("no exact resend is offered while the credential is refused, and an open resend confirmation ends",
+        not (L.resendOffered uncertainRefused) && not (L.laneResendConfirm uncertainRefused)
+          && case L.resendAdmission uncertainRefused of L.ResendUnoffered -> True; _ -> False),
+      ("a later refusal keeps the read ticket of the first refusal", L.laneCredentialRefused (L.refuseCredential 9 refused) == Just 7),
+      ("the delivery of a read that started before the refusal does not end the refused state",
+        L.laneCredentialRefused (L.credentialStep 9 7 (Right ()) refused) == Just 7
+          && L.laneCredentialRefused (L.credentialStep 9 6 (Right ()) refused) == Just 7),
+      ("the delivery of a read that started after the refusal ends the refused state, and mutations start again",
+        L.laneCredentialRefused (L.credentialStep 8 8 (Right ()) refused) == Nothing
+          && L.mutationAdmission (L.credentialStep 8 8 (Right ()) refused) == L.KeyStart),
+      ("another failure of a later read keeps the refused state",
+        L.laneCredentialRefused (L.credentialStep 8 8 (Left C.TransportUnavailable) refused) == Just 7),
+      ("a credential refusal of the stream or of a poll ends the event worker with the refused delivery state",
+        (streamShown, streamStep) == (L.DeliveryRefused, L.FollowClosed) && (pollShown, pollStep) == (L.DeliveryRefused, L.PollClosed)
+          && L.deliveryText L.DeliveryRefused == "delivery stopped (credential refused)"),
+      ("only a current overview after the refusal starts the stream again",
+        L.overviewStartsStream (C.FetchGeneration 2) (C.FetchGeneration 2) L.DeliveryRefused
+          && not (L.overviewStartsStream (C.FetchGeneration 1) (C.FetchGeneration 2) L.DeliveryRefused)),
+      ("the header row shows the refused credential in place of the delivery state, and the status line names the stop",
+        "credential refused" `T.isInfixOf` contextRow (shell True) && not ("delivery" `T.isInfixOf` contextRow (shell True))
+          && L.credentialRefusedStatus `T.isInfixOf` shell True
+          && "delivery stopped (credential refused)" `T.isInfixOf` contextRow (shell False) && not (L.credentialRefusedStatus `T.isInfixOf` shell False)),
+      ("the footer offers no mutation key while the credential is refused",
+        not ("Enter NEW REQUEST" `T.isInfixOf` browser True) && "Enter NEW REQUEST" `T.isInfixOf` browser False)
+    ]
+
 -- | Manager loss and restart: the reachability of the manager that each
 -- completed read decides, the unreachable state in the shell header, the
 -- stale mark of every retained observation while the manager is
@@ -2855,7 +2925,7 @@ managerLossTests render profile row snapshot receiptValue = do
       create = S.Create row
       original = "pending-original" :: T.Text
       location = "/v1/commands/cmd_original" :: T.Text
-      awaiting = L.Lane Nothing (L.MutationAwaiting create original location) False False :: L.Lane T.Text T.Text
+      awaiting = L.Lane Nothing (L.MutationAwaiting create original location) False False Nothing :: L.Lane T.Text T.Text
       reading = awaiting {L.laneReadTicket = Just (L.ReadTicket 4 L.PageSetRead)}
       (lossStep, afterLoss) = L.readStep 4 (L.Declared (Left C.TransportUnavailable) :: L.CallOutcome Int) reading
       -- After the restart, the receipt at the receipt location reports the
@@ -2929,7 +2999,7 @@ liveDeliveryTests render profile = do
       composite = S.compositeResources (S.RequestSelection "req_1" (Just "run_1")) Nothing (Just "/v1/commands/cmd_1")
       routed resources = L.invalidatedFetches composite (noted resources)
       idleLane = L.sessionLane :: L.Lane T.Text T.Text
-      reading ticket = L.Lane (Just (L.ReadTicket ticket L.PageSetRead)) L.MutationIdle False False :: L.Lane T.Text T.Text
+      reading ticket = L.Lane (Just (L.ReadTicket ticket L.PageSetRead)) L.MutationIdle False False Nothing :: L.Lane T.Text T.Text
       g0 = C.FetchGeneration 0
       -- One overview invalidation, its fetch taken and started with ticket 5.
       (r1, f1) = L.invalidateFetches [L.OverviewFetch] C.newRefresh L.noFetches
@@ -3178,8 +3248,8 @@ requestEndTests reviewed preparation receiptValue = do
   misplaced <- receiptOf "discard" preparationURI (Just (effect "discarded" preparationURI))
   otherRequest <- receiptOf "withdraw" requestURI (Just (effect "withdrawn" "/v1/requests/other"))
   let opened confirmation = L.mutationKeyOutcome ["observe","submit","control"] (L.confirmationOperation confirmation)
-      idle = L.Lane Nothing L.MutationIdle False False :: L.Lane T.Text T.Text
-      busy = L.Lane Nothing (L.MutationAwaiting removal ("pending" :: T.Text) ("/v1/commands/cmd_12" :: T.Text)) False False
+      idle = L.Lane Nothing L.MutationIdle False False Nothing :: L.Lane T.Text T.Text
+      busy = L.Lane Nothing (L.MutationAwaiting removal ("pending" :: T.Text) ("/v1/commands/cmd_12" :: T.Text)) False False Nothing
   checks
     [ ("a removal is a remove-input of the request", S.mutationOperation removal == "remove-input" && S.mutationURI removal == requestURI
           && S.mutationProfile removal == C.draftProfile draft),
@@ -3286,7 +3356,7 @@ captureTests workflowRow reviewed preparation receiptValue unrelated = do
   -- uncertain send offers only the exact resend of the retained attempt.
   let pending = "pending-capture" :: T.Text
       attempt = L.Attempt capture pending Nothing
-      sending = L.Lane Nothing (L.MutationSending 9 attempt) False False :: L.Lane T.Text T.Text
+      sending = L.Lane Nothing (L.MutationSending 9 attempt) False False Nothing :: L.Lane T.Text T.Text
       (uncertainStep, uncertainLane) = L.sendStep 9 (L.Declared (Left C.TransportUnavailable)) sending
       awaiting = sending {L.laneMutation = L.MutationAwaiting capture pending ("/v1/commands/cmd_capture" :: T.Text)}
   checks
