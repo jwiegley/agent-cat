@@ -164,7 +164,48 @@ the inner worker inherits the pipes of the manager. When only the proxy ends,
 the inner worker keeps those pipes open and the run continues under `owned`
 supervision. The manager does not observe the loss of the proxy alone, and the
 cleanup of the proxy group does not signal the inner group. This is an instance
-of the escaped-descendant limit that the next section states.
+of the escaped-descendant limit that the
+[verification section](#verification-and-remaining-owners) states.
+
+## Manager loss and restart
+
+When the manager process ends without its orderly close, for example through
+SIGKILL, the worker pipes of each started run lose their manager end. The inner
+frontend worker reads the end of its control input. The runtime then cancels
+the run with the message `control input closed`, the run log receives its stop,
+and the worker processes exit. The manager log of the killed lifetime ends
+without its shutdown notice.
+
+A restart on the same root and configuration acquires the configuration storage
+slot and the service lease again and reconciles the Store, as the
+[storage contract](STORAGE.md#restart-and-offline-restoration) describes. The
+manager log of the new lifetime continues with a lifetime notice whose
+reconciliation counts name the changed rows. Each owned run becomes `lost`, the
+reservation of each such run becomes quarantined, and each dispatch-attempted
+start or control becomes `unresolved`. The manager reads no run store to recover
+a worker and dispatches no start again. The catalogue of the new lifetime
+publishes new profile revisions, so a client reads the catalogue again before it
+creates a request. An exact replay of an earlier command returns the receipt of
+its first response. The replay of an unresolved approval returns that receipt
+and sends nothing.
+
+`GET /v1/runs/{id}` shows `lost` supervision, the `lost-supervision` limitation
+and the last validated runtime status, and the run control resource offers no
+cancel. The quarantined reservation keeps its execution slot and its resource
+keys until cleanup evidence permits their reuse. A request of a profile whose
+resource keys meet those keys waits in the queue with `profile-busy`. A profile
+without resource keys has the unclassified resource, which every other such
+profile shares. Requests with other resource keys are admitted while an
+execution slot remains. The local administration operations `check-quarantine`
+and `release-quarantine` refuse with `state-conflict`, so at present no
+operation releases a quarantined reservation.
+
+The pruning round at open keeps each sealed segment that names the lost run,
+because the run is not observed terminal. The flow verb reports the earlier
+lifetime under `lifetimeWithoutShutdown`, verifies the consent of the start
+relay of the lost run and exits with status 2. The `failures-manager` mode of
+`manager/test/service_http.py` checks these facts across two lifetimes of the
+running protected manager.
 
 ## Verification and remaining owners
 

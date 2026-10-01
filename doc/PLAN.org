@@ -4462,6 +4462,29 @@ Non-blocking findings of the fess audit of Phase B part 2 subtask C23 (WM-028 fu
 4. (low) manager/test/service_http.py (about line 4707). The variable terminal is defined and not used. Fix: remove it.
 5. (low) manager/WORKERS.md (about lines 146-148). The section states the sequence owned, then cleanup-pending, then lost. The test observes only lost, 0.01 seconds after SIGKILL. Fix: observe cleanup-pending in a check, or state only what the check shows.
 
+* TODO [#D] Resolve C24 fess findings on manager loss and restart
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-c24-manager-loss-fess-findings-g5xr
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-30 Wed 18:00]
+:MODIFIED: [2026-09-30 Wed 18:00]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of the fess audit of Phase B part 2 subtask C24 (WM-028 functional, manager death and restart, mode failures-manager of manager/test/service_http.py). Report: fess/b2-C24-r1.md in the private evidence directory.
+
+1. (medium, functional) manager/test/service_http.py (about lines 348-352), manager/CONFIGURATION.md (about line 90) and manager/src/Agentic/Manager/Credentials.hs (about line 184). After a manager crash, restart reconciliation quarantines the lost run's reservation, and the reservation keeps its execution slot and resource keys. The local administration operations check-quarantine and release-quarantine are refused with state-conflict (OtherAdmin), so nothing releases the quarantine. With the default executionReservations of 1, or with profiles that have no resource keys, no new run can start after a crash. The failures-manager mode passes "serves new work" only because its fixture adds a second reservation and a profile with its own resource key. This follows the existing WM-020/WM-042 design and is not a C24 regression. Fix: schedule the WM-042 quarantine inspection and release (cleanup evidence) as a functional item. Until it exists, state in manager/CONFIGURATION.md that a crash with one reservation blocks all later runs.
+2. (medium) manager/test/service_http.py (about line 5095) and manager/src/Agentic/Manager/Store.hs (about lines 233-240). The case 4 assertion that the pruning round at open kept the lost run's segment has no positive control. It also passes if the pruner did not run, if the byte trigger did not hold, or if the round failed, because a prune failure becomes a recordFaultLine that nothing checks. Fix: seal an extra terminal-only segment (for example a withdrawn request) as the oldest segment, ahead of the lost run's segment, and assert that it is pruned while the lost-run segment stays. At a minimum, assert that no "manager-log prune" fault was recorded.
+3. (low) manager/test/service_http.py (about lines 240 and 5055-5070). The harness seals the killed lifetime's manager log itself and splits it at the padding request's first record, while the writer splits by the size threshold S. The comment "as the writer seals it" holds only for the file format and naming. Fix: reword it to "in the writer's segment format", or reach a real seal through a smaller configured ceiling.
+4. (low) manager/test/service_http.py (about lines 5175-5179). The exit status of the second manager lifetime is not asserted. SIGTERM ends it with returncode -2 through the SIGTERM-to-UserInterrupt path (cli/src/Agentic/Cli.hs, about lines 998-1001). Fix: assert second.returncode == -signal.SIGINT so that an unexpected crash of the second lifetime fails the mode.
+
+Other C24 limitations recorded with the commit: the restarted manager does not ingest the on-disk evidence of the lost run (GET /v1/runs/{id} keeps runtime status running with lost supervision, as documented), and only N8 was run for the new mode.
+
 * TODO [#D] Resolve C4 fess findings on the pruned flow reader
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -17264,7 +17287,7 @@ Network mutation remains behind G3 until the required evidence is complete.
 :LABELS:   ["p5","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-30 Wed 17:36]
+:MODIFIED: [2026-09-30 Wed 18:00]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-028
 :SOURCE_REPO: agent-cat
@@ -17407,6 +17430,13 @@ public or production deployment.
     "author": "johnw",
     "text": "C23 (functional part of the worker-death boundary): new mode failures-worker of manager/test/service_http.py passed at N8. After SIGKILL of every worker process group of a run waiting at its person question, GET /v1/runs/{id} shows lost supervision with no verified result, an answer and a cancel are each refused with 409 ownership-unavailable, the run is not re-dispatched (one run.started), a new request on the same manager completes, and agentic-run flow exits 2 with lostSupervision and the open ask under uncertain. manager/ci/supervision.sh passed after a test-harness fix in manager/test/supervision/case.py (the copied run() read the undefined global mode). make -C doc check and the Phase A journey at N8 passed. No production code changed. Security-only parts of WM-028 stay deferred under the 2026-09-30 operator direction. Proxy-only loss stays open as a containment item. Follow-up: acat-c23-worker-loss-fess-findings-p34r. Evidence: B2/C23 in the private evidence directory.",
     "created_at": "2026-10-01T00:36:08Z"
+  },
+  {
+    "id": 435,
+    "issue_id": "acat-wm-028-g1n0",
+    "author": "johnw",
+    "text": "Phase B part 2 C24 (functional, manager death and restart): new mode failures-manager of manager/test/service_http.py. A manager killed with SIGKILL while a run waits at its question leaves no worker of that run after a bounded wait (the worker reads the end of its control input and the runtime cancels the run). A restart on the same root and configuration records a new lifetime notice with reconciliation counts, the reader reports the earlier lifetime as lost (no shutdown notice), the run shows lost supervision, nothing is dispatched again (one start relay, one run store), exact replays of the enqueue and the approval return the original 202 receipts, the pruning round at open keeps the non-terminal lost run's segment, and a fresh request completes with a verified result. No production code changed. manager/WORKERS.md gains the section 'Manager loss and restart' and manager/STORAGE.md a cross-reference. Checks passed: the -ftui-tests build, failures-manager at N8, make -C doc check, the Phase A journey at N8. Fess not blocking, findings in acat-c24-manager-loss-fess-findings-g5xr. Evidence: B2/C24 in the private resume-20260923 directory. Security-only parts of WM-028 stay deferred.",
+    "created_at": "2026-10-01T01:00:35Z"
   }
 ]
 #+end_src
@@ -18954,7 +18984,7 @@ Publish precommitted workload and resource ceilings. All core advertised bounds 
 :LABELS:   ["p10","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-30 Wed 00:03]
+:MODIFIED: [2026-09-30 Wed 18:00]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-042
 :SOURCE_REPO: agent-cat
@@ -19074,6 +19104,20 @@ recipe that ignores WAL or unresolved effects.
     "created_by": "johnw",
     "metadata": "{}",
     "thread_id": ""
+  }
+]
+#+end_src
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 436,
+    "issue_id": "acat-wm-042-sdg9",
+    "author": "johnw",
+    "text": "Phase B part 2 C24 finding (functional): after a manager crash, restart reconciliation quarantines the lost run's reservation with its execution slot and resource keys, and Credentials.perform refuses check-quarantine and release-quarantine with state-conflict. With the default executionReservations of 1 no new run can start after a crash until the WM-042 cleanup-evidence release exists. See acat-c24-manager-loss-fess-findings-g5xr finding 1.",
+    "created_at": "2026-10-01T01:00:36Z"
   }
 ]
 #+end_src

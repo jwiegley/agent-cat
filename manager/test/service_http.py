@@ -72,7 +72,7 @@ consent_control = len(sys.argv) == 6 and sys.argv[5] == "tui-consent-control"
 # runs one manager lifetime and does not enter the restart loop.
 LIFECYCLE = "credential-lifecycle"
 lifecycle = len(sys.argv) == 6 and sys.argv[5] == LIFECYCLE
-mixed = len(sys.argv) == 6 and sys.argv[5] in ("mixed", "mixed-confirm", "tui-approval", "tui-consent-control", APPROVE_FAULT, LIFECYCLE, "pages", "routes", "failures-worker") + JOURNEYS
+mixed = len(sys.argv) == 6 and sys.argv[5] in ("mixed", "mixed-confirm", "tui-approval", "tui-consent-control", APPROVE_FAULT, LIFECYCLE, "pages", "routes", "failures-worker", "failures-manager") + JOURNEYS
 confirm_uncertain = mixed and sys.argv[5] == "mixed-confirm"
 # The boundary mode checks WM-024 through the running protected manager with
 # raw socket and ssl connections: plaintext and TLS 1.2 refusal, request
@@ -230,6 +230,26 @@ person_mode = len(sys.argv) == 6 and sys.argv[5] == PERSON
 # Each numbered case prints its own PASS line. It runs one manager lifetime.
 WORKER_FAILURE = "failures-worker"
 worker_failure_mode = len(sys.argv) == 6 and sys.argv[5] == WORKER_FAILURE
+# The failures-manager mode checks the failure ending of a lost manager
+# through two lifetimes of the protected manager with the mixed fixture. A
+# mixed-controls run waits at its person question, and a padding request
+# receives three large literal inputs before it is withdrawn, so that the manager
+# log and its claim checks hold more than (L - R) div 2 bytes. The harness
+# then kills the manager process with SIGKILL. Every worker process of the
+# run must end within a bounded wait. While no manager runs, the harness
+# seals the manager log in two segments, as the writer seals it: the first
+# holds the records of the lost run and the second the padding. A restart on
+# the same root and configuration must begin a new lifetime with its
+# lifetime notice and reconciliation counts, show the run with lost
+# supervision, dispatch no start again, return the original receipt for an
+# exact replay of an earlier command, keep the protected segment of the lost
+# run in the pruning round at open, and review, approve and complete a fresh
+# request. After the ordinary end of the second lifetime, the flow verb must
+# report the first lifetime without its shutdown notice and the second with
+# it. Each numbered case prints its own PASS line. It runs two manager
+# lifetimes.
+MANAGER_FAILURE = "failures-manager"
+manager_failure_mode = len(sys.argv) == 6 and sys.argv[5] == MANAGER_FAILURE
 # The modes that configure the control fixture profiles in place of the
 # scripted profile: profile_1 runs the recovery-offering retry adapter and
 # profile_steer runs the steerable adapter. The controls-routing mode also
@@ -296,6 +316,12 @@ if collections or routes_mode:
 PAGES_ENVIRONMENT_MARKER = "acatpagesenvironment" + secrets.token_hex(16)
 if pages_mode:
     configuration["limits"]["globalPageSets"] = 8
+# The failures-manager mode sets L - R to 4 MiB, so that three large literal
+# inputs take the manager log above the byte trigger of the pruner at open,
+# while the command ledger keeps room for every command of the mode.
+MANAGER_FAILURE_LEDGER = 4 * 1024 * 1024
+if manager_failure_mode:
+    configuration["limits"]["globalMutationLedgerBytes"] = 16 * 131072 + MANAGER_FAILURE_LEDGER
 # The pages mode also configures one local retention root. A local frontend
 # run writes one completed run into it before the manager starts, and the
 # manager serves it through --legacy-history as a read-only legacy entry.
@@ -314,6 +340,16 @@ if mixed:
         targetLabel="Deterministic ACP retry", targetArguments=["--engine", "acp", "--adapter", "mixed-adapter"],
         environment=[{"name": "PATH", "value": str(adapters)}]
         + ([{"name": "ACAT_PAGES_MARKER", "value": PAGES_ENVIRONMENT_MARKER}] if pages_mode else []))
+# The restart quarantines the reservation of the lost run, with its resource
+# keys, until cleanup evidence permits their reuse. The failures-manager mode
+# therefore gives profile_1 its own resource key and configures profile_2
+# with the same mixed launcher and another resource key, and a second
+# execution reservation, for the fresh request of the second lifetime.
+if manager_failure_mode:
+    configuration["limits"]["executionReservations"] = 2
+    configuration["profiles"][0]["resourceKeys"] = ["fixture_one"]
+    configuration["profiles"].append(dict(configuration["profiles"][0], id="profile_2",
+                                          workspaceLabel="HTTPS second fixture", resourceKeys=["fixture_two"]))
 if control_profiles:
     adapters = work / "adapters"
     adapters.mkdir(mode=0o700)
@@ -416,7 +452,8 @@ def administration(payload, refused=None):
 
 issued = administration({"version": 1, "operation": "issue-credential", "label": "HTTPS fixture",
                          "scopes": ["observe", "submit"] + (["control", "export"] if mixed else ["control"] if captures_mode or discard_mode or lineage_mode or control_profiles or person_mode else ["control", "export"] if exports_mode else []),
-                         "profileIds": CONTROL_PROFILES or (["profile_1", "profile_plain"] if person_mode else ["profile_1"]),
+                         "profileIds": CONTROL_PROFILES or (["profile_1", "profile_plain"] if person_mode else
+                                                            ["profile_1", "profile_2"] if manager_failure_mode else ["profile_1"]),
                          "expiresAt": "2999-01-01T00:00:00Z", "outputFile": str(work / "credential")})
 bearer = (work / "credential").read_bytes().decode("ascii")
 if collections:
@@ -597,8 +634,8 @@ MIXED_TEXT = "Café λ — explicit false.\nSecond line."
 def mixed_client(capabilities, authorized, attempts=None):
     """The read and mutation steps of the mixed workflow, bound to one
     credential. When attempts is a list, each mutation appends its operation,
-    URI, exact headers, exact payload and receipt URI, so a later step can
-    repeat the exact attempt."""
+    URI, exact headers, exact payload, receipt URI and original receipt, so a
+    later step can repeat the exact attempt."""
 
     def observed(path, schema):
         deadline = time.monotonic() + 5
@@ -646,7 +683,7 @@ def mixed_client(capabilities, authorized, attempts=None):
         assert status == 202, ("mutation refused or uncertain", body["operation"], status, receipt.get("code"))
         validate("CommandReceipt", receipt)
         if attempts is not None:
-            attempts.append((body["operation"], path, headers, payload, receipt["links"]["self"]))
+            attempts.append((body["operation"], path, headers, payload, receipt["links"]["self"], receipt))
         if body["operation"] == "approve":
             # Runtime association is independent evidence. The approval receipt
             # remains dispatch-attempted and is not reclassified as delivered.
@@ -1332,7 +1369,7 @@ def credential_lifecycle():
                 for path in ("/v1/capabilities", base + "/control", approval):
                     status, value = status_of(path, authorized)
                     assert status == 200, ("overlap authentication", name, path, status, value.get("code"))
-            _, enqueue_path, enqueue_headers, enqueue_payload, receipt_uri = next(item for item in a_attempts if item[0] == "enqueue")
+            _, enqueue_path, enqueue_headers, enqueue_payload, receipt_uri, _ = next(item for item in a_attempts if item[0] == "enqueue")
             status, replayed, _, _ = exchange(enqueue_path, enqueue_headers | a2_auth, method="POST", payload=enqueue_payload)
             assert status == 202 and replayed["links"]["self"] == receipt_uri, ("rotated replay", status, replayed.get("code"))
             validate("CommandReceipt", replayed)
@@ -4866,6 +4903,313 @@ def worker_failure_checks():
 
 if worker_failure_mode:
     worker_failure_checks()
+    raise SystemExit(0)
+
+
+def manager_failure_checks():
+    """The failure ending of a lost manager through two lifetimes of the real
+    HTTPS manager. Each numbered case prints one PASS line."""
+    authorized = {"Authorization": "Bearer " + bearer}
+    flow_dir = work / "manager" / "flow"
+    half = MANAGER_FAILURE_LEDGER // 2
+
+    def serve(index):
+        """Start one foreground manager lifetime on the same root and
+        configuration and wait for HTTPS readiness."""
+        with (work / f"server-{index}.stdout").open("wb") as output, (work / f"server-{index}.stderr").open("wb") as errors:
+            process = subprocess.Popen([str(runner), "--manager", "serve", "--config", str(config),
+                                        "+RTS", "-N" + native, "-RTS"], stdout=output, stderr=errors)
+        wait_ready(process)
+        return process
+
+    def process_groups():
+        """Every live process with its process group and command, from one
+        process listing."""
+        listing = subprocess.run(["ps", "-Ao", "pid=,pgid=,command="], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                 text=True, timeout=10, check=True).stdout
+        return [(int(pid), int(pgid), command) for pid, pgid, command in
+                (line.strip().split(None, 2) for line in listing.splitlines() if len(line.split(None, 2)) == 3)]
+
+    def log_files():
+        """The sealed segments in start order, then the active file."""
+        sealed = sorted((flow_dir / "sealed").glob("*/*.ndjson"))
+        return sealed + sorted(flow_dir.glob("*.ndjson"))
+
+    def log_bytes():
+        """The bytes of the manager log and of its claim checks, as the
+        writer counts them."""
+        claims = [path for path in (flow_dir / "claims").rglob("*") if path.is_file()] if (flow_dir / "claims").is_dir() else []
+        return sum(path.stat().st_size for path in log_files() + claims)
+
+    def log_records():
+        """Every record line of the manager log, in position order."""
+        return [json.loads(line) for path in log_files() for line in path.read_bytes().splitlines()]
+
+    def names(record, identities):
+        return bool(set(record["about"].values()) & identities)
+
+    def start_relays(run):
+        return [record for record in log_records() if record["schema"] == "relay"
+                and record["body"].get("inline", {}).get("kind") == "start" and record["about"].get("managerRun") == run]
+
+    def run_starts(store):
+        return [line for line in (store / "events.ndjson").read_bytes().splitlines()
+                if json.loads(line)["event"]["type"] == "run.started"]
+
+    first = serve(0)
+    try:
+        status, capabilities, raw = request("/v1/capabilities", authorized)
+        assert status == 200
+        validate("Capabilities", capabilities, raw)
+        attempts = []
+        client = mixed_client(capabilities, authorized, attempts)
+        observed, wait_for, mutate, _ = client
+        status, catalogue, _ = request("/v1/workflows?profileId=profile_1", authorized)
+        assert status == 200
+        workflow = next(item for item in catalogue["items"] if item["name"] == "mixed-controls")
+        create = json.dumps({"workflowId": workflow["id"], "descriptorRevision": workflow["revision"],
+                             "profileId": workflow["profileId"], "profileRevision": workflow["profileRevision"]},
+                            separators=(",", ":")).encode()
+
+        def create_request():
+            key = capabilities["authorityEpoch"] + "." + secrets.token_urlsafe(16)
+            status, created, raw = request("/v1/requests", authorized | {
+                "Content-Type": "application/json", "Idempotency-Key": key}, method="POST", payload=create)
+            assert status == 201, ("request creation", status, created.get("code"))
+            validate("Request", created, raw)
+            return created
+
+        # Case 1. A run waits at its person question with a live worker, and
+        # a withdrawn padding request takes the manager log above the byte
+        # trigger of the pruner.
+        lost_request = create_request()
+        _, run = approve_mixed(lost_request, workflow, client)
+        base = "/v1/runs/" + run
+        head, _, _ = drive_mixed(run, client, stop_at_question=True, overview=False)
+        control, _, _ = observed(base + "/control", "RunControl")
+        assert control["supervision"] == "owned" and control["decisionHeadId"] == head, (control["supervision"], control["decisionHeadId"])
+        padding = create_request()
+        padding_uri = padding["links"]["self"]
+        # Each literal replaces the previous one, so that the request view
+        # stays within its one-MiB bound, while each command record keeps its
+        # own claim check.
+        for letter in "abc":
+            current, tag, _ = observed(padding_uri, "Request")
+            mutate(padding_uri, {"operation": "set-input", "input": {"name": workflow["inputs"][0]["name"],
+                "source": "literal", "value": letter * 900000}}, tag)
+        current, tag, _ = observed(padding_uri, "Request")
+        mutate(padding_uri, {"operation": "withdraw"}, tag)
+        current, _, _ = observed(padding_uri, "Request")
+        assert current["phase"] == "withdrawn", ("padding request phase", current["phase"])
+        assert not (flow_dir / "sealed").exists(), ("the first lifetime sealed a segment", sorted((flow_dir / "sealed").rglob("*")))
+        before_kill = log_bytes()
+        assert before_kill > half, ("the manager log does not reach the byte trigger", before_kill, half)
+        manager_group = os.getpgid(first.pid)
+        tree = [entry for entry in process_groups() if entry[0] in set(descendants(first.pid))]
+        (work / "worker-processes.txt").write_text("".join(f"{pid} {pgid} {command}\n" for pid, pgid, command in tree))
+        targets = sorted({pgid for _, pgid, _ in tree})
+        assert targets and manager_group not in targets, ("worker process groups", targets, manager_group)
+        print("PASS failures-manager case 1: run", run, "waits at person question", head, "under owned supervision, with",
+              len(tree), "worker processes in process groups", targets, "and the manager log holds", before_kill,
+              "bytes above the byte trigger", half, flush=True)
+
+        # Case 2. SIGKILL of the manager process. Each worker process of the
+        # run sees its control channel end and stops within the bound.
+        first.kill()
+        first.wait(timeout=25)
+        killed = time.monotonic()
+        while True:
+            remaining = [entry for entry in process_groups() if entry[1] in targets]
+            if not remaining or time.monotonic() - killed > 30:
+                break
+            time.sleep(0.1)
+        (work / "worker-processes-after-kill.txt").write_text("".join(f"{pid} {pgid} {command}\n" for pid, pgid, command in remaining))
+        assert not remaining, ("worker processes remain after the manager loss", remaining)
+        stopped_after = time.monotonic() - killed
+    finally:
+        if first.poll() is None:
+            first.kill()
+        first.wait(timeout=25)
+        (work / "server-0.exit").write_text(str(first.returncode) + "\n")
+    assert first.returncode == -signal.SIGKILL, ("the first lifetime did not end by SIGKILL", first.returncode)
+    stores = sorted(work.glob("manager/runs/runs/*/runtime"))
+    assert len(stores) == 1, ("run stores after the manager loss", stores)
+    lost_store = stores[0]
+    assert len(run_starts(lost_store)) == 1 and len(start_relays(run)) == 1, ("starts of the lost run", len(run_starts(lost_store)), len(start_relays(run)))
+    print("PASS failures-manager case 2: after SIGKILL of the manager, no process of the worker groups", targets, "remains after",
+          round(stopped_after, 2), "seconds", flush=True)
+
+    # Case 3. While no manager runs, seal the manager log in two segments as
+    # the writer seals it: the records of the lost run, then the padding.
+    actives = sorted(flow_dir.glob("*.ndjson"))
+    assert len(actives) == 1, ("manager logs after the first lifetime", actives)
+    active = actives[0]
+    stream = active.name[:-len(".ndjson")]
+    raw_lines = active.read_bytes().splitlines(keepends=True)
+    assert raw_lines and all(line.endswith(b"\n") for line in raw_lines), "the first lifetime left a torn manager log"
+    records = [json.loads(line) for line in raw_lines]
+    first_lifetime = records[0]
+    assert first_lifetime["schema"] == "notice" and first_lifetime["body"]["inline"]["notice"] == "lifetime", ("first record", first_lifetime["schema"])
+    assert not [record for record in records if record["schema"] == "notice" and record["body"]["inline"]["notice"] == "shutdown"], (
+        "the killed lifetime wrote a shutdown notice")
+    split = next(index for index, record in enumerate(records) if record["about"].get("request") == padding["id"])
+    lost_identities = {lost_request["id"], run}
+    assert any(names(record, lost_identities) for record in records[:split]), "the first segment names no record of the lost run"
+    assert not [index for index, record in enumerate(records) if index >= split and names(record, lost_identities)], (
+        "a record of the lost run follows the padding")
+    sealed_dir = flow_dir / "sealed" / stream
+    sealed_dir.parent.mkdir(mode=0o700, exist_ok=True)
+    sealed_dir.mkdir(mode=0o700)
+    for start, end in ((0, split), (split, len(raw_lines))):
+        segment = sealed_dir / ("%020d.ndjson" % start)
+        segment.write_bytes(b"".join(raw_lines[start:end]))
+        segment.chmod(0o600)
+    active.unlink()
+    sealed_bytes = log_bytes()
+    assert sealed_bytes > half, ("the sealed manager log does not reach the byte trigger", sealed_bytes, half)
+    print("PASS failures-manager case 3: the manager log of the killed lifetime has no shutdown notice and is sealed at",
+          split, "of", len(records), "records, with", sealed_bytes, "bytes above the byte trigger", half, flush=True)
+
+    second = serve(1)
+    try:
+        # Case 4. The new lifetime begins with its lifetime notice and
+        # reconciliation counts, and the pruning round at open keeps the
+        # protected segment of the lost run.
+        status, capabilities, raw = request("/v1/capabilities", authorized)
+        assert status == 200
+        validate("Capabilities", capabilities, raw)
+        client = mixed_client(capabilities, authorized)
+        observed, wait_for, mutate, _ = client
+        actives = sorted(flow_dir.glob("*.ndjson"))
+        assert actives == [active], ("manager logs of the second lifetime", actives)
+        notice = json.loads(active.read_bytes().splitlines()[0])
+        body = notice["body"]["inline"]
+        reconciliation = body["reconciliation"]
+        assert body["notice"] == "lifetime" and body["processGeneration"] != first_lifetime["body"]["inline"]["processGeneration"], (
+            "the second lifetime notice", body["notice"], body["processGeneration"])
+        # The owned run becomes lost, its reservation is quarantined and its
+        # dispatch-attempted approval becomes unresolved. Nothing else changes.
+        assert reconciliation == {"preparations": 0, "requests": 0, "runs": 1, "commands": 1, "reservations": 1,
+                                  "observations": 0, "uploads": 0}, ("the reconciliation counts of the second lifetime", reconciliation)
+        starts = sorted(int(path.name[:20]) for path in sealed_dir.glob("*.ndjson"))
+        assert starts == [0, split], ("the pruning round at open removed a protected segment", starts)
+        first_segment = [json.loads(line) for line in (sealed_dir / ("%020d.ndjson" % 0)).read_bytes().splitlines()]
+        assert first_segment == records[:split], "the protected segment changed"
+        print("PASS failures-manager case 4: the second lifetime begins with lifetime notice", body["processGeneration"],
+              "and reconciliation counts", reconciliation, "; the pruning round at open kept the segments", starts,
+              "with the records of the lost run", flush=True)
+
+        # Case 5. The run shows lost supervision, and no start is dispatched
+        # again.
+        value, _, raw = observed(base, "Run")
+        (work / "lost-run.json").write_bytes(raw)
+        assert value["supervision"] == "lost" and "lost-supervision" in value["limitations"], (
+            "lost run", value["supervision"], value["limitations"])
+        assert value["runtime"] is None or value["runtime"]["status"] != "succeeded", ("lost run runtime", value["runtime"])
+        assert value["verification"]["state"] != "verified", ("lost run verification", value["verification"])
+        control, _, raw = observed(base + "/control", "RunControl")
+        (work / "lost-control.json").write_bytes(raw)
+        assert control["supervision"] == "lost" and not control["cancelAllowed"], ("lost run control", control["supervision"], control["cancelAllowed"])
+        stores = sorted(work.glob("manager/runs/runs/*/runtime"))
+        assert stores == [lost_store], ("run stores after the restart", stores)
+        assert len(run_starts(lost_store)) == 1 and len(start_relays(run)) == 1, ("starts of the lost run after the restart",
+            len(run_starts(lost_store)), len(start_relays(run)))
+        print("PASS failures-manager case 5: run", run, "shows lost supervision with runtime", value["runtime"] and value["runtime"]["status"],
+              "and verification", value["verification"]["state"], "; its store holds one run start and the manager log one start relay", flush=True)
+
+        # Case 6. An exact replay of an earlier command returns the receipt
+        # of its first response. The approval of the lost run is unresolved,
+        # and its replay dispatches no start.
+        replays = []
+        for operation in ("enqueue", "approve"):
+            _, path, headers, payload, receipt_uri, original = next(item for item in attempts if item[0] == operation)
+            status, replayed, raw, _ = exchange(path, headers, method="POST", payload=payload)
+            assert status == 202, ("exact replay after the restart", operation, status, replayed.get("code"))
+            validate("CommandReceipt", replayed, raw)
+            assert replayed == original and replayed["links"]["self"] == receipt_uri, (
+                "the replay receipt differs from the original receipt", operation, replayed, original)
+            current, _, _ = observed(receipt_uri, "CommandReceipt")
+            replays.append((operation, original["id"], original["state"], current["state"]))
+        assert replays[1][3] == "unresolved", ("the approval of the lost run", replays[1])
+        assert sorted(work.glob("manager/runs/runs/*/runtime")) == [lost_store] and len(start_relays(run)) == 1, (
+            "the replay of the approval dispatched a start")
+        print("PASS failures-manager case 6: exact replays returned the original receipts (operation, command, original state,",
+              "current state)", replays, "and the replay of the unresolved approval dispatched no start", flush=True)
+
+        # Case 7. The quarantined reservation of the lost run keeps its
+        # resource key: a request of profile_1 waits with profile-busy and is
+        # withdrawn. A fresh request of profile_2 is reviewed, approved and
+        # completed. The new lifetime publishes the profile revisions of its
+        # own catalogue.
+        def mixed_workflow(profile):
+            status, catalogue, _ = request("/v1/workflows?profileId=" + profile, authorized)
+            assert status == 200
+            found = next(item for item in catalogue["items"] if item["name"] == "mixed-controls")
+            return found, json.dumps({"workflowId": found["id"], "descriptorRevision": found["revision"],
+                                      "profileId": found["profileId"], "profileRevision": found["profileRevision"]},
+                                     separators=(",", ":")).encode()
+
+        workflow, create = mixed_workflow("profile_1")
+        blocked = create_request()
+        blocked_uri = blocked["links"]["self"]
+        for declaration in workflow["inputs"]:
+            current, tag, _ = observed(blocked_uri, "Request")
+            mutate(blocked_uri, {"operation": "set-input", "input": {"name": declaration["name"],
+                "source": "literal", "value": MIXED_TEXT}}, tag)
+        current, tag, _ = observed(blocked_uri, "Request")
+        mutate(blocked_uri, {"operation": "enqueue"}, tag)
+        current, tag, _ = wait_for(blocked_uri, "Request", lambda value: value["admission"]["reasons"] == ["profile-busy"])
+        assert current["phase"] == "queued" and current["preparationId"] is None, ("blocked request", current["phase"], current["preparationId"])
+        mutate(blocked_uri, {"operation": "withdraw"}, tag)
+        workflow, create = mixed_workflow("profile_2")
+        _, fresh = approve_mixed(create_request(), workflow, client)
+        _, answered, recovered = drive_mixed(fresh, client, overview=False)
+        assert answered and recovered, ("fresh run decisions", answered, recovered)
+        artifact = verified_download(fresh, client, authorized)
+        value, _, _ = observed(base, "Run")
+        assert value["supervision"] == "lost", ("lost run after the fresh run", value["supervision"])
+        assert len(run_starts(lost_store)) == 1 and len(start_relays(run)) == 1, "the lost run started again"
+        print("PASS failures-manager case 7: request", blocked["id"], "of profile_1 waited with profile-busy behind the quarantined",
+              "reservation; fresh run", fresh, "of profile_2 was reviewed, approved, answered and retried, and succeeded with",
+              "verified result", artifact["id"], "; the lost run stays lost with one start", flush=True)
+    finally:
+        if second.poll() is None:
+            second.terminate()
+        second.wait(timeout=25)
+        (work / "server-1.exit").write_text(str(second.returncode) + "\n")
+
+    # Case 8. The flow verb reports the first lifetime without its shutdown
+    # notice and the second with it, keeps the records of the lost run and
+    # verifies the consent of both start relays. The run log of the lost run
+    # ends with the stop that the worker wrote when its control input closed.
+    stores = sorted(work.glob("manager/runs/runs/*/runtime"))
+    assert len(stores) == 2 and lost_store in stores, ("run stores after the second lifetime", stores)
+    flow_status, flowed, summary = read_flow("manager-failure-flow", [flow_dir] + stores)
+    assert flow_status == 2 and summary["verified"] and not summary["problems"], (
+        "the flow verb does not verify the logs of both lifetimes", flow_status, summary["problems"])
+    manager_summary = next(item for item in summary["logs"] if item["kind"] == "manager")
+    lifetimes = summary["joins"]["lifetimes"]
+    assert len(lifetimes) == 2 and lifetimes[0]["lifetime"]["position"] == 0 and lifetimes[0]["shutdown"] is None, ("lifetimes", lifetimes)
+    assert lifetimes[1]["shutdown"] is not None, ("the second lifetime has no shutdown notice", lifetimes)
+    assert summary["states"]["lifetimeWithoutShutdown"] == [lifetimes[0]["lifetime"]], ("lost lifetimes", summary["states"]["lifetimeWithoutShutdown"])
+    assert not summary["states"]["unresolvedDelivery"], ("unresolved deliveries", summary["states"]["unresolvedDelivery"])
+    assert manager_summary["floor"] == 0, ("manager log floor", manager_summary["floor"])
+    assert len(summary["consent"]) == 2 and all(item["verified"] for item in summary["consent"]), ("consent", summary["consent"])
+    relays = [record for record in flowed if record["schema"] == "relay" and record["body"]["kind"] == "start"
+              and record["about"].get("managerRun") == run]
+    assert len(relays) == 1, ("start relays of the lost run in the flow verb", len(relays))
+    lost_report = next(item["report"] for item in summary["logs"] if item["kind"] == "run" and item["log"] == str(lost_store))
+    last_event = json.loads((lost_store / "events.ndjson").read_bytes().splitlines()[-1])["event"]
+    assert lost_report["stop"] is not None and last_event["type"] == "run.cancelled", (
+        "the run log of the lost run has no stop of its worker", lost_report["stop"], last_event["type"])
+    print("PASS failures-manager case 8: the flow verb exits 2 and verifies both consents; it reports lifetime", lifetimes[0]["lifetime"],
+          "without its shutdown notice and the second lifetime with shutdown notice", lifetimes[1]["shutdown"], "; floor 0, one start relay",
+          "of the lost run, and its run log stops at", lost_report["stop"], "with", last_event["type"], repr(last_event.get("message")), flush=True)
+    print("PASS failures-manager: every manager-loss case held across two lifetimes of the TLS 1.3 manager", flush=True)
+
+
+if manager_failure_mode:
+    manager_failure_checks()
     raise SystemExit(0)
 
 

@@ -290,6 +290,8 @@ preparations become invalidated, unresolved reservations remain quarantined,
 and owned runs become lost supervision without changing their Runtime evidence.
 Uncertain starts and controls remain unresolved with their original request and
 receipt bytes. No stored identifier becomes a dispatch or cleanup handle.
+A quarantined reservation keeps its execution slot and its resource keys, as
+the [worker contract](WORKERS.md#manager-loss-and-restart) describes.
 Reconciliation pages at most 100 changed resources per transaction and publishes
 their matching preparation, request, run, control and command invalidations in
 that transaction. Each page has at most 200 events within the existing limit of
