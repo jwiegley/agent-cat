@@ -2064,8 +2064,50 @@
     "refusal": "InvalidAnswer"
    },
    {
-    "name": "structured question has no text editor",
+    "name": "structured question takes JSON that agrees with its editor schema",
     "decision": "{\"version\":1,\"id\":\"decision_3\",\"revision\":\"decisionrev_1\",\"runId\":\"run_21\",\"profileId\":\"profile_main\",\"generation\":\"generation_3\",\"address\":{\"occurrenceId\":\"0\"},\"state\":\"pending\",\"position\":0,\"observedSequence\":\"9007199254740994\",\"queue\":\"/v1/decisions?runId=run_21\",\"kind\":\"question\",\"question\":{\"code\":{\"json\":{\"schema\":{\"property\":{\"name\":\"ok\",\"schema\":\"boolean\",\"rest\":\"object\"}}}},\"semanticSchema\":{\"property\":{\"name\":\"ok\",\"schema\":\"boolean\",\"rest\":\"object\"}},\"editorSchema\":{\"type\":\"object\",\"properties\":{\"ok\":{\"type\":\"boolean\"}},\"required\":[\"ok\"],\"additionalProperties\":false},\"addressee\":\"person 雪\",\"scope\":{\"model\":\"deep\",\"mode\":null},\"draw\":\"184467440737095516160\",\"prompt\":\"Answer\\u0000 雪😀\"}}",
+    "input": "{\"ok\":true}",
+    "projection": "{\"operation\":\"answer\",\"occurrenceId\":\"0\",\"generation\":\"generation_3\",\"value\":{\"ok\":true}}"
+   },
+   {
+    "name": "structured question keeps nested arrays and Unicode",
+    "decision": "{\"version\":1,\"id\":\"decision_3\",\"revision\":\"decisionrev_1\",\"runId\":\"run_21\",\"profileId\":\"profile_main\",\"generation\":\"generation_3\",\"address\":{\"occurrenceId\":\"0\"},\"state\":\"pending\",\"position\":0,\"observedSequence\":\"9007199254740994\",\"queue\":\"/v1/decisions?runId=run_21\",\"kind\":\"question\",\"question\":{\"code\":{\"json\":{\"schema\":{\"property\":{\"name\":\"ok\",\"schema\":\"boolean\",\"rest\":{\"property\":{\"name\":\"notes\",\"schema\":{\"array\":{\"items\":\"string\"}},\"rest\":\"object\"}}}}}},\"semanticSchema\":{\"property\":{\"name\":\"ok\",\"schema\":\"boolean\",\"rest\":{\"property\":{\"name\":\"notes\",\"schema\":{\"array\":{\"items\":\"string\"}},\"rest\":\"object\"}}}},\"editorSchema\":{\"type\":\"object\",\"properties\":{\"ok\":{\"type\":\"boolean\"},\"notes\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}}},\"required\":[\"ok\",\"notes\"],\"additionalProperties\":false},\"addressee\":\"person 雪\",\"scope\":{\"model\":\"deep\",\"mode\":null},\"draw\":\"184467440737095516160\",\"prompt\":\"Answer\\u0000 雪😀\"}}",
+    "input": "{\"notes\":[\"雪😀\",\"\"],\"ok\":false}",
+    "projection": "{\"operation\":\"answer\",\"occurrenceId\":\"0\",\"generation\":\"generation_3\",\"value\":{\"notes\":[\"雪😀\",\"\"],\"ok\":false}}"
+   },
+   {
+    "name": "structured field of the wrong type refuses",
+    "decision": "{\"version\":1,\"id\":\"decision_3\",\"revision\":\"decisionrev_1\",\"runId\":\"run_21\",\"profileId\":\"profile_main\",\"generation\":\"generation_3\",\"address\":{\"occurrenceId\":\"0\"},\"state\":\"pending\",\"position\":0,\"observedSequence\":\"9007199254740994\",\"queue\":\"/v1/decisions?runId=run_21\",\"kind\":\"question\",\"question\":{\"code\":{\"json\":{\"schema\":{\"property\":{\"name\":\"ok\",\"schema\":\"boolean\",\"rest\":\"object\"}}}},\"semanticSchema\":{\"property\":{\"name\":\"ok\",\"schema\":\"boolean\",\"rest\":\"object\"}},\"editorSchema\":{\"type\":\"object\",\"properties\":{\"ok\":{\"type\":\"boolean\"}},\"required\":[\"ok\"],\"additionalProperties\":false},\"addressee\":\"person 雪\",\"scope\":{\"model\":\"deep\",\"mode\":null},\"draw\":\"184467440737095516160\",\"prompt\":\"Answer\\u0000 雪😀\"}}",
+    "input": "{\"ok\":\"yes\"}",
+    "refusal": "InvalidAnswer"
+   },
+   {
+    "name": "structured array item of the wrong type refuses",
+    "decision": "{\"version\":1,\"id\":\"decision_3\",\"revision\":\"decisionrev_1\",\"runId\":\"run_21\",\"profileId\":\"profile_main\",\"generation\":\"generation_3\",\"address\":{\"occurrenceId\":\"0\"},\"state\":\"pending\",\"position\":0,\"observedSequence\":\"9007199254740994\",\"queue\":\"/v1/decisions?runId=run_21\",\"kind\":\"question\",\"question\":{\"code\":{\"json\":{\"schema\":{\"property\":{\"name\":\"ok\",\"schema\":\"boolean\",\"rest\":{\"property\":{\"name\":\"notes\",\"schema\":{\"array\":{\"items\":\"string\"}},\"rest\":\"object\"}}}}}},\"semanticSchema\":{\"property\":{\"name\":\"ok\",\"schema\":\"boolean\",\"rest\":{\"property\":{\"name\":\"notes\",\"schema\":{\"array\":{\"items\":\"string\"}},\"rest\":\"object\"}}}},\"editorSchema\":{\"type\":\"object\",\"properties\":{\"ok\":{\"type\":\"boolean\"},\"notes\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}}},\"required\":[\"ok\",\"notes\"],\"additionalProperties\":false},\"addressee\":\"person 雪\",\"scope\":{\"model\":\"deep\",\"mode\":null},\"draw\":\"184467440737095516160\",\"prompt\":\"Answer\\u0000 雪😀\"}}",
+    "input": "{\"notes\":[1],\"ok\":true}",
+    "refusal": "InvalidAnswer"
+   },
+   {
+    "name": "structured answer without a required field refuses",
+    "decision": "{\"version\":1,\"id\":\"decision_3\",\"revision\":\"decisionrev_1\",\"runId\":\"run_21\",\"profileId\":\"profile_main\",\"generation\":\"generation_3\",\"address\":{\"occurrenceId\":\"0\"},\"state\":\"pending\",\"position\":0,\"observedSequence\":\"9007199254740994\",\"queue\":\"/v1/decisions?runId=run_21\",\"kind\":\"question\",\"question\":{\"code\":{\"json\":{\"schema\":{\"property\":{\"name\":\"ok\",\"schema\":\"boolean\",\"rest\":{\"property\":{\"name\":\"notes\",\"schema\":{\"array\":{\"items\":\"string\"}},\"rest\":\"object\"}}}}}},\"semanticSchema\":{\"property\":{\"name\":\"ok\",\"schema\":\"boolean\",\"rest\":{\"property\":{\"name\":\"notes\",\"schema\":{\"array\":{\"items\":\"string\"}},\"rest\":\"object\"}}}},\"editorSchema\":{\"type\":\"object\",\"properties\":{\"ok\":{\"type\":\"boolean\"},\"notes\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}}},\"required\":[\"ok\",\"notes\"],\"additionalProperties\":false},\"addressee\":\"person 雪\",\"scope\":{\"model\":\"deep\",\"mode\":null},\"draw\":\"184467440737095516160\",\"prompt\":\"Answer\\u0000 雪😀\"}}",
+    "input": "{\"ok\":true}",
+    "refusal": "InvalidAnswer"
+   },
+   {
+    "name": "structured answer with an unknown field refuses",
+    "decision": "{\"version\":1,\"id\":\"decision_3\",\"revision\":\"decisionrev_1\",\"runId\":\"run_21\",\"profileId\":\"profile_main\",\"generation\":\"generation_3\",\"address\":{\"occurrenceId\":\"0\"},\"state\":\"pending\",\"position\":0,\"observedSequence\":\"9007199254740994\",\"queue\":\"/v1/decisions?runId=run_21\",\"kind\":\"question\",\"question\":{\"code\":{\"json\":{\"schema\":{\"property\":{\"name\":\"ok\",\"schema\":\"boolean\",\"rest\":\"object\"}}}},\"semanticSchema\":{\"property\":{\"name\":\"ok\",\"schema\":\"boolean\",\"rest\":\"object\"}},\"editorSchema\":{\"type\":\"object\",\"properties\":{\"ok\":{\"type\":\"boolean\"}},\"required\":[\"ok\"],\"additionalProperties\":false},\"addressee\":\"person 雪\",\"scope\":{\"model\":\"deep\",\"mode\":null},\"draw\":\"184467440737095516160\",\"prompt\":\"Answer\\u0000 雪😀\"}}",
+    "input": "{\"ok\":true,\"extra\":null}",
+    "refusal": "InvalidAnswer"
+   },
+   {
+    "name": "structured answer that is not JSON refuses",
+    "decision": "{\"version\":1,\"id\":\"decision_3\",\"revision\":\"decisionrev_1\",\"runId\":\"run_21\",\"profileId\":\"profile_main\",\"generation\":\"generation_3\",\"address\":{\"occurrenceId\":\"0\"},\"state\":\"pending\",\"position\":0,\"observedSequence\":\"9007199254740994\",\"queue\":\"/v1/decisions?runId=run_21\",\"kind\":\"question\",\"question\":{\"code\":{\"json\":{\"schema\":{\"property\":{\"name\":\"ok\",\"schema\":\"boolean\",\"rest\":\"object\"}}}},\"semanticSchema\":{\"property\":{\"name\":\"ok\",\"schema\":\"boolean\",\"rest\":\"object\"}},\"editorSchema\":{\"type\":\"object\",\"properties\":{\"ok\":{\"type\":\"boolean\"}},\"required\":[\"ok\"],\"additionalProperties\":false},\"addressee\":\"person 雪\",\"scope\":{\"model\":\"deep\",\"mode\":null},\"draw\":\"184467440737095516160\",\"prompt\":\"Answer\\u0000 雪😀\"}}",
+    "input": "ok",
+    "refusal": "InvalidAnswer"
+   },
+   {
+    "name": "structured question without an editor schema refuses",
+    "decision": "{\"version\":1,\"id\":\"decision_3\",\"revision\":\"decisionrev_1\",\"runId\":\"run_21\",\"profileId\":\"profile_main\",\"generation\":\"generation_3\",\"address\":{\"occurrenceId\":\"0\"},\"state\":\"pending\",\"position\":0,\"observedSequence\":\"9007199254740994\",\"queue\":\"/v1/decisions?runId=run_21\",\"kind\":\"question\",\"question\":{\"code\":{\"json\":{\"schema\":{\"property\":{\"name\":\"ok\",\"schema\":\"boolean\",\"rest\":\"object\"}}}},\"semanticSchema\":{\"property\":{\"name\":\"ok\",\"schema\":\"boolean\",\"rest\":\"object\"}},\"editorSchema\":null,\"addressee\":\"person 雪\",\"scope\":{\"model\":\"deep\",\"mode\":null},\"draw\":\"184467440737095516160\",\"prompt\":\"Answer\\u0000 雪😀\"}}",
     "input": "{\"ok\":true}",
     "refusal": "InvalidAnswer"
    },

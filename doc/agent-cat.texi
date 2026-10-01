@@ -3407,8 +3407,20 @@ by its identity.  @key{RET} opens the run of the selected head by its
 identifier, and the live monitor shows the question head of that run.  The
 answer editor converts the typed text with the simple answer codes:
 @code{text} takes the text, @code{flag} takes yes, no, true, or false,
-@code{receipt} takes no text, and @code{verdict} and structured codes take
-JSON.  @kbd{C-d} sends the answer to that decision.  @key{ESC} on the live
+@code{receipt} takes no text, and @code{verdict} takes JSON.  A question with
+a structured code takes JSON text in the structured answer editor.  The
+details of its head show the answer schema, and the header of its editor shows
+the editor schema of the decision, for example @samp{structured JSON
+@{"notes": [string], "ok": boolean@}}.  Before any send, the frontend checks
+the JSON value against that schema: an object must have exactly the fields of
+the schema, and each value and each array item must have the type of its
+schema.  A value that does not agree is refused with a numbered key outcome
+that names the first field, for example @samp{answer did not start: answer
+field ok must be a boolean}.  A structured question whose decision gives no
+editor schema takes no answer.  @kbd{C-d} sends the answer to that decision.
+@kbd{C-d} while an answer to that decision is in flight shows the numbered key
+outcome @samp{answer did not start: an answer to this decision is in flight.}
+and sends nothing.  @key{ESC} on the live
 monitor returns to the Manager decisions view.  The frontend reads the
 decision heads when the view opens and keeps them current through the manager
 event stream while the view is shown.  @kbd{g} reads them again.  A declared
@@ -3422,8 +3434,20 @@ and input, and the answer text of each decision.  A draft survives a refresh, a
 resize, a change of the selection, and leaving and reopening a run.  A
 completed input or answer command removes its draft.  When the decision at the
 head of a run changes, the draft of the earlier decision is removed, and the
-answer editor shows the draft of the new head or no text.  At most 64 drafts
-are kept.
+answer editor shows the draft of the new head or no text.  One exception keeps
+a draft: when the head of the displayed run changes before the frontend sent
+an answer to the earlier head, the new head takes the draft of the earlier
+head unless it has its own draft, a run without a head keeps the draft, and
+the line @samp{Control:} states @samp{decision changed; draft kept}.  The
+frontend never sends a kept draft by itself.  At most 64 drafts are kept.
+
+A 412 @code{stale-revision} refusal of a command is definite, because the
+manager recognizes a matching retry of a durable command before it evaluates
+the precondition.  The command lane becomes idle, nothing is retained for a
+resend, and the frontend reads the selection again.  A refused answer keeps
+its draft, and the line @samp{Control:} states @samp{answer refused: 412
+stale-revision; decision changed; draft kept}.  @kbd{C-d} then sends the kept
+draft to the new head only when the operator presses it.
 
 After the first overview of a session is installed, the frontend follows the
 manager event stream from the cursor of that overview.  Each invalidation
@@ -3722,9 +3746,7 @@ the observation line states that automatic refresh is paused instead of
 A declared client failure keeps its declared meaning, and the internal-fault
 rules above apply to every step of the journey.
 
-Service mode does not support these features.  It has no
-structured answer editor, so a question with the @code{structured} code or with
-a code that is not a name shows its prompt and accepts no answer.  The
+Service mode does not support these features.  The
 frontend offers no run history, lineage, or export.  Except
 for its event stream, it does not reconnect after a manager restart or a
 credential revocation.  It has no accepted layout at 40

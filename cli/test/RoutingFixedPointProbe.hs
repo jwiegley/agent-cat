@@ -127,6 +127,7 @@ registry =
           ("lineage-typed", row (Needs $ taking (input "input" :> noInputs) lineageTypedProgram)),
           ("mixed-controls", row (Needs $ taking (input "input" :> noInputs) mixedControlProgram)),
           ("parallel-person", row (Needs $ taking (input "input" :> noInputs) parallelPersonProgram)),
+          ("structured-person", row (Needs $ taking (input "input" :> noInputs) structuredPersonProgram)),
           ("prompt-source", row (Needs $ taking (input "input" :> noInputs) sourceProgram)),
           ("captured-input", row (Needs $ taking (stdinInputAs "input" :> noInputs) capturedInputProgram)),
           ("tail-source", row (Needs $ taking (argsInputAs "input" :> noInputs) sourceProgram)),
@@ -278,6 +279,16 @@ typedPersonProgram body = B.program [] $
     (B.one (B.askPerson "nested-number" [B.lit body])) $
   B.bindAsI S.SFlag "final-control-confirmation"
     (B.one (B.askPerson "final-control-confirmation" [B.lit "Confirm after all seven typed-control generations have been checked."])) B.stop
+
+-- Two person questions of one structured object code, in order. The service
+-- TUI answers them with its structured answer editor.
+structuredPersonProgram :: Text -> Program
+structuredPersonProgram body = B.program [] $
+  B.bindAsI reviewCode "first" (B.one (B.askPerson "first" [B.lit body])) $
+  B.bindAsI reviewCode "second" (B.one (B.askPerson "second" [B.lit body])) B.stop
+  where
+    reviewCode = S.SStructured (S.schemaProperty @"ok" S.schemaBoolean
+      (S.schemaProperty @"notes" (S.schemaArray S.schemaString) S.schemaObject))
 
 pinnedProgram :: Text -> Program
 pinnedProgram pin = workflow W.do

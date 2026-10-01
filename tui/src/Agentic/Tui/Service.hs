@@ -12,13 +12,13 @@ module Agentic.Tui.Service
     requestReady, literalInputs, suppliedName, receiptMatches, receiptEffectKind, captureMatches, capturedReceipt, captureLimit, readCaptureFile,
     approvalBody, approvalSelectors,
     RunObservation (..), ResultReference (..), Verification (..), Artifact (..),
-    ControlView (..), ControlOffer (..), DecisionView (..), DecisionContent (..),
+    ControlView (..), ControlOffer (..), DecisionView (..), DecisionContent (..), EditorSchema (..), editorCheck, editorSchemaText,
     observeSnapshot, observeControl, observeDecision, observeResult, decodeSnapshot, decodeControl, decodeDecision,
     RunItem (..), RunContent (..), KnownRun (..), OverviewMember (..), decodeRequestItem, decodeRunItem, decodeOverviewMember,
     decodeOverviewItem, OverviewRow (..), overviewRows, overviewStatus, overviewRowKey, OverviewOpen (..), overviewOpen,
     loadDecisions, decodeDecisionHeads, decisionRows, decisionsStatus, decisionsOpen, decisionAddressee,
     decisionPrompt, answerValue, answerOffered, retryOffer, headMatches,
-    DecisionHead (..), decisionHead, answerMutation, answerBody,
+    DecisionHead (..), decisionHead, answerMutation, answerKey, answerBody,
     retryMutation, retryBody, retryEffect,
     cancelOffered, cancelMutation, steerOffer, steerMutation, steerBody, recoveryOffer, chooseRecoveryMutation, chooseRecoveryBody,
     redirectOffer, redirectMutation, redirectBody, redirectLines,
@@ -808,7 +808,22 @@ data ControlView = ControlView
     controlCancel :: !Bool, controlHead :: !(Maybe Text), controlOffers :: ![ControlOffer], controlValue :: !Value
   } deriving (Eq, Show)
 
-data DecisionContent = QuestionContent !Value !Text | RecoveryContent !Text !Text ![RecoveryOption]
+-- | The content of a decision. A question carries its observation code, the
+-- editor schema of the decision when the manager gives one, and its prompt.
+data DecisionContent = QuestionContent !Value !(Maybe EditorSchema) !Text | RecoveryContent !Text !Text ![RecoveryOption]
+  deriving (Eq, Show)
+
+-- | The editor schema of a question, in the frozen editor vocabulary: a
+-- primitive type, an array of one item schema, or a closed object whose
+-- properties are all required.
+data EditorSchema
+  = EditorNull
+  | EditorBoolean
+  | EditorInteger
+  | EditorNumber
+  | EditorString
+  | EditorArray !EditorSchema
+  | EditorObject !(Map.Map Text EditorSchema)
   deriving (Eq, Show)
 
 data DecisionView = DecisionView
@@ -1133,8 +1148,9 @@ overviewRow positions member = case member of
     ([ "Decision: " <> decisionId view, "Run: " <> decisionRun view, "Kind: " <> decisionKindName view,
        "State: " <> decisionState view, "Occurrence: " <> occurrenceText (decisionOccurrence view) ]
       <> case decisionContent view of
-        QuestionContent code prompt -> [ "Answer type: " <> (case code of String name -> name; _ -> "structured"),
-          "Addressee: " <> fromMaybe "none" (decisionAddressee view), "Prompt: " <> prompt ]
+        QuestionContent code schema prompt -> [ "Answer type: " <> (case code of String name -> name; _ -> "structured") ]
+          <> [ "Answer schema: " <> editorSchemaText editor | Object _ <- [code], Just editor <- [schema] ]
+          <> [ "Addressee: " <> fromMaybe "none" (decisionAddressee view), "Prompt: " <> prompt ]
         RecoveryContent _ message _ -> ["Recovery: " <> message])
   where
     listed values = if null values then "none" else T.intercalate ", " values
@@ -1475,29 +1491,87 @@ parseQuestion = withObject "question" $ \fields -> do
     Object tagged | Just (Object structured) <- KM.lookup "json" tagged ->
       unless (KM.lookup "schema" structured == Just schema) (fail "question schema agreement")
     _ -> pure ()
-  _ <- at (nullable (editorSchema 0)) fields "editorSchema"
+  editor <- at (nullable (editorSchema 0)) fields "editorSchema"
   _ <- at (text 0 1024) fields "addressee"
   _ <- at (withObject "scope" $ \scope -> do
     closed ["model","mode"] scope
     (,) <$> at (nullable (text 0 1024)) scope "model" <*> at (nullable (text 0 1024)) scope "mode") fields "scope"
   _ <- at natural fields "draw"
-  QuestionContent code <$> at (text 0 524288) fields "prompt"
+  QuestionContent code editor <$> at (text 0 524288) fields "prompt"
 
-editorSchema :: Int -> Value -> Parser ()
+-- | The editor schema of a question in the frozen editor vocabulary. An
+-- object schema must be closed and must require each of its properties.
+editorSchema :: Int -> Value -> Parser EditorSchema
 editorSchema depth = withObject "editor schema" $ \fields -> do
   unless (depth < 64) (fail "editor schema depth")
   kind <- at (oneOf ["null","boolean","integer","number","string","array","object"]) fields "type"
   case kind of
-    "array" -> closed ["type","items"] fields >> at (editorSchema (depth + 1)) fields "items"
+    "array" -> closed ["type","items"] fields >> EditorArray <$> at (editorSchema (depth + 1)) fields "items"
     "object" -> do
       closed ["type","properties","required","additionalProperties"] fields
       properties <- fields .: "properties" :: Parser Object
       unless (KM.size properties <= 256 && all ((<=1024) . T.length . Key.toText) (KM.keys properties)) (fail "editor properties")
-      mapM_ (editorSchema (depth + 1)) (KM.elems properties)
+      schemas <- traverse (editorSchema (depth + 1)) (KM.toMapText properties)
       required <- at (list 256 (text 0 1024)) fields "required" >>= uniqueBy id
       additional <- fields .: "additionalProperties" :: Parser Bool
-      unless (not additional && Set.fromList required == Set.fromList (map Key.toText (KM.keys properties))) (fail "editor required fields")
-    _ -> closed ["type"] fields
+      unless (not additional && Set.fromList required == Map.keysSet schemas) (fail "editor required fields")
+      pure (EditorObject schemas)
+    _ -> closed ["type"] fields >> pure (case kind of
+      "null" -> EditorNull
+      "boolean" -> EditorBoolean
+      "integer" -> EditorInteger
+      "number" -> EditorNumber
+      _ -> EditorString)
+
+-- | Check a JSON answer against the editor schema of its question. The
+-- refusal names the first field that does not agree, for example
+-- @answer field ok must be a boolean@.
+editorCheck :: EditorSchema -> Value -> Either Text ()
+editorCheck = go "answer"
+  where
+    go place schema value = case (schema, value) of
+      (EditorNull, Null) -> Right ()
+      (EditorBoolean, Bool _) -> Right ()
+      (EditorInteger, Number number) | number == fromInteger (truncate number) -> Right ()
+      (EditorNumber, Number _) -> Right ()
+      (EditorString, String _) -> Right ()
+      (EditorArray item, Array values) ->
+        mapM_ (\(index, element) -> go (place <> " item " <> T.pack (show index)) item element) (zip [0 :: Int ..] (V.toList values))
+      (EditorObject properties, Object fields) -> do
+        let given = KM.toMapText fields
+        case Map.keys (Map.difference properties given) of
+          name : _ -> Left (place <> " lacks the field " <> name)
+          [] -> pure ()
+        case Map.keys (Map.difference given properties) of
+          name : _ -> Left (place <> " has the unknown field " <> name)
+          [] -> pure ()
+        mapM_ (\(name, (field, element)) -> go (place <> " field " <> name) field element)
+          (Map.toList (Map.intersectionWith (,) properties given))
+      _ -> Left (place <> " must be " <> editorSchemaNoun schema)
+
+-- | The noun of an editor schema in a refusal.
+editorSchemaNoun :: EditorSchema -> Text
+editorSchemaNoun schema = case schema of
+  EditorNull -> "null"
+  EditorBoolean -> "a boolean"
+  EditorInteger -> "an integer"
+  EditorNumber -> "a number"
+  EditorString -> "a string"
+  EditorArray _ -> "an array"
+  EditorObject _ -> "an object"
+
+-- | One line that shows an editor schema to the operator, for example
+-- @{"notes": [string], "ok": boolean}@.
+editorSchemaText :: EditorSchema -> Text
+editorSchemaText schema = case schema of
+  EditorNull -> "null"
+  EditorBoolean -> "boolean"
+  EditorInteger -> "integer"
+  EditorNumber -> "number"
+  EditorString -> "string"
+  EditorArray item -> "[" <> editorSchemaText item <> "]"
+  EditorObject properties -> "{" <> T.intercalate ", " [quoted name <> ": " <> editorSchemaText field | (name, field) <- Map.toList properties] <> "}"
+  where quoted name = "\"" <> name <> "\""
 
 headMatches :: ControlView -> DecisionView -> Bool
 headMatches control decision = controlRun control == decisionRun decision && controlSupervision control == "owned"
@@ -1511,9 +1585,10 @@ matchingOffers control decision
 
 answerOffered :: ControlView -> DecisionView -> Bool
 answerOffered control decision = case decisionContent decision of
-  QuestionContent (String code) _ | code `elem` ["text","verdict","flag","receipt"] ->
-    any ((== "answer") . offerOperation) (matchingOffers control decision)
+  QuestionContent (String code) _ _ | code `elem` ["text","verdict","flag","receipt"] -> offered
+  QuestionContent (Object _) _ _ -> offered
   _ -> False
+  where offered = any ((== "answer") . offerOperation) (matchingOffers control decision)
 
 retryOffer :: ControlView -> DecisionView -> Maybe ControlOffer
 retryOffer control decision = case decisionContent decision of
@@ -1567,6 +1642,18 @@ answerMutation profile (RunRead snapshot (_, control) decision) input = do
     (Left "the occurrence is not waiting for an answer")
   value <- answerValue view input
   Right (Answer view value, observed)
+
+-- | The outcome of Ctrl-D on the displayed question head, given whether the
+-- command lane already holds an answer to this decision, whether the
+-- installed observation is stale, the request profile, the run components
+-- and the editor input: the answer mutation with its precondition, or the
+-- reason why nothing starts. An answer in flight decides first, so a second
+-- Ctrl-D never starts a second answer.
+answerKey :: Bool -> Bool -> Text -> RunRead observed -> Text -> Either Text (Mutation, observed)
+answerKey pending stale profile components input
+  | pending = Left "an answer to this decision is in flight."
+  | stale = Left "the decision observation is stale."
+  | otherwise = answerMutation profile components input
 
 -- | The retry mutation for the recovery at the head, given the request
 -- profile and one composite read of the run components, with the control
@@ -1812,14 +1899,26 @@ occurrenceText = T.pack . show . occurrenceNumber
 
 decisionPrompt :: DecisionView -> Maybe PersonPrompt
 decisionPrompt decision = case decisionContent decision of
-  QuestionContent code prompt -> Just (PersonPrompt (decisionOccurrence decision)
-    (case code of String name -> name; _ -> "structured") "question" prompt)
+  QuestionContent code schema prompt -> Just (PersonPrompt (decisionOccurrence decision)
+    (case (code, schema) of
+      (String name, _) -> name
+      (_, Just editor) -> "structured JSON " <> editorSchemaText editor
+      _ -> "structured") "question" prompt)
   _ -> Nothing
 
+-- | The JSON answer of the editor input. A question with a code name
+-- converts the input with 'personAnswerValue'. A structured question takes
+-- JSON text, which must agree with the editor schema of the decision before
+-- any send.
 answerValue :: DecisionView -> Text -> Either Text Value
 answerValue decision input = case decisionContent decision of
-  QuestionContent (String code) _ -> personAnswerValue code input
-  _ -> Left "structured answer editor is not available"
+  QuestionContent (String code) _ _ -> personAnswerValue code input
+  QuestionContent (Object _) (Just schema) _ -> do
+    value <- personAnswerValue "structured" input
+    editorCheck schema value
+    Right value
+  QuestionContent _ _ _ -> Left "the decision gives no editor schema for its structured answer"
+  RecoveryContent {} -> Left "a recovery decision takes no answer"
 
 -- | The run components of one composite read: the complete snapshot page
 -- set, the run controls with their observation, and the observation of the

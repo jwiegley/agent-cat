@@ -199,6 +199,8 @@ module Agentic.Tui.ServiceLane
     recordDraft,
     dropDraft,
     showDraft,
+    keepDraft,
+    draftKeptText,
   )
 where
 
@@ -441,6 +443,12 @@ data SendStep pending location response
     SendFaulted
   | -- | A declared failure left the original attempt unresolved.
     SendUncertain
+  | -- | The manager refused the attempt with 412 @stale-revision@. The
+    -- manager recognizes a matching retry of a durable command before it
+    -- evaluates the precondition, so this refusal proves that no command
+    -- exists under the key of the attempt. The lane becomes idle, nothing is
+    -- retained for a resend, and nothing is sent again.
+    SendRefused !(Attempt pending location) !C.ClientFailure
   | SendDelivered !(Attempt pending location) !response
 
 -- | Complete the send that holds the given ticket.
@@ -448,6 +456,8 @@ sendStep :: Int -> CallOutcome response -> Lane pending location -> (SendStep pe
 sendStep ticket outcome lane = case laneMutation lane of
   MutationSending expected attempt | ticket == expected -> case outcome of
     InternalFault -> (SendFaulted, faultLane (settleUncertain attempt FaultUncertainty lane))
+    Declared (Left failure@(C.Refused 412 "stale-revision")) ->
+      (SendRefused attempt failure, lane {laneMutation = MutationIdle, laneResendConfirm = False})
     Declared (Left failure) -> (SendUncertain, declaredSendUncertain attempt (T.pack (show failure)) lane)
     Declared (Right response) -> (SendDelivered attempt response, lane)
   _ -> (SendStale, lane)
@@ -1429,3 +1439,27 @@ showDraft before after drafts@(Drafts kept)
         AnswerDraft other earlier -> other /= run || earlier == decision
         InputDraft {} -> True) kept)
       _ -> drafts
+
+-- | The fixed text that states that the decision of a draft changed and
+-- that the draft is kept.
+draftKeptText :: Text
+draftKeptText = "decision changed; draft kept"
+
+-- | The drafts after the displayed question head of a run changed from the
+-- decision of the first identity while the live monitor still shows that
+-- run, given the identity of the head that the monitor shows now. The caller
+-- applies it only when this session holds no answer to the earlier decision,
+-- so the earlier draft was never sent. 'Nothing' means that nothing is kept:
+-- the earlier identity is not an answer draft, it has no draft, the head did
+-- not change, or the new head has its own draft. A new head of the run takes the
+-- earlier draft, so 'showDraft' shows it in the editor. A run without a head
+-- keeps the earlier draft as it is. Nothing is sent, and the operator sends
+-- the kept draft only with an explicit key.
+keepDraft :: DraftKey -> Maybe DraftKey -> Drafts -> Maybe Drafts
+keepDraft earlier after drafts@(Drafts kept) = case earlier of
+  AnswerDraft run decision | Just text <- draftText earlier drafts, after /= Just earlier -> case after of
+    Just later@(AnswerDraft other next) | other == run, next /= decision, not (Map.member later kept) ->
+      Just (Drafts (Map.insert later text (Map.delete earlier kept)))
+    Nothing -> Just drafts
+    _ -> Nothing
+  _ -> Nothing

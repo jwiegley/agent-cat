@@ -243,8 +243,11 @@ identity. `Enter` opens the run of the selected head by its identifier with
 the profile of the decision (`decisionsOpen`), as a decision row of the
 overview does, and the live monitor shows the question head of that run. The
 answer editor converts the typed text with the existing simple codes of
-`Agentic.Tui.Person.personAnswerValue`, and `Ctrl-D` sends it to that decision
-with the decision observation as `If-Match`. `Esc` on the live monitor
+`Agentic.Tui.Person.personAnswerValue`, or with the structured answer editor
+for a structured question, and `Ctrl-D` sends it to that decision with the
+decision observation as `If-Match`. The details of a structured head also
+show its answer schema, for example `Answer schema: {"notes": [string], "ok":
+boolean}`. `Esc` on the live monitor
 returns to the Manager decisions view. Opening the view starts a read of the
 decision heads through live delivery, and live delivery keeps them current
 while the view is shown. `g` reads them again. A declared refusal keeps the
@@ -345,9 +348,20 @@ Without a key press, the view lists the two pending heads in the order of
 `GET /v1/decisions`, each a `text` ask addressed to `person
 model:fixed-point`. `Enter` on the second head opens its run, the typed answer
 completes that run with the typed text as its only recorded answer, and the
-other head stays pending. `Esc` returns to the view, which then lists only the
-other head. The frontend answers that head in the same way, and the view then
-lists no pending head.
+other head stays pending. Each answer is sent with two `Ctrl-D` presses in
+one write, and the second press shows the numbered key outcome of an answer
+in flight. `Esc` returns to the view, which then lists only the other head.
+The frontend answers that head in the same way, and the view then lists no
+pending head. The harness then starts a structured-person run, whose two
+person questions take one structured object code. The view shows the answer
+schema of its head, and an answer whose field `ok` is a string is refused
+before any send. With a valid draft in the editor, the harness stops the TUI
+process, answers the first question through HTTP, writes `Ctrl-D` and lets
+the TUI continue. The TUI answer receives 412 `stale-revision`, the monitor
+states `answer refused: 412 stale-revision; decision changed; draft kept`,
+the second question shows the draft, and nothing is sent until `Ctrl-D`
+sends the draft to the second question. The run records the harness answer
+and the draft as typed values.
 
 The application state keeps the text drafts by identity
 (`Agentic.Tui.ServiceLane.Drafts`): the input editor text of each request and
@@ -358,8 +372,13 @@ change of the selection, and leaving and reopening a run. A completed
 shows its accepted literal, and a question without a draft shows an empty
 editor. Only the decision at the head of a run can be answered, so the display
 of the head of a run removes the answer drafts of the other decisions of that
-run, and the text typed for an earlier head never stays in the editor. At
-most 64 drafts are kept, and each is bounded by its editor.
+run. One exception keeps a draft: when the head of the displayed run changes
+before this session sent an answer to the earlier head
+(`Agentic.Tui.ServiceLane.keepDraft`), the new head takes the draft of the
+earlier head unless it has its own draft, a run without a head keeps the
+draft, and the line `Control:` states `decision changed; draft kept`. The
+frontend never sends a kept draft by itself. At most 64 drafts are kept, and
+each is bounded by its editor.
 
 After the first overview of a session is installed, the frontend starts the
 event worker of the session in its own worker slot (`ServiceEventsWork`). The
@@ -468,7 +487,13 @@ paused instead of `Observation: current`.
 Every command is sent once. The lane retains the original pending command and
 receipt location. An uncertain send is never repeated automatically. When the
 manager offers an exact resend, `x` opens a confirmation and `y` sends the
-retained command unchanged. Any failure that the client does not declare is an
+retained command unchanged. A 412 `stale-revision` refusal of a send is
+definite, because the manager recognizes a matching retry of a durable
+command before it evaluates the precondition. The lane becomes idle, retains
+nothing to resend, and reads the selection again
+(`Agentic.Tui.ServiceLane.SendRefused`). A refused answer keeps its draft,
+and the line `Control:` states `answer refused: 412 stale-revision; decision
+changed; draft kept`. Any failure that the client does not declare is an
 internal fault. The frontend then shows fixed text without exception detail,
 stops automatic refresh and every further mutation, and keeps only read-only
 actions and detachment. `Ctrl-C`, or `q` while no answer editor has the keys,
@@ -477,8 +502,19 @@ exits without cancelling manager-owned work.
 A question head accepts the simple codes `text`, `verdict`, `flag` and
 `receipt`. `Agentic.Tui.Person.personAnswerValue` converts the editor input by
 the question code, as in the local person view, so `false` for a `flag` question
-is sent as the JSON value `false`. The answer carries the entity tag of the
-displayed decision as its precondition.
+is sent as the JSON value `false`. A question with a structured code takes
+JSON text in the structured answer editor. Its header shows the editor schema
+of the decision, for example `structured JSON {"notes": [string], "ok":
+boolean}`. Before any send, `Agentic.Tui.Service.editorCheck` checks the JSON
+value against that schema (`Agentic.Tui.Service.EditorSchema`): the exact
+fields of an object, the type of each value and of each array item. A value
+that does not agree is refused with a numbered key outcome that names the
+first field, for example `answer did not start: answer field ok must be a
+boolean`. A structured question whose decision gives no editor schema takes no
+answer. The answer carries the entity tag of the displayed decision as its
+precondition. `Ctrl-D` while an answer to the displayed decision is in flight
+shows the numbered key outcome `answer did not start: an answer to this
+decision is in flight.` and sends nothing (`Agentic.Tui.Service.answerKey`).
 
 The live monitor sends a run control only when the displayed run controls
 (`/v1/runs/{id}/control`) offer it. `c` opens a cancel confirmation when the
@@ -564,8 +600,7 @@ the answer conversion against the `resources` section of
 `test/manager_client_vectors.json`, which [the protocol
 description](../doc/api/README.md#pages-and-live-delivery) describes.
 
-Service mode does not support the structured answer editor, run history,
-lineage, export,
+Service mode does not support run history, lineage, export,
 reconnection of the session after a manager restart or a credential
 revocation, or acceptance at 40x12 and 80x24. The
 [manual](../doc/agent-cat.texi) entry for `--service` states the complete key

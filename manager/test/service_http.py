@@ -475,13 +475,30 @@ TUI_REDIRECT = "tui-redirect"
 # model:fixed-point.
 # 3. Down and Enter on the second head open the run of that decision at its
 # head, and the live monitor names Esc DECISIONS. The TUI types an answer and
-# sends it with Ctrl-D, which it presses again after a numbered deferral
-# during a page-set read. The run must succeed with the typed text as its only
-# recorded answer, and the adapter must receive no session/prompt.
+# sends it with two Ctrl-D presses in one write. The first starts the answer,
+# and the second must show the numbered key outcome of an answer in flight.
+# After a numbered deferral during a page-set read, the TUI presses them
+# again. The run must succeed with the typed text as its only recorded
+# answer, and the adapter must receive no session/prompt.
 # 4. Esc returns to the Decisions view, which must list only the other head
 # without a key press. Enter opens its run, and the TUI answers it in the
 # same way, so that the run succeeds with its own typed text.
 # 5. Esc returns to the Decisions view, which must list no pending head.
+# 6. The harness starts a structured-person request of profile_1. Its two
+# person questions take one structured object code, {"notes": [string],
+# "ok": boolean}. The Decisions view must show the answer schema, and Enter
+# opens the run at the first question. A typed JSON answer whose field ok is
+# a string must be refused before any send with the numbered key outcome
+# "answer field ok must be a boolean", and the decision must stay pending.
+# 7. The TUI replaces the text with a valid JSON answer, the draft. The
+# harness stops the TUI process, answers the first question through HTTP
+# and waits for its effect, writes Ctrl-D and lets the TUI continue. The TUI
+# answer must receive 412 stale-revision: the live monitor must state
+# "answer refused: 412 stale-revision; decision changed; draft kept", the
+# second question must show the draft in its editor, and the TUI must send
+# nothing by itself. Ctrl-D then sends the draft to the second question, and
+# the run must succeed with the harness answer and the draft as its recorded
+# typed values.
 # Each step prints its own PASS line. It runs one manager lifetime.
 TUI_DECISIONS = "tui-decisions"
 TUI_MODES = {OVERVIEW: (["profile_1", "profile_2"], ["observe", "submit"]), INPUTS: (["profile_1"], ["observe", "submit", "control"]),
@@ -5129,14 +5146,14 @@ def decisions_checks():
         identifier that wraps across rows stays one string."""
         return "".join(line.split("\u2502", 1)[1].strip() for line in screen.splitlines() if "\u2502" in line).replace(" ", "")
 
-    def start(client, profile):
-        """Create, enqueue and approve one prompt-source request of the
+    def start(client, profile, name="prompt-source"):
+        """Create, enqueue and approve one request of the named workflow and
         profile through HTTP with the credential of the harness. Returns the
         run, its pending decision head and its run store."""
         before = set(work.glob("manager/runs/runs/*/runtime"))
         status, catalogue, _ = request("/v1/workflows?profileId=" + profile, harness)
         assert status == 200, ("decisions catalogue", profile, status)
-        workflow = next(item for item in catalogue["items"] if item["name"] == "prompt-source")
+        workflow = next(item for item in catalogue["items"] if item["name"] == name)
         key = capabilities["authorityEpoch"] + "." + secrets.token_urlsafe(16)
         body = {"workflowId": workflow["id"], "descriptorRevision": workflow["revision"],
                 "profileId": workflow["profileId"], "profileRevision": workflow["profileRevision"]}
@@ -5162,26 +5179,33 @@ def decisions_checks():
             session.pump(0.1)
 
     def send_answer(session):
-        """Press Ctrl-D until the TUI starts the answer. An answer key is
+        """Press Ctrl-D twice in one write until the TUI starts the answer.
+        The first press starts the answer, and the second must show the
+        numbered key outcome of an answer in flight. An answer key is
         deferred while a page-set read is in flight, and a deferred key is
         never replayed, so a new numbered key outcome that names the deferral
-        sends Ctrl-D again, as the operator does. Any other key outcome
-        fails."""
+        sends both presses again, as the operator does. Any other key outcome
+        fails. Returns the number of the in-flight key outcome."""
         deferral = re.compile(r"Key (\d+): answer deferred during a page-set read\.")
+        in_flight = re.compile(r"Key (\d+): answer did not start: an answer to this decision is in flight\.")
         refusal = re.compile(r"Key (\d+): (.*)")
         seen = max([int(number) for number in re.findall(r"Key (\d+):", session.screen.text())], default=0)
-        started = ("preparing explicit answer", "sending one answer attempt", "Answer sent to the manager")
         for _ in range(10):
-            session.send(b"\x04")
+            session.send(b"\x04\x04")
             deadline = time.monotonic() + 15
             while True:
                 session.pump()
                 screen = session.screen.text()
-                if any(marker in screen for marker in started):
-                    return
+                found = in_flight.search(screen)
+                if found and int(found.group(1)) > seen:
+                    # Only an answer to this decision in the command lane
+                    # gives this outcome, so the first press started it.
+                    return int(found.group(1))
                 found = deferral.search(screen)
                 if found and int(found.group(1)) > seen:
                     seen = int(found.group(1))
+                    session.settle()
+                    seen = max([seen] + [int(number) for number in re.findall(r"Key (\d+):", session.screen.text())])
                     break
                 other = refusal.search(screen)
                 assert not (other and int(other.group(1)) > seen), ("the answer key was refused", other.group(2) if other else "")
@@ -5198,7 +5222,7 @@ def decisions_checks():
         assert "Esc DECISIONS" in screen, ("the live monitor of a run opened from the Decisions view does not name Esc DECISIONS", screen)
         session.send(text.encode())
         session.wait_screen(text, timeout=10)
-        send_answer(session)
+        outcomes.append(send_answer(session))
         try:
             snapshot, _, raw = client[1]("/v1/runs/" + run + "/snapshot", "RunSnapshot",
                 lambda value: value["runtime"] is not None and value["runtime"]["status"] in terminal)
@@ -5213,6 +5237,8 @@ def decisions_checks():
         relayed = requests.read_text().splitlines() if requests.exists() else []
         assert "session/prompt" not in relayed, ("the adapter received a turn for a person-routed ask", relayed)
         save(session, run + "-answered")
+
+    outcomes = []
 
     def back(session, count):
         """Esc from the live monitor returns to the Decisions view, which
@@ -5295,7 +5321,80 @@ def decisions_checks():
                 screen = back(session, 0)
                 assert "No rows are visible." in screen, "the Decisions view still lists a row"
                 save(session, "done")
-                print("PASS tui-decisions 5: after both answers the Decisions view lists no pending head", flush=True)
+                print("PASS tui-decisions 5: after both answers the Decisions view lists no pending head; the second Ctrl-D of each answer",
+                      "showed the in-flight key outcomes", outcomes, flush=True)
+
+                # 6. A structured question shows its schema, and a wrong field type is refused locally.
+                run, first, store = start(client, "profile_1", "structured-person")
+                session.wait_screen("Decisions: current; pending heads: 1", timeout=10)
+                screen = focused(session, first)
+                shown = details(screen)
+                for line in ("Run:" + run, "Answertype:structured", "Answerschema:{\"notes\":[string],\"ok\":boolean}", "Addressee:personfirst"):
+                    assert line in shown, ("the structured head lacks a detail line", first, line)
+                session.send(b"\r")
+                session.wait_screen("Your answer", timeout=20)
+                screen = session.wait_screen("structured JSON {\"notes\": [string], \"ok\": boolean}", timeout=10)
+                save(session, "structured-head")
+                invalid = '{"ok": "yes", "notes": []}'
+                session.send(invalid.encode())
+                session.wait_screen(invalid, timeout=10)
+                seen = max([int(number) for number in re.findall(r"Key (\d+):", session.screen.text())], default=0)
+                session.send(b"\x04")
+                refused = re.compile(r"Key (\d+): answer did not start: answer field ok must be a boolean")
+                deadline = time.monotonic() + 10
+                while not ((found := refused.search(session.screen.text())) and int(found.group(1)) > seen):
+                    assert time.monotonic() < deadline, ("the invalid structured answer was not refused locally", session.screen.text())
+                    session.pump(0.1)
+                save(session, "structured-refused")
+                pending, _, _ = client[0]("/v1/decisions/" + first, "Decision")
+                assert pending["state"] == "pending", ("a locally refused answer changed the decision", pending["state"])
+                print("PASS tui-decisions 6: the structured head of run", run, "showed its answer schema, and the answer with a string",
+                      "field ok was refused before any send as key outcome", found.group(1), "while decision", first, "stayed pending", flush=True)
+
+                # 7. A stale answer receives 412, keeps its draft and sends nothing by itself.
+                session.send(b"\x7f" * len(invalid))
+                deadline = time.monotonic() + 10
+                while invalid in session.screen.text():
+                    assert time.monotonic() < deadline, ("the editor kept the invalid text", session.screen.text())
+                    session.pump(0.1)
+                draft = '{"ok": true, "notes": ["kept draft"]}'
+                session.send(draft.encode())
+                session.wait_screen(draft, timeout=10)
+                head, tag, _ = client[0]("/v1/decisions/" + first, "Decision")
+                theirs = {"ok": False, "notes": ["harness answer"]}
+                os.kill(session.process.pid, signal.SIGSTOP)
+                try:
+                    client[2]("/v1/decisions/" + first, {"operation": "answer", "occurrenceId": head["address"]["occurrenceId"],
+                                                         "generation": head["generation"], "value": theirs}, tag)
+                    session.send(b"\x04")
+                finally:
+                    os.kill(session.process.pid, signal.SIGCONT)
+                screen = session.wait_screen("answer refused: 412 stale-revision; decision changed; draft kept", timeout=20)
+                save(session, "stale-refused")
+                control, _, _ = client[1]("/v1/runs/" + run + "/control", "RunControl",
+                                          lambda value: value["decisionHeadId"] not in (None, first))
+                second = control["decisionHeadId"]
+                screen = session.wait_screen("Request 2 \u00b7 structured JSON", timeout=20)
+                assert draft in screen, ("the second question does not show the kept draft", screen)
+                save(session, "stale-kept")
+                time.sleep(2)
+                waiting, _, _ = client[0]("/v1/decisions/" + second, "Decision")
+                assert waiting["state"] == "pending", ("the TUI sent the kept draft by itself", waiting["state"])
+                recorded = [record["answer"] for record in json.loads((store / "answers.json").read_bytes())["answers"]]
+                assert recorded == [theirs], ("the stale TUI answer reached the run", recorded)
+                outcomes.append(send_answer(session))
+                try:
+                    snapshot, _, raw = client[1]("/v1/runs/" + run + "/snapshot", "RunSnapshot",
+                        lambda value: value["runtime"] is not None and value["runtime"]["status"] in terminal)
+                finally:
+                    save(session, "structured-sent")
+                (work / ("tui-decisions-" + run + "-terminal.json")).write_bytes(raw)
+                assert snapshot["runtime"]["status"] == "succeeded", ("structured run terminal status", run, snapshot["runtime"]["status"])
+                recorded = {record["occurrenceId"]: record["answer"] for record in json.loads((store / "answers.json").read_bytes())["answers"]}
+                assert recorded == {"0": theirs, "1": json.loads(draft)}, ("structured recorded answers by occurrence", recorded)
+                print("PASS tui-decisions 7: the TUI answer to decision", first, "after the harness answer received 412 stale-revision,",
+                      "the draft moved to decision", second, "without a send, and Ctrl-D sent it, so run", run,
+                      "recorded the typed values", recorded, flush=True)
                 session.send(b"q")
                 assert session.wait_exit(20) == 0
                 session.assert_restored()

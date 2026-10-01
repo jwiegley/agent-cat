@@ -163,6 +163,7 @@ serviceTests render = do
     (case S.decodeDecision (alter "question" (alter "scope" (remove "mode")) decisionValue) of Left C.InvalidResponse -> True; _ -> False)
   compositeTests render profile row request0 preparation snapshot absentRuntime (metadata,items) control decision
   decisionTests render profile request0 receiptValue (metadata,items) (decisionValue,decision) control
+  structuredAnswerTests (metadata,items) decisionValue control
   liveTests render profile request0 (metadata,items)
   resultTests render profile
   saveTests
@@ -299,7 +300,7 @@ overviewTests render row request0 preparation = do
       unpublished = S.RunItem "run_overview_2" "runrev_2" "profile_main" (S.KnownContent (S.KnownRun "workflow_main" Nothing
         Nothing Nothing Nothing Nothing "lost" "unknown" S.Absent ["lost-supervision"]))
       decision = S.DecisionView "dec_overview_1" "decrev_1" "run_overview_1" "profile_main" "gen_1" (OccurrenceId 0) "pending" 0 5
-        (S.QuestionContent (String "flag") "Continue?") Null
+        (S.QuestionContent (String "flag") Nothing "Continue?") Null
       members = [S.DecisionMember decision, S.RunMember run, S.RequestMember request, S.RunMember unpublished]
       rows = S.overviewRows members
       detailsOf ident = maybe [] S.overviewRowDetails (listToMaybe [entry | entry <- rows, S.overviewRowId entry == ident])
@@ -624,7 +625,7 @@ resourceVectorTests = do
         "occurrenceId" .= occurrenceText (S.decisionOccurrence view), "state" .= S.decisionState view,
         "position" .= S.decisionPosition view, "observedSequence" .= T.pack (show (S.decisionSequence view)),
         "content" .= case S.decisionContent view of
-          S.QuestionContent code prompt -> object ["kind" .= ("question" :: T.Text), "code" .= code, "prompt" .= prompt]
+          S.QuestionContent code _ prompt -> object ["kind" .= ("question" :: T.Text), "code" .= code, "prompt" .= prompt]
           S.RecoveryContent gap message choices -> object ["kind" .= ("recovery" :: T.Text), "gap" .= gap,
             "message" .= message, "choices" .= map choiceProjection choices] ]
     choiceProjection option = object ["choice" .= recoveryChoice option, "target" .= recoveryTarget option]
@@ -1423,6 +1424,100 @@ liveTests render profile request0 (metadata,items) = do
         ("Observation refused: " <> sanitized) `T.isInfixOf` commandFrame (140,36)),
       ("no label, request or command-screen frame contains a raw control character",
         all (T.null . raw) [labelPresent, labelAbsent, commandFrame (140,36), commandFrame (80,24)])
+    ]
+
+-- | The structured answer editor: the editor schema of a structured
+-- question, the local check of the JSON answer before any send, the outcome
+-- of Ctrl-D while an answer is in flight, the definite 412 refusal of a send
+-- and the answer draft that a changed head keeps.
+structuredAnswerTests :: (Value,[Value]) -> Value -> S.ControlView -> IO ()
+structuredAnswerTests (metadata,items) decisionValue control = do
+  snapshot <- either (die . show) pure (S.decodeSnapshot metadata items)
+  let semantic = object ["property" .= object ["name" .= ("ok" :: T.Text), "schema" .= ("boolean" :: T.Text),
+        "rest" .= object ["property" .= object ["name" .= ("notes" :: T.Text),
+          "schema" .= object ["array" .= object ["items" .= ("string" :: T.Text)]], "rest" .= ("object" :: T.Text)]]]]
+      editor = object ["type" .= ("object" :: T.Text), "required" .= (["ok","notes"] :: [T.Text]), "additionalProperties" .= False,
+        "properties" .= object ["ok" .= object ["type" .= ("boolean" :: T.Text)],
+          "notes" .= object ["type" .= ("array" :: T.Text), "items" .= object ["type" .= ("string" :: T.Text)]]]]
+      structuredValue schema = alter "question" (put "editorSchema" schema . put "semanticSchema" semantic
+        . put "code" (object ["json" .= object ["schema" .= semantic]])) decisionValue
+      expected = S.EditorObject (Map.fromList [("ok", S.EditorBoolean), ("notes", S.EditorArray S.EditorString)])
+      decisionObs = ("/v1/decisions/decision_3", "\"decisionrev_1\"") :: (T.Text,T.Text)
+      controlObs = ("/v1/runs/run_21/control", "\"controlrev_2\"") :: (T.Text,T.Text)
+      refusedWith fragment result = case result of Left reason -> fragment `T.isInfixOf` reason; Right _ -> False
+  structured <- either (die . show) pure (S.decodeDecision (structuredValue editor))
+  unschemed <- either (die . show) pure (S.decodeDecision (structuredValue Null))
+  let runRead = S.RunRead snapshot (controlObs,control) (Just (decisionObs,structured))
+      answer = S.answerMutation "profile_main" runRead
+      valid = "{\"ok\": true, \"notes\": [\"kept draft\"]}"
+      typed = object ["ok" .= True, "notes" .= (["kept draft"] :: [T.Text])]
+  checks
+    [ ("a structured question keeps the editor schema of the decision",
+        case S.decisionContent structured of S.QuestionContent (Object _) (Just schema) _ -> schema == expected; _ -> False),
+      ("a structured question offers its answer like a named code", S.answerOffered control structured),
+      ("the answer type line shows the editor schema of a structured question",
+        fmap personPromptCode (S.decisionPrompt structured) == Just "structured JSON {\"notes\": [string], \"ok\": boolean}"),
+      ("a JSON answer that agrees with the editor schema is the typed value", S.answerValue structured valid == Right typed),
+      ("a field of the wrong type is refused before any send",
+        refusedWith "answer field ok must be a boolean" (S.answerValue structured "{\"ok\": \"yes\", \"notes\": []}")),
+      ("an array item of the wrong type is refused before any send",
+        refusedWith "answer field notes item 1 must be a string" (S.answerValue structured "{\"ok\": false, \"notes\": [\"a\", 2]}")),
+      ("a missing field and an unknown field are refused before any send",
+        refusedWith "answer lacks the field notes" (S.answerValue structured "{\"ok\": true}")
+          && refusedWith "answer has the unknown field extra" (S.answerValue structured "{\"ok\": true, \"notes\": [], \"extra\": 1}")),
+      ("text that is not JSON is refused before any send", refusedWith "answer is not JSON" (S.answerValue structured "ok")),
+      ("integer and number schemas accept only their values",
+        S.editorCheck S.EditorInteger (Number 3) == Right () && refusedWith "must be an integer" (S.editorCheck S.EditorInteger (Number 3.5))
+          && S.editorCheck S.EditorNumber (Number 3.5) == Right () && S.editorCheck S.EditorNull Null == Right ()),
+      ("a structured question without an editor schema takes no answer",
+        refusedWith "no editor schema" (S.answerValue unschemed valid)),
+      ("the structured answer mutation carries the typed value on the exact decision observation",
+        answer valid == Right (S.Answer structured typed, decisionObs)
+          && "\"value\":{\"notes\":[\"kept draft\"],\"ok\":true}" `T.isInfixOf` TE.decodeUtf8 (BL.toStrict (encode (S.answerBody structured typed)))),
+      ("Ctrl-D while an answer to the head is in flight has its own reason and starts nothing",
+        S.answerKey True False "profile_main" runRead valid == Left "an answer to this decision is in flight."
+          && S.answerKey True True "profile_main" runRead valid == Left "an answer to this decision is in flight."),
+      ("Ctrl-D on a stale observation starts nothing, and otherwise it is the answer mutation",
+        S.answerKey False True "profile_main" runRead valid == Left "the decision observation is stale."
+          && S.answerKey False False "profile_main" runRead valid == answer valid),
+      ("the overview details of a structured decision show the answer schema",
+        maybe False (elem "Answer schema: {\"notes\": [string], \"ok\": boolean}" . S.overviewRowDetails)
+          (listToMaybe (S.decisionRows [structured])))
+    ]
+  -- A 412 stale-revision refusal of a send is definite: the lane becomes
+  -- idle and retains nothing to resend. Any other declared refusal keeps the
+  -- attempt unresolved.
+  let attempt = L.Attempt (S.Answer structured typed) ("pending-answer" :: T.Text) Nothing
+      sending = L.Lane Nothing (L.MutationSending 4 attempt) False False :: L.Lane T.Text T.Text
+      (refusedStep, refusedLane) = L.sendStep 4 (L.Declared (Left (C.Refused 412 "stale-revision"))) sending
+      (otherStep, otherLane) = L.sendStep 4 (L.Declared (Left (C.Refused 409 "decision-not-head"))) sending
+  checks
+    [ ("a 412 stale-revision refusal of an answer returns the attempt and leaves the lane idle without a resend",
+        case (refusedStep, L.laneMutation refusedLane) of
+          (L.SendRefused refused (C.Refused 412 "stale-revision"), L.MutationIdle) ->
+            L.attemptMutation refused == S.Answer structured typed && not (L.resendOffered refusedLane)
+              && L.mutationAdmission refusedLane == L.KeyStart
+          _ -> False),
+      ("another declared refusal keeps the attempt unresolved",
+        case (otherStep, L.laneMutation otherLane) of
+          (L.SendUncertain, L.MutationUncertain _ (L.DeclaredUncertainty _)) -> True
+          _ -> False)
+    ]
+  -- A changed head keeps the draft of the earlier head that was never sent.
+  let first = L.AnswerDraft "run_21" "decision_3"
+      next = L.AnswerDraft "run_21" "decision_4"
+      typedDrafts = L.recordDraft first valid L.noDrafts
+      carried = L.keepDraft first (Just next) typedDrafts
+  checks
+    [ ("a new head of the shown run takes the draft of the earlier head, and showDraft shows it",
+        fmap (L.draftText next) carried == Just (Just valid) && fmap (L.draftText first) carried == Just Nothing
+          && fmap (snd . L.showDraft (Just first) (Just next)) carried == Just (Just (Just valid))),
+      ("a run without a head keeps the earlier draft as it is", L.keepDraft first Nothing typedDrafts == Just typedDrafts),
+      ("the same head, a head without a draft, a new head with its own draft and an input keep nothing",
+        isNothing (L.keepDraft first (Just first) typedDrafts) && isNothing (L.keepDraft first (Just next) L.noDrafts)
+          && isNothing (L.keepDraft first (Just next) (L.recordDraft next "own" typedDrafts))
+          && isNothing (L.keepDraft (L.InputDraft "req_8" "topic") Nothing typedDrafts)),
+      ("the kept-draft text is fixed", L.draftKeptText == "decision changed; draft kept")
     ]
 
 -- | The service decision head, the answer mutation and the rendering of

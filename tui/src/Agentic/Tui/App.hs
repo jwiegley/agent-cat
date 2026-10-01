@@ -769,7 +769,12 @@ serviceSavable state = case modelScreen (stateModel state) of
 -- | Whether the command lane holds an answer to this decision. A retained
 -- answer stays bound to its original decision when the head changes.
 serviceAnswerPending :: AppState -> Service.DecisionView -> Bool
-serviceAnswerPending state view = case serviceMutation state of
+serviceAnswerPending state view = serviceAnswerHeld state (Service.decisionId view)
+
+-- | Whether the command lane holds an answer to the decision with this
+-- identifier.
+serviceAnswerHeld :: AppState -> Text -> Bool
+serviceAnswerHeld state ident = case serviceMutation state of
   Lane.MutationPreparing _ mutation -> answers mutation
   Lane.MutationSending _ attempt -> answers (Lane.attemptMutation attempt)
   Lane.MutationAwaiting mutation _ _ -> answers mutation
@@ -777,8 +782,32 @@ serviceAnswerPending state view = case serviceMutation state of
   Lane.MutationIdle -> False
   where
     answers mutation = case mutation of
-      Service.Answer decision _ -> Service.decisionId decision == Service.decisionId view
+      Service.Answer decision _ -> Service.decisionId decision == ident
       _ -> False
+
+-- | The run whose live monitor the service frontend shows.
+serviceShownRun :: AppState -> Maybe Text
+serviceShownRun state = case (stateBackend state, modelScreen (stateModel state)) of
+  (ServiceBackend {}, LiveScreen run) -> Just (runIdText run)
+  _ -> Nothing
+
+-- | Keep the answer draft of the earlier question head when the head of the
+-- shown run changed before this session sent an answer to it
+-- ('Lane.keepDraft'). The line @Control:@ of the run then states
+-- 'Lane.draftKeptText', unless it already states it after a 412 refusal.
+-- Nothing is sent.
+keepServiceDraft :: Maybe Lane.DraftKey -> AppState -> AppState
+keepServiceDraft before state = case before of
+  Just earlier@(Lane.AnswerDraft run decision)
+    | serviceShownRun state == Just run, not (serviceAnswerHeld state decision),
+      Just drafts <- Lane.keepDraft earlier (serviceDraftKey state) (stateServiceDrafts state) ->
+        let stated = case stateServiceControlOutcome state of
+              Just (ident, label) -> ident == run && Lane.draftKeptText `T.isSuffixOf` label
+              Nothing -> False
+         in state {stateServiceDrafts = drafts,
+              stateServiceControlOutcome = if stated then stateServiceControlOutcome state else Just (run, Lane.draftKeptText),
+              stateModel = (stateModel state) {modelStatus = Lane.draftKeptText}}
+  _ -> state
 
 -- | The installed preparation observation.
 servicePreparation :: AppState -> Maybe (Manager.Observed,Manager.Preparation)
@@ -1078,6 +1107,21 @@ handleServiceSent client ticket result = do
     (Lane.SendStale,_) -> pure ()
     (Lane.SendFaulted,lane) -> faultService state lane
     (Lane.SendUncertain,lane) -> uncertainService state lane
+    -- A 412 refusal proves that the manager holds no command under the key,
+    -- so the lane is idle and nothing is sent again. A refused answer keeps
+    -- its draft, the line @Control:@ states that the decision changed, and
+    -- the selection is read again.
+    (Lane.SendRefused attempt failure,lane) -> do
+      let operation = Service.mutationOperation (Lane.attemptMutation attempt)
+          refusal = operation <> " refused: " <> Lane.refusalCode failure
+          (label,outcome) = case Lane.attemptMutation attempt of
+            Service.Answer decision _ ->
+              let text = refusal <> "; " <> Lane.draftKeptText in (text, Just (Service.decisionRun decision, text))
+            _ -> (refusal <> "; the resource changed and nothing was sent again", stateServiceControlOutcome state)
+      put state {stateServiceLane = lane, stateServiceControlOutcome = outcome,
+        stateModel = (stateModel state) {modelStatus = label}}
+      liftIO (writeIORef (stateServiceUncertainExit state) (isJust (stateServiceApproval state)))
+      refreshServiceRequest client Lane.AutomaticRefresh
     (Lane.SendDelivered attempt@(Lane.Attempt mutation pending _) response,_) -> case mutation of
         Service.Create workflow -> case Manager.decodeObservation (Manager.responseValue response) of
           Right request | Manager.responseStatus response == 201, Service.requestMatches workflow request,
@@ -1260,7 +1304,7 @@ handleServiceEvent client event = do
   before <- get
   handleServiceEventCore client event
   pumpServiceFetches client
-  modify (showServiceDraft (serviceDraftKey before))
+  modify (showServiceDraft (serviceDraftKey before) . keepServiceDraft (serviceDraftKey before))
   after <- get
   let view current = (modelScreen (stateModel current), stateConfirmDetails current, stateKeyHelp current, serviceResendConfirm current, stateServiceConfirm current)
       noticeEvent = Approval.NoticeEvent
@@ -1489,8 +1533,8 @@ handleServiceEventCore client event = do
     -- A question head takes the text entry keys. Ctrl-D sends one answer for
     -- the displayed head. Text keys edit the answer, which is kept as the
     -- draft of the decision, so q does not detach here, and Ctrl-C detaches.
-    -- Esc returns to the manager overview and sends nothing. No key sends
-    -- while an answer to this decision is in the command lane.
+    -- Esc returns to the manager overview and sends nothing. No text key
+    -- edits while an answer to this decision is in the command lane.
     VtyEvent key | Just (Service.QuestionHead view _) <- serviceHead state, not (stateKeyHelp state), not (serviceResendConfirm state),
         stateServiceConfirm state == Nothing -> case key of
       Vty.EvKey Vty.KEsc [] -> leaveServiceSelection
@@ -1498,17 +1542,17 @@ handleServiceEventCore client event = do
       Vty.EvKey Vty.KPageDown [] -> vScrollBy (viewportScroll PersonViewport) 10
       Vty.EvKey Vty.KHome [] -> vScrollToBeginning (viewportScroll PersonViewport)
       Vty.EvKey Vty.KEnd [] -> vScrollToEnd (viewportScroll PersonViewport)
-      _ | serviceAnswerPending state view -> pure ()
       -- Every Ctrl-D has one numbered visible outcome: a start, or a key
-      -- outcome that names why nothing was sent.
+      -- outcome that names why nothing was sent, also while an answer to
+      -- this decision is in flight ('Service.answerKey').
       Vty.EvKey (Vty.KChar 'd') [Vty.MCtrl] -> case (serviceRunRead state, serviceProfile state) of
-        (Just components, Just profile)
-          | isJust (Lane.installedStale (stateServiceObservation state)) ->
-              serviceKeyOutcome False "answer did not start: the decision observation is stale."
-          | otherwise -> case Service.answerMutation profile components (editorContents (statePersonEditor state)) of
-                Left failure -> serviceKeyOutcome False ("answer did not start: " <> failure)
-                Right (mutation,observed) -> serviceMutationKey "answer" (beginServiceMutation client mutation (Just observed))
+        (Just components, Just profile) ->
+          case Service.answerKey (serviceAnswerPending state view) (isJust (Lane.installedStale (stateServiceObservation state)))
+                 profile components (editorContents (statePersonEditor state)) of
+            Left failure -> serviceKeyOutcome False ("answer did not start: " <> failure)
+            Right (mutation,observed) -> serviceMutationKey "answer" (beginServiceMutation client mutation (Just observed))
         _ -> serviceKeyOutcome False "answer did not start: the decision is not observed."
+      _ | serviceAnswerPending state view -> pure ()
       _ -> handlePersonEditorInput event >> recordServiceDraft
     -- The steer editor below the live monitor takes the text entry keys, so
     -- q edits the text here, and Ctrl-C detaches.

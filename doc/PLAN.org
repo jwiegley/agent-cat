@@ -3061,7 +3061,7 @@ Acceptance: each item is fixed with a check, or recorded as not needed with a re
 :LABELS:   ["workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-29 Tue 12:34]
-:MODIFIED: [2026-10-01 Thu 02:05]
+:MODIFIED: [2026-10-01 Thu 05:16]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -3098,6 +3098,13 @@ Non-blocking findings of fess audit fess/fast-A6A7-r1.md (2026-09-29) on subtask
     "author": "johnw",
     "text": "Finding 6 is addressed by subtask PC18 (2026-10-01): answer drafts are keyed by run and decision id, and showing the head decision of a run removes the drafts of its other decisions, so a stale draft disappears when the head changes. A model check covers the removal. Evidence: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/PC/PC18/impl-r1 (build.exit, model.exit, overview.exit, journey.exit and doc-check.exit all 0). Fess: fess/pc-PC18-r1.md, not blocking; its findings are filed as acat-pc18-selection-fess-54tl. Findings 2, 3, 4, 5, 7, 8, 9 and 10 are unchanged.",
     "created_at": "2026-10-01T09:05:36Z"
+  },
+  {
+    "id": 500,
+    "issue_id": "acat-a6a7-fess-followup-1exm",
+    "author": "johnw",
+    "text": "Finding 5 is addressed by subtask PC25 (2026-10-01): Ctrl-D while an answer is in flight now shows a numbered key outcome ('Key N: answer did not start: an answer to this decision is in flight.') through the pure function answerKey, and tui-decisions asserts it. PC25 also changes the PC18 rule for finding 6: an unsent draft now moves to the new head of the same run with a visible 'decision changed; draft kept' notice instead of being removed. That choice is open in acat-pc25-answer-fess-1m4e finding 2. Evidence: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/PC/PC25/impl-r1 (build, model, decisions, journey and doc-check exits all 0). Fess: fess/pc-PC25-r1.md, not blocking. Findings 2, 3, 4, 7, 8, 9 and 10 are unchanged.",
+    "created_at": "2026-10-01T12:16:40Z"
   }
 ]
 #+end_src
@@ -10534,6 +10541,28 @@ Non-blocking findings of fess audit fess/pc-PC22-r1.md (2026-10-01) on subtask P
 5. (low) manager/test/service_http.py tui_control_checks, the comment "# 4. f and i are refused locally, and a abandons.": the code refuses i and b. Fix: change the comment.
 6. (low) tui/src/Agentic/Tui/App.hs activeLayer and stateSteerTiming: stateSteerTiming stays set when a service head appears, so the steer editor is hidden and shows again after the head clears. Only leaveServiceSelection clears it. Fix: clear stateSteerTiming when a head is installed, or document that the editor is restored.
 7. (low) manager/test/__pycache__/: an untracked, unignored .pyc directory was left in the worktree. Disposition: the Integrator deleted it before the PC22 commit; consider adding __pycache__ to .gitignore.
+
+* TODO [#D] Resolve the non-blocking fess findings of subtask PC25    :review:
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pc25-answer-fess-1m4e
+:LABELS:   ["review","workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-01 Thu 05:16]
+:MODIFIED: [2026-10-01 Thu 05:16]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess audit fess/pc-PC25-r1.md (2026-10-01) on subtask PC25 (WM-034 structured answer editor, stale answers and the Ctrl-D outcome).
+
+1. (medium) tui/src/Agentic/Tui/ServiceLane.hs (SendRefused) and tui/src/Agentic/Tui/App.hs: the 412 stale-revision rule (idle lane, nothing kept for a resend) applies to every mutation, including cancel, steer, redirect, retry, recovery choice, withdraw, discard, remove-input and set-input. Before PC25 a 412 left the attempt unresolved with a resend offer. Only the answer path ran end to end. Fix: run tui-overview, tui-inputs, tui-controls, tui-redirect or bash tui/ci/tui.sh once before the phase gate.
+2. (medium) tui/src/Agentic/Tui/ServiceLane.hs keepDraft and tui/src/Agentic/Tui/App.hs keepServiceDraft: an unsent draft for head A moves to the new head B of the same run and fills the editor of B, so one Ctrl-D sends the text of A as the answer of B. This reverses the PC18 rule for acat-a6a7 finding 6. A visible notice is shown and tui-decisions step 7 asserts the move. Fix: the operator decides between moving the draft and keeping it under its original decision identity.
+3. (low) tui/src/Agentic/Tui/ServiceLane.hs and App.hs comments claim that a 412 proves no command exists under the key. The manager can store a refused command with refusal stale-revision. Fix: say that no effect was admitted under the key.
+4. (low) tui/src/Agentic/Tui/Service.hs editorCheck: an integer schema accepts Number 3.0, which the runtime may refuse. Fix: add a vector for 3.0 against an integer schema, or send the integral value as an Integer.
+5. (low) manager/test/service_http.py tui-decisions step 7 depends on Brick reading the waiting Ctrl-D before the manager event after SIGCONT. Fix: if the step flakes, wait for the in-flight outcome or make the ordering deterministic.
 
 * TODO [#C] Resolve PC5 fess findings in legacy history windows    :review:
 :PROPERTIES:
@@ -19056,7 +19085,7 @@ to an unapproved local launch.
 :LABELS:   ["p7","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-01 Thu 04:53]
+:MODIFIED: [2026-10-01 Thu 05:16]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-034
 :SOURCE_REPO: agent-cat
@@ -19240,6 +19269,13 @@ Local-mode behavior remains intact without a duplicated service runtime model.
     "author": "johnw",
     "text": "PC24 (Decisions view and person-routed asks): D on the service workflow browser (not Tab) opens a Manager decisions view that reads the full /v1/decisions page set without runId and lists the pending head of each run in manager observation order; a list that names one decision or one run twice is refused. Enter opens the run at the selected head, and Esc returns to the list view used last. A question decision shows its answer type, addressee (for example person model:fixed-point) and prompt. An ask that personAnswers routes to the person is answered with the simple codes of personAnswerValue. The new tui-decisions mode, on the person-answers fixture, answers a person-routed ask from the Decisions view and the run continues with the typed value. Evidence scope (/Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/PC/PC24/impl-r1): Werror build, tui-model-test at N8 (attempt 1 failed; fixed, model-test-2 exit 0), tui-decisions at N8 (four earlier attempts failed during development; final exit 0, and the fess audit reran it on the final code with exit 0), Phase A journey at N8, make -C doc check, all exit 0. Limitations: a refused decisions read has no backoff retry; Esc returns to the list view used last; tui/ci/tui.sh, ALLBUILD and the N=1 journey were not run. Fess r1 non-blocking; findings in acat-dc6b. Package stays open.",
     "created_at": "2026-10-01T11:53:06Z"
+  },
+  {
+    "id": 499,
+    "issue_id": "acat-wm-034-3vqz",
+    "author": "johnw",
+    "text": "PC25 (structured answer editor, stale answers and the Ctrl-D outcome): the service TUI accepts a structured JSON answer for every question code that personAnswerValue does not cover. editorSchema returns a typed EditorSchema, and editorCheck validates the answer against it before the send, naming the first field that does not agree. A 412 stale-revision on an answer leaves the lane idle with nothing kept for a resend, keeps the draft, shows 'decision changed; draft kept' and reads the run again. A head change before the send moves the unsent draft to the new head of the same run with the same notice, and nothing is sent until Ctrl-D. Ctrl-D while an answer is in flight has a numbered key outcome. tui-decisions now sends a structured answer that the runtime decodes as the typed value, and forces a 412 by answering over HTTP first. Evidence scope (/Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/PC/PC25/impl-r1): Werror build, tui-model-test at N8 (866 checks; first run failed on an old vector, fixed), tui-decisions at N8, Phase A journey at N8, make -C doc check, all exit 0. Limitations: the 412 rule applies to every lane mutation but only answers ran end to end; tui-overview, tui-inputs, tui-controls, tui-redirect and tui/ci/tui.sh were not run. Fess r1 non-blocking; findings in acat-pc25-answer-fess-1m4e. Package stays open.",
+    "created_at": "2026-10-01T12:16:40Z"
   }
 ]
 #+end_src
