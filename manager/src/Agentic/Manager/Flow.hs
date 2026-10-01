@@ -37,6 +37,7 @@ module Agentic.Manager.Flow
     closeManagerFlow,
     managerFlowBytes,
     managerFlowSegments,
+    managerFlowUnanswered,
     managerFlowSeals,
     managerFlowAppends,
     pruneManagerFlowSegment,
@@ -144,6 +145,7 @@ import Agentic.Runtime
     FlowSegments (..),
     FlowSegment (..),
     FlowWindow (..),
+    FlowWindowEntry (..),
     FlowWindowLimits (..),
     FlowWindowRefusal (..),
     flowSealedSegments,
@@ -172,6 +174,7 @@ import Agentic.Runtime
     flowWriterBytes,
     flowWriterSeals,
     flowWriterSegments,
+    flowWriterUnanswered,
     pruneFlowSegment,
     isFlowSha256,
     maxFrameBytes,
@@ -343,6 +346,27 @@ managerFlowBytes flow = withMVar (managerLock flow) $ \_ -> either (const (pure 
 -- not be opened. The writer lock is taken and released.
 managerFlowSegments :: ManagerFlow -> IO [FlowSegment]
 managerFlowSegments flow = withMVar (managerLock flow) $ \_ -> either (const (pure [])) flowWriterSegments (managerWriter flow)
+
+-- | Each ask of the retained log that no reply names, oldest first, with its
+-- record and its body value, both decoded from the log. The positions come
+-- from the reply-check index of the runtime writer, and each record is read
+-- from its file with a window of one record. The writer lock is held for the
+-- whole read, so no append or prune changes the log meanwhile. A log that
+-- could not be opened, or a read that fails, gives the failure.
+managerFlowUnanswered :: ManagerFlow -> IO (Either ManagerFlowFailure [(Position, Record, Either Text Value)])
+managerFlowUnanswered flow = case managerWriter flow of
+  Left why -> pure (Left (ManagerFlowUnavailable (managerFlowOpenWord why)))
+  Right writer -> withMVar (managerLock flow) $ \_ -> do
+    asks <- flowWriterUnanswered writer
+    found <- synchronous (mapM (askAt . fst) asks)
+    pure (either (Left . ManagerFlowUnavailable . T.pack . displayException) Right found)
+  where
+    askAt position = do
+      ManagerWindow _ window <- readManagerWindow (managerRoot flow) (managerStream flow) position (FlowWindowLimits 1 maxFrameBytes)
+      case window of
+        Right (FlowWindow [FlowWindowEntry found record _] _ _ _)
+          | found == position -> (,,) position record <$> managerFlowContent flow record
+        _ -> throwIO (FlowError ("the log holds no complete record at the position " <> showPosition position <> " of an ask"))
 
 -- | The number of seals of the log in this lifetime, which the Store pruner
 -- watches. A log that could not be opened never seals.

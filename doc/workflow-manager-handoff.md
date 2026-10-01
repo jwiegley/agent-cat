@@ -756,11 +756,14 @@ S = max(65536, (L - R) div 16), with global positions that continue across
 segments. The Store pruner removes the oldest sealed segments while their
 records are older than 604800 seconds or the log holds more than
 (L - R) div 2 bytes, and it stops at the first segment that names live work:
-a request that is not terminal, a run that is not observed terminal, the
-parent run of a live request or an ask without a reply. The newest sealed
-segment and the active file stay. When live work holds the floor, the log can
-still reach L minus R, and then every ordinary command and review
-publication is refused with `storage-quota`. At a 64 MiB ceiling, L minus R
+a request that is not terminal, a run that is not observed terminal and has
+not lost its supervision, the parent run of a live request or an ask without
+a reply. The open of a serving lifetime first answers each command ask of an
+earlier lifetime that has no reply, with the current receipt of its command
+or with a failure reply. The newest sealed segment and the active file
+stay. When live work holds the floor, the log can still reach L minus R,
+and then every ordinary command and review publication is refused with
+`storage-quota`. At a 64 MiB ceiling, L minus R
 holds about 2929 simple journeys of 22193 bytes each. A log above the configured
 `globalMutationLedgerBytes`, or one with an undecodable complete line, makes
 every append of the lifetime fail, so ordinary commands are refused with

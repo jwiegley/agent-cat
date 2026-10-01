@@ -161,7 +161,15 @@ position, its record count, its bytes, the latest time of its records, the
 request, manager run and command identifiers and the claim checks that its
 records name. `flowWriterSegments` returns the sealed segments with whether an
 ask in each has no reply, and `flowWriterSeals` counts the seals of the
-writer. `pruneFlowSegment` removes the oldest sealed segment when it starts at
+writer. `flowWriterUnanswered` reads the reply-check index under the writer
+lock and returns the position and schema of each retained ask, from the
+floor to the current end, that no reply names. The manager, which receives
+every command ask of its log, uses it at the reconciliation of a new
+lifetime: it answers each orphaned command ask of an earlier lifetime with a
+receipt or a failure reply, as the
+[storage contract](../manager/STORAGE.md#orphaned-asks) states. The writer
+appends that reply as it appends any other record, and it never originates or
+answers an ask itself. `pruneFlowSegment` removes the oldest sealed segment when it starts at
 a given position, it is not the newest sealed segment and every ask in it has
 a reply. Under the writer lock it unlinks the segment, moves the floor to the
 start of the next sealed segment, removes each claim-check file that no

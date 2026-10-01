@@ -2375,22 +2375,33 @@ flowAgePruneChecks work = do
 
 -- | A sealed segment that names a request that is not terminal, a run that is
 -- not observed terminal, the parent run of a live request or an unanswered
--- ask is kept, and it keeps every later segment.
+-- ask is kept, and it keeps every later segment. The open of a serving
+-- lifetime answers the orphaned ask of an earlier lifetime with the current
+-- receipt of its command, so a fault that fails that reply keeps the ask
+-- without a reply for one lifetime.
 flowProtectedPruneChecks :: FilePath -> IO ()
 flowProtectedPruneChecks work = do
   (path, root) <- fixture work "flow-prune-protected" (64 * commandCapacity) 20
   let administer statement = withInstalled path $ \installed -> withCoordinationStore installed $ \store -> mutate store (execute statement [])
-      serve action = withInstalled path $ \installed -> withServingStore installed action
+      replyFault = ManagerFlowFault (\schema _ -> pure (schema == Runtime.FlowReceipt))
+      serve action = withInstalled path $ \installed -> withServingStoreWith Runtime.strictFlowCodec (Just replyFault) installed action
       starts = sealedStartsOf root =<< streamOf
       streamOf = withInstalled path $ \installed -> withCoordinationStore installed (fmap storeStreamId . storeIdentity)
+      receipt = firstFlow flowReceipts
   stream <- withInstalled path $ \installed -> withCoordinationStore installed $ \store -> do
     mutate store seed
+    -- An observer run keeps its supervision across the restarts of this
+    -- check, which make an owned run lost.
+    mutate store (execute "UPDATE runs SET supervision='observer' WHERE id='run_1'" [])
     mutate store (execute "INSERT INTO runs (id,revision,control_revision,request_id,profile_id,root_identity,native_run_id,supervision,result_state,terminal_observed) VALUES ('run_2','run_revision','control_revision',NULL,'profile_1','root_2','native_2','observer','absent',1)" [])
     mutate store (execute "INSERT INTO requests (id,revision,client_id,workflow_id,descriptor_revision,profile_id,profile_revision,phase,admission,blocking_reasons,validation_errors,parent_run_id,lineage_operation) VALUES ('request_2','r0','client_1','workflow_1','descriptor_1','profile_1','profile_revision','draft','not-queued',X'5b5d',X'5b5d','run_2','restart')" [])
+    -- The committed command of the orphaned ask.
+    mutate store (execute "INSERT INTO commands(id,revision,profile_id,operation,client_id,authority_epoch,method,resource_uri,idempotency_key,receipt,retired,accepted_at,state,reserved_bytes) VALUES (?,'r','profile_1','answer','client_1','authority_1','POST',?,'key_orphaned',?,0,?,'accepted',0)"
+      [SQL.SQLText (receiptId receipt), SQL.SQLText (receiptResource receipt), SQL.SQLBlob (encoded receipt), SQL.SQLText (receiptAcceptedAt receipt)])
     storeStreamId <$> storeIdentity store
   old <- eightDaysAgo
   let notice about = oldLine old Runtime.FlowNotice about (noticeFlowBody (ShutdownNotice "generation_old"))
-      ask = oldLine old Runtime.FlowCommand Runtime.noAbout (commandFlowBody (firstFlow flowCommands))
+      ask = oldLine old Runtime.FlowCommand Runtime.noAbout {Runtime.aboutCommand = Just (receiptId receipt)} (commandFlowBody (firstFlow flowCommands))
   writeOldLog root stream
     [ [notice Runtime.noAbout],
       [notice Runtime.noAbout {Runtime.aboutRequest = Just "request_1"}],
@@ -2409,18 +2420,17 @@ flowProtectedPruneChecks work = do
   serve (const (pure ()))
   starts >>= check "a segment that names the parent run of a live request is kept" . (== [3, 4, 5])
   administer "UPDATE requests SET phase='withdrawn' WHERE id='request_2'"
-  -- The ask gets its reply in this lifetime, after the round at open.
-  serve $ \store -> do
-    flow <- maybe (error "FAIL the serving lifetime has no manager log") pure (storeManagerFlow store)
-    let receipt = firstFlow flowReceipts
-    void (appendManagerReply flow (64 * commandCapacity) Following Runtime.FlowReceipt (Runtime.Position 4) Runtime.Manager (Runtime.To Runtime.Manager) Runtime.noAbout {Runtime.aboutCommand = Just (receiptId receipt)} (receiptFlowBody receipt) >>= right)
-  starts >>= check "a segment with an ask that has no reply is kept" . (== [4, 5])
   serve (const (pure ()))
-  starts >>= check "a segment whose ask has its reply is removed, and the newest sealed segment is kept" . (== [5])
+  starts >>= check "a segment with an ask that has no reply is kept" . (== [4, 5])
+  -- Without the fault, the open answers the orphaned ask before the round at
+  -- open.
+  withInstalled path $ \installed -> withServingStore installed (const (pure ()))
+  starts >>= check "the open answers an orphaned ask, its segment is removed, and the newest sealed segment is kept" . (== [5])
   report <- readManagerLog (foldl (</>) root (managerFlowPath stream))
-  check "the reader decodes a receipt whose command lies below the floor"
+  check "the reader decodes the current receipt that answers an orphaned ask whose command lies below the floor"
     (managerLogFloor report == Runtime.Position 5 && pruneReportIntact report
-      && [receipt | ReceiptValue receipt <- Map.elems (managerLogValues report)] == take 1 flowReceipts)
+      && [answered | ReceiptValue answered <- Map.elems (managerLogValues report)] == [receipt]
+      && [Runtime.recReplyTo record | entry <- managerLogEntries report, Just record <- [Runtime.entryRecord entry], Runtime.recSchema record == Runtime.FlowReceipt] == [Just (Runtime.Position 4)])
 
 -- | A live request holds the floor, so the log reaches L - R. An ordinary
 -- command is then refused with storage-quota, and a cancel still uses the

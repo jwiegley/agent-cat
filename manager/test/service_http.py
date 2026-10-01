@@ -234,31 +234,39 @@ worker_failure_mode = len(sys.argv) == 6 and sys.argv[5] == WORKER_FAILURE
 # the release of its quarantined reservations through three lifetimes of the
 # protected manager with the mixed fixture, one profile and one execution
 # reservation. A mixed-controls run waits at its person question, and a
-# padding request receives three large literal inputs before it is
-# withdrawn, so that the manager log and its claim checks hold more than
-# (L - R) div 2 bytes. The harness then kills the manager process with
-# SIGKILL. Every worker process must end within a bounded wait. While no
-# manager runs, the harness seals the manager log in two segments, as the
-# writer seals it: the first holds the records of the lost run and the second
-# the padding. A restart on the same root and configuration must begin a new
-# lifetime with its lifetime notice and reconciliation counts, answer status
-# and check-store through the live channel with the quarantined reservation
-# of the lost run, answer check-quarantine with clean cleanup evidence whose
-# digest the harness recomputes from the terminal record of the run log, all
-# without a database change or a manager-log append, show the run with lost
+# padding request receives three large literal inputs before it is withdrawn,
+# so that the manager log and its claim checks hold more than (L - R) div 2
+# bytes. The harness then kills the manager process with SIGKILL. Every worker
+# process must end within a bounded wait. While no manager runs, the harness
+# seals the manager log in two segments, as the writer seals it: the first
+# holds the records of the lost run and the second the padding. It also
+# truncates the log after the withdrawal ask of the padding and appends a copy
+# of that ask with a fresh command identifier, as crashes before a receipt and
+# before a COMMIT leave them. A restart on the same root and configuration
+# must begin a new lifetime with its lifetime notice and reconciliation
+# counts, answer the withdrawal ask with the receipt that GET returns and the
+# other ask with lifetime-ended, execute no command again, answer status and
+# check-store through the live channel with the quarantined reservation of the
+# lost run, answer check-quarantine with clean cleanup evidence whose digest
+# the harness recomputes from the terminal record of the run log, all without
+# a database change or a manager-log append, show the run with lost
 # supervision, dispatch no start again, return the original receipt for an
-# exact replay of an earlier command, and keep the protected segment of the
-# lost run in the pruning round at open. A new request then stays queued with
-# capacity. A release with a wrong digest refuses with cleanup-unverified, and
-# the request stays queued. The release with the evidence of check-quarantine
-# frees the capacity, and the request reaches review without another client
-# command. Its approved run completes with a verified result. A request in
-# review is then lost with a second SIGKILL. The third lifetime releases its
-# no-launch quarantine in the same way, and a new request runs to
-# completion. After the ordinary end of the third lifetime, the flow verb
-# must report the first two lifetimes without their shutdown notices and the
-# third with it, and decode the release commands and their receipts. Each
-# numbered case prints its own PASS line. It runs three manager lifetimes.
+# exact replay of an earlier command, and remove the segment of the lost run
+# in the pruning round at open, because a lost run is terminal for pruning. A
+# new request then stays queued with capacity. A release with a wrong digest
+# refuses with cleanup-unverified, and the request stays queued. The release
+# with the evidence of check-quarantine frees the capacity, and the request
+# reaches review without another client command. Its approved run completes
+# with a verified result. A request in review is then lost with a second
+# SIGKILL, and the harness appends two release asks without replies to the
+# killed log: a copy of the committed release and a copy that names the new
+# quarantine. The third lifetime answers them with committed-receipt-lost and
+# outcome-uncertain, releases its no-launch quarantine in the same way, and a
+# new request runs to completion. After the ordinary end of the third
+# lifetime, the flow verb must report no undecided command, the retained
+# lifetimes before the third without their shutdown notices and the third with
+# it, and decode each release command with its one reply. Each numbered case
+# prints its own PASS line. It runs three manager lifetimes.
 MANAGER_FAILURE = "failures-manager"
 manager_failure_mode = len(sys.argv) == 6 and sys.argv[5] == MANAGER_FAILURE
 # The storage mode checks the storage-error endings through four lifetimes of
@@ -5036,6 +5044,34 @@ def manager_failure_checks():
         """Every record line of the manager log, in position order."""
         return [json.loads(line) for path in log_files() for line in path.read_bytes().splitlines()]
 
+    def positioned():
+        """Every record line of the manager log with its position: the
+        sealed segments from the start of the oldest, then the active file."""
+        sealed = sorted((flow_dir / "sealed").glob("*/*.ndjson"))
+        position = int(sealed[0].name[:20]) if sealed else 0
+        found = []
+        for path in log_files():
+            assert path not in sealed or int(path.name[:20]) == position, ("a sealed segment does not continue the positions", path, position)
+            for line in path.read_bytes().splitlines():
+                found.append((position, json.loads(line)))
+                position += 1
+        return found
+
+    def orphan_replies(asks):
+        """For each orphaned ask, by position, its sender and its expected
+        reply body, the replies of the manager log that name it. Each must be
+        the one reply of the manager to the sender, with that body."""
+        replies = {}
+        for position, record in positioned():
+            if record.get("replyTo") in asks:
+                replies.setdefault(record["replyTo"], []).append(record)
+        for position, (sender, schema, body) in asks.items():
+            found = replies.get(position, [])
+            assert len(found) == 1 and found[0]["schema"] == schema and found[0]["from"] == "manager" \
+                and found[0]["to"] == {"to": sender} and found[0]["body"] == {"inline": body}, (
+                "the reply to an orphaned ask", position, schema, body, found)
+        return sorted(asks)
+
     def lifetime_notice():
         """The body of the lifetime notice of the newest lifetime."""
         return [record for record in log_records() if record["schema"] == "notice"
@@ -5233,6 +5269,24 @@ def manager_failure_checks():
     assert not [record for record in records if record["schema"] == "notice" and record["body"]["inline"]["notice"] == "shutdown"], (
         "the killed lifetime wrote a shutdown notice")
     split = next(index for index, record in enumerate(records) if record["about"].get("request") == padding["id"])
+    # A crash after the COMMIT of the padding withdrawal and before its
+    # receipt leaves its command ask without a reply, and a crash after the
+    # command record of a further command and before its COMMIT leaves an ask
+    # whose command has no ledger row. The harness truncates the log after the
+    # withdrawal ask and appends such an ask, a copy of the withdrawal ask
+    # with a fresh command identifier.
+    withdrawal = next(item[5] for item in attempts if item[0] == "withdraw")
+    withdraw_at = next(index for index, record in enumerate(records)
+                       if record["schema"] == "command" and record["about"].get("command") == withdrawal["id"])
+    assert split < withdraw_at and all(names(record, {padding["id"], withdrawal["id"]}) for record in records[withdraw_at + 1:]), (
+        "a record after the withdrawal ask names other work", [record["schema"] for record in records[withdraw_at + 1:]])
+    rolled_id = "command_" + secrets.token_hex(24)
+    assert len(rolled_id) == len(withdrawal["id"]) and raw_lines[withdraw_at].count(withdrawal["id"].encode()) == 1
+    raw_lines = raw_lines[:withdraw_at + 1] + [raw_lines[withdraw_at].replace(withdrawal["id"].encode(), rolled_id.encode())]
+    records = [json.loads(line) for line in raw_lines]
+    rolled_at = len(raw_lines) - 1
+    ledger_before = dict(read_store("SELECT id,state FROM commands"))
+    assert withdrawal["id"] in ledger_before and rolled_id not in ledger_before, "the ledger rows of the orphaned asks"
     lost_identities = {lost_request["id"], run}
     assert any(names(record, lost_identities) for record in records[:split]), "the first segment names no record of the lost run"
     assert not [index for index, record in enumerate(records) if index >= split and names(record, lost_identities)], (
@@ -5248,7 +5302,8 @@ def manager_failure_checks():
     sealed_bytes = log_bytes()
     assert sealed_bytes > half, ("the sealed manager log does not reach the byte trigger", sealed_bytes, half)
     print("PASS failures-manager case 3: the manager log of the killed lifetime has no shutdown notice and is sealed at",
-          split, "of", len(records), "records, with", sealed_bytes, "bytes above the byte trigger", half, flush=True)
+          split, "of", len(records), "records, with", sealed_bytes, "bytes above the byte trigger", half,
+          "; the withdrawal ask at", withdraw_at, "and the ask at", rolled_at, "without a ledger row have no reply", flush=True)
 
     lost_reservations = [ident for (ident,) in read_store(
         "SELECT id FROM reservations WHERE request_id=? AND state!='released'", (lost_request["id"],))]
@@ -5258,8 +5313,11 @@ def manager_failure_checks():
     second = serve(1)
     try:
         # Case 4. The new lifetime begins with its lifetime notice and
-        # reconciliation counts, and the pruning round at open keeps the
-        # protected segment of the lost run.
+        # reconciliation counts, and answers each orphaned command ask of the
+        # killed lifetime: the withdrawal with its current receipt and the
+        # ask without a ledger row with lifetime-ended. No command executes
+        # again. A lost run is terminal for pruning, so the pruning round at
+        # open removes the segment of the lost run and moves the floor.
         status, capabilities, raw = request("/v1/capabilities", authorized)
         assert status == 200
         validate("Capabilities", capabilities, raw)
@@ -5276,12 +5334,21 @@ def manager_failure_checks():
         assert reconciliation == {"preparations": 0, "requests": 0, "runs": 1, "commands": 1, "reservations": 1,
                                   "observations": 0, "uploads": 0}, ("the reconciliation counts of the second lifetime", reconciliation)
         starts = sorted(int(path.name[:20]) for path in sealed_dir.glob("*.ndjson"))
-        assert starts == [0, split], ("the pruning round at open removed a protected segment", starts)
-        first_segment = [json.loads(line) for line in (sealed_dir / ("%020d.ndjson" % 0)).read_bytes().splitlines()]
-        assert first_segment == records[:split], "the protected segment changed"
+        assert starts == [split], ("the pruning round at open kept the segment of the lost run", starts)
+        assert positioned()[0][0] == split and not start_relays(run), ("the floor after the pruning round at open", positioned()[0][0])
+        ledger_after = dict(read_store("SELECT id,state FROM commands"))
+        changed = {ident for ident in ledger_after if ledger_after[ident] != ledger_before.get(ident)}
+        assert ledger_after.keys() == ledger_before.keys() and len(changed) == 1 and ledger_after[changed.pop()] == "unresolved", (
+            "the restart executed or changed a command beyond the reconciliation", ledger_before, ledger_after)
+        current_withdrawal, _, _ = observed(withdrawal["links"]["self"], "CommandReceipt")
+        credential_sender = records[withdraw_at]["from"]
+        answered = orphan_replies({
+            withdraw_at: (credential_sender, "receipt", current_withdrawal),
+            rolled_at: (credential_sender, "failure", {"class": "refused", "message": "lifetime-ended"})})
         print("PASS failures-manager case 4: the second lifetime begins with lifetime notice", generation,
-              "and reconciliation counts", reconciliation, "; the pruning round at open kept the segments", starts,
-              "with the records of the lost run", flush=True)
+              "and reconciliation counts", reconciliation, "; it answers the orphaned asks at", answered,
+              "with the receipt that GET returns and with lifetime-ended, executes no command again,",
+              "and the pruning round at open removes the segment of the lost run and keeps", starts, flush=True)
 
         # Case 4a. status through the live channel reports the serving
         # lifetime and the quarantined reservation, without a change.
@@ -5304,10 +5371,10 @@ def manager_failure_checks():
         (work / "lost-control.json").write_bytes(raw)
         assert control["supervision"] == "lost" and not control["cancelAllowed"], ("lost run control", control["supervision"], control["cancelAllowed"])
         assert sorted(work.glob("manager/runs/runs/*/runtime")) == initial_stores, "a run store appeared after the restart"
-        assert len(run_starts(lost_store)) == 1 and len(start_relays(run)) == 1, ("starts of the lost run after the restart",
+        assert len(run_starts(lost_store)) == 1 and not start_relays(run), ("starts of the lost run after the restart",
             len(run_starts(lost_store)), len(start_relays(run)))
         print("PASS failures-manager case 5: run", run, "shows lost supervision with runtime", value["runtime"] and value["runtime"]["status"],
-              "and verification", value["verification"]["state"], "; its store holds one run start and the manager log one start relay", flush=True)
+              "and verification", value["verification"]["state"], "; its store holds one run start and the retained manager log no new start relay", flush=True)
 
         # Case 6. An exact replay of an earlier command returns the receipt
         # of its first response. The approval of the lost run is unresolved,
@@ -5323,7 +5390,7 @@ def manager_failure_checks():
             current, _, _ = observed(receipt_uri, "CommandReceipt")
             replays.append((operation, original["id"], original["state"], current["state"]))
         assert replays[1][3] == "unresolved", ("the approval of the lost run", replays[1])
-        assert sorted(work.glob("manager/runs/runs/*/runtime")) == initial_stores and len(start_relays(run)) == 1, (
+        assert sorted(work.glob("manager/runs/runs/*/runtime")) == initial_stores and not start_relays(run), (
             "the replay of the approval dispatched a start")
         print("PASS failures-manager case 6: exact replays returned the original receipts (operation, command, original state,",
               "current state)", replays, "and the replay of the unresolved approval dispatched no start", flush=True)
@@ -5342,7 +5409,7 @@ def manager_failure_checks():
         _, second_run = release_and_run(epoch, client, lost_reservations[0], terminal_facts, "7")
         value, _, _ = observed(base, "Run")
         assert value["supervision"] == "lost", ("the lost run after the release", value["supervision"])
-        assert len(run_starts(lost_store)) == 1 and len(start_relays(run)) == 1, "the lost run started again"
+        assert len(run_starts(lost_store)) == 1 and not start_relays(run), "the lost run started again"
 
         # Case 8. A request waits in review with a live preparation when the
         # manager is killed again.
@@ -5363,9 +5430,26 @@ def manager_failure_checks():
         "SELECT id FROM reservations WHERE request_id=? AND state!='released'", (review_request["id"],))]
     assert len(review_reservations) == 1, ("the reservation of the request in review", review_reservations)
     review_natives = {native for (native,) in read_store("SELECT native_run_id FROM preparations WHERE request_id=?", (review_request["id"],))}
+    # A crash after the command record of a release and before its receipt
+    # leaves an administration ask without a reply. The harness appends two
+    # such asks to the killed log: a copy of the committed release of the
+    # second lifetime, whose reservation is released, and a copy that names
+    # the reservation of the request in review, which no release committed.
+    release_line = next(line for path in log_files() for line in path.read_bytes().splitlines()
+                        if json.loads(line)["schema"] == "command"
+                        and json.loads(line)["body"].get("inline", {}).get("quarantineId") == lost_reservations[0])
+    uncertain_line = release_line.replace(lost_reservations[0].encode(), review_reservations[0].encode()).replace(
+        lost_request["id"].encode(), review_request["id"].encode())
+    assert release_line.count(lost_reservations[0].encode()) == 1 and release_line.count(lost_request["id"].encode()) == 1 \
+        and len(uncertain_line) == len(release_line), "the release ask copies"
+    active_bytes = active.read_bytes()
+    assert active_bytes.endswith(b"\n"), "the second lifetime left a torn manager log"
+    committed_at = positioned()[-1][0] + 1
+    active.write_bytes(active_bytes + release_line + b"\n" + uncertain_line + b"\n")
+    operator_sender = json.loads(release_line)["from"]
     print("PASS failures-manager case 8: request", review_request["id"], "waited in review with", len(tree),
           "worker processes in process groups", targets, "; after SIGKILL of the manager none remained after",
-          round(review_stopped, 2), "seconds", flush=True)
+          round(review_stopped, 2), "seconds ; the release asks at", [committed_at, committed_at + 1], "have no reply", flush=True)
 
     # The third lifetime.
     third = serve(2)
@@ -5386,6 +5470,14 @@ def manager_failure_checks():
         generation = body["processGeneration"]
         assert body["reconciliation"] == {"preparations": 1, "requests": 1, "runs": 0, "commands": 1, "reservations": 1,
                                           "observations": 1, "uploads": 0}, ("the reconciliation counts of the third lifetime", body["reconciliation"])
+        # The open answers the orphaned release asks: the committed release
+        # with committed-receipt-lost and the other with outcome-uncertain.
+        # Neither releases a reservation.
+        released = orphan_replies({
+            committed_at: (operator_sender, "failure", {"class": "refused", "message": "committed-receipt-lost"}),
+            committed_at + 1: (operator_sender, "failure", {"class": "refused", "message": "outcome-uncertain"})})
+        assert read_store("SELECT state FROM reservations WHERE id=?", (review_reservations[0],)) == [("quarantined",)], (
+            "an orphaned release ask released a reservation")
         status_value = administration({"version": 1, "operation": "status"})["result"]
         assert status_value["processGeneration"] == generation and status_value["activeReservations"] == 1, ("status of the third lifetime", status_value)
         quarantine = review_reservations[0]
@@ -5404,46 +5496,64 @@ def manager_failure_checks():
         _, third_run = release_and_run(epoch, client, quarantine, no_launch_facts, "9")
         value, _, _ = observed(base, "Run")
         assert value["supervision"] == "lost", ("the lost run in the third lifetime", value["supervision"])
+        print("PASS failures-manager case 9a: the third lifetime answers the orphaned release asks at", released,
+              "with committed-receipt-lost and outcome-uncertain and releases no reservation for them", flush=True)
     finally:
         ended(third, 2, False)
 
-    # Case 10. The flow verb reports the first two lifetimes without their
-    # shutdown notices and the third with it, keeps the records of the lost
-    # run, verifies the consent of the three start relays and decodes both
-    # release commands with their receipts. The run log of the lost run ends
-    # with the stop that the worker wrote when its control input closed.
+    # Case 10. The flow verb reports no undecided command, the retained
+    # lifetimes before the third without their shutdown notices and the third
+    # with it, the floor past the pruned segment of the lost run, the consent
+    # of each retained start relay, and each release command with its one
+    # reply: a receipt for the two releases that committed with their
+    # receipts, and the failure of the two orphaned release asks. The run log
+    # of the lost run ends with the stop that the worker wrote when its
+    # control input closed.
     stores = [store for store in sorted(work.glob("manager/runs/runs/*/runtime")) if store.parent.name not in review_natives]
     assert len(stores) == 3 and lost_store in stores, ("run stores after the third lifetime", stores)
+    retained = positioned()
     flow_status, flowed, summary = read_flow("manager-failure-flow", [flow_dir] + stores)
     assert flow_status == 2 and summary["verified"] and not summary["problems"], (
         "the flow verb does not verify the logs of the three lifetimes", flow_status, summary["problems"])
+    assert summary["states"]["undecided"] == [], ("undecided commands after the restarts", summary["states"]["undecided"])
     manager_summary = next(item for item in summary["logs"] if item["kind"] == "manager")
+    floor = retained[0][0]
+    assert manager_summary["floor"] == floor and floor >= split, ("manager log floor", manager_summary["floor"], floor, split)
     lifetimes = summary["joins"]["lifetimes"]
-    assert len(lifetimes) == 3 and lifetimes[0]["lifetime"]["position"] == 0 and lifetimes[0]["shutdown"] is None \
-        and lifetimes[1]["shutdown"] is None and lifetimes[2]["shutdown"] is not None, ("lifetimes", lifetimes)
-    assert summary["states"]["lifetimeWithoutShutdown"] == [lifetimes[0]["lifetime"], lifetimes[1]["lifetime"]], (
+    notices = [position for position, record in retained if record["schema"] == "notice" and record["body"]["inline"]["notice"] == "lifetime"]
+    assert [item["lifetime"]["position"] for item in lifetimes] == notices and notices[0] > 0 and lifetimes[-1]["shutdown"] is not None \
+        and all(item["shutdown"] is None for item in lifetimes[:-1]), ("lifetimes", lifetimes, notices)
+    assert summary["states"]["lifetimeWithoutShutdown"] == [item["lifetime"] for item in lifetimes[:-1]], (
         "lost lifetimes", summary["states"]["lifetimeWithoutShutdown"])
     assert not summary["states"]["unresolvedDelivery"], ("unresolved deliveries", summary["states"]["unresolvedDelivery"])
-    assert manager_summary["floor"] == 0, ("manager log floor", manager_summary["floor"])
-    assert len(summary["consent"]) == 3 and all(item["verified"] for item in summary["consent"]), ("consent", summary["consent"])
-    relays = [record for record in flowed if record["schema"] == "relay" and record["body"]["kind"] == "start"
-              and record["about"].get("managerRun") == run]
-    assert len(relays) == 1, ("start relays of the lost run in the flow verb", len(relays))
+    starts_flowed = [record for record in flowed if record["schema"] == "relay" and record["body"]["kind"] == "start"]
+    assert starts_flowed and len(summary["consent"]) == len(starts_flowed) and all(item["verified"] for item in summary["consent"]), (
+        "consent", summary["consent"])
+    relays = [record for record in starts_flowed if record["about"].get("managerRun") == run]
+    assert not relays, ("start relays of the lost run in the flow verb", len(relays))
     releases = [record for record in flowed if record["schema"] == "command" and record["body"].get("administration") == "release-quarantine"]
-    assert [record["body"]["quarantineId"] for record in releases] == [lost_reservations[0], quarantine], (
-        "release commands in the flow verb", [record["body"] for record in releases])
+    orphaned_releases = {committed_at: "committed-receipt-lost", committed_at + 1: "outcome-uncertain"}
+    assert [record["body"]["quarantineId"] for record in releases] == [lost_reservations[0], lost_reservations[0], quarantine, quarantine] \
+        and [record["position"] for record in releases][1:3] == sorted(orphaned_releases), (
+        "release commands in the flow verb", [(record["position"], record["body"]) for record in releases])
     for record in releases:
-        receipts = [reply for reply in flowed if reply["schema"] == "receipt" and reply["replyTo"] == record["position"]]
-        assert len(receipts) == 1 and receipts[0]["body"]["operation"] == "release-quarantine" and receipts[0]["body"]["result"] == {
-            "quarantineId": record["body"]["quarantineId"], "state": "released"}, ("the receipt of a release command", record["position"], receipts)
+        replies = [reply for reply in flowed if reply.get("replyTo") == record["position"]]
+        if record["position"] in orphaned_releases:
+            assert len(replies) == 1 and replies[0]["schema"] == "failure" and replies[0]["body"] == {
+                "class": "refused", "message": orphaned_releases[record["position"]]}, ("the reply to an orphaned release ask", record["position"], replies)
+        else:
+            assert len(replies) == 1 and replies[0]["schema"] == "receipt" and replies[0]["body"]["operation"] == "release-quarantine" \
+                and replies[0]["body"]["result"] == {"quarantineId": record["body"]["quarantineId"], "state": "released"}, (
+                "the receipt of a release command", record["position"], replies)
     lost_report = next(item["report"] for item in summary["logs"] if item["kind"] == "run" and item["log"] == str(lost_store))
     last_event = json.loads((lost_store / "events.ndjson").read_bytes().splitlines()[-1])["event"]
     assert lost_report["stop"] is not None and last_event["type"] == "run.cancelled", (
         "the run log of the lost run has no stop of its worker", lost_report["stop"], last_event["type"])
-    print("PASS failures-manager case 10: the flow verb exits 2 and verifies three consents; it reports lifetimes",
-          lifetimes[0]["lifetime"], "and", lifetimes[1]["lifetime"], "without their shutdown notices and the third lifetime with",
-          "shutdown notice", lifetimes[2]["shutdown"], "; it decodes the release commands at", [record["position"] for record in releases],
-          "with their receipts; floor 0, one start relay of the lost run, and its run log stops at", lost_report["stop"],
+    print("PASS failures-manager case 10: the flow verb exits 2 with no undecided command and verifies", len(summary["consent"]),
+          "retained consents; it reports lifetimes", [item["lifetime"]["position"] for item in lifetimes[:-1]],
+          "without their shutdown notices and the third lifetime with shutdown notice", lifetimes[-1]["shutdown"],
+          "; it decodes the release commands at", [record["position"] for record in releases],
+          "each with its one reply; floor", floor, "past the pruned segment of the lost run, and its run log stops at", lost_report["stop"],
           "with", last_event["type"], repr(last_event.get("message")), flush=True)
     print("PASS failures-manager: every manager-loss and quarantine-release case held across three lifetimes of the TLS 1.3 manager",
           second_run, third_run, flush=True)

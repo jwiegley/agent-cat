@@ -253,18 +253,29 @@ another client command, as after the release of a terminal run. The
 [command contract](COMMANDS.md#local-credential-administration) states the
 transaction.
 
-The pruning round at open keeps each sealed segment that names the lost run,
-because the run is not observed terminal. The flow verb reports each earlier
-lifetime under `lifetimeWithoutShutdown`, verifies the consent of the start
-relay of the lost run, decodes each release command and its receipt, and
-exits with status 2. The `failures-manager` mode of
-`manager/test/service_http.py` checks these facts across three lifetimes of
-the running protected manager with one profile and one execution reservation.
-The first SIGKILL loses a run in flight, and the second loses a request in
-review. After each restart a new request waits with `capacity`, a release
-with a wrong digest refuses with `cleanup-unverified`, and the release with
-the evidence of `check-quarantine` lets the request reach review without
-another client command. Its approved run then completes.
+The open of the new lifetime answers each command ask of the killed lifetime
+that has no reply, before it serves. An ordinary command with a ledger row
+receives its current receipt, an ordinary command without a row receives the
+failure `lifetime-ended`, and an administration operation receives the
+failure `committed-receipt-lost` or `outcome-uncertain`, as the
+[storage contract](STORAGE.md#orphaned-asks) states. No command executes
+again. A run with `lost` supervision counts as terminal for pruning, so the
+pruning round at open removes a sealed segment that names only the lost run
+and other terminal work, and the retained floor moves past it. A segment
+that names an owned or cleanup-pending run stays protected. The flow verb
+reports no undecided command, reports each retained earlier lifetime under
+`lifetimeWithoutShutdown`, verifies the consent of each retained start relay,
+decodes each release command with its one reply, and exits with status 2.
+The `failures-manager` mode of `manager/test/service_http.py` checks these
+facts across three lifetimes of the running protected manager with one
+profile and one execution reservation. The first SIGKILL loses a run in
+flight, and the second loses a request in review. While no manager runs,
+the harness leaves command asks without replies in the killed log, as a
+crash before a receipt or before a COMMIT leaves them. After each restart a
+new request waits with `capacity`, a release with a wrong digest refuses
+with `cleanup-unverified`, and the release with the evidence of
+`check-quarantine` lets the request reach review without another client
+command. Its approved run then completes.
 
 ## Verification and remaining owners
 

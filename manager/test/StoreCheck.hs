@@ -10,6 +10,11 @@ import Agentic.Manager.Configuration
 import Agentic.Manager.Profile (Diagnostic (SupervisionUnavailable))
 import Agentic.Manager.Schema (schemaVersion, schemaStatements, commandMigration, draftMigration, admissionMigration, approvalMigration, ingestionMigration, controlMigration, artifactMigration, historyMigration, restartMigration)
 import Agentic.Manager.Store
+import Agentic.Manager.Flow
+  (AdministrationBody (..), AdministrationOperation (..), CommandBody (..), ManagerLogReport (..), ManagerValue (..), Notice (ShutdownNotice),
+   administrationFlowBody, commandFlowBody, managerFlowPath, managerFlowSealed, managerFlowSegments, noticeFlowBody, readManagerLog)
+import Agentic.Manager.Protocol.Command (CommandReceipt (..), CommandState (Accepted), Operation (Create), encoded)
+import qualified "agentic" Agentic.Runtime as Runtime
 import Control.Concurrent (threadDelay, throwTo)
 import Control.Concurrent.Async (AsyncCancelled (..), async, asyncThreadId, wait, cancel, poll, waitCatch, withAsync)
 import Control.Concurrent.MVar (newEmptyMVar, putMVar, takeMVar)
@@ -31,7 +36,12 @@ import qualified Data.Text as T
 import qualified Database.SQLite3 as SQL
 import GHC.Clock (getMonotonicTimeNSec)
 import GHC.Conc (BlockReason (BlockedOnSTM))
-import System.Directory (createDirectory, doesFileExist, removeFile)
+import System.Directory (createDirectory, createDirectoryIfMissing, doesFileExist, removeFile)
+import System.Posix.Types (CUid (..))
+import System.Posix.User (getEffectiveUserID)
+import qualified Data.Map.Strict as Map
+import Data.Time.Clock (getCurrentTime)
+import Data.Word (Word64)
 import System.Environment (getArgs, getExecutablePath)
 import System.Exit (ExitCode (ExitSuccess))
 import System.FilePath ((</>))
@@ -70,6 +80,7 @@ main = do
       admissionMigrationChecks work
       ingestionMigrationChecks work
       conditionalTransactionChecks work
+      flowFloorChecks work
       putStrLn "PASS manager coordination storage"
     _ -> error "usage: manager-store-check PRIVATE_DIRECTORY"
 
@@ -88,7 +99,12 @@ withInstalled path action = do
   bracket (installConfiguration config >>= right) closeConfiguration action
 
 fixture :: FilePath -> String -> IO (FilePath, FilePath)
-fixture work name = do
+fixture work name = fixtureWith work name 8388608
+
+-- | A fixture whose configuration sets @globalMutationLedgerBytes@ to the
+-- given value.
+fixtureWith :: FilePath -> String -> Int -> IO (FilePath, FilePath)
+fixtureWith work name ledger = do
   let root = work </> name
       path = work </> (name <> ".json")
   createDirectory root
@@ -100,7 +116,7 @@ fixture work name = do
        ["drafts" .= (10 :: Int), "globalDrafts" .= (20 :: Int),
         "globalCaptureBytes" .= (67108864 :: Int), "globalPageSets" .= (2 :: Int),
         "globalConnections" .= (4 :: Int), "globalDatabaseReaders" .= (2 :: Int),
-        "globalMutationLedgerBytes" .= (8388608 :: Int), "safetyControlsPerMinute" .= (10 :: Int),
+        "globalMutationLedgerBytes" .= ledger, "safetyControlsPerMinute" .= (10 :: Int),
         "executionReservations" .= (1 :: Int)]]
   setFileMode path 0o600
   pure (path, root)
@@ -926,3 +942,109 @@ terminalAdmissionChecks work = do
     retryStoreCleanup store
     expect "closed Store refuses terminal action" StoreClosed marked
     readIORef entered >>= check "closed Store never enters later body" . (==1)
+
+-- | The open of a serving lifetime answers each command ask of an earlier
+-- lifetime that has no reply, and the pruner treats a run with lost
+-- supervision as terminal. A segment that names an owned or cleanup-pending
+-- run stays protected. The ledger is small, so the byte trigger of the pruner
+-- holds.
+flowFloorChecks :: FilePath -> IO ()
+flowFloorChecks work = do
+  let ledger = 16 * 131072 + 524288
+      t = SQL.SQLText
+      receipt = CommandReceipt "command_kept" "profile_1" Create "/v1/requests" Accepted "2026-09-30T00:00:00Z" Nothing Nothing Nothing Nothing
+  (path, root) <- fixtureWith work "flow-floor" ledger
+  stream <- withInstalled path $ \installed -> withCoordinationStore installed $ \store -> do
+    mutate store (do
+      client "client_1"
+      forM_ ["request_lost", "request_guard"] $ \ident -> execute "INSERT INTO requests (id,revision,client_id,workflow_id,descriptor_revision,profile_id,profile_revision,phase,admission,blocking_reasons,validation_errors) VALUES (?,'revision_1','client_1','workflow_1','descriptor_1','profile_1','profile_revision_1','associated','released',X'5b5d',X'5b5d')" [t ident]
+      forM_ [("run_lost", "request_lost", "owned"), ("run_guard", "request_guard", "observer")] $ \(run, request, supervision) ->
+        execute "INSERT INTO runs(id,revision,control_revision,request_id,profile_id,root_identity,native_run_id,supervision,result_state) VALUES (?,'revision','revision',?,'profile_1','root_1',?,?,'absent')" [t run, t request, t ("native_" <> run), t supervision]
+      execute "INSERT INTO commands(id,revision,profile_id,operation,client_id,authority_epoch,method,resource_uri,idempotency_key,receipt,retired,accepted_at,state,reserved_bytes) VALUES ('command_kept','r','profile_1','create','client_1','authority_1','POST','/v1/requests','key_kept',?,0,'2026-09-30T00:00:00Z','accepted',0)" [SQL.SQLBlob (encoded receipt)]
+      execute "INSERT INTO commands(id,revision,profile_id,operation,client_id,authority_epoch,method,resource_uri,idempotency_key,retired,accepted_at,state,reserved_bytes) VALUES ('command_retired','r','profile_1','create','client_1','authority_1','POST','/v1/requests','key_retired',1,'2026-09-30T00:00:00Z','acknowledged',0)" []
+      execute "INSERT INTO credentials VALUES ('credential_issued','client_1',?,'2999-01-01T00:00:00Z',0)" [SQL.SQLBlob (BS.replicate 32 7)]
+      execute "INSERT INTO credential_administration(credential_id,label) VALUES ('credential_issued','issued')" []
+      execute "INSERT INTO reservations(id,request_id,slot,process_generation,state) VALUES ('reservation_released','request_lost',NULL,'generation_old','released')" []
+      execute "INSERT INTO reservations(id,request_id,slot,process_generation,state) VALUES ('reservation_quarantined','request_guard',0,'generation_old','quarantined')" []) [event]
+    storeStreamId <$> storeIdentity store
+  now <- getCurrentTime
+  CUid uid <- getEffectiveUserID
+  let line from about schema body = Runtime.encodeFlowLine (Runtime.Record schema from (Runtime.To Runtime.Manager) about Nothing (Runtime.Inline body) now) <> "\n"
+      notice about generation = line Runtime.Manager about Runtime.FlowNotice (noticeFlowBody (ShutdownNotice generation))
+      credential = Runtime.Principal (Runtime.Credential "client_1" "credential_1")
+      operator = Runtime.Principal (Runtime.LocalAccount uid Nothing)
+      commandAsk ident = line credential Runtime.noAbout {Runtime.aboutCommand = Just ident} Runtime.FlowCommand
+        (commandFlowBody (CommandBody Create "profile_1" "POST" "/v1/requests" "application/json" Nothing (Just (object ["workflowId" .= ("workflow_1" :: Text)])) Nothing))
+      adminAsk body = line operator Runtime.noAbout Runtime.FlowCommand (administrationFlowBody body)
+      -- A committed command, a command whose transaction never committed, a
+      -- command whose receipt is retired, a committed issue, a committed
+      -- release and a release whose effect the Store does not hold.
+      asks =
+        [ (credential, commandAsk "command_kept"), (credential, commandAsk "command_rolled"), (credential, commandAsk "command_retired"),
+          (operator, adminAsk (AdministrationBody AdministerIssue "client_1" "credential_issued" Nothing "issued" ["observe"] ["profile_1"] "2999-01-01T00:00:00Z")),
+          (operator, adminAsk (ReleaseAdministration "reservation_released" "request_lost" "cleanup_1" (T.replicate 64 "a"))),
+          (operator, adminAsk (ReleaseAdministration "reservation_quarantined" "request_guard" "cleanup_2" (T.replicate 64 "b")))
+        ]
+      expected = [Right receipt, Left "lifetime-ended", Left "receipt-expired", Left "committed-receipt-lost", Left "committed-receipt-lost", Left "outcome-uncertain"]
+      segments =
+        [ [notice Runtime.noAbout {Runtime.aboutManagerRun = Just "run_lost"} "generation_old", notice Runtime.noAbout {Runtime.aboutRequest = Just "request_lost"} "generation_old"],
+          map snd asks,
+          [notice Runtime.noAbout {Runtime.aboutManagerRun = Just "run_guard"} "generation_old"],
+          [notice Runtime.noAbout ("generation_pad_" <> T.pack (show n) <> T.replicate 400 "p") | n <- [1 .. 700 :: Int]],
+          [notice Runtime.noAbout "generation_old"]
+        ]
+      starts = map fromIntegral (scanl (+) 0 (map length segments)) :: [Word64]
+      askPositions = take (length asks) [starts !! 1 ..]
+  writeFlowLog root stream segments [notice Runtime.noAbout "generation_old"]
+  let replies report =
+        [ (asked, record, outcome)
+          | entry <- managerLogEntries report,
+            Just record <- [Runtime.entryRecord entry],
+            Just (Runtime.Position asked) <- [Runtime.recReplyTo record],
+            let outcome = case (Runtime.recSchema record, Map.lookup (Runtime.entryPosition entry) (managerLogValues report), Runtime.entryContent entry >>= either (const Nothing) Just . Runtime.failureFromBody) of
+                  (Runtime.FlowReceipt, Just (ReceiptValue carried), _) -> Right carried
+                  (Runtime.FlowFailure, _, Just (Runtime.Refused, reason)) -> Left reason
+                  _ -> Left "undecoded"
+        ]
+  withInstalled path $ \installed -> withServingStore installed $ \store -> do
+    flow <- maybe (error "FAIL the serving lifetime has no manager log") pure (storeManagerFlow store)
+    let sealed = map Runtime.segmentFirst <$> managerFlowSegments flow
+        guarded = take 3 (drop 2 starts)
+    sealed >>= check "the round at open prunes the segments of a lost run and of answered orphaned asks, and keeps the segment of an unobserved run" . (== guarded)
+    rowsEqual store "SELECT id,state FROM commands ORDER BY id" [[t "command_kept", t "accepted"], [t "command_retired", t "acknowledged"]]
+      >>= check "answering orphaned asks executes and admits no command and changes no receipt state"
+    rowsEqual store "SELECT id,state FROM reservations ORDER BY id" [[t "reservation_quarantined", t "quarantined"], [t "reservation_released", t "released"]]
+      >>= check "answering an orphaned release releases no reservation"
+    forM_ ["owned", "cleanup-pending"] $ \supervision -> do
+      mutate store (execute "UPDATE runs SET supervision=? WHERE id='run_guard'" [t supervision]) [event]
+      pruneManagerLog store
+      sealed >>= check ("a segment that names a run with " <> T.unpack supervision <> " supervision stays protected") . (== guarded)
+    mutate store (execute "UPDATE runs SET supervision='lost' WHERE id='run_guard'" []) [event]
+    pruneManagerLog store
+    sealed >>= check "a segment that names a lost run is pruned, and the newest sealed segment is kept" . (== drop 4 (take 5 starts))
+  report <- readManagerLog (foldl (</>) root (managerFlowPath stream))
+  let answered = replies report
+  check "each orphaned ask has exactly one reply, from the manager to its sender, that names its position"
+    ( map (\(asked, _, _) -> asked) answered == askPositions
+        && and [Runtime.recFrom record == Runtime.Manager && Runtime.recTo record == Runtime.To sender | ((_, record, _), (sender, _)) <- zip answered asks]
+    )
+  check "a committed command receives its current receipt, a rolled-back command lifetime-ended, a retired receipt receipt-expired, and an administration ask committed-receipt-lost or outcome-uncertain"
+    (map (\(_, _, outcome) -> outcome) answered == expected)
+  check "the retained floor moves past the pruned segments, and the reader reports no problem"
+    (managerLogFloor report == Runtime.Position (starts !! 4) && all (null . Runtime.entryProblems) (managerLogEntries report))
+  withInstalled path $ \installed -> withServingStore installed (const (pure ()))
+  again <- readManagerLog (foldl (</>) root (managerFlowPath stream))
+  check "a later lifetime answers no ask again" (replies again == answered)
+  putStrLn "PASS manager log floor after lost runs and orphaned asks"
+
+-- | Write the sealed segments and the active file of a manager log, the
+-- segments from position 0, as a writer of an earlier lifetime left them.
+writeFlowLog :: FilePath -> Text -> [[BS.ByteString]] -> [BS.ByteString] -> IO ()
+writeFlowLog root stream segments active = do
+  let sealed = foldl (</>) root (managerFlowSealed stream)
+      private directory = createDirectoryIfMissing True directory >> setFileMode directory 0o700
+      privateFile file bytes = BS.writeFile file bytes >> setFileMode file 0o600
+  mapM_ private [root </> "flow", root </> "flow" </> "sealed", sealed, root </> "flow" </> "claims", root </> "flow" </> "claims" </> T.unpack stream]
+  forM_ (zip (scanl (+) 0 (map length segments)) segments) $ \(start, lines') ->
+    privateFile (sealed </> Runtime.flowSegmentName (Runtime.Position (fromIntegral start))) (BS.concat lines')
+  privateFile (foldl (</>) root (managerFlowPath stream)) (BS.concat active)

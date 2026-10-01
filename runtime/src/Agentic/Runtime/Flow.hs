@@ -93,6 +93,7 @@ module Agentic.Runtime.Flow
     FlowSegment (..),
     flowSegmentName,
     flowWriterSegments,
+    flowWriterUnanswered,
     flowWriterSeals,
     pruneFlowSegment,
     flowClaimDirectory,
@@ -1220,6 +1221,19 @@ sealActive writer segments current = do
 flowWriterSegments :: FlowWriter -> IO [FlowSegment]
 flowWriterSegments writer = withMVar (writerState writer) $ \current ->
   pure [segment {segmentUnanswered = unansweredIn (stateFloor current) (stateIndex current) segment} | segment <- toList (stateSealed current)]
+
+-- | The position and the schema of each ask of the retained log that no reply
+-- names, oldest first. The reader reads the reply-check index of the writer
+-- under the writer lock: every retained record from the floor to the current
+-- end, with whether a reply names it. An ask below the floor was pruned and is
+-- not listed.
+flowWriterUnanswered :: FlowWriter -> IO [(Position, Schema)]
+flowWriterUnanswered writer = withMVar (writerState writer) $ \current ->
+  pure
+    [ (Position (stateFloor current + offset), schema)
+      | (offset, (schema, False)) <- zip [0 ..] (toList (stateIndex current)),
+        schemaRole schema == AskSchema
+    ]
 
 -- | The number of seals of the writer, which a pruner watches.
 flowWriterSeals :: FlowWriter -> STM Word64

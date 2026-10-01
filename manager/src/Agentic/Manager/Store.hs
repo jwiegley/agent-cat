@@ -1,5 +1,6 @@
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE ForeignFunctionInterface #-}
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
@@ -11,6 +12,7 @@ module Agentic.Manager.Store
     withStoreAdministration, tryWithStoreCatalogues, tryWithStoreFiles,
     AuthorizationWatch, withStoreAuthorizationWatch, withStoreConfigurationWatch, withStoreCataloguesWatch, withStoreCatalogueContextWatch, authorizationWatchCurrent, withAuthorizationObservation, withAuthorizationReadObservation, awaitAuthorizationChange,
     CommitDeadline, withCommitDeadline, withPreparedCommitDeadline, enforceCommitDeadline, enforceAdmissionFence, managerFlowRoom, appendCommandRecord, appendReviewRecord, noticeAfterCommit, PostCommit, noPostCommit, takePostCommit, appendPostCommit, Transaction, execute, query, refuseTransaction, runTransaction, runRead, StoreAdmission (..), runTransactionWithAdmission, runReadWithAdmission, transactionGeneration,
+    commandReceiptColumns, commandRowReceipt,
     Invalidation (..), EventReadFailure (..), RetainedEvents (..), readRetainedEvents, readRetainedEventsWith, retainEvents, backupCoordinationStore, restoreCoordinationStore, reservationOccupancy
   ) where
 
@@ -19,8 +21,9 @@ import qualified Agentic.Manager.Store.Admission as Admission
 import Agentic.Manager.Configuration
   (InstalledConfiguration, acquireConfigurationStorage, releaseConfigurationStorage, withConfigurationAdministration, withConfigurationSnapshot, withConfigurationCatalogues, tryConfigurationCatalogueContext, withConfigurationLoan, withConfiguredRetentionRootLoan, validateHistoryBindings, revalidateRetentionRoot, configuredInvocations, configuredLimits, probeConfiguredCapabilities)
 import Agentic.Manager.Flow
-  (ManagerFlow, ManagerFlowFault, ManagerFlowFailure (..), FlowRecordClass (Refusing), CredentialEntry (..), Notice, noticeFlowBody, managerFlowCeiling, Lifetime (..), Reconciliation (..), noReconciliation, openManagerFlow, managerFlowOpenFailure, managerFlowOpenWord, closeManagerFlow, managerFlowBytes, managerFlowSegments, managerFlowSeals, pruneManagerFlowSegment, managerFlowAllowance, managerFlowContent, appendManagerAsk, appendManagerTell, appendManagerReply, appendLifetime, appendShutdown)
-import Agentic.Manager.Protocol.Command (failureCode, mutationLedgerReserve)
+  (ManagerFlow, ManagerFlowFault, ManagerFlowFailure (..), FlowRecordClass (Refusing, Following, Reserved), CommandBody (..), commandFromFlowBody, AdministrationBody (..), AdministrationOperation (..), administrationFromFlowBody, receiptFlowBody, managerFlowUnanswered, CredentialEntry (..), Notice, noticeFlowBody, managerFlowCeiling, Lifetime (..), Reconciliation (..), noReconciliation, openManagerFlow, managerFlowOpenFailure, managerFlowOpenWord, closeManagerFlow, managerFlowBytes, managerFlowSegments, managerFlowSeals, pruneManagerFlowSegment, managerFlowAllowance, managerFlowContent, appendManagerAsk, appendManagerTell, appendManagerReply, appendLifetime, appendShutdown)
+import Agentic.Manager.Protocol.Command (failureCode, mutationLedgerReserve, Operation (Cancel), CommandReceipt (..), CommandFailure (ReceiptExpired), decodeReceipt, encoded, parseState)
+import qualified Agentic.Manager.Protocol.Command as Command
 import Agentic.Manager.Profile (ConfigurationLimits (..), PublicProfile, Diagnostic (SupervisionUnavailable), Discovery)
 import Agentic.Manager.Fault.Record (ManagerFault (AuthorizationChanged), loanFault, internalLabel, refusalLabel, ioExceptionName, recordErasure, recordFaultLine)
 import Agentic.Manager.Worker.State (WorkerLifecycle, acceptingPreparation)
@@ -31,7 +34,7 @@ import Agentic.Runtime
   (PrivateRoot, assertPrivateRoot, closePrivateRoot, openPrivateSubroot, privateRootPath,
    openPrivateRoot, privateRootIdentity, readPrivateFileAt, ensurePrivateDirectoryAt, removePrivateFileAt,
    publishPrivateCaptureAt, CapturePublication (..), privateCaptureBytes, privateCaptureSha256,
-   withPrivateDirectoryAt, writePrivateExclusiveAt, strictFlowCodec, FlowCodec, Actor (Manager), Address (To, Approvers), About, Position, Record, Schema (FlowCommand, FlowFailure, FlowReview, FlowNotice), FlowSegment (..), FailureKind (Refused), failureBody, WorkflowInputDescriptor (..), frontendLiteralBytes, FrontendCapabilities, FrontendInvocation, ProcessGroup, createProcessGroup, terminateProcessGroup, groupOutcome, processGroupLive)
+   withPrivateDirectoryAt, writePrivateExclusiveAt, strictFlowCodec, FlowCodec, Actor (Manager), Address (To, Approvers), About (..), Position, Record (..), Schema (FlowCommand, FlowFailure, FlowReceipt, FlowReview, FlowNotice), FlowSegment (..), FailureKind (Refused), failureBody, WorkflowInputDescriptor (..), frontendLiteralBytes, FrontendCapabilities, FrontendInvocation, ProcessGroup, createProcessGroup, terminateProcessGroup, groupOutcome, processGroupLive)
 import Control.Concurrent (rtsSupportsBoundThreads)
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (race, withAsync, asyncWithUnmask, cancel, wait)
@@ -45,12 +48,14 @@ import Control.DeepSeq (NFData (..), force)
 import Crypto.Hash (Digest, SHA256, hashInit, hashUpdate, hashFinalize)
 import qualified Crypto.Hash as Hash
 import Data.ByteArray (convert)
-import Data.Aeson (Value, eitherDecodeStrict', encode)
+import Data.Aeson (FromJSON, Value (Object), eitherDecodeStrict', encode)
+import qualified Data.Aeson.KeyMap as KeyMap
 import qualified Data.ByteString.Lazy as BL
 import Crypto.Random (getRandomBytes)
 import Data.ByteArray.Encoding (Base (Base16), convertToBase)
 import qualified Data.ByteString as BS
 import Data.Int (Int64)
+import Data.Maybe (isNothing)
 import Data.Word (Word64)
 import Data.Bits ((.&.))
 import Data.Char (isAlphaNum, isAscii, isSpace)
@@ -257,10 +262,12 @@ withManagerLogPruner store action = case storeManagerFlow store of
 -- configuration, database and then the leaf writer lock, and runs one
 -- read-only query over the identifiers that the segment names. The segment is
 -- protected, and pruning stops, when a request that it names is not terminal,
--- a run that it names has not been observed terminal, a run that it names is
--- the parent run of a request that is not terminal, or an ask in it has no
--- reply. A request is terminal when it is withdrawn or refused, or when it is
--- associated and no run of it is unobserved, as the overview decides. A
+-- a run that it names has not been observed terminal and has not lost its
+-- supervision, a run that it names is the parent run of a request that is not
+-- terminal, or an ask in it has no reply. A request is terminal when it is
+-- withdrawn or refused, or when it is associated and each run of it is
+-- observed terminal or lost. The open of a serving lifetime answers the
+-- orphaned asks of earlier lifetimes before the round at open. A
 -- command that the segment names counts as its request and its run. So the
 -- retained floor stays contiguous: it is the start of the oldest remaining
 -- sealed segment.
@@ -296,14 +303,17 @@ pruneCandidate manager limits segment = do
       if protected then pure False else Transaction (\_ -> pruneManagerFlowSegment manager (segmentFirst segment))
 
 -- | Whether live work needs the records of a sealed segment, by one read-only
--- query over the request, run and command identifiers that it names.
+-- query over the request, run and command identifiers that it names. A run
+-- whose supervision is @lost@ counts as terminal: no worker of this manager
+-- serves it, and no later lifetime adopts it. An owned or cleanup-pending run
+-- that has not been observed terminal keeps its segment.
 segmentProtected :: FlowSegment -> Transaction Bool
 segmentProtected segment = do
   rows <- query ("WITH named_requests(id) AS (SELECT value FROM json_each(?) UNION SELECT request_id FROM commands WHERE request_id IS NOT NULL AND id IN (SELECT value FROM json_each(?))), "
     <> "named_runs(id) AS (SELECT value FROM json_each(?) UNION SELECT run_id FROM commands WHERE run_id IS NOT NULL AND id IN (SELECT value FROM json_each(?))), "
-    <> "live_requests(id) AS (SELECT r.id FROM requests r WHERE r.phase NOT IN ('withdrawn','refused') AND (r.phase!='associated' OR EXISTS(SELECT 1 FROM runs u WHERE u.request_id=r.id AND u.terminal_observed=0))) "
+    <> "live_requests(id) AS (SELECT r.id FROM requests r WHERE r.phase NOT IN ('withdrawn','refused') AND (r.phase!='associated' OR EXISTS(SELECT 1 FROM runs u WHERE u.request_id=r.id AND u.terminal_observed=0 AND u.supervision!='lost'))) "
     <> "SELECT EXISTS(SELECT 1 FROM named_requests n JOIN live_requests l ON l.id=n.id) "
-    <> "OR EXISTS(SELECT 1 FROM named_runs n JOIN runs u ON u.id=n.id WHERE u.terminal_observed=0) "
+    <> "OR EXISTS(SELECT 1 FROM named_runs n JOIN runs u ON u.id=n.id WHERE u.terminal_observed=0 AND u.supervision!='lost') "
     <> "OR EXISTS(SELECT 1 FROM named_runs n JOIN requests r ON r.parent_run_id=n.id JOIN live_requests l ON l.id=r.id)")
     [names segmentRequests, names segmentCommands, names segmentRuns, names segmentCommands]
   case rows of
@@ -352,15 +362,18 @@ openStore mode installed root lease = storageErrors $ do
         [[SQL.SQLText epoch, SQL.SQLText stream]] -> pure (epoch, stream, reconciliation)
         _ -> throwIO StoreIntegrity
     -- A serving lifetime writes the manager log of its stream. Its lifetime
-    -- notice follows the reconciliation. A credential list that cannot be
-    -- read fails the open. A failed append of the notice leaves a gap entry.
-    -- A log that cannot be opened is recorded once in the private fault log by
-    -- the fixed word of its reason.
+    -- notice follows the reconciliation, and the replies to the orphaned
+    -- command asks of earlier lifetimes follow the notice. A credential list
+    -- that cannot be read fails the open. A failed append of the notice leaves
+    -- a gap entry. A log that cannot be opened is recorded once in the private
+    -- fault log by the fixed word of its reason, and it has no ask to answer.
     flow <- forM logCeiling $ \((codec, fault), total) -> do
       (listed, omitted) <- bounded db 5000000 (readCredentialList db)
       bracketOnError (openManagerFlow codec fault root stream total) closeManagerFlow $ \manager -> do
         forM_ (managerFlowOpenFailure manager) (recordFaultLine "manager-log open" . ("flow " <>) . managerFlowOpenWord)
-        manager <$ appendLifetime manager total (Lifetime generation reconciliation listed omitted)
+        void (appendLifetime manager total (Lifetime generation reconciliation listed omitted))
+        when (isNothing (managerFlowOpenFailure manager)) (answerOrphanedAsks db manager total)
+        pure manager
     CoordinationStore installed root db (StoreIdentity schemaVersion epoch stream generation)
       <$> newMVar () <*> newIORef False <*> newIORef False <*> pure lease <*> ((,,,) <$> newMVar () <*> newTVarIO 0 <*> newTVarIO (Just 0) <*> newTVarIO 0) <*> newTVarIO (WorkerRegistry False False Nothing []) <*> newMVar () <*> newIORef False <*> newTVarIO (False, Nothing) <*> pure flow
   where
@@ -371,6 +384,133 @@ openStore mode installed root lease = storageErrors $ do
         Left failure | isDoesNotExistError failure -> pure ()
         Left failure -> throwIO failure
         Right () -> pure ()
+
+-- | Answer each command ask of an earlier lifetime that has no reply, at the
+-- open of a serving lifetime, after the reconciliation and the lifetime
+-- notice. The command is the only ask schema of the manager log, and before
+-- serving no ask of the new lifetime exists, so every unanswered ask of the
+-- retained log is orphaned. Each reply is a record from the manager to the
+-- sender of the ask, with the identifiers of the ask, and it names the
+-- position of the ask. It has the class of the receipt of the ask: the reply
+-- to a cancel may use the reserve, and every other reply stays within the
+-- ceiling minus the reserve. A failed append of a reply, such as one above
+-- that allowance, leaves a gap entry and the ask without a reply, and a later
+-- lifetime answers it.
+--
+-- An ordinary command ask whose command has a ledger row receives a @receipt@
+-- reply with the current receipt of the command, which
+-- @GET /v1/commands/{id}@ returns after the reconciliation. A command whose
+-- receipt is retired receives a @failure@ reply with the reason
+-- @receipt-expired@. An ordinary command ask without a ledger row receives a
+-- @failure@ reply with the reason @lifetime-ended@, because its transaction
+-- never committed. An administration ask, whose command record precedes the
+-- COMMIT and whose receipt follows it, receives a @failure@ reply with the
+-- reason @committed-receipt-lost@ when the Store holds its committed effect,
+-- and @outcome-uncertain@ otherwise. The reconciliation never executes,
+-- admits or delivers a command again. A log whose asks cannot be read is
+-- recorded once in the private fault log, and its asks keep no reply.
+answerOrphanedAsks :: SQL.Database -> ManagerFlow -> Int64 -> IO ()
+answerOrphanedAsks db manager total = do
+  listed <- managerFlowUnanswered manager
+  case listed of
+    Left _ -> recordFaultLine "manager-log reconciliation" "stopped unreadable"
+    Right asks -> forM_ asks $ \(position, record, content) -> do
+      reply <- bounded db 5000000 (orphanedReply db record content)
+      let recordClass = case content >>= commandFromFlowBody of
+            Right command | commandBodyOperation command == Cancel -> Reserved
+            _ -> Following
+          answer schema = appendManagerReply manager total recordClass schema position Manager (To (recFrom record)) (recAbout record)
+      void $ case reply of
+        Right receipt -> answer FlowReceipt (receiptFlowBody receipt)
+        Left reason -> answer FlowFailure (failureBody Refused reason)
+
+-- | The current receipt that answers an orphaned command ask, or the fixed
+-- reason of its @failure@ reply. An ask whose body cannot be read and that
+-- names no command is uncertain.
+orphanedReply :: SQL.Database -> Record -> Either Text Value -> IO (Either Text CommandReceipt)
+orphanedReply db record content = case content of
+  Right value
+    | administration value -> case administrationFromFlowBody value of
+        Right body -> do
+          committed <- administrationCommitted db body
+          pure (Left (if committed then "committed-receipt-lost" else "outcome-uncertain"))
+        Left _ -> pure (Left "outcome-uncertain")
+  Left _ | isNothing (aboutCommand (recAbout record)) -> pure (Left "outcome-uncertain")
+  _ -> case aboutCommand (recAbout record) of
+    Nothing -> pure (Left "lifetime-ended")
+    Just ident -> do
+      rows <- rawRows db ("SELECT " <> commandReceiptColumns <> " FROM commands WHERE id=?") [SQL.SQLText ident]
+      case rows of
+        [] -> pure (Left "lifetime-ended")
+        [row] -> case commandRowReceipt ident row of
+          Right receipt -> pure (Right receipt)
+          Left ReceiptExpired -> pure (Left "receipt-expired")
+          Left _ -> throwIO StoreIntegrity
+        _ -> throwIO StoreIntegrity
+  where
+    administration = \case
+      Object fields -> KeyMap.member "administration" fields
+      _ -> False
+
+-- | Whether the Store holds the committed effect of an administration
+-- operation: the @credential_administration@ row of an issued credential, the
+-- row of the superseded credential that names the credential of a rotation,
+-- the revocation of a revoked credential, and the release of a released
+-- reservation.
+administrationCommitted :: SQL.Database -> AdministrationBody -> IO Bool
+administrationCommitted db body = do
+  found <- case body of
+    ReleaseAdministration quarantine _ _ _ ->
+      scalar' "SELECT EXISTS(SELECT 1 FROM reservations WHERE id=? AND state='released')" [quarantine]
+    AdministrationBody {administrationOperation = operation, administrationCredential = credential, administrationPrevious = previous} -> case operation of
+      AdministerIssue -> scalar' "SELECT EXISTS(SELECT 1 FROM credential_administration WHERE credential_id=?)" [credential]
+      AdministerRotate -> case previous of
+        Just superseded -> scalar' "SELECT EXISTS(SELECT 1 FROM credential_administration WHERE credential_id=?) AND EXISTS(SELECT 1 FROM credential_administration WHERE credential_id=? AND superseded_by=?)" [credential, superseded, credential]
+        Nothing -> pure [[SQL.SQLInteger 0]]
+      AdministerRevoke -> scalar' "SELECT EXISTS(SELECT 1 FROM credentials WHERE id=? AND revoked=1)" [credential]
+      AdministerRelease -> pure [[SQL.SQLInteger 0]]
+  case found of
+    [[SQL.SQLInteger flag]] -> pure (flag /= 0)
+    _ -> throwIO StoreIntegrity
+  where
+    scalar' statement values = rawRows db statement (map SQL.SQLText values)
+
+-- | The columns of a @commands@ row from which 'commandRowReceipt' computes
+-- the current receipt of the command, in order.
+commandReceiptColumns :: Text
+commandReceiptColumns = "receipt,retired,state,attempted_at,acknowledgement,effect_evidence,refusal"
+
+-- | The current receipt of a command from the 'commandReceiptColumns' of its
+-- row: the original receipt with the current state, dispatch time,
+-- acknowledgement, effect evidence and refusal. It is the receipt that
+-- @GET /v1/commands/{id}@ returns. A retired receipt gives 'ReceiptExpired',
+-- and a row that does not decode, or whose receipt names another command,
+-- gives 'Command.StorageUnavailable'.
+commandRowReceipt :: Text -> [SQL.SQLData] -> Either CommandFailure CommandReceipt
+commandRowReceipt ident row = case row of
+  [SQL.SQLBlob bytes, SQL.SQLInteger 0, SQL.SQLText state, attempted, acknowledgement, effect, refusal] -> do
+    original <- decodeReceipt bytes
+    unless (receiptId original == ident) (Left Command.StorageUnavailable)
+    currentState <- maybe (Left Command.StorageUnavailable) Right (parseState state)
+    attemptTime <- optionalText attempted
+    ack <- optionalJson acknowledgement
+    observed <- optionalJson effect
+    refused <- optionalText refusal
+    decodeReceipt $ encoded original
+      { receiptState = currentState, receiptAttemptedAt = attemptTime, receiptAcknowledgement = ack,
+        receiptEffect = observed, receiptRefusal = maybe (receiptRefusal original) Just refused }
+  [_, SQL.SQLInteger 1, _, _, _, _, _] -> Left ReceiptExpired
+  _ -> Left Command.StorageUnavailable
+  where
+    optionalText = \case
+      SQL.SQLNull -> Right Nothing
+      SQL.SQLText value -> Right (Just value)
+      _ -> Left Command.StorageUnavailable
+    optionalJson :: FromJSON a => SQL.SQLData -> Either CommandFailure (Maybe a)
+    optionalJson = \case
+      SQL.SQLNull -> Right Nothing
+      SQL.SQLBlob bytes -> either (const (Left Command.StorageUnavailable)) (Right . Just) (eitherDecodeStrict' bytes)
+      _ -> Left Command.StorageUnavailable
 
 -- | At most 1000 credentials of the Store for a lifetime notice, and the
 -- number of the others. No verifier is read.

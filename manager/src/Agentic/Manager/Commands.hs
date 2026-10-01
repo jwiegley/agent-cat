@@ -32,7 +32,7 @@ import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.Except (ExceptT (..), runExceptT, throwE)
 import Crypto.Hash (Context, Digest, SHA256, hash, hashInit, hashUpdate, hashFinalize)
 import Crypto.Random (getRandomBytes)
-import Data.Aeson (FromJSON, Value (..), eitherDecodeStrict')
+import Data.Aeson (Value (..))
 import qualified Data.Aeson.Key as Key
 import qualified Data.Aeson.KeyMap as KM
 import Data.ByteArray (convert, constEq)
@@ -986,20 +986,13 @@ originalReceipt ident = do
     [[_, SQL.SQLInteger 1]] -> throwE ReceiptExpired
     _ -> throwE StorageUnavailable
 
+-- | The current receipt of a command, as 'commandRowReceipt' computes it from
+-- the row.
 currentReceipt :: Text -> CommandTx CommandReceipt
 currentReceipt ident = do
-  original <- originalReceipt ident
-  rows <- sql "SELECT state,attempted_at,acknowledgement,effect_evidence,refusal FROM commands WHERE id=?" [text ident]
+  rows <- sql ("SELECT " <> commandReceiptColumns <> " FROM commands WHERE id=?") [text ident]
   case rows of
-    [[SQL.SQLText state, attempted, acknowledgement, effect, refusal]] -> do
-      currentState <- maybe (throwE StorageUnavailable) pure (parseState state)
-      attemptTime <- sqlOptionalText attempted
-      ack <- decodeOptional acknowledgement
-      observed <- decodeOptional effect
-      refused <- sqlOptionalText refusal
-      let receipt = original {receiptState = currentState, receiptAttemptedAt = attemptTime,
-            receiptAcknowledgement = ack, receiptEffect = observed, receiptRefusal = case refused of Nothing -> receiptRefusal original; Just code -> Just code}
-      checked (decodeReceipt (encoded receipt))
+    [row] -> checked (commandRowReceipt ident row)
     _ -> throwE StorageUnavailable
 
 checkPrecondition :: CommandRequest -> Maybe (Text, Text, Text) -> CommandTx ()
@@ -1125,10 +1118,6 @@ sqlOptionalText :: SQL.SQLData -> CommandTx (Maybe Text)
 sqlOptionalText SQL.SQLNull = pure Nothing
 sqlOptionalText (SQL.SQLText value) = pure (Just value)
 sqlOptionalText _ = throwE StorageUnavailable
-decodeOptional :: FromJSON a => SQL.SQLData -> CommandTx (Maybe a)
-decodeOptional SQL.SQLNull = pure Nothing
-decodeOptional (SQL.SQLBlob bytes) = either (const (throwE StorageUnavailable)) (pure . Just) (eitherDecodeStrict' bytes)
-decodeOptional _ = throwE StorageUnavailable
 checked :: Either CommandFailure a -> CommandTx a
 checked = either throwE pure
 require :: Bool -> CommandFailure -> CommandTx ()

@@ -430,6 +430,39 @@ fails. The section
 [Growth, open refusals and recovery](#growth-open-refusals-and-recovery)
 states the reasons and the recovery.
 
+### Orphaned asks
+
+The open of a serving lifetime answers each command ask of an earlier
+lifetime that has no reply. `Store.openStore` does so after
+`reconcileRestart` and the lifetime notice, and before the pruning round at
+open. The command is the only ask schema of the manager log, and no ask of
+the new lifetime exists before it serves, so every unanswered ask of the
+retained log is orphaned. `managerFlowUnanswered` lists the asks from the
+reply-check index of the writer and reads each record from the log. Each reply
+goes from the manager to the sender of the ask, carries the identifiers of
+the ask and names the position of the ask:
+
+| Ask | Reply |
+| --- | --- |
+| An ordinary command whose ledger row exists. | A `receipt` reply with the current receipt of the command, which `GET /v1/commands/{id}` returns after the reconciliation. A start or control that was dispatch-attempted reads `unresolved`. |
+| An ordinary command whose ledger row exists with a retired receipt. | A `failure` reply with the reason `receipt-expired`. |
+| An ordinary command without a ledger row. Its transaction never committed. | A `failure` reply with the reason `lifetime-ended`. |
+| A credential administration or a release of a quarantined reservation whose committed effect the Store holds. | A `failure` reply with the reason `committed-receipt-lost`. |
+| Any other administration operation, whose command record precedes the COMMIT and whose receipt follows it. | A `failure` reply with the reason `outcome-uncertain`. |
+
+The committed effect of an issue is the `credential_administration` row of
+the issued credential, of a rotation that row and the row of the superseded
+credential that names it in `superseded_by`, of a revocation the revoked
+credential, and of a release the reservation in state `released`. A failure
+reply carries the class `refused` and the reason as its message. A reply has
+the class of the receipt of its ask: the reply to a cancel may use the
+reserve, and every other reply stays within L - R. A reply that cannot be
+appended leaves a gap entry and the ask without a reply, and a later
+lifetime answers it. A log whose asks cannot be read is recorded once in the
+private fault log as `manager-log reconciliation` with `stopped unreadable`.
+The reconciliation never executes, admits or delivers a command again, and it
+changes no ledger row.
+
 ### Pruning
 
 The Store of a serving lifetime owns the pruner of its manager log.
@@ -453,9 +486,13 @@ A trigger holds when one of these is true:
 A segment is protected when one of these is true:
 
 - A request that it names is not terminal. A request is terminal when it is
-  withdrawn or refused, or when it is associated and no run of it has
-  `terminal_observed=0`, which is the predicate of the overview.
-- A run that it names has `terminal_observed=0`.
+  withdrawn or refused, or when it is associated and each run of it has
+  `terminal_observed=1` or `lost` supervision.
+- A run that it names has `terminal_observed=0` and supervision other than
+  `lost`. An owned, cleanup-pending or observer run that has not been
+  observed terminal is protected. A run with `lost` supervision counts as
+  terminal for pruning, because no worker of this manager serves it and no
+  later lifetime adopts it.
 - A run that it names is the parent run of a request that is not terminal.
 - An ask in it has no reply in the retained log.
 
@@ -486,15 +523,16 @@ earlier streams, which remain after a restoration, are not.
 With no live work, a steady stream of appends keeps the log at most
 (L - R) div 2 plus one segment. A long-lived run, a pending review or a request that
 waits in the queue holds the floor, so the log can still reach L - R, and
-the refusals of the next section apply. Two cases hold the floor for every
-later lifetime. A run that a restart left with lost supervision keeps
+the refusals of the next section apply. A crash does not hold the floor in
+later lifetimes. A run that a restart left with lost supervision keeps
 `terminal_observed=0`, because the manager reads no run store after a
-restart. A command whose receipt reply was never appended, after a crash
-between the commit and the append or after a failed append, keeps an ask
-without a reply, and a same-key replay appends none. No operation clears
-either case at present. The age trigger is evaluated only at the open and
-after a seal, so a manager that does not seal keeps old segments until its
-next seal or restart.
+restart, but its supervision makes it terminal for pruning. A command whose
+receipt reply was never appended, after a crash between the commit and the
+append or after a failed append, keeps an ask without a reply until the next
+open of a serving lifetime answers it, as the section
+[Orphaned asks](#orphaned-asks) states. A same-key replay appends no record.
+The age trigger is evaluated only at the open and after a seal, so a manager
+that does not seal keeps old segments until its next seal or restart.
 
 The age trigger ties the floor to `replaySeconds`: while the log stays below
 (L - R) div 2 bytes, the pruner removes no record that is younger than 604800
@@ -696,8 +734,10 @@ segments while a trigger holds and no live work needs them. The age trigger
 holds when the newest record of the segment is more than 604800 seconds old,
 the value of `replaySeconds`. The byte trigger holds when the log and its
 claim checks hold more than (L - R) div 2 bytes. A segment is protected when it
-names a request that is not terminal, a run with `terminal_observed=0`, the
-parent run of a request that is not terminal, or an ask without a reply. The
+names a request that is not terminal, a run with `terminal_observed=0` whose
+supervision is not `lost`, the parent run of a request that is not terminal,
+or an ask without a reply. The open of a serving lifetime answers each
+orphaned ask of an earlier lifetime first. The
 newest sealed segment and the active file are never removed. The retained
 floor is the start of the oldest remaining sealed segment, or 0 before the
 first seal, and the writer refuses a reply that names a position below it.
