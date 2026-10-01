@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from contextlib import ExitStack
+import fcntl
 import hashlib
 import json
 import os
@@ -574,6 +575,21 @@ def process_parents() -> dict[int, int]:
     return {int(pid): int(parent) for pid, parent in (row.split() for row in rows)}
 
 
+def owner_lock_held(run: Path) -> bool:
+    """Whether another open description holds the exclusive lock of owner.lock."""
+    path = run / "owner.lock"
+    status = path.lstat()
+    assert stat.S_ISREG(status.st_mode) and stat.S_IMODE(status.st_mode) == 0o600, oct(status.st_mode)
+    descriptor = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
+    try:
+        fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        return True
+    finally:
+        os.close(descriptor)
+    return False
+
+
 def native_cleanup(runner: Path, directory: Path) -> None:
     for operation in ["discard", "cancel", "terminate"]:
         case = directory / ("native-cleanup-" + operation)
@@ -589,9 +605,11 @@ def native_cleanup(runner: Path, directory: Path) -> None:
                 assert frame is not None, "human-controlled run exited before cancellation"
                 if frame["event"]["type"] == "occurrence.person-answer-pending":
                     break
+            assert owner_lock_held(session.run), "live inner worker does not hold owner.lock"
             session.send({"controlId": "cleanup", "expectedOccurrenceId": None, "expectedAttemptId": None,
                           "command": {"type": "cancelRun"}})
             assert session.finish(130)[-1]["event"]["type"] == "run.cancelled"
+            assert not owner_lock_held(session.run), "owner.lock stays held after the inner worker exits"
         elif operation == "terminate":
             session.process.terminate()
             assert session.finish(-signal.SIGINT) == []
@@ -992,7 +1010,7 @@ def main() -> None:
         session.send(session.decision("discard"))
         assert session.finish() == []
     shutil.rmtree(temporary)
-    print("native session: capability discovery, exact invocation retention, v2/v3 lineage, transport capture, approval, in-process tool routing, controls, and local human answers passed")
+    print("native session: capability discovery, exact invocation retention, v2/v3 lineage, transport capture, approval, in-process tool routing, controls, the owner lock of a live worker, and local human answers passed")
 
 
 if __name__ == "__main__":

@@ -2193,7 +2193,7 @@ Transform matrices need DecidableEq o (Classical.propDecidable) while Mat/Panel 
 :LABELS:   ["workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-30 Wed 20:47]
-:MODIFIED: [2026-10-01 Thu 10:30]
+:MODIFIED: [2026-10-01 Thu 10:50]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -2221,6 +2221,13 @@ Further limitations recorded by the implementer: only N8 was run; the cleanup-re
     "author": "johnw",
     "text": "Item 1 resolved by Phase E subtask PE1: the restart reconciliation in manager/src/Agentic/Manager/Store.hs (one fragment, uncertainCommands, used by reconcileRestart and reconcileChanged) no longer reclassifies a start command whose run has runs.terminal_observed=1. failures-manager case 9 (third lifetime) again expects commands 0, and every command row keeps its state and revision through the third restart. Case 4 (second lifetime) still reports commands 1, and case 6 replays the unresolved approve with its first receipt and no start dispatched. manager/WORKERS.md and manager/STORAGE.md state the rule. Evidence: resume-20260923 PE/PE1/impl-r1 logs (build of agentic-run, routing-fixed-point-probe and manager-store-check; manager-store-check at N8; failures-manager at N8 with TUI_CHECK; JOURNEY-ONCE at N8; make -C doc check; all exit 0). Fess: non-blocking (fess/pe-PE1-r1.md), findings filed as a follow-up. Items 2 to 6 stay open, so the issue stays open.",
     "created_at": "2026-10-01T17:30:53Z"
+  },
+  {
+    "id": 527,
+    "issue_id": "acat-70ll",
+    "author": "johnw",
+    "text": "Phase E closeout commit 5a3d3f4f records item 1 as met by PE1 (d133764c) in the handoff. Items 2 to 6 stay open, so the issue stays open.",
+    "created_at": "2026-10-01T17:50:27Z"
   }
 ]
 #+end_src
@@ -5783,6 +5790,24 @@ Actor-flow increment 2, service subscription (4 to 6 engineering days, inside WM
   }
 ]
 #+end_src
+
+* TODO [#D] Start ACP and agent-deck engines through ProcessGroup sessions
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-engine-owner-lock-coverage-9snr
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-01 Thu 11:00]
+:MODIFIED: [2026-10-01 Thu 11:00]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Later work under the PE2 owner decision of 2026-10-01 (option C). The run owner lock runs/<run>/owner.lock covers the inner frontend worker, plus any engine session that starts through Runtime ProcessGroup spawnSession (createProcessGroup), which inherits the lock through posix_spawn_file_actions_addinherit_np on macOS. The inner worker starts no engine that way today. ACP starts through System.Process.createProcess in connectAcp (engine/acp/src/Agentic/Acp.hs), agent-deck through withCreateProcess (engine/agent-deck/src/Agentic/AgentDeck.hs), and shell steps through readCreateProcessWithExitCode (runtime/src/Agentic/Runtime/Shell.hs). These processes do not hold the lock, so its absence proves only that the inner worker has ended.
+
+Work: start the ACP and agent-deck engines through Runtime ProcessGroup sessions by way of a neutral spawn hook in engine/api (engine/acp/AGENTS.md forbids a runtime import), so that each engine session leader holds the owner lock. This changes engine signalling to session groups. Keep FD_CLOEXEC on owner.lock. Update manager/WORKERS.md ("Run directory owner lock") and runtime/README.md when the coverage changes.
 
 * DONE [#B] Engine: party→backend routing, so one run can span adapters (PAL-consensus parity)
 :PROPERTIES:
@@ -10957,6 +10982,26 @@ Non-blocking findings of fess audit fess/pc-PC9-r1.md (2026-09-30) on subtask PC
 6. (low) The vectors command in doc/api/README.md (near 798) calls list-bin without a build step. Add the BUILD command for manager-client-check before it.
 7. (low) The implementer summary said 102 named vectors. The file has 105 vectors, 83 of them named, and the 117 PASS lines are 105 vector checks plus 12 SSE decode checks. The integration record uses the corrected count.
 
+* TODO [#D] Resolve PE2 fess findings in the run owner lock
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pe2-owner-lock-fess-mnwp
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-01 Thu 11:00]
+:MODIFIED: [2026-10-01 Thu 11:00]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of the fess audit of Phase E subtask PE2 (run owner lock, option C, first part of acat-phase-c-review-findings-hwxy item 1). Report: fess/pe-PE2-r1.md in the private resume-20260923 evidence directory.
+
+1. (medium) Verification gap on acceptance item 3. ext-pi (ext-pi/src/supervisor.ts about lines 430 and 527) and the local TUI launcher (tui/src/Agentic/Tui/Process.hs about lines 204-223) write their own run directories and do not call runFrontendSession, so their runs never contain owner.lock. Only runs started by the frontend worker (the service path) carry it, as the retained N=8 journey fixture shows. Fix: record in doc/workflow-manager-handoff.md that only frontend-worker runs carry owner.lock, and optionally add a restore or prune case over a directory that contains owner.lock.
+2. (low) The implementer limitation that the new ProcessGroupTests case was never shown failing is wrong: PE/PE2/impl-r1/fail-first.log (exit 1) records "FAIL spawned session leader holds the inherited owner lock after the parent closes its descriptor". Fix: correct the hand-off record.
+3. (low) The implementer limitation that the run directory has no prune or deletion path is wrong: ext-pi restore prunes run directories by age and by count with a recursive removal (ext-pi/src/supervisor.ts about lines 81 and 128). The manager/WORKERS.md text is correct. Fix: correct the hand-off record and cite the ext-pi retention pruning.
+
 * TODO [#C] Phase B part 1 review follow-ups: download quota, id row bound, legacy history, precision gaps
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -11209,7 +11254,7 @@ Deferred security stage for Phase C (operator direction of 2026-09-30: functiona
 :LABELS:   ["review","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-10-01 Thu 09:51]
-:MODIFIED: [2026-10-01 Thu 09:51]
+:MODIFIED: [2026-10-01 Thu 11:00]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -11224,6 +11269,27 @@ Findings of the Phase C end-of-phase review (two lenses, range cc29f51a..cb62e35
 4. (low) After cancelOnStop the engine drops every session/update and refuses every permission on that connection until the reply to the cancelled prompt arrives. An adapter that never replies to a cancelled prompt would empty the answers of every later turn on that connection. ACP requires the reply. Item 1 of acat-pc7-acp-cancel-fess-3lb2 holds the repair. (engine/acp/src/Agentic/Acp.hs)
 
 The other review findings are held by acat-70ll (unresolved approve after a restart), acat-pc17-follow-fess-jd40 (overview fence after a 410), acat-jdmd (40x12 monitor), acat-a6a7-fess-followup-1exm, acat-a10a11-fess-followup-33k1 and acat-a5s2b-fess-followup-s9rl (Phase A polish), acat-pc8-tui-polish-fess-y3yt and acat-ftw9 (retrieval retry), acat-w8t0, acat-pc14-endpoint-switch-fess-2oup and acat-w92x.
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 528,
+    "issue_id": "acat-phase-c-review-findings-hwxy",
+    "author": "johnw",
+    "text": "Phase E stopping point (closeout commit 5a3d3f4f): item 1 (launched quarantine with no terminal record) is still open. PE2 implements the worker half of runs/<run>/owner.lock in the uncommitted worktree (eleven files, no fess audit) and stopped on an owner question: (A) clear FD_CLOEXEC, (B) move the ACP and agent-deck engine starts onto Runtime ProcessGroup sessions through an engine/api spawn hook, or (C) accept a worker-only lock and defer engine coverage. PE3 depends on the answer. Items 2 and later remain open (PE5 to PE7 not started).",
+    "created_at": "2026-10-01T17:50:27Z"
+  },
+  {
+    "id": 532,
+    "issue_id": "acat-phase-c-review-findings-hwxy",
+    "author": "johnw",
+    "text": "Item 1, first part, landed by Phase E subtask PE2 under the owner decision of 2026-10-01 (option C). The inner frontend worker creates runs/<run>/owner.lock (mode 0600, exclusive create, O_NOFOLLOW, FD_CLOEXEC kept) before supervisor-manifest.json and the first heartbeat, takes LOCK_EX|LOCK_NB through the one flock binding (now runtime/cbits/private_sync.c, lockPrivateDescriptor), and holds it until it exits. Engine sessions started through Runtime ProcessGroup spawnSession inherit it on macOS (posix_spawn_file_actions_addinherit_np). Process-library engine starts (ACP connectAcp, agent-deck withCreateProcess, shell steps) are not covered, so the absence of the lock proves that the inner worker has ended; engine coverage is filed as acat-engine-owner-lock-coverage-9snr. Nothing reads the lock yet: PE3 (owner-released evidence for a launched quarantine) remains, so item 1 stays open. Evidence: resume-20260923 PE/PE2/impl-r1 (build, runtime-contract-test at N8 with the new ownerLockCheck case, control_probe, tui-model-test at N8, ext-pi integration 8 of 8, frontend_session_probe, JOURNEY-ONCE at N8 with owner.lock in the fixture, make -C doc check; all exit 0; fail-first.log shows the new case failing without the inherit call). Fess: non-blocking (fess/pe-PE2-r1.md), findings filed as acat-pe2-owner-lock-fess-mnwp.",
+    "created_at": "2026-10-01T18:00:20Z"
+  }
+]
+#+end_src
 
 * DONE [#E] fanT fusion holds only laxly at m=0 after the l59 repair
 :PROPERTIES:
@@ -13598,7 +13664,7 @@ Review finding 2: widthT re-runs the grade arithmetic, so widthT_eq_width is a h
 :LABELS:   ["workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-10-01 Thu 10:30]
-:MODIFIED: [2026-10-01 Thu 10:30]
+:MODIFIED: [2026-10-01 Thu 10:50]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -13614,6 +13680,20 @@ Non-blocking findings of the fess audit of Phase E subtask PE1 (restart keeps th
 The untracked manager/test/__pycache__ that the audit also reported was deleted before the commit.
 
 Limitation recorded by the implementer: the suite was not run before the fix to show the new case 9 assertion failing.
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 526,
+    "issue_id": "acat-vbze",
+    "author": "johnw",
+    "text": "Item 1 resolved by the Phase E closeout commit 5a3d3f4f: the new section 'Phase E stopping point of 2026-10-01' of doc/workflow-manager-handoff.md supersedes item 4 of the Phase C review and marks acat-70ll item 1 as met by PE1 (d133764c). Evidence: make -C doc check exit 0 (resume-20260923 Z/CLOSEOUT-pe/doc-check.log). Items 2 and 3 stay open, so the issue stays open.",
+    "created_at": "2026-10-01T17:50:27Z"
+  }
+]
+#+end_src
 
 * DONE [#B] Shortest-list 5: Frag := ENat
 :PROPERTIES:
@@ -19932,7 +20012,7 @@ check fail.
 :LABELS:   ["p8","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-09 Wed 22:34]
+:MODIFIED: [2026-10-01 Thu 10:50]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-036
 :SOURCE_REPO: agent-cat
@@ -20019,6 +20099,20 @@ invocation tuples or exposing secrets.
 ]
 #+end_src
 
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 529,
+    "issue_id": "acat-wm-036-5ndj",
+    "author": "johnw",
+    "text": "Status at the Phase E stopping point of 2026-10-01 (closeout commit 5a3d3f4f): not started. The run stopped at PE2 before PE10 to PE28. The deferred Phase E security items are listed in the handoff section 'Phase E stopping point of 2026-10-01'. The package stays open.",
+    "created_at": "2026-10-01T17:50:27Z"
+  }
+]
+#+end_src
+
 * TODO [#B] WM-037: Migrate Pi native UI and tool-mediated controls    :p8:
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -20026,7 +20120,7 @@ invocation tuples or exposing secrets.
 :LABELS:   ["p8","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-09 Wed 22:34]
+:MODIFIED: [2026-10-01 Thu 10:50]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-037
 :SOURCE_REPO: agent-cat
@@ -20094,6 +20188,20 @@ verified output, and lineage behave consistently with the other clients.
 ]
 #+end_src
 
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 530,
+    "issue_id": "acat-wm-037-dz3v",
+    "author": "johnw",
+    "text": "Status at the Phase E stopping point of 2026-10-01 (closeout commit 5a3d3f4f): not started. The run stopped at PE2 before PE10 to PE28. The deferred Phase E security items are listed in the handoff section 'Phase E stopping point of 2026-10-01'. The package stays open.",
+    "created_at": "2026-10-01T17:50:28Z"
+  }
+]
+#+end_src
+
 * TODO [#B] WM-038: Add Pi real-host service-mode acceptance    :p8:
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -20101,7 +20209,7 @@ verified output, and lineage behave consistently with the other clients.
 :LABELS:   ["p8","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-11 Fri 19:36]
+:MODIFIED: [2026-10-01 Thu 10:50]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-038
 :SOURCE_REPO: agent-cat
@@ -20175,6 +20283,20 @@ WM-008 completed handoff 2026-09-12T02:36:23+00:00: Adopt the shared root-role r
     "created_by": "johnw",
     "metadata": "{}",
     "thread_id": ""
+  }
+]
+#+end_src
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 531,
+    "issue_id": "acat-wm-038-mgb7",
+    "author": "johnw",
+    "text": "Status at the Phase E stopping point of 2026-10-01 (closeout commit 5a3d3f4f): not started. The run stopped at PE2 before PE10 to PE28. The deferred Phase E security items are listed in the handoff section 'Phase E stopping point of 2026-10-01'. The package stays open.",
+    "created_at": "2026-10-01T17:50:28Z"
   }
 ]
 #+end_src

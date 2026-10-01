@@ -27,6 +27,8 @@ module Agentic.Runtime.PrivateRoot
     createPrivateDirectoryAt,
     openPrivateFileAt,
     openPrivateLogAt,
+    createPrivateLockAt,
+    lockPrivateDescriptor,
     privateFileIdentityAt,
     privateFileSizeAt,
     listPrivateDirectoryAt,
@@ -236,6 +238,23 @@ createPrivateDirectoryAt = descend False
 openPrivateFileAt :: PrivateRoot -> [FilePath] -> IO Handle
 openPrivateFileAt root components = withParent root components $ \parent file ->
   bracketOnError (openFdAt (Just parent) file WriteOnly fileFlags) closeFd fdToHandle
+
+-- | Create a private lock file exclusively, as 'openPrivateFileAt' creates a
+-- file, and take an exclusive @flock@ on its open description without
+-- waiting. The result keeps @FD_CLOEXEC@. The lock lasts while any
+-- descriptor that shares the description is open.
+createPrivateLockAt :: PrivateRoot -> [FilePath] -> IO Fd
+createPrivateLockAt root components = withParent root components $ \parent file ->
+  bracketOnError (openFdAt (Just parent) file WriteOnly fileFlags) closeFd $ \descriptor -> do
+    lockPrivateDescriptor "private lock unavailable" descriptor
+    pure descriptor
+
+-- | Take an exclusive @flock@ on the open description of the descriptor
+-- without waiting. A lock that another description holds raises an
+-- 'IOException' with @EWOULDBLOCK@ and the given location.
+lockPrivateDescriptor :: String -> Fd -> IO ()
+lockPrivateDescriptor location (Fd descriptor) =
+  void (throwErrnoIfMinus1Retry location (c_lock_private_descriptor descriptor))
 
 -- | Open an append-only private log for reading and appending, creating it
 -- when it is absent. The file must be a regular file of the effective user
@@ -672,3 +691,4 @@ foreign import ccall unsafe "renameat" c_renameat :: CInt -> CString -> CInt -> 
 foreign import ccall unsafe "linkat" c_linkat :: CInt -> CString -> CInt -> CString -> CInt -> IO CInt
 foreign import ccall unsafe "unlinkat" c_unlinkat :: CInt -> CString -> CInt -> IO CInt
 foreign import ccall safe "agentic_sync_private_descriptor" c_sync_private_descriptor :: CInt -> IO CInt
+foreign import ccall unsafe "agentic_lock_private_descriptor" c_lock_private_descriptor :: CInt -> IO CInt

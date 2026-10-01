@@ -15,6 +15,7 @@ module Agentic.Runtime.ProcessGroup
     processGroupLive,
     terminateProcessGroup,
     closeGroupPipes,
+    setInheritedOwnerLock,
   )
 where
 
@@ -23,16 +24,19 @@ import Control.Concurrent.Async (asyncWithUnmask, waitCatch)
 import Control.Concurrent.MVar (MVar, newEmptyMVar, newMVar, putMVar, readMVar, tryReadMVar, tryTakeMVar, withMVar)
 import Control.Exception (IOException, SomeException, fromException, mask, mask_, finally, throwIO, try, uninterruptibleMask_)
 import Control.Monad (void)
+import Data.IORef (IORef, atomicWriteIORef, newIORef)
 import Foreign.C.Error (throwErrnoIfMinus1Retry)
 import Foreign.C.Types (CInt (..))
 import System.Exit (ExitCode)
 import System.IO (Handle, hClose)
 import System.Posix.Signals (Signal, sigKILL, sigTERM)
-import System.Posix.Types (ProcessID)
+import System.IO.Unsafe (unsafePerformIO)
+import System.Posix.Types (Fd (Fd), ProcessID)
 import System.Process (CreateProcess, ProcessHandle, getPid, waitForProcess)
 import System.Timeout (timeout)
 #if defined(darwin_HOST_OS)
 import Control.Monad (when)
+import Data.IORef (readIORef)
 import Foreign.C.Error (throwErrno)
 import Foreign.C.String (CString, peekCString, withCString)
 import Foreign.Marshal (alloca, allocaArray, maybeWith, withArray, withArray0, withMany)
@@ -77,6 +81,22 @@ createProcessGroup command = mask_ $ do
   _ <- forkIO (monitorGroup group process)
   pure group
 
+-- | The descriptor of the owner lock that each later session leader
+-- inherits, or -1 for none. It is a process-wide setting.
+inheritedOwnerLock :: IORef CInt
+inheritedOwnerLock = unsafePerformIO (newIORef (-1))
+{-# NOINLINE inheritedOwnerLock #-}
+
+-- | Name the open owner-lock descriptor that each session leader spawned
+-- after this call inherits, or name none. On macOS the session spawn adds the
+-- descriptor to its file actions with @posix_spawn_file_actions_addinherit_np@,
+-- so the leader holds the same open file description, and with it the same
+-- @flock@, even though the descriptor keeps @FD_CLOEXEC@ in this process.
+-- The caller keeps the descriptor open while it is named. Other platforms
+-- and spawns through the process library do not pass it on.
+setInheritedOwnerLock :: Maybe Fd -> IO ()
+setInheritedOwnerLock = atomicWriteIORef inheritedOwnerLock . maybe (-1) (\(Fd descriptor) -> descriptor)
+
 -- | The spawn itself. On macOS the process library honours @close_fds@ only
 -- through a fork whose child closes every descriptor up to the soft
 -- @RLIMIT_NOFILE@, so each spawn costs time in proportion to that limit. The
@@ -95,7 +115,8 @@ createProcessGroup command = mask_ $ do
 -- because @posix_spawn@ does not tell a failed working directory from a failed
 -- exec. It refuses 'UseHandle' streams, @create_group@, @delegate_ctlc@,
 -- @child_group@ and @child_user@, which no caller uses. Other platforms keep
--- the process-library spawn.
+-- the process-library spawn. The descriptor that 'setInheritedOwnerLock'
+-- names is the one more descriptor that the Apple path passes on.
 spawnSession :: CreateProcess -> IO (Maybe Handle, Maybe Handle, Maybe Handle, ProcessHandle)
 #if defined(darwin_HOST_OS)
 spawnSession command = do
@@ -118,8 +139,9 @@ spawnSession command = do
                   alloca $ \failure -> do
                     -- The lock excludes a process-library spawn while the new
                     -- pipes lack FD_CLOEXEC.
-                    pid <- withMVar runInteractiveProcess_lock $ \_ ->
-                      spawnSessionNative argv directory environment streams ends failure
+                    pid <- withMVar runInteractiveProcess_lock $ \_ -> do
+                      inherited <- readIORef inheritedOwnerLock
+                      spawnSessionNative argv directory environment streams inherited ends failure
                     when (pid == -1) $ do
                       step <- peek failure >>= peekCString
                       throwErrno ("createProcess: " <> step)
@@ -238,7 +260,7 @@ closeGroupPipes group = mapM_ (mapM_ close) [groupInput group, groupOutput group
 #if defined(darwin_HOST_OS)
 -- A safe call, so a spawn never holds a capability.
 foreign import ccall safe "agentic_spawn_session"
-  spawnSessionNative :: Ptr CString -> CString -> Ptr CString -> Ptr CInt -> Ptr CInt -> Ptr CString -> IO CInt
+  spawnSessionNative :: Ptr CString -> CString -> Ptr CString -> Ptr CInt -> CInt -> Ptr CInt -> Ptr CString -> IO CInt
 #endif
 
 foreign import ccall unsafe "agentic_child_exited"

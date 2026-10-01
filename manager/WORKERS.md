@@ -167,6 +167,33 @@ cleanup of the proxy group does not signal the inner group. This is an instance
 of the escaped-descendant limit that the
 [verification section](#verification-and-remaining-owners) states.
 
+## Run directory owner lock
+
+When the inner frontend worker starts a run, it creates `runs/<run>/owner.lock`
+in the private state root before it writes `supervisor-manifest.json` and the
+first `owner.json` heartbeat. The worker creates the file exclusively as a
+private regular file with mode 0600, takes an exclusive, nonblocking `flock` on
+its open description, and keeps the descriptor open until the worker process
+exits. The descriptor keeps `FD_CLOEXEC` in the worker. The worker names it with
+the Runtime `setInheritedOwnerLock`, so on macOS each engine session that the
+worker starts through the Runtime `createProcessGroup` holds the same open
+description and with it the same lock. The lock does not cover the engine
+processes that start through the process library: the ACP adapter starts its
+agent with `createProcess` in `connectAcp`, the agent-deck adapter uses
+`withCreateProcess`, and the shell steps of `Agentic.Shell` use
+`readCreateProcessWithExitCode`. These processes do not receive the
+descriptor. They normally end when their pipes to the ended worker close. At
+present no engine of the inner worker starts through `createProcessGroup`, so
+the lock covers the inner worker process only.
+
+While the inner worker lives, another open of `owner.lock` cannot take an
+exclusive lock. An exclusive lock that a later open takes therefore shows that
+the original inner worker has ended. It does not show that the engine processes
+of the run that started through the process library have ended. No component
+reads the lock at present. The file stays in
+the run directory after the run ends, and restoration and pruning handle it as
+any other file of the run directory.
+
 ## Manager loss and restart
 
 When the manager process ends without its orderly close, for example through

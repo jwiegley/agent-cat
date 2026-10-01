@@ -175,6 +175,12 @@ runFrontendSession runnerId runnerVersion credentialArgument describe prepare = 
         _ <- revalidate
         ensurePrivateDirectoryAt root ["runs"]
         createPrivateDirectoryAt root runComponents
+        -- The worker holds this lock until it exits. An engine session that
+        -- it spawns through createProcessGroup on macOS inherits the same open
+        -- description. Process-library spawns (ACP connectAcp, agent-deck
+        -- withCreateProcess, Agentic.Shell) do not.
+        ownerLock <- createPrivateLockAt root (runComponents <> ["owner.lock"])
+        setInheritedOwnerLock (Just ownerLock)
         createPrivateDirectoryAt root (runComponents <> ["inputs"])
         mapM_ (\(index, (_, bytes)) -> writePrivateExclusiveAt root (runComponents <> ["inputs", show index <> ".txt"]) bytes) (zip [(0 :: Int) ..] inputs)
         created <- timestamp

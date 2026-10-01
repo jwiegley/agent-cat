@@ -33,6 +33,10 @@ When `AGENT_CAT_STATE_ANCHOR` is present, it contains a JSON array of the absolu
 root path, device number, and inode number captured by the parent. The child reopens
 and validates that identity before confined input, lineage, or store access. The
 identity is not an authorization token and does not relax ownership or mode checks.
+`createPrivateLockAt` creates a private lock file with the same exclusive
+creation and takes an exclusive, nonblocking `flock` on its open description
+through `lockPrivateDescriptor`. The manager service lease takes its lock
+through the same function.
 
 ## Control event order
 
@@ -342,10 +346,30 @@ macOS 26 SDK deprecates that call in favour of
 build uses those headers. The helper never calls
 `posix_spawnp`, because on macOS that call, with a working directory and a
 relative PATH entry, reports an error and still leaves a child that no caller
-owns. Other platforms keep the process-library spawn. The runtime contract test
-checks the descriptor set, nonblocking parent pipe ends, closed standard
-descriptors, session leadership, resolution rules, exec errors and a bound on
-the spawn cost at a soft `RLIMIT_NOFILE` of 1048576.
+owns. Other platforms keep the process-library spawn.
+
+`setInheritedOwnerLock` names one open owner-lock descriptor, or none, for the
+whole process. On macOS the helper adds that descriptor to the file actions of
+each later session spawn with `posix_spawn_file_actions_addinherit_np`. The
+session leader then holds the same open file description under the same number,
+and with it the same `flock`, although the descriptor keeps `FD_CLOEXEC` in the
+parent. The caller keeps the descriptor open while the setting names it. A spawn
+through the process library and every spawn on another platform do not receive
+it. The inner frontend worker names its `owner.lock` descriptor in this way, as
+[the worker ownership notes](../manager/WORKERS.md#run-directory-owner-lock)
+describe. The ACP adapter (`connectAcp`), the agent-deck adapter
+(`withCreateProcess`) and `Agentic.Shell` (`readCreateProcessWithExitCode`)
+spawn through the process library, so their processes do not hold the
+descriptor. Those processes normally end when their pipes to the ended worker
+close.
+
+The runtime contract test checks the descriptor set, nonblocking parent pipe
+ends, closed standard descriptors, session leadership, resolution rules, exec
+errors, the inherited owner lock and a bound on the spawn cost at a soft
+`RLIMIT_NOFILE` of 1048576. The owner-lock case closes the parent descriptor
+after the spawn, shows that a fresh open of the lock file cannot take the lock
+while the session leader lives, and shows that it can take the lock after the
+group ends.
 
 ## Process-group termination grace
 

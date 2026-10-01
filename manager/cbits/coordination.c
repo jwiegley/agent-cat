@@ -1,11 +1,6 @@
-#include <sys/file.h>
 #include <fcntl.h>
 #include <sqlite3.h>
 #include <stdint.h>
-
-int agentic_manager_lock(int fd) {
-    return flock(fd, LOCK_EX | LOCK_NB);
-}
 
 int agentic_manager_duplicate_lease(int fd) {
     return fcntl(fd, F_DUPFD_CLOEXEC, 0);

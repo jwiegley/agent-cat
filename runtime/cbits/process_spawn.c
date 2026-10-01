@@ -288,12 +288,15 @@ static int name_stream(posix_spawn_file_actions_t *actions, int target, const st
 
 /* Spawn argv in a new session.  modes[i] is AGENTIC_STREAM_PIPE,
    AGENTIC_STREAM_CLOSED, or a descriptor to inherit as standard descriptor i.
+   An inherited descriptor of zero or more is the owner lock: the child holds
+   it under the same number and shares its open file description, although
+   the parent keeps FD_CLOEXEC on it.  -1 names no descriptor.
    On success the parent pipe ends are stored in parent_ends, each with
    FD_CLOEXEC and O_NONBLOCK set, and the PID is returned.  On failure no child exists, every
    pipe is closed, *failed_doing names the failed step, errno holds the error,
    and -1 is returned. */
 int agentic_spawn_session(char *const argv[], const char *directory, char *const environment[],
-                          const int modes[3], int parent_ends[3], const char **failed_doing)
+                          const int modes[3], int inherited, int parent_ends[3], const char **failed_doing)
 {
     struct stream streams[3];
     posix_spawn_file_actions_t actions;
@@ -335,6 +338,10 @@ int agentic_spawn_session(char *const argv[], const char *directory, char *const
             *failed_doing = "posix_spawn_file_actions";
             goto attributes;
         }
+    }
+    if (inherited >= 0 && (error = posix_spawn_file_actions_addinherit_np(&actions, inherited)) != 0) {
+        *failed_doing = "posix_spawn_file_actions_addinherit_np";
+        goto attributes;
     }
     if (environment != NULL) {
         executable = find_executable(directory, argv[0]);

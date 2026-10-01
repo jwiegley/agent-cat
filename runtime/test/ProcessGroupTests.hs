@@ -4,10 +4,13 @@
 
 -- | Spawn contracts of 'createProcessGroup': inherited descriptors, closed
 -- standard descriptors, nonblocking parent pipe ends, session leadership,
--- executable resolution, exec errors and spawn cost.
+-- executable resolution, exec errors, the inherited owner lock and spawn cost.
 module ProcessGroupTests (processGroupTests, spawnCostCheck, spawnCostProbe) where
 
 import Agentic.Runtime (ProcessGroup, closeGroupPipes, createProcessGroup, groupErrors, groupInput, groupOutput, groupPid, terminateProcessGroup, waitProcessGroup)
+#if defined(darwin_HOST_OS)
+import Agentic.Runtime (lockPrivateDescriptor, processGroupLive, setInheritedOwnerLock)
+#endif
 import Control.Concurrent (threadDelay)
 import Control.Exception (IOException, bracket, finally, try)
 import Control.Monad (forM, forM_, unless)
@@ -31,13 +34,14 @@ import System.Process (CreateProcess (..), StdStream (..), proc)
 import Data.Int (Int32)
 import Data.List (sort, (\\))
 import Data.Word (Word64)
-import Foreign.C.Error (throwErrno)
+import Foreign.C.Error (Errno (Errno), eWOULDBLOCK, throwErrno)
 import Foreign.C.Types (CInt (..))
 import Foreign.Marshal.Alloc (allocaBytes)
 import Foreign.Marshal.Array (allocaArray, peekArray)
 import Foreign.Ptr (Ptr)
 import Foreign.Storable (peekByteOff)
 import GHC.IO.Exception (IOErrorType (..), IOException (ioe_errno, ioe_filename, ioe_type))
+import System.Posix.IO (OpenFileFlags (cloexec, creat, exclusive), OpenMode (WriteOnly))
 #else
 import Data.List (sort)
 import System.Directory (listDirectory)
@@ -109,8 +113,11 @@ processGroupTests = do
     directory <- canonicalizePath work
     resolutionChecks directory
     execErrorChecks directory
+#if defined(darwin_HOST_OS)
+    ownerLockCheck directory
+#endif
   spawnCostCheck
-  putStrLn ("PASS process group: stdio-only descriptors, nonblocking parent pipe ends, closed standard descriptors, session leader, execvp and find_executable resolution, exec error class/errno/file, spawn cost below one second for " <> show timedSpawns <> " spawns at soft RLIMIT_NOFILE " <> show highDescriptorLimit)
+  putStrLn ("PASS process group: stdio-only descriptors, nonblocking parent pipe ends, closed standard descriptors, session leader, execvp and find_executable resolution, exec error class/errno/file, inherited owner lock, spawn cost below one second for " <> show timedSpawns <> " spawns at soft RLIMIT_NOFILE " <> show highDescriptorLimit)
 
 expect :: String -> Bool -> IO ()
 expect label condition = unless condition $ do
@@ -229,6 +236,42 @@ sessionCheck = do
     processGroup <- getProcessGroupIDOf pid
     expect "spawned child leads its own session" (session == pid && session /= parent)
     expect "spawned child leads its own process group" (processGroup == pid)
+
+#if defined(darwin_HOST_OS)
+-- | A lock descriptor that 'setInheritedOwnerLock' names reaches the session
+-- leader as the same open file description. A fresh open of the lock file
+-- cannot take the exclusive lock while the leader lives, after the parent has
+-- closed its own descriptor, and can take it once the group has ended. The
+-- setting is cleared before the parent descriptor closes, so that no later
+-- spawn names a closed descriptor.
+ownerLockCheck :: FilePath -> IO ()
+ownerLockCheck directory = do
+  let path = directory </> "owner.lock"
+      command = (proc "/bin/sleep" ["30"]) {std_in = NoStream, std_out = NoStream, std_err = NoStream}
+  parent <- openFd path WriteOnly defaultFileFlags {creat = Just 0o600, exclusive = True, cloexec = True}
+  group <- (do
+      lockPrivateDescriptor "owner lock check" parent
+      setInheritedOwnerLock (Just parent)
+      createProcessGroup command)
+    `finally` (setInheritedOwnerLock Nothing >> closeFd parent)
+  (do
+      live <- processGroupLive group
+      expect "owner lock check: the session leader lives" live
+      held <- lockedElsewhere path
+      expect "spawned session leader holds the inherited owner lock after the parent closes its descriptor" held)
+    `finally` (terminateProcessGroup 2000000 group `finally` closeGroupPipes group)
+  released <- lockedElsewhere path
+  expect "inherited owner lock is free after the process group ends" (not released)
+  where
+    -- Only EWOULDBLOCK shows another holder. Any other failure is raised.
+    lockedElsewhere path = bracket (openFd path ReadOnly defaultFileFlags {cloexec = True}) closeFd $ \fresh -> do
+      taken <- try @IOException (lockPrivateDescriptor "owner lock probe" fresh)
+      case taken of
+        Right () -> pure False
+        Left failure
+          | fmap Errno (ioe_errno failure) == Just eWOULDBLOCK -> pure True
+          | otherwise -> ioError failure
+#endif
 
 -- | The executable resolution of the process-library fork path. With an
 -- explicit environment, @find_executable@ resolves the name and @execve@ runs
