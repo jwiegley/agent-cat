@@ -53,6 +53,19 @@
 -- ('admitStamped'). The command that a switch leaves unresolved stays listed
 -- for its own profile, and no later session sends it. A failed connection
 -- keeps the active session and records its fixed reason.
+--
+-- Live delivery keeps two reads current: the manager overview and the
+-- composite read of the selected request ('FetchKey'). The event worker of
+-- the session records each invalidated resource in a bounded set
+-- ('Invalidated') and wakes the frontend once. 'invalidatedFetches' routes
+-- the set to the reads that read an invalidated resource, and the refresh
+-- coordinator of the session decides each fetch: one fetch in flight for
+-- each read, and one later fetch when invalidations arrive during it.
+-- 'Fetches' holds the fetches that wait for the read lane and the fetch that
+-- holds the read ticket. A fetch runs through the single-flight read lane
+-- like any other read, so the mutation deferral rule is unchanged. While the
+-- stream is live, the timer refresh of the selected request is only a
+-- safety read ('safetyReadDue').
 module Agentic.Tui.ServiceLane
   ( CallOutcome (..),
     serviceCall,
@@ -91,6 +104,7 @@ module Agentic.Tui.ServiceLane
     newEndpoints,
     endpointsGeneration,
     activeIdentity,
+    SessionGeneration (..),
     Stamped (..),
     admitStamped,
     moveEndpoint,
@@ -132,6 +146,29 @@ module Agentic.Tui.ServiceLane
     unresolvedNotice,
     faultScreen,
     shutdownNotices,
+    FetchKey (..),
+    Delivery (..),
+    deliveryText,
+    Invalidated (..),
+    noInvalidations,
+    invalidatedBound,
+    noteInvalidation,
+    invalidatedFetches,
+    Fetches (..),
+    noFetches,
+    invalidateFetches,
+    takeFetch,
+    fetchStarted,
+    fetchSkipped,
+    fetchCompleted,
+    fetchAbandoned,
+    resnapshotFetches,
+    OverviewRetry (..),
+    overviewRefused,
+    overviewRetryDue,
+    overviewRetryStarted,
+    safetyReadInterval,
+    safetyReadDue,
   )
 where
 
@@ -139,10 +176,12 @@ import qualified Agentic.Manager.Client as C
 import Agentic.Tui.Service (Endpoint, Mutation, ReadVerdict (..), missingScope, mutationOperation, mutationURI)
 import Control.Exception (SomeAsyncException, SomeException, evaluate, fromException, throwIO, try)
 import Data.List (findIndex)
+import qualified Data.Set as Set
 import Data.Maybe (isJust)
 import Data.Text (Text)
 import qualified Data.Text as T
-import Data.Time.Clock (NominalDiffTime, UTCTime, diffUTCTime)
+import Data.Time.Clock (NominalDiffTime, UTCTime, addUTCTime, diffUTCTime)
+import Numeric.Natural (Natural)
 
 -- | The outcome of one call into the manager client facade.
 data CallOutcome a
@@ -512,16 +551,26 @@ data EndpointSlot = EndpointSlot
   deriving (Eq, Show)
 
 -- | The client profiles of one service frontend in the given order, the
--- index of the active profile, the selection of the Endpoints view and the
--- refresh coordinator of the active session. The generation of that
--- coordinator fences every worker result. A switch advances it.
+-- index of the active profile, the selection of the Endpoints view, the
+-- generation of the active session and the refresh coordinator of that
+-- session. The session generation fences every worker result, and a switch
+-- advances it. The coordinator has a generation of its own, which fences the
+-- fetches of live delivery. A switch and a resnapshot advance it, so a
+-- resnapshot discards the fetches in flight without discarding the other
+-- worker results of the session.
 data Endpoints = Endpoints
   { endpointsSlots :: ![EndpointSlot],
     endpointsActive :: !Int,
     endpointsCursor :: !Int,
-    endpointsRefresh :: !(C.Refresh Text)
+    endpointsSession :: !SessionGeneration,
+    endpointsRefresh :: !(C.Refresh FetchKey)
   }
   deriving (Eq, Show)
+
+-- | The generation of one session of the frontend. Each successful switch
+-- opens a session of the next generation.
+newtype SessionGeneration = SessionGeneration Natural
+  deriving (Eq, Ord, Show)
 
 -- | The profiles at startup: the connected first profile with its identity
 -- and the other profiles without a session.
@@ -531,11 +580,12 @@ newEndpoints first identity rest =
     (EndpointSlot first EndpointActive (Just identity) [] : [EndpointSlot path EndpointIdle Nothing [] | path <- rest])
     0
     0
+    (SessionGeneration 0)
     C.newRefresh
 
 -- | The generation of the active session.
-endpointsGeneration :: Endpoints -> C.FetchGeneration
-endpointsGeneration = C.refreshGeneration . endpointsRefresh
+endpointsGeneration :: Endpoints -> SessionGeneration
+endpointsGeneration = endpointsSession
 
 -- | The endpoint identity of the active session.
 activeIdentity :: Endpoints -> Maybe Endpoint
@@ -545,7 +595,7 @@ activeIdentity endpoints = case drop (endpointsActive endpoints) (endpointsSlots
 
 -- | One worker result with the generation of the session that started the
 -- worker.
-data Stamped a = Stamped !C.FetchGeneration !a
+data Stamped a = Stamped !SessionGeneration !a
 
 -- | The result when the session that started its worker is still the active
 -- session. A result of an earlier session gives 'Nothing' and changes
@@ -617,6 +667,7 @@ switchStep ticket outcome unresolved endpoints =
               endpoints
                 { endpointsSlots = zipWith update [0 ..] slots,
                   endpointsActive = index,
+                  endpointsSession = let SessionGeneration previous = endpointsSession endpoints in SessionGeneration (previous + 1),
                   endpointsRefresh = C.advanceGeneration (endpointsRefresh endpoints)
                 } )
       Left reason -> (SwitchFailed reason, replaceSlot index (slots !! index) {slotState = EndpointFailed reason} endpoints)
@@ -875,3 +926,210 @@ shutdownNotices :: Bool -> Bool -> [Text]
 shutdownNotices uncertain faulted =
   ["The frontend stopped manager operations after an internal frontend fault." | faulted]
     <> ["Manager command outcome may be uncertain. The manager run was not cancelled." | uncertain]
+
+-- | A read that live delivery keeps current: the manager overview, or the
+-- composite read of the selected request.
+data FetchKey = OverviewFetch | RequestFetch
+  deriving (Eq, Ord, Show, Enum, Bounded)
+
+-- | The state of the event stream of the session.
+data Delivery
+  = -- | No stream runs. The first overview of the session has not been read.
+    DeliveryIdle
+  | -- | The stream connects and has delivered nothing yet.
+    DeliveryConnecting
+  | -- | The stream delivered a heartbeat or an invalidation.
+    DeliveryLive
+  | -- | The stream failed with this refusal code and reconnects after the
+    -- backoff.
+    DeliveryReconnecting !Text
+  | -- | The manager refused the cursor with 410. The stream waits for a new
+    -- overview, whose cursor starts it again.
+    DeliveryResnapshot
+  | -- | The stream stopped for this reason and does not reconnect.
+    DeliveryStopped !Text
+  deriving (Eq, Show)
+
+-- | The delivery state as the shell shows it.
+deliveryText :: Delivery -> Text
+deliveryText delivery = "delivery " <> case delivery of
+  DeliveryIdle -> "not started"
+  DeliveryConnecting -> "connecting"
+  DeliveryLive -> "live"
+  DeliveryReconnecting code -> "reconnecting (" <> code <> ")"
+  DeliveryResnapshot -> "resnapshot"
+  DeliveryStopped reason -> "stopped (" <> reason <> ")"
+
+-- | The resources that invalidations named since the frontend last took the
+-- set, at most 'invalidatedBound' of them. A further resource sets the
+-- overflow mark, which invalidates every read.
+data Invalidated = Invalidated
+  { invalidatedResources :: !(Set.Set Text),
+    invalidatedOverflow :: !Bool
+  }
+  deriving (Eq, Show)
+
+noInvalidations :: Invalidated
+noInvalidations = Invalidated Set.empty False
+
+-- | The largest number of distinct resources that the set holds.
+invalidatedBound :: Int
+invalidatedBound = 1024
+
+-- | Record the resource of one invalidation.
+noteInvalidation :: Text -> Invalidated -> Invalidated
+noteInvalidation resource invalidated@(Invalidated resources overflow)
+  | overflow || Set.member resource resources = invalidated
+  | Set.size resources >= invalidatedBound = Invalidated resources True
+  | otherwise = Invalidated (Set.insert resource resources) False
+
+-- | The reads that read an invalidated resource, given the resources of the
+-- composite read of the selected request ('Agentic.Tui.Service.compositeResources').
+-- The overview reads every overview member, and an invalidation names a
+-- member as @/v1/requests/{id}@, @/v1/preparations/{id}@, @/v1/runs/{id}@
+-- or @/v1/decisions/{id}@, or names a resource below a member, such as
+-- @/v1/runs/{id}/snapshot@ when the runtime status of a run changes. The
+-- overview shows that status, so a resource at or below a member
+-- invalidates the overview. The composite read reads its resources and the
+-- resources below them, such as the snapshot and the controls of its run,
+-- so a resource invalidates it when one of the two resources is the other
+-- or lies below it. An overflowing set invalidates both reads.
+invalidatedFetches :: [Text] -> Invalidated -> [FetchKey]
+invalidatedFetches composite (Invalidated resources overflow)
+  | overflow = [minBound .. maxBound]
+  | otherwise =
+      [OverviewFetch | any member invalidated]
+        <> [RequestFetch | any (\resource -> any (related resource) composite) invalidated]
+  where
+    invalidated = Set.toList resources
+    member resource = case T.splitOn "/" resource of
+      "" : "v1" : collection : ident : _ -> collection `elem` ["requests", "preparations", "runs", "decisions"] && not (T.null ident)
+      _ -> False
+    related one other = one == other || below one other || below other one
+    below parent child = (parent <> "/") `T.isPrefixOf` child
+
+-- | The fetches of live delivery that wait for the read lane, in order, and
+-- the fetch that holds the read ticket with its ticket number.
+data Fetches = Fetches
+  { fetchesWaiting :: ![(FetchKey, C.FetchGeneration)],
+    fetchesReading :: !(Maybe (Int, FetchKey, C.FetchGeneration))
+  }
+  deriving (Eq, Show)
+
+noFetches :: Fetches
+noFetches = Fetches [] Nothing
+
+-- | Apply invalidations of these reads to the coordinator. A read whose
+-- fetch waits for the read lane has read nothing yet, so its invalidation
+-- changes nothing. Every other invalidation goes to the coordinator, which
+-- starts a fetch of an idle read and only marks a read in flight dirty. A
+-- started fetch waits for the read lane.
+invalidateFetches :: [FetchKey] -> C.Refresh FetchKey -> Fetches -> (C.Refresh FetchKey, Fetches)
+invalidateFetches keys refresh fetches = foldl step (refresh, fetches) keys
+  where
+    step (current, held) key
+      | key `elem` map fst (fetchesWaiting held) = (current, held)
+      | otherwise =
+          let (next, actions) = C.invalidateResource key current
+           in (next, foldl (flip queue) held actions)
+
+-- | Add the fetch that a coordinator action starts to the waiting fetches.
+queue :: C.RefreshAction FetchKey -> Fetches -> Fetches
+queue action fetches = case action of
+  C.StartFetch key generation | key `notElem` map fst (fetchesWaiting fetches) ->
+    fetches {fetchesWaiting = fetchesWaiting fetches <> [(key, generation)]}
+  _ -> fetches
+
+-- | The first waiting fetch that may start now, given which reads may
+-- start. Nothing starts while a fetch holds the read ticket or while any
+-- read holds it.
+takeFetch :: (FetchKey -> Bool) -> Lane pending location -> Fetches -> Maybe ((FetchKey, C.FetchGeneration), Fetches)
+takeFetch startable lane fetches
+  | isJust (fetchesReading fetches) || isJust (laneReadTicket lane) = Nothing
+  | otherwise = case break (startable . fst) (fetchesWaiting fetches) of
+      (before, first : after) -> Just (first, fetches {fetchesWaiting = before <> after})
+      (_, []) -> Nothing
+
+-- | Record that the read with this ticket number performs the fetch.
+fetchStarted :: Int -> (FetchKey, C.FetchGeneration) -> Fetches -> Fetches
+fetchStarted ticket (key, generation) fetches = fetches {fetchesReading = Just (ticket, key, generation)}
+
+-- | Complete a taken fetch that started no read, because its read has
+-- nothing to read, such as the composite read without a selected request.
+fetchSkipped :: (FetchKey, C.FetchGeneration) -> C.Refresh FetchKey -> Fetches -> (C.Refresh FetchKey, Fetches)
+fetchSkipped (key, generation) refresh fetches =
+  let (next, actions) = C.completeFetch key generation refresh
+   in (next, foldl (flip queue) fetches actions)
+
+-- | Complete the read with this ticket number when it performs the fetch:
+-- whether its result installs, and the next coordinator and fetches. A
+-- result of an earlier generation does not install. When invalidations
+-- arrived during the fetch, exactly one later fetch waits. A read that does
+-- not perform the fetch gives 'Nothing'.
+fetchCompleted :: Int -> C.Refresh FetchKey -> Fetches -> Maybe (Bool, C.Refresh FetchKey, Fetches)
+fetchCompleted ticket refresh fetches = case fetchesReading fetches of
+  Just (reading, key, generation) | reading == ticket ->
+    let (next, actions) = C.completeFetch key generation refresh
+     in Just (C.InstallFetch key generation `elem` actions, next, foldl (flip queue) fetches {fetchesReading = Nothing} actions)
+  _ -> Nothing
+
+-- | The fetch whose read no longer holds the read ticket without a
+-- completion, because a mutation key or an exact resend ended and cancelled
+-- that read, waits again at the front. Its coordinator flight stays.
+fetchAbandoned :: Lane pending location -> Fetches -> Fetches
+fetchAbandoned lane fetches = case fetchesReading fetches of
+  Just (ticket, key, generation) | fmap ticketNumber (laneReadTicket lane) /= Just ticket ->
+    Fetches ((key, generation) : filter ((/= key) . fst) (fetchesWaiting fetches)) Nothing
+  _ -> fetches
+
+-- | The resnapshot after a 410 refusal of the stream. The coordinator
+-- advances its generation, so a fetch still in flight completes without
+-- installing, and in particular an overview read from before the refusal
+-- installs no old cursor. The waiting fetches of the earlier generation are
+-- dropped, and both reads are fetched again in the new generation. The
+-- fetch in flight keeps the read ticket until it completes, so the new
+-- fetches start after it.
+resnapshotFetches :: C.Refresh FetchKey -> Fetches -> (C.Refresh FetchKey, Fetches)
+resnapshotFetches refresh fetches =
+  invalidateFetches [minBound .. maxBound] (C.advanceGeneration refresh) fetches {fetchesWaiting = []}
+
+-- | The retry of an overview read of live delivery or of a resnapshot after
+-- a refusal: the time of the next read, or 'Nothing' while that read waits
+-- or runs, and the backoff of the next refusal. A refusal can answer the
+-- last invalidation, and after a 410 no stream runs, so without this retry
+-- no later invalidation reads the overview again.
+data OverviewRetry = OverviewRetry
+  { retryDue :: !(Maybe UTCTime),
+    retryBackoff :: !C.Backoff
+  }
+  deriving (Eq, Show)
+
+-- | A refused overview read at this time. The next read is due after the
+-- delay of the backoff of the client, which doubles from one second up to
+-- 'C.reconnectBackoffMaxSeconds'.
+overviewRefused :: UTCTime -> Maybe OverviewRetry -> OverviewRetry
+overviewRefused now previous =
+  let (seconds, next) = C.reconnectDelay (maybe C.initialBackoff retryBackoff previous)
+   in OverviewRetry (Just (addUTCTime (fromIntegral seconds) now)) next
+
+-- | Whether the refused overview read is due again at this time.
+overviewRetryDue :: Maybe OverviewRetry -> UTCTime -> Bool
+overviewRetryDue retry now = maybe False (<= now) (retry >>= retryDue)
+
+-- | The retry after its overview read was queued. It is due again only
+-- after a further refusal.
+overviewRetryStarted :: OverviewRetry -> OverviewRetry
+overviewRetryStarted retry = retry {retryDue = Nothing}
+
+-- | The shortest interval between two timer reads of the selected request
+-- while the stream is live.
+safetyReadInterval :: NominalDiffTime
+safetyReadInterval = 5
+
+-- | Whether the timer reads the selected request at this time, given the
+-- delivery state and the time of the latest timer read. Without a live
+-- stream the timer reads at every tick.
+safetyReadDue :: Delivery -> Maybe UTCTime -> UTCTime -> Bool
+safetyReadDue delivery latest now = case (delivery, latest) of
+  (DeliveryLive, Just previous) -> diffUTCTime now previous >= safetyReadInterval
+  _ -> True

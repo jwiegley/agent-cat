@@ -313,13 +313,23 @@ endpoints_mode = len(sys.argv) == 6 and sys.argv[5] == ENDPOINTS
 # configured profiles of each mode and the scopes of its TUI credential.
 #
 # The tui-overview mode starts the service TUI, which reads the manager
-# overview after the profiles load. O opens the Manager overview view from
-# the workflow browser, and the view must show the empty overview. The
-# harness then creates a request through HTTP with its own credential. After
-# g, the view must list the request with its phase and blocking reasons. The
-# harness then stops the manager, and after g the view must keep the request
-# and mark the overview stale with the refusal code. Each step prints its own
-# PASS line. It runs one manager lifetime.
+# overview after the profiles load and then follows the event stream from
+# its cursor. O opens the Manager overview view from the workflow browser,
+# and the view must show the empty overview while the header shows the
+# delivery state live. The harness then creates a request through HTTP with
+# its own credential. Within 3 seconds and without a key press, the view must
+# list the request with its phase and blocking reasons, and the delivery
+# state must still read live. The harness then runs the request through
+# HTTP with the mixed fixture: it approves the request, and the view must
+# show the run with runtime status Running and its pending question without
+# a key press. It answers the question and retries the recovery. The
+# overview lists only live requests and active runs, so within 3 seconds
+# after the harness observes the terminal status Succeeded, and without a
+# key press, the view must no longer list the run. The harness then creates
+# a second request, which must appear without a key press. It then stops the
+# manager, and after g the view must keep the second request and mark the
+# overview stale with the refusal code. Each step prints its own PASS line.
+# It runs one manager lifetime.
 OVERVIEW = "tui-overview"
 TUI_MODES = {OVERVIEW: (["profile_1"], ["observe", "submit"])}
 tui_mode = sys.argv[5] if len(sys.argv) == 6 and sys.argv[5] in TUI_MODES else None
@@ -409,7 +419,8 @@ LEGACY_ENTRIES = 300
 if pages_mode:
     LEGACY_ROOT.mkdir(mode=0o700)
     configuration["localRetentionRoots"] = [str(LEGACY_ROOT)]
-if mixed:
+# The tui-overview mode also runs one request through the mixed fixture.
+if mixed or tui_mode == OVERVIEW:
     adapters = work / "adapters"
     adapters.mkdir(mode=0o700)
     launcher = adapters / "mixed-adapter"
@@ -541,7 +552,7 @@ class TuiModeFixture:
         configuration["profiles"] = [profile for profile in configuration["profiles"] if profile["id"] in profiles]
         assert [profile["id"] for profile in configuration["profiles"]] == profiles, ("unknown TUI mode profile", profiles)
         config.write_text(json.dumps(configuration))
-        for name, granted in (("tui", scopes), ("harness", ["observe", "submit"])):
+        for name, granted in (("tui", scopes), ("harness", ["observe", "submit", "control"])):
             administration({"version": 1, "operation": "issue-credential", "label": "TUI mode " + name,
                             "scopes": granted, "profileIds": profiles,
                             "expiresAt": "2999-01-01T00:00:00Z", "outputFile": str(work / ("credential-" + name))})
@@ -3726,6 +3737,24 @@ def overview_checks():
     def save(session, name):
         (work / ("tui-overview-" + name + ".screen.txt")).write_text(session.screen.text())
 
+    def create_draft():
+        """Create one draft request of the mixed workflow through HTTP with
+        the credential of the harness."""
+        key = capabilities["authorityEpoch"] + "." + secrets.token_urlsafe(16)
+        body = {"workflowId": workflow["id"], "descriptorRevision": workflow["revision"],
+                "profileId": workflow["profileId"], "profileRevision": workflow["profileRevision"]}
+        status, created, raw = request("/v1/requests", harness | {"Content-Type": "application/json", "Idempotency-Key": key},
+                                       method="POST", payload=json.dumps(body, separators=(",", ":")).encode())
+        assert status == 201, ("request creation", status, created.get("code"))
+        validate("Request", created, raw)
+        assert created["phase"] == "draft" and created["admission"]["reasons"], (
+            "the created request has no blocking reason", created["admission"])
+        return created
+
+    def live_header(session):
+        assert any("Manager overview" in row and "delivery live" in row for row in session.screen.lines()[:3]), (
+            "the delivery state is not live", session.screen.lines()[:3])
+
     def details(screen):
         """The details column joined without separators, so that a long
         identifier that wraps across rows stays one string."""
@@ -3752,41 +3781,66 @@ def overview_checks():
                 session.send(b"O")
                 screen = session.wait_screen("Manager overview")
                 screen = session.wait_screen("Overview: current; requests: 0, preparations: 0, runs: 0, decisions: 0")
-                save(session, "empty")
                 assert "No rows are visible." in screen, "the empty overview lists a row"
-                print("PASS tui-overview 1: O opens the Manager overview, which shows the empty overview that the TUI read after the profiles loaded", flush=True)
-                # 2. A request that the harness creates appears after g.
-                key = capabilities["authorityEpoch"] + "." + secrets.token_urlsafe(16)
-                body = {"workflowId": workflow["id"], "descriptorRevision": workflow["revision"],
-                        "profileId": workflow["profileId"], "profileRevision": workflow["profileRevision"]}
-                status, created, raw = request("/v1/requests", harness | {"Content-Type": "application/json", "Idempotency-Key": key},
-                                               method="POST", payload=json.dumps(body, separators=(",", ":")).encode())
-                assert status == 201, ("request creation", status, created.get("code"))
-                validate("Request", created, raw)
+                session.wait_screen("delivery live", timeout=20)
+                assert any("Manager overview" in row and "delivery live" in row for row in session.screen.lines()[:3]), (
+                    "the header lacks the live delivery state", session.screen.lines()[:3])
+                save(session, "empty")
+                print("PASS tui-overview 1: O opens the Manager overview, which shows the empty overview that the TUI read after the profiles loaded,",
+                      "and the header shows delivery live", flush=True)
+                # 2. A request that the harness creates appears without a key press.
+                created = create_draft()
                 reasons = created["admission"]["reasons"]
-                assert created["phase"] == "draft" and reasons, ("the created request has no blocking reason", created["admission"])
-                session.settle()
-                assert created["id"] not in session.screen.text(), "the overview changed before g"
-                session.send(b"g")
-                screen = session.wait_screen("Overview: current; requests: 1, preparations: 0, runs: 0, decisions: 0")
+                created_at = time.monotonic()
+                screen = session.wait_screen("Overview: current; requests: 1, preparations: 0, runs: 0, decisions: 0", timeout=3)
+                elapsed = time.monotonic() - created_at
                 save(session, "created")
+                live_header(session)
                 for line in ("> request draft", "Phase: draft", "Admission: " + created["admission"]["state"],
                              "Blocking reasons: " + ", ".join(reasons)):
                     assert line in screen, ("the overview lacks a line of the created request", line)
                 for value in ("Request:" + created["id"], "Workflow:" + workflow["id"]):
                     assert value in details(screen), ("the overview details lack the created request", value)
-                print("PASS tui-overview 2: after g the overview lists request", created["id"], "with phase draft and blocking reasons",
-                      ", ".join(reasons), flush=True)
-                # 3. A refused read keeps the overview and marks it stale.
+                print("PASS tui-overview 2: without a key press the overview lists request", created["id"], "with phase draft and blocking reasons",
+                      ", ".join(reasons), f"after {elapsed:.2f} seconds, and the delivery state reads live", flush=True)
+                # 3. Runtime status changes of a run reach the overview
+                # without a key press. The overview lists live requests and
+                # active runs, so the terminal run and its released request
+                # leave it.
+                client = mixed_client(capabilities, harness)
+                _, run = approve_mixed(created, workflow, client)
+                drive_mixed(run, client, stop_at_question=True, overview=False)
+                screen = session.wait_screen("decision question", timeout=3)
+                assert "run Running" in screen, "the overview lacks the running run"
+                save(session, "running")
+                _, answered, recovered = drive_mixed(run, client, overview=False)
+                assert answered and recovered, ("mixed workflow decisions", answered, recovered)
+                finished_at = time.monotonic()
+                screen = session.wait_screen("Overview: current; requests: 0, preparations: 0, runs: 0, decisions: 0", timeout=3)
+                elapsed = time.monotonic() - finished_at
+                save(session, "succeeded")
+                assert "No rows are visible." in screen, "the overview still lists the terminal run"
+                live_header(session)
+                print("PASS tui-overview 3: without a key press the overview shows run", run, "Running with its question, and it drops the run",
+                      f"{elapsed:.2f} seconds after the harness observed the terminal status Succeeded", flush=True)
+                # 4. A second request appears without a key press.
+                second = create_draft()
+                second_reasons = second["admission"]["reasons"]
+                screen = session.wait_screen("Overview: current; requests: 1, preparations: 0, runs: 0, decisions: 0", timeout=3)
+                save(session, "second")
+                assert "Request:" + second["id"] in details(screen), "the overview details lack the second request"
+                live_header(session)
+                print("PASS tui-overview 4: without a key press the overview lists the second request", second["id"], flush=True)
+                # 5. A refused read keeps the overview and marks it stale.
                 process.terminate()
                 process.wait(timeout=25)
                 session.send(b"g")
                 screen = session.wait_screen("Overview: stale (TransportUnavailable); the last complete overview is retained")
                 save(session, "stale")
-                for line in ("> request draft", "Phase: draft", "Blocking reasons: " + ", ".join(reasons)):
+                for line in ("> request draft", "Phase: draft", "Blocking reasons: " + ", ".join(second_reasons)):
                     assert line in screen, ("the stale overview lost a line of the request", line)
-                assert "Request:" + created["id"] in details(screen), "the stale overview lost the request"
-                print("PASS tui-overview 3: with the manager stopped, g keeps the overview and marks it stale with TransportUnavailable", flush=True)
+                assert "Request:" + second["id"] in details(screen), "the stale overview lost the request"
+                print("PASS tui-overview 5: with the manager stopped, g keeps the overview and marks it stale with TransportUnavailable", flush=True)
                 session.send(b"\x1b")
                 session.wait_screen("Manager workflows")
                 session.send(b"q")

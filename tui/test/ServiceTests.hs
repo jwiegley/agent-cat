@@ -168,6 +168,7 @@ serviceTests render = do
   endpointTests render profile
   switchTests render row profile
   overviewTests render row request0
+  liveDeliveryTests render profile
   where
     profileValue = object ["version" .= (1 :: Int), "id" .= ("profile_main" :: T.Text),
       "revision" .= ("profile_rev_4" :: T.Text), "workspaceLabel" .= ("Café 雪 λ" :: T.Text),
@@ -372,7 +373,7 @@ switchTests render row profile = do
   checks
     [ ("the first profile is active with its identity at generation zero and the others have no session",
         L.activeIdentity start == Just first && states start == [L.EndpointActive, L.EndpointIdle, L.EndpointIdle]
-          && generation start == C.FetchGeneration 0),
+          && generation start == L.SessionGeneration 0),
       ("selecting the active endpoint starts nothing", activeRefusal == L.SwitchRefused "endpoint 1 is already active."),
       ("selecting another endpoint connects its profile and keeps the active session",
         switchStart == L.SwitchStart "/p/two.json" && L.endpointsActive connecting == 0
@@ -388,7 +389,8 @@ switchTests render row profile = do
         faultStep == L.SwitchFailed "internal frontend fault during the connection"),
       ("a successful connection makes the new identity active and advances the generation",
         connectedStep == L.SwitchConnected "second session" && L.endpointsActive switched == 1 && L.activeIdentity switched == Just second
-          && generation switched == C.FetchGeneration 1 && states switched == [L.EndpointIdle, L.EndpointActive, L.EndpointIdle]),
+          && generation switched == L.SessionGeneration 1
+          && C.refreshGeneration (L.endpointsRefresh switched) == C.FetchGeneration 1 && states switched == [L.EndpointIdle, L.EndpointActive, L.EndpointIdle]),
       ("a late result of the earlier session is not admitted, so it never reaches the new session",
         isNothing (L.admitStamped switched late) && L.admitStamped switched current == Just 1),
       ("the stale read ticket of the earlier session is stale for the lane of the new session",
@@ -407,7 +409,7 @@ switchTests render row profile = do
           && null (L.unresolvedCommands (L.Lane Nothing (L.MutationAwaiting create "pending" "/v1/commands/c") False False :: L.Lane T.Text T.Text))),
       ("selecting the earlier endpoint again opens a new session at a new generation and keeps its unresolved command listed",
         backStart == L.SwitchStart "/p/one.json" && backStep == L.SwitchConnected "first again" && L.endpointsActive returned == 0
-          && L.activeIdentity returned == Just first && generation returned == C.FetchGeneration 2
+          && L.activeIdentity returned == Just first && generation returned == L.SessionGeneration 2
           && map L.slotUnresolved (L.endpointsSlots returned) == [unresolved, [], []]
           && isNothing (L.admitStamped returned current)),
       ("the Endpoints view lists each profile with its state, path and identity, and marks the selection",
@@ -1974,3 +1976,143 @@ approvalTests render profile row request preparation expiry = do
   check ("the longest notice does not clip the review at the smallest admissible height " <> show smallest)
     (all (`T.isInfixOf` tight) (concatMap (wrapDisplayLines 80) (serviceReviewRows preparation tag))
       && noticeShown (100,smallest) tight (A.KeyNotice maxBound longest))
+
+-- | Live delivery: the bounded set of invalidated resources, the routing of
+-- invalidations to the overview and the composite read, the coordination of
+-- their fetches through the read lane, the safety read and the delivery state
+-- in the identity row.
+liveDeliveryTests :: ((Int,Int) -> Presentation -> T.Text) -> S.Profile -> IO ()
+liveDeliveryTests render profile = do
+  now <- maybe (die "time") pure (iso8601ParseM "2026-10-01T12:00:00Z" :: Maybe UTCTime)
+  let noted = foldr L.noteInvalidation L.noInvalidations
+      composite = S.compositeResources (S.Selection "req_1" (Just "run_1")) Nothing (Just "/v1/commands/cmd_1")
+      routed resources = L.invalidatedFetches composite (noted resources)
+      idleLane = L.sessionLane :: L.Lane T.Text T.Text
+      reading ticket = L.Lane (Just (L.ReadTicket ticket L.PageSetRead)) L.MutationIdle False False :: L.Lane T.Text T.Text
+      g0 = C.FetchGeneration 0
+      -- One overview invalidation, its fetch taken and started with ticket 5.
+      (r1, f1) = L.invalidateFetches [L.OverviewFetch] C.newRefresh L.noFetches
+      taken1 = L.takeFetch (const True) idleLane f1
+      f2 = maybe f1 (\(fetch, rest) -> L.fetchStarted 5 fetch rest) taken1
+      -- Three invalidations during the fetch.
+      (r3, f3) = foldl (\(refresh, fetches) key -> L.invalidateFetches [key] refresh fetches) (r1, f2)
+        [L.OverviewFetch, L.OverviewFetch, L.OverviewFetch]
+      completed5 = L.fetchCompleted 5 r3 f3
+      -- The one later fetch, started with ticket 6 and completed.
+      (r5, f5) = maybe (r3, f3) (\(_, refresh, fetches) -> (refresh, fetches)) completed5
+      f6 = maybe f5 (\(fetch, rest) -> L.fetchStarted 6 fetch rest) (L.takeFetch (const True) idleLane f5)
+      completed6 = L.fetchCompleted 6 r5 f6
+      -- Invalidations while a fetch waits for the read lane add nothing.
+      (rw, fw) = foldl (\(refresh, fetches) key -> L.invalidateFetches [key] refresh fetches) (C.newRefresh, L.noFetches)
+        [L.RequestFetch, L.RequestFetch, L.OverviewFetch, L.RequestFetch]
+      fwStarted = maybe fw (\(fetch, rest) -> L.fetchStarted 9 fetch rest) (L.takeFetch (const True) idleLane fw)
+      completedWaiting = L.fetchCompleted 9 rw fwStarted
+      -- A fetch of an earlier generation does not install.
+      completedEarlier = L.fetchCompleted 5 (C.advanceGeneration r1) f2
+      -- A mutation key ends and cancels the read of the fetch.
+      abandoned = L.fetchAbandoned idleLane f2
+      skipped = L.fetchSkipped (L.RequestFetch, g0) (fst (L.invalidateFetches [L.RequestFetch] C.newRefresh L.noFetches)) L.noFetches
+      -- A 410 resnapshot while the overview fetch of ticket 5 is in flight
+      -- and a composite fetch waits.
+      (rq, fq) = L.invalidateFetches [L.RequestFetch] r1 f2
+      (rs, fs) = L.resnapshotFetches rq fq
+      g1 = C.FetchGeneration 1
+      completedBefore = L.fetchCompleted 5 rs fs
+      afterBefore = maybe (rs, fs) (\(_, refresh, fetches) -> (refresh, fetches)) completedBefore
+      fsStarted = maybe (snd afterBefore) (\(fetch, rest) -> L.fetchStarted 6 fetch rest) (L.takeFetch (const True) idleLane (snd afterBefore))
+      completedAfter = L.fetchCompleted 6 (fst afterBefore) fsStarted
+      -- Refused overview reads and their retries.
+      retry1 = L.overviewRefused now Nothing
+      retry2 = L.overviewRefused (addUTCTime 1 now) (Just (L.overviewRetryStarted retry1))
+      retryLimit = iterate (L.overviewRefused now . Just) retry1 !! 8
+      overflowing = foldr L.noteInvalidation L.noInvalidations ["/v1/requests/req_" <> T.pack (show n) | n <- [1 .. L.invalidatedBound + 1]]
+      live = S.Endpoint "127.0.0.1" 54321 "stream_A" "epoch_A" ["observe", "submit"]
+      shell size delivery = render size ((emptyPresentation (initialServiceModel [profile])) {presentationService = True, presentationNoColor = True,
+        presentationServiceEndpoint = Just live, presentationServiceDelivery = delivery})
+  checks
+    [ ("the composite read reads its request, its run and the receipt of the retained command",
+        composite == ["/v1/requests/req_1", "/v1/runs/run_1", "/v1/commands/cmd_1"]),
+      ("a request invalidation of the selected request invalidates the overview and the composite read",
+        routed ["/v1/requests/req_1"] == [L.OverviewFetch, L.RequestFetch]),
+      ("a request invalidation of another request invalidates only the overview",
+        routed ["/v1/requests/req_2"] == [L.OverviewFetch]),
+      ("a snapshot or control invalidation of the selected run invalidates the overview and the composite read",
+        routed ["/v1/runs/run_1/snapshot"] == [L.OverviewFetch, L.RequestFetch]
+          && routed ["/v1/runs/run_1/control"] == [L.OverviewFetch, L.RequestFetch]),
+      ("a snapshot, output or export invalidation of another run invalidates the overview, which shows its runtime status",
+        all (\resource -> routed [resource] == [L.OverviewFetch])
+          ["/v1/runs/run_2/snapshot", "/v1/runs/run_2/outputs", "/v1/runs/run_2/exports", "/v1/runs/run_2"]),
+      ("a resource below a preparation, request or decision of another request invalidates the overview",
+        all (\resource -> routed [resource] == [L.OverviewFetch])
+          ["/v1/preparations/prep_2/draft", "/v1/requests/req_2/history", "/v1/decisions/dec_2/answer"]),
+      ("a collection resource without a member identifier is no overview member",
+        L.OverviewFetch `notElem` routed ["/v1/runs"] && L.OverviewFetch `notElem` routed ["/v1/runs/"]
+          && null (routed ["/v1/decisions"])),
+      ("a receipt invalidation of the retained command invalidates the composite read",
+        routed ["/v1/commands/cmd_1"] == [L.RequestFetch] && null (routed ["/v1/commands/cmd_2"])),
+      ("an artifact invalidation invalidates nothing that the overview or the composite read reads",
+        null (routed ["/v1/artifacts/art_1"])),
+      ("the invalidated set holds each resource once and sets its overflow mark beyond its bound",
+        L.invalidatedResources (noted ["/v1/requests/a", "/v1/requests/a"]) == Set.fromList ["/v1/requests/a"]
+          && L.invalidatedOverflow overflowing && Set.size (L.invalidatedResources overflowing) == L.invalidatedBound
+          && L.invalidatedFetches [] overflowing == [L.OverviewFetch, L.RequestFetch]),
+      ("an invalidation of an idle read starts one fetch, which waits for the read lane",
+        L.fetchesWaiting f1 == [(L.OverviewFetch, g0)] && C.refreshFlights r1 == Map.fromList [(L.OverviewFetch, C.Flight g0 False)]),
+      ("no fetch starts while another read holds the read ticket, and a read that may not start keeps waiting",
+        isNothing (L.takeFetch (const True) (reading 3) f1) && isNothing (L.takeFetch (const False) idleLane f1)),
+      ("invalidations that arrive during a fetch start nothing and mark the read dirty",
+        L.fetchesWaiting f3 == [] && L.fetchesReading f3 == Just (5, L.OverviewFetch, g0)
+          && C.refreshFlights r3 == Map.fromList [(L.OverviewFetch, C.Flight g0 True)]),
+      ("the completion of that fetch installs and leaves exactly one later fetch waiting",
+        fmap (\(install, _, fetches) -> (install, L.fetchesWaiting fetches, L.fetchesReading fetches)) completed5
+          == Just (True, [(L.OverviewFetch, g0)], Nothing)),
+      ("the completion of the later fetch installs and leaves the read idle with nothing waiting",
+        fmap (\(install, refresh, fetches) -> (install, L.fetchesWaiting fetches, Map.null (C.refreshFlights refresh))) completed6
+          == Just (True, [], True)),
+      ("invalidations while a fetch waits add nothing, so its completion leaves nothing waiting",
+        L.fetchesWaiting fw == [(L.RequestFetch, g0), (L.OverviewFetch, g0)]
+          && fmap (\(install, _, fetches) -> (install, L.fetchesWaiting fetches)) completedWaiting == Just (True, [(L.OverviewFetch, g0)])),
+      ("a fetch of an earlier generation completes without installing",
+        fmap (\(install, _, fetches) -> (install, L.fetchesReading fetches)) completedEarlier == Just (False, Nothing)),
+      ("a read that does not perform a fetch completes no fetch",
+        isNothing (L.fetchCompleted 4 r3 f3)),
+      ("a fetch whose read lost the read ticket without a completion waits again at the front",
+        L.fetchesWaiting abandoned == [(L.OverviewFetch, g0)] && isNothing (L.fetchesReading abandoned)
+          && L.fetchAbandoned (reading 5) f2 == f2),
+      ("a resnapshot advances the fetch generation and fetches both reads again after the fetch in flight",
+        C.refreshGeneration rs == g1 && L.fetchesWaiting fs == [(L.OverviewFetch, g1), (L.RequestFetch, g1)]
+          && L.fetchesReading fs == Just (5, L.OverviewFetch, g0) && isNothing (L.takeFetch (const True) idleLane fs)),
+      ("an overview fetch from before the resnapshot completes without installing its old cursor",
+        fmap (\(install, _, fetches) -> (install, L.fetchesReading fetches, L.fetchesWaiting fetches)) completedBefore
+          == Just (False, Nothing, [(L.OverviewFetch, g1), (L.RequestFetch, g1)])),
+      ("the overview fetch of the resnapshot installs and leaves the composite fetch waiting",
+        fmap (\(install, _, fetches) -> (install, L.fetchesWaiting fetches)) completedAfter == Just (True, [(L.RequestFetch, g1)])),
+      ("a refused overview read is read again after the backoff of the client, which doubles up to its limit",
+        L.retryDue retry1 == Just (addUTCTime 1 now)
+          && not (L.overviewRetryDue (Just retry1) now)
+          && L.overviewRetryDue (Just retry1) (addUTCTime 1 now)
+          && L.retryDue retry2 == Just (addUTCTime 3 now)
+          && L.retryDue retryLimit == Just (addUTCTime (fromIntegral C.reconnectBackoffMaxSeconds) now)),
+      ("an overview retry is not due while its read waits or runs, or without a refusal",
+        not (L.overviewRetryDue (Just (L.overviewRetryStarted retry1)) (addUTCTime 5 now))
+          && not (L.overviewRetryDue Nothing (addUTCTime 5 now))),
+      ("a fetch that reads nothing completes at once and leaves the read idle",
+        Map.null (C.refreshFlights (fst skipped)) && L.fetchesWaiting (snd skipped) == []),
+      ("while the stream is live the timer reads the selected request at most every five seconds",
+        not (L.safetyReadDue L.DeliveryLive (Just now) (addUTCTime 4 now)) && L.safetyReadDue L.DeliveryLive (Just now) (addUTCTime 5 now)
+          && L.safetyReadDue L.DeliveryLive Nothing now),
+      ("without a live stream the timer reads at every tick",
+        all (\delivery -> L.safetyReadDue delivery (Just now) (addUTCTime 1 now))
+          [L.DeliveryIdle, L.DeliveryConnecting, L.DeliveryReconnecting "TransportUnavailable", L.DeliveryResnapshot, L.DeliveryStopped "internal frontend fault"]),
+      ("the delivery state names each state of the stream",
+        map L.deliveryText [L.DeliveryIdle, L.DeliveryConnecting, L.DeliveryLive, L.DeliveryReconnecting "TransportUnavailable", L.DeliveryResnapshot]
+          == ["delivery not started", "delivery connecting", "delivery live", "delivery reconnecting (TransportUnavailable)", "delivery resnapshot"]),
+      ("the service shell shows the delivery state in the header row above the complete identity row",
+        (case T.lines (shell (140,36) L.DeliveryLive) of
+          _ : context : identityRow : _ -> "delivery live" `T.isInfixOf` context && endpointLine live `T.isInfixOf` identityRow
+          _ -> False)
+          && endpointLine live `T.isInfixOf` shell (140,36) L.DeliveryLive
+          && "delivery reconnecting (TransportUnavailable)" `T.isInfixOf` shell (140,36) (L.DeliveryReconnecting "TransportUnavailable")),
+      ("a small terminal without the identity row shows no delivery state",
+        not ("delivery" `T.isInfixOf` shell (40,12) L.DeliveryLive))
+    ]

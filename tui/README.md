@@ -146,13 +146,14 @@ connects it, and `Esc` returns to the screen below the view.
 `Agentic.Tui.Service.connectEndpoint`, and the active session continues to
 work while it runs. A failed connection keeps the active session and shows its
 fixed reason, the same text as the startup line without the `--tui --service:`
-prefix. A successful connection cancels the read, preparation and send workers
-of the earlier session, closes that session, and clears every observation,
+prefix. A successful connection cancels the read, preparation, send and event
+workers of the earlier session, closes that session, and clears every observation,
 selection, retained result and settled command. The new session then loads
-the manager profiles. The switch also advances the generation of the refresh
-coordinator of the session, and every worker result carries the generation of
-the session that started the worker, so a late result of an earlier session is
-never handled. A command whose outcome is unresolved at the switch, or whose
+the manager profiles. The switch advances the session generation, and every
+worker result carries the generation of the session that started the worker,
+so a late result of an earlier session is never handled. The switch also
+advances the generation of the refresh coordinator of the session, which
+fences the fetches of live delivery. A command whose outcome is unresolved at the switch, or whose
 send was in flight, stays listed under its own profile as `unresolved
 OPERATION URI`. No later session sends it, and its pending command is bound to
 the closed session, so the client refuses it with `WrongEndpoint`. Selecting an
@@ -180,6 +181,59 @@ last complete overview and marks it stale with the refusal code, for example
 `Overview: stale (TransportUnavailable)` after the manager stops. The view is
 not read on the one-second timer.
 
+After the first overview of a session is installed, the frontend starts the
+event worker of the session in its own worker slot (`ServiceEventsWork`). The
+worker follows `/v1/events` from the cursor of that overview with
+`Agentic.Manager.Client.streamEvents`. It records the resource of each
+invalidation in a set of at most 1024 resources (`Invalidated`) and records
+the delivery state. It then writes one `ServiceWakeup` event to the Brick
+channel unless a wakeup is pending, so a full channel never drops an
+invalidation. A resource beyond the bound sets the overflow mark of the set,
+which invalidates both reads. The handler of the wakeup takes the set and the
+delivery state, and `Agentic.Tui.ServiceLane.invalidatedFetches` routes the
+resources to the reads that read them. An invalidation of an overview member,
+`/v1/requests/{id}`, `/v1/preparations/{id}`, `/v1/runs/{id}` or
+`/v1/decisions/{id}`, or of a resource below a member, invalidates the
+overview. The manager reports a change of the runtime status of a run as
+`/v1/runs/{id}/snapshot`, and the overview shows that status, so such an
+invalidation reads the overview again. An invalidation of a resource
+that the composite read of the selected request reads
+(`Agentic.Tui.Service.compositeResources`), or of a resource below or above
+one of them, invalidates the composite read. The refresh coordinator of the
+session decides each fetch, so each read has at most one fetch in flight and
+invalidations during that fetch give exactly one later fetch. An invalidation
+of a read whose fetch waits for the read lane changes nothing. `Fetches` holds
+the waiting fetches and the fetch that holds the read ticket. A fetch runs
+through the single-flight read lane like any other read, under the rules of
+automatic refresh: no fetch starts during a preparation or a send, after an
+internal fault, or while a deferred key pauses refresh. A mutation key or an
+exact resend that ends the read of a fetch makes that fetch wait again. The
+overview is fetched while its view is shown. An invalidation of the overview
+while the view is hidden leaves its fetch waiting until the view opens. A fetch of the composite read
+without a selected request reads nothing. A result of an earlier generation
+does not install. The header row above the identity row shows the delivery
+state at its right end: `delivery connecting`, `delivery live`, `delivery
+reconnecting (CODE)`, `delivery resnapshot`, `delivery stopped (REASON)` or
+`delivery not started`. After the manager ends the stream or a failure, the
+worker reconnects with the identifier of the last complete event after the
+jittered backoff of the client, which doubles from one second up to 30
+seconds. Each further connection attempt shows `delivery connecting`. A
+connection that delivered a heartbeat or an invalidation resets the backoff.
+A 410 refusal ends the worker. The frontend then makes a resnapshot
+(`Agentic.Tui.ServiceLane.resnapshotFetches`): the refresh coordinator
+advances its generation, so a fetch in flight completes without installing,
+and an overview read from before the refusal installs no old cursor. Both
+reads are fetched again in the new generation, and the cursor of the new
+overview starts a new worker. The session generation does not change, so the
+other worker results of the session stay admitted. When an overview read of
+live delivery or of the resnapshot is refused, the timer reads the overview
+again after the backoff of the client, which doubles from one second up to 30
+seconds, until an overview installs. While the view is hidden, that read waits
+until the view opens, except for a resnapshot. A refused overview read of
+live delivery keeps the status line, and the overview line shows the refusal
+code. Closing the client ends the worker, and an internal
+fault of the worker stops the stream.
+
 A key whose operation needs a scope that the capabilities do not list starts
 nothing and shows the numbered key outcome `OPERATION did not start: this
 credential lacks SCOPE.` before any other admission is decided, so it never
@@ -196,8 +250,12 @@ internal-fault flag and the resend confirmation. Every read of the manager
 passes through that single-flight lane. One composite read covers the selected
 request, its review, the receipt of a retained command, and the run snapshot,
 run controls and pending decision, and a complete read is installed in one
-step. The frontend repeats the read on a one-second timer, and `g` requests it
-at once. A declared refusal keeps the last complete observation and marks it
+step. Without a live event stream, the frontend repeats the read on a
+one-second timer. While the stream is live, live delivery reads it again after
+each invalidation of a resource that it reads, and the timer read is a safety
+read at most every five seconds (`safetyReadDue`). A timer read that starts
+no read, because another read holds the read lane, does not count toward
+that interval. `g` requests it at once. A declared refusal keeps the last complete observation and marks it
 stale with the refusal code. Every mutation key has one visible outcome: a
 start, a refusal or a deferral. A refusal or a deferral is a numbered key
 outcome that remains until the next key or view change. A key never cancels a
@@ -232,7 +290,7 @@ digest. It retains up to 64 MiB of unchanged bytes and does not retrieve them
 again. A declared refusal, or a retrieval that finds no verified result, retains
 no bytes. The status line and the result lines show it as a failure that the
 next refresh retries. An automatic refresh retries after the next installed
-composite read, so each one-second refresh starts at most one retrieval, and
+composite read, so each automatic refresh starts at most one retrieval, and
 `g` retries at once. `Agentic.Tui.Save.saveExact` publishes those bytes at a
 new absolute path with mode 0600 and refuses an existing entry, a symbolic
 link, or an invalid path. It writes a private file in the destination
@@ -256,7 +314,7 @@ description](../doc/api/README.md#pages-and-live-delivery) describes.
 Service mode does not support cancellation, steering, redirect, failover or
 abandon, the structured answer editor, captured and other non-literal inputs,
 withdrawal or discarding of a request, more than one concurrent run, run history,
-lineage, export, event-driven refresh, reconnection after a manager restart or a
+lineage, export, reconnection of the session after a manager restart or a
 credential revocation, observation of earlier runs after a
 frontend restart, or acceptance at 40x12 and 80x24. The
 [manual](../doc/agent-cat.texi) entry for `--service` states the complete key

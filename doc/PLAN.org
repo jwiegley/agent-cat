@@ -10295,6 +10295,27 @@ Non-blocking findings of fess audit fess/pc-PC15-r1.md (2026-10-01) on subtask P
 
 Limitations recorded by the implementer: tui-overview creates only a draft request, so its manager has no runs or decisions; the run fields and decision rows are checked by the model test and fixed-size renders at (80,24) and (40,12) only. The overview is read at bootstrap and on g, not on the one-second timer or from the event stream. The new tests were not shown failing first. The refusal case covers TransportUnavailable only, not a 503 manager problem.
 
+* TODO [#D] Resolve the non-blocking fess findings of subtask PC16    :review:
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pc16-events-fess-j8za
+:LABELS:   ["review","workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-01 Thu 01:20]
+:MODIFIED: [2026-10-01 Thu 01:20]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess audit fess/pc-PC16-r2.md (2026-10-01) on subtask PC16 (WM-034 service event worker with coalesced wakeup and live install).
+
+1. (low) doc/agent-cat.texi near line 3359 and tui/README.md near line 181 still say without qualification that the overview view is not read on the one-second timer. The overview retry is queued from the Tick handler (App.hs Tick branch, overviewRetryDue). Qualify the sentence: the timer reads the overview only for the retry of a refused live or resnapshot overview read.
+2. (low) tui/src/Agentic/Tui/App.hs handleServiceResult and startServiceEvents: an explicit g overview read (ExplicitOverview) is not a coordinated fetch, so the fetch generation does not fence it. If it is in flight across a 410, it installs the pre-410 cursor and starts a worker from it. That worker gets a second 410 and the state converges, at the cost of one wasted cycle. Route explicit overview reads through the coordinator, or have startServiceEvents ignore a cursor from a read that started before the latest resnapshot.
+3. (low) PC/PC16/impl-r2/attempt1/tui-overview.log: during a normal run the manager refused a live overview read with 503 storage-unavailable. The TUI now recovers through the retry, but the cause is not investigated. Investigate store admission under concurrent overview reads during a run.
+4. (low, known limitation) A refused explicit overview read gets no automatic retry unless delivery is in the resnapshot state, and a retried live overview read waits while the view is hidden. Both agree with the rule that the overview is read while its view is shown. Record as a known limitation; no change needed now.
+
 * TODO [#C] Resolve PC5 fess findings in legacy history windows    :review:
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -18216,7 +18237,7 @@ public or production deployment.
 :LABELS:   ["p6","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-01 Thu 00:38]
+:MODIFIED: [2026-10-01 Thu 01:20]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-029
 :SOURCE_REPO: agent-cat
@@ -18405,6 +18426,13 @@ coordination or SQL into the TUI.
     "author": "johnw",
     "text": "PC15 (2026-10-01): the TUI consumes Client.loadOverview (PC11 Overview bootstrap) through the single-flight read lane and the Manager overview view. Checks and evidence as recorded on acat-wm-034-3vqz. WM-029 stays open for closeout.",
     "created_at": "2026-10-01T07:38:20Z"
+  },
+  {
+    "id": 484,
+    "issue_id": "acat-wm-029-nlmg",
+    "author": "johnw",
+    "text": "PC16 consumes the WM-029 shared client live delivery (Client.streamEvents, the PC12 refresh coordinator, advanceGeneration on 410 resnapshot, and the reconnection backoff) in the service TUI event worker. Evidence scope: PC/PC16/impl-r2 checks all exit 0 (build, tui-model-test, tui-overview N8, journey N8, doc check). Package stays open.",
+    "created_at": "2026-10-01T08:20:51Z"
   }
 ]
 #+end_src
@@ -18788,7 +18816,7 @@ to an unapproved local launch.
 :LABELS:   ["p7","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-01 Thu 00:38]
+:MODIFIED: [2026-10-01 Thu 01:20]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-034
 :SOURCE_REPO: agent-cat
@@ -18909,6 +18937,13 @@ Local-mode behavior remains intact without a duplicated service runtime model.
     "author": "johnw",
     "text": "PC15 (2026-10-01): Manager overview view and the shared TUI mode fixture. After the profiles load, the service TUI reads the authorized Overview with Client.loadOverview through the single-flight read lane (ServiceOverviewReady in the ServiceReadWork slot) and decodes each member with the Service.hs decoders (decodeOverviewItem), with no runtime reducer. O opens the Manager overview view from the workflow browser (Tab, h, s, l, m, f, c, i, digits, Enter and arrows unchanged; Esc returns to Manager workflows). It lists requests (workflow, phase, admission, position, blocking reasons), preparations, runs (runtime status, supervision and verification as distinct fields) and pending decisions (run, kind, state). g reads it again; a refused read keeps the last overview marked stale with the refusal code. Cursor in AppState, reset on endpoint switch. The profile list appears only after the overview read finishes. New shared service_http.py helper for TUI modes (separate TUI and harness credentials through local administration, TuiSession at 80x24) and mode tui-overview. Checks passed: Werror build with -ftui-tests of agentic-run, routing-fixed-point-probe, tui-model-test; tui-model-test (661 checks, including the Phase A key-sequence test); tui-overview at N=8 (empty overview, HTTP-created request after g with phase and blocking reasons, refusal keeps stale overview); the Phase A journey at N=8; make -C doc check. Evidence: resume-20260923/PC/PC15; fess/pc-PC15-r1.md (non-blocking), findings filed as acat-pc15-overview-fess-bu2e. Package stays open.",
     "created_at": "2026-10-01T07:38:20Z"
+  },
+  {
+    "id": 483,
+    "issue_id": "acat-wm-034-3vqz",
+    "author": "johnw",
+    "text": "PC16 (service event worker with coalesced wakeup and live install): the service TUI starts ServiceEventsWork after the first overview and runs Client.streamEvents from the overview cursor. Invalidations reach Brick through a TVar key set and one non-blocking wakeup, and the PC12 coordinator in AppState refetches the overview and the selected request composite with one fetch in flight and one dirty fetch per resource, under fetch-generation and session-generation fencing. The shell shows delivery 'live', and the timer safety read of the selected request runs at most every 5 seconds while live. Evidence scope (private evidence dir PC/PC16/impl-r2): Werror build, tui-model-test, tui-overview at N8 (HTTP-created request appears without a key press within 3 s, approve and answer over HTTP reach the TUI live), Phase A journey N8, make -C doc check, all exit 0. Fess r2 non-blocking; findings in acat-pc16-events-fess-j8za. Package stays open.",
+    "created_at": "2026-10-01T08:20:50Z"
   }
 ]
 #+end_src

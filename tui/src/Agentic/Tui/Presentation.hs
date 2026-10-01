@@ -56,7 +56,7 @@ import Agentic.Tui.RunModel
 import Agentic.Tui.Save (SaveRefusal (..), Saved (..))
 import Agentic.Tui.Types
 import qualified Agentic.Tui.Service as Service
-import Agentic.Tui.ServiceLane (EndpointSlot (..), EndpointState (..), Endpoints (..), KeyOutcome, internalFaultStatus, keyOutcomeLine)
+import Agentic.Tui.ServiceLane (Delivery (..), EndpointSlot (..), EndpointState (..), Endpoints (..), KeyOutcome, deliveryText, internalFaultStatus, keyOutcomeLine)
 import qualified Agentic.Manager.Client as Manager
 import Brick
 import Brick.Widgets.Border (borderWithLabel, hBorder, hBorderWithLabel, vBorder)
@@ -126,6 +126,9 @@ data Presentation = Presentation
     -- | The endpoint identity of the service session. The service shell shows
     -- it in its own header row when the terminal has room for that row.
     presentationServiceEndpoint :: !(Maybe Service.Endpoint),
+    -- | The delivery state of the event stream of the service session, which
+    -- the header row of the screen context shows above the identity row.
+    presentationServiceDelivery :: !Delivery,
     -- | The client profiles of the service frontend, their connection
     -- states and identities, which the Endpoints view lists.
     presentationServiceEndpoints :: !(Maybe Endpoints),
@@ -210,6 +213,7 @@ emptyPresentation model =
       presentationNoColor = False,
       presentationService = False,
       presentationServiceEndpoint = Nothing,
+      presentationServiceDelivery = DeliveryIdle,
       presentationServiceEndpoints = Nothing,
       presentationServiceMutation = Nothing,
       presentationServiceResendConfirm = False,
@@ -268,14 +272,18 @@ layout presentation width height
     footerRows = shellFooterRows height
     mainRows = shellMainRows identity width height
     identityRows = [bar width (muted (displayText (oneLine width (" " <> endpointLine endpoint)))) | Just endpoint <- [presentationServiceEndpoint presentation]]
+    -- The header row of the screen context. Above the identity row it also
+    -- shows the delivery state of the event stream at its right end.
+    contextRow = bar width (hBox ([padLeft (Pad 1) (headerContext presentation)]
+      <> [padLeft Max (muted (displayText (deliveryText (presentationServiceDelivery presentation) <> " "))) | identity]))
     headerWidgets = case headerRows of
       0 -> []
       1 -> [bar width (hBox [withAttr (attrName "title") (displayText "agent-cat"), displayText " / ", headerContext presentation])]
       _ | LiveScreen _ <- modelScreen (presentationModel presentation) ->
-            [ bar width (padLeft (Pad 1) (headerContext presentation)),
+            [ contextRow,
               bar width (muted (displayText (oneLine width (liveSubtitle presentation))))
             ] <> identityRows
-        | otherwise -> [bar width (withAttr (attrName "title") (displayText (" agent-cat  /  " <> screenTitle (modelScreen (presentationModel presentation))))), bar width (padLeft (Pad 1) (headerContext presentation))]
+        | otherwise -> [bar width (withAttr (attrName "title") (displayText (" agent-cat  /  " <> screenTitle (modelScreen (presentationModel presentation))))), contextRow]
             <> identityRows
     mainWidget = hLimit width (vLimit mainRows (padBottom Max (layerView presentation width height mainRows)))
     statusWidgets = [bar width (statusView presentation width) | statusRows == 1]

@@ -3358,6 +3358,35 @@ refusal keeps the last complete overview and marks it stale with the refusal
 code, for example @samp{Overview: stale (TransportUnavailable)} after the
 manager stops.  The view is not read on the one-second timer.
 
+After the first overview of a session is installed, the frontend follows the
+manager event stream from the cursor of that overview.  Each invalidation
+names a resource.  An invalidation of an overview member, which is a request,
+preparation, run, or decision, or of a resource below a member, causes the
+overview to be read again while its view is shown.  The manager reports a
+change of the runtime status of a run as the snapshot resource of that run,
+so the overview shows the new runtime status.  When the view is hidden, that read waits and runs when the view
+opens.  An invalidation of a resource that the composite read of the selected
+request reads, such as the request, its run snapshot, or the receipt of a
+retained command, causes that read to be read again.  Each of the two reads
+has at most one fetch in progress, and invalidations that arrive during it
+cause exactly one later fetch.  These reads use the single-flight read lane
+under the rules of automatic refresh, so no read starts during a preparation
+or a send, after an internal fault, or while a deferred key pauses refresh.
+The header row above the identity row shows the delivery state:
+@samp{delivery connecting}, @samp{delivery live},
+@samp{delivery reconnecting (@var{code})}, @samp{delivery resnapshot},
+@samp{delivery stopped (@var{reason})}, or @samp{delivery not started}.  When
+the manager ends the stream or the connection fails, the frontend reconnects
+with the identifier of the last complete event after a delay of one second
+that doubles up to thirty seconds.  When the manager refuses the cursor with
+status 410, the frontend discards the results of the reads in progress, reads
+the overview and the selected request again, and follows the stream from the
+cursor of the new overview.  When the manager refuses that overview read, or
+an overview read that follows an invalidation, the frontend reads the overview
+again after a delay of one second that doubles up to thirty seconds, until an
+overview is installed.  A switch to another
+endpoint stops the stream of the earlier session.
+
 A key whose operation needs a credential scope that the capabilities do not
 list starts nothing.  It shows the numbered key outcome
 @samp{@var{operation} did not start: this credential lacks @var{scope}.} before
@@ -3391,8 +3420,9 @@ All reads of the manager pass through one single-flight observation lane.  No
 read starts while another read is in flight.  The frontend reads the selected
 request, its review, the receipt of a retained command, and the run snapshot,
 run controls, and pending decision in one composite read, and it installs a
-complete read in one step.  It repeats that read on a one-second timer, and
-@kbd{g} requests it at once.  When the manager refuses a read with a declared
+complete read in one step.  Without a live event stream, it repeats that read
+on a one-second timer.  While the stream is live, the timer read occurs at most
+every five seconds as a safety read.  @kbd{g} requests the read at once.  When the manager refuses a read with a declared
 failure, the frontend keeps the last complete observation, marks it stale with
 the refusal code, and continues to display it.  If no complete observation
 exists, the status line states that none is installed.  Observations are
@@ -3525,9 +3555,8 @@ structured answer editor, so a question with the @code{structured} code or with
 a code that is not a name shows its prompt and accepts no answer.  Captured inputs and
 other non-literal inputs cannot be supplied.  A request cannot be withdrawn or
 discarded.  The frontend follows one run at a time, and it offers no run
-history, lineage, or export.  It re-reads on a timer and does not consume the
-manager event stream.  It does not reconnect after a manager restart or a
-credential revocation.  After a
+history, lineage, or export.  Except for its event stream, it does not
+reconnect after a manager restart or a credential revocation.  After a
 restart of the frontend, it cannot observe runs that an earlier session
 started.  It has no accepted layout at 40
 columns by 12 rows or at 80 columns by 24 rows.  Service mode is not an

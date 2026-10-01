@@ -18,7 +18,7 @@ module Agentic.Tui.Service
     DecisionHead (..), decisionHead, answerMutation, answerBody,
     retryMutation, retryBody, retryEffect,
     runTerminal, resultWanted, resultReferenced, decodeOutputs, VerifiedResult (..), retrieveResult, resultLines,
-    observedBinding, RunRead (..), RequestRead (..), Selection (..), ReadVerdict (..), readVerdict, runReadValid,
+    observedBinding, RunRead (..), RequestRead (..), Selection (..), compositeResources, ReadVerdict (..), readVerdict, runReadValid,
     readRequestId, readRequestRun, runtimeStatus, observationLines,
     approvalStatus, receiptSettlement
   ) where
@@ -1319,6 +1319,20 @@ data RequestRead observed = RequestRead
 -- A read of the run components takes place only when the run is known.
 data Selection = Selection { selectedRequest :: !Text, selectedRun :: !(Maybe Text) }
   deriving (Eq, Show)
+
+-- | The resources that the composite read of the selection reads, given
+-- the installed composite read and the receipt URI of a retained command:
+-- the request, the preparation that the installed request names, the run of
+-- the selection, the decision at the head of the installed run controls and
+-- the receipt. An invalidation of one of these resources, or of a resource
+-- below or above one of them, invalidates the composite read.
+compositeResources :: Selection -> Maybe (RequestRead observed) -> Maybe Text -> [Text]
+compositeResources (Selection request run) installed receipt =
+  ["/v1/requests/" <> request]
+    <> ["/v1/preparations/" <> preparation | Just preparation <- [installed >>= C.draftPreparation . snd . readRequest]]
+    <> ["/v1/runs/" <> ident | Just ident <- [run]]
+    <> ["/v1/decisions/" <> decision | Just decision <- [installed >>= readRun >>= controlHead . snd . runReadControl]]
+    <> [uri | Just uri <- [receipt]]
 
 -- | How a delivered composite read relates to the current selection.
 data ReadVerdict
