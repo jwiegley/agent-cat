@@ -10270,6 +10270,31 @@ Non-blocking findings of fess audit fess/pc-PC14-r1.md (2026-10-01) on subtask P
 
 Limitations recorded by the implementer: the tui-endpoints harness uses one manager with two credentials, and the identity change is checked through the credential scopes and the stream identifier; on a narrow terminal the Endpoints identity line wraps without its indentation; the journey ran only at N=8, and bash tui/ci/tui.sh and ALLBUILD did not run.
 
+* TODO [#D] Resolve the non-blocking fess findings of subtask PC15    :review:
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pc15-overview-fess-bu2e
+:LABELS:   ["review","workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-01 Thu 00:38]
+:MODIFIED: [2026-10-01 Thu 00:38]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess audit fess/pc-PC15-r1.md (2026-10-01) on subtask PC15 (WM-034 Manager overview view and the shared TUI mode fixture).
+
+1. (medium) tui/test/ServiceTests.hs lines 284 to 313: the Phase A key-sequence test calls only the pure serviceBrowserKey, and press keeps the model unchanged when that function returns Nothing. The keys s, l, m, f, c, i, 1 and Tab therefore do nothing in the test, and the modelTab and modelWorkflowIndex conjuncts cannot fail. The real handler handleServiceEventCore (App.hs lines 965 to 1027) is not run. The Phase A journey covers the real key path. Drive the sequence through an extracted pure browser key dispatch, or rename the test so that it states its real scope.
+2. (medium) tui/src/Agentic/Tui/App.hs lines 808 to 816: the profile list appears only after the overview read finishes. A slow /v1/snapshot read delays the profile list at startup, after r and after each endpoint switch, and an internal fault in the overview read replaces the profile list with the fault screen. Show the profiles as soon as they load and guard the Enter race another way (for example, report Enter as deferred while the read runs), or get explicit operator acceptance of the gating.
+3. (low) App.hs line 820: a refused overview read reuses refuseRequestRead, so the status line reads "observation refused: CODE; no complete observation is installed", the text for a refused request read. During bootstrap it shows on the profile screen. Give the overview refusal its own status text, for example from Service.overviewStatus.
+4. (low) tui/test/ServiceTests.hs lines 276 to 281: the "Endpoint switching" doc comment now sits above overviewTests, and switchTests (line 344) has no comment. Move the comment above switchTests.
+5. (low) App.hs line 964: g on the overview while a command is sending hits the serviceSending guard and shows nothing, while g during another read shows a status line (App.hs line 1012). Show the same status for both busy cases, or document the difference.
+6. (low) doc/agent-cat.texi line 3530: the PC15 diff also deletes the stale clause "and it cannot switch to another endpoint" (PC14 cleanup). The deletion is correct and is recorded in the PC15 commit message.
+
+Limitations recorded by the implementer: tui-overview creates only a draft request, so its manager has no runs or decisions; the run fields and decision rows are checked by the model test and fixed-size renders at (80,24) and (40,12) only. The overview is read at bootstrap and on g, not on the one-second timer or from the event stream. The new tests were not shown failing first. The refusal case covers TransportUnavailable only, not a 503 manager problem.
+
 * TODO [#C] Resolve PC5 fess findings in legacy history windows    :review:
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -18191,7 +18216,7 @@ public or production deployment.
 :LABELS:   ["p6","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-01 Thu 00:18]
+:MODIFIED: [2026-10-01 Thu 00:38]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-029
 :SOURCE_REPO: agent-cat
@@ -18373,6 +18398,13 @@ coordination or SQL into the TUI.
     "author": "johnw",
     "text": "PC14 (2026-10-01): the TUI now calls the PC12 coordinator advanceGeneration on an endpoint switch and fences every service worker result by generation. A pending command of a closed Client is refused by Reference binding (WrongEndpoint) and is never sent through the new Client. Checks and evidence as recorded on acat-wm-033-4g77. WM-029 stays open for closeout.",
     "created_at": "2026-10-01T07:18:35Z"
+  },
+  {
+    "id": 482,
+    "issue_id": "acat-wm-029-nlmg",
+    "author": "johnw",
+    "text": "PC15 (2026-10-01): the TUI consumes Client.loadOverview (PC11 Overview bootstrap) through the single-flight read lane and the Manager overview view. Checks and evidence as recorded on acat-wm-034-3vqz. WM-029 stays open for closeout.",
+    "created_at": "2026-10-01T07:38:20Z"
   }
 ]
 #+end_src
@@ -18756,7 +18788,7 @@ to an unapproved local launch.
 :LABELS:   ["p7","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-30 Wed 22:24]
+:MODIFIED: [2026-10-01 Thu 00:38]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-034
 :SOURCE_REPO: agent-cat
@@ -18870,6 +18902,13 @@ Local-mode behavior remains intact without a duplicated service runtime model.
     "author": "johnw",
     "text": "Subtask PC8 (2026-09-30) advances this package with Phase A TUI polish: retrieval retry, bounded refresh pause after a deferred key, and saveExact success with a leftover note after publication. It does not complete the package. Checks: Werror build of agentic-run, routing-fixed-point-probe and tui-model-test with -ftui-tests; tui-model-test at N8 (525 PASS); tui-journey at N8 (PASS, 0 deferred keys); make -C doc check. Evidence: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/PC/PC8/impl-r1 (build.exit, model.exit, journey.exit and doc-check.exit all 0). Fess: fess/pc-PC8-r1.md, not blocking; its findings are filed as acat-pc8-tui-polish-fess-y3yt.",
     "created_at": "2026-10-01T05:24:39Z"
+  },
+  {
+    "id": 481,
+    "issue_id": "acat-wm-034-3vqz",
+    "author": "johnw",
+    "text": "PC15 (2026-10-01): Manager overview view and the shared TUI mode fixture. After the profiles load, the service TUI reads the authorized Overview with Client.loadOverview through the single-flight read lane (ServiceOverviewReady in the ServiceReadWork slot) and decodes each member with the Service.hs decoders (decodeOverviewItem), with no runtime reducer. O opens the Manager overview view from the workflow browser (Tab, h, s, l, m, f, c, i, digits, Enter and arrows unchanged; Esc returns to Manager workflows). It lists requests (workflow, phase, admission, position, blocking reasons), preparations, runs (runtime status, supervision and verification as distinct fields) and pending decisions (run, kind, state). g reads it again; a refused read keeps the last overview marked stale with the refusal code. Cursor in AppState, reset on endpoint switch. The profile list appears only after the overview read finishes. New shared service_http.py helper for TUI modes (separate TUI and harness credentials through local administration, TuiSession at 80x24) and mode tui-overview. Checks passed: Werror build with -ftui-tests of agentic-run, routing-fixed-point-probe, tui-model-test; tui-model-test (661 checks, including the Phase A key-sequence test); tui-overview at N=8 (empty overview, HTTP-created request after g with phase and blocking reasons, refusal keeps stale overview); the Phase A journey at N=8; make -C doc check. Evidence: resume-20260923/PC/PC15; fess/pc-PC15-r1.md (non-blocking), findings filed as acat-pc15-overview-fess-bu2e. Package stays open.",
+    "created_at": "2026-10-01T07:38:20Z"
   }
 ]
 #+end_src

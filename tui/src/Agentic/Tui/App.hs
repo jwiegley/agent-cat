@@ -123,6 +123,9 @@ data ServiceEvent
   | ServicePrepared !Int !(Lane.CallOutcome Manager.PendingCommand)
   | ServiceSent !Int !(Lane.CallOutcome Manager.ClientResponse)
   | ServiceRequestReady !Int !(Lane.CallOutcome (Service.RequestRead Manager.Observed))
+    -- | The overview read with this ticket, and whether it completes the
+    -- bootstrap of the session, which shows the profiles afterwards.
+  | ServiceOverviewReady !Int !Bool !(Lane.CallOutcome [Service.OverviewMember])
     -- | The retrieval of the verified result of this run.
   | ServiceResultReady !Int !Text !(Lane.CallOutcome (Maybe Service.VerifiedResult))
 
@@ -208,6 +211,11 @@ data AppState = AppState
     -- | The last complete composite read of the selected request and its
     -- stale mark. Only 'Lane.requestStep' installs a read or marks it stale.
     stateServiceObservation :: !(Lane.Installed (Service.RequestRead Manager.Observed)),
+    -- | The last complete manager overview and its stale mark. Only
+    -- 'Lane.requestStep' installs an overview or marks it stale.
+    stateServiceOverview :: !(Lane.Installed [Service.OverviewMember]),
+    -- | The selected row of the manager overview view.
+    stateServiceOverviewCursor :: !Int,
     stateServiceApproval :: !(Maybe (Service.Mutation,Manager.PendingCommand,Maybe Manager.Reference)),
     stateServiceApprovalStatus :: !(Maybe Text),
     stateServiceLastReceipt :: !(Maybe Manager.CommandReceipt),
@@ -330,6 +338,8 @@ runAppWith backend = mask $ \restore -> do
             stateServiceWorkflow = Nothing,
             stateServiceRequestId = Nothing,
             stateServiceObservation = Lane.noObservation,
+            stateServiceOverview = Lane.noObservation,
+            stateServiceOverviewCursor = 0,
             stateServiceApproval = Nothing,
             stateServiceApprovalStatus = Nothing,
             stateServiceLastReceipt = Nothing,
@@ -403,6 +413,17 @@ startServiceRead kind status action = do
 startServiceProfiles :: Manager.Client -> EventM Name AppState ()
 startServiceProfiles client = startServiceRead Lane.PageSetRead "loading manager catalogue" $ \ticket ->
   ServiceProfilesReady ticket <$> Lane.serviceCall (Service.loadProfiles client)
+
+-- | Read the authorized manager overview through the single-flight lane,
+-- given whether the read completes the bootstrap of the session.
+startServiceOverview :: Manager.Client -> Bool -> EventM Name AppState ()
+startServiceOverview client bootstrap = startServiceRead Lane.PageSetRead "reading the manager overview" $ \ticket ->
+  ServiceOverviewReady ticket bootstrap <$> Lane.serviceCall
+    ((>>= traverse Service.decodeOverviewItem . Manager.overviewItems) <$> Manager.loadOverview client)
+
+-- | The rows of the installed manager overview.
+serviceOverviewRows :: AppState -> [Service.OverviewRow]
+serviceOverviewRows = maybe [] Service.overviewRows . Lane.installedRead . stateServiceOverview
 
 startServiceWorkflows :: Manager.Client -> Service.Profile -> EventM Name AppState ()
 startServiceWorkflows client profile = startServiceRead Lane.PageSetRead "loading manager catalogue" $ \ticket ->
@@ -787,8 +808,28 @@ handleServiceResult client serviceEvent = do
       (Lane.ReadStale,_) -> pure ()
       (Lane.ReadFaulted,lane) -> faultService state lane
       (Lane.ReadRefused problem,lane) -> put (failed lane problem)
-      (Lane.ReadDelivered profiles,lane) -> put state {stateServiceLane = lane, stateServiceProfiles = profiles,
-        stateServiceWorkflows = [], stateModel = initialServiceModel profiles, statePaneFocus = PrimaryPane}
+      -- The profiles show after the overview read of the bootstrap, so no
+      -- profile key meets that read in flight.
+      (Lane.ReadDelivered profiles,lane) -> do
+        put state {stateServiceLane = lane, stateServiceProfiles = profiles, stateServiceWorkflows = []}
+        startServiceOverview client True
+    -- A refused overview read keeps the last complete overview and marks it
+    -- stale with the refusal code.
+    ServiceOverviewReady ticket bootstrap result ->
+      let shown current
+            | bootstrap = current {stateModel = initialServiceModel (stateServiceProfiles current), statePaneFocus = PrimaryPane}
+            | otherwise = current
+      in case Lane.requestStep (const Service.ReadCurrent) ticket result (stateServiceLane state) (stateServiceOverview state) of
+        (Lane.RequestStale,lane,_) -> put state {stateServiceLane = lane}
+        (Lane.RequestFaulted,lane,_) -> faultService state lane
+        (Lane.RequestRefused problem,lane,installed) ->
+          let next = shown state {stateServiceLane = lane, stateServiceOverview = installed}
+          in put next {stateModel = refuseRequestRead (Lane.refusalCode problem) (isJust (Lane.installedRead installed)) (stateModel next)}
+        (Lane.RequestInstalled _,lane,installed) ->
+          let next = shown state {stateServiceLane = lane, stateServiceOverview = installed}
+              rows = serviceOverviewRows next
+          in put next {stateServiceOverviewCursor = max 0 (min (length rows - 1) (stateServiceOverviewCursor state)),
+               stateModel = if bootstrap then stateModel next else (stateModel next) {modelStatus = "manager overview read"}}
     ServiceWorkflowsReady ticket profile result -> case Lane.readStep ticket result (stateServiceLane state) of
       (Lane.ReadStale,_) -> pure ()
       (Lane.ReadFaulted,lane) -> faultService state lane
@@ -925,6 +966,12 @@ handleServiceEventCore client event = do
       -- outcome, including while a command is in progress.
       | Just (operation,start) <- serviceNewMutationKey state key modifiers -> serviceMutationKey operation start
       | serviceSending state -> pure ()
+      -- h, O and Esc move among the workflow browser, the workflow help and
+      -- the manager overview. Every other browser key keeps its behavior.
+      | Just model <- serviceBrowserKey (Service.workflowHelp <$> atMay (stateServiceWorkflows state) (modelWorkflowIndex (stateModel state)))
+          key modifiers (stateModel state) ->
+          put state {stateModel = model, statePaneFocus = if ServiceOverviewScreen `elem` [modelScreen model, modelScreen (stateModel state)]
+            then PrimaryPane else statePaneFocus state}
       | null modifiers -> case key of
           Vty.KEsc -> serviceBack state
           Vty.KUp -> serviceMove (-1) state
@@ -965,10 +1012,10 @@ handleServiceEventCore client event = do
                 let model = (stateModel state) {modelScreen = InputScreen 0}
                 in put state {stateModel = model, stateEditor = Edit.editorText InputEditor Nothing (inputValue model)}
               _ -> pure ()
-          Vty.KChar 'h' | modelScreen (stateModel state) == BrowserScreen ->
-            case atMay (stateServiceWorkflows state) (modelWorkflowIndex (stateModel state)) of
-              Just workflow -> put state {stateModel = (stateModel state) {modelScreen = HelpScreen (Service.workflowHelp workflow)}}
-              Nothing -> pure ()
+          -- g on the manager overview reads the overview again.
+          Vty.KChar 'g' | modelScreen (stateModel state) == ServiceOverviewScreen -> case Lane.laneReadTicket (stateServiceLane state) of
+            Nothing -> startServiceOverview client False
+            Just _ -> put state {stateModel = (stateModel state) {modelStatus = "overview read not started: another manager read is in flight; press g again"}}
           Vty.KChar 'g' -> refreshServiceRequest client Lane.ExplicitRefresh
           Vty.KChar 'x' | Lane.resendOffered (stateServiceLane state) -> put (onLane (\lane -> lane {Lane.laneResendConfirm = True}) state)
           Vty.KChar 'r' | ServiceProfilesScreen {} <- modelScreen (stateModel state) -> startServiceProfiles client
@@ -1010,7 +1057,6 @@ handleServiceEventCore client event = do
       ServiceProfilesScreen {} -> halt
       InitialLoading -> halt
       ServiceReviewScreen {} | stateConfirmDetails state -> put state {stateConfirmDetails = False}
-      HelpScreen _ -> put state {stateModel = (stateModel state) {modelScreen = BrowserScreen}}
       BrowserScreen | serviceIdle state -> do
         put (onLane (\lane -> lane {Lane.laneReadTicket = Nothing}) state) {stateServiceWorkflows = [],
           stateModel = initialServiceModel (stateServiceProfiles state), statePaneFocus = PrimaryPane}
@@ -1020,6 +1066,9 @@ handleServiceEventCore client event = do
       HelpScreen _ -> vScrollBy (viewportScroll HelpViewport) delta
       FailureScreen _ -> vScrollBy (viewportScroll FailureViewport) delta
       ServiceRequestScreen _ -> vScrollBy (viewportScroll FailureViewport) delta
+      ServiceOverviewScreen | statePaneFocus state == PrimaryPane -> do
+        put state {stateServiceOverviewCursor = max 0 (min (length (serviceOverviewRows state) - 1) (stateServiceOverviewCursor state + delta))}
+        vScrollToBeginning (viewportScroll BrowserDetailViewport)
       ServiceReviewScreen {} | stateConfirmDetails state -> vScrollBy (viewportScroll ConfirmDetailsViewport) delta
       LiveScreen _
         | stateRunDetails state -> vScrollBy (viewportScroll FailureViewport) delta
@@ -1117,6 +1166,8 @@ clearServiceSession state =
       stateServiceWorkflow = Nothing,
       stateServiceRequestId = Nothing,
       stateServiceObservation = Lane.noObservation,
+      stateServiceOverview = Lane.noObservation,
+      stateServiceOverviewCursor = 0,
       stateServiceApproval = Nothing,
       stateServiceApprovalStatus = Nothing,
       stateServiceLastReceipt = Nothing,
@@ -1203,6 +1254,9 @@ toPresentation state =
       presentationServiceApproval = stateServiceApprovalStatus state,
       presentationServiceFault = serviceFaulted state,
       presentationServiceKeyOutcome = stateServiceKeyOutcome state,
+      presentationServiceOverview = let installed = stateServiceOverview state in
+        OverviewView (serviceOverviewRows state) (stateServiceOverviewCursor state)
+          (Service.overviewStatus (Lane.installedStale installed) (Service.overviewRows <$> Lane.installedRead installed)),
       presentationServiceObservation = let installed = stateServiceObservation state in
         Service.observationLines (Lane.refreshPaused (stateNow state) (stateServiceLane state) (stateServiceKeyOutcome state))
           (Lane.installedStale installed) (isJust (Lane.installedRead installed)) (serviceRun state),

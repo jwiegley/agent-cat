@@ -13,6 +13,7 @@ module Agentic.Tui.Service
     ControlView (..), ControlOffer (..), DecisionView (..), DecisionContent (..),
     observeSnapshot, observeControl, observeDecision, observeResult, decodeSnapshot, decodeControl, decodeDecision,
     RunItem (..), RunContent (..), KnownRun (..), OverviewMember (..), decodeRequestItem, decodeRunItem, decodeOverviewMember,
+    decodeOverviewItem, OverviewRow (..), overviewRows, overviewStatus,
     decisionPrompt, answerValue, answerOffered, retryOffer, headMatches,
     DecisionHead (..), decisionHead, answerMutation, answerBody,
     retryMutation, retryBody, retryEffect,
@@ -48,7 +49,8 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Vector as V
 import Data.Word (Word32, Word64)
-import Data.Maybe (isJust, listToMaybe)
+import Data.List (sortOn)
+import Data.Maybe (fromMaybe, isJust, listToMaybe)
 import qualified Data.Text.Encoding as TE
 import Data.Text.Encoding.Error (lenientDecode)
 
@@ -750,13 +752,16 @@ resultLines run retrieval = case runTerminal run of
       RunStarting -> "starting"
       RunRunning -> "running"
       RunCancelling -> "cancelling"
-    verificationName verification = case verification of
-      Absent -> "absent"
-      Referenced _ -> "referenced"
-      Verified _ -> "verified"
-      Unavailable _ reason -> "unavailable (" <> reason <> ")"
     preview bytes = T.map (\character -> if character == '\n' then ' ' else character)
       (T.take 120 (TE.decodeUtf8With lenientDecode (BS.take 480 bytes)))
+
+-- | The display name of a verification state.
+verificationName :: Verification -> Text
+verificationName verification = case verification of
+  Absent -> "absent"
+  Referenced _ -> "referenced"
+  Verified _ -> "verified"
+  Unavailable _ reason -> "unavailable (" <> reason <> ")"
 
 decodeControl :: Value -> Either C.ClientFailure ControlView
 decodeControl = decode parseControl
@@ -805,14 +810,90 @@ decodeRunItem = decode parseRunItem
 decodeOverviewMember :: Value -> Either C.ClientFailure OverviewMember
 decodeOverviewMember value = do
   (kind,member) <- decode (withObject "overview member" $ \fields -> do
-    kind <- at (oneOf ["request","preparation","run","decision"]) fields "kind"
-    closed ["kind",Key.fromText kind] fields
-    (,) kind <$> fields .: Key.fromText kind) value
-  case kind of
-    "request" -> RequestMember <$> decodeRequestItem member
-    "preparation" -> PreparationMember <$> C.decodeObservation member
-    "run" -> RunMember <$> decodeRunItem member
-    _ -> DecisionMember <$> decodeDecision member
+    name <- at (oneOf (map fst overviewKinds)) fields "kind"
+    closed ["kind",Key.fromText name] fields
+    kind <- maybe (fail "overview kind") pure (lookup name overviewKinds)
+    (,) kind <$> fields .: Key.fromText name) value
+  decodeMember kind member
+  where overviewKinds = [("request",C.OverviewRequest),("preparation",C.OverviewPreparation),("run",C.OverviewRun),("decision",C.OverviewDecision)]
+
+-- | The member of one item of the page set that 'C.loadOverview' assembled,
+-- decoded by its kind as 'decodeOverviewMember' decodes it.
+decodeOverviewItem :: C.OverviewItem -> Either C.ClientFailure OverviewMember
+decodeOverviewItem item = decodeMember (C.overviewKind item) (C.overviewValue item)
+
+decodeMember :: C.OverviewKind -> Value -> Either C.ClientFailure OverviewMember
+decodeMember kind member = case kind of
+  C.OverviewRequest -> RequestMember <$> decodeRequestItem member
+  C.OverviewPreparation -> PreparationMember <$> C.decodeObservation member
+  C.OverviewRun -> RunMember <$> decodeRunItem member
+  C.OverviewDecision -> DecisionMember <$> decodeDecision member
+
+-- | The display projection of one overview member: its kind, its identity,
+-- a one-line list label and its detail lines. A request keeps its phase,
+-- admission and blocking reasons. A run keeps its runtime status, its
+-- supervision and its verification on distinct lines, and a runtime that the
+-- manager does not publish is shown as not published. The projection reads
+-- only the decoded member. No runtime reducer takes part.
+data OverviewRow = OverviewRow
+  { overviewRowKind :: !C.OverviewKind, overviewRowId :: !Text, overviewRowLabel :: !Text, overviewRowDetails :: ![Text]
+  } deriving (Eq, Show)
+
+-- | The rows of the overview members: the requests first, then the
+-- preparations, the runs and the decisions, each kind in manager order.
+overviewRows :: [OverviewMember] -> [OverviewRow]
+overviewRows = sortOn overviewRowKind . map overviewRow
+
+overviewRow :: OverviewMember -> OverviewRow
+overviewRow member = case member of
+  RequestMember request -> OverviewRow C.OverviewRequest (C.draftId request)
+    ("request " <> C.draftPhase request <> "  " <> C.draftId request)
+    [ "Request: " <> C.draftId request, "Workflow: " <> C.draftWorkflow request, "Profile: " <> C.draftProfile request,
+      "Phase: " <> C.draftPhase request, "Admission: " <> C.draftAdmission request,
+      "Position: " <> maybe "none" (T.pack . show) (C.draftPosition request),
+      "Blocking reasons: " <> listed (C.draftReasons request),
+      "Preparation: " <> fromMaybe "none" (C.draftPreparation request), "Run: " <> fromMaybe "none" (C.draftRun request) ]
+  PreparationMember preparation -> OverviewRow C.OverviewPreparation (C.preparationId preparation)
+    ("preparation  " <> C.preparationId preparation)
+    [ "Preparation: " <> C.preparationId preparation, "Request: " <> C.preparationRequest preparation,
+      "Profile: " <> C.preparationProfile preparation, "Expires: " <> C.preparationExpiresAt preparation ]
+  RunMember item -> case runItemContent item of
+    UnreadableContent category -> OverviewRow C.OverviewRun (runItemId item) ("run unreadable  " <> runItemId item)
+      [ "Run: " <> runItemId item, "Profile: " <> runItemProfile item, "Manifest: unreadable (" <> category <> ")" ]
+    KnownContent known -> OverviewRow C.OverviewRun (runItemId item)
+      ("run " <> maybe "unpublished" (\(status,_,_) -> runStatusLabel status) (knownRuntime known) <> "  " <> runItemId item)
+      ([ "Run: " <> runItemId item, "Workflow: " <> knownWorkflow known, "Profile: " <> runItemProfile item,
+        "Request: " <> fromMaybe "none" (knownRequest known),
+        "Runtime status: " <> maybe "not published" (\(status,sequenceNumber,protocol) -> runStatusLabel status
+          <> " (sequence " <> T.pack (show sequenceNumber) <> ", protocol " <> T.pack (show protocol) <> ")") (knownRuntime known),
+        "Supervision: " <> knownSupervision known, "Verification: " <> verificationName (knownVerification known),
+        "Integrity: " <> knownIntegrity known, "Limitations: " <> listed (knownLimitations known) ]
+        <> maybe [] (\parent -> ["Lineage: " <> fromMaybe "unknown" (knownLineage known) <> " of run " <> parent]) (knownParent known))
+  DecisionMember view -> OverviewRow C.OverviewDecision (decisionId view)
+    ("decision " <> decisionKind view <> "  run " <> decisionRun view)
+    ([ "Decision: " <> decisionId view, "Run: " <> decisionRun view, "Kind: " <> decisionKind view,
+       "State: " <> decisionState view, "Occurrence: " <> occurrenceText (decisionOccurrence view) ]
+      <> case decisionContent view of
+        QuestionContent _ prompt -> ["Prompt: " <> prompt]
+        RecoveryContent _ message _ -> ["Recovery: " <> message])
+  where
+    listed values = if null values then "none" else T.intercalate ", " values
+    decisionKind view = case decisionContent view of
+      QuestionContent {} -> "question"
+      RecoveryContent {} -> "recovery"
+
+-- | The status line of the installed overview, given the refusal code of the
+-- latest read when that read was refused and the installed rows. A refusal
+-- keeps the last complete overview and marks it stale.
+overviewStatus :: Maybe Text -> Maybe [OverviewRow] -> Text
+overviewStatus stale rows = case (stale, rows) of
+  (Nothing, Nothing) -> "Overview: not read"
+  (Nothing, Just current) -> "Overview: current; " <> counts current
+  (Just code, Just retained) -> "Overview: stale (" <> code <> "); the last complete overview is retained; " <> counts retained
+  (Just code, Nothing) -> "Overview: refused (" <> code <> "); no complete overview is installed"
+  where
+    counts current = T.intercalate ", " [name <> ": " <> T.pack (show (length (filter ((== kind) . overviewRowKind) current)))
+      | (name,kind) <- [("requests",C.OverviewRequest),("preparations",C.OverviewPreparation),("runs",C.OverviewRun),("decisions",C.OverviewDecision)]]
 
 parseRunItem :: Value -> Parser RunItem
 parseRunItem = withObject "run" $ \fields -> do

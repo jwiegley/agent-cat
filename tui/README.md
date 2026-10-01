@@ -158,6 +158,28 @@ OPERATION URI`. No later session sends it, and its pending command is bound to
 the closed session, so the client refuses it with `WrongEndpoint`. Selecting an
 earlier profile again opens a new session with new references.
 
+After the profiles load, the frontend reads the authorized manager overview
+(`/v1/snapshot`) through `Agentic.Manager.Client.loadOverview` in the
+single-flight read lane, and it shows the profiles when that read completes.
+The same happens after a switch to another endpoint and after `r` on the
+profile browser. `O` opens the Manager overview view from the workflow
+browser. `Tab`, `h`, `Enter`, the arrow keys and the other browser keys keep
+their behavior there, and `Esc` returns from the view to the workflow browser.
+The view lists the requests with their workflow, phase, admission state and
+blocking reasons, then the preparations, then the runs with their runtime
+status, supervision and verification as distinct fields, and then the pending
+decisions with their run and kind. `Agentic.Tui.Service.decodeOverviewItem`
+decodes each member with the decoders of the request and run collections, and
+`overviewRows` projects it for display. No runtime reducer takes part. A wide
+terminal shows the list beside the details of the selected row. A narrow
+terminal shows one pane at a time, and `Left` and `Right` select the pane.
+`Up` and `Down` select a row, and the application state keeps the selected
+row. `g` reads the overview again. While another read is in flight, `g`
+starts nothing and the status line states it. A declared refusal keeps the
+last complete overview and marks it stale with the refusal code, for example
+`Overview: stale (TransportUnavailable)` after the manager stops. The view is
+not read on the one-second timer.
+
 A key whose operation needs a scope that the capabilities do not list starts
 nothing and shows the numbered key outcome `OPERATION did not start: this
 credential lacks SCOPE.` before any other admission is decided, so it never
@@ -223,7 +245,9 @@ line names the private file that remains.
 collections and the members of the `/snapshot` overview, with
 `decodeRequestItem`, `decodeRunItem` and `decodeOverviewMember`. A run item
 is a known run with its public summary or a catalogue entry with an
-unreadable manifest. Service mode does not read these resources yet.
+unreadable manifest. The Manager overview view reads the members of the
+`/snapshot` overview. Service mode does not read the `/requests` and `/runs`
+collections.
 `tui-model-test` checks these decoders, the decision and control decoders and
 the answer conversion against the `resources` section of
 `test/manager_client_vectors.json`, which [the protocol
@@ -234,6 +258,6 @@ abandon, the structured answer editor, captured and other non-literal inputs,
 withdrawal or discarding of a request, more than one concurrent run, run history,
 lineage, export, event-driven refresh, reconnection after a manager restart or a
 credential revocation, observation of earlier runs after a
-frontend restart, Overview bootstrap, or acceptance at 40x12 and 80x24. The
+frontend restart, or acceptance at 40x12 and 80x24. The
 [manual](../doc/agent-cat.texi) entry for `--service` states the complete key
 behavior. Service mode is not an accepted milestone.

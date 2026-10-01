@@ -8,6 +8,7 @@ module Agentic.Tui.Model
     initialModel,
     initialServiceModel,
     selectedServiceProfile,
+    serviceBrowserKey,
     refuseRequestRead,
     refuseCatalogueRead,
     serviceRunObserved,
@@ -67,6 +68,7 @@ import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
 import qualified Data.ByteString.Lazy as BL
 import qualified Data.Vector as Vector
+import qualified Graphics.Vty as Vty
 
 -- | One of the three top-level browser panes.
 data BrowserTab = WorkflowsTab | RunsTab | RoutingTab
@@ -77,6 +79,9 @@ data Screen
   = InitialLoading
   | BrowserScreen
   | ServiceProfilesScreen ![Service.Profile] !Int
+    -- | The manager overview. Its rows and cursor belong to the application
+    -- state, which installs each overview read.
+  | ServiceOverviewScreen
   | ServiceRequestScreen !Manager.DraftView
   | ServiceReviewScreen !Manager.Preparation !Text
   | ServiceCommandScreen !Text
@@ -138,6 +143,21 @@ initialServiceModel profiles = (initialModel [] [] (Left "manager profile catalo
 selectedServiceProfile :: TuiModel -> Maybe Service.Profile
 selectedServiceProfile model = case modelScreen model of
   ServiceProfilesScreen profiles index -> atMay profiles index
+  _ -> Nothing
+
+-- | The navigation of one key among the service workflow browser, the help
+-- of the selected workflow and the manager overview, given the help text of
+-- the selected workflow. @h@ opens that help, @O@ opens the manager overview,
+-- and @Esc@ returns from either one to the workflow browser. Every other key
+-- gives 'Nothing', and the caller keeps its own behavior for that key, so the
+-- browser keys of the Phase A journey keep their meaning.
+serviceBrowserKey :: Maybe Text -> Vty.Key -> [Vty.Modifier] -> TuiModel -> Maybe TuiModel
+serviceBrowserKey help key modifiers model = case (modelScreen model, key, modifiers) of
+  (BrowserScreen, Vty.KChar 'h', []) -> (\text -> model {modelScreen = HelpScreen text}) <$> help
+  (BrowserScreen, Vty.KChar 'O', []) ->
+    Just model {modelScreen = ServiceOverviewScreen, modelStatus = "manager overview: g reads it again"}
+  (HelpScreen _, Vty.KEsc, []) -> Just model {modelScreen = BrowserScreen}
+  (ServiceOverviewScreen, Vty.KEsc, []) -> Just model {modelScreen = BrowserScreen, modelStatus = "manager workflows"}
   _ -> Nothing
 
 -- | The model after a refused read of the selected request, given the

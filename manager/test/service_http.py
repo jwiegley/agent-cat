@@ -309,9 +309,23 @@ control_profiles = controls_mode or routing_mode or live_mode
 # line. It runs one manager lifetime.
 ENDPOINTS = "tui-endpoints"
 endpoints_mode = len(sys.argv) == 6 and sys.argv[5] == ENDPOINTS
-assert len(sys.argv) == 5 or mixed or boundary or pages_mode or events_mode or captures_mode or discard_mode or exports_mode or lineage_mode or control_profiles or person_mode or endpoints_mode
+# The TUI modes share one fixture, TuiModeFixture. TUI_MODES names the
+# configured profiles of each mode and the scopes of its TUI credential.
+#
+# The tui-overview mode starts the service TUI, which reads the manager
+# overview after the profiles load. O opens the Manager overview view from
+# the workflow browser, and the view must show the empty overview. The
+# harness then creates a request through HTTP with its own credential. After
+# g, the view must list the request with its phase and blocking reasons. The
+# harness then stops the manager, and after g the view must keep the request
+# and mark the overview stale with the refusal code. Each step prints its own
+# PASS line. It runs one manager lifetime.
+OVERVIEW = "tui-overview"
+TUI_MODES = {OVERVIEW: (["profile_1"], ["observe", "submit"])}
+tui_mode = sys.argv[5] if len(sys.argv) == 6 and sys.argv[5] in TUI_MODES else None
+assert len(sys.argv) == 5 or mixed or boundary or pages_mode or events_mode or captures_mode or discard_mode or exports_mode or lineage_mode or control_profiles or person_mode or endpoints_mode or tui_mode
 assert not tui_approval or os.environ.get("TUI_CHECK")
-assert not endpoints_mode or os.environ.get("TUI_CHECK")
+assert not (endpoints_mode or tui_mode) or os.environ.get("TUI_CHECK")
 assert native in ("1", "8")
 print(f"work={work}", flush=True)
 sys.path.insert(0, str(source / "test"))
@@ -514,6 +528,37 @@ def administration(payload, refused=None):
     return value
 
 
+class TuiModeFixture:
+    """The shared fixture of the TUI modes. It writes the manager
+    configuration with the profiles that the mode names. It issues one
+    credential for the client profile of the TUI and a separate credential
+    for the harness through local administration, so that the requests of the
+    harness spend nothing of the per-client bounds of the TUI credential
+    (sseReadersPerClient 2 and ordinaryMutationsPerMinute 30). session()
+    starts the TUI through TuiSession, at 80x24 by default."""
+
+    def __init__(self, profiles, scopes):
+        configuration["profiles"] = [profile for profile in configuration["profiles"] if profile["id"] in profiles]
+        assert [profile["id"] for profile in configuration["profiles"]] == profiles, ("unknown TUI mode profile", profiles)
+        config.write_text(json.dumps(configuration))
+        for name, granted in (("tui", scopes), ("harness", ["observe", "submit"])):
+            administration({"version": 1, "operation": "issue-credential", "label": "TUI mode " + name,
+                            "scopes": granted, "profileIds": profiles,
+                            "expiresAt": "2999-01-01T00:00:00Z", "outputFile": str(work / ("credential-" + name))})
+        self.harness = {"Authorization": "Bearer " + (work / "credential-harness").read_bytes().decode("ascii")}
+        self.client_profile = work / "client-profile-tui.json"
+        self.client_profile.write_text(json.dumps({"version": 1, "endpoint": f"https://127.0.0.1:{port}/v1",
+                                                   "credentialFile": str(work / "credential-tui"), "caFile": str(cert)}))
+        self.client_profile.chmod(0o600)
+        self.client_state = work / "unused-client-state"
+
+    def session(self, rows=24, columns=80):
+        """The service TUI of the TUI credential in a new pseudo-terminal."""
+        from tui_probe import TuiSession
+        command = [os.environ["TUI_CHECK"], "--tui", "--service", str(self.client_profile), "+RTS", "-N" + native, "-RTS"]
+        return TuiSession(runner, self.client_state, rows=rows, columns=columns, command=command, explicit_state=False)
+
+
 issued = administration({"version": 1, "operation": "issue-credential", "label": "HTTPS fixture",
                          "scopes": ["observe", "submit"] + (["control", "export"] if mixed else ["control"] if captures_mode or discard_mode or lineage_mode or control_profiles or person_mode else ["control", "export"] if exports_mode else []),
                          "profileIds": CONTROL_PROFILES or (["profile_1", "profile_plain"] if person_mode else
@@ -546,6 +591,7 @@ if endpoints_mode:
         administration({"version": 1, "operation": "issue-credential", "label": "HTTPS endpoint " + name,
                         "scopes": scopes, "profileIds": ["profile_1"],
                         "expiresAt": "2999-01-01T00:00:00Z", "outputFile": str(work / ("credential-" + name))})
+tui_fixture = TuiModeFixture(*TUI_MODES[tui_mode]) if tui_mode else None
 configuration["administrationRoot"] = str(work / "admin")
 config.write_text(json.dumps(configuration))
 context = ssl.create_default_context(cafile=str(cert))
@@ -3673,6 +3719,88 @@ def endpoint_checks():
             (work / "server-0.exit").write_text(str(process.returncode) + "\n")
 
 
+def overview_checks():
+    """The tui-overview mode. See OVERVIEW for the steps."""
+    harness = tui_fixture.harness
+
+    def save(session, name):
+        (work / ("tui-overview-" + name + ".screen.txt")).write_text(session.screen.text())
+
+    def details(screen):
+        """The details column joined without separators, so that a long
+        identifier that wraps across rows stays one string."""
+        return "".join(line.split("│", 1)[1].strip() for line in screen.splitlines() if "│" in line)
+
+    with (work / "server-0.stdout").open("wb") as output, (work / "server-0.stderr").open("wb") as errors:
+        process = subprocess.Popen([str(runner), "--manager", "serve", "--config", str(config),
+                                    "+RTS", "-N" + native, "-RTS"], stdout=output, stderr=errors)
+        try:
+            wait_ready(process)
+            status, overview, raw = request("/v1/snapshot", harness)
+            assert status == 200 and overview["items"] == [], "the overview mode does not start from an empty manager"
+            status, capabilities, _ = request("/v1/capabilities", harness)
+            assert status == 200
+            status, catalogue, _ = request("/v1/workflows?profileId=profile_1", harness)
+            assert status == 200
+            workflow = next(item for item in catalogue["items"] if item["name"] == "mixed-controls")
+            with tui_fixture.session() as session:
+                # 1. The overview of the bootstrap shows the empty manager.
+                session.wait_screen("Manager profiles")
+                session.wait_screen("profile_1")
+                session.send(b"\r")
+                session.wait_screen("Manager workflows")
+                session.send(b"O")
+                screen = session.wait_screen("Manager overview")
+                screen = session.wait_screen("Overview: current; requests: 0, preparations: 0, runs: 0, decisions: 0")
+                save(session, "empty")
+                assert "No rows are visible." in screen, "the empty overview lists a row"
+                print("PASS tui-overview 1: O opens the Manager overview, which shows the empty overview that the TUI read after the profiles loaded", flush=True)
+                # 2. A request that the harness creates appears after g.
+                key = capabilities["authorityEpoch"] + "." + secrets.token_urlsafe(16)
+                body = {"workflowId": workflow["id"], "descriptorRevision": workflow["revision"],
+                        "profileId": workflow["profileId"], "profileRevision": workflow["profileRevision"]}
+                status, created, raw = request("/v1/requests", harness | {"Content-Type": "application/json", "Idempotency-Key": key},
+                                               method="POST", payload=json.dumps(body, separators=(",", ":")).encode())
+                assert status == 201, ("request creation", status, created.get("code"))
+                validate("Request", created, raw)
+                reasons = created["admission"]["reasons"]
+                assert created["phase"] == "draft" and reasons, ("the created request has no blocking reason", created["admission"])
+                session.settle()
+                assert created["id"] not in session.screen.text(), "the overview changed before g"
+                session.send(b"g")
+                screen = session.wait_screen("Overview: current; requests: 1, preparations: 0, runs: 0, decisions: 0")
+                save(session, "created")
+                for line in ("> request draft", "Phase: draft", "Admission: " + created["admission"]["state"],
+                             "Blocking reasons: " + ", ".join(reasons)):
+                    assert line in screen, ("the overview lacks a line of the created request", line)
+                for value in ("Request:" + created["id"], "Workflow:" + workflow["id"]):
+                    assert value in details(screen), ("the overview details lack the created request", value)
+                print("PASS tui-overview 2: after g the overview lists request", created["id"], "with phase draft and blocking reasons",
+                      ", ".join(reasons), flush=True)
+                # 3. A refused read keeps the overview and marks it stale.
+                process.terminate()
+                process.wait(timeout=25)
+                session.send(b"g")
+                screen = session.wait_screen("Overview: stale (TransportUnavailable); the last complete overview is retained")
+                save(session, "stale")
+                for line in ("> request draft", "Phase: draft", "Blocking reasons: " + ", ".join(reasons)):
+                    assert line in screen, ("the stale overview lost a line of the request", line)
+                assert "Request:" + created["id"] in details(screen), "the stale overview lost the request"
+                print("PASS tui-overview 3: with the manager stopped, g keeps the overview and marks it stale with TransportUnavailable", flush=True)
+                session.send(b"\x1b")
+                session.wait_screen("Manager workflows")
+                session.send(b"q")
+                assert session.wait_exit(20) == 0
+                session.assert_restored()
+            assert not tui_fixture.client_state.exists(), "the service TUI created local runner state"
+            print("PASS tui-overview: the overview view followed the manager overview through the actual service TUI", flush=True)
+        finally:
+            if process.poll() is None:
+                process.terminate()
+            process.wait(timeout=25)
+            (work / "server-0.exit").write_text(str(process.returncode) + "\n")
+
+
 def capture_checks():
     """POST /v1/captures through the real HTTPS manager. Each numbered case
     prints one PASS line."""
@@ -6162,6 +6290,11 @@ if events_mode:
 
 if endpoints_mode:
     endpoint_checks()
+    raise SystemExit(0)
+
+
+if tui_mode == OVERVIEW:
+    overview_checks()
     raise SystemExit(0)
 
 

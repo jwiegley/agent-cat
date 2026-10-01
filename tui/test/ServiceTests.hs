@@ -10,7 +10,7 @@ import Agentic.Runtime (DescriptorCapabilities (..), WorkflowDescriptor (..), Wo
 import Agentic.Tui.Person (PersonPrompt (..))
 import Agentic.Tui.Model
 import qualified Agentic.Tui.Approval as A
-import Agentic.Tui.Presentation (ActiveLayer (..), Presentation (..), emptyPresentation, endpointLine, endpointsLines, serviceRequestLines, serviceReviewAllowed, serviceReviewRows,
+import Agentic.Tui.Presentation (ActiveLayer (..), OverviewView (..), PaneFocus (..), Presentation (..), emptyPresentation, endpointLine, endpointsLines, serviceRequestLines, serviceReviewAllowed, serviceReviewRows,
   savedLeftoverNote, serviceSaveRefusal, serviceSavedLine, wrapDisplayLines)
 import Agentic.Tui.RunModel (emptyRunView, reconcileRunView)
 import Agentic.Tui.Save (SaveRefusal (..), Saved (..), saveExact, saveExactUsing)
@@ -20,7 +20,7 @@ import Control.Concurrent (forkIO, newEmptyMVar, putMVar, takeMVar, threadDelay,
 import Control.Exception (AsyncException (ThreadKilled), ErrorCall (ErrorCall), SomeException, finally, fromException, throwIO, try)
 import Data.Bits ((.&.))
 import Data.Char (isSpace)
-import Data.Maybe (isNothing)
+import Data.Maybe (fromMaybe, isNothing, listToMaybe)
 import qualified Data.Set as Set
 import GHC.Clock (getMonotonicTimeNSec)
 import System.Directory (createDirectory, doesPathExist, getTemporaryDirectory, listDirectory, removePathForcibly)
@@ -167,6 +167,7 @@ serviceTests render = do
   resourceVectorTests
   endpointTests render profile
   switchTests render row profile
+  overviewTests render row request0
   where
     profileValue = object ["version" .= (1 :: Int), "id" .= ("profile_main" :: T.Text),
       "revision" .= ("profile_rev_4" :: T.Text), "workspaceLabel" .= ("Café 雪 λ" :: T.Text),
@@ -275,6 +276,71 @@ endpointTests render profile = do
 -- | Endpoint switching: the selection, the connection of another profile,
 -- generation fencing of late results, the unresolved command of the earlier
 -- session, a failed connection, the switch back and the Endpoints view.
+-- | The navigation keys of the service workflow browser, the projection of
+-- the manager overview, its stale mark and fixed-size renders of its view.
+overviewTests :: ((Int,Int) -> Presentation -> T.Text) -> S.Workflow -> C.DraftView -> IO ()
+overviewTests render row request0 = do
+  let browser = (initialModel [S.workflowDisplay row] [] (Left "manager owns routing")) {modelStatus = "manager catalogue: profile_main"}
+      help = Just (S.workflowHelp row)
+      press model (key, modifiers) = fromMaybe model (serviceBrowserKey help key modifiers model)
+      phaseA = map (\character -> (Vty.KChar character, [])) "slmfci1" <> [(Vty.KChar '\t', []), (Vty.KChar 'h', []), (Vty.KEsc, [])]
+      afterPhaseA = foldl press browser phaseA
+      overviewModel = press browser (Vty.KChar 'O', [])
+      request = request0 {C.draftId = "req_overview_1", C.draftPhase = "draft", C.draftAdmission = "not-queued",
+        C.draftPosition = Nothing, C.draftReasons = ["missing-inputs", "profile-busy"]}
+      run = S.RunItem "run_overview_1" "runrev_1" "profile_main" (S.KnownContent (S.KnownRun "workflow_main" (Just "req_overview_1")
+        Nothing Nothing (Just 3) (Just (RunRunning, 7, 2)) "owned" "valid" (S.Referenced "art_1") []))
+      unpublished = S.RunItem "run_overview_2" "runrev_2" "profile_main" (S.KnownContent (S.KnownRun "workflow_main" Nothing
+        Nothing Nothing Nothing Nothing "lost" "unknown" S.Absent ["lost-supervision"]))
+      decision = S.DecisionView "dec_overview_1" "decrev_1" "run_overview_1" "profile_main" "gen_1" (OccurrenceId 0) "pending" 0 5
+        (S.QuestionContent (String "flag") "Continue?") Null
+      members = [S.DecisionMember decision, S.RunMember run, S.RequestMember request, S.RunMember unpublished]
+      rows = S.overviewRows members
+      detailsOf ident = maybe [] S.overviewRowDetails (listToMaybe [entry | entry <- rows, S.overviewRowId entry == ident])
+      current = S.overviewStatus Nothing (Just rows)
+      stale = S.overviewStatus (Just "TransportUnavailable") (Just rows)
+      lane = L.Lane (Just (L.ReadTicket 4 L.PageSetRead)) L.MutationIdle False False :: L.Lane T.Text T.Text
+      installed = L.Installed (Just members) Nothing
+      (refusedStep, _, kept) = L.requestStep (const S.ReadCurrent) 4 (L.Declared (Left C.TransportUnavailable)) lane installed
+      presentation model status cursor focus = (emptyPresentation model) {presentationService = True, presentationNoColor = True,
+        presentationPaneFocus = focus, presentationServiceOverview = OverviewView rows cursor status}
+      wide = render (80,24) (presentation overviewModel current 0 PrimaryPane)
+      staleFrame = render (80,24) (presentation overviewModel stale 0 PrimaryPane)
+      narrowList = render (40,12) (presentation overviewModel current 0 PrimaryPane)
+      narrowDetails = render (40,12) (presentation overviewModel current 0 SecondaryPane)
+  checks
+    [ ("the Phase A key sequence slmfci1, Tab, h, Esc leaves the service browser on the workflows list",
+        modelScreen afterPhaseA == BrowserScreen && modelTab afterPhaseA == WorkflowsTab && modelWorkflowIndex afterPhaseA == 0),
+      ("h in the Phase A sequence opens the workflow help, and no Phase A key opens the overview",
+        modelScreen (foldl press browser (take 9 phaseA)) == HelpScreen (S.workflowHelp row)
+          && all (\step -> modelScreen (press browser step) /= ServiceOverviewScreen) phaseA
+          && serviceBrowserKey help (Vty.KChar 'o') [] browser == Nothing),
+      ("O opens the manager overview from the workflow browser, and Esc returns to the workflows list",
+        modelScreen overviewModel == ServiceOverviewScreen && modelScreen (press overviewModel (Vty.KEsc, [])) == BrowserScreen),
+      ("the overview lists the requests first, then the runs and the decisions",
+        map S.overviewRowKind rows == [C.OverviewRequest, C.OverviewRun, C.OverviewRun, C.OverviewDecision]),
+      ("a request row keeps its workflow, phase, admission and blocking reasons",
+        all (`elem` detailsOf "req_overview_1") ["Phase: draft", "Admission: not-queued", "Blocking reasons: missing-inputs, profile-busy",
+          "Workflow: " <> C.draftWorkflow request]),
+      ("a run row keeps runtime status, supervision and verification as distinct fields",
+        all (`elem` detailsOf "run_overview_1") ["Runtime status: Running (sequence 7, protocol 2)", "Supervision: owned", "Verification: referenced"]
+          && all (`elem` detailsOf "run_overview_2") ["Runtime status: not published", "Supervision: lost", "Verification: absent"]),
+      ("a pending decision row names its run and kind",
+        all (`elem` detailsOf "dec_overview_1") ["Run: run_overview_1", "Kind: question"]),
+      ("a refused overview read keeps the earlier overview and marks it stale with the refusal code",
+        (case refusedStep of L.RequestRefused C.TransportUnavailable -> True; _ -> False)
+          && kept == L.Installed (Just members) (Just "TransportUnavailable")
+          && "Overview: stale (TransportUnavailable); the last complete overview is retained" `T.isPrefixOf` stale),
+      ("the overview view at (80,24) shows the list beside the details of the selected request",
+        all (`T.isInfixOf` wide) ["Manager overview", "Overview: current", "> request draft", "Phase: draft", "Blocking reasons:", "missing-inputs"]),
+      ("the stale overview at (80,24) keeps the request and names the refusal",
+        all (`T.isInfixOf` staleFrame) ["Overview: stale (TransportUnavailable)", "> request draft", "Phase: draft"]),
+      ("a narrow terminal shows one overview pane at a time",
+        "> request draft" `T.isInfixOf` narrowList && not ("Phase: draft" `T.isInfixOf` narrowList)
+          && "Phase: draft" `T.isInfixOf` narrowDetails && not ("> request draft" `T.isInfixOf` narrowDetails))
+    ]
+  putStrLn "RENDER manager overview at (80,24):" >> putStr (T.unpack wide)
+
 switchTests :: ((Int,Int) -> Presentation -> T.Text) -> S.Workflow -> S.Profile -> IO ()
 switchTests render row profile = do
   let first = S.Endpoint "127.0.0.1" 8443 "stream_A" "epoch_A" ["observe", "submit"]

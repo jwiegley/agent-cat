@@ -203,8 +203,9 @@ data MutationState pending location
 data ReadKind
   = -- | Only single resources: the request, its preparation and a receipt.
     SingleResourceRead
-  | -- | At least one page set: the profiles, the workflows, or the composite
-    -- read of an associated request with its snapshot page set.
+  | -- | At least one page set: the profiles, the workflows, the manager
+    -- overview, or the composite read of an associated request with its
+    -- snapshot page set.
     PageSetRead
   deriving (Eq, Show, Enum, Bounded)
 

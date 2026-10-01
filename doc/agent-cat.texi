@@ -3341,6 +3341,23 @@ switch, or whose send was in progress, stays listed under its own profile as
 unresolved.  No later session sends it.  Selecting an earlier profile again
 opens a new session.
 
+After the profiles load, the frontend reads the authorized manager overview
+through the single-flight read lane, and it shows the profiles when that read
+completes.  The same happens after a switch to another endpoint and after
+@kbd{r} on the profile browser.  @kbd{O} opens the Manager overview view from
+the workflow browser.  @key{TAB}, @kbd{h}, @key{RET}, the arrow keys, and the
+other browser keys keep their behavior, and @key{ESC} returns from the view to
+the workflow browser.  The view lists the requests with their workflow, phase,
+admission state, and blocking reasons, then the preparations, then the runs
+with their runtime status, supervision, and verification as distinct fields,
+and then the pending decisions with their run and kind.  A wide terminal shows
+the list beside the details of the selected row.  A narrow terminal shows one
+pane at a time, and @key{LEFT} and @key{RIGHT} select the pane.  @key{UP} and
+@key{DOWN} select a row.  @kbd{g} reads the overview again.  A declared
+refusal keeps the last complete overview and marks it stale with the refusal
+code, for example @samp{Overview: stale (TransportUnavailable)} after the
+manager stops.  The view is not read on the one-second timer.
+
 A key whose operation needs a credential scope that the capabilities do not
 list starts nothing.  It shows the numbered key outcome
 @samp{@var{operation} did not start: this credential lacks @var{scope}.} before
@@ -3510,9 +3527,9 @@ other non-literal inputs cannot be supplied.  A request cannot be withdrawn or
 discarded.  The frontend follows one run at a time, and it offers no run
 history, lineage, or export.  It re-reads on a timer and does not consume the
 manager event stream.  It does not reconnect after a manager restart or a
-credential revocation, and it cannot switch to another endpoint.  After a
+credential revocation.  After a
 restart of the frontend, it cannot observe runs that an earlier session
-started.  It has no Overview bootstrap, and it has no accepted layout at 40
+started.  It has no accepted layout at 40
 columns by 12 rows or at 80 columns by 24 rows.  Service mode is not an
 accepted milestone, and it closes no workflow-manager package or gate.
 @end table
