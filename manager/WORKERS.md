@@ -188,9 +188,11 @@ the lock covers the inner worker process only.
 
 While the inner worker lives, another open of `owner.lock` cannot take an
 exclusive lock. An exclusive lock that a later open takes therefore shows that
-the original inner worker has ended. It does not show that the engine processes
-of the run that started through the process library have ended. No component
-reads the lock at present. The file stays in
+the original inner worker and each engine session leader that holds the same
+open description have ended. It does not show that the engine processes of the
+run that started through the process library have ended. The quarantine check
+reads the lock, as the
+[manager-loss section](#manager-loss-and-restart) states. The file stays in
 the run directory after the run ends, and restoration and pruning handle it as
 any other file of the run directory.
 
@@ -249,13 +251,25 @@ its start intent and its run, and it classifies the claim by these rules:
   `clean`. The evidence facts are the reservation identity, the run identity,
   the position of the record, the SHA-256 digest of the exact bytes of its
   line and the current process generation.
-- Launched without a terminal record. The state is `cleanup-required`.
+- Launched, with the owner released. The run store holds no terminal record,
+  and the check opens `runs/<run>/owner.lock` in the recorded run root
+  read-only, without following a symbolic link, finds a private regular file
+  of the effective user with one link, and takes its exclusive, nonblocking
+  `flock`. It releases the lock at once. The free lock shows that the inner
+  frontend worker and each engine session leader that inherited its lock have
+  ended. The state is `clean`. The evidence facts are the reservation
+  identity, the run identity and the current process generation.
+- Launched without a terminal record, with the owner not released. Another
+  process holds the lock, or `owner.lock` is absent, cannot be opened or is
+  not a private regular file. An absent file is no proof, because a worker
+  that started before the owner lock existed created none. The state is
+  `cleanup-required`.
 - Unreadable. The run store cannot be read, or the identity names a claim that
   a restoration carried forward. The state is `unverifiable`.
 
 The evidence facts of a `clean` claim form one JSON object, encoded with its
 keys in order and without white space. The member `evidence` names the rule:
-`no-launch` or `terminal-record`. The evidence digest is the lowercase SHA-256
+`no-launch`, `terminal-record` or `owner-released`. The evidence digest is the lowercase SHA-256
 digest of these bytes, and the evidence identity is `cleanup_` followed by the
 first 32 hexadecimal digits of the digest. Two checks in one lifetime therefore
 return the same identity and digest. The process generation is a fact, so a
@@ -266,13 +280,19 @@ identity and a reservation that is not quarantined refuse with
 
 The check is read-only. It changes no Store row, appends nothing to the
 manager log, reads or signals no stored process identity and adopts no worker.
+The lock probe of the `owner-released` rule holds the lock only for the probe
+and changes no run store.
 
 The local administration operation `release-quarantine` releases one
 quarantined reservation with the evidence identity and digest of a `clean`
 check. It computes the evidence again under the held Store file slot and
 configuration guard, and refuses with `cleanup-unverified` when the evidence
 is not `clean` or differs from the supplied values. Because the process
-generation is a fact, evidence from an earlier lifetime never matches. An
+generation is a fact, evidence from an earlier lifetime never matches. A
+launched reservation without a terminal record is therefore releasable once
+the inner worker of its run and the engine session leaders that hold its owner
+lock have ended, and a release while the lock is held refuses with
+`cleanup-unverified`. An
 unknown identity and a reservation that is not quarantined refuse with
 `state-conflict`. A release frees the execution slot and the resource keys of
 the reservation in one transaction and records the release and its receipt in

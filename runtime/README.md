@@ -36,7 +36,11 @@ identity is not an authorization token and does not relax ownership or mode chec
 `createPrivateLockAt` creates a private lock file with the same exclusive
 creation and takes an exclusive, nonblocking `flock` on its open description
 through `lockPrivateDescriptor`. The manager service lease takes its lock
-through the same function.
+through the same function. `probePrivateLockAt` opens an existing lock file
+read-only without following a final symbolic link, requires a private regular
+file of the effective user with one link, and reports whether its exclusive
+`flock` is free. A free lock is taken and released at once. The manager
+quarantine check reads the run owner lock in this way.
 
 ## Control event order
 

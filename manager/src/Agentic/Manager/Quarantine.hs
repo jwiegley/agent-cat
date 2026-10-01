@@ -19,7 +19,7 @@ import Agentic.Manager.Protocol.LocalAdmin (AdminFailure (..), adminError, admin
 import Agentic.Manager.Store
 import Agentic.Runtime
   ( FlowLiveness (FlowLive), FlowReport (..), Position (..), PrivateRoot, RunId, closePrivateRoot, mkRunId,
-    openPrivateSubroot, privateRootPath, readFlow, readFlowLine, runIdText, runLogName )
+    openPrivateSubroot, privateRootPath, probePrivateLockAt, readFlow, readFlowLine, runIdText, runLogName )
 import Control.DeepSeq (NFData (rnf))
 import Control.Exception (IOException, bracket, throwIO, try)
 import Control.Monad (forM, unless)
@@ -88,11 +88,13 @@ storeCheck integrity identities = object ["integrity" .= integrity, "quarantineI
 
 -- | The answer of @check-quarantine@ for one quarantined claim.
 data QuarantineState
-  = -- | Cleanup evidence holds: the reservation never launched a run, or the
-    -- run store of its run holds the terminal record of the runtime.
+  = -- | Cleanup evidence holds: the reservation never launched a run, the
+    -- run store of its run holds the terminal record of the runtime, or the
+    -- owner lock of its run is free.
     QuarantineClean
-  | -- | The reservation launched a run, and its run store holds no terminal
-    -- record.
+  | -- | The reservation launched a run, its run store holds no terminal
+    -- record, and the owner lock of its run is held, absent or not a
+    -- private regular file.
     QuarantineCleanupRequired
   | -- | The run store cannot be read, or the claim is one that a restoration
     -- carried forward, whose run the Store does not record.
@@ -141,7 +143,9 @@ instance NFData Claim where
 -- 'StateConflict'. The Store file slot and one read transaction are taken in
 -- the lock order file slot, configuration, database. A launched reservation
 -- reads the run log of its run with the runtime readers: the first event
--- record whose event ends the run is the terminal record.
+-- record whose event ends the run is the terminal record. Without a terminal
+-- record, the free owner lock of the run shows that its inner frontend worker
+-- has ended.
 inspectQuarantine :: CoordinationStore -> Text -> IO (QuarantineState, Maybe CleanupEvidence)
 inspectQuarantine store ident = withStoreFiles store $ \root -> do
   generation <- storeProcessGeneration <$> storeIdentity store
@@ -160,14 +164,20 @@ classify root generation ident claim =
       pure (QuarantineClean, Just (evidence (("evidence", "no-launch") : ("processGeneration", toValue generation) : facts)))
     ClaimLaunched _ run recorded native -> do
       found <- try @IOException (try @StoreFailure (terminalRecord root recorded native))
-      pure $ case found of
+      case found of
         Right (Right (Just (Position position, bytes))) ->
-          (QuarantineClean, Just (evidence
+          pure (QuarantineClean, Just (evidence
             [("evidence", "terminal-record"), ("reservationId", toValue ident), ("runId", toValue run),
              ("position", toValue position), ("recordSha256", toValue (sha256 bytes)),
              ("processGeneration", toValue generation)]))
-        Right (Right Nothing) -> (QuarantineCleanupRequired, Nothing)
-        _ -> (QuarantineUnverifiable, Nothing)
+        Right (Right Nothing) -> do
+          released <- ownerReleased root recorded native
+          pure $ if released
+            then (QuarantineClean, Just (evidence
+              [("evidence", "owner-released"), ("reservationId", toValue ident), ("runId", toValue run),
+               ("processGeneration", toValue generation)]))
+            else (QuarantineCleanupRequired, Nothing)
+        _ -> pure (QuarantineUnverifiable, Nothing)
   where
     toValue :: Aeson.ToJSON a => a -> Value
     toValue = Aeson.toJSON
@@ -304,6 +314,20 @@ terminalRecord root recorded native = withRecordedRunRoot root recorded $ \runs 
       Nothing
         | null (reportProblems report) -> pure Nothing
         | otherwise -> ioError (userError "the run store cannot be read")
+
+-- Whether the inner frontend worker of a run has ended: the exclusive lock of
+-- runs/<run>/owner.lock in the recorded run root is free. The probe takes the
+-- lock and releases it at once. A lock that another open description holds, an absent
+-- lock file, and a lock file that cannot be opened as a private regular file
+-- give 'False'. An absent file is no proof, because a worker from before the
+-- owner lock never created one.
+ownerReleased :: PrivateRoot -> Text -> RunId -> IO Bool
+ownerReleased root recorded native = do
+  probed <- try @IOException (try @StoreFailure (withRecordedRunRoot root recorded $ \runs ->
+    probePrivateLockAt runs ["runs", T.unpack (runIdText native), "owner.lock"]))
+  pure $ case probed of
+    Right (Right free) -> free
+    _ -> False
 
 evidence :: [(Text, Value)] -> CleanupEvidence
 evidence facts =

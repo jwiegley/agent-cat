@@ -29,6 +29,7 @@ module Agentic.Runtime.PrivateRoot
     openPrivateLogAt,
     createPrivateLockAt,
     lockPrivateDescriptor,
+    probePrivateLockAt,
     privateFileIdentityAt,
     privateFileSizeAt,
     listPrivateDirectoryAt,
@@ -66,7 +67,7 @@ import qualified Data.ByteString.Lazy as BL
 import Data.IORef (atomicModifyIORef', newIORef, readIORef, writeIORef)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
-import Foreign.C.Error (eEXIST, eNOENT, getErrno, throwErrno, throwErrnoIfMinus1Retry)
+import Foreign.C.Error (eEXIST, eINTR, eNOENT, eWOULDBLOCK, getErrno, throwErrno, throwErrnoIfMinus1Retry)
 import Foreign.C.String (CString, withCString)
 import Foreign.C.Types (CInt (..))
 import System.Directory (canonicalizePath, createDirectoryIfMissing)
@@ -255,6 +256,32 @@ createPrivateLockAt root components = withParent root components $ \parent file 
 lockPrivateDescriptor :: String -> Fd -> IO ()
 lockPrivateDescriptor location (Fd descriptor) =
   void (throwErrnoIfMinus1Retry location (c_lock_private_descriptor descriptor))
+
+-- | Whether the exclusive @flock@ of the private lock file at the path is
+-- free. The probe opens the file read-only without following a final
+-- symbolic link. The file must be a regular file of the effective user with
+-- private permissions and one link. A free lock is taken and released at
+-- once, and the result is 'True'. A lock that another open description holds
+-- gives 'False'. An absent file, a file that is not a private regular file,
+-- and every other failure raise an 'IOException'.
+probePrivateLockAt :: PrivateRoot -> [FilePath] -> IO Bool
+probePrivateLockAt root components = withParent root components $ \parent file ->
+  bracket (openFdAt (Just parent) file ReadOnly defaultFileFlags {nofollow = True, cloexec = True, nonBlock = True}) closeFd $ \descriptor@(Fd raw) -> do
+    status <- getFdStatus descriptor
+    unless (isRegularFile status && linkCount status == 1) $
+      ioError (userError "private lock is not a regular file with one link")
+    unless (fileOwner status == privateRootOwner root && fileMode status .&. 0o077 == 0) $
+      ioError (userError "private lock is not private to the effective user")
+    let attempt = do
+          result <- c_lock_private_descriptor raw
+          if result == 0
+            then pure True
+            else do
+              errno <- getErrno
+              if errno == eINTR
+                then attempt
+                else if errno == eWOULDBLOCK then pure False else throwErrno "private lock probe"
+    attempt
 
 -- | Open an append-only private log for reading and appending, creating it
 -- when it is absent. The file must be a regular file of the effective user

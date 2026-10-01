@@ -58,10 +58,11 @@ import qualified Database.SQLite3 as SQL
 import qualified Database.SQLite3.Direct as Direct
 import Foreign.Ptr (Ptr)
 import Foreign.C.Types (CInt (..))
-import System.Directory (createDirectory, createDirectoryIfMissing, doesDirectoryExist, doesFileExist, listDirectory, renameDirectory, renameFile)
+import System.Directory (createDirectory, createDirectoryIfMissing, doesDirectoryExist, doesFileExist, listDirectory, removeDirectoryRecursive, renameDirectory, renameFile)
 import System.Environment (getArgs)
 import System.FilePath ((</>), takeDirectory)
 import System.IO (BufferMode (LineBuffering), hSetBuffering, stdout)
+import System.Posix.IO (closeFd)
 import System.Posix.Files (setFileMode, fileMode, fileSize, getFileStatus, getSymbolicLinkStatus)
 import System.Posix.Types (CUid (..))
 import System.Posix.User (getEffectiveUserID)
@@ -1128,6 +1129,79 @@ quarantineChecks root store = do
   release "restored_pc2" evidenceId digest >>= releaseRefused "cleanup-unverified" "release-quarantine refuses a restoration claim with cleanup-unverified"
   write ["DELETE FROM restoration_quarantine WHERE id='restored_pc2'"]
 
+-- check-quarantine and release-quarantine on a launched reservation whose run
+-- store holds no terminal record. The fixture writes the reservation, its
+-- consumed preparation and its lost run, and a run store under the recorded
+-- run root that holds only the start record. Without runs/<run>/owner.lock
+-- the claim needs cleanup. While a second open description of the lock file
+-- holds the lock, the claim needs cleanup and the release refuses. Once that
+-- description closes, the claim is clean with owner-released evidence, and
+-- the release frees the reservation.
+launchedQuarantineChecks :: FilePath -> CoordinationStore -> IO ()
+launchedQuarantineChecks root store = do
+  generation <- storeProcessGeneration <$> storeIdentity store
+  let runsPath = root </> "runs"
+      runPath = runsPath </> "runs" </> "native_pe3"
+      native = Runtime.RunId "native_pe3"
+      manifest = Runtime.RunManifest native "review" "0.1.0.0" (object ["program" .= ("fixture" :: Text)]) "scripted" (object ["kind" .= ("scripted" :: Text)]) Nothing Runtime.RootRun Nothing (Just Runtime.PersonAnswerLocalControl)
+      start = Runtime.Start native (T.replicate 64 "a") ("sha256:" <> T.replicate 64 "b") (Just Runtime.PersonAnswerLocalControl) "scripted" Runtime.RootRun Nothing []
+      answer = administerLocally StoreStopped (pure ()) store (Admin.CheckQuarantine "reservation_pe3") >>= adminValue
+      release suppliedId suppliedDigest = administerLocally StoreStopped (pure ()) store (Admin.ReleaseQuarantine "reservation_pe3" suppliedId suppliedDigest) >>= adminValue
+      needsCleanup label value = check label (adminField "ok" value == Bool True
+        && adminField "result" value == object ["quarantineId" .= ("reservation_pe3" :: Text), "state" .= ("cleanup-required" :: Text),
+             "cleanupEvidenceId" .= Null, "cleanupEvidenceDigest" .= Null, "processGeneration" .= generation, "expiresAt" .= Null])
+      unverified label value = check label (adminField "ok" value == Bool False
+        && adminField "operation" value == String "release-quarantine"
+        && adminField "code" (adminField "error" value) == String "cleanup-unverified")
+      reservationState = withRaw root (\db -> rawRows db "SELECT state,slot FROM reservations WHERE id='reservation_pe3'")
+      facts = "{\"evidence\":\"owner-released\",\"processGeneration\":\"" <> TE.encodeUtf8 generation
+        <> "\",\"reservationId\":\"reservation_pe3\",\"runId\":\"run_pe3\"}"
+      digest = T.pack (show (hash facts :: Digest SHA256))
+      evidenceId = "cleanup_" <> T.take 32 digest
+  forM_ [runsPath, runsPath </> "runs", runPath] $ \directory -> createDirectoryIfMissing False directory >> setFileMode directory 0o700
+  Runtime.withRunStoreVersioned Runtime.latestStoreVersion Runtime.correlatedProtocolVersion (runPath </> "runtime") manifest $ \runtime ->
+    Runtime.withRunLog runtime Runtime.Manager start (const (pure ()))
+  identity <- withStoreFiles store $ \files ->
+    bracket (Runtime.openPrivateSubroot files ["runs"]) Runtime.closePrivateRoot (pure . T.pack . Runtime.privateRootIdentity)
+  withRaw root $ \db -> do
+    mapM_ (SQL.exec db)
+      ["INSERT INTO requests (id,revision,client_id,workflow_id,descriptor_revision,profile_id,profile_revision,phase,admission,blocking_reasons,validation_errors) VALUES ('request_pe3','r0','client_1','workflow_1','descriptor_1','profile_1','profile_revision','associated','released',X'5b5d',X'5b5d')",
+       "INSERT INTO reservations (id,request_id,slot,process_generation,state) VALUES ('reservation_pe3','request_pe3',14,'process_old','quarantined')"]
+    rawInsert db "INSERT INTO preparations (id,revision,request_id,request_revision,profile_revision,reservation_id,process_generation,worker_identity,root_identity,native_run_id,expires_at,review_digest,review,private_binding,state,reason) VALUES ('preparation_pe3','p0','request_pe3','r0','profile_revision','reservation_pe3','process_old','worker_old',?,'native_pe3','2999-01-01T00:00:00Z','digest',X'7b7d',X'7b7d','consumed','consumed')"
+      [SQL.SQLText identity]
+    rawInsert db "INSERT INTO runs (id,revision,control_revision,request_id,preparation_id,profile_id,root_identity,native_run_id,supervision,result_state) VALUES ('run_pe3','run_revision','control_revision','request_pe3','preparation_pe3','profile_1',?,'native_pe3','lost','absent')"
+      [SQL.SQLText identity]
+  answer >>= needsCleanup "check-quarantine reports a launched claim without owner.lock as cleanup-required"
+  release evidenceId digest >>= unverified "release-quarantine refuses a launched claim without owner.lock with cleanup-unverified"
+  held <- bracket (Runtime.openPrivateRoot "runs" runsPath) Runtime.closePrivateRoot $ \runs ->
+    Runtime.createPrivateLockAt runs ["runs", "native_pe3", "owner.lock"]
+  answer >>= needsCleanup "check-quarantine reports a launched claim whose owner.lock is held as cleanup-required"
+  release evidenceId digest >>= unverified "release-quarantine refuses a launched claim whose owner.lock is held with cleanup-unverified"
+  reservationState >>= check "a refused release keeps the launched reservation quarantined in its slot"
+    . (== [[SQL.SQLText "quarantined", SQL.SQLInteger 14]])
+  closeFd held
+  first <- answer
+  second <- answer
+  let result = adminField "result" first
+  check "check-quarantine gives owner-released evidence for a launched claim whose owner.lock is free"
+    (adminField "ok" first == Bool True && adminField "state" result == String "clean"
+      && adminField "cleanupEvidenceDigest" result == String digest
+      && adminField "cleanupEvidenceId" result == String evidenceId
+      && (case adminField "expiresAt" result of String _ -> True; _ -> False))
+  check "two checks of a free owner.lock return the same evidence"
+    (all (\key -> adminField key (adminField "result" second) == adminField key result) ["state", "cleanupEvidenceId", "cleanupEvidenceDigest"])
+  released <- release evidenceId digest
+  check "release-quarantine with owner-released evidence frees the launched reservation"
+    (adminField "ok" released == Bool True && adminField "result" released
+      == object ["quarantineId" .= ("reservation_pe3" :: Text), "state" .= ("released" :: Text)])
+  reservationState >>= check "the released launched reservation has no slot" . (== [[SQL.SQLText "released", SQL.SQLNull]])
+  withRaw root $ \db -> mapM_ (SQL.exec db)
+    ["DELETE FROM runs WHERE id='run_pe3'",
+     "DELETE FROM preparations WHERE id='preparation_pe3'",
+     "DELETE FROM reservations WHERE id='reservation_pe3'",
+     "DELETE FROM requests WHERE id='request_pe3'"]
+  removeDirectoryRecursive runPath
+
 credentialAdministrationChecks :: FilePath -> IO ()
 credentialAdministrationChecks work = withFixture work "credentials" (64*commandCapacity) 20 $ \_ root _ store profile proof -> do
   let expiry = "2999-01-01T00:00:00Z"
@@ -1172,6 +1246,7 @@ credentialAdministrationChecks work = withFixture work "credentials" (64*command
     (adminField "ok" checked == Bool True && adminField "result" checked == object
       ["integrity" .= ("valid" :: Text), "quarantineIds" .= quarantined])
   quarantineChecks root store
+  launchedQuarantineChecks root store
   req <- request store SetInput "credential-rotation"
   original <- withAuthorizedView store proof "profile_1" [Observe] (\view -> do
     submission <- submitCommand store proof req (edit profile (commandResource req) "rotated_revision") >>= right

@@ -76,11 +76,14 @@ claims that wait for cleanup evidence.
 `check-quarantine` takes one `quarantineId` from `check-store` and reports the
 cleanup evidence of that claim with the frozen result `quarantineId`, `state`,
 `cleanupEvidenceId`, `cleanupEvidenceDigest`, `processGeneration`, and
-`expiresAt`. The state is `clean` when the reservation never launched a run or
-when the run store of its run holds the terminal record of the runtime,
-`cleanup-required` when its run has no terminal record, and `unverifiable` when
-the run store cannot be read or the identity names a claim that a restoration
-carried forward. A `clean` answer carries the evidence identity, the lowercase
+`expiresAt`. The state is `clean` when the reservation never launched a run
+(evidence `no-launch`), when the run store of its run holds the terminal record
+of the runtime (evidence `terminal-record`), or when its run has no terminal
+record and the check can take the exclusive lock of the `owner.lock` file of
+the run (evidence `owner-released`). The state is `cleanup-required` when its
+run has no terminal record and that lock is held, absent or not a private
+regular file, and `unverifiable` when the run store cannot be read or the
+identity names a claim that a restoration carried forward. A `clean` answer carries the evidence identity, the lowercase
 SHA-256 digest of the canonical JSON facts, and an expiry 600 seconds after the
 check. The other states carry `null` in these three members. The facts include
 the process generation of the answering lifetime, so two checks in one
@@ -102,7 +105,9 @@ quarantined, a reservation that a release already released included, refuse
 with `state-conflict`. Evidence that is not `clean`, or whose identity or
 digest differs from the supplied values, refuses with `cleanup-unverified`. A
 claim that a restoration carried forward is `unverifiable`, so its release
-refuses with `cleanup-unverified`. A refusal changes no Store row and appends
+refuses with `cleanup-unverified`. A launched claim without a terminal record
+whose `owner.lock` is held is `cleanup-required`, so its release also refuses
+with `cleanup-unverified`. A refusal changes no Store row and appends
 nothing to the manager log. Otherwise one transaction deletes the resource
 keys of the reservation, sets the reservation `released` with no slot,
 advances the revision of its request, sets a `reserved` request admission to

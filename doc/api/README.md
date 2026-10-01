@@ -845,8 +845,10 @@ channel implement credential listing, issuance, rotation and revocation, the
 read-only `status`, `check-store` and `check-quarantine` operations, and
 `release-quarantine`.
 `check-quarantine` answers `clean` with cleanup evidence when the reservation
-never launched a run or when the run log of its run holds the terminal record
-of the runtime, `cleanup-required` when that run has no terminal record, and
+never launched a run, when the run log of its run holds the terminal record
+of the runtime, or when that run has no terminal record and the exclusive lock
+of its `owner.lock` file is free, `cleanup-required` when that run has no
+terminal record and the lock is held or the file is absent, and
 `unverifiable` when the run store cannot be read or the identity names a
 restoration claim. The evidence digest is the lowercase SHA-256 digest of the
 canonical JSON facts, which include the answering process generation, and the
