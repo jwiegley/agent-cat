@@ -742,7 +742,10 @@ second consumer of the `events` section and of the `refresh` section.
 vitest with the same pass criteria and the same splits, and it asserts the
 number of cases of each subsection. It
 reads the file with a lossless JSON parser, so that each number reaches the
-decoders with its exact value.
+decoders with its exact value. The same client loads a client profile with
+the rules of `connectClientProfile` and sends its requests over HTTPS with
+the CA file of the profile as its only trust anchors and TLS 1.3 only, as
+`ext-pi/README.md` states.
 
 The `resources` section of the same file holds the vectors of the public
 resource types. Each case gives the resource as JSON text in `json`, and

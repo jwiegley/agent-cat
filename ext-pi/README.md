@@ -18,6 +18,9 @@ machine event stream (protocol version 2 when advertised, with version 1 retaine
 for older runners), and the correlated control channel. Descriptor v3 advertises
 sanitized routing inspection and protocol negotiation; v2 completion carries a
 verified private result reference.
+In service mode only, the extension also communicates with the agent-cat
+manager through the versioned `/v1` HTTP protocol, as the section "Manager
+client" states.
 The CLI and runtime own scheduling, persistence semantics, effects, and engine
 behavior; the extension owns trusted
 discovery, approval, supervision, the user interface, retention, and durable
@@ -65,7 +68,9 @@ the Haskell client modules `Agentic.Manager.Client.Events`,
 shared protocol codecs `Agentic.Manager.Protocol.Draft`,
 `Agentic.Manager.Protocol.Preparation` and `Agentic.Manager.Protocol.Command`,
 and of the service parsers of `Agentic.Tui.Service`. It imports no Haskell
-code. Its modules perform no I/O and hold no session.
+code. `src/manager/profile.ts` and `src/manager/transport.ts` load a client
+profile and perform the HTTPS requests of one session. The other modules
+perform no I/O and hold no session.
 
 `src/manager/json.ts` parses JSON text without loss. `parseJson` uses the
 source text that `JSON.parse` of Node 22 gives to a reviver, and it keeps the
@@ -160,6 +165,86 @@ They do not change the state that they receive, and no action is a send.
   target observes the effect only when the caller sees the effect and the
   entity tag differs from the precondition. An `uncertain` report carries
   the same `Uncertain` value unchanged, and the client resends nothing.
+
+`src/manager/profile.ts` loads a client profile as `connectClientProfile`
+of `Agentic.Manager.Client` does. A client profile is a JSON object with
+exactly these four fields:
+
+```json
+{
+  "version": 1,
+  "endpoint": "https://127.0.0.1:8443/v1",
+  "credentialFile": "/absolute/path/to/credential",
+  "caFile": "/absolute/path/to/ca.pem"
+}
+```
+
+- `version` is 1.
+- `endpoint` starts with `https://` and has the path `/v1` or `/v1/`. It has
+  no user information, query or fragment, and no space, control character
+  or backslash.
+- `credentialFile` and `caFile` are absolute paths of at most 4096 bytes.
+- The profile file and the credential file are regular files that the user
+  owns, with no group or other permission bits and one link. The profile
+  file holds at most 16384 bytes. The credential file holds 32 to 512
+  visible ASCII bytes other than the comma.
+- The CA file is a regular file of at most 1 MiB that no group or other
+  user can write, and it holds at least one PEM certificate.
+
+`ClientProfile.load` reads the files without following a final symbolic
+link. It refuses before any request: `InvalidClientProfile` for a profile
+that does not parse, has a missing or an extra field, has another version
+or has a relative path, `InvalidEndpoint` for the endpoint,
+`ClientFileUnavailable` for a file that is missing, too large, not regular
+or not private, and `CredentialUnavailable` for credential bytes outside
+the bounds. Only this module reads the credential file. A `ClientProfile`
+keeps the credential path and fingerprint in private fields, and its JSON
+form names only the endpoint. `authorization` reads the credential again
+for each request and gives `CredentialChanged` when its fingerprint differs
+from the fingerprint at load.
+
+`src/manager/transport.ts` holds `ManagerTransport`, the HTTPS transport of
+one loaded profile:
+
+- Each request uses `node:https` with the CA file as its only trust anchors,
+  TLS 1.3 as its only version and its own agent, so no environment proxy
+  and no connection pool applies. It sends the bearer in `Authorization`,
+  `Accept-Encoding: identity` and `Connection: close`. A redirect status
+  gives `RedirectRefused`, and no redirect is followed. A JSON response is
+  complete within 15 seconds, and its body is at most 1 MiB, or the request
+  gives `TransportUnavailable` or `ResponseTooLarge`.
+- `get` gives the status, the lossless JSON value, the `ETag` and the
+  `Location` of a response with `version` 1. `post` sends a JSON body of at
+  most 2 MiB once with `Content-Type: application/json`, an
+  `Idempotency-Key` and an optional `If-Match`. It never resends.
+  `commandKey` gives a new idempotency key of an authority epoch. A problem
+  response gives `Refused` with its status and code.
+- `streamEvents` opens one SSE connection to `/v1/events` with the cursor in
+  `Last-Event-ID`, parses it with `feedSse`, and gives each invalidation and
+  heartbeat in order. It ends at the end of the response or after 45 seconds
+  without a byte, and gives the last complete event identifier.
+  `pollEvents` reads one JSON batch of the same resource after a cursor.
+- `followEvents` follows `/v1/events` as the event worker of the TUI does.
+  After an end or a failure of the stream, it reconnects with the last
+  complete event identifier after the jittered wait of `reconnectDelay`. A
+  connection that delivered an item resets the backoff. After two
+  consecutive ends without a delivery, or after another refusal of the
+  stream, it polls every second from the cursor and connects the stream
+  again when the backoff has passed. A 410 refusal ends it with
+  `resnapshot`, a credential refusal ends it with `refused`, and `close`
+  ends it with `closed`.
+- `close` aborts every open request, the open stream and every wait. Every
+  later call and every result that arrives after `close` gives
+  `ClientClosed`.
+
+`test/manager-transport.test.ts` runs the transport against a local
+`node:https` server on `127.0.0.1`. The test generates an EC P-256 CA and a
+leaf certificate with the subject alternative name `IP:127.0.0.1` in a
+temporary directory with `openssl` from `PATH`. It covers GET and POST with
+their headers over TLS 1.3, a refused redirect, an oversized body, a server
+certificate of another CA, the reconnection of a dropped stream with
+`Last-Event-ID`, the polling fallback, a 410 refusal, `close` during an open
+stream with a late response, and the profile refusals before any request.
 
 `test/manager-vectors.test.ts` reads `../test/manager_client_vectors.json` and
 runs every case of its `events`, `resources` and `refresh` sections with the
