@@ -392,8 +392,38 @@ OVERVIEW = "tui-overview"
 # cannot delay the second review. Each step prints its own PASS line. It runs
 # one manager lifetime.
 INPUTS = "tui-inputs"
-TUI_MODES = {OVERVIEW: (["profile_1", "profile_2"], ["observe", "submit"]), INPUTS: (["profile_1"], ["observe", "submit", "control"])}
+# The tui-controls mode sends the run controls of WM-034 through the service
+# TUI with the ACP control fixtures of the controls mode: profile_1 runs the
+# recovery-offering retry adapter, profile_steer the steerable adapter, and
+# profile_route the retry adapter with a spare candidate, as in the
+# controls-routing mode. The harness creates, approves and settles each run
+# with its own credential, and the TUI opens the run from the Manager
+# overview by its identifier and sends the control.
+# 1. While a profile_steer run holds its first turn, c opens the cancel
+# confirmation and y sends the cancel. The live monitor must show cancel
+# accepted and then the runtime status Cancelled, the run must end
+# cancelled through HTTP, and no frame may show the status Succeeded or
+# Failed for the run.
+# 2. While a second profile_steer run holds its first turn, i opens the
+# steer editor below the monitor, and Ctrl-D sends the typed text. The live
+# monitor must show the effect steered, and the run log must hold the steer
+# record. The harness then completes the run.
+# 3. At the recovery decision of a profile_route run, f sends the fail-over
+# choice. The live monitor must show failed over, and after the run
+# succeeds, its run log must hold a second question to the spare candidate
+# with the answer of that candidate.
+# 4. At the recovery decision of a profile_1 run, whose controls offer no
+# steer, i and b are refused locally with numbered key outcomes and send
+# nothing.
+# a then sends the abandon choice. The live monitor must show abandoned, the
+# decision must leave the queue of the run, and the run must end failed.
+# Each step prints its own PASS line. It runs one manager lifetime.
+TUI_CONTROLS = "tui-controls"
+TUI_MODES = {OVERVIEW: (["profile_1", "profile_2"], ["observe", "submit"]), INPUTS: (["profile_1"], ["observe", "submit", "control"]),
+             TUI_CONTROLS: (["profile_1", "profile_steer", "profile_route"], ["observe", "submit", "control"])}
 tui_mode = sys.argv[5] if len(sys.argv) == 6 and sys.argv[5] in TUI_MODES else None
+# The tui-controls mode configures the control fixture profiles.
+control_profiles = control_profiles or tui_mode == TUI_CONTROLS
 assert len(sys.argv) == 5 or mixed or boundary or pages_mode or events_mode or captures_mode or discard_mode or exports_mode or lineage_mode or control_profiles or person_mode or endpoints_mode or tui_mode
 assert not tui_approval or os.environ.get("TUI_CHECK")
 assert not (endpoints_mode or tui_mode) or os.environ.get("TUI_CHECK")
@@ -502,7 +532,7 @@ if tui_mode == OVERVIEW:
     configuration["profiles"][0]["resourceKeys"] = ["overview_one"]
     configuration["profiles"].append(dict(configuration["profiles"][0], id="profile_2",
                                           workspaceLabel="HTTPS second fixture", resourceKeys=["overview_two"]))
-if tui_mode == INPUTS:
+if tui_mode in (INPUTS, TUI_CONTROLS):
     configuration["limits"]["executionReservations"] = 2
 # The restart quarantines the reservation of the lost run, or of a request
 # in review, with its execution slot and resource keys, until the operator
@@ -533,7 +563,7 @@ if control_profiles:
              targetArguments=["--engine", "acp", "--adapter", "retry-adapter"], environment=fixture_path),
         dict(scripted, id="profile_steer", workspaceLabel="HTTPS steer fixture", targetLabel="Deterministic ACP steer",
              targetArguments=["--engine", "acp", "--adapter", "steer-adapter"], environment=fixture_path)]
-    if routing_mode:
+    if routing_mode or tui_mode == TUI_CONTROLS:
         # The route named spare answers the spare candidate of the
         # mixed-controls question. The primary candidate keeps the retry
         # adapter, which offers a recovery after its decoding budget.
@@ -4412,6 +4442,341 @@ def input_checks():
             (work / "server-0.exit").write_text(str(process.returncode) + "\n")
 
 
+def tui_control_checks():
+    """The tui-controls mode. See TUI_CONTROLS for the steps."""
+    harness = tui_fixture.harness
+    terminal = ("succeeded", "failed", "cancelled")
+
+    def save(session, name):
+        (work / ("tui-controls-" + name + ".screen.txt")).write_text(session.screen.text())
+
+    def start(profile):
+        """Create, enqueue and approve one mixed-controls request of the
+        profile through HTTP with the credential of the harness. Returns
+        the run."""
+        status, catalogue, _ = request("/v1/workflows?profileId=" + profile, harness)
+        assert status == 200, ("control catalogue", profile, status)
+        workflow = next(item for item in catalogue["items"] if item["name"] == "mixed-controls")
+        body = {"workflowId": workflow["id"], "descriptorRevision": workflow["revision"],
+                "profileId": workflow["profileId"], "profileRevision": workflow["profileRevision"]}
+        key = capabilities["authorityEpoch"] + "." + secrets.token_urlsafe(16)
+        status, created, raw = request("/v1/requests", harness | {"Content-Type": "application/json", "Idempotency-Key": key},
+                                       method="POST", payload=json.dumps(body, separators=(",", ":")).encode())
+        assert status == 201, ("control request creation", profile, status, created.get("code"))
+        validate("Request", created, raw)
+        _, run = approve_mixed(created, workflow, client)
+        return run
+
+    def details(screen):
+        return "".join(line.split("\u2502", 1)[1].strip() for line in screen.splitlines() if "\u2502" in line)
+
+    def open_run(session, run):
+        """Open the run from its row of the Manager overview."""
+        deadline = time.monotonic() + 30
+        while True:
+            session.send(b"\x1b[A" * 16)
+            session.settle()
+            for _ in range(16):
+                screen = session.screen.text()
+                if "> run Running" in screen and "Run:" + run in details(screen).replace(" ", ""):
+                    session.send(b"\r")
+                    session.wait_screen("Approval receipt:", timeout=20)
+                    return session.wait_screen("Runtime: Running", timeout=20)
+                session.send(b"\x1b[B")
+                session.settle()
+            assert time.monotonic() < deadline, ("the overview lists no running row of the run", run, session.screen.text())
+            session.send(b"g")
+            session.pump(0.5)
+
+    def leave(session):
+        """Esc from the live monitor back to the overview."""
+        session.send(b"\x1b")
+        return session.wait_screen("Manager overview", timeout=10)
+
+    def snapshot_of(run):
+        value, _, _ = client[0]("/v1/runs/" + run + "/snapshot", "RunSnapshot")
+        return value
+
+    def ended(run, expected):
+        value, _, raw = client[1]("/v1/runs/" + run + "/snapshot", "RunSnapshot",
+            lambda value: value["runtime"] is not None and value["runtime"]["status"] in terminal)
+        (work / ("tui-controls-" + run + "-terminal.json")).write_bytes(raw)
+        assert value["runtime"]["status"] == expected, ("control run terminal status", run, value["runtime"]["status"], expected)
+
+    def offered(run, ready):
+        value, _, _ = client[1]("/v1/runs/" + run + "/control", "RunControl", ready)
+        return value
+
+    def answer_person(run):
+        """Answer the person question of a held profile_steer run with typed
+        false, so that the live monitor shows the held attempt without a
+        question head. The steerable attempt holds its turn until a steer."""
+        control = offered(run, lambda value: value["decisionHeadId"] is not None)
+        decision, tag, _ = client[0]("/v1/decisions/" + control["decisionHeadId"], "Decision")
+        assert decision["kind"] == "question", ("held run head", decision["kind"])
+        client[2]("/v1/decisions/" + decision["id"], {"operation": "answer", "occurrenceId": decision["address"]["occurrenceId"],
+                                                     "generation": decision["generation"], "value": False}, tag)
+        return offered(run, lambda value: value["decisionHeadId"] is None and value["cancelAllowed"]
+                       and any(offer["operation"] == "steer" for offer in value["offers"]))
+
+    def answer_until_recovery(run):
+        """Answer each question head of the run with typed false until the
+        head is a recovery decision. Returns that decision."""
+        deadline = time.monotonic() + 60
+        while True:
+            assert time.monotonic() < deadline, ("recovery head deadline", run)
+            control, control_tag, _ = client[0]("/v1/runs/" + run + "/control", "RunControl")
+            head = control["decisionHeadId"]
+            if head is None:
+                time.sleep(0.05)
+                continue
+            decision, tag, _ = client[0]("/v1/decisions/" + head, "Decision")
+            if decision["kind"] == "recovery":
+                return decision
+            client[2]("/v1/decisions/" + head, {"operation": "answer", "occurrenceId": decision["address"]["occurrenceId"],
+                                               "generation": decision["generation"], "value": False}, tag)
+
+    def settle(run, expected):
+        """Answer each remaining question head with typed false until the
+        run ends, and require the expected terminal status. A recovery head
+        fails the step."""
+        deadline = time.monotonic() + 90
+        while True:
+            value = snapshot_of(run)
+            if value["runtime"] is not None and value["runtime"]["status"] in terminal:
+                break
+            assert time.monotonic() < deadline, ("settle deadline", run)
+            control, _, _ = client[0]("/v1/runs/" + run + "/control", "RunControl")
+            head = control["decisionHeadId"]
+            if head is None:
+                time.sleep(0.05)
+                continue
+            decision, tag, _ = client[0]("/v1/decisions/" + head, "Decision")
+            assert decision["kind"] == "question", ("an unexpected recovery head", run, decision["kind"])
+            client[2]("/v1/decisions/" + head, {"operation": "answer", "occurrenceId": decision["address"]["occurrenceId"],
+                                               "generation": decision["generation"], "value": False}, tag)
+        ended(run, expected)
+
+    def run_records(run):
+        records, cursor = [], None
+        for _ in range(1024):
+            target = f"/v1/runs/{run}/routes" + ("" if cursor is None else "?after=" + cursor)
+            status, value, raw = request(target, harness | {"Accept": "application/json"})
+            assert status == 200, ("run route batch", run, status, value.get("code"))
+            validate("RouteBatch", value, raw)
+            records += value["records"]
+            cursor = value["cursor"]
+            if not value["hasMore"]:
+                return records
+        raise AssertionError(("run route pages did not end", run))
+
+    def commands(run_resources):
+        """The operations of the commands of these resources in the
+        coordination database, read through a read-only connection."""
+        import sqlite3
+        found = sorted((work / "manager").rglob("coordination.sqlite3"))
+        assert len(found) == 1, ("coordination database", found)
+        connection = sqlite3.connect(found[0].as_uri() + "?mode=ro", uri=True)
+        try:
+            marks = ",".join("?" * len(run_resources))
+            return [row[0] for row in connection.execute(
+                "SELECT operation FROM commands WHERE resource_uri IN (" + marks + ")", run_resources).fetchall()]
+        finally:
+            connection.close()
+
+    def runtime_labels(start):
+        """The runtime labels that the TUI wrote to the PTY after the byte offset start."""
+        text = bytes(session.output[start:]).decode("utf-8", "replace")
+        return set(RUNTIME_LINE.findall(text))
+
+    def press(keys, expect, operation, timeout=30):
+        """Send the keys and wait for the expected screen text. A mutation
+        key is deferred while a page-set read is in flight, and a deferred
+        key is never replayed, so a key outcome that names the deferral of
+        the operation sends the keys again, as the operator does. Returns
+        the screen and the number of deferrals."""
+        deadline = time.monotonic() + timeout
+        deferred = 0
+        while True:
+            start = len(session.output)
+            for key in keys:
+                session.send(key)
+                if key != keys[-1]:
+                    session.pump(0.2)
+            while True:
+                session.pump()
+                screen = session.screen.text()
+                if expect in screen:
+                    session.settle()
+                    return session.screen.text(), deferred
+                if operation + " deferred during a page-set read." in bytes(session.output[start:]).decode("utf-8", "replace"):
+                    deferred += 1
+                    break
+                assert time.monotonic() < deadline and session.process.poll() is None, (
+                    "the TUI screen did not show the expected text", expect, session.screen.text())
+            assert deferred <= 20, ("the key was deferred too often", operation)
+
+    def new_store(before):
+        deadline = time.monotonic() + 20
+        while True:
+            stores = sorted(set(work.glob("manager/runs/runs/*/runtime")) - before)
+            if len(stores) == 1:
+                return stores[0]
+            assert len(stores) == 0 and time.monotonic() < deadline, ("new run store", stores)
+            time.sleep(0.05)
+
+    def store_flow(name, store):
+        completed = subprocess.run([str(runner), "flow", str(store)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60)
+        (work / (name + ".ndjson")).write_bytes(completed.stdout)
+        (work / (name + ".stderr")).write_bytes(completed.stderr)
+        lines = [json.loads(line) for line in completed.stdout.splitlines()]
+        assert lines and "summary" in lines[-1] and completed.returncode == 0 and lines[-1]["summary"]["verified"], (
+            "the flow verb did not verify the ended run log", name, completed.returncode, completed.stderr[-2000:])
+        return lines[:-1]
+
+    with (work / "server-0.stdout").open("wb") as output, (work / "server-0.stderr").open("wb") as errors:
+        process = subprocess.Popen([str(runner), "--manager", "serve", "--config", str(config),
+                                    "+RTS", "-N" + native, "-RTS"], stdout=output, stderr=errors)
+        try:
+            wait_ready(process)
+            status, capabilities, _ = request("/v1/capabilities", harness)
+            assert status == 200 and "control" in capabilities["scopes"]
+            client = mixed_client(capabilities, harness)
+            with tui_fixture.session(rows=40, columns=140) as session:
+                session.wait_screen("Manager profiles")
+                session.wait_screen("profile_1")
+                session.send(b"\r")
+                session.wait_screen("Manager workflows")
+                session.send(b"O")
+                session.wait_screen("Manager overview")
+
+                # 1. c and y cancel a held run.
+                run = start("profile_steer")
+                answer_person(run)
+                open_run(session, run)
+                session.wait_screen("c CANCEL", timeout=20)
+                save(session, "cancel-open")
+                begin = len(session.output)
+                deferrals = 0
+                while True:
+                    _, deferred = press([b"c"], "Confirm cancel", "cancel")
+                    save(session, "cancel-confirmation")
+                    deferrals += deferred
+                    # A deferred y closes the confirmation, so c opens it again.
+                    screen, deferred = press([b"y"], "Control: cancel accepted", "cancel")
+                    deferrals += deferred
+                    if "Control: cancel accepted" in screen:
+                        break
+                screen = session.wait_screen("Control: cancel accepted; the runtime status is Cancelled", timeout=30)
+                assert "Runtime: Cancelled" in screen, "the live monitor does not show the cancelled runtime status"
+                save(session, "cancelled")
+                ended(run, "cancelled")
+                labels = runtime_labels(begin)
+                assert not labels & {"Succeeded", "Failed"}, ("the cancelled run was shown as finished", labels)
+                text = bytes(session.output[begin:]).decode("utf-8", "replace")
+                waiting = "waiting for the runtime status Cancelled" in text
+                sent = commands(["/v1/runs/" + run + "/control"])
+                assert sent == ["cancel"], ("the TUI sent other than one cancel", sent)
+                print("PASS tui-controls 1: c and y sent one cancel of held run", run, "; the live monitor showed cancel accepted",
+                      "(with the waiting line first)" if waiting else "(the receipt and the cancelled status arrived in one read)",
+                      "and then the runtime status Cancelled, the run ended cancelled, and the runtime labels after the key were",
+                      sorted(labels), "; deferred key presses:", deferrals, flush=True)
+                leave(session)
+
+                # 2. i and Ctrl-D steer a held run.
+                run = start("profile_steer")
+                control = answer_person(run)
+                offer = next(offer for offer in control["offers"] if offer["operation"] == "steer")
+                open_run(session, run)
+                session.wait_screen("i/b STEER", timeout=20)
+                _, deferrals = press([b"i"], "Steer \u00b7 interrupt-now", "steer")
+                session.send("Focus on the patch \u03bb.".encode())
+                session.wait_screen("Focus on the patch \u03bb.", timeout=10)
+                save(session, "steer-editor")
+                _, deferred = press([b"\x04"], "Control: steered", "steer")
+                deferrals += deferred
+                save(session, "steered")
+                records = run_records(run)
+                steers = [record for record in records if record["schema"] == "steer"]
+                assert steers, "the run log holds no steer record"
+                sent = commands(["/v1/runs/" + run + "/control"])
+                assert sent == ["steer"], ("the TUI sent other than one steer", sent)
+                settle(run, "succeeded")
+                print("PASS tui-controls 2: i opened the steer editor below the monitor, Ctrl-D sent one interrupt-now steer of attempt",
+                      offer["address"], "of run", run, "; the live monitor showed the effect steered, the run log holds", len(steers),
+                      "steer record, and the run succeeded", "; deferred key presses:", deferrals, flush=True)
+                leave(session)
+
+                # 3. f fails over the recovery of a two-candidate question.
+                before = set(work.glob("manager/runs/runs/*/runtime"))
+                run = start("profile_route")
+                store = new_store(before)
+                decision = answer_until_recovery(run)
+                assert any(item["choice"] == "failover" for item in decision["choices"]), ("failover not published", decision["choices"])
+                open_run(session, run)
+                session.wait_screen("f FAILOVER", timeout=20)
+                save(session, "failover-open")
+                _, deferrals = press([b"f"], "Control: failed over", "choose-recovery")
+                save(session, "failed-over")
+                sent = commands(["/v1/decisions/" + decision["id"]])
+                assert sent == ["choose-recovery"], ("the TUI sent other than one recovery choice", sent)
+                settle(run, "succeeded")
+                records = store_flow("tui-controls-failover-flow", store)
+                occurrence = decision["address"]["occurrenceId"]
+                questions = [record for record in records if record["schema"] == "question" and str(record["about"].get("occurrence")) == occurrence
+                             and isinstance(record["to"].get("to"), dict) and "model" in record["to"]["to"]]
+                assert len(questions) == 2 and questions[1]["to"]["to"]["model"].endswith("@spare"), (
+                    "fail-over questions", [(record["position"], record["to"]) for record in questions])
+                answers = [record for record in records if record["schema"] == "answer" and record.get("replyTo") == questions[1]["position"]]
+                assert len(answers) == 1 and answers[0]["from"] == {"model": questions[1]["to"]["to"]["model"]}, ("spare answer", answers)
+                print("PASS tui-controls 3: f sent one failover choice for decision", decision["id"], "of run", run,
+                      "; the live monitor showed failed over, the run succeeded, and its run log holds question", questions[1]["position"],
+                      "to", questions[1]["to"]["to"]["model"], "with its answer", "; deferred key presses:", deferrals, flush=True)
+                leave(session)
+
+                # 4. f and i are refused locally, and a abandons.
+                run = start("profile_1")
+                decision = answer_until_recovery(run)
+                control, _, _ = client[0]("/v1/runs/" + run + "/control", "RunControl")
+                assert not any(offer["operation"] == "steer" for offer in control["offers"]), ("unexpected steer offer", control["offers"])
+                open_run(session, run)
+                session.wait_screen("a ABANDON", timeout=20)
+                screen, deferrals = press([b"i"], "steer did not start: the manager offers no interrupt-now steer for this run.", "steer")
+                first = re.search(r"Key (\d+): steer did not start: the manager offers no interrupt-now", screen)
+                screen, deferred = press([b"b"], "steer did not start: the manager offers no next-boundary steer for this run.", "steer")
+                deferrals += deferred
+                second = re.search(r"Key (\d+): steer did not start: the manager offers no next-boundary", screen)
+                assert first and second and int(second.group(1)) > int(first.group(1)), (
+                    "the local refusals are not numbered outcomes", first and first.group(0), second and second.group(0))
+                save(session, "refused")
+                assert commands(["/v1/decisions/" + decision["id"], "/v1/runs/" + run + "/control"]) == [], "a refused key sent a command"
+                _, deferred = press([b"a"], "Control: abandoned", "choose-recovery")
+                deferrals += deferred
+                save(session, "abandoned")
+                sent = commands(["/v1/decisions/" + decision["id"]])
+                assert sent == ["choose-recovery"], ("the TUI sent other than one recovery choice", sent)
+                status, resolved, _ = request("/v1/decisions/" + decision["id"], harness)
+                ending = resolved["code"] if status == 404 else resolved.get("state")
+                assert (status == 404 and ending == "unavailable-resource") or (status == 200 and ending != "pending"), (
+                    "the abandoned decision is still pending", status, ending)
+                queue, _, _ = client[0]("/v1/decisions?runId=" + run, "DecisionPage")
+                assert decision["id"] not in [item["id"] for item in queue["items"]], "the abandoned decision is still queued"
+                settle(run, "failed")
+                print("PASS tui-controls 4: i and b at the recovery decision", decision["id"], "were refused locally as key outcomes",
+                      first.group(1), "and", second.group(1), "without a command, a sent one abandon choice, the live monitor showed abandoned,",
+                      "the decision left the run queue (" + str(status) + " " + str(ending) + ") and run", run, "ended failed", "; deferred key presses:", deferrals, flush=True)
+                session.send(b"q")
+                assert session.wait_exit(20) == 0
+                session.assert_restored()
+            assert not tui_fixture.client_state.exists(), "the service TUI created local runner state"
+            print("PASS tui-controls: the cancel, steer, fail-over and abandon controls ran through the actual service TUI", flush=True)
+        finally:
+            if process.poll() is None:
+                process.terminate()
+            process.wait(timeout=25)
+            (work / "server-0.exit").write_text(str(process.returncode) + "\n")
+
+
 def capture_checks():
     """POST /v1/captures through the real HTTPS manager. Each numbered case
     prints one PASS line."""
@@ -6866,7 +7231,7 @@ if person_mode:
     raise SystemExit(0)
 
 
-if control_profiles:
+if control_profiles and tui_mode != TUI_CONTROLS:
     facts = control_checks()
     if live_mode:
         live_flow_checks(facts)
@@ -6911,6 +7276,11 @@ if tui_mode == OVERVIEW:
 
 if tui_mode == INPUTS:
     input_checks()
+    raise SystemExit(0)
+
+
+if tui_mode == TUI_CONTROLS:
+    tui_control_checks()
     raise SystemExit(0)
 
 
@@ -7198,7 +7568,7 @@ for iteration in range(2):
                                         Every kind needs the header, the service lines with the runtime, and no
                                         row left from the request screen. The live monitor adds both panes and
                                         its footer. A question head adds the answer dialog, and a recovery head
-                                        adds the read-only recovery dialog.
+                                        adds the recovery dialog.
                                         """
                                         if (RUNTIME_LINE.search(visible) is None or "elapsed unknown" not in visible or "Run: " + run not in visible
                                                 or any(row in visible for row in REQUEST_SCREEN_ROWS) or "RUN DETAILS" in visible):
@@ -7207,8 +7577,8 @@ for iteration in range(2):
                                             return "live"
                                         if "Your answer" in visible and ("Ctrl-D SEND ANSWER" in visible or "WAITING FOR THE MANAGER EFFECT" in visible):
                                             return "question"
-                                        if "Recovery required" in visible and (("r RETRY" in visible and "READ-ONLY RECOVERY" not in visible)
-                                                                               or ("READ-ONLY RECOVERY" in visible and "Choices (read-only here): " in visible)):
+                                        if "Recovery required" in visible and (("r RETRY" in visible and "NO RECOVERY OFFERED" not in visible)
+                                                                               or ("NO RECOVERY OFFERED" in visible and "Choices (not offered by the manager): " in visible)):
                                             return "recovery"
                                         return None
 
@@ -7430,16 +7800,37 @@ for iteration in range(2):
                                             wait_frame(("live", "recovery"), 45, "TUI kept the answered question head", "after-answer")
                                             continue
                                         # At the recovery head the TUI offers r for the manager retry offer. The
-                                        # local cancel, save and route keys have no binding, and failover and
-                                        # abandon are refused as unsupported. The TUI handles keys in order, so
-                                        # the key help that ? opens marks the end of their handling.
+                                        # local save and route keys have no binding, c opens the cancel
+                                        # confirmation, which n closes without a send, and i is refused locally,
+                                        # because the run controls offer no steer. A mutation key that a
+                                        # page-set read defers is pressed again. The TUI handles keys in order,
+                                        # so the key help that ? opens marks the end of their handling.
                                         assert (decision["message"].splitlines() or [""])[0][:30] in visible, "recovery message not displayed"
                                         assert any(offer["operation"] == "retry" and offer["address"] == decision["address"]
                                                    and offer["generation"] == decision["generation"] for offer in control["offers"]), "the manager offers no retry"
-                                        assert "r RETRY" in visible and "READ-ONLY RECOVERY" not in visible, "the TUI does not offer the manager retry"
+                                        assert "r RETRY" in visible and "NO RECOVERY OFFERED" not in visible, "the TUI does not offer the manager retry"
                                         assert not any(text in visible for text in ("c CANCEL RUN", "PgUp/PgDn scroll", "Esc CANCEL RUN")), "local recovery keys offered"
                                         before, _ = run_read(base + "/snapshot", "RunSnapshot")
-                                        session.send(b"cs1fa")
+                                        session.send(b"s1")
+
+                                        def key_until(key, expect, operation):
+                                            """Send the key until the screen shows the expected text. A key
+                                            outcome that names the deferral of the operation sends it again."""
+                                            deadline = time.monotonic() + 20
+                                            while True:
+                                                start = len(session.output)
+                                                session.send(key)
+                                                while True:
+                                                    session.pump()
+                                                    if expect in session.screen.text():
+                                                        return
+                                                    if operation + " deferred during a page-set read." in bytes(session.output[start:]).decode("utf-8", "replace"):
+                                                        break
+                                                    assert time.monotonic() < deadline, ("the TUI did not show", expect, session.screen.text())
+
+                                        key_until(b"c", "Confirm cancel", "cancel")
+                                        key_until(b"n", "cancel was not sent: the confirmation was closed.", "cancel")
+                                        key_until(b"i", "steer did not start: the manager offers no interrupt-now steer for this run.", "steer")
                                         session.send(b"?")
                                         session.wait_screen("Keyboard shortcuts")
                                         session.send(b"\x1b")
@@ -7451,7 +7842,8 @@ for iteration in range(2):
                                         after_keys, _ = run_read(base + "/snapshot", "RunSnapshot")
                                         assert after_keys["runtime"]["status"] not in ("cancelling", "cancelled"), "a local key cancelled the manager run"
                                         assert after_keys["controlAcks"] == before["controlAcks"], "a local key sent a manager control"
-                                        print("PASS actual TUI recovery head ignores the local c, s and 1 keys and refuses f and a: no control, decision or acknowledgement changed", flush=True)
+                                        print("PASS actual TUI recovery head ignores the local s and 1 keys, n closes the cancel confirmation that c opened,",
+                                              "and the unoffered steer of i is refused locally: no control, decision or acknowledgement changed", flush=True)
                                         # The run details open over the recovery head. On a short terminal they
                                         # are longer than their viewport, so End hides their first row and Home
                                         # shows it again.

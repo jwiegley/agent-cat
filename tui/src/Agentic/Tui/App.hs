@@ -274,6 +274,10 @@ data AppState = AppState
     stateServiceApproval :: !(Maybe (Service.Mutation,Manager.PendingCommand,Maybe Manager.Reference)),
     stateServiceApprovalStatus :: !(Maybe Text),
     stateServiceLastReceipt :: !(Maybe Manager.CommandReceipt),
+    -- | The run and the outcome of the latest cancel, steer or recovery
+    -- choice that completed, as 'Service.controlOutcome' reads it from the
+    -- receipt of the command.
+    stateServiceControlOutcome :: !(Maybe (Text, Text)),
     -- | The sequence number of the latest approval-key press on the review.
     -- It counts approval-key presses only, not every key event.
     stateServiceKeySerial :: !Int,
@@ -412,6 +416,7 @@ runAppWith backend = mask $ \restore -> do
             stateServiceApproval = Nothing,
             stateServiceApprovalStatus = Nothing,
             stateServiceLastReceipt = Nothing,
+            stateServiceControlOutcome = Nothing,
             stateServiceKeySerial = 0,
             stateServiceApprovalPress = Nothing,
             stateServiceNotice = Nothing,
@@ -675,7 +680,7 @@ newServiceSelection state = state {stateServiceObservation = Lane.noObservation,
 -- that confirm a command in progress continue, and nothing is sent.
 leaveServiceSelection :: EventM Name AppState ()
 leaveServiceSelection = modify $ \state -> case serviceLeave (stateModel state) of
-  Just model -> state {stateModel = model, statePaneFocus = PrimaryPane}
+  Just model -> state {stateModel = model, statePaneFocus = PrimaryPane, stateSteerTiming = Nothing}
   Nothing -> state
 
 serviceMutation :: AppState -> MutationState
@@ -1134,6 +1139,16 @@ applyServiceObservation client (Service.RequestRead requestRead preparation rece
     (Just (Service.Retry _ _ offer _,_,_), _) | confirmed (Service.retryEffect offer) -> do
       put (idleService state) {stateModel = (stateModel state) {modelStatus = "retry effect observed"}}
       liftIO (writeIORef (stateServiceUncertainExit state) (isJust (stateServiceApproval state)))
+    -- A cancel, a steer and a recovery choice complete on the outcome that
+    -- 'Service.controlOutcome' reads from their own receipt: the accepting
+    -- runtime acknowledgement of a cancel, the effect steered of a steer,
+    -- and the effect recovery-chosen of a recovery choice. The live monitor
+    -- shows that outcome for the run.
+    (Just (mutation,_,_), _) | Just run <- Service.controlMutationRun mutation, Just received <- fresh,
+      Just outcome <- Service.controlOutcome mutation received -> do
+        put (idleService state) {stateServiceControlOutcome = Just (run, outcome),
+          stateModel = (stateModel state) {modelStatus = Service.mutationOperation mutation <> " outcome observed: " <> outcome}}
+        liftIO (writeIORef (stateServiceUncertainExit state) (isJust (stateServiceApproval state)))
     -- A removal, a withdrawal and a discard complete on their own
     -- effect-observed receipt of their effect kind, which names the request.
     -- The request screen then shows the request of this read: its readiness
@@ -1412,7 +1427,8 @@ handleServiceEventCore client event = do
     -- draft of the decision, so q does not detach here, and Ctrl-C detaches.
     -- Esc returns to the manager overview and sends nothing. No key sends
     -- while an answer to this decision is in the command lane.
-    VtyEvent key | Just (Service.QuestionHead view _) <- serviceHead state, not (stateKeyHelp state), not (serviceResendConfirm state) -> case key of
+    VtyEvent key | Just (Service.QuestionHead view _) <- serviceHead state, not (stateKeyHelp state), not (serviceResendConfirm state),
+        stateServiceConfirm state == Nothing -> case key of
       Vty.EvKey Vty.KEsc [] -> leaveServiceSelection
       Vty.EvKey Vty.KPageUp [] -> vScrollBy (viewportScroll PersonViewport) (-10)
       Vty.EvKey Vty.KPageDown [] -> vScrollBy (viewportScroll PersonViewport) 10
@@ -1430,6 +1446,9 @@ handleServiceEventCore client event = do
                 Right (mutation,observed) -> serviceMutationKey "answer" (beginServiceMutation client mutation (Just observed))
         _ -> serviceKeyOutcome False "answer did not start: the decision is not observed."
       _ -> handlePersonEditorInput event >> recordServiceDraft
+    -- The steer editor below the live monitor takes the text entry keys, so
+    -- q edits the text here, and Ctrl-C detaches.
+    VtyEvent key | activeLayer state == SteerLayer -> handleServiceSteerKey client event key
     -- The save dialog of the verified result takes the text entry keys, so q
     -- edits the path here, and Ctrl-C detaches.
     VtyEvent key | activeLayer state == SaveLayer -> handleSaveResultKey event key
@@ -1497,10 +1516,6 @@ handleServiceEventCore client event = do
       -- Every approval-key press on the review has exactly one visible
       -- outcome, whatever the command and read lanes hold.
       | Just press <- Approval.reviewApprovalKey (modelScreen (stateModel state)) key modifiers -> handleApprovalKey client press
-      -- Failover and abandon are not supported at a recovery head in this
-      -- milestone. Each press has one visible refusal.
-      | Just (Service.RecoveryHead {}) <- serviceHead state, null modifiers, key `elem` [Vty.KChar 'f', Vty.KChar 'a'] ->
-          serviceKeyOutcome False ((if key == Vty.KChar 'f' then "failover" else "abandon") <> " did not start: it is not supported here.")
       -- Every key that asks for a new mutation has exactly one visible
       -- outcome, including while a command is in progress.
       | Just (operation,start) <- serviceNewMutationKey state key modifiers -> serviceMutationKey operation start
@@ -1537,8 +1552,9 @@ handleServiceEventCore client event = do
           Vty.KChar 'd' | ServiceReviewScreen {} <- modelScreen (stateModel state) -> do
             put state {stateConfirmDetails = not (stateConfirmDetails state)}
             vScrollToBeginning (viewportScroll ConfirmDetailsViewport)
-          -- The live monitor keeps only its read-only keys in service mode.
-          -- Local cancel, steer, redirect and result keys have no binding here.
+          -- In service mode the live monitor sends the run controls only
+          -- through 'serviceNewMutationKey'. Local redirect and result keys
+          -- have no binding here.
           Vty.KChar 'd' | LiveScreen _ <- modelScreen (stateModel state) -> do
             put state {stateRunDetails = not (stateRunDetails state)}
             vScrollToBeginning (viewportScroll FailureViewport)
@@ -1594,7 +1610,46 @@ handleServiceEventCore client event = do
                 Left failure -> serviceKeyOutcome False ("retry did not start: " <> failure)
                 Right (mutation,observed) -> beginServiceMutation client mutation (Just observed)
           _ -> serviceKeyOutcome False "retry did not start: the decision is not observed.")
+      -- f and a at a recovery head choose failover or abandon only through
+      -- the choose-recovery offer that the installed control observation
+      -- presents for that head, with the decision observation as If-Match.
+      (LiveScreen _, Vty.KChar choiceKey, []) | choiceKey `elem` ['f','a'], Just (Service.RecoveryHead {}) <- serviceHead state ->
+        let choice = if choiceKey == 'f' then "failover" else "abandon"
+         in Just ("choose-recovery", runControl choice $ \profile components -> Service.chooseRecoveryMutation profile components choice)
+      -- c opens the cancel confirmation only when the installed control
+      -- observation allows a cancel of the displayed run. Only its y starts
+      -- the cancel.
+      (LiveScreen _, Vty.KChar 'c', []) -> Just ("cancel", case (serviceRunRead state, serviceProfile state) of
+        (Just components, Just profile)
+          | isJust (Lane.installedStale (stateServiceObservation state)) -> serviceKeyOutcome False "cancel did not start: the control observation is stale."
+          | otherwise -> case Service.cancelMutation profile components of
+              Left failure -> serviceKeyOutcome False ("cancel did not start: " <> failure <> ".")
+              Right _ -> modify (\current -> current {stateServiceConfirm =
+                Just (Lane.ConfirmCancel (runIdText (Service.runIdentity (Service.runReadSnapshot components))))})
+        _ -> serviceKeyOutcome False "cancel did not start: the run controls are not observed.")
+      -- i and b open the steer editor below the live monitor only when the
+      -- installed control observation offers a steer with that timing.
+      (LiveScreen _, Vty.KChar timingKey, []) | timingKey `elem` ['i','b'] ->
+        let timing = if timingKey == 'i' then InterruptNow else NextBoundary
+         in Just ("steer", case serviceRunRead state of
+              Just (Service.RunRead _ (_,control) _)
+                | isJust (Service.steerOffer control (serviceSelectedOccurrence state) (steeringTimingText timing)) ->
+                    modify (\current -> current {stateSteerTiming = Just timing, stateControlError = Nothing, stateControlEditor = blankEditor})
+                | otherwise -> serviceKeyOutcome False ("steer did not start: the manager offers no " <> steeringTimingText timing <> " steer for this run.")
+              Nothing -> serviceKeyOutcome False "steer did not start: the run controls are not observed.")
       _ -> Nothing
+    -- Start a control of the displayed run from the installed composite
+    -- read, or show why it did not start.
+    runControl choice build = do
+      current <- get
+      case (serviceRunRead current, serviceProfile current) of
+        (Just components, Just profile)
+          | isJust (Lane.installedStale (stateServiceObservation current)) ->
+              serviceKeyOutcome False (choice <> " did not start: the control observation is stale.")
+          | otherwise -> case build profile components of
+              Left failure -> serviceKeyOutcome False (choice <> " did not start: " <> failure <> ".")
+              Right (mutation,observed) -> beginServiceMutation client mutation (Just observed)
+        _ -> serviceKeyOutcome False (choice <> " did not start: the decision is not observed.")
     -- The live monitor without its run details open.
     liveMonitor state = case modelScreen (stateModel state) of
       LiveScreen _ -> not (stateRunDetails state)
@@ -1660,6 +1715,14 @@ handleServiceConfirm client confirmation key modifiers = case key of
         (Lane.ConfirmDiscard ident, ServiceReviewScreen displayed _, Just (_,request), Just (observed,preparation))
           | Manager.preparationId displayed == ident, Manager.preparationId preparation == ident ->
               beginServiceMutation client (Service.Discard request preparation) (Just observed)
+        -- The cancel starts from the control observation of the displayed
+        -- run that is installed when y is pressed.
+        (Lane.ConfirmCancel ident, LiveScreen shown, _, _)
+          | runIdText shown == ident, Just components <- serviceRunRead state, Just profile <- serviceProfile state,
+            Nothing <- Lane.installedStale (stateServiceObservation state),
+            Right (mutation,observed) <- Service.cancelMutation profile components,
+            Service.controlRun (snd (Service.runReadControl components)) == ident ->
+              beginServiceMutation client mutation (Just observed)
         _ -> serviceKeyOutcome False (Lane.confirmChangedText operation)
   Vty.KChar 'n' | null modifiers -> closed
   Vty.KEsc -> closed
@@ -1667,6 +1730,36 @@ handleServiceConfirm client confirmation key modifiers = case key of
   where
     operation = Lane.confirmationOperation confirmation
     closed = modify (\state -> state {stateServiceConfirm = Nothing}) >> serviceKeyOutcome False (Lane.confirmCancelledText operation)
+
+-- | One key in the steer editor below the live monitor of a service run.
+-- Esc closes the editor. Ctrl-D builds the steer from the installed control
+-- observation, the selected occurrence, the timing of the editor and its
+-- text, and decides it once with 'serviceMutationKey'. A started steer
+-- closes the editor. A steer that the manager no longer offers, or an empty
+-- text, keeps the editor open with a numbered key outcome. Every other key
+-- edits the text.
+handleServiceSteerKey :: Manager.Client -> BrickEvent Name AppEvent -> Vty.Event -> EventM Name AppState ()
+handleServiceSteerKey client original key = case key of
+  Vty.EvKey Vty.KEsc [] -> modify (\state -> state {stateSteerTiming = Nothing, stateControlError = Nothing})
+  Vty.EvKey (Vty.KChar 'd') [Vty.MCtrl] -> serviceMutationKey "steer" $ do
+    state <- get
+    let text = T.intercalate "\n" (Edit.getEditContents (stateControlEditor state))
+    case (stateSteerTiming state, serviceRunRead state, serviceProfile state) of
+      (Just timing, Just components, Just profile)
+        | isJust (Lane.installedStale (stateServiceObservation state)) ->
+            serviceKeyOutcome False "steer did not start: the control observation is stale."
+        | otherwise -> case Service.steerMutation profile components (serviceSelectedOccurrence state) (steeringTimingText timing) text of
+            Left failure -> serviceKeyOutcome False ("steer did not start: " <> failure <> ".")
+            Right (mutation,observed) -> do
+              put state {stateSteerTiming = Nothing, stateControlError = Nothing}
+              beginServiceMutation client mutation (Just observed)
+      _ -> serviceKeyOutcome False "steer did not start: the run controls are not observed."
+  _ -> handleControlEditorInput original
+
+-- | The occurrence that the live monitor selects in the installed run.
+serviceSelectedOccurrence :: AppState -> Maybe OccurrenceId
+serviceSelectedOccurrence state =
+  snapshotOccurrenceId <$> (modelSnapshot (stateModel state) >>= \snapshot -> selectedOccurrence snapshot (stateRunView state))
 
 -- | Change only the client profiles of the service backend.
 onEndpoints :: (Lane.Endpoints -> Lane.Endpoints) -> AppState -> AppState
@@ -1756,6 +1849,7 @@ clearServiceSession state =
       stateServiceApproval = Nothing,
       stateServiceApprovalStatus = Nothing,
       stateServiceLastReceipt = Nothing,
+      stateServiceControlOutcome = Nothing,
       stateServiceApprovalPress = Nothing,
       stateServiceNotice = Nothing,
       stateServiceKeyOutcome = Nothing,
@@ -1854,9 +1948,17 @@ toPresentation state =
         Service.observationLines (Lane.refreshPaused (stateNow state) (stateServiceLane state) (stateServiceKeyOutcome state))
           (Lane.installedStale installed) (isJust (Lane.installedRead installed)) (serviceRun state),
       presentationServiceRun = serviceRun state,
-      presentationServiceRetry = case (serviceHead state, serviceRunRead state) of
-        (Just (Service.RecoveryHead view _ _), Just (Service.RunRead _ (_,control) _)) -> isJust (Service.retryOffer control view)
-        _ -> False,
+      presentationServiceRecoveryOffers = case (serviceHead state, serviceRunRead state) of
+        (Just (Service.RecoveryHead view _ _), Just (Service.RunRead _ (_,control) _)) ->
+          ["retry" | isJust (Service.retryOffer control view)]
+            <> [choice | choice <- ["failover","abandon"], isJust (Service.recoveryOffer control view choice)]
+        _ -> [],
+      presentationServiceRunKeys = case (modelScreen (stateModel state), serviceRunRead state) of
+        (LiveScreen _, Just (Service.RunRead _ (_,control) _)) ->
+          ["c CANCEL" | Service.cancelOffered control]
+            <> ["i/b STEER" | any (isJust . Service.steerOffer control Nothing) ["interrupt-now","next-boundary"]]
+        _ -> [],
+      presentationServiceControlLines = Service.controlLines (stateServiceControlOutcome state) (serviceRun state),
       presentationServiceResultLines = case serviceRun state of
         Just run -> Service.resultLines run (Lane.retrievalShown (runIdText (Service.runIdentity run)) (stateServiceResult state))
           <> [line | Just (ident, line) <- [stateServiceSaved state], ident == runIdText (Service.runIdentity run)]

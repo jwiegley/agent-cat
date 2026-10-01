@@ -10449,6 +10449,30 @@ Non-blocking findings of fess audit fess/pc-PC21-r1.md (2026-10-01) on subtask P
 5. (low) doc/workflow-manager-handoff.md near line 1034: the dated Phase A section of 2026-09-29 still lists "no withdrawal or discarding of a request". That section is a record, but the current-state section at the top must state the new behavior. Fix: the closeout of this run updates the current-state section.
 6. (low) manager/test/service_http.py near lines 4366 to 4380: the withdrawal of a queued request has no end-to-end evidence. The queued path is the same manager branch and TUI code path as the draft path. Fix (optional): hold a request in the queued phase in a fixture and withdraw it.
 
+* TODO [#D] Resolve the non-blocking fess findings of subtask PC22    :review:
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pc22-controls-fess-zhoh
+:LABELS:   ["review","workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-01 Thu 03:59]
+:MODIFIED: [2026-10-01 Thu 03:59]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess audit fess/pc-PC22-r1.md (2026-10-01) on subtask PC22 (WM-034 run controls: cancel, steer, fail-over and abandon).
+
+1. (medium) manager/test/service_http.py tui_control_checks step 1 (cancel): the harness accepts the combined line "Control: cancel accepted; the runtime status is Cancelled" without first seeing the waiting line, so the end-to-end check does not enforce the order "cancel accepted, then Cancelled". Only the model tests prove the waiting state. Fix: require the waiting line where timing allows, for example by holding the cancelled transition in the fixture, or state in the mode description that either form is accepted.
+2. (low) manager/test/service_http.py tui_control_checks press() and step 1: when a page-set read defers y, the confirmation closes, but press([b'y']) sends only y again and waits for its 30-second assertion; the outer loop that sends c again is never reached. Fix: on a deferral of y, return to the outer loop so that it sends c and then y again.
+3. (low) doc/agent-cat.texi, the paragraph "Every C-d, r, f, a, c, i, or b that sends nothing": on the live monitor without a recovery head, f and a fall through to `_ -> pure ()` in handleServiceEventCore (tui/src/Agentic/Tui/App.hs) and show nothing, and a c that opens the confirmation shows a dialog, not a numbered outcome. Fix: narrow the sentence, or add a numbered refusal for f and a outside a recovery head.
+4. (low) tui/README.md, the run controls paragraph: it says the recovery dialog and the footer list the published choices that are not offered, but footerItems for RecoveryLayer shows only the offered keys. Fix: say that the dialog lists the choices that are not offered and the footer shows the offered keys.
+5. (low) manager/test/service_http.py tui_control_checks, the comment "# 4. f and i are refused locally, and a abandons.": the code refuses i and b. Fix: change the comment.
+6. (low) tui/src/Agentic/Tui/App.hs activeLayer and stateSteerTiming: stateSteerTiming stays set when a service head appears, so the steer editor is hidden and shows again after the head clears. Only leaveServiceSelection clears it. Fix: clear stateSteerTiming when a head is installed, or document that the editor is restored.
+7. (low) manager/test/__pycache__/: an untracked, unignored .pyc directory was left in the worktree. Disposition: the Integrator deleted it before the PC22 commit; consider adding __pycache__ to .gitignore.
+
 * TODO [#C] Resolve PC5 fess findings in legacy history windows    :review:
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -18963,7 +18987,7 @@ to an unapproved local launch.
 :LABELS:   ["p7","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-01 Thu 03:10]
+:MODIFIED: [2026-10-01 Thu 03:59]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-034
 :SOURCE_REPO: agent-cat
@@ -19126,6 +19150,13 @@ Local-mode behavior remains intact without a duplicated service runtime model.
     "author": "johnw",
     "text": "PC21 (remove-input, withdrawal and preparation discard): the Mutation type gains RemoveInput (remove-input with the request ETag), Withdraw (withdraw with the request ETag, draft or queued only) and Discard (preparation discard with the preparation ETag, live preparation of a request in review), each with receiptMatches and its effect kind (input-changed, withdrawn, discarded). In the input editor Ctrl-R removes the supplied input. W on a draft or queued request and X on the review open a confirmation; y sends once after a second admission check for the same resource, n or Esc closes it without sending. Every key has one lane outcome. tui-inputs shows a removed input leaving the draft with readiness naming it as missing, a discard returning the request to draft with a null preparationId after which Enter prepares a new review, and a withdrawal showing phase withdrawn; the database holds exactly one remove-input, two discards and one withdraw. Evidence scope (/Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/PC/PC21/impl-r1): Werror build (build-1), tui-model-test at N8 (attempt 1 failed on wrong receipts in the new test; fixed, model-test-2 exit 0), tui-inputs at N8, Phase A journey at N8, make -C doc check, all exit 0. Limitations: the TUI withdraws only draft or queued requests; queued withdrawal has no end-to-end check; tui/ci/tui.sh, ALLBUILD and the N=1 journey were not run. Fess r1 non-blocking; findings in acat-pc21-withdraw-fess-ip98. Package stays open.",
     "created_at": "2026-10-01T10:10:11Z"
+  },
+  {
+    "id": 494,
+    "issue_id": "acat-wm-034-3vqz",
+    "author": "johnw",
+    "text": "PC22 (run controls: cancel, steer, fail-over and abandon): the TUI Mutation type gains Cancel and Steer (POST /v1/runs/{id}/control with the displayed control observation as If-Match) and ChooseRecovery (failover or abandon, POST /v1/decisions/{id} with the decision observation as If-Match). Each is built only from an offer of the installed control observation. In the run monitor c opens a cancel confirmation and y sends it; i and b open the steer editor below the monitor (Ctrl-D sends); f and a sit beside r at a recovery head, and the old 'f and a refuse' rule is removed. A key for an operation that is not offered sends nothing and shows a numbered key outcome. An accepted cancel shows 'cancel accepted' until the snapshot shows Cancelled and is never shown as finished. Receipt effects (steered, failed over, abandoned) come from the command receipts. The new tui-controls mode shows a held run cancelled, a steer with effect steered, a fail-over that asks controlled@spare, and an abandon that ends the decision, with i and b refused locally at the recovery head. Evidence scope (/Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/PC/PC22/impl-r1): Werror build, tui-model-test at N8, tui-controls at N8, Phase A journey at N8, make -C doc check, all exit 0; the fess audit reran BUILD and tui-controls (exit 0). Limitations: the end-to-end check accepts the combined cancel line, so only the model tests enforce the waiting line before Cancelled; a rejected runtime acknowledgement is covered only by model tests; only single-offer steers ran end to end; tui/ci/tui.sh, ALLBUILD and the N=1 journey were not run. Fess r1 non-blocking. Package stays open.",
+    "created_at": "2026-10-01T10:59:35Z"
   }
 ]
 #+end_src

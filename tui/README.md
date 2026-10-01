@@ -119,8 +119,9 @@ catalogue, creates a request with literal or captured inputs, opens an existing
 request or run from the Manager overview view, and shows the exact manager review. Only `y` in the
 summary view approves that review. The frontend then follows the run in the
 live monitor, answers the questions that the manager routes to the person,
-invokes an offered recovery retry with `r`, recognizes the terminal state,
-retrieves the verified result, and saves it with `s`.
+sends the run controls that the manager offers (cancel, steer, retry,
+fail-over and abandon), recognizes the terminal state, retrieves the verified
+result, and saves it with `s`.
 
 Service mode starts no local machine, helper process or local runner state.
 When the connection fails at startup, the frontend prints one fixed line that
@@ -278,6 +279,17 @@ review after the first discard, closes a withdrawal confirmation without a
 send, and withdraws the request. It then checks that the coordination
 database holds one command of each removal, discard and withdrawal.
 
+The tui-controls mode of `manager/test/service_http.py` opens runs of the
+ACP control fixtures from the Manager overview and sends their controls
+through the actual frontend. A cancel of a held run shows `cancel accepted`
+and then the runtime status Cancelled, and no frame shows the run as
+succeeded or failed. A steer reaches the effect `steered`, and the run log
+holds the steer record. A fail-over at a recovery head asks the spare
+candidate. `i` and `b` at a recovery head whose controls offer no steer are
+refused locally with numbered key outcomes and send nothing, and an abandon
+then ends the decision and the run fails. The mode checks that the
+coordination database holds exactly one command for each control.
+
 The application state keeps the text drafts by identity
 (`Agentic.Tui.ServiceLane.Drafts`): the input editor text of each request and
 input, and the answer text of each decision of each run. An editor shows the
@@ -403,9 +415,39 @@ A question head accepts the simple codes `text`, `verdict`, `flag` and
 `receipt`. `Agentic.Tui.Person.personAnswerValue` converts the editor input by
 the question code, as in the local person view, so `false` for a `flag` question
 is sent as the JSON value `false`. The answer carries the entity tag of the
-displayed decision as its precondition. A recovery head sends only the retry
-that the run controls offer, with the entity tag of the displayed control
-observation. `f` and `a` refuse failover and abandon.
+displayed decision as its precondition.
+
+The live monitor sends a run control only when the displayed run controls
+(`/v1/runs/{id}/control`) offer it. `c` opens a cancel confirmation when the
+controls allow a cancel, and its `y` sends the cancel with the entity tag of
+the displayed control observation. `i` and `b` open the steer editor below
+the monitor for a steer with the timing `interrupt-now` or `next-boundary`
+when a steer offer has that timing. The offer of the selected occurrence
+comes first. `Ctrl-D` sends the text with the entity tag of the displayed
+control observation, and `Esc` closes the editor. At a recovery head, `r`
+sends the retry that the controls offer with the entity tag of the control
+observation. `f` and `a` send the fail-over or the abandon choice that a
+`choose-recovery` offer of the controls carries through `POST
+/v1/decisions/{id}`, with the entity tag of the displayed decision
+observation. The recovery dialog and the footer show the key of each offered
+choice and list the published choices that the controls do not offer. A key
+for an operation that the controls do not offer sends nothing and shows a
+numbered key outcome, for example `steer did not start: the manager offers no
+interrupt-now steer for this run.` The footer shows `c CANCEL` and `i/b STEER`
+only while the controls offer them.
+
+`Agentic.Tui.Service.controlOutcome` reads the outcome of a control from its
+own receipt, and the live monitor shows it on the line `Control:`. A cancel
+completes when the runtime acknowledgement accepts, queues or delivers it,
+because the runtime cancellation names no control and the receipt records no
+cancel effect. The line then shows `cancel accepted; waiting for the runtime
+status Cancelled` until the snapshot publishes the runtime status cancelled,
+and `cancel accepted; the runtime status is Cancelled` after it. An accepted
+cancel is never shown as a finished or succeeded run. A steer completes on
+the effect `steered`, and a fail-over or an abandon on the effect
+`recovery-chosen`, which the line shows as `steered`, `failed over` and
+`abandoned`. A runtime acknowledgement that rejects a control leaves the
+command unresolved with that reason.
 
 A run is terminal only when the snapshot runtime status is succeeded, failed,
 cancelled or orphaned. For a succeeded run with a verified result reference,
@@ -436,8 +478,8 @@ the answer conversion against the `resources` section of
 `test/manager_client_vectors.json`, which [the protocol
 description](../doc/api/README.md#pages-and-live-delivery) describes.
 
-Service mode does not support cancellation, steering, redirect, failover or
-abandon, the structured answer editor, run history, lineage, export,
+Service mode does not support redirect, the structured answer editor, run
+history, lineage, export,
 reconnection of the session after a manager restart or a credential
 revocation, or acceptance at 40x12 and 80x24. The
 [manual](../doc/agent-cat.texi) entry for `--service` states the complete key

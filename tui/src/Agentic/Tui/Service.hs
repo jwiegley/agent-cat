@@ -19,6 +19,8 @@ module Agentic.Tui.Service
     decisionPrompt, answerValue, answerOffered, retryOffer, headMatches,
     DecisionHead (..), decisionHead, answerMutation, answerBody,
     retryMutation, retryBody, retryEffect,
+    cancelOffered, cancelMutation, steerOffer, steerMutation, steerBody, recoveryOffer, chooseRecoveryMutation, chooseRecoveryBody,
+    controlMutation, controlMutationRun, controlOutcome, controlLines,
     runTerminal, resultWanted, resultReferenced, decodeOutputs, VerifiedResult (..), retrieveResult, resultLines,
     observedBinding, RunRead (..), RequestRead (..), Selection (..), selectedRun, compositeResources, ReadVerdict (..), readVerdict, runReadValid,
     readRequestId, readRequestRun, runtimeStatus, observationLines,
@@ -37,7 +39,7 @@ import Agentic.Runtime
 import Agentic.Tui.Person (PersonPrompt (..), personAnswerValue)
 import Agentic.Tui.RunModel (runStatusLabel)
 import Control.Exception (IOException, finally, onException, try)
-import Control.Monad (unless)
+import Control.Monad (unless, when)
 import Data.Scientific (toBoundedInteger)
 import System.FilePath (isAbsolute)
 import System.IO (hClose)
@@ -48,7 +50,7 @@ import qualified Data.ByteString as BS
 import qualified Data.Map.Strict as Map
 import Data.Time.Clock (UTCTime)
 import Data.Time.Format.ISO8601 (iso8601ParseM)
-import Data.Aeson (Object, Value (..), object, parseJSON, withArray, withObject, withText, (.:), (.=))
+import Data.Aeson (Object, Value (..), object, parseJSON, toJSON, withArray, withObject, withText, (.:), (.=))
 import qualified Data.Aeson.Key as Key
 import qualified Data.Aeson.KeyMap as KM
 import Data.Aeson.Types (Parser, parseEither)
@@ -175,6 +177,21 @@ data Mutation
     -- the latest attempt that the snapshot publishes for the occurrence, and
     -- the manager names it in the effect address.
   | Retry !ControlView !DecisionView !ControlOffer !(Maybe Word32)
+    -- | The cancel of the run that this control observation names, for the
+    -- request profile. The control observation is the precondition, and it
+    -- allows the cancel.
+  | Cancel !Text !ControlView
+    -- | The steer of the attempt that this steer offer names, for the request
+    -- profile, with the timing (@interrupt-now@ or @next-boundary@) and the
+    -- text. The control observation that offered it is the precondition.
+  | Steer !Text !ControlView !ControlOffer !Text !Text
+    -- | The recovery choice (@failover@ or @abandon@) that this
+    -- choose-recovery offer of the control observation carries for the
+    -- recovery decision at the head. The decision observation is the
+    -- precondition. The attempt is the latest attempt that the snapshot
+    -- publishes for the occurrence, and the manager names it in the effect
+    -- address.
+  | ChooseRecovery !ControlView !DecisionView !ControlOffer !Text !(Maybe Word32)
   deriving (Eq, Show)
 
 mutationOperation :: Mutation -> Text
@@ -190,6 +207,9 @@ mutationOperation mutation = case mutation of
   Discard {} -> "discard"
   Answer {} -> "answer"
   Retry _ _ offer _ -> offerOperation offer
+  Cancel {} -> "cancel"
+  Steer {} -> "steer"
+  ChooseRecovery {} -> "choose-recovery"
 
 mutationURI :: Mutation -> Text
 mutationURI mutation = case mutation of
@@ -204,6 +224,9 @@ mutationURI mutation = case mutation of
   Discard _ preparation -> "/v1/preparations/" <> C.preparationId preparation
   Answer decision _ -> "/v1/decisions/" <> decisionId decision
   Retry control _ _ _ -> "/v1/runs/" <> controlRun control <> "/control"
+  Cancel _ control -> "/v1/runs/" <> controlRun control <> "/control"
+  Steer _ control _ _ _ -> "/v1/runs/" <> controlRun control <> "/control"
+  ChooseRecovery _ decision _ _ _ -> "/v1/decisions/" <> decisionId decision
 
 mutationProfile :: Mutation -> Text
 mutationProfile mutation = case mutation of
@@ -218,6 +241,9 @@ mutationProfile mutation = case mutation of
   Discard _ preparation -> C.preparationProfile preparation
   Answer decision _ -> decisionProfile decision
   Retry _ decision _ _ -> decisionProfile decision
+  Cancel profile _ -> profile
+  Steer profile _ _ _ _ -> profile
+  ChooseRecovery _ decision _ _ _ -> decisionProfile decision
 
 requestURI :: C.DraftView -> Text
 requestURI request = "/v1/requests/" <> C.draftId request
@@ -289,12 +315,38 @@ prepareMutation client now mutation observed
           decodeControl (C.observedValue current) == Right control,
           retryOffer control decision == Just offer -> C.prepareObserved client current (retryBody decision offer)
         _ -> pure (Left C.InvalidResponse)
+      -- The cancel precondition is the exact control observation that
+      -- allowed the cancel, with its entity tag as If-Match.
+      Cancel _ control -> case observed of
+        Just current | owned current (mutationURI mutation) (controlRevision control),
+          decodeControl (C.observedValue current) == Right control,
+          cancelOffered control -> C.prepareObserved client current (object ["operation" .= ("cancel" :: Text)])
+        _ -> pure (Left C.InvalidResponse)
+      -- The steer precondition is the exact control observation that
+      -- offered the steer with this timing.
+      Steer _ control offer timing message -> case observed of
+        Just current | owned current (mutationURI mutation) (controlRevision control),
+          decodeControl (C.observedValue current) == Right control,
+          steerOffer control (Just (offerOccurrence offer)) timing == Just offer,
+          not (T.null (T.strip message)) -> C.prepareObserved client current (steerBody offer timing message)
+        _ -> pure (Left C.InvalidResponse)
+      -- The recovery-choice precondition is the exact decision observation
+      -- at the head, with its entity tag as If-Match. The control
+      -- observation offers the choice.
+      ChooseRecovery control decision offer choice _ -> case observed of
+        Just current | owned current (mutationURI mutation) (decisionRevision decision),
+          decodeDecision (C.observedValue current) == Right decision,
+          recoveryOffer control decision choice == Just offer -> C.prepareObserved client current (chooseRecoveryBody decision choice)
+        _ -> pure (Left C.InvalidResponse)
   where
     needed = case mutation of
       Approve {} -> ["observe","submit","control"]
       Discard {} -> ["observe","submit","control"]
       Answer {} -> ["observe","control"]
       Retry {} -> ["observe","control"]
+      Cancel {} -> ["observe","control"]
+      Steer {} -> ["observe","control"]
+      ChooseRecovery {} -> ["observe","control"]
       _ -> ["observe","submit"]
     permitted = case C.clientCapabilities client of
       Object fields -> case (KM.lookup "scopes" fields, KM.lookup "profileIds" fields) of
@@ -432,8 +484,10 @@ approvalSelectors preparation =
 -- | Whether a receipt is the receipt of this mutation. An effect of an input
 -- change, an enqueue, a withdrawal or a discard names the request. An effect of an answer names the
 -- run controls and the occurrence of the answered decision. An effect of a
--- retry names the run controls, the recovering occurrence and the attempt
--- that the retry follows.
+-- retry or of a recovery choice names the run controls, the recovering
+-- occurrence and the attempt that it follows. An effect of a steer names the
+-- run controls and the steered attempt, and an effect of a cancel names the
+-- run controls.
 receiptMatches :: Mutation -> C.CommandReceipt -> Bool
 receiptMatches mutation receipt = C.operationName (C.receiptOperation receipt) == mutationOperation mutation
   && C.receiptProfile receipt == mutationProfile mutation && C.receiptResource receipt == mutationURI mutation
@@ -447,6 +501,16 @@ receiptMatches mutation receipt = C.operationName (C.receiptOperation receipt) =
            && KM.lookup "address" fields == Just (object (["occurrenceId" .= occurrenceText (decisionOccurrence decision)]
                 <> ["attemptId" .= T.pack (show number) | Just number <- [attempt]]))
        (Retry {}, Just _) -> False
+       (Cancel {}, Just (Object fields)) -> KM.lookup "resource" fields == Just (String (mutationURI mutation))
+       (Steer _ _ offer _ _, Just (Object fields)) ->
+         KM.lookup "resource" fields == Just (String (mutationURI mutation))
+           && KM.lookup "address" fields == Just (object (["occurrenceId" .= occurrenceText (offerOccurrence offer)]
+                <> ["attemptId" .= T.pack (show number) | Just number <- [offerAttempt offer]]))
+       (ChooseRecovery control decision _ _ attempt, Just (Object fields)) ->
+         KM.lookup "resource" fields == Just (String ("/v1/runs/" <> controlRun control <> "/control"))
+           && KM.lookup "address" fields == Just (object (["occurrenceId" .= occurrenceText (decisionOccurrence decision)]
+                <> ["attemptId" .= T.pack (show number) | Just number <- [attempt]]))
+       (_, Just _) | controlMutation mutation -> False
        (Discard request _, Just (Object fields)) -> KM.lookup "resource" fields == Just (String (requestURI request))
        (_, Just (Object fields)) | mutationOperation mutation `elem` requestEffects ->
          KM.lookup "resource" fields == Just (String (mutationURI mutation))
@@ -1457,6 +1521,127 @@ retryBody decision offer = object $
 retryEffect :: ControlOffer -> Text
 retryEffect offer = if offerOperation offer == "retry" then "retried" else "recovery-chosen"
 
+-- | Whether the control observation allows a cancel of its run: the manager
+-- owns the live run and reports @cancelAllowed@.
+cancelOffered :: ControlView -> Bool
+cancelOffered control = controlSupervision control == "owned" && controlCancel control
+
+-- | The cancel mutation for the request profile and one composite read of
+-- the run components, with the control observation that becomes its
+-- precondition. The control observation must allow the cancel and belong to
+-- the run of the snapshot.
+cancelMutation :: Text -> RunRead observed -> Either Text (Mutation, observed)
+cancelMutation profile (RunRead snapshot (observed, control) _) = do
+  unless (controlRun control == runIdText (runIdentity snapshot)) (Left "the controls belong to another run")
+  unless (cancelOffered control) (Left "the manager offers no cancel for this run")
+  Right (Cancel profile control, observed)
+
+-- | The steer offer of an owned control observation with this timing. An
+-- offer for the given occurrence comes first, and the first steer offer
+-- otherwise. Every steer offer names one attempt.
+steerOffer :: ControlView -> Maybe OccurrenceId -> Text -> Maybe ControlOffer
+steerOffer control selected timing
+  | controlSupervision control /= "owned" = Nothing
+  | otherwise = listToMaybe ([offer | offer <- offers, Just (offerOccurrence offer) == selected] <> offers)
+  where offers = [offer | offer <- controlOffers control, offerOperation offer == "steer", isJust (offerAttempt offer), timing `elem` offerTimings offer]
+
+-- | The steer mutation for the request profile, one composite read of the
+-- run components, the selected occurrence, the timing and the text, with
+-- the control observation that becomes its precondition. Only 'steerOffer'
+-- selects the offer, and an empty text is refused before any send.
+steerMutation :: Text -> RunRead observed -> Maybe OccurrenceId -> Text -> Text -> Either Text (Mutation, observed)
+steerMutation profile (RunRead snapshot (observed, control) _) selected timing message = do
+  unless (controlRun control == runIdText (runIdentity snapshot)) (Left "the controls belong to another run")
+  offer <- maybe (Left ("the manager offers no " <> timing <> " steer for this run")) Right (steerOffer control selected timing)
+  when (T.null (T.strip message)) (Left "the steering text is empty")
+  Right (Steer profile control offer timing message, observed)
+
+-- | The closed steer body for the attempt of the offer.
+steerBody :: ControlOffer -> Text -> Text -> Value
+steerBody offer timing message = object
+  [ "operation" .= ("steer" :: Text), "occurrenceId" .= occurrenceText (offerOccurrence offer),
+    "attemptId" .= maybe "" (T.pack . show) (offerAttempt offer), "timing" .= timing, "text" .= message ]
+
+-- | The choose-recovery offer of the control observation that carries this
+-- choice for the recovery decision at the head, when the decision publishes
+-- the choice. Only 'matchingOffers' supplies the candidates, so the controls
+-- must be owned and name the decision as the pending head at position 0.
+recoveryOffer :: ControlView -> DecisionView -> Text -> Maybe ControlOffer
+recoveryOffer control decision choice = case decisionContent decision of
+  RecoveryContent _ _ choices | any ((== choice) . recoveryChoice) choices ->
+    listToMaybe [offer | offer <- matchingOffers control decision, offerOperation offer == "choose-recovery",
+      any ((== choice) . recoveryChoice) (offerChoices offer)]
+  _ -> Nothing
+
+-- | The recovery-choice mutation for the request profile, one composite read
+-- of the run components and the choice (@failover@ or @abandon@), with the
+-- decision observation that becomes its precondition. Only 'recoveryOffer'
+-- selects the offer. The decision and the controls must belong to the run of
+-- the snapshot and to the profile, and the snapshot must publish the
+-- recovery of the occurrence.
+chooseRecoveryMutation :: Text -> RunRead observed -> Text -> Either Text (Mutation, observed)
+chooseRecoveryMutation profile (RunRead snapshot (_, control) decision) choice = do
+  (observed, view) <- maybe (Left "no decision is at the head of the queue") Right decision
+  offer <- maybe (Left ("the manager offers no " <> choice <> " for this decision")) Right (recoveryOffer control view choice)
+  unless (decisionRun view == runIdText (runIdentity snapshot) && controlRun control == decisionRun view)
+    (Left "the decision belongs to another run")
+  unless (decisionProfile view == profile) (Left "the decision belongs to another profile")
+  occurrence <- maybe (Left "the snapshot publishes no recovery for this decision") Right
+    (runSnapshot snapshot >>= Map.lookup (decisionOccurrence view) . snapshotOccurrences)
+  unless (isJust (snapshotOccurrenceRecovery occurrence)) (Left "the snapshot publishes no recovery for this decision")
+  let attempt = attemptNumber . fst <$> Map.lookupMax (snapshotOccurrenceAttempts occurrence)
+  Right (ChooseRecovery control view offer choice attempt, observed)
+
+-- | The closed choose-recovery body for one decision and choice.
+chooseRecoveryBody :: DecisionView -> Text -> Value
+chooseRecoveryBody decision choice = object
+  [ "operation" .= ("choose-recovery" :: Text), "occurrenceId" .= occurrenceText (decisionOccurrence decision),
+    "generation" .= decisionGeneration decision, "choice" .= choice ]
+
+-- | Whether a mutation is a cancel, a steer or a recovery choice of a run.
+controlMutation :: Mutation -> Bool
+controlMutation = isJust . controlMutationRun
+
+-- | The run of a cancel, a steer or a recovery choice. No other mutation has
+-- one.
+controlMutationRun :: Mutation -> Maybe Text
+controlMutationRun mutation = case mutation of
+  Cancel _ control -> Just (controlRun control)
+  Steer _ control _ _ _ -> Just (controlRun control)
+  ChooseRecovery control _ _ _ _ -> Just (controlRun control)
+  _ -> Nothing
+
+-- | The displayed outcome of a cancel, a steer or a recovery choice that its
+-- own receipt shows. A cancel is accepted when the runtime acknowledgement
+-- accepts, queues or delivers it. The runtime cancellation names no control,
+-- so the receipt records no cancel effect, and only the snapshot shows the
+-- cancelled run. A steer completes on the effect steered, and a recovery
+-- choice on the effect recovery-chosen. No other receipt has an outcome.
+controlOutcome :: Mutation -> C.CommandReceipt -> Maybe Text
+controlOutcome mutation receipt
+  | not (receiptMatches mutation receipt) = Nothing
+  | otherwise = case (mutation, C.stateName (C.receiptState receipt), receiptEffectKind receipt) of
+      (Cancel {}, state, _) | state `elem` ["acknowledged","effect-observed"],
+        Just (Object fields) <- toJSON <$> C.receiptAcknowledgement receipt,
+        Just (String accepted) <- KM.lookup "state" fields, accepted `elem` ["accepted","queued","delivered"] -> Just "cancel accepted"
+      (Steer {}, "effect-observed", Just "steered") -> Just "steered"
+      (ChooseRecovery _ _ _ "failover" _, "effect-observed", Just "recovery-chosen") -> Just "failed over"
+      (ChooseRecovery _ _ _ "abandon" _, "effect-observed", Just "recovery-chosen") -> Just "abandoned"
+      _ -> Nothing
+
+-- | The control line of the live monitor, given the run and the outcome of
+-- its latest completed control and the installed run observation. An
+-- accepted cancel shows @cancel accepted@ and waits for the runtime status
+-- cancelled until the snapshot publishes it. It never shows a finished or
+-- succeeded state. Every other outcome shows as its receipt shows it.
+controlLines :: Maybe (Text, Text) -> Maybe RunObservation -> [Text]
+controlLines outcome run = case (outcome, run) of
+  (Just (ident, label), Just observed) | ident == runIdText (runIdentity observed) -> case (label, runtimeStatus observed) of
+    ("cancel accepted", Just RunCancelledStatus) -> ["Control: cancel accepted; the runtime status is Cancelled"]
+    ("cancel accepted", _) -> ["Control: cancel accepted; waiting for the runtime status Cancelled"]
+    _ -> ["Control: " <> label]
+  _ -> []
+
 -- | The closed answer body for one decision.
 answerBody :: DecisionView -> Value -> Value
 answerBody decision value = object
@@ -1636,12 +1821,20 @@ approvalStatus approval result before = case result of
 
 -- | The declared reason to leave a pending attempt unresolved, taken from the
 -- receipt read of this read. Only a readable receipt of that attempt that the
--- manager reports as refused or unresolved settles it. An unreadable receipt
+-- manager reports as refused or unresolved settles it, and so does a
+-- readable receipt of a cancel, a steer or a recovery choice whose runtime
+-- acknowledgement rejects the control. An unreadable receipt
 -- settles nothing, so it never offers an exact resend.
 receiptSettlement :: Mutation -> Maybe (Mutation, Either C.ClientFailure C.CommandReceipt) -> Maybe Text
 receiptSettlement mutation result = case result of
   Just (_, Right received) | receiptMatches mutation received, C.stateName (C.receiptState received) `elem` ["refused","unresolved"] ->
     Just (C.stateName (C.receiptState received))
+  -- A runtime acknowledgement that rejects the control ends it without an
+  -- effect.
+  Just (_, Right received) | receiptMatches mutation received, controlMutation mutation,
+    Just (Object fields) <- toJSON <$> C.receiptAcknowledgement received,
+    Just (String rejected) <- KM.lookup "state" fields, rejected `elem` ["rejected-stale","unsupported","failed"] ->
+      Just ("runtime acknowledgement " <> rejected)
   _ -> Nothing
 
 parseOutput :: Value -> Parser (Maybe Artifact)

@@ -3621,10 +3621,40 @@ its precondition.  A @code{retry} offer sends the @code{retry} operation, and a
 @code{choose-recovery} offer that carries the retry choice sends that choice.
 The retry completes only when the command receipt reports the observed effect
 of the offer kind, @code{retried} or @code{recovery-chosen}, for the recovering
-occurrence and attempt of the run.  Failover and abandon are not supported
-here, and @kbd{f} and @kbd{a} show a refusal.  Without a retry offer, the
-choices are read-only.  Every @kbd{C-d} or @kbd{r} that sends nothing shows a
-numbered key outcome that states the reason.  When an observation read in flight defers a mutation key,
+occurrence and attempt of the run.  When a @code{choose-recovery} offer of the
+run controls carries the fail-over or the abandon choice for the head, @kbd{f}
+or @kbd{a} sends that choice once to the decision, with the entity tag of the
+displayed decision observation as its precondition.  The choice completes only
+when the command receipt reports the observed @code{recovery-chosen} effect for
+the recovering occurrence and attempt of the run.  The recovery dialog shows
+the key of each offered choice and lists the published choices that the run
+controls do not offer.
+
+The live monitor also sends the run controls that the displayed run controls
+offer.  When the controls allow a cancel, @kbd{c} opens a cancel confirmation,
+and its @kbd{y} sends the cancel once to the run controls with the entity tag of
+the displayed control observation as its precondition.  The cancel completes
+when the runtime acknowledgement in its command receipt accepts, queues, or
+delivers it.  The runtime cancellation names no control, so the receipt
+records no cancel effect.  The line @samp{Control: cancel accepted; waiting for
+the runtime status Cancelled} then remains until the snapshot publishes the
+runtime status cancelled, and the line becomes @samp{Control: cancel accepted;
+the runtime status is Cancelled}.  An accepted cancel is never shown as a
+finished or succeeded run.  When a steer offer has the timing
+@code{interrupt-now} or @code{next-boundary}, @kbd{i} or @kbd{b} opens the steer
+editor below the monitor for that timing.  The offer of the selected occurrence
+comes first.  @kbd{C-d} sends the text once to the run controls with the entity
+tag of the displayed control observation, and @kbd{ESC} closes the editor.  The
+steer completes only when the command receipt reports the observed
+@code{steered} effect for the steered attempt.  The line @samp{Control:} shows
+@samp{steered}, @samp{failed over}, or @samp{abandoned} from the receipt of the
+latest completed control of the run.  A runtime acknowledgement that rejects a
+control leaves the command unresolved with that reason.  The footer shows
+@samp{c CANCEL} and @samp{i/b STEER} only while the controls offer them.
+
+Every @kbd{C-d}, @kbd{r}, @kbd{f}, @kbd{a}, @kbd{c}, @kbd{i}, or @kbd{b} that
+sends nothing, for example for an operation that the run controls do not
+offer, shows a numbered key outcome that states the reason.  When an observation read in flight defers a mutation key,
 automatic refresh pauses until that read completes or for at most three
 seconds from the key outcome, whichever comes first.  While the pause holds,
 the observation line states that automatic refresh is paused instead of
@@ -3634,7 +3664,7 @@ A declared client failure keeps its declared meaning, and the internal-fault
 rules above apply to every step of the journey.
 
 Service mode does not support these features.  The frontend offers no
-cancellation, steering, redirect, failover, or abandon of a run.  It has no
+redirect of a run.  It has no
 structured answer editor, so a question with the @code{structured} code or with
 a code that is not a name shows its prompt and accepts no answer.  The
 frontend offers no run history, lineage, or export.  Except

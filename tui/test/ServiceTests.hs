@@ -6,7 +6,7 @@ module ServiceTests (serviceTests) where
 import qualified Agentic.Manager.Client as C
 import Agentic.Runtime (DescriptorCapabilities (..), WorkflowDescriptor (..), WorkflowInputDescriptor (..), WorkflowInputSource (..),
   OccurrenceId (..), AttemptId (..), RunSnapshot (..), OccurrenceSnapshot (..), AttemptSnapshot (..), ControlAckSnapshot (..),
-  PersonAnswering (..), RecoverySnapshot (..), RecoveryOption (..), RunStatus (..), mkRunId)
+  PersonAnswering (..), RecoverySnapshot (..), RecoveryOption (..), RunStatus (..), mkRunId, runIdText)
 import Agentic.Tui.Person (PersonPrompt (..))
 import Agentic.Tui.Model
 import qualified Agentic.Tui.Approval as A
@@ -1479,8 +1479,8 @@ decisionTests render profile request0 receiptValue (metadata,items) (decisionVal
       ("a sent service answer at (140,36) waits for the manager effect and shows no editor",
         all (`T.isInfixOf` submitted) ["WAITING FOR THE MANAGER EFFECT", "waiting for its observed effect"]
           && not ("Ctrl-D SEND ANSWER" `T.isInfixOf` submitted)),
-      ("the service recovery head at (140,36) shows the published message and choices read-only",
-        all (`T.isInfixOf` recoveryFrame) ["Recovery required", "Retry the adapter?", "Choices (read-only here): retry", "READ-ONLY RECOVERY",
+      ("the service recovery head at (140,36) without a manager offer shows the published message and choices as not offered",
+        all (`T.isInfixOf` recoveryFrame) ["Recovery required", "Retry the adapter?", "Choices (not offered by the manager): retry", "NO RECOVERY OFFERED",
           "Runtime: Running", "q DETACH", "d DETAILS"] && not (any (`T.isInfixOf` recoveryFrame) localOnly)),
       ("control sequences in a decision prompt render as U+FFFD at (140,36)", sanitized `T.isInfixOf` hostileQuestion),
       ("control sequences in a recovery message render as U+FFFD at (140,36)", sanitized `T.isInfixOf` hostileRecovery),
@@ -1583,15 +1583,149 @@ retryTests render headPresentation (metadata,items) receiptValue (controlObs,con
     _ -> die "FAIL the retry fixture has no recovery head"
   let base = (headPresentation RecoveryLayer) {presentationRecovery = Just (occurrence,recovery), presentationServiceRun = Just recoverySnapshot,
         presentationModel = (presentationModel (headPresentation RecoveryLayer)) {modelSnapshot = Just native}}
-      offered = render (140,36) base {presentationServiceRetry = True}
-      mixedChoices = render (140,36) base {presentationServiceRetry = True,
+      offered = render (140,36) base {presentationServiceRecoveryOffers = ["retry"]}
+      mixedChoices = render (140,36) base {presentationServiceRecoveryOffers = ["retry"],
         presentationRecovery = Just (occurrence,recovery {snapshotRecoveryChoices = [RecoveryOption "retry" Nothing, RecoveryOption "abandon" Nothing]})}
+      allChoices = [RecoveryOption "retry" Nothing, RecoveryOption "failover" Nothing, RecoveryOption "abandon" Nothing]
+      everyOffer = render (140,36) base {presentationServiceRecoveryOffers = ["retry","failover","abandon"], presentationServiceRunKeys = ["c CANCEL"],
+        presentationRecovery = Just (occurrence,recovery {snapshotRecoveryChoices = allChoices})}
   putStrLn "RENDER service recovery head with a retry offer at (140,36):" >> putStr (T.unpack offered)
+  putStrLn "RENDER service recovery head with retry, failover and abandon offers at (140,36):" >> putStr (T.unpack everyOffer)
   checks
     [ ("a recovery head with a retry offer shows r RETRY and no read-only marker",
         all (`T.isInfixOf` offered) ["Recovery required", "Retry the adapter?", "r RETRY", "q DETACH"]
-          && not (any (`T.isInfixOf` offered) ["READ-ONLY RECOVERY", "Choices (read-only here)", "Unsupported here"])),
-      ("published choices other than retry are shown as unsupported", "Unsupported here: abandon" `T.isInfixOf` mixedChoices)
+          && not (any (`T.isInfixOf` offered) ["NO RECOVERY OFFERED", "Choices (not offered by the manager)", "Not offered", "f FAILOVER", "a ABANDON"])),
+      ("published choices that the manager does not offer are shown as not offered", "Not offered: abandon" `T.isInfixOf` mixedChoices),
+      ("a recovery head with retry, failover and abandon offers shows r, f, a and the cancel key",
+        all (`T.isInfixOf` everyOffer) ["r RETRY", "f FAILOVER", "a ABANDON", "c CANCEL"] && not ("Not offered" `T.isInfixOf` everyOffer))
+    ]
+  controlTests render base receiptValue (controlObs,owned) (decisionObs,decision) snapshot recoverySnapshot
+
+-- | The cancel, the steer and the recovery choices of a run: each starts
+-- only when the control observation offers it, carries the displayed
+-- observation as its precondition, sends its closed body, and completes
+-- only on the outcome that its own receipt shows.
+controlTests :: ((Int,Int) -> Presentation -> T.Text) -> Presentation -> Value -> ((T.Text,T.Text),S.ControlView) -> ((T.Text,T.Text),S.DecisionView)
+  -> S.RunObservation -> S.RunObservation -> IO ()
+controlTests render base receiptValue (controlObs,owned) (decisionObs,recoveryDecision) runningSnapshot recoverySnapshot = do
+  otherRunId <- either (die . show) pure (mkRunId "run_other")
+  let refused result = case result of Left _ -> True; Right _ -> False
+      encodedBody value = TE.decodeUtf8 (BL.toStrict (encode value))
+      running = S.RunRead runningSnapshot (controlObs,owned {S.controlOffers = [], S.controlHead = Nothing}) Nothing
+      withControl changed = running {S.runReadControl = (controlObs,changed)}
+      steerAt occurrence attempt timings = S.ControlOffer "steer" (OccurrenceId occurrence) (Just attempt) Nothing timings [] []
+      steerOffer = steerAt 0 2 ["interrupt-now","next-boundary"]
+      steering offers = withControl owned {S.controlOffers = offers, S.controlHead = Nothing}
+      steer read' selected timing text = S.steerMutation "profile_main" read' selected timing text
+  -- Cancel.
+  (cancel,cancelObserved) <- either (die . ("FAIL the fixture cancel was refused: " <>) . T.unpack) pure (S.cancelMutation "profile_main" running)
+  checks
+    [ ("a cancel that the control observation allows is the cancel mutation with the control observation as its precondition",
+        cancel == S.Cancel "profile_main" (snd (S.runReadControl running)) && cancelObserved == controlObs),
+      ("the cancel is sent to the run controls with the request profile",
+        S.mutationOperation cancel == "cancel" && S.mutationURI cancel == "/v1/runs/run_21/control" && S.mutationProfile cancel == "profile_main"),
+      ("no cancel starts when the control observation does not allow it",
+        refused (S.cancelMutation "profile_main" (withControl owned {S.controlCancel = False}))),
+      ("no cancel starts for controls that are not owned",
+        refused (S.cancelMutation "profile_main" (withControl owned {S.controlSupervision = "observer"}))),
+      ("no cancel starts for the controls of another run",
+        refused (S.cancelMutation "profile_main" running {S.runReadSnapshot = runningSnapshot {S.runIdentity = otherRunId}}))
+    ]
+  -- Steer.
+  (steered,steerObserved) <- either (die . ("FAIL the fixture steer was refused: " <>) . T.unpack) pure
+    (steer (steering [steerOffer]) Nothing "interrupt-now" "Focus on the patch.")
+  checks
+    [ ("a steer offer with the timing is the steer mutation with the control observation as its precondition",
+        steered == S.Steer "profile_main" owned {S.controlOffers = [steerOffer], S.controlHead = Nothing} steerOffer "interrupt-now" "Focus on the patch."
+          && steerObserved == controlObs),
+      ("the steer is sent to the run controls with the closed steer body",
+        S.mutationOperation steered == "steer" && S.mutationURI steered == "/v1/runs/run_21/control"
+          && encodedBody (S.steerBody steerOffer "interrupt-now" "Focus on the patch.")
+            == "{\"attemptId\":\"2\",\"occurrenceId\":\"0\",\"operation\":\"steer\",\"text\":\"Focus on the patch.\",\"timing\":\"interrupt-now\"}"),
+      ("no steer starts without a steer offer of that timing",
+        refused (steer (steering []) Nothing "interrupt-now" "text")
+          && refused (steer (steering [steerAt 0 2 ["next-boundary"]]) Nothing "interrupt-now" "text")
+          && not (refused (steer (steering [steerAt 0 2 ["next-boundary"]]) Nothing "next-boundary" "text"))),
+      ("no steer starts with an empty text", refused (steer (steering [steerOffer]) Nothing "interrupt-now" "  \n ")),
+      ("no steer starts for controls that are not owned",
+        refused (steer (withControl owned {S.controlOffers = [steerOffer], S.controlSupervision = "lost"}) Nothing "interrupt-now" "text")),
+      ("the steer offer of the selected occurrence comes first",
+        case steer (steering [steerOffer, steerAt 1 0 ["interrupt-now"]]) (Just (OccurrenceId 1)) "interrupt-now" "text" of
+          Right (S.Steer _ _ offer _ _, _) -> S.offerOccurrence offer == OccurrenceId 1
+          _ -> False)
+    ]
+  -- Recovery choices.
+  let choices = [RecoveryOption "retry" Nothing, RecoveryOption "failover" Nothing, RecoveryOption "abandon" Nothing]
+      decision = recoveryDecision {S.decisionContent = S.RecoveryContent "adapter gap" "Retry the adapter?" choices}
+      chooseOffer offered = S.ControlOffer "choose-recovery" (OccurrenceId 0) Nothing (Just "generation_3") [] offered []
+      fullOffer = chooseOffer [RecoveryOption "failover" Nothing, RecoveryOption "abandon" Nothing]
+      recoveryRead offers changed = S.RunRead recoverySnapshot (controlObs,owned {S.controlOffers = offers}) (Just (decisionObs,changed))
+      choose read' choice = S.chooseRecoveryMutation "profile_main" read' choice
+  (failover,failoverObserved) <- either (die . ("FAIL the fixture failover was refused: " <>) . T.unpack) pure (choose (recoveryRead [fullOffer] decision) "failover")
+  (abandon,_) <- either (die . ("FAIL the fixture abandon was refused: " <>) . T.unpack) pure (choose (recoveryRead [fullOffer] decision) "abandon")
+  checks
+    [ ("a failover offer is the recovery-choice mutation with the decision observation as its precondition",
+        failover == S.ChooseRecovery owned {S.controlOffers = [fullOffer]} decision fullOffer "failover" (Just 2) && failoverObserved == decisionObs),
+      ("the recovery choice is sent to the decision with the closed choose-recovery body",
+        S.mutationOperation failover == "choose-recovery" && S.mutationURI failover == "/v1/decisions/decision_3"
+          && S.mutationProfile failover == "profile_main"
+          && encodedBody (S.chooseRecoveryBody decision "abandon")
+            == "{\"choice\":\"abandon\",\"generation\":\"generation_3\",\"occurrenceId\":\"0\",\"operation\":\"choose-recovery\"}"),
+      ("no recovery choice starts without a choose-recovery offer that carries it",
+        refused (choose (recoveryRead [chooseOffer [RecoveryOption "failover" Nothing]] decision) "abandon")
+          && refused (choose (recoveryRead [] decision) "failover")
+          && refused (choose (recoveryRead [S.ControlOffer "retry" (OccurrenceId 0) Nothing (Just "generation_3") [] [] []] decision) "failover")),
+      ("no recovery choice starts when the decision does not publish it",
+        refused (choose (recoveryRead [fullOffer] decision {S.decisionContent = S.RecoveryContent "gap" "message" [RecoveryOption "retry" Nothing]}) "failover")),
+      ("no recovery choice starts for a decision that is not the head or another generation",
+        refused (choose (recoveryRead [fullOffer] decision {S.decisionPosition = 1}) "failover")
+          && refused (choose (recoveryRead [fullOffer {S.offerGeneration = Just "generation_9"}] decision) "failover")),
+      ("no recovery choice starts for another profile", refused (S.chooseRecoveryMutation "profile_other" (recoveryRead [fullOffer] decision) "failover"))
+    ]
+  -- Receipts and outcomes.
+  let effect kind place = object ["kind" .= (kind :: T.Text), "runtimeSequence" .= ("12" :: T.Text), "address" .= place,
+        "resource" .= ("/v1/runs/run_21/control" :: T.Text)]
+      address occurrence attempt = object (["occurrenceId" .= (occurrence :: T.Text)] <> ["attemptId" .= (value :: T.Text) | Just value <- [attempt]])
+      acknowledgement state = object ["commandId" .= ("cmd_11" :: T.Text), "state" .= (state :: T.Text), "message" .= ("Runtime acknowledgement" :: T.Text),
+        "command" .= ("cancel" :: T.Text), "occurrenceId" .= Null, "attemptId" .= Null]
+      receipt operation resource state ack value = put "operation" (String operation) (put "requiredScopes" (toJSON ["control" :: T.Text])
+        (put "resource" (String resource) (put "links" (object ["self" .= ("/v1/commands/cmd_11" :: T.Text), "resource" .= resource])
+          (put "state" (String state) (put "acknowledgement" ack (put "effect" value
+            (put "dispatchAttemptedAt" (String "2026-09-03T00:00:01Z") receiptValue)))))))
+      decoded value = either (die . ("FAIL control receipt fixture: " <>) . show) pure (C.decodeObservation value)
+  acceptedCancel <- decoded (receipt "cancel" "/v1/runs/run_21/control" "acknowledged" (acknowledgement "accepted") Null)
+  rejectedCancel <- decoded (receipt "cancel" "/v1/runs/run_21/control" "acknowledged" (acknowledgement "rejected-stale") Null)
+  attemptedCancel <- decoded (receipt "cancel" "/v1/runs/run_21/control" "dispatch-attempted" Null Null)
+  steerReceipt <- decoded (receipt "steer" "/v1/runs/run_21/control" "effect-observed" Null (effect "steered" (address "0" (Just "2"))))
+  otherSteer <- decoded (receipt "steer" "/v1/runs/run_21/control" "effect-observed" Null (effect "steered" (address "0" (Just "1"))))
+  chosenReceipt <- decoded (receipt "choose-recovery" "/v1/decisions/decision_3" "effect-observed" Null (effect "recovery-chosen" (address "0" (Just "2"))))
+  checks
+    [ ("an accepting runtime acknowledgement of a cancel shows cancel accepted",
+        S.controlOutcome cancel acceptedCancel == Just "cancel accepted" && S.receiptSettlement cancel (Just (cancel,Right acceptedCancel)) == Nothing),
+      ("a cancel without an acknowledgement has no outcome yet", S.controlOutcome cancel attemptedCancel == Nothing),
+      ("a rejecting runtime acknowledgement settles the cancel without an outcome",
+        S.controlOutcome cancel rejectedCancel == Nothing
+          && S.receiptSettlement cancel (Just (cancel,Right rejectedCancel)) == Just "runtime acknowledgement rejected-stale"),
+      ("a steered effect of the steered attempt shows steered", S.controlOutcome steered steerReceipt == Just "steered"),
+      ("a steered effect of another attempt does not complete the steer", S.controlOutcome steered otherSteer == Nothing),
+      ("a recovery-chosen effect shows failed over for a failover and abandoned for an abandon",
+        S.controlOutcome failover chosenReceipt == Just "failed over" && S.controlOutcome abandon chosenReceipt == Just "abandoned"),
+      ("a receipt of one control does not complete another control",
+        S.controlOutcome cancel steerReceipt == Nothing && S.controlOutcome steered chosenReceipt == Nothing && S.controlOutcome failover acceptedCancel == Nothing),
+      ("only cancels, steers and recovery choices are control mutations with a run",
+        map S.controlMutationRun [cancel, steered, failover] == replicate 3 (Just "run_21") && not (S.controlMutation (S.Answer recoveryDecision (Bool False))))
+    ]
+  -- The live monitor shows the offered run keys and the control line.
+  native <- maybe (die "FAIL missing running runtime") pure (S.runSnapshot runningSnapshot)
+  let liveModel = (presentationModel base) {modelScreen = LiveScreen (S.runIdentity runningSnapshot), modelSnapshot = Just native}
+      live = render (140,36) base {presentationLayer = ScreenLayer, presentationModel = liveModel, presentationRecovery = Nothing,
+        presentationServiceRun = Just runningSnapshot, presentationServiceRunKeys = ["c CANCEL", "i/b STEER"],
+        presentationServiceControlLines = S.controlLines (Just ("run_21","cancel accepted")) (Just runningSnapshot)}
+  putStrLn "RENDER service live monitor with run keys and an accepted cancel at (140,36):" >> putStr (T.unpack live)
+  checks
+    [ ("the live monitor offers c and i/b and shows the accepted cancel without a finished state",
+        all (`T.isInfixOf` live) ["c CANCEL", "i/b STEER", "Control: cancel accepted"] && not (any (`T.isInfixOf` live) ["Succeeded", "Finished"])),
+      ("the control line belongs only to its run", S.controlLines (Just ("run_other","steered")) (Just runningSnapshot) == [])
     ]
 
 -- | Terminal recognition and verified result selection from the validated
@@ -1618,6 +1752,14 @@ resultTests render profile = do
   orphaned <- decoded (runtime "orphaned" verifiedMetadata)
   running <- decoded (runtime "running" verifiedMetadata)
   cancelling <- decoded (runtime "cancelling" verifiedMetadata)
+  let accepted run = S.controlLines (Just (runIdText (S.runIdentity run), "cancel accepted")) (Just run)
+  checks
+    [ ("an accepted cancel waits for the runtime status cancelled until the snapshot publishes it",
+        all (\run -> accepted run == ["Control: cancel accepted; waiting for the runtime status Cancelled"]) [running, cancelling]),
+      ("an accepted cancel shows the runtime status cancelled once the snapshot publishes it, never a finished state",
+        accepted cancelled == ["Control: cancel accepted; the runtime status is Cancelled"]
+          && not (any (\line -> any (`T.isInfixOf` line) ["Succeeded", "succeeded", "finished", "Finished"]) (concatMap accepted [running, cancelling, cancelled])))
+    ]
   absent <- decoded (put "runtime" Null verifiedMetadata)
   referencedOther <- decoded (alter "result" (put "artifactId" (String "artifact_2")) verifiedMetadata)
   referenced <- decoded (put "verification" (object ["state" .= ("referenced" :: T.Text), "artifactId" .= ("artifact_1" :: T.Text)]) metadata)
@@ -2384,7 +2526,11 @@ requestEndTests reviewed preparation receiptValue = do
           && isJustText (opened (L.ConfirmWithdraw "req_1") busy) && isJustText (opened (L.ConfirmDiscard "prep_1") busy)),
       ("a closed or changed confirmation states that nothing was sent",
         L.confirmCancelledText "withdraw" == "withdraw was not sent: the confirmation was closed."
-          && L.confirmChangedText "discard" == "discard did not start: the confirmed resource is no longer displayed.")
+          && L.confirmChangedText "discard" == "discard did not start: the confirmed resource is no longer displayed."),
+      ("the cancel confirmation names the run and its y key cancels",
+        let (title, rows) = L.confirmationLines (L.ConfirmCancel "run_1")
+         in L.confirmationOperation (L.ConfirmCancel "run_1") == "cancel" && title == " Confirm cancel "
+              && any ("run_1" `T.isInfixOf`) rows && any ("y CANCEL RUN" `T.isInfixOf`) rows)
     ]
   where
     isJustText = maybe False (not . T.null . fst)

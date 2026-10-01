@@ -23,6 +23,7 @@ module Agentic.Tui.Presentation
     serviceSavedLine,
     savedLeftoverNote,
     wrapDisplayLines,
+    steeringTimingText,
   )
 where
 
@@ -161,9 +162,17 @@ data Presentation = Presentation
     -- the published workflow and target label from it, also when the runtime
     -- is absent.
     presentationServiceRun :: !(Maybe Service.RunObservation),
-    -- | Whether the installed control observation offers a retry for the
-    -- recovery at the head, as 'Agentic.Tui.Service.retryOffer' decides.
-    presentationServiceRetry :: !Bool,
+    -- | The recovery choices (@retry@, @failover@, @abandon@) that the
+    -- installed control observation offers for the recovery at the head, as
+    -- 'Agentic.Tui.Service.retryOffer' and
+    -- 'Agentic.Tui.Service.recoveryOffer' decide.
+    presentationServiceRecoveryOffers :: ![Text],
+    -- | The run keys that the installed control observation offers on the
+    -- live monitor: @c CANCEL@ and @i/b STEER@.
+    presentationServiceRunKeys :: ![Text],
+    -- | The control line of the installed run, as
+    -- 'Agentic.Tui.Service.controlLines' produces it.
+    presentationServiceControlLines :: ![Text],
     -- | The terminal status and verified result lines of the installed run,
     -- as 'Agentic.Tui.Service.resultLines' produces them.
     presentationServiceResultLines :: ![Text],
@@ -232,7 +241,9 @@ emptyPresentation model =
       presentationServiceObservation = [],
       presentationServiceRequestLines = [],
       presentationServiceRun = Nothing,
-      presentationServiceRetry = False,
+      presentationServiceRecoveryOffers = [],
+      presentationServiceRunKeys = [],
+      presentationServiceControlLines = [],
       presentationServiceResultLines = [],
       presentationServiceSavable = False,
       presentationServiceKeyOutcome = Nothing,
@@ -470,12 +481,14 @@ screenView presentation width totalHeight mainHeight = case modelScreen model of
 
 -- | The lines above the live monitor in service mode: the request and its
 -- run, the installed observation with its stale mark and published runtime,
--- and the approval receipt status, which stays separate from the runtime.
+-- the approval receipt status, which stays separate from the runtime, the
+-- outcome of the latest control of the run, and the result lines.
 serviceLiveLines :: Presentation -> [Text]
 serviceLiveLines presentation =
   presentationServiceRequestLines presentation
     <> presentationServiceObservation presentation
     <> ["Approval receipt: " <> fromMaybe "none" (presentationServiceApproval presentation)]
+    <> presentationServiceControlLines presentation
     <> presentationServiceResultLines presentation
 
 -- | The lines that name a request, its phase and its run. The run has its own
@@ -1021,13 +1034,16 @@ recoveryView presentation width mainHeight = case presentationRecovery presentat
         contentWidth = confirmationInnerWidth width
         contentHeight = sum (map (length . wrapDisplayLines contentWidth) [request, message])
         choices = snapshotRecoveryChoices recovery
-        -- Service mode offers r only when the control observation offers a
-        -- retry. Other published choices are shown as unsupported here.
-        unsupported = [recoveryChoice option | option <- choices, recoveryChoice option /= "retry"]
+        -- Service mode offers the key of a choice only when the control
+        -- observation offers that choice. Other published choices are
+        -- shown as not offered.
+        offered = presentationServiceRecoveryOffers presentation
+        unoffered = [recoveryChoice option | option <- choices, recoveryChoice option `notElem` offered]
         actions
-          | presentationService presentation, presentationServiceRetry presentation =
-              T.intercalate "   " (["r RETRY"] <> ["Unsupported here: " <> T.intercalate ", " unsupported | not (null unsupported)])
-          | presentationService presentation = "Choices (read-only here): " <> T.intercalate ", " (map recoveryChoice choices)
+          | presentationService presentation, not (null offered) =
+              T.intercalate "   " ([recoveryKeyText choice <> " " <> T.toUpper choice | choice <- offered]
+                <> ["Not offered: " <> T.intercalate ", " unoffered | not (null unoffered)])
+          | presentationService presentation = "Choices (not offered by the manager): " <> T.intercalate ", " (map recoveryChoice choices)
           | otherwise = T.intercalate "   " [recoveryKeyText (recoveryChoice option) <> " " <> recoveryChoice option | option <- choices]
      in dialog width (min mainHeight (contentHeight + 4)) " Recovery required " $
           vBox
@@ -1093,7 +1109,11 @@ keyHelpLines presentation = case modelScreen model of
   LiveScreen _
     | presentationService presentation ->
         ["d full run details and error", "Tab focus pane", "Up/Down move or scroll", "j/k select occurrence", "G follow output",
-         "g refreshes observations"] <> ["r retries the recovery that the manager offers" | presentationServiceRetry presentation]
+         "g refreshes observations"] <> ["r retries the recovery that the manager offers" | "retry" `elem` presentationServiceRecoveryOffers presentation]
+          <> ["f fails over the recovery that the manager offers" | "failover" `elem` presentationServiceRecoveryOffers presentation]
+          <> ["a abandons the recovery that the manager offers" | "abandon" `elem` presentationServiceRecoveryOffers presentation]
+          <> ["c cancels the run after a confirmation" | "c CANCEL" `elem` presentationServiceRunKeys presentation]
+          <> ["i or b opens the steer editor for interrupt-now or next-boundary" | "i/b STEER" `elem` presentationServiceRunKeys presentation]
           <> ["s saves the verified result bytes to a new file" | presentationServiceSavable presentation]
           <> ["Esc returns to the manager overview; the manager run continues", "q detaches; the manager run continues", "? or Esc close this help"]
   LiveScreen _ ->
@@ -1227,8 +1247,11 @@ footerItems presentation width height
     | presentationPersonSubmitted presentation -> ["Esc CANCEL RUN", "WAITING FOR DELIVERY"]
     | otherwise -> ["Esc CANCEL RUN", "Ctrl-D SUBMIT", "Enter newline", "PgUp/PgDn prompt"]
   RecoveryLayer
-    | presentationService presentation, presentationServiceRetry presentation -> ["r RETRY", "d DETAILS", "g REFRESH", "Esc OVERVIEW", "? KEYS", "q DETACH"]
-    | presentationService presentation -> ["READ-ONLY RECOVERY", "d DETAILS", "g REFRESH", "Esc OVERVIEW", "? KEYS", "q DETACH"]
+    | presentationService presentation, offered@(_ : _) <- presentationServiceRecoveryOffers presentation ->
+        [recoveryKeyText choice <> " " <> T.toUpper choice | choice <- offered] <> presentationServiceRunKeys presentation
+          <> ["d DETAILS", "g REFRESH", "Esc OVERVIEW", "? KEYS", "q DETACH"]
+    | presentationService presentation -> ["NO RECOVERY OFFERED"] <> presentationServiceRunKeys presentation
+        <> ["d DETAILS", "g REFRESH", "Esc OVERVIEW", "? KEYS", "q DETACH"]
     | otherwise -> recoveryItems presentation <> ["c CANCEL RUN", "PgUp/PgDn scroll"]
   SteerLayer -> ["Esc CLOSE", "Ctrl-D SEND", "Enter newline"]
   SaveLayer -> ["Esc CANCEL", "Ctrl-D SAVE"] <> ["PgUp/PgDn ERROR" | Just _ <- [presentationSaveError presentation]]
@@ -1288,8 +1311,10 @@ footerItems presentation width height
       ConfirmScreen _ -> confirmItems False
       ProcessLoading _ -> ["Esc CANCEL STARTUP"]
       LaunchingScreen _ -> ["Esc DETACH", "c CANCEL RUN", "? KEYS"]
-      LiveScreen _ | presentationService presentation, compact -> ["q DETACH", "Esc OVERVIEW", "Tab PANE", "d DETAILS", "? KEYS"] <> saveItem
-                   | presentationService presentation -> ["q DETACH", "Esc OVERVIEW"] <> saveItem <> ["g REFRESH", "d DETAILS", compactNavigation, "? KEYS"]
+      LiveScreen _ | presentationService presentation, compact -> ["q DETACH", "Esc OVERVIEW"] <> presentationServiceRunKeys presentation
+                       <> ["Tab PANE", "d DETAILS", "? KEYS"] <> saveItem
+                   | presentationService presentation -> ["q DETACH", "Esc OVERVIEW"] <> presentationServiceRunKeys presentation
+                       <> saveItem <> ["g REFRESH", "d DETAILS", compactNavigation, "? KEYS"]
       LiveScreen _ | compact ->
         ["Esc " <> if presentationRunning presentation then "DETACH" else "RUNS", "Tab PANE", "d DETAILS", "? KEYS"]
           <> ["c CANCEL" | presentationRunning presentation]

@@ -751,13 +751,15 @@ unobservedText operation = operation <> " did not start: the request validator i
 
 -- | A mutation that starts only after an explicit confirmation, with the
 -- identifier of the resource that its key named: the withdrawal of a
--- request, and the discard of the review of a preparation. The key opens the
+-- request, the discard of the review of a preparation, and the cancel of a
+-- run. The key opens the
 -- confirmation only when 'mutationKeyOutcome' would start the mutation. The
 -- confirming key decides again with 'mutationKeyOutcome', and the mutation
 -- starts only for the resource that the key named.
 data Confirmation
   = ConfirmWithdraw !Text
   | ConfirmDiscard !Text
+  | ConfirmCancel !Text
   deriving (Eq, Show)
 
 -- | The manager operation of a confirmation.
@@ -765,6 +767,7 @@ confirmationOperation :: Confirmation -> Text
 confirmationOperation confirmation = case confirmation of
   ConfirmWithdraw _ -> "withdraw"
   ConfirmDiscard _ -> "discard"
+  ConfirmCancel _ -> "cancel"
 
 -- | The title and the lines of the dialog of a confirmation.
 confirmationLines :: Confirmation -> (Text, [Text])
@@ -779,6 +782,11 @@ confirmationLines confirmation = case confirmation of
       [ "Discard the review of preparation " <> ident <> "?",
         "The request returns to the draft phase, and Enter prepares a new review.",
         "y DISCARD REVIEW   n BACK" ] )
+  ConfirmCancel ident ->
+    ( " Confirm cancel ",
+      [ "Cancel run " <> ident <> "?",
+        "The manager asks the runtime to cancel the run. The run ends only when its runtime status is Cancelled.",
+        "y CANCEL RUN   n BACK" ] )
 
 -- | The fixed status text of a confirmation that n or Esc closed.
 confirmCancelledText :: Text -> Text
