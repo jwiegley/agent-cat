@@ -831,7 +831,8 @@ decodeMember kind member = case kind of
 
 -- | The display projection of one overview member: its kind, its identity,
 -- a one-line list label and its detail lines. A request keeps its phase,
--- admission and blocking reasons. A run keeps its runtime status, its
+-- admission and blocking reasons. A queued request also shows its position
+-- among the queued requests of its profile ('queuePositions'). A run keeps its runtime status, its
 -- supervision and its verification on distinct lines, and a runtime that the
 -- manager does not publish is shown as not published. The projection reads
 -- only the decoded member. No runtime reducer takes part.
@@ -842,17 +843,36 @@ data OverviewRow = OverviewRow
 -- | The rows of the overview members: the requests first, then the
 -- preparations, the runs and the decisions, each kind in manager order.
 overviewRows :: [OverviewMember] -> [OverviewRow]
-overviewRows = sortOn overviewRowKind . map overviewRow
+overviewRows members = sortOn overviewRowKind (map (overviewRow (queuePositions members)) members)
 
-overviewRow :: OverviewMember -> OverviewRow
-overviewRow member = case member of
+-- | The position of each queued request among the queued requests of its
+-- profile, in overview order, with the number of those requests. The
+-- manager position of a request counts the queued requests of every
+-- profile, so it differs from this position when another profile also has
+-- queued requests.
+queuePositions :: [OverviewMember] -> Map.Map Text (Int, Int)
+queuePositions members = Map.fromList
+  [ (C.draftId request, (position, length queued))
+  | profile <- profiles,
+    let queued = filter ((== profile) . C.draftProfile) queuedRequests,
+    (position, request) <- zip [1 ..] queued ]
+  where
+    queuedRequests = [request | RequestMember request <- members, C.draftPhase request == "queued"]
+    profiles = Set.toList (Set.fromList (map C.draftProfile queuedRequests))
+
+overviewRow :: Map.Map Text (Int, Int) -> OverviewMember -> OverviewRow
+overviewRow positions member = case member of
   RequestMember request -> OverviewRow C.OverviewRequest (C.draftId request)
-    ("request " <> C.draftPhase request <> "  " <> C.draftId request)
-    [ "Request: " <> C.draftId request, "Workflow: " <> C.draftWorkflow request, "Profile: " <> C.draftProfile request,
+    ("request " <> C.draftPhase request <> maybe "" (\place -> " " <> placeText place) queuePlace <> "  " <> C.draftId request)
+    ([ "Request: " <> C.draftId request, "Workflow: " <> C.draftWorkflow request, "Profile: " <> C.draftProfile request,
       "Phase: " <> C.draftPhase request, "Admission: " <> C.draftAdmission request,
-      "Position: " <> maybe "none" (T.pack . show) (C.draftPosition request),
-      "Blocking reasons: " <> listed (C.draftReasons request),
-      "Preparation: " <> fromMaybe "none" (C.draftPreparation request), "Run: " <> fromMaybe "none" (C.draftRun request) ]
+      "Position: " <> maybe "none" (T.pack . show) (C.draftPosition request) ]
+      <> maybe [] (\place -> ["Profile queue position: " <> placeText place]) queuePlace
+      <> [ "Blocking reasons: " <> listed (C.draftReasons request),
+      "Preparation: " <> fromMaybe "none" (C.draftPreparation request), "Run: " <> fromMaybe "none" (C.draftRun request) ])
+    where
+      queuePlace = Map.lookup (C.draftId request) positions
+      placeText (position, count) = T.pack (show position) <> " of " <> T.pack (show count)
   PreparationMember preparation -> OverviewRow C.OverviewPreparation (C.preparationId preparation)
     ("preparation  " <> C.preparationId preparation)
     [ "Preparation: " <> C.preparationId preparation, "Request: " <> C.preparationRequest preparation,
@@ -902,7 +922,7 @@ data OverviewOpen
 -- decision row opens the run of the decision. A preparation row opens its
 -- request when the overview lists that request.
 overviewOpen :: [OverviewMember] -> (C.OverviewKind, Text) -> OverviewOpen
-overviewOpen members key = case [member | member <- members, overviewRowKey (overviewRow member) == key] of
+overviewOpen members key = case [member | member <- members, overviewRowKey (overviewRow Map.empty member) == key] of
   RequestMember request : _ -> OpenRequest request
   RunMember item : _ -> OpenRun (runItemId item) (runItemProfile item)
   DecisionMember view : _ -> OpenRun (decisionRun view) (decisionProfile view)

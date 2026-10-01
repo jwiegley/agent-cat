@@ -10383,6 +10383,27 @@ Non-blocking findings of fess audit fess/pc-PC18-r1.md (2026-10-01) on subtask P
 5. (low) tui/src/Agentic/Tui/Service.hs near line 1364: the compositeResources docstring does not say that a run selection reads neither the request nor its preparation. The stateServiceObservation comment (App.hs near 240) still says "composite read of the selected request". Fix: update both comments.
 6. (low) tui/src/Agentic/Tui/Presentation.hs near line 1190: Esc on a question head works while an answer is pending, because the Esc case comes before the serviceAnswerPending guard, but the pending-answer footer does not list Esc OVERVIEW. Fix: add Esc OVERVIEW to that footer, or guard Esc and document it.
 
+* TODO [#D] Resolve the non-blocking fess findings of subtask PC19    :review:
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pc19-concurrency-fess-6oxj
+:LABELS:   ["review","workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-01 Thu 02:28]
+:MODIFIED: [2026-10-01 Thu 02:28]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess audit fess/pc-PC19-r1.md (2026-10-01) on subtask PC19 (WM-034 concurrent runs, queue position and observation after a TUI restart).
+
+1. (low) manager/test/service_http.py near lines 4033 and 4075: the negative draft checks (draft not in screen) read the screen when 'Your answer' first appears. If the draft were drawn one frame later, they would still pass. Fix: call session.settle() or pump about 0.5 s before reading the screen for the negative checks.
+2. (low) manager/test/service_http.py near lines 4053 and 4068: these waits match only 'decisions: ' with no count. Step 5 asserts count('decision question') == 2, but steps 7 and 8 assert no decision rows. Fix: in steps 7 and 8, assert that the screen has two 'decision question' rows, as step 5 does.
+3. (low) tui/src/Agentic/Tui/Service.hs near lines 853 to 878: only the Manager overview shows the per-profile queue position. The request screen still shows only the manager Position, which counts the queued requests of every profile. Fix: also show 'Profile queue position' on the request screen, or record the gap for a later package.
+4. (low) tui/src/Agentic/Tui/Service.hs near lines 834 and 835: the added comment line is much longer than the surrounding wrapped lines. Fix: rewrap the comment.
+
 * TODO [#C] Resolve PC5 fess findings in legacy history windows    :review:
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -18890,7 +18911,7 @@ to an unapproved local launch.
 :LABELS:   ["p7","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-01 Thu 02:05]
+:MODIFIED: [2026-10-01 Thu 02:28]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-034
 :SOURCE_REPO: agent-cat
@@ -19032,6 +19053,13 @@ Local-mode behavior remains intact without a duplicated service runtime model.
     "author": "johnw",
     "text": "PC18 (identity-keyed selection, drafts and run opening by id): AppState holds a selection (RequestSelection or RunSelection) instead of one journey. Enter on a Manager overview row opens a request by its phase or a run by its identifier, read through snapshot, controls and head decision only. Esc returns to the overview and sends nothing. Overview focus is kept by row kind and id. Input and answer drafts are kept by identity (at most 64), and showing a new head removes the drafts of the run's other decisions. Steer drafts are deferred until service steering exists. Evidence scope (/Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/PC/PC18/impl-r1): Werror build, tui-model-test at N8, tui-overview at N8 with steps 3a to 3c (open a held run, type an answer draft, Esc, HTTP shows the run still pending with unchanged revision and controlAcks, reopen shows the draft after a safety read and a resize), Phase A journey at N8, make -C doc check, all exit 0. Fess r1 non-blocking; findings in acat-pc18-selection-fess-54tl. Package stays open.",
     "created_at": "2026-10-01T09:05:36Z"
+  },
+  {
+    "id": 490,
+    "issue_id": "acat-wm-034-3vqz",
+    "author": "johnw",
+    "text": "PC19 (concurrent runs, queue position and observation after a TUI restart): a new pure function, Service.queuePositions, numbers the queued requests of each profile in overview order. A queued overview row shows 'request queued K of N' and its details show 'Profile queue position: K of N' before the blocking reasons. The tui-overview fixture now runs with executionReservations 2 and two profiles with separate resource keys. It shows two concurrent runs with independent statuses, a third request queued with reason capacity at position 1 of 1, an answer draft that survives a switch to the other run and back, and a TUI restart after which the overview lists both active runs and opens one at its question. tui/README.md, doc/tui-design.md and doc/agent-cat.texi describe the behavior. Evidence scope (/Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/PC/PC19/impl-r1): Werror build, tui-model-test at N8, tui-overview at N8 (attempts 1 and 2 failed on an exact decision count, fixed in the test; final run exit 0), Phase A journey at N8, make -C doc check, all exit 0. Limitations: two concurrent runs need two profiles because runs of one profile share resource keys; the request screen shows only the manager Position; drafts do not survive a TUI restart; tui/ci/tui.sh, ALLBUILD and the N=1 journey were not run. Fess r1 non-blocking; findings in acat-pc19-concurrency-fess-6oxj. Package stays open.",
+    "created_at": "2026-10-01T09:28:42Z"
   }
 ]
 #+end_src

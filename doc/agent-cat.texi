@@ -3350,7 +3350,14 @@ other browser keys keep their behavior, and @key{ESC} returns from the view to
 the workflow browser.  The view lists the requests with their workflow, phase,
 admission state, and blocking reasons, then the preparations, then the runs
 with their runtime status, supervision, and verification as distinct fields,
-and then the pending decisions with their run and kind.  A wide terminal shows
+and then the pending decisions with their run and kind.  A queued request
+also shows its position among the queued requests of its profile, in overview
+order, as @samp{request queued 1 of 2} in the list and as
+@samp{Profile queue position: 1 of 2} in the details.  The @samp{Position}
+line shows the position that the manager reports, which counts the queued
+requests of every profile.  The view lists every active run of the
+authorized profiles, so several runs that run at once each show their own
+runtime status and decisions.  A wide terminal shows
 the list beside the details of the selected row.  A narrow terminal shows one
 pane at a time, and @key{LEFT} and @key{RIGHT} select the pane.  @key{UP} and
 @key{DOWN} select a row.  The frontend keeps the selected row by its kind and
@@ -3373,7 +3380,12 @@ session created opens.  A row opens only while no manager command is in
 progress.  @key{ESC} on the live monitor, on a question or recovery head, and on
 the request screen while no command is in progress returns to the overview and
 sends nothing.  The selection stays, so the run continues at the manager, and
-@key{RET} on its row shows it again.
+@key{RET} on its row shows it again.  @key{RET} on the row of another run
+selects that run, and the earlier run continues at the manager.  The workflow
+browser creates a new request while earlier runs continue.  A frontend that
+starts again reads the overview, which lists the active runs that an earlier
+session or another client started, and @key{RET} on the row of such a run
+shows its live monitor.
 
 The frontend keeps the text drafts by identity: the input text of each request
 and input, and the answer text of each decision.  A draft survives a refresh, a
@@ -3588,11 +3600,9 @@ cancellation, steering, redirect, failover, or abandon of a run.  It has no
 structured answer editor, so a question with the @code{structured} code or with
 a code that is not a name shows its prompt and accepts no answer.  Captured inputs and
 other non-literal inputs cannot be supplied.  A request cannot be withdrawn or
-discarded.  The frontend follows one run at a time, and it offers no run
-history, lineage, or export.  Except for its event stream, it does not
-reconnect after a manager restart or a credential revocation.  After a
-restart of the frontend, it cannot observe runs that an earlier session
-started.  It has no accepted layout at 40
+discarded.  The frontend offers no run history, lineage, or export.  Except
+for its event stream, it does not reconnect after a manager restart or a
+credential revocation.  It has no accepted layout at 40
 columns by 12 rows or at 80 columns by 24 rows.  Service mode is not an
 accepted milestone, and it closes no workflow-manager package or gate.
 @end table

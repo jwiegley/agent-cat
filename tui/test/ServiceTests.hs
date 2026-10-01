@@ -324,6 +324,18 @@ overviewTests render row request0 preparation = do
       ("a request row keeps its workflow, phase, admission and blocking reasons",
         all (`elem` detailsOf "req_overview_1") ["Phase: draft", "Admission: not-queued", "Blocking reasons: missing-inputs, profile-busy",
           "Workflow: " <> C.draftWorkflow request]),
+      ("a queued request shows its blocking reasons and its position among the queued requests of its profile in overview order",
+        let queued ident profile = request {C.draftId = ident, C.draftProfile = profile, C.draftPhase = "queued",
+              C.draftAdmission = "waiting", C.draftReasons = ["capacity"]}
+            queue = S.overviewRows [S.RequestMember (queued "req_q1" "profile_main"), S.RunMember run,
+              S.RequestMember (queued "req_q2" "profile_other"), S.RequestMember request, S.RequestMember (queued "req_q3" "profile_main")]
+            rowOf ident = listToMaybe [entry | entry <- queue, S.overviewRowId entry == ident]
+            placed ident place = maybe False (\entry -> ("Profile queue position: " <> place) `elem` S.overviewRowDetails entry
+              && "Blocking reasons: capacity" `elem` S.overviewRowDetails entry
+              && ("request queued " <> place <> "  " <> ident) == S.overviewRowLabel entry) (rowOf ident)
+         in placed "req_q1" "1 of 2" && placed "req_q3" "2 of 2" && placed "req_q2" "1 of 1"
+              && maybe False (not . any ("Profile queue position" `T.isPrefixOf`) . S.overviewRowDetails) (rowOf "req_overview_1")
+              && maybe False ((== "request draft  req_overview_1") . S.overviewRowLabel) (rowOf "req_overview_1")),
       ("a run row keeps runtime status, supervision and verification as distinct fields",
         all (`elem` detailsOf "run_overview_1") ["Runtime status: Running (sequence 7, protocol 2)", "Supervision: owned", "Verification: referenced"]
           && all (`elem` detailsOf "run_overview_2") ["Runtime status: not published", "Supervision: lost", "Verification: absent"]),

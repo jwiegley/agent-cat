@@ -330,22 +330,42 @@ endpoints_mode = len(sys.argv) == 6 and sys.argv[5] == ENDPOINTS
 # that the same decision is still the pending head, and that no control
 # acknowledgement was added. The focus must still be on the run row, and
 # Enter must show the question head with the same draft again, after a
-# safety read and after a resize. Esc returns to the overview again. The
-# harness then answers the question and retries the recovery. The
-# overview lists only live requests and active runs, so within 3 seconds
-# after the harness observes the terminal status Succeeded, and without a
-# key press, the view must no longer list the run. The harness then creates
-# a second request, which must appear without a key press, and quits the TUI.
+# safety read and after a resize. Esc returns to the overview again.
+#
+# The manager has two execution reservations and two profiles with their own
+# resource keys. While the first run waits at its question, the TUI creates
+# a second request from the workflows browser of the second profile, types
+# its literal input and enqueues it. The harness reads that the first run is
+# still running at the same question, approves the second request and stops
+# its run at its question. The TUI shows the question of the second run, and
+# Esc returns to the overview, which must list both runs as Running with
+# their own identifiers, profiles and questions. The TUI then opens the first
+# run, which must show its draft, then the second run, which must not show
+# that draft and receives a draft of its own, and then the first run again,
+# which must show only its own draft. The harness then creates and enqueues
+# a third request of the first profile. Both reservations are held, so the
+# manager keeps it queued with the blocking reason capacity, and its row must
+# show that reason and the position 1 of 1 among the queued requests of its
+# profile. The harness then quits the TUI and starts it again. The restarted
+# TUI must list both active runs and the queued request, and Enter on the row
+# of the second run must show its question. The harness then answers the
+# question of the first run and retries its recovery. The overview lists only
+# live requests and active runs, so within 3 seconds after the harness
+# observes the terminal status Succeeded, and without a key press, the view
+# must list one run, the second run, still Running. The third request then
+# leaves the queue. The harness approves it and completes it and the second
+# run, and the view must become empty. The harness then creates a further
+# request, which must appear without a key press, and quits the TUI.
 # It then holds the two SSE readers of the TUI credential open and starts the
 # TUI again. The SSE request of the TUI is refused with 429, so the header
-# must show the delivery state polling, and a third request that the harness
+# must show the delivery state polling, and another request that the harness
 # creates must appear within 3 seconds without a key press. The harness then
 # releases the two readers, and the delivery state must return to live. It
 # then stops the manager, and after g the view must keep both requests and
 # mark the overview stale with the refusal code. Each step prints its own
 # PASS line. It runs one manager lifetime.
 OVERVIEW = "tui-overview"
-TUI_MODES = {OVERVIEW: (["profile_1"], ["observe", "submit"])}
+TUI_MODES = {OVERVIEW: (["profile_1", "profile_2"], ["observe", "submit"])}
 tui_mode = sys.argv[5] if len(sys.argv) == 6 and sys.argv[5] in TUI_MODES else None
 assert len(sys.argv) == 5 or mixed or boundary or pages_mode or events_mode or captures_mode or discard_mode or exports_mode or lineage_mode or control_profiles or person_mode or endpoints_mode or tui_mode
 assert not tui_approval or os.environ.get("TUI_CHECK")
@@ -445,6 +465,16 @@ if mixed or tui_mode == OVERVIEW:
         targetLabel="Deterministic ACP retry", targetArguments=["--engine", "acp", "--adapter", "mixed-adapter"],
         environment=[{"name": "PATH", "value": str(adapters)}]
         + ([{"name": "ACAT_PAGES_MARKER", "value": PAGES_ENVIRONMENT_MARKER}] if pages_mode else []))
+# The tui-overview mode runs two mixed-controls runs at once and queues a
+# third request behind them. The manager has two execution reservations, and
+# each of its two profiles has its own resource key, so one run of each
+# profile holds a reservation, and a third request waits with the blocking
+# reason capacity.
+if tui_mode == OVERVIEW:
+    configuration["limits"]["executionReservations"] = 2
+    configuration["profiles"][0]["resourceKeys"] = ["overview_one"]
+    configuration["profiles"].append(dict(configuration["profiles"][0], id="profile_2",
+                                          workspaceLabel="HTTPS second fixture", resourceKeys=["overview_two"]))
 # The restart quarantines the reservation of the lost run, or of a request
 # in review, with its execution slot and resource keys, until the operator
 # releases it with cleanup evidence. The failures-manager mode keeps one
@@ -3751,12 +3781,14 @@ def overview_checks():
     def save(session, name):
         (work / ("tui-overview-" + name + ".screen.txt")).write_text(session.screen.text())
 
-    def create_draft():
-        """Create one draft request of the mixed workflow through HTTP with
-        the credential of the harness."""
+    def create_draft(chosen=None):
+        """Create one draft request of the mixed workflow of the first
+        profile, or of the chosen workflow, through HTTP with the credential
+        of the harness."""
+        chosen = chosen or workflow
         key = capabilities["authorityEpoch"] + "." + secrets.token_urlsafe(16)
-        body = {"workflowId": workflow["id"], "descriptorRevision": workflow["revision"],
-                "profileId": workflow["profileId"], "profileRevision": workflow["profileRevision"]}
+        body = {"workflowId": chosen["id"], "descriptorRevision": chosen["revision"],
+                "profileId": chosen["profileId"], "profileRevision": chosen["profileRevision"]}
         status, created, raw = request("/v1/requests", harness | {"Content-Type": "application/json", "Idempotency-Key": key},
                                        method="POST", payload=json.dumps(body, separators=(",", ":")).encode())
         assert status == 201, ("request creation", status, created.get("code"))
@@ -3812,6 +3844,37 @@ def overview_checks():
         """The details column joined without separators, so that a long
         identifier that wraps across rows stays one string."""
         return "".join(line.split("│", 1)[1].strip() for line in screen.splitlines() if "│" in line)
+
+    def focus_row(session, label, value):
+        """Move the overview focus to the row whose list label starts with
+        label and whose details contain value, such as "Run:" and a run
+        identifier. Returns the screen."""
+        session.send(b"\x1b[A" * 16)
+        session.settle()
+        for _ in range(16):
+            screen = session.screen.text()
+            if "> " + label in screen and value in details(screen).replace(" ", ""):
+                return screen
+            session.send(b"\x1b[B")
+            session.settle()
+        raise AssertionError(("no overview row has the label and the value", label, value, session.screen.text()))
+
+    def open_run(session, run):
+        """Focus the row of this run and open it with Enter. Returns the
+        screen of its question head."""
+        focus_row(session, "run Running", "Run:" + run)
+        session.send(b"\r")
+        return session.wait_screen("Your answer", timeout=20)
+
+    def leave(session):
+        """Esc from the live monitor back to the overview."""
+        session.send(b"\x1b")
+        session.wait_screen("Manager overview", timeout=10)
+        return session.wait_screen("Overview: current", timeout=10)
+
+    def run_rows(screen):
+        """The number of run rows that the overview list shows."""
+        return sum(1 for line in screen.splitlines() if line.split("│", 1)[0].strip().lstrip("> ").startswith("run Running"))
 
     with (work / "server-0.stdout").open("wb") as output, (work / "server-0.stderr").open("wb") as errors:
         process = subprocess.Popen([str(runner), "--manager", "serve", "--config", str(config),
@@ -3912,29 +3975,153 @@ def overview_checks():
                 session.wait_screen("Manager overview", timeout=10)
                 print("PASS tui-overview 3c: the reopened run showed the typed answer draft again, after a safety read and after a resize,",
                       "and Esc returned to the overview", flush=True)
-                _, answered, recovered = drive_mixed(run, client, overview=False)
-                assert answered and recovered, ("mixed workflow decisions", answered, recovered)
-                finished_at = time.monotonic()
-                screen = session.wait_screen("Overview: current; requests: 0, preparations: 0, runs: 0, decisions: 0", timeout=3)
-                elapsed = time.monotonic() - finished_at
-                save(session, "succeeded")
-                assert "No rows are visible." in screen, "the overview still lists the terminal run"
-                live_header(session)
-                print("PASS tui-overview 3: without a key press the overview shows run", run, "Running with its question, and it drops the run",
-                      f"{elapsed:.2f} seconds after the harness observed the terminal status Succeeded", flush=True)
-                # 4. A second request appears without a key press.
-                second = create_draft()
-                screen = session.wait_screen("Overview: current; requests: 1, preparations: 0, runs: 0, decisions: 0", timeout=3)
-                save(session, "second")
-                assert "Request:" + second["id"] in details(screen), "the overview details lack the second request"
-                live_header(session)
-                print("PASS tui-overview 4: without a key press the overview lists the second request", second["id"], flush=True)
+                # 4. While the first run waits at its question, the
+                # workflows browser of the second profile creates a second
+                # request, and the TUI types its literal input and enqueues it.
+                status, catalogue_2, _ = request("/v1/workflows?profileId=profile_2", harness)
+                assert status == 200
+                index_2 = next(i for i, item in enumerate(catalogue_2["items"]) if item["name"] == "mixed-controls")
+                workflow_2 = catalogue_2["items"][index_2]
+                session.send(b"\x1b")
+                session.wait_screen("Manager workflows")
+                session.send(b"\x1b")
+                session.wait_screen("Manager profiles")
+                session.send(b"\x1b[B\r")
+                screen = session.wait_screen("Manager workflows")
+                assert "profile_2" in screen, "the workflows browser does not show the second profile"
+                session.send(b"\x1b[B" * index_2 + b"\r")
+                session.wait_screen("request validator current", timeout=30)
+                session.send(b"\x1b[200~" + MIXED_TEXT.encode() + b"\x1b[201~")
+                session.send(b"\x04")
+                session.wait_screen("Enter REQUEST REVIEW", timeout=30)
+                session.send(b"\r")
+                session.wait_screen("Approve exact manager review", timeout=45)
+                save(session, "second-review")
+                status, current, _ = request("/v1/snapshot", harness)
+                assert status == 200
+                created_2 = [item["request"] for item in current["items"]
+                             if item["kind"] == "request" and item["request"]["profileId"] == "profile_2"]
+                assert len(created_2) == 1 and created_2[0]["phase"] == "review", ("the TUI request of the second profile", created_2)
+                still, _, _ = client[0]("/v1/runs/" + run + "/snapshot", "RunSnapshot")
+                still_control, _, _ = client[0]("/v1/runs/" + run + "/control", "RunControl")
+                assert still["runtime"]["status"] == "running" and still_control["decisionHeadId"] == head, (
+                    "the first run did not continue at its question while the TUI created the second request")
+                print("PASS tui-overview 4: the workflows browser of profile_2 created request", created_2[0]["id"],
+                      "and the TUI enqueued it to review while run", run, "kept running at its question", flush=True)
+                # 5. The harness approves the second request and stops its run
+                # at its question. Both runs then run at once.
+                _, run_2 = approve_review(created_2[0], workflow_2, client)
+                head_2, _, _ = drive_mixed(run_2, client, stop_at_question=True, overview=False)
+                session.wait_screen("Your answer", timeout=30)
+                save(session, "second-question")
+                screen = leave(session)
+                screen = session.wait_screen("Overview: current; requests: 2, preparations: 0, runs: 2, decisions: ", timeout=10)
+                save(session, "two-runs")
+                assert run_rows(screen) == 2 and screen.count("decision question") == 2, "the overview does not list two running runs"
+                for ident, profile in ((run, "profile_1"), (run_2, "profile_2")):
+                    screen = focus_row(session, "run Running", "Run:" + ident)
+                    assert "Profile: " + profile in screen and "Runtime status: Running" in screen, (
+                        "the run row lacks its own profile and status", ident)
+                print("PASS tui-overview 5: the overview lists runs", run, "and", run_2,
+                      "as Running with their own profiles and question decisions", flush=True)
+                # 6. An answer draft survives a switch to the other run and back.
+                screen = open_run(session, run)
+                assert draft in session.wait_screen(draft, timeout=10), "the first run lost its draft"
+                leave(session)
+                screen = open_run(session, run_2)
+                save(session, "second-open")
+                assert draft not in screen, "the second run shows the draft of the first run"
+                draft_2 = "pc19 second draft"
+                session.send(draft_2.encode())
+                session.wait_screen(draft_2, timeout=10)
+                leave(session)
+                open_run(session, run)
+                screen = session.wait_screen(draft, timeout=10)
+                save(session, "first-reopen")
+                assert draft_2 not in screen, "the first run shows the draft of the second run"
+                leave(session)
+                for ident, decision_id in ((run, head), (run_2, head_2)):
+                    unchanged, _, _ = client[0]("/v1/runs/" + ident + "/control", "RunControl")
+                    assert unchanged["decisionHeadId"] == decision_id, ("a switch changed a pending question", ident)
+                print("PASS tui-overview 6: the answer draft of run", run, "survived a switch to run", run_2,
+                      "and back, and each run showed only its own draft", flush=True)
+                # 7. A third request waits behind the two held reservations.
+                third = create_draft()
+                enqueue_mixed(third, workflow, client)
+                queued, _, _ = client[1](third["links"]["self"], "Request",
+                                         lambda value: value["phase"] == "queued" and value["admission"]["reasons"] == ["capacity"])
+                screen = session.wait_screen("Overview: current; requests: 3, preparations: 0, runs: 2, decisions: ", timeout=10)
+                screen = focus_row(session, "request queued 1 of 1", "Request:" + third["id"])
+                save(session, "queued")
+                for line in ("Phase: queued", "Profile: profile_1", "Profile queue position: 1 of 1", "Blocking reasons: capacity"):
+                    assert line in screen, ("the queued request row lacks a line", line)
+                print("PASS tui-overview 7: request", third["id"], "is queued with blocking reason capacity and position 1 of 1",
+                      "among the queued requests of profile_1, at manager position", queued["admission"]["position"], flush=True)
                 session.send(b"\x1b")
                 session.wait_screen("Manager workflows")
                 session.send(b"q")
                 assert session.wait_exit(20) == 0
                 session.assert_restored()
-            # 5. With no free SSE reader the restarted TUI polls and still
+            # 8. The restarted TUI lists both active runs and opens one.
+            with tui_fixture.session() as session:
+                open_overview(session)
+                screen = session.wait_screen("Overview: current; requests: 3, preparations: 0, runs: 2, decisions: ", timeout=20)
+                save(session, "restarted")
+                assert run_rows(screen) == 2, "the restarted TUI does not list two running runs"
+                focus_row(session, "run Running", "Run:" + run)
+                focus_row(session, "request queued 1 of 1", "Request:" + third["id"])
+                screen = open_run(session, run_2)
+                save(session, "restarted-open")
+                assert draft not in screen and draft_2 not in screen, "the restarted TUI shows a draft of the earlier TUI"
+                reopened, _, _ = client[0]("/v1/runs/" + run_2 + "/control", "RunControl")
+                assert reopened["decisionHeadId"] == head_2, "opening the run changed its question"
+                leave(session)
+                print("PASS tui-overview 8: the restarted TUI lists runs", run, "and", run_2, "and the queued request, and Enter opens",
+                      "the question of run", run_2, flush=True)
+                # 9. The runs keep independent statuses: the first run ends
+                # and leaves the overview while the second stays at its question.
+                _, answered, recovered = drive_mixed(run, client, overview=False)
+                assert answered and recovered, ("mixed workflow decisions", answered, recovered)
+                finished_at = time.monotonic()
+                while True:
+                    screen = session.screen.text()
+                    if "Overview: current;" in screen and " runs: 1," in screen:
+                        break
+                    assert time.monotonic() < finished_at + 3, ("the overview still lists the terminal run", screen)
+                    session.pump(0.05)
+                elapsed = time.monotonic() - finished_at
+                screen = focus_row(session, "run Running", "Run:" + run_2)
+                save(session, "first-succeeded")
+                assert run_rows(screen) == 1, "the overview does not list exactly the second run"
+                assert "Run:" + run not in details(screen).replace(" ", ""), "the overview still lists the terminal run"
+                live_header(session)
+                print("PASS tui-overview 9: without a key press the overview drops run", run,
+                      f"{elapsed:.2f} seconds after the harness observed the terminal status Succeeded, and run", run_2,
+                      "stays Running at its question", flush=True)
+                # 10. The third request leaves the queue. The harness completes
+                # it and the second run, and the overview becomes empty.
+                _, run_3 = approve_review(third, workflow, client)
+                for ident in (run_3, run_2):
+                    _, answered, recovered = drive_mixed(ident, client, overview=False)
+                    assert answered and recovered, ("mixed workflow decisions", ident, answered, recovered)
+                screen = session.wait_screen("Overview: current; requests: 0, preparations: 0, runs: 0, decisions: 0", timeout=10)
+                save(session, "succeeded")
+                assert "No rows are visible." in screen, "the overview still lists a terminal run"
+                print("PASS tui-overview 10: request", third["id"], "left the queue as run", run_3,
+                      "and the overview became empty after runs", run_3, "and", run_2, "succeeded", flush=True)
+                # 11. A further request appears without a key press.
+                second = create_draft()
+                screen = session.wait_screen("Overview: current; requests: 1, preparations: 0, runs: 0, decisions: 0", timeout=3)
+                save(session, "second")
+                assert "Request:" + second["id"] in details(screen), "the overview details lack the further request"
+                live_header(session)
+                print("PASS tui-overview 11: without a key press the overview lists the further request", second["id"], flush=True)
+                session.send(b"\x1b")
+                session.wait_screen("Manager workflows")
+                session.send(b"q")
+                assert session.wait_exit(20) == 0
+                session.assert_restored()
+            # 12. With no free SSE reader the restarted TUI polls and still
             # shows an HTTP change within 3 seconds.
             held = hold_readers()
             try:
@@ -3944,15 +4131,15 @@ def overview_checks():
                     session.wait_screen("delivery polling", timeout=20)
                     live_header(session, "polling")
                     save(session, "polling")
-                    third = create_draft()
+                    fourth = create_draft()
                     created_at = time.monotonic()
                     screen = session.wait_screen("Overview: current; requests: 2, preparations: 0, runs: 0, decisions: 0", timeout=3)
                     elapsed = time.monotonic() - created_at
                     save(session, "polled")
                     live_header(session, "polling")
-                    print("PASS tui-overview 5: with both SSE readers of its credential held, the restarted TUI shows delivery polling and lists request",
-                          third["id"], f"without a key press after {elapsed:.2f} seconds", flush=True)
-                    # 6. A free reader returns delivery to live.
+                    print("PASS tui-overview 12: with both SSE readers of its credential held, the restarted TUI shows delivery polling and lists request",
+                          fourth["id"], f"without a key press after {elapsed:.2f} seconds", flush=True)
+                    # 13. A free reader returns delivery to live.
                     for connection, response in held:
                         response.close()
                         connection.close()
@@ -3961,9 +4148,9 @@ def overview_checks():
                     session.wait_screen("delivery live", timeout=60)
                     live_header(session)
                     save(session, "relive")
-                    print("PASS tui-overview 6: after the harness released the readers, the delivery state returned to live after",
+                    print("PASS tui-overview 13: after the harness released the readers, the delivery state returned to live after",
                           f"{time.monotonic() - released_at:.2f} seconds", flush=True)
-                    # 7. A refused read keeps the overview and marks it stale.
+                    # 14. A refused read keeps the overview and marks it stale.
                     process.terminate()
                     process.wait(timeout=25)
                     session.send(b"g")
@@ -3973,8 +4160,8 @@ def overview_checks():
                     for line in ("> request draft", "Phase: draft"):
                         assert line in screen, ("the stale overview lost a line of the selected request", line)
                     assert any("Request:" + item["id"] in details(screen) and "Blocking reasons: " + ", ".join(item["admission"]["reasons"]) in screen
-                               for item in (second, third)), "the stale overview lost the selected request"
-                    print("PASS tui-overview 7: with the manager stopped, g keeps both requests and marks the overview stale with TransportUnavailable",
+                               for item in (second, fourth)), "the stale overview lost the selected request"
+                    print("PASS tui-overview 14: with the manager stopped, g keeps both requests and marks the overview stale with TransportUnavailable",
                           flush=True)
                     session.send(b"\x1b")
                     session.wait_screen("Manager workflows")

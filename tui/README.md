@@ -170,7 +170,14 @@ their behavior there, and `Esc` returns from the view to the workflow browser.
 The view lists the requests with their workflow, phase, admission state and
 blocking reasons, then the preparations, then the runs with their runtime
 status, supervision and verification as distinct fields, and then the pending
-decisions with their run and kind. `Agentic.Tui.Service.decodeOverviewItem`
+decisions with their run and kind. A queued request also shows its position
+among the queued requests of its profile, in overview order
+(`Agentic.Tui.Service.queuePositions`): `request queued 1 of 2` in the list
+and `Profile queue position: 1 of 2` in the details. The `Position` line shows
+the admission position that the manager reports, which counts the queued
+requests of every profile. The view lists every active run of the authorized
+profiles, so runs that run at once each show their own runtime status and
+decisions. `Agentic.Tui.Service.decodeOverviewItem`
 decodes each member with the decoders of the request and run collections, and
 `overviewRows` projects it for display. No runtime reducer takes part. A wide
 terminal shows the list beside the details of the selected row. A narrow
@@ -204,7 +211,14 @@ so the reads that confirm a command in progress continue, and the run
 continues at the manager. An installed read of the selection never replaces
 the overview, a browser or the help (`serviceShowsSelection`). `Enter` on the
 row of the run that the installed observation already shows opens it at once
-with that observation.
+with that observation. `Enter` on the row of another run selects that run,
+and the earlier run continues at the manager. The workflow browser creates a
+new request while earlier runs continue. A frontend that starts again reads
+the overview, which lists the active runs that an earlier session or another
+client started, and `Enter` on the row of such a run shows its live monitor.
+The tui-overview mode of `manager/test/service_http.py` runs two runs at once
+with two execution reservations, queues a third request behind them, and
+opens both runs after a restart of the frontend.
 
 The application state keeps the text drafts by identity
 (`Agentic.Tui.ServiceLane.Drafts`): the input editor text of each request and
@@ -366,9 +380,8 @@ description](../doc/api/README.md#pages-and-live-delivery) describes.
 
 Service mode does not support cancellation, steering, redirect, failover or
 abandon, the structured answer editor, captured and other non-literal inputs,
-withdrawal or discarding of a request, more than one selection at a time, run history,
-lineage, export, reconnection of the session after a manager restart or a
-credential revocation, observation of earlier runs after a
-frontend restart, or acceptance at 40x12 and 80x24. The
+withdrawal or discarding of a request, run history, lineage, export,
+reconnection of the session after a manager restart or a credential
+revocation, or acceptance at 40x12 and 80x24. The
 [manual](../doc/agent-cat.texi) entry for `--service` states the complete key
 behavior. Service mode is not an accepted milestone.
