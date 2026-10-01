@@ -629,9 +629,20 @@ storage failures are not converted into successful receipts.
 `RUNNER` denotes the configured registry executable. The following forms define
 the command boundary. Offline administration and a configured same-user local
 channel implement credential listing, issuance, rotation and revocation, and the
-read-only `status` and `check-store` operations. The operations
-`reload-profiles`, `drain`, `shutdown`, `backup`, `restore`,
-`check-quarantine`, and `release-quarantine` receive `state-conflict`.
+read-only `status`, `check-store` and `check-quarantine` operations.
+`check-quarantine` answers `clean` with cleanup evidence when the reservation
+never launched a run or when the run log of its run holds the terminal record
+of the runtime, `cleanup-required` when that run has no terminal record, and
+`unverifiable` when the run store cannot be read or the identity names a
+restoration claim. The evidence digest is the lowercase SHA-256 digest of the
+canonical JSON facts, which include the answering process generation, and the
+evidence identity is `cleanup_` followed by its first 32 hexadecimal digits.
+Clean evidence expires 600 seconds after the check. An unknown identity and a
+reservation that is not quarantined receive `state-conflict`.
+[`manager/WORKERS.md`](../../manager/WORKERS.md#manager-loss-and-restart)
+states the facts of each rule. The operations `reload-profiles`, `drain`,
+`shutdown`, `backup`, `restore`, and `release-quarantine` receive
+`state-conflict`.
 Existing `RUNNER --tui` and native frontend commands remain unchanged.
 
 ```text

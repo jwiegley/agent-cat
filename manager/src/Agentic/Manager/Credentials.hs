@@ -181,10 +181,12 @@ perform store principal request = case request of
         logged <- recordAdministration store principal (administered AdministerRotate (Just previous) value)
         pure ((value, logged), changed revision)
     pure (object ["credential" .= fst metadata, "previousCredentialId" .= previous, "secretWritten" .= True], snd metadata)
-  -- Store status and inspection belong to "Agentic.Manager.Quarantine". The
-  -- other recognized operations have no implementation yet.
+  -- Store status, inspection and quarantine checks belong to
+  -- "Agentic.Manager.Quarantine". The other recognized operations have no
+  -- implementation yet.
   Status -> throwIO StateConflict
   CheckStore -> throwIO StateConflict
+  CheckQuarantine _ -> throwIO StateConflict
   OtherAdmin _ -> throwIO StateConflict
 
 -- | The command body of a credential operation, from the metadata of the

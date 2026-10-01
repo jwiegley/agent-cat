@@ -4529,7 +4529,7 @@ Non-blocking findings of the fess audit of Phase B part 2 subtask C23 (WM-028 fu
 :LABELS:   ["workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-30 Wed 18:00]
-:MODIFIED: [2026-09-30 Wed 20:01]
+:MODIFIED: [2026-09-30 Wed 20:21]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -4555,6 +4555,13 @@ Other C24 limitations recorded with the commit: the restarted manager does not i
     "author": "johnw",
     "text": "Item 1 partly advanced by Phase C subtask PC1: check-store now lists the quarantined reservation of a lost run and status counts it (failures-manager case 4a). Release of the quarantine (check-quarantine, release-quarantine) is still refused with state-conflict, so item 1 stays open.",
     "created_at": "2026-10-01T03:01:39Z"
+  },
+  {
+    "id": 455,
+    "issue_id": "acat-c24-manager-loss-fess-findings-g5xr",
+    "author": "johnw",
+    "text": "Item 1 advanced by Phase C subtask PC2: check-quarantine now returns cleanup evidence for the quarantined reservation of a lost run (clean, with the terminal-record digest that failures-manager recomputes). release-quarantine still answers state-conflict, so the reservation keeps its slot and item 1 stays open. Evidence: resume-20260923 PC2 logs (build of agentic-run, routing-fixed-point-probe and manager-command-check; manager-command-check main at N8 with credential_cli.py; failures-manager at N8 with TUI_CHECK; JOURNEY-ONCE at N8; make -C doc check; all exit 0). Fess: non-blocking, findings filed as acat-e4i6.",
+    "created_at": "2026-10-01T03:21:33Z"
   }
 ]
 #+end_src
@@ -5199,6 +5206,31 @@ Owner directive 2026-08-12: use the standard libraries as much as possible; do n
   }
 ]
 #+end_src
+
+* TODO [#C] Resolve PC2 fess findings in check-quarantine
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-e4i6
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-30 Wed 20:21]
+:MODIFIED: [2026-09-30 Wed 20:21]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of the fess audit of Phase C subtask PC2 (WM-042 check-quarantine with cleanup evidence). Report: fess/pc-PC2-r1.md in the private resume-20260923 evidence directory.
+
+1. (medium) manager/src/Agentic/Manager/Quarantine.hs (about lines 156 and 237). No fixture reaches the cleanup-required branch (a launched run whose flow.ndjson has no stop) or the unverifiable branch for an unreadable run store. A regression that reports either one as clean would pass every check. Fix: add a CommandCheck or failures-worker fixture with a quarantined reservation whose run log has no stop and assert cleanup-required with null id, digest and expiresAt. Then remove or corrupt the run store and assert unverifiable.
+2. (low) manager/test/CommandCheck.hs (about line 1080) and manager/test/service_http.py (about line 5270). The tests check only that expiresAt is a string. Fix: assert that expiresAt falls between the times taken before and after the call, plus cleanupEvidenceLifetime.
+3. (low) manager/src/Agentic/Manager/Quarantine.hs (about lines 227-237). A runs row whose run store has no runtime directory or no flow.ndjson classifies as unverifiable, not cleanup-required. Fix: decide which state a missing run store gives, state it in manager/WORKERS.md, and add a fixture.
+4. (low) manager/WORKERS.md (about line 225). The text says the facts are encoded "with its keys in order". The behavior and the harness depend on sorted key order. Fix: say "with its keys in sorted order".
+5. (low) manager/src/Agentic/Manager/Quarantine.hs (about lines 140 and 167). processGeneration is read twice, once for the response and once for the facts. Fix: return the generation from inspectQuarantine and use that one value.
+6. (low) manager/src/Agentic/Manager/Quarantine.hs (about lines 251-259). answered now also catches AdminFailure, which changes the error path of status and check-store too. Fix: confirm that this is intended, or catch AdminFailure only in checkQuarantine.
+
+Further limitations recorded by the implementer: offline clean evidence through the CLI has no end-to-end test (only the unknown-id refusal offline); a Store integrity fault (two run rows for one reservation, or a start intent without a run) answers storage-unavailable, not unverifiable, with no fixture.
 
 * DONE [#B] Actor flow increment 1a: run log, flow broker, strict codecs and reader
 :PROPERTIES:
@@ -10087,7 +10119,7 @@ Deferred security stage for Phase B part 2 (operator direction of 2026-09-30: fu
 :LABELS:   ["review","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-30 Wed 19:20]
-:MODIFIED: [2026-09-30 Wed 19:20]
+:MODIFIED: [2026-09-30 Wed 20:21]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -10112,6 +10144,20 @@ Low:
 11. The functional low gaps of part 1 stay open (tracked in acat-phase-b1-review-followups-dk1v).
 
 The closeout corrected the documentation that findings 1 to 3 name (manager/STORAGE.md, doc/api/README.md, the handoff). Findings 1 and 2 are the functional repairs that Phase C needs first.
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 456,
+    "issue_id": "acat-phase-b2-review-findings-x8fv",
+    "author": "johnw",
+    "text": "Item 2 advanced by Phase C subtask PC2: check-quarantine gives cleanup evidence for a quarantined reservation. The release (release-quarantine) is still to come, so item 2 stays open. Evidence: resume-20260923 PC2 logs (build of agentic-run, routing-fixed-point-probe and manager-command-check; manager-command-check main at N8 with credential_cli.py; failures-manager at N8 with TUI_CHECK; JOURNEY-ONCE at N8; make -C doc check; all exit 0). Fess: non-blocking, findings filed as acat-e4i6.",
+    "created_at": "2026-10-01T03:21:33Z"
+  }
+]
+#+end_src
 
 * DONE [#E] fanT fusion holds only laxly at m=0 after the l59 repair
 :PROPERTIES:
@@ -19251,7 +19297,7 @@ Publish precommitted workload and resource ceilings. All core advertised bounds 
 :LABELS:   ["p10","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-30 Wed 20:01]
+:MODIFIED: [2026-09-30 Wed 20:21]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-042
 :SOURCE_REPO: agent-cat
@@ -19392,6 +19438,13 @@ recipe that ignores WAL or unresolved effects.
     "author": "johnw",
     "text": "Phase C subtask PC1: the local administration operations status and check-store are typed (Status, CheckStore) and implemented by the new manager owner Agentic.Manager.Quarantine, dispatched by name from the live channel (state serving) and from offline administration (state stopped). status returns the frozen LocalAdminResponse shape with activeReservations counting non-released reservations. check-store returns integrity from a read-only SQLite quick_check and lists quarantined reservation ids and restoration_quarantine ids. Both are read-only and append nothing to the manager log. Evidence (private resume-20260923/PC/PC1/impl-r1, all exit 0): build, manager-command-check at N8 with credential_cli.py, service_http.py failures-manager at N8 (new case 4a: after SIGKILL and restart, check-store lists the lost run's quarantined reservation id and status counts it, with data_version and manager-log bytes unchanged), the N8 journey, make -C doc check. Fess non-blocking, findings filed as acat-3dg6. Quarantine release (check-quarantine, release-quarantine), reload-profiles, drain and shutdown remain state-conflict and open under this package.",
     "created_at": "2026-10-01T03:01:39Z"
+  },
+  {
+    "id": 454,
+    "issue_id": "acat-wm-042-sdg9",
+    "author": "johnw",
+    "text": "Phase C subtask PC2: check-quarantine is a typed constructor (CheckQuarantine) handled by the Quarantine owner on the live channel and offline. It returns clean, cleanup-required or unverifiable with cleanup evidence (no-launch facts, or the runtime terminal record digest with the current processGeneration), a cleanup_ id from the SHA-256 digest and expiresAt 600 seconds after the check. It is read-only. failures-manager recomputes the terminal-record and no-launch digests after a SIGKILL and restart. Evidence: resume-20260923 PC2 logs (build of agentic-run, routing-fixed-point-probe and manager-command-check; manager-command-check main at N8 with credential_cli.py; failures-manager at N8 with TUI_CHECK; JOURNEY-ONCE at N8; make -C doc check; all exit 0). Fess: non-blocking, findings filed as acat-e4i6. release-quarantine still answers state-conflict.",
+    "created_at": "2026-10-01T03:21:33Z"
   }
 ]
 #+end_src

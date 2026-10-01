@@ -32,6 +32,7 @@ data LocalAdminRequest
   | ListCredentials
   | Status
   | CheckStore
+  | CheckQuarantine !Text
   | OtherAdmin !Text
 
 -- | Fixed refusals. Storage failure makes no assertion about publication or COMMIT.
@@ -59,11 +60,12 @@ adminOperation request = case request of
   ListCredentials -> "list-credentials"
   Status -> "status"
   CheckStore -> "check-store"
+  CheckQuarantine _ -> "check-quarantine"
   OtherAdmin name -> name
 
 otherOperations :: [Text]
 otherOperations = ["reload-profiles", "drain", "shutdown",
-  "backup", "restore", "check-quarantine", "release-quarantine"]
+  "backup", "restore", "release-quarantine"]
 
 validLocalFile :: FilePath -> Bool
 validLocalFile path = let value = T.pack path in T.length value >= 2 && T.length value <= 8192
@@ -86,6 +88,7 @@ validAdminRequest request = case request of
   ListCredentials -> True
   Status -> True
   CheckStore -> True
+  CheckQuarantine ident -> validId ident
   OtherAdmin name -> name `elem` otherOperations
 
 decodeLocalAdminRequest :: BS.ByteString -> Either AdminFailure LocalAdminRequest
@@ -95,7 +98,7 @@ decodeLocalAdminRequest bytes
       value <- either (\failure -> Left (if failure == "duplicate-field" then DuplicateField else MalformedRequest)) Right (decodeStrictValue bytes)
       fields <- case value of Object fields -> Right fields; _ -> Left MalformedRequest
       operation <- case KM.lookup "operation" fields of Just (String name) -> Right name; _ -> Left MalformedRequest
-      unless (operation `elem` (["issue-credential","rotate-credential","revoke-credential","list-credentials","status","check-store"] <> otherOperations)) (Left UnknownOperation)
+      unless (operation `elem` (["issue-credential","rotate-credential","revoke-credential","list-credentials","status","check-store","check-quarantine"] <> otherOperations)) (Left UnknownOperation)
       case KM.lookup "version" fields of
         Just (Number 1) -> Right ()
         Just (Number _) -> Left UnsupportedVersion
@@ -127,11 +130,11 @@ parseRequest operation fields = case operation of
   "list-credentials" -> pure ListCredentials
   "status" -> pure Status
   "check-store" -> pure CheckStore
+  "check-quarantine" -> CheckQuarantine <$> fields .: "quarantineId"
   _ -> do
     case operation of
       "backup" -> localFile "outputFile"
       "restore" -> localFile "backupFile" >> localFile "fencingEvidenceFile"
-      "check-quarantine" -> identifier "quarantineId"
       "release-quarantine" -> do
         identifier "quarantineId"
         identifier "cleanupEvidenceId"

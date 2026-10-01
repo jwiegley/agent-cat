@@ -63,6 +63,10 @@ assert status["ok"] and status["result"]["state"] == "stopped", status
 assert status["result"]["activeReservations"] == 0, status
 checked = call({"version": 1, "operation": "check-store"})
 assert checked["ok"] and checked["result"] == {"integrity": "valid", "quarantineIds": []}, checked
+# Offline check-quarantine refuses an identity that names no quarantined claim.
+unknown = call({"version": 1, "operation": "check-quarantine", "quarantineId": "reservation_unknown"})
+assert not unknown["ok"] and unknown["operation"] == "check-quarantine", unknown
+assert unknown["error"]["code"] == "state-conflict", unknown
 
 holding = subprocess.Popen([str(owner), "hold-credentials", str(original)],
                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
@@ -92,7 +96,7 @@ assert rotated["ok"] and rotated["result"]["credential"]["clientId"] == issued["
 revoked = call({"version": 1, "operation": "revoke-credential",
                 "credentialId": rotated["result"]["credential"]["credentialId"]})
 assert revoked["ok"]
-print("PASS frozen stdin CLI, offline status and check-store, exclusive offline ownership, private issuance and revocation")
+print("PASS frozen stdin CLI, offline status, check-store and check-quarantine, exclusive offline ownership, private issuance and revocation")
 
 # A separate, short private namespace avoids Unix socket path limits on the data root.
 admin_root = Path(tempfile.mkdtemp(prefix="admin.", dir=os.environ["TMPDIR"]))
@@ -142,6 +146,8 @@ try:
     assert live_status["result"]["processGeneration"] != status["result"]["processGeneration"], live_status
     live_checked = call({"version": 1, "operation": "check-store"})
     assert live_checked["ok"] and live_checked["result"] == {"integrity": "valid", "quarantineIds": []}, live_checked
+    live_unknown = call({"version": 1, "operation": "check-quarantine", "quarantineId": "reservation_unknown"})
+    assert not live_unknown["ok"] and live_unknown["error"]["code"] == "state-conflict", live_unknown
     for payload, code, eof in [
         (b'{', "malformed-request", True),
         (b'{', "malformed-request", False),

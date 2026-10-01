@@ -54,10 +54,11 @@ JSON request through stdin EOF and writes one bounded JSON result. Duplicate
 fields, unknown fields, unknown operations, malformed input, and oversized input
 refuse before dispatch with `operation: null`. Errors do not reflect input or
 parser diagnostics. The implemented operations are `issue-credential`,
-`rotate-credential`, `revoke-credential`, `list-credentials`, `status`, and
-`check-store`. The other recognized operations, `reload-profiles`, `drain`,
-`shutdown`, `backup`, `restore`, `check-quarantine`, and `release-quarantine`,
-receive `state-conflict` before the CLI reads the configuration.
+`rotate-credential`, `revoke-credential`, `list-credentials`, `status`,
+`check-store`, and `check-quarantine`. The other recognized operations,
+`reload-profiles`, `drain`, `shutdown`, `backup`, `restore`, and
+`release-quarantine`, receive `state-conflict` before the CLI reads the
+configuration.
 
 `status` and `check-store` are read-only. They change no Store row and append
 nothing to the manager log. `status` returns the authority epoch and stream
@@ -72,6 +73,24 @@ quarantine identity. When offline administration cannot open the Store,
 `check-store` reports `unavailable` with no identities. A restart quarantines
 each reservation that the previous lifetime held, so these operations show the
 claims that wait for cleanup evidence.
+
+`check-quarantine` takes one `quarantineId` from `check-store` and reports the
+cleanup evidence of that claim with the frozen result `quarantineId`, `state`,
+`cleanupEvidenceId`, `cleanupEvidenceDigest`, `processGeneration`, and
+`expiresAt`. The state is `clean` when the reservation never launched a run or
+when the run store of its run holds the terminal record of the runtime,
+`cleanup-required` when its run has no terminal record, and `unverifiable` when
+the run store cannot be read or the identity names a claim that a restoration
+carried forward. A `clean` answer carries the evidence identity, the lowercase
+SHA-256 digest of the canonical JSON facts, and an expiry 600 seconds after the
+check. The other states carry `null` in these three members. The facts include
+the process generation of the answering lifetime, so two checks in one
+lifetime return the same identity and digest, and a new lifetime gives a new
+digest. An unknown identity and a reservation that is not quarantined refuse
+with `state-conflict`. The check is read-only like `status`, and it reads or
+signals no stored process identity. The
+[manager-loss section of WORKERS.md](WORKERS.md#manager-loss-and-restart)
+states the evidence rules and the facts of each rule.
 
 When `administrationRoot` is omitted from the trusted operator configuration,
 the CLI acquires the existing configuration lease and original Store. It refuses

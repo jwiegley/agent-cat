@@ -333,9 +333,9 @@ The [storage contract](STORAGE.md) describes the installation lease, scoped
 SQLite lifetime, relational records, atomic invalidations, bounded internal
 transactions, and passive checkpoint results. `withCoordinationStore` consumes
 the existing installed configuration without exposing SQL, bearer material or
-worker authority. The local credential operations and the read-only `status`
-and `check-store` operations described in [COMMANDS.md](COMMANDS.md) use that
-original Store through trusted embedding,
+worker authority. The local credential operations and the read-only `status`,
+`check-store` and `check-quarantine` operations described in
+[COMMANDS.md](COMMANDS.md) use that original Store through trusted embedding,
 the exclusive offline stdin CLI, or its configured same-user local channel.
 `withLocalAdministration` scopes that channel around an existing Store owner's
 action. It creates no HTTP listener. `RUNNER --manager serve` starts the

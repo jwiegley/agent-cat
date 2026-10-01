@@ -232,21 +232,24 @@ WORKER_FAILURE = "failures-worker"
 worker_failure_mode = len(sys.argv) == 6 and sys.argv[5] == WORKER_FAILURE
 # The failures-manager mode checks the failure ending of a lost manager
 # through two lifetimes of the protected manager with the mixed fixture. A
-# mixed-controls run waits at its person question, and a padding request
-# receives three large literal inputs before it is withdrawn, so that the manager
-# log and its claim checks hold more than (L - R) div 2 bytes. The harness
-# then kills the manager process with SIGKILL. Every worker process of the
-# run must end within a bounded wait. While no manager runs, the harness
-# seals the manager log in two segments, as the writer seals it: the first
-# holds the records of the lost run and the second the padding. A restart on
-# the same root and configuration must begin a new lifetime with its
-# lifetime notice and reconciliation counts, answer status and check-store
-# through the live channel with the quarantined reservation of the lost run
-# and without a database change or a manager-log append, show the run with
-# lost supervision, dispatch no start again, return the original receipt for an
-# exact replay of an earlier command, keep the protected segment of the lost
-# run in the pruning round at open, and review, approve and complete a fresh
-# request. After the ordinary end of the second lifetime, the flow verb must
+# mixed-controls run waits at its person question, a request of another
+# profile waits in review, and a padding request receives three large literal
+# inputs before it is withdrawn, so that the manager log and its claim checks
+# hold more than (L - R) div 2 bytes. The harness then kills the manager
+# process with SIGKILL. Every worker process must end within a bounded wait.
+# While no manager runs, the harness seals the manager log in two segments,
+# as the writer seals it: the first holds the records of the lost run and the
+# second the padding. A restart on the same root and configuration must
+# begin a new lifetime with its lifetime notice and reconciliation counts,
+# answer status and check-store through the live channel with the
+# quarantined reservations of the lost run and of the request in review,
+# answer check-quarantine for each of them with clean cleanup evidence whose
+# digest the harness recomputes from the terminal record of the run log and
+# from the Store, all without a database change or a manager-log append, show
+# the run with lost supervision, dispatch no start again, return the original
+# receipt for an exact replay of an earlier command, keep the protected
+# segment of the lost run in the pruning round at open, and review, approve
+# and complete a fresh request. After the ordinary end of the second lifetime, the flow verb must
 # report the first lifetime without its shutdown notice and the second with
 # it. Each numbered case prints its own PASS line. It runs two manager
 # lifetimes.
@@ -372,16 +375,19 @@ if mixed:
         targetLabel="Deterministic ACP retry", targetArguments=["--engine", "acp", "--adapter", "mixed-adapter"],
         environment=[{"name": "PATH", "value": str(adapters)}]
         + ([{"name": "ACAT_PAGES_MARKER", "value": PAGES_ENVIRONMENT_MARKER}] if pages_mode else []))
-# The restart quarantines the reservation of the lost run, with its resource
-# keys, until cleanup evidence permits their reuse. The failures-manager mode
-# therefore gives profile_1 its own resource key and configures profile_2
-# with the same mixed launcher and another resource key, and a second
-# execution reservation, for the fresh request of the second lifetime.
+# The restart quarantines the reservation of the lost run and the
+# reservation of a request in review, with their resource keys, until cleanup
+# evidence permits their reuse. The failures-manager mode therefore gives
+# profile_1 its own resource key, configures profile_2 for the request in
+# review and profile_3 for the fresh request of the second lifetime, each with
+# the same mixed launcher and another resource key, and three execution
+# reservations.
 if manager_failure_mode:
-    configuration["limits"]["executionReservations"] = 2
+    configuration["limits"]["executionReservations"] = 3
     configuration["profiles"][0]["resourceKeys"] = ["fixture_one"]
-    configuration["profiles"].append(dict(configuration["profiles"][0], id="profile_2",
-                                          workspaceLabel="HTTPS second fixture", resourceKeys=["fixture_two"]))
+    for number, word in ((2, "two"), (3, "three")):
+        configuration["profiles"].append(dict(configuration["profiles"][0], id=f"profile_{number}",
+                                              workspaceLabel=f"HTTPS fixture {word}", resourceKeys=[f"fixture_{word}"]))
 if control_profiles:
     adapters = work / "adapters"
     adapters.mkdir(mode=0o700)
@@ -485,7 +491,7 @@ def administration(payload, refused=None):
 issued = administration({"version": 1, "operation": "issue-credential", "label": "HTTPS fixture",
                          "scopes": ["observe", "submit"] + (["control", "export"] if mixed else ["control"] if captures_mode or discard_mode or lineage_mode or control_profiles or person_mode else ["control", "export"] if exports_mode else []),
                          "profileIds": CONTROL_PROFILES or (["profile_1", "profile_plain"] if person_mode else
-                                                            ["profile_1", "profile_2"] if manager_failure_mode else ["profile_1"]),
+                                                            ["profile_1", "profile_2", "profile_3"] if manager_failure_mode else ["profile_1"]),
                          "expiresAt": "2999-01-01T00:00:00Z", "outputFile": str(work / "credential")})
 bearer = (work / "credential").read_bytes().decode("ascii")
 if collections:
@@ -4991,6 +4997,30 @@ def manager_failure_checks():
         return [line for line in (store / "events.ndjson").read_bytes().splitlines()
                 if json.loads(line)["event"]["type"] == "run.started"]
 
+    def mixed_workflow(profile):
+        status, catalogue, _ = request("/v1/workflows?profileId=" + profile, authorized)
+        assert status == 200
+        found = next(item for item in catalogue["items"] if item["name"] == "mixed-controls")
+        return found, json.dumps({"workflowId": found["id"], "descriptorRevision": found["revision"],
+                                  "profileId": found["profileId"], "profileRevision": found["profileRevision"]},
+                                 separators=(",", ":")).encode()
+
+    def read_store(statement, parameters=()):
+        """The rows of one read-only query of the coordination database."""
+        import sqlite3
+        found = sorted((work / "manager").rglob("coordination.sqlite3"))
+        assert len(found) == 1, ("coordination database", found)
+        connection = sqlite3.connect(found[0].as_uri() + "?mode=ro", uri=True)
+        try:
+            return [tuple(row) for row in connection.execute(statement, parameters)]
+        finally:
+            connection.close()
+
+    def canonical_digest(facts):
+        """The SHA-256 of the canonical JSON bytes of the facts: sorted keys,
+        no whitespace, and UTF-8 text."""
+        return hashlib.sha256(json.dumps(facts, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
+
     first = serve(0)
     try:
         status, capabilities, raw = request("/v1/capabilities", authorized)
@@ -5023,6 +5053,22 @@ def manager_failure_checks():
         head, _, _ = drive_mixed(run, client, stop_at_question=True, overview=False)
         control, _, _ = observed(base + "/control", "RunControl")
         assert control["supervision"] == "owned" and control["decisionHeadId"] == head, (control["supervision"], control["decisionHeadId"])
+        # A request of profile_2 waits in review with a live preparation when
+        # the manager is killed.
+        review_workflow, create = mixed_workflow("profile_2")
+        review_request = create_request()
+        review_uri = review_request["links"]["self"]
+        for declaration in review_workflow["inputs"]:
+            current, tag, _ = observed(review_uri, "Request")
+            mutate(review_uri, {"operation": "set-input", "input": {"name": declaration["name"],
+                "source": "literal", "value": MIXED_TEXT}}, tag)
+        current, tag, _ = observed(review_uri, "Request")
+        mutate(review_uri, {"operation": "enqueue"}, tag)
+        current, _, _ = wait_for(review_uri, "Request", lambda value: value["preparationId"] is not None)
+        review_preparation, _, _ = observed("/v1/preparations/" + current["preparationId"], "Preparation")
+        assert current["phase"] == "review" and review_preparation["state"] == "live", (
+            "request in review", current["phase"], review_preparation["state"])
+        workflow, create = mixed_workflow("profile_1")
         padding = create_request()
         padding_uri = padding["links"]["self"]
         # Each literal replaces the previous one, so that the request view
@@ -5044,7 +5090,8 @@ def manager_failure_checks():
         (work / "worker-processes.txt").write_text("".join(f"{pid} {pgid} {command}\n" for pid, pgid, command in tree))
         targets = sorted({pgid for _, pgid, _ in tree})
         assert targets and manager_group not in targets, ("worker process groups", targets, manager_group)
-        print("PASS failures-manager case 1: run", run, "waits at person question", head, "under owned supervision, with",
+        print("PASS failures-manager case 1: run", run, "waits at person question", head, "under owned supervision, request",
+              review_request["id"], "waits in review,", "with",
               len(tree), "worker processes in process groups", targets, "and the manager log holds", before_kill,
               "bytes above the byte trigger", half, flush=True)
 
@@ -5067,9 +5114,15 @@ def manager_failure_checks():
         first.wait(timeout=25)
         (work / "server-0.exit").write_text(str(first.returncode) + "\n")
     assert first.returncode == -signal.SIGKILL, ("the first lifetime did not end by SIGKILL", first.returncode)
-    stores = sorted(work.glob("manager/runs/runs/*/runtime"))
-    assert len(stores) == 1, ("run stores after the manager loss", stores)
-    lost_store = stores[0]
+    # The run store of the lost run, and of the preparation in review when
+    # its worker created one, by the native run identities of the Store.
+    native_runs = {native for (native,) in read_store("SELECT native_run_id FROM runs WHERE id=?", (run,))}
+    assert len(native_runs) == 1, ("native run of the lost run", native_runs)
+    lost_store = work / "manager" / "runs" / "runs" / native_runs.pop() / "runtime"
+    review_natives = {native for (native,) in read_store("SELECT native_run_id FROM preparations WHERE request_id=?", (review_request["id"],))}
+    initial_stores = sorted(work.glob("manager/runs/runs/*/runtime"))
+    assert lost_store in initial_stores and all(store == lost_store or store.parent.name in review_natives for store in initial_stores), (
+        "run stores after the manager loss", initial_stores)
     assert len(run_starts(lost_store)) == 1 and len(start_relays(run)) == 1, ("starts of the lost run", len(run_starts(lost_store)), len(start_relays(run)))
     print("PASS failures-manager case 2: after SIGKILL of the manager, no process of the worker groups", targets, "remains after",
           round(stopped_after, 2), "seconds", flush=True)
@@ -5109,13 +5162,12 @@ def manager_failure_checks():
     found = sorted((work / "manager").rglob("coordination.sqlite3"))
     assert len(found) == 1, ("coordination database", found)
     database_uri = found[0].as_uri() + "?mode=ro"
-    connection = sqlite3.connect(database_uri, uri=True)
-    try:
-        lost_reservations = [row[0] for row in connection.execute(
-            "SELECT id FROM reservations WHERE request_id=? AND state!='released'", (lost_request["id"],))]
-    finally:
-        connection.close()
+    lost_reservations = [ident for (ident,) in read_store(
+        "SELECT id FROM reservations WHERE request_id=? AND state!='released'", (lost_request["id"],))]
     assert len(lost_reservations) == 1, ("the reservation of the lost run", lost_reservations)
+    review_reservations = [ident for (ident,) in read_store(
+        "SELECT id FROM reservations WHERE request_id=? AND state!='released'", (review_request["id"],))]
+    assert len(review_reservations) == 1, ("the reservation of the request in review", review_reservations)
 
     second = serve(1)
     try:
@@ -5134,10 +5186,13 @@ def manager_failure_checks():
         reconciliation = body["reconciliation"]
         assert body["notice"] == "lifetime" and body["processGeneration"] != first_lifetime["body"]["inline"]["processGeneration"], (
             "the second lifetime notice", body["notice"], body["processGeneration"])
-        # The owned run becomes lost, its reservation is quarantined and its
-        # dispatch-attempted approval becomes unresolved. Nothing else changes.
-        assert reconciliation == {"preparations": 0, "requests": 0, "runs": 1, "commands": 1, "reservations": 1,
-                                  "observations": 0, "uploads": 0}, ("the reconciliation counts of the second lifetime", reconciliation)
+        # The owned run becomes lost and its dispatch-attempted approval
+        # becomes unresolved. The live preparation and the prepared admission
+        # observation of the request in review become invalidated, and the
+        # request becomes refused. Both reservations are quarantined. Nothing
+        # else changes.
+        assert reconciliation == {"preparations": 1, "requests": 1, "runs": 1, "commands": 1, "reservations": 2,
+                                  "observations": 1, "uploads": 0}, ("the reconciliation counts of the second lifetime", reconciliation)
         starts = sorted(int(path.name[:20]) for path in sealed_dir.glob("*.ndjson"))
         assert starts == [0, split], ("the pruning round at open removed a protected segment", starts)
         first_segment = [json.loads(line) for line in (sealed_dir / ("%020d.ndjson" % 0)).read_bytes().splitlines()]
@@ -5160,13 +5215,68 @@ def manager_failure_checks():
             observer.close()
         assert status_value["state"] == "serving" and status_value["processGeneration"] == body["processGeneration"], (
             "status of the second lifetime", status_value)
-        assert status_value["activeReservations"] == 1, ("active reservations after the restart", status_value)
-        assert checked == {"integrity": "valid", "quarantineIds": lost_reservations}, ("check-store after the restart", checked, lost_reservations)
+        quarantined = sorted(lost_reservations + review_reservations)
+        assert status_value["activeReservations"] == 2, ("active reservations after the restart", status_value)
+        assert checked == {"integrity": "valid", "quarantineIds": quarantined}, ("check-store after the restart", checked, quarantined)
         assert version_after == version_before, ("status or check-store changed the database", version_before, version_after)
         assert log_bytes() == log_before, ("status or check-store appended to the manager log", log_before, log_bytes())
         print("PASS failures-manager case 4a: status reports", status_value["state"], "with", status_value["activeReservations"],
-              "active reservation, and check-store reports", checked["integrity"], "integrity with the quarantined reservation",
-              lost_reservations[0], "of the lost run, without a database change or a manager-log append", flush=True)
+              "active reservations, and check-store reports", checked["integrity"], "integrity with the quarantined reservations",
+              quarantined, "of the lost run and of the request in review, without a database change or a manager-log append", flush=True)
+
+        # Case 4b. check-quarantine gives cleanup evidence for each
+        # quarantined reservation. The harness recomputes each digest from
+        # the canonical facts that it reads from the run store and the Store.
+        # The terminal record of the lost run is the first event record of
+        # its run log whose event ends the run.
+        generation = body["processGeneration"]
+        events = {json.loads(line)["sequence"]: json.loads(line)["event"]["type"]
+                  for line in (lost_store / "events.ndjson").read_bytes().splitlines()}
+        run_log = (lost_store / "flow.ndjson").read_bytes().splitlines()
+        stop = next(index for index, line in enumerate(run_log) if json.loads(line)["schema"] == "event"
+                    and events.get(str(json.loads(line)["body"]["event"])) in ("run.completed", "run.failed", "run.cancelled"))
+        expected = {lost_reservations[0]: {
+            "evidence": "terminal-record", "reservationId": lost_reservations[0], "runId": run, "position": stop,
+            "recordSha256": hashlib.sha256(run_log[stop]).hexdigest(), "processGeneration": generation}}
+        (review_phase,), = read_store("SELECT phase FROM requests WHERE id=?", (review_request["id"],))
+        expected[review_reservations[0]] = {
+            "evidence": "no-launch", "reservationId": review_reservations[0], "requestId": review_request["id"],
+            "requestPhase": review_phase,
+            "preparationStates": [state for (state,) in read_store(
+                "SELECT state FROM preparations WHERE reservation_id=? ORDER BY id", (review_reservations[0],))],
+            "admissionObservationState": next((state for (state,) in read_store(
+                "SELECT state FROM admission_observations WHERE reservation_id=?", (review_reservations[0],))), None),
+            "resourceKeys": [[kind, key] for kind, key in read_store(
+                "SELECT kind,resource_key FROM reservation_resources WHERE reservation_id=? ORDER BY kind,resource_key", (review_reservations[0],))],
+            "processGeneration": generation}
+        assert review_phase == "refused" and expected[review_reservations[0]]["resourceKeys"] == [["operator", "fixture_two"]], (
+            "the facts of the request in review", expected[review_reservations[0]])
+        observer = sqlite3.connect(database_uri, uri=True)
+        try:
+            version_before = observer.execute("PRAGMA data_version").fetchone()[0]
+            log_before = log_bytes()
+            answers = {ident: [administration({"version": 1, "operation": "check-quarantine", "quarantineId": ident})["result"]
+                               for _ in range(2)] for ident in quarantined}
+            administration({"version": 1, "operation": "check-quarantine", "quarantineId": "reservation_unknown"}, refused="state-conflict")
+            version_after = observer.execute("PRAGMA data_version").fetchone()[0]
+        finally:
+            observer.close()
+        for ident, (once, twice) in answers.items():
+            digest = canonical_digest(expected[ident])
+            assert once["quarantineId"] == ident and once["state"] == "clean" and once["processGeneration"] == generation, (
+                "check-quarantine of a quarantined reservation", ident, once)
+            assert once["cleanupEvidenceDigest"] == digest and once["cleanupEvidenceId"] == "cleanup_" + digest[:32], (
+                "the evidence digest differs from the canonical facts", ident, once, expected[ident])
+            assert once["expiresAt"] is not None and all(twice[key] == once[key] for key in
+                ("quarantineId", "state", "cleanupEvidenceId", "cleanupEvidenceDigest", "processGeneration")), (
+                "two checks differ", ident, once, twice)
+        assert version_after == version_before, ("check-quarantine changed the database", version_before, version_after)
+        assert log_bytes() == log_before, ("check-quarantine appended to the manager log", log_before, log_bytes())
+        print("PASS failures-manager case 4b: check-quarantine reports the lost run", run, "clean with terminal-record evidence at",
+              "position", stop, "and the request in review", review_request["id"], "clean with no-launch evidence; the harness",
+              "recomputed both digests", sorted(answer[0]["cleanupEvidenceDigest"] for answer in answers.values()),
+              ", two checks agree, an unknown identity refuses with state-conflict, and nothing changed in the database or the",
+              "manager log", flush=True)
 
         # Case 5. The run shows lost supervision, and no start is dispatched
         # again.
@@ -5180,7 +5290,7 @@ def manager_failure_checks():
         (work / "lost-control.json").write_bytes(raw)
         assert control["supervision"] == "lost" and not control["cancelAllowed"], ("lost run control", control["supervision"], control["cancelAllowed"])
         stores = sorted(work.glob("manager/runs/runs/*/runtime"))
-        assert stores == [lost_store], ("run stores after the restart", stores)
+        assert stores == initial_stores, ("run stores after the restart", stores)
         assert len(run_starts(lost_store)) == 1 and len(start_relays(run)) == 1, ("starts of the lost run after the restart",
             len(run_starts(lost_store)), len(start_relays(run)))
         print("PASS failures-manager case 5: run", run, "shows lost supervision with runtime", value["runtime"] and value["runtime"]["status"],
@@ -5200,24 +5310,17 @@ def manager_failure_checks():
             current, _, _ = observed(receipt_uri, "CommandReceipt")
             replays.append((operation, original["id"], original["state"], current["state"]))
         assert replays[1][3] == "unresolved", ("the approval of the lost run", replays[1])
-        assert sorted(work.glob("manager/runs/runs/*/runtime")) == [lost_store] and len(start_relays(run)) == 1, (
+        assert sorted(work.glob("manager/runs/runs/*/runtime")) == initial_stores and len(start_relays(run)) == 1, (
             "the replay of the approval dispatched a start")
         print("PASS failures-manager case 6: exact replays returned the original receipts (operation, command, original state,",
               "current state)", replays, "and the replay of the unresolved approval dispatched no start", flush=True)
 
         # Case 7. The quarantined reservation of the lost run keeps its
         # resource key: a request of profile_1 waits with profile-busy and is
-        # withdrawn. A fresh request of profile_2 is reviewed, approved and
-        # completed. The new lifetime publishes the profile revisions of its
-        # own catalogue.
-        def mixed_workflow(profile):
-            status, catalogue, _ = request("/v1/workflows?profileId=" + profile, authorized)
-            assert status == 200
-            found = next(item for item in catalogue["items"] if item["name"] == "mixed-controls")
-            return found, json.dumps({"workflowId": found["id"], "descriptorRevision": found["revision"],
-                                      "profileId": found["profileId"], "profileRevision": found["profileRevision"]},
-                                     separators=(",", ":")).encode()
-
+        # withdrawn. A fresh request of profile_3 is reviewed, approved and
+        # completed, and check-quarantine of its held reservation refuses
+        # with state-conflict. The new lifetime publishes the profile
+        # revisions of its own catalogue.
         workflow, create = mixed_workflow("profile_1")
         blocked = create_request()
         blocked_uri = blocked["links"]["self"]
@@ -5230,8 +5333,12 @@ def manager_failure_checks():
         current, tag, _ = wait_for(blocked_uri, "Request", lambda value: value["admission"]["reasons"] == ["profile-busy"])
         assert current["phase"] == "queued" and current["preparationId"] is None, ("blocked request", current["phase"], current["preparationId"])
         mutate(blocked_uri, {"operation": "withdraw"}, tag)
-        workflow, create = mixed_workflow("profile_2")
-        _, fresh = approve_mixed(create_request(), workflow, client)
+        workflow, create = mixed_workflow("profile_3")
+        fresh_request = create_request()
+        _, fresh = approve_mixed(fresh_request, workflow, client)
+        held = [ident for (ident,) in read_store("SELECT id FROM reservations WHERE request_id=? AND state='held'", (fresh_request["id"],))]
+        assert len(held) == 1, ("the held reservation of the fresh run", held)
+        administration({"version": 1, "operation": "check-quarantine", "quarantineId": held[0]}, refused="state-conflict")
         _, answered, recovered = drive_mixed(fresh, client, overview=False)
         assert answered and recovered, ("fresh run decisions", answered, recovered)
         artifact = verified_download(fresh, client, authorized)
@@ -5239,8 +5346,9 @@ def manager_failure_checks():
         assert value["supervision"] == "lost", ("lost run after the fresh run", value["supervision"])
         assert len(run_starts(lost_store)) == 1 and len(start_relays(run)) == 1, "the lost run started again"
         print("PASS failures-manager case 7: request", blocked["id"], "of profile_1 waited with profile-busy behind the quarantined",
-              "reservation; fresh run", fresh, "of profile_2 was reviewed, approved, answered and retried, and succeeded with",
-              "verified result", artifact["id"], "; the lost run stays lost with one start", flush=True)
+              "reservation; fresh run", fresh, "of profile_3 was reviewed, approved, answered and retried, and succeeded with",
+              "verified result", artifact["id"], "; check-quarantine of its held reservation", held[0], "refused with state-conflict;",
+              "the lost run stays lost with one start", flush=True)
     finally:
         if second.poll() is None:
             second.terminate()
@@ -5251,7 +5359,7 @@ def manager_failure_checks():
     # notice and the second with it, keeps the records of the lost run and
     # verifies the consent of both start relays. The run log of the lost run
     # ends with the stop that the worker wrote when its control input closed.
-    stores = sorted(work.glob("manager/runs/runs/*/runtime"))
+    stores = [store for store in sorted(work.glob("manager/runs/runs/*/runtime")) if store.parent.name not in review_natives]
     assert len(stores) == 2 and lost_store in stores, ("run stores after the second lifetime", stores)
     flow_status, flowed, summary = read_flow("manager-failure-flow", [flow_dir] + stores)
     assert flow_status == 2 and summary["verified"] and not summary["problems"], (

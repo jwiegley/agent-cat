@@ -8,7 +8,7 @@ import Agentic.Manager.Configuration (Configuration, configurationAdministration
 import Agentic.Manager.Credentials (administerCredentials)
 import Agentic.Manager.Protocol.Json (decodeStrictValue)
 import Agentic.Manager.Protocol.LocalAdmin
-import Agentic.Manager.Quarantine (StoreState (..), reportStatus, reportStoreCheck)
+import Agentic.Manager.Quarantine (StoreState (..), checkQuarantine, reportStatus, reportStoreCheck)
 import Agentic.Manager.Store (CoordinationStore, withStoreAdministration)
 import Agentic.Runtime (PrivateRoot, assertPrivateRoot, closePrivateRoot, openPrivateRoot, privateRootPath)
 import Control.Concurrent.Async (link, withAsync)
@@ -72,6 +72,7 @@ administerLocally :: StoreState -> CoordinationStore -> LocalAdminRequest -> IO 
 administerLocally state store request = case request of
   Status -> reportStatus state store
   CheckStore -> reportStoreCheck store
+  CheckQuarantine ident -> checkQuarantine store ident
   IssueCredential {} -> administerCredentials store request
   RotateCredential {} -> administerCredentials store request
   RevokeCredential {} -> administerCredentials store request

@@ -138,6 +138,7 @@ module Agentic.Runtime.Flow
     FlowStates (..),
     FlowReport (..),
     readFlow,
+    readFlowLine,
     readFlowLogAt,
     flowAcknowledgements,
     flowVerified,
@@ -224,7 +225,7 @@ import qualified Data.ByteString.Lazy as BL
 import Data.Char (isDigit, isHexDigit, isLower)
 import Data.Foldable (toList)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
-import Data.List (nub, sortOn)
+import Data.List (genericDrop, nub, sortOn)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (isJust, isNothing, listToMaybe)
@@ -1700,6 +1701,16 @@ readFlowLines root path claims base limit = do
   let (complete, torn) = splitFlowLines bytes
   entries <- traverse (readEntry root claims) (zip [base ..] complete)
   pure (entries, torn)
+
+-- | The exact bytes of the complete line at the position of the log at the
+-- path of the root, without its newline, or nothing when the log holds no
+-- complete line at that position. The reader reads the prefix that the file
+-- holds when it is opened, within the bound of 'readFlow', so a live writer
+-- never changes the answer for a complete line.
+readFlowLine :: PrivateRoot -> [FilePath] -> Position -> IO (Maybe BS.ByteString)
+readFlowLine root path (Position index) = do
+  bytes <- readPrivatePrefixAt root path maxFlowLogBytes
+  pure (listToMaybe (genericDrop index (fst (splitFlowLines bytes))))
 
 -- | The complete lines of a log, without their newlines, and the size of a
 -- final line without its newline.

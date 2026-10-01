@@ -284,6 +284,13 @@ the other log, and it joins no event. `flowAcknowledgements` pairs each
 `control` of a run log with its first later acknowledgement event, or with
 none, which is the join behind the unacknowledged state.
 
+`readFlowLine` returns the exact bytes of the complete line at one position of
+a log at a path of a private root, without its newline, or nothing when the log
+holds no complete line at that position. It reads the prefix that the file
+holds when it is opened, within the bound of `readFlow`, so a live writer does
+not change the bytes of a complete line. The cleanup evidence of the manager
+digests the line at the stop that `readFlow` reports.
+
 ## Positioned windows
 
 `readFlowWindow` reads one window of a log file by position. It takes the path

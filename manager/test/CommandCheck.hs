@@ -1045,8 +1045,53 @@ credentialParserChecks source = do
   oversized <- adminValue (Admin.adminSuccess "list-credentials" (String (T.replicate 1048576 "x")))
   check "whole oversized response refuses within newline-inclusive byte ceiling" (adminField "code" (adminField "error" oversized) == String "size-limit")
 
+-- check-quarantine on claims that the fixture writes directly: an unknown
+-- identity, a reservation that is held, a quarantined reservation that never
+-- launched a run, and a claim that a restoration carried forward. A separate
+-- connection writes the rows and removes them afterwards, so the later checks
+-- see the original Store.
+quarantineChecks :: FilePath -> CoordinationStore -> IO ()
+quarantineChecks root store = do
+  let write statements = withRaw root (\db -> mapM_ (SQL.exec db) statements)
+      answer ident = administerLocally StoreStopped store (Admin.CheckQuarantine ident) >>= adminValue
+      refusedConflict label value = check label (adminField "ok" value == Bool False
+        && adminField "operation" value == String "check-quarantine"
+        && adminField "code" (adminField "error" value) == String "state-conflict")
+  adminRefused "credential owner leaves quarantine checks to their owner" Admin.StateConflict store (Admin.CheckQuarantine "reservation_pc2")
+  answer "reservation_unknown" >>= refusedConflict "check-quarantine refuses an unknown identity with state-conflict"
+  write ["INSERT INTO requests (id,revision,client_id,workflow_id,descriptor_revision,profile_id,profile_revision,phase,admission,blocking_reasons,validation_errors) VALUES ('request_pc2','r0','client_1','workflow_1','descriptor_1','profile_1','profile_revision','refused','refused',X'5b5d',X'5b5d')",
+         "INSERT INTO reservations (id,request_id,slot,process_generation,state) VALUES ('reservation_pc2','request_pc2',14,'process_old','held')",
+         "INSERT INTO reservation_resources (kind,resource_key,reservation_id) VALUES ('operator','key_pc2','reservation_pc2')"]
+  answer "reservation_pc2" >>= refusedConflict "check-quarantine refuses a held reservation with state-conflict"
+  write ["UPDATE reservations SET state='quarantined' WHERE id='reservation_pc2'"]
+  generation <- storeProcessGeneration <$> storeIdentity store
+  let facts = "{\"admissionObservationState\":null,\"evidence\":\"no-launch\",\"preparationStates\":[],\"processGeneration\":\""
+        <> TE.encodeUtf8 generation <> "\",\"requestId\":\"request_pc2\",\"requestPhase\":\"refused\",\"reservationId\":\"reservation_pc2\",\"resourceKeys\":[[\"operator\",\"key_pc2\"]]}"
+      digest = T.pack (show (hash facts :: Digest SHA256))
+  first <- answer "reservation_pc2"
+  second <- answer "reservation_pc2"
+  let result = adminField "result" first
+  check "check-quarantine gives no-launch evidence over the canonical facts of an unlaunched reservation"
+    (adminField "ok" first == Bool True && adminField "state" result == String "clean"
+      && adminField "quarantineId" result == String "reservation_pc2"
+      && adminField "cleanupEvidenceDigest" result == String digest
+      && adminField "cleanupEvidenceId" result == String ("cleanup_" <> T.take 32 digest)
+      && adminField "processGeneration" result == String generation
+      && (case adminField "expiresAt" result of String _ -> True; _ -> False))
+  check "two checks in one lifetime return the same evidence"
+    (all (\key -> adminField key (adminField "result" second) == adminField key result) ["state", "cleanupEvidenceId", "cleanupEvidenceDigest"])
+  write ["DELETE FROM reservation_resources WHERE reservation_id='reservation_pc2'",
+         "DELETE FROM reservations WHERE id='reservation_pc2'",
+         "DELETE FROM requests WHERE id='request_pc2'",
+         "INSERT INTO restoration_quarantine (id,slot,resources) VALUES ('restored_pc2',14,'[]')"]
+  restored <- adminField "result" <$> answer "restored_pc2"
+  check "check-quarantine reports a restoration claim as unverifiable without evidence"
+    (restored == object ["quarantineId" .= ("restored_pc2" :: Text), "state" .= ("unverifiable" :: Text),
+      "cleanupEvidenceId" .= Null, "cleanupEvidenceDigest" .= Null, "processGeneration" .= generation, "expiresAt" .= Null])
+  write ["DELETE FROM restoration_quarantine WHERE id='restored_pc2'"]
+
 credentialAdministrationChecks :: FilePath -> IO ()
-credentialAdministrationChecks work = withFixture work "credentials" (64*commandCapacity) 20 $ \_ _ _ store profile proof -> do
+credentialAdministrationChecks work = withFixture work "credentials" (64*commandCapacity) 20 $ \_ root _ store profile proof -> do
   let expiry = "2999-01-01T00:00:00Z"
       issue = Admin.IssueCredential "Terminal" [Observe,Submit,Control,ExportScope] ["profile_1"] expiry
       destination = work </> "one-time.credential"
@@ -1088,6 +1133,7 @@ credentialAdministrationChecks work = withFixture work "credentials" (64*command
   check "check-store reports a valid quick check and the quarantined claims"
     (adminField "ok" checked == Bool True && adminField "result" checked == object
       ["integrity" .= ("valid" :: Text), "quarantineIds" .= quarantined])
+  quarantineChecks root store
   req <- request store SetInput "credential-rotation"
   original <- withAuthorizedView store proof "profile_1" [Observe] (\view -> do
     submission <- submitCommand store proof req (edit profile (commandResource req) "rotated_revision") >>= right

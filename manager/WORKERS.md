@@ -196,9 +196,46 @@ keys until cleanup evidence permits their reuse. A request of a profile whose
 resource keys meet those keys waits in the queue with `profile-busy`. A profile
 without resource keys has the unclassified resource, which every other such
 profile shares. Requests with other resource keys are admitted while an
-execution slot remains. The local administration operations `check-quarantine`
-and `release-quarantine` refuse with `state-conflict`, so at present no
-operation releases a quarantined reservation.
+execution slot remains.
+
+The local administration operation `check-quarantine` reports the cleanup
+evidence of one quarantined reservation. It reads the reservation, its request,
+its start intent and its run, and it classifies the claim by these rules:
+
+- No launch. No start intent and no run names the reservation, directly or
+  through one of its preparations. This is the case of a request that the
+  restart refused while it was preparing or in review, and of a reservation
+  that never reached a start. The state is `clean`. The evidence facts are the
+  reservation identity, the request identity, the current request phase, the
+  states of the preparations of the reservation, the state of its admission
+  observation, its resource keys and the current process generation.
+- Launched and ended. The run log `flow.ndjson` of the run store of the run
+  holds the terminal record that the runtime writes when the run ends, for
+  example the stop that follows `control input closed` after a manager loss.
+  The terminal record is the first event record whose event in
+  `events.ndjson` ends the run, as the runtime readers find it. The state is
+  `clean`. The evidence facts are the reservation identity, the run identity,
+  the position of the record, the SHA-256 digest of the exact bytes of its
+  line and the current process generation.
+- Launched without a terminal record. The state is `cleanup-required`.
+- Unreadable. The run store cannot be read, or the identity names a claim that
+  a restoration carried forward. The state is `unverifiable`.
+
+The evidence facts of a `clean` claim form one JSON object, encoded with its
+keys in order and without white space. The member `evidence` names the rule:
+`no-launch` or `terminal-record`. The evidence digest is the lowercase SHA-256
+digest of these bytes, and the evidence identity is `cleanup_` followed by the
+first 32 hexadecimal digits of the digest. Two checks in one lifetime therefore
+return the same identity and digest. The process generation is a fact, so a
+new lifetime gives a new digest. The evidence expires 600 seconds after the
+check. The other states carry no identity, no digest and no expiry. An unknown
+identity and a reservation that is not quarantined refuse with
+`state-conflict`.
+
+The check is read-only. It changes no Store row, appends nothing to the
+manager log, reads or signals no stored process identity and adopts no worker.
+The operation `release-quarantine` refuses with `state-conflict`, so at present
+no operation releases a quarantined reservation.
 
 The pruning round at open keeps each sealed segment that names the lost run,
 because the run is not observed terminal. The flow verb reports the earlier

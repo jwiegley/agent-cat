@@ -7,7 +7,7 @@
 -- | A single leased SQLite writer with strict, bounded transaction results.
 module Agentic.Manager.Store
   ( CoordinationStore, StoreIdentity (..), StoreFailure (..), Checkpoint (..),
-    withCoordinationStore, withServingStore, withServingStoreWith, storeManagerFlow, pruneManagerLog, storeIdentity, checkpointStore, withStoreConfiguration, withStoreCatalogues, withStoreRetentionRoot, withStoreRetentionRootLoan, withStoreArtifactResponse, withStoreArtifactResponseWithin, artifactResponsePlaces, artifactResponseWait, artifactResponseDeadline, validateStoreHistoryBindings, revalidateStoreRetentionRoot, storeInvocations, withStoreFiles, withStoreFileLoan, withStoreReader, withStoreAdmission, withStoreWorker, StoreWorker, createStoreWorkerGroup, storeWorkerCleanupConfirmed, requestStoreWorkersStop, awaitStoreWorkersStop, retryStoreCleanup, probeStoreCapabilities,
+    withCoordinationStore, withServingStore, withServingStoreWith, storeManagerFlow, pruneManagerLog, storeIdentity, checkpointStore, withStoreConfiguration, withStoreCatalogues, withStoreRetentionRoot, withStoreRetentionRootLoan, withStoreArtifactResponse, withStoreArtifactResponseWithin, artifactResponsePlaces, artifactResponseWait, artifactResponseDeadline, validateStoreHistoryBindings, revalidateStoreRetentionRoot, storeInvocations, withStoreFiles, withStoreFileLoan, withRecordedRunRoot, withStoreReader, withStoreAdmission, withStoreWorker, StoreWorker, createStoreWorkerGroup, storeWorkerCleanupConfirmed, requestStoreWorkersStop, awaitStoreWorkersStop, retryStoreCleanup, probeStoreCapabilities,
     withStoreAdministration, tryWithStoreCatalogues, tryWithStoreFiles,
     AuthorizationWatch, withStoreAuthorizationWatch, withStoreConfigurationWatch, withStoreCataloguesWatch, withStoreCatalogueContextWatch, authorizationWatchCurrent, withAuthorizationObservation, withAuthorizationReadObservation, awaitAuthorizationChange,
     CommitDeadline, withCommitDeadline, withPreparedCommitDeadline, enforceCommitDeadline, enforceAdmissionFence, managerFlowRoom, appendCommandRecord, appendReviewRecord, noticeAfterCommit, PostCommit, noPostCommit, takePostCommit, appendPostCommit, Transaction, execute, query, refuseTransaction, runTransaction, runRead, StoreAdmission (..), runTransactionWithAdmission, runReadWithAdmission, transactionGeneration,
@@ -942,6 +942,18 @@ withStoreArtifactResponseWithin deadline (CoordinationStore _ _ _ _ _ closed _ _
     let end = begun + fromIntegral deadline * 1000
         within = getMonotonicTimeNSec >>= \now -> when (now >= end) (throwIO StoreDeadline)
     (Just <$> restore (action within)) `finally` release
+
+-- | Open the run root @runs@ of a Store root that a file operation holds,
+-- check that its identity is the recorded root identity of a run, and check
+-- both roots again after the action. A different identity is
+-- 'StoreIntegrity'.
+withRecordedRunRoot :: PrivateRoot -> Text -> (PrivateRoot -> IO a) -> IO a
+withRecordedRunRoot root recorded action = bracket (openPrivateSubroot root ["runs"]) closePrivateRoot $ \runs -> do
+  unless (T.pack (privateRootIdentity runs) == recorded) (throwIO StoreIntegrity)
+  result <- action runs
+  assertPrivateRoot runs
+  assertPrivateRoot root
+  pure result
 
 -- | One ordinary file operation, joined by store close. It waits for the file
 -- slot within a fresh five-second allowance, and a slot that stays held for

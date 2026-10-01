@@ -76,12 +76,7 @@ binding store proof ident = runRead store $ do
 -- its identity is the recorded one, and check both roots again after the
 -- action.
 withRunRoot :: PrivateRoot -> RunAssociation -> (PrivateRoot -> IO a) -> IO a
-withRunRoot root association action = bracket (openPrivateSubroot root ["runs"]) closePrivateRoot $ \runs -> do
-  unless (T.pack (privateRootIdentity runs) == associationRoot association) (throwIO StoreIntegrity)
-  result <- action runs
-  assertPrivateRoot runs
-  assertPrivateRoot root
-  pure result
+withRunRoot root association = withRecordedRunRoot root (associationRoot association)
 
 sourceBytes :: PrivateRoot -> RunAssociation -> ResultRef -> IO BS.ByteString
 sourceBytes runs association = captureObservedResult runs (associationNative association)
