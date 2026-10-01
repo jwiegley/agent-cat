@@ -401,9 +401,11 @@ INPUTS = "tui-inputs"
 # overview by its identifier and sends the control.
 # 1. While a profile_steer run holds its first turn, c opens the cancel
 # confirmation and y sends the cancel. The live monitor must show cancel
-# accepted and then the runtime status Cancelled, the run must end
-# cancelled through HTTP, and no frame may show the status Succeeded or
-# Failed for the run.
+# accepted before any frame shows the runtime status Cancelled, and the
+# coordination database must then hold the one cancel command. The monitor
+# must then show the runtime status Cancelled, the run must end cancelled
+# through HTTP, and no frame may show the status Succeeded or Failed for the
+# run.
 # 2. While a second profile_steer run holds its first turn, i opens the
 # steer editor below the monitor, and Ctrl-D sends the typed text. The live
 # monitor must show the effect steered, and the run log must hold the steer
@@ -418,7 +420,12 @@ INPUTS = "tui-inputs"
 # a then sends the abandon choice. The live monitor must show abandoned, the
 # decision must leave the queue of the run, and the run must end failed.
 # Each step prints its own PASS line. It runs one manager lifetime.
+# The tui-controls-broken-cancel control runs the same mode, but at step 1 the
+# harness presses Esc instead of y in the cancel confirmation. The TUI then
+# sends no cancel, so the mode must fail with CANCEL_ORDER.
 TUI_CONTROLS = "tui-controls"
+TUI_CONTROLS_BROKEN = "tui-controls-broken-cancel"
+CANCEL_ORDER = "JOURNEY-ASSERT cancel accepted before cancelled"
 # The tui-redirect mode sends the redirects of WM-034 through the service TUI
 # with the profiles of the live-redirect mode: profile_live, whose first
 # candidate is the ACP hold fixture and whose spare candidate is the ACP stub
@@ -541,8 +548,11 @@ TUI_DECISIONS = "tui-decisions"
 # restart, resume and fork as eligible, and r sends a restart. The TUI opens
 # the child request, which names the parent run and the operation. The
 # lineage collection of the run must hold that one child. Enter prepares its
-# review, which names the parent run, the operation restart and no edits, and
-# y approves it. The child run must succeed, and its run representation must
+# review, which names the parent run, the operation restart and no edits. Its
+# two lineage rows do not fit the main area of 80x24, so y must show the
+# notice of the consent rule, and the child request must stay in review with
+# the same preparation. After a resize to 100x30, y approves it, and the TUI
+# returns to 80x24. The child run must succeed, and its run representation must
 # name the earlier run as its parent and restart as its lineage.
 # 9. On the live monitor of the restarted run, after its supervision ended
 # and the TUI retrieved its verified result, l opens the lineage menu and f opens the fork edits. Enter on occurrence 0
@@ -643,7 +653,30 @@ TUI_MODES = {OVERVIEW: (["profile_1", "profile_2"], ["observe", "submit"]), INPU
              TUI_FAILURES: (["profile_1"], ["observe", "submit", "control"]),
              TUI_SIZES: (["profile_1"], ["observe", "submit", "control"]),
              TUI_SIZES_BROKEN: (["profile_1"], ["observe", "submit", "control"])}
+TUI_MODES[TUI_CONTROLS_BROKEN] = TUI_MODES[TUI_CONTROLS]
 tui_mode = sys.argv[5] if len(sys.argv) == 6 and sys.argv[5] in TUI_MODES else None
+# The broken-cancel control is the tui-controls mode with one changed key.
+cancel_control = tui_mode == TUI_CONTROLS_BROKEN
+if cancel_control:
+    tui_mode = TUI_CONTROLS
+# The lifecycle modes tui-overview, tui-inputs, tui-controls, tui-redirect,
+# tui-decisions and tui-history share one standard. Each TUI session runs at
+# 80x24 over the actual manager and deterministic workers. Each step checks
+# what the TUI shows against manager facts that the harness reads through
+# HTTP with its own credential. Each session ends with q, exit status 0 and
+# the restored terminal. Each mode fails when it takes more than
+# LIFECYCLE_SECONDS, and its last PASS line states the elapsed time.
+LIFECYCLE_MODES = (OVERVIEW, INPUTS, TUI_CONTROLS, TUI_REDIRECT, TUI_DECISIONS, TUI_HISTORY)
+LIFECYCLE_SECONDS = 900
+mode_started = time.monotonic()
+
+
+def lifecycle_elapsed():
+    """The seconds since the harness started, which must stay within
+    LIFECYCLE_SECONDS for a lifecycle mode."""
+    elapsed = time.monotonic() - mode_started
+    assert elapsed <= LIFECYCLE_SECONDS, ("the lifecycle mode took longer than its bound", tui_mode, round(elapsed), LIFECYCLE_SECONDS)
+    return f"{elapsed:.0f} seconds"
 # The tui-controls and tui-redirect modes configure the control fixture
 # profiles.
 control_profiles = control_profiles or tui_mode in (TUI_CONTROLS, TUI_REDIRECT)
@@ -4224,8 +4257,10 @@ def overview_checks():
                 assert any("Manager overview" in row and "delivery live" in row for row in session.screen.lines()[:3]), (
                     "the header lacks the live delivery state", session.screen.lines()[:3])
                 save(session, "empty")
-                print("PASS tui-overview 1: O opens the Manager overview, which shows the empty overview that the TUI read after the profiles loaded,",
-                      "and the header shows delivery live", flush=True)
+                status, overview, _ = request("/v1/snapshot", harness)
+                assert status == 200 and overview["items"] == [], ("the manager overview is not empty", status, overview.get("items"))
+                print("PASS tui-overview 1: O opens the Manager overview, which shows the empty overview that the TUI read after the profiles loaded",
+                      "and that the harness reads, and the header shows delivery live", flush=True)
                 # 2. A request that the harness creates appears without a key press.
                 created = create_draft()
                 reasons = created["admission"]["reasons"]
@@ -4251,7 +4286,12 @@ def overview_checks():
                 screen = session.wait_screen("decision question", timeout=3)
                 assert "run Running" in screen, "the overview lacks the running run"
                 save(session, "running")
-                print("PASS tui-overview 3a: without a key press the overview shows run", run, "Running with its question", flush=True)
+                running, _, _ = client[0]("/v1/runs/" + run + "/snapshot", "RunSnapshot")
+                running_control, _, _ = client[0]("/v1/runs/" + run + "/control", "RunControl")
+                assert running["runtime"]["status"] == "running" and running_control["decisionHeadId"] == head, (
+                    "the manager does not hold the run at its question", running["runtime"]["status"], running_control["decisionHeadId"], head)
+                print("PASS tui-overview 3a: without a key press the overview shows run", run, "Running with its question, as the manager",
+                      "publishes it with head", head, flush=True)
                 # 3b. The held run opens from the overview by its identifier,
                 # keeps a typed answer draft, and Esc leaves it running.
                 held_before, _, _ = client[0]("/v1/runs/" + run + "/snapshot", "RunSnapshot")
@@ -4300,6 +4340,10 @@ def overview_checks():
                 assert "Your answer" in screen, "the reopened run lost its question head"
                 session.send(b"\x1b")
                 session.wait_screen("Manager overview", timeout=10)
+                reopened_snapshot, _, _ = client[0]("/v1/runs/" + run + "/snapshot", "RunSnapshot")
+                reopened_control, _, _ = client[0]("/v1/runs/" + run + "/control", "RunControl")
+                assert reopened_snapshot["runtime"]["status"] == "running" and reopened_control["decisionHeadId"] == head \
+                    and reopened_snapshot["controlAcks"] == held_before["controlAcks"], "reopening the run changed the manager run"
                 print("PASS tui-overview 3c: the reopened run showed the typed answer draft again, after a safety read and after a resize,",
                       "and Esc returned to the overview", flush=True)
                 # 4. While the first run waits at its question, the
@@ -4441,6 +4485,9 @@ def overview_checks():
                 screen = session.wait_screen("Overview: current; requests: 1, preparations: 0, runs: 0, decisions: 0", timeout=3)
                 save(session, "second")
                 assert "Request:" + second["id"] in details(screen), "the overview details lack the further request"
+                status, current, _ = request("/v1/snapshot", harness)
+                assert status == 200 and [item["request"]["id"] for item in current["items"] if item["kind"] == "request"] == [second["id"]], (
+                    "the manager overview does not hold exactly the further request", status)
                 live_header(session)
                 print("PASS tui-overview 11: without a key press the overview lists the further request", second["id"], flush=True)
                 session.send(b"\x1b")
@@ -4464,6 +4511,9 @@ def overview_checks():
                     elapsed = time.monotonic() - created_at
                     save(session, "polled")
                     live_header(session, "polling")
+                    status, current, _ = request("/v1/snapshot", harness)
+                    assert status == 200 and sorted(item["request"]["id"] for item in current["items"] if item["kind"] == "request") == sorted(
+                        [second["id"], fourth["id"]]), ("the manager overview does not hold the two requests that the TUI lists", status)
                     print("PASS tui-overview 12: with both SSE readers of its credential held, the restarted TUI shows delivery polling and lists request",
                           fourth["id"], f"without a key press after {elapsed:.2f} seconds", flush=True)
                     # 13. A free reader returns delivery to live.
@@ -4475,11 +4525,20 @@ def overview_checks():
                     session.wait_screen("delivery live", timeout=60)
                     live_header(session)
                     save(session, "relive")
+                    status, current, _ = request("/v1/snapshot", harness)
+                    assert status == 200 and len([item for item in current["items"] if item["kind"] == "request"]) == 2, (
+                        "the manager overview changed while the delivery state returned to live", status)
                     print("PASS tui-overview 13: after the harness released the readers, the delivery state returned to live after",
                           f"{time.monotonic() - released_at:.2f} seconds", flush=True)
                     # 14. A refused read keeps the overview and marks it stale.
                     process.terminate()
                     process.wait(timeout=25)
+                    try:
+                        exchange("/v1/snapshot", harness)
+                    except ConnectionRefusedError:
+                        pass
+                    else:
+                        raise AssertionError("the stopped manager still answers the harness")
                     session.send(b"g")
                     screen = session.wait_screen("Overview: stale (TransportUnavailable); the last complete overview is retained")
                     save(session, "stale")
@@ -4500,7 +4559,7 @@ def overview_checks():
                     response.close()
                     connection.close()
             assert not tui_fixture.client_state.exists(), "the service TUI created local runner state"
-            print("PASS tui-overview: the overview view followed the manager overview through the actual service TUI", flush=True)
+            print("PASS tui-overview: the overview view followed the manager overview through the actual service TUI in", lifecycle_elapsed(), flush=True)
         finally:
             if process.poll() is None:
                 process.terminate()
@@ -4581,7 +4640,7 @@ def input_checks():
             assert status == 200
             index = next(i for i, item in enumerate(catalogue["items"]) if item["name"] == "captured-input")
             assert [item["name"] for item in catalogue["items"][index]["inputs"]] == ["input"]
-            with tui_fixture.session(rows=40, columns=140) as session:
+            with tui_fixture.session() as session:
                 # 1. Ctrl-T captures the editor text, and Ctrl-R removes it.
                 new_request(session, index)
                 session.send(b"\x1b[200~" + editor_text.encode() + b"\x1b[201~")
@@ -4590,6 +4649,11 @@ def input_checks():
                 screen = session.wait_screen("Captured inputs:", timeout=30)
                 session.wait_screen("Enter REQUEST REVIEW", timeout=30)
                 save(session, "editor-request")
+                status, overview, _ = request("/v1/snapshot", harness)
+                assert status == 200
+                captured = [item["request"] for item in overview["items"] if item["kind"] == "request"]
+                assert len(captured) == 1 and [(entry["name"], entry["source"]) for entry in captured[0]["readiness"]["supplied"]] == [
+                    ("input", "capture")], ("the manager request does not supply the captured input", captured)
                 session.send(b"e")
                 session.wait_screen("Ctrl-R REMOVE INPUT", timeout=10)
                 session.send(b"\x12")
@@ -4652,6 +4716,9 @@ def input_checks():
                 session.wait_screen("Confirm withdrawal", timeout=10)
                 session.send(b"n")
                 session.wait_screen("withdraw was not sent: the confirmation was closed.", timeout=10)
+                status, kept, _ = request("/v1/requests/" + first["id"], harness)
+                assert status == 200 and kept["phase"] == "draft" and "withdraw" not in database_commands(first["id"], discarded_reviews), (
+                    "the closed confirmation withdrew the request", status, kept.get("phase"))
                 session.send(b"W")
                 session.wait_screen("Confirm withdrawal", timeout=10)
                 session.send(b"y")
@@ -4668,7 +4735,7 @@ def input_checks():
                 session.send(b"q")
                 assert session.wait_exit(20) == 0
                 session.assert_restored()
-            with tui_fixture.session(rows=40, columns=140) as session:
+            with tui_fixture.session() as session:
                 # 2. Ctrl-O opens the path editor, and Ctrl-D captures the file.
                 new_request(session, index)
                 session.send(b"\x0f")
@@ -4702,7 +4769,7 @@ def input_checks():
             print("PASS tui-inputs 6: no file of the manager root contains the path of the captured file", flush=True)
             assert not tui_fixture.client_state.exists(), "the service TUI created local runner state"
             print("PASS tui-inputs: the editor and file captures reached the exact review, and the removal, the discards and the withdrawal",
-                  "completed once each through the actual service TUI", flush=True)
+                  "completed once each through the actual service TUI in", lifecycle_elapsed(), flush=True)
         finally:
             if process.poll() is None:
                 process.terminate()
@@ -4896,17 +4963,24 @@ def tui_control_checks():
         text = bytes(session.output[start:]).decode("utf-8", "replace")
         return set(RUNTIME_LINE.findall(text))
 
-    def press(keys, expect, operation, timeout=30):
+    def press(keys, expect, operation, timeout=30, failure=None, forbidden=None):
         """Send the keys and wait for the expected screen text. A mutation
         key is deferred while a page-set read is in flight, and a deferred
         key is never replayed, so a new numbered key outcome that names the
         deferral of the operation sends the keys again, as the operator does.
-        A redraw of an earlier key outcome is not a new deferral. Returns the
-        screen and the number of deferrals."""
+        A redraw of an earlier key outcome is not a new deferral. A screen
+        that shows the forbidden text before the expected text, or a
+        deadline, fails with the failure message when one is given. Returns
+        the screen and the number of deferrals."""
         deadline = time.monotonic() + timeout
         deferred = 0
         deferral = re.compile(r"Key (\d+): " + re.escape(operation) + r" deferred during a page-set read\.")
         seen = max([int(number) for number in re.findall(r"Key (\d+):", session.screen.text())], default=0)
+
+        def shows(screen):
+            # A key outcome wider than the terminal wraps over two rows.
+            return expect in screen or squeeze(expect) in squeeze(screen)
+
         while True:
             for key in keys:
                 session.send(key)
@@ -4915,17 +4989,29 @@ def tui_control_checks():
             while True:
                 session.pump()
                 screen = session.screen.text()
-                if expect in screen:
+                if shows(screen):
                     session.settle()
                     return session.screen.text(), deferred
+                if forbidden is not None and forbidden in screen:
+                    # One frame can arrive in several reads, so the rest of
+                    # the frame may still bring the expected text.
+                    session.settle()
+                    screen = session.screen.text()
+                    assert shows(screen), (failure or "the TUI showed the forbidden text first", forbidden, screen)
+                    return screen, deferred
                 found = deferral.search(screen)
                 if found and int(found.group(1)) > seen:
                     seen = int(found.group(1))
                     deferred += 1
+                    # The read that deferred the key is still in flight, so
+                    # the operator waits a moment before pressing again.
+                    pause = time.monotonic() + 0.3
+                    while time.monotonic() < pause:
+                        session.pump(0.05)
                     break
                 assert time.monotonic() < deadline and session.process.poll() is None, (
-                    "the TUI screen did not show the expected text", expect, session.screen.text())
-            assert deferred <= 20, ("the key was deferred too often", operation)
+                    failure or "the TUI screen did not show the expected text", expect, session.screen.text())
+            assert deferred <= 20, ("the key was deferred too often", operation, session.screen.text())
 
     def new_store(before):
         deadline = time.monotonic() + 20
@@ -4967,6 +5053,17 @@ def tui_control_checks():
         """The redirect line of the live monitor for these offered targets."""
         return "Redirect occurrence " + occurrence + place + ": " + "   ".join(str(index + 1) + " " + target for index, target in enumerate(targets))
 
+    def wait_listing(text, timeout):
+        """Wait until the live monitor shows the redirect line, which wraps
+        at 80 columns. Returns the screen."""
+        deadline = time.monotonic() + timeout
+        while squeeze(text) not in squeeze(session.screen.text()):
+            assert time.monotonic() < deadline and session.process.poll() is None, (
+                "the live monitor does not show the redirect line", text, session.screen.text())
+            session.pump(0.05)
+        session.settle()
+        return session.screen.text()
+
     def digit(offer, target):
         """The digit key of the target in the offer."""
         return str(offer["targets"].index(target) + 1).encode()
@@ -4992,7 +5089,7 @@ def tui_control_checks():
         first, spare = window["targets"]
         answer_question(run)
         open_run(session, run)
-        session.wait_screen(listing(occurrence, " in its dispatch window", window["targets"]), timeout=20)
+        wait_listing(listing(occurrence, " in its dispatch window", window["targets"]), 20)
         save(session, "live-window")
         _, deferrals = press([digit(window, first)], "Control: redirected occurrence " + occurrence + " to " + first, "redirect")
         control = offered(run, lambda value: any(offer["operation"] == "redirect" and spare in offer["targets"] and first not in offer["targets"]
@@ -5002,7 +5099,7 @@ def tui_control_checks():
         attempt = held(run, occurrence)
         number = attempt["address"]["attemptId"]
         shown = listing(occurrence, ", attempt " + number + " in flight", live["targets"])
-        session.wait_screen(shown, timeout=20)
+        wait_listing(shown, 20)
         save(session, "live-offer")
         screen, deferred = press([b"9"], "redirect did not start: the manager offers no target 9 for occurrence " + occurrence + ".", "redirect")
         deferrals += deferred
@@ -5045,7 +5142,7 @@ def tui_control_checks():
         first, spare = window["targets"]
         answer_question(run)
         open_run(session, run)
-        session.wait_screen(listing(occurrence, " in its dispatch window", window["targets"]), timeout=20)
+        wait_listing(listing(occurrence, " in its dispatch window", window["targets"]), 20)
         _, deferrals = press([digit(window, spare)], "Control: redirected occurrence " + occurrence + " to " + spare, "redirect")
         save(session, "window-redirected")
         rows = redirects(run)
@@ -5073,7 +5170,7 @@ def tui_control_checks():
         occurrence = window["address"]["occurrenceId"]
         first, spare = window["targets"]
         open_run(session, run)
-        session.wait_screen(listing(occurrence, " in its dispatch window", window["targets"]), timeout=20)
+        wait_listing(listing(occurrence, " in its dispatch window", window["targets"]), 20)
         _, deferrals = press([digit(window, first)], "Control: redirected occurrence " + occurrence + " to " + first, "redirect")
         attempt = held(run, occurrence)
         control, _, _ = client[0]("/v1/runs/" + run + "/control", "RunControl")
@@ -5108,17 +5205,17 @@ def tui_control_checks():
         first, spare = window["targets"]
         answer_question(run)
         open_run(session, run)
-        session.wait_screen(listing(occurrence, " in its dispatch window", window["targets"]), timeout=20)
+        wait_listing(listing(occurrence, " in its dispatch window", window["targets"]), 20)
         _, deferrals = press([digit(window, first)], "Control: redirected occurrence " + occurrence + " to " + first, "redirect")
         attempt = held(run, occurrence)
         number = attempt["address"]["attemptId"]
-        session.wait_screen(listing(occurrence, ", attempt " + number + " in flight", [spare]), timeout=20)
+        wait_listing(listing(occurrence, ", attempt " + number + " in flight", [spare]), 20)
         _, deferred = press([b"1"], "Control: redirected occurrence " + occurrence + " from attempt " + number + " to " + spare, "redirect")
         deferrals += deferred
         control = offered(run, lambda value: any(offer["operation"] == "redirect" and offer["targets"] == [first] for offer in value["offers"]))
         attempt = held(run, occurrence)
         assert attempt["address"]["attemptId"] != number, ("the spare candidate holds no new attempt", attempt["address"])
-        session.wait_screen(listing(occurrence, ", attempt " + attempt["address"]["attemptId"] + " in flight", [first]), timeout=20)
+        wait_listing(listing(occurrence, ", attempt " + attempt["address"]["attemptId"] + " in flight", [first]), 20)
         save(session, "stale-offer")
         _, deferred = press([b"1"], "Control: redirect to " + first + ": runtime acknowledgement rejected-stale", "redirect")
         deferrals += deferred
@@ -5146,9 +5243,6 @@ def tui_control_checks():
               "without a resend offer or a second send while the attempt kept running, and c and y cancelled the run",
               "; deferred key presses:", deferrals, flush=True)
         leave(session)
-        assert not tui_fixture.client_state.exists(), "the service TUI created local runner state"
-        print("PASS tui-redirect: the dispatch-window and live redirects, the rejected-stale acknowledgement and the local refusals ran",
-              "through the actual service TUI", flush=True)
 
     with (work / "server-0.stdout").open("wb") as output, (work / "server-0.stderr").open("wb") as errors:
         process = subprocess.Popen([str(runner), "--manager", "serve", "--config", str(config),
@@ -5158,7 +5252,7 @@ def tui_control_checks():
             status, capabilities, _ = request("/v1/capabilities", harness)
             assert status == 200 and "control" in capabilities["scopes"]
             client = mixed_client(capabilities, harness)
-            with tui_fixture.session(rows=40, columns=140) as session:
+            with tui_fixture.session() as session:
                 session.wait_screen("Manager profiles")
                 session.wait_screen(TUI_MODES[tui_mode][0][0])
                 session.send(b"\r")
@@ -5170,14 +5264,21 @@ def tui_control_checks():
                     session.send(b"q")
                     assert session.wait_exit(20) == 0
                     session.assert_restored()
+                    assert not tui_fixture.client_state.exists(), "the service TUI created local runner state"
+                    print("PASS tui-redirect: the dispatch-window and live redirects, the rejected-stale acknowledgement and the local refusals ran",
+                          "through the actual service TUI, which quit with status 0 and restored the terminal, in", lifecycle_elapsed(), flush=True)
                     return
 
-                # 1. c and y cancel a held run.
+                # 1. c and y cancel a held run. The control presses Esc
+                # instead of y, so the TUI sends no cancel.
                 run = start("profile_steer")
                 answer_person(run)
                 open_run(session, run)
                 session.wait_screen("c CANCEL", timeout=20)
                 save(session, "cancel-open")
+                confirm = b"\x1b" if cancel_control else b"y"
+                if cancel_control:
+                    print("CONTROL pressed Esc instead of y in the cancel confirmation", flush=True)
                 begin = len(session.output)
                 deferrals = 0
                 while True:
@@ -5185,10 +5286,13 @@ def tui_control_checks():
                     save(session, "cancel-confirmation")
                     deferrals += deferred
                     # A deferred y closes the confirmation, so c opens it again.
-                    screen, deferred = press([b"y"], "Control: cancel accepted", "cancel")
+                    screen, deferred = press([confirm], "Control: cancel accepted", "cancel", timeout=20,
+                                             failure=CANCEL_ORDER, forbidden="Runtime: Cancelled")
                     deferrals += deferred
                     if "Control: cancel accepted" in screen:
                         break
+                save(session, "cancel-accepted")
+                assert commands(["/v1/runs/" + run + "/control"]) == ["cancel"], (CANCEL_ORDER, "no cancel command while the TUI shows cancel accepted")
                 screen = session.wait_screen("Control: cancel accepted; the runtime status is Cancelled", timeout=30)
                 assert "Runtime: Cancelled" in screen, "the live monitor does not show the cancelled runtime status"
                 save(session, "cancelled")
@@ -5291,7 +5395,7 @@ def tui_control_checks():
                 assert session.wait_exit(20) == 0
                 session.assert_restored()
             assert not tui_fixture.client_state.exists(), "the service TUI created local runner state"
-            print("PASS tui-controls: the cancel, steer, fail-over and abandon controls ran through the actual service TUI", flush=True)
+            print("PASS tui-controls: the cancel, steer, fail-over and abandon controls ran through the actual service TUI in", lifecycle_elapsed(), flush=True)
         finally:
             if process.poll() is None:
                 process.terminate()
@@ -5401,6 +5505,10 @@ def decisions_checks():
         assert snapshot["runtime"]["status"] == "succeeded", ("decisions run terminal status", run, snapshot["runtime"]["status"])
         answers = json.loads((store / "answers.json").read_bytes())["answers"]
         assert [record["answer"] for record in answers] == [text], ("recorded answers", run, [record["answer"] for record in answers])
+        published = [(item["occurrenceId"], item["answer"], item["source"]) for item in snapshot["items"]]
+        assert published == [("0", text, "asked:person model:fixed-point")], ("the published answer of the run", run, published)
+        assert [(ack["command"], ack["state"]) for ack in snapshot["controlAcks"]] == [("answer", "delivered")], (
+            "the run does not acknowledge exactly one delivered answer", run, snapshot["controlAcks"])
         relayed = requests.read_text().splitlines() if requests.exists() else []
         assert "session/prompt" not in relayed, ("the adapter received a turn for a person-routed ask", relayed)
         save(session, run + "-answered")
@@ -5422,7 +5530,7 @@ def decisions_checks():
             status, capabilities, _ = request("/v1/capabilities", harness)
             assert status == 200
             client = mixed_client(capabilities, harness)
-            with tui_fixture.session(rows=40, columns=140) as session:
+            with tui_fixture.session() as session:
                 # 1. D opens the Decisions view, which shows no pending head.
                 session.wait_screen("Manager profiles")
                 session.wait_screen("profile_1")
@@ -5434,6 +5542,8 @@ def decisions_checks():
                 screen = session.wait_screen("Decisions: current; pending heads: 0", timeout=20)
                 assert "No rows are visible." in screen, "the empty Decisions view lists a row"
                 save(session, "empty")
+                status, listed, _ = request("/v1/decisions", harness)
+                assert status == 200 and listed["items"] == [], ("the manager lists a pending decision head", status, listed.get("items"))
                 print("PASS tui-decisions 1: D on the workflows browser opens the Decisions view, which shows no pending head", flush=True)
 
                 # 2. Two person-routed asks appear in manager observation order.
@@ -5479,6 +5589,9 @@ def decisions_checks():
                 first = order[0]
                 focused(session, first)
                 save(session, "one-head")
+                status, listed, _ = request("/v1/decisions", harness)
+                assert status == 200 and [item["id"] for item in listed["items"]] == [first], (
+                    "the manager does not list exactly the other head", status, listed.get("items"))
                 run, store = runs[first]
                 answer(session, run, store, "Answered from the Decisions view, first head.")
                 print("PASS tui-decisions 4: without a key press the Decisions view dropped head", second, "and listed only head", first,
@@ -5488,12 +5601,18 @@ def decisions_checks():
                 screen = back(session, 0)
                 assert "No rows are visible." in screen, "the Decisions view still lists a row"
                 save(session, "done")
+                status, listed, _ = request("/v1/decisions", harness)
+                assert status == 200 and listed["items"] == [], ("the manager still lists a pending decision head", status, listed.get("items"))
                 print("PASS tui-decisions 5: after both answers the Decisions view lists no pending head; the second Ctrl-D of each answer",
                       "showed the in-flight key outcomes", outcomes, flush=True)
 
                 # 6. A structured question shows its schema, and a wrong field type is refused locally.
                 run, first, store = start(client, "profile_1", "structured-person")
                 session.wait_screen("Decisions: current; pending heads: 1", timeout=10)
+                status, listed, _ = request("/v1/decisions", harness)
+                assert status == 200 and [item["id"] for item in listed["items"]] == [first] and "json" in listed["items"][0]["question"]["code"] \
+                    and sorted(listed["items"][0]["question"]["editorSchema"]["properties"]) == ["notes", "ok"], (
+                    "the manager does not list exactly the structured head", status, listed.get("items"))
                 screen = focused(session, first)
                 shown = details(screen)
                 for line in ("Run:" + run, "Answertype:structured", "Answerschema:{\"notes\":[string],\"ok\":boolean}", "Addressee:personfirst"):
@@ -5559,13 +5678,16 @@ def decisions_checks():
                 assert snapshot["runtime"]["status"] == "succeeded", ("structured run terminal status", run, snapshot["runtime"]["status"])
                 recorded = {record["occurrenceId"]: record["answer"] for record in json.loads((store / "answers.json").read_bytes())["answers"]}
                 assert recorded == {"0": theirs, "1": json.loads(draft)}, ("structured recorded answers by occurrence", recorded)
+                # The snapshot publishes a structured answer as its compact JSON text.
+                published = {item["occurrenceId"]: json.loads(item["answer"]) for item in snapshot["items"]}
+                assert published == recorded, ("the published answers of the structured run", published)
                 print("PASS tui-decisions 7: the TUI answer to decision", first, "after the harness answer received 412 stale-revision,",
                       "the draft moved to decision", second, "without a send, and Ctrl-D sent it, so run", run,
                       "recorded the typed values", recorded, flush=True)
                 session.send(b"q")
                 assert session.wait_exit(20) == 0
                 session.assert_restored()
-            print("PASS tui-decisions: person-routed asks were answered from the Decisions view of the actual service TUI", flush=True)
+            print("PASS tui-decisions: person-routed asks were answered from the Decisions view of the actual service TUI in", lifecycle_elapsed(), flush=True)
         finally:
             if process.poll() is None:
                 process.terminate()
@@ -5662,7 +5784,7 @@ def history_checks():
             status, capabilities, _ = request("/v1/capabilities", harness)
             assert status == 200
             client = mixed_client(capabilities, harness)
-            with tui_fixture.session(rows=40, columns=140) as session:
+            with tui_fixture.session() as session:
                 # 1. H opens the History view with the legacy entries only.
                 session.wait_screen("Manager profiles")
                 session.wait_screen("profile_1")
@@ -5674,6 +5796,9 @@ def history_checks():
                 screen = session.wait_screen(f"History: current; runs: {HISTORY_LEGACY_ENTRIES} (managed 0, legacy {HISTORY_LEGACY_ENTRIES})", timeout=30)
                 assert "Supervision: observer" in screen, ("the first legacy entry does not show observer supervision", screen)
                 save(session, "legacy-only")
+                listed = all_runs()
+                assert len(listed) == HISTORY_LEGACY_ENTRIES and all(item["supervision"] == "observer" for item in listed), (
+                    "the manager history is not the legacy entries only", len(listed))
                 print("PASS tui-history 1: H on the workflows browser opens the History view, which lists the",
                       HISTORY_LEGACY_ENTRIES, "legacy entries with observer supervision and no managed run", flush=True)
 
@@ -5718,6 +5843,7 @@ def history_checks():
                 save(session, "earlier-detail")
                 screen = retrieve(session)
                 save(session, "earlier-retrieved")
+                retrieved_screen = session.screen.text()
                 saved_path = work / "tui-history-saved-result.bin"
                 assert not os.path.lexists(saved_path)
                 session.wait_screen("s SAVE RESULT", timeout=10)
@@ -5733,7 +5859,7 @@ def history_checks():
                     assert time.monotonic() < deadline, ("the TUI save outcome did not appear", session.screen.text())
                     session.pump()
                 save(session, "earlier-saved")
-                assert squeeze("Result SHA-256: " + artifact["sha256"]) in squeeze(session.screen.text()), (
+                assert squeeze("Result SHA-256: " + artifact["sha256"]) in squeeze(retrieved_screen), (
                     "the run detail does not show the artifact digest")
                 saved = saved_path.read_bytes()
                 saved_status = os.lstat(saved_path)
@@ -5750,6 +5876,11 @@ def history_checks():
                 open_detail(session, later)
                 retrieve(session)
                 save(session, "later-retrieved")
+                outputs, _, _ = client[0]("/v1/runs/" + later + "/outputs", "OutputPage")
+                later_result = next(item for item in outputs["items"] if item["kind"] == "result")
+                assert later_result["verification"]["state"] == "verified", ("the later result is not verified", later_result["verification"])
+                for text in ("Result: verified " + later_result["artifact"]["bytes"] + " bytes", "Result SHA-256: " + later_result["artifact"]["sha256"]):
+                    assert squeeze(text) in squeeze(session.screen.text()), ("the later run detail does not show the published result", text)
                 back(session)
                 focus(session, order.index(earlier), earlier)
                 screen = open_detail(session, earlier)
@@ -5770,6 +5901,8 @@ def history_checks():
                 session.send(b"r")
                 session.wait_screen("result not retrieved: a legacy entry publishes no size and digest for its result", timeout=10)
                 save(session, "legacy-detail")
+                legacy_view, _, _ = client[0]("/v1/runs/" + legacy, "Run")
+                assert legacy_view["supervision"] == "observer", ("the manager does not publish the legacy entry as observed", legacy_view["supervision"])
                 print("PASS tui-history 6: the detail of legacy entry", legacy, "showed observer supervision, and r stated that a legacy entry",
                       "publishes no size and digest for its result", flush=True)
 
@@ -5903,7 +6036,20 @@ def history_checks():
                 preparation = child_review(restart_child)
                 assert preparation["review"]["lineage"] == {"parentRunId": earlier, "operation": "restart", "edits": []}, (
                     "the restart review lineage", preparation["review"].get("lineage"))
+                # The two lineage rows take the summary review beyond the
+                # main area of 80x24, so the consent rule refuses y there.
+                session.send(b"y")
+                shown("Approval did not start: the complete review does not fit. Resize the terminal.", 10)
+                save(session, "restart-review-refused")
+                unchanged, _, _ = client[0]("/v1/requests/" + restart_child["id"], "Request")
+                assert unchanged["phase"] == "review" and unchanged["preparationId"] == preparation["id"] and unchanged["runId"] is None, (
+                    "the refused approval changed the restart child request", unchanged["phase"], unchanged["preparationId"], unchanged["runId"])
+                session.resize(30, 100)
+                shown("Lineage edits: none", 10)
+                session.settle()
                 mutation_key(b"y", "Runtime: Succeeded", 90)
+                session.resize(24, 80)
+                shown("Runtime: Succeeded", 10)
                 save(session, "restart-run")
                 associated, _, _ = client[0]("/v1/requests/" + restart_child["id"], "Request")
                 restarted = associated["runId"]
@@ -5915,7 +6061,8 @@ def history_checks():
                 (work / "tui-history-restarted-snapshot.json").write_bytes(raw)
                 assert snapshot["runtime"]["status"] == "succeeded", ("the restarted run status", snapshot["runtime"]["status"])
                 print("PASS tui-history 8: l and r on the detail of run", earlier, "created the child request", restart_child["id"],
-                      "whose request screen and review named the parent and the operation restart; y approved it, and its run", restarted,
+                      "whose request screen and review named the parent and the operation restart; at 80x24 y was refused because the review",
+                      "does not fit and the request stayed in review, and after a resize to 100x30 y approved it, and its run", restarted,
                       "succeeded with parentRunId", earlier, "and lineage restart", flush=True)
 
                 # 9. l, f and one replacement fork the restarted run, and the child review shows the edit.
@@ -5954,7 +6101,7 @@ def history_checks():
                 assert session.wait_exit(20) == 0
                 session.assert_restored()
             print("PASS tui-history: the History view of the actual service TUI listed every run across windows, saved a verified result,",
-                  "exported it once, restarted it to a succeeded child run and forked that run with one replacement", flush=True)
+                  "exported it once, restarted it to a succeeded child run and forked that run with one replacement in", lifecycle_elapsed(), flush=True)
         finally:
             if process.poll() is None:
                 process.terminate()

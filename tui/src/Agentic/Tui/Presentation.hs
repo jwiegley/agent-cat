@@ -349,7 +349,12 @@ layout presentation width height
     identity = isJust (presentationServiceEndpoint presentation)
     headerRows = shellHeaderRows identity width height
     statusRows = shellStatusRows height
-    footerRows = shellFooterRows height
+    -- A key outcome wider than the terminal takes the first footer row as a
+    -- second status row, so that its reason stays readable. The main area
+    -- keeps its rows, and with them every fit decision, such as the fit of
+    -- the exact review.
+    outcomeRows = keyOutcomeRows presentation width statusRows (shellFooterRows height)
+    footerRows = shellFooterRows height - (outcomeRows - statusRows)
     mainRows = shellMainRows identity width height
     identityRows = [bar width (muted (displayText (oneLine width (" " <> endpointLine endpoint)))) | Just endpoint <- [presentationServiceEndpoint presentation]]
     -- The header row of the screen context. Above the identity row it also
@@ -376,7 +381,7 @@ layout presentation width height
         | otherwise -> [bar width (withAttr (attrName "title") (displayText (" agent-cat  /  " <> screenTitle (modelScreen (presentationModel presentation))))), contextRow]
             <> identityRows
     mainWidget = hLimit width (vLimit mainRows (padBottom Max (layerView presentation width height mainRows)))
-    statusWidgets = [bar width (statusView presentation width) | statusRows == 1]
+    statusWidgets = [vLimit outcomeRows (bar width (statusView presentation width outcomeRows)) | statusRows == 1]
     footerWidgets = map (bar width . (\line -> if T.all isSpace line then muted hBorder else shortcutLine line)) footerLines
     footerLines = packedFooter width footerRows (footerItems presentation width height)
 
@@ -471,8 +476,25 @@ headerContext presentation = case modelScreen model of
 serviceMutationsStopped :: Presentation -> Bool
 serviceMutationsStopped presentation = presentationServiceFault presentation || presentationServiceCredentialRefused presentation
 
-statusView :: Presentation -> Int -> Widget Name
-statusView presentation width = withAttr attribute (displayText (oneLine width message))
+-- | The status rows: two when a key outcome is wider than the terminal and
+-- the footer has two rows to give one of them, and otherwise the status rows
+-- of the shell.
+keyOutcomeRows :: Presentation -> Int -> Int -> Int -> Int
+keyOutcomeRows presentation width statusRows footerRows = case presentationServiceKeyOutcome presentation of
+  Just outcome | statusRows == 1, footerRows == 2, displayWidth (keyOutcomeLine outcome) > width -> 2
+  _ -> statusRows
+
+-- | The status line, or the key outcome wrapped to the given number of rows,
+-- the last of them shortened with an ellipsis.
+statusView :: Presentation -> Int -> Int -> Widget Name
+statusView presentation width rows
+  | rows > 1, Just outcome <- presentationServiceKeyOutcome presentation =
+      let wrapped = wrapDisplayLines width (safeDisplay (keyOutcomeLine outcome))
+          (shown', rest) = splitAt rows wrapped
+          lastLine = T.unwords (drop (rows - 1) shown' <> rest)
+          rowsShown = take (rows - 1) shown' <> [oneLine width lastLine | not (null shown')]
+       in withAttr (attrName "warning") (vBox (map displayText rowsShown))
+  | otherwise = withAttr attribute (displayText (oneLine width message))
   where
     model = presentationModel presentation
     (attribute, message)

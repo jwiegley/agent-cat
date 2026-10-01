@@ -3455,8 +3455,12 @@ supervision, the integrity, the verification, the result reference, and the
 number of occurrences.  The detail of a legacy entry comes from
 @code{/v1/runs/@var{id}}, because the manager refuses the other run resources
 of a legacy entry.  The event stream keeps the detail current while it is
-shown, and @kbd{g} reads it again.  @kbd{r} retrieves the verified result of a
-succeeded managed run whose result is verified or referenced.  The download
+shown, and @kbd{g} reads it again.  @key{UP} and @key{DOWN} scroll a detail
+that is taller than the main area.  The saved result, export, and lineage
+lines come last, and a new outcome of one of them scrolls the detail to its
+end, so the outcome of the key is visible at 80 by 24 cells.  @kbd{r}
+retrieves the verified result of a succeeded managed run whose result is
+verified or referenced.  The download
 must have the size and the SHA-256 digest that the run outputs state.  For
 any other run, @kbd{r} downloads nothing, and the status line states the
 reason, for example @samp{result not retrieved: a legacy entry publishes no
@@ -3893,9 +3897,14 @@ the observation line states that automatic refresh is paused instead of
 A declared client failure keeps its declared meaning, and the internal-fault
 rules above apply to every step of the journey.
 
-Service mode does not support these features.  It does not reconnect after a
-credential revocation.  Service mode is not an accepted milestone, and it
-closes no workflow-manager package or gate.
+The manager refuses a revoked credential at every read, so after a
+revocation the refused-credential state lasts for the rest of the session.  A
+new session with a new credential reads the manager runs again.
+
+A numbered key outcome that is wider than the terminal takes the first of the
+two footer rows as a second status row, so its reason stays readable at 80 by
+24 cells.  The main area keeps its rows, and with them the fit of the exact
+review.
 @end table
 
 In local mode, the application enters its Brick screen before runner discovery

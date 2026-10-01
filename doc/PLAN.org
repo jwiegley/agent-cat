@@ -10657,6 +10657,33 @@ Non-blocking findings of fess audit fess/pc-PC25-r1.md (2026-10-01) on subtask P
 4. (low) tui/src/Agentic/Tui/Service.hs editorCheck: an integer schema accepts Number 3.0, which the runtime may refuse. Fix: add a vector for 3.0 against an integer schema, or send the integral value as an Integer.
 5. (low) manager/test/service_http.py tui-decisions step 7 depends on Brick reading the waiting Ctrl-D before the manager event after SIGCONT. Fix: if the step flakes, wait for the in-flight outcome or make the ordering deterministic.
 
+* TODO [#D] Resolve the non-blocking fess findings of subtask PC32    :review:
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pc32-follow-fess-9owj
+:LABELS:   ["review","workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-01 Thu 08:28]
+:MODIFIED: [2026-10-01 Thu 08:28]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess audit fess/pc-PC32-r1.md (2026-10-01) on subtask PC32 (WM-035 lifecycle PTY journeys: manager facts, restoration and the cancel control).
+
+1. (medium) manager/test/service_http.py near lines 404, 4990-4997 and 5290, and doc/tui-release-evidence.md lines 69-72: the positive cancel-ordering check accepts a frame that shows both 'Control: cancel accepted' and 'Runtime: Cancelled'. In the N8 run both arrived in one read, so the order 'accepted before cancelled' was never observed, yet the evidence document states it. The negative control tui-controls-broken-cancel fails on its 20-second timeout, not on an order violation. Fix: restate the comment and the evidence document as the enforced rule (no frame shows Cancelled without the acceptance, and the database holds exactly one cancel command once acceptance shows), or make the check strict.
+2. (medium) manager/test/service_http.py near lines 6039-6050, tui/README.md lines 552 and 871: tui-history step 8 does not stay at 80x24. The restart child review has two lineage rows and needs 16 rows, and 80x24 has room for 14. The harness checks the refusal at 80x24, resizes to 100x30 to approve, and returns to 80x24. Decision needed: change the review layout (for example selector labels without padding and a dialog inner width of 78) or accept the gap. Related to acat-jdmd item 2.
+3. (low) tui/src/Agentic/Tui/Presentation.hs near lines 356-357 and 379: a key outcome wider than the terminal takes one of the two footer rows, so packedFooter shows only the first packed row and hides second-row hints such as 'RESIZE TO REVIEW' and '? KEYS'. tui-sizes and bash tui/ci/tui.sh were not rerun after this change. Fix: rerun both and keep the consent hints visible.
+4. (low) tui/src/Agentic/Tui/App.hs line 891: the Haddock line for serviceExportLines now sits above historyOutcomeLines, which has two '-- |' blocks. Fix: move the line back.
+5. (low) doc/agent-cat.texi lines 3900-3902: the refused-credential state is said to last for the rest of the session, but a successful read clears it (ServiceLane.hs:361) and E switches profile. Fix: state the actual exit paths.
+6. (low) manager/test/service_http.py line 5008: a fixed 0.3-second pause after a deferred key works around one run in which a page-set read stayed in flight for 21 presses and hit the 20-deferral bound. Fix: investigate the in-flight read, or bound the deferral by time.
+7. (low) N8 evidence tui-controls-cancel-accepted.screen.txt: after the cancel, the output pane shows request 1 as 'Failed' with a raw GHC call stack (throwIO, called at runtime/src/Agentic/Exec.hs:1365:15) while the run is Cancelled. Fix: determine whether it predates PC32, and show the cancellation instead of a call stack.
+8. (limitation) Some lifecycle steps still check manager state that HTTP does not serve (coordination database command rows, run store answers.json, attempt events, flow verb, adapter request log), beside the new HTTP facts.
+
+Evidence: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/PC/PC32/impl-r1 (private).
+
 * TODO [#C] Resolve PC5 fess findings in legacy history windows    :review:
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -19463,7 +19490,7 @@ Local-mode behavior remains intact without a duplicated service runtime model.
 :LABELS:   ["p7","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-01 Thu 07:48]
+:MODIFIED: [2026-10-01 Thu 08:28]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-035
 :SOURCE_REPO: agent-cat
@@ -19583,6 +19610,13 @@ check fail.
     "author": "johnw",
     "text": "PC31 (2026-10-01): service_http.py mode tui-sizes drives the service TUI from the keyboard at 40x12, 80x24 and 140x36 in a PTY (test/tui_probe.py): catalogue, setup with a pasted literal, review, approval, answer editing, completion, retrieval and save of the verified result. Resizes during setup and review keep the input draft and the review; at 40x12 y is refused with 'Approval did not start: the complete review does not fit. Resize the terminal.'; at 80x24 the harness approves; a resize to 140x36 during answer editing keeps the typed answer. The live monitor, overview, decisions and history views are each resized to all three sizes, and assert_restored passes at exit. Negative control tui-sizes-broken-draft fails with 'JOURNEY-ASSERT draft survives resize'. Two rendering fixes in Presentation.hs: the summary review now fits 80x24 (merged rows), and the header context reserves the width of the delivery state. Two new model checks in tui/test/ServiceTests.hs. Checks passed: Werror build with -ftui-tests of agentic-run, routing-fixed-point-probe, tui-model-test; tui-model-test at N8; tui-sizes at N8; tui-sizes-broken-draft (expected nonzero with its literal); Phase A journey at N8; make -C doc check. Evidence: resume-20260923/PC/PC31/impl-r1; fess/pc-PC31-r1.md (non-blocking), follow-up acat-jdmd (includes the open 40x12 live-monitor defect). Slow event stream, expired pages, control-sequence payloads and the other WM-035 items are not covered by this subtask. Package stays open.",
     "created_at": "2026-10-01T14:48:45Z"
+  },
+  {
+    "id": 507,
+    "issue_id": "acat-wm-035-9uqq",
+    "author": "johnw",
+    "text": "PC32 (2026-10-01): the lifecycle modes tui-overview, tui-inputs, tui-controls, tui-redirect, tui-decisions and tui-history of manager/test/service_http.py now run at 80x24 over the actual manager and deterministic workers. Each step reads manager facts through HTTP with the harness credential, each session ends with q, exit 0 and assert_restored, and each mode fails past LIFECYCLE_SECONDS=900 (final N8 runs: overview 195 s, controls 163 s, inputs 46 s, redirect 53 s, history 53 s, decisions 34 s). Negative control tui-controls-broken-cancel presses Esc in the cancel confirmation and fails with 'JOURNEY-ASSERT cancel accepted before cancelled'. Fixes: Presentation.hs keyOutcomeRows lets a key outcome wider than the terminal use a footer row (new tui-model-test check); App.hs scrolls the history detail to a new save, export or lineage outcome. tui/README.md, doc/tui-release-evidence.md and doc/agent-cat.texi describe service mode as supported. Checks passed: Werror build with -ftui-tests of agentic-run, routing-fixed-point-probe, tui-model-test; the six lifecycle modes at N8; tui-controls-broken-cancel (expected nonzero with its literal); Phase A journey at N8; make -C doc check. Evidence: resume-20260923/PC/PC32/impl-r1; fess/pc-PC32-r1.md (non-blocking), follow-up acat-pc32-follow-fess-9owj. Limitation: the tui-history restart-child review (two lineage rows) does not fit 80x24 and is approved at 100x30. Package stays open.",
+    "created_at": "2026-10-01T15:28:43Z"
   }
 ]
 #+end_src

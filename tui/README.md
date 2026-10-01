@@ -115,13 +115,19 @@ same frontend to a running workflow manager through the public
 `Agentic.Manager.Client` facade. It takes 1 to 8 absolute client-profile paths
 and connects the first one at startup.
 It follows one selected request or run at a time. It browses the manager
-catalogue, creates a request with literal or captured inputs, opens an existing
-request or run from the Manager overview view, and shows the exact manager review. Only `y` in the
-summary view approves that review. The frontend then follows the run in the
-live monitor, answers the questions that the manager routes to the person,
-sends the run controls that the manager offers (cancel, steer, retry,
-fail-over and abandon), recognizes the terminal state, retrieves the verified
-result, and saves it with `s`.
+catalogue, creates a request with literal or captured inputs, removes an
+input, withdraws a request, and shows the exact manager review. Only `y` in
+the summary view approves that review, and `X` discards it. The Manager
+overview, Manager decisions and History views list the requests, runs and
+pending decisions of the authorized profiles and open any of them by its
+identifier. The frontend follows a run in the live monitor, answers the
+questions that the manager routes to the person, and sends the run controls
+that the manager offers: cancel, steer, retry, fail-over, abandon and
+redirect. It recognizes the terminal state, retrieves the verified result,
+saves it with `s`, exports it with `e`, and restarts, resumes or forks a run
+with `l`. It follows the event stream of the manager, falls back to polling,
+shows a manager loss and a refused credential, and switches between client
+profiles with `E`.
 
 Service mode starts no local machine, helper process or local runner state.
 When the connection fails at startup, the frontend prints one fixed line that
@@ -286,7 +292,11 @@ snapshot the manager refuses. The detail shows the run, the workflow, the
 target, the runtime status, the supervision, the integrity, the
 verification, the result reference and the number of occurrences of a
 managed run, or the representation of a legacy entry. Live delivery keeps
-the detail current while it is shown, and `g` reads it again. `r` retrieves
+the detail current while it is shown, and `g` reads it again. `Up` and
+`Down` scroll a detail that is taller than the main area. The saved result,
+export and lineage lines come last, and a new outcome of one of them
+scrolls the detail to its end, so the outcome of the key is visible at
+80x24. `r` retrieves
 the verified result of a succeeded managed run with a verified or referenced
 result through `Agentic.Tui.Service.retrieveResult` and
 `Agentic.Manager.Client.downloadVerified`, which check the size and the
@@ -539,7 +549,9 @@ lineage menu with restart, resume and fork eligible, and `r` sends a
 restart. The frontend opens the child request, which names the parent run
 and the operation, and the lineage collection of the run holds that child.
 `Enter` prepares its review, which names the parent run, the operation
-restart and no edits, and `y` approves it. The child run succeeds and names
+restart and no edits. Its two lineage rows do not fit 80x24, so a summary `y`
+there shows the notice of the consent rule and the request stays in review.
+After a resize to 100x30, `y` approves it. The child run succeeds and names
 the earlier run as its parent and restart as its lineage. On the live
 monitor of that child run, after the frontend retrieved its verified result,
 `l` and `f` open the fork edits, `Enter` and `Ctrl-D` replace the answer of
@@ -878,5 +890,21 @@ resized to all three sizes, and the mode requires the restored terminal after
 `q`. The control mode `tui-sizes-broken-draft` clears the input editor before
 the first resize and must fail with `JOURNEY-ASSERT draft survives resize`.
 
+A numbered key outcome that is wider than the terminal takes the first of
+the two footer rows as a second status row, so its reason stays readable at
+80x24. The main area keeps its rows, and with them the fit of the exact
+review.
+
+The lifecycle modes of `manager/test/service_http.py` (tui-overview,
+tui-inputs, tui-controls, tui-redirect, tui-decisions and tui-history) share
+one standard. Each runs the TUI at 80x24 over the actual manager and
+deterministic workers. Each step checks what the TUI shows against manager
+facts that the harness reads through HTTP with its own credential. Each TUI
+session ends with `q`, exit status 0 and the restored terminal, and each mode
+fails when it takes more than 900 seconds. The control mode
+`tui-controls-broken-cancel` presses `Esc` instead of `y` in the cancel
+confirmation, so the TUI sends no cancel, and the mode must fail with
+`JOURNEY-ASSERT cancel accepted before cancelled`.
+
 The [manual](../doc/agent-cat.texi) entry for `--service` states the complete
-key behavior. Service mode is not an accepted milestone.
+key behavior.

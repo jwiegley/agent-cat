@@ -288,6 +288,13 @@ endpointTests render profile = do
         "Key 5: create did not start: this credential lacks submit." `T.isInfixOf`
           render (80,24) ((emptyPresentation catalogue) {presentationService = True, presentationNoColor = True,
             presentationServiceKeyOutcome = Just (L.KeyOutcome 5 (L.scopeText "create" "submit") Nothing)})),
+      ("a key outcome wider than 80 columns wraps over two status rows at 80x24 and is shown complete",
+        let wideOutcome = L.KeyOutcome 7 "steer did not start: the manager offers no interrupt-now steer for this run." Nothing
+            frame = render (80,24) ((emptyPresentation catalogue) {presentationService = True, presentationNoColor = True,
+              presentationServiceKeyOutcome = Just wideOutcome})
+            joined = T.filter (not . isSpace)
+         in T.length (L.keyOutcomeLine wideOutcome) > 80 && joined (L.keyOutcomeLine wideOutcome) `T.isInfixOf` joined frame
+              && not ("for this…" `T.isInfixOf` frame) && length (T.lines frame) == 24),
       ("every startup failure has its one fixed line",
         and [ L.startupFailureText failure == "--tui --service: " <> line | (failure, line) <- failures ]),
       ("the startup failure lines are distinct single lines",

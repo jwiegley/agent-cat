@@ -42,9 +42,49 @@ publication was performed.
 | Opt-in frontend state sharing and runner-specific defaults | `tuiCmd` state-root selection and frontend-manifest v2 | Default-state PTY assertion; TUI/ext-pi shared manifest/restore tests |
 | macOS/Linux support and terminal restoration | POSIX fd/process-group implementation; three-system flake | Darwin PTY normal/exception/signal tests; Darwin and Linux builds below |
 | Service-mode journey at 40x12, 80x24 and 140x36 with resizes | `Tui.Presentation.serviceReviewRows`, `serviceReviewAllowed` and the header row; drafts kept by identity in `Tui.App` | The tui-sizes mode and its `tui-sizes-broken-draft` control in `manager/test/service_http.py`; `tui-model-test` review-fit and header-row checks |
+| Service-mode lifecycle at 80x24: overview, inputs, run controls, redirects, decisions and history | `Tui.App`, `Tui.Service`, `Tui.ServiceLane` and `Tui.Presentation`, with the wrapped key outcome (`keyOutcomeRows`) and the scroll of the run detail to a new outcome (`historyOutcomeLines`) | The tui-overview, tui-inputs, tui-controls, tui-redirect, tui-decisions and tui-history modes and the `tui-controls-broken-cancel` control in `manager/test/service_http.py`, and the `tui-model-test` check of the wrapped key outcome at 80x24 |
 | Downstream `wf --tui` uses its own 74-workflow registry | Public `Agentic.Tui` facade reached through `cliMain` | Downstream gates and a scripted `wf --tui` `hello-world` PTY launch |
 
 ## Fresh validation record
+
+### Service-mode lifecycle journeys (2026-10-01)
+
+The lifecycle modes of `manager/test/service_http.py` drive the service TUI
+through `test/tui_probe.py` at 80 by 24 cells over the actual manager and
+deterministic workers. The modes are tui-overview, tui-inputs, tui-controls,
+tui-redirect, tui-decisions and tui-history. They share one standard:
+
+1. Each step checks what the TUI shows against manager facts that the harness
+   reads through HTTP with its own credential, such as the overview, the
+   request readiness, the pending decision heads, the run snapshot with its
+   published answers and control acknowledgements, the run outputs and the
+   run collection.
+2. Each TUI session ends with `q`, exit status 0 and the restored terminal
+   mode, alternate screen and cursor.
+3. Each mode fails when it takes more than 900 seconds, and its last PASS
+   line states the elapsed time.
+
+The control `tui-controls-broken-cancel` presses `Esc` instead of `y` in the
+cancel confirmation of the tui-controls mode. The TUI sends no cancel, and the
+control fails with `JOURNEY-ASSERT cancel accepted before cancelled`. In the
+positive mode the monitor shows `cancel accepted` before any frame shows the
+runtime status Cancelled, and the coordination database then holds the one
+cancel command.
+
+The journeys found two rendering defects at 80 by 24, which are corrected.
+The status line cut a key outcome wider than 80 columns, such as `Key 1: steer
+did not start: the manager offers no interrupt-now steer for this run.`, with
+an ellipsis. Such an outcome now takes the first of the two footer rows as a
+second status row. The main area keeps its rows, and with them the fit of the
+exact review. The read-only run detail of the History view is taller than the
+main area at 80 by 24, so the save, export and lineage outcome lines at its
+end were not visible after their key. A new outcome now scrolls the detail to
+its end. The harness also matches a wrapped key outcome and a wrapped redirect
+line, and it waits a moment after a deferred key before it presses the key
+again. One step leaves 80 by 24 on purpose: the summary review of the
+restart child in tui-history has two lineage rows and does not fit 80 by 24,
+so `y` there shows the notice of the consent rule while the request stays in
+review, and `y` approves the review after a resize to 100 by 30. The Phase A journey (`tui-journey`) passes with these changes.
 
 ### Service-mode size journey (2026-10-01)
 

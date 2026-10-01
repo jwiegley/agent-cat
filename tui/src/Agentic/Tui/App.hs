@@ -889,6 +889,13 @@ serviceVerifiedResult state = do
   (,) run <$> Lane.retrievedResult run (stateServiceResults state)
 
 -- | The export line of this run: the outcome of its latest export.
+-- | The outcome lines of the read-only detail of a run: its saved result,
+-- its export and its lineage operation, in the order that the detail shows
+-- them after the run lines.
+historyOutcomeLines :: AppState -> Text -> [Text]
+historyOutcomeLines state run =
+  [line | Just (ident, line) <- [stateServiceSaved state], ident == run] <> serviceExportLines state run <> serviceLineageLines state run
+
 serviceExportLines :: AppState -> Text -> [Text]
 serviceExportLines state run = [line | Just (ident, outcome) <- [stateServiceExport state], ident == run, line <- Service.exportLines outcome]
 
@@ -2522,9 +2529,7 @@ toPresentation state =
                 (Just code, Just _) -> "Run detail: stale (" <> code <> "); the last complete detail is retained"
                 (Just code, Nothing) -> "Run detail: refused (" <> code <> "); no complete detail is installed"]
             <> maybe [] (\shown -> Service.historyDetailLines shown (Lane.retrievalShown run (stateServiceResults state))) detail
-            <> [line | Just (ident, line) <- [stateServiceSaved state], ident == run]
-            <> serviceExportLines state run
-            <> serviceLineageLines state run
+            <> historyOutcomeLines state run
         _ -> [],
       presentationServiceObservation = let installed = stateServiceObservation state in
         Service.observationLines (Lane.refreshPaused (stateNow state) (stateServiceLane state) (stateServiceKeyOutcome state))
@@ -2805,6 +2810,15 @@ resetEnteredViewport before after = do
   when (newHelp oldScreen newScreen) (vScrollToBeginning (viewportScroll HelpViewport))
   when (oldDecision /= newDecision && maybe False ((== MandatoryRecovery) . mandatoryKind) newDecision) (vScrollToBeginning (viewportScroll RecoveryViewport))
   when (oldDecision /= newDecision && maybe False ((== MandatoryPerson) . mandatoryKind) newDecision) (vScrollToBeginning (viewportScroll PersonViewport))
+  -- A new save, export or lineage outcome on the read-only run detail
+  -- scrolls the detail to its end, where those outcome lines are, so that
+  -- the outcome of the key is visible also when the detail is taller than
+  -- the main area, as it is at 80x24.
+  case newScreen of
+    ServiceHistoryRunScreen run
+      | oldScreen == newScreen, historyOutcomeLines after run /= historyOutcomeLines before run, not (null (historyOutcomeLines after run)) ->
+          vScrollToEnd (viewportScroll FailureViewport)
+    _ -> pure ()
   where
     newFailure (FailureScreen old) (FailureScreen new) = old /= new
     newFailure _ FailureScreen {} = True
