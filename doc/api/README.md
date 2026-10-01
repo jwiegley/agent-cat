@@ -236,7 +236,11 @@ with the same representation. A legacy entry has `observer` supervision and a
 null `requestId`. Its result artifact downloads through `/artifacts/{id}`.
 The other run resources refuse a legacy entry with 403 `insufficient-scope`,
 because no stored record grants control, export or lineage authority. Without
-the option, `/runs` lists managed runs only.
+the option, `/runs` lists managed runs only. For each page of `/runs` and for
+each legacy `/runs/{id}`, the service reads the bound roots in full, within
+the history bounds of at most 256 entries and 1 MiB encoded for all bound
+roots together. When the bound roots hold more, the service refuses the
+request, and the refusal of `/runs` includes the managed runs.
 `/runs/{id}/exports` and `/runs/{id}/lineage-requests` are page sets of one
 run. The first lists the export receipts of the run in identifier order, and
 each item equals the `/exports/{id}` representation. The second lists the

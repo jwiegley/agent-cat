@@ -11,10 +11,13 @@ checks on the built Pi fork, the retention and pruning of the manager log,
 the functional review findings of part 1, actor-flow increment 2 (the route
 resources), the remaining mutation routes and controls of WM-027,
 actor-flow increment 3 (the live re-route and the asks that people answer),
-and the functional failure endings of WM-028. Subtasks C1 to C25 landed.
-Subtask C26 ran the part 2 gate on `9f1ae979` with the C26 repair of the
-`pages` assertion and wrote this section. This section describes the
-current state. Where any section below differs, this section supersedes
+and the functional failure endings of WM-028. All 26 subtasks landed, from
+`7ec954f8` to `00686da1`. Subtask C26 ran the part 2 gate on `9f1ae979` with
+the C26 repair of the `pages` assertion and wrote the first form of this
+section. Two review lenses then reviewed `5e8bbf9f..00686da1`, and the
+closeout of the run brought this section up to date. The run did not stop
+early, and no authorization is pending. This section describes the current
+state. Where any section below differs, this section supersedes
 it, and the sections below remain as chronology. The evidence of each
 subtask is under `B2/<subtask>/impl-r1` in the resume directory.
 
@@ -45,7 +48,7 @@ subtask is under `B2/<subtask>/impl-r1` in the resume directory.
 | C23 | `76e65633` | A lost worker ends with lost supervision and no second start. `manager/ci/supervision.sh` is repaired. |
 | C24 | `de22ba49` | A manager killed with SIGKILL ends its runs honestly, and a restart dispatches nothing again. No production code changed. |
 | C25 | `9f1ae979` | Storage errors end honestly: the command-ledger ceiling, a missing manager log and a removed or corrupted result. No production code changed. |
-| C26 | this section | The part 2 gate below, a repair of one pages-mode assertion, and this section. |
+| C26 | `00686da1` | The part 2 gate below, a repair of one pages-mode assertion, and the first form of this section. |
 
 ### Delivered behavior
 
@@ -85,8 +88,11 @@ subtask is under `B2/<subtask>/impl-r1` in the resume directory.
   answers through the person gate instead of the routed backend. The review
   shows the field, so exact approval covers it.
 - A lost worker, a lost manager and the storage errors of WM-028 end
-  honestly. A lost run shows lost supervision with no verified result, it
-  starts once, and new work proceeds. At the command-ledger ceiling an
+  honestly. A lost run shows lost supervision with no verified result, and
+  it starts once. New work proceeds only when a free execution reservation
+  and free resource keys remain, because the quarantined reservation of a
+  lost run keeps its slot and its keys. The `failures-manager` mode uses two
+  reservations and a second profile for this reason. At the command-ledger ceiling an
   ordinary command is refused with 429 `storage-quota`, and a cancel still
   ends a run through the cancel reserve.
 - The `/v1` contract changes only by additions since `5e8bbf9f`: the paths
@@ -243,6 +249,15 @@ not done:
 - The remaining Name Constraints work, including the optional patch B18 of
   `crypton-x509-validation`, and the scenarios of item 1 of `acat-3iof`.
 - Scans for synthetic secret markers beyond those of the existing modes.
+- The unauthorized and forbidden negative matrices of each new route beyond
+  one scope check for each route family.
+- The ruling on the redaction exception for the `targetLabel`
+  `acp:mixed-adapter` (`acat-b13-fess-en44`).
+- The authority fencing of an older-backup restoration in WM-028.
+- The items of `acat-8tzp`: the warp-tls plaintext refusal bytes, the
+  refusal of a non-loopback allowed peer and a slow body with no body byte.
+- A credential scope change or revocation during a retained response, for
+  which no operation exists yet.
 - The threat model of increment 2 stays a design reference, and no review
   of it gates serving.
 
@@ -262,34 +277,81 @@ not done:
   approved policy. After an automatic fail-over the offer can list a target
   that the runtime then rejects, and the stopped ACP turn of a live
   re-route is not cancelled at the adapter while the run continues.
-- The pruner uses the wall clock and a fixed age of 604800 seconds, and an
-  uncertain command or a lost run holds the floor until an operator acts.
+- The pruner uses the wall clock and a fixed age of 604800 seconds, and it
+  evaluates the age only at the open and after a seal. A run that a restart
+  left with lost supervision, or a command whose receipt reply was never
+  appended, protects its segment in every later lifetime. No operation
+  clears either case, so after one such event the floor no longer moves and
+  the manager log grows toward its allowance. `manager/STORAGE.md` states
+  this behavior.
+- For each page of `/v1/runs`, the service reads every bound legacy root in
+  full, within 256 entries and 1 MiB encoded. Bound roots that hold more
+  make the service refuse the whole run collection, managed runs included.
+  `doc/api/README.md` states this ceiling.
+- A redirect that arrives after an attempt has returned its answer, and
+  before the runtime closes the attempt, drops that answer. The question
+  fails as redirected, and the chosen candidate is asked again.
 - A SIGKILL of the frontend proxy group alone leaves the inner worker group
   alive, so that run stays under owned supervision (WM-019 containment).
 - The open fess findings of each subtask are in the tracker items that the
-  commit messages of C1 to C25 name.
+  commit messages of C1 to C26 name, from
+  `acat-c1-ext-pi-fess-findings-ld5u` to
+  `acat-c26-part2-gate-fess-findings-jvnc`.
+
+### End-of-part review
+
+Two lenses reviewed `5e8bbf9f..00686da1`: packages, and working behavior.
+Both returned "approve with notes" with no critical or high finding, and no
+fix round ran. The working lens rebuilt `agentic-run` and
+`routing-fixed-point-probe` with `-ftui-tests` incrementally, and the build
+was already current. It then ran `tui-journey` at N1 and then N8 on
+`00686da1`, and both runs passed with every `FLOW-ASSERT` and the consent
+chain review 7, approve 8, receipt 9, start relay 10 and run start 0
+(fixture root `/Users/johnw/Products/k.M0a5ItPm/tmp/review-b2.kDNb9t6E`).
+The open findings follow. The closeout corrected the documentation that the
+first three medium findings name, and the behavior of each stays as stated.
+
+| Severity | Finding | Location |
+| --- | --- | --- |
+| Medium | A lost run or a command ask with no receipt reply protects its segment in every later lifetime, so the pruner floor stops and the manager log grows toward its allowance. No operation clears either case. A possible repair answers orphaned asks at restart and treats a lost run as terminal for pruning. | `Store.hs` `pruneCandidate`, `segmentProtected`, `Commands.hs` `recordReceipt` |
+| Medium | After a manager crash the quarantined reservation keeps its slot and resource keys. With the default of one execution reservation, no new run starts until WM-042 adds a quarantine release. | `manager/WORKERS.md`, `failures-manager` |
+| Medium | Legacy history is not windowed. Each page of `/v1/runs` reads every bound root in full within 256 entries and 1 MiB, and a larger root refuses the whole collection. | `History.hs` `legacyRuns`, `legacyItems` |
+| Medium | A live re-route stops the attempt in the runtime, but no caller sends `session/cancel` to the adapter, so the stopped ACP turn stays open until that engine shuts down. | `Exec.hs` `withPhysicalAttempt`, `Acp.hs` `cancelTurn` |
+| Low | A redirect that arrives after the attempt returned its answer drops the answer and asks the chosen candidate again. | `Exec.hs` `withPhysicalAttempt` |
+| Low | The pruner evaluates the age trigger only at the open and after a seal. | `Store.hs` `withManagerLogPruner` |
+| Low | The fold of an in-flight redirect without a dispatch builds a dispatch with one target, so a second live redirect of the same occurrence would fail the fold. No current path reaches it, because a control runtime opens a dispatch for every question with two or more candidates. | `Snapshot.hs`, `ext-pi/src/reducer.ts` |
+| Low | The general paragraph on page sets says that a set holds one revision, and the next paragraph says that each window of `/requests` and `/runs` reads its own database boundary. | `doc/api/README.md`, "Pages and live delivery" |
+| Low | The part 2 openapi comparison in the stage directory accepts added optional properties, and the gate list named only the route paths. The rule is not a repository check. | `B2/C26/impl-r1/api_additive_v2.py` |
+| Low | The ext-pi supervisor and the TUI do not originate a live redirect. Only `/v1` and the local control channel of `test/control_probe.py` send one. | `ext-pi/src/supervisor.ts` |
+| Low | The functional low gaps of part 1 stay open: a held preflight control without an acknowledgement when a run fails before carriage, a failed failure-reply append without a gap entry, and a review record that a later pre-commit step rolls back without an ending. | `acat-phase-b1-review-followups-dk1v` |
 
 ### Package status
 
-| Package or item | Status | Evidence |
-| --- | --- | --- |
-| Manager-log retention (`acat-3mgw`) | Met and closed | C2, C3, C4, gate steps 8 and 12 |
-| Increment 2 (`acat-en4g`) | Met for function, with its security items deferred | C8 to C11, gate steps 1 and 12 |
-| Increment 3 (`acat-c18n`) | Met for function | C18 to C22, gate steps 7, 12 and 15 |
-| WM-025 (`acat-wm-025-3utw`) | Met for function, with its security items deferred | C6, C7, C9, C10, gate steps 9 and 12 |
-| WM-026 (`acat-wm-026-qo1e`) | Met for function, with route SSE added | C11, gate step 12 |
-| WM-027 (`acat-wm-027-gcu6`) | Met for function | C12 to C17, C20, gate step 12 |
-| WM-028 (`acat-wm-028-g1n0`) | The functional failure endings are met, and the security negatives are deferred | C23, C24, C25, gate step 12 |
-| `acat-62j0` | Gates 5, 6 and 11 ext-pi have evidence, and the table above maps gates 1 to 11. The broker-api-default revalidation, the journey latency and the `policy-probe` expectation remain. | C1, C17, C18, C19, this gate |
-| Part 1 review findings of C5, C6 and C7 | Met | C5, C6, C7, gate steps 9 and 12 |
+| Package or item | Status | Evidence | Tracker |
+| --- | --- | --- | --- |
+| Manager-log retention (`acat-3mgw`) | Met. The floor-stop finding above stays open. | C2, C3, C4, gate steps 8 and 12 | Closed |
+| Increment 2 (`acat-en4g`) | Met for function, with its security items deferred | C8 to C11, gate steps 1 and 12 | Closed |
+| Increment 3 (`acat-c18n`) | Met for function. The adapter cancel finding stays open. | C18 to C22, gate steps 7, 12 and 15 | Closed |
+| WM-025 (`acat-wm-025-3utw`) | Met for function, with its security items deferred. The legacy ceiling finding stays open. | C6, C7, C9, C10, gate steps 9 and 12 | Closed |
+| WM-026 (`acat-wm-026-qo1e`) | Met for function, with route SSE added | C11, gate step 12 | Closed |
+| WM-027 (`acat-wm-027-gcu6`) | Met for function | C12 to C17, C20, gate step 12 | Closed |
+| WM-028 (`acat-wm-028-g1n0`) | The functional failure endings are met. One lens rates it partial, because new work after a manager crash needs a second reservation. The database-full case, older-backup fencing and the security negatives are not done. | C23, C24, C25, gate step 12 | Open |
+| `acat-62j0` | Gates 5, 6 and 11 ext-pi have evidence, and the table above maps gates 1 to 11. The broker-api-default revalidation, the journey latency and the `policy-probe` expectation remain. | C1, C17, C18, C19, this gate | Open |
+| Part 1 review findings of C5, C6 and C7 (`acat-phase-b1-review-followups-dk1v`) | Met for the three medium findings. The part 1 precision gaps remain. | C5, C6, C7, gate steps 9 and 12 | Open |
 
 ### Next action
 
-1. The Integrator commits C26 and decides the tracker state of the packages
-   in the table above.
-2. Phase C follows: the shared client and the full TUI service mode, which
-   can use the route resources, the new mutation routes and the live
-   redirect.
+1. The tracker records the closeout. The open review findings above are
+   in `acat-phase-b2-review-findings-x8fv`, and the deferred security items
+   are in `acat-phase-b2-deferred-security-k1hl`. The packages closed for
+   function name that issue in their closing comments.
+2. Phase C follows under the functionality-first direction of 2026-09-30
+   and the fast-validation direction of 2026-09-29: the shared client
+   (WM-029) and the full TUI service mode (WM-033 to WM-035). The TUI uses
+   the route resources, the new mutation routes and the live redirect
+   through `/v1`. A working quarantine release (WM-042) and answers to
+   orphaned command asks at restart are the functional repairs that Phase C
+   most needs, because a manager crash otherwise blocks later runs.
 3. A later security stage takes the deferred items above, the negatives
    of WM-024 and WM-028 and the G2 witness.
 

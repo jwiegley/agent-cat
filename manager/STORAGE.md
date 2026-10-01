@@ -485,7 +485,15 @@ earlier streams, which remain after a restoration, are not.
 With no live work, a steady stream of appends keeps the log at most
 (L - R) div 2 plus one segment. A long-lived run, a pending review or a request that
 waits in the queue holds the floor, so the log can still reach L - R, and
-the refusals of the next section apply.
+the refusals of the next section apply. Two cases hold the floor for every
+later lifetime. A run that a restart left with lost supervision keeps
+`terminal_observed=0`, because the manager reads no run store after a
+restart. A command whose receipt reply was never appended, after a crash
+between the commit and the append or after a failed append, keeps an ask
+without a reply, and a same-key replay appends none. No operation clears
+either case at present. The age trigger is evaluated only at the open and
+after a seal, so a manager that does not seal keeps old segments until its
+next seal or restart.
 
 The age trigger ties the floor to `replaySeconds`: while the log stays below
 (L - R) div 2 bytes, the pruner removes no record that is younger than 604800
