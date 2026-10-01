@@ -76,7 +76,7 @@ import Control.Concurrent.STM
   )
 import Crypto.Random (getRandomBytes)
 import Control.Exception (AsyncException (UserInterrupt), SomeAsyncException, SomeException, bracket, displayException, finally, fromException, mask, mask_, onException, throwIO, try, uninterruptibleMask_)
-import Control.Monad (forM_, forever, unless, void, when)
+import Control.Monad (forM_, forever, mfilter, unless, void, when)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Trans.Except (ExceptT (..), runExceptT)
 import Data.Aeson (Value (..), encode)
@@ -140,6 +140,12 @@ data ServiceEvent
     -- the explicit g key started it, and the heads in manager observation
     -- order.
   | ServiceDecisionsReady !Int !Bool !(Lane.CallOutcome [Service.DecisionView])
+    -- | The read of the run list of @/v1/runs@ with this ticket, whether the
+    -- explicit g key started it, and the runs in identifier order.
+  | ServiceHistoryReady !Int !Bool !(Lane.CallOutcome [Service.RunItem])
+    -- | The read of the detail of this run with this ticket, and whether an
+    -- explicit key started it.
+  | ServiceHistoryDetailReady !Int !Bool !Text !(Lane.CallOutcome Service.HistoryDetail)
     -- | The retrieval of the verified result of this run.
   | ServiceResultReady !Int !Text !(Lane.CallOutcome (Maybe Service.VerifiedResult))
 
@@ -262,6 +268,15 @@ data AppState = AppState
     -- | The selected row of the manager decisions view, by the kind and
     -- identity of the row.
     stateServiceDecisionsFocus :: !(Lane.RowFocus (Manager.OverviewKind, Text)),
+    -- | The last complete run list of @/v1/runs@ in identifier order and its
+    -- stale mark. Only 'Lane.requestStep' installs it or marks it stale.
+    stateServiceHistory :: !(Lane.Installed [Service.RunItem]),
+    -- | The selected row of the History view, by the kind and identity of
+    -- the row.
+    stateServiceHistoryFocus :: !(Lane.RowFocus (Manager.OverviewKind, Text)),
+    -- | The last complete detail of the run that the run detail shows and
+    -- its stale mark. Only 'Lane.requestStep' installs it or marks it stale.
+    stateServiceHistoryDetail :: !(Lane.Installed Service.HistoryDetail),
     -- | The text drafts by identity: the input editor text of each request
     -- and input, and the answer text of each decision. The editors show the
     -- draft of the displayed identity ('serviceDraftKey').
@@ -311,10 +326,11 @@ data AppState = AppState
     -- | Whether the Endpoints view is open over the service screen.
     stateEndpointsView :: !Bool,
     stateServiceFaultExit :: !(IORef Bool),
-    -- | The retrieval of the verified result of the named run: the exact
-    -- verified bytes, or a retryable failure. Only 'Lane.retrievalStep' and
-    -- 'Lane.retrievalObserved' change it.
-    stateServiceResult :: !(Maybe (Lane.Retrieval Service.VerifiedResult)),
+    -- | The retrievals of the verified results of the session by run
+    -- identifier: the exact verified bytes, or a retryable failure, for each
+    -- run. Only 'Lane.retrievalStep' and 'Lane.retrievalObserved' change
+    -- them.
+    stateServiceResults :: !(Lane.Retrievals Service.VerifiedResult),
     -- | The result line of the latest successful save of the verified bytes
     -- of the named run.
     stateServiceSaved :: !(Maybe (Text, Text))
@@ -419,6 +435,9 @@ runAppWith backend = mask $ \restore -> do
             stateServiceOverviewFocus = Lane.noFocus,
             stateServiceDecisions = Lane.noObservation,
             stateServiceDecisionsFocus = Lane.noFocus,
+            stateServiceHistory = Lane.noObservation,
+            stateServiceHistoryFocus = Lane.noFocus,
+            stateServiceHistoryDetail = Lane.noObservation,
             stateServiceDrafts = Lane.noDrafts,
             stateServiceCaptures = Map.empty,
             stateServiceSink = sink,
@@ -440,7 +459,7 @@ runAppWith backend = mask $ \restore -> do
             stateServiceSession = session,
             stateEndpointsView = False,
             stateServiceFaultExit = faultExit,
-            stateServiceResult = Nothing,
+            stateServiceResults = Lane.noRetrievals,
             stateServiceSaved = Nothing
           }
       stopAll [] = pure ()
@@ -524,6 +543,28 @@ startServiceDecisions :: Manager.Client -> Bool -> EventM Name AppState ()
 startServiceDecisions client explicit =
   startServiceReadShown Lane.PageSetRead (if explicit then Just "reading the manager decisions" else Nothing) $ \ticket ->
     ServiceDecisionsReady ticket explicit <$> Lane.serviceCall (Service.loadDecisions client)
+
+-- | Read the run list of @/v1/runs@ through the single-flight lane, every
+-- window of it, given whether the explicit g key starts the read. A read of
+-- live delivery keeps the status line.
+startServiceHistory :: Manager.Client -> Bool -> EventM Name AppState ()
+startServiceHistory client explicit =
+  startServiceReadShown Lane.PageSetRead (if explicit then Just "reading the manager history" else Nothing) $ \ticket ->
+    ServiceHistoryReady ticket explicit <$> Lane.serviceCall (Service.loadHistory client)
+
+-- | Read the detail of this run of the installed run list through the
+-- single-flight lane ('Service.observeHistoryDetail'), given whether an
+-- explicit key starts the read. A read of live delivery keeps the status
+-- line. A run that the installed run list does not name is not read.
+startServiceHistoryDetail :: Manager.Client -> Bool -> Text -> EventM Name AppState ()
+startServiceHistoryDetail client explicit run = do
+  state <- get
+  case find ((== run) . Service.runItemId) (fromMaybe [] (Lane.installedRead (stateServiceHistory state))) of
+    Nothing -> put state {stateModel = (stateModel state) {modelStatus = "run detail not read: the installed history does not list run " <> run}}
+    Just item ->
+      startServiceReadShown (if Service.historyLegacy item then Lane.SingleResourceRead else Lane.PageSetRead)
+        (if explicit then Just "reading the run detail" else Nothing) $ \ticket ->
+          ServiceHistoryDetailReady ticket explicit run <$> Lane.serviceCall (Service.observeHistoryDetail client item)
 
 -- | Start the event worker of the session from the cursor of an installed
 -- overview that started in the given fetch generation, when
@@ -634,6 +675,10 @@ serviceOverviewRows = maybe [] Service.overviewRows . Lane.installedRead . state
 serviceDecisionRows :: AppState -> [Service.OverviewRow]
 serviceDecisionRows = maybe [] Service.decisionRows . Lane.installedRead . stateServiceDecisions
 
+-- | The rows of the installed run list, in identifier order.
+serviceHistoryRows :: AppState -> [Service.OverviewRow]
+serviceHistoryRows = maybe [] Service.historyRows . Lane.installedRead . stateServiceHistory
+
 -- | Load the workflow catalogue of a profile, and then open the given
 -- request when one is given.
 startServiceWorkflows :: Manager.Client -> Service.Profile -> Maybe Manager.DraftView -> EventM Name AppState ()
@@ -681,6 +726,47 @@ openDecisionRow = do
       Service.OpenRun run profile -> openServiceRun DecisionsList run profile
       Service.OpenRequest _ -> refused "a decision row opens only its run"
       Service.OpenNothing reason -> refused reason
+
+-- | Open the read-only detail of the selected run of the History view. The
+-- detail of the run that the run detail already shows keeps its
+-- observation, and any other run starts with no observation. The detail is
+-- read at once. Nothing is selected and nothing is sent, so the selection,
+-- its reads and a command in progress stay.
+openHistoryRow :: EventM Name AppState ()
+openHistoryRow = do
+  state <- get
+  let keys = map Service.overviewRowKey (serviceHistoryRows state)
+  case atMay keys (Lane.focusedIndex keys (stateServiceHistoryFocus state)) of
+    Nothing -> put state {stateModel = (stateModel state) {modelStatus = "history row not opened: no run row is selected"}}
+    Just (_, run) -> do
+      let same = fmap Service.historyDetailRun (Lane.installedRead (stateServiceHistoryDetail state)) == Just run
+      put state {stateServiceHistoryDetail = if same then stateServiceHistoryDetail state else Lane.noObservation,
+        stateModel = (stateModel state) {modelScreen = ServiceHistoryRunScreen run, modelStatus = "manager run detail opened"}}
+      vScrollToBeginning (viewportScroll FailureViewport)
+      invalidateServiceFetches [Lane.HistoryFetch]
+
+-- | Retrieve the verified result of the run that the run detail shows, for
+-- the r key. Only an installed detail of a succeeded managed run with a
+-- verified or referenced result starts 'Service.retrieveResult', and only
+-- when 'Lane.retrievalDue' allows an explicit retrieval: retained bytes are
+-- not retrieved again, and a failed retrieval is retried at once. Every r
+-- has one visible outcome on the status line.
+retrieveHistoryResult :: Manager.Client -> Text -> EventM Name AppState ()
+retrieveHistoryResult client run = do
+  state <- get
+  let status :: Text -> EventM Name AppState ()
+      status text = put state {stateModel = (stateModel state) {modelStatus = text}}
+  case Lane.installedRead (stateServiceHistoryDetail state) of
+    Just detail | Service.historyDetailRun detail == run -> case Service.historyRetrievable detail of
+      Left reason -> status ("result not retrieved: " <> reason)
+      Right observation
+        | not (Lane.retrievalDue Lane.ExplicitRefresh run (stateServiceResults state)) ->
+            status "verified result already retained; s saves it"
+        | isJust (Lane.laneReadTicket (stateServiceLane state)) ->
+            status "result retrieval not started: another manager read is in flight; press r again"
+        | otherwise -> startServiceRead Lane.PageSetRead "retrieving the verified result" $ \ticket ->
+            ServiceResultReady ticket run <$> Lane.serviceCall (Service.retrieveResult client observation)
+    _ -> status "result not retrieved: the run detail is not observed"
 
 -- | Select this request of this catalogue row and show it by its phase. The
 -- request screen shows at once, and the next installed read shows the
@@ -753,17 +839,22 @@ serviceHead state = case (stateBackend state, modelScreen (stateModel state)) of
   (ServiceBackend {}, LiveScreen _) -> serviceRunRead state >>= Service.decisionHead
   _ -> Nothing
 
--- | The retained verified result bytes of the installed run.
+-- | The retained verified result bytes of the run that the screen shows:
+-- the run of the run detail, or else the installed run.
 serviceVerifiedResult :: AppState -> Maybe (Text, Service.VerifiedResult)
 serviceVerifiedResult state = do
-  run <- runIdText . Service.runIdentity <$> serviceRun state
-  (,) run <$> Lane.retrievedResult run (stateServiceResult state)
+  run <- case modelScreen (stateModel state) of
+    ServiceHistoryRunScreen shown -> Just shown
+    _ -> runIdText . Service.runIdentity <$> serviceRun state
+  (,) run <$> Lane.retrievedResult run (stateServiceResults state)
 
 -- | Whether s opens the save dialog: the live monitor shows no decision head
--- and no run details, and the verified result bytes of its run are retained.
+-- and no run details, or the run detail shows its run, and the verified
+-- result bytes of that run are retained.
 serviceSavable :: AppState -> Bool
 serviceSavable state = case modelScreen (stateModel state) of
   LiveScreen _ -> not (stateRunDetails state) && serviceHead state == Nothing && isJust (serviceVerifiedResult state)
+  ServiceHistoryRunScreen _ -> isJust (serviceVerifiedResult state)
   _ -> False
 
 -- | Whether the command lane holds an answer to this decision. A retained
@@ -969,6 +1060,10 @@ pumpServiceFetches client = do
             Lane.OverviewFetch -> modelScreen (stateModel state) == ServiceOverviewScreen || stateServiceDelivery state == Lane.DeliveryResnapshot
             Lane.RequestFetch -> True
             Lane.DecisionsFetch -> modelScreen (stateModel state) == ServiceDecisionsScreen
+            Lane.HistoryFetch -> case modelScreen (stateModel state) of
+              ServiceHistoryScreen -> True
+              ServiceHistoryRunScreen _ -> True
+              _ -> False
       case Lane.takeFetch startable lane fetches of
         Nothing -> put state {stateServiceFetches = fetches}
         Just (fetch, rest) -> do
@@ -977,6 +1072,9 @@ pumpServiceFetches client = do
             Lane.OverviewFetch -> startServiceOverview client LiveOverview
             Lane.RequestFetch -> refreshServiceRequest client Lane.AutomaticRefresh
             Lane.DecisionsFetch -> startServiceDecisions client False
+            Lane.HistoryFetch -> case modelScreen (stateModel state) of
+              ServiceHistoryRunScreen run -> startServiceHistoryDetail client False run
+              _ -> startServiceHistory client False
           after <- get
           case Lane.laneReadTicket (stateServiceLane after) of
             Just ticket -> put after {stateServiceFetches = Lane.fetchStarted (Lane.ticketNumber ticket) fetch rest}
@@ -1009,7 +1107,7 @@ refreshServiceRequest client cause = do
     -- publishes the verified state.
     Just _ | not (serviceSending state), Just run <- serviceRun state,
       Service.resultWanted run || Service.resultReferenced run,
-      Lane.retrievalDue cause (runIdText (Service.runIdentity run)) (stateServiceResult state) ->
+      Lane.retrievalDue cause (runIdText (Service.runIdentity run)) (stateServiceResults state) ->
         startServiceRead Lane.PageSetRead "retrieving the verified result" $ \ticket ->
           ServiceResultReady ticket (runIdText (Service.runIdentity run)) <$> Lane.serviceCall (Service.retrieveResult client run)
     -- The run components are read only for the run that the installed
@@ -1377,6 +1475,8 @@ serviceEventTicket serviceEvent = case serviceEvent of
   ServiceRequestReady ticket _ -> ticket
   ServiceOverviewReady ticket _ _ _ -> ticket
   ServiceDecisionsReady ticket _ _ -> ticket
+  ServiceHistoryReady ticket _ _ -> ticket
+  ServiceHistoryDetailReady ticket _ _ _ -> ticket
   ServiceResultReady ticket _ _ -> ticket
 
 -- | The refresh coordinator of the session.
@@ -1450,6 +1550,42 @@ handleServiceResultCore client serviceEvent = do
         (Lane.RequestInstalled _,lane,installed) ->
           let next = state {stateServiceLane = lane, stateServiceDecisions = installed}
           in put (if explicit then next {stateModel = (stateModel next) {modelStatus = "manager decisions read"}} else next)
+    -- A refused read of the run list keeps the last complete run list and
+    -- marks it stale with the refusal code. The focus keeps the identity of
+    -- the selected row.
+    ServiceHistoryReady ticket explicit result ->
+      case Lane.requestStep (const Service.ReadCurrent) ticket result (stateServiceLane state) (stateServiceHistory state) of
+        (Lane.RequestStale,lane,_) -> put state {stateServiceLane = lane}
+        (Lane.RequestFaulted,lane,_) -> faultService state lane
+        (Lane.RequestRefused problem,lane,installed) ->
+          let next = state {stateServiceLane = lane, stateServiceHistory = installed}
+          in put (if explicit
+            then next {stateModel = refuseRequestRead (Lane.refusalCode problem) (isJust (Lane.installedRead installed)) (stateModel next)}
+            else next)
+        (Lane.RequestInstalled _,lane,installed) ->
+          let next = state {stateServiceLane = lane, stateServiceHistory = installed}
+          in put (if explicit then next {stateModel = (stateModel next) {modelStatus = "manager history read"}} else next)
+    -- Only a detail of the run that the run detail shows installs. A refused
+    -- read keeps the last complete detail and marks it stale.
+    ServiceHistoryDetailReady ticket explicit run result ->
+      let verdict detail = case modelScreen (stateModel state) of
+            ServiceHistoryRunScreen shown | shown == run && Service.historyDetailRun detail == run -> Service.ReadCurrent
+            _ -> Service.ReadForeign
+          installedNow = case Lane.installedRead (stateServiceHistoryDetail state) of
+            Just detail | Service.historyDetailRun detail /= run -> Lane.noObservation
+            _ -> stateServiceHistoryDetail state
+      in case Lane.requestStep verdict ticket result (stateServiceLane state) installedNow of
+        (Lane.RequestStale,lane,_) -> put state {stateServiceLane = lane}
+        (Lane.RequestFaulted,lane,_) -> faultService state lane
+        (Lane.RequestRefused problem,lane,installed) ->
+          let next = state {stateServiceLane = lane, stateServiceHistoryDetail = installed}
+          in put (if explicit
+            then next {stateModel = refuseRequestRead (Lane.refusalCode problem) (isJust (Lane.installedRead installed)) (stateModel next)}
+            else next)
+        (Lane.RequestInstalled _,lane,installed) ->
+          let next = state {stateServiceLane = lane, stateServiceHistoryDetail = installed,
+                stateServiceResults = Lane.retrievalObserved run (stateServiceResults state)}
+          in put (if explicit then next {stateModel = (stateModel next) {modelStatus = "manager run detail read"}} else next)
     -- A catalogue that the overview loaded for a request opens that request
     -- when it lists the workflow revision of the request.
     ServiceWorkflowsReady ticket profile opening result -> case Lane.readStep ticket result (stateServiceLane state) of
@@ -1480,22 +1616,29 @@ handleServiceResultCore client serviceEvent = do
         (Lane.RequestFaulted,lane,_) -> faultService state lane
         (Lane.RequestRefused problem,lane,installed) -> put state {stateServiceLane = lane, stateServiceObservation = installed,
           stateModel = refuseRequestRead (Lane.refusalCode problem) (isJust (Lane.installedRead installed)) (stateModel state)}
-        -- An installed composite read makes a failed retrieval due again.
+        -- An installed composite read makes a failed retrieval of its run
+        -- due again.
         (Lane.RequestInstalled observation,lane,installed) ->
           put state {stateServiceLane = lane, stateServiceObservation = installed,
-            stateServiceResult = Lane.retrievalObserved (stateServiceResult state)} >> applyServiceObservation client observation
+            stateServiceResults = maybe id (Lane.retrievalObserved . runIdText . Service.runIdentity . Service.runReadSnapshot)
+              (Service.readRun observation) (stateServiceResults state)} >> applyServiceObservation client observation
     -- Only retrieved verified bytes are retained for their run. A declared
     -- refusal and a retrieval without a verified result are retryable
     -- failures that the status line and the result lines show.
     ServiceResultReady ticket run result ->
-      let retrieved :: ServiceLane -> Lane.Retrieval Service.VerifiedResult -> EventM Name AppState ()
-          retrieved lane retrieval = put state {stateServiceLane = lane, stateServiceResult = Just retrieval,
-                stateModel = (stateModel state) {modelStatus = Lane.retrievalStatus retrieval}}
+      let retrieved :: ServiceLane -> Lane.Retrievals Service.VerifiedResult -> EventM Name AppState ()
+          -- On the run detail of the run, r retries a failed retrieval.
+          retrieved lane retrievals = put state {stateServiceLane = lane, stateServiceResults = retrievals,
+                stateModel = (stateModel state) {modelStatus = case (Lane.retrievalOf run retrievals, modelScreen (stateModel state)) of
+                  (Just (Lane.RetrievalFailed code _), ServiceHistoryRunScreen shown) | shown == run ->
+                    "verified result not retrieved: " <> code <> "; r retries"
+                  (Just retrieval, _) -> Lane.retrievalStatus retrieval
+                  (Nothing, _) -> modelStatus (stateModel state)}}
       in case Lane.readStep ticket result (stateServiceLane state) of
         (Lane.ReadStale,_) -> pure ()
         (Lane.ReadFaulted,lane) -> faultService state lane
-        (Lane.ReadRefused problem,lane) -> retrieved lane (Lane.retrievalStep run (Left problem))
-        (Lane.ReadDelivered value,lane) -> retrieved lane (Lane.retrievalStep run (Right value))
+        (Lane.ReadRefused problem,lane) -> retrieved lane (Lane.retrievalStep run (Left problem) (stateServiceResults state))
+        (Lane.ReadDelivered value,lane) -> retrieved lane (Lane.retrievalStep run (Right value) (stateServiceResults state))
 
 handleServiceEventCore :: Manager.Client -> BrickEvent Name AppEvent -> EventM Name AppState ()
 handleServiceEventCore client event = do
@@ -1628,15 +1771,17 @@ handleServiceEventCore client event = do
       -- outcome, including while a command is in progress.
       | Just (operation,start) <- serviceNewMutationKey state key modifiers -> serviceMutationKey operation start
       | serviceSending state -> pure ()
-      -- h, O, D and Esc move among the workflow browser, the workflow help,
-      -- the manager overview and the manager decisions. Every other browser
-      -- key keeps its behavior. Opening the manager decisions reads the
-      -- pending decision heads through live delivery.
+      -- h, O, D, H and Esc move among the workflow browser, the workflow
+      -- help, the manager overview, the manager decisions, the History view
+      -- and its run detail. Every other browser key keeps its behavior.
+      -- Opening the manager decisions or the History view reads its list
+      -- through live delivery.
       | Just model <- serviceBrowserKey (Service.workflowHelp <$> atMay (stateServiceWorkflows state) (modelWorkflowIndex (stateModel state)))
           key modifiers (stateModel state) -> do
-          put state {stateModel = model, statePaneFocus = if any (`elem` [ServiceOverviewScreen, ServiceDecisionsScreen]) [modelScreen model, modelScreen (stateModel state)]
+          put state {stateModel = model, statePaneFocus = if any (`elem` [ServiceOverviewScreen, ServiceDecisionsScreen, ServiceHistoryScreen]) [modelScreen model, modelScreen (stateModel state)]
             then PrimaryPane else statePaneFocus state}
           when (modelScreen model == ServiceDecisionsScreen) (invalidateServiceFetches [Lane.DecisionsFetch])
+          when (modelScreen model == ServiceHistoryScreen) (invalidateServiceFetches [Lane.HistoryFetch])
       | null modifiers -> case key of
           Vty.KEsc -> serviceBack state
           Vty.KUp -> serviceMove (-1) state
@@ -1648,6 +1793,11 @@ handleServiceEventCore client event = do
           -- On the live monitor End follows the output tail. Elsewhere, the
           -- run details included, Home and End scroll the same viewport as
           -- PgUp and PgDn.
+          -- Home and End on the History view select the first or the last run.
+          Vty.KHome | ServiceHistoryScreen <- modelScreen (stateModel state), statePaneFocus state == PrimaryPane ->
+            serviceMove (negate (length (serviceHistoryRows state))) state
+          Vty.KEnd | ServiceHistoryScreen <- modelScreen (stateModel state), statePaneFocus state == PrimaryPane ->
+            serviceMove (length (serviceHistoryRows state)) state
           Vty.KHome | not (liveMonitor state) -> vScrollToBeginning (viewportScroll (serviceViewport state))
           Vty.KEnd | liveMonitor state -> followOutputTail
                    | otherwise -> vScrollToEnd (viewportScroll (serviceViewport state))
@@ -1657,6 +1807,8 @@ handleServiceEventCore client event = do
           Vty.KEnter | ServiceOverviewScreen <- modelScreen (stateModel state) -> openOverviewRow client
           -- Enter on the manager decisions opens the run of the selected head.
           Vty.KEnter | ServiceDecisionsScreen <- modelScreen (stateModel state) -> openDecisionRow
+          -- Enter on the History view opens the read-only detail of the selected run.
+          Vty.KEnter | ServiceHistoryScreen <- modelScreen (stateModel state) -> openHistoryRow
           Vty.KEnter | serviceIdle state -> case modelScreen (stateModel state) of
             ServiceProfilesScreen {} -> case selectedServiceProfile (stateModel state) of
               Just profile | Service.profileReadiness profile == "ready", Service.profileRefusal profile == Nothing -> startServiceWorkflows client profile Nothing
@@ -1690,6 +1842,16 @@ handleServiceEventCore client event = do
           Vty.KChar 'g' | modelScreen (stateModel state) == ServiceDecisionsScreen -> case Lane.laneReadTicket (stateServiceLane state) of
             Nothing -> startServiceDecisions client True
             Just _ -> put state {stateModel = (stateModel state) {modelStatus = "decisions read not started: another manager read is in flight; press g again"}}
+          -- g on the History view reads the run list again, and on the run
+          -- detail it reads the detail again.
+          Vty.KChar 'g' | modelScreen (stateModel state) == ServiceHistoryScreen -> case Lane.laneReadTicket (stateServiceLane state) of
+            Nothing -> startServiceHistory client True
+            Just _ -> put state {stateModel = (stateModel state) {modelStatus = "history read not started: another manager read is in flight; press g again"}}
+          Vty.KChar 'g' | ServiceHistoryRunScreen run <- modelScreen (stateModel state) -> case Lane.laneReadTicket (stateServiceLane state) of
+            Nothing -> startServiceHistoryDetail client True run
+            Just _ -> put state {stateModel = (stateModel state) {modelStatus = "run detail read not started: another manager read is in flight; press g again"}}
+          -- r on the run detail retrieves the verified result of its run.
+          Vty.KChar 'r' | ServiceHistoryRunScreen run <- modelScreen (stateModel state) -> retrieveHistoryResult client run
           Vty.KChar 'g' -> refreshServiceRequest client Lane.ExplicitRefresh
           Vty.KChar 'x' | Lane.resendOffered (stateServiceLane state) -> put (onLane (\lane -> lane {Lane.laneResendConfirm = True}) state)
           Vty.KChar 'r' | ServiceProfilesScreen {} <- modelScreen (stateModel state) -> startServiceProfiles client
@@ -1806,6 +1968,10 @@ handleServiceEventCore client event = do
       ServiceDecisionsScreen | statePaneFocus state == PrimaryPane -> do
         put state {stateServiceDecisionsFocus = Lane.moveFocus delta (map Service.overviewRowKey (serviceDecisionRows state)) (stateServiceDecisionsFocus state)}
         vScrollToBeginning (viewportScroll BrowserDetailViewport)
+      ServiceHistoryScreen | statePaneFocus state == PrimaryPane -> do
+        put state {stateServiceHistoryFocus = Lane.moveFocus delta (map Service.overviewRowKey (serviceHistoryRows state)) (stateServiceHistoryFocus state)}
+        vScrollToBeginning (viewportScroll BrowserDetailViewport)
+      ServiceHistoryRunScreen _ -> vScrollBy (viewportScroll FailureViewport) delta
       ServiceReviewScreen {} | stateConfirmDetails state -> vScrollBy (viewportScroll ConfirmDetailsViewport) delta
       LiveScreen _
         | stateRunDetails state -> vScrollBy (viewportScroll FailureViewport) delta
@@ -1821,6 +1987,7 @@ handleServiceEventCore client event = do
       HelpScreen _ -> HelpViewport
       FailureScreen _ -> FailureViewport
       ServiceRequestScreen _ -> FailureViewport
+      ServiceHistoryRunScreen _ -> FailureViewport
       ServiceReviewScreen {} -> ConfirmDetailsViewport
       LiveScreen _ -> FailureViewport
       _ | statePaneFocus state == SecondaryPane -> BrowserDetailViewport
@@ -1975,6 +2142,9 @@ clearServiceSession state =
       stateServiceOverviewFocus = Lane.noFocus,
       stateServiceDecisions = Lane.noObservation,
       stateServiceDecisionsFocus = Lane.noFocus,
+      stateServiceHistory = Lane.noObservation,
+      stateServiceHistoryFocus = Lane.noFocus,
+      stateServiceHistoryDetail = Lane.noObservation,
       stateServiceDrafts = Lane.noDrafts,
       stateServiceCaptures = Map.empty,
       stateServiceDelivery = Lane.DeliveryIdle,
@@ -1989,7 +2159,7 @@ clearServiceSession state =
       stateServiceNotice = Nothing,
       stateServiceKeyOutcome = Nothing,
       stateServiceConfirm = Nothing,
-      stateServiceResult = Nothing,
+      stateServiceResults = Lane.noRetrievals,
       stateServiceSaved = Nothing,
       stateConfirmDetails = False,
       stateRunDetails = False,
@@ -2082,6 +2252,21 @@ toPresentation state =
       presentationServiceDecisions = let installed = stateServiceDecisions state in
         OverviewView (serviceDecisionRows state) (Lane.focusedIndex (map Service.overviewRowKey (serviceDecisionRows state)) (stateServiceDecisionsFocus state))
           (Service.decisionsStatus (Lane.installedStale installed) (Service.decisionRows <$> Lane.installedRead installed)),
+      presentationServiceHistory = let installed = stateServiceHistory state in
+        OverviewView (serviceHistoryRows state) (Lane.focusedIndex (map Service.overviewRowKey (serviceHistoryRows state)) (stateServiceHistoryFocus state))
+          (Service.historyStatus (Lane.installedStale installed) (Lane.installedRead installed)),
+      presentationServiceHistoryDetail = case modelScreen (stateModel state) of
+        ServiceHistoryRunScreen run ->
+          let installed = stateServiceHistoryDetail state
+              detail = mfilter ((== run) . Service.historyDetailRun) (Lane.installedRead installed)
+          in [case (Lane.installedStale installed, detail) of
+                (Nothing, Nothing) -> "Run detail: reading run " <> run
+                (Nothing, Just _) -> "Run detail: current"
+                (Just code, Just _) -> "Run detail: stale (" <> code <> "); the last complete detail is retained"
+                (Just code, Nothing) -> "Run detail: refused (" <> code <> "); no complete detail is installed"]
+            <> maybe [] (\shown -> Service.historyDetailLines shown (Lane.retrievalShown run (stateServiceResults state))) detail
+            <> [line | Just (ident, line) <- [stateServiceSaved state], ident == run]
+        _ -> [],
       presentationServiceObservation = let installed = stateServiceObservation state in
         Service.observationLines (Lane.refreshPaused (stateNow state) (stateServiceLane state) (stateServiceKeyOutcome state))
           (Lane.installedStale installed) (isJust (Lane.installedRead installed)) (serviceRun state),
@@ -2102,7 +2287,7 @@ toPresentation state =
           (LiveScreen _, Just (Service.RunRead snapshot (_,control) _)) -> Service.redirectLines control snapshot (serviceSelectedOccurrence state)
           _ -> [],
       presentationServiceResultLines = case serviceRun state of
-        Just run -> Service.resultLines run (Lane.retrievalShown (runIdText (Service.runIdentity run)) (stateServiceResult state))
+        Just run -> Service.resultLines run (Lane.retrievalShown (runIdText (Service.runIdentity run)) (stateServiceResults state))
           <> [line | Just (ident, line) <- [stateServiceSaved state], ident == runIdText (Service.runIdentity run)]
         Nothing -> [],
       presentationServiceSavable = serviceSavable state,

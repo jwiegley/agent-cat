@@ -501,10 +501,42 @@ TUI_REDIRECT = "tui-redirect"
 # typed values.
 # Each step prints its own PASS line. It runs one manager lifetime.
 TUI_DECISIONS = "tui-decisions"
+# The tui-history mode reads the History view of the service TUI and
+# retrieves the verified result of an earlier run. It configures the
+# scripted profile_1 and one local retention root, which a local frontend run
+# and its copies fill with HISTORY_LEGACY_ENTRIES legacy entries before the
+# manager starts, as in the pages mode. The manager serves them through
+# --legacy-history, so /v1/runs holds more legacy entries than one window.
+# 1. The TUI selects profile_1, and H on the workflows browser opens the
+# History view, which lists the legacy entries and no managed run.
+# 2. The harness runs two prompt-source requests of profile_1 to success
+# through HTTP with its own credential, one after the other. Without a key
+# press, the view must count both managed runs and every legacy entry.
+# 3. The harness reads every page of /v1/runs. Its items must be in
+# identifier order. Home and Down in the History view must reach each
+# managed run and the legacy entries on both sides of the window bound at
+# the positions of the harness list, so the TUI lists every run in the
+# identifier order of all windows.
+# 4. Enter on the earlier run opens its read-only run detail, which shows
+# the runtime status Succeeded. r retrieves the verified result, and s saves
+# it to a fresh absolute path. The saved file must hold mode 0600 and the
+# exact bytes, size and SHA-256 of the artifact that the harness downloads
+# through the run outputs.
+# 5. Esc returns to the History view. The TUI opens the later run and
+# retrieves its result. It then opens the earlier run again, which must show
+# its retained verified result without another r, so the results of both
+# runs are kept by run identifier.
+# 6. Enter on a legacy entry opens its detail representation, which shows
+# observer supervision, and r states that a legacy entry publishes no size
+# and digest for its result.
+# Each step prints its own PASS line. It runs one manager lifetime.
+TUI_HISTORY = "tui-history"
+HISTORY_LEGACY_ENTRIES = 300
 TUI_MODES = {OVERVIEW: (["profile_1", "profile_2"], ["observe", "submit"]), INPUTS: (["profile_1"], ["observe", "submit", "control"]),
              TUI_CONTROLS: (["profile_1", "profile_steer", "profile_route"], ["observe", "submit", "control"]),
              TUI_REDIRECT: (["profile_live", "profile_live_effect", "profile_live_stale"], ["observe", "submit", "control"]),
-             TUI_DECISIONS: (["profile_1", "profile_2"], ["observe", "submit", "control"])}
+             TUI_DECISIONS: (["profile_1", "profile_2"], ["observe", "submit", "control"]),
+             TUI_HISTORY: (["profile_1"], ["observe", "submit"])}
 tui_mode = sys.argv[5] if len(sys.argv) == 6 and sys.argv[5] in TUI_MODES else None
 # The tui-controls and tui-redirect modes configure the control fixture
 # profiles.
@@ -592,7 +624,12 @@ if storage_mode:
 # them through --legacy-history as read-only legacy entries.
 LEGACY_ROOT = work / "legacy"
 LEGACY_ENTRIES = 300
-if pages_mode:
+# The tui-history mode configures the same retention root and raises the
+# global page-set bound, so that a read of the harness and a read of the TUI
+# can hold page sets at once.
+if tui_mode == TUI_HISTORY:
+    configuration["limits"]["globalPageSets"] = 8
+if pages_mode or tui_mode == TUI_HISTORY:
     LEGACY_ROOT.mkdir(mode=0o700)
     configuration["localRetentionRoots"] = [str(LEGACY_ROOT)]
 # The tui-overview mode also runs one request through the mixed fixture.
@@ -5406,6 +5443,216 @@ def decisions_checks():
             (work / "server-0.exit").write_text(str(process.returncode) + "\n")
 
 
+def history_checks():
+    """The tui-history mode. See TUI_HISTORY for the steps."""
+    harness = tui_fixture.harness
+    clone_legacy_runs(legacy_frontend_run(), HISTORY_LEGACY_ENTRIES - 1)
+    terminal = ("succeeded", "failed", "cancelled")
+
+    def save(session, name):
+        (work / ("tui-history-" + name + ".screen.txt")).write_text(session.screen.text())
+
+    def details(screen):
+        """The details column joined without separators, so that a long
+        identifier that wraps across rows stays one string."""
+        return "".join(line.split("│", 1)[1].strip() for line in screen.splitlines() if "│" in line).replace(" ", "")
+
+    def run_to_success(client):
+        """Create, enqueue, approve and complete one prompt-source request of
+        profile_1 through HTTP with the credential of the harness. Returns
+        the run identifier."""
+        status, catalogue, _ = request("/v1/workflows?profileId=profile_1", harness)
+        assert status == 200, ("history catalogue", status)
+        workflow = next(item for item in catalogue["items"] if item["name"] == "prompt-source")
+        key = capabilities["authorityEpoch"] + "." + secrets.token_urlsafe(16)
+        body = {"workflowId": workflow["id"], "descriptorRevision": workflow["revision"],
+                "profileId": workflow["profileId"], "profileRevision": workflow["profileRevision"]}
+        status, created, raw = request("/v1/requests", harness | {"Content-Type": "application/json", "Idempotency-Key": key},
+                                       method="POST", payload=json.dumps(body, separators=(",", ":")).encode())
+        assert status == 201, ("history request creation", status, created.get("code"))
+        validate("Request", created, raw)
+        _, run = approve_mixed(created, workflow, client)
+        snapshot, _, raw = client[1]("/v1/runs/" + run + "/snapshot", "RunSnapshot",
+            lambda value: value["runtime"] is not None and value["runtime"]["status"] in terminal)
+        (work / ("tui-history-" + run + "-terminal.json")).write_bytes(raw)
+        assert snapshot["runtime"]["status"] == "succeeded", ("history run terminal status", run, snapshot["runtime"]["status"])
+        return run
+
+    def all_runs():
+        """Every page of /v1/runs of the harness credential, in order."""
+        pages, raws = [], []
+        target = "/v1/runs"
+        while target is not None:
+            status, value, raw = request(target, harness)
+            assert status == 200, ("history run page", target, status, value.get("code"))
+            validate("RunPage", value, raw)
+            assert value["page"]["index"] == len(pages), ("history page index", value["page"]["index"], len(pages))
+            pages.append(value)
+            raws.append(raw)
+            target = value["page"]["next"]
+        (work / "tui-history-runs.ndjson").write_bytes(b"\n".join(raws) + b"\n")
+        return [item for page in pages for item in page["items"]]
+
+    def focus(session, index, expected):
+        """Home and then Down index times select the row at this position of
+        the History view. The focused details must name the expected run."""
+        session.send(b"\x1b[H")
+        session.settle()
+        if index:
+            session.send(b"\x1b[B" * index)
+        deadline = time.monotonic() + 20
+        while "Run:" + expected not in details(session.screen.text()):
+            assert time.monotonic() < deadline, ("the History row at this position is not the run", index, expected, session.screen.text())
+            session.pump(0.1)
+        return details(session.screen.text())
+
+    def open_detail(session, run):
+        """Enter opens the read-only detail of the focused run."""
+        session.send(b"\r")
+        session.wait_screen("Manager run detail", timeout=10)
+        screen = session.wait_screen("Run detail: current", timeout=20)
+        assert "Run: " + run in screen, ("the run detail names another run", run, screen)
+        return screen
+
+    def retrieve(session):
+        """r retrieves the verified result of the shown run."""
+        session.send(b"r")
+        return session.wait_screen("Result: verified ", timeout=30)
+
+    def back(session):
+        session.send(b"\x1b")
+        return session.wait_screen("History: current; runs: " + str(HISTORY_LEGACY_ENTRIES + 2), timeout=15)
+
+    with (work / "server-0.stdout").open("wb") as output, (work / "server-0.stderr").open("wb") as errors:
+        process = subprocess.Popen([str(runner), "--manager", "serve", "--config", str(config),
+                                    "--legacy-history", f"{LEGACY_ROOT}=profile_1",
+                                    "+RTS", "-N" + native, "-RTS"], stdout=output, stderr=errors)
+        try:
+            wait_ready(process)
+            status, capabilities, _ = request("/v1/capabilities", harness)
+            assert status == 200
+            client = mixed_client(capabilities, harness)
+            with tui_fixture.session(rows=40, columns=140) as session:
+                # 1. H opens the History view with the legacy entries only.
+                session.wait_screen("Manager profiles")
+                session.wait_screen("profile_1")
+                session.send(b"\r")
+                session.wait_screen("Manager workflows")
+                session.wait_screen("H HISTORY")
+                session.send(b"H")
+                session.wait_screen("Manager history")
+                screen = session.wait_screen(f"History: current; runs: {HISTORY_LEGACY_ENTRIES} (managed 0, legacy {HISTORY_LEGACY_ENTRIES})", timeout=30)
+                assert "Supervision: observer" in screen, ("the first legacy entry does not show observer supervision", screen)
+                save(session, "legacy-only")
+                print("PASS tui-history 1: H on the workflows browser opens the History view, which lists the",
+                      HISTORY_LEGACY_ENTRIES, "legacy entries with observer supervision and no managed run", flush=True)
+
+                # 2. Two runs complete, and the view counts them without a key press.
+                earlier = run_to_success(client)
+                later = run_to_success(client)
+                screen = session.wait_screen(f"History: current; runs: {HISTORY_LEGACY_ENTRIES + 2} (managed 2, legacy {HISTORY_LEGACY_ENTRIES})",
+                                             timeout=30)
+                save(session, "two-runs")
+                print("PASS tui-history 2: runs", earlier, "and", later, "succeeded through HTTP, and without a key press the History view",
+                      "counted both managed runs and the", HISTORY_LEGACY_ENTRIES, "legacy entries", flush=True)
+
+                # 3. The TUI lists every run in the identifier order of all windows.
+                listed = all_runs()
+                order = [item["id"] for item in listed]
+                assert len(order) == HISTORY_LEGACY_ENTRIES + 2 and len(set(order)) == len(order), ("history run count", len(order))
+                assert order == sorted(order), "the /v1/runs items are not in identifier order"
+                legacy_positions = [index for index, item in enumerate(listed) if item["supervision"] == "observer"]
+                assert len(legacy_positions) == HISTORY_LEGACY_ENTRIES and len(legacy_positions) > 256, (
+                    "the legacy entries do not exceed one window", len(legacy_positions))
+                samples = [(order.index(earlier), earlier), (order.index(later), later)] + [
+                    (legacy_positions[place], order[legacy_positions[place]]) for place in (0, 255, 256, len(legacy_positions) - 1)]
+                for index, run in sorted(samples):
+                    shown = focus(session, index, run)
+                    if run in (earlier, later):
+                        supervision = next(item["supervision"] for item in listed if item["id"] == run)
+                        assert supervision != "observer", ("a managed run has observer supervision", run)
+                        for line in ("Runtimestatus:Succeeded", "Supervision:" + supervision):
+                            assert line in shown, ("the managed run row lacks a detail line", run, line)
+                    else:
+                        assert "Supervision:observer" in shown, ("the legacy row lacks observer supervision", run)
+                save(session, "order")
+                print("PASS tui-history 3: the harness read", len(order), "runs over every page of /v1/runs in identifier order, more legacy",
+                      "entries than one window holds, and the History rows at positions", sorted(index for index, _ in samples),
+                      "named the same runs, both managed runs and the legacy entries on both sides of the window bound", flush=True)
+
+                # 4. The verified result of the earlier run is retrieved and saved with exact bytes.
+                focus(session, order.index(earlier), earlier)
+                screen = open_detail(session, earlier)
+                assert "Runtime status: Succeeded" in screen and "Result: r retrieves the verified bytes" in screen, (
+                    "the run detail of the earlier run is not a succeeded run before retrieval", screen)
+                save(session, "earlier-detail")
+                screen = retrieve(session)
+                save(session, "earlier-retrieved")
+                saved_path = work / "tui-history-saved-result.bin"
+                assert not os.path.lexists(saved_path)
+                session.wait_screen("s SAVE RESULT", timeout=10)
+                session.send(b"s")
+                session.wait_screen("Save verified result", timeout=10)
+                session.send(str(saved_path).encode())
+                session.send(b"\x04")
+                artifact = verified_download(earlier, client, harness)
+                size = int(artifact["bytes"])
+                outcome = "Saved the verified " + str(size) + " bytes to " + str(saved_path)
+                deadline = time.monotonic() + 15
+                while squeeze(outcome) not in squeeze(session.screen.text()):
+                    assert time.monotonic() < deadline, ("the TUI save outcome did not appear", session.screen.text())
+                    session.pump()
+                save(session, "earlier-saved")
+                assert squeeze("Result SHA-256: " + artifact["sha256"]) in squeeze(session.screen.text()), (
+                    "the run detail does not show the artifact digest")
+                saved = saved_path.read_bytes()
+                saved_status = os.lstat(saved_path)
+                downloaded = (work / "verified-result.json").read_bytes()
+                assert stat.S_ISREG(saved_status.st_mode) and stat.S_IMODE(saved_status.st_mode) == 0o600, ("saved mode", oct(saved_status.st_mode))
+                assert saved == downloaded and len(saved) == size and hashlib.sha256(saved).hexdigest() == artifact["sha256"], (
+                    "the saved bytes differ from the artifact bytes")
+                print("PASS tui-history 4: the read-only detail of run", earlier, "showed Succeeded, r retrieved its verified result, and s saved",
+                      size, "bytes with mode 0600 that equal the artifact bytes and SHA-256", artifact["sha256"], "of the harness download", flush=True)
+
+                # 5. The results of both runs are kept by run identifier.
+                back(session)
+                focus(session, order.index(later), later)
+                open_detail(session, later)
+                retrieve(session)
+                save(session, "later-retrieved")
+                back(session)
+                focus(session, order.index(earlier), earlier)
+                screen = open_detail(session, earlier)
+                screen = session.wait_screen("Result: verified " + str(size) + " bytes", timeout=10)
+                assert "Result: r retrieves the verified bytes" not in screen and "s SAVE RESULT" in screen, (
+                    "the earlier run lost its retained result", screen)
+                save(session, "earlier-kept")
+                print("PASS tui-history 5: after the retrieval of run", later, "the detail of run", earlier,
+                      "still showed its retained verified result without another r", flush=True)
+
+                # 6. A legacy entry shows its representation and no retrieval.
+                back(session)
+                legacy = order[legacy_positions[0]]
+                focus(session, legacy_positions[0], legacy)
+                screen = open_detail(session, legacy)
+                assert "Supervision: observer" in screen and "a legacy entry publishes no size and digest" in screen, (
+                    "the legacy detail lacks its supervision or its result line", screen)
+                session.send(b"r")
+                session.wait_screen("result not retrieved: a legacy entry publishes no size and digest for its result", timeout=10)
+                save(session, "legacy-detail")
+                print("PASS tui-history 6: the detail of legacy entry", legacy, "showed observer supervision, and r stated that a legacy entry",
+                      "publishes no size and digest for its result", flush=True)
+                session.send(b"q")
+                assert session.wait_exit(20) == 0
+                session.assert_restored()
+            print("PASS tui-history: the History view of the actual service TUI listed every run across windows and saved a verified result", flush=True)
+        finally:
+            if process.poll() is None:
+                process.terminate()
+            process.wait(timeout=25)
+            (work / "server-0.exit").write_text(str(process.returncode) + "\n")
+
+
 def capture_checks():
     """POST /v1/captures through the real HTTPS manager. Each numbered case
     prints one PASS line."""
@@ -7887,6 +8134,11 @@ if tui_mode in (TUI_CONTROLS, TUI_REDIRECT):
 
 if tui_mode == TUI_DECISIONS:
     decisions_checks()
+    raise SystemExit(0)
+
+
+if tui_mode == TUI_HISTORY:
+    history_checks()
     raise SystemExit(0)
 
 

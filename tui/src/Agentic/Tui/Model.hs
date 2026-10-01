@@ -90,6 +90,13 @@ data Screen
     -- manager observation order. Its rows and cursor belong to the
     -- application state, which installs each read of @/v1/decisions@.
   | ServiceDecisionsScreen
+    -- | The History view: the runs of @/v1/runs@ in identifier order. Its
+    -- rows and cursor belong to the application state, which installs each
+    -- read of the run list.
+  | ServiceHistoryScreen
+    -- | The read-only detail of one run of the History view, by its run
+    -- identifier. The application state installs each read of the detail.
+  | ServiceHistoryRunScreen !Text
   | ServiceRequestScreen !Manager.DraftView
   | ServiceReviewScreen !Manager.Preparation !Text
   | ServiceCommandScreen !Text
@@ -170,12 +177,14 @@ selectedServiceProfile model = case modelScreen model of
   _ -> Nothing
 
 -- | The navigation of one key among the service workflow browser, the help
--- of the selected workflow, the manager overview and the manager decisions,
--- given the help text of the selected workflow. @h@ opens that help, @O@
--- opens the manager overview, @D@ opens the manager decisions, and @Esc@
--- returns from each of them to the workflow browser. Every other key gives
--- 'Nothing', and the caller keeps its own behavior for that key, so the
--- browser keys of the Phase A journey keep their meaning.
+-- of the selected workflow, the manager overview, the manager decisions and
+-- the History view, given the help text of the selected workflow. @h@ opens
+-- that help, @O@ opens the manager overview, @D@ opens the manager
+-- decisions, @H@ opens the History view, and @Esc@ returns from each of them
+-- to the workflow browser. @Esc@ on the detail of a run returns to the
+-- History view. Every other key gives 'Nothing', and the caller keeps its
+-- own behavior for that key, so the browser keys of the Phase A journey keep
+-- their meaning.
 serviceBrowserKey :: Maybe Text -> Vty.Key -> [Vty.Modifier] -> TuiModel -> Maybe TuiModel
 serviceBrowserKey help key modifiers model = case (modelScreen model, key, modifiers) of
   (BrowserScreen, Vty.KChar 'h', []) -> (\text -> model {modelScreen = HelpScreen text}) <$> help
@@ -186,7 +195,12 @@ serviceBrowserKey help key modifiers model = case (modelScreen model, key, modif
       modelStatus = "manager decisions: Enter opens the run at the selected head"}
   (HelpScreen _, Vty.KEsc, []) -> Just model {modelScreen = BrowserScreen}
   (ServiceOverviewScreen, Vty.KEsc, []) -> Just model {modelScreen = BrowserScreen, modelStatus = "manager workflows"}
+  (BrowserScreen, Vty.KChar 'H', []) ->
+    Just model {modelScreen = ServiceHistoryScreen, modelStatus = "manager history: Enter opens the detail of the selected run"}
   (ServiceDecisionsScreen, Vty.KEsc, []) -> Just model {modelScreen = BrowserScreen, modelStatus = "manager workflows"}
+  (ServiceHistoryScreen, Vty.KEsc, []) -> Just model {modelScreen = BrowserScreen, modelStatus = "manager workflows"}
+  (ServiceHistoryRunScreen _, Vty.KEsc, []) ->
+    Just model {modelScreen = ServiceHistoryScreen, modelStatus = "manager history: Enter opens the detail of the selected run"}
   _ -> Nothing
 
 -- | The model after a refused read of the selected request, given the

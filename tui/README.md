@@ -256,6 +256,58 @@ last complete heads and marks them stale with the refusal code, for example
 states the number of pending heads, for example `Decisions: current; pending
 heads: 2`.
 
+`H` opens the History view from the workflow browser. `Tab` and the other
+browser keys keep their behavior, and `Esc` returns from the view to the
+workflow browser. The view reads the complete page set of `/v1/runs`
+(`Agentic.Tui.Service.loadHistory`). The client follows every page of every
+window of the set, so the view lists each managed run of the authorized
+profiles and each legacy entry of their bound retention roots once, in the
+identifier order of the collection. `decodeHistory` decodes each item with
+the run decoder and refuses a collection that names one run twice.
+`historyRows` keeps the order of the collection. Each row shows the runtime
+status and the run in the list, and the details show the workflow, the
+profile, the request, the runtime status, the supervision, the verification,
+the integrity and the limitations. A legacy entry
+(`Agentic.Tui.Service.historyLegacy`) is an entry with an unreadable
+manifest, or a known run with `observer` supervision and no request. The
+status line above the list counts the runs, for example `History: current;
+runs: 302 (managed 2, legacy 300)`. `Up` and `Down` select a row, `Home` and
+`End` select the first and the last run, and the application state keeps the
+selected row by its identity. Opening the view starts a read of the run list
+through live delivery, and live delivery keeps it current while the view is
+shown. `g` reads it again. A declared refusal keeps the last complete run
+list and marks it stale with the refusal code.
+
+`Enter` on a row opens the read-only run detail of that run. It selects
+nothing and sends nothing, so the selection, its reads and a command in
+progress stay. `Agentic.Tui.Service.observeHistoryDetail` reads the snapshot
+page set of a managed run and `/v1/runs/{id}` of a legacy entry, whose
+snapshot the manager refuses. The detail shows the run, the workflow, the
+target, the runtime status, the supervision, the integrity, the
+verification, the result reference and the number of occurrences of a
+managed run, or the representation of a legacy entry. Live delivery keeps
+the detail current while it is shown, and `g` reads it again. `r` retrieves
+the verified result of a succeeded managed run with a verified or referenced
+result through `Agentic.Tui.Service.retrieveResult` and
+`Agentic.Manager.Client.downloadVerified`, which check the size and the
+SHA-256 digest of the run outputs. `r` on any other run starts nothing and
+the status line states the reason (`historyRetrievable`), for example
+`result not retrieved: a legacy entry publishes no size and digest for its
+result`, because the representation of a legacy entry gives no size and
+digest against which the frontend could verify a download. A refused
+retrieval retains no bytes, the status line states `verified result not
+retrieved: CODE; r retries`, and the next `r` retries at once. `s` then opens
+the save dialog, which publishes the retained bytes with
+`Agentic.Tui.Save.saveExact`. `Esc` returns to the History view.
+
+The application state keeps the retrievals of the verified results by run
+identifier (`Agentic.Tui.ServiceLane.Retrievals`), for the live monitor and
+for the run detail alike. Each run keeps its own retrieval and its own retry
+rule, so the result of one run stays retained while another run is
+retrieved. At most eight runs are kept. A retrieval of a new run beyond that
+bound removes the run whose retrieval completed first, so the retained bytes
+stay within 512 MiB.
+
 In the input editor of a request, `Ctrl-D` sends the editor text as a
 literal. `Ctrl-T` captures the exact editor text as raw UTF-8 bytes instead.
 `Ctrl-O` opens a path editor. There, `Ctrl-D` reads the named local file and
@@ -363,6 +415,20 @@ the second question shows the draft, and nothing is sent until `Ctrl-D`
 sends the draft to the second question. The run records the harness answer
 and the draft as typed values.
 
+The tui-history mode of `manager/test/service_http.py` reads the History
+view. It binds a local retention root with 300 legacy entries, more than one
+window of `/v1/runs` holds, and the harness runs two prompt-source runs to
+success. Without a key press, the view counts both managed runs and every
+legacy entry. The rows of the view at the positions of both managed runs and
+of the legacy entries on both sides of the window bound name the runs at the
+same positions of the harness list, which is in identifier order. The
+frontend opens the earlier run, retrieves its verified result with `r` and
+saves it with `s`, and the saved file holds mode 0600 and the exact bytes and
+SHA-256 digest of the artifact that the harness downloads. After a retrieval
+of the later run, the detail of the earlier run still shows its retained
+result. The detail of a legacy entry shows `observer` supervision, and `r`
+states that a legacy entry publishes no size and digest for its result.
+
 The application state keeps the text drafts by identity
 (`Agentic.Tui.ServiceLane.Drafts`): the input editor text of each request and
 input, and the answer text of each decision of each run. An editor shows the
@@ -401,7 +467,9 @@ that the composite read of the selected request reads
 one of them, invalidates the composite read. An invalidation of a run or a
 decision, or of a resource below one, invalidates the decision heads of the
 Manager decisions view, because a new head, an answered head and the end of a
-run change them. The refresh coordinator of the
+run change them. An invalidation of a run, or of a resource below one,
+invalidates the History view, which reads the run list or the detail of the
+shown run. The refresh coordinator of the
 session decides each fetch, so each read has at most one fetch in flight and
 invalidations during that fetch give exactly one later fetch. An invalidation
 of a read whose fetch waits for the read lane changes nothing. `Fetches` holds
@@ -410,9 +478,10 @@ through the single-flight read lane like any other read, under the rules of
 automatic refresh: no fetch starts during a preparation or a send, after an
 internal fault, or while a deferred key pauses refresh. A mutation key or an
 exact resend that ends the read of a fetch makes that fetch wait again. The
-overview is fetched while its view is shown, and the decision heads are
-fetched while the Manager decisions view is shown. An invalidation of either
-read while its view is hidden leaves its fetch waiting until the view opens. A fetch of the composite read
+overview is fetched while its view is shown, the decision heads are
+fetched while the Manager decisions view is shown, and the History view is
+fetched while it or its run detail is shown. An invalidation of one of these
+reads while its view is hidden leaves its fetch waiting until the view opens. A fetch of the composite read
 without a selected request reads nothing. A result of an earlier generation
 does not install. The header row above the identity row shows the delivery
 state at its right end: `delivery connecting`, `delivery live`, `delivery
@@ -593,14 +662,14 @@ collections and the members of the `/snapshot` overview, with
 `decodeRequestItem`, `decodeRunItem` and `decodeOverviewMember`. A run item
 is a known run with its public summary or a catalogue entry with an
 unreadable manifest. The Manager overview view reads the members of the
-`/snapshot` overview. Service mode does not read the `/requests` and `/runs`
-collections.
+`/snapshot` overview, and the History view reads the `/runs` collection.
+Service mode does not read the `/requests` collection.
 `tui-model-test` checks these decoders, the decision and control decoders and
 the answer conversion against the `resources` section of
 `test/manager_client_vectors.json`, which [the protocol
 description](../doc/api/README.md#pages-and-live-delivery) describes.
 
-Service mode does not support run history, lineage, export,
+Service mode does not support lineage, export,
 reconnection of the session after a manager restart or a credential
 revocation, or acceptance at 40x12 and 80x24. The
 [manual](../doc/agent-cat.texi) entry for `--service` states the complete key

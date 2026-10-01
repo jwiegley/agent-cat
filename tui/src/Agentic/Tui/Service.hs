@@ -17,6 +17,8 @@ module Agentic.Tui.Service
     RunItem (..), RunContent (..), KnownRun (..), OverviewMember (..), decodeRequestItem, decodeRunItem, decodeOverviewMember,
     decodeOverviewItem, OverviewRow (..), overviewRows, overviewStatus, overviewRowKey, OverviewOpen (..), overviewOpen,
     loadDecisions, decodeDecisionHeads, decisionRows, decisionsStatus, decisionsOpen, decisionAddressee,
+    loadHistory, decodeHistory, historyLegacy, historyRows, historyStatus, HistoryDetail (..), historyDetailRun,
+    observeHistoryDetail, historyRetrievable, historyDetailLines,
     decisionPrompt, answerValue, answerOffered, retryOffer, headMatches,
     DecisionHead (..), decisionHead, answerMutation, answerKey, answerBody,
     retryMutation, retryBody, retryEffect,
@@ -62,7 +64,7 @@ import qualified Data.Text as T
 import qualified Data.Vector as V
 import Data.Word (Word32, Word64)
 import Data.List (sortOn)
-import Data.Maybe (fromMaybe, isJust, listToMaybe)
+import Data.Maybe (fromMaybe, isJust, isNothing, listToMaybe)
 import qualified Data.Text.Encoding as TE
 import Data.Text.Encoding.Error (lenientDecode)
 
@@ -988,10 +990,7 @@ resultLines :: RunObservation -> Maybe (Either Text VerifiedResult) -> [Text]
 resultLines run retrieval = case runTerminal run of
   Nothing -> []
   Just status -> ("Terminal: " <> statusName status) : case (status, retrieval) of
-    (RunSucceeded, Just (Right result)) ->
-      [ "Result: verified " <> T.pack (show (BS.length (verifiedBytes result))) <> " bytes",
-        "Result SHA-256: " <> artifactDigest (verifiedArtifact result),
-        "Result preview: " <> preview (verifiedBytes result) ]
+    (RunSucceeded, Just (Right result)) -> verifiedLines result
     (RunSucceeded, _) | not (resultWanted run || resultReferenced run) ->
       ["Result: no download; verification is " <> verificationName (runVerification run)]
     (RunSucceeded, Nothing) -> ["Result: retrieving the verified bytes"]
@@ -1006,6 +1005,16 @@ resultLines run retrieval = case runTerminal run of
       RunStarting -> "starting"
       RunRunning -> "running"
       RunCancelling -> "cancelling"
+
+-- | The display lines of retained verified bytes: their size, the SHA-256
+-- digest of their artifact and a bounded preview, which is decoded
+-- leniently for display only.
+verifiedLines :: VerifiedResult -> [Text]
+verifiedLines result =
+  [ "Result: verified " <> T.pack (show (BS.length (verifiedBytes result))) <> " bytes",
+    "Result SHA-256: " <> artifactDigest (verifiedArtifact result),
+    "Result preview: " <> preview (verifiedBytes result) ]
+  where
     preview bytes = T.map (\character -> if character == '\n' then ' ' else character)
       (T.take 120 (TE.decodeUtf8With lenientDecode (BS.take 480 bytes)))
 
@@ -1238,6 +1247,117 @@ overviewStatus stale rows = case (stale, rows) of
   where
     counts current = T.intercalate ", " [name <> ": " <> T.pack (show (length (filter ((== kind) . overviewRowKind) current)))
       | (name,kind) <- [("requests",C.OverviewRequest),("preparations",C.OverviewPreparation),("runs",C.OverviewRun),("decisions",C.OverviewDecision)]]
+
+-- | The runs of the History view: the complete page set of @/v1/runs@,
+-- every window of it, in the identifier order of the collection
+-- ('decodeHistory'). The page set holds the managed runs of the authorized
+-- profiles and the legacy entries of their bound retention roots.
+loadHistory :: C.Client -> IO (Either C.ClientFailure [RunItem])
+loadHistory client = collection client "/v1/runs" parseHistory
+
+-- | The runs of the items of one complete @/v1/runs@ page set, in the order
+-- of the items. Each item is a run representation, and one run appears at
+-- most once.
+decodeHistory :: [Value] -> Either C.ClientFailure [RunItem]
+decodeHistory = either (const (Left C.InvalidResponse)) Right . parseEither parseHistory
+
+parseHistory :: [Value] -> Parser [RunItem]
+parseHistory values = traverse parseRunItem values >>= uniqueBy runItemId
+
+-- | Whether a run of the History view is a legacy entry of a bound local
+-- retention root: an entry with an unreadable manifest, or a known run with
+-- observer supervision and no request. The manager serves the detail
+-- representation of a legacy entry and refuses its other run resources.
+historyLegacy :: RunItem -> Bool
+historyLegacy item = case runItemContent item of
+  UnreadableContent _ -> True
+  KnownContent known -> knownSupervision known == "observer" && isNothing (knownRequest known)
+
+-- | The rows of the History view: one row for each run, in the identifier
+-- order of the collection. Each row has the details of the run row of the
+-- overview: the runtime status, the supervision and the verification.
+historyRows :: [RunItem] -> [OverviewRow]
+historyRows = map (overviewRow Map.empty . RunMember)
+
+-- | The status line of the installed History view, given the refusal code
+-- of the latest read when that read was refused and the installed runs. A
+-- refusal keeps the last complete run list and marks it stale.
+historyStatus :: Maybe Text -> Maybe [RunItem] -> Text
+historyStatus stale runs = case (stale, runs) of
+  (Nothing, Nothing) -> "History: not read"
+  (Nothing, Just current) -> "History: current; " <> counts current
+  (Just code, Just retained) -> "History: stale (" <> code <> "); the last complete run list is retained; " <> counts retained
+  (Just code, Nothing) -> "History: refused (" <> code <> "); no complete run list is installed"
+  where
+    counts items = let legacy = length (filter historyLegacy items) in
+      "runs: " <> shown (length items) <> " (managed " <> shown (length items - legacy) <> ", legacy " <> shown legacy <> ")"
+    shown = T.pack . show
+
+-- | The read-only detail of one run of the History view: the snapshot of a
+-- managed run, or the detail representation of a legacy entry.
+data HistoryDetail = ManagedDetail !RunObservation | LegacyDetail !RunItem
+  deriving (Eq, Show)
+
+-- | The run identifier of a run detail.
+historyDetailRun :: HistoryDetail -> Text
+historyDetailRun detail = case detail of
+  ManagedDetail run -> runIdText (runIdentity run)
+  LegacyDetail item -> runItemId item
+
+-- | Read the detail of one run of the History view: the snapshot page set of
+-- a managed run, or @/v1/runs/{id}@ of a legacy entry ('historyLegacy'),
+-- whose snapshot the manager refuses. The detail must name the same run.
+observeHistoryDetail :: C.Client -> RunItem -> IO (Either C.ClientFailure HistoryDetail)
+observeHistoryDetail client item
+  | historyLegacy item = case C.reference client ("/v1/runs/" <> runItemId item) of
+      Left failure -> pure (Left failure)
+      Right location -> do
+        received <- C.observeResource client location
+        pure $ do
+          observed <- received
+          value <- decodeRunItem (C.observedValue observed)
+          unless (runItemId value == runItemId item && runItemProfile value == runItemProfile item) (Left C.InvalidResponse)
+          Right (LegacyDetail value)
+  | otherwise = fmap ManagedDetail <$> observeSnapshot client (runItemId item)
+
+-- | The run whose verified result @r@ retrieves from a run detail, or the
+-- reason why @r@ retrieves nothing. Only a succeeded managed run with a
+-- verified or referenced result is retrieved, through 'retrieveResult'. A
+-- legacy entry publishes no size and digest for its result, so the frontend
+-- cannot verify a download of it.
+historyRetrievable :: HistoryDetail -> Either Text RunObservation
+historyRetrievable detail = case detail of
+  LegacyDetail _ -> Left "a legacy entry publishes no size and digest for its result"
+  ManagedDetail run
+    | resultWanted run || resultReferenced run -> Right run
+    | isNothing (runTerminal run) -> Left "the run is not terminal"
+    | runTerminal run /= Just RunSucceeded -> Left "the run did not succeed"
+    | otherwise -> Left ("the run has no verified result; verification is " <> verificationName (runVerification run))
+
+-- | The display lines of a run detail, given the retrieval of its verified
+-- result: none yet, the failure code of the latest retrieval, or the
+-- verified bytes. A managed run shows its snapshot summary, and a legacy
+-- entry shows its representation.
+historyDetailLines :: HistoryDetail -> Maybe (Either Text VerifiedResult) -> [Text]
+historyDetailLines detail retrieval = case detail of
+  LegacyDetail item -> overviewRowDetails (overviewRow Map.empty (RunMember item))
+    <> ["Result: not retrieved; a legacy entry publishes no size and digest for its result"]
+  ManagedDetail run ->
+    [ "Run: " <> runIdText (runIdentity run),
+      "Workflow: " <> fromMaybe "not published" (runWorkflow run),
+      "Target: " <> fromMaybe "not published" (runTarget run),
+      "Runtime status: " <> maybe "not published" runStatusLabel (runtimeStatus run)
+        <> maybe "" (\number -> " (sequence " <> T.pack (show number) <> ")") (runSequence run),
+      "Supervision: " <> runSupervision run, "Integrity: " <> runIntegrity run,
+      "Verification: " <> verificationName (runVerification run),
+      "Result reference: " <> maybe "none" (\reference -> resultArtifact reference <> ", " <> T.pack (show (resultBytes reference))
+        <> " bytes, SHA-256 " <> resultDigest reference) (runResult run),
+      "Occurrences: " <> maybe "none" (T.pack . show . Map.size . snapshotOccurrences) (runSnapshot run) ]
+    <> case (historyRetrievable detail, retrieval) of
+      (Right _, Just (Right result)) -> verifiedLines result
+      (Right _, Just (Left code)) -> ["Result: not retrieved (" <> code <> "); r retries"]
+      (Right _, Nothing) -> ["Result: r retrieves the verified bytes"]
+      (Left reason, _) -> ["Result: no retrieval; " <> reason]
 
 parseRunItem :: Value -> Parser RunItem
 parseRunItem = withObject "run" $ \fields -> do

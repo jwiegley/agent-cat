@@ -13428,6 +13428,29 @@ deep-review + validated (both medium). Parse.lean:447-451 reads the two idents w
 ]
 #+end_src
 
+* TODO [#D] Resolve the non-blocking fess findings of subtask PC26    :review:
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-w92x
+:LABELS:   ["review","workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-01 Thu 05:41]
+:MODIFIED: [2026-10-01 Thu 05:41]
+:CREATED_BY: johnw
+:SOURCE_REPO: .
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess audit fess/pc-PC26-r1.md (2026-10-01) on subtask PC26 (WM-034 History view and verified results of any run).
+
+1. (medium) tui/src/Agentic/Tui/Service.hs historyRetrievable (near line 1328): every legacy entry is refused, so the result of a succeeded legacy run cannot be retrieved or saved. The acceptance item says "any succeeded run". The /v1 run representation gives no size or SHA-256 digest that Client.downloadVerified could check (doc/api/README.md near lines 231-237). Fix: the operator decides between an additive manager field (result size and SHA-256 for a legacy entry) and recording legacy result retrieval as out of scope.
+2. (low) manager/test/service_http.py near line 630: tui-history raises limits.globalPageSets from 2 to 8. No check shows the History view under contention at the base limit, where a 429 should give a stale mark. Fix: record the gap, or add a step that holds page sets at the base limit and asserts the stale History status.
+3. (low) tui/src/Agentic/Tui/ServiceLane.hs retrievalStep (near line 925): eviction follows completion order across all screens. Eight History retrievals can evict the retained bytes of the live-monitor run, and the next automatic refresh downloads them again (up to 64 MiB). The bound is by count, not by bytes. Fix: exempt the live-monitor run from eviction, or bound the map by total bytes.
+4. (low) tui/src/Agentic/Tui/ServiceLane.hs near line 1254: an invalidation of any run routes to HistoryFetch. On the detail screen (App.hs near line 1075) this reads the snapshot page set of the shown run again, even when the invalidated run is a different run. Fix: start the detail read only when an invalidated resource is at or below /v1/runs/{shown id}.
+5. (low) tui/test/ServiceTests.hs near line 284: historyTests sits between the Haddock comment of switchTests and switchTests, so the comment is orphaned. Fix: move lines 284-286 back above switchTests.
+
+Disclosed limitations of the implementer: r and s work on the read-only run detail only; Client.getPageSet refuses a windowed /v1/runs set whose item count grows past totalItems between windows (the race is not exercised); stateServiceSaved keeps only the latest save line; tui/ci/tui.sh, ALLBUILD and the N=1 journey were not run.
+
 * TODO [#D] Make the ProfileCheck help-barrier label match its own failure
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -19085,7 +19108,7 @@ to an unapproved local launch.
 :LABELS:   ["p7","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-01 Thu 05:16]
+:MODIFIED: [2026-10-01 Thu 05:41]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-034
 :SOURCE_REPO: agent-cat
@@ -19276,6 +19299,13 @@ Local-mode behavior remains intact without a duplicated service runtime model.
     "author": "johnw",
     "text": "PC25 (structured answer editor, stale answers and the Ctrl-D outcome): the service TUI accepts a structured JSON answer for every question code that personAnswerValue does not cover. editorSchema returns a typed EditorSchema, and editorCheck validates the answer against it before the send, naming the first field that does not agree. A 412 stale-revision on an answer leaves the lane idle with nothing kept for a resend, keeps the draft, shows 'decision changed; draft kept' and reads the run again. A head change before the send moves the unsent draft to the new head of the same run with the same notice, and nothing is sent until Ctrl-D. Ctrl-D while an answer is in flight has a numbered key outcome. tui-decisions now sends a structured answer that the runtime decodes as the typed value, and forces a 412 by answering over HTTP first. Evidence scope (/Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/PC/PC25/impl-r1): Werror build, tui-model-test at N8 (866 checks; first run failed on an old vector, fixed), tui-decisions at N8, Phase A journey at N8, make -C doc check, all exit 0. Limitations: the 412 rule applies to every lane mutation but only answers ran end to end; tui-overview, tui-inputs, tui-controls, tui-redirect and tui/ci/tui.sh were not run. Fess r1 non-blocking; findings in acat-pc25-answer-fess-1m4e. Package stays open.",
     "created_at": "2026-10-01T12:16:40Z"
+  },
+  {
+    "id": 501,
+    "issue_id": "acat-wm-034-3vqz",
+    "author": "johnw",
+    "text": "Subtask PC26 (2026-10-01): the service TUI has a History view (H on the service browser, not Tab) over every window of the /v1/runs page set, with runtime status, supervision and verification, legacy entries marked. Enter opens a read-only run detail (snapshot for a managed run, /v1/runs/{id} for a legacy entry). r retrieves the verified result of a succeeded managed run through Service.retrieveResult and Client.downloadVerified, and s saves it with saveExact. Retrieved results are kept by run id in Lane.Retrievals (bound 8) with the PC8 retry rule per run. New service_http.py mode tui-history: 300 legacy entries plus two managed runs, row order across windows, the earlier result retrieved, verified and saved with equal bytes, size, SHA-256 and mode 0600. Evidence: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/PC/PC26 (Werror build, tui-model-test N8, tui-history N8, Phase A journey N8, make -C doc check, all exit 0). Fess: fess/pc-PC26-r1.md, not blocking; findings filed as acat-w92x. Open: the result of a legacy entry cannot be retrieved (no size or digest in the frozen run representation), which awaits an operator decision.",
+    "created_at": "2026-10-01T12:41:13Z"
   }
 ]
 #+end_src

@@ -173,6 +173,7 @@ serviceTests render = do
   switchTests render row profile
   overviewTests render row request0 preparation
   decisionsViewTests render row decisionValue
+  historyTests render row
   draftTests profile request0
   liveDeliveryTests render profile
   where
@@ -283,6 +284,108 @@ endpointTests render profile = do
 -- | Endpoint switching: the selection, the connection of another profile,
 -- generation fencing of late results, the unresolved command of the earlier
 -- session, a failed connection, the switch back and the Endpoints view.
+-- | The History view: its navigation keys, the run list of @/v1/runs@ in
+-- collection order with legacy entries, its status line, the read-only run
+-- detail with its result lines, the retrieval rule of r and fixed-size
+-- renders.
+historyTests :: ((Int,Int) -> Presentation -> T.Text) -> S.Workflow -> IO ()
+historyTests render row = do
+  runsValue <- BS.readFile "test/fixtures/manager/v1/valid/runs.json" >>= either die pure . eitherDecodeStrict'
+  runItems <- case runsValue of
+    Object fields | Just (Array values) <- KM.lookup "items" fields -> pure (V.toList values)
+    _ -> die "invalid runs fixture shape"
+  snapshotValue <- BS.readFile "test/fixtures/manager/v1/valid/snapshot-result-metadata.json" >>= either die pure . eitherDecodeStrict'
+  (metadata,items) <- case snapshotValue of
+    Object fields | Just (Array values) <- KM.lookup "items" fields -> pure (Object (KM.delete "page" (KM.delete "items" fields)),V.toList values)
+    _ -> die "invalid result snapshot fixture shape"
+  outputsValue <- BS.readFile "test/fixtures/manager/v1/valid/outputs.json" >>= either die pure . eitherDecodeStrict'
+  (outputMetadata,outputItems) <- case outputsValue of
+    Object fields | Just (Array values) <- KM.lookup "items" fields -> pure (Object (KM.delete "page" (KM.delete "items" fields)),V.toList values)
+    _ -> die "invalid outputs fixture shape"
+  let verifiedMetadata = put "verification" (object ["state" .= ("verified" :: T.Text), "artifactId" .= ("artifact_1" :: T.Text)]) metadata
+      runtime status = put "runtime" (object ["status" .= (status :: T.Text), "lastSequence" .= ("7" :: T.Text), "protocolVersion" .= (2 :: Int)])
+      decoded value = either (die . show) pure (S.decodeSnapshot value items)
+  verified <- decoded verifiedMetadata
+  failed <- decoded (runtime "failed" verifiedMetadata)
+  running <- decoded (runtime "running" verifiedMetadata)
+  artifact <- case S.decodeOutputs verified outputMetadata outputItems of
+    Right (Just value) -> pure value
+    other -> die ("FAIL the verified fixture artifact was refused: " <> show other)
+  firstItem <- maybe (die "empty runs fixture") pure (listToMaybe runItems)
+  let browser = (initialModel [S.workflowDisplay row] [] (Left "manager owns routing")) {modelStatus = "manager catalogue: profile_main"}
+      help = Just (S.workflowHelp row)
+      press model (key, modifiers) = fromMaybe model (serviceBrowserKey help key modifiers model)
+      phaseA = map (\character -> (Vty.KChar character, [])) "slmfci1" <> [(Vty.KChar '\t', []), (Vty.KChar 'h', []), (Vty.KEsc, [])]
+      historyModel = press browser (Vty.KChar 'H', [])
+      detailModel = historyModel {modelScreen = ServiceHistoryRunScreen "run_21"}
+      later = put "id" (String "run_9") $ put "links" (object [(Key.fromText name, String ("/v1/runs/run_9" <> suffix))
+        | (name, suffix) <- [("self", ""), ("snapshot", "/snapshot"), ("control", "/control"), ("outputs", "/outputs"),
+          ("exports", "/exports"), ("lineageRequests", "/lineage-requests")]]) firstItem
+      legacy = S.RunItem "run_legacy_1" "handle_1" "profile_main" (S.KnownContent (S.KnownRun "prompt-source" Nothing
+        Nothing Nothing (Just 2) (Just (RunSucceeded, 4, 2)) "observer" "valid" (S.Referenced "result_handle_1") []))
+      unreadable = S.RunItem "run_legacy_2" "handle_2" "profile_main" (S.UnreadableContent "malformed-manifest")
+      listed = either (const []) id (S.decodeHistory (runItems <> [later]))
+      runs = listed <> [legacy]
+      rows = S.historyRows runs
+      status = S.historyStatus Nothing (Just runs)
+      bytes = BS.replicate 80 65 <> "\n"
+      result = S.VerifiedResult artifact bytes
+      managed = S.ManagedDetail verified
+      detailLines retrieval = S.historyDetailLines managed retrieval
+      legacyLines = S.historyDetailLines (S.LegacyDetail legacy) Nothing
+      presentation model = (emptyPresentation model) {presentationService = True, presentationNoColor = True,
+        presentationServiceHistory = OverviewView rows 0 status}
+      listFrame = render (100,30) (presentation historyModel)
+      detailFrame savable = render (100,30) ((presentation detailModel) {presentationServiceHistoryDetail = "Run detail: current" : detailLines (Just (Right result)),
+        presentationServiceSavable = savable})
+  putStrLn "RENDER manager history at (100,30):" >> putStr (T.unpack listFrame)
+  putStrLn "RENDER manager run detail at (100,30):" >> putStr (T.unpack (detailFrame True))
+  checks
+    [ ("H opens the History view from the workflow browser, and Esc returns to the workflows list",
+        modelScreen historyModel == ServiceHistoryScreen && modelScreen (press historyModel (Vty.KEsc, [])) == BrowserScreen),
+      ("Esc on the run detail returns to the History view",
+        modelScreen (press detailModel (Vty.KEsc, [])) == ServiceHistoryScreen),
+      ("no Phase A key and no Tab opens the History view, and h still opens the workflow help",
+        all (\step -> modelScreen (press browser step) /= ServiceHistoryScreen) phaseA
+          && fmap modelScreen (serviceBrowserKey help (Vty.KChar 'h') [] browser) == Just (HelpScreen (S.workflowHelp row))),
+      ("the run list keeps the identifier order of the collection across its items and refuses a repeated run",
+        map S.runItemId listed == ["run_21", "run_9"] && map S.overviewRowId rows == ["run_21", "run_9", "run_legacy_1"]
+          && S.decodeHistory (runItems <> runItems) == Left C.InvalidResponse),
+      ("a legacy entry is a run with observer supervision and no request, or an entry with an unreadable manifest",
+        S.historyLegacy legacy && S.historyLegacy unreadable && not (any S.historyLegacy listed)),
+      ("each run row shows its runtime status, supervision and verification",
+        all (`elem` maybe [] S.overviewRowDetails (listToMaybe [entry | entry <- rows, S.overviewRowId entry == "run_legacy_1"]))
+          ["Runtime status: Succeeded (sequence 4, protocol 2)", "Supervision: observer", "Verification: referenced"]),
+      ("golden: the history status counts the managed runs and the legacy entries and keeps a stale mark",
+        status == "History: current; runs: 3 (managed 2, legacy 1)"
+          && S.historyStatus (Just "TransportUnavailable") (Just runs)
+            == "History: stale (TransportUnavailable); the last complete run list is retained; runs: 3 (managed 2, legacy 1)"
+          && S.historyStatus Nothing Nothing == "History: not read"
+          && S.historyStatus (Just "403 insufficient-scope") Nothing == "History: refused (403 insufficient-scope); no complete run list is installed"),
+      ("r retrieves only a succeeded managed run with a verified or referenced result",
+        S.historyRetrievable managed == Right verified
+          && S.historyRetrievable (S.ManagedDetail failed) == Left "the run did not succeed"
+          && S.historyRetrievable (S.ManagedDetail running) == Left "the run is not terminal"
+          && S.historyRetrievable (S.LegacyDetail legacy) == Left "a legacy entry publishes no size and digest for its result"),
+      ("the run detail shows the snapshot summary and the result state of r",
+        all (`elem` detailLines Nothing) ["Run: run_21", "Workflow: review", "Runtime status: Succeeded (sequence 9007199254740993)",
+          "Verification: verified", "Result: r retrieves the verified bytes"]
+          && "Result: not retrieved (503 storage-unavailable); r retries" `elem` detailLines (Just (Left "503 storage-unavailable"))
+          && "Result: verified 81 bytes" `elem` detailLines (Just (Right result))
+          && "Result: no retrieval; the run did not succeed" `elem` S.historyDetailLines (S.ManagedDetail failed) Nothing),
+      ("the detail of a legacy entry shows its representation and no retrieval",
+        all (`elem` legacyLines) ["Run: run_legacy_1", "Supervision: observer",
+          "Result: not retrieved; a legacy entry publishes no size and digest for its result"]),
+      ("the History view at (100,30) lists the runs beside the details of the first run",
+        all (`T.isInfixOf` listFrame) ["Manager history", "History: current; runs: 3 (managed 2, legacy 1)", "> run Running  run_21",
+          "Supervision: lost", "Enter OPEN RUN"]),
+      ("the run detail at (100,30) is read-only and names r, and s only while the bytes are retained",
+        all (`T.isInfixOf` detailFrame True) ["Manager run detail", "Run detail [read-only]", "Result: verified 81 bytes", "r RETRIEVE RESULT", "s SAVE RESULT"]
+          && not ("s SAVE RESULT" `T.isInfixOf` detailFrame False)),
+      ("the service workflow browser names H HISTORY",
+        "H HISTORY" `T.isInfixOf` render (120,30) ((emptyPresentation browser) {presentationService = True, presentationNoColor = True}))
+    ]
+
 -- | The navigation keys of the service workflow browser, the projection of
 -- the manager overview, its stale mark and fixed-size renders of its view.
 overviewTests :: ((Int,Int) -> Presentation -> T.Text) -> S.Workflow -> C.DraftView -> C.Preparation -> IO ()
@@ -1167,41 +1270,58 @@ compositeTests render profile row request0 preparation snapshot absentRuntime (m
           && not (L.refreshPaused (after 1) reading Nothing))
     ]
   -- The retrieval of the verified result retries a failure. An automatic
-  -- refresh retries after the next installed composite read, and g retries
-  -- at once. Only retrieved bytes are retained, and they are never retrieved
-  -- again.
+  -- refresh retries after the next installed observation of the run, and g
+  -- retries at once. Only retrieved bytes are retained, by run identifier,
+  -- and they are never retrieved again.
   let bytesOf = "verified bytes" :: T.Text
-      refusedOnce = L.retrievalStep "run_21" (Left (C.Refused 503 "storage-unavailable") :: Either C.ClientFailure (Maybe T.Text))
-      noneYet = L.retrievalStep "run_21" (Right Nothing :: Either C.ClientFailure (Maybe T.Text))
-      retrievedOnce = L.retrievalStep "run_21" (Right (Just bytesOf))
-      due cause retrieval = L.retrievalDue cause "run_21" retrieval
+      firstRetrieval run finished = L.retrievalStep run finished L.noRetrievals :: L.Retrievals T.Text
+      refusedOnce = firstRetrieval "run_21" (Left (C.Refused 503 "storage-unavailable"))
+      noneYet = firstRetrieval "run_21" (Right Nothing)
+      retrievedOnce = firstRetrieval "run_21" (Right (Just bytesOf))
+      due cause retrievals = L.retrievalDue cause "run_21" retrievals
+      both = L.retrievalStep "run_22" (Right (Just "second bytes")) retrievedOnce
+      otherFailed = L.retrievalStep "run_22" (Left (C.Refused 503 "storage-unavailable")) retrievedOnce
+      full = foldl (\retrievals number -> L.retrievalStep ("run_" <> T.pack (show number)) (Right (Just ("bytes" :: T.Text))) retrievals)
+        L.noRetrievals [1 .. L.retrievalsBound]
+      beyond = L.retrievalStep "run_new" (Right (Just "new bytes")) full
+      retried = L.retrievalStep "run_1" (Left (C.Refused 503 "storage-unavailable")) full
   checks
     [ ("a run without a retrieval is retrieved on an automatic and an explicit refresh",
-        due L.AutomaticRefresh Nothing && due L.ExplicitRefresh Nothing
-          && due L.AutomaticRefresh (Just (L.Retrieval "run_other" (L.Retrieved bytesOf)))),
+        due L.AutomaticRefresh L.noRetrievals && due L.ExplicitRefresh L.noRetrievals
+          && due L.AutomaticRefresh (firstRetrieval "run_other" (Right (Just bytesOf)))),
       ("a refusal and a retrieval without a verified result are retryable failures, not retained bytes",
-        refusedOnce == L.Retrieval "run_21" (L.RetrievalFailed "503 storage-unavailable" False)
-          && noneYet == L.Retrieval "run_21" (L.RetrievalFailed "no verified result" False)
-          && L.retrievedResult "run_21" (Just refusedOnce) == Nothing && L.retrievedResult "run_21" (Just noneYet) == Nothing),
+        L.retrievalOf "run_21" refusedOnce == Just (L.RetrievalFailed "503 storage-unavailable" False)
+          && L.retrievalOf "run_21" noneYet == Just (L.RetrievalFailed "no verified result" False)
+          && L.retrievedResult "run_21" refusedOnce == Nothing && L.retrievedResult "run_21" noneYet == Nothing),
       ("after a failure an automatic refresh reads the observation first and does not retrieve",
-        not (due L.AutomaticRefresh (Just noneYet)) && not (due L.AutomaticRefresh (Just refusedOnce))),
+        not (due L.AutomaticRefresh noneYet) && not (due L.AutomaticRefresh refusedOnce)),
       ("after a failure g retries the retrieval at once",
-        due L.ExplicitRefresh (Just noneYet) && due L.ExplicitRefresh (Just refusedOnce)),
-      ("an installed composite read makes the failed retrieval due for the next automatic refresh",
-        due L.AutomaticRefresh (L.retrievalObserved (Just noneYet)) && due L.AutomaticRefresh (L.retrievalObserved (Just refusedOnce))),
+        due L.ExplicitRefresh noneYet && due L.ExplicitRefresh refusedOnce),
+      ("an installed observation of the run makes its failed retrieval due for the next automatic refresh",
+        due L.AutomaticRefresh (L.retrievalObserved "run_21" noneYet) && due L.AutomaticRefresh (L.retrievalObserved "run_21" refusedOnce)
+          && not (due L.AutomaticRefresh (L.retrievalObserved "run_other" noneYet))),
       ("a retry that finds the verified state retains the bytes, and they are not retrieved again",
-        L.retrievedResult "run_21" (Just retrievedOnce) == Just bytesOf
-          && not (due L.AutomaticRefresh (Just retrievedOnce)) && not (due L.ExplicitRefresh (Just retrievedOnce))
-          && L.retrievalObserved (Just retrievedOnce) == Just retrievedOnce),
-      ("the retained bytes belong to their run only", L.retrievedResult "run_other" (Just retrievedOnce) == Nothing
-          && L.retrievalShown "run_other" (Just retrievedOnce) == Nothing),
+        L.retrievedResult "run_21" retrievedOnce == Just bytesOf
+          && not (due L.AutomaticRefresh retrievedOnce) && not (due L.ExplicitRefresh retrievedOnce)
+          && L.retrievalObserved "run_21" retrievedOnce == retrievedOnce),
+      ("the retained bytes belong to their run only", L.retrievedResult "run_other" retrievedOnce == Nothing
+          && L.retrievalShown "run_other" retrievedOnce == Nothing),
+      ("the results of several runs are kept by run identifier, and a failure of one run keeps the bytes of another",
+        L.retrievedResult "run_21" both == Just bytesOf && L.retrievedResult "run_22" both == Just "second bytes"
+          && L.retrievalRuns both == ["run_21", "run_22"]
+          && L.retrievedResult "run_21" otherFailed == Just bytesOf && L.retrievalShown "run_22" otherFailed == Just (Left "503 storage-unavailable")
+          && not (L.retrievalDue L.ExplicitRefresh "run_21" otherFailed) && L.retrievalDue L.ExplicitRefresh "run_22" otherFailed),
+      ("a new run beyond the bound removes the run whose retrieval completed first, and a retry of a kept run removes none",
+        length (L.retrievalRuns full) == L.retrievalsBound && length (L.retrievalRuns beyond) == L.retrievalsBound
+          && "run_1" `notElem` L.retrievalRuns beyond && L.retrievedResult "run_new" beyond == Just "new bytes"
+          && L.retrievedResult "run_2" beyond == Just "bytes" && L.retrievalRuns retried == L.retrievalRuns full),
       ("the result lines show a failure as retried and the bytes as retrieved",
-        L.retrievalShown "run_21" (Just noneYet) == Just (Left "no verified result")
-          && L.retrievalShown "run_21" (Just retrievedOnce) == Just (Right bytesOf)),
+        L.retrievalShown "run_21" noneYet == Just (Left "no verified result")
+          && L.retrievalShown "run_21" retrievedOnce == Just (Right bytesOf)),
       ("golden: the status line states the failure and the retry",
-        L.retrievalStatus noneYet == "verified result not retrieved: no verified result; the next refresh retries"
-          && L.retrievalStatus refusedOnce == "verified result not retrieved: 503 storage-unavailable; the next refresh retries"
-          && L.retrievalStatus retrievedOnce == "verified result retrieved")
+        fmap L.retrievalStatus (L.retrievalOf "run_21" noneYet) == Just "verified result not retrieved: no verified result; the next refresh retries"
+          && fmap L.retrievalStatus (L.retrievalOf "run_21" refusedOnce) == Just "verified result not retrieved: 503 storage-unavailable; the next refresh retries"
+          && fmap L.retrievalStatus (L.retrievalOf "run_21" retrievedOnce) == Just "verified result retrieved")
     ]
   let busyText = maybe "" id (L.admissionText "enqueue" L.KeyBusy)
       loadingModel = (initialServiceModel [profile]) {modelScreen = ServiceRequestScreen associated, modelStatus = "loading manager catalogue"}
@@ -2532,10 +2652,10 @@ liveDeliveryTests render profile = do
       ("a request invalidation of another request invalidates only the overview",
         routed ["/v1/requests/req_2"] == [L.OverviewFetch]),
       ("a snapshot or control invalidation of the selected run invalidates the overview, the composite read and the decision heads",
-        routed ["/v1/runs/run_1/snapshot"] == [L.OverviewFetch, L.RequestFetch, L.DecisionsFetch]
-          && routed ["/v1/runs/run_1/control"] == [L.OverviewFetch, L.RequestFetch, L.DecisionsFetch]),
-      ("a snapshot, output or export invalidation of another run invalidates the overview, which shows its runtime status, and the decision heads",
-        all (\resource -> routed [resource] == [L.OverviewFetch, L.DecisionsFetch])
+        routed ["/v1/runs/run_1/snapshot"] == [L.OverviewFetch, L.RequestFetch, L.DecisionsFetch, L.HistoryFetch]
+          && routed ["/v1/runs/run_1/control"] == [L.OverviewFetch, L.RequestFetch, L.DecisionsFetch, L.HistoryFetch]),
+      ("a snapshot, output or export invalidation of another run invalidates the overview, which shows its runtime status, the decision heads and the history",
+        all (\resource -> routed [resource] == [L.OverviewFetch, L.DecisionsFetch, L.HistoryFetch])
           ["/v1/runs/run_2/snapshot", "/v1/runs/run_2/outputs", "/v1/runs/run_2/exports", "/v1/runs/run_2"]),
       ("a resource below a preparation or request of another request invalidates only the overview",
         all (\resource -> routed [resource] == [L.OverviewFetch]) ["/v1/preparations/prep_2/draft", "/v1/requests/req_2/history"]),
@@ -2551,7 +2671,7 @@ liveDeliveryTests render profile = do
       ("the invalidated set holds each resource once and sets its overflow mark beyond its bound",
         L.invalidatedResources (noted ["/v1/requests/a", "/v1/requests/a"]) == Set.fromList ["/v1/requests/a"]
           && L.invalidatedOverflow overflowing && Set.size (L.invalidatedResources overflowing) == L.invalidatedBound
-          && L.invalidatedFetches [] overflowing == [L.OverviewFetch, L.RequestFetch, L.DecisionsFetch]),
+          && L.invalidatedFetches [] overflowing == [L.OverviewFetch, L.RequestFetch, L.DecisionsFetch, L.HistoryFetch]),
       ("an invalidation of an idle read starts one fetch, which waits for the read lane",
         L.fetchesWaiting f1 == [(L.OverviewFetch, g0)] && C.refreshFlights r1 == Map.fromList [(L.OverviewFetch, C.Flight g0 False)]),
       ("no fetch starts while another read holds the read ticket, and a read that may not start keeps waiting",
@@ -2576,13 +2696,14 @@ liveDeliveryTests render profile = do
         L.fetchesWaiting abandoned == [(L.OverviewFetch, g0)] && isNothing (L.fetchesReading abandoned)
           && L.fetchAbandoned (reading 5) f2 == f2),
       ("a resnapshot advances the fetch generation and fetches every read again after the fetch in flight",
-        C.refreshGeneration rs == g1 && L.fetchesWaiting fs == [(L.OverviewFetch, g1), (L.RequestFetch, g1), (L.DecisionsFetch, g1)]
+        C.refreshGeneration rs == g1 && L.fetchesWaiting fs == [(L.OverviewFetch, g1), (L.RequestFetch, g1), (L.DecisionsFetch, g1), (L.HistoryFetch, g1)]
           && L.fetchesReading fs == Just (5, L.OverviewFetch, g0) && isNothing (L.takeFetch (const True) idleLane fs)),
       ("an overview fetch from before the resnapshot completes without installing its old cursor",
         fmap (\(install, _, fetches) -> (install, L.fetchesReading fetches, L.fetchesWaiting fetches)) completedBefore
-          == Just (False, Nothing, [(L.OverviewFetch, g1), (L.RequestFetch, g1), (L.DecisionsFetch, g1)])),
-      ("the overview fetch of the resnapshot installs and leaves the composite and decision fetches waiting",
-        fmap (\(install, _, fetches) -> (install, L.fetchesWaiting fetches)) completedAfter == Just (True, [(L.RequestFetch, g1), (L.DecisionsFetch, g1)])),
+          == Just (False, Nothing, [(L.OverviewFetch, g1), (L.RequestFetch, g1), (L.DecisionsFetch, g1), (L.HistoryFetch, g1)])),
+      ("the overview fetch of the resnapshot installs and leaves the composite, decision and history fetches waiting",
+        fmap (\(install, _, fetches) -> (install, L.fetchesWaiting fetches)) completedAfter
+          == Just (True, [(L.RequestFetch, g1), (L.DecisionsFetch, g1), (L.HistoryFetch, g1)])),
       ("a refused overview read is read again after the backoff of the client, which doubles up to its limit",
         L.retryDue retry1 == Just (addUTCTime 1 now)
           && not (L.overviewRetryDue (Just retry1) now)

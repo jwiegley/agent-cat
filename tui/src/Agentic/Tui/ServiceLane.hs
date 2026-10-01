@@ -38,7 +38,7 @@
 -- outcome, whichever comes first.
 --
 -- The verified result of a run is retrieved through the same lane. Only
--- retrieved verified bytes are retained ('Retrieval'). A refusal or a
+-- retrieved verified bytes are retained, by run identifier ('Retrievals'). A refusal or a
 -- retrieval without a verified result is a retryable failure: an automatic
 -- refresh retries it after the next installed composite read, and an
 -- explicit refresh retries it at once ('retrievalDue').
@@ -54,9 +54,9 @@
 -- for its own profile, and no later session sends it. A failed connection
 -- keeps the active session and records its fixed reason.
 --
--- Live delivery keeps three reads current: the manager overview, the
--- composite read of the selected request and the pending decision heads of
--- the manager decisions ('FetchKey'). The event worker of
+-- Live delivery keeps four reads current: the manager overview, the
+-- composite read of the selected request, the pending decision heads of
+-- the manager decisions and the shown read of the History view ('FetchKey'). The event worker of
 -- the session records each invalidated resource in a bounded set
 -- ('Invalidated') and wakes the frontend once. 'invalidatedFetches' routes
 -- the set to the reads that read an invalidated resource, and the refresh
@@ -132,8 +132,12 @@ module Agentic.Tui.ServiceLane
     refreshPauseLimit,
     refreshPaused,
     RefreshCause (..),
-    Retrieval (..),
+    Retrievals,
+    noRetrievals,
+    retrievalsBound,
     RetrievalState (..),
+    retrievalOf,
+    retrievalRuns,
     retrievalDue,
     retrievalStep,
     retrievalObserved,
@@ -207,7 +211,8 @@ where
 import qualified Agentic.Manager.Client as C
 import Agentic.Tui.Service (Endpoint, Mutation, ReadVerdict (..), missingScope, mutationOperation, mutationURI)
 import Control.Exception (SomeAsyncException, SomeException, evaluate, fromException, throwIO, try)
-import Data.List (elemIndex, findIndex)
+import Data.List (elemIndex, findIndex, minimumBy)
+import Data.Ord (comparing)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Data.Maybe (fromMaybe, isJust)
@@ -855,70 +860,97 @@ refreshPaused now lane outcome = case outcome >>= outcomeDeferral of
 data RefreshCause = AutomaticRefresh | ExplicitRefresh
   deriving (Eq, Show, Enum, Bounded)
 
--- | The retrieval of the verified result of one run, by its run identifier.
-data Retrieval result = Retrieval
-  { retrievalRun :: !Text,
-    retrievalState :: !(RetrievalState result)
-  }
+-- | The retrievals of the verified results of the session by run
+-- identifier. Each run keeps its own retrieval state and its own retry rule
+-- ('retrievalDue'). At most 'retrievalsBound' runs are kept. A new run
+-- beyond that bound removes the run whose retrieval completed first, so the
+-- retained bytes stay bounded. The counter orders the completions.
+data Retrievals result = Retrievals !Int !(Map.Map Text (Int, RetrievalState result))
   deriving (Eq, Show)
+
+-- | No retrieval, as for a new session.
+noRetrievals :: Retrievals result
+noRetrievals = Retrievals 0 Map.empty
+
+-- | The largest number of runs whose retrievals the session keeps. With the
+-- 64 MiB bound of one verified result, the retained bytes stay within
+-- 512 MiB.
+retrievalsBound :: Int
+retrievalsBound = 8
 
 -- | The latest retrieval of the verified result of a run.
 data RetrievalState result
   = -- | The exact verified bytes. They are never retrieved again.
     Retrieved !result
   | -- | The latest retrieval was refused with this code, or it found no
-    -- verified result. The flag records whether a composite read was
-    -- installed after that retrieval, which makes an automatic retry due.
+    -- verified result. The flag records whether an observation of the run
+    -- was installed after that retrieval, which makes an automatic retry due.
     RetrievalFailed !Text !Bool
   deriving (Eq, Show)
 
+-- | The latest retrieval of this run.
+retrievalOf :: Text -> Retrievals result -> Maybe (RetrievalState result)
+retrievalOf run (Retrievals _ entries) = snd <$> Map.lookup run entries
+
+-- | The runs with a retrieval, in identifier order.
+retrievalRuns :: Retrievals result -> [Text]
+retrievalRuns (Retrievals _ entries) = Map.keys entries
+
 -- | Whether a refresh for this cause retrieves the verified result of this
--- run now, given the retained retrieval. A run without a retrieval is
+-- run now, given the retrievals of the session. A run without a retrieval is
 -- retrieved. Retrieved bytes are never retrieved again. After a failure, an
 -- explicit refresh retries at once, and an automatic refresh retries only
--- after the next installed composite read, so each automatic refresh starts
--- at most one retrieval and the observation keeps its refresh.
-retrievalDue :: RefreshCause -> Text -> Maybe (Retrieval result) -> Bool
-retrievalDue cause run retrieval = case retrieval of
-  Just (Retrieval ident state) | ident == run -> case state of
-    Retrieved _ -> False
-    RetrievalFailed _ observed -> observed || cause == ExplicitRefresh
-  _ -> True
+-- after the next installed observation of the run, so each automatic refresh
+-- starts at most one retrieval and the observation keeps its refresh.
+retrievalDue :: RefreshCause -> Text -> Retrievals result -> Bool
+retrievalDue cause run retrievals = case retrievalOf run retrievals of
+  Just (Retrieved _) -> False
+  Just (RetrievalFailed _ observed) -> observed || cause == ExplicitRefresh
+  Nothing -> True
 
--- | The retrieval after one completed retrieval of this run: the verified
+-- | The retrievals after one completed retrieval of this run: the verified
 -- bytes, or a retryable failure with the refusal code or the fixed text
--- @no verified result@.
-retrievalStep :: Text -> Either C.ClientFailure (Maybe result) -> Retrieval result
-retrievalStep run outcome = Retrieval run $ case outcome of
-  Right (Just result) -> Retrieved result
-  Right Nothing -> RetrievalFailed "no verified result" False
-  Left failure -> RetrievalFailed (refusalCode failure) False
+-- @no verified result@. The retrievals of the other runs stay, except that a
+-- new run beyond 'retrievalsBound' removes the run whose retrieval completed
+-- first.
+retrievalStep :: Text -> Either C.ClientFailure (Maybe result) -> Retrievals result -> Retrievals result
+retrievalStep run outcome (Retrievals counter entries) =
+  Retrievals (counter + 1) (Map.insert run (counter, state) kept)
+  where
+    state = case outcome of
+      Right (Just result) -> Retrieved result
+      Right Nothing -> RetrievalFailed "no verified result" False
+      Left failure -> RetrievalFailed (refusalCode failure) False
+    kept
+      | Map.member run entries || Map.size entries < retrievalsBound = entries
+      | otherwise = Map.delete (fst (minimumBy (comparing (fst . snd)) (Map.toList entries))) entries
 
--- | The retrieval after an installed composite read. A failed retrieval
--- becomes due for an automatic retry. Retrieved bytes stay.
-retrievalObserved :: Maybe (Retrieval result) -> Maybe (Retrieval result)
-retrievalObserved retrieval = case retrieval of
-  Just (Retrieval run (RetrievalFailed code _)) -> Just (Retrieval run (RetrievalFailed code True))
-  _ -> retrieval
+-- | The retrievals after an installed observation of this run. A failed
+-- retrieval of the run becomes due for an automatic retry. Retrieved bytes
+-- and the retrievals of the other runs stay.
+retrievalObserved :: Text -> Retrievals result -> Retrievals result
+retrievalObserved run (Retrievals counter entries) = Retrievals counter (Map.adjust observed run entries)
+  where
+    observed (order, state) = case state of
+      RetrievalFailed code _ -> (order, RetrievalFailed code True)
+      Retrieved _ -> (order, state)
 
 -- | The retained verified bytes of this run.
-retrievedResult :: Text -> Maybe (Retrieval result) -> Maybe result
-retrievedResult run retrieval = case retrieval of
-  Just (Retrieval ident (Retrieved result)) | ident == run -> Just result
+retrievedResult :: Text -> Retrievals result -> Maybe result
+retrievedResult run retrievals = case retrievalOf run retrievals of
+  Just (Retrieved result) -> Just result
   _ -> Nothing
 
 -- | The retrieval of this run for display: none yet, the failure code of the
 -- latest retrieval, or the verified bytes.
-retrievalShown :: Text -> Maybe (Retrieval result) -> Maybe (Either Text result)
-retrievalShown run retrieval = case retrieval of
-  Just (Retrieval ident state) | ident == run -> Just $ case state of
-    Retrieved result -> Right result
-    RetrievalFailed code _ -> Left code
-  _ -> Nothing
+retrievalShown :: Text -> Retrievals result -> Maybe (Either Text result)
+retrievalShown run retrievals = flip fmap (retrievalOf run retrievals) $ \state -> case state of
+  Retrieved result -> Right result
+  RetrievalFailed code _ -> Left code
 
 -- | The status line after one completed retrieval.
-retrievalStatus :: Retrieval result -> Text
-retrievalStatus retrieval = case retrievalState retrieval of
+retrievalStatus :: RetrievalState result -> Text
+retrievalStatus state = case state of
   Retrieved _ -> "verified result retrieved"
   RetrievalFailed code _ -> "verified result not retrieved: " <> code <> "; the next refresh retries"
 
@@ -1018,9 +1050,10 @@ shutdownNotices uncertain faulted =
     <> ["Manager command outcome may be uncertain. The manager run was not cancelled." | uncertain]
 
 -- | A read that live delivery keeps current: the manager overview, the
--- composite read of the selected request, or the pending decision heads of
--- the manager decisions.
-data FetchKey = OverviewFetch | RequestFetch | DecisionsFetch
+-- composite read of the selected request, the pending decision heads of
+-- the manager decisions, or the shown read of the History view, which is
+-- the run list or the detail of one run.
+data FetchKey = OverviewFetch | RequestFetch | DecisionsFetch | HistoryFetch
   deriving (Eq, Ord, Show, Enum, Bounded)
 
 -- | The state of live delivery of the session.
@@ -1207,8 +1240,10 @@ noteInvalidation resource invalidated@(Invalidated resources overflow)
 -- so a resource invalidates it when one of the two resources is the other
 -- or lies below it. The decision heads change with a decision, such as a
 -- new head or an answered head, and with a run, whose end leaves its queue,
--- so a resource at or below a decision or a run invalidates them. An
--- overflowing set invalidates every read.
+-- so a resource at or below a decision or a run invalidates them. The
+-- History view lists every run and shows the detail of one run, so a
+-- resource at or below a run invalidates it. An overflowing set invalidates
+-- every read.
 invalidatedFetches :: [Text] -> Invalidated -> [FetchKey]
 invalidatedFetches composite (Invalidated resources overflow)
   | overflow = [minBound .. maxBound]
@@ -1216,6 +1251,7 @@ invalidatedFetches composite (Invalidated resources overflow)
       [OverviewFetch | any (member ["requests", "preparations", "runs", "decisions"]) invalidated]
         <> [RequestFetch | any (\resource -> any (related resource) composite) invalidated]
         <> [DecisionsFetch | any (member ["runs", "decisions"]) invalidated]
+        <> [HistoryFetch | any (member ["runs"]) invalidated]
   where
     invalidated = Set.toList resources
     member collections resource = case T.splitOn "/" resource of

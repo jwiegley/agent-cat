@@ -191,6 +191,14 @@ data Presentation = Presentation
     -- observation order, the selected row and the decisions status line,
     -- which the manager decisions view shows.
     presentationServiceDecisions :: !OverviewView,
+    -- | The rows of the installed run list of @/v1/runs@ in identifier
+    -- order, the selected row and the history status line, which the
+    -- History view shows.
+    presentationServiceHistory :: !OverviewView,
+    -- | The lines of the installed detail of the run that the run detail
+    -- shows, as 'Agentic.Tui.Service.historyDetailLines' produces them,
+    -- with the status line of the detail read and the saved line.
+    presentationServiceHistoryDetail :: ![Text],
     presentationConfig :: !(Maybe TuiConfig),
     presentationPersonPrompt :: !(Maybe PersonPrompt),
     presentationPersonSubmitted :: !Bool,
@@ -210,8 +218,8 @@ data Presentation = Presentation
     presentationSpinner :: !Text
   }
 
--- | The display state of the manager overview view and of the manager
--- decisions view.
+-- | The display state of the manager overview view, of the manager
+-- decisions view and of the History view.
 data OverviewView = OverviewView
   { overviewViewRows :: ![Service.OverviewRow], overviewViewCursor :: !Int, overviewViewStatus :: !Text }
 
@@ -256,6 +264,8 @@ emptyPresentation model =
       presentationServiceKeyOutcome = Nothing,
       presentationServiceOverview = OverviewView [] 0 (Service.overviewStatus Nothing Nothing),
       presentationServiceDecisions = OverviewView [] 0 (Service.decisionsStatus Nothing Nothing),
+      presentationServiceHistory = OverviewView [] 0 (Service.historyStatus Nothing Nothing),
+      presentationServiceHistoryDetail = [],
       presentationConfig = Nothing,
       presentationPersonPrompt = Nothing,
       presentationPersonSubmitted = False,
@@ -394,6 +404,8 @@ headerContext presentation = case modelScreen model of
   BrowserScreen | presentationService presentation -> displayText "Manager workflows"
   ServiceOverviewScreen -> displayText "Manager overview"
   ServiceDecisionsScreen -> displayText "Manager decisions"
+  ServiceHistoryScreen -> displayText "Manager history"
+  ServiceHistoryRunScreen _ -> displayText "Manager run detail"
   BrowserScreen -> tabs (modelTab model)
   LiveScreen _ -> hBox [withAttr (attrName "title") (displayText (liveContext presentation))]
   LaunchingScreen _ -> displayText "Starting runner…"
@@ -469,6 +481,8 @@ screenView presentation width totalHeight mainHeight = case modelScreen model of
   ServiceProfilesScreen _ _ -> browserView presentation width totalHeight
   ServiceOverviewScreen -> serviceRowsView "Overview" "Select an overview row." (presentationServiceOverview presentation) presentation width totalHeight
   ServiceDecisionsScreen -> serviceRowsView "Decisions" "Select a decision row." (presentationServiceDecisions presentation) presentation width totalHeight
+  ServiceHistoryScreen -> serviceRowsView "History" "Select a run row." (presentationServiceHistory presentation) presentation width totalHeight
+  ServiceHistoryRunScreen _ -> pane "Run detail [read-only]" (viewport FailureViewport Vertical (vBox (map displayTextWrap (presentationServiceHistoryDetail presentation))))
   ServiceRequestScreen request -> serviceRequestView presentation request
   ServiceReviewScreen preparation tag -> serviceReviewView presentation preparation tag width totalHeight mainHeight
   ServiceCommandScreen message -> pane "Manager command" (viewport FailureViewport Vertical (displayTextWrap message))
@@ -589,7 +603,7 @@ serviceReviewView presentation preparation tag width _ mainHeight
         [ "Lineage: " <> Manager.reviewLineageOperation lineage <> " of run " <> Manager.reviewLineageParent lineage,
           "Lineage edits:", jsonTextValue (toJSON (Manager.reviewLineageEdits lineage)) ]) (Manager.reviewLineage review)
 
--- | The manager overview or the manager decisions, given the title of the
+-- | The manager overview, the manager decisions or the History view, given the title of the
 -- list pane, the text of an empty detail pane and the display state: the
 -- status line, the list of rows and the detail lines of the selected row. A
 -- wide terminal shows the list beside the details. A narrow terminal shows
@@ -1088,12 +1102,17 @@ keyHelpLines :: Presentation -> [Text]
 keyHelpLines presentation = case modelScreen model of
   BrowserScreen | presentationService presentation ->
     ["Up/Down select"] <> ["Enter creates a manager request" | not faulted]
-      <> ["Right/Left focus details/list", "h workflow help", "O manager overview", "D manager decisions", "Esc profiles", "E manager endpoints", "q detach",
+      <> ["Right/Left focus details/list", "h workflow help", "O manager overview", "D manager decisions", "H manager history", "Esc profiles",
+        "E manager endpoints", "q detach",
         "? or Esc close this help"]
   ServiceOverviewScreen -> ["Up/Down select", "Enter opens the selected request or run", "Right/Left focus details/list", "g reads the overview again", "Esc workflows",
     "E manager endpoints", "q detach", "? or Esc close this help"]
   ServiceDecisionsScreen -> ["Up/Down select", "Enter opens the run at the selected decision head", "Right/Left focus details/list",
     "g reads the decision heads again", "Esc workflows", "E manager endpoints", "q detach", "? or Esc close this help"]
+  ServiceHistoryScreen -> ["Up/Down select", "Home/End first or last run", "Enter opens the read-only detail of the selected run",
+    "Right/Left focus details/list", "g reads the run list again", "Esc workflows", "E manager endpoints", "q detach", "? or Esc close this help"]
+  ServiceHistoryRunScreen _ -> ["r retrieves the verified result of a succeeded run", "s saves the retrieved result to a new absolute path",
+    "g reads the run detail again", "Up/Down scroll", "Esc returns to the history", "E manager endpoints", "q detach", "? or Esc close this help"]
   BrowserScreen ->
     [ "Up/Down       select",
       "Right/Left    focus details/list",
@@ -1297,6 +1316,8 @@ footerItems presentation width height
       ServiceProfilesScreen _ _ -> ["Enter SELECT", "r REFRESH", browserPaneHint, "? KEYS", "q DETACH", "E ENDPOINTS"]
       ServiceOverviewScreen -> ["Enter OPEN", "g REFRESH", "Esc WORKFLOWS", browserPaneHint, "? KEYS", "q DETACH", "E ENDPOINTS"]
       ServiceDecisionsScreen -> ["Enter OPEN RUN", "g REFRESH", "Esc WORKFLOWS", browserPaneHint, "? KEYS", "q DETACH", "E ENDPOINTS"]
+      ServiceHistoryScreen -> ["Enter OPEN RUN", "g REFRESH", "Home/End", "Esc WORKFLOWS", browserPaneHint, "? KEYS", "q DETACH", "E ENDPOINTS"]
+      ServiceHistoryRunScreen _ -> ["r RETRIEVE RESULT"] <> saveItem <> ["g REFRESH", "Esc HISTORY", "? KEYS", "q DETACH", "E ENDPOINTS"]
       ServiceRequestScreen request ->
         ["g REFRESH", "q DETACH"] <> [serviceBackLabel presentation | presentationServiceMutation presentation == Nothing]
           <> (if Manager.draftPhase request == "draft" && presentationServiceMutation presentation == Nothing
@@ -1311,7 +1332,7 @@ footerItems presentation width height
       ServiceCommandScreen _ -> ["g REFRESH", "q DETACH"] <>
         ["x EXACT RESEND" | Just (_,_,True) <- [presentationServiceMutation presentation]]
       BrowserScreen
-        | presentationService presentation -> ["h HELP", "O OVERVIEW", "D DECISIONS", "Esc PROFILES", browserPaneHint, "? KEYS", "q DETACH"]
+        | presentationService presentation -> ["h HELP", "O OVERVIEW", "D DECISIONS", "H HISTORY", "Esc PROFILES", browserPaneHint, "? KEYS", "q DETACH"]
             <> ["Enter NEW REQUEST" | presentationServiceMutation presentation == Nothing, not (presentationServiceFault presentation)]
             <> ["E ENDPOINTS"]
         | presentationRunning presentation -> ["Esc REATTACH", "c CANCEL RUN", "Tab SECTION", "? KEYS", browserPaneHint]
@@ -1412,6 +1433,8 @@ screenTitle = \case
   ServiceProfilesScreen _ _ -> "manager profiles"
   ServiceOverviewScreen -> "manager overview"
   ServiceDecisionsScreen -> "manager decisions"
+  ServiceHistoryScreen -> "manager history"
+  ServiceHistoryRunScreen _ -> "manager run detail"
   ServiceRequestScreen _ -> "manager request"
   ServiceReviewScreen {} -> "exact manager review"
   ServiceCommandScreen _ -> "manager command"
