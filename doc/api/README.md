@@ -628,9 +628,10 @@ storage failures are not converted into successful receipts.
 
 `RUNNER` denotes the configured registry executable. The following forms define
 the command boundary. Offline administration and a configured same-user local
-channel implement credential listing, issuance, rotation and revocation. Other
-administration operations, including `reload-profiles`, receive
-`state-conflict`.
+channel implement credential listing, issuance, rotation and revocation, and the
+read-only `status` and `check-store` operations. The operations
+`reload-profiles`, `drain`, `shutdown`, `backup`, `restore`,
+`check-quarantine`, and `release-quarantine` receive `state-conflict`.
 Existing `RUNNER --tui` and native frontend commands remain unchanged.
 
 ```text

@@ -200,6 +200,7 @@ library
     Agentic.Cli.LocalAdmin
     Agentic.Manager.Credentials
     Agentic.Manager.LocalAdmin
+    Agentic.Manager.Quarantine
     Agentic.Manager.Transport
     Agentic.Manager.Service
     Agentic.Manager.Observation
@@ -551,6 +552,7 @@ executable manager-command-check
     Agentic.Manager.Test.AcceptanceAudit
     Agentic.Manager.Credentials
     Agentic.Manager.LocalAdmin
+    Agentic.Manager.Quarantine
     Agentic.Manager.Protocol.LocalAdmin
     Agentic.Manager.Commands
     Agentic.Manager.Protocol.Artifact

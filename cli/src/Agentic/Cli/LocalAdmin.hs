@@ -5,12 +5,13 @@
 module Agentic.Cli.LocalAdmin (runLocalAdmin) where
 
 import Agentic.Manager.Configuration
-import Agentic.Manager.Credentials (administerCredentials)
-import Agentic.Manager.LocalAdmin (callLocalAdministration)
+import Agentic.Manager.LocalAdmin (administerLocally, callLocalAdministration)
 import Agentic.Manager.Profile (Diagnostic)
 import Agentic.Manager.Protocol.LocalAdmin
-import Agentic.Manager.Store (StoreFailure, withCoordinationStore)
-import Control.Exception (IOException, bracket, try)
+import Agentic.Manager.Quarantine (StoreState (StoreStopped), unavailableStoreCheck)
+import Agentic.Manager.Store (CoordinationStore, StoreFailure, withCoordinationStore)
+import Control.Exception (IOException, bracket, throwIO, try)
+import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.Aeson (Value (..), eitherDecodeStrict')
 import qualified Data.Aeson.KeyMap as KM
 import qualified Data.ByteString as BS
@@ -19,6 +20,7 @@ import System.IO (stdin, stdout)
 
 -- A configured channel is authoritative even when unavailable. Only omission
 -- selects offline ownership, including the normal restart reconciliation.
+-- Operations without an implementation refuse before either path.
 runLocalAdmin :: (FilePath -> IO (Either Diagnostic Configuration)) -> FilePath -> IO ()
 runLocalAdmin load path = do
   input <- try @IOException (BS.hGet stdin 2097153)
@@ -45,7 +47,7 @@ runLocalAdmin load path = do
                         case installed of
                           Left _ -> pure (adminError (Just (adminOperation request)) StorageUnavailable)
                           Right owner -> bracket (pure owner) closeConfiguration $ \active ->
-                            withCoordinationStore active $ \store -> administerCredentials store request
+                            offline request (withCoordinationStore active)
         pure $ case result of
           Right (Right (Right response)) -> response
           _ -> adminError (Just (adminOperation request)) StorageUnavailable
@@ -53,3 +55,16 @@ runLocalAdmin load path = do
   case eitherDecodeStrict' output of
     Right (Object fields) | KM.lookup "ok" fields == Just (Bool True) -> exitSuccess
     _ -> exitFailure
+
+-- | Offline administration on a Store that this process opens. A Store that
+-- cannot be opened answers @check-store@ with integrity @unavailable@. Every
+-- other failure keeps its existing mapping.
+offline :: LocalAdminRequest -> ((CoordinationStore -> IO BS.ByteString) -> IO BS.ByteString) -> IO BS.ByteString
+offline request open = do
+  entered <- newIORef False
+  result <- try @StoreFailure (open (\store -> writeIORef entered True >> administerLocally StoreStopped store request))
+  opened <- readIORef entered
+  case (request, result) of
+    (_, Right response) -> pure response
+    (CheckStore, Left _) | not opened -> pure unavailableStoreCheck
+    (_, Left failure) -> throwIO failure

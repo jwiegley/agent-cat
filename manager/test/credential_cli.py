@@ -53,9 +53,16 @@ for payload, code in [
     assert value["operation"] is None and value["error"]["code"] == code
     assert value["error"]["message"] == ""
 
-for operation in ["status", "reload-profiles", "drain", "shutdown", "check-store"]:
+for operation in ["reload-profiles", "drain", "shutdown"]:
     value = call({"version": 1, "operation": operation})
     assert not value["ok"] and value["error"]["code"] == "state-conflict"
+
+# Offline status and check-store answer from the Store that the CLI opens.
+status = call({"version": 1, "operation": "status"})
+assert status["ok"] and status["result"]["state"] == "stopped", status
+assert status["result"]["activeReservations"] == 0, status
+checked = call({"version": 1, "operation": "check-store"})
+assert checked["ok"] and checked["result"] == {"integrity": "valid", "quarantineIds": []}, checked
 
 holding = subprocess.Popen([str(owner), "hold-credentials", str(original)],
                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
@@ -85,7 +92,7 @@ assert rotated["ok"] and rotated["result"]["credential"]["clientId"] == issued["
 revoked = call({"version": 1, "operation": "revoke-credential",
                 "credentialId": rotated["result"]["credential"]["credentialId"]})
 assert revoked["ok"]
-print("PASS frozen stdin CLI, exclusive offline ownership, private issuance and revocation")
+print("PASS frozen stdin CLI, offline status and check-store, exclusive offline ownership, private issuance and revocation")
 
 # A separate, short private namespace avoids Unix socket path limits on the data root.
 admin_root = Path(tempfile.mkdtemp(prefix="admin.", dir=os.environ["TMPDIR"]))
@@ -128,6 +135,13 @@ try:
     expect_line(live, "ready")
     assert address.stat().st_mode & 0o777 == 0o600
     assert call({"version": 1, "operation": "list-credentials"})["ok"]
+    # The live channel answers status and check-store from the serving Store.
+    live_status = call({"version": 1, "operation": "status"})
+    assert live_status["ok"] and live_status["result"]["state"] == "serving", live_status
+    assert live_status["result"]["authorityEpoch"] == status["result"]["authorityEpoch"], live_status
+    assert live_status["result"]["processGeneration"] != status["result"]["processGeneration"], live_status
+    live_checked = call({"version": 1, "operation": "check-store"})
+    assert live_checked["ok"] and live_checked["result"] == {"integrity": "valid", "quarantineIds": []}, live_checked
     for payload, code, eof in [
         (b'{', "malformed-request", True),
         (b'{', "malformed-request", False),
@@ -260,4 +274,4 @@ for symbolic in [False, True]:
     assert sentinel.read_bytes() == b"keep"
     assert address.is_symlink() if symbolic else address.read_bytes() == b"keep"
     address.unlink()
-print("PASS live original-Store administration, retained-response revocation, endpoint ownership and no offline fallback")
+print("PASS live original-Store administration, live status and check-store, retained-response revocation, endpoint ownership and no offline fallback")

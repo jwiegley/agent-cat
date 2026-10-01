@@ -6,7 +6,8 @@ module Main (main) where
 
 import qualified "agentic" Agentic.Manager as Public
 import Agentic.Manager.Credentials (administerCredentials)
-import Agentic.Manager.LocalAdmin (withLocalAdministration)
+import Agentic.Manager.LocalAdmin (administerLocally, withLocalAdministration)
+import Agentic.Manager.Quarantine (StoreState (..))
 import qualified Agentic.Manager.Protocol.LocalAdmin as Admin
 import Agentic.Manager.Authorization
 import Agentic.Manager.Commands
@@ -1070,7 +1071,23 @@ credentialAdministrationChecks work = withFixture work "credentials" (64*command
   adminRefused "exclusive publication collision" Admin.OutputConflict store (issue destination)
   BS.readFile destination >>= check "collision never replaces one-time bytes" . (== bearer)
   scalarInt store "SELECT count(*) FROM credentials" >>= check "collision never activates another credential" . (==4)
-  adminRefused "other admin owner not falsely implemented" Admin.StateConflict store (Admin.OtherAdmin "status")
+  adminRefused "other admin owner not falsely implemented" Admin.StateConflict store (Admin.OtherAdmin "drain")
+  adminRefused "credential owner leaves store status to its owner" Admin.StateConflict store Admin.Status
+  identity <- storeIdentity store
+  held <- scalarInt store "SELECT count(*) FROM reservations WHERE state!='released'"
+  stopped <- administerLocally StoreStopped store Admin.Status >>= adminValue
+  check "offline status reports the stopped Store identity and its active reservations"
+    (adminField "ok" stopped == Bool True && adminField "result" stopped == object
+      ["state" .= ("stopped" :: Text), "authorityEpoch" .= storeAuthorityEpoch identity,
+       "streamId" .= storeStreamId identity, "processGeneration" .= storeProcessGeneration identity,
+       "activeReservations" .= held])
+  serving <- administerLocally StoreServing store Admin.Status >>= adminValue
+  check "live status reports a serving Store" (adminField "state" (adminField "result" serving) == String "serving")
+  quarantined <- runRead store ((\rows -> [claim | [SQL.SQLText claim] <- rows]) <$> query "SELECT id FROM reservations WHERE state='quarantined' UNION SELECT id FROM restoration_quarantine ORDER BY id" [])
+  checked <- administerLocally StoreStopped store Admin.CheckStore >>= adminValue
+  check "check-store reports a valid quick check and the quarantined claims"
+    (adminField "ok" checked == Bool True && adminField "result" checked == object
+      ["integrity" .= ("valid" :: Text), "quarantineIds" .= quarantined])
   req <- request store SetInput "credential-rotation"
   original <- withAuthorizedView store proof "profile_1" [Observe] (\view -> do
     submission <- submitCommand store proof req (edit profile (commandResource req) "rotated_revision") >>= right

@@ -54,8 +54,24 @@ JSON request through stdin EOF and writes one bounded JSON result. Duplicate
 fields, unknown fields, unknown operations, malformed input, and oversized input
 refuse before dispatch with `operation: null`. Errors do not reflect input or
 parser diagnostics. The implemented operations are `issue-credential`,
-`rotate-credential`, `revoke-credential`, and `list-credentials`. Other recognized
-operations receive `state-conflict` and remain with their existing owners.
+`rotate-credential`, `revoke-credential`, `list-credentials`, `status`, and
+`check-store`. The other recognized operations, `reload-profiles`, `drain`,
+`shutdown`, `backup`, `restore`, `check-quarantine`, and `release-quarantine`,
+receive `state-conflict` before the CLI reads the configuration.
+
+`status` and `check-store` are read-only. They change no Store row and append
+nothing to the manager log. `status` returns the authority epoch and stream
+identity of the Store, the process generation of the lifetime that answers, and
+the count of reservations that are not released, quarantined reservations
+included. Its `state` is `serving` through the live channel and `stopped` in
+offline administration. `check-store` runs the SQLite quick check on the open
+Store and reports `valid` or `corrupt`. It also lists, in identity order and at
+most 256, the identities of the reservations in state `quarantined` and of the
+claims that a restoration carried forward. A reservation identity is its
+quarantine identity. When offline administration cannot open the Store,
+`check-store` reports `unavailable` with no identities. A restart quarantines
+each reservation that the previous lifetime held, so these operations show the
+claims that wait for cleanup evidence.
 
 When `administrationRoot` is omitted from the trusted operator configuration,
 the CLI acquires the existing configuration lease and original Store. It refuses

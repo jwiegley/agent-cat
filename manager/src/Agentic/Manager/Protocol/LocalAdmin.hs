@@ -30,6 +30,8 @@ data LocalAdminRequest
   | RotateCredential !Text !Text !FilePath
   | RevokeCredential !Text
   | ListCredentials
+  | Status
+  | CheckStore
   | OtherAdmin !Text
 
 -- | Fixed refusals. Storage failure makes no assertion about publication or COMMIT.
@@ -55,10 +57,12 @@ adminOperation request = case request of
   RotateCredential {} -> "rotate-credential"
   RevokeCredential {} -> "revoke-credential"
   ListCredentials -> "list-credentials"
+  Status -> "status"
+  CheckStore -> "check-store"
   OtherAdmin name -> name
 
 otherOperations :: [Text]
-otherOperations = ["status", "reload-profiles", "drain", "shutdown", "check-store",
+otherOperations = ["reload-profiles", "drain", "shutdown",
   "backup", "restore", "check-quarantine", "release-quarantine"]
 
 validLocalFile :: FilePath -> Bool
@@ -80,6 +84,8 @@ validAdminRequest request = case request of
   RotateCredential ident expiry path -> validId ident && validExpiry expiry && validLocalFile path
   RevokeCredential ident -> validId ident
   ListCredentials -> True
+  Status -> True
+  CheckStore -> True
   OtherAdmin name -> name `elem` otherOperations
 
 decodeLocalAdminRequest :: BS.ByteString -> Either AdminFailure LocalAdminRequest
@@ -89,7 +95,7 @@ decodeLocalAdminRequest bytes
       value <- either (\failure -> Left (if failure == "duplicate-field" then DuplicateField else MalformedRequest)) Right (decodeStrictValue bytes)
       fields <- case value of Object fields -> Right fields; _ -> Left MalformedRequest
       operation <- case KM.lookup "operation" fields of Just (String name) -> Right name; _ -> Left MalformedRequest
-      unless (operation `elem` (["issue-credential","rotate-credential","revoke-credential","list-credentials"] <> otherOperations)) (Left UnknownOperation)
+      unless (operation `elem` (["issue-credential","rotate-credential","revoke-credential","list-credentials","status","check-store"] <> otherOperations)) (Left UnknownOperation)
       case KM.lookup "version" fields of
         Just (Number 1) -> Right ()
         Just (Number _) -> Left UnsupportedVersion
@@ -119,6 +125,8 @@ parseRequest operation fields = case operation of
   "rotate-credential" -> RotateCredential <$> fields .: "credentialId" <*> fields .: "expiresAt" <*> fields .: "outputFile"
   "revoke-credential" -> RevokeCredential <$> fields .: "credentialId"
   "list-credentials" -> pure ListCredentials
+  "status" -> pure Status
+  "check-store" -> pure CheckStore
   _ -> do
     case operation of
       "backup" -> localFile "outputFile"

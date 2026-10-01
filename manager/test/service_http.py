@@ -240,8 +240,10 @@ worker_failure_mode = len(sys.argv) == 6 and sys.argv[5] == WORKER_FAILURE
 # seals the manager log in two segments, as the writer seals it: the first
 # holds the records of the lost run and the second the padding. A restart on
 # the same root and configuration must begin a new lifetime with its
-# lifetime notice and reconciliation counts, show the run with lost
-# supervision, dispatch no start again, return the original receipt for an
+# lifetime notice and reconciliation counts, answer status and check-store
+# through the live channel with the quarantined reservation of the lost run
+# and without a database change or a manager-log append, show the run with
+# lost supervision, dispatch no start again, return the original receipt for an
 # exact replay of an earlier command, keep the protected segment of the lost
 # run in the pruning round at open, and review, approve and complete a fresh
 # request. After the ordinary end of the second lifetime, the flow verb must
@@ -5103,6 +5105,18 @@ def manager_failure_checks():
     print("PASS failures-manager case 3: the manager log of the killed lifetime has no shutdown notice and is sealed at",
           split, "of", len(records), "records, with", sealed_bytes, "bytes above the byte trigger", half, flush=True)
 
+    import sqlite3
+    found = sorted((work / "manager").rglob("coordination.sqlite3"))
+    assert len(found) == 1, ("coordination database", found)
+    database_uri = found[0].as_uri() + "?mode=ro"
+    connection = sqlite3.connect(database_uri, uri=True)
+    try:
+        lost_reservations = [row[0] for row in connection.execute(
+            "SELECT id FROM reservations WHERE request_id=? AND state!='released'", (lost_request["id"],))]
+    finally:
+        connection.close()
+    assert len(lost_reservations) == 1, ("the reservation of the lost run", lost_reservations)
+
     second = serve(1)
     try:
         # Case 4. The new lifetime begins with its lifetime notice and
@@ -5131,6 +5145,28 @@ def manager_failure_checks():
         print("PASS failures-manager case 4: the second lifetime begins with lifetime notice", body["processGeneration"],
               "and reconciliation counts", reconciliation, "; the pruning round at open kept the segments", starts,
               "with the records of the lost run", flush=True)
+
+        # Case 4a. Local administration through the live channel reports the
+        # serving lifetime and the quarantined reservation of the lost run. It
+        # changes no Store row and appends nothing to the manager log.
+        observer = sqlite3.connect(database_uri, uri=True)
+        try:
+            version_before = observer.execute("PRAGMA data_version").fetchone()[0]
+            log_before = log_bytes()
+            status_value = administration({"version": 1, "operation": "status"})["result"]
+            checked = administration({"version": 1, "operation": "check-store"})["result"]
+            version_after = observer.execute("PRAGMA data_version").fetchone()[0]
+        finally:
+            observer.close()
+        assert status_value["state"] == "serving" and status_value["processGeneration"] == body["processGeneration"], (
+            "status of the second lifetime", status_value)
+        assert status_value["activeReservations"] == 1, ("active reservations after the restart", status_value)
+        assert checked == {"integrity": "valid", "quarantineIds": lost_reservations}, ("check-store after the restart", checked, lost_reservations)
+        assert version_after == version_before, ("status or check-store changed the database", version_before, version_after)
+        assert log_bytes() == log_before, ("status or check-store appended to the manager log", log_before, log_bytes())
+        print("PASS failures-manager case 4a: status reports", status_value["state"], "with", status_value["activeReservations"],
+              "active reservation, and check-store reports", checked["integrity"], "integrity with the quarantined reservation",
+              lost_reservations[0], "of the lost run, without a database change or a manager-log append", flush=True)
 
         # Case 5. The run shows lost supervision, and no start is dispatched
         # again.

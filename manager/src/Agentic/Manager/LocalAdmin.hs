@@ -2,12 +2,13 @@
 {-# LANGUAGE TypeApplications #-}
 
 -- | A same-user local channel to an existing coordinator, not a second writer.
-module Agentic.Manager.LocalAdmin (withLocalAdministration, callLocalAdministration) where
+module Agentic.Manager.LocalAdmin (withLocalAdministration, callLocalAdministration, administerLocally) where
 
 import Agentic.Manager.Configuration (Configuration, configurationAdministrationRoot)
 import Agentic.Manager.Credentials (administerCredentials)
 import Agentic.Manager.Protocol.Json (decodeStrictValue)
 import Agentic.Manager.Protocol.LocalAdmin
+import Agentic.Manager.Quarantine (StoreState (..), reportStatus, reportStoreCheck)
 import Agentic.Manager.Store (CoordinationStore, withStoreAdministration)
 import Agentic.Runtime (PrivateRoot, assertPrivateRoot, closePrivateRoot, openPrivateRoot, privateRootPath)
 import Control.Concurrent.Async (link, withAsync)
@@ -60,10 +61,22 @@ withLocalAdministration store action = do
             Left _ -> pure (adminError Nothing MalformedRequest)
             Right bytes -> case decodeLocalAdminRequest bytes of
               Left failure -> pure (adminError Nothing failure)
-              Right request -> administerCredentials store request
+              Right request -> administerLocally StoreServing store request
           -- Only connection IO has an outer deadline. An admitted mutation is
           -- neither interrupted by this timer nor retried after a lost reply.
           void (try @IOException (boundedIO 5000000 (Net.sendAll connection response)))
+
+-- | Dispatch one decoded request to its owner on the original Store. The live
+-- channel passes 'StoreServing' and offline administration 'StoreStopped'.
+administerLocally :: StoreState -> CoordinationStore -> LocalAdminRequest -> IO BS.ByteString
+administerLocally state store request = case request of
+  Status -> reportStatus state store
+  CheckStore -> reportStoreCheck store
+  IssueCredential {} -> administerCredentials store request
+  RotateCredential {} -> administerCredentials store request
+  RevokeCredential {} -> administerCredentials store request
+  ListCredentials -> administerCredentials store request
+  OtherAdmin _ -> administerCredentials store request
 
 -- | Nothing selects the existing offline path. A configured channel failure
 -- never reopens the Store or retries the request through another path.
