@@ -15,10 +15,10 @@ import { join, resolve } from "node:path";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import extension from "../src/index.ts";
 import type { Outcome } from "../src/manager/events.ts";
-import { parseJson, type JsonValue } from "../src/manager/json.ts";
+import { encodeJson, parseJson, type JsonValue } from "../src/manager/json.ts";
 import type { ClientProfile } from "../src/manager/profile.ts";
 import type { SessionTransport } from "../src/manager/session.ts";
-import type { ClientResponse, Delivery, FollowEnd, FollowOptions, StreamItem } from "../src/manager/transport.ts";
+import type { ClientResponse, CommandHeaders, Delivery, FollowEnd, FollowOptions, StreamItem } from "../src/manager/transport.ts";
 import { MANAGER_ROLE_MARKER, ROOT_ROLE_FILE } from "../src/root-role.ts";
 import { ServiceMode } from "../src/service-mode.ts";
 import { RunSupervisor } from "../src/supervisor.ts";
@@ -58,8 +58,12 @@ class FakeTransport implements SessionTransport {
   /** The resources whose replies an unfenced transport gave, in order. */
   readonly late: string[] = [];
 
-  async post(resource: string): Promise<Reply> {
+  /** The exact body and the If-Match value of each POST, in order. */
+  readonly bodies: Array<{ readonly body: string; readonly ifMatch: string | null }> = [];
+
+  async post(resource: string, body: JsonValue, command: CommandHeaders): Promise<Reply> {
     this.posts.push(resource);
+    this.bodies.push({ body: encodeJson(body), ifMatch: command.ifMatch });
     return UNREACHABLE;
   }
 
@@ -98,14 +102,14 @@ class FakeTransport implements SessionTransport {
   }
 }
 
-function ok(value: unknown): Reply {
+function ok(value: unknown, etag: string | null = null): Reply {
   const text = JSON.stringify(value);
-  return { ok: true, value: { status: 200, value: parseJson(text) as JsonValue, etag: null, location: null, bytes: Buffer.byteLength(text) } };
+  return { ok: true, value: { status: 200, value: parseJson(text) as JsonValue, etag, location: null, bytes: Buffer.byteLength(text) } };
 }
 
-function capabilities(versions: Record<string, unknown> = {}): unknown {
+function capabilities(versions: Record<string, unknown> = {}, scopes = ["observe", "submit"]): unknown {
   return {
-    version: 1, authorityEpoch: "epoch_1", streamId: "s", scopes: ["observe", "submit"], profileIds: ["profile_1"],
+    version: 1, authorityEpoch: "epoch_1", streamId: "s", scopes, profileIds: ["profile_1"],
     transports: ["sse", "polling"],
     limits: {
       requestTargetBytes: 8192, headerBytes: 16384, headerFields: 100, jsonBodyBytes: 2097152, jsonDepth: 64,
@@ -169,6 +173,13 @@ function decision(id: string, runId: string): unknown {
         draw: "0", prompt: "Proceed?",
       },
     },
+  };
+}
+
+function control(runId: string, headId: string): unknown {
+  return {
+    version: 1, runId, revision: `${runId}_control`, supervision: "owned", cancelAllowed: true, decisionHeadId: headId,
+    offers: [{ operation: "answer", address: { occurrenceId: "0" }, generation: "generation_3", timings: [], choices: [], targets: [] }],
   };
 }
 
@@ -464,6 +475,51 @@ describe("service mode of the extension", () => {
     expect(service.runs()).toEqual([]);
     await service.close();
   });
+
+  it.each([
+    ["pending", '"decision_a1_rev"', "uncertain",
+      "Command answer uncertain: TransportUnavailable. One read of /v1/decisions/decision_a1 does not settle it. The command is not sent again."],
+    ["resolved", '"decision_a1_rev_2"', "accepted",
+      "Command answer accepted: the send was uncertain (TransportUnavailable), and one read of /v1/decisions/decision_a1 observes its effect."],
+  ] as const)("answers a flag question with JSON false and reconciles an uncertain send with one read while the decision is %s",
+    async (later, tag, outcome, notice) => {
+      const { local } = await localState();
+      process.env.AGENT_CAT_STATE_DIR = local;
+      process.env.AGENT_CAT_MANAGER_PROFILE = profile("answer", "alpha.test");
+      const head = (decision("decision_a1", "run_a1") as { decision: Record<string, unknown> }).decision;
+      const base = manager([run("run_a1", "running"), decision("decision_a1", "run_a1")]);
+      const fake = transports({
+        "alpha.test": (resource, count) => {
+          if (resource === "/v1/capabilities") return ok(capabilities({}, ["observe", "submit", "control"]));
+          if (resource === "/v1/decisions?runId=run_a1") {
+            const page = { setId: "set_q", revision: "rev_q", expiresAt: new Date(Date.now() + 60000).toISOString(), index: 0, totalItems: 1, next: null };
+            return ok({ version: 1, page, items: [head] });
+          }
+          if (resource === "/v1/decisions/decision_a1") return count === 1 ? ok(head, '"decision_a1_rev"') : ok({ ...head, state: later }, tag);
+          if (resource === "/v1/runs/run_a1/control") return ok(control("run_a1", "decision_a1"), '"control_rev"');
+          return base(resource, count);
+        },
+      });
+      const pi = host({ manager: { transport: fake.transport } });
+      const titles: string[] = [];
+      Object.assign(pi.ctx.ui, { editor: async (title: string) => (titles.push(title), "  No ") });
+      await pi.fire("session_start");
+      await until(async () => (await pi.status()).includes("delivery live"));
+      await pi.commands.get("wfm-answer")!.handler("run_a1", pi.ctx);
+      const [made] = fake.made;
+      expect(titles).toEqual(["Answer of decision decision_a1 (flag: yes, no, true or false): Proceed?"]);
+      // One POST of the typed JSON false, bound to the decision revision that was read.
+      expect(made.posts).toEqual(["/v1/decisions/decision_a1"]);
+      expect(made.bodies).toEqual([{ body: '{"generation":"generation_3","occurrenceId":"0","operation":"answer","value":false}', ifMatch: '"decision_a1_rev"' }]);
+      // The uncertain send is reconciled with one read of the decision and never sent again.
+      expect(made.gets.filter((uri) => uri === "/v1/decisions/decision_a1")).toHaveLength(2);
+      const record = pi.notices.find((line) => line.message.startsWith("Command answer "));
+      expect(record?.message).toContain(notice);
+      expect(await pi.status()).toMatch(new RegExp(`\n {2}answer {2}${outcome} {2}`));
+      await new Promise((wake) => setTimeout(wake, 50));
+      await pi.fire("session_shutdown");
+      expect(made.posts).toEqual(["/v1/decisions/decision_a1"]);
+    });
 
   it("closes a connection that completes after close", async () => {
     let release: (reply: Reply) => void = () => {};

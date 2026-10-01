@@ -436,6 +436,16 @@ export default function agentCatExtension(pi: ExtensionAPI, hooks: ExtensionHook
     handler: async (args, ctx) => requests.discard(ctx, args),
   });
 
+  pi.registerCommand("wfm-monitor", {
+    description: "Show the live monitor of a manager run: runtime status, observation freshness, decisions, and the terminal result",
+    handler: async (args, ctx) => requests.monitor(ctx, args),
+  });
+
+  pi.registerCommand("wfm-answer", {
+    description: "Answer the head decision of a manager run with a typed answer, or send a recovery choice that the manager offers",
+    handler: async (args, ctx) => requests.answer(ctx, args),
+  });
+
   pi.registerCommand("wfm-endpoints", {
     description: "Choose the active manager client profile",
     handler: async (args, ctx) => {

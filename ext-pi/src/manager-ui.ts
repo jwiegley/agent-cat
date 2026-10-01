@@ -10,6 +10,13 @@
  * `approve`, with the preparation entity tag as `If-Match` and the review
  * selectors of that display. A declined review sends nothing.
  *
+ * `/wfm-monitor` shows a `ServiceMonitor` of one run in a native Pi
+ * component: the runtime status, the observation freshness, the decision
+ * queue, the offers and, at the end, the Terminal and Result lines of the
+ * verified result. `/wfm-answer` acts on the head of the decision queue of a
+ * run: a typed answer through `answerValue` and `answerBody`, or one of the
+ * recovery choices that `recoveryActions` finds in the offers of the run.
+ *
  * Every command goes through the `ManagerSession` of the active service
  * binding, and each send is recorded as a `CommandRecord`. A record states
  * only the outcome of the command (accepted, refused or uncertain) and the
@@ -24,17 +31,25 @@ import { readFile } from "node:fs/promises";
 import type { ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
 import { matchesKey, truncateToWidth, wrapTextWithAnsi, type Component, type TUI } from "@earendil-works/pi-tui";
 import type { ClientFailure, Outcome } from "./manager/events.ts";
-import { encodeJson, isJsonArray, isJsonObject, jsonMember, type JsonObject, type JsonValue } from "./manager/json.ts";
+import { encodeJson, isJsonArray, isJsonObject, jsonMember, JsonNumber, type JsonObject, type JsonValue } from "./manager/json.ts";
 import {
+  answerBody,
+  answerValue,
   decodeCommandReceipt,
+  decodeControl,
+  decodeDecision,
   decodeDraftView,
   decodeInputDeclaration,
   decodePreparation,
   requiredScopes,
+  type ControlOffer,
+  type ControlView,
+  type DecisionView,
   type DraftView,
   type InputDeclaration,
   type Operation,
   type Preparation,
+  type RecoveryOption,
 } from "./manager/resources.ts";
 import type { ManagerSession, Observed, PendingCommand, Reference } from "./manager/session.ts";
 import type { ServiceMode } from "./service-mode.ts";
@@ -234,6 +249,431 @@ export class ReviewComponent implements Component {
   invalidate(): void {}
 }
 
+// ---------------------------------------------------------------------------
+// Decisions, recovery choices and the live monitor of a service run.
+
+/**
+ * The offers of the controls of a run that address a decision: the controls
+ * are owned and name the decision as their head, the decision is pending at
+ * position 0, and each offer addresses the occurrence and the generation of
+ * the decision. Any other decision has no offer.
+ *
+ * @public
+ */
+export function decisionOffers(control: ControlView, decision: DecisionView): ControlOffer[] {
+  if (control.runId !== decision.runId || control.supervision !== "owned" || control.decisionHeadId !== decision.id
+    || decision.state !== "pending" || decision.position !== 0) return [];
+  return control.offers.filter((offer) => offer.occurrenceId === decision.occurrenceId && offer.attemptId === null
+    && offer.generation === decision.generation);
+}
+
+/**
+ * One recovery choice that the manager offers for a recovery decision.
+ * `operation` names the command: `retry` goes to the controls of the run,
+ * and `choose-recovery` goes to the decision.
+ *
+ * @public
+ */
+export type RecoveryAction = {
+  readonly label: string;
+  readonly option: RecoveryOption;
+  readonly operation: "retry" | "choose-recovery";
+};
+
+function recoveryLabel(option: RecoveryOption): string {
+  if (option.choice === "retry") return "Retry";
+  if (option.choice === "abandon") return "Abandon";
+  return option.target === null ? "Fail over" : `Fail over to ${option.target}`;
+}
+
+/**
+ * The recovery choices of a recovery decision that the manager offers, in
+ * the order of the decision. A choice is offered when a `retry` offer
+ * addresses the decision, for the choice `retry`, or when a
+ * `choose-recovery` offer of the decision carries the same choice and
+ * target. A retry prefers the `retry` offer, as the TUI does. A choice
+ * without an offer is not listed, and a question has no recovery choice.
+ *
+ * @public
+ */
+export function recoveryActions(control: ControlView, decision: DecisionView): RecoveryAction[] {
+  if (decision.content.kind !== "recovery") return [];
+  const offers = decisionOffers(control, decision);
+  const actions: RecoveryAction[] = [];
+  for (const option of decision.content.choices) {
+    const retry = option.choice === "retry" && offers.some((offer) => offer.operation === "retry");
+    const chosen = offers.some((offer) => offer.operation === "choose-recovery"
+      && offer.choices.some((item) => item.choice === option.choice && item.target === option.target));
+    if (retry || chosen) actions.push({ label: recoveryLabel(option), option, operation: retry ? "retry" : "choose-recovery" });
+  }
+  return actions;
+}
+
+/** A prompt on one line: each line end becomes one space. */
+function oneLine(value: string): string {
+  return value.replace(/\r?\n/g, " ");
+}
+
+/** The answer form of a question code, for the editor title and the monitor. */
+function codeLabel(decision: DecisionView): string {
+  if (decision.content.kind !== "question") return "recovery";
+  const { code } = decision.content;
+  if (code === "flag") return "flag: yes, no, true or false";
+  if (code === "receipt") return "receipt: empty";
+  return typeof code === "string" ? code : "structured JSON";
+}
+
+/** The line of one decision of the queue of a run. */
+function decisionLine(decision: DecisionView): string {
+  const place = decision.position === 0 ? `Head ${decision.id}` : `${decision.id} at position ${decision.position}`;
+  if (decision.content.kind === "question") {
+    return `  ${place}: ${decision.state} question (${codeLabel(decision)}): ${oneLine(decision.content.prompt)}`;
+  }
+  const choices = decision.content.choices.map(recoveryLabel).join(", ") || "none";
+  return `  ${place}: ${decision.state} recovery (${decision.content.gap}): ${oneLine(decision.content.message)}; choices ${choices}`;
+}
+
+/**
+ * The retrieval of the verified result of a succeeded run: not started,
+ * waiting for the verification of the manager, in progress, verified with
+ * the size and SHA-256 of the exact downloaded bytes, or failed with a
+ * failure code.
+ *
+ * @public
+ */
+export type ResultRetrieval =
+  | { readonly kind: "none" }
+  | { readonly kind: "waiting" }
+  | { readonly kind: "retrieving" }
+  | { readonly kind: "verified"; readonly bytes: number; readonly sha256: string }
+  | { readonly kind: "failed"; readonly code: string };
+
+/**
+ * One observation of the live monitor: the last complete read, kept after a
+ * later read fails, and the failure code of the latest read when it failed.
+ *
+ * @public
+ */
+export type Kept<Value> = { readonly value: Value | undefined; readonly failure: string | undefined };
+
+/**
+ * The state that the live monitor shows: the run, the delivery state of the
+ * session, the run snapshot, the controls and the decision queue of the run,
+ * and the retrieval of its result.
+ *
+ * @public
+ */
+export type MonitorState = {
+  readonly runId: string;
+  readonly delivery: string;
+  readonly snapshot: Kept<JsonObject>;
+  readonly control: Kept<ControlView>;
+  readonly queue: Kept<readonly DecisionView[]>;
+  readonly result: ResultRetrieval;
+};
+
+/** The terminal runtime statuses. */
+const TERMINAL_STATUSES = ["succeeded", "failed", "cancelled", "orphaned"];
+
+/** A member of a JSON object, or `undefined`. */
+function memberOf(value: JsonValue | undefined, name: string): JsonValue | undefined {
+  return value !== undefined && isJsonObject(value) ? jsonMember(value, name) : undefined;
+}
+
+/** The runtime status of a run snapshot, or `undefined` before native evidence. */
+export function snapshotStatus(snapshot: JsonObject): string | undefined {
+  return text(memberOf(memberOf(snapshot, "runtime"), "status"));
+}
+
+/**
+ * The lines of the live monitor of a service run. They state the run and
+ * its workflow, the delivery state, the freshness of the observation, the
+ * runtime status with any supervision other than `owned`, the pending
+ * decisions of the run with the head first, and the offered controls. A
+ * terminal run then has the Terminal line and the Result lines: the verified
+ * size and SHA-256 of the retrieved bytes, or the state of the retrieval.
+ * The last read that completed stays in view after a later read fails, and
+ * the freshness line names the failure.
+ *
+ * @public
+ */
+export function serviceMonitorLines(state: MonitorState): string[] {
+  const snapshot = state.snapshot.value;
+  const workflow = snapshot === undefined ? undefined : text(jsonMember(snapshot, "workflow"));
+  const lines = [`Service run ${state.runId}${workflow === undefined ? "" : `, workflow ${workflow}`}`, `Delivery: ${state.delivery}`];
+  const kept = [state.snapshot, state.control, state.queue];
+  const failure = kept.find((item) => item.failure !== undefined)?.failure;
+  if (kept.every((item) => item.value === undefined && item.failure === undefined)) lines.push("Observation: not yet read");
+  else if (failure === undefined) lines.push(kept.every((item) => item.value !== undefined) ? "Observation: current" : "Observation: reading");
+  else if (kept.every((item) => item.value !== undefined)) lines.push(`Observation: stale (${failure}); the last complete observation is retained`);
+  else lines.push(`Observation: refused (${failure}); no complete observation is installed`);
+  if (snapshot !== undefined) {
+    const supervision = text(jsonMember(snapshot, "supervision"));
+    const status = snapshotStatus(snapshot);
+    lines.push(`Runtime: ${status ?? "not yet observed"}${supervision === undefined || supervision === "owned" ? "" : `; supervision ${supervision}`}`);
+  }
+  const pending = (state.queue.value ?? []).filter((decision) => decision.state === "pending" || decision.state === "submitting");
+  if (state.queue.value !== undefined) {
+    lines.push(pending.length === 0 ? "Decisions: none pending" : `Decisions: ${pending.length} pending`);
+    for (const decision of [...pending].sort((a, b) => a.position - b.position)) lines.push(decisionLine(decision));
+  }
+  const control = state.control.value;
+  if (control !== undefined) {
+    const operations = [...new Set(control.offers.map((offer) => offer.operation)), ...(control.cancelAllowed ? ["cancel"] : [])];
+    lines.push(`Offers: ${operations.join(", ") || "none"}`);
+  }
+  return [...lines, ...outcomeLines(state)];
+}
+
+/**
+ * The Terminal line and the Result lines of a terminal run, as the TUI
+ * names them. A run that is not terminal has no outcome lines.
+ *
+ * @public
+ */
+export function outcomeLines(state: MonitorState): string[] {
+  const snapshot = state.snapshot.value;
+  const status = snapshot === undefined ? undefined : snapshotStatus(snapshot);
+  if (snapshot === undefined || status === undefined || !TERMINAL_STATUSES.includes(status)) return [];
+  const lines = [`Terminal: ${status}`];
+  const failure = text(jsonMember(snapshot, "failure"));
+  if (failure !== undefined) lines.push(`Failure: ${text(jsonMember(snapshot, "failureClass")) ?? "unclassified"}: ${oneLine(failure)}`);
+  if (status !== "succeeded") return [...lines, "Result: no download for a run that did not succeed"];
+  const verification = text(memberOf(jsonMember(snapshot, "verification"), "state")) ?? "absent";
+  const { result } = state;
+  switch (result.kind) {
+    case "verified":
+      return [...lines, `Result: verified ${result.bytes} bytes`, `Result SHA-256: ${result.sha256}`];
+    case "failed":
+      return [...lines, `Result: not retrieved (${result.code}); the next change of the run retries`];
+    case "retrieving":
+    case "waiting":
+      return [...lines, result.kind === "retrieving" ? "Result: retrieving the verified bytes" : "Result: waiting for the verification of the manager"];
+    case "none":
+      return [...lines, ["verified", "referenced"].includes(verification) ? "Result: retrieving the verified bytes"
+        : `Result: no download; verification is ${verification}`];
+  }
+}
+
+/** The size and download of the verified result output of a run, or `undefined`. */
+function verifiedArtifact(outputs: JsonValue): { download: string; bytes: bigint; sha256: string } | undefined {
+  const items = memberOf(outputs, "items");
+  if (items === undefined || !isJsonArray(items)) return undefined;
+  for (const item of items) {
+    if (memberOf(item, "kind") !== "result" || memberOf(memberOf(item, "verification"), "state") !== "verified") continue;
+    const artifact = memberOf(item, "artifact");
+    const download = text(memberOf(artifact, "download"));
+    const sha256 = text(memberOf(artifact, "sha256"));
+    const size = memberOf(artifact, "bytes");
+    const bytes = typeof size === "string" && /^[0-9]+$/.test(size) ? BigInt(size)
+      : size instanceof JsonNumber && /^[0-9]+$/.test(size.source) ? BigInt(size.source) : undefined;
+    if (download !== undefined && sha256 !== undefined && bytes !== undefined) return { download, bytes, sha256 };
+  }
+  return undefined;
+}
+
+/** The watched resources of a live monitor. */
+type MonitorReferences = { readonly snapshot: Reference; readonly control: Reference; readonly queue: Reference };
+
+/**
+ * The live monitor of one service run. It watches the run snapshot, the
+ * controls and the decision queue of the run through the session, so each
+ * related event of the manager reads them again. Each read that completes
+ * replaces the kept read of its resource, and a failed read keeps the
+ * earlier one. When the snapshot of a succeeded run names a referenced or
+ * verified result, the monitor reads the outputs of the run, downloads the
+ * verified result once through `ManagerSession.download`, which checks the
+ * size and the SHA-256, and keeps only the size and the digest. A result
+ * that the manager has not verified yet is read again after the next change
+ * of the snapshot. The monitor sends no command.
+ *
+ * @public
+ */
+export class ServiceMonitor {
+  readonly runId: string;
+  readonly #session: ManagerSession;
+  readonly #references: MonitorReferences;
+  #snapshot: Kept<JsonObject> = { value: undefined, failure: undefined };
+  #control: Kept<ControlView> = { value: undefined, failure: undefined };
+  #queue: Kept<readonly DecisionView[]> = { value: undefined, failure: undefined };
+  #result: ResultRetrieval = { kind: "none" };
+  /** The entity tag of the snapshot at the last retrieval attempt. */
+  #attempted: string | null | undefined;
+  #changed: () => void = () => {};
+  #closed = false;
+
+  private constructor(session: ManagerSession, runId: string, references: MonitorReferences) {
+    this.#session = session;
+    this.runId = runId;
+    this.#references = references;
+  }
+
+  /** The monitor of a run of the current binding, or the refusal of its references. */
+  static open(session: ManagerSession, runId: string): Outcome<ServiceMonitor> {
+    const snapshot = session.reference(`/v1/runs/${runId}/snapshot`);
+    const control = session.reference(`/v1/runs/${runId}/control`);
+    const queue = session.reference(`/v1/decisions?runId=${runId}`);
+    if (!snapshot.ok) return snapshot;
+    if (!control.ok) return control;
+    if (!queue.ok) return queue;
+    return { ok: true, value: new ServiceMonitor(session, runId, { snapshot: snapshot.value, control: control.value, queue: queue.value }) };
+  }
+
+  /** Watch the resources of the run and call `changed` after each change of the monitor. */
+  start(changed: () => void): Outcome<undefined> {
+    this.#changed = changed;
+    for (const reference of Object.values(this.#references)) {
+      const watched = this.#session.watch(reference);
+      if (!watched.ok) return watched;
+    }
+    this.refresh();
+    return { ok: true, value: undefined };
+  }
+
+  /** Wait until each watched resource has an installed read, at most `timeoutMs` each, and take the reads. */
+  async settled(timeoutMs: number): Promise<void> {
+    for (const reference of Object.values(this.#references)) await this.#session.waitFor(reference, () => true, timeoutMs);
+    this.refresh();
+  }
+
+  /** Stop the monitor. Later changes call nothing. */
+  close(): void {
+    this.#closed = true;
+    this.#changed = () => {};
+  }
+
+  /** The state that the monitor shows now. */
+  state(): MonitorState {
+    return {
+      runId: this.runId, delivery: this.#session.deliveryState, snapshot: this.#snapshot, control: this.#control, queue: this.#queue,
+      result: this.#result,
+    };
+  }
+
+  /** The lines of `serviceMonitorLines` for the state now. */
+  lines(): string[] {
+    return serviceMonitorLines(this.state());
+  }
+
+  /** Take the installed reads of the session, and start the retrieval of a succeeded result. */
+  refresh(): void {
+    if (this.#closed) return;
+    const snapshot = this.#take(this.#references.snapshot, this.#snapshot, (value) => (isJsonObject(value) ? value : undefined));
+    this.#snapshot = snapshot.kept;
+    this.#control = this.#take(this.#references.control, this.#control, (value) => {
+      const decoded = decodeControl(value);
+      return decoded.ok ? decoded.value : undefined;
+    }).kept;
+    this.#queue = this.#take(this.#references.queue, this.#queue, (value) => {
+      const items = memberOf(value, "items");
+      if (items === undefined || !isJsonArray(items)) return undefined;
+      const decisions: DecisionView[] = [];
+      for (const item of items) {
+        const decoded = decodeDecision(item);
+        if (!decoded.ok) return undefined;
+        decisions.push(decoded.value);
+      }
+      return decisions;
+    }).kept;
+    const value = this.#snapshot.value;
+    const verification = value === undefined ? undefined : text(memberOf(jsonMember(value, "verification"), "state"));
+    if (value !== undefined && snapshotStatus(value) === "succeeded" && (verification === "verified" || verification === "referenced")
+      && this.#result.kind !== "verified" && this.#result.kind !== "retrieving" && snapshot.etag !== this.#attempted) {
+      this.#attempted = snapshot.etag;
+      this.#result = { kind: "retrieving" };
+      void this.#retrieve();
+    }
+  }
+
+  #take<Value>(reference: Reference, kept: Kept<Value>, decode: (value: JsonValue) => Value | undefined)
+    : { kept: Kept<Value>; etag: string | null | undefined } {
+    const installed = this.#session.current(reference);
+    if (installed === undefined) return { kept, etag: undefined };
+    if (!installed.ok) return { kept: { value: kept.value, failure: failureText(installed.failure) }, etag: undefined };
+    const value = decode(installed.value.value);
+    return value === undefined
+      ? { kept: { value: kept.value, failure: "InvalidResponse" }, etag: undefined }
+      : { kept: { value, failure: undefined }, etag: installed.value.etag };
+  }
+
+  async #retrieve(): Promise<void> {
+    const outputs = this.#session.reference(`/v1/runs/${this.runId}/outputs`);
+    const read = outputs.ok ? await this.#session.get(outputs.value) : outputs;
+    if (this.#closed) return;
+    if (!read.ok) {
+      this.#result = { kind: "failed", code: failureText(read.failure) };
+      return this.#changed();
+    }
+    const artifact = verifiedArtifact(read.value.value);
+    if (artifact === undefined) {
+      // Reading the outputs makes the manager verify a referenced result,
+      // and the next change of the snapshot starts the retrieval again.
+      this.#result = { kind: "waiting" };
+      return this.#changed();
+    }
+    const location = this.#session.reference(artifact.download);
+    const bytes = location.ok ? await this.#session.download(location.value, artifact.bytes, artifact.sha256) : location;
+    if (this.#closed) return;
+    this.#result = bytes.ok ? { kind: "verified", bytes: bytes.value.length, sha256: artifact.sha256 }
+      : { kind: "failed", code: failureText(bytes.failure) };
+    this.#changed();
+  }
+}
+
+/** The key line of the live monitor. */
+export const MONITOR_KEYS = "q or Escape closes, j k scroll; /wfm-answer answers the head decision";
+
+/**
+ * The native live monitor component. It shows the lines of a
+ * `ServiceMonitor` and keeps the Terminal and Result lines in view at every
+ * height. `j`, `k` and the arrow keys scroll the other lines, and `q` or
+ * Escape closes it.
+ *
+ * @public
+ */
+export class ServiceMonitorComponent implements Component {
+  readonly #tui: TUI;
+  readonly #theme: Theme;
+  readonly #monitor: ServiceMonitor;
+  readonly #close: () => void;
+  #offset = 0;
+
+  constructor(tui: TUI, theme: Theme, monitor: ServiceMonitor, close: () => void) {
+    this.#tui = tui;
+    this.#theme = theme;
+    this.#monitor = monitor;
+    this.#close = close;
+  }
+
+  handleInput(data: string): void {
+    if (matchesKey(data, "escape") || matchesKey(data, "ctrl+c") || data === "q") return this.#close();
+    if (matchesKey(data, "down") || data === "j") this.#offset += 1;
+    else if (matchesKey(data, "up") || data === "k") this.#offset = Math.max(0, this.#offset - 1);
+    else return;
+    this.#tui.requestRender();
+  }
+
+  render(width: number): string[] {
+    const columns = Math.max(1, width);
+    const state = this.#monitor.state();
+    const outcome = outcomeLines(state);
+    const all = serviceMonitorLines(state);
+    const body = all.slice(0, all.length - outcome.length).flatMap((line) => wrapTextWithAnsi(line, columns));
+    const ending = outcome.flatMap((line) => wrapTextWithAnsi(line, columns));
+    const keys = wrapTextWithAnsi(MONITOR_KEYS, columns);
+    const height = Math.max(1, this.#tui.terminal.rows - 4 - keys.length - ending.length);
+    this.#offset = Math.min(this.#offset, Math.max(0, body.length - height));
+    const shown = body.slice(this.#offset, this.#offset + height);
+    return [
+      ...shown.map((line, index) => (index === 0 && this.#offset === 0 ? this.#theme.fg("accent", line) : line)),
+      ...ending.map((line) => this.#theme.fg(line.startsWith("Terminal: succeeded") ? "success" : "accent", line)),
+      ...keys.map((line) => this.#theme.fg("dim", line)),
+    ];
+  }
+
+  invalidate(): void {}
+}
+
 /**
  * The commands of the human path over the active service binding.
  *
@@ -244,6 +684,8 @@ export class ManagerRequests {
   readonly #records: CommandRecord[] = [];
   /** The editor drafts of each input, keyed by endpoint identity, request and input name. */
   readonly #drafts = new Map<string, string>();
+  /** The answer drafts of each decision, keyed by endpoint identity and decision. */
+  readonly #answerDrafts = new Map<string, string>();
 
   constructor(service: () => ServiceMode | undefined) {
     this.#service = service;
@@ -298,9 +740,16 @@ export class ManagerRequests {
    * its request, and a capture gives `captured` with its identifier. An
    * approval does not settle its receipt: the run that the request names is
    * its execution fact.
+   *
+   * An uncertain send is reconciled with one read under the rules of
+   * `reconcile` in `src/manager/refresh.ts`: the target observes the effect
+   * only when `effectVisible` sees it and the entity tag differs from the
+   * precondition. A reconciled effect gives the receipt state
+   * `effect-observed`. Otherwise the command stays uncertain. The command is
+   * never sent again.
    */
   async #command(ctx: ExtensionContext, session: ManagerSession, operation: Operation, target: string,
-    prepared: Outcome<PendingCommand>, settle = true): Promise<
+    prepared: Outcome<PendingCommand>, settle = true, effectVisible: (value: JsonValue) => boolean = () => false): Promise<
     | { kind: "receipt"; state: string }
     | { kind: "created"; request: DraftView; location: Reference }
     | { kind: "captured"; captureId: string }
@@ -318,8 +767,18 @@ export class ManagerRequests {
       return { kind: "refused", failure: sent.failure };
     }
     if (sent.kind === "uncertain") {
+      const reconciled = await session.reconcileCommand(sent.uncertain, effectVisible);
+      if (reconciled.kind === "effect-observed") {
+        this.#record(ctx, session, operation, target, "accepted",
+          `the send was uncertain (${failureText(sent.failure)}), and one read of ${target} observes its effect. The command is not sent again.`);
+        return { kind: "receipt", state: "effect-observed" };
+      }
+      if (reconciled.kind === "refused") {
+        this.#record(ctx, session, operation, target, "refused", "the send was uncertain, and its receipt states refused");
+        return { kind: "receipt", state: "refused" };
+      }
       this.#record(ctx, session, operation, target, "uncertain",
-        `${failureText(sent.failure)}. The command is not sent again. /wfm-status shows the manager state.`);
+        `${failureText(sent.failure)}. One read of ${target} does not settle it. The command is not sent again. /wfm-status shows the manager state.`);
       return { kind: "uncertain" };
     }
     if (sent.capture !== null) {
@@ -458,6 +917,222 @@ export class ManagerRequests {
     const observed = await session.get(preparation.value);
     if (!observed.ok) return ctx.ui.notify(`The preparation could not be read: ${failureText(observed.failure)}`, "error");
     await this.#discard(ctx, session, preparation.value, observed.value.etag, read.request.id);
+  }
+
+  /**
+   * `/wfm-monitor [RUN_ID]`: the live monitor of a service run. In the Pi TUI
+   * it is a `ServiceMonitorComponent` that each change of service mode draws
+   * again, until `q` or Escape. Outside the TUI, one notification gives the
+   * lines after the first reads. The monitor sends no command.
+   */
+  async monitor(ctx: ExtensionContext, args: string): Promise<void> {
+    const session = this.#session(ctx);
+    const service = this.#service();
+    if (session === undefined || service === undefined) return;
+    const runId = await this.#chooseRun(ctx, args, service.runs().map((run) => ({ runId: run.runId, label: `${run.runId}  ${run.status}  ${run.workflowId ?? "unreadable manifest"}` })),
+      "Run to monitor");
+    if (runId === undefined) return;
+    const opened = ServiceMonitor.open(session, runId);
+    if (!opened.ok) return ctx.ui.notify(`Run ${runId} cannot be monitored: ${failureText(opened.failure)}`, "error");
+    const monitor = opened.value;
+    if (ctx.mode !== "tui") {
+      const started = monitor.start(() => {});
+      if (!started.ok) return ctx.ui.notify(`Run ${runId} cannot be watched: ${failureText(started.failure)}`, "error");
+      await monitor.settled(EFFECT_WAIT_MS);
+      monitor.close();
+      return ctx.ui.notify(monitor.lines().join("\n"), "info");
+    }
+    await ctx.ui.custom<void>((tui, theme, _keys, done) => {
+      let unsubscribe = () => {};
+      const component = new ServiceMonitorComponent(tui, theme, monitor, () => {
+        unsubscribe();
+        monitor.close();
+        done();
+      });
+      unsubscribe = service.subscribe(() => {
+        monitor.refresh();
+        tui.requestRender();
+      });
+      const started = monitor.start(() => tui.requestRender());
+      if (!started.ok) ctx.ui.notify(`Run ${runId} cannot be watched: ${failureText(started.failure)}`, "error");
+      return component;
+    });
+  }
+
+  /** The kept answer draft of a decision of the active binding. */
+  answerDraft(decisionId: string): string | undefined {
+    const session = this.#service()?.session;
+    return session === undefined ? undefined : this.#answerDrafts.get(answerKey(session, decisionId));
+  }
+
+  /**
+   * `/wfm-answer [RUN_ID]`: act on the head decision of a run, as the queue
+   * `/v1/decisions?runId=RUN_ID` gives it. A question opens the typed editor,
+   * and `answerValue` gives the typed JSON value, so the flag input `no`
+   * gives JSON `false`. The answer binds the decision revision that was read
+   * before the editor opened. A 412 `stale-revision` keeps the typed text as
+   * a draft, states it, and sends nothing again. The editor opens again with
+   * the draft only while the same decision is still the pending head, and a
+   * decision that another client answered reads as 404
+   * `unavailable-resource`, since the manager serves only pending
+   * decisions. A
+   * recovery decision offers only the choices of `recoveryActions`.
+   */
+  async answer(ctx: ExtensionContext, args: string): Promise<void> {
+    const session = this.#session(ctx);
+    const service = this.#service();
+    if (session === undefined || service === undefined) return;
+    if (!ctx.hasUI) return ctx.ui.notify("/wfm-answer requires the interactive Pi interface", "error");
+    const heads = service.decisions().filter((decision) => decision.state === "pending");
+    const runId = await this.#chooseRun(ctx, args,
+      heads.map((decision) => ({ runId: decision.runId, label: `${decision.runId}  ${decision.kind}  ${decision.decisionId}` })), "Run whose decision to answer");
+    if (runId === undefined) return;
+    for (;;) {
+      const head = await this.#head(ctx, session, runId);
+      if (head === undefined) return;
+      if (head.decision.content.kind === "recovery") return this.#recover(ctx, session, head);
+      if (!(await this.#answerQuestion(ctx, session, head))) return;
+    }
+  }
+
+  /** A run identifier from the arguments, or from a selection of the given runs. */
+  async #chooseRun(ctx: ExtensionContext, args: string, runs: readonly { runId: string; label: string }[], title: string)
+    : Promise<string | undefined> {
+    const chosen = args.trim();
+    if (chosen) {
+      if (/^[A-Za-z0-9_-]+$/.test(chosen)) return chosen;
+      ctx.ui.notify(`Unknown run ${chosen}`, "error");
+      return undefined;
+    }
+    if (runs.length === 0) {
+      ctx.ui.notify("No run of the manager is open for this command", "info");
+      return undefined;
+    }
+    if (!ctx.hasUI) {
+      ctx.ui.notify(`Usage: name a run: ${runs.map((run) => run.runId).join(", ")}`, "warning");
+      return undefined;
+    }
+    const labels = runs.map((run) => run.label);
+    const selected = await ctx.ui.select(title, labels);
+    return selected === undefined ? undefined : runs[labels.indexOf(selected)].runId;
+  }
+
+  /**
+   * The head decision of a run from its queue, with one read of the
+   * decision and one read of the controls of the run, or `undefined` after a
+   * notification.
+   */
+  async #head(ctx: ExtensionContext, session: ManagerSession, runId: string): Promise<Head | undefined> {
+    const queue = await this.#collection(session, `/v1/decisions?runId=${runId}`);
+    if (!queue.ok) {
+      ctx.ui.notify(`The decision queue of run ${runId} could not be read: ${failureText(queue.failure)}`, "error");
+      return undefined;
+    }
+    const listed = queue.value.map((item) => decodeDecision(item));
+    const found = listed.find((decoded) => decoded.ok && decoded.value.position === 0 && decoded.value.state === "pending");
+    if (found === undefined || !found.ok) {
+      ctx.ui.notify(`Run ${runId} has no pending decision head. /wfm-monitor ${runId} shows the run.`, "info");
+      return undefined;
+    }
+    const decisionRef = session.reference(`/v1/decisions/${found.value.id}`);
+    const controlRef = session.reference(`/v1/runs/${runId}/control`);
+    if (!decisionRef.ok || !controlRef.ok) return undefined;
+    const [decisionRead, controlRead] = [await session.get(decisionRef.value), await session.get(controlRef.value)];
+    const decision = decisionRead.ok ? decodeDecision(decisionRead.value.value) : decisionRead;
+    const control = controlRead.ok ? decodeControl(controlRead.value.value) : controlRead;
+    if (!decisionRead.ok || !decision.ok || !controlRead.ok || !control.ok) {
+      const failure = !decision.ok ? decision.failure : !control.ok ? control.failure : null;
+      ctx.ui.notify(`The head decision of run ${runId} could not be read: ${failureText(failure)}`, "error");
+      return undefined;
+    }
+    return { runId, decision: decision.value, decisionObserved: decisionRead.value, control: control.value, controlObserved: controlRead.value };
+  }
+
+  /**
+   * Answer a question head once through the typed editor. Gives `true` when
+   * a 412 left the same decision pending at the head, so the editor opens
+   * again with the draft, and `false` otherwise.
+   */
+  async #answerQuestion(ctx: ExtensionContext, session: ManagerSession, head: Head): Promise<boolean> {
+    const { decision, runId } = head;
+    if (decision.content.kind !== "question") return false;
+    if (!decisionOffers(head.control, decision).some((offer) => offer.operation === "answer")) {
+      ctx.ui.notify(`The manager offers no answer for decision ${decision.id} of run ${runId}. Nothing was sent.`, "warning");
+      return false;
+    }
+    const key = answerKey(session, decision.id);
+    let value: JsonValue;
+    let typed: string;
+    for (;;) {
+      const entered = await ctx.ui.editor(`Answer of decision ${decision.id} (${codeLabel(decision)}): ${oneLine(decision.content.prompt)}`,
+        this.#answerDrafts.get(key));
+      if (entered === undefined) {
+        ctx.ui.notify(`No answer was sent for decision ${decision.id}.`, "info");
+        return false;
+      }
+      typed = entered;
+      this.#answerDrafts.set(key, typed);
+      const answer = answerValue(decision, typed);
+      if (answer.ok) {
+        value = answer.value;
+        break;
+      }
+      ctx.ui.notify(`The answer is refused before any send: ${answer.failure.reason}. The draft is kept, and the editor opens again.`, "warning");
+    }
+    const target = head.decisionObserved.reference;
+    const sent = await this.#command(ctx, session, "answer", target.uri, session.prepare(target, answerBody(decision, value), head.decisionObserved.etag),
+      true, (observed) => {
+        const current = decodeDecision(observed);
+        return current.ok && current.value.state !== "pending";
+      });
+    if (sent.kind === "refused" && sent.failure.kind === "Refused" && sent.failure.status === 412) {
+      ctx.ui.notify(`Decision ${decision.id} changed before the answer arrived (412 stale-revision). Nothing was sent again. `
+        + `The draft ${JSON.stringify(typed)} is kept.`, "warning");
+      // The manager serves only pending decisions, so a decision that was
+      // answered elsewhere reads as 404 unavailable-resource.
+      const again = await session.get(target);
+      const current = again.ok ? decodeDecision(again.value.value) : again;
+      if (current.ok && current.value.state === "pending" && current.value.position === 0) return true;
+      const reason = current.ok ? `state ${current.value.state}, position ${current.value.position}` : failureText(current.failure);
+      ctx.ui.notify(`Decision ${decision.id} is no longer the pending head (${reason}), so the kept draft is not sent. `
+        + `/wfm-answer ${runId} acts on the next head.`, "info");
+      return false;
+    }
+    if (sent.kind === "receipt" && sent.state === "effect-observed") {
+      this.#answerDrafts.delete(key);
+      ctx.ui.notify(`Answer ${encodeJson(value)} reached decision ${decision.id} of run ${runId}.`, "info");
+    }
+    return false;
+  }
+
+  /** Send one recovery choice that the manager offers for a recovery head, after the selection of the user. */
+  async #recover(ctx: ExtensionContext, session: ManagerSession, head: Head): Promise<void> {
+    const { decision, runId } = head;
+    if (decision.content.kind !== "recovery") return;
+    const actions = recoveryActions(head.control, decision);
+    if (actions.length === 0) {
+      return ctx.ui.notify(`The manager offers no recovery choice for decision ${decision.id} of run ${runId}. Nothing was sent.`, "warning");
+    }
+    const labels = actions.map((action) => action.label);
+    const selected = await ctx.ui.select(`Recovery of decision ${decision.id} (${decision.content.gap}): ${oneLine(decision.content.message)}`, labels);
+    if (selected === undefined) return ctx.ui.notify(`No recovery choice was sent for decision ${decision.id}.`, "info");
+    const action = actions[labels.indexOf(selected)];
+    const address = { occurrenceId: decision.occurrenceId.toString(), generation: decision.generation };
+    const sent = action.operation === "retry"
+      ? await this.#command(ctx, session, "retry", head.controlObserved.reference.uri,
+        session.prepare(head.controlObserved.reference, { operation: "retry", ...address }, head.controlObserved.etag), true, (observed) => {
+          const control = decodeControl(observed);
+          return control.ok && control.value.decisionHeadId !== decision.id;
+        })
+      : await this.#command(ctx, session, "choose-recovery", head.decisionObserved.reference.uri,
+        session.prepare(head.decisionObserved.reference, { operation: "choose-recovery", ...address, choice: action.option.choice },
+          head.decisionObserved.etag), true, (observed) => {
+          const current = decodeDecision(observed);
+          return current.ok && current.value.state !== "pending";
+        });
+    if (sent.kind === "receipt" && sent.state === "effect-observed") {
+      ctx.ui.notify(`Recovery ${action.label} reached decision ${decision.id} of run ${runId}.`, "info");
+    }
   }
 
   async #chooseRequest(ctx: ExtensionContext, session: ManagerSession, args: string, phases: readonly string[], title: string)
@@ -670,3 +1345,16 @@ export class ManagerRequests {
 function draftKey(session: ManagerSession, requestId: string, name: string): string {
   return JSON.stringify([session.identity, requestId, name]);
 }
+
+function answerKey(session: ManagerSession, decisionId: string): string {
+  return JSON.stringify([session.identity, "decision", decisionId]);
+}
+
+/** The head decision of a run with the reads that its commands bind. */
+type Head = {
+  readonly runId: string;
+  readonly decision: DecisionView;
+  readonly decisionObserved: Observed;
+  readonly control: ControlView;
+  readonly controlObserved: Observed;
+};

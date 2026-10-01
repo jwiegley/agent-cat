@@ -507,8 +507,10 @@ the binding and its resource. An observation is not an `OwnedRun` or a
 process and no local run store, and it grants no supervision or control
 authority. A decision head is the decision at position 0 of the queue of its
 run. `ServiceMode` itself sends no manager command. Only the commands of the
-section "Requests and review in service mode" send commands, through the
-session of the active binding.
+sections "Requests and review in service mode" and "Live monitor and
+decisions in service mode" send commands, through the session of the active
+binding. `ServiceMode.subscribe` calls a listener after each change of the
+connection or of the observations, and the live monitor uses it.
 
 | Command | Purpose |
 |---|---|
@@ -518,6 +520,8 @@ session of the active binding.
 | `/wfm-review [REQUEST_ID]` | Continue a request: collect its missing inputs and enqueue it, follow its admission, or show its exact review. |
 | `/wfm-withdraw [REQUEST_ID]` | Withdraw a request before its start. |
 | `/wfm-discard [REQUEST_ID]` | Discard the live preparation of a request in review. |
+| `/wfm-monitor [RUN_ID]` | Show the live monitor of a service run, as the section "Live monitor and decisions in service mode" states. |
+| `/wfm-answer [RUN_ID]` | Answer the head decision of a run with a typed answer, or send a recovery choice that the manager offers. |
 
 The status widget lists active local runs and active service runs in
 separate sections, and the status line counts each kind.
@@ -604,7 +608,16 @@ binding and refuses while the manager is not connected.
 Each send is one command, and nothing is sent again by itself. Each send
 gives one notification that begins with `Command OPERATION` and states its
 outcome: `accepted` with the receipt identifier and the receipt state,
-`refused` with the status and code, or `uncertain`. For each command except
+`refused` with the status and code, or `uncertain`. An uncertain send is
+reconciled with one read through `ManagerSession.reconcileCommand`, under the
+rules of `reconcile` in `src/manager/refresh.ts`. Without a receipt location,
+the read of the target observes the effect only when the command sees its
+effect there and the entity tag differs from the precondition. An answer or
+a recovery choice sees its effect when the decision is no longer pending, and
+a retry sees its effect when the controls name another head. The other
+commands see no effect in their target, so they stay uncertain. A reconciled
+effect gives an `accepted` notification that names the read. The command is
+never sent again, also when it stays uncertain. For each command except
 `approve`, the command waits until its receipt settles, and the notification
 names the settled state and the effect. An approval names the state of its
 receipt at acceptance, and the run that the request then names is its
@@ -623,9 +636,74 @@ entity tag of the live preparation. The manager then returns the request to
 `draft`, and `/wfm-review` prepares a new review. Each of the three commands
 takes a request identifier, or offers the open requests of the overview.
 
+## Live monitor and decisions in service mode
+
+`/wfm-monitor [RUN_ID]` opens a `ServiceMonitorComponent` of
+`src/manager-ui.ts` for a run, or offers the service runs of the overview.
+Its `ServiceMonitor` watches `/v1/runs/RUN_ID/snapshot`,
+`/v1/runs/RUN_ID/control` and the decision queue `/v1/decisions?runId=RUN_ID`
+through the session, so each related event of the manager reads them again,
+and each change of service mode draws the monitor again. The monitor sends no
+command. It shows these lines, which `serviceMonitorLines` gives:
+
+| Line | Content |
+|---|---|
+| `Service run RUN_ID, workflow NAME` | The run and the workflow of its snapshot. |
+| `Delivery: STATE` | The delivery state of the session. |
+| `Observation: ...` | `current` when the latest read of each resource completed. `stale (CODE)` when a later read failed, and the last complete read stays in view. `refused (CODE)` when a resource has no complete read. |
+| `Runtime: STATUS` | The runtime status of the snapshot, or `not yet observed`, followed by any supervision other than `owned`. |
+| `Decisions: N pending` | The pending decisions of the queue, the head first. A question line names its code and its prompt. A recovery line names its gap, its message and its choices. |
+| `Offers: ...` | The operations that the controls offer, and `cancel` when the manager allows it. |
+| `Terminal: STATUS` | The terminal status of the run, followed by its failure when it has one. |
+| `Result: ...` | For a succeeded run, `verified N bytes` and `Result SHA-256: DIGEST` of the retrieved bytes, or the state of the retrieval. Other runs have no download. |
+
+When the snapshot of a succeeded run names a referenced or verified result,
+the monitor reads `/v1/runs/RUN_ID/outputs` and downloads the verified result
+once through `ManagerSession.download`, which checks its size and SHA-256. A
+result that the manager has not verified yet is read again after the next
+change of the snapshot. The component keeps the Terminal and Result lines in
+view at every height, scrolls the other lines with `j`, `k` and the arrow
+keys, and closes with `q` or Escape. Outside the Pi TUI, one notification
+gives the lines after the first reads.
+
+`/wfm-answer [RUN_ID]` acts on the head of a run, or offers the runs whose
+head is pending. It reads the queue `/v1/decisions?runId=RUN_ID` as a complete
+page set, takes the pending decision at position 0, and reads that decision
+and the controls of the run. An offer counts only when the controls are
+owned, name the decision as their head, and address its occurrence and its
+generation.
+
+- A question needs an `answer` offer. The typed editor names the decision,
+  the code and the prompt. `answerValue` gives the typed JSON value, so the
+  flag input `no` gives JSON `false`, and an input that does not agree with
+  the code or the editor schema is refused before any send, after which the
+  editor opens again with the draft. The answer body of `answerBody` goes to
+  `/v1/decisions/ID` with the decision entity tag as `If-Match`.
+- A 412 `stale-revision` refusal keeps the typed text as a draft and names
+  it in a notification. Nothing is sent again. The command reads the
+  decision once more. While the same decision is the pending head, the
+  editor opens again with the draft. The manager serves only pending
+  decisions, so a decision that another client answered reads as 404
+  `unavailable-resource`, and the notification states that the kept draft is
+  not sent.
+- A recovery decision offers only the choices of `recoveryActions`: `Retry`
+  when a `retry` offer addresses the decision, and each choice that a
+  `choose-recovery` offer carries with the same target, such as `Fail over
+  to TARGET` or `Abandon`. A retry goes to `/v1/runs/RUN_ID/control` with the
+  control entity tag, and another choice goes to `/v1/decisions/ID` with the
+  decision entity tag. A decision without an offered choice sends nothing.
+
+Each send follows the rules of the section "Requests and review in service
+mode", and the answer or the choice that reaches its effect gives one
+notification, for example `Answer false reached decision ID of run RUN_ID.`
+
 `test/manager-ui.test.ts` checks that the review lists every selector and
 consent fact, that the component wraps the review within the width and
-reaches every line by scrolling, and the choice of each key.
+reaches every line by scrolling, and the choice of each key. It also checks
+that `recoveryActions` lists only offered choices for the head of owned
+controls, the lines of a running and a terminal run, the stale and refused
+observation lines, and that the monitor component keeps the Terminal and
+Result lines in view at 12 rows.
 `test/manager-ui-live.test.ts` runs only when `AGENT_CAT_MANAGER_PROFILE`
 names a client profile. It drives the extension with a fake Pi host, a fake
 UI and a transport that records each POST, against a running manager with the
@@ -637,8 +715,23 @@ review and requires that the approve body names the selectors of the
 preparation. It captures exact editor text for `captured-input`. It declines
 a review, requires that nothing was sent to the preparation and that the
 request is still in review, and then discards the preparation and withdraws
-the request. The `pi-client` mode of `manager/test/service_http.py` runs it
-before the session check and confirms each step against manager facts.
+the request. It starts a mixed-controls run, requires that `/wfm-monitor`
+shows the runtime status, the current observation and the Bool question,
+answers the question through `/wfm-answer` with `no`, which sends JSON
+`false`, requires that the recovery choices equal the offered choices and
+selects Retry, and requires that a second `/wfm-monitor` ends with the
+Terminal and Result lines of the verified result. It then starts a second
+mixed-controls run. While the editor of `/wfm-answer` is open, it writes the
+decision to the handshake file that `AGENT_CAT_MANAGER_HARNESS_ANSWER`
+names, and the harness answers first through HTTP with its own credential.
+The answer of the extension receives 412, the draft is kept, and the
+extension sends nothing more to the decision. The check then abandons the
+recovery, or retries it when no abandon is offered. The six steps each have a
+timeout of 600 seconds. The `pi-client` mode of
+`manager/test/service_http.py` runs it before the session check and confirms
+each step against manager facts: the answer commands, the retry command, the
+answers of the run stores as JSON `false`, the verified result, and that the
+preempted decision has only the answer command of the harness.
 
 `test/service-mode.test.ts` drives the extension with a fake Pi host, a fake
 UI and an injected fake transport. It requires that restore reaches only the
@@ -647,7 +740,10 @@ that shutdown and reload close the transport without a POST, that a late
 overview of the earlier endpoint is never installed after a switch and a
 stored reference of that endpoint is refused, and that a 401, an unsupported
 profile, an unsupported capability version and an unreachable manager show
-their refusal states. The last step of `test/manager-live.test.ts` starts a
+their refusal states. It also requires that `/wfm-answer` sends the flag input
+`No` as JSON `false` with the decision entity tag, and that an uncertain send
+is reconciled with one read of the decision and never sent again, both while
+the decision stays pending and after it changed. The last step of `test/manager-live.test.ts` starts a
 second run, closes the extension and the session during their live
 streams, and the `pi-client` mode of `manager/test/service_http.py` then
 confirms over HTTP that the run is still running under owned supervision.
@@ -722,6 +818,8 @@ for the control descriptor.
 | `/wfm-review [REQUEST_ID]` | Service mode: continue a manager request or show its exact review. |
 | `/wfm-withdraw [REQUEST_ID]` | Service mode: withdraw a manager request before its start. |
 | `/wfm-discard [REQUEST_ID]` | Service mode: discard the live preparation of a manager request in review. |
+| `/wfm-monitor [RUN_ID]` | Service mode: the live monitor of a manager run, with its Terminal and Result lines. |
+| `/wfm-answer [RUN_ID]` | Service mode: answer the head decision of a manager run, or send an offered recovery choice. |
 
 The `agent_cat_workflow` tool lets a model discover, start, inspect, control,
 restart, resume, or fork runs. Starts from the tool are limited to the

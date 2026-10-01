@@ -25,11 +25,25 @@
  *    to the preparation, and the request stays in review. `/wfm-review` then
  *    discards the preparation with `d`, and `/wfm-withdraw` withdraws the
  *    request.
- * 4. The extension closes.
+ * 4. `/wfm mixed-controls` starts a run. `/wfm-monitor` shows its runtime
+ *    status, the observation freshness and its Bool question, and `q`
+ *    closes it. `/wfm-answer` answers the question through the typed editor
+ *    with `no`, which sends JSON `false`, and then offers only the recovery
+ *    choices that the manager offers, of which the check selects Retry. A
+ *    second `/wfm-monitor` shows terminal success with the Terminal and
+ *    Result lines of the verified result.
+ * 5. `/wfm mixed-controls` starts a second run. While the editor of
+ *    `/wfm-answer` is open, the harness answers the question first through
+ *    HTTP with its own credential, through the handshake file that
+ *    `AGENT_CAT_MANAGER_HARNESS_ANSWER` names. The answer of the extension
+ *    receives 412 `stale-revision`, the draft is kept, and nothing is sent
+ *    again. The recovery head is then abandoned, or retried when the
+ *    manager offers no abandon.
+ * 6. The extension closes.
  */
 
 import { createHash } from "node:crypto";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -37,13 +51,23 @@ import extension from "../src/index.ts";
 import type { Outcome } from "../src/manager/events.ts";
 import { encodeJson, isJsonObject, jsonMember, type JsonObject, type JsonValue } from "../src/manager/json.ts";
 import { ClientProfile } from "../src/manager/profile.ts";
-import { decodeCommandReceipt, decodeDraftView, decodePreparation, type DraftView } from "../src/manager/resources.ts";
+import {
+  decodeCommandReceipt,
+  decodeControl,
+  decodeDecision,
+  decodeDraftView,
+  decodePreparation,
+  type ControlView,
+  type DecisionView,
+  type DraftView,
+} from "../src/manager/resources.ts";
 import { ManagerSession, type Observed, type Reference, type SessionTransport } from "../src/manager/session.ts";
 import { ManagerTransport, type CommandHeaders, type TransportOptions } from "../src/manager/transport.ts";
-import type { ReviewComponent } from "../src/manager-ui.ts";
+import type { Component } from "@earendil-works/pi-tui";
 
 const PROFILE = process.env.AGENT_CAT_MANAGER_PROFILE;
 const REPORT = process.env.AGENT_CAT_MANAGER_REPORT;
+const HARNESS_ANSWER = process.env.AGENT_CAT_MANAGER_HARNESS_ANSWER;
 
 /** The exact literal, with leading spaces, Unicode and an inner line end. `PI_UI_LITERAL` of the harness states it. */
 const LITERAL = "  Café λ — exact literal.\n\tSecond line ✓";
@@ -53,6 +77,12 @@ const CAPTURED = "  Captured Ünïcode λ\r\nsecond line\n";
 
 /** The literal of the declined request. */
 const DECLINED = "declined review";
+
+/** The literal of the run that the Pi user answers. `PI_UI_ANSWERED` of the harness states it. */
+const ANSWERED = "Pi answer λ: explicit false.";
+
+/** The literal of the run whose question the harness answers first. `PI_UI_STALE` of the harness states it. */
+const STALE = "Pi stale λ: the harness answers first.";
 
 const STEP_MS = 600_000;
 const WAIT_MS = 120_000;
@@ -93,7 +123,8 @@ type Script = {
   select?: (title: string, options: string[]) => string | undefined;
   editor?: (title: string, prefill: string | undefined) => Promise<string | undefined> | string | undefined;
   confirm?: (title: string, message: string) => boolean;
-  review?: (screen: string) => string;
+  /** The key for a drawn component, or `undefined` to keep it open until its next drawing. */
+  review?: (screen: string) => string | undefined;
 };
 
 describe.runIf(PROFILE)("the human path of service mode against a live manager", () => {
@@ -133,14 +164,28 @@ describe.runIf(PROFILE)("the human path of service mode against a live manager",
         return script.confirm(title, message);
       },
       custom: <T>(factory: (tui: unknown, theme: unknown, keys: unknown, done: (value: T) => void) => unknown) =>
-        new Promise<T>((resolve) => {
-          const tui = { terminal: { rows: 400 }, requestRender: () => {} };
+        new Promise<T>((resolve, reject) => {
+          // Each drawing gives the screen to the script, which answers with a key or keeps the component open.
+          let open = true;
+          let component: Component | undefined;
+          const show = () => {
+            if (!open || component === undefined) return;
+            const screen = component.render(120).join("\n");
+            screens.push(screen);
+            if (script.review === undefined) {
+              open = false;
+              return reject(new Error(`unexpected component: ${screen}`));
+            }
+            const key = script.review(screen);
+            if (key !== undefined) component.handleInput?.(key);
+          };
+          const tui = { terminal: { rows: 400 }, requestRender: () => setImmediate(show) };
           const theme = { fg: (_color: string, value: string) => value };
-          const component = factory(tui, theme, {}, resolve) as ReviewComponent;
-          const screen = component.render(120).join("\n");
-          screens.push(screen);
-          if (script.review === undefined) throw new Error("unexpected review");
-          component.handleInput(script.review(screen));
+          component = factory(tui, theme, {}, (value) => {
+            open = false;
+            resolve(value);
+          }) as Component;
+          show();
         }),
     },
   };
@@ -209,6 +254,99 @@ describe.runIf(PROFILE)("the human path of service mode against a live manager",
   async function preparationOf(requestId: string): Promise<string> {
     return draftOf(must(await session.get(ref(`/v1/requests/${requestId}`)), "request")).preparationId ?? "";
   }
+
+  /** The command identifier of the latest accepted command of an operation, from its notification. */
+  function acceptedCommand(operation: string): string {
+    const notice = [...notices].reverse().find((line) => line.startsWith(`Command ${operation} accepted: command `));
+    const id = notice?.slice(`Command ${operation} accepted: command `.length).split(",")[0];
+    if (id === undefined) throw new Error(`no accepted ${operation}: ${notices.join("\n")}`);
+    return `/v1/commands/${id}`;
+  }
+
+  /** Create a mixed-controls request with a literal through /wfm, approve its review, and give its request and run. */
+  async function startMixed(literal: string): Promise<{ requestId: string; runId: string }> {
+    script = {
+      select: (title) => (title.startsWith("Input input") ? "Literal text" : undefined),
+      editor: () => literal,
+      review: () => "a",
+      confirm: () => true,
+    };
+    await run("wfm", "mixed-controls");
+    const requestId = createdRequest();
+    const request = draftOf(must(await session.get(ref(`/v1/requests/${requestId}`)), "mixed request"));
+    expect(request.readiness.supplied).toEqual([{ source: "literal", name: "input", value: literal }]);
+    expect(request.runId).not.toBeNull();
+    return { requestId, runId: request.runId ?? "" };
+  }
+
+  /** Open /wfm-monitor of a run until a drawing satisfies the predicate, and give that drawing. */
+  async function monitored(runId: string, ready: (screen: string) => boolean, step: string): Promise<string> {
+    let seen: string | undefined;
+    script = {
+      review: (screen) => {
+        if (!ready(screen)) return undefined;
+        seen = screen;
+        return "q";
+      },
+    };
+    let timer: NodeJS.Timeout | undefined;
+    const late = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`${step}: ${screens.at(-1)}`)), WAIT_MS);
+    });
+    try {
+      await Promise.race([run("wfm-monitor", runId), late]);
+    } finally {
+      clearTimeout(timer);
+    }
+    if (seen === undefined) throw new Error(`${step}: the monitor closed without the expected screen`);
+    return seen;
+  }
+
+  /** The next head decision of a run that is not in `handled`, with the controls that name it, or `undefined` at the end of the run. */
+  async function nextHead(runId: string, handled: ReadonlySet<string>): Promise<{ decision: DecisionView; control: ControlView } | undefined> {
+    const deadline = Date.now() + WAIT_MS;
+    for (;;) {
+      const snapshot = must(await session.get(ref(`/v1/runs/${runId}/snapshot`)), "snapshot");
+      const runtime = isJsonObject(snapshot.value) ? jsonMember(snapshot.value, "runtime") : undefined;
+      const status = runtime !== undefined && runtime !== null && isJsonObject(runtime) ? jsonMember(runtime, "status") : undefined;
+      const control = must(decodeControl(must(await session.get(ref(`/v1/runs/${runId}/control`)), "control").value), "control decode");
+      const head = control.decisionHeadId;
+      if (head !== null && !handled.has(head)) {
+        const decision = must(decodeDecision(must(await session.get(ref(`/v1/decisions/${head}`)), "head").value), "head decode");
+        if (decision.state === "pending") return { decision, control };
+      }
+      if (typeof status === "string" && ["succeeded", "failed", "cancelled"].includes(status)) return undefined;
+      if (Date.now() > deadline) throw new Error(`no next head of run ${runId}: ${JSON.stringify(control.value)}`);
+      await new Promise((wake) => setTimeout(wake, 250));
+    }
+  }
+
+  /** The labels of the recovery choices that the controls offer for a recovery head, read from the offers themselves. */
+  function offeredChoices(control: ControlView, decision: DecisionView): string[] {
+    if (decision.content.kind !== "recovery") return [];
+    const offers = control.offers.filter((offer) => offer.occurrenceId === decision.occurrenceId && offer.generation === decision.generation);
+    return decision.content.choices.filter((option) => offers.some((offer) => (offer.operation === "retry" && option.choice === "retry")
+      || (offer.operation === "choose-recovery" && offer.choices.some((item) => item.choice === option.choice && item.target === option.target))))
+      .map((option) => (option.choice === "retry" ? "Retry" : option.choice === "abandon" ? "Abandon"
+        : option.target === null ? "Fail over" : `Fail over to ${option.target}`));
+  }
+
+  /** Ask the harness to answer a decision first through HTTP with its own credential, and give its answer command. */
+  async function harnessAnswers(decision: string): Promise<string> {
+    if (HARNESS_ANSWER === undefined) throw new Error("AGENT_CAT_MANAGER_HARNESS_ANSWER names no handshake file");
+    writeFileSync(`${HARNESS_ANSWER}.tmp`, JSON.stringify({ decision }), { mode: 0o600 });
+    renameSync(`${HARNESS_ANSWER}.tmp`, HARNESS_ANSWER);
+    const done = `${HARNESS_ANSWER}.done`;
+    const deadline = Date.now() + WAIT_MS;
+    while (!existsSync(done)) {
+      if (Date.now() > deadline) throw new Error("the harness did not answer first");
+      await new Promise((wake) => setTimeout(wake, 100));
+    }
+    return (JSON.parse(readFileSync(done, "utf8")) as { command: string }).command;
+  }
+
+  /** The POSTs to a resource after an index of `posts`. */
+  const postsTo = (resource: string, from = 0): Post[] => posts.slice(from).filter((post) => post.resource === resource);
 
   beforeAll(async () => {
     session = must(await ManagerSession.connect(must(await ClientProfile.load(PROFILE ?? ""), "profile")), "connect");
@@ -358,6 +496,140 @@ describe.runIf(PROFILE)("the human path of service mode against a live manager",
     const withdrawn = draftOf(await until(`/v1/requests/${requestId}`, (observed) => draftOf(observed).phase === "withdrawn", "withdrawn"));
     expect(withdrawn.runId).toBeNull();
     Object.assign(report, { declinedRequestId: requestId, declinedPreparationId: preparationId });
+  }, STEP_MS);
+
+  it("monitors a run, answers its Bool question with JSON false, retries the offered recovery and sees terminal success", async () => {
+    const { requestId, runId } = await startMixed(ANSWERED);
+    const question = await monitored(runId, (screen) => screen.includes(`Independent confirmation? ${ANSWERED}`)
+      && screen.includes("Observation: current") && screen.includes("Runtime: running"), "monitor question");
+    expect(question).toContain(`Service run ${runId}, workflow mixed-controls`);
+    expect(question).toContain("Delivery: live");
+    expect(question).toMatch(/Decisions: [12] pending/);
+    expect(question).not.toContain("Terminal:");
+    const handled = new Set<string>();
+    let answerCommand = "";
+    let retryCommand = "";
+    let answeredDecision = "";
+    for (let head = await nextHead(runId, handled); head !== undefined; head = await nextHead(runId, handled)) {
+      const { decision, control } = head;
+      handled.add(decision.id);
+      const before = posts.length;
+      if (decision.content.kind === "question") {
+        const titles: string[] = [];
+        script = {
+          editor: (title, prefill) => {
+            titles.push(title);
+            expect(prefill).toBeUndefined();
+            return "no";
+          },
+        };
+        await run("wfm-answer", runId);
+        expect(titles).toHaveLength(1);
+        expect(titles[0]).toContain(`Answer of decision ${decision.id} (flag: yes, no, true or false): Independent confirmation? ${ANSWERED}`);
+        const sent = postsTo(`/v1/decisions/${decision.id}`, before);
+        expect(sent).toHaveLength(1);
+        expect(JSON.parse(String(sent[0].body))).toEqual({
+          operation: "answer", occurrenceId: decision.occurrenceId.toString(), generation: decision.generation, value: false,
+        });
+        expect(notices, notices.join("\n")).toContain(`Answer false reached decision ${decision.id} of run ${runId}.`);
+        answerCommand = acceptedCommand("answer");
+        answeredDecision = decision.id;
+      } else {
+        const offered = offeredChoices(control, decision);
+        expect(offered).toContain("Retry");
+        let shown: string[] = [];
+        script = {
+          select: (title, options) => {
+            expect(title).toContain(`Recovery of decision ${decision.id}`);
+            shown = options;
+            return "Retry";
+          },
+        };
+        await run("wfm-answer", runId);
+        expect(shown).toEqual(offered);
+        const sent = postsTo(`/v1/runs/${runId}/control`, before);
+        expect(sent).toHaveLength(1);
+        expect(JSON.parse(String(sent[0].body))).toEqual({ operation: "retry", occurrenceId: decision.occurrenceId.toString(), generation: decision.generation });
+        expect(notices, notices.join("\n")).toContain(`Recovery Retry reached decision ${decision.id} of run ${runId}.`);
+        retryCommand = acceptedCommand("retry");
+      }
+    }
+    expect(handled.size).toBe(2);
+    expect(answerCommand && retryCommand).not.toBe("");
+    const terminal = await monitored(runId, (screen) => screen.includes("Terminal: succeeded") && /Result SHA-256: [0-9a-f]{64}/.test(screen),
+      "monitor terminal");
+    expect(terminal).toContain("Runtime: succeeded");
+    expect(terminal).toContain("Decisions: none pending");
+    const bytes = /Result: verified ([0-9]+) bytes/.exec(terminal);
+    const sha256 = /Result SHA-256: ([0-9a-f]{64})/.exec(terminal);
+    expect(bytes).not.toBeNull();
+    // The Terminal and Result lines end the monitor, above its key line.
+    const lines = terminal.split("\n");
+    expect(lines.slice(-4, -1)).toEqual(["Terminal: succeeded", `Result: verified ${bytes?.[1]} bytes`, `Result SHA-256: ${sha256?.[1]}`]);
+    await succeeded(runId);
+    Object.assign(report, {
+      monitoredRequestId: requestId, monitoredRunId: runId, answeredDecisionId: answeredDecision, answerCommand, retryCommand,
+      resultBytes: Number(bytes?.[1]), resultSha256: sha256?.[1],
+    });
+  }, STEP_MS);
+
+  it("keeps the draft of an answer that the harness preempted with 412 and sends nothing again", async () => {
+    const { requestId, runId } = await startMixed(STALE);
+    const handled = new Set<string>();
+    let staleDecision = "";
+    let harnessCommand = "";
+    let recovery = "";
+    let stalePosts = 0;
+    for (let head = await nextHead(runId, handled); head !== undefined; head = await nextHead(runId, handled)) {
+      const { decision, control } = head;
+      handled.add(decision.id);
+      const before = posts.length;
+      if (decision.content.kind === "question") {
+        let editors = 0;
+        script = {
+          editor: async (_title, prefill) => {
+            editors += 1;
+            expect(prefill).toBeUndefined();
+            // The harness answers first while the editor is open.
+            harnessCommand = await harnessAnswers(`/v1/decisions/${decision.id}`);
+            return "no";
+          },
+        };
+        await run("wfm-answer", runId);
+        expect(editors).toBe(1);
+        stalePosts = postsTo(`/v1/decisions/${decision.id}`, before).length;
+        expect(stalePosts).toBe(1);
+        expect(notices.some((line) => line.startsWith("Command answer refused: 412 stale-revision"))).toBe(true);
+        expect(notices, notices.join("\n")).toContain(
+          `Decision ${decision.id} changed before the answer arrived (412 stale-revision). Nothing was sent again. The draft "no" is kept.`);
+        expect(notices.at(-1)).toBe(`Decision ${decision.id} is no longer the pending head (404 unavailable-resource), `
+          + `so the kept draft is not sent. /wfm-answer ${runId} acts on the next head.`);
+        staleDecision = decision.id;
+      } else {
+        const offered = offeredChoices(control, decision);
+        recovery = staleDecision !== "" && offered.includes("Abandon") ? "Abandon" : "Retry";
+        let shown: string[] = [];
+        script = {
+          select: (_title, options) => {
+            shown = options;
+            return recovery;
+          },
+        };
+        await run("wfm-answer", runId);
+        expect(shown).toEqual(offered);
+        expect(notices, notices.join("\n")).toContain(`Recovery ${recovery} reached decision ${decision.id} of run ${runId}.`);
+      }
+    }
+    expect(staleDecision).not.toBe("");
+    // Nothing more reached the preempted decision from the extension.
+    await new Promise((wake) => setTimeout(wake, 1000));
+    expect(postsTo(`/v1/decisions/${staleDecision}`)).toHaveLength(stalePosts);
+    // The manager serves only pending decisions, and the queue no longer lists the answered one.
+    expect(await session.get(ref(`/v1/decisions/${staleDecision}`))).toEqual({ ok: false, failure: { kind: "Refused", status: 404, code: "unavailable-resource" } });
+    const queue = must(await session.get(ref(`/v1/decisions?runId=${runId}`)), "stale queue");
+    const listed = jsonMember(queue.value as JsonObject, "items");
+    expect(Array.isArray(listed) && listed.some((item) => isJsonObject(item) && jsonMember(item, "id") === staleDecision)).toBe(false);
+    Object.assign(report, { staleRequestId: requestId, staleRunId: runId, staleDecisionId: staleDecision, harnessAnswerCommand: harnessCommand, staleRecovery: recovery });
   }, STEP_MS);
 
   it("closes the extension and writes the report", async () => {

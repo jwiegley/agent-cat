@@ -12,10 +12,10 @@
  * supervision or control authority.
  *
  * `ServiceMode` sends no manager command. The commands of
- * `src/manager-ui.ts` send commands through its session. `close` closes
- * the transport, and the work of the manager continues under its own
- * supervision. A switch
- * between profiles uses `ManagerSession.switchEndpoint`, which advances the
+ * `src/manager-ui.ts` send commands through its session, and the live
+ * monitor of `/wfm-monitor` follows its changes through `subscribe`.
+ * `close` closes the transport, and the work of the manager continues under
+ * its own supervision. A switch between profiles uses `ManagerSession.switchEndpoint`, which advances the
  * refresh generation, discards every read of the earlier binding that is in
  * flight, and refuses every reference of the earlier binding with
  * `WrongEndpoint`.
@@ -171,6 +171,7 @@ export class ServiceMode {
   #runs = new Map<string, ServiceRunView>();
   #requests = new Map<string, ServiceRequestView>();
   #decisions = new Map<string, ServiceDecisionView>();
+  readonly #listeners = new Set<() => void>();
   /** The selection lane: one selection at a time, in order. */
   #lane: Promise<unknown> = Promise.resolve();
   #closed = false;
@@ -215,6 +216,19 @@ export class ServiceMode {
   /** The decision heads of the active binding, in overview order. */
   decisions(): ServiceDecisionView[] {
     return [...this.#decisions.values()];
+  }
+
+  /**
+   * Call a listener after each change of the connection or of the
+   * observations, as `onChange` is called, until the returned function
+   * removes it or `close`. The live monitor of `/wfm-monitor` reads its
+   * watched resources again on each call.
+   */
+  subscribe(listener: () => void): () => void {
+    this.#listeners.add(listener);
+    return () => {
+      this.#listeners.delete(listener);
+    };
   }
 
   /** Connect to the first profile. */
@@ -358,7 +372,9 @@ export class ServiceMode {
   }
 
   #changed(): void {
-    if (!this.#closed) this.#options.onChange?.();
+    if (this.#closed) return;
+    this.#options.onChange?.();
+    for (const listener of [...this.#listeners]) listener();
   }
 
   /**
@@ -372,6 +388,8 @@ export class ServiceMode {
     this.#closed = true;
     this.#connection = { kind: "closed" };
     this.#clear();
+    for (const listener of [...this.#listeners]) listener();
+    this.#listeners.clear();
     const session = this.#session;
     this.#session = undefined;
     if (session !== undefined) await session.close();

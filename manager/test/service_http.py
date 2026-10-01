@@ -342,8 +342,15 @@ endpoints_mode = len(sys.argv) == 6 and sys.argv[5] == ENDPOINTS
 # node from PATH in ext-pi twice, each time with AGENT_CAT_MANAGER_PROFILE
 # set to a client profile and AGENT_CAT_MANAGER_REPORT set to a report file.
 # The first run, ext-pi/test/manager-ui-live.test.ts with the pi-ui
-# profile, drives /wfm, /wfm-review and /wfm-withdraw of the extension with
-# a fake Pi UI. vitest must report its four steps passed. The harness then
+# profile, drives /wfm, /wfm-review, /wfm-withdraw, /wfm-monitor and
+# /wfm-answer of the extension with a fake Pi UI. vitest must report its six
+# steps passed. During its stale-answer step the check writes the decision
+# that it is about to answer to the handshake file that
+# AGENT_CAT_MANAGER_HARNESS_ANSWER names. The harness then answers that
+# decision first with JSON false through HTTP with its own credential, waits
+# until the command reaches its effect, and writes the command to the file
+# with the suffix .done. This answer is the only mutation of the harness.
+# The harness then
 # reads with its own credential that the prompt-source request supplied
 # exactly the literal PI_UI_LITERAL and names a succeeded run whose program
 # received the literal, that its preparation is consumed and the single
@@ -355,6 +362,18 @@ endpoints_mode = len(sys.argv) == 6 and sys.argv[5] == ENDPOINTS
 # reached the effect discarded and the request is withdrawn. A discard
 # reaches that effect only for a live preparation of a request in review,
 # so this confirms that the declined review left the request in review.
+# For the monitored run of PI_UI_ANSWERED it reads that the one answer
+# command and the one retry command of the report reached their effects,
+# that the run store records the answer of its person question as JSON
+# false, that the run succeeded, and that the verified result that the
+# monitor showed has the size and SHA-256 of the harness download. For the
+# run of PI_UI_STALE it reads that the only answer command of the preempted
+# decision is the answer of the harness, which reached its effect, so the
+# 412 answer of the extension left no command, that the decision is no
+# longer served or queued, that the run store records JSON false, and that the run ended
+# succeeded after a retry or failed after an abandon. The harness then takes
+# a new cursor, and the reads of the session check count only the commands
+# after it.
 # The second run, ext-pi/test/manager-live.test.ts with the first client
 # profile, runs the session check. Through the session of
 # src/manager/session.ts, the check connects, bootstraps the overview,
@@ -381,8 +400,8 @@ endpoints_mode = len(sys.argv) == 6 and sys.argv[5] == ENDPOINTS
 # succeeded, and that the size and SHA-256 of the report equal the harness
 # download. It also reads that the second run is still running under owned
 # supervision with its question pending, after every client connection
-# closed. The harness performs no mutation, and the mode does not require
-# TUI_CHECK. Each step prints its own PASS line. It runs one manager lifetime.
+# closed. The harness performs no mutation other than the answer of the
+# stale-answer step, and the mode does not require TUI_CHECK. Each step prints its own PASS line. It runs one manager lifetime.
 PI_CLIENT = "pi-client"
 pi_client_mode = len(sys.argv) == 6 and sys.argv[5] == PI_CLIENT
 # The TUI modes share one fixture, TuiModeFixture. TUI_MODES names the
@@ -1415,6 +1434,10 @@ MIXED_TEXT = "Café λ — explicit false.\nSecond line."
 # ext-pi/test/manager-ui-live.test.ts, as LITERAL and CAPTURED state them.
 PI_UI_LITERAL = "  Café λ — exact literal.\n\tSecond line ✓"
 PI_UI_CAPTURED = "  Captured Ünïcode λ\r\nsecond line\n"
+# The literals of the two mixed-controls runs of the monitor and answer steps
+# of ext-pi/test/manager-ui-live.test.ts, as ANSWERED and STALE state them.
+PI_UI_ANSWERED = "Pi answer λ: explicit false."
+PI_UI_STALE = "Pi stale λ: the harness answers first."
 
 
 def mixed_client(capabilities, authorized, attempts=None):
@@ -9399,14 +9422,64 @@ def pi_client_checks():
             client = mixed_client(capabilities, harness)
             observed = client[0]
 
-            def vitest(test_file, profile, report_file, log_file, steps):
-                """Run one live check of ext-pi with the client profile and give its report."""
+            harness_answers = []
+
+            def harness_answer(handshake):
+                """Answer the decision that the handshake file names with JSON
+                false through HTTP with the harness credential, wait until the
+                command reaches its effect, and write the command to the file
+                with the suffix .done."""
+                global posts_forbidden
+                named = json.loads(handshake.read_bytes())["decision"]
+                decision, tag, _ = observed(named, "Decision")
+                assert decision["state"] == "pending" and decision["kind"] == "question", ("the named decision", decision["state"], decision["kind"])
+                body = {"operation": "answer", "occurrenceId": decision["address"]["occurrenceId"], "generation": decision["generation"], "value": False}
+                key = capabilities["authorityEpoch"] + "." + secrets.token_urlsafe(16)
+                previous, posts_forbidden = posts_forbidden, False
+                try:
+                    status, receipt, raw = request(named, harness | {"Content-Type": "application/json", "Idempotency-Key": key, "If-Match": tag},
+                                                   method="POST", payload=json.dumps(body, separators=(",", ":")).encode())
+                finally:
+                    posts_forbidden = previous
+                assert status == 202, ("the harness answer", status, receipt.get("code"))
+                validate("CommandReceipt", receipt, raw)
+                command = receipt["links"]["self"]
+                deadline = time.monotonic() + 40
+                while True:
+                    settled, _, _ = observed(command, "CommandReceipt")
+                    if settled["state"] in ("effect-observed", "refused", "unresolved"):
+                        break
+                    assert time.monotonic() < deadline, ("the harness answer did not settle", settled["state"])
+                    time.sleep(0.05)
+                assert settled["state"] == "effect-observed", ("the harness answer", settled["state"], settled.get("refusal"))
+                harness_answers.append((named, command))
+                written = handshake.with_name(handshake.name + ".tmp")
+                written.write_text(json.dumps({"command": command}))
+                os.replace(written, handshake.with_name(handshake.name + ".done"))
+
+            def vitest(test_file, profile, report_file, log_file, steps, handshake=None):
+                """Run one live check of ext-pi with the client profile and give
+                its report. With a handshake file, answer the decision that the
+                check names there first, once."""
                 environment = dict(os.environ, AGENT_CAT_MANAGER_PROFILE=str(profile), AGENT_CAT_MANAGER_REPORT=str(report_file))
+                if handshake is not None:
+                    environment["AGENT_CAT_MANAGER_HARNESS_ANSWER"] = str(handshake)
                 with log_file.open("wb") as log:
-                    completed = subprocess.run(["node", "node_modules/vitest/vitest.mjs", "run", test_file],
-                                               cwd=source / "ext-pi", env=environment, stdout=log, stderr=subprocess.STDOUT, timeout=720)
+                    child = subprocess.Popen(["node", "node_modules/vitest/vitest.mjs", "run", test_file],
+                                             cwd=source / "ext-pi", env=environment, stdout=log, stderr=subprocess.STDOUT)
+                    try:
+                        deadline = time.monotonic() + 720
+                        while child.poll() is None:
+                            assert time.monotonic() < deadline, ("the ext-pi live check exceeded 720 seconds", test_file)
+                            if handshake is not None and handshake.is_file() and not harness_answers:
+                                harness_answer(handshake)
+                            time.sleep(0.05)
+                    finally:
+                        if child.poll() is None:
+                            child.kill()
+                            child.wait()
                 text = re.sub(r"\x1b\[[0-9;]*m", "", log_file.read_text(errors="replace"))
-                assert completed.returncode == 0, ("the ext-pi live check failed", test_file, completed.returncode, text[-4000:])
+                assert child.returncode == 0, ("the ext-pi live check failed", test_file, child.returncode, text[-4000:])
                 assert re.search(r"Tests\s+%d passed \(%d\)" % (steps, steps), text) and report_file.is_file(), (
                     "the ext-pi live check did not run its steps", test_file, text[-4000:])
                 return json.loads(report_file.read_bytes())
@@ -9420,8 +9493,12 @@ def pi_client_checks():
                 snapshot, _, _ = observed("/v1/runs/" + run_id + "/snapshot", "RunSnapshot")
                 assert snapshot["runtime"] is not None and snapshot["runtime"]["status"] == "succeeded", ("run status", run_id, snapshot["runtime"])
 
-            ui = vitest("test/manager-ui-live.test.ts", ui_profile, ui_report_path, ui_log_path, 4)
+            ui = vitest("test/manager-ui-live.test.ts", ui_profile, ui_report_path, ui_log_path, 6, work / "pi-client-harness-answer.json")
             ui_receipts = command_receipts(cursor, harness)
+            # The reads of the session check count only the commands after this cursor.
+            status, middle, _ = request("/v1/snapshot", harness)
+            assert status == 200, ("snapshot after the human path", status)
+            session_cursor = middle["cursor"]
             literal, _, _ = observed("/v1/requests/" + ui["literalRequestId"], "Request")
             assert literal["readiness"]["supplied"] == [{"name": "input", "source": "literal", "value": PI_UI_LITERAL}], (
                 "the request did not supply exactly the literal", literal["readiness"]["supplied"])
@@ -9464,24 +9541,67 @@ def pi_client_checks():
                 "the declined request", withdrawn["phase"], discarded["state"], discarded["reason"])
             print("PASS pi-client 4: the declined review of preparation", ui["declinedPreparationId"], "has no approve command, the later",
                   "discard reached the effect discarded from review, and request", ui["declinedRequestId"], "is withdrawn", flush=True)
+            def person_answers(literal):
+                """The answers of the person question of every run whose input is the literal, from the run stores."""
+                return [entry["answer"] for path in work.glob("manager/runs/runs/*/runtime/answers.json")
+                        for entry in json.loads(path.read_bytes())["answers"]
+                        if (entry["question"].get("prompt") or "").startswith("Independent confirmation? " + literal)]
+
+            def receipts_of(operation, resource):
+                return [(uri, receipt) for uri, receipt in ui_receipts if receipt["operation"] == operation and receipt["resource"] == resource]
+
+            monitored = ui["monitoredRunId"]
+            answered = receipts_of("answer", "/v1/decisions/" + ui["answeredDecisionId"])
+            retried = receipts_of("retry", "/v1/runs/" + monitored + "/control")
+            assert [uri for uri, _ in answered] == [ui["answerCommand"]] and [uri for uri, _ in retried] == [ui["retryCommand"]], (
+                "the answer and retry commands of the monitored run", [uri for uri, _ in answered], [uri for uri, _ in retried], ui)
+            assert all(receipt["state"] == "effect-observed" for _, receipt in answered + retried), ("a command of the monitored run",)
+            assert person_answers(PI_UI_ANSWERED) == [False], ("the run store does not record JSON false", person_answers(PI_UI_ANSWERED))
+            succeeded(monitored)
+            artifact = verified_download(monitored, client, harness)
+            assert int(artifact["bytes"]) == ui["resultBytes"] and artifact["sha256"] == ui["resultSha256"], (
+                "the monitored result differs from the harness download", artifact["bytes"], artifact["sha256"], ui)
+            print("PASS pi-client 5: /wfm-monitor showed run", monitored, "and its question, /wfm-answer sent answer command",
+                  ui["answerCommand"], "whose answer the run store records as JSON false, the offered retry", ui["retryCommand"],
+                  "reached its effect, the run succeeded, and the monitor showed the Terminal and Result lines of the verified",
+                  artifact["bytes"], "bytes with the SHA-256", artifact["sha256"], "of the harness download", flush=True)
+            stale = "/v1/decisions/" + ui["staleDecisionId"]
+            assert harness_answers == [(stale, ui["harnessAnswerCommand"])], ("the harness answer", harness_answers, ui)
+            preempted = receipts_of("answer", stale)
+            assert [uri for uri, _ in preempted] == [ui["harnessAnswerCommand"]] and preempted[0][1]["state"] == "effect-observed", (
+                "the commands of the preempted decision", [(uri, receipt["state"]) for uri, receipt in preempted])
+            # The manager serves only pending decisions.
+            status, resolved, _ = request(stale, harness)
+            assert status == 404 and resolved["code"] == "unavailable-resource", ("the preempted decision is still served", status)
+            queue, _, _ = observed("/v1/decisions?runId=" + ui["staleRunId"], "DecisionPage")
+            assert ui["staleDecisionId"] not in [item["id"] for item in queue["items"]], "the preempted decision is still queued"
+            assert person_answers(PI_UI_STALE) == [False], ("the run store of the preempted run", person_answers(PI_UI_STALE))
+            ending, _, _ = observed("/v1/runs/" + ui["staleRunId"] + "/snapshot", "RunSnapshot")
+            expected_ending = "failed" if ui["staleRecovery"] == "Abandon" else "succeeded"
+            assert ending["runtime"] is not None and ending["runtime"]["status"] == expected_ending, (
+                "the preempted run", ui["staleRecovery"], ending["runtime"])
+            print("PASS pi-client 6: the harness answered decision", ui["staleDecisionId"], "first with command", ui["harnessAnswerCommand"],
+                  "while the editor of /wfm-answer was open, the 412 answer of the extension left no command and the draft was kept,",
+                  "and run", ui["staleRunId"], "ended", expected_ending, "after the offered", ui["staleRecovery"], flush=True)
             ui_stores = set(run_prompts)
             report = vitest("test/manager-live.test.ts", tui_fixture.client_profile, report_path, log_path, 7)
             assert report["reconnectLastEventId"] == report["reconnectCursor"] and report["pollEvents"] > 0, ("report delivery", report)
-            print("PASS pi-client 5: the ext-pi session ran its seven steps against the protected endpoint, the forced SSE drop",
+            print("PASS pi-client 7: the ext-pi session ran its seven steps against the protected endpoint, the forced SSE drop",
                   "resumed with Last-Event-ID", report["reconnectCursor"], "and", report["events"], "delivered events, of which",
                   report["pollEvents"], "came through polling, equal the polling listing", flush=True)
             status, requests, _ = request("/v1/requests", harness)
             assert status == 200 and sorted(item["id"] for item in requests["items"]) == sorted(
-                [report["requestId"], report["secondRequestId"], ui["literalRequestId"], ui["capturedRequestId"], ui["declinedRequestId"]]), (
+                [report["requestId"], report["secondRequestId"], ui["literalRequestId"], ui["capturedRequestId"], ui["declinedRequestId"],
+                 ui["monitoredRequestId"], ui["staleRequestId"]]), (
                 "the manager holds other than the requests of the two checks", status)
             submitted, _, _ = observed("/v1/requests/" + report["requestId"], "Request")
             expected = [{"name": declaration["name"], "source": "literal", "value": MIXED_TEXT} for declaration in workflow["inputs"]]
             assert submitted["readiness"]["supplied"] == expected, ("the request did not supply exactly the literal", submitted["readiness"])
             assert submitted["runId"] == report["runId"] and submitted["phase"] == "associated", (
                 "the request does not name the run", submitted["runId"], submitted["phase"])
-            print("PASS pi-client 6: request", report["requestId"], "supplied exactly the Unicode literal and names run", report["runId"],
+            print("PASS pi-client 8: request", report["requestId"], "supplied exactly the Unicode literal and names run", report["runId"],
                   flush=True)
-            receipts = command_receipts(cursor, harness)
+            receipts = command_receipts(session_cursor, harness)
             answers = [(uri, receipt) for uri, receipt in receipts if receipt["operation"] == "answer"]
             retries = [(uri, receipt) for uri, receipt in receipts if receipt["operation"] == "retry"]
             assert [uri for uri, _ in answers] == [report["answerCommand"]] and [uri for uri, _ in retries] == [report["retryCommand"]], (
@@ -9501,14 +9621,14 @@ def pi_client_checks():
             recorded = [entry["answer"] for path in answer_files for entry in json.loads(path.read_bytes())["answers"]
                         if entry["occurrenceId"] == occurrence]
             assert recorded == [False], ("the run store does not record the answer as JSON false", occurrence, recorded)
-            print("PASS pi-client 7: the run store records the answer as JSON false, and answer command", report["answerCommand"],
+            print("PASS pi-client 9: the run store records the answer as JSON false, and answer command", report["answerCommand"],
                   "and retry command", report["retryCommand"], "reached their effects", flush=True)
             snapshot, _, _ = observed("/v1/runs/" + report["runId"] + "/snapshot", "RunSnapshot")
             assert snapshot["runtime"] is not None and snapshot["runtime"]["status"] == "succeeded", ("run status", snapshot["runtime"])
             artifact = verified_download(report["runId"], client, harness)
             assert int(artifact["bytes"]) == report["resultBytes"] and artifact["sha256"] == report["resultSha256"], (
                 "the ext-pi result differs from the harness download", artifact["bytes"], artifact["sha256"], report)
-            print("PASS pi-client 8: run", report["runId"], "succeeded, and the verified result of", artifact["bytes"],
+            print("PASS pi-client 10: run", report["runId"], "succeeded, and the verified result of", artifact["bytes"],
                   "bytes has the SHA-256", artifact["sha256"], "of the ext-pi download", flush=True)
             second = report["secondRunId"]
             secondary, _, _ = observed("/v1/requests/" + report["secondRequestId"], "Request")
@@ -9522,10 +9642,11 @@ def pi_client_checks():
             assert control["decisionHeadId"] is not None, ("the second run has no pending decision head", control)
             head, _, _ = observed("/v1/decisions/" + control["decisionHeadId"], "Decision")
             assert head["state"] == "pending" and head["kind"] == "question", ("the question of the second run is not pending", head["state"])
-            print("PASS pi-client 9: after the extension and the session closed during their live streams, run", second,
+            print("PASS pi-client 11: after the extension and the session closed during their live streams, run", second,
                   "is still running under owned supervision, and its question", control["decisionHeadId"], "is pending", flush=True)
         print("PASS pi-client: the /wfm human path and the ext-pi manager session completed their journeys through the protected",
-              "HTTPS endpoint, and the harness confirmed each step from manager facts without a mutation", flush=True)
+              "HTTPS endpoint, and the harness confirmed each step from manager facts, with no mutation except its first answer of the stale-answer step",
+              flush=True)
     finally:
         if process.poll() is None:
             process.terminate()
