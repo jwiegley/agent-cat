@@ -1,12 +1,13 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { appendFile, cp, mkdir, mkdtemp, readFile, readdir, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { appendFile, cp, mkdir, mkdtemp, readFile, readdir, rename, rm, stat, symlink, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
 import { discoverRunner } from "../src/catalogue.ts";
 import { prepareLaunch } from "../src/launch.ts";
+import { MANAGER_ROLE_MARKER, ROOT_ROLE_FILE } from "../src/root-role.ts";
 import { parseLaunchManifest, RunSupervisor, type OwnedRun } from "../src/supervisor.ts";
 import type { RunnerConfig, RunSnapshot } from "../src/types.ts";
 
@@ -42,6 +43,31 @@ async function prepared(hang = false, legacy = false) {
   const launch = await prepareLaunch({ runner, descriptor, cwd: directory, stateDir: join(directory, "state"), inputs: { subject: "x" }, targetKind: "scripted", targetArgs: ["--scripted"] });
   if (hang) launch.env.FIXTURE_HANG = "1";
   return launch;
+}
+
+async function cloneTerminalRun(
+  template: string, runRoot: string, runId: string, createdAt: (template: string) => string,
+  fields: Record<string, unknown> = {},
+): Promise<string> {
+  const target = join(runRoot, runId);
+  await cp(template, target, { recursive: true });
+  const manifest = JSON.parse(await readFile(join(target, "supervisor-manifest.json"), "utf8"));
+  Object.assign(manifest, fields, { runId, createdAt: createdAt(manifest.createdAt) });
+  await writeFile(join(target, "supervisor-manifest.json"), `${JSON.stringify(manifest)}\n`, "utf8");
+  const snapshot = JSON.parse(await readFile(join(target, "snapshot.json"), "utf8"));
+  snapshot.runId = runId;
+  const replacementResult = await installResult(join(target, "runtime"), runId, "receipt", "done");
+  const eventsPath = join(target, "live-events.ndjson");
+  const events = (await readFile(eventsPath, "utf8")).trimEnd().split("\n").map((line) => {
+    const event = { ...JSON.parse(line), runId };
+    if (event.event.type === "run.completed") event.event.result = replacementResult;
+    return event;
+  });
+  snapshot.result = replacementResult;
+  await writeFile(eventsPath, `${events.map((event) => JSON.stringify(event)).join("\n")}\n`, "utf8");
+  snapshot.eventDigests = events.map((event) => [event.sequence, JSON.stringify(event)]);
+  await writeFile(join(target, "snapshot.json"), `${JSON.stringify(snapshot)}\n`, "utf8");
+  return target;
 }
 
 function terminal(run: OwnedRun): Promise<RunSnapshot> {
@@ -441,31 +467,59 @@ describe("run supervisor", () => {
     await new RunSupervisor().start(launch).finished;
     const runRoot = dirname(launch.storeDir);
     const newerId = "newer-run";
-    const newer = join(runRoot, newerId);
-    await cp(launch.storeDir, newer, { recursive: true });
-    const manifest = JSON.parse(await readFile(join(newer, "supervisor-manifest.json"), "utf8"));
-    manifest.runId = newerId;
-    manifest.createdAt = new Date(Date.parse(manifest.createdAt) + 1_000).toISOString();
-    await writeFile(join(newer, "supervisor-manifest.json"), `${JSON.stringify(manifest)}\n`, "utf8");
-    const snapshot = JSON.parse(await readFile(join(newer, "snapshot.json"), "utf8"));
-    snapshot.runId = newerId;
-    await writeFile(join(newer, "snapshot.json"), `${JSON.stringify(snapshot)}\n`, "utf8");
-    const replacementResult = await installResult(join(newer, "runtime"), newerId, "receipt", "done");
-    const eventsPath = join(newer, "live-events.ndjson");
-    const events = (await readFile(eventsPath, "utf8")).trimEnd().split("\n").map((line) => {
-      const event = { ...JSON.parse(line), runId: newerId };
-      if (event.event.type === "run.completed") event.event.result = replacementResult;
-      return event;
-    });
-    snapshot.result = replacementResult;
-    await writeFile(eventsPath, `${events.map((event) => JSON.stringify(event)).join("\n")}\n`, "utf8");
-    snapshot.eventDigests = events.map((event) => [event.sequence, JSON.stringify(event)]);
-    await writeFile(join(newer, "snapshot.json"), `${JSON.stringify(snapshot)}\n`, "utf8");
+    await cloneTerminalRun(launch.storeDir, runRoot, newerId, (createdAt) => new Date(Date.parse(createdAt) + 1_000).toISOString());
     const restored = new RunSupervisor();
     await restored.restore(dirname(runRoot), { days: 0, maxRuns: 1 });
     expect((await readdir(runRoot)).sort()).toEqual([newerId]);
     const retained = restored.get(newerId)?.snapshot;
     expect(retained?.status, retained?.failure).toBe("succeeded");
+  });
+
+  it("refuses restore and retention against a manager root before any deletion", async () => {
+    const launch = await prepared();
+    await new RunSupervisor().start(launch).finished;
+    const directory = dirname(dirname(dirname(launch.storeDir)));
+    const old = () => new Date(Date.now() - 400 * 86_400_000).toISOString();
+    const populate = async (stateDir: string) => {
+      const runRoot = join(stateDir, "runs");
+      await mkdir(runRoot, { recursive: true, mode: 0o700 });
+      await cloneTerminalRun(launch.storeDir, runRoot, "old-completed", old);
+      await cloneTerminalRun(launch.storeDir, runRoot, "old-parent", old);
+      await cloneTerminalRun(launch.storeDir, runRoot, "old-child", old, { parentRunId: "old-parent", lineage: "restart" });
+      await cloneTerminalRun(launch.storeDir, runRoot, "recent-completed", () => new Date().toISOString());
+      const partial = join(runRoot, "partial-without-manifest");
+      await mkdir(partial, { mode: 0o700 });
+      const stale = new Date(Date.now() - 400 * 86_400_000);
+      await utimes(partial, stale, stale);
+      return runRoot;
+    };
+    const localRuns = await populate(join(directory, "local-state"));
+    const managerRoot = join(directory, "manager-root");
+    await mkdir(managerRoot, { mode: 0o700 });
+    await writeFile(join(managerRoot, ROOT_ROLE_FILE), MANAGER_ROLE_MARKER, { mode: 0o600 });
+    const managerRuns = await populate(managerRoot);
+    const nested = join(managerRoot, "nested", "state");
+    const nestedRuns = await populate(nested);
+    const listing = async (root: string) => {
+      const entries = await readdir(root, { recursive: true });
+      return Promise.all(entries.sort().map(async (entry) => [entry, (await stat(join(root, entry))).mtimeMs] as const));
+    };
+    const managerBefore = await listing(managerRoot);
+
+    for (const stateDir of [managerRoot, nested]) {
+      const supervisor = new RunSupervisor();
+      await expect(supervisor.restore(stateDir, { days: 30, maxRuns: 1 })).rejects.toThrow("manager state root");
+      expect(supervisor.snapshots()).toEqual([]);
+    }
+    expect(await listing(managerRoot)).toEqual(managerBefore);
+    expect((await readdir(managerRuns)).sort()).toEqual(["old-child", "old-completed", "old-parent", "partial-without-manifest", "recent-completed"]);
+    expect((await readdir(nestedRuns)).sort()).toEqual(["old-child", "old-completed", "old-parent", "partial-without-manifest", "recent-completed"]);
+
+    const local = new RunSupervisor();
+    await local.restore(join(directory, "local-state"), { days: 30, maxRuns: 1 });
+    expect((await readdir(localRuns)).sort()).toEqual(["old-parent"]);
+    expect(local.snapshots().map((snapshot) => [snapshot.runId, snapshot.status])).toEqual([["old-parent", "succeeded"]]);
+    expect(await listing(managerRoot)).toEqual(managerBefore);
   });
 
   it("forces an unresponsive process group and classifies cancellation honestly", async () => {

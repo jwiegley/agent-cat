@@ -4,7 +4,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { discoverRunner, readHelp, readRouting, supportsRoutingInspection } from "./catalogue.ts";
-import { configuredRemote, configuredRunners, retentionPolicy, stateDirectory } from "./config.ts";
+import { configuredManagerProfiles, configuredRemote, configuredRunners, retentionPolicy, stateDirectory } from "./config.ts";
 import { CurrentSessionBridge } from "./current-bridge.ts";
 import { MutationGrants, type GrantScope } from "./grants.ts";
 import { assertNoCredentialArgs, prepareLaunch, preflightLineage, previewPlan, type LineageEdit, type PreparedLaunch } from "./launch.ts";
@@ -12,7 +12,7 @@ import { formatMonitor } from "./monitor.ts";
 import { WorkflowMonitorComponent } from "./monitor-ui.ts";
 import { openRemotePi } from "./pi-remote-runtime.mjs";
 import { RunSupervisor } from "./supervisor.ts";
-import type { ControlAckSnapshot, RoutingInspection, RunnerConfig, RunSnapshot, TargetKind, WorkflowDescriptor } from "./types.ts";
+import type { ClientMode, ControlAckSnapshot, RoutingInspection, RunnerConfig, RunSnapshot, TargetKind, WorkflowDescriptor } from "./types.ts";
 
 export default function agentCatExtension(pi: ExtensionAPI): void {
   const supervisor = new RunSupervisor();
@@ -108,8 +108,9 @@ export default function agentCatExtension(pi: ExtensionAPI): void {
 
   pi.on("session_start", async (_event, ctx) => {
     lastContext = ctx;
-    await currentBridge.start(stateDirectory());
+    configuredManagerProfiles();
     await supervisor.restore(stateDirectory(), retentionPolicy());
+    await currentBridge.start(stateDirectory());
     updateWidget(ctx, supervisor);
   });
   pi.on("input", async (event, ctx) => {
@@ -372,8 +373,9 @@ export default function agentCatExtension(pi: ExtensionAPI): void {
   pi.registerCommand("wf-status", {
     description: "Show recent agent-cat workflow runs",
     handler: async (_args, ctx) => {
+      const mode = configuredManagerProfiles();
       const rows = supervisor.snapshots().map((snapshot) => `${snapshot.runId}  ${snapshot.status}  ${snapshot.workflow ?? "starting"}`);
-      ctx.ui.notify(rows.join("\n") || "No active workflow runs", "info");
+      ctx.ui.notify([modeLine(mode), rows.join("\n") || "No active workflow runs"].join("\n"), "info");
     },
   });
 
@@ -725,6 +727,11 @@ function grantError(scope: string) {
       return { content: [{ type: "text", text: `Cancellation requested for ${params.runId}` }], details: {} };
     },
   });
+}
+
+function modeLine(mode: ClientMode): string {
+  if (mode.kind === "local") return "Mode: local";
+  return `Mode: service with ${mode.profiles.length} manager profile${mode.profiles.length === 1 ? "" : "s"}. Current-session, owned-child, deck, ACP, and remote Pi targets stay local.`;
 }
 
 function notifyControl(ctx: ExtensionContext, action: string, ack: ControlAckSnapshot): void {

@@ -1,5 +1,5 @@
 import { isAbsolute } from "node:path";
-import type { RunnerConfig } from "./types.ts";
+import type { ClientMode, RunnerConfig } from "./types.ts";
 
 export function configuredRunners(cwd: string, env: NodeJS.ProcessEnv = process.env): RunnerConfig[] {
   const configured = env.AGENT_CAT_RUNNERS;
@@ -26,6 +26,36 @@ export function configuredRunners(cwd: string, env: NodeJS.ProcessEnv = process.
     ids.add(entry.id);
     return { id: entry.id, executable: entry.executable, prefixArgs, allowedCwds };
   });
+}
+
+export const MAX_MANAGER_PROFILES = 8;
+
+/**
+ * Reads the explicit client mode. Service mode is active only when `AGENT_CAT_MANAGER_PROFILES`
+ * (a JSON array of 1 to 8 absolute client-profile paths) or `AGENT_CAT_MANAGER_PROFILE` (one
+ * absolute path) is set. Local mode applies otherwise, and the local targets stay local in both.
+ */
+export function configuredManagerProfiles(env: NodeJS.ProcessEnv = process.env): ClientMode {
+  const configured = env.AGENT_CAT_MANAGER_PROFILES;
+  const single = env.AGENT_CAT_MANAGER_PROFILE;
+  if (configured && single) throw new Error("configure AGENT_CAT_MANAGER_PROFILES or AGENT_CAT_MANAGER_PROFILE, not both");
+  if (single) {
+    if (!isAbsolute(single)) throw new Error("AGENT_CAT_MANAGER_PROFILE must be an absolute path");
+    return { kind: "service", profiles: [single] };
+  }
+  if (!configured) return { kind: "local" };
+  let parsed: unknown;
+  try { parsed = JSON.parse(configured); } catch { throw new Error("AGENT_CAT_MANAGER_PROFILES is not valid JSON"); }
+  if (!Array.isArray(parsed) || parsed.length === 0 || parsed.length > MAX_MANAGER_PROFILES) {
+    throw new Error(`AGENT_CAT_MANAGER_PROFILES must be a JSON array of 1 to ${MAX_MANAGER_PROFILES} paths`);
+  }
+  const profiles: string[] = [];
+  parsed.forEach((value, index) => {
+    if (typeof value !== "string" || !isAbsolute(value)) throw new Error(`AGENT_CAT_MANAGER_PROFILES[${index}] must be an absolute path`);
+    if (profiles.includes(value)) throw new Error(`AGENT_CAT_MANAGER_PROFILES[${index}] is duplicated`);
+    profiles.push(value);
+  });
+  return { kind: "service", profiles };
 }
 
 export function stateDirectory(env: NodeJS.ProcessEnv = process.env): string {

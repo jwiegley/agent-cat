@@ -23,6 +23,40 @@ behavior; the extension owns trusted
 discovery, approval, supervision, the user interface, retention, and durable
 run references.
 
+## Supported host
+
+The supported host is the built Pi fork at `~/src/fork/pi`, commit `7857926ee`.
+The directory `node_modules/@earendil-works` holds one symbolic link for each
+host package, and each link points into `~/src/fork/pi/packages`. The linked
+packages are these, each at version 0.99.1:
+
+| Package | Fork directory |
+|---|---|
+| `@earendil-works/chord` | `packages/chord` |
+| `@earendil-works/pi-ai` | `packages/ai` |
+| `@earendil-works/pi-client` | `packages/client` |
+| `@earendil-works/pi-coding-agent` | `packages/coding-agent` |
+| `@earendil-works/pi-protocol` | `packages/protocol` |
+| `@earendil-works/pi-server` | `packages/server` |
+| `@earendil-works/pi-telemetry` | `packages/telemetry` |
+| `@earendil-works/pi-tui` | `packages/tui` |
+
+`@earendil-works/pi-agent-core` 0.99.1 is not linked. It resolves from
+`pi-coding-agent` through the `node_modules` directory at the root of the fork,
+to `packages/agent`. The supported toolchain is Node 22.23.3, TypeScript 5.9.3,
+and vitest 4.1.9.
+
+The links are never replaced by a registry install. The `devDependencies` pins
+of `package.json` and `package-lock.json` name older registry versions. They
+differ from the supported set, and they are not used to install the host.
+`test/host-versions.test.ts` enumerates every linked package, resolves it and
+`pi-agent-core` through the Node resolver, and fails when a version is outside
+the supported set, a linked package is not listed, or a listed package is
+missing.
+
+agent-cat owns `ext-pi` and its manager client. The Pi owner owns the host. The
+fork is built for this extension and is not edited by agent-cat work.
+
 ## Configuration
 
 Set the user-owned environment variables before you start Pi:
@@ -40,6 +74,22 @@ of `AGENT_CAT_RUNNER`:
 ```sh
 export AGENT_CAT_RUNNERS='[{"id":"stable","executable":"/opt/agentic-run","allowedCwds":["/work"]},{"id":"next","executable":"/opt/agentic-run-next"}]'
 ```
+
+The extension runs in local mode unless a manager client profile is
+configured. Service mode is active only when one of these variables is set:
+
+```sh
+export AGENT_CAT_MANAGER_PROFILE=/absolute/path/to/profile.json
+export AGENT_CAT_MANAGER_PROFILES='["/absolute/first.json","/absolute/second.json"]'
+```
+
+`AGENT_CAT_MANAGER_PROFILE` names one client profile.
+`AGENT_CAT_MANAGER_PROFILES` is a JSON array of 1 to 8 distinct absolute
+client-profile paths. The extension refuses to start when both variables are
+set, when a path is relative, or when the array is empty, holds more than 8
+entries, or repeats a path. `/wf-status` states the active mode. The
+current-session, owned-child, deck, ACP, and remote Pi targets stay local in
+both modes. The extension never advertises them as manager capabilities.
 
 A remote Pi server requires a private transport in addition. The session
 identifier is optional. When it is omitted, the extension uses the
@@ -220,6 +270,18 @@ attach read-only to a live run's event stream while controls stay with the origi
 exclusive supervisor; a dead owner leaves the run `orphaned`. State sharing occurs
 only when those frontends are explicitly given the same `AGENT_CAT_STATE_DIR`.
 
+The state directory is a local root. Before restore, reconstruction, or
+retention, the extension applies the local-use check of the section
+"State-root roles" of `runtime/README.md`. It canonicalizes the configured path,
+then reads `.agentic-root-role.json` in the state directory and in each
+ancestor, at most 256 directories. An absent marker means an unmarked
+directory. The exact bytes `{"version":1,"role":"manager"}` followed by one LF
+mark a manager root. Any other content, a file that is not regular, or a
+symbolic link refuses. When the state directory is a manager root or lies
+beneath one, session start fails with an error that names the manager root.
+Restore and retention then delete nothing, and the extension does not create
+its current-session bridge in that directory.
+
 agent-cat persists six kinds of state. These are an immutable manifest with a
 fixed reference to a private `program.json`, an append-only event journal, and
 schema-indexed reusable answers that are keyed by the complete bare question.
@@ -265,8 +327,11 @@ launch and lineage approval refuse when interactive approval is unavailable.
 
 ## Build and test
 
+The host packages link into the built Pi fork as the section "Supported host"
+states. Do not run `npm ci` or `npm install`, because either command replaces
+those links with the registry pins of `package-lock.json`.
+
 ```sh
-npm ci --legacy-peer-deps --ignore-scripts
 npm run check
 npm test
 AGENT_CAT_E2E_RUNNER="$(cd .. && nix develop path:. -c cabal list-bin agentic-run)" npm run test:integration

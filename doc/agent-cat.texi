@@ -2375,11 +2375,17 @@ The TypeScript extension under @file{ext-pi/} has its own checks:
 
 @example
 cd ext-pi
-npm ci --legacy-peer-deps --ignore-scripts
 npm run check
 npm test
 AGENT_CAT_E2E_RUNNER="$(cd .. && nix develop path:. -c cabal list-bin agentic-run)" npm run test:integration
 @end example
+
+The packages under @file{ext-pi/node_modules/@@earendil-works} are symbolic links
+into the built Pi fork, and the section ``Supported host'' of
+@file{ext-pi/README.md} names the supported versions.  A registry install
+replaces those links, so the checks do not start with @command{npm ci}.
+@file{test/host-versions.test.ts} fails when a linked package reports a version
+outside that set or is not listed.
 
 The unit tests run against fixtures.  The integration tests require a freshly
 built @command{agentic-run} and the accompanying local Pi packages.  They

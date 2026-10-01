@@ -5,6 +5,14 @@ export type RunnerConfig = {
   allowedCwds: string[];
 };
 
+/**
+ * The explicit client mode. Service mode names the client profiles of one or more managers.
+ * Every target kind stays a local target in both modes and is never a manager capability.
+ */
+export type ClientMode =
+  | { kind: "local" }
+  | { kind: "service"; profiles: readonly string[] };
+
 export type WorkflowInputSource = "prompt" | "command-tail" | "stdin";
 
 export type WorkflowInput = {

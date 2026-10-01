@@ -1,9 +1,10 @@
 import { createHash } from "node:crypto";
-import { access, mkdtemp, readFile, readdir, rm, stat } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, readdir, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import extension, { parseWorkflowCommand } from "../src/index.ts";
+import { MANAGER_ROLE_MARKER, ROOT_ROLE_FILE } from "../src/root-role.ts";
 
 const created: string[] = [];
 afterEach(async () => Promise.all(created.splice(0).map((path) => rm(path, { recursive: true, force: true }))));
@@ -72,6 +73,34 @@ describe("Pi extension lifecycle", () => {
       else process.env.AGENT_CAT_STATE_DIR = previousState;
       if (previousDeckSession === undefined) delete process.env.AGENTDECK_INSTANCE_ID;
       else process.env.AGENTDECK_INSTANCE_ID = previousDeckSession;
+    }
+  });
+
+  it("refuses session start against a manager root before the bridge or retention writes", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "agent-cat-extension-manager-root-"));
+    created.push(directory);
+    const managerRoot = join(directory, "manager");
+    await mkdir(join(managerRoot, "runs", "partial"), { recursive: true, mode: 0o700 });
+    await writeFile(join(managerRoot, ROOT_ROLE_FILE), MANAGER_ROLE_MARKER, { mode: 0o600 });
+    const stale = new Date(Date.now() - 400 * 86_400_000);
+    await utimes(join(managerRoot, "runs", "partial"), stale, stale);
+    const previousState = process.env.AGENT_CAT_STATE_DIR;
+    process.env.AGENT_CAT_STATE_DIR = managerRoot;
+    try {
+      const events = new Map<string, Array<(event: unknown, ctx: unknown) => Promise<unknown>>>();
+      extension({
+        registerEntryRenderer: () => {}, registerTool: () => {}, registerCommand: () => {}, appendEntry: () => {}, sendUserMessage: () => {},
+        startTaskTurn: async () => {},
+        on: (name: string, handler: (event: unknown, ctx: unknown) => Promise<unknown>) => events.set(name, [...(events.get(name) ?? []), handler]),
+      } as never);
+      const ctx = { cwd: directory, mode: "tui", hasUI: true, ui: { notify: () => {}, setWidget: () => {}, setStatus: () => {} } };
+      const [start] = events.get("session_start") ?? [];
+      await expect(start!({}, ctx)).rejects.toThrow("is a manager state root");
+      expect((await readdir(managerRoot)).sort()).toEqual([ROOT_ROLE_FILE, "runs"]);
+      expect(await readdir(join(managerRoot, "runs"))).toEqual(["partial"]);
+    } finally {
+      if (previousState === undefined) delete process.env.AGENT_CAT_STATE_DIR;
+      else process.env.AGENT_CAT_STATE_DIR = previousState;
     }
   });
 
@@ -251,11 +280,16 @@ describe("Pi extension lifecycle", () => {
       await commands.get("wf")!.handler("fixture", ctx);
       expect(notices.at(-1)).toContain("requires interactive approval");
       await commands.get("wf-status")!.handler("", ctx);
-      expect(notices.at(-1)).toContain("No active workflow runs");
+      expect(notices.at(-1)).toBe("Mode: local\nNo active workflow runs");
+      process.env.AGENT_CAT_MANAGER_PROFILES = '["/profiles/first.json","/profiles/second.json"]';
+      await commands.get("wf-status")!.handler("", ctx);
+      expect(notices.at(-1)).toBe("Mode: service with 2 manager profiles. Current-session, owned-child, deck, ACP, and remote Pi targets stay local.\nNo active workflow runs");
+      delete process.env.AGENT_CAT_MANAGER_PROFILES;
       await commands.get("wf-launch")!.handler("agent-cat:fixture", ctx);
       expect(notices.at(-1)).toContain("requires interactive approval");
     } finally {
       if (previousRunner === undefined) delete process.env.AGENT_CAT_RUNNER; else process.env.AGENT_CAT_RUNNER = previousRunner;
+      delete process.env.AGENT_CAT_MANAGER_PROFILES;
     }
   });
 

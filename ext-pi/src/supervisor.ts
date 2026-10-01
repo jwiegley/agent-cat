@@ -4,6 +4,7 @@ import { constants as fsConstants, createReadStream } from "node:fs";
 import { appendFile, lstat, mkdir, open, readdir, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { isAbsolute, join, relative } from "node:path";
 import { initialSnapshot, reduceEvent } from "./reducer.ts";
+import { assertLocalStateRoot } from "./root-role.ts";
 import type { PreparedLaunch } from "./launch.ts";
 import type { Writable } from "node:stream";
 import type { ControlAckSnapshot, LaunchManifest, RunSnapshot, RuntimeEvent } from "./types.ts";
@@ -61,6 +62,7 @@ export class RunSupervisor {
   }
 
   async restore(stateDir: string, policy: { days: number; maxRuns: number } = { days: 30, maxRuns: 100 }): Promise<void> {
+    await assertLocalStateRoot(stateDir);
     const root = join(stateDir, "runs");
     let entries;
     try {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { configuredRemote, configuredRunners, retentionPolicy, stateDirectory } from "../src/config.ts";
+import { configuredManagerProfiles, configuredRemote, configuredRunners, retentionPolicy, stateDirectory } from "../src/config.ts";
 
 describe("trusted extension configuration", () => {
   it("loads runners only from explicit absolute user configuration", () => {
@@ -17,6 +17,23 @@ describe("trusted extension configuration", () => {
     ]);
     expect(() => configuredRunners("/work", { AGENT_CAT_RUNNERS: "[]" })).toThrow("non-empty");
     expect(() => configuredRunners("/work", { AGENT_CAT_RUNNER: "/one", AGENT_CAT_RUNNERS: "[]" })).toThrow("not both");
+  });
+
+  it("selects service mode only from explicit absolute manager profiles", () => {
+    expect(configuredManagerProfiles({})).toEqual({ kind: "local" });
+    expect(configuredManagerProfiles({ AGENT_CAT_RUNNER: "/trusted/runner", AGENT_CAT_PI_REMOTE_SOCKET: "/private/socket" })).toEqual({ kind: "local" });
+    expect(configuredManagerProfiles({ AGENT_CAT_MANAGER_PROFILE: "/profiles/one.json" })).toEqual({ kind: "service", profiles: ["/profiles/one.json"] });
+    const eight = Array.from({ length: 8 }, (_, index) => `/profiles/${index}.json`);
+    expect(configuredManagerProfiles({ AGENT_CAT_MANAGER_PROFILES: JSON.stringify(eight) })).toEqual({ kind: "service", profiles: eight });
+    expect(() => configuredManagerProfiles({ AGENT_CAT_MANAGER_PROFILE: "/one.json", AGENT_CAT_MANAGER_PROFILES: '["/two.json"]' })).toThrow("not both");
+    expect(() => configuredManagerProfiles({ AGENT_CAT_MANAGER_PROFILE: "profiles/one.json" })).toThrow("must be an absolute path");
+    expect(() => configuredManagerProfiles({ AGENT_CAT_MANAGER_PROFILES: '["/one.json","relative.json"]' })).toThrow("AGENT_CAT_MANAGER_PROFILES[1] must be an absolute path");
+    expect(() => configuredManagerProfiles({ AGENT_CAT_MANAGER_PROFILES: "[]" })).toThrow("1 to 8 paths");
+    expect(() => configuredManagerProfiles({ AGENT_CAT_MANAGER_PROFILES: JSON.stringify([...eight, "/profiles/8.json"]) })).toThrow("1 to 8 paths");
+    expect(() => configuredManagerProfiles({ AGENT_CAT_MANAGER_PROFILES: '"/one.json"' })).toThrow("1 to 8 paths");
+    expect(() => configuredManagerProfiles({ AGENT_CAT_MANAGER_PROFILES: "[/one.json]" })).toThrow("not valid JSON");
+    expect(() => configuredManagerProfiles({ AGENT_CAT_MANAGER_PROFILES: "[1]" })).toThrow("must be an absolute path");
+    expect(() => configuredManagerProfiles({ AGENT_CAT_MANAGER_PROFILES: '["/one.json","/one.json"]' })).toThrow("duplicated");
   });
 
   it("requires complete remote and private-state configuration", () => {
