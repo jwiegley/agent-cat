@@ -10197,6 +10197,29 @@ Non-blocking findings of fess audit fess/pc-PC11-r2.md (2026-09-30) on subtask P
 
 Limitations recorded by the implementer: no test reproduces the credential-rotation window between two reads (the fix closes it by construction, since withExchange reads the credential once and sends the checked bearer); the real mode leaves one closed stream registered on the server until the server next writes to it, and this release timing is not documented; the TUI does not yet use streamEvents, pollEventBatch or loadOverview (WM-033 to WM-035); security hardening and hostile-stream negatives are deferred under the 2026-09-30 operator direction.
 
+* TODO [#E] Resolve the non-blocking fess findings of subtask PC12    :review:
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pc12-refresh-fess-109a
+:LABELS:   ["review","workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-30 Wed 23:25]
+:MODIFIED: [2026-09-30 Wed 23:25]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess audit fess/pc-PC12-r1.md (2026-09-30) on subtask PC12 (WM-029 refresh serialization, dirty coalescing, generation fencing and uncertain-command reconciliation).
+
+1. (medium) The backoff reset after a delivered event is not library behavior. In manager/test/ClientCheck.hs near line 478 the checker sets the state to initialBackoff itself, so the check only proves that initialBackoff gives 1 second (see also manager/src/Agentic/Manager/Client/Refresh.hs near 87 and doc/api/README.md near 626). Add a library function such as deliveredEvent :: Backoff -> Backoff and use it in backoffVector, or state in doc/api/README.md that the reset belongs to the caller.
+2. (low) No check exercises uncertainPending (manager/src/Agentic/Manager/Client.hs near 488). The reconciliation vectors build Uncertain directly from JSON (ClientCheck.hs near 511). Add a check that calls prepareCommand with a precondition, passes the result through uncertainPending, and confirms that the precondition text and the target equal the inputs and match the ETag form of a target read.
+3. (low) test/manager_client_vectors.json near line 3589 and the next "without a precondition" vector: the opaque command object carries "precondition": "\"rev_1\"" while the top-level precondition is null. Set the command object precondition to null in both vectors.
+4. (low, no change needed) jitteredMicroseconds (Refresh.hs near 101) goes beyond the requirement. It is recorded as an intentional addition, because doc/api/README.md already says the backoff is jittered.
+
+Limitations recorded by the implementer: nothing calls the coordinator, the backoff or reconcile yet; the TUI service lane keeps its own receipt-based reconciliation, and moving it onto Agentic.Manager.Client.Refresh belongs to WM-033 to WM-035; resendAdmission stays the only resend; the caller supplies the jitter fraction and the client never reconnects by itself; advanceGeneration returns no actions, so earlier-generation fetches still on the wire are discarded on completion and early cancellation is left to the caller; reconciliation from the target alone depends on the caller deciding whether the effect is visible, and the pure rule only adds the guard that the target ETag must differ from the precondition.
+
 * TODO [#C] Resolve PC5 fess findings in legacy history windows    :review:
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -18118,7 +18141,7 @@ public or production deployment.
 :LABELS:   ["p6","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-30 Wed 23:15]
+:MODIFIED: [2026-09-30 Wed 23:26]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-029
 :SOURCE_REPO: agent-cat
@@ -18279,6 +18302,13 @@ coordination or SQL into the TUI.
     "author": "johnw",
     "text": "PC11 (live delivery in the client): Agentic.Manager.Client gains streamEvents (one GET /v1/events with Accept text/event-stream and Last-Event-ID under the session and credential checks of exchange; checks status 200, text/event-stream and no-store; reads with brRead through the PC9 parser; gives each invalidation or heartbeat to a callback; ends after reconnectIdleSeconds 45 without bytes and returns the last complete event identifier or a ClientFailure; 410 problems map through problemFailure; closeClient ends the stream), pollEventBatch (pollEvents decoded into the typed EventBatch) and loadOverview (getPageSet of /v1/snapshot with kind and resource identity, cursor and oldestCursor, the same cursor required on every page). withExchange now reads the credential once through sessionBearer and sends the checked bearer. The real mode of manager-client-check streams a request.changed invalidation for a request it created within 10 seconds, polls the same event from the same cursor, and ends an idle stream at a 4000 ms test bound with the last event identifier. client_native.py gains stream-idle, stream-close, stream-gone, overview and bad-overview. Checks passed: Werror build with -ftui-tests, vectors mode, service_http base with CLIENT_CHECK, client_native.py, events-lifecycle, the Phase A journey at N=8, make -C doc check. Evidence: resume-20260923/PC/PC11/impl-r2; fess/pc-PC11-r2.md (non-blocking). Follow-up: acat-pc11-live-delivery-fess-pm15. The TUI does not use these operations yet (WM-033 to WM-035). Package stays open.",
     "created_at": "2026-10-01T06:15:30Z"
+  },
+  {
+    "id": 476,
+    "issue_id": "acat-wm-029-nlmg",
+    "author": "johnw",
+    "text": "PC12 (2026-09-30): pure refresh coordinator in Agentic.Manager.Client.Refresh (single flight per resource, dirty coalescing, generation fencing, advanceGeneration for resnapshot and endpoint switch), bounded reconnect backoff (1 to 30 seconds) with jitter, and uncertain-command reconciliation whose result cannot carry a send. New refresh section in test/manager_client_vectors.json (271 PASS in the vectors mode, 39 of them refresh, backoff, jitter or reconciliation). Checks passed: Werror build with -ftui-tests of manager-client-check, agentic-run, routing-fixed-point-probe, tui-model-test; vectors mode; source-boundaries; make -C doc check. Fess pc-PC12-r1 non-blocking, findings filed as acat-pc12-refresh-fess-109a. Not yet called by the TUI (WM-033 to WM-035). WM-029 stays open for closeout.",
+    "created_at": "2026-10-01T06:26:01Z"
   }
 ]
 #+end_src

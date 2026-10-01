@@ -2372,5 +2372,1306 @@
     "refusal": "InvalidResponse"
    }
   ]
+ },
+ "refresh": {
+  "sequences": [
+   {
+    "name": "an idle invalidation fetches once and installs",
+    "steps": [
+     {
+      "invalidate": "/v1/runs/run_1",
+      "actions": [
+       [
+        "fetch",
+        "/v1/runs/run_1",
+        0
+       ]
+      ]
+     },
+     {
+      "complete": "/v1/runs/run_1",
+      "generation": 0,
+      "actions": [
+       [
+        "install",
+        "/v1/runs/run_1",
+        0
+       ]
+      ]
+     }
+    ]
+   },
+   {
+    "name": "invalidations during a fetch coalesce into one later fetch",
+    "steps": [
+     {
+      "invalidate": "/v1/runs/run_1",
+      "actions": [
+       [
+        "fetch",
+        "/v1/runs/run_1",
+        0
+       ]
+      ]
+     },
+     {
+      "invalidate": "/v1/runs/run_1",
+      "actions": []
+     },
+     {
+      "invalidate": "/v1/runs/run_1",
+      "actions": []
+     },
+     {
+      "invalidate": "/v1/runs/run_1",
+      "actions": []
+     },
+     {
+      "complete": "/v1/runs/run_1",
+      "generation": 0,
+      "actions": [
+       [
+        "install",
+        "/v1/runs/run_1",
+        0
+       ],
+       [
+        "fetch",
+        "/v1/runs/run_1",
+        0
+       ]
+      ]
+     },
+     {
+      "complete": "/v1/runs/run_1",
+      "generation": 0,
+      "actions": [
+       [
+        "install",
+        "/v1/runs/run_1",
+        0
+       ]
+      ]
+     }
+    ]
+   },
+   {
+    "name": "an invalidation during the coalesced fetch gives one more fetch",
+    "steps": [
+     {
+      "invalidate": "/v1/runs/run_1",
+      "actions": [
+       [
+        "fetch",
+        "/v1/runs/run_1",
+        0
+       ]
+      ]
+     },
+     {
+      "invalidate": "/v1/runs/run_1",
+      "actions": []
+     },
+     {
+      "complete": "/v1/runs/run_1",
+      "generation": 0,
+      "actions": [
+       [
+        "install",
+        "/v1/runs/run_1",
+        0
+       ],
+       [
+        "fetch",
+        "/v1/runs/run_1",
+        0
+       ]
+      ]
+     },
+     {
+      "invalidate": "/v1/runs/run_1",
+      "actions": []
+     },
+     {
+      "invalidate": "/v1/runs/run_1",
+      "actions": []
+     },
+     {
+      "complete": "/v1/runs/run_1",
+      "generation": 0,
+      "actions": [
+       [
+        "install",
+        "/v1/runs/run_1",
+        0
+       ],
+       [
+        "fetch",
+        "/v1/runs/run_1",
+        0
+       ]
+      ]
+     },
+     {
+      "complete": "/v1/runs/run_1",
+      "generation": 0,
+      "actions": [
+       [
+        "install",
+        "/v1/runs/run_1",
+        0
+       ]
+      ]
+     },
+     {
+      "invalidate": "/v1/runs/run_1",
+      "actions": [
+       [
+        "fetch",
+        "/v1/runs/run_1",
+        0
+       ]
+      ]
+     },
+     {
+      "complete": "/v1/runs/run_1",
+      "generation": 0,
+      "actions": [
+       [
+        "install",
+        "/v1/runs/run_1",
+        0
+       ]
+      ]
+     }
+    ]
+   },
+   {
+    "name": "resources are serialized independently",
+    "steps": [
+     {
+      "invalidate": "/v1/runs/run_1",
+      "actions": [
+       [
+        "fetch",
+        "/v1/runs/run_1",
+        0
+       ]
+      ]
+     },
+     {
+      "invalidate": "/v1/requests/request_1",
+      "actions": [
+       [
+        "fetch",
+        "/v1/requests/request_1",
+        0
+       ]
+      ]
+     },
+     {
+      "invalidate": "/v1/runs/run_1",
+      "actions": []
+     },
+     {
+      "complete": "/v1/requests/request_1",
+      "generation": 0,
+      "actions": [
+       [
+        "install",
+        "/v1/requests/request_1",
+        0
+       ]
+      ]
+     },
+     {
+      "complete": "/v1/runs/run_1",
+      "generation": 0,
+      "actions": [
+       [
+        "install",
+        "/v1/runs/run_1",
+        0
+       ],
+       [
+        "fetch",
+        "/v1/runs/run_1",
+        0
+       ]
+      ]
+     },
+     {
+      "invalidate": "/v1/requests/request_1",
+      "actions": [
+       [
+        "fetch",
+        "/v1/requests/request_1",
+        0
+       ]
+      ]
+     },
+     {
+      "complete": "/v1/runs/run_1",
+      "generation": 0,
+      "actions": [
+       [
+        "install",
+        "/v1/runs/run_1",
+        0
+       ]
+      ]
+     },
+     {
+      "complete": "/v1/requests/request_1",
+      "generation": 0,
+      "actions": [
+       [
+        "install",
+        "/v1/requests/request_1",
+        0
+       ]
+      ]
+     }
+    ]
+   },
+   {
+    "name": "a resnapshot drops the fetch in flight",
+    "steps": [
+     {
+      "invalidate": "/v1/runs/run_1",
+      "actions": [
+       [
+        "fetch",
+        "/v1/runs/run_1",
+        0
+       ]
+      ]
+     },
+     {
+      "resnapshot": true,
+      "generation": 1,
+      "actions": []
+     },
+     {
+      "complete": "/v1/runs/run_1",
+      "generation": 0,
+      "actions": [
+       [
+        "discard",
+        "/v1/runs/run_1",
+        0
+       ]
+      ]
+     },
+     {
+      "invalidate": "/v1/runs/run_1",
+      "actions": [
+       [
+        "fetch",
+        "/v1/runs/run_1",
+        1
+       ]
+      ]
+     },
+     {
+      "complete": "/v1/runs/run_1",
+      "generation": 1,
+      "actions": [
+       [
+        "install",
+        "/v1/runs/run_1",
+        1
+       ]
+      ]
+     }
+    ]
+   },
+   {
+    "name": "an older completion after the current one is discarded",
+    "steps": [
+     {
+      "invalidate": "/v1/runs/run_1",
+      "actions": [
+       [
+        "fetch",
+        "/v1/runs/run_1",
+        0
+       ]
+      ]
+     },
+     {
+      "resnapshot": true,
+      "generation": 1,
+      "actions": []
+     },
+     {
+      "invalidate": "/v1/runs/run_1",
+      "actions": [
+       [
+        "fetch",
+        "/v1/runs/run_1",
+        1
+       ]
+      ]
+     },
+     {
+      "complete": "/v1/runs/run_1",
+      "generation": 1,
+      "actions": [
+       [
+        "install",
+        "/v1/runs/run_1",
+        1
+       ]
+      ]
+     },
+     {
+      "complete": "/v1/runs/run_1",
+      "generation": 0,
+      "actions": [
+       [
+        "discard",
+        "/v1/runs/run_1",
+        0
+       ]
+      ]
+     }
+    ]
+   },
+   {
+    "name": "an older completion before the current one is discarded",
+    "steps": [
+     {
+      "invalidate": "/v1/runs/run_1",
+      "actions": [
+       [
+        "fetch",
+        "/v1/runs/run_1",
+        0
+       ]
+      ]
+     },
+     {
+      "resnapshot": true,
+      "generation": 1,
+      "actions": []
+     },
+     {
+      "invalidate": "/v1/runs/run_1",
+      "actions": [
+       [
+        "fetch",
+        "/v1/runs/run_1",
+        1
+       ]
+      ]
+     },
+     {
+      "complete": "/v1/runs/run_1",
+      "generation": 0,
+      "actions": [
+       [
+        "discard",
+        "/v1/runs/run_1",
+        0
+       ]
+      ]
+     },
+     {
+      "invalidate": "/v1/runs/run_1",
+      "actions": []
+     },
+     {
+      "complete": "/v1/runs/run_1",
+      "generation": 1,
+      "actions": [
+       [
+        "install",
+        "/v1/runs/run_1",
+        1
+       ],
+       [
+        "fetch",
+        "/v1/runs/run_1",
+        1
+       ]
+      ]
+     },
+     {
+      "complete": "/v1/runs/run_1",
+      "generation": 1,
+      "actions": [
+       [
+        "install",
+        "/v1/runs/run_1",
+        1
+       ]
+      ]
+     }
+    ]
+   },
+   {
+    "name": "an endpoint switch drops every resource",
+    "steps": [
+     {
+      "invalidate": "/v1/runs/run_1",
+      "actions": [
+       [
+        "fetch",
+        "/v1/runs/run_1",
+        0
+       ]
+      ]
+     },
+     {
+      "invalidate": "/v1/requests/request_1",
+      "actions": [
+       [
+        "fetch",
+        "/v1/requests/request_1",
+        0
+       ]
+      ]
+     },
+     {
+      "invalidate": "/v1/runs/run_1",
+      "actions": []
+     },
+     {
+      "endpointSwitch": true,
+      "generation": 1,
+      "actions": []
+     },
+     {
+      "complete": "/v1/runs/run_1",
+      "generation": 0,
+      "actions": [
+       [
+        "discard",
+        "/v1/runs/run_1",
+        0
+       ]
+      ]
+     },
+     {
+      "complete": "/v1/requests/request_1",
+      "generation": 0,
+      "actions": [
+       [
+        "discard",
+        "/v1/requests/request_1",
+        0
+       ]
+      ]
+     },
+     {
+      "invalidate": "/v1/requests/request_1",
+      "actions": [
+       [
+        "fetch",
+        "/v1/requests/request_1",
+        1
+       ]
+      ]
+     },
+     {
+      "complete": "/v1/requests/request_1",
+      "generation": 1,
+      "actions": [
+       [
+        "install",
+        "/v1/requests/request_1",
+        1
+       ]
+      ]
+     }
+    ]
+   },
+   {
+    "name": "a resnapshot clears the dirty flag of the earlier generation",
+    "steps": [
+     {
+      "invalidate": "/v1/runs/run_1",
+      "actions": [
+       [
+        "fetch",
+        "/v1/runs/run_1",
+        0
+       ]
+      ]
+     },
+     {
+      "invalidate": "/v1/runs/run_1",
+      "actions": []
+     },
+     {
+      "resnapshot": true,
+      "generation": 1,
+      "actions": []
+     },
+     {
+      "invalidate": "/v1/runs/run_1",
+      "actions": [
+       [
+        "fetch",
+        "/v1/runs/run_1",
+        1
+       ]
+      ]
+     },
+     {
+      "complete": "/v1/runs/run_1",
+      "generation": 1,
+      "actions": [
+       [
+        "install",
+        "/v1/runs/run_1",
+        1
+       ]
+      ]
+     },
+     {
+      "complete": "/v1/runs/run_1",
+      "generation": 0,
+      "actions": [
+       [
+        "discard",
+        "/v1/runs/run_1",
+        0
+       ]
+      ]
+     }
+    ]
+   },
+   {
+    "name": "two advances fence both earlier generations",
+    "steps": [
+     {
+      "invalidate": "/v1/runs/run_1",
+      "actions": [
+       [
+        "fetch",
+        "/v1/runs/run_1",
+        0
+       ]
+      ]
+     },
+     {
+      "resnapshot": true,
+      "generation": 1,
+      "actions": []
+     },
+     {
+      "invalidate": "/v1/requests/request_1",
+      "actions": [
+       [
+        "fetch",
+        "/v1/requests/request_1",
+        1
+       ]
+      ]
+     },
+     {
+      "endpointSwitch": true,
+      "generation": 2,
+      "actions": []
+     },
+     {
+      "invalidate": "/v1/runs/run_1",
+      "actions": [
+       [
+        "fetch",
+        "/v1/runs/run_1",
+        2
+       ]
+      ]
+     },
+     {
+      "complete": "/v1/requests/request_1",
+      "generation": 1,
+      "actions": [
+       [
+        "discard",
+        "/v1/requests/request_1",
+        1
+       ]
+      ]
+     },
+     {
+      "complete": "/v1/runs/run_1",
+      "generation": 0,
+      "actions": [
+       [
+        "discard",
+        "/v1/runs/run_1",
+        0
+       ]
+      ]
+     },
+     {
+      "complete": "/v1/runs/run_1",
+      "generation": 2,
+      "actions": [
+       [
+        "install",
+        "/v1/runs/run_1",
+        2
+       ]
+      ]
+     },
+     {
+      "invalidate": "/v1/requests/request_1",
+      "actions": [
+       [
+        "fetch",
+        "/v1/requests/request_1",
+        2
+       ]
+      ]
+     },
+     {
+      "complete": "/v1/requests/request_1",
+      "generation": 2,
+      "actions": [
+       [
+        "install",
+        "/v1/requests/request_1",
+        2
+       ]
+      ]
+     }
+    ]
+   },
+   {
+    "name": "a completion of an idle resource is discarded",
+    "steps": [
+     {
+      "complete": "/v1/runs/run_1",
+      "generation": 0,
+      "actions": [
+       [
+        "discard",
+        "/v1/runs/run_1",
+        0
+       ]
+      ]
+     },
+     {
+      "invalidate": "/v1/runs/run_1",
+      "actions": [
+       [
+        "fetch",
+        "/v1/runs/run_1",
+        0
+       ]
+      ]
+     },
+     {
+      "complete": "/v1/runs/run_1",
+      "generation": 0,
+      "actions": [
+       [
+        "install",
+        "/v1/runs/run_1",
+        0
+       ]
+      ]
+     },
+     {
+      "complete": "/v1/runs/run_1",
+      "generation": 0,
+      "actions": [
+       [
+        "discard",
+        "/v1/runs/run_1",
+        0
+       ]
+      ]
+     }
+    ]
+   },
+   {
+    "name": "a completion of a later generation is discarded",
+    "steps": [
+     {
+      "invalidate": "/v1/runs/run_1",
+      "actions": [
+       [
+        "fetch",
+        "/v1/runs/run_1",
+        0
+       ]
+      ]
+     },
+     {
+      "complete": "/v1/runs/run_1",
+      "generation": 1,
+      "actions": [
+       [
+        "discard",
+        "/v1/runs/run_1",
+        1
+       ]
+      ]
+     },
+     {
+      "complete": "/v1/runs/run_1",
+      "generation": 0,
+      "actions": [
+       [
+        "install",
+        "/v1/runs/run_1",
+        0
+       ]
+      ]
+     }
+    ]
+   },
+   {
+    "name": "out-of-order completions across three generations",
+    "steps": [
+     {
+      "invalidate": "/v1/runs/run_1",
+      "actions": [
+       [
+        "fetch",
+        "/v1/runs/run_1",
+        0
+       ]
+      ]
+     },
+     {
+      "invalidate": "/v1/requests/request_1",
+      "actions": [
+       [
+        "fetch",
+        "/v1/requests/request_1",
+        0
+       ]
+      ]
+     },
+     {
+      "resnapshot": true,
+      "generation": 1,
+      "actions": []
+     },
+     {
+      "invalidate": "/v1/runs/run_1",
+      "actions": [
+       [
+        "fetch",
+        "/v1/runs/run_1",
+        1
+       ]
+      ]
+     },
+     {
+      "invalidate": "/v1/requests/request_1",
+      "actions": [
+       [
+        "fetch",
+        "/v1/requests/request_1",
+        1
+       ]
+      ]
+     },
+     {
+      "resnapshot": true,
+      "generation": 2,
+      "actions": []
+     },
+     {
+      "invalidate": "/v1/runs/run_1",
+      "actions": [
+       [
+        "fetch",
+        "/v1/runs/run_1",
+        2
+       ]
+      ]
+     },
+     {
+      "complete": "/v1/requests/request_1",
+      "generation": 1,
+      "actions": [
+       [
+        "discard",
+        "/v1/requests/request_1",
+        1
+       ]
+      ]
+     },
+     {
+      "complete": "/v1/runs/run_1",
+      "generation": 1,
+      "actions": [
+       [
+        "discard",
+        "/v1/runs/run_1",
+        1
+       ]
+      ]
+     },
+     {
+      "invalidate": "/v1/runs/run_1",
+      "actions": []
+     },
+     {
+      "complete": "/v1/requests/request_1",
+      "generation": 0,
+      "actions": [
+       [
+        "discard",
+        "/v1/requests/request_1",
+        0
+       ]
+      ]
+     },
+     {
+      "complete": "/v1/runs/run_1",
+      "generation": 2,
+      "actions": [
+       [
+        "install",
+        "/v1/runs/run_1",
+        2
+       ],
+       [
+        "fetch",
+        "/v1/runs/run_1",
+        2
+       ]
+      ]
+     },
+     {
+      "complete": "/v1/runs/run_1",
+      "generation": 0,
+      "actions": [
+       [
+        "discard",
+        "/v1/runs/run_1",
+        0
+       ]
+      ]
+     },
+     {
+      "complete": "/v1/runs/run_1",
+      "generation": 2,
+      "actions": [
+       [
+        "install",
+        "/v1/runs/run_1",
+        2
+       ]
+      ]
+     }
+    ]
+   }
+  ],
+  "backoff": [
+   {
+    "name": "the delay doubles up to the cap",
+    "steps": [
+     "failure",
+     "failure",
+     "failure",
+     "failure",
+     "failure",
+     "failure",
+     "failure",
+     "failure"
+    ],
+    "delays": [
+     1,
+     2,
+     4,
+     8,
+     16,
+     30,
+     30,
+     30
+    ]
+   },
+   {
+    "name": "a delivered event resets the delay",
+    "steps": [
+     "failure",
+     "failure",
+     "failure",
+     "delivered",
+     "failure",
+     "failure"
+    ],
+    "delays": [
+     1,
+     2,
+     4,
+     1,
+     2
+    ]
+   },
+   {
+    "name": "a delivered event at the cap resets the delay",
+    "steps": [
+     "failure",
+     "failure",
+     "failure",
+     "failure",
+     "failure",
+     "failure",
+     "failure",
+     "delivered",
+     "failure",
+     "failure"
+    ],
+    "delays": [
+     1,
+     2,
+     4,
+     8,
+     16,
+     30,
+     30,
+     1,
+     2
+    ]
+   },
+   {
+    "name": "deliveries between failures keep one second",
+    "steps": [
+     "delivered",
+     "failure",
+     "delivered",
+     "failure",
+     "delivered"
+    ],
+    "delays": [
+     1,
+     1
+    ]
+   }
+  ],
+  "jitter": [
+   {
+    "name": "fraction zero waits half the delay",
+    "seconds": 30,
+    "fraction": 0,
+    "microseconds": 15000000
+   },
+   {
+    "name": "fraction one waits the whole delay",
+    "seconds": 30,
+    "fraction": 1,
+    "microseconds": 30000000
+   },
+   {
+    "name": "fraction one half",
+    "seconds": 1,
+    "fraction": 0.5,
+    "microseconds": 750000
+   },
+   {
+    "name": "a fraction above one is clamped",
+    "seconds": 30,
+    "fraction": 2,
+    "microseconds": 30000000
+   },
+   {
+    "name": "a fraction below zero is clamped",
+    "seconds": 4,
+    "fraction": -1,
+    "microseconds": 2000000
+   }
+  ],
+  "reconciliation": [
+   {
+    "name": "an effect-observed receipt observes the effect",
+    "command": {
+     "bytes": "{\"version\":1,\"operation\":\"cancel\"}",
+     "key": "epoch_1.AAAAAAAAAAAAAAAAAAAAAA",
+     "precondition": "\"rev_1\""
+    },
+    "target": "/v1/runs/run_1/control",
+    "precondition": "\"rev_1\"",
+    "receipt": "/v1/commands/command_1",
+    "observation": {
+     "receiptState": "effect-observed"
+    },
+    "read": "receipt",
+    "report": "effect-observed"
+   },
+   {
+    "name": "a refused receipt reports the refusal",
+    "command": {
+     "bytes": "{\"version\":1,\"operation\":\"cancel\"}",
+     "key": "epoch_1.AAAAAAAAAAAAAAAAAAAAAA",
+     "precondition": "\"rev_1\""
+    },
+    "target": "/v1/runs/run_1/control",
+    "precondition": "\"rev_1\"",
+    "receipt": "/v1/commands/command_1",
+    "observation": {
+     "receiptState": "refused"
+    },
+    "read": "receipt",
+    "report": "refused"
+   },
+   {
+    "name": "an accepted receipt stays uncertain",
+    "command": {
+     "bytes": "{\"version\":1,\"operation\":\"cancel\"}",
+     "key": "epoch_1.AAAAAAAAAAAAAAAAAAAAAA",
+     "precondition": "\"rev_1\""
+    },
+    "target": "/v1/runs/run_1/control",
+    "precondition": "\"rev_1\"",
+    "receipt": "/v1/commands/command_1",
+    "observation": {
+     "receiptState": "accepted"
+    },
+    "read": "receipt",
+    "report": "uncertain"
+   },
+   {
+    "name": "a dispatch-attempted receipt stays uncertain",
+    "command": {
+     "bytes": "{\"version\":1,\"operation\":\"cancel\"}",
+     "key": "epoch_1.AAAAAAAAAAAAAAAAAAAAAA",
+     "precondition": "\"rev_1\""
+    },
+    "target": "/v1/runs/run_1/control",
+    "precondition": "\"rev_1\"",
+    "receipt": "/v1/commands/command_1",
+    "observation": {
+     "receiptState": "dispatch-attempted"
+    },
+    "read": "receipt",
+    "report": "uncertain"
+   },
+   {
+    "name": "an acknowledged receipt stays uncertain",
+    "command": {
+     "bytes": "{\"version\":1,\"operation\":\"cancel\"}",
+     "key": "epoch_1.AAAAAAAAAAAAAAAAAAAAAA",
+     "precondition": "\"rev_1\""
+    },
+    "target": "/v1/runs/run_1/control",
+    "precondition": "\"rev_1\"",
+    "receipt": "/v1/commands/command_1",
+    "observation": {
+     "receiptState": "acknowledged"
+    },
+    "read": "receipt",
+    "report": "uncertain"
+   },
+   {
+    "name": "an unresolved receipt stays uncertain",
+    "command": {
+     "bytes": "{\"version\":1,\"operation\":\"cancel\"}",
+     "key": "epoch_1.AAAAAAAAAAAAAAAAAAAAAA",
+     "precondition": "\"rev_1\""
+    },
+    "target": "/v1/runs/run_1/control",
+    "precondition": "\"rev_1\"",
+    "receipt": "/v1/commands/command_1",
+    "observation": {
+     "receiptState": "unresolved"
+    },
+    "read": "receipt",
+    "report": "uncertain"
+   },
+   {
+    "name": "an expired receipt stays uncertain",
+    "command": {
+     "bytes": "{\"version\":1,\"operation\":\"cancel\"}",
+     "key": "epoch_1.AAAAAAAAAAAAAAAAAAAAAA",
+     "precondition": "\"rev_1\""
+    },
+    "target": "/v1/runs/run_1/control",
+    "precondition": "\"rev_1\"",
+    "receipt": "/v1/commands/command_1",
+    "observation": {
+     "failure": {
+      "refused": [
+       410,
+       "receipt-expired"
+      ]
+     }
+    },
+    "read": "receipt",
+    "report": "uncertain"
+   },
+   {
+    "name": "an unavailable transport stays uncertain",
+    "command": {
+     "bytes": "{\"version\":1,\"operation\":\"cancel\"}",
+     "key": "epoch_1.AAAAAAAAAAAAAAAAAAAAAA",
+     "precondition": "\"rev_1\""
+    },
+    "target": "/v1/runs/run_1/control",
+    "precondition": "\"rev_1\"",
+    "receipt": "/v1/commands/command_1",
+    "observation": {
+     "failure": "TransportUnavailable"
+    },
+    "read": "receipt",
+    "report": "uncertain"
+   },
+   {
+    "name": "a target observation does not decide when a receipt is known",
+    "command": {
+     "bytes": "{\"version\":1,\"operation\":\"cancel\"}",
+     "key": "epoch_1.AAAAAAAAAAAAAAAAAAAAAA",
+     "precondition": "\"rev_1\""
+    },
+    "target": "/v1/runs/run_1/control",
+    "precondition": "\"rev_1\"",
+    "receipt": "/v1/commands/command_1",
+    "observation": {
+     "targetETag": "\"rev_2\"",
+     "effectVisible": true
+    },
+    "read": "receipt",
+    "report": "uncertain"
+   },
+   {
+    "name": "a visible effect at a new revision observes the effect",
+    "command": {
+     "bytes": "{\"version\":1,\"operation\":\"cancel\"}",
+     "key": "epoch_1.AAAAAAAAAAAAAAAAAAAAAA",
+     "precondition": "\"rev_1\""
+    },
+    "target": "/v1/runs/run_1/control",
+    "precondition": "\"rev_1\"",
+    "receipt": null,
+    "observation": {
+     "targetETag": "\"rev_2\"",
+     "effectVisible": true
+    },
+    "read": "target",
+    "report": "effect-observed"
+   },
+   {
+    "name": "a visible effect at the precondition revision stays uncertain",
+    "command": {
+     "bytes": "{\"version\":1,\"operation\":\"cancel\"}",
+     "key": "epoch_1.AAAAAAAAAAAAAAAAAAAAAA",
+     "precondition": "\"rev_1\""
+    },
+    "target": "/v1/runs/run_1/control",
+    "precondition": "\"rev_1\"",
+    "receipt": null,
+    "observation": {
+     "targetETag": "\"rev_1\"",
+     "effectVisible": true
+    },
+    "read": "target",
+    "report": "uncertain"
+   },
+   {
+    "name": "a new revision without the effect stays uncertain",
+    "command": {
+     "bytes": "{\"version\":1,\"operation\":\"cancel\"}",
+     "key": "epoch_1.AAAAAAAAAAAAAAAAAAAAAA",
+     "precondition": "\"rev_1\""
+    },
+    "target": "/v1/runs/run_1/control",
+    "precondition": "\"rev_1\"",
+    "receipt": null,
+    "observation": {
+     "targetETag": "\"rev_2\"",
+     "effectVisible": false
+    },
+    "read": "target",
+    "report": "uncertain"
+   },
+   {
+    "name": "a visible effect without a precondition observes the effect",
+    "command": {
+     "bytes": "{\"version\":1,\"operation\":\"cancel\"}",
+     "key": "epoch_1.AAAAAAAAAAAAAAAAAAAAAA",
+     "precondition": "\"rev_1\""
+    },
+    "target": "/v1/runs/run_1/control",
+    "precondition": null,
+    "receipt": null,
+    "observation": {
+     "targetETag": "\"rev_2\"",
+     "effectVisible": true
+    },
+    "read": "target",
+    "report": "effect-observed"
+   },
+   {
+    "name": "no visible effect without a precondition stays uncertain",
+    "command": {
+     "bytes": "{\"version\":1,\"operation\":\"cancel\"}",
+     "key": "epoch_1.AAAAAAAAAAAAAAAAAAAAAA",
+     "precondition": "\"rev_1\""
+    },
+    "target": "/v1/runs/run_1/control",
+    "precondition": null,
+    "receipt": null,
+    "observation": {
+     "targetETag": "\"rev_2\"",
+     "effectVisible": false
+    },
+    "read": "target",
+    "report": "uncertain"
+   },
+   {
+    "name": "a receipt observation does not decide without a receipt location",
+    "command": {
+     "bytes": "{\"version\":1,\"operation\":\"cancel\"}",
+     "key": "epoch_1.AAAAAAAAAAAAAAAAAAAAAA",
+     "precondition": "\"rev_1\""
+    },
+    "target": "/v1/runs/run_1/control",
+    "precondition": "\"rev_1\"",
+    "receipt": null,
+    "observation": {
+     "receiptState": "effect-observed"
+    },
+    "read": "target",
+    "report": "uncertain"
+   },
+   {
+    "name": "a refused target read stays uncertain",
+    "command": {
+     "bytes": "{\"version\":1,\"operation\":\"cancel\"}",
+     "key": "epoch_1.AAAAAAAAAAAAAAAAAAAAAA",
+     "precondition": "\"rev_1\""
+    },
+    "target": "/v1/runs/run_1/control",
+    "precondition": "\"rev_1\"",
+    "receipt": null,
+    "observation": {
+     "failure": {
+      "refused": [
+       404,
+       "resource-unavailable"
+      ]
+     }
+    },
+    "read": "target",
+    "report": "uncertain"
+   },
+   {
+    "name": "an invalid target response stays uncertain",
+    "command": {
+     "bytes": "{\"version\":1,\"operation\":\"cancel\"}",
+     "key": "epoch_1.AAAAAAAAAAAAAAAAAAAAAA",
+     "precondition": "\"rev_1\""
+    },
+    "target": "/v1/runs/run_1/control",
+    "precondition": "\"rev_1\"",
+    "receipt": null,
+    "observation": {
+     "failure": "InvalidResponse"
+    },
+    "read": "target",
+    "report": "uncertain"
+   }
+  ]
  }
 }

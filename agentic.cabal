@@ -213,6 +213,7 @@ library
     Agentic.Manager.Protocol.LocalAdmin
     Agentic.Manager.Client.Events
     Agentic.Manager.Client.Failure
+    Agentic.Manager.Client.Refresh
     Agentic.Cli.Frontend
     Agentic.DSL.Json
     Agentic.Exec

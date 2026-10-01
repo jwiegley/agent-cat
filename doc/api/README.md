@@ -596,11 +596,52 @@ shutdown an open route stream ends after its current block or heartbeat. An
 ordinary restart keeps the `streamId`, so the route aliases and every cursor
 taken before the restart stay valid.
 
-Refreshes are serialized per resource. An invalidation received during a
-refresh sets a dirty flag, and the resource is fetched again afterward. A
-resnapshot or endpoint change invalidates older fetch generations and page
-sets. Mutation receipts are not replacement snapshots. Closing every network
-client never closes a manager-owned worker control pipe.
+The public client coordinates refreshes without I/O in
+`Agentic.Manager.Client.Refresh`, which the `Agentic.Manager.Client` facade
+re-exports. A `Refresh` value holds the current fetch generation and, for each
+resource key, at most one fetch in flight with its generation and a dirty
+flag. A key without a fetch in flight is idle. `invalidateResource` and
+`completeFetch` return the next value and the actions that the caller
+performs: `StartFetch`, `InstallFetch` or `DiscardFetch`, each with its key
+and generation.
+
+- `invalidateResource` starts a fetch of the current generation for an idle
+  resource. For a resource with a fetch in flight, it only sets the dirty
+  flag. Any number of invalidations during one fetch therefore give exactly
+  one later fetch.
+- `completeFetch` installs a completion only when its generation is the
+  current generation and the resource has a fetch in flight of that
+  generation. When the dirty flag is set, exactly one more fetch starts, and
+  otherwise the resource becomes idle. Every other completion, in particular
+  a late completion of an earlier generation, is discarded and changes
+  nothing. An installed result is a value or a refusal.
+- `advanceGeneration` applies a resnapshot, after a 410 refusal or a new
+  overview, and an endpoint switch. The generation advances and every
+  resource becomes idle, so the results of every fetch of an earlier
+  generation, page sets included, are discarded when they complete.
+
+`reconnectDelay` gives the delay before a reconnection and the next backoff.
+The delay starts at one second (`initialBackoff`) and doubles up to
+`reconnectBackoffMaxSeconds` (30 seconds). A connection that delivered an
+event resets the backoff to `initialBackoff`. `jitteredMicroseconds` gives
+the wait for a delay and a fraction from zero to one. The wait is between
+half the delay and the whole delay, so it never passes 30 seconds.
+
+A pending command whose send outcome is uncertain becomes an `Uncertain`
+value through `uncertainPending`. That value keeps the exact pending command,
+with its bytes, key and precondition, its target resource and the receipt
+location that an earlier response gave. `reconcileRead` names the one read of
+a reconciliation: the receipt location when one is known, or else the target
+resource. `reconcile` reports the result of that read. With a receipt
+location, only the receipt state decides: `effect-observed` reports the
+effect, `refused` reports the refusal, and every other state stays uncertain.
+Without one, the target reports the effect only when the caller sees the
+effect in it and its entity tag differs from the precondition. A failed read
+and an observation of the other read stay uncertain. A command that stays
+uncertain comes back unchanged. No report carries a send, so reconciliation
+never sends. The only resend is the explicit exact resend that the frontend
+offers. Mutation receipts are not replacement snapshots. Closing every
+network client never closes a manager-owned worker control pipe.
 
 The public client decodes live delivery without I/O in
 `Agentic.Manager.Client.Events`, which the `Agentic.Manager.Client` facade
@@ -694,7 +735,21 @@ types are `Preparation`, `Review`, `ReviewInput`, `ReviewLineage` and
 command state and for each effect kind. The projection of these types is the
 encoding of the decoded value by the shared protocol codec, and the refusal
 is `InvalidResponse`. The `vectors` mode of `manager-client-check` runs
-these sections and the `events` section.
+these sections, the `events` section and the `refresh` section.
+
+The `refresh` section holds the vectors of the refresh coordinator. A
+`sequences` vector scripts invalidations, completions with their
+generations, resnapshots and endpoint switches, and states the exact actions
+of each step. The check also confirms in every step that an install has the
+current generation, that a completion of another generation never installs,
+that an invalidation of a resource in flight starts nothing, that a
+completion starts at most one fetch, and that an advance leaves every
+resource idle. A `backoff` vector lists failures and delivered events and
+the delay of each failure. A `jitter` vector states the wait for a delay and
+a fraction. A `reconciliation` vector gives an uncertain command, its
+precondition and receipt location, and the result of the read, and states
+the expected read and report. The check confirms that a command that stays
+uncertain comes back unchanged.
 
 The `decisions`, `answers`, `controls`, `requests` and `runs` sections hold
 the cases that `tui-model-test` runs with the parsers of

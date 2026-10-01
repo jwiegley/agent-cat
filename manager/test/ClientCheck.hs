@@ -11,9 +11,10 @@ import Control.Monad (forM_, unless, void, when)
 import Data.Aeson (ToJSON (toJSON), Value (..), eitherDecodeStrict, object, (.=))
 import qualified Data.Aeson.Key as Key
 import qualified Data.Aeson.KeyMap as KM
+import qualified Data.Map.Strict as Map
 import qualified Data.ByteString as BS
 import Data.Char (digitToInt, isHexDigit)
-import Data.Foldable (toList)
+import Data.Foldable (foldlM, toList)
 import Data.List (find, isPrefixOf)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -141,7 +142,8 @@ main = do
     ["bad-overview",profile] -> withClient profile $ \client -> do
       result <- C.loadOverview client
       check "overview whose pages differ in cursor refuses" (case result of Left C.InvalidResponse -> True; _ -> False)
-    ["vectors",path] -> BS.readFile path >>= either (die . ("vector file: " <>)) (\root -> eventVectors root >> resourceVectors root)
+    ["vectors",path] -> BS.readFile path >>= either (die . ("vector file: " <>))
+      (\root -> eventVectors root >> resourceVectors root >> refreshVectors root)
       . eitherDecodeStrict
     _ -> die "usage: manager-client-check MODE ABS_CLIENT_PROFILE [FAILURE_KIND] | manager-client-check vectors PATH"
 
@@ -397,3 +399,129 @@ sseVector vector = do
     Just "route" -> check (vectorLabel "sse decode" vector) (decodes C.decodeRouteBlock)
     Nothing -> pure ()
     Just other -> die ("FAIL unknown decode " <> T.unpack other)
+
+-- | The refresh section of test/manager_client_vectors.json: scripted
+-- coordinator sequences, reconnection backoff, jitter and reconciliation.
+refreshVectors :: Value -> IO ()
+refreshVectors root = do
+  let section = field "refresh" root
+      counted name = do
+        let items = members name section
+        when (null items) (die ("FAIL vector section refresh." <> T.unpack name <> " is empty"))
+        pure items
+  counted "sequences" >>= mapM_ refreshSequence
+  counted "backoff" >>= mapM_ backoffVector
+  counted "jitter" >>= mapM_ jitterVector
+  counted "reconciliation" >>= mapM_ reconcileVector
+
+integerField :: Value -> Maybe Integer
+integerField (Number value) = Just (round value)
+integerField _ = Nothing
+
+-- One action of a sequence step: kind, resource key and generation.
+expectedAction :: String -> Value -> IO (C.RefreshAction Text)
+expectedAction label value = case value of
+  Array items | [String kind, String key, Number generation] <- toList items ->
+    let at = C.FetchGeneration (round generation) in case kind of
+      "fetch" -> pure (C.StartFetch key at)
+      "install" -> pure (C.InstallFetch key at)
+      "discard" -> pure (C.DiscardFetch key at)
+      _ -> die ("FAIL " <> label <> " names an unknown action")
+  _ -> die ("FAIL " <> label <> " has a malformed action")
+
+-- Run a coordinator sequence. Each step states its exact actions. Every step
+-- also keeps the coordinator rules: an install has the current generation, a
+-- completion of another generation never installs, an invalidation of a
+-- resource in flight starts nothing, a completion starts at most one fetch,
+-- and an advance leaves every resource idle.
+refreshSequence :: Value -> IO ()
+refreshSequence vector = do
+  let label = vectorLabel "refresh sequence" vector
+  final <- foldlM (\state (index, step) -> do
+    let stepLabel = label <> " step " <> show (index :: Int)
+        current = C.refreshGeneration state
+    expected <- mapM (expectedAction stepLabel) (members "actions" step)
+    (next, actions, rule) <- case (text (field "invalidate" step), text (field "complete" step)) of
+      (Just key, Nothing) -> do
+        let (next, actions) = C.invalidateResource key state
+            inFlight = Map.member key (C.refreshFlights state)
+        pure (next, actions, if inFlight then null actions else actions == [C.StartFetch key current])
+      (Nothing, Just key) -> do
+        generation <- maybe (die ("FAIL " <> stepLabel <> " has no generation")) (pure . C.FetchGeneration . fromInteger)
+          (integerField (field "generation" step))
+        let (next, actions) = C.completeFetch key generation state
+            installs = [at | C.InstallFetch _ at <- actions]
+            fetches = [() | C.StartFetch _ _ <- actions]
+        pure (next, actions, all (== current) installs && (generation == current || null installs) && length fetches <= 1)
+      (Nothing, Nothing) | bool "resnapshot" step || bool "endpointSwitch" step -> do
+        let next = C.advanceGeneration state
+            C.FetchGeneration before = current
+        pure (next, [], Map.null (C.refreshFlights next)
+          && integerField (field "generation" step) == Just (toInteger before + 1)
+          && C.refreshGeneration next == C.FetchGeneration (before + 1))
+      _ -> die ("FAIL " <> stepLabel <> " names no single step kind")
+    unless (actions == expected) (die ("FAIL " <> stepLabel <> ": " <> show actions))
+    unless rule (die ("FAIL " <> stepLabel <> " breaks a coordinator rule"))
+    pure next) C.newRefresh (zip [1 ..] (members "steps" vector))
+  check (label <> " ending at " <> show (C.refreshGeneration final)) True
+
+-- A backoff vector: the delay of each failure in order, every delay within one
+-- second and the cap, and a delivered event resets the next delay to one second.
+backoffVector :: Value -> IO ()
+backoffVector vector = do
+  let label = vectorLabel "backoff" vector
+      run (backoff, delivered, delays) step = case step of
+        String "failure" -> do
+          let (delay, next) = C.reconnectDelay backoff
+          when (delivered && delay /= 1) (die ("FAIL " <> label <> ": no reset after delivery"))
+          pure (next, False, delays <> [delay])
+        String "delivered" -> pure (C.initialBackoff, True, delays)
+        _ -> die ("FAIL " <> label <> " has an unknown step")
+  (_, _, delays) <- foldlM run (C.initialBackoff, False, []) (members "steps" vector)
+  let expected = [fromInteger delay | Just delay <- map integerField (members "delays" vector)]
+  check label (delays == expected && C.reconnectBackoffMaxSeconds == 30
+    && all (\delay -> delay >= 1 && delay <= C.reconnectBackoffMaxSeconds) delays)
+
+jitterVector :: Value -> IO ()
+jitterVector vector = case (integerField (field "seconds" vector), field "fraction" vector, integerField (field "microseconds" vector)) of
+  (Just seconds, Number fraction, Just expected) -> do
+    let delayed = C.jitteredMicroseconds (fromInteger seconds) (realToFrac fraction)
+    check (vectorLabel "jitter" vector) (toInteger delayed == expected
+      && toInteger delayed <= 1000000 * toInteger C.reconnectBackoffMaxSeconds && 2 * toInteger delayed >= 1000000 * seconds)
+  _ -> die ("FAIL " <> vectorLabel "jitter" vector <> " is malformed")
+
+-- A reconciliation vector. The read is the receipt location when one is
+-- known and otherwise the target. A command that stays uncertain comes back
+-- unchanged with its exact bytes, key and precondition, and no report sends.
+reconcileVector :: Value -> IO ()
+reconcileVector vector = do
+  let label = vectorLabel "reconciliation" vector
+      observation = field "observation" vector
+  target <- maybe (die ("FAIL " <> label <> " has no target")) pure (text (field "target" vector))
+  observed <- case (field "receiptState" observation, field "targetETag" observation, field "failure" observation) of
+    (state@(String _), Null, Null) -> either (const (die ("FAIL " <> label <> " names an unknown receipt state"))) (pure . C.ObservedReceipt)
+      (C.decodeObservation state)
+    (Null, String etag, Null) -> pure (C.ObservedTarget etag (bool "effectVisible" observation))
+    (Null, Null, failure) -> C.ObservedFailure <$> case failure of
+      String "InvalidResponse" -> pure C.InvalidResponse
+      String "TransportUnavailable" -> pure C.TransportUnavailable
+      Object _ | [Number status, String code] <- members "refused" failure -> pure (C.Refused (round status) code)
+      _ -> die ("FAIL " <> label <> " names an unknown failure")
+    _ -> die ("FAIL " <> label <> " has a malformed observation")
+  let uncertain = C.Uncertain (field "command" vector) target (text (field "precondition" vector)) (text (field "receipt" vector))
+      read' = case C.reconcileRead uncertain of
+        C.ReadReceipt location -> ("receipt", location)
+        C.ReadTarget location -> ("target", location)
+      expectedRead = case text (field "receipt" vector) of
+        Just location -> ("receipt", location)
+        Nothing -> ("target", target)
+      outcome = C.reconcile uncertain observed
+      report = case outcome of
+        C.ReconciledEffect -> "effect-observed"
+        C.ReconciledRefused -> "refused"
+        C.ReconciledUncertain _ -> "uncertain"
+      retained = case outcome of
+        C.ReconciledUncertain kept -> kept == uncertain && C.uncertainCommand kept == field "command" vector
+        _ -> True
+  check label (read' == expectedRead && Just (fst read') == text (field "read" vector)
+    && Just report == text (field "report" vector) && retained)

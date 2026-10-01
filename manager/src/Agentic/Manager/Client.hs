@@ -15,10 +15,16 @@ module Agentic.Manager.Client
     problemFailure, validCursor, validETag,
     sseBlockBytes, SseParser, SseEvent (..), SseBlock (..), newSseParser, feedSse, closeSse,
     EventName (..), eventNameText, parseEventName, Invalidation (..), InvalidationEvent (..), EventBatch (..),
-    RouteRecord (..), RoutePayload (..), decodeEventBlock, decodeRouteBlock
+    RouteRecord (..), RoutePayload (..), decodeEventBlock, decodeRouteBlock,
+    FetchGeneration (..), Flight (..), Refresh, refreshGeneration, refreshFlights, newRefresh,
+    RefreshAction (..), invalidateResource, completeFetch, advanceGeneration,
+    reconnectBackoffMaxSeconds, Backoff, backoffSeconds, initialBackoff, reconnectDelay, jitteredMicroseconds,
+    Uncertain (..), ReconcileRead (..), reconcileRead, ReconcileObservation (..), Reconciled (..), reconcile,
+    uncertainPending
   ) where
 
 import Agentic.Manager.Client.Events
+import Agentic.Manager.Client.Refresh
 import Agentic.Manager.Client.Failure (ClientFailure (..), problemFailure)
 
 import Agentic.Manager.Protocol.Command
@@ -474,6 +480,14 @@ prepareCommand client@(Client _ _ _ _ _ epoch _ _) location precondition value =
   let key = TE.encodeUtf8 epoch <> "." <> convertToBase Base64URLUnpadded nonce
   when (BS.length key > 128) (throwIO InvalidResponse)
   pure (PendingCommand location key header bytes)
+
+-- | The pending command of a send whose outcome is uncertain, with its
+-- target, its precondition and the receipt location that an earlier response
+-- gave, if any. The command keeps its exact bytes and key, and 'reconcile'
+-- never sends it. Only an explicit exact resend sends it again.
+uncertainPending :: PendingCommand -> Maybe Reference -> Uncertain PendingCommand Reference
+uncertainPending pending@(PendingCommand location _ condition _) =
+  Uncertain pending location (fmap TE.decodeLatin1 condition)
 
 -- | One HTTP attempt using the retained exact bytes. Failure returns to the caller.
 -- Neither redirects nor a dropped response cause another request here.
