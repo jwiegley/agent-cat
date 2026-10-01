@@ -785,6 +785,10 @@ executable manager-history-check
     Agentic.Manager.Test.AcceptanceAudit
     Agentic.Manager.Artifacts
     Agentic.Manager.History
+    Agentic.Manager.Approval
+    Agentic.Manager.Events
+    Agentic.Manager.Overview
+    Agentic.Manager.Pages
     Agentic.Manager.Protocol.Artifact
     Agentic.Manager.State
     Agentic.Manager.Admission

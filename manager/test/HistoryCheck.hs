@@ -13,6 +13,8 @@ import Agentic.Manager.Profile hiding (StaleRevision)
 import Agentic.Manager.Protocol.Command
 import Agentic.Manager.Protocol.Draft
 import Agentic.Manager.Lineage
+import qualified Agentic.Manager.Overview as Overview
+import Agentic.Manager.Pages (Producer (..), Window (..))
 import Agentic.Manager.Schema
 import Agentic.Manager.Store
 import Agentic.Runtime
@@ -28,6 +30,7 @@ import qualified Data.ByteString.Char8 as BSC
 import Data.Either (isLeft)
 import Data.IORef
 import qualified Data.Map.Strict as Map
+import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Database.SQLite3 as SQL
@@ -196,6 +199,7 @@ main = do
             stamp <- getCurrentTime
             overflow <- try @SomeException(withPrivateDirectoryAt legacyRoot [] (\fd -> listRunCatalogueBoundedAt 256 legacy fd Nothing stamp))
             check "catalogue cap refuses instead of returning prefix" (isLeft overflow)
+          windowedLegacy store proof legacy binding ident
           -- Remains present deliberately. Reopen tests query only retained legacy content.
           pure (binding,ident,expected)
         let (binding,ident,expected)=retained
@@ -241,6 +245,70 @@ observationRace work source = do
           result <- wait download
           called <- readIORef entered
           check "removed retention root cannot enter artifact response" (result==Left ResourceUnavailable && not called)
+
+-- The bound legacy root now holds more than 256 entries. Every run window
+-- lists each managed and legacy run once in identifier order, and a legacy
+-- detail read decodes only its own entry.
+windowedLegacy :: CoordinationStore -> CredentialProof -> FilePath -> LegacyHistory -> Text -> IO ()
+windowedLegacy store proof path binding ident = do
+  -- More entries than the row budget of one transaction.
+  bracket (openPrivateRoot "large catalogue" path) closePrivateRoot $ \legacyRoot ->
+    forM_ [258..1200::Int] $ \n -> ensurePrivateDirectoryAt legacyRoot ["runs","overflow-"<>show n]
+  retained <- retainLegacyHandles store proof [binding]
+  check "retention pass keeps the observable binding" (length retained == 1)
+  identity <- scalar store "SELECT root_identity FROM history_entries WHERE id=?" [txt ident]
+  -- The identifiers of one selection, read in transactions of 500 rows.
+  let idsOf :: Text -> SQL.SQLData -> IO [Text]
+      idsOf selection parameter = more "" []
+        where
+          more after visited = do
+            found' <- runRead store $ do
+              rows <- query (selection <> " AND id>? ORDER BY id LIMIT 500") [parameter,txt after]
+              pure [value | [SQL.SQLText value] <- rows]
+            case found' of
+              [] -> pure (concat (reverse visited))
+              found -> more (last found) (found:visited)
+  managed <- idsOf "SELECT id FROM runs WHERE profile_id=?" (txt "profile_1")
+  legacy <- idsOf "SELECT id FROM history_entries WHERE root_identity=?" (txt identity)
+  check "bound legacy root holds more than 1000 retained entries" (length legacy > 1000)
+  let expected = Set.toAscList (Set.fromList (managed <> legacy))
+      legacySet = Set.fromList legacy
+      page size = do
+        (total,first,next) <- Overview.withCollectionSourceWindow size store proof Nothing retained Overview.Runs $ \_ _ producer -> do
+          (_,_,total,Window items after) <- produceFirst producer
+          pure (total,items,after)
+        let more visited Nothing = pure (reverse visited)
+            more visited (Just after) = do
+              Window items following <- Overview.withCollectionSourceWindow size store proof Nothing retained Overview.Runs $ \_ _ producer ->
+                produceAfter producer after
+              more (items:visited) following
+        rest <- more [] next
+        pure (total,first:rest)
+  forM_ [Overview.windowSize,100] $ \size -> do
+    (total,windows) <- page size
+    let listed = concatMap (map (string . field "id")) windows
+        label = " (window " <> show size <> ")"
+    check ("large legacy root pages every legacy and managed run once in identifier order" <> label) (listed == expected)
+    check ("large legacy root keeps every managed run listed" <> label) (all (`elem` listed) managed && not (null managed))
+    check ("large legacy root total counts every run" <> label) (total == length expected)
+    check ("each window decodes at most 256 legacy entries" <> label)
+      (length windows > 1 && all (\items -> length (filter ((`Set.member` legacySet) . string . field "id") items) <= 256) windows)
+    check ("each window holds at most its size" <> label) (all ((<= size) . length) windows)
+  (_,windows) <- page Overview.windowSize
+  let listedValue = case [value | value <- concat windows, field "id" value == String ident] of
+        [value] -> value
+        _ -> error "legacy window item"
+  detail <- legacyRun store proof [binding] ident
+  check "legacy detail of a large root decodes its entry with the window representation"
+    (fmap legacyRunValue detail == Just listedValue)
+  overflowEntry <- runRead store $ do
+    rows <- query "SELECT id FROM history_entries WHERE root_identity=? AND component='overflow-200'" [txt identity]
+    pure [value | [SQL.SQLText value] <- rows]
+  overflowDetail <- case overflowEntry of
+    [handle] -> legacyRun store proof [binding] handle
+    _ -> error "overflow handle"
+  check "legacy detail of an unreadable entry keeps the unreadable form"
+    (fmap (field "kind" . legacyRunValue) overflowDetail == Just (String "unreadable-manifest"))
 
 blockedQueryDeadline :: OperatorProfile -> IO ()
 blockedQueryDeadline policy = do

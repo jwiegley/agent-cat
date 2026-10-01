@@ -4554,7 +4554,7 @@ Non-blocking findings of the fess audit of Phase B part 2 subtask C23 (WM-028 fu
 :LABELS:   ["workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-30 Wed 18:00]
-:MODIFIED: [2026-09-30 Wed 20:47]
+:MODIFIED: [2026-09-30 Wed 21:17]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -4594,6 +4594,13 @@ Other C24 limitations recorded with the commit: the restarted manager does not i
     "author": "johnw",
     "text": "Item 1 resolved by Phase C subtask PC3: release-quarantine frees the quarantined reservation after operator cleanup evidence, and failures-manager now runs with executionReservations 1 and one profile, for a crash during a run and during review. Items 2 to 4 stay open, so the issue stays open. Evidence: resume-20260923 PC/PC3/impl-r1 logs (build of agentic-run, routing-fixed-point-probe, manager-command-check and manager-admission-check; failures-manager at N8 with TUI_CHECK; manager-command-check main at N8 with credential_cli.py; manager-admission-check restart-native and main at N8; JOURNEY-ONCE at N8; make -C doc check; all exit 0). Fess: non-blocking, findings filed as acat-70ll.",
     "created_at": "2026-10-01T03:47:12Z"
+  },
+  {
+    "id": 463,
+    "issue_id": "acat-c24-manager-loss-fess-findings-g5xr",
+    "author": "johnw",
+    "text": "Advanced by Phase C subtask PC4: after a manager crash, orphaned command asks get one reply at the next open and a lost run no longer holds the pruner floor. Evidence: resume-20260923 PC/PC4/impl-r1 logs (build of agentic-run, routing-fixed-point-probe and manager-store-check; manager-store-check at N8 with the new flowFloorChecks case; manager-command-check flow mode; failures-manager at N8 with TUI_CHECK, asserting the replies through the flow verb; service_http.py storage mode; JOURNEY-ONCE at N8; make -C doc check; all exit 0). The fess audit reran the build and manager-store-check. Fess: non-blocking, findings filed as acat-ksvd.",
+    "created_at": "2026-10-01T04:17:57Z"
   }
 ]
 #+end_src
@@ -4726,7 +4733,7 @@ Non-blocking findings of the fess audit of Phase B part 2 subtask C6 (keyset win
 :LABELS:   ["workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-30 Wed 12:50]
-:MODIFIED: [2026-09-30 Wed 12:50]
+:MODIFIED: [2026-09-30 Wed 21:44]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -4747,6 +4754,20 @@ Non-blocking findings of the fess audit of Phase B part 2 subtask C7 (legacy his
 5. (low) Every legacy GET /v1/runs/{id} walks the whole bound root to find one entry (History.hs:189). Fix: look up the entry directly through its history_entries component.
 
 6. (low) The served path shows no limitation marker because the version-2 fixture carries none. Only manager-history-check covers the legacy marker and the unreadable-manifest form. Fix: optionally add a version-1 manifest entry to the pages fixture.
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 465,
+    "issue_id": "acat-c7-legacy-history-fess-findings-vbak",
+    "author": "johnw",
+    "text": "Phase C subtask PC5 resolves item 2 (legacy entries are now paged within the keyset windows, so a large bound root no longer refuses all of /v1/runs) and item 5 (GET /v1/runs/{id} finds the component in history_entries and decodes only that entry). manager-history-check gains a 1200-entry bound root case that pages every window, which covers part of item 1 at the History level. Evidence as in acat-phase-b2-review-findings-x8fv. Items 1, 3, 4 and 6 remain open, so this issue stays open.",
+    "created_at": "2026-10-01T04:44:30Z"
+  }
+]
+#+end_src
 
 * TODO [#D] Resolve C8 fess findings on the flow window reader
 :PROPERTIES:
@@ -8517,6 +8538,33 @@ A3 fess finding (low). The approval notice number counts approval-key presses on
 ]
 #+end_src
 
+* TODO [#C] Resolve PC4 fess findings in orphaned-ask replies and lost-run pruning    :review:
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-ksvd
+:LABELS:   ["review","workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-30 Wed 21:17]
+:MODIFIED: [2026-09-30 Wed 21:17]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking fess findings of Phase C subtask PC4 (report: resume-20260923 fess/pc-PC4-r1.md).
+
+Medium:
+1. Store.hs administrationCommitted counts any reservation in state released as a committed release and any credential with revoked=1 as a committed revoke. No column records the command that caused the effect, so an orphaned release ask that would have been refused (for example a duplicate release) reads committed-receipt-lost. The failures-manager committed orphan is such a duplicate. Repair: record the releasing or revoking command id, or document that committed-receipt-lost means only that the effect is present.
+2. Verification gap: a restart now appends one reply per unanswered ask. manager-admission-check, the default mode of manager-command-check, tui/ci/tui.sh, credential_cli.py and the other service_http.py modes were not run after PC4. Run them once and fix any record-count drift.
+
+Low:
+3. Store.hs answerOrphanedAsks: when the asks cannot be read, the fault line 'manager-log reconciliation stopped unreadable' omits the ManagerFlowFailure reason, and failed reply appends are discarded with void.
+4. An undecodable ask body that names a command without a ledger row reads lifetime-ended even if it was an administration ask; it should read outcome-uncertain. answerOrphanedAsks replies to every ask schema without asserting FlowCommand.
+5. manager/STORAGE.md Growth paragraph: 'A crash does not hold the floor in later lifetimes' goes too far, because a failed reply append or an unreadable log still holds the floor until a later lifetime.
+6. doc/workflow-manager-handoff.md: the dated floor-stop finding row of the end-of-part review still describes the old behavior; mark it resolved at closeout.
+7. A retired receipt gets a failure reply with receipt-expired, a fourth reason that the requirement did not name (documented in STORAGE.md).
+
 * DONE [#E] Prob->Rat faithfulness bridge blocked by core Rat's proof poverty
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -10068,6 +10116,33 @@ HIGH (deep/alexey): SqZero has no CompleteCSemiring and no PMod P M beyond the d
 ]
 #+end_src
 
+* TODO [#C] Resolve PC5 fess findings in legacy history windows    :review:
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pc5-legacy-windows-fess-fjb1
+:LABELS:   ["review","workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-30 Wed 21:44]
+:MODIFIED: [2026-09-30 Wed 21:44]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking fess findings of Phase C subtask PC5 (legacy history handle retention and keyset windows). Report: resume-20260923 fess/pc-PC5-r1.md.
+
+Medium:
+1. listPrivateDirectoryAt with bound 65537 raises an IOException when a root holds 65538 or more names, and bounded converts it to ResourceUnavailable. Only a root with exactly 65537 names refuses with view-too-large, which doc/api/README.md, manager/README.md and the retainLegacyHandles docstring state. No test covers it. Fix: refuse every count above 65536 with view-too-large and add a test with a lowered bound. (History.hs retainLegacyHandles, bounded; runtime PrivateFile.hs)
+2. A retained handle whose entry directory was deleted from the root now lists in /v1/runs in the unreadable-manifest form, counts in the total and returns unreadable-manifest on GET /v1/runs/{id}. GET /v1/history still leaves it out, so the two disagree. Fix: filter window candidates against the listed names, or record the change as accepted behavior. (History.hs observeEntry, Overview.hs runCandidates)
+3. A window retains parent handles while it decodes. A missing parent whose id sorts before a window already served is left out of the current page set and appears in the next listing. No test covers it. Fix: record the limitation, or retain parent handles before the first window of a page set. (History.hs observeLegacy)
+4. Legacy decoding and Store retention now run inside the 5-second window allowance. The 1200-entry test uses empty entry directories, so nothing shows that 256 real entries with journals decode and retain within 5 seconds. Fix: add a timing check with a few hundred readable entries. (Overview.hs withSourceWithin)
+
+Low:
+5. The large-root case of manager-history-check holds only unreadable entries, so the 1 MiB prefix cut, the StoreBusy retry after three attempts and parent-handle retention at scale do not run. The detail check compares representations and does not prove that one entry is decoded. (manager/test/HistoryCheck.hs windowedLegacy)
+6. doc/workflow-manager-handoff.md (End-of-part review table) and the Phase B part 2 findings record still say "Legacy history is not windowed" and name the removed legacyRuns. Close at the Phase C closeout.
+7. retainLegacyHandles runs on every page request, so each request lists up to 65536 names and runs up to about 132 read transactions per root. Optional: retain only for the first window of a page set. (Service.hs withCollectionSource)
+
 * TODO [#C] Phase B part 1 review follow-ups: download quota, id row bound, legacy history, precision gaps
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -10165,7 +10240,7 @@ Deferred security stage for Phase B part 2 (operator direction of 2026-09-30: fu
 :LABELS:   ["review","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-30 Wed 19:20]
-:MODIFIED: [2026-09-30 Wed 20:47]
+:MODIFIED: [2026-09-30 Wed 21:44]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -10208,6 +10283,20 @@ The closeout corrected the documentation that findings 1 to 3 name (manager/STOR
     "author": "johnw",
     "text": "Item 2 resolved by Phase C subtask PC3: release-quarantine frees a quarantined reservation, and with one execution reservation a new run starts after a manager crash once the operator releases it. Other items stay open. Evidence: resume-20260923 PC/PC3/impl-r1 logs (build of agentic-run, routing-fixed-point-probe, manager-command-check and manager-admission-check; failures-manager at N8 with TUI_CHECK; manager-command-check main at N8 with credential_cli.py; manager-admission-check restart-native and main at N8; JOURNEY-ONCE at N8; make -C doc check; all exit 0). Fess: non-blocking, findings filed as acat-70ll.",
     "created_at": "2026-10-01T03:47:13Z"
+  },
+  {
+    "id": 461,
+    "issue_id": "acat-phase-b2-review-findings-x8fv",
+    "author": "johnw",
+    "text": "Item 1 resolved by Phase C subtask PC4: the open of a serving lifetime answers each orphaned command ask of an earlier lifetime (current receipt, lifetime-ended, outcome-uncertain or committed-receipt-lost), and the pruner treats a run with lost supervision as terminal. Owned and cleanup-pending runs stay protected. Other items stay open. Evidence: resume-20260923 PC/PC4/impl-r1 logs (build of agentic-run, routing-fixed-point-probe and manager-store-check; manager-store-check at N8 with the new flowFloorChecks case; manager-command-check flow mode; failures-manager at N8 with TUI_CHECK, asserting the replies through the flow verb; service_http.py storage mode; JOURNEY-ONCE at N8; make -C doc check; all exit 0). The fess audit reran the build and manager-store-check. Fess: non-blocking, findings filed as acat-ksvd.",
+    "created_at": "2026-10-01T04:17:57Z"
+  },
+  {
+    "id": 464,
+    "issue_id": "acat-phase-b2-review-findings-x8fv",
+    "author": "johnw",
+    "text": "Phase C subtask PC5 resolves medium finding 3. History.retainLegacyHandles lists only the entry names of each bound root (at most 65536) and inserts the missing history_entries rows at most 100 per transaction. Each /v1/runs window is one keyset over runs and history_entries of the bound roots, and decodes at most 256 legacy entries and 1 MiB of its own. legacyRuns is removed, and GET /v1/runs/{id} of a legacy entry decodes only that entry. Evidence: build of agentic-run, routing-fixed-point-probe, manager-history-check and manager-artifact-check with -ftui-tests; manager-history-check at N8 with a 1200-entry bound root that pages every window and reads one detail; service_http.py pages at N8; the Phase A journey at N8 (logs in the private resume-20260923 evidence directory; fess report fess/pc-PC5-r1.md, non-blocking, findings filed as acat-pc5-legacy-windows-fess-fjb1). The handoff table row stays for the Phase C closeout. Findings 4 to 11 remain open.",
+    "created_at": "2026-10-01T04:44:30Z"
   }
 ]
 #+end_src
@@ -19350,7 +19439,7 @@ Publish precommitted workload and resource ceilings. All core advertised bounds 
 :LABELS:   ["p10","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-30 Wed 20:47]
+:MODIFIED: [2026-09-30 Wed 21:17]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-042
 :SOURCE_REPO: agent-cat
@@ -19505,6 +19594,13 @@ recipe that ignores WAL or unresolved effects.
     "author": "johnw",
     "text": "Phase C subtask PC3: release-quarantine is now a typed local administration operation (live and offline). It recomputes the PC2 cleanup evidence under one Store admission, refuses state-conflict or cleanup-unverified without changes, and otherwise releases the reservation, records the ask and receipt in the manager log (decoded by agentic-run flow), and wakes admission on the live channel. failures-manager shows that with executionReservations 1 a request queued after a SIGKILL during a run or during review reaches review after the release without another client command and its run completes. Evidence: resume-20260923 PC/PC3/impl-r1 logs (build of agentic-run, routing-fixed-point-probe, manager-command-check and manager-admission-check; failures-manager at N8 with TUI_CHECK; manager-command-check main at N8 with credential_cli.py; manager-admission-check restart-native and main at N8; JOURNEY-ONCE at N8; make -C doc check; all exit 0). Fess: non-blocking, findings filed as acat-70ll. WM-042 stays open for its other work.",
     "created_at": "2026-10-01T03:47:12Z"
+  },
+  {
+    "id": 462,
+    "issue_id": "acat-wm-042-sdg9",
+    "author": "johnw",
+    "text": "Advanced by Phase C subtask PC4 (manager-log floor recovery after a crash: orphaned asks answered at restart, lost runs terminal for pruning). The package stays open. Evidence: resume-20260923 PC/PC4/impl-r1 logs (build of agentic-run, routing-fixed-point-probe and manager-store-check; manager-store-check at N8 with the new flowFloorChecks case; manager-command-check flow mode; failures-manager at N8 with TUI_CHECK, asserting the replies through the flow verb; service_http.py storage mode; JOURNEY-ONCE at N8; make -C doc check; all exit 0). The fess audit reran the build and manager-store-check. Fess: non-blocking, findings filed as acat-ksvd.",
+    "created_at": "2026-10-01T04:17:57Z"
   }
 ]
 #+end_src

@@ -128,21 +128,34 @@ the listener does not open. Without the option the service binds no retention
 root, and the run collection lists managed runs only. The service does not
 require a binding for each configured root.
 
-`Service` keeps the bindings. For the run collection, `History.legacyRuns`
-renders the entries of the bound roots of the observable profiles before the
-Overview source takes its loans. It applies the history bounds of 256 entries,
-1 MiB and 30 seconds, and it retains each opaque handle, result reference and
-revision first. Overview then merges these entries into the identifier order
-and keyset condition of the managed runs, lists those of the authorized
-profiles, and counts them in the total. No window writes to the Store.
-`GET /v1/runs/{id}` reads a retained legacy entry through `History.legacyRun`
-and returns the same representation. A retained entry of a root that the
-service does not bind, or of a profile that the credential cannot observe,
-refuses as an unknown run.
+`Service` keeps the bindings. For the run collection,
+`History.retainLegacyHandles` runs before the Overview source takes its
+loans. For each bound root of an observable profile, it lists the entry
+names, at most 65536, without a manifest read, and retains an opaque
+`history_` handle for each new name, at most 100 handles and 100
+`run.changed` invalidations in one transaction. Overview then opens those
+roots under its file slot through `History.withLegacyRootsLoan`. Each window
+is one keyset over the managed run identifiers and the retained handles of
+the opened roots, in one identifier order, for the authorized profiles, and
+the total of the first window counts both. `History.legacyWindow` decodes
+the legacy entries of the window by their component names, at most 256
+entries, and keeps the longest prefix of at most 1 MiB encoded. It retains
+the parent handles, result references and revisions of those entries before
+the window takes its boundary, and the window ends before the first legacy
+entry that it does not hold. A handle that a retention adds inside the
+window, for example the handle of a parent that the root does not hold,
+repeats the window, at most three times, and then the window refuses with a
+busy Store. A handle whose entry directory is absent lists in the
+`unreadable-manifest` form. `GET /v1/runs/{id}` reads a retained legacy entry
+through `History.legacyRun`, which resolves the component name from
+`history_entries` and decodes only that entry, and returns the same
+representation. A retained entry of a root that the service does not bind,
+or of a profile that the credential cannot observe, refuses as an unknown
+run.
 
 A legacy entry uses the frozen Run representation with `observer`
 supervision, a null `requestId`, and the limitations that
-`History.legacyItems` computes. An unreadable legacy manifest gives the
+`History.renderEntryWith` computes. An unreadable legacy manifest gives the
 `unreadable-manifest` form. The frozen Run schema represents every legacy
 entry without a contract change. Its advertised result artifact downloads
 through `Artifacts.artifactDownload`, which rechecks the configured root and

@@ -8,7 +8,7 @@
 -- | A single leased SQLite writer with strict, bounded transaction results.
 module Agentic.Manager.Store
   ( CoordinationStore, StoreIdentity (..), StoreFailure (..), Checkpoint (..),
-    withCoordinationStore, withServingStore, withServingStoreWith, storeManagerFlow, pruneManagerLog, storeIdentity, checkpointStore, withStoreConfiguration, withStoreCatalogues, withStoreRetentionRoot, withStoreRetentionRootLoan, withStoreArtifactResponse, withStoreArtifactResponseWithin, artifactResponsePlaces, artifactResponseWait, artifactResponseDeadline, validateStoreHistoryBindings, revalidateStoreRetentionRoot, storeInvocations, withStoreFiles, withStoreFileLoan, withRecordedRunRoot, withStoreReader, withStoreAdmission, withStoreWorker, StoreWorker, createStoreWorkerGroup, storeWorkerCleanupConfirmed, requestStoreWorkersStop, awaitStoreWorkersStop, retryStoreCleanup, probeStoreCapabilities,
+    withCoordinationStore, withServingStore, withServingStoreWith, storeManagerFlow, pruneManagerLog, storeIdentity, checkpointStore, withStoreConfiguration, withStoreCatalogues, withStoreRetentionRoot, withStoreRetentionRootLoan, withStoreRetentionRootsLoan, withStoreArtifactResponse, withStoreArtifactResponseWithin, artifactResponsePlaces, artifactResponseWait, artifactResponseDeadline, validateStoreHistoryBindings, revalidateStoreRetentionRoot, storeInvocations, withStoreFiles, withStoreFileLoan, withRecordedRunRoot, withStoreReader, withStoreAdmission, withStoreWorker, StoreWorker, createStoreWorkerGroup, storeWorkerCleanupConfirmed, requestStoreWorkersStop, awaitStoreWorkersStop, retryStoreCleanup, probeStoreCapabilities,
     withStoreAdministration, tryWithStoreCatalogues, tryWithStoreFiles,
     AuthorizationWatch, withStoreAuthorizationWatch, withStoreConfigurationWatch, withStoreCataloguesWatch, withStoreCatalogueContextWatch, authorizationWatchCurrent, withAuthorizationObservation, withAuthorizationReadObservation, awaitAuthorizationChange,
     CommitDeadline, withCommitDeadline, withPreparedCommitDeadline, enforceCommitDeadline, enforceAdmissionFence, managerFlowRoom, appendCommandRecord, appendReviewRecord, noticeAfterCommit, PostCommit, noPostCommit, takePostCommit, appendPostCommit, Transaction, execute, query, refuseTransaction, runTransaction, runRead, StoreAdmission (..), runTransactionWithAdmission, runReadWithAdmission, transactionGeneration,
@@ -1032,6 +1032,23 @@ withStoreRetentionRootLoan :: CoordinationStore -> FilePath -> Text -> (IO () ->
 withStoreRetentionRootLoan store@(CoordinationStore installed _ _ _ _ _ _ _ _ _ _ _ _ _) path profile action =
   withStoreFileLoan store $ \files _ ->
     withConfiguredRetentionRootLoan installed path profile $ \close root -> action (close >> files) root
+
+-- | The file slot and loans of several explicitly configured read-only
+-- retention roots under that one slot, in the order given. The callback
+-- receives one release action, the retained manager root and the retention
+-- roots. The release closes the retention roots and returns the file slot. A
+-- response owner calls it before its first network write, and the scope end
+-- calls it otherwise. The first root that the configuration refuses refuses
+-- the whole loan with its diagnostic.
+withStoreRetentionRootsLoan :: CoordinationStore -> [(FilePath, Text)]
+  -> (IO () -> PrivateRoot -> [PrivateRoot] -> IO a) -> IO (Either Diagnostic a)
+withStoreRetentionRootsLoan store@(CoordinationStore installed _ _ _ _ _ _ _ _ _ _ _ _ _) bindings action =
+  withStoreFileLoan store $ \files root -> open root files bindings []
+  where
+    open root release [] opened = Right <$> action release root (reverse opened)
+    open root release ((path, profile) : rest) opened =
+      either Left id <$> withConfiguredRetentionRootLoan installed path profile
+        (\close retained -> open root (close >> release) rest (retained : opened))
 
 -- | The number of artifact responses that can hold captured bytes across
 -- their network writes at the same time. With the 64 MiB artifact ceiling,

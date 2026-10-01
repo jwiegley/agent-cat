@@ -14,7 +14,7 @@ import Agentic.Manager.Authorization
 import Agentic.Manager.Drafts (readDraftAt)
 import Agentic.Manager.Fault (FaultClass (InternalFault), ManagerFault (DeadlineElapsed), refuseStorageUnavailable)
 import qualified Agentic.Manager.Events as Events
-import Agentic.Manager.History (LegacyRun (..), managedRunInView)
+import Agentic.Manager.History (LegacyHistory, LegacyRun (..), legacyRootIdentities, legacyWindow, managedRunInView, withLegacyRootsLoan)
 import Agentic.Manager.Pages (Producer (..), Window (..))
 import Agentic.Manager.Profile (ConfigurationLimits, publicId)
 import qualified Agentic.Manager.Protocol.Command as C
@@ -24,10 +24,11 @@ import Control.DeepSeq (NFData (rnf))
 import Control.Exception (catch, throwIO)
 import Control.Monad (foldM, unless, when)
 import Crypto.Hash (Digest, SHA256, hash)
-import Data.Aeson (Value, object, toJSON, (.=))
+import Data.Aeson (Value, eitherDecodeStrict', object, toJSON, (.=))
 import qualified Data.Aeson.Key as Key
 import Data.Aeson.Types (Pair)
 import qualified Data.ByteString as BS
+import Data.List (sortOn)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (fromMaybe, listToMaybe)
 import Data.Text (Text)
@@ -37,8 +38,9 @@ import qualified Database.SQLite3 as SQL
 import System.Timeout (timeout)
 
 -- | One frozen paged read collection. 'Requests' lists every request of the
--- authorized profiles and 'Runs' every managed run and every supplied legacy
--- entry of those profiles, both in identifier order and in keyset windows.
+-- authorized profiles and 'Runs' every managed run and every retained legacy
+-- entry of the supplied bindings of those profiles, both in identifier order
+-- and in keyset windows.
 -- 'Decisions' without a run lists the pending run heads in manager
 -- observation order, and with a run lists the pending FIFO queue of that run.
 data Collection = Requests | Runs | Decisions !(Maybe Text)
@@ -91,45 +93,55 @@ withOverviewSourceWithin allowance store proof admission action =
 -- A run selector that names no run of an authorized profile refuses with
 -- `forbidden`, as the detail resources do. Each window of a request or run
 -- collection has its own boundary, and the total counts the members at the
--- boundary of the first window. The run collection merges the supplied legacy
--- entries into the same identifier order and keyset condition, and lists
--- those of the authorized profiles. The other collections ignore them. The
--- caller retains the legacy entries before the source takes its loans, so no
--- window writes to the Store.
-withCollectionSource :: CoordinationStore -> CredentialProof -> Maybe Admission -> [LegacyRun] -> Collection
+-- boundary of the first window. The run collection opens the roots of the
+-- supplied legacy bindings under its file slot. Each window is one keyset
+-- over the managed run identifiers and the retained legacy handles of those
+-- roots, in one identifier order, and lists those of the authorized profiles.
+-- A window decodes only its own legacy entries, each by its component name,
+-- at most 256 entries and 1 MiB encoded, and ends before the first legacy
+-- entry beyond that bound. It retains the parent handles, result references
+-- and revisions of those entries before it takes its boundary. The caller
+-- retains the handles of the entry names first, with
+-- 'Agentic.Manager.History.retainLegacyHandles'. The other collections
+-- ignore the bindings.
+withCollectionSource :: CoordinationStore -> CredentialProof -> Maybe Admission -> [LegacyHistory] -> Collection
   -> (AuthorizedView -> ConfigurationLimits -> Producer -> IO a) -> IO a
 withCollectionSource = withCollectionSourceWindow windowSize
 
 -- | 'withCollectionSource' with an explicit window size. Only tests choose a
 -- size other than 'windowSize'.
-withCollectionSourceWindow :: Int -> CoordinationStore -> CredentialProof -> Maybe Admission -> [LegacyRun] -> Collection
+withCollectionSourceWindow :: Int -> CoordinationStore -> CredentialProof -> Maybe Admission -> [LegacyHistory] -> Collection
   -> (AuthorizedView -> ConfigurationLimits -> Producer -> IO a) -> IO a
 withCollectionSourceWindow window store proof admission legacy collection action =
-  withSourceWithin 5000000 window (Members collection) store proof admission legacy $ \view limits materialize ->
+  withSourceWithin 5000000 window (Members collection) store proof admission bound $ \view limits materialize ->
     action view limits $
       Producer (materialize Nothing) (\after -> (\(_, _, _, members) -> members) <$> materialize (Just after))
+  where
+    bound = case collection of
+      Runs -> legacy
+      _ -> []
 
 -- The materializer takes the last identifier of the previous window, and
 -- returns the revision, fields and total of its boundary with one window.
-withSourceWithin :: Int -> Int -> Source -> CoordinationStore -> CredentialProof -> Maybe Admission -> [LegacyRun]
+withSourceWithin :: Int -> Int -> Source -> CoordinationStore -> CredentialProof -> Maybe Admission -> [LegacyHistory]
   -> (AuthorizedView -> ConfigurationLimits -> (Maybe Text -> IO (Text,[Pair],Int,Window)) -> IO a) -> IO a
-withSourceWithin allowance window source store proof admission legacy action = withStoreFileLoan store $ \files root ->
+withSourceWithin allowance window source store proof admission legacy action = withLegacyRootsLoan store legacy $ \files root roots ->
   withAuthorizedCatalogueContext store proof [C.Observe] $ \view limits visible _ invocations -> do
     attachResponseLoan view files
     action view limits $ \after -> do
       revalidateAuthorizedView view >>= either throwIO pure
-      result <- timeout allowance (materialize root view (map fst visible) invocations after)
+      result <- timeout allowance (materialize root roots view (map fst visible) invocations after)
         `catch` \(failure :: StoreFailure) -> case failure of
           StoreLimit -> throwIO C.ViewTooLarge
           _ -> throwIO failure
       maybe (refuseStorageUnavailable "overview materialization" (InternalFault DeadlineElapsed)) pure result
   where
-    materialize root view profiles invocations after = do
+    materialize root roots view profiles invocations after = do
       revision <- authorizedCursorRevision view
       let publicProfiles = map publicId profiles
           allowed = SQL.SQLText (TE.decodeUtf8 (C.encoded publicProfiles))
-          legacyVisible = Map.fromList [(legacyRunId entry, legacyRunValue entry) | entry <- legacy,
-            legacyRunProfile entry `elem` publicProfiles]
+          rootIdentities = SQL.SQLText (TE.decodeUtf8 (C.encoded [identity | (identity, profile) <- legacyRootIdentities roots,
+            profile `elem` publicProfiles]))
       queue <- case source of
         Members (Decisions (Just run)) -> do
           association <- resolveRun store proof [C.Observe] run
@@ -146,34 +158,59 @@ withSourceWithin allowance window source store proof admission legacy action = w
           bounded found = do
             when (length found > window) (refuseTransaction C.ViewTooLarge)
             pure found
-          -- One keyset window of a request or run table in identifier order,
-          -- with the member count of the table at the first window. The
-          -- extra members are merged into the same order under the same
-          -- keyset condition, and the total counts them.
-          keyset kind table extra = do
-            found <- case after of
-              Nothing -> ids (window + 1) ("SELECT id FROM " <> table <> profileFilter <> " ORDER BY id") [allowed]
-              Just previous -> ids (window + 1) ("SELECT id FROM " <> table <> profileFilter <> " AND id>? ORDER BY id")
-                [allowed, SQL.SQLText previous]
+          following = maybe [] (pure . SQL.SQLText) after
+          -- One keyset window of the request table in identifier order,
+          -- with the member count of the table at the first window.
+          keyset kind table = do
+            found <- keysetMembers (window + 1) ("SELECT id,0 AS member FROM " <> table <> profileFilter
+              <> maybe "" (const " AND id>?") after <> " ORDER BY id") ([allowed] <> following)
             total <- case after of
-              Nothing -> Just . (+ length extra) <$> count ("SELECT count(*) FROM " <> table <> profileFilter) [allowed]
+              Nothing -> Just <$> count ("SELECT count(*) FROM " <> table <> profileFilter) [allowed]
               Just _ -> pure Nothing
-            let following = [member | member@(_, ident) <- extra, maybe True (ident >) after]
-                merged = take (window + 1) (mergeMembers (tag kind found) following)
-                kept = take window merged
-                continuation = if length merged > window then snd <$> listToMaybe (reverse kept) else Nothing
-            pure (kept, total, continuation)
-          whole kind found = (tag kind found, Nothing, Nothing)
-          identifiers = case (source, queue) of
+            let kept = take window (tag kind (map fst found))
+                continuation = if length found > window then snd <$> listToMaybe (reverse kept) else Nothing
+            pure (kept, total, continuation, True)
+          -- The managed run identifiers and the retained legacy handles of
+          -- the opened roots after the previous window, in identifier order,
+          -- at most one more than a window.
+          runCandidates = do
+            found <- keysetMembers (window + 1) ("SELECT id,member FROM (SELECT id,0 AS member FROM runs" <> profileFilter
+              <> " UNION ALL SELECT id,1 AS member FROM history_entries" <> profileFilter
+              <> " AND root_identity IN (SELECT value FROM json_each(?)))"
+              <> maybe "" (const " WHERE id>?") after <> " ORDER BY id")
+              ([allowed, allowed, rootIdentities] <> following)
+            mapM (\(ident, member) -> case member of
+              0 -> pure (RunKind, ident)
+              1 -> pure (LegacyRunKind, ident)
+              _ -> refuseTransaction StoreIntegrity) found
+          -- One run window ends before the first legacy entry that the
+          -- decoded legacy window does not hold. A legacy candidate before
+          -- that entry that is not decoded is a concurrent retention, and
+          -- the window is not complete.
+          runWindow decoded stop = do
+            found <- runCandidates
+            total <- case after of
+              Nothing -> do
+                runs <- count ("SELECT count(*) FROM runs" <> profileFilter) [allowed]
+                entries <- count ("SELECT count(*) FROM history_entries" <> profileFilter
+                  <> " AND root_identity IN (SELECT value FROM json_each(?))") [allowed, rootIdentities]
+                pure (Just (runs + entries))
+              Just _ -> pure Nothing
+            let kept = take window (takeWhile (\(_, ident) -> maybe True (ident <) stop) found)
+                held = and [Map.member ident decoded | (LegacyRunKind, ident) <- kept]
+                continuation = if length kept < length found then snd <$> listToMaybe (reverse kept) else Nothing
+            pure (kept, total, continuation, held && not (null kept && not (null found)))
+          whole kind found = (tag kind found, Nothing, Nothing, True)
+          identifiers decoded stop = case (source, queue) of
             (Overview, _) -> do
               requests <- live "SELECT r.id FROM requests r WHERE r.profile_id IN (SELECT value FROM json_each(?)) AND r.phase NOT IN ('withdrawn','refused') AND (r.phase!='associated' OR EXISTS(SELECT 1 FROM runs u WHERE u.request_id=r.id AND u.terminal_observed=0)) ORDER BY r.id"
               preparations <- live "SELECT p.id FROM preparations p JOIN requests r ON r.id=p.request_id WHERE r.profile_id IN (SELECT value FROM json_each(?)) AND p.state='live' ORDER BY p.id"
               runs <- live "SELECT id FROM runs WHERE profile_id IN (SELECT value FROM json_each(?)) AND terminal_observed=0 ORDER BY id"
               decisions <- live "SELECT d.id FROM decisions d JOIN runs r ON r.id=d.run_id WHERE r.profile_id IN (SELECT value FROM json_each(?)) AND d.state IN ('pending','submitting') ORDER BY length(d.observed_order),d.observed_order,d.id"
               pure (tag RequestKind requests <> tag PreparationKind preparations <> tag RunKind runs <> tag DecisionKind decisions,
-                Nothing, Nothing)
-            (Members Requests, _) -> keyset RequestKind "requests" []
-            (Members Runs, _) -> keyset RunKind "runs" (tag LegacyRunKind (Map.keys legacyVisible))
+                Nothing, Nothing, True)
+            (Members Requests, _) -> keyset RequestKind "requests"
+            (Members Runs, _) -> runWindow decoded stop
             (Members (Decisions _), Just association) -> whole DecisionKind <$> (decisionQueueIds (window + 1) association >>= bounded)
             (Members (Decisions _), Nothing) -> whole DecisionKind <$> (decisionHeadIds (window + 1) publicProfiles >>= bounded)
           boundary :: NFData b => Transaction b -> IO (Text,Text,b)
@@ -186,7 +223,21 @@ withSourceWithin allowance window source store proof admission legacy action = w
                   pure (Events.cursorAt binding (retainedHighWater batch),
                     Events.cursorAt binding (retainedFloor batch),value)
             readRetainedEventsWith store prepare project >>= either (const (throwIO StoreIntegrity)) pure
-      (cursor,oldest,(members,total,continuation)) <- boundary identifiers
+          -- The legacy entries of a run window are decoded and retained
+          -- before its boundary. A concurrent retention inside the window
+          -- repeats the window, at most three times.
+          attempt :: Int -> IO (Map.Map Text Value,(Text,Text,([(Kind,Text)],Maybe Int,Maybe Text,Bool)))
+          attempt tries = do
+            (decoded,stop) <- case source of
+              Members Runs -> do
+                found <- runRead store runCandidates
+                legacyWindow store roots invocations [ident | (LegacyRunKind, ident) <- found]
+              _ -> pure ([],Nothing)
+            let decodedMap = Map.fromList [(legacyRunId entry, legacyRunValue entry) | entry <- decoded]
+            outcome@(_,_,(_,_,_,complete)) <- boundary (identifiers decodedMap stop)
+            if complete then pure (decodedMap,outcome)
+              else if tries < 3 then attempt (tries + 1) else throwIO StoreBusy
+      (legacyVisible,(cursor,oldest,(members,total,continuation,_))) <- attempt 1
       let present kind value = case source of
             Overview -> object ["kind" .= kindWord kind,Key.fromText (kindWord kind) .= value]
             Members _ -> value
@@ -216,14 +267,6 @@ withSourceWithin allowance window source store proof admission legacy action = w
           ["snapshotVersion" .= (1 :: Int),"cursor" .= cursor,"oldestCursor" .= oldest],counted,members')
         Members collection -> (collectionName collection <> "_" <> digest,[],counted,members')
 
--- Two identifier-ordered member lists in one identifier order.
-mergeMembers :: [(Kind,Text)] -> [(Kind,Text)] -> [(Kind,Text)]
-mergeMembers left [] = left
-mergeMembers [] right = right
-mergeMembers left@(l:ls) right@(r:rs)
-  | snd r < snd l = r : mergeMembers left rs
-  | otherwise = l : mergeMembers ls right
-
 collectionName :: Collection -> Text
 collectionName collection = case collection of
   Requests -> "requests"
@@ -237,6 +280,20 @@ ids bound selection parameters = do
   mapM (\row -> case row of
     [SQL.SQLText ident] | C.validId ident -> pure ident
     _ -> refuseTransaction StoreIntegrity) rows
+
+-- The identifier and member number of each row of one identifier-ordered
+-- selection of the columns @id@ and @member@, at most the given number. The
+-- rows arrive as one aggregated row, so that a window of 1024 identifiers
+-- stays within the row budget of its transaction.
+keysetMembers :: Int -> Text -> [SQL.SQLData] -> Transaction [(Text, Int)]
+keysetMembers bound selection parameters = do
+  rows <- query ("SELECT json_group_array(json_array(id,member)) FROM (" <> selection <> " LIMIT ?)")
+    (parameters <> [SQL.SQLInteger (fromIntegral bound)])
+  case rows of
+    [[SQL.SQLText members]] -> case eitherDecodeStrict' (TE.encodeUtf8 members) of
+      Right decoded | all (C.validId . fst) decoded -> pure (sortOn fst decoded)
+      _ -> refuseTransaction StoreIntegrity
+    _ -> refuseTransaction StoreIntegrity
 
 count :: Text -> [SQL.SQLData] -> Transaction Int
 count selection parameters = do

@@ -328,17 +328,20 @@ withOverviewSource service proof = Overview.withOverviewSource (serviceStore ser
 -- | One frozen request, run or decision collection with this service's
 -- original Admission, so that managed supervision reads as the detail
 -- resources read it. The run collection also lists the legacy entries of the
--- bound retention roots, which are retained before the source takes its loans.
+-- bound retention roots of the observable profiles. Their handles are
+-- retained before the source takes its loans, and each window decodes only
+-- its own legacy entries.
 withCollectionSource :: Service -> CredentialProof -> Overview.Collection
   -> (AuthorizedView -> ConfigurationLimits -> Producer -> IO a) -> IO a
 withCollectionSource service proof collection respond = do
   legacy <- case collection of
-    Overview.Runs -> History.legacyRuns (serviceStore service) proof (legacyHistory service)
+    Overview.Runs -> History.retainLegacyHandles (serviceStore service) proof (legacyHistory service)
     _ -> pure []
   Overview.withCollectionSource (serviceStore service) proof (Just (admission service)) legacy collection respond
 
 -- | One managed run, or one legacy entry of a bound retention root, in the
--- representation of its run collection item.
+-- representation of its run collection item. A legacy read decodes only the
+-- entry that its handle names.
 withRun :: Service -> CredentialProof -> Text -> (AuthorizedView -> Value -> IO a) -> IO a
 withRun service proof ident respond = do
   legacy <- History.legacyRun (serviceStore service) proof (legacyHistory service) ident
