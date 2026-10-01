@@ -110,8 +110,8 @@ data ReviewCheck a
     ReviewStale
   | -- | The preparation has expired or is no longer live.
     ReviewExpired
-  | -- | The preparation does not bind the request, the workflow and the
-    -- operator literals.
+  | -- | The preparation does not bind the request, the workflow, the
+    -- operator literals and the capture receipts of the session.
     ReviewMismatched
   | -- | The complete review does not fit the terminal.
     ReviewClipped
@@ -122,8 +122,10 @@ data ReviewCheck a
 -- | Check the displayed review and validator against the installed
 -- observations. The first argument reads the validator of an installed
 -- preparation observation. The second is the current time, and the third
--- states whether the complete review fits the terminal. A current review
--- yields the installed request and the installed preparation observation.
+-- states whether the complete review fits the terminal. The operator
+-- literals and the capture receipts of the session by capture identifier
+-- follow the observations. A current review yields the installed request
+-- and the installed preparation observation.
 checkReview ::
   (observed -> Text) ->
   UTCTime ->
@@ -132,15 +134,16 @@ checkReview ::
   Maybe (requestObserved, C.DraftView) ->
   Maybe (observed, C.Preparation) ->
   Map.Map Text Text ->
+  Map.Map Text C.CaptureReceipt ->
   C.Preparation ->
   Text ->
   ReviewCheck (C.DraftView, observed)
-checkReview validator now fits workflow request preparation literals displayed tag =
+checkReview validator now fits workflow request preparation literals captures displayed tag =
   case (workflow, request, preparation) of
     (Just row, Just (_, draft), Just (observed, installed))
       | installed /= displayed || validator observed /= tag -> ReviewStale
       | not (reviewLive now displayed) -> ReviewExpired
-      | not (reviewMatches row draft displayed) || literalInputs draft /= literals -> ReviewMismatched
+      | not (reviewMatches captures row draft displayed) || literalInputs draft /= literals -> ReviewMismatched
       | not fits -> ReviewClipped
       | otherwise -> ReviewCurrent (draft, observed)
     _ -> ReviewStale

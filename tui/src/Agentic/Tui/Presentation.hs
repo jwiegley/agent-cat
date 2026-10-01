@@ -104,6 +104,8 @@ data ActiveLayer
   | RecoveryLayer
   | SteerLayer
   | SaveLayer
+    -- | The path editor of a file capture over the service input editor.
+  | CaptureFileLayer
   | FilterLayer
   | ConfirmDetailsLayer
   | ConfirmLayer
@@ -179,6 +181,8 @@ data Presentation = Presentation
     presentationSteerTiming :: !(Maybe SteeringTiming),
     presentationControlError :: !(Maybe Text),
     presentationSaveError :: !(Maybe Text),
+    -- | The refusal of the latest read of the path editor of a file capture.
+    presentationCaptureError :: !(Maybe Text),
     presentationFinalResult :: !(Maybe (Either Text Value)),
     presentationFinalLoading :: !Bool,
     presentationShowResult :: !Bool,
@@ -237,6 +241,7 @@ emptyPresentation model =
       presentationSteerTiming = Nothing,
       presentationControlError = Nothing,
       presentationSaveError = Nothing,
+      presentationCaptureError = Nothing,
       presentationFinalResult = Nothing,
       presentationFinalLoading = False,
       presentationShowResult = False,
@@ -414,6 +419,7 @@ layerView presentation width totalHeight mainHeight = case presentationLayer pre
   RecoveryLayer -> headView recoveryView
   SteerLayer -> steerView presentation width mainHeight
   SaveLayer -> saveResultView presentation width mainHeight
+  CaptureFileLayer -> captureFileView presentation width mainHeight
   FilterLayer -> workflowFilterView presentation width mainHeight
   ConfirmDetailsLayer -> confirmDetailsView presentation width mainHeight
   ConfirmLayer -> confirmSummaryView presentation width totalHeight mainHeight
@@ -484,6 +490,10 @@ serviceRequestView presentation request = pane "Manager request" $ viewport Fail
   <> [ "Approval receipt: " <> fromMaybe "none" (presentationServiceApproval presentation),
     "Runtime completion and result verification are not inferred from this request.", "", "Retained operator literals:" ]
   <> concat [[name, value] | (name,value) <- Map.toList (modelInputs (presentationModel presentation))]
+  <> (if null captured then [] else "" : "Captured inputs:" : captured)
+  where
+    Manager.Readiness _ supplied _ _ = Manager.draftReadiness request
+    captured = [name <> ": capture " <> ident | Manager.CapturedValue name ident <- supplied]
 
 serviceReviewRows :: Manager.Preparation -> Text -> [Text]
 serviceReviewRows preparation tag =
@@ -911,6 +921,19 @@ workflowFilterView presentation width mainHeight = vBox
     query = T.unwords (T.words (T.intercalate "\n" (Edit.getEditContents (presentationEditor presentation))))
     filtered = presentation {presentationModel = setWorkflowFilter query (presentationModel presentation), presentationPaneFocus = PrimaryPane}
 
+-- | The path editor of a file capture. The frontend reads the named local
+-- file and sends only its bytes.
+captureFileView :: Presentation -> Int -> Int -> Widget Name
+captureFileView presentation width mainHeight =
+  dialog width mainHeight " Capture a local file " $
+    vBox
+      [ displayTextWrap "Capture the exact bytes of a local UTF-8 file as this input. The manager receives the bytes, not the path.",
+        vLimit 3 (borderWithLabel (displayText " Path • ") (Edit.renderEditor (displayText . T.unlines) True (presentationEditor presentation))),
+        case presentationCaptureError presentation of
+          Nothing -> displayText "Ctrl-D captures. Esc cancels."
+          Just failure -> withAttr (attrName "error") (displayTextWrap ("ERROR: " <> failure))
+      ]
+
 saveResultView :: Presentation -> Int -> Int -> Widget Name
 saveResultView presentation width mainHeight =
   dialog width mainHeight " Save verified result " $
@@ -1198,6 +1221,7 @@ footerItems presentation width height = case presentationLayer presentation of
     | otherwise -> recoveryItems presentation <> ["c CANCEL RUN", "PgUp/PgDn scroll"]
   SteerLayer -> ["Esc CLOSE", "Ctrl-D SEND", "Enter newline"]
   SaveLayer -> ["Esc CANCEL", "Ctrl-D SAVE"] <> ["PgUp/PgDn ERROR" | Just _ <- [presentationSaveError presentation]]
+  CaptureFileLayer -> ["Esc CANCEL", "Ctrl-D CAPTURE FILE"]
   FilterLayer -> ["Enter APPLY", "Esc CANCEL"]
   ConfirmDetailsLayer -> confirmItems True
   ConfirmLayer -> confirmItems False
@@ -1242,6 +1266,7 @@ footerItems presentation width height = case presentationLayer presentation of
         | modelTab model == RoutingTab -> ["p PERSONA", "Tab SECTION", browserPaneHint, "? KEYS", "q QUIT"]
         | otherwise -> ["Enter CONFIGURE", "/ FILTER", "Tab SECTION", browserPaneHint, "? KEYS", "q QUIT"]
       InputScreen index -> [if index == 0 then "Esc CANCEL" else "Esc PREVIOUS", "Ctrl-D CONTINUE", "Enter newline"]
+        <> (if presentationService presentation then ["Ctrl-T CAPTURE TEXT", "Ctrl-O CAPTURE FILE"] else [])
       TargetScreen -> ["Esc BACK", "s SCRIPTED", "l/Enter ROUTING", "Up/Down SCROLL", "p PERSONA", "? KEYS"]
       HelpLoading -> ["Esc CANCEL"]
       HelpScreen _ -> ["Esc BACK", "Up/Down SCROLL", "PgUp/PgDn", "Home/End", "? KEYS"]

@@ -3447,12 +3447,30 @@ approval hint is absent.
 Service mode follows one selected request or run at a time through a running
 manager.  It browses the manager's profiles, workflows, and help, creates a
 request, opens an existing request or run from the Manager overview view,
-submits literal inputs, and displays the exact manager review before explicit
-approval.  After approval it follows the run in the live monitor, answers the
+submits literal or captured inputs, and displays the exact manager review
+before explicit approval.  After approval it follows the run in the live monitor, answers the
 questions that the manager routes to the person, invokes an offered recovery
 retry, recognizes the terminal state, retrieves the verified result, and saves
 its bytes.  Receipt status is separate from request association and runtime
 outcome.
+
+In the input editor of a request, @kbd{C-d} sends the editor text as a
+literal input.  @kbd{C-t} captures the exact editor text as raw UTF-8 bytes
+instead.  @kbd{C-o} opens a path editor, where @kbd{C-d} reads the named local
+file and captures its exact bytes, and @key{ESC} closes the editor.  The file
+must be a regular UTF-8 file of at most the @code{captureBytes} limit of the
+capabilities.  The frontend reads the file itself, so the manager receives
+the bytes and never the path.  A path that the frontend cannot read keeps the
+path editor open with its reason, and nothing is sent.  A capture is one
+@code{application/octet-stream} POST of @code{/v1/captures} for the request,
+without @code{If-Match}.  Its receipt must name the request, the profile, and
+the size and SHA-256 digest of the sent bytes.  The frontend then sends a new
+@code{set-input} command with source @code{capture} and the capture
+identifier, and that command completes on its own @code{input-changed}
+effect.  The request screen lists the captured inputs.  A captured input
+agrees with the exact review only when the review repeats the size and digest
+of a capture receipt that this session received, so the review of a capture
+made by another session cannot be approved here.
 
 Every manager command is sent once.  The client retains the original pending
 command and its receipt location, and it never rebuilds or retargets them.
@@ -3491,7 +3509,7 @@ never approves, @kbd{y} never approves in the detail view that @kbd{d} opens,
 and no key approves while the key help is open.  A summary @kbd{y} starts an
 approval only when no manager command is in progress or unresolved, no internal
 fault has occurred, and the displayed review is the installed one, is still
-live, binds the request and its literals, and fits the terminal in full.  An
+live, binds the request, its literals, and its captured inputs, and fits the terminal in full.  An
 observation read in flight does not prevent the approval, because the approval
 ends that read before it prepares the command.  Every press of @key{RET} or
 @kbd{y} on the review shows one fixed notice that carries the sequence number of
@@ -3598,8 +3616,7 @@ rules above apply to every step of the journey.
 Service mode does not support these features.  The frontend offers no
 cancellation, steering, redirect, failover, or abandon of a run.  It has no
 structured answer editor, so a question with the @code{structured} code or with
-a code that is not a name shows its prompt and accepts no answer.  Captured inputs and
-other non-literal inputs cannot be supplied.  A request cannot be withdrawn or
+a code that is not a name shows its prompt and accepts no answer.  A request cannot be withdrawn or
 discarded.  The frontend offers no run history, lineage, or export.  Except
 for its event stream, it does not reconnect after a manager restart or a
 credential revocation.  It has no accepted layout at 40

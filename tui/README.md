@@ -115,8 +115,8 @@ same frontend to a running workflow manager through the public
 `Agentic.Manager.Client` facade. It takes 1 to 8 absolute client-profile paths
 and connects the first one at startup.
 It follows one selected request or run at a time. It browses the manager
-catalogue, creates a request with literal inputs, opens an existing request or
-run from the Manager overview view, and shows the exact manager review. Only `y` in the
+catalogue, creates a request with literal or captured inputs, opens an existing
+request or run from the Manager overview view, and shows the exact manager review. Only `y` in the
 summary view approves that review. The frontend then follows the run in the
 live monitor, answers the questions that the manager routes to the person,
 invokes an offered recovery retry with `r`, recognizes the terminal state,
@@ -219,6 +219,33 @@ client started, and `Enter` on the row of such a run shows its live monitor.
 The tui-overview mode of `manager/test/service_http.py` runs two runs at once
 with two execution reservations, queues a third request behind them, and
 opens both runs after a restart of the frontend.
+
+In the input editor of a request, `Ctrl-D` sends the editor text as a
+literal. `Ctrl-T` captures the exact editor text as raw UTF-8 bytes instead.
+`Ctrl-O` opens a path editor. There, `Ctrl-D` reads the named local file and
+captures its exact bytes, and `Esc` closes the editor. The file must be a
+regular UTF-8 file of at most the `captureBytes` limit of the capabilities,
+and `Agentic.Tui.Service.readCaptureFile` reads it in the frontend, so the
+manager receives the bytes and never the path. A path that the frontend
+cannot read keeps the path editor open with its reason and sends nothing.
+Each capture key has one lane outcome, as every mutation key has. A capture
+(`Agentic.Tui.Service.Capture`) is one octet-stream POST of
+`/v1/captures?requestId=ID` with no `If-Match`, prepared by
+`Agentic.Manager.Client.prepareCapture` and sent once. Its 202 response must
+carry a capture receipt with the request, the profile, the size and the
+SHA-256 of the sent bytes (`captureMatches`). When the next request read
+shows the capture command receipt, the frontend prepares a new `set-input`
+command with source `capture` and the capture identifier
+(`SaveCapture`) from that request observation. That command completes on its
+own `input-changed` effect, as a literal does. An uncertain capture or
+`set-input` offers only the exact resend of the retained command. The frontend
+keeps the capture receipts of the session, and a captured input agrees with
+the exact review only when the review repeats the size and SHA-256 of such a
+receipt. A request whose capture this session did not make therefore shows
+its request screen and not an approvable review. The request screen lists
+the captured inputs with their capture identifiers. The tui-inputs mode of
+`manager/test/service_http.py` captures editor text and a local file through
+the actual frontend and checks both exact reviews.
 
 The application state keeps the text drafts by identity
 (`Agentic.Tui.ServiceLane.Drafts`): the input editor text of each request and
@@ -379,8 +406,7 @@ the answer conversion against the `resources` section of
 description](../doc/api/README.md#pages-and-live-delivery) describes.
 
 Service mode does not support cancellation, steering, redirect, failover or
-abandon, the structured answer editor, captured and other non-literal inputs,
-withdrawal or discarding of a request, run history, lineage, export,
+abandon, the structured answer editor, withdrawal or discarding of a request, run history, lineage, export,
 reconnection of the session after a manager restart or a credential
 revocation, or acceptance at 40x12 and 80x24. The
 [manual](../doc/agent-cat.texi) entry for `--service` states the complete key

@@ -1,4 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 -- | Public manager observations used by the existing terminal presentation.
 -- These records carry no local launch, process, filesystem or control authority.
@@ -8,7 +9,8 @@ module Agentic.Tui.Service
     decodeProfile, decodeWorkflow, createBody,
     Mutation (..), mutationOperation, mutationURI, mutationProfile, prepareMutation,
     observeDraft, observePreparation, observeReceipt, requestMatches, reviewMatches, reviewLive,
-    requestReady, literalInputs, receiptMatches, receiptEffectKind, approvalBody, approvalSelectors,
+    requestReady, literalInputs, receiptMatches, receiptEffectKind, captureMatches, capturedReceipt, captureLimit, readCaptureFile,
+    approvalBody, approvalSelectors,
     RunObservation (..), ResultReference (..), Verification (..), Artifact (..),
     ControlView (..), ControlOffer (..), DecisionView (..), DecisionContent (..),
     observeSnapshot, observeControl, observeDecision, observeResult, decodeSnapshot, decodeControl, decodeDecision,
@@ -34,7 +36,13 @@ import Agentic.Runtime
     PublicUsage (..), FailureClass (..), PersonAnswering (..), RunId (runIdText), mkRunId )
 import Agentic.Tui.Person (PersonPrompt (..), personAnswerValue)
 import Agentic.Tui.RunModel (runStatusLabel)
+import Control.Exception (IOException, finally, onException, try)
 import Control.Monad (unless)
+import Data.Scientific (toBoundedInteger)
+import System.FilePath (isAbsolute)
+import System.IO (hClose)
+import System.Posix.Files (getFdStatus, isRegularFile)
+import System.Posix.IO (OpenFileFlags (cloexec, nonBlock), OpenMode (ReadOnly), closeFd, defaultFileFlags, fdToHandle, openFd)
 import Crypto.Hash (Digest, SHA256, hash)
 import qualified Data.ByteString as BS
 import qualified Data.Map.Strict as Map
@@ -141,6 +149,14 @@ createBody row = object
 data Mutation
   = Create !Workflow
   | SaveLiteral !C.DraftView !Text !Text !Int
+    -- | The capture of these exact raw UTF-8 bytes for the named input of
+    -- the request, at this input index. The bytes come from the input
+    -- editor or from a local file that the operator named, and the manager
+    -- receives only the bytes.
+  | Capture !C.DraftView !Text !BS.ByteString !Int
+    -- | The set-input of the named input with source capture and the
+    -- identifier of this capture receipt, at this input index.
+  | SaveCapture !C.DraftView !Text !C.CaptureReceipt !Int
   | Enqueue !C.DraftView
   | Approve !C.DraftView !C.Preparation
     -- | The typed answer to the question that this decision observation
@@ -157,6 +173,8 @@ mutationOperation :: Mutation -> Text
 mutationOperation mutation = case mutation of
   Create _ -> "create"
   SaveLiteral {} -> "set-input"
+  Capture {} -> "capture"
+  SaveCapture {} -> "set-input"
   Enqueue _ -> "enqueue"
   Approve {} -> "approve"
   Answer {} -> "answer"
@@ -166,6 +184,8 @@ mutationURI :: Mutation -> Text
 mutationURI mutation = case mutation of
   Create _ -> "/v1/requests"
   SaveLiteral request _ _ _ -> requestURI request
+  Capture request _ _ _ -> "/v1/captures?requestId=" <> C.draftId request
+  SaveCapture request _ _ _ -> requestURI request
   Enqueue request -> requestURI request
   Approve _ preparation -> "/v1/preparations/" <> C.preparationId preparation
   Answer decision _ -> "/v1/decisions/" <> decisionId decision
@@ -175,6 +195,8 @@ mutationProfile :: Mutation -> Text
 mutationProfile mutation = case mutation of
   Create row -> workflowProfile row
   SaveLiteral request _ _ _ -> C.draftProfile request
+  Capture request _ _ _ -> C.draftProfile request
+  SaveCapture request _ _ _ -> C.draftProfile request
   Enqueue request -> C.draftProfile request
   Approve _ preparation -> C.preparationProfile preparation
   Answer decision _ -> decisionProfile decision
@@ -192,10 +214,21 @@ prepareMutation client now mutation observed
         Left failure -> pure (Left failure)
         Right location -> C.prepareCommand client location Nothing (createBody row)
       SaveLiteral request name value _ -> fromDraft request $ do
-        let C.Readiness declarations _ _ _ = C.draftReadiness request
-        unless (C.draftPhase request == "draft" && name `elem` [n | C.InputDeclaration n _ <- declarations]) (Left C.InvalidResponse)
+        editableInput request name
         Right (object ["operation" .= ("set-input" :: Text), "input" .= object
           ["name" .= name, "source" .= ("literal" :: Text), "value" .= value]])
+      -- A capture has no existing-resource validator, so it carries no
+      -- If-Match. The installed request observation still names an editable
+      -- input of the request.
+      Capture request name bytes _ -> case (observed, editableInput request name) of
+        (Just current, Right ()) | owned current (requestURI request) (C.draftRevision request),
+          C.decodeObservation (C.observedValue current) == Right request -> C.prepareCapture client (C.draftId request) bytes
+        _ -> pure (Left C.InvalidResponse)
+      SaveCapture request name receipt _ -> fromDraft request $ do
+        editableInput request name
+        unless (C.captureRequest receipt == C.draftId request && C.captureProfile receipt == C.draftProfile request) (Left C.InvalidResponse)
+        Right (object ["operation" .= ("set-input" :: Text), "input" .= object
+          ["name" .= name, "source" .= ("capture" :: Text), "captureId" .= C.captureId receipt]])
       Enqueue request -> fromDraft request $
         if C.draftPhase request == "draft" && requestReady request
         then Right (object ["operation" .= ("enqueue" :: Text)]) else Left C.InvalidResponse
@@ -232,6 +265,9 @@ prepareMutation client now mutation observed
           && String (mutationProfile mutation) `V.elem` profiles
         _ -> False
       _ -> False
+    editableInput request name = do
+      let C.Readiness declarations _ _ _ = C.draftReadiness request
+      unless (C.draftPhase request == "draft" && name `elem` [n | C.InputDeclaration n _ <- declarations]) (Left C.InvalidResponse)
     fromDraft request body = case (observed,body) of
       (Just current,Right value) | owned current (requestURI request) (C.draftRevision request),
         C.decodeObservation (C.observedValue current) == Right request -> C.prepareObserved client current value
@@ -304,8 +340,10 @@ literalInputs request = case C.draftReadiness request of
 
 -- | Agreement of the exact review with the selected request's native input bytes.
 -- Logical literals are unchanged. Prompt transport's declared LF is included by Runtime.
-reviewMatches :: Workflow -> C.DraftView -> C.Preparation -> Bool
-reviewMatches row request preparation = requestMatches row request && requestReady request
+-- A captured input agrees only with a capture receipt of this session, given
+-- by capture identifier, whose size and SHA-256 the review repeats.
+reviewMatches :: Map.Map Text C.CaptureReceipt -> Workflow -> C.DraftView -> C.Preparation -> Bool
+reviewMatches captures row request preparation = requestMatches row request && requestReady request
   && C.draftPreparation request == Just (C.preparationId preparation)
   && C.preparationRequest preparation == C.draftId request
   && C.preparationRequestRevision preparation == C.draftRevision request
@@ -313,16 +351,22 @@ reviewMatches row request preparation = requestMatches row request && requestRea
   && C.preparationProfileRevision preparation == C.draftProfileRevision request
   && C.preparationDescriptorRevision preparation == C.draftDescriptorRevision request
   && C.reviewWorkflow review == workflowId row && C.reviewProfile review == workflowProfile row
-  && Map.size literals == length inputs && traverse binding inputs == Just (C.reviewInputs review)
+  && length supplied == length inputs && traverse binding inputs == Just (C.reviewInputs review)
   where
     review = C.preparationReview preparation
-    literals = literalInputs request
+    C.Readiness _ supplied _ _ = C.draftReadiness request
     inputs = workflowInputs (workflowDisplay row)
-    binding input = do
-      logical <- Map.lookup (workflowInputName input) literals
-      let bytes = frontendLiteralBytes (workflowInputSource input) logical
-      pure (C.ReviewInput (workflowInputName input) "literal" (T.pack (show (BS.length bytes)))
-        (T.pack (show (hash bytes :: Digest SHA256))))
+    binding input = case [value | value <- supplied, suppliedName value == workflowInputName input] of
+      [C.LiteralValue name logical] ->
+        let bytes = frontendLiteralBytes (workflowInputSource input) logical
+         in Just (C.ReviewInput name "literal" (T.pack (show (BS.length bytes))) (T.pack (show (hash bytes :: Digest SHA256))))
+      [C.CapturedValue name ident] -> do
+        receipt <- Map.lookup ident captures
+        unless (C.captureId receipt == ident && C.captureRequest receipt == C.draftId request
+          && C.captureProfile receipt == C.draftProfile request) Nothing
+        Just (C.ReviewInput name "capture" (T.pack (show (C.captureBytes receipt))) (C.captureDigest receipt))
+      _ -> Nothing
+    suppliedName value = case value of C.LiteralValue name _ -> name; C.CapturedValue name _ -> name
 
 reviewLive :: UTCTime -> C.Preparation -> Bool
 reviewLive now preparation = C.preparationState preparation == "live" && C.preparationReason preparation == Nothing
@@ -366,6 +410,54 @@ receiptMatches mutation receipt = C.operationName (C.receiptOperation receipt) =
        (_, Just (Object fields)) | mutationOperation mutation `elem` ["set-input","enqueue"] ->
          KM.lookup "resource" fields == Just (String (mutationURI mutation))
        (_, Just _) -> mutationOperation mutation `notElem` ["set-input","enqueue","answer"]
+
+-- | Whether a capture receipt names the exact bytes of this capture: its
+-- request, its profile, their size and their SHA-256. No other mutation has
+-- a capture receipt.
+captureMatches :: Mutation -> C.CaptureReceipt -> Bool
+captureMatches mutation receipt = case mutation of
+  Capture request _ bytes _ -> C.captureRequest receipt == C.draftId request
+    && C.captureProfile receipt == C.draftProfile request
+    && C.captureBytes receipt == fromIntegral (BS.length bytes)
+    && C.captureDigest receipt == T.pack (show (hash bytes :: Digest SHA256))
+  _ -> False
+
+-- | A capture receipt of this session that 'captureMatches' this capture.
+-- Every such receipt names the same request, profile, size and digest.
+capturedReceipt :: Mutation -> Map.Map Text C.CaptureReceipt -> Maybe C.CaptureReceipt
+capturedReceipt mutation = listToMaybe . filter (captureMatches mutation) . Map.elems
+
+-- | The @captureBytes@ limit of the capabilities of the session. The client
+-- accepts only capabilities that state it, so 0 never occurs.
+captureLimit :: C.Client -> Int
+captureLimit client = case C.clientCapabilities client of
+  Object fields | Just (Object limits) <- KM.lookup "limits" fields, Just (Number limit) <- KM.lookup "captureBytes" limits,
+    Just count <- toBoundedInteger limit -> count
+  _ -> 0
+
+-- | The exact bytes of the local file at this absolute path, for a capture:
+-- a regular file of at most the given number of bytes whose bytes are UTF-8.
+-- The refusal text names the reason. Only the bytes leave this function, so
+-- the manager never receives the path.
+readCaptureFile :: Int -> FilePath -> IO (Either Text BS.ByteString)
+readCaptureFile limit path
+  | not (isAbsolute path) || any (`elem` ['\NUL', '\n', '\r']) path = pure (Left "the file path must be one absolute single-line path")
+  | otherwise = do
+      -- A nonblocking open never waits on a FIFO or a device, and only a
+      -- regular file is read.
+      outcome <- try $ do
+        descriptor <- openFd path ReadOnly defaultFileFlags {nonBlock = True, cloexec = True}
+        status <- getFdStatus descriptor `onException` closeFd descriptor
+        if not (isRegularFile status) then Nothing <$ closeFd descriptor else do
+          handle <- fdToHandle descriptor `onException` closeFd descriptor
+          Just <$> BS.hGet handle (limit + 1) `finally` hClose handle
+      pure $ case outcome of
+        Left (failure :: IOException) -> Left ("the file cannot be read: " <> T.pack (show failure))
+        Right Nothing -> Left "the path does not name a regular file"
+        Right (Just bytes)
+          | BS.length bytes > limit -> Left ("the file exceeds the capture limit of " <> T.pack (show limit) <> " bytes")
+          | Left _ <- TE.decodeUtf8' bytes -> Left "the file is not UTF-8 text"
+          | otherwise -> Right bytes
 
 receiptEffectKind :: C.CommandReceipt -> Maybe Text
 receiptEffectKind receipt = case C.effectValue <$> C.receiptEffect receipt of

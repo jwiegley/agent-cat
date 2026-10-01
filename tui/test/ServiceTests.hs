@@ -105,11 +105,11 @@ serviceTests render = do
       preparation = preparation0 {C.preparationReview = review}
       unframed = reviewInput {C.reviewInputBytes = T.pack (show (BS.length (TE.encodeUtf8 logical))),
         C.reviewInputSha256 = T.pack (show (hash (TE.encodeUtf8 logical) :: Digest SHA256))}
-  check "review binds the native prompt LF without changing logical text" (S.reviewMatches selectedWorkflowRow request preparation)
+  check "review binds the native prompt LF without changing logical text" (S.reviewMatches Map.empty selectedWorkflowRow request preparation)
   check "logical-byte hash does not authorize different prompt-transport bytes"
-    (not (S.reviewMatches selectedWorkflowRow request (preparation {C.preparationReview = review {C.reviewInputs = [unframed]}})))
+    (not (S.reviewMatches Map.empty selectedWorkflowRow request (preparation {C.preparationReview = review {C.reviewInputs = [unframed]}})))
   check "review cannot move to another request revision"
-    (not (S.reviewMatches selectedWorkflowRow (request {C.draftRevision = "other"}) preparation))
+    (not (S.reviewMatches Map.empty selectedWorkflowRow (request {C.draftRevision = "other"}) preparation))
   check "review selectors fit the acceptance terminal in full" (serviceReviewAllowed preparation "\"preprev_1\"" (140,36))
   check "clipped selectors disable approval" (not (serviceReviewAllowed preparation "\"preprev_1\"" (40,8)))
   check "all five exact selectors are rendered" (all (`elem` serviceReviewRows preparation "\"preprev_1\"") (S.approvalSelectors preparation))
@@ -131,6 +131,7 @@ serviceTests render = do
         "address" .= Null, "resource" .= ("/v1/requests/other" :: T.Text)]
   unrelated <- either (die . show) pure (C.decodeObservation (put "state" (String "effect-observed") (put "effect" unrelatedEffect receiptValue)))
   check "effect for another resource cannot advance the input editor" (not (S.receiptMatches mutation unrelated))
+  captureTests selectedWorkflowRow request preparation receiptValue unrelated
   snapshotValue <- BS.readFile "test/fixtures/manager/v1/valid/run-snapshot.json" >>= either die pure . eitherDecodeStrict'
   (metadata,items) <- case snapshotValue of
     Object fields | Just (Array values) <- KM.lookup "items" fields -> pure (Object (KM.delete "page" (KM.delete "items" fields)),V.toList values)
@@ -1824,7 +1825,7 @@ approvalTests render profile row request preparation expiry = do
   let live = addUTCTime (-1) expiry
       tag = "\"preprev_1\"" :: T.Text
       literals = S.literalInputs request
-      review now fits installed draft inputs = A.checkReview id now fits (Just row) (fmap ((,) ()) draft) installed inputs preparation tag
+      review now fits installed draft inputs = A.checkReview id now fits (Just row) (fmap ((,) ()) draft) installed inputs Map.empty preparation tag
   check "a current, live, bound and complete review is current and yields its request and validator"
     (case review live True (Just (tag,preparation)) (Just request) literals of
       A.ReviewCurrent (draft,validator) -> draft == request && validator == tag; _ -> False)
@@ -1838,7 +1839,7 @@ approvalTests render profile row request preparation expiry = do
       ("a missing installed request makes the displayed review stale",
         review live True (Just (tag,preparation)) Nothing literals == A.ReviewStale),
       ("a missing workflow makes the displayed review stale",
-        A.checkReview id live True Nothing (Just ((),request)) (Just (tag,preparation)) literals preparation tag == A.ReviewStale),
+        A.checkReview id live True Nothing (Just ((),request)) (Just (tag,preparation)) literals Map.empty preparation tag == A.ReviewStale),
       ("a review at its expiry is expired", review expiry True (Just (tag,preparation)) (Just request) literals == A.ReviewExpired),
       ("a review for another request revision is mismatched",
         review live True (Just (tag,preparation)) (Just (request {C.draftRevision = "other"})) literals == A.ReviewMismatched),
@@ -2322,3 +2323,119 @@ followTests now = do
         (\(_, _, step) -> step) (stream (L.StreamEnd False "c_10" (Just C.ClientClosed)) L.DeliveryLive start) == L.FollowClosed
           && (\(_, _, step) -> step) (L.afterPoll now (Left C.ClientClosed) L.DeliveryPolling start) == L.PollClosed)
     ]
+
+-- | The capture of editor text or local file bytes, the set-input that binds
+-- it, the exact review of a captured input, the send-once lane rule of a
+-- capture and the local file read.
+captureTests :: S.Workflow -> C.DraftView -> C.Preparation -> Value -> C.CommandReceipt -> IO ()
+captureTests workflowRow reviewed preparation receiptValue unrelated = do
+  let captured = TE.encodeUtf8 "\65279Captured \955 text\r\nsecond line\n"
+      digest :: BS.ByteString -> T.Text
+      digest bytes = T.pack (show (hash bytes :: Digest SHA256))
+      draft = reviewed {C.draftPhase = "draft", C.draftPreparation = Nothing}
+      capture = S.Capture draft "subject" captured 0
+      receipt = C.CaptureReceipt "capture_1" (C.draftId draft) (C.draftProfile draft) (fromIntegral (BS.length captured)) (digest captured)
+      other = receipt {C.captureId = "capture_2", C.captureDigest = digest "other bytes\n"}
+      save = S.SaveCapture draft "subject" receipt 0
+      captureURI = "/v1/captures?requestId=" <> C.draftId draft
+      asCapture = put "operation" (String "capture") . put "resource" (String captureURI)
+        . put "links" (object ["self" .= ("/v1/commands/cmd_11" :: T.Text), "resource" .= captureURI])
+      inputChanged = object ["kind" .= ("input-changed" :: T.Text), "runtimeSequence" .= Null,
+        "address" .= Null, "resource" .= ("/v1/requests/" <> C.draftId draft)]
+  captureCommand <- either (die . show) pure (C.decodeObservation (asCapture receiptValue))
+  changed <- either (die . show) pure (C.decodeObservation (put "state" (String "effect-observed") (put "effect" inputChanged receiptValue)))
+  checks
+    [ ("a capture is a submit-scoped capture of /v1/captures for its request and profile",
+        S.mutationOperation capture == "capture" && S.mutationURI capture == captureURI
+          && S.mutationProfile capture == C.draftProfile draft && S.missingScope ["observe","submit"] "capture" == Nothing
+          && S.missingScope ["observe"] "capture" == Just "submit"),
+      ("the set-input of a capture is a set-input of the request", S.mutationOperation save == "set-input" && S.mutationURI save == "/v1/requests/" <> C.draftId draft),
+      ("a capture receipt names the exact captured bytes", S.captureMatches capture receipt),
+      ("a capture receipt of other bytes, another size, another request or another profile is not this capture",
+        not (any (S.captureMatches capture) [other, receipt {C.captureBytes = C.captureBytes receipt + 1},
+          receipt {C.captureRequest = "req_other"}, receipt {C.captureProfile = "profile_other"}])),
+      ("only a capture has a capture receipt", not (S.captureMatches save receipt) && not (S.captureMatches (S.SaveLiteral draft "subject" "x" 0) receipt)),
+      ("the capture command receipt is bound to the capture and is never an observed effect",
+        S.receiptMatches capture captureCommand && S.receiptEffectKind captureCommand == Nothing),
+      ("the capture command receipt completes no set-input", not (S.receiptMatches save captureCommand) && not (S.receiptMatches (S.SaveLiteral draft "subject" "x" 0) captureCommand)),
+      ("a set-input receipt does not complete a capture", not (S.receiptMatches capture changed)),
+      ("the set-input of a capture completes on its own input-changed effect",
+        S.receiptMatches save changed && S.receiptEffectKind changed == Just "input-changed"),
+      ("an input-changed effect for another resource does not complete the set-input of a capture", not (S.receiptMatches save unrelated)),
+      ("the capture continues only with a receipt of the same bytes",
+        S.capturedReceipt capture (Map.fromList [("capture_1", receipt), ("capture_2", other)]) == Just receipt
+          && S.capturedReceipt capture (Map.fromList [("capture_2", other)]) == Nothing)
+    ]
+  -- The exact review of a captured input repeats the size and digest of a
+  -- capture receipt of the session.
+  let capturedRequest = reviewed {C.draftReadiness = C.Readiness [C.InputDeclaration "subject" "prompt"] [C.CapturedValue "subject" "capture_1"] [] []}
+      captureInput = C.ReviewInput "subject" "capture" (T.pack (show (BS.length captured))) (digest captured)
+      capturedReview = preparation {C.preparationReview = (C.preparationReview preparation) {C.reviewInputs = [captureInput]}}
+      known = Map.fromList [("capture_1", receipt)]
+  checks
+    [ ("a captured input agrees with the exact review through the capture receipt of the session",
+        S.reviewMatches known workflowRow capturedRequest capturedReview),
+      ("a captured input without a capture receipt of the session does not agree", not (S.reviewMatches Map.empty workflowRow capturedRequest capturedReview)),
+      ("a review of other captured bytes does not agree",
+        not (S.reviewMatches known workflowRow capturedRequest capturedReview {C.preparationReview = (C.preparationReview capturedReview)
+          {C.reviewInputs = [captureInput {C.reviewInputSha256 = digest "other bytes\n"}]}})),
+      ("a literal review does not agree with a captured input",
+        not (S.reviewMatches known workflowRow capturedRequest preparation)),
+      ("a captured input does not agree with a receipt of another request",
+        not (S.reviewMatches (Map.fromList [("capture_1", receipt {C.captureRequest = "req_other"})]) workflowRow capturedRequest capturedReview))
+    ]
+  -- Each capture is sent once: a delivered capture leaves the lane busy, so
+  -- no key starts another capture, and a late duplicate result is stale. An
+  -- uncertain send offers only the exact resend of the retained attempt.
+  let pending = "pending-capture" :: T.Text
+      attempt = L.Attempt capture pending Nothing
+      sending = L.Lane Nothing (L.MutationSending 9 attempt) False False :: L.Lane T.Text T.Text
+      (uncertainStep, uncertainLane) = L.sendStep 9 (L.Declared (Left C.TransportUnavailable)) sending
+      awaiting = sending {L.laneMutation = L.MutationAwaiting capture pending ("/v1/commands/cmd_capture" :: T.Text)}
+  checks
+    [ ("a delivered capture is the one retained attempt",
+        case L.sendStep 9 (L.Declared (Right ())) sending of
+          (L.SendDelivered delivered (), _) -> L.attemptPending delivered == pending && L.attemptMutation delivered == capture
+          _ -> False),
+      ("while a capture awaits its set-input no key starts another capture and a duplicate result is stale",
+        L.mutationAdmission awaiting == L.KeyBusy && isJustText (L.mutationKeyOutcome ["observe","submit"] "capture" awaiting)
+          && case L.sendStep 9 (L.Declared (Right ())) awaiting of (L.SendStale, _) -> True; _ -> False),
+      ("an uncertain capture retains the attempt and offers its exact resend",
+        case (uncertainStep, L.laneMutation uncertainLane) of
+          (L.SendUncertain, L.MutationUncertain retained (L.DeclaredUncertainty _)) ->
+            L.attemptPending retained == pending && L.resendOffered uncertainLane
+              && L.mutationNotice uncertainLane == Just ("capture", captureURI, True)
+          _ -> False),
+      ("the only send that an uncertain capture offers is the exact resend of its retained bytes and key",
+        case L.resendAdmission uncertainLane of
+          L.ResendStart retained -> L.attemptPending retained == pending && L.attemptMutation retained == capture
+          _ -> False),
+      ("an uncertain capture starts no new capture or set-input", L.mutationAdmission uncertainLane == L.KeyBusy
+          && isJustText (L.mutationKeyOutcome ["observe","submit"] "capture" uncertainLane)
+          && isJustText (L.mutationKeyOutcome ["observe","submit"] "set-input" uncertainLane))
+    ]
+  -- The local file read gives the exact bytes of a regular UTF-8 file
+  -- within the limit, and refuses every other path.
+  temporary <- getTemporaryDirectory
+  let root = temporary </> "agentic-capture-file-test"
+  removePathForcibly root
+  createDirectory root
+  BS.writeFile (root </> "captured.txt") captured
+  BS.writeFile (root </> "binary.bin") (BS.pack [0xff, 0xfe, 0x00])
+  exact <- S.readCaptureFile 1024 (root </> "captured.txt")
+  tooLarge <- S.readCaptureFile (BS.length captured - 1) (root </> "captured.txt")
+  binary <- S.readCaptureFile 1024 (root </> "binary.bin")
+  directory <- S.readCaptureFile 1024 root
+  relative <- S.readCaptureFile 1024 "captured.txt"
+  missing <- S.readCaptureFile 1024 (root </> "absent.txt")
+  removePathForcibly root
+  checks
+    [ ("a local UTF-8 file within the limit gives its exact bytes", exact == Right captured),
+      ("a file above the capture limit is refused", tooLarge == Left ("the file exceeds the capture limit of " <> T.pack (show (BS.length captured - 1)) <> " bytes")),
+      ("a file that is not UTF-8 is refused", binary == Left "the file is not UTF-8 text"),
+      ("a directory is refused", directory == Left "the path does not name a regular file"),
+      ("a relative path is refused", relative == Left "the file path must be one absolute single-line path"),
+      ("a missing file is refused with its read failure", either ("the file cannot be read: " `T.isPrefixOf`) (const False) missing)
+    ]
+  where
+    isJustText = maybe False (not . T.null . fst)

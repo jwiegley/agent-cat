@@ -199,6 +199,11 @@ data AppState = AppState
     stateFilterEditing :: !Bool,
     stateSaveResult :: !Bool,
     stateSaveError :: !(Maybe Text),
+    -- | Whether the path editor of a file capture is open over the input
+    -- editor, its path editor, and the refusal of its latest read.
+    stateCaptureFile :: !Bool,
+    stateCaptureEditor :: !(Edit.Editor Text Name),
+    stateCaptureError :: !(Maybe Text),
     stateNow :: !UTCTime,
     stateRunStartedAt :: !(Maybe UTCTime),
     stateRunPersona :: !(Maybe Text),
@@ -250,6 +255,9 @@ data AppState = AppState
     -- and input, and the answer text of each decision. The editors show the
     -- draft of the displayed identity ('serviceDraftKey').
     stateServiceDrafts :: !Lane.Drafts,
+    -- | The capture receipts of this session by capture identifier. Only a
+    -- captured input with one of these receipts agrees with an exact review.
+    stateServiceCaptures :: !(Map.Map Text Manager.CaptureReceipt),
     -- | The live sink of the event worker of the session.
     stateServiceSink :: !LiveSink,
     -- | The delivery state that the latest wakeup read from the live sink.
@@ -353,6 +361,9 @@ runAppWith backend = mask $ \restore -> do
             stateFilterEditing = False,
             stateSaveResult = False,
             stateSaveError = Nothing,
+            stateCaptureFile = False,
+            stateCaptureEditor = blankEditor,
+            stateCaptureError = Nothing,
             stateNow = now,
             stateRunStartedAt = Nothing,
             stateRunPersona = Nothing,
@@ -389,6 +400,7 @@ runAppWith backend = mask $ \restore -> do
             stateServiceOverview = Lane.noObservation,
             stateServiceOverviewFocus = Lane.noFocus,
             stateServiceDrafts = Lane.noDrafts,
+            stateServiceCaptures = Map.empty,
             stateServiceSink = sink,
             stateServiceDelivery = Lane.DeliveryIdle,
             stateServiceFetches = Lane.noFetches,
@@ -1024,6 +1036,16 @@ handleServiceSent client ticket result = do
               liftIO (writeIORef (stateServiceUncertainExit state) False)
               refreshServiceRequest client Lane.AutomaticRefresh
           _ -> uncertainService state (Lane.declaredSendUncertain attempt "invalid creation response" (stateServiceLane state))
+        -- A capture answers with its capture receipt, which must name the
+        -- exact bytes that were sent. The set-input that binds it starts
+        -- from the next installed request read ('applyServiceObservation').
+        Service.Capture {} -> case Manager.captureResponse response of
+          Right (receipt,location) | Service.captureMatches mutation receipt -> do
+            put (onLane (\lane -> lane {Lane.laneMutation = Lane.MutationAwaiting mutation pending location}) state) {
+              stateServiceCaptures = Map.insert (Manager.captureId receipt) receipt (stateServiceCaptures state),
+              stateModel = (stateModel state) {modelStatus = "capture stored; reading the request before its set-input"}}
+            refreshServiceRequest client Lane.AutomaticRefresh
+          _ -> uncertainService state (Lane.declaredSendUncertain attempt "invalid capture response" (stateServiceLane state))
         _ -> case (Manager.decodeObservation (Manager.responseValue response),Manager.responseLocation response) of
           (Right receipt,Just location) | Manager.responseStatus response == 202, Service.receiptMatches mutation receipt,
             Manager.referenceURI location == "/v1/commands/" <> Manager.receiptId receipt -> do
@@ -1038,8 +1060,8 @@ handleServiceSent client ticket result = do
 -- confirms nothing and offers no resend. 'serviceRunObserved' decides whether
 -- a read with run components shows the run in the live monitor. The
 -- occurrence selection, pane focus, output position and run details stay.
-applyServiceObservation :: Service.RequestRead Manager.Observed -> EventM Name AppState ()
-applyServiceObservation (Service.RequestRead requestRead preparation receiptResult runComponents) = do
+applyServiceObservation :: Manager.Client -> Service.RequestRead Manager.Observed -> EventM Name AppState ()
+applyServiceObservation client (Service.RequestRead requestRead preparation receiptResult runComponents) = do
   before <- get
   let fresh = case receiptResult of Just (_,Right received) -> Just received; _ -> Nothing
       state = before {stateServiceLastReceipt = maybe (stateServiceLastReceipt before) Just fresh,
@@ -1057,22 +1079,43 @@ applyServiceObservation (Service.RequestRead requestRead preparation receiptResu
       -- selection is shown, so it never replaces the overview or a browser.
       shownScreen current screen = if serviceShowsSelection (modelScreen (stateModel current)) then screen else modelScreen (stateModel current)
       requested = snd <$> requestRead
+      -- An observed input change shows the next input, or the request after
+      -- the last input, with these operator literals. Its draft ends.
+      inputSaved :: Manager.DraftView -> Text -> Map.Map Text Text -> Int -> EventM Name AppState ()
+      inputSaved request name literals index = do
+        let model = (stateModel state) {modelInputs = literals,
+              modelScreen = case modelWorkflow (stateModel state) of
+                Just descriptor | index + 1 < length (workflowInputs descriptor) -> InputScreen (index + 1)
+                _ -> ServiceRequestScreen request, modelStatus = "input effect observed"}
+        put (idleService state) {stateModel = model,
+          stateEditor = Edit.editorText InputEditor Nothing (inputValue model),
+          stateServiceDrafts = Lane.dropDraft (Lane.InputDraft (Manager.draftId request) name) (stateServiceDrafts state)}
+        liftIO (writeIORef (stateServiceUncertainExit state) (isJust (stateServiceApproval state)))
   put state
   case (pending, requested) of
     (Just (mutation@(Service.SaveLiteral _ name value index),command,location), Just request)
       | confirmed "input-changed" ->
           if Service.literalInputs request == Map.insert name value (modelInputs (stateModel state))
             && Manager.draftPhase request == "draft"
-          then do
-            let model = (stateModel state) {modelInputs = Map.insert name value (modelInputs (stateModel state)),
-                  modelScreen = case modelWorkflow (stateModel state) of
-                    Just descriptor | index + 1 < length (workflowInputs descriptor) -> InputScreen (index + 1)
-                    _ -> ServiceRequestScreen request, modelStatus = "input effect observed"}
-            put (idleService state) {stateModel = model,
-              stateEditor = Edit.editorText InputEditor Nothing (inputValue model),
-              stateServiceDrafts = Lane.dropDraft (Lane.InputDraft (Manager.draftId request) name) (stateServiceDrafts state)}
-            liftIO (writeIORef (stateServiceUncertainExit state) (isJust (stateServiceApproval state)))
+          then inputSaved request name (Map.insert name value (modelInputs (stateModel state))) index
           else settleService state (Lane.Attempt mutation command location) "request no longer matches the submitted literals"
+    -- A stored capture continues with the set-input that binds it, once
+    -- its own receipt reads back. That set-input is prepared from the
+    -- request observation of this installed read, and it is a new command
+    -- with its own key, not a resend.
+    (Just (mutation@(Service.Capture _ name _ index),_,_), Just request)
+      | Just (observed,_) <- requestRead, maybe False (Service.receiptMatches mutation) fresh,
+        Just receipt <- Service.capturedReceipt mutation (stateServiceCaptures state) -> do
+          put (idleService state)
+          beginServiceMutation client (Service.SaveCapture request name receipt index) (Just observed)
+    (Just (mutation@(Service.SaveCapture _ name receipt index),command,location), Just request)
+      | confirmed "input-changed" ->
+          let Manager.Readiness _ supplied _ _ = Manager.draftReadiness request
+              literals = Map.delete name (modelInputs (stateModel state))
+           in if Manager.CapturedValue name (Manager.captureId receipt) `elem` supplied
+                && Service.literalInputs request == literals && Manager.draftPhase request == "draft"
+              then inputSaved request name literals index
+              else settleService state (Lane.Attempt mutation command location) "request no longer matches the submitted capture"
     -- The answer completes only on its own effect-observed receipt of kind
     -- answer-accepted, whose address 'Service.receiptMatches' binds to the
     -- answered occurrence and run. Its draft ends with it.
@@ -1115,7 +1158,7 @@ applyServiceObservation (Service.RequestRead requestRead preparation receiptResu
       (InputScreen _, _) -> put current {stateModel = (stateModel current) {modelStatus = "request validator current; Ctrl-D sends the literal"}}
       (_, Just request) -> case (stateServiceWorkflow current,preparation) of
         (Just workflow,Just (prepObserved,prep))
-          | Service.reviewMatches workflow request prep, Service.literalInputs request == modelInputs (stateModel current),
+          | Service.reviewMatches (stateServiceCaptures current) workflow request prep, Service.literalInputs request == modelInputs (stateModel current),
             Service.reviewLive (stateNow current) prep -> do
               let screen = ServiceReviewScreen prep (Manager.observedETag prepObserved)
               put current {stateConfirmDetails = stateConfirmDetails current && modelScreen (stateModel current) == screen,
@@ -1172,7 +1215,8 @@ serviceReviewView state = Approval.reviewView (stateKeyHelp state) (stateConfirm
 serviceReviewCheck :: AppState -> Manager.Preparation -> Text -> Approval.ReviewCheck (Manager.DraftView, Manager.Observed)
 serviceReviewCheck state displayed tag =
   Approval.checkReview Manager.observedETag (stateNow state) (serviceReviewAllowed displayed tag (stateTerminalSize state))
-    (stateServiceWorkflow state) (serviceRequest state) (servicePreparation state) (modelInputs (stateModel state)) displayed tag
+    (stateServiceWorkflow state) (serviceRequest state) (servicePreparation state) (modelInputs (stateModel state))
+    (stateServiceCaptures state) displayed tag
 
 -- | Handle one worker result of the active session.
 handleServiceResult :: Manager.Client -> ServiceEvent -> EventM Name AppState ()
@@ -1294,7 +1338,7 @@ handleServiceResultCore client serviceEvent = do
         -- An installed composite read makes a failed retrieval due again.
         (Lane.RequestInstalled observation,lane,installed) ->
           put state {stateServiceLane = lane, stateServiceObservation = installed,
-            stateServiceResult = Lane.retrievalObserved (stateServiceResult state)} >> applyServiceObservation observation
+            stateServiceResult = Lane.retrievalObserved (stateServiceResult state)} >> applyServiceObservation client observation
     -- Only retrieved verified bytes are retained for their run. A declared
     -- refusal and a retrieval without a verified result are retryable
     -- failures that the status line and the result lines show.
@@ -1367,7 +1411,15 @@ handleServiceEventCore client event = do
     -- The save dialog of the verified result takes the text entry keys, so q
     -- edits the path here, and Ctrl-C detaches.
     VtyEvent key | activeLayer state == SaveLayer -> handleSaveResultKey event key
+    -- The path editor of a file capture takes the text entry keys.
+    VtyEvent key | activeLayer state == CaptureFileLayer -> handleCaptureFileKey client event key
     VtyEvent key | InputScreen index <- modelScreen (stateModel state) -> case key of
+      -- Ctrl-T captures the exact editor text as raw UTF-8 bytes instead of
+      -- sending it as a literal.
+      Vty.EvKey (Vty.KChar 't') [Vty.MCtrl] -> captureServiceInput client (TE.encodeUtf8 (editorContents (stateEditor state)))
+      -- Ctrl-O opens the path editor of a file capture.
+      Vty.EvKey (Vty.KChar 'o') [Vty.MCtrl] ->
+        put state {stateCaptureFile = True, stateCaptureError = Nothing, stateCaptureEditor = Edit.editorText InputEditor (Just 1) ""}
       Vty.EvKey (Vty.KChar 'd') [Vty.MCtrl] ->
         case (serviceRequest state,modelWorkflow (stateModel state)) of
           (Just (observed,request),Just descriptor) | Just input <- atMay (workflowInputs descriptor) index ->
@@ -1628,6 +1680,7 @@ clearServiceSession state =
       stateServiceOverview = Lane.noObservation,
       stateServiceOverviewFocus = Lane.noFocus,
       stateServiceDrafts = Lane.noDrafts,
+      stateServiceCaptures = Map.empty,
       stateServiceDelivery = Lane.DeliveryIdle,
       stateServiceFetches = Lane.noFetches,
       stateServiceSafetyAt = Nothing,
@@ -1645,6 +1698,9 @@ clearServiceSession state =
       stateKeyHelp = False,
       stateSaveResult = False,
       stateSaveError = Nothing,
+      stateCaptureFile = False,
+      stateCaptureEditor = blankEditor,
+      stateCaptureError = Nothing,
       stateRunView = emptyRunView,
       statePaneFocus = PrimaryPane,
       stateOutputFollow = True,
@@ -1763,6 +1819,7 @@ toPresentation state =
       presentationSteerTiming = stateSteerTiming state,
       presentationControlError = stateControlError state,
       presentationSaveError = stateSaveError state,
+      presentationCaptureError = stateCaptureError state,
       presentationFinalResult = stateFinalResult state,
       presentationFinalLoading = stateFinalLoading state,
       presentationShowResult = stateShowResult state,
@@ -1777,6 +1834,7 @@ currentEditor state = case activeLayer state of
   PersonLayer -> statePersonEditor state
   SteerLayer -> stateControlEditor state
   SaveLayer -> stateSaveEditor state
+  CaptureFileLayer -> stateCaptureEditor state
   FilterLayer -> stateFilterEditor state
   _ -> stateEditor state
 
@@ -1793,6 +1851,7 @@ activeLayer state
   | Just decision <- listToMaybe (stateMandatoryDecisions state), mandatoryKind decision == MandatoryRecovery = RecoveryLayer
   | isJust (stateSteerTiming state) = SteerLayer
   | stateSaveResult state = SaveLayer
+  | stateCaptureFile state = CaptureFileLayer
   | stateFilterEditing state = FilterLayer
   | ConfirmScreen _ <- screen, stateConfirmDetails state = ConfirmDetailsLayer
   | ConfirmScreen _ <- screen = ConfirmLayer
@@ -2025,6 +2084,8 @@ handleKey original key = do
     RecoveryLayer -> maybe (pure ()) (\decision -> handleRecoveryKey (mandatoryOccurrence decision) key) (listToMaybe (stateMandatoryDecisions state))
     SteerLayer -> handleSteerKey original key
     SaveLayer -> handleSaveResultKey original key
+    -- Only service mode opens the path editor of a file capture.
+    CaptureFileLayer -> pure ()
     FilterLayer -> handleFilterKey original key
     ConfirmDetailsLayer -> handleConfirmDetailsKey key
     ConfirmLayer -> handleConfirmKey key
@@ -2299,6 +2360,39 @@ handleFilterKey original key = case key of
       state <- get
       let query = T.unwords (T.words (T.intercalate "\n" (Edit.getEditContents (stateFilterEditor state))))
       put state {stateFilterEditing = False, stateModel = (setWorkflowFilter query (stateModel state)) {modelStatus = "workflow filter applied"}}
+
+-- | Start the capture of these exact bytes for the input that the input
+-- editor shows. The key has one lane outcome: a start or a key outcome.
+captureServiceInput :: Manager.Client -> BS.ByteString -> EventM Name AppState ()
+captureServiceInput client bytes = do
+  state <- get
+  case (serviceRequest state, modelWorkflow (stateModel state), modelScreen (stateModel state)) of
+    (Just (observed,request), Just descriptor, InputScreen index) | Just input <- atMay (workflowInputs descriptor) index ->
+      serviceMutationKey "capture" $ beginServiceMutation client (Service.Capture request (workflowInputName input) bytes index) (Just observed)
+    _ -> serviceKeyOutcome False (Lane.unobservedText "capture")
+
+-- | The path editor of a file capture. Ctrl-D reads the named local file
+-- with 'Service.readCaptureFile' and captures its exact bytes. A refused
+-- read keeps the editor open with its reason and sends nothing. Esc closes
+-- the editor.
+handleCaptureFileKey :: Manager.Client -> BrickEvent Name AppEvent -> Vty.Event -> EventM Name AppState ()
+handleCaptureFileKey client original key = case key of
+  Vty.EvKey Vty.KEsc [] -> modify (\state -> state {stateCaptureFile = False, stateCaptureError = Nothing})
+  Vty.EvKey (Vty.KChar 'd') [Vty.MCtrl] -> do
+    state <- get
+    let path = T.unpack (editorContents (stateCaptureEditor state))
+    outcome <- liftIO (Service.readCaptureFile (Service.captureLimit client) path)
+    case outcome of
+      Left refusal -> put state {stateCaptureError = Just refusal}
+      Right bytes -> do
+        put state {stateCaptureFile = False, stateCaptureError = Nothing}
+        captureServiceInput client bytes
+  _ -> do
+    state <- get
+    (editor, ()) <- nestEventM (stateCaptureEditor state) (Edit.handleEditorEvent original)
+    if BS.length (TE.encodeUtf8 (editorContents editor)) <= 4096
+      then put state {stateCaptureEditor = editor, stateCaptureError = Nothing}
+      else put state {stateCaptureError = Just "the file path exceeds 4096 UTF-8 bytes"}
 
 openSaveResult :: EventM Name AppState ()
 openSaveResult = do

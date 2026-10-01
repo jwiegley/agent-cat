@@ -10404,6 +10404,28 @@ Non-blocking findings of fess audit fess/pc-PC19-r1.md (2026-10-01) on subtask P
 3. (low) tui/src/Agentic/Tui/Service.hs near lines 853 to 878: only the Manager overview shows the per-profile queue position. The request screen still shows only the manager Position, which counts the queued requests of every profile. Fix: also show 'Profile queue position' on the request screen, or record the gap for a later package.
 4. (low) tui/src/Agentic/Tui/Service.hs near lines 834 and 835: the added comment line is much longer than the surrounding wrapped lines. Fix: rewrap the comment.
 
+* TODO [#D] Resolve the non-blocking fess findings of subtask PC20    :review:
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pc20-captures-fess-4twb
+:LABELS:   ["review","workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-01 Thu 02:51]
+:MODIFIED: [2026-10-01 Thu 02:51]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess audit fess/pc-PC20-r1.md (2026-10-01) on subtask PC20 (WM-034 captured inputs from the editor and from a local file).
+
+1. (medium) tui/src/Agentic/Tui/App.hs near line 1042 and tui/test/ServiceTests.hs near line 2396: no test covers the App-level capture logic, which is the 202 handling (a receipt that does not match the sent bytes becomes an uncertain send) and the start of SaveCapture in applyServiceObservation. The model tests for "sent once" and "exact resend" call the generic ServiceLane functions with a Capture value. Fix: move the decision from a capture 202 to the lane state into a pure function and test that a mismatched receipt becomes uncertain and offers only the exact resend, and that SaveCapture starts only after the capture command receipt reads back.
+2. (low) tui/src/Agentic/Tui/App.hs near line 2384: handleCaptureFileKey reads the file synchronously on the Brick event thread. With captureBytes at 64 MiB, a large file freezes the UI during the read. Fix: read the file in a worker and deliver the bytes as an app event, or document the freeze.
+3. (low) tui/src/Agentic/Tui/App.hs near line 2378: when a page-set read defers a file capture, the path editor has already closed, so the read and the typed path are lost. Fix: keep the path editor open when the capture key outcome is a deferral.
+4. (low) tui/src/Agentic/Tui/Service.hs near lines 432 and 369: Service.captureLimit parses captureBytes a second time beside the parser in prepareCapture, and its fallback of 0 is unreachable. The local suppliedName duplicates Agentic.Manager.Protocol.Draft.suppliedName. Fix: expose the limit from the client facade once and reuse the suppliedName of Protocol.Draft.
+5. (low) manager/src/Agentic/Manager/Client.hs near lines 497 and 514: no unit test checks the refusals of captureResponse (a non-202 response, a missing or malformed Location) or the headers of prepareCapture (octet-stream media type, no If-Match, a new key). manager-client-check does not call either function. Fix: add cases to manager-client-check or to the vectors.
+
 * TODO [#C] Resolve PC5 fess findings in legacy history windows    :review:
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -18325,7 +18347,7 @@ public or production deployment.
 :LABELS:   ["p6","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-01 Thu 01:39]
+:MODIFIED: [2026-10-01 Thu 02:51]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-029
 :SOURCE_REPO: agent-cat
@@ -18528,6 +18550,13 @@ coordination or SQL into the TUI.
     "author": "johnw",
     "text": "PC17 consumes the WM-029 shared client (Client.streamEvents, Client.pollEventBatch, the PC12 reconnection backoff and advanceGeneration on 410) in the service TUI event worker for resnapshot, reconnection and polling fallback. Evidence scope: PC/PC17/impl-r1 checks all exit 0 (build, tui-model-test, tui-overview N8, journey N8, doc check). Package stays open.",
     "created_at": "2026-10-01T08:39:10Z"
+  },
+  {
+    "id": 492,
+    "issue_id": "acat-wm-029-nlmg",
+    "author": "johnw",
+    "text": "PC20 adds the additive client facade operations prepareCapture (octet-stream POST /v1/captures?requestId=ID with exact bytes, a new key, no If-Match, the captureBytes bound) and captureResponse (202 CaptureReceipt plus Location /v1/commands/{id}); PendingCommand keeps its media type so sendCommand sends any pending command once. Exercised end to end by tui-inputs at N8 (evidence /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/PC/PC20/impl-r1). No direct manager-client-check case yet; see acat-pc20-captures-fess-4twb. Package stays open.",
+    "created_at": "2026-10-01T09:51:46Z"
   }
 ]
 #+end_src
@@ -18911,7 +18940,7 @@ to an unapproved local launch.
 :LABELS:   ["p7","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-01 Thu 02:28]
+:MODIFIED: [2026-10-01 Thu 02:51]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-034
 :SOURCE_REPO: agent-cat
@@ -19060,6 +19089,13 @@ Local-mode behavior remains intact without a duplicated service runtime model.
     "author": "johnw",
     "text": "PC19 (concurrent runs, queue position and observation after a TUI restart): a new pure function, Service.queuePositions, numbers the queued requests of each profile in overview order. A queued overview row shows 'request queued K of N' and its details show 'Profile queue position: K of N' before the blocking reasons. The tui-overview fixture now runs with executionReservations 2 and two profiles with separate resource keys. It shows two concurrent runs with independent statuses, a third request queued with reason capacity at position 1 of 1, an answer draft that survives a switch to the other run and back, and a TUI restart after which the overview lists both active runs and opens one at its question. tui/README.md, doc/tui-design.md and doc/agent-cat.texi describe the behavior. Evidence scope (/Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/PC/PC19/impl-r1): Werror build, tui-model-test at N8, tui-overview at N8 (attempts 1 and 2 failed on an exact decision count, fixed in the test; final run exit 0), Phase A journey at N8, make -C doc check, all exit 0. Limitations: two concurrent runs need two profiles because runs of one profile share resource keys; the request screen shows only the manager Position; drafts do not survive a TUI restart; tui/ci/tui.sh, ALLBUILD and the N=1 journey were not run. Fess r1 non-blocking; findings in acat-pc19-concurrency-fess-6oxj. Package stays open.",
     "created_at": "2026-10-01T09:28:42Z"
+  },
+  {
+    "id": 491,
+    "issue_id": "acat-wm-034-3vqz",
+    "author": "johnw",
+    "text": "PC20 (captured inputs from the editor and from a local file): in the input editor Ctrl-T captures the editor text and Ctrl-O opens a path editor that reads a local UTF-8 file within captureBytes and captures its bytes. The manager never sees a path. New mutations Capture and SaveCapture (set-input with source capture and the capture id), each with one lane outcome and an exact resend after an uncertain send. The tui-inputs mode shows a 50-byte editor capture and a 100004-byte file capture in the exact review with source capture and the exact SHA-256. Evidence scope (/Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/PC/PC20/impl-r1): Werror build (build-6), tui-model-test at N8, tui-inputs at N8 (attempt 1 failed because a profile holds one review at a time; the harness now discards the first review; rerun exit 0), Phase A journey at N8, make -C doc check, all exit 0. Limitations: only the model test covers an uncertain capture send; a capture from an earlier TUI session is not approvable after a restart; tui/ci/tui.sh, ALLBUILD and the N=1 journey were not run. Fess r1 non-blocking; findings in acat-pc20-captures-fess-4twb. Package stays open.",
+    "created_at": "2026-10-01T09:51:45Z"
   }
 ]
 #+end_src

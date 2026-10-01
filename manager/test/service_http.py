@@ -365,7 +365,24 @@ endpoints_mode = len(sys.argv) == 6 and sys.argv[5] == ENDPOINTS
 # mark the overview stale with the refusal code. Each step prints its own
 # PASS line. It runs one manager lifetime.
 OVERVIEW = "tui-overview"
-TUI_MODES = {OVERVIEW: (["profile_1", "profile_2"], ["observe", "submit"])}
+# The tui-inputs mode supplies captured inputs through the service TUI with
+# the scripted captured-input workflow. The TUI creates a request from the
+# workflows browser, pastes two lines of Unicode text into the input editor and
+# captures it with Ctrl-T instead of sending it as a literal. The TUI must
+# then show the captured input on the request screen and, after Enter, the
+# exact review. Through HTTP the request must name the input as source
+# capture, and the review must name it as capture with the size and SHA-256
+# of the editor bytes. The harness then quits the TUI, discards that review,
+# because a profile holds one review at a time, and starts the TUI again.
+# The TUI creates a second request, Ctrl-O opens the path editor, and the TUI
+# captures a local UTF-8 file of more than one upload chunk that the harness
+# wrote. The review must name the exact size and SHA-256 of the file bytes.
+# No file of the manager root may contain the path of that file. The manager
+# has two execution reservations, so the cleanup of the discarded review
+# cannot delay the second review. Each step prints its own PASS line. It runs
+# one manager lifetime.
+INPUTS = "tui-inputs"
+TUI_MODES = {OVERVIEW: (["profile_1", "profile_2"], ["observe", "submit"]), INPUTS: (["profile_1"], ["observe", "submit"])}
 tui_mode = sys.argv[5] if len(sys.argv) == 6 and sys.argv[5] in TUI_MODES else None
 assert len(sys.argv) == 5 or mixed or boundary or pages_mode or events_mode or captures_mode or discard_mode or exports_mode or lineage_mode or control_profiles or person_mode or endpoints_mode or tui_mode
 assert not tui_approval or os.environ.get("TUI_CHECK")
@@ -475,6 +492,8 @@ if tui_mode == OVERVIEW:
     configuration["profiles"][0]["resourceKeys"] = ["overview_one"]
     configuration["profiles"].append(dict(configuration["profiles"][0], id="profile_2",
                                           workspaceLabel="HTTPS second fixture", resourceKeys=["overview_two"]))
+if tui_mode == INPUTS:
+    configuration["limits"]["executionReservations"] = 2
 # The restart quarantines the reservation of the lost run, or of a request
 # in review, with its execution slot and resource keys, until the operator
 # releases it with cleanup evidence. The failures-manager mode keeps one
@@ -4181,6 +4200,128 @@ def overview_checks():
             (work / "server-0.exit").write_text(str(process.returncode) + "\n")
 
 
+def input_checks():
+    """The tui-inputs mode. See INPUTS for the steps."""
+    harness = tui_fixture.harness
+    editor_text = "Captured \u03bb editor input \u2014 caf\u00e9 \u96ea\nsecond line"
+    editor_bytes = editor_text.encode()
+    line = "\ufeffFile capture \u03bb \u2014 caf\u00e9 \u96ea\r\n".encode()
+    file_bytes = line * (100000 // len(line)) + b"last line\n"
+    marker = "pc20capture" + secrets.token_hex(8)
+    file_path = work / (marker + ".txt")
+    file_path.write_bytes(file_bytes)
+
+    def save(session, name):
+        (work / ("tui-inputs-" + name + ".screen.txt")).write_text(session.screen.text())
+
+    def new_request(session, index):
+        """Select profile_1 and create a request of the captured-input
+        workflow from the workflows browser. Returns the input screen."""
+        session.wait_screen("Manager profiles")
+        session.wait_screen("profile_1")
+        session.send(b"\r")
+        session.wait_screen("Manager workflows")
+        session.send(b"\x1b[A" * 40 + b"\x1b[B" * index + b"\r")
+        return session.wait_screen("request validator current", timeout=30)
+
+    def reviewed(expected, bytes_):
+        """The single request in review whose input is a capture of these
+        exact bytes, read through HTTP with the credential of the harness."""
+        status, overview, _ = request("/v1/snapshot", harness)
+        assert status == 200
+        requests = [item["request"] for item in overview["items"] if item["kind"] == "request"
+                    and item["request"]["phase"] == "review" and item["request"]["id"] not in expected]
+        assert len(requests) == 1, ("the TUI request in review", requests)
+        status, created, raw = request("/v1/requests/" + requests[0]["id"], harness)
+        assert status == 200
+        validate("Request", created, raw)
+        supplied = created["readiness"]["supplied"]
+        assert len(supplied) == 1 and supplied[0]["name"] == "input" and supplied[0]["source"] == "capture", (
+            "the request input is not a capture", supplied)
+        status, preparation, raw = request("/v1/preparations/" + created["preparationId"], harness)
+        assert status == 200
+        validate("Preparation", preparation, raw)
+        inputs = [{"name": "input", "source": "capture", "bytes": str(len(bytes_)), "sha256": hashlib.sha256(bytes_).hexdigest()}]
+        assert preparation["review"]["inputs"] == inputs, ("the exact review of the captured input", preparation["review"]["inputs"], inputs)
+        return created, supplied[0]["captureId"], raw
+
+    with (work / "server-0.stdout").open("wb") as output, (work / "server-0.stderr").open("wb") as errors:
+        process = subprocess.Popen([str(runner), "--manager", "serve", "--config", str(config),
+                                    "+RTS", "-N" + native, "-RTS"], stdout=output, stderr=errors)
+        try:
+            wait_ready(process)
+            status, capabilities, _ = request("/v1/capabilities", harness)
+            assert status == 200
+            status, catalogue, _ = request("/v1/workflows?profileId=profile_1", harness)
+            assert status == 200
+            index = next(i for i, item in enumerate(catalogue["items"]) if item["name"] == "captured-input")
+            assert [item["name"] for item in catalogue["items"][index]["inputs"]] == ["input"]
+            with tui_fixture.session(rows=40, columns=140) as session:
+                # 1. Ctrl-T captures the editor text.
+                new_request(session, index)
+                session.send(b"\x1b[200~" + editor_text.encode() + b"\x1b[201~")
+                session.settle()
+                session.send(b"\x14")
+                screen = session.wait_screen("Captured inputs:", timeout=30)
+                session.wait_screen("Enter REQUEST REVIEW", timeout=30)
+                save(session, "editor-request")
+                session.send(b"\r")
+                session.wait_screen("Approve exact manager review", timeout=45)
+                save(session, "editor-review")
+                first, capture_id, raw = reviewed((), editor_bytes)
+                (work / "tui-inputs-editor-review.json").write_bytes(raw)
+                assert "input: capture " + capture_id in screen.replace("\n", ""), "the request screen does not name the capture"
+                print("PASS tui-inputs 1: Ctrl-T captured the editor text of request", first["id"], "as capture", capture_id,
+                      "and the TUI showed the exact review, which names the input as capture with", len(editor_bytes),
+                      "bytes and SHA-256", hashlib.sha256(editor_bytes).hexdigest(), flush=True)
+                session.send(b"q")
+                assert session.wait_exit(20) == 0
+                session.assert_restored()
+            observed, wait_for, mutate, _ = mixed_client(capabilities, harness)
+            _, tag, _ = observed("/v1/preparations/" + first["preparationId"], "Preparation")
+            mutate("/v1/preparations/" + first["preparationId"], {"operation": "discard"}, tag)
+            wait_for(first["links"]["self"], "Request", lambda value: value["phase"] == "draft")
+            with tui_fixture.session(rows=40, columns=140) as session:
+                # 2. Ctrl-O opens the path editor, and Ctrl-D captures the file.
+                new_request(session, index)
+                session.send(b"\x0f")
+                session.wait_screen("Capture a local file")
+                session.send(str(work / "absent-file.txt").encode())
+                session.send(b"\x04")
+                session.wait_screen("ERROR: the file cannot be read", timeout=10)
+                session.send(b"\x1b")
+                session.wait_screen("request validator current", timeout=10)
+                session.send(b"\x0f")
+                session.wait_screen("Capture a local file")
+                session.send(str(file_path).encode())
+                session.send(b"\x04")
+                session.wait_screen("Captured inputs:", timeout=30)
+                session.wait_screen("Enter REQUEST REVIEW", timeout=30)
+                save(session, "file-request")
+                session.send(b"\r")
+                session.wait_screen("Approve exact manager review", timeout=45)
+                save(session, "file-review")
+                second, file_capture, raw = reviewed((first["id"],), file_bytes)
+                (work / "tui-inputs-file-review.json").write_bytes(raw)
+                print("PASS tui-inputs 2: a missing path kept the path editor open with its read failure, and Ctrl-O captured the local file of",
+                      len(file_bytes), "bytes for request", second["id"], "as capture", file_capture,
+                      "with its exact SHA-256 in the review the TUI showed", flush=True)
+                session.send(b"q")
+                assert session.wait_exit(20) == 0
+                session.assert_restored()
+            # 3. The manager received the bytes and never the path.
+            leaked = [str(path) for path in (work / "manager").rglob("*") if path.is_file() and marker.encode() in path.read_bytes()]
+            assert leaked == [], ("a manager file names the captured file path", leaked)
+            print("PASS tui-inputs 3: no file of the manager root contains the path of the captured file", flush=True)
+            assert not tui_fixture.client_state.exists(), "the service TUI created local runner state"
+            print("PASS tui-inputs: the editor and file captures reached the exact review through the actual service TUI", flush=True)
+        finally:
+            if process.poll() is None:
+                process.terminate()
+            process.wait(timeout=25)
+            (work / "server-0.exit").write_text(str(process.returncode) + "\n")
+
+
 def capture_checks():
     """POST /v1/captures through the real HTTPS manager. Each numbered case
     prints one PASS line."""
@@ -6675,6 +6816,11 @@ if endpoints_mode:
 
 if tui_mode == OVERVIEW:
     overview_checks()
+    raise SystemExit(0)
+
+
+if tui_mode == INPUTS:
+    input_checks()
     raise SystemExit(0)
 
 

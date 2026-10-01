@@ -627,6 +627,17 @@ event resets the backoff to `initialBackoff`. `jitteredMicroseconds` gives
 the wait for a delay and a fraction from zero to one. The wait is between
 half the delay and the whole delay, so it never passes 30 seconds.
 
+`prepareCapture` builds the pending command of a capture from a request
+identifier and exact raw bytes. The command is an `application/octet-stream`
+POST of `/v1/captures?requestId=ID` with a new idempotency key and no
+`If-Match`. Bytes above the `captureBytes` limit of the capabilities refuse
+with `ResponseTooLarge`, and bytes that are not UTF-8 refuse with
+`InvalidResponse`. `sendCommand` sends the retained bytes, key and media type
+of any pending command once. `captureResponse` accepts only a 202 response
+whose body is a `CaptureReceipt` and whose `Location` names
+`/v1/commands/{id}`, and it returns the receipt and that location. The
+manager receives the bytes and never a source path.
+
 A pending command whose send outcome is uncertain becomes an `Uncertain`
 value through `uncertainPending`. That value keeps the exact pending command,
 with its bytes, key and precondition, its target resource and the receipt

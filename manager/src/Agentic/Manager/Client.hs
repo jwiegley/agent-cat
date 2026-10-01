@@ -8,8 +8,8 @@ module Agentic.Manager.Client
     getResource, observeResource, observedReference, observedETag, observedValue, prepareObserved,
     pollEvents, pollEventBatch, StreamItem (..), streamEvents, streamEventsWithin, reconnectIdleMilliseconds,
     Overview (..), OverviewItem (..), OverviewKind (..), loadOverview,
-    prepareCommand, sendCommand, downloadVerified, decodeObservation,
-    DraftView (..), Readiness (..), InputDeclaration (..), SuppliedInput (..), InputError (..),
+    prepareCommand, prepareCapture, sendCommand, captureResponse, downloadVerified, decodeObservation,
+    CaptureReceipt (..), DraftView (..), Readiness (..), InputDeclaration (..), SuppliedInput (..), InputError (..),
     Preparation (..), Review (..), ReviewInput (..), ReviewLineage (..), ReviewEdit (..), PublicPolicy, policyValue,
     CommandReceipt (..), CommandState, Operation, stateName, operationName, parseOperation, effectValue,
     Scope, scopeName, requiredScopes,
@@ -31,7 +31,7 @@ import Agentic.Manager.Client.Failure (ClientFailure (..), problemFailure)
 import Agentic.Manager.Protocol.Command
   (validId, validResource, validRevision, encoded, CommandReceipt (..), CommandState, Operation, stateName, operationName,
    parseOperation, Scope, scopeName, requiredScopes, effectValue)
-import Agentic.Manager.Protocol.Draft (DraftView (..), Readiness (..), InputDeclaration (..), SuppliedInput (..), InputError (..))
+import Agentic.Manager.Protocol.Draft (CaptureReceipt (..), DraftView (..), Readiness (..), InputDeclaration (..), SuppliedInput (..), InputError (..))
 import Agentic.Manager.Protocol.Preparation (Preparation (..), Review (..), ReviewInput (..), ReviewLineage (..), ReviewEdit (..), PublicPolicy, policyValue)
 import Control.Concurrent.Async (race)
 import Control.Concurrent.STM (TVar, atomically, check, newTVarIO, readTVar, readTVarIO, writeTVar)
@@ -91,9 +91,10 @@ data Client = Client !Text !HTTP.Request !HTTP.Manager !(IO BS.ByteString)
 -- | A URI paired with the original client session, not a retargetable string.
 data Reference = Reference !Text !Text deriving (Eq, Ord)
 
--- | Exact pending bytes, key and preconditions for an explicitly requested attempt.
--- This object cannot migrate to another session or credential identity.
-data PendingCommand = PendingCommand !Reference !BS.ByteString !(Maybe BS.ByteString) !BS.ByteString
+-- | Exact pending bytes, key, precondition and media type for an explicitly
+-- requested attempt. This object cannot migrate to another session or
+-- credential identity.
+data PendingCommand = PendingCommand !Reference !BS.ByteString !(Maybe BS.ByteString) !BS.ByteString !BS.ByteString
 
 -- | One bounded public response. A receipt is not a replacement run snapshot.
 data ClientResponse = ClientResponse
@@ -483,25 +484,62 @@ prepareCommand client@(Client _ _ _ _ _ epoch _ _) location precondition value =
   when (BS.length bytes > 2097152) (throwIO ResponseTooLarge)
   either (const (throwIO InvalidResponse)) (const (pure ())) (decodeStrictValue bytes)
   header <- traverse checkedETag precondition
+  key <- commandKey epoch
+  pure (PendingCommand location key header "application/json" bytes)
+
+-- | The pending capture of these exact raw UTF-8 bytes for the identified
+-- request: an @application/octet-stream@ POST of
+-- @/v1/captures?requestId=ID@ with a new idempotency key and no @If-Match@.
+-- Bytes above the @captureBytes@ limit of the capabilities refuse with
+-- 'ResponseTooLarge', and bytes that are not UTF-8 refuse with
+-- 'InvalidResponse'. 'sendCommand' sends it once, and 'captureResponse'
+-- decodes the answer. The manager receives only the bytes, never a path.
+prepareCapture :: Client -> Text -> BS.ByteString -> IO (Either ClientFailure PendingCommand)
+prepareCapture client@(Client _ _ _ _ _ epoch capabilities _) requestId bytes = clientIO $ do
+  unless (validId requestId) (throwIO InvalidEndpoint)
+  location <- either throwIO pure (reference client ("/v1/captures?requestId=" <> requestId))
+  checkActive client
+  unless (validId epoch && T.length epoch <= 105) (throwIO UnsupportedVersion)
+  limit <- either (const (throwIO InvalidResponse)) pure (parseEither captureLimit capabilities)
+  when (BS.length bytes > limit) (throwIO ResponseTooLarge)
+  either (const (throwIO InvalidResponse)) (const (pure ())) (TE.decodeUtf8' bytes)
+  key <- commandKey epoch
+  pure (PendingCommand location key Nothing "application/octet-stream" bytes)
+  where
+    captureLimit = withObject "capabilities" $ \fields -> fields .: "limits" >>= withObject "limits" (.: "captureBytes")
+
+-- | The capture receipt and the command location of a capture response: a
+-- 202 whose body is a 'CaptureReceipt' and whose @Location@ names
+-- @/v1/commands/{id}@. Any other response refuses with 'InvalidResponse'.
+captureResponse :: ClientResponse -> Either ClientFailure (CaptureReceipt, Reference)
+captureResponse response = case (responseStatus response, responseLocation response) of
+  (202, Just location) | "/v1/commands/" `T.isPrefixOf` referenceURI location
+    && validId (T.drop 13 (referenceURI location)) -> (\receipt -> (receipt, location)) <$> decodeObservation (responseValue response)
+  _ -> Left InvalidResponse
+
+-- | A new idempotency key of the authority epoch.
+commandKey :: Text -> IO BS.ByteString
+commandKey epoch = do
   nonce <- getRandomBytes 16 :: IO BS.ByteString
   let key = TE.encodeUtf8 epoch <> "." <> convertToBase Base64URLUnpadded nonce
   when (BS.length key > 128) (throwIO InvalidResponse)
-  pure (PendingCommand location key header bytes)
+  pure key
 
 -- | The pending command of a send whose outcome is uncertain, with its
 -- target, its precondition and the receipt location that an earlier response
 -- gave, if any. The command keeps its exact bytes and key, and 'reconcile'
 -- never sends it. Only an explicit exact resend sends it again.
 uncertainPending :: PendingCommand -> Maybe Reference -> Uncertain PendingCommand Reference
-uncertainPending pending@(PendingCommand location _ condition _) =
+uncertainPending pending@(PendingCommand location _ condition _ _) =
   Uncertain pending location (fmap TE.decodeLatin1 condition)
 
--- | One HTTP attempt using the retained exact bytes. Failure returns to the caller.
--- Neither redirects nor a dropped response cause another request here.
+-- | One HTTP attempt using the retained exact bytes and media type. Failure
+-- returns to the caller. Neither redirects nor a dropped response cause
+-- another request here.
 sendCommand :: Client -> PendingCommand -> IO (Either ClientFailure ClientResponse)
-sendCommand client (PendingCommand location key condition bytes) = clientIO $
+sendCommand client (PendingCommand location key condition media bytes) = clientIO $
   exchangeJSON client location "POST"
-    ([ ("Content-Type","application/json"),("Idempotency-Key",key)]
+    ([ ("Content-Type",media),("Idempotency-Key",key)]
       <> maybe [] (\value -> [("If-Match",value)]) condition) (HTTP.RequestBodyBS bytes)
 
 getJSON :: Client -> Reference -> IO ClientResponse
