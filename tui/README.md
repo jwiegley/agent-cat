@@ -894,9 +894,14 @@ manager issues, a review without lineage fits 80x24, and at 40x12 a summary
 `y` shows `Approval did not start: the complete review does not fit. Resize
 the terminal.` The header row above the identity row always shows the
 delivery state, or the state that replaces it, complete after at least one
-space, and a long screen context gives way to it. At 40x12 the service lines
-of the live monitor fill the main area, so the terminal and result lines
-appear from 80x24 on, and `d` shows the run details at every size.
+space, and a long screen context gives way to it. When the service lines of
+the live monitor do not all fit in the main area, `serviceMonitorLines` gives
+the `Terminal:` line and the `Result:` lines (the verified size and SHA-256
+digest, or the state of the result) their rows first. Each other line, such
+as the request, run, observation, control, preview and saved lines, shows in
+its order only while its wrapped rows fit in the rows that remain. The shown
+lines keep their order. Thus at 40x12 a terminal run shows its outcome and
+its verified result, and `d` shows the run details at every size.
 
 The tui-sizes mode of `manager/test/service_http.py` drives the service
 journey through the keyboard at 40x12, 80x24 and 140x36. At 40x12 the TUI
@@ -908,9 +913,11 @@ there. At the question head the TUI types the answer, and a resize to 140x36
 keeps it in the editor. The TUI answers, retries the recovery, shows terminal
 success and the verified result, and saves it with `s`. The live monitor, the
 Manager overview, the Manager decisions view and the History view are each
-resized to all three sizes, and the mode requires the restored terminal after
-`q`. The control mode `tui-sizes-broken-draft` clears the input editor before
-the first resize and must fail with `JOURNEY-ASSERT draft survives resize`.
+resized to all three sizes. At each size the live monitor must show terminal
+success and the verified size and SHA-256 of the harness download. The mode
+requires the restored terminal after `q`. The control mode
+`tui-sizes-broken-draft` clears the input editor before the first resize
+and must fail with `JOURNEY-ASSERT draft survives resize`.
 
 A numbered key outcome that is wider than the terminal takes the first of
 the two footer rows as a second status row, so its reason stays readable at

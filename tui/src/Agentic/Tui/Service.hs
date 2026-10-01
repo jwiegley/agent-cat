@@ -25,7 +25,7 @@ module Agentic.Tui.Service
     cancelOffered, cancelMutation, steerOffer, steerMutation, steerBody, recoveryOffer, chooseRecoveryMutation, chooseRecoveryBody,
     redirectOffer, redirectMutation, redirectBody, redirectLines,
     controlMutation, controlMutationRun, controlOutcome, controlLines,
-    runTerminal, resultWanted, resultReferenced, decodeOutputs, VerifiedResult (..), retrieveResult, resultLines,
+    runTerminal, resultWanted, resultReferenced, decodeOutputs, VerifiedResult (..), retrieveResult, outcomeLines, previewLines,
     observedBinding, RunRead (..), RequestRead (..), Selection (..), selectedRun, compositeResources, ReadVerdict (..), readVerdict, runReadValid,
     readRequestId, readRequestRun, runtimeStatus, observationLines,
     approvalStatus, receiptSettlement,
@@ -1078,16 +1078,17 @@ retrieveResult client run
       Right location -> fmap (Just . VerifiedResult artifact)
         <$> C.downloadVerified client location (artifactBytes artifact) (artifactDigest artifact)
 
--- | Display lines for a terminal run, given the retrieval of its result: no
--- retrieval yet, the failure code of a retrieval that the next refresh
--- retries, or the verified bytes. A run that is not
--- terminal has no lines. The preview is bounded and is decoded leniently for
--- display only.
-resultLines :: RunObservation -> Maybe (Either Text VerifiedResult) -> [Text]
-resultLines run retrieval = case runTerminal run of
+-- | The outcome lines of a terminal run, given the retrieval of its result:
+-- the Terminal line and the Result lines. The Result lines are the verified
+-- size and the SHA-256 digest of retrieved bytes, or the state of the result:
+-- no retrieval yet, the failure code of a retrieval that the next refresh
+-- retries, or no download. A run that is not terminal has no lines. The live
+-- monitor gives these lines priority over its other rows.
+outcomeLines :: RunObservation -> Maybe (Either Text VerifiedResult) -> [Text]
+outcomeLines run retrieval = case runTerminal run of
   Nothing -> []
   Just status -> ("Terminal: " <> statusName status) : case (status, retrieval) of
-    (RunSucceeded, Just (Right result)) -> verifiedLines result
+    (RunSucceeded, Just (Right result)) -> verifiedSummary result
     (RunSucceeded, _) | not (resultWanted run || resultReferenced run) ->
       ["Result: no download; verification is " <> verificationName (runVerification run)]
     (RunSucceeded, Nothing) -> ["Result: retrieving the verified bytes"]
@@ -1103,17 +1104,30 @@ resultLines run retrieval = case runTerminal run of
       RunRunning -> "running"
       RunCancelling -> "cancelling"
 
+-- | The preview line of a succeeded run whose verified bytes are retained.
+-- Any other run has no preview line. The preview follows the outcome lines.
+previewLines :: RunObservation -> Maybe (Either Text VerifiedResult) -> [Text]
+previewLines run retrieval = case (runTerminal run, retrieval) of
+  (Just RunSucceeded, Just (Right result)) -> [previewLine result]
+  _ -> []
+
 -- | The display lines of retained verified bytes: their size, the SHA-256
--- digest of their artifact and a bounded preview, which is decoded
--- leniently for display only.
+-- digest of their artifact and a bounded preview.
 verifiedLines :: VerifiedResult -> [Text]
-verifiedLines result =
+verifiedLines result = verifiedSummary result <> [previewLine result]
+
+-- | The size of retained verified bytes and the SHA-256 digest of their
+-- artifact.
+verifiedSummary :: VerifiedResult -> [Text]
+verifiedSummary result =
   [ "Result: verified " <> T.pack (show (BS.length (verifiedBytes result))) <> " bytes",
-    "Result SHA-256: " <> artifactDigest (verifiedArtifact result),
-    "Result preview: " <> preview (verifiedBytes result) ]
-  where
-    preview bytes = T.map (\character -> if character == '\n' then ' ' else character)
-      (T.take 120 (TE.decodeUtf8With lenientDecode (BS.take 480 bytes)))
+    "Result SHA-256: " <> artifactDigest (verifiedArtifact result) ]
+
+-- | The bounded preview of retained verified bytes, which is decoded
+-- leniently for display only.
+previewLine :: VerifiedResult -> Text
+previewLine result = "Result preview: " <> T.map (\character -> if character == '\n' then ' ' else character)
+  (T.take 120 (TE.decodeUtf8With lenientDecode (BS.take 480 (verifiedBytes result))))
 
 -- | The display name of a verification state.
 verificationName :: Verification -> Text

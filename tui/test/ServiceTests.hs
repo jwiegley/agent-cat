@@ -2373,7 +2373,8 @@ resultTests render profile = do
     other -> die ("FAIL the verified fixture artifact was refused: " <> show other)
   let bytes = BS.replicate 80 65 <> "\n"
       result = S.VerifiedResult artifact bytes
-      successLines = S.resultLines verified (Just (Right result))
+      successLines = S.outcomeLines verified (Just (Right result))
+      previewLines = S.previewLines verified (Just (Right result))
   checks
     [ ("only a succeeded runtime with a verified matching result reference is retrieved",
         S.resultWanted verified && not (any S.resultWanted [unavailable, failed, cancelled, orphaned, running, cancelling, absent, referencedOther, referenced])),
@@ -2382,15 +2383,15 @@ resultTests render profile = do
       ("the output artifact that the manager verified for a referenced snapshot is bound to the same reference",
         S.decodeOutputs referenced outputMetadata outputItems == Right (Just artifact) && refusedOutputs referenced (alterArtifact (put "bytes" (String "82")))),
       ("a referenced result waits for the retrieval, and an unavailable one downloads nothing",
-        S.resultLines referenced Nothing == ["Terminal: succeeded", "Result: retrieving the verified bytes"]),
+        S.outcomeLines referenced Nothing == ["Terminal: succeeded", "Result: retrieving the verified bytes"]),
       ("succeeded, failed, cancelled and orphaned are terminal",
         map S.runTerminal [verified, failed, cancelled, orphaned] == map Just [RunSucceeded, RunFailedStatus, RunCancelledStatus, RunOrphaned]),
       ("a null, running or cancelling runtime is never terminal and shows no result lines",
-        all ((== Nothing) . S.runTerminal) [running, cancelling, absent] && all (null . (`S.resultLines` Nothing)) [running, cancelling, absent]),
+        all ((== Nothing) . S.runTerminal) [running, cancelling, absent] && all (null . (`S.outcomeLines` Nothing)) [running, cancelling, absent]),
       ("failed, cancelled and orphaned runs show their terminal status without a download",
-        [S.resultLines run Nothing | run <- [failed, cancelled, orphaned]] ==
+        [S.outcomeLines run Nothing | run <- [failed, cancelled, orphaned]] ==
           [["Terminal: " <> name, "Result: no download for a run that did not succeed"] | name <- ["failed", "cancelled", "orphaned"]]),
-      ("unavailable verification yields no download", S.resultLines unavailable Nothing == ["Terminal: succeeded", "Result: no download; verification is unavailable (missing)"]),
+      ("unavailable verification yields no download", S.outcomeLines unavailable Nothing == ["Terminal: succeeded", "Result: no download; verification is unavailable (missing)"]),
       ("the verified output artifact is bound to the run result reference",
         S.artifactId artifact == "artifact_1" && S.artifactRun artifact == "run_21" && S.artifactKind artifact == "source-result"
           && S.artifactBytes artifact == 81 && S.artifactDigest artifact == "9294065bba4452375bfdc9a35d8126ce26a9d6f8fb720a22cccb3cb706651fcd"
@@ -2400,37 +2401,56 @@ resultTests render profile = do
           alterArtifact (put "runId" (String "run_other")), alterArtifact (put "kind" (String "export")), alterArtifact (put "id" (String "artifact_2")),
           alterArtifact (put "code" (String "text"))]),
       ("a verified output artifact for an unverified run snapshot is refused", refusedOutputs unavailable outputItems),
-      ("a retrieved result shows the terminal status, the verified size, the digest and a bounded preview",
+      ("a retrieved result shows the terminal status, the verified size and the digest, and then a bounded preview",
         successLines == ["Terminal: succeeded", "Result: verified 81 bytes",
-          "Result SHA-256: 9294065bba4452375bfdc9a35d8126ce26a9d6f8fb720a22cccb3cb706651fcd", "Result preview: " <> T.replicate 80 "A" <> " "]),
+          "Result SHA-256: 9294065bba4452375bfdc9a35d8126ce26a9d6f8fb720a22cccb3cb706651fcd"]
+          && previewLines == ["Result preview: " <> T.replicate 80 "A" <> " "]),
+      ("only a succeeded run with retained verified bytes has a preview line",
+        all (\run -> null (S.previewLines run (Just (Right result)))) [failed, cancelled, orphaned, running]
+          && null (S.previewLines verified Nothing) && null (S.previewLines verified (Just (Left "503 storage-unavailable")))),
       ("a pending or refused retrieval is shown as such",
-        S.resultLines verified Nothing == ["Terminal: succeeded", "Result: retrieving the verified bytes"]
-          && S.resultLines verified (Just (Left "503 storage-unavailable")) == ["Terminal: succeeded", "Result: not retrieved (503 storage-unavailable); the next refresh retries"]),
+        S.outcomeLines verified Nothing == ["Terminal: succeeded", "Result: retrieving the verified bytes"]
+          && S.outcomeLines verified (Just (Left "503 storage-unavailable")) == ["Terminal: succeeded", "Result: not retrieved (503 storage-unavailable); the next refresh retries"]),
       ("a long preview is bounded to 120 characters",
-        T.length (last (S.resultLines verified (Just (Right result {S.verifiedBytes = BS.replicate 100000 66})))) == T.length "Result preview: " + 120)
+        map T.length (S.previewLines verified (Just (Right result {S.verifiedBytes = BS.replicate 100000 66}))) == [T.length "Result preview: " + 120])
     ]
   native <- maybe (die "FAIL missing result runtime") pure (S.runSnapshot verified)
   let model = (initialServiceModel [profile]) {modelScreen = LiveScreen (S.runIdentity verified), modelSnapshot = Just native}
       frame = render (140,36) (emptyPresentation model)
         { presentationService = True, presentationNoColor = True, presentationRunView = reconcileRunView native emptyRunView,
-          presentationServiceRun = Just verified, presentationServiceResultLines = successLines,
+          presentationServiceRun = Just verified, presentationServiceOutcomeLines = successLines, presentationServiceResultLines = previewLines,
           presentationServiceObservation = S.observationLines False Nothing True (Just verified) }
   putStrLn "RENDER service terminal result at (140,36):" >> putStr (T.unpack frame)
   check "the live monitor at (140,36) shows the terminal status, the verified size and the digest"
     (all (`T.isInfixOf` frame) ["Runtime: Succeeded", "Terminal: succeeded", "Result: verified 81 bytes",
       "Result SHA-256: 9294065bba4452375bfdc9a35d8126ce26a9d6f8fb720a22cccb3cb706651fcd"])
+  -- At 40x12 the request, run, observation and saved lines do not all fit
+  -- above the live monitor, so the Terminal line and the Result lines take
+  -- the rows first. A wrapped digest continues on the next screen row.
+  let smallRequest = ["Request: request_" <> T.replicate 48 "a" <> "   Phase: associated", "Run: run_" <> T.replicate 48 "b"]
+      smallFrame = render (40,12) (emptyPresentation model)
+        { presentationService = True, presentationNoColor = True, presentationRunView = reconcileRunView native emptyRunView,
+          presentationServiceRun = Just verified, presentationServiceRequestLines = smallRequest,
+          presentationServiceObservation = S.observationLines False Nothing True (Just verified),
+          presentationServiceOutcomeLines = successLines,
+          presentationServiceResultLines = previewLines <> [serviceSavedLine "/tmp/a-long-directory-name/saved-result.bin" 81 Saved] }
+      squeezed = T.filter (not . isSpace)
+  putStrLn "RENDER service terminal result at (40,12):" >> putStr (T.unpack smallFrame)
+  check "the live monitor at (40,12) shows the Terminal line, the verified size and the digest of a terminal run"
+    (all ((`T.isInfixOf` squeezed smallFrame) . squeezed) ["Terminal: succeeded", "Result: verified 81 bytes",
+      "Result SHA-256: 9294065bba4452375bfdc9a35d8126ce26a9d6f8fb720a22cccb3cb706651fcd"])
   -- The service save dialog, its fixed refusal and the saved result line.
   let savable = (emptyPresentation model)
         { presentationService = True, presentationNoColor = True, presentationRunView = reconcileRunView native emptyRunView,
           presentationServiceRun = Just verified, presentationServiceObservation = S.observationLines False Nothing True (Just verified),
-          presentationServiceResultLines = successLines, presentationServiceSavable = True }
+          presentationServiceOutcomeLines = successLines, presentationServiceResultLines = previewLines, presentationServiceSavable = True }
       existingPath = "/tmp/caf\233/existing.bin"
       existing = mkIOError alreadyExistsErrorType "createLink" Nothing (Just (T.unpack existingPath))
       offeredFrame = render (140,36) savable
       dialogFrame = render (140,36) savable {presentationLayer = SaveLayer}
       refusedFrame = render (140,36) savable {presentationLayer = SaveLayer, presentationSaveError = Just (serviceSaveRefusal existingPath (SaveIOFailure existing))}
       invalidFrame = render (140,36) savable {presentationLayer = SaveLayer, presentationSaveError = Just (serviceSaveRefusal "relative.bin" InvalidDestination)}
-      savedFrame = render (140,36) savable {presentationServiceResultLines = successLines <> [serviceSavedLine "/tmp/saved.bin" 81 Saved]}
+      savedFrame = render (140,36) savable {presentationServiceResultLines = previewLines <> [serviceSavedLine "/tmp/saved.bin" 81 Saved]}
       -- A wrapped row continues after the dialog border and its padding.
       compact = T.filter (\c -> not (isSpace c) && not ('\x2500' <= c && c <= '\x257f'))
   putStrLn "RENDER service save refusal at (140,36):" >> putStr (T.unpack refusedFrame)
@@ -2988,7 +3008,7 @@ managerLossTests render profile row snapshot receiptValue = do
       ("an owned run shows only its runtime status", S.observationLines False Nothing True (Just owned) == ["Observation: current", "Runtime: Running"]),
       ("a run of an earlier manager lifetime shows its lost supervision with the runtime status of its snapshot and is not terminal",
         S.observationLines False Nothing True (Just lostRun) == ["Observation: current", "Runtime: Running; supervision lost"]
-          && isNothing (S.runTerminal lostRun) && null (S.resultLines lostRun Nothing)),
+          && isNothing (S.runTerminal lostRun) && null (S.outcomeLines lostRun Nothing)),
       ("the last observation of a held run stays installed and stale while the manager is unreachable",
         S.observationLines False (L.shownStale lost1 (Just "TransportUnavailable")) True (Just owned)
           == ["Observation: stale (TransportUnavailable); the last complete observation is retained", "Runtime: Running"]),

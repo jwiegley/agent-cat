@@ -189,8 +189,13 @@ data Presentation = Presentation
     -- monitor the redirect line, as 'Agentic.Tui.Service.redirectLines'
     -- produces it.
     presentationServiceControlLines :: ![Text],
-    -- | The terminal status and verified result lines of the installed run,
-    -- as 'Agentic.Tui.Service.resultLines' produces them.
+    -- | The Terminal line and the Result lines of the installed run, as
+    -- 'Agentic.Tui.Service.outcomeLines' produces them. The live monitor
+    -- gives them priority over its other rows.
+    presentationServiceOutcomeLines :: ![Text],
+    -- | The lines that follow the outcome lines: the result preview, as
+    -- 'Agentic.Tui.Service.previewLines' produces it, and the saved, export
+    -- and lineage lines of the installed run.
     presentationServiceResultLines :: ![Text],
     -- | Whether s opens the save dialog for the retained verified result
     -- bytes of the installed run.
@@ -292,6 +297,7 @@ emptyPresentation model =
       presentationServiceRecoveryOffers = [],
       presentationServiceRunKeys = [],
       presentationServiceControlLines = [],
+      presentationServiceOutcomeLines = [],
       presentationServiceResultLines = [],
       presentationServiceSavable = False,
       presentationServiceExportable = False,
@@ -579,7 +585,7 @@ screenView presentation width totalHeight mainHeight = case modelScreen model of
   LaunchingScreen _ -> loadingView presentation "Waiting for the validated run.started event..." "Esc detaches; c cancels"
   LiveScreen _
     | presentationService presentation ->
-        vBox (map displayTextWrap (serviceLiveLines presentation) <> [maybe (loadingView presentation "Runtime not yet observed. The manager has published no runtime status for this run." "q detaches; the manager run continues")
+        vBox (map displayTextWrap (serviceMonitorLines presentation width mainHeight) <> [maybe (loadingView presentation "Runtime not yet observed. The manager has published no runtime status for this run." "q detaches; the manager run continues")
           (liveView presentation width totalHeight) (modelSnapshot model)])
     | otherwise -> maybe (loadingView presentation "Waiting for run.started..." "Esc detaches; c cancels") (liveView presentation width totalHeight) (modelSnapshot model)
   FailureScreen failure -> viewport FailureViewport Vertical (withAttr (attrName "error") (displayTextWrap ("ERROR: " <> failure)))
@@ -589,15 +595,41 @@ screenView presentation width totalHeight mainHeight = case modelScreen model of
 -- | The lines above the live monitor in service mode: the request and its
 -- run, the installed observation with its stale mark and published runtime,
 -- the approval receipt status, which stays separate from the runtime, the
--- outcome of the latest control of the run, the redirect line, and the
--- result lines.
+-- outcome of the latest control of the run, the redirect line, the Terminal
+-- line and the Result lines, and the lines that follow the result.
 serviceLiveLines :: Presentation -> [Text]
-serviceLiveLines presentation =
-  presentationServiceRequestLines presentation
-    <> presentationServiceObservation presentation
-    <> ["Approval receipt: " <> fromMaybe "none" (presentationServiceApproval presentation)]
-    <> presentationServiceControlLines presentation
-    <> presentationServiceResultLines presentation
+serviceLiveLines = map snd . serviceRankedLines
+
+-- | The service lines, each with whether it is an outcome line: the Terminal
+-- line or a Result line, which have priority over the other rows.
+serviceRankedLines :: Presentation -> [(Bool, Text)]
+serviceRankedLines presentation =
+  map ((,) False)
+    ( presentationServiceRequestLines presentation
+        <> presentationServiceObservation presentation
+        <> ["Approval receipt: " <> fromMaybe "none" (presentationServiceApproval presentation)]
+        <> presentationServiceControlLines presentation )
+    <> map ((,) True) (presentationServiceOutcomeLines presentation)
+    <> map ((,) False) (presentationServiceResultLines presentation)
+
+-- | The service lines that the live monitor shows in the given screen rows
+-- at the given width. When every line fits, every line shows. Otherwise the
+-- Terminal line and the Result lines show first, and each other line shows
+-- only while its wrapped rows fit in the rows that remain. The shown lines
+-- keep their order, so a small terminal clips the request, observation,
+-- control and preview lines before the outcome of a terminal run.
+serviceMonitorLines :: Presentation -> Int -> Int -> [Text]
+serviceMonitorLines presentation width rows
+  | sum (map (cost . snd) ranked) <= rows = map snd ranked
+  | otherwise = keep (rows - sum [cost line | (True, line) <- ranked]) ranked
+  where
+    ranked = serviceRankedLines presentation
+    cost = length . wrapDisplayLines width
+    keep _ [] = []
+    keep budget ((True, line) : rest) = line : keep budget rest
+    keep budget ((False, line) : rest)
+      | cost line <= budget = line : keep (budget - cost line) rest
+      | otherwise = keep budget rest
 
 -- | The lines that name a request, its phase and its run. The run has its own
 -- line, so a long request id never splits the run id across screen rows.
@@ -1308,15 +1340,16 @@ liveView presentation width totalHeight snapshot = vBox (failureBanner <> banner
       | Map.null (snapshotOccurrences snapshot) && not (null failureBanner) = [displayText "No workflow requests started."]
       | otherwise = [panes]
     -- In service mode the service lines stand above the live monitor, so the
-    -- banner limit counts their screen rows.
+    -- banner limit counts the screen rows of the lines that it shows.
+    mainRows = shellMainRows (isJust (presentationServiceEndpoint presentation)) width totalHeight
     serviceRows
-      | presentationService presentation = sum (map (length . wrapDisplayLines width) (serviceLiveLines presentation))
+      | presentationService presentation = sum (map (length . wrapDisplayLines width) (serviceMonitorLines presentation width mainRows))
       | otherwise = 0
     failureBanner = case snapshotRunFailure snapshot of
       Nothing -> []
       Just failure ->
         let rows = wrapDisplayLines width (T.takeWhile (/= '\n') (T.strip failure))
-            limit = max 1 (min 6 (shellMainRows (isJust (presentationServiceEndpoint presentation)) width totalHeight - serviceRows - if Map.null (snapshotOccurrences snapshot) then 4 else 6))
+            limit = max 1 (min 6 (mainRows - serviceRows - if Map.null (snapshotOccurrences snapshot) then 4 else 6))
          in [ withAttr (attrName "error") (displayText ("Run " <> T.toLower (runStatusLabel (snapshotRunStatus snapshot)))),
               vBox (map displayText (take limit rows))
             ]

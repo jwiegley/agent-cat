@@ -700,7 +700,11 @@ FORWARD_DELAY = 5.0
 # downloaded bytes. The run store must record the answer as JSON false.
 # 6. The live monitor, the Manager overview, the Manager decisions view and
 # the History view are each resized to 40x12, 80x24 and 140x36, and each
-# redraw must show its view. At 140x36 the History view must list the run.
+# redraw must show its view. At each size the live monitor must show terminal
+# success and the verified result whose size and SHA-256 equal the harness
+# download. At 40x12 the other service lines do not all fit, so this asserts
+# that the Terminal and Result lines keep their rows. At 140x36 the History
+# view must list the run.
 # q then quits with status 0, and the terminal must be restored.
 # The tui-sizes-broken-draft control clears the input editor with Backspace
 # before the first resize, so it must fail with DRAFT_SURVIVES. Each step
@@ -9264,12 +9268,17 @@ def size_checks():
             session.wait_screen("s SAVE RESULT", timeout=15)
             print("PASS tui-sizes 5: the live monitor shows terminal success and verified result", artifact["id"], "of", artifact["bytes"],
                   "bytes, the run store records JSON false, and s saved the exact bytes with mode 0600", flush=True)
-            # 6. Every view redraws at every size.
-            # At 40x12 the service lines fill the main area, so the runtime
-            # line is the last row of the live monitor that fits.
-            for size, marker in ((small, "Runtime: Succeeded"), (standard, "Result SHA-256: " + artifact["sha256"]),
-                                 (large, "Result SHA-256: " + artifact["sha256"])):
-                resize(session, size, marker, "live")
+            # 6. Every view redraws at every size. At every size the live
+            # monitor shows terminal success and the verified size and
+            # SHA-256 of the harness download. At 40x12 the other service
+            # lines do not all fit, and the Terminal and Result lines keep
+            # their rows.
+            outcome = ("Terminal: succeeded", "Result: verified " + str(int(artifact["bytes"])) + " bytes",
+                       "Result SHA-256: " + artifact["sha256"])
+            for size in (small, standard, large):
+                screen = squeeze(resize(session, size, outcome[2], "live"))
+                for row in outcome:
+                    assert squeeze(row) in screen, ("the live monitor lacks its outcome row", size, row)
             session.send(b"\x1b")
             session.wait_screen("Manager overview", timeout=10)
             views = ((b"", "Manager overview", "overview"), (b"D", "Manager decisions", "decisions"), (b"H", "Manager history", "history"))
@@ -9289,7 +9298,8 @@ def size_checks():
                 session.send(b"\x1b")
                 session.wait_screen("Manager workflows", timeout=10)
             print("PASS tui-sizes 6: the live monitor, the Manager overview, the Manager decisions view and the History view redrew",
-                  "at 40x12, 80x24 and 140x36, and the History view lists run", run, flush=True)
+                  "at 40x12, 80x24 and 140x36, the live monitor showed terminal success and the verified size and SHA-256 at each",
+                  "size, and the History view lists run", run, flush=True)
             session.send(b"q")
             assert session.wait_exit(20) == 0, "the service TUI did not exit with status 0"
             session.assert_restored()

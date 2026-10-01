@@ -888,7 +888,10 @@ serviceVerifiedResult state = do
     _ -> runIdText . Service.runIdentity <$> serviceRun state
   (,) run <$> Lane.retrievedResult run (stateServiceResults state)
 
--- | The export line of this run: the outcome of its latest export.
+-- | The retrieval of the result of a run that the screen shows.
+serviceRetrieval :: AppState -> Service.RunObservation -> Maybe (Either Text Service.VerifiedResult)
+serviceRetrieval state run = Lane.retrievalShown (runIdText (Service.runIdentity run)) (stateServiceResults state)
+
 -- | The outcome lines of the read-only detail of a run: its saved result,
 -- its export and its lineage operation, in the order that the detail shows
 -- them after the run lines.
@@ -896,6 +899,7 @@ historyOutcomeLines :: AppState -> Text -> [Text]
 historyOutcomeLines state run =
   [line | Just (ident, line) <- [stateServiceSaved state], ident == run] <> serviceExportLines state run <> serviceLineageLines state run
 
+-- | The export line of this run: the outcome of its latest export.
 serviceExportLines :: AppState -> Text -> [Text]
 serviceExportLines state run = [line | Just (ident, outcome) <- [stateServiceExport state], ident == run, line <- Service.exportLines outcome]
 
@@ -2553,8 +2557,11 @@ toPresentation state =
         <> case (modelScreen (stateModel state), serviceRunRead state) of
           (LiveScreen _, Just (Service.RunRead snapshot (_,control) _)) -> Service.redirectLines control snapshot (serviceSelectedOccurrence state)
           _ -> [],
+      presentationServiceOutcomeLines = case serviceRun state of
+        Just run -> Service.outcomeLines run (serviceRetrieval state run)
+        Nothing -> [],
       presentationServiceResultLines = case serviceRun state of
-        Just run -> Service.resultLines run (Lane.retrievalShown (runIdText (Service.runIdentity run)) (stateServiceResults state))
+        Just run -> Service.previewLines run (serviceRetrieval state run)
           <> [line | Just (ident, line) <- [stateServiceSaved state], ident == runIdText (Service.runIdentity run)]
           <> serviceExportLines state (runIdText (Service.runIdentity run))
           <> serviceLineageLines state (runIdText (Service.runIdentity run))
