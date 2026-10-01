@@ -327,6 +327,21 @@ with `cleanup-unverified`, and the release with the evidence of
 `check-quarantine` lets the request reach review without another client
 command. Its approved run then completes.
 
+When the worker processes of a lost run outlive the manager, the run log
+receives no stop, and the operator first ends those processes. The operator
+then runs `check-quarantine` again and releases the reservation with the
+`owner-released` evidence that it returns. The `failures-launched` mode of
+`manager/test/service_http.py` checks this procedure across two lifetimes with
+one profile and one execution reservation. Before it kills the manager with
+SIGKILL, the harness stops the worker process groups with SIGSTOP. After the
+restart a new request waits with `capacity`. While the stopped inner worker
+holds the owner lock, `check-quarantine` reports `cleanup-required` and a
+release refuses with `cleanup-unverified`. After the harness kills the stopped
+groups with SIGKILL and no process of them remains, the run log still holds no
+terminal record. `check-quarantine` then reports `clean` with the
+`owner-released` evidence, the release with that evidence lets the request
+reach review without another client command, and its approved run completes.
+
 ## Verification and remaining owners
 
 `manager/ci/workers.sh` builds actual Cabal targets with warnings as errors and runs

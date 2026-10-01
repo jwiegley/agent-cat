@@ -74,7 +74,7 @@ consent_control = len(sys.argv) == 6 and sys.argv[5] == "tui-consent-control"
 # runs one manager lifetime and does not enter the restart loop.
 LIFECYCLE = "credential-lifecycle"
 lifecycle = len(sys.argv) == 6 and sys.argv[5] == LIFECYCLE
-mixed = len(sys.argv) == 6 and sys.argv[5] in ("mixed", "mixed-confirm", "tui-approval", "tui-consent-control", APPROVE_FAULT, LIFECYCLE, "pages", "routes", "failures-worker", "failures-manager", "storage") + JOURNEYS
+mixed = len(sys.argv) == 6 and sys.argv[5] in ("mixed", "mixed-confirm", "tui-approval", "tui-consent-control", APPROVE_FAULT, LIFECYCLE, "pages", "routes", "failures-worker", "failures-manager", "failures-launched", "storage") + JOURNEYS
 confirm_uncertain = mixed and sys.argv[5] == "mixed-confirm"
 # The boundary mode checks WM-024 through the running protected manager with
 # raw socket and ssl connections: plaintext and TLS 1.2 refusal, request
@@ -271,6 +271,29 @@ worker_failure_mode = len(sys.argv) == 6 and sys.argv[5] == WORKER_FAILURE
 # prints its own PASS line. It runs three manager lifetimes.
 MANAGER_FAILURE = "failures-manager"
 manager_failure_mode = len(sys.argv) == 6 and sys.argv[5] == MANAGER_FAILURE
+# The failures-launched mode checks the release of the quarantined
+# reservation of a launched run whose worker processes outlive the manager,
+# through two lifetimes of the protected manager with the mixed fixture, one
+# profile and one execution reservation. A mixed-controls run waits at its
+# person question. The harness lists the worker processes of the manager,
+# stops their process groups with SIGSTOP and kills the manager process with
+# SIGKILL. The stopped inner worker keeps the owner lock of the run, and the
+# run log receives no stop. A restart on the same root and configuration
+# quarantines the reservation of the lost run, and a new request waits in the
+# queue with capacity. check-quarantine reports cleanup-required, and
+# release-quarantine refuses with cleanup-unverified, both for the evidence
+# that a free lock would give and for a wrong digest, without a database
+# change or a manager-log append. The harness then kills the stopped groups
+# with SIGKILL and waits until no process of them remains. The run log of the
+# lost run still holds no terminal record. check-quarantine then reports
+# clean with the owner-released evidence whose digest the harness recomputes
+# from the reservation, the run and the process generation. A release with a
+# wrong digest refuses with cleanup-unverified. The release with the evidence
+# frees the capacity, and the queued request reaches review without another
+# client command. Its approved run completes with a verified result. Each
+# numbered case prints its own PASS line. It runs two manager lifetimes.
+LAUNCHED_FAILURE = "failures-launched"
+launched_failure_mode = len(sys.argv) == 6 and sys.argv[5] == LAUNCHED_FAILURE
 # The storage mode checks the storage-error endings through four lifetimes of
 # the protected manager with the mixed fixture. Case 1 configures the
 # smallest globalMutationLedgerBytes that admits the four commands of one
@@ -854,10 +877,11 @@ if tui_mode in (INPUTS, TUI_CONTROLS, TUI_REDIRECT, TUI_DECISIONS):
     configuration["limits"]["executionReservations"] = 2
 # The restart quarantines the reservation of the lost run, or of a request
 # in review, with its execution slot and resource keys, until the operator
-# releases it with cleanup evidence. The failures-manager mode keeps one
-# profile and one execution reservation, so that a quarantined reservation
-# holds all capacity, and gives the profile its own resource key.
-if manager_failure_mode or tui_mode == TUI_FAILURES:
+# releases it with cleanup evidence. The failures-manager and
+# failures-launched modes keep one profile and one execution reservation, so
+# that a quarantined reservation holds all capacity, and give the profile its
+# own resource key.
+if manager_failure_mode or launched_failure_mode or tui_mode == TUI_FAILURES:
     configuration["limits"]["executionReservations"] = 1
     configuration["profiles"][0]["resourceKeys"] = ["fixture_one"]
 if control_profiles:
@@ -7780,8 +7804,9 @@ if worker_failure_mode:
 def manager_failure_checks():
     """The failure ending of a lost manager and the release of its quarantined
     reservations through three lifetimes of the real HTTPS manager with one
-    profile and one execution reservation. Each numbered case prints one PASS
-    line."""
+    profile and one execution reservation. The failures-launched mode runs
+    launched_release in place of the three lifetimes. Each numbered case
+    prints one PASS line."""
     import sqlite3
     authorized = {"Authorization": "Bearer " + bearer}
     flow_dir = work / "manager" / "flow"
@@ -7813,12 +7838,9 @@ def manager_failure_checks():
         assert targets and os.getpgid(process.pid) not in targets, ("worker process groups", targets, os.getpgid(process.pid))
         return tree, targets
 
-    def kill(process, targets, index):
-        """SIGKILL of the manager process. Each worker process sees its
-        control channel end and stops within the bound. Returns the seconds
-        until no process of the worker groups remained."""
-        process.kill()
-        process.wait(timeout=25)
+    def vanished(targets, index):
+        """Wait until no process of the worker groups remains, within the
+        bound. Returns the seconds of the wait."""
         killed = time.monotonic()
         while True:
             remaining = [entry for entry in process_groups() if entry[1] in targets]
@@ -7826,8 +7848,16 @@ def manager_failure_checks():
                 break
             time.sleep(0.1)
         (work / f"worker-processes-after-kill-{index}.txt").write_text("".join(f"{pid} {pgid} {command}\n" for pid, pgid, command in remaining))
-        assert not remaining, ("worker processes remain after the manager loss", remaining)
+        assert not remaining, ("worker processes remain", remaining)
         return time.monotonic() - killed
+
+    def kill(process, targets, index):
+        """SIGKILL of the manager process. Each worker process sees its
+        control channel end and stops within the bound. Returns the seconds
+        until no process of the worker groups remained."""
+        process.kill()
+        process.wait(timeout=25)
+        return vanished(targets, index)
 
     def ended(process, index, killed):
         """End a lifetime that a case left running, and check how it ended."""
@@ -7946,9 +7976,12 @@ def manager_failure_checks():
         return administration({"version": 1, "operation": "release-quarantine", "quarantineId": quarantine,
                                "cleanupEvidenceId": evidence, "cleanupEvidenceDigest": digest}, refused=refused)
 
-    def release_and_run(epoch, client, quarantine, facts, case):
+    def release_and_run(epoch, client, quarantine, facts, case, queued=None):
         """A new request stays queued with capacity behind the quarantined
-        reservation. check-store lists the reservation and check-quarantine
+        reservation. A given queued pair of the request and its workflow
+        names a request that the caller created and enqueued before. Otherwise
+        the request is created and enqueued here. check-store lists the
+        reservation and check-quarantine
         gives the clean evidence of the facts, without a change. A release
         with a wrong digest and a release of an unknown identity refuse
         without a change, and the request stays queued. The release with the
@@ -7957,10 +7990,13 @@ def manager_failure_checks():
         verified result. Releases of the held reservation of that run and of
         the released reservation refuse with state-conflict."""
         observed, wait_for, _, _ = client
-        workflow, payload = mixed_workflow("profile_1")
-        waiting = create_request(epoch, payload)
+        if queued is None:
+            workflow, payload = mixed_workflow("profile_1")
+            waiting = create_request(epoch, payload)
+            enqueue_mixed(waiting, workflow, client)
+        else:
+            waiting, workflow = queued
         waiting_uri = waiting["links"]["self"]
-        enqueue_mixed(waiting, workflow, client)
         current, _, _ = wait_for(waiting_uri, "Request", lambda value: value["admission"]["reasons"] == ["capacity"])
         assert current["phase"] == "queued" and current["preparationId"] is None, ("queued request", current["phase"], current["preparationId"])
         (checked, answers), same = unchanged(lambda: (
@@ -7997,13 +8033,143 @@ def manager_failure_checks():
         _, answered, recovered = drive_mixed(run, client, overview=False)
         assert answered and recovered, ("decisions of the new run", case, answered, recovered)
         artifact = verified_download(run, client, authorized)
-        print(f"PASS failures-manager case {case}: request", waiting["id"], "waited with capacity behind quarantined reservation",
+        print(f"PASS {sys.argv[5]} case {case}: request", waiting["id"], "waited with capacity behind quarantined reservation",
               quarantine, "; check-quarantine gave", once["cleanupEvidenceId"], "over the recomputed facts of", facts["evidence"],
               "; a wrong digest refused with cleanup-unverified and an unknown identity with state-conflict without a change;",
               "the release freed the capacity, the request reached review without another client command, and run", run,
               "succeeded with verified result", artifact["id"], "; releases of held reservation", held[0],
               "and of the released reservation refused with state-conflict", flush=True)
         return waiting, run
+
+    def stopped(targets):
+        """Every live process of the worker groups, with whether ps shows it
+        stopped, from one process listing."""
+        listing = subprocess.run(["ps", "-Ao", "pid=,pgid=,stat="], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                 text=True, timeout=10, check=True).stdout
+        return [(int(pid), stat.startswith("T")) for pid, pgid, stat in
+                (line.split() for line in listing.splitlines() if len(line.split()) == 3) if int(pgid) in targets]
+
+    def launched_release():
+        """The failures-launched mode. See LAUNCHED_FAILURE for the steps. The
+        harness signals only the worker process groups of its own manager,
+        which it reads from the live processes before the manager dies, never
+        from a stored PID."""
+        first = serve(0)
+        try:
+            status, capabilities, raw = request("/v1/capabilities", authorized)
+            assert status == 200
+            validate("Capabilities", capabilities, raw)
+            epoch = capabilities["authorityEpoch"]
+            client = mixed_client(capabilities, authorized)
+            observed, _, _, _ = client
+            workflow, create = mixed_workflow("profile_1")
+
+            # Case 1. A run waits at its person question with a live worker.
+            lost_request = create_request(epoch, create)
+            _, run = approve_mixed(lost_request, workflow, client)
+            head, _, _ = drive_mixed(run, client, stop_at_question=True, overview=False)
+            control, _, _ = observed("/v1/runs/" + run + "/control", "RunControl")
+            assert control["supervision"] == "owned" and control["decisionHeadId"] == head, (control["supervision"], control["decisionHeadId"])
+            tree, targets = workers(first, 0)
+            print("PASS failures-launched case 1: run", run, "waits at person question", head, "under owned supervision, with",
+                  len(tree), "worker processes in process groups", targets, flush=True)
+
+            # Case 2. SIGSTOP of the worker process groups, then SIGKILL of
+            # the manager process. Every worker process stays, stopped.
+            for group in targets:
+                os.killpg(group, signal.SIGSTOP)
+            deadline = time.monotonic() + 10
+            while not all(halted for _, halted in stopped(targets)):
+                assert time.monotonic() < deadline, ("the worker processes did not stop", stopped(targets))
+                time.sleep(0.05)
+            first.kill()
+            first.wait(timeout=25)
+            time.sleep(1)
+            held = stopped(targets)
+            assert sorted(pid for pid, _ in held) == sorted(pid for pid, _, _ in tree) and all(halted for _, halted in held), (
+                "the stopped worker processes after the manager loss", held, tree)
+        finally:
+            ended(first, 0, True)
+        assert first.returncode == -signal.SIGKILL, ("the first lifetime did not end by SIGKILL", first.returncode)
+        native_runs = {native for (native,) in read_store("SELECT native_run_id FROM runs WHERE id=?", (run,))}
+        assert len(native_runs) == 1, ("native run of the lost run", native_runs)
+        lost_store = work / "manager" / "runs" / "runs" / native_runs.pop() / "runtime"
+        assert (lost_store.parent / "owner.lock").is_file(), ("the owner lock of the lost run", lost_store.parent)
+
+        def terminal_events():
+            return [line for line in (lost_store / "events.ndjson").read_bytes().splitlines()
+                    if json.loads(line)["event"]["type"] in ("run.completed", "run.failed", "run.cancelled")]
+        assert not terminal_events(), ("the run log of the stopped run holds a terminal record", terminal_events())
+        print("PASS failures-launched case 2: after SIGSTOP of process groups", targets, "and SIGKILL of the manager, the",
+              len(held), "worker processes remain stopped and the run log of", run, "holds no terminal record", flush=True)
+        lost_reservations = [ident for (ident,) in read_store(
+            "SELECT id FROM reservations WHERE request_id=? AND state!='released'", (lost_request["id"],))]
+        assert len(lost_reservations) == 1, ("the reservation of the lost run", lost_reservations)
+        quarantine = lost_reservations[0]
+
+        second = serve(1)
+        try:
+            # Case 3. The restart quarantines the reservation of the lost run.
+            # A new request waits with capacity. While the stopped inner
+            # worker holds the owner lock, check-quarantine reports
+            # cleanup-required, and a release refuses with cleanup-unverified,
+            # without a change.
+            status, capabilities, raw = request("/v1/capabilities", authorized)
+            assert status == 200
+            validate("Capabilities", capabilities, raw)
+            client = mixed_client(capabilities, authorized)
+            observed, wait_for, _, _ = client
+            generation = lifetime_notice()["processGeneration"]
+            assert read_store("SELECT state FROM reservations WHERE id=?", (quarantine,)) == [("quarantined",)], (
+                "the reservation of the lost run after the restart", read_store("SELECT state FROM reservations WHERE id=?", (quarantine,)))
+            value, _, _ = observed("/v1/runs/" + run, "Run")
+            assert value["supervision"] == "lost", ("the lost run", value["supervision"])
+            workflow, create = mixed_workflow("profile_1")
+            waiting = create_request(epoch, create)
+            enqueue_mixed(waiting, workflow, client)
+            current, _, _ = wait_for(waiting["links"]["self"], "Request", lambda value: value["admission"]["reasons"] == ["capacity"])
+            assert current["phase"] == "queued" and current["preparationId"] is None, ("queued request", current["phase"], current["preparationId"])
+            facts = {"evidence": "owner-released", "reservationId": quarantine, "runId": run, "processGeneration": generation}
+            digest = canonical_digest(facts)
+            (required, refusals), same = unchanged(lambda: (
+                administration({"version": 1, "operation": "check-quarantine", "quarantineId": quarantine})["result"],
+                [release(quarantine, "cleanup_" + digest[:32], digest, refused="cleanup-unverified"),
+                 release(quarantine, "cleanup_" + digest[:32], "0" * 64, refused="cleanup-unverified")]))
+            assert same, "check-quarantine or a refused release changed the database or the manager log while the owner lock was held"
+            assert required == {"quarantineId": quarantine, "state": "cleanup-required", "cleanupEvidenceId": None,
+                                "cleanupEvidenceDigest": None, "processGeneration": generation, "expiresAt": None}, (
+                "check-quarantine while the owner lock is held", required)
+            current, _, _ = observed(waiting["links"]["self"], "Request")
+            assert current["phase"] == "queued" and current["admission"]["reasons"] == ["capacity"], (
+                "the request left the queue after a refused release", current["phase"], current["admission"])
+            print("PASS failures-launched case 3: while the stopped worker holds the owner lock, check-quarantine of", quarantine,
+                  "reports cleanup-required and release-quarantine refuses with cleanup-unverified for the owner-released",
+                  "digest and for a wrong digest, without a change, and request", waiting["id"], "waits with capacity", flush=True)
+
+            # Case 4. SIGKILL of the stopped groups. Once no process of them
+            # remains, the run log still holds no terminal record.
+            for group in targets:
+                os.killpg(group, signal.SIGKILL)
+            gone_after = vanished(targets, 1)
+            assert not terminal_events(), ("the run log of the killed run holds a terminal record", terminal_events())
+            print("PASS failures-launched case 4: after SIGKILL of the stopped process groups", targets, "no process remained after",
+                  round(gone_after, 2), "seconds, and the run log of", run, "holds no terminal record", flush=True)
+
+            # Case 5. check-quarantine reports clean with the owner-released
+            # evidence. The release with it frees the capacity, and the queued
+            # request reaches review without another client command and
+            # completes.
+            _, second_run = release_and_run(epoch, client, quarantine, facts, "5", queued=(waiting, workflow))
+            value, _, _ = observed("/v1/runs/" + run, "Run")
+            assert value["supervision"] == "lost", ("the lost run after the release", value["supervision"])
+            assert not terminal_events(), "the release changed the run store of the lost run"
+        finally:
+            ended(second, 1, False)
+        print("PASS failures-launched: the launched quarantine of run", run, "was released with owner-released evidence once its",
+              "stopped worker processes were gone, and run", second_run, "completed with one execution reservation", flush=True)
+
+    if launched_failure_mode:
+        return launched_release()
 
     # The first lifetime.
     first = serve(0)
@@ -8377,7 +8543,7 @@ def manager_failure_checks():
           second_run, third_run, flush=True)
 
 
-if manager_failure_mode:
+if manager_failure_mode or launched_failure_mode:
     manager_failure_checks()
     raise SystemExit(0)
 
