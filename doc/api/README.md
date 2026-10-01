@@ -602,6 +602,54 @@ resnapshot or endpoint change invalidates older fetch generations and page
 sets. Mutation receipts are not replacement snapshots. Closing every network
 client never closes a manager-owned worker control pipe.
 
+The public client decodes live delivery without I/O in
+`Agentic.Manager.Client.Events`, which the `Agentic.Manager.Client` facade
+re-exports. `newSseParser` starts the parser of one connection, with the
+identifier that a reconnection sends in `Last-Event-ID`. `feedSse` accepts
+the response bytes split at any point and returns one outcome for each block
+that the bytes complete, in order. A line ends at LF or at CRLF, and a blank
+line ends a block. A block with `data` dispatches an event with the `id` of
+the block, its last `event` name or `message`, and its `data` lines joined
+with LF. A block with an `id` and no `data` advances the last event
+identifier and dispatches nothing. The route stream writes such a block when
+a batch serves no record. A block of comment lines only is a heartbeat. The
+parser refuses with `InvalidResponse` a block larger than `sseBlockBytes`,
+counted with its terminating blank line, and an incomplete block as soon as
+it passes that bound. It also refuses a block that is not UTF-8, a carriage
+return that does not end a line, and an `id` that is not a canonical cursor.
+`closeSse` discards an incomplete final block and returns the last complete
+event identifier. The parser does not remove a repeated identifier. Each
+complete block dispatches once, and the consumer compares identifiers.
+
+`decodeEventBlock` decodes a dispatched block of `/events` as an
+`InvalidationEvent` with one of the seven event names and an `Invalidation`
+of `version`, `resource` and `revision`. `decodeRouteBlock` decodes a block
+of a route stream as a `RouteRecord`. It checks that the record identifier
+equals the block identifier and that the event name is `route.` followed by
+the record schema. The decoders of `Invalidation`, `InvalidationEvent`,
+`EventBatch` and `RouteRecord` refuse unknown and missing fields. Their
+encoding gives back the decoded JSON value unchanged, including `false`,
+`null`, large numbers in a route body and Unicode text. A number that the
+protocol bounds to 64 bits refuses when it is out of range and is never
+rounded. `problemFailure` maps a problem response to `Refused` with its
+status and code, so a 410 `view-expired` or `cursor-expired` problem gives
+`Refused 410` with that code. A body whose `status` differs from the response
+status, or whose `code` is not a bounded identifier, gives `InvalidResponse`.
+`validCursor` checks the cursor syntax. `validETag` checks a strong entity
+tag, and the client compares entity tags only for equality.
+
+The `events` section of `test/manager_client_vectors.json` holds the vectors
+of these functions. An `sse` vector describes a byte stream as `text`, `hex`
+and `repeat` segments, lists split points, and states the expected outcomes
+and the last event identifier at close, or a refusal. The check feeds each
+stream whole, at each listed split, at every single split point of a stream
+of at most 2048 bytes, and one byte at a time. An `sse` vector can also
+state whether its dispatched events decode as invalidations or as route
+records. The `invalidations`, `batches` and `routeRecords` vectors hold JSON
+text that decodes and encodes back to the same value, or that refuses with
+`InvalidResponse`. The `cursors`, `etags` and `problems` vectors cover the
+cursor syntax, entity-tag equality and the mapping of problem bodies.
+
 ## Refusals
 
 Problems use `application/problem+json`, with a bounded stable `code`, status,
@@ -742,3 +790,10 @@ The gate checks the standard OpenAPI and JSON Schema descriptions, the
 independent resource/scope ledger, strict payloads, SSE boundaries, and receipt
 bindings for exact download bytes. It does not establish that a manager,
 credential operation, worker, network transport, or service client exists.
+
+The client check runs the client vectors. It checks the pure decoding of the
+public client and opens no connection:
+
+```sh
+direnv exec . bash -c '"$(bash test/cabal.sh list-bin manager-client-check)" vectors test/manager_client_vectors.json'
+```

@@ -1,0 +1,1168 @@
+{
+ "version": 1,
+ "events": {
+  "sse": [
+   {
+    "name": "one event with LF",
+    "stream": [
+     {
+      "text": "id: s.5\nevent: run.changed\ndata: {\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}\n\n"
+     }
+    ],
+    "splits": [
+     [
+      3
+     ],
+     [
+      10,
+      40
+     ],
+     [
+      91
+     ]
+    ],
+    "expected": [
+     {
+      "event": {
+       "id": "s.5",
+       "name": "run.changed",
+       "data": "{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}"
+      }
+     }
+    ],
+    "lastId": "s.5",
+    "decode": "invalidation",
+    "decodeValid": true
+   },
+   {
+    "name": "one event with CRLF",
+    "stream": [
+     {
+      "text": "id: s.5\r\nevent: run.changed\r\ndata: {\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}\r\n\r\n"
+     }
+    ],
+    "splits": [
+     [
+      7
+     ],
+     [
+      8
+     ],
+     [
+      94
+     ],
+     [
+      95
+     ]
+    ],
+    "expected": [
+     {
+      "event": {
+       "id": "s.5",
+       "name": "run.changed",
+       "data": "{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}"
+      }
+     }
+    ],
+    "lastId": "s.5",
+    "decode": "invalidation",
+    "decodeValid": true
+   },
+   {
+    "name": "mixed LF and CRLF lines",
+    "stream": [
+     {
+      "text": "id: s.6\r\nevent: request.changed\ndata: {\"version\":1,\"resource\":\"/v1/requests/request_2\",\"revision\":\"r2\"}\r\n\n"
+     }
+    ],
+    "splits": [
+     [
+      9
+     ],
+     [
+      104
+     ]
+    ],
+    "expected": [
+     {
+      "event": {
+       "id": "s.6",
+       "name": "request.changed",
+       "data": "{\"version\":1,\"resource\":\"/v1/requests/request_2\",\"revision\":\"r2\"}"
+      }
+     }
+    ],
+    "lastId": "s.6",
+    "decode": "invalidation",
+    "decodeValid": true
+   },
+   {
+    "name": "partial final block dispatches nothing",
+    "stream": [
+     {
+      "text": "id: s.5\nevent: run.changed\ndata: {\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}\n\nid: s.6\nevent: run.changed\ndata: {\"version\":1,\"resource\":\"/v1/requests/request_2\",\"revision\":\"r2\"}"
+     }
+    ],
+    "splits": [
+     [
+      92
+     ],
+     [
+      97
+     ]
+    ],
+    "expected": [
+     {
+      "event": {
+       "id": "s.5",
+       "name": "run.changed",
+       "data": "{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}"
+      }
+     }
+    ],
+    "lastId": "s.5"
+   },
+   {
+    "name": "partial block only",
+    "stream": [
+     {
+      "text": "id: s.9\nevent: run.changed\ndata: {\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}\n"
+     }
+    ],
+    "splits": [
+     [
+      4
+     ]
+    ],
+    "expected": [],
+    "lastId": null
+   },
+   {
+    "name": "comment blocks are heartbeats",
+    "stream": [
+     {
+      "text": ": keepalive\n\nid: s.5\nevent: run.changed\ndata: {\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}\n\n:\n\n"
+     }
+    ],
+    "splits": [
+     [
+      1
+     ],
+     [
+      13
+     ],
+     [
+      14,
+      20
+     ]
+    ],
+    "expected": [
+     "heartbeat",
+     {
+      "event": {
+       "id": "s.5",
+       "name": "run.changed",
+       "data": "{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}"
+      }
+     },
+     "heartbeat"
+    ],
+    "lastId": "s.5",
+    "decode": "invalidation",
+    "decodeValid": true
+   },
+   {
+    "name": "heartbeat keeps the reconnection identifier",
+    "initialId": "s.3",
+    "stream": [
+     {
+      "text": ": hb\r\n\r\n"
+     }
+    ],
+    "splits": [
+     [
+      5
+     ]
+    ],
+    "expected": [
+     "heartbeat"
+    ],
+    "lastId": "s.3"
+   },
+   {
+    "name": "comment inside an event block",
+    "stream": [
+     {
+      "text": "id: s.10\n: note inside a block\nevent: command.changed\ndata: {\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}\n\n"
+     }
+    ],
+    "splits": [
+     [
+      12
+     ]
+    ],
+    "expected": [
+     {
+      "event": {
+       "id": "s.10",
+       "name": "command.changed",
+       "data": "{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}"
+      }
+     }
+    ],
+    "lastId": "s.10"
+   },
+   {
+    "name": "duplicate identifiers dispatch each block",
+    "stream": [
+     {
+      "text": "id: s.7\nevent: run.changed\ndata: {\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}\n\nid: s.7\nevent: run.changed\ndata: {\"version\":1,\"resource\":\"/v1/requests/request_2\",\"revision\":\"r2\"}\n\n"
+     }
+    ],
+    "splits": [
+     [
+      96
+     ]
+    ],
+    "expected": [
+     {
+      "event": {
+       "id": "s.7",
+       "name": "run.changed",
+       "data": "{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}"
+      }
+     },
+     {
+      "event": {
+       "id": "s.7",
+       "name": "run.changed",
+       "data": "{\"version\":1,\"resource\":\"/v1/requests/request_2\",\"revision\":\"r2\"}"
+      }
+     }
+    ],
+    "lastId": "s.7",
+    "decode": "invalidation",
+    "decodeValid": true
+   },
+   {
+    "name": "multi-line data without id or event",
+    "stream": [
+     {
+      "text": "data: line one\ndata:line two\ndata:  indented\ndata\n\n"
+     }
+    ],
+    "splits": [
+     [
+      15
+     ],
+     [
+      30
+     ]
+    ],
+    "expected": [
+     {
+      "event": {
+       "id": null,
+       "name": "message",
+       "data": "line one\nline two\n indented\n"
+      }
+     }
+    ],
+    "lastId": null
+   },
+   {
+    "name": "id-only block advances the identifier",
+    "initialId": "route_r.3",
+    "stream": [
+     {
+      "text": "id: route_r.12\n\n"
+     }
+    ],
+    "splits": [
+     [
+      3
+     ]
+    ],
+    "expected": [
+     {
+      "advance": "route_r.12"
+     }
+    ],
+    "lastId": "route_r.12"
+   },
+   {
+    "name": "blank lines and other fields dispatch nothing",
+    "stream": [
+     {
+      "text": "\n\nevent: run.changed\nretry: 5\n\n"
+     }
+    ],
+    "splits": [
+     [
+      1
+     ]
+    ],
+    "expected": [],
+    "lastId": null
+   },
+   {
+    "name": "route block with Unicode data",
+    "stream": [
+     {
+      "text": "id: route_r.8\nevent: route.answer\ndata: {\"id\":\"route_r.8\",\"class\":\"public\",\"position\":7,\"schema\":\"answer\",\"from\":{\"actor\":\"person\"},\"to\":\"public\",\"about\":{\"question\":3},\"replyTo\":3,\"at\":\"2026-09-30T00:00:00Z\",\"body\":{\"text\":\"héllo ✓ 𝄞\",\"flag\":false,\"none\":null,\"big\":123456789012345678901234567890,\"huge\":1e400,\"nested\":{\"list\":[false,null,0]}}}\n\n"
+     }
+    ],
+    "splits": [
+     [
+      227
+     ],
+     [
+      238
+     ],
+     [
+      227,
+      238
+     ]
+    ],
+    "expected": [
+     {
+      "event": {
+       "id": "route_r.8",
+       "name": "route.answer",
+       "data": "{\"id\":\"route_r.8\",\"class\":\"public\",\"position\":7,\"schema\":\"answer\",\"from\":{\"actor\":\"person\"},\"to\":\"public\",\"about\":{\"question\":3},\"replyTo\":3,\"at\":\"2026-09-30T00:00:00Z\",\"body\":{\"text\":\"héllo ✓ 𝄞\",\"flag\":false,\"none\":null,\"big\":123456789012345678901234567890,\"huge\":1e400,\"nested\":{\"list\":[false,null,0]}}}"
+      }
+     }
+    ],
+    "lastId": "route_r.8",
+    "decode": "route",
+    "decodeValid": true
+   },
+   {
+    "name": "route block whose event name differs from its schema",
+    "stream": [
+     {
+      "text": "id: route_r.8\nevent: route.question\ndata: {\"id\":\"route_r.8\",\"class\":\"public\",\"position\":7,\"schema\":\"answer\",\"from\":{\"actor\":\"person\"},\"to\":\"public\",\"about\":{\"question\":3},\"replyTo\":3,\"at\":\"2026-09-30T00:00:00Z\",\"body\":{\"text\":\"héllo ✓ 𝄞\",\"flag\":false,\"none\":null,\"big\":123456789012345678901234567890,\"huge\":1e400,\"nested\":{\"list\":[false,null,0]}}}\n\n"
+     }
+    ],
+    "splits": [
+     [
+      20
+     ]
+    ],
+    "expected": [
+     {
+      "event": {
+       "id": "route_r.8",
+       "name": "route.question",
+       "data": "{\"id\":\"route_r.8\",\"class\":\"public\",\"position\":7,\"schema\":\"answer\",\"from\":{\"actor\":\"person\"},\"to\":\"public\",\"about\":{\"question\":3},\"replyTo\":3,\"at\":\"2026-09-30T00:00:00Z\",\"body\":{\"text\":\"héllo ✓ 𝄞\",\"flag\":false,\"none\":null,\"big\":123456789012345678901234567890,\"huge\":1e400,\"nested\":{\"list\":[false,null,0]}}}"
+      }
+     }
+    ],
+    "lastId": "route_r.8",
+    "decode": "route",
+    "decodeValid": false
+   },
+   {
+    "name": "route block whose identifier differs from its record",
+    "stream": [
+     {
+      "text": "id: route_r.9\nevent: route.answer\ndata: {\"id\":\"route_r.8\",\"class\":\"public\",\"position\":7,\"schema\":\"answer\",\"from\":{\"actor\":\"person\"},\"to\":\"public\",\"about\":{\"question\":3},\"replyTo\":3,\"at\":\"2026-09-30T00:00:00Z\",\"body\":{\"text\":\"héllo ✓ 𝄞\",\"flag\":false,\"none\":null,\"big\":123456789012345678901234567890,\"huge\":1e400,\"nested\":{\"list\":[false,null,0]}}}\n\n"
+     }
+    ],
+    "splits": [
+     [
+      20
+     ]
+    ],
+    "expected": [
+     {
+      "event": {
+       "id": "route_r.9",
+       "name": "route.answer",
+       "data": "{\"id\":\"route_r.8\",\"class\":\"public\",\"position\":7,\"schema\":\"answer\",\"from\":{\"actor\":\"person\"},\"to\":\"public\",\"about\":{\"question\":3},\"replyTo\":3,\"at\":\"2026-09-30T00:00:00Z\",\"body\":{\"text\":\"héllo ✓ 𝄞\",\"flag\":false,\"none\":null,\"big\":123456789012345678901234567890,\"huge\":1e400,\"nested\":{\"list\":[false,null,0]}}}"
+      }
+     }
+    ],
+    "lastId": "route_r.9",
+    "decode": "route",
+    "decodeValid": false
+   },
+   {
+    "name": "Unicode resource frames but does not decode",
+    "stream": [
+     {
+      "text": "id: s.11\nevent: run.changed\ndata: {\"version\":1,\"resource\":\"/v1/runs/rün\",\"revision\":\"r1\"}\n\n"
+     }
+    ],
+    "splits": [
+     [
+      62
+     ]
+    ],
+    "expected": [
+     {
+      "event": {
+       "id": "s.11",
+       "name": "run.changed",
+       "data": "{\"version\":1,\"resource\":\"/v1/runs/rün\",\"revision\":\"r1\"}"
+      }
+     }
+    ],
+    "lastId": "s.11",
+    "decode": "invalidation",
+    "decodeValid": false
+   },
+   {
+    "name": "unknown event name does not decode",
+    "stream": [
+     {
+      "text": "id: s.12\nevent: run.created\ndata: {\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}\n\n"
+     }
+    ],
+    "splits": [
+     [
+      10
+     ]
+    ],
+    "expected": [
+     {
+      "event": {
+       "id": "s.12",
+       "name": "run.created",
+       "data": "{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}"
+      }
+     }
+    ],
+    "lastId": "s.12",
+    "decode": "invalidation",
+    "decodeValid": false
+   },
+   {
+    "name": "event without id does not decode",
+    "initialId": "s.12",
+    "stream": [
+     {
+      "text": "event: service.changed\ndata: {\"version\":1,\"resource\":\"/v1/capabilities\",\"revision\":\"r3\"}\n\n"
+     }
+    ],
+    "splits": [
+     [
+      10
+     ]
+    ],
+    "expected": [
+     {
+      "event": {
+       "id": null,
+       "name": "service.changed",
+       "data": "{\"version\":1,\"resource\":\"/v1/capabilities\",\"revision\":\"r3\"}"
+      }
+     }
+    ],
+    "lastId": "s.12",
+    "decode": "invalidation",
+    "decodeValid": false
+   },
+   {
+    "name": "service invalidation",
+    "stream": [
+     {
+      "text": "id: s.13\nevent: service.changed\ndata: {\"version\":1,\"resource\":\"/v1/capabilities\",\"revision\":\"r3\"}\n\n"
+     }
+    ],
+    "splits": [
+     [
+      10
+     ]
+    ],
+    "expected": [
+     {
+      "event": {
+       "id": "s.13",
+       "name": "service.changed",
+       "data": "{\"version\":1,\"resource\":\"/v1/capabilities\",\"revision\":\"r3\"}"
+      }
+     }
+    ],
+    "lastId": "s.13",
+    "decode": "invalidation",
+    "decodeValid": true
+   },
+   {
+    "name": "block of exactly sseBlockBytes",
+    "stream": [
+     {
+      "text": "data: "
+     },
+     {
+      "repeat": "x",
+      "count": 16376
+     },
+     {
+      "text": "\n\n"
+     }
+    ],
+    "splits": [
+     [
+      6
+     ],
+     [
+      16383
+     ]
+    ],
+    "expected": [
+     {
+      "event": {
+       "id": null,
+       "name": "message",
+       "data": {
+        "repeat": "x",
+        "count": 16376
+       }
+      }
+     }
+    ],
+    "lastId": null
+   },
+   {
+    "name": "block one byte above sseBlockBytes",
+    "refuse": true,
+    "stream": [
+     {
+      "text": "data: "
+     },
+     {
+      "repeat": "x",
+      "count": 16377
+     },
+     {
+      "text": "\n\n"
+     }
+    ],
+    "splits": [
+     [
+      6
+     ],
+     [
+      16384
+     ]
+    ],
+    "expected": []
+   },
+   {
+    "name": "oversized incomplete block refuses before its end",
+    "refuse": true,
+    "stream": [
+     {
+      "text": "id: s.5\nevent: run.changed\ndata: {\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}\n\ndata: "
+     },
+     {
+      "repeat": "y",
+      "count": 16500
+     }
+    ],
+    "splits": [
+     [
+      92
+     ],
+     [
+      192
+     ]
+    ],
+    "expected": [
+     {
+      "event": {
+       "id": "s.5",
+       "name": "run.changed",
+       "data": "{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}"
+      }
+     }
+    ]
+   },
+   {
+    "name": "oversized CRLF block",
+    "refuse": true,
+    "stream": [
+     {
+      "text": "data: "
+     },
+     {
+      "repeat": "z",
+      "count": 16377
+     },
+     {
+      "text": "\r\n\r\n"
+     }
+    ],
+    "splits": [
+     [
+      6
+     ]
+    ],
+    "expected": []
+   },
+   {
+    "name": "invalid UTF-8 refuses",
+    "refuse": true,
+    "stream": [
+     {
+      "text": "id: s.5\nevent: run.changed\ndata: {\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}\n\ndata: a"
+     },
+     {
+      "hex": "ff"
+     },
+     {
+      "text": "b\n\n"
+     }
+    ],
+    "splits": [
+     [
+      92
+     ],
+     [
+      99
+     ]
+    ],
+    "expected": [
+     {
+      "event": {
+       "id": "s.5",
+       "name": "run.changed",
+       "data": "{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}"
+      }
+     }
+    ]
+   },
+   {
+    "name": "truncated UTF-8 sequence refuses",
+    "refuse": true,
+    "stream": [
+     {
+      "text": "data: "
+     },
+     {
+      "hex": "e282"
+     },
+     {
+      "text": "\n\n"
+     }
+    ],
+    "splits": [
+     [
+      7
+     ]
+    ],
+    "expected": []
+   },
+   {
+    "name": "lone carriage return refuses",
+    "refuse": true,
+    "stream": [
+     {
+      "text": "data: a\rb\n\n"
+     }
+    ],
+    "splits": [
+     [
+      8
+     ]
+    ],
+    "expected": []
+   },
+   {
+    "name": "identifier that is not a cursor refuses",
+    "refuse": true,
+    "stream": [
+     {
+      "text": "id: s.01\ndata: x\n\n"
+     }
+    ],
+    "splits": [
+     [
+      4
+     ]
+    ],
+    "expected": []
+   }
+  ],
+  "invalidations": [
+   {
+    "name": "run invalidation",
+    "json": "{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}",
+    "valid": true
+   },
+   {
+    "name": "service invalidation",
+    "json": "{\"version\":1,\"resource\":\"/v1/capabilities\",\"revision\":\"r3\"}",
+    "valid": true
+   },
+   {
+    "name": "version written as 1.0",
+    "json": "{\"version\":1.0,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}",
+    "valid": true
+   },
+   {
+    "name": "revision false",
+    "json": "{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":false}",
+    "valid": false
+   },
+   {
+    "name": "revision null",
+    "json": "{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":null}",
+    "valid": false
+   },
+   {
+    "name": "resource null",
+    "json": "{\"version\":1,\"resource\":null,\"revision\":\"r1\"}",
+    "valid": false
+   },
+   {
+    "name": "version 2",
+    "json": "{\"version\":2,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}",
+    "valid": false
+   },
+   {
+    "name": "version 1e400",
+    "json": "{\"version\":1e400,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}",
+    "valid": false
+   },
+   {
+    "name": "version above 64 bits",
+    "json": "{\"version\":18446744073709551617,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}",
+    "valid": false
+   },
+   {
+    "name": "version false",
+    "json": "{\"version\":false,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}",
+    "valid": false
+   },
+   {
+    "name": "unknown field",
+    "json": "{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\",\"delta\":{}}",
+    "valid": false
+   },
+   {
+    "name": "missing revision",
+    "json": "{\"version\":1,\"resource\":\"/v1/runs/run_1\"}",
+    "valid": false
+   },
+   {
+    "name": "Unicode resource",
+    "json": "{\"version\":1,\"resource\":\"/v1/runs/rün\",\"revision\":\"r1\"}",
+    "valid": false
+   },
+   {
+    "name": "Unicode revision",
+    "json": "{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"rév\"}",
+    "valid": false
+   },
+   {
+    "name": "resource outside /v1",
+    "json": "{\"version\":1,\"resource\":\"/v2/runs/run_1\",\"revision\":\"r1\"}",
+    "valid": false
+   },
+   {
+    "name": "bare /v1/ resource",
+    "json": "{\"version\":1,\"resource\":\"/v1/\",\"revision\":\"r1\"}",
+    "valid": false
+   }
+  ],
+  "batches": [
+   {
+    "name": "two events and hasMore false",
+    "json": "{\"version\":1,\"cursor\":\"s.9\",\"oldestCursor\":\"s.0\",\"events\":[{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.9\",\"event\":\"service.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/capabilities\",\"revision\":\"r3\"}}],\"hasMore\":false}",
+    "valid": true
+   },
+   {
+    "name": "no events and hasMore true",
+    "json": "{\"version\":1,\"cursor\":\"s.18446744073709551615\",\"oldestCursor\":\"s.18446744073709551615\",\"events\":[],\"hasMore\":true}",
+    "valid": true
+   },
+   {
+    "name": "hasMore null",
+    "json": "{\"version\":1,\"cursor\":\"s.9\",\"oldestCursor\":\"s.0\",\"events\":[],\"hasMore\":null}",
+    "valid": false
+   },
+   {
+    "name": "hasMore as text",
+    "json": "{\"version\":1,\"cursor\":\"s.9\",\"oldestCursor\":\"s.0\",\"events\":[],\"hasMore\":\"false\"}",
+    "valid": false
+   },
+   {
+    "name": "cursor with a leading zero",
+    "json": "{\"version\":1,\"cursor\":\"s.09\",\"oldestCursor\":\"s.0\",\"events\":[],\"hasMore\":false}",
+    "valid": false
+   },
+   {
+    "name": "cursor above 64 bits",
+    "json": "{\"version\":1,\"cursor\":\"s.18446744073709551616\",\"oldestCursor\":\"s.0\",\"events\":[],\"hasMore\":false}",
+    "valid": false
+   },
+   {
+    "name": "cursor as a number",
+    "json": "{\"version\":1,\"cursor\":9,\"oldestCursor\":\"s.0\",\"events\":[],\"hasMore\":false}",
+    "valid": false
+   },
+   {
+    "name": "missing oldestCursor",
+    "json": "{\"version\":1,\"cursor\":\"s.9\",\"events\":[],\"hasMore\":false}",
+    "valid": false
+   },
+   {
+    "name": "unknown event name",
+    "json": "{\"version\":1,\"cursor\":\"s.9\",\"oldestCursor\":\"s.0\",\"events\":[{\"id\":\"s.5\",\"event\":\"run.created\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}}],\"hasMore\":false}",
+    "valid": false
+   },
+   {
+    "name": "event with an unknown field",
+    "json": "{\"version\":1,\"cursor\":\"s.9\",\"oldestCursor\":\"s.0\",\"events\":[{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"},\"retry\":1}],\"hasMore\":false}",
+    "valid": false
+   },
+   {
+    "name": "event with Unicode data",
+    "json": "{\"version\":1,\"cursor\":\"s.9\",\"oldestCursor\":\"s.0\",\"events\":[{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/rün\",\"revision\":\"r1\"}}],\"hasMore\":false}",
+    "valid": false
+   },
+   {
+    "name": "events null",
+    "json": "{\"version\":1,\"cursor\":\"s.9\",\"oldestCursor\":\"s.0\",\"events\":null,\"hasMore\":false}",
+    "valid": false
+   },
+   {
+    "name": "257 events",
+    "json": "{\"version\":1,\"cursor\":\"s.9\",\"oldestCursor\":\"s.0\",\"events\":[{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}},{\"id\":\"s.5\",\"event\":\"run.changed\",\"data\":{\"version\":1,\"resource\":\"/v1/runs/run_1\",\"revision\":\"r1\"}}],\"hasMore\":false}",
+    "valid": false
+   }
+  ],
+  "routeRecords": [
+   {
+    "name": "inline body keeps false, null, large numerics and Unicode",
+    "json": "{\"id\":\"route_r.8\",\"class\":\"public\",\"position\":7,\"schema\":\"answer\",\"from\":{\"actor\":\"person\"},\"to\":\"public\",\"about\":{\"question\":3},\"replyTo\":3,\"at\":\"2026-09-30T00:00:00Z\",\"body\":{\"text\":\"héllo ✓ 𝄞\",\"flag\":false,\"none\":null,\"big\":123456789012345678901234567890,\"huge\":1e400,\"nested\":{\"list\":[false,null,0]}}}",
+    "valid": true
+   },
+   {
+    "name": "manager record with a claim",
+    "json": "{\"id\":\"route_r.8\",\"class\":\"actor\",\"position\":7,\"schema\":\"relay\",\"from\":\"manager\",\"to\":{\"actor\": \"tool\"},\"about\":{\"question\": 3},\"replyTo\":null,\"at\":\"2026-09-30T00:00:00Z\",\"claim\":{\"sha256\": \"000000000000000000000000000000000000000000000000000000000000000a\", \"bytes\": 18446744073709551615}}",
+    "valid": true
+   },
+   {
+    "name": "event record at the largest position",
+    "json": "{\"id\":\"route_r.18446744073709551615\",\"class\":\"public\",\"position\":18446744073709551614,\"schema\":\"event\",\"from\":{\"actor\": \"person\"},\"to\":\"public\",\"about\":{\"question\": 3},\"replyTo\":3,\"at\":\"2026-09-30T00:00:00Z\",\"event\":{\"sequence\": 18446744073709551615}}",
+    "valid": true
+   },
+   {
+    "name": "omitted body of an oversized block",
+    "json": "{\"id\":\"route_r.8\",\"class\":\"public\",\"position\":7,\"schema\":\"answer\",\"from\":{\"actor\": \"person\"},\"to\":\"public\",\"about\":{\"question\": 3},\"replyTo\":3,\"at\":\"2026-09-30T00:00:00Z\",\"body\":{\"omitted\": \"size\", \"bytes\": 20000}}",
+    "valid": true
+   },
+   {
+    "name": "position whose identifier overflows",
+    "json": "{\"id\":\"route_r.18446744073709551615\",\"class\":\"public\",\"position\":18446744073709551615,\"schema\":\"answer\",\"from\":{\"actor\": \"person\"},\"to\":\"public\",\"about\":{\"question\": 3},\"replyTo\":3,\"at\":\"2026-09-30T00:00:00Z\",\"body\":1}",
+    "valid": false
+   },
+   {
+    "name": "position 1e400",
+    "json": "{\"id\":\"route_r.8\",\"class\":\"public\",\"position\":1e400,\"schema\":\"answer\",\"from\":{\"actor\": \"person\"},\"to\":\"public\",\"about\":{\"question\": 3},\"replyTo\":3,\"at\":\"2026-09-30T00:00:00Z\",\"body\":1}",
+    "valid": false
+   },
+   {
+    "name": "fractional position",
+    "json": "{\"id\":\"route_r.8\",\"class\":\"public\",\"position\":7.5,\"schema\":\"answer\",\"from\":{\"actor\": \"person\"},\"to\":\"public\",\"about\":{\"question\": 3},\"replyTo\":3,\"at\":\"2026-09-30T00:00:00Z\",\"body\":1}",
+    "valid": false
+   },
+   {
+    "name": "replyTo false",
+    "json": "{\"id\":\"route_r.8\",\"class\":\"public\",\"position\":7,\"schema\":\"answer\",\"from\":{\"actor\": \"person\"},\"to\":\"public\",\"about\":{\"question\": 3},\"replyTo\":false,\"at\":\"2026-09-30T00:00:00Z\",\"body\":1}",
+    "valid": false
+   },
+   {
+    "name": "body and claim together",
+    "json": "{\"id\":\"route_r.8\",\"class\":\"public\",\"position\":7,\"schema\":\"answer\",\"from\":{\"actor\": \"person\"},\"to\":\"public\",\"about\":{\"question\": 3},\"replyTo\":3,\"at\":\"2026-09-30T00:00:00Z\",\"body\":1,\"claim\":{\"sha256\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"bytes\": 1}}",
+    "valid": false
+   },
+   {
+    "name": "no body, claim or event",
+    "json": "{\"id\":\"route_r.8\",\"class\":\"public\",\"position\":7,\"schema\":\"answer\",\"from\":{\"actor\": \"person\"},\"to\":\"public\",\"about\":{\"question\": 3},\"replyTo\":3,\"at\":\"2026-09-30T00:00:00Z\"}",
+    "valid": false
+   },
+   {
+    "name": "identifier that does not name the next position",
+    "json": "{\"id\":\"route_r.7\",\"class\":\"public\",\"position\":7,\"schema\":\"answer\",\"from\":{\"actor\": \"person\"},\"to\":\"public\",\"about\":{\"question\": 3},\"replyTo\":3,\"at\":\"2026-09-30T00:00:00Z\",\"body\":1}",
+    "valid": false
+   },
+   {
+    "name": "unknown class",
+    "json": "{\"id\":\"route_r.8\",\"class\":\"private\",\"position\":7,\"schema\":\"answer\",\"from\":{\"actor\": \"person\"},\"to\":\"public\",\"about\":{\"question\": 3},\"replyTo\":3,\"at\":\"2026-09-30T00:00:00Z\",\"body\":1}",
+    "valid": false
+   },
+   {
+    "name": "unknown schema",
+    "json": "{\"id\":\"route_r.8\",\"class\":\"public\",\"position\":7,\"schema\":\"engine-result\",\"from\":{\"actor\": \"person\"},\"to\":\"public\",\"about\":{\"question\": 3},\"replyTo\":3,\"at\":\"2026-09-30T00:00:00Z\",\"body\":1}",
+    "valid": false
+   },
+   {
+    "name": "from text other than manager",
+    "json": "{\"id\":\"route_r.8\",\"class\":\"public\",\"position\":7,\"schema\":\"answer\",\"from\":\"person\",\"to\":\"public\",\"about\":{\"question\": 3},\"replyTo\":3,\"at\":\"2026-09-30T00:00:00Z\",\"body\":1}",
+    "valid": false
+   },
+   {
+    "name": "uppercase claim digest",
+    "json": "{\"id\":\"route_r.8\",\"class\":\"public\",\"position\":7,\"schema\":\"answer\",\"from\":{\"actor\": \"person\"},\"to\":\"public\",\"about\":{\"question\": 3},\"replyTo\":3,\"at\":\"2026-09-30T00:00:00Z\",\"claim\":{\"sha256\": \"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\", \"bytes\": 1}}",
+    "valid": false
+   },
+   {
+    "name": "unknown field",
+    "json": "{\"id\":\"route_r.8\",\"class\":\"public\",\"position\":7,\"schema\":\"answer\",\"from\":{\"actor\": \"person\"},\"to\":\"public\",\"about\":{\"question\": 3},\"replyTo\":3,\"at\":\"2026-09-30T00:00:00Z\",\"body\":1,\"problems\":[]}",
+    "valid": false
+   },
+   {
+    "name": "missing at",
+    "json": "{\"id\":\"route_r.8\",\"class\":\"public\",\"position\":7,\"schema\":\"answer\",\"from\":{\"actor\": \"person\"},\"to\":\"public\",\"about\":{\"question\": 3},\"replyTo\":3,\"body\":1}",
+    "valid": false
+   }
+  ],
+  "cursors": [
+   {
+    "cursor": "s.0",
+    "valid": true
+   },
+   {
+    "cursor": "s.18446744073709551615",
+    "valid": true
+   },
+   {
+    "cursor": "a-b_C.42",
+    "valid": true
+   },
+   {
+    "cursor": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.1",
+    "valid": true
+   },
+   {
+    "cursor": "s.01",
+    "valid": false
+   },
+   {
+    "cursor": "s.",
+    "valid": false
+   },
+   {
+    "cursor": ".5",
+    "valid": false
+   },
+   {
+    "cursor": "s.18446744073709551616",
+    "valid": false
+   },
+   {
+    "cursor": "s.-1",
+    "valid": false
+   },
+   {
+    "cursor": "s.1.2",
+    "valid": false
+   },
+   {
+    "cursor": "s 1.2",
+    "valid": false
+   },
+   {
+    "cursor": "é.1",
+    "valid": false
+   },
+   {
+    "cursor": "s.1e3",
+    "valid": false
+   },
+   {
+    "cursor": "",
+    "valid": false
+   },
+   {
+    "cursor": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.1",
+    "valid": false
+   },
+   {
+    "cursor": "s.000000000000000000001",
+    "valid": false
+   }
+  ],
+  "etags": [
+   {
+    "a": "\"abc\"",
+    "b": "\"abc\"",
+    "valid": [
+     true,
+     true
+    ],
+    "equal": true
+   },
+   {
+    "a": "\"abc\"",
+    "b": "\"ABC\"",
+    "valid": [
+     true,
+     true
+    ],
+    "equal": false
+   },
+   {
+    "a": "\"r_1\"",
+    "b": "\"r_2\"",
+    "valid": [
+     true,
+     true
+    ],
+    "equal": false
+   },
+   {
+    "a": "W/\"abc\"",
+    "b": "\"abc\"",
+    "valid": [
+     false,
+     true
+    ],
+    "equal": false
+   },
+   {
+    "a": "abc",
+    "b": "\"\"",
+    "valid": [
+     false,
+     false
+    ],
+    "equal": false
+   },
+   {
+    "a": "\"a b\"",
+    "b": "\"é\"",
+    "valid": [
+     false,
+     false
+    ],
+    "equal": false
+   }
+  ],
+  "problems": [
+   {
+    "name": "view-expired",
+    "status": 410,
+    "body": {
+     "type": "urn:agent-cat:manager:problem:view-expired",
+     "title": "Refused",
+     "status": 410,
+     "code": "view-expired",
+     "instance": "/v1/events"
+    },
+    "expected": {
+     "refused": [
+      410,
+      "view-expired"
+     ]
+    }
+   },
+   {
+    "name": "cursor-expired",
+    "status": 410,
+    "body": {
+     "type": "urn:agent-cat:manager:problem:cursor-expired",
+     "title": "Refused",
+     "status": 410,
+     "code": "cursor-expired",
+     "instance": "/v1/events"
+    },
+    "expected": {
+     "refused": [
+      410,
+      "cursor-expired"
+     ]
+    }
+   },
+   {
+    "name": "status written as 410.0",
+    "status": 410,
+    "body": {
+     "status": 410.0,
+     "code": "cursor-expired"
+    },
+    "expected": {
+     "refused": [
+      410,
+      "cursor-expired"
+     ]
+    }
+   },
+   {
+    "name": "malformed request",
+    "status": 400,
+    "body": {
+     "type": "urn:agent-cat:manager:problem:malformed-request",
+     "title": "Refused",
+     "status": 400,
+     "code": "malformed-request",
+     "instance": "/v1/events"
+    },
+    "expected": {
+     "refused": [
+      400,
+      "malformed-request"
+     ]
+    }
+   },
+   {
+    "name": "body status differs from response status",
+    "status": 410,
+    "body": {
+     "type": "urn:agent-cat:manager:problem:view-expired",
+     "title": "Refused",
+     "status": 409,
+     "code": "view-expired",
+     "instance": "/v1/events"
+    },
+    "expected": "InvalidResponse"
+   },
+   {
+    "name": "status as text",
+    "status": 410,
+    "body": {
+     "status": "410",
+     "code": "view-expired"
+    },
+    "expected": "InvalidResponse"
+   },
+   {
+    "name": "missing code",
+    "status": 410,
+    "body": {
+     "status": 410,
+     "title": "Gone"
+    },
+    "expected": "InvalidResponse"
+   },
+   {
+    "name": "code null",
+    "status": 410,
+    "body": {
+     "status": 410,
+     "code": null
+    },
+    "expected": "InvalidResponse"
+   },
+   {
+    "name": "Unicode code",
+    "status": 410,
+    "body": {
+     "status": 410,
+     "code": "view-expïred"
+    },
+    "expected": "InvalidResponse"
+   },
+   {
+    "name": "body that is not an object",
+    "status": 410,
+    "body": false,
+    "expected": "InvalidResponse"
+   }
+  ]
+ }
+}

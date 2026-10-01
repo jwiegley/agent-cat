@@ -9,8 +9,15 @@ module Agentic.Manager.Client
     pollEvents, prepareCommand, sendCommand, downloadVerified, decodeObservation,
     DraftView (..), Readiness (..), InputDeclaration (..), SuppliedInput (..), InputError (..),
     Preparation (..), Review (..), ReviewInput (..), ReviewLineage (..), ReviewEdit (..), PublicPolicy, policyValue,
-    CommandReceipt (..), CommandState, Operation, stateName, operationName, effectValue
+    CommandReceipt (..), CommandState, Operation, stateName, operationName, effectValue,
+    problemFailure, validCursor, validETag,
+    sseBlockBytes, SseParser, SseEvent (..), SseBlock (..), newSseParser, feedSse, closeSse,
+    EventName (..), eventNameText, parseEventName, Invalidation (..), InvalidationEvent (..), EventBatch (..),
+    RouteRecord (..), RoutePayload (..), decodeEventBlock, decodeRouteBlock
   ) where
+
+import Agentic.Manager.Client.Events
+import Agentic.Manager.Client.Failure (ClientFailure (..), problemFailure)
 
 import Agentic.Manager.Protocol.Command
   (validId, validResource, encoded, CommandReceipt (..), CommandState, Operation, stateName, operationName, effectValue)
@@ -81,13 +88,6 @@ data ClientResponse = ClientResponse
   { responseStatus :: !Int, responseValue :: !Value,
     responseETag :: !(Maybe Text), responseLocation :: !(Maybe Reference), responseBodyBytes :: !Int
   }
-
--- | Fixed local failures. Request headers and exception diagnostics are not retained.
-data ClientFailure = ClientClosed | InvalidEndpoint | WrongEndpoint | CredentialUnavailable
-  | CredentialChanged | TransportUnavailable | RedirectRefused | InvalidResponse
-  | ResponseTooLarge | UnsupportedVersion | Refused !Int !Text | ClientFileUnavailable | InvalidClientProfile
-  deriving (Eq, Show)
-instance Exception ClientFailure
 
 -- | The composition root supplies verified TLS settings and a private byte reader.
 -- Environment proxies, cookies, redirects and implicit transport retries are disabled.
@@ -349,14 +349,6 @@ pollEvents client cursor = clientIO $ do
   location <- either throwIO pure (reference client "/v1/events")
   exchangeJSON client location "GET" [("Last-Event-ID",TE.encodeUtf8 cursor)] (HTTP.RequestBodyBS BS.empty)
 
-validCursor :: Text -> Bool
-validCursor value = case T.splitOn "." value of
-  [stream,number] -> validId stream && not (T.null number) && T.length number <= 20
-    && T.all (\c -> c >= '0' && c <= '9') number
-    && (number == "0" || T.take 1 number /= "0")
-    && T.foldl' (\n c -> 10 * n + toInteger (fromEnum c - fromEnum '0')) 0 number <= 18446744073709551615
-  _ -> False
-
 prepareCommand :: Client -> Reference -> Maybe Text -> Value -> IO (Either ClientFailure PendingCommand)
 prepareCommand client@(Client _ _ _ _ _ epoch _ _) location precondition value = clientIO $ do
   checkReference client location
@@ -390,7 +382,7 @@ exchangeJSON client location method headers body = do
       expectedMedia = if status >= 200 && status < 300 then "application/json" else "application/problem+json"
   unless (media == Just expectedMedia && lookup "Cache-Control" returnedHeaders == Just "no-store") (throwIO InvalidResponse)
   value <- either (const (throwIO InvalidResponse)) pure (decodeStrictValue bytes)
-  unless (status >= 200 && status < 300) (throwIO (publicRefusal status value))
+  unless (status >= 200 && status < 300) (throwIO (problemFailure status value))
   case value of
     Object fields | KM.lookup "version" fields == Just (Number 1) -> pure ()
     _ -> throwIO UnsupportedVersion
@@ -409,7 +401,7 @@ downloadVerified client location size checksum = clientIO $ do
   unless (status == 200) $ do
     when (BS.length bytes > 1048576) (throwIO ResponseTooLarge)
     problem <- either (const (throwIO InvalidResponse)) pure (decodeStrictValue bytes)
-    throwIO (publicRefusal status problem)
+    throwIO (problemFailure status problem)
   unless (BS.length bytes == size
     && fmap (BC.takeWhile (/= ';')) (lookup "Content-Type" headers) == Just "application/octet-stream"
     && lookup "Cache-Control" headers == Just "no-store"
@@ -475,8 +467,7 @@ fingerprint bytes = BA.convert (hash bytes :: Digest SHA256)
 
 checkedETag :: Text -> IO BS.ByteString
 checkedETag value = do
-  unless (T.length value >= 3 && T.length value <= 130 && T.head value == '"'
-    && T.last value == '"' && validId (T.dropEnd 1 (T.drop 1 value))) (throwIO InvalidResponse)
+  unless (validETag value) (throwIO InvalidResponse)
   pure (TE.encodeUtf8 value)
 
 decodeText :: BS.ByteString -> IO Text
@@ -554,13 +545,6 @@ checkLimits = withObject "limits" $ \fields -> do
 capabilityEpoch :: Value -> Text
 capabilityEpoch (Object fields) = case KM.lookup "authorityEpoch" fields of Just (String value) -> value; _ -> ""
 capabilityEpoch _ = ""
-
-publicRefusal :: Int -> Value -> ClientFailure
-publicRefusal status (Object fields) = case (KM.lookup "status" fields,KM.lookup "code" fields) of
-  (Just (Number number),Just (String code)) | number == fromIntegral status
-    && validId code && T.length code <= 128 -> Refused status code
-  _ -> InvalidResponse
-publicRefusal _ _ = InvalidResponse
 
 clientIO :: IO a -> IO (Either ClientFailure a)
 clientIO action = do

@@ -10274,6 +10274,30 @@ Non-blocking findings of fess audit fess/pc-PC8-r1.md (2026-09-30) on subtask PC
 
 Implementer limitations: the new tests were written after the production change and were not shown failing first.
 
+* TODO [#E] Resolve the non-blocking fess findings of subtask PC9    :review:
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pc9-sse-events-fess-bjzi
+:LABELS:   ["review","workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-30 Wed 22:40]
+:MODIFIED: [2026-09-30 Wed 22:40]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess audit fess/pc-PC9-r1.md (2026-09-30) on subtask PC9 (WM-029 SSE block parser, event DTOs and event vectors).
+
+1. (low) Refusal vectors only check that the dispatched blocks are a prefix of the expected blocks (manager/test/ClientCheck.hs near 235). A parser that refuses too early, or that drops blocks completed before the refusal in one-byte feeding, still passes. Require exact equality for the one-byte and listed-split feeds, and keep the prefix rule only for the whole-stream feed.
+2. (low) When a chunk completes valid blocks and then refuses, feedSse returns only Left InvalidResponse, so those blocks and the advanced last identifier are lost (manager/src/Agentic/Manager/Client/Events.hs near 60-66). Neither the Haddock nor doc/api/README.md states this. Document that a refusal discards the outcomes of the refusing chunk, or return the blocks completed before the refusal.
+3. (low) In the ETag vectors, the equality sub-check compares the fixture with its own Text equality (manager/test/ClientCheck.hs near 149). No client function is under test there. Remove it, or add a client ETag equality function and test it.
+4. (low) The route-record and SSE vectors use synthetic shapes that the manager never emits (test/manager_client_vectors.json). Add at least one route block and one /events block captured from a manager run, for example the tui-journey fixture.
+5. (low) The comment on members says it gives a failure that names the vector, but members returns [] for a missing field (manager/test/ClientCheck.hs near 114). A typo in an expected key silently becomes "expects nothing". Correct the comment and make the expected and stream keys required.
+6. (low) The vectors command in doc/api/README.md (near 798) calls list-bin without a build step. Add the BUILD command for manager-client-check before it.
+7. (low) The implementer summary said 102 named vectors. The file has 105 vectors, 83 of them named, and the 117 PASS lines are 105 vector checks plus 12 SSE decode checks. The integration record uses the corrected count.
+
 * TODO [#C] Phase B part 1 review follow-ups: download quota, id row bound, legacy history, precision gaps
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -18048,7 +18072,7 @@ public or production deployment.
 :LABELS:   ["p6","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-27 Sun 01:54]
+:MODIFIED: [2026-09-30 Wed 22:40]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-029
 :SOURCE_REPO: agent-cat
@@ -18188,6 +18212,13 @@ coordination or SQL into the TUI.
     "author": "johnw",
     "text": "Subtask A5R (rebase audit follow-ups) is integrated on branch workflow-manager-checkpoint-20260923. It adds runtime broker tests for epoch passthrough and shell tool log delivery through brokerLog, a frontend preparation and lineage test on the probe row 'in-process' with non-empty rowTools, and current-state corrections to runtime/BROKER.md, doc/tui-release-evidence.md and doc/tui-design.md. It removes the assertion-free ext-pi/test/pi-remote-acp.test.mjs. Evidence: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A5R/impl-r2 and /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/A/A5R/verify-r2. Broker and runtime tests pass at N1 and N8 (model tests). The frontend session probe passes at N1 and N8 (deterministic native fixture). Five mutants fail as expected. tui/ci/tui.sh passes (deterministic PTY fixture, second verifier run after a first failure under host load 88 to 97, root kept). The ACP gate reports 21 scenarios. ext-pi npm test gives 89 passed and 5 skipped. No actual UI interaction or operator exercise was performed. This comment does not close the package.",
     "created_at": "2026-09-27T08:54:44Z"
+  },
+  {
+    "id": 473,
+    "issue_id": "acat-wm-029-nlmg",
+    "author": "johnw",
+    "text": "Subtask PC9 (2026-09-30) adds the pure live-delivery decoding of the shared client: an incremental SSE block parser (manager/src/Agentic/Manager/Client/Events.hs: newSseParser, feedSse, closeSse; LF and CRLF, id, event, multi-line data, comment-only blocks as heartbeats, refusal of blocks above sseBlockBytes 16384, invalid UTF-8 and invalid ids with InvalidResponse, a partial final block discarded at close), strict event DTOs (Invalidation for the seven event names, EventBatch, RouteRecord), problemFailure (manager/src/Agentic/Manager/Client/Failure.hs: 410 view-expired and cursor-expired give Refused 410 code), validETag, and the vectors mode of manager-client-check with test/manager_client_vectors.json (105 vectors, 117 PASS checks). All of it is re-exported from Agentic.Manager.Client, and the TUI still imports only the facade. Not yet done in WM-029: the HTTP streaming reader, reconnect, and decoding a polling response as an EventBatch. Evidence: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/PC/PC9/impl-r1 (build.exit, vectors.exit, source-boundaries.exit and doc-check.exit all 0). Fess: fess/pc-PC9-r1.md, not blocking; its findings are filed as acat-pc9-sse-events-fess-bjzi.",
+    "created_at": "2026-10-01T05:40:59Z"
   }
 ]
 #+end_src
