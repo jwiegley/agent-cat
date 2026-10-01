@@ -2101,18 +2101,111 @@ liveDeliveryTests render profile = do
       ("while the stream is live the timer reads the selected request at most every five seconds",
         not (L.safetyReadDue L.DeliveryLive (Just now) (addUTCTime 4 now)) && L.safetyReadDue L.DeliveryLive (Just now) (addUTCTime 5 now)
           && L.safetyReadDue L.DeliveryLive Nothing now),
-      ("without a live stream the timer reads at every tick",
+      ("without a live stream, also while polling or disconnected, the timer reads at every tick of one second",
         all (\delivery -> L.safetyReadDue delivery (Just now) (addUTCTime 1 now))
-          [L.DeliveryIdle, L.DeliveryConnecting, L.DeliveryReconnecting "TransportUnavailable", L.DeliveryResnapshot, L.DeliveryStopped "internal frontend fault"]),
-      ("the delivery state names each state of the stream",
-        map L.deliveryText [L.DeliveryIdle, L.DeliveryConnecting, L.DeliveryLive, L.DeliveryReconnecting "TransportUnavailable", L.DeliveryResnapshot]
-          == ["delivery not started", "delivery connecting", "delivery live", "delivery reconnecting (TransportUnavailable)", "delivery resnapshot"]),
+          [L.DeliveryIdle, L.DeliveryConnecting, L.DeliveryPolling, L.DeliveryDisconnected now "TransportUnavailable", L.DeliveryResnapshot,
+           L.DeliveryStopped "internal frontend fault"]),
+      ("the delivery state names each state of delivery, with the UTC time of a disconnection",
+        map L.deliveryText [L.DeliveryIdle, L.DeliveryConnecting, L.DeliveryLive, L.DeliveryPolling,
+                            L.DeliveryDisconnected (addUTCTime 5 now) "TransportUnavailable", L.DeliveryResnapshot]
+          == ["delivery not started", "delivery connecting", "delivery live", "delivery polling",
+              "delivery disconnected since 12:00:05Z (TransportUnavailable)", "delivery resnapshot"]),
       ("the service shell shows the delivery state in the header row above the complete identity row",
         (case T.lines (shell (140,36) L.DeliveryLive) of
           _ : context : identityRow : _ -> "delivery live" `T.isInfixOf` context && endpointLine live `T.isInfixOf` identityRow
           _ -> False)
           && endpointLine live `T.isInfixOf` shell (140,36) L.DeliveryLive
-          && "delivery reconnecting (TransportUnavailable)" `T.isInfixOf` shell (140,36) (L.DeliveryReconnecting "TransportUnavailable")),
+          && "delivery polling" `T.isInfixOf` shell (140,36) L.DeliveryPolling
+          && "delivery disconnected since 12:00:00Z (TransportUnavailable)" `T.isInfixOf` shell (140,36) (L.DeliveryDisconnected now "TransportUnavailable")),
       ("a small terminal without the identity row shows no delivery state",
         not ("delivery" `T.isInfixOf` shell (40,12) L.DeliveryLive))
+    ]
+  followTests now
+
+-- | The transport rules of the event worker: the resnapshot after a 410
+-- refusal, the identifier of each reconnection and poll, and the fallback
+-- to polling.
+followTests :: UTCTime -> IO ()
+followTests now = do
+  let at seconds = addUTCTime seconds now
+      transport = Just C.TransportUnavailable
+      quota = Just (C.Refused 429 "storage-quota")
+      start = L.newFollow "c_10"
+      stream end delivery follow = L.afterStream (at 1) end delivery follow
+      -- The resnapshot path after a 410 refusal of the stream or of a poll,
+      -- with an overview fetch of generation 0 in flight.
+      resnapshotPath code viaPoll =
+        let (follow, delivery, refused) = if viaPoll
+              then (\(f, d, step) -> (f, d, Left step)) (L.afterPoll (at 1) (Left (C.Refused 410 code)) L.DeliveryPolling start)
+              else (\(f, d, step) -> (f, d, Right step)) (stream (L.StreamEnd True "c_12" (Just (C.Refused 410 code))) L.DeliveryLive start)
+            (r0, f0) = L.invalidateFetches [L.OverviewFetch] C.newRefresh L.noFetches
+            inFlight = maybe f0 (\(fetch, rest) -> L.fetchStarted 5 fetch rest) (L.takeFetch (const True) idle f0)
+            (r1, f1) = L.resnapshotFetches r0 inFlight
+            stale = L.fetchCompleted 5 r1 f1
+            (r2, f2) = maybe (r1, f1) (\(_, refresh, fetches) -> (refresh, fetches)) stale
+            fresh = maybe f2 (\(fetch, rest) -> L.fetchStarted 6 fetch rest) (L.takeFetch (const True) idle f2)
+            installed = L.fetchCompleted 6 r2 fresh
+            g0 = C.FetchGeneration 0
+            g1 = C.FetchGeneration 1
+         in refused == (if viaPoll then Left L.PollResnapshot else Right L.FollowResnapshot)
+              && delivery == L.DeliveryResnapshot
+              && C.refreshGeneration r1 == g1
+              && fmap (\(install, _, _) -> install) stale == Just False
+              && not (L.overviewStartsStream g0 (C.refreshGeneration r2) delivery)
+              && fmap (\(install, _, _) -> install) installed == Just True
+              && L.overviewStartsStream g1 (C.refreshGeneration r2) delivery
+              && L.followCursor (L.newFollow "c_99") == "c_99" && L.followCursor follow /= "c_99"
+      idle = L.sessionLane :: L.Lane T.Text T.Text
+      -- A connection that delivered up to c_17 and then lost its transport.
+      (lost1, lostShown1, lostStep1) = stream (L.StreamEnd True "c_17" transport) L.DeliveryLive start
+      -- The reconnection from c_17 delivers nothing and fails again.
+      (lost2, lostShown2, lostStep2) = L.afterStream (at 3) (L.StreamEnd False "c_17" transport) lostShown1 lost1
+      -- The manager ends a stream that delivered up to c_20.
+      (ended, endedShown, endedStep) = stream (L.StreamEnd True "c_20" Nothing) L.DeliveryLive start
+      -- The first stream is refused with 429 because no SSE reader is free.
+      (refused1, refusedShown1, refusedStep1) = stream (L.StreamEnd False "c_10" quota) L.DeliveryConnecting start
+      -- Polling from c_10: a batch with more events, a batch without, a failed poll.
+      (polled1, polledShown1, polledStep1) = L.afterPoll (at 2) (Right ("c_14", True)) refusedShown1 refused1
+      (polled2, polledShown2, polledStep2) = L.afterPoll (at 2) (Right ("c_15", False)) polledShown1 polled1
+      (polled3, polledShown3, polledStep3) = L.afterPoll (at 3) (Left C.TransportUnavailable) polledShown2 polled2
+      -- The stream is tried again from c_15 while polling and refused again.
+      (refused2, refusedShown2, refusedStep2) = L.afterStream (at 4) (L.StreamEnd False "c_15" quota) L.DeliveryPolling polled2
+      -- A later stream attempt connects and delivers.
+      (back, _, backStep) = L.afterStream (at 9) (L.StreamEnd True "c_21" Nothing) L.DeliveryLive refused2
+  checks
+    [ ("a 410 view-expired refusal of the stream takes a new overview in a new generation, installs nothing older and restarts from the new cursor",
+        resnapshotPath "view-expired" False),
+      ("a 410 cursor-expired refusal of the stream takes a new overview in a new generation, installs nothing older and restarts from the new cursor",
+        resnapshotPath "cursor-expired" False),
+      ("a 410 view-expired or cursor-expired refusal of a poll takes the same resnapshot path",
+        resnapshotPath "view-expired" True && resnapshotPath "cursor-expired" True),
+      ("an installed overview starts no second worker while a stream is live, polling or disconnected",
+        not (any (L.overviewStartsStream (C.FetchGeneration 1) (C.FetchGeneration 1))
+          [L.DeliveryConnecting, L.DeliveryLive, L.DeliveryPolling, L.DeliveryDisconnected now "TransportUnavailable"])
+          && L.overviewStartsStream (C.FetchGeneration 0) (C.FetchGeneration 0) L.DeliveryIdle),
+      ("after a transport failure the worker reconnects from its last complete event identifier with the reset backoff",
+        lostStep1 == L.FollowStream 1 && L.followCursor lost1 == "c_17" && L.followFailures lost1 == 1
+          && lostShown1 == L.DeliveryDisconnected (at 1) "TransportUnavailable"),
+      ("after the manager ends the stream the worker reconnects from the identifier of its last complete event",
+        endedStep == L.FollowStream 1 && L.followCursor ended == "c_20" && endedShown == L.DeliveryLive),
+      ("a second consecutive SSE failure changes to polling from the same identifier and keeps the time of the first failure",
+        lostStep2 == L.FollowPoll 2 && L.followCursor lost2 == "c_17" && L.followFailures lost2 == 2
+          && lostShown2 == L.DeliveryDisconnected (at 1) "TransportUnavailable"),
+      ("a 429 refusal of the stream changes to polling at once and tries the stream again after the backoff",
+        refusedStep1 == L.FollowPoll 1 && L.followCursor refused1 == "c_10"
+          && refusedShown1 == L.DeliveryDisconnected (at 1) "429 storage-quota"),
+      ("a polling batch shows polling and gives the cursor of the next poll, and a batch with more events polls again at once",
+        polledStep1 == L.PollNow && L.followCursor polled1 == "c_14" && polledShown1 == L.DeliveryPolling
+          && polledStep2 == L.PollLater && L.followCursor polled2 == "c_15" && polledShown2 == L.DeliveryPolling),
+      ("a failed poll keeps its cursor and shows the disconnection",
+        polledStep3 == L.PollLater && L.followCursor polled3 == "c_15"
+          && polledShown3 == L.DeliveryDisconnected (at 3) "TransportUnavailable"),
+      ("a refused stream attempt while polling keeps the polling state, sends the polled identifier and doubles the backoff",
+        refusedStep2 == L.FollowPoll 2 && refusedShown2 == L.DeliveryPolling && L.followCursor refused2 == "c_15"
+          && C.backoffSeconds (L.followBackoff refused2) == 4),
+      ("a stream that delivers again resets the backoff and the count of failures",
+        backStep == L.FollowStream 1 && L.followFailures back == 1 && C.backoffSeconds (L.followBackoff back) == 2),
+      ("a closed client ends the worker after a stream or a poll",
+        (\(_, _, step) -> step) (stream (L.StreamEnd False "c_10" (Just C.ClientClosed)) L.DeliveryLive start) == L.FollowClosed
+          && (\(_, _, step) -> step) (L.afterPoll now (Left C.ClientClosed) L.DeliveryPolling start) == L.PollClosed)
     ]

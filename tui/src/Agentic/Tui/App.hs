@@ -75,7 +75,7 @@ import Control.Concurrent.STM
   )
 import Crypto.Random (getRandomBytes)
 import Control.Exception (AsyncException (UserInterrupt), SomeAsyncException, SomeException, bracket, displayException, finally, fromException, mask, mask_, onException, throwIO, try, uninterruptibleMask_)
-import Control.Monad (forever, unless, void, when)
+import Control.Monad (forM_, forever, unless, void, when)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Trans.Except (ExceptT (..), runExceptT)
 import Data.Aeson (Value (..), encode)
@@ -88,7 +88,7 @@ import Data.Maybe (fromMaybe, isJust, listToMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
-import Data.Time.Clock (UTCTime, diffUTCTime, getCurrentTime, utctDayTime)
+import Data.Time.Clock (UTCTime, addUTCTime, diffUTCTime, getCurrentTime, utctDayTime)
 import Data.Time.Format (defaultTimeLocale, parseTimeM)
 import GHC.Clock (getMonotonicTimeNSec)
 import qualified Graphics.Vty as Vty
@@ -129,9 +129,10 @@ data ServiceEvent
   | ServicePrepared !Int !(Lane.CallOutcome Manager.PendingCommand)
   | ServiceSent !Int !(Lane.CallOutcome Manager.ClientResponse)
   | ServiceRequestReady !Int !(Lane.CallOutcome (Service.RequestRead Manager.Observed))
-    -- | The overview read with this ticket, what started it, and the event
-    -- cursor and members of the overview.
-  | ServiceOverviewReady !Int !OverviewOrigin !(Lane.CallOutcome (Text, [Service.OverviewMember]))
+    -- | The overview read with this ticket, what started it, the fetch
+    -- generation in which it started, and the event cursor and members of
+    -- the overview.
+  | ServiceOverviewReady !Int !OverviewOrigin !Manager.FetchGeneration !(Lane.CallOutcome (Text, [Service.OverviewMember]))
     -- | The retrieval of the verified result of this run.
   | ServiceResultReady !Int !Text !(Lane.CallOutcome (Maybe Service.VerifiedResult))
 
@@ -463,18 +464,21 @@ startServiceProfiles client = startServiceRead Lane.PageSetRead "loading manager
 -- | Read the authorized manager overview through the single-flight lane,
 -- given what starts the read. A read of live delivery keeps the status line.
 startServiceOverview :: Manager.Client -> OverviewOrigin -> EventM Name AppState ()
-startServiceOverview client origin =
+startServiceOverview client origin = do
+  generation <- Manager.refreshGeneration . serviceRefresh <$> get
   startServiceReadShown Lane.PageSetRead (if origin == LiveOverview then Nothing else Just "reading the manager overview") $ \ticket ->
-    ServiceOverviewReady ticket origin <$> Lane.serviceCall
+    ServiceOverviewReady ticket origin generation <$> Lane.serviceCall
       ((>>= \overview -> (,) (Manager.overviewCursor overview) <$> traverse Service.decodeOverviewItem (Manager.overviewItems overview))
         <$> Manager.loadOverview client)
 
 -- | Start the event worker of the session from the cursor of an installed
--- overview, when no stream runs or a 410 refusal ended the stream.
-startServiceEvents :: Manager.Client -> Text -> EventM Name AppState ()
-startServiceEvents client cursor = do
+-- overview that started in the given fetch generation, when
+-- 'Lane.overviewStartsStream' allows it: no stream runs, or a 410 refusal
+-- ended the stream, and the overview is of the current generation.
+startServiceEvents :: Manager.Client -> Manager.FetchGeneration -> Text -> EventM Name AppState ()
+startServiceEvents client generation cursor = do
   state <- get
-  when (stateServiceDelivery state `elem` [Lane.DeliveryIdle, Lane.DeliveryResnapshot]) $ do
+  when (Lane.overviewStartsStream generation (Manager.refreshGeneration (serviceRefresh state)) (stateServiceDelivery state)) $ do
     let sink = stateServiceSink state
     liftIO (atomically (writeTVar (sinkDelivery sink) Lane.DeliveryConnecting))
     put state {stateServiceDelivery = Lane.DeliveryConnecting}
@@ -482,57 +486,90 @@ startServiceEvents client cursor = do
 
 -- | The event worker of one session. It follows @/events@ from the cursor
 -- with 'Manager.streamEvents' and records each invalidated resource and the
--- delivery state in the live sink, with one pending wakeup. After the
--- manager ends the stream or a failure, it reconnects with the identifier of
--- the last complete event after the jittered backoff. A connection that
--- delivered a heartbeat or an invalidation resets the backoff. A 410
--- refusal ends the worker with 'Lane.DeliveryResnapshot', and the frontend
--- reads a new overview whose cursor starts the next worker. A closed client
--- ends the worker. An internal fault stops the stream, and the timer
--- refresh continues at every tick.
+-- delivery state in the live sink, with one pending wakeup. The pure rules
+-- of 'Lane.afterStream' and 'Lane.afterPoll' decide each next step. After
+-- the manager ends the stream or a failure, the worker reconnects with the
+-- identifier of the last complete event after the jittered backoff. After
+-- 'Lane.streamFailureLimit' consecutive failures or a refusal of the
+-- stream, for example 429 when the credential has no free SSE reader, it
+-- polls with 'Manager.pollEventBatch' every second from that identifier and
+-- connects the stream again when the jittered backoff has passed. A 410
+-- refusal of the stream or of a poll ends the worker with
+-- 'Lane.DeliveryResnapshot', and the frontend reads a new overview whose
+-- cursor starts the next worker. A closed client ends the worker. An
+-- internal fault stops delivery, and the timer refresh continues at every
+-- tick.
 serviceEventWorker :: BChan AppEvent -> LiveSink -> Manager.Client -> Text -> IO ()
-serviceEventWorker channel sink client = follow Manager.initialBackoff
+serviceEventWorker channel sink client = stream . Lane.newFollow
   where
     wake = notifyOnce channel (sinkWakeup sink) ServiceWakeup
-    publish delivery = do
-      changed <- atomically $ do
+    -- Apply one pure delivery transition and wake the frontend when the
+    -- state changed.
+    transition change = do
+      (result, changed) <- atomically $ do
         current <- readTVar (sinkDelivery sink)
-        writeTVar (sinkDelivery sink) delivery
-        pure (current /= delivery)
+        let (result, next) = change current
+        writeTVar (sinkDelivery sink) next
+        pure (result, current /= next)
       when changed wake
-    follow backoff cursor = do
-      latest <- newIORef cursor
+      pure result
+    noteEvents events = atomically $ forM_ events $ \event ->
+      modifyTVar' (sinkInvalidated sink) (Lane.noteInvalidation (Manager.invalidationResource (Manager.invalidationEventData event)))
+    stream follow = do
+      latest <- newIORef (Lane.followCursor follow)
       delivered <- newIORef False
-      outcome <- Lane.serviceCall . Manager.streamEvents client cursor $ \item -> do
+      outcome <- Lane.serviceCall . Manager.streamEvents client (Lane.followCursor follow) $ \item -> do
         writeIORef delivered True
         case item of
-          Manager.StreamHeartbeat -> publish Lane.DeliveryLive
+          Manager.StreamHeartbeat -> transition (const ((), Lane.DeliveryLive))
           Manager.StreamInvalidation event -> do
             writeIORef latest (Manager.invalidationEventId event)
-            atomically $ do
-              modifyTVar' (sinkInvalidated sink) (Lane.noteInvalidation (Manager.invalidationResource (Manager.invalidationEventData event)))
-              writeTVar (sinkDelivery sink) Lane.DeliveryLive
+            noteEvents [event]
+            atomically (writeTVar (sinkDelivery sink) Lane.DeliveryLive)
             wake
       worked <- readIORef delivered
       resume <- readIORef latest
-      let base = if worked then Manager.initialBackoff else backoff
       case outcome of
-        Lane.Declared (Left Manager.ClientClosed) -> pure ()
-        Lane.Declared (Left (Manager.Refused 410 _)) -> publish Lane.DeliveryResnapshot
-        Lane.Declared (Left failure) -> publish (Lane.DeliveryReconnecting (Lane.refusalCode failure)) >> reconnect base resume
-        Lane.Declared (Right ended) -> reconnect base ended
-        Lane.InternalFault -> publish (Lane.DeliveryStopped "internal frontend fault")
-    -- Each further connection attempt starts in the connecting state.
-    reconnect backoff resume = do
-      next <- pause backoff
-      publish Lane.DeliveryConnecting
-      follow next resume
-    pause backoff = do
-      let (seconds, next) = Manager.reconnectDelay backoff
+        Lane.InternalFault -> transition (const ((), Lane.DeliveryStopped "internal frontend fault"))
+        Lane.Declared result -> do
+          now <- getCurrentTime
+          let end = Lane.StreamEnd worked (either (const resume) id result) (either Just (const Nothing) result)
+          (follow', step) <- transition $ \delivery ->
+            let (next, shown, chosen) = Lane.afterStream now end delivery follow in ((next, chosen), shown)
+          case step of
+            Lane.FollowClosed -> pure ()
+            Lane.FollowResnapshot -> pure ()
+            Lane.FollowStream seconds -> pause seconds >> stream follow'
+            Lane.FollowPoll seconds -> do
+              wait <- jittered seconds
+              poll follow' (addUTCTime (fromIntegral wait / 1000000) now)
+    -- Poll from the cursor until the stream is due again at the given time.
+    poll follow due = do
+      outcome <- Lane.serviceCall (Manager.pollEventBatch client (Lane.followCursor follow))
+      case outcome of
+        Lane.InternalFault -> transition (const ((), Lane.DeliveryStopped "internal frontend fault"))
+        Lane.Declared result -> do
+          -- The invalidations of a batch wake the frontend even when the
+          -- delivery state stays the same.
+          forM_ result $ \batch -> unless (null (Manager.batchEvents batch)) (noteEvents (Manager.batchEvents batch) >> wake)
+          now <- getCurrentTime
+          (follow', step) <- transition $ \delivery ->
+            let batch = fmap (\value -> (Manager.batchCursor value, Manager.batchHasMore value)) result
+                (next, shown, chosen) = Lane.afterPoll now batch delivery follow
+             in ((next, chosen), shown)
+          case step of
+            Lane.PollClosed -> pure ()
+            Lane.PollResnapshot -> pure ()
+            Lane.PollNow -> poll follow' due
+            Lane.PollLater -> do
+              threadDelay (Lane.pollIntervalSeconds * 1000000)
+              later <- getCurrentTime
+              if later >= due then stream follow' else poll follow' due
+    pause seconds = jittered seconds >>= threadDelay
+    jittered seconds = do
       bytes <- getRandomBytes 2 :: IO BS.ByteString
       let fraction = fromIntegral (foldl (\total byte -> 256 * total + fromIntegral byte) (0 :: Int) (BS.unpack bytes)) / 65535
-      threadDelay (Manager.jitteredMicroseconds seconds fraction)
-      pure next
+      pure (Manager.jitteredMicroseconds seconds fraction)
 
 -- | The rows of the installed manager overview.
 serviceOverviewRows :: AppState -> [Service.OverviewRow]
@@ -1018,7 +1055,7 @@ serviceEventTicket serviceEvent = case serviceEvent of
   ServicePrepared ticket _ -> ticket
   ServiceSent ticket _ -> ticket
   ServiceRequestReady ticket _ -> ticket
-  ServiceOverviewReady ticket _ _ -> ticket
+  ServiceOverviewReady ticket _ _ _ -> ticket
   ServiceResultReady ticket _ _ -> ticket
 
 -- | The refresh coordinator of the session.
@@ -1045,7 +1082,7 @@ handleServiceResultCore client serviceEvent = do
     -- A refused overview read keeps the last complete overview and marks it
     -- stale with the refusal code. An installed overview starts the event
     -- worker from its cursor when no stream runs.
-    ServiceOverviewReady ticket origin result ->
+    ServiceOverviewReady ticket origin generation result ->
       let bootstrap = origin == BootstrapOverview
           shown current
             | bootstrap = current {stateModel = initialServiceModel (stateServiceProfiles current), statePaneFocus = PrimaryPane}
@@ -1076,7 +1113,7 @@ handleServiceResultCore client serviceEvent = do
           in do
             put next {stateServiceOverviewCursor = max 0 (min (length rows - 1) (stateServiceOverviewCursor state)),
               stateModel = if origin == ExplicitOverview then (stateModel next) {modelStatus = "manager overview read"} else stateModel next}
-            mapM_ (startServiceEvents client) cursor
+            mapM_ (startServiceEvents client generation) cursor
     ServiceWorkflowsReady ticket profile result -> case Lane.readStep ticket result (stateServiceLane state) of
       (Lane.ReadStale,_) -> pure ()
       (Lane.ReadFaulted,lane) -> faultService state lane

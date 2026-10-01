@@ -10302,7 +10302,7 @@ Limitations recorded by the implementer: tui-overview creates only a draft reque
 :LABELS:   ["review","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-10-01 Thu 01:20]
-:MODIFIED: [2026-10-01 Thu 01:20]
+:MODIFIED: [2026-10-01 Thu 01:39]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -10315,6 +10315,43 @@ Non-blocking findings of fess audit fess/pc-PC16-r2.md (2026-10-01) on subtask P
 2. (low) tui/src/Agentic/Tui/App.hs handleServiceResult and startServiceEvents: an explicit g overview read (ExplicitOverview) is not a coordinated fetch, so the fetch generation does not fence it. If it is in flight across a 410, it installs the pre-410 cursor and starts a worker from it. That worker gets a second 410 and the state converges, at the cost of one wasted cycle. Route explicit overview reads through the coordinator, or have startServiceEvents ignore a cursor from a read that started before the latest resnapshot.
 3. (low) PC/PC16/impl-r2/attempt1/tui-overview.log: during a normal run the manager refused a live overview read with 503 storage-unavailable. The TUI now recovers through the retry, but the cause is not investigated. Investigate store admission under concurrent overview reads during a run.
 4. (low, known limitation) A refused explicit overview read gets no automatic retry unless delivery is in the resnapshot state, and a retried live overview read waits while the view is hidden. Both agree with the rule that the overview is read while its view is shown. Record as a known limitation; no change needed now.
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 487,
+    "issue_id": "acat-pc16-events-fess-j8za",
+    "author": "johnw",
+    "text": "PC17 fess finding 1 (acat-pc17-follow-fess-jd40) restates item 2 of this issue for explicit and bootstrap overview reads across a 410. PC17 fenced the stream start (overviewStartsStream) but not the row install.",
+    "created_at": "2026-10-01T08:39:11Z"
+  }
+]
+#+end_src
+
+* TODO [#D] Resolve the non-blocking fess findings of subtask PC17    :review:
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pc17-follow-fess-jd40
+:LABELS:   ["review","workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-01 Thu 01:39]
+:MODIFIED: [2026-10-01 Thu 01:39]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess audit fess/pc-PC17-r1.md (2026-10-01) on subtask PC17 (WM-034 resnapshot after 410, reconnection with backoff and polling fallback).
+
+1. (medium) tui/src/Agentic/Tui/App.hs ServiceOverviewReady (near lines 1084-1116): only overview reads started by a coordinated fetch are fenced by the fetch generation. An explicit g read (ExplicitOverview) or a BootstrapOverview read that started before a 410 resnapshot still installs its rows. Only the stream start is fenced (overviewStartsStream). This contradicts the requirement "no install of an earlier-generation result". Fix: in ServiceOverviewReady, when the read generation differs from refreshGeneration for any origin, free the read ticket and install nothing. Add a model or integration check. This also covers item 2 of acat-pc16-events-fess-j8za.
+2. (medium) doc/tui-design.md near line 253 says a 410 "installs no result of the earlier generation", and doc/agent-cat.texi near lines 3389-3391 says it "discards the results of the reads in progress". Both are false for explicit and bootstrap overview reads until item 1 is fixed. Fix the code or reword both documents.
+3. (medium) tui/test/ServiceTests.hs followTests, resnapshotPath, last conjunct: `L.followCursor (L.newFollow "c_99") == "c_99" && L.followCursor follow /= "c_99"` cannot fail. No model check fails if the old cursor is used at the stream restart. Factor the cursor choice into a pure function and assert on it, or assert in the tui-overview harness.
+4. (low) tui/src/Agentic/Tui/ServiceLane.hs near lines 1048 and 1085: afterStream and afterPoll match `Refused 410 _` and ignore the code, so the view-expired and cursor-expired tests are one check. Merge the test names or note this in the test comment.
+5. (low) tui/src/Agentic/Tui/ServiceLane.hs near lines 1053-1060: a stream that delivered and then ended normally counts as SSE failure 1, so one later transport failure starts polling. Two normal ends with no delivery show "disconnected (TransportUnavailable)" although no transport failure occurred. Do not count a normal end as a failure, or document the rule and use a distinct code.
+6. (low) manager/test/__pycache__/ was left untracked by the tui-overview run and no ignore rule covers it. The Integrator deleted it. Add an ignore rule or run the harness with python3 -B.
 
 * TODO [#C] Resolve PC5 fess findings in legacy history windows    :review:
 :PROPERTIES:
@@ -18237,7 +18274,7 @@ public or production deployment.
 :LABELS:   ["p6","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-01 Thu 01:20]
+:MODIFIED: [2026-10-01 Thu 01:39]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-029
 :SOURCE_REPO: agent-cat
@@ -18433,6 +18470,13 @@ coordination or SQL into the TUI.
     "author": "johnw",
     "text": "PC16 consumes the WM-029 shared client live delivery (Client.streamEvents, the PC12 refresh coordinator, advanceGeneration on 410 resnapshot, and the reconnection backoff) in the service TUI event worker. Evidence scope: PC/PC16/impl-r2 checks all exit 0 (build, tui-model-test, tui-overview N8, journey N8, doc check). Package stays open.",
     "created_at": "2026-10-01T08:20:51Z"
+  },
+  {
+    "id": 486,
+    "issue_id": "acat-wm-029-nlmg",
+    "author": "johnw",
+    "text": "PC17 consumes the WM-029 shared client (Client.streamEvents, Client.pollEventBatch, the PC12 reconnection backoff and advanceGeneration on 410) in the service TUI event worker for resnapshot, reconnection and polling fallback. Evidence scope: PC/PC17/impl-r1 checks all exit 0 (build, tui-model-test, tui-overview N8, journey N8, doc check). Package stays open.",
+    "created_at": "2026-10-01T08:39:10Z"
   }
 ]
 #+end_src
@@ -18816,7 +18860,7 @@ to an unapproved local launch.
 :LABELS:   ["p7","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-01 Thu 01:20]
+:MODIFIED: [2026-10-01 Thu 01:39]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-034
 :SOURCE_REPO: agent-cat
@@ -18944,6 +18988,13 @@ Local-mode behavior remains intact without a duplicated service runtime model.
     "author": "johnw",
     "text": "PC16 (service event worker with coalesced wakeup and live install): the service TUI starts ServiceEventsWork after the first overview and runs Client.streamEvents from the overview cursor. Invalidations reach Brick through a TVar key set and one non-blocking wakeup, and the PC12 coordinator in AppState refetches the overview and the selected request composite with one fetch in flight and one dirty fetch per resource, under fetch-generation and session-generation fencing. The shell shows delivery 'live', and the timer safety read of the selected request runs at most every 5 seconds while live. Evidence scope (private evidence dir PC/PC16/impl-r2): Werror build, tui-model-test, tui-overview at N8 (HTTP-created request appears without a key press within 3 s, approve and answer over HTTP reach the TUI live), Phase A journey N8, make -C doc check, all exit 0. Fess r2 non-blocking; findings in acat-pc16-events-fess-j8za. Package stays open.",
     "created_at": "2026-10-01T08:20:50Z"
+  },
+  {
+    "id": 485,
+    "issue_id": "acat-wm-034-3vqz",
+    "author": "johnw",
+    "text": "PC17 (resnapshot after 410, reconnection with backoff and polling fallback): the service event worker follows a pure transport model (Follow, afterStream, afterPoll, overviewStartsStream). A 410 view-expired or cursor-expired takes a new overview in a new fetch generation and restarts the stream from its cursor. A transport failure or stream end reconnects from the last complete event identifier with the PC12 backoff. An SSE refusal (for example 429 with no free SSE reader) or two consecutive failures switch to Client.pollEventBatch every second, with SSE retried after the backoff. The shell shows delivery live, polling, or disconnected since a time. Evidence scope (private evidence dir PC/PC17/impl-r1): Werror build, tui-model-test (followTests, 13 checks), tui-overview at N8 (both SSE readers held: 'delivery polling' and an HTTP-created request shown in 1.55 s; live again after release), Phase A journey N8, make -C doc check, all exit 0. Fess r1 non-blocking; findings in acat-pc17-follow-fess-jd40. Package stays open.",
+    "created_at": "2026-10-01T08:39:10Z"
   }
 ]
 #+end_src

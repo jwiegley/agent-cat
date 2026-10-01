@@ -149,6 +149,17 @@ module Agentic.Tui.ServiceLane
     FetchKey (..),
     Delivery (..),
     deliveryText,
+    disconnected,
+    Follow (..),
+    newFollow,
+    streamFailureLimit,
+    pollIntervalSeconds,
+    StreamEnd (..),
+    FollowStep (..),
+    afterStream,
+    PollStep (..),
+    afterPoll,
+    overviewStartsStream,
     Invalidated (..),
     noInvalidations,
     invalidatedBound,
@@ -181,6 +192,7 @@ import Data.Maybe (isJust)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Time.Clock (NominalDiffTime, UTCTime, addUTCTime, diffUTCTime)
+import Data.Time.Format (defaultTimeLocale, formatTime)
 import Numeric.Natural (Natural)
 
 -- | The outcome of one call into the manager client facade.
@@ -932,17 +944,20 @@ shutdownNotices uncertain faulted =
 data FetchKey = OverviewFetch | RequestFetch
   deriving (Eq, Ord, Show, Enum, Bounded)
 
--- | The state of the event stream of the session.
+-- | The state of live delivery of the session.
 data Delivery
   = -- | No stream runs. The first overview of the session has not been read.
     DeliveryIdle
-  | -- | The stream connects and has delivered nothing yet.
+  | -- | The first stream connects and has delivered nothing yet.
     DeliveryConnecting
   | -- | The stream delivered a heartbeat or an invalidation.
     DeliveryLive
-  | -- | The stream failed with this refusal code and reconnects after the
-    -- backoff.
-    DeliveryReconnecting !Text
+  | -- | The latest JSON polling batch succeeded. The stream is tried again
+    -- after the backoff.
+    DeliveryPolling
+  | -- | Delivery failed at this time with this refusal code, and nothing has
+    -- succeeded since. The worker reconnects or polls again.
+    DeliveryDisconnected !UTCTime !Text
   | -- | The manager refused the cursor with 410. The stream waits for a new
     -- overview, whose cursor starts it again.
     DeliveryResnapshot
@@ -950,15 +965,133 @@ data Delivery
     DeliveryStopped !Text
   deriving (Eq, Show)
 
--- | The delivery state as the shell shows it.
+-- | The delivery state as the shell shows it. The time of a disconnection
+-- is the UTC time of day.
 deliveryText :: Delivery -> Text
 deliveryText delivery = "delivery " <> case delivery of
   DeliveryIdle -> "not started"
   DeliveryConnecting -> "connecting"
   DeliveryLive -> "live"
-  DeliveryReconnecting code -> "reconnecting (" <> code <> ")"
+  DeliveryPolling -> "polling"
+  DeliveryDisconnected since code -> "disconnected since " <> T.pack (formatTime defaultTimeLocale "%H:%M:%SZ" since) <> " (" <> code <> ")"
   DeliveryResnapshot -> "resnapshot"
   DeliveryStopped reason -> "stopped (" <> reason <> ")"
+
+-- | A failure of delivery at this time with this failure. A delivery that
+-- is already disconnected keeps the time of its first failure.
+disconnected :: UTCTime -> C.ClientFailure -> Delivery -> Delivery
+disconnected now failure current = case current of
+  DeliveryDisconnected since _ -> DeliveryDisconnected since (refusalCode failure)
+  _ -> DeliveryDisconnected now (refusalCode failure)
+
+-- | The transport state of the event worker: the last complete event
+-- identifier, which every reconnection and every poll sends, the backoff of
+-- the next SSE attempt, and the number of consecutive SSE failures.
+data Follow = Follow
+  { followCursor :: !Text,
+    followBackoff :: !C.Backoff,
+    followFailures :: !Int
+  }
+  deriving (Eq, Show)
+
+-- | The worker that starts from the cursor of an installed overview.
+newFollow :: Text -> Follow
+newFollow cursor = Follow cursor C.initialBackoff 0
+
+-- | The number of consecutive SSE failures after which the worker polls.
+streamFailureLimit :: Int
+streamFailureLimit = 2
+
+-- | The interval between two JSON polling batches.
+pollIntervalSeconds :: Int
+pollIntervalSeconds = 1
+
+-- | The end of one SSE connection: whether it delivered a heartbeat or an
+-- invalidation, the identifier of its last complete event, which is the
+-- supplied cursor when no event arrived, and its failure. 'Nothing' is an
+-- end of the response by the manager or after the idle bound.
+data StreamEnd = StreamEnd
+  { endDelivered :: !Bool,
+    endCursor :: !Text,
+    endFailure :: !(Maybe C.ClientFailure)
+  }
+  deriving (Eq, Show)
+
+-- | What the worker does after an SSE connection.
+data FollowStep
+  = -- | Connect again from the cursor after this delay in seconds.
+    FollowStream !Int
+  | -- | Poll every 'pollIntervalSeconds' from the cursor, and connect again
+    -- after this delay in seconds.
+    FollowPoll !Int
+  | -- | The manager refused the cursor with 410. A new overview is needed.
+    FollowResnapshot
+  | -- | The client is closed. The worker ends.
+    FollowClosed
+  deriving (Eq, Show)
+
+-- | The step after one SSE connection at this time, the next transport
+-- state, and the next delivery state, given the current one. Every
+-- reconnection and every poll starts from the last complete event
+-- identifier. A connection that delivered resets the backoff and the count
+-- of consecutive failures, and its end then counts as one failure. A 410
+-- refusal needs a resnapshot. Any other refusal, for example 429 when the
+-- credential has no free SSE reader, or 'streamFailureLimit' consecutive
+-- failures change to polling. Otherwise the worker connects again after the
+-- backoff. The backoff doubles with each attempt that delivered nothing. An
+-- SSE attempt that fails while polling keeps the polling state, so the next
+-- batch decides the state.
+afterStream :: UTCTime -> StreamEnd -> Delivery -> Follow -> (Follow, Delivery, FollowStep)
+afterStream now (StreamEnd delivered cursor failure) delivery follow = case failure of
+  Just C.ClientClosed -> (follow', delivery, FollowClosed)
+  Just (C.Refused 410 _) -> (follow', DeliveryResnapshot, FollowResnapshot)
+  Just refusal@(C.Refused _ _) -> (backedOff, lost refusal, FollowPoll seconds)
+  Just other | failures >= streamFailureLimit -> (backedOff, lost other, FollowPoll seconds)
+  Just other -> (backedOff, disconnected now other delivery, FollowStream seconds)
+  Nothing | failures >= streamFailureLimit -> (backedOff, lost C.TransportUnavailable, FollowPoll seconds)
+  Nothing -> (backedOff, delivery, FollowStream seconds)
+  where
+    base = if delivered then C.initialBackoff else followBackoff follow
+    failures = (if delivered then 0 else followFailures follow) + 1
+    (seconds, next) = C.reconnectDelay base
+    follow' = follow {followCursor = cursor}
+    backedOff = Follow cursor next failures
+    lost reason = case delivery of
+      DeliveryPolling -> DeliveryPolling
+      _ -> disconnected now reason delivery
+
+-- | What the worker does after one JSON polling batch.
+data PollStep
+  = -- | The batch has more events. Poll again at once.
+    PollNow
+  | -- | Poll again after 'pollIntervalSeconds', or connect the stream when
+    -- its backoff has passed.
+    PollLater
+  | -- | The manager refused the cursor with 410. A new overview is needed.
+    PollResnapshot
+  | -- | The client is closed. The worker ends.
+    PollClosed
+  deriving (Eq, Show)
+
+-- | The step after one polling batch at this time, the next transport
+-- state and the next delivery state. A batch gives the cursor of the next
+-- poll and the polling state, and a batch with more events polls again at
+-- once. A failed poll keeps the cursor and disconnects.
+afterPoll :: UTCTime -> Either C.ClientFailure (Text, Bool) -> Delivery -> Follow -> (Follow, Delivery, PollStep)
+afterPoll now outcome delivery follow = case outcome of
+  Right (cursor, more) -> (follow {followCursor = cursor}, DeliveryPolling, if more then PollNow else PollLater)
+  Left C.ClientClosed -> (follow, delivery, PollClosed)
+  Left (C.Refused 410 _) -> (follow, DeliveryResnapshot, PollResnapshot)
+  Left failure -> (follow, disconnected now failure delivery, PollLater)
+
+-- | Whether an installed overview starts the event worker from its cursor:
+-- only an overview read that started in the current fetch generation, and
+-- only when no worker runs, before the first stream of the session or after
+-- a 410 refusal. An overview read from before a resnapshot never starts the
+-- stream from its earlier cursor.
+overviewStartsStream :: C.FetchGeneration -> C.FetchGeneration -> Delivery -> Bool
+overviewStartsStream started current delivery =
+  started == current && delivery `elem` [DeliveryIdle, DeliveryResnapshot]
 
 -- | The resources that invalidations named since the frontend last took the
 -- set, at most 'invalidatedBound' of them. A further resource sets the
@@ -1128,7 +1261,8 @@ safetyReadInterval = 5
 
 -- | Whether the timer reads the selected request at this time, given the
 -- delivery state and the time of the latest timer read. Without a live
--- stream the timer reads at every tick.
+-- stream, in particular while the worker polls or is disconnected, the timer
+-- reads at every tick of one second.
 safetyReadDue :: Delivery -> Maybe UTCTime -> UTCTime -> Bool
 safetyReadDue delivery latest now = case (delivery, latest) of
   (DeliveryLive, Just previous) -> diffUTCTime now previous >= safetyReadInterval

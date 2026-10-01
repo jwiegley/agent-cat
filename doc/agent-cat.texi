@@ -3373,15 +3373,23 @@ cause exactly one later fetch.  These reads use the single-flight read lane
 under the rules of automatic refresh, so no read starts during a preparation
 or a send, after an internal fault, or while a deferred key pauses refresh.
 The header row above the identity row shows the delivery state:
-@samp{delivery connecting}, @samp{delivery live},
-@samp{delivery reconnecting (@var{code})}, @samp{delivery resnapshot},
-@samp{delivery stopped (@var{reason})}, or @samp{delivery not started}.  When
-the manager ends the stream or the connection fails, the frontend reconnects
-with the identifier of the last complete event after a delay of one second
-that doubles up to thirty seconds.  When the manager refuses the cursor with
-status 410, the frontend discards the results of the reads in progress, reads
-the overview and the selected request again, and follows the stream from the
-cursor of the new overview.  When the manager refuses that overview read, or
+@samp{delivery connecting}, @samp{delivery live}, @samp{delivery polling},
+@samp{delivery disconnected since @var{time} (@var{code})},
+@samp{delivery resnapshot}, @samp{delivery stopped (@var{reason})}, or
+@samp{delivery not started}.  The time of a disconnection is the UTC time of
+the first failure since delivery last succeeded.  When the manager ends the
+stream or the connection fails, the frontend reconnects with the identifier
+of the last complete event after a delay of one second that doubles up to
+thirty seconds.  After two consecutive failures of the stream, or when the
+manager refuses the stream, for example with status 429 when the two event
+stream readers of the credential are in use, the frontend polls the events
+from the same identifier every second and shows @samp{delivery polling}.  It
+tries the stream again after the delay, and a stream that delivers returns
+the state to @samp{delivery live}.  While the frontend polls or is
+disconnected, it reads the selected request every second.  When the manager
+refuses the cursor with status 410, the frontend discards the results of the
+reads in progress, reads the overview and the selected request again, and
+follows the stream from the cursor of the new overview.  When the manager refuses that overview read, or
 an overview read that follows an invalidation, the frontend reads the overview
 again after a delay of one second that doubles up to thirty seconds, until an
 overview is installed.  A switch to another

@@ -326,10 +326,15 @@ endpoints_mode = len(sys.argv) == 6 and sys.argv[5] == ENDPOINTS
 # overview lists only live requests and active runs, so within 3 seconds
 # after the harness observes the terminal status Succeeded, and without a
 # key press, the view must no longer list the run. The harness then creates
-# a second request, which must appear without a key press. It then stops the
-# manager, and after g the view must keep the second request and mark the
-# overview stale with the refusal code. Each step prints its own PASS line.
-# It runs one manager lifetime.
+# a second request, which must appear without a key press, and quits the TUI.
+# It then holds the two SSE readers of the TUI credential open and starts the
+# TUI again. The SSE request of the TUI is refused with 429, so the header
+# must show the delivery state polling, and a third request that the harness
+# creates must appear within 3 seconds without a key press. The harness then
+# releases the two readers, and the delivery state must return to live. It
+# then stops the manager, and after g the view must keep both requests and
+# mark the overview stale with the refusal code. Each step prints its own
+# PASS line. It runs one manager lifetime.
 OVERVIEW = "tui-overview"
 TUI_MODES = {OVERVIEW: (["profile_1"], ["observe", "submit"])}
 tui_mode = sys.argv[5] if len(sys.argv) == 6 and sys.argv[5] in TUI_MODES else None
@@ -3751,9 +3756,48 @@ def overview_checks():
             "the created request has no blocking reason", created["admission"])
         return created
 
-    def live_header(session):
-        assert any("Manager overview" in row and "delivery live" in row for row in session.screen.lines()[:3]), (
-            "the delivery state is not live", session.screen.lines()[:3])
+    def live_header(session, state="live"):
+        assert any("Manager overview" in row and "delivery " + state in row for row in session.screen.lines()[:3]), (
+            "the delivery state is not " + state, session.screen.lines()[:3])
+
+    def open_overview(session):
+        """Select the profile and open the Manager overview view."""
+        session.wait_screen("Manager profiles")
+        session.wait_screen("profile_1")
+        session.send(b"\r")
+        session.wait_screen("Manager workflows")
+        session.send(b"O")
+        return session.wait_screen("Manager overview")
+
+    def hold_readers():
+        """Open the two SSE readers of the TUI credential on /v1/events from
+        the cursor of an overview of that credential. A registration refused
+        with 429 storage-quota is tried again: the stream of the TUI that
+        quit keeps its subscription until its next write fails, at the
+        latest at its next heartbeat."""
+        tui = {"Authorization": "Bearer " + (work / "credential-tui").read_bytes().decode("ascii")}
+        status, own, _ = request("/v1/snapshot", tui)
+        assert status == 200, ("TUI credential overview", status)
+        held = []
+        deadline = time.monotonic() + 40
+        while len(held) < 2:
+            connection = http.client.HTTPSConnection("127.0.0.1", port, context=context, timeout=60)
+            connection.request("GET", "/v1/events?after=" + own["cursor"], headers=tui | {"Accept": "text/event-stream"})
+            response = connection.getresponse()
+            if response.status == 200:
+                assert response.getheader("Content-Type") == "text/event-stream"
+                held.append((connection, response))
+                continue
+            raw = response.read(1048577)
+            status = response.status
+            response.close()
+            connection.close()
+            refused = frozen.parse_json(raw)
+            validate("Problem", refused)
+            assert status == 429 and refused["code"] == "storage-quota" and time.monotonic() < deadline, (
+                "TUI credential reader admission", status, refused["code"])
+            time.sleep(0.25)
+        return held
 
     def details(screen):
         """The details column joined without separators, so that a long
@@ -3774,12 +3818,7 @@ def overview_checks():
             workflow = next(item for item in catalogue["items"] if item["name"] == "mixed-controls")
             with tui_fixture.session() as session:
                 # 1. The overview of the bootstrap shows the empty manager.
-                session.wait_screen("Manager profiles")
-                session.wait_screen("profile_1")
-                session.send(b"\r")
-                session.wait_screen("Manager workflows")
-                session.send(b"O")
-                screen = session.wait_screen("Manager overview")
+                open_overview(session)
                 screen = session.wait_screen("Overview: current; requests: 0, preparations: 0, runs: 0, decisions: 0")
                 assert "No rows are visible." in screen, "the empty overview lists a row"
                 session.wait_screen("delivery live", timeout=20)
@@ -3825,27 +3864,67 @@ def overview_checks():
                       f"{elapsed:.2f} seconds after the harness observed the terminal status Succeeded", flush=True)
                 # 4. A second request appears without a key press.
                 second = create_draft()
-                second_reasons = second["admission"]["reasons"]
                 screen = session.wait_screen("Overview: current; requests: 1, preparations: 0, runs: 0, decisions: 0", timeout=3)
                 save(session, "second")
                 assert "Request:" + second["id"] in details(screen), "the overview details lack the second request"
                 live_header(session)
                 print("PASS tui-overview 4: without a key press the overview lists the second request", second["id"], flush=True)
-                # 5. A refused read keeps the overview and marks it stale.
-                process.terminate()
-                process.wait(timeout=25)
-                session.send(b"g")
-                screen = session.wait_screen("Overview: stale (TransportUnavailable); the last complete overview is retained")
-                save(session, "stale")
-                for line in ("> request draft", "Phase: draft", "Blocking reasons: " + ", ".join(second_reasons)):
-                    assert line in screen, ("the stale overview lost a line of the request", line)
-                assert "Request:" + second["id"] in details(screen), "the stale overview lost the request"
-                print("PASS tui-overview 5: with the manager stopped, g keeps the overview and marks it stale with TransportUnavailable", flush=True)
                 session.send(b"\x1b")
                 session.wait_screen("Manager workflows")
                 session.send(b"q")
                 assert session.wait_exit(20) == 0
                 session.assert_restored()
+            # 5. With no free SSE reader the restarted TUI polls and still
+            # shows an HTTP change within 3 seconds.
+            held = hold_readers()
+            try:
+                with tui_fixture.session() as session:
+                    open_overview(session)
+                    session.wait_screen("Overview: current; requests: 1, preparations: 0, runs: 0, decisions: 0")
+                    session.wait_screen("delivery polling", timeout=20)
+                    live_header(session, "polling")
+                    save(session, "polling")
+                    third = create_draft()
+                    created_at = time.monotonic()
+                    screen = session.wait_screen("Overview: current; requests: 2, preparations: 0, runs: 0, decisions: 0", timeout=3)
+                    elapsed = time.monotonic() - created_at
+                    save(session, "polled")
+                    live_header(session, "polling")
+                    print("PASS tui-overview 5: with both SSE readers of its credential held, the restarted TUI shows delivery polling and lists request",
+                          third["id"], f"without a key press after {elapsed:.2f} seconds", flush=True)
+                    # 6. A free reader returns delivery to live.
+                    for connection, response in held:
+                        response.close()
+                        connection.close()
+                    held = []
+                    released_at = time.monotonic()
+                    session.wait_screen("delivery live", timeout=60)
+                    live_header(session)
+                    save(session, "relive")
+                    print("PASS tui-overview 6: after the harness released the readers, the delivery state returned to live after",
+                          f"{time.monotonic() - released_at:.2f} seconds", flush=True)
+                    # 7. A refused read keeps the overview and marks it stale.
+                    process.terminate()
+                    process.wait(timeout=25)
+                    session.send(b"g")
+                    screen = session.wait_screen("Overview: stale (TransportUnavailable); the last complete overview is retained")
+                    save(session, "stale")
+                    assert screen.count("request draft") == 2, "the stale overview lost a request row"
+                    for line in ("> request draft", "Phase: draft"):
+                        assert line in screen, ("the stale overview lost a line of the selected request", line)
+                    assert any("Request:" + item["id"] in details(screen) and "Blocking reasons: " + ", ".join(item["admission"]["reasons"]) in screen
+                               for item in (second, third)), "the stale overview lost the selected request"
+                    print("PASS tui-overview 7: with the manager stopped, g keeps both requests and marks the overview stale with TransportUnavailable",
+                          flush=True)
+                    session.send(b"\x1b")
+                    session.wait_screen("Manager workflows")
+                    session.send(b"q")
+                    assert session.wait_exit(20) == 0
+                    session.assert_restored()
+            finally:
+                for connection, response in held:
+                    response.close()
+                    connection.close()
             assert not tui_fixture.client_state.exists(), "the service TUI created local runner state"
             print("PASS tui-overview: the overview view followed the manager overview through the actual service TUI", flush=True)
         finally:

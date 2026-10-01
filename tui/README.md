@@ -213,18 +213,33 @@ while the view is hidden leaves its fetch waiting until the view opens. A fetch 
 without a selected request reads nothing. A result of an earlier generation
 does not install. The header row above the identity row shows the delivery
 state at its right end: `delivery connecting`, `delivery live`, `delivery
-reconnecting (CODE)`, `delivery resnapshot`, `delivery stopped (REASON)` or
-`delivery not started`. After the manager ends the stream or a failure, the
-worker reconnects with the identifier of the last complete event after the
-jittered backoff of the client, which doubles from one second up to 30
-seconds. Each further connection attempt shows `delivery connecting`. A
-connection that delivered a heartbeat or an invalidation resets the backoff.
-A 410 refusal ends the worker. The frontend then makes a resnapshot
+polling`, `delivery disconnected since HH:MM:SSZ (CODE)`, `delivery
+resnapshot`, `delivery stopped (REASON)` or `delivery not started`. The time
+of a disconnection is the UTC time of the first failure since delivery last
+succeeded. The pure rules `Agentic.Tui.ServiceLane.afterStream` and
+`afterPoll` decide each step of the worker from its transport state
+(`Follow`): the last complete event identifier, the backoff and the number
+of consecutive SSE failures. After the manager ends the stream or a failure,
+the worker reconnects with the identifier of the last complete event after
+the jittered backoff of the client, which doubles from one second up to 30
+seconds. A connection that delivered a heartbeat or an invalidation resets
+the backoff and the count of failures. After two consecutive SSE failures, or
+after a refusal of the stream such as 429 `storage-quota` when the two SSE
+readers of the credential are in use, the worker polls with
+`Agentic.Manager.Client.pollEventBatch` from the same identifier: at once
+after a batch with `hasMore`, and otherwise every second. Each batch gives
+the cursor of the next poll and the state `delivery polling`, and its
+invalidations take the same path as those of the stream. When the jittered
+backoff has passed, the worker connects the stream again. A refused attempt
+while polling keeps `delivery polling` and doubles the backoff, and a
+connection that delivers returns the state to `delivery live`. A 410 refusal
+of the stream or of a poll ends the worker. The frontend then makes a resnapshot
 (`Agentic.Tui.ServiceLane.resnapshotFetches`): the refresh coordinator
 advances its generation, so a fetch in flight completes without installing,
 and an overview read from before the refusal installs no old cursor. Both
-reads are fetched again in the new generation, and the cursor of the new
-overview starts a new worker. The session generation does not change, so the
+reads are fetched again in the new generation. Only an overview read that
+started in the current generation starts a new worker from its cursor
+(`overviewStartsStream`). The session generation does not change, so the
 other worker results of the session stay admitted. When an overview read of
 live delivery or of the resnapshot is refused, the timer reads the overview
 again after the backoff of the client, which doubles from one second up to 30
@@ -250,8 +265,9 @@ internal-fault flag and the resend confirmation. Every read of the manager
 passes through that single-flight lane. One composite read covers the selected
 request, its review, the receipt of a retained command, and the run snapshot,
 run controls and pending decision, and a complete read is installed in one
-step. Without a live event stream, the frontend repeats the read on a
-one-second timer. While the stream is live, live delivery reads it again after
+step. Without a live event stream, in particular while the event worker
+polls or is disconnected, the frontend repeats the read on a one-second
+timer. While the stream is live, live delivery reads it again after
 each invalidation of a resource that it reads, and the timer read is a safety
 read at most every five seconds (`safetyReadDue`). A timer read that starts
 no read, because another read holds the read lane, does not count toward
