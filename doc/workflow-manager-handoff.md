@@ -2,6 +2,341 @@
 
 <!-- handoff-id: wm023-20260923; status: paused-unaccepted-wip; accepted: WM-001..WM-022,G0,G1; resume-branch: workflow-manager-checkpoint-20260923; fess: every-subtask -->
 
+## Phase C of 2026-10
+
+The resume workflow delivered Phase C under the operator directions of
+2026-09-29 for fast validation and of 2026-09-30 for functionality first,
+as subtasks PC1 to PC34 after `cc29f51a`. PC1 to PC7 repair the four
+functional medium findings of section 4 of the remaining-scope report
+(quarantine inspection and release, the floor stop, legacy windowing and
+the adapter cancel). PC8 takes the Phase A polish findings. PC9 to PC12
+complete the shared client of WM-029. PC13 and PC14 complete the backend
+selection and endpoint identity of WM-033. PC15 to PC30 complete the
+service views, editors and controls of WM-034. PC31 to PC33 add the PTY
+acceptance journeys of WM-035. PC1 to PC33 landed, from `843ebc10` to
+`b698073e`. Subtask PC34 ran the Phase C gate on `b698073e` and wrote this
+section. This section describes the current state. Where any section
+below differs, this section supersedes it, and the sections below remain
+as chronology. The evidence of each subtask is under `PC/<subtask>/impl-r1`
+in the resume directory, and the gate evidence is under
+`PC/PC34/impl-r1`.
+
+| Subtask | Commit | Result |
+| --- | --- | --- |
+| PC1 | `843ebc10` | The local administration operations `status` and `check-store` are typed, and the new owner `Agentic.Manager.Quarantine` answers them on the live channel and offline. |
+| PC2 | `78ca46bc` | `check-quarantine` returns clean, cleanup-required or unverifiable evidence for a quarantined reservation. |
+| PC3 | `ea09eef5` | `release-quarantine` frees a quarantined reservation with clean evidence, and a queued request starts after a manager crash with one reservation. |
+| PC4 | `1d4961f4` | The open of a serving lifetime answers each orphaned command ask, and a run with lost supervision no longer holds the pruner floor. |
+| PC5 | `cc30234c` | Each window of `/v1/runs` is one keyset over the managed runs and the retained legacy handles, and a window decodes only its own legacy entries. |
+| PC6 | `e09b6a76` | The `pages` mode pages a bound legacy root of 300 entries. |
+| PC7 | `b2b1a1af` | The engine sends `session/cancel` when a live re-route, a run cancel or a killed sibling stops an ACP prompt in flight. |
+| PC8 | `c4193249` | The TUI retries a failed retrieval, bounds the refresh pause and saves exactly after publication. |
+| PC9 | `19a4a001` | The client has an SSE block parser, event DTOs and event vectors. |
+| PC10 | `24b3dbf5` | `test/manager_client_vectors.json` holds DTO vectors for the public resource types. |
+| PC11 | `ca300908` | The client reads the event stream, polls typed events and bootstraps the Overview. |
+| PC12 | `e9ac2ac1` | The client has a refresh coordinator, a bounded reconnection backoff and the reconciliation rule of an uncertain command. |
+| PC13 | `50ec050b` | The TUI takes an explicit backend (`--local` or `--service`), shows the endpoint identity and refuses keys that the credential scopes do not allow. |
+| PC14 | `b405854a` | `--tui --service` takes 1 to 8 profiles and switches between them with generation fencing and no retargeting. |
+| PC15 | `7d00c5eb` | The TUI has a Manager overview view and a shared mode fixture in `service_http.py`. |
+| PC16 | `ea8284b5` | A service event worker installs live changes with a coalesced wakeup. |
+| PC17 | `174d7f5b` | The event worker resnapshots after a 410, reconnects with backoff and falls back to polling. |
+| PC18 | `352c4010` | Selection is keyed by identity, drafts survive refresh, and Enter opens a request or a run by its identifier. |
+| PC19 | `3b56e945` | The TUI shows the queue position and follows concurrent runs and a TUI restart. |
+| PC20 | `c4156653` | The TUI captures inputs from the editor and from a local file. |
+| PC21 | `f47f777a` | The TUI removes inputs, withdraws requests and discards reviews. |
+| PC22 | `9a5c83f4` | The TUI sends cancel, steer, fail-over and abandon when the run control resource offers them. |
+| PC23 | `811ba114` | The TUI sends a redirect inside the dispatch window and a live redirect of the attempt in flight. |
+| PC24 | `525c4cfa` | The TUI has a Manager decisions view and answers person-routed asks. |
+| PC25 | `d8bfd18e` | The TUI has a structured answer editor, shows a stale answer and keeps its draft, and sends a draft on Ctrl-D. |
+| PC26 | `473e9931` | The TUI has a History view and keeps verified results by run identifier. |
+| PC27 | `45c84f35` | The TUI exports the verified result of a run. |
+| PC28 | `2bc437ef` | The TUI restarts, resumes and forks from a run. |
+| PC29 | `758b3c1c` | The TUI shows a manager loss and recovers after a manager restart. |
+| PC30 | `d3a2cc66` | The TUI shows a refused credential, and quitting it leaves the manager runs running. |
+| PC31 | `b393be5e` | The PTY journey `tui-sizes` runs at 40x12, 80x24 and 140x36 with resize. |
+| PC32 | `540d3ee2` | The six lifecycle journeys run at 80x24 and assert manager facts and terminal restoration. |
+| PC33 | `b698073e` | `tui-failures` adds a stale-answer step and a delayed-response endpoint switch. |
+| PC34 | This commit | The Phase C gate below and this section. |
+
+### Delivered behavior
+
+- After a manager crash, the operator inspects and releases the
+  quarantined reservation of a lost run. The local administration
+  operations `status`, `check-store`, `check-quarantine` and
+  `release-quarantine` are typed, and the owner
+  `Agentic.Manager.Quarantine` answers them on the live channel and
+  offline. `check-quarantine` returns clean, cleanup-required or
+  unverifiable evidence with an evidence identifier and a digest.
+  `release-quarantine` recomputes that evidence under one Store admission,
+  frees the slot and the resource keys only when the evidence is clean, and
+  wakes admission, so that a queued request starts with one execution
+  reservation. The lost run keeps its lost supervision. A refusal changes
+  nothing. `reload-profiles`, `drain` and `shutdown` still answer
+  `state-conflict`.
+- The open of a serving lifetime answers each command ask of an earlier
+  lifetime that has no reply. An ordinary command gets its current receipt
+  or a failure reply, and an administration ask gets
+  `committed-receipt-lost` or `outcome-uncertain`. Nothing executes again.
+  The pruner treats a run with lost supervision as terminal, so neither
+  case holds the floor of the manager log after a restart.
+- Legacy history is windowed. The service retains one handle for each
+  entry name of a bound root, up to 65536 names. Each window of `/v1/runs`
+  is one keyset over the managed runs and those handles, in identifier
+  order, and it decodes at most 256 of its own legacy entries and 1 MiB. A
+  legacy `GET /v1/runs/{id}` decodes only the entry that it names. The
+  `pages` mode pages a bound root of 300 entries.
+- When a live re-route, a run cancel or a killed sibling branch stops an
+  ACP prompt in flight, the engine sends `session/cancel` before the stop
+  leaves the prompt, and it drops the late reply of that prompt.
+- The shared client of WM-029 parses server-sent events in blocks, decodes
+  the event and resource DTOs against language-neutral vectors in
+  `test/manager_client_vectors.json`, reads the event stream, polls typed
+  events and bootstraps the Overview. A pure refresh coordinator
+  serializes refreshes, coalesces dirty marks and fences each fetch by
+  generation. A bounded backoff paces reconnection, and a rule reconciles
+  an uncertain command from the target resource without a resend.
+- The TUI selects its backend explicitly. `agentic-run --tui` and
+  `--tui --local` start local mode, and `--tui --service PROFILE ...` takes
+  1 to 8 absolute client profiles. Service mode starts no local runner,
+  shows the endpoint identity, refuses the keys that the credential scopes
+  do not allow and switches endpoints with `E`. A switch advances the
+  session generation, discards every late result of the earlier session and
+  never retargets an earlier reference.
+- The service TUI drives the existing views and editors from the manager
+  resources. It has the Manager overview (`O`), Manager decisions (`D`) and
+  History (`H`) views, keeps selection and drafts by identity across
+  refresh, shows the queue position and follows concurrent runs. It
+  captures inputs from the editor and from a local file, removes inputs,
+  withdraws requests, discards reviews, approves only the exact review,
+  answers person-routed asks with a structured editor, keeps a stale
+  answer as a draft and sends it on Ctrl-D, and sends cancel, steer, retry,
+  fail-over, abandon, the dispatch-window redirect and the live redirect
+  when the run control resource offers them. It retrieves, saves and
+  exports verified results, and it restarts, resumes and forks a run with
+  `l`. An event worker installs live changes, resnapshots after a 410,
+  reconnects with backoff and falls back to polling. The TUI shows a
+  manager loss and recovers after a restart, shows a refused credential
+  without starting a mutation or a local run, and leaves the manager runs
+  running when it quits.
+- The PTY journeys of WM-035 drive the service TUI from the keyboard over
+  the running manager and deterministic workers: `tui-sizes` at 40x12,
+  80x24 and 140x36 with resize, the six lifecycle modes at 80x24 with
+  manager facts read through HTTP and a terminal restoration check,
+  `tui-endpoints`, and `tui-failures` with manager loss and restart, a
+  stale answer, a refused credential, a quit during a held run and an
+  endpoint change during delayed responses.
+- The `/v1` contract has no change since `cc29f51a`: `doc/api/openapi.yaml`
+  is unchanged, and the contract check reports the same 107 schemas and 31
+  operations. `DataBroker` keeps its nine operations, and the golden flow
+  fixtures keep their bytes. The runtime adds two readers in
+  `Agentic.Runtime.Flow`, `flowWriterUnanswered` and `readFlowLine`.
+
+### Gate of Phase C
+
+Subtask PC34 ran the gate once on the tree of `b698073e`, in this order.
+Each step has a `.log` and an `.exit` file under `PC/PC34/impl-r1`, and
+each log names its command on its third line. The first failure of each
+step is under `PC/PC34/impl-r1/failed-r0`. Every step passed, and each
+negative control failed with its literal message as intended.
+
+1. `make -C doc check` passed (`01-doc-check`). Its contract check
+   reported 107 schemas, 31 operations, 341 payload cases, 20 SSE cases, 4
+   route SSE cases and 3 byte-bound downloads.
+2. The incremental Werror build of all targets with `-ftui-tests` and
+   `tui-model-test` passed (`02-allbuild`).
+3. `tui-model-test` passed at N1 and then at N8 (`03-model-test`).
+4. The `vectors` mode of `manager-client-check` passed with 271 PASS lines
+   (`04a-client-vectors`). `manager/test/client_native.py` passed at N8
+   with 33 PASS lines (`04b-client-native-N8`). The base mode of
+   `manager/test/service_http.py` with `CLIENT_CHECK` passed at N8
+   (`04c-service-base-client-N8`).
+5. The main mode of `manager-store-check` passed at N8
+   (`05a-store-main-N8`). The main mode of `manager-command-check` with
+   `command_contract.py` and `credential_cli.py` passed at N8
+   (`05b-command-main-N8`). Its first run gave the checks a work directory
+   that was not named `N8`, and `credential_cli.py`, which requires the
+   name `N1` or `N8`, stopped on that assertion after the command checks
+   and the contract had passed (`failed-r0/05b-command-main-N8`). The rerun
+   used a work directory named `N8` and passed. No code changed. The modes
+   `restart-native` and main of `manager-admission-check` passed at N8
+   (`05c-admission-restart-native-N8`, `05d-admission-main-N8`).
+6. `manager-history-check` passed at N8 (`06-history-N8`).
+7. `test/control_probe.py` passed at N8 (`07-control-probe-N8`).
+8. `manager/test/service_http.py` passed at N8 once in each of the modes
+   `pages`, `events-lifecycle`, `live-redirect`, `person-answers` and
+   `failures-manager`, the last with `TUI_CHECK`, each with a fresh fixture
+   (`08a` to `08e`). Case 10 of `pages` listed the 300 legacy entries and
+   the managed run once each in identifier order.
+   `failures-manager` held every manager-loss and quarantine-release case
+   across three manager lifetimes.
+9. Each PTY mode passed at N8 with `TUI_CHECK` and a fresh fixture:
+   `tui-overview`, `tui-inputs`, `tui-controls`, `tui-redirect`,
+   `tui-decisions`, `tui-history`, `tui-endpoints`, `tui-failures` and
+   `tui-sizes` (`09a` to `09i`).
+10. The control `tui-sizes-broken-draft` failed with "JOURNEY-ASSERT draft
+    survives resize", `tui-controls-broken-cancel` failed with
+    "JOURNEY-ASSERT cancel accepted before cancelled", and
+    `tui-failures-broken-stale` failed with "JOURNEY-ASSERT stale answer
+    kept draft", each at N8 (`10a` to `10c`).
+11. `tui-journey` passed at N1 and then N8 with every `FLOW-ASSERT` and a
+    verified consent chain (`11a-journey-pair`, fixture root
+    `/Users/johnw/Products/k.M0a5ItPm/tmp/pc34.Z85FZong`). In both runs
+    the review was at position 7 and the approve at position 8. The
+    manager logs held 26 records in 22181 and 22182 bytes, and the run-log
+    storage ratio was 1.408 at N1 and at N8. The control
+    `tui-journey-broken-answer` failed with "JOURNEY-ASSERT typed answer is
+    not JSON false", `tui-consent-control` failed with "detail-view key
+    approved a review", and `tui-flow-approve-fault` failed with
+    "FLOW-FAULT the approve append failed and the manager refused the
+    approval with storage-unavailable", each at N8 (`11b` to `11d`).
+12. In `ext-pi`, on the built Pi fork, `npm run check` passed
+    (`12a-ext-pi-check`), `npm test` passed with 92 tests and 5 skipped
+    (`12b-ext-pi-test`), and `npm run test:integration` passed its 8
+    Vitest cases with `AGENT_CAT_E2E_RUNNER` set to the `-ftui-tests` build
+    of `agentic-run` (`12c-ext-pi-integration`).
+13. `bash engine/acp/ci/acp.sh` passed its 23 scenarios (`13a-acp-ci`).
+    It builds `agentic-run` without `-ftui-tests`, so the incremental
+    Werror build of `agentic-run` and `routing-fixed-point-probe` with
+    `-ftui-tests` ran next, rebuilt `agentic-run` and passed
+    (`13b-rebuild-tui-tests`).
+14. `bash tui/ci/tui.sh` passed (`14-tui-ci`). It covers TUI local mode,
+    the source boundaries, `tui-model-test` and the TUI probes.
+15. `make -C doc check` passed after this section (`15-doc-check-final`).
+
+### Checks not run
+
+- `cli/ci/policies.sh`, `manager/ci/approval.sh`, `manager/ci/controls.sh`,
+  the `admission_audit.py` mutation audits, mutant suites, stability
+  samples of more than a few starts and `-fforce-recomp` builds. The
+  operator direction of 2026-09-29 removes them from routine validation.
+  The `policy-probe` case of PC13 is in `cli/ci/policies.sh` and did not
+  run for this reason.
+- `bisim/ci/tier0.sh` and every Lean or oracle check. The operator
+  direction forbids them for this run.
+- The N1 runs of the manager, client and PTY checks. Each ran once at N8.
+  Only `tui-model-test` and `tui-journey` ran at N1 and N8.
+- The checks that the Phase C gate list does not name:
+  `runtime-contract-test`, `test/flow_probe.py`, `test/progress_probe.py`,
+  `test/person_control_probe.py`, `test/lineage_probe.py`,
+  `manager-command-check flow`, `manager-artifact-check`,
+  `manager-approval-check`, `manager-worker-check`, `manager-draft-check`,
+  the store modes other than main, the admission modes `shutdown-only` and
+  `shutdown-native`, `make -C doc check-haskell`,
+  `cli/ci/routing-config.sh`, `cli/ci/examples.sh`,
+  `engine/agent-deck/ci/deck.sh`, `manager/ci/supervision.sh`,
+  `manager/ci/vertical.sh`, and the `service_http.py` modes `mixed`,
+  `routes`, `mutations-captures`, `mutations-discard`, `mutations-exports`,
+  `mutations-lineage`, `controls`, `controls-routing`, `failures-worker`
+  and `storage`. The modes `credential-lifecycle` and `boundary` are
+  security checks and did not run.
+- The revalidation of `broker-api-default` (`678326b`) and the measurement
+  of the append latency in the journey, which `acat-62j0` names.
+- `engine/acp/ci/route-live.sh`, which needs a paid provider.
+
+### Deferred security items
+
+The operator direction of 2026-09-30 defers security work to a later stage.
+The existing authentication, scope checks, exact consent and bounds stay in
+place, and the gate above exercised them. Phase C added no security
+hardening. The deferred items of Phase B part 2 stay deferred, and Phase C
+adds these:
+
+- The security verification items of WM-029: revocation during live
+  delivery, the refusal to forward a credential to another origin, and
+  hostile event and resource bodies beyond the refusal vectors.
+- The terminal-escape and hostile-text negatives of WM-035 for the service
+  views, and revocation during a TUI session beyond the refused-credential
+  state of `tui-failures`.
+- The security parts of WM-033: the refusal matrix of each key for each
+  scope beyond the scope refusals that PC13 added.
+- The hostile-input negatives of the quarantine administration operations
+  and of the legacy handle retention.
+
+### Remaining limits
+
+- At 40x12 the live monitor does not show the Terminal and Result lines.
+  The defect is open (`acat-jdmd`).
+- The summary review fits 80x24 with no spare row, so a long profile
+  identifier or a lineage review is refused at that size. The restart
+  child review of `tui-history` has two lineage rows, and the harness
+  approves it at 100x30. The workflows browser and the history detail are
+  not resized in `tui-sizes`.
+- The session-generation fence after an endpoint switch has model-test
+  evidence only, because the switch closes the earlier client and the
+  delay forwarder of `tui-failures` then drops the late bytes.
+- The TUI cannot retrieve the result of a legacy entry, because the run
+  representation gives no size or digest to verify. This waits for an
+  operator decision.
+- A stale answer moves its draft to the new decision head. This changes
+  the rule of PC18 for finding 6 of `acat-a6a7-fess-followup-1exm` and
+  waits for an operator decision.
+- The bounded refresh pause of PC8 changes only the observation line,
+  because the single-flight lane starts no read while the read ticket is
+  held. An operator decision on that rule is open. The retrieval retry has
+  no limit.
+- Under the frozen contract the export bytes are the code-and-value
+  document, not the artifact bytes. The frozen redirect body has no
+  attempt field, so the TUI only displays the attempt.
+- Two concurrent runs need two profiles, because the runs of one profile
+  share resource keys. Drafts and captures of an earlier TUI session do not
+  survive a TUI restart.
+- A refused receipt still offers the exact resend with a contradictory
+  notice. Some App wiring, such as the stop of automatic refresh on a
+  refused credential and the reachability display, has model-test or
+  fixture evidence only.
+- `release-quarantine` does not enforce the `expiresAt` of its evidence.
+  `committed-receipt-lost` detects the effect, not the command that caused
+  it, so a duplicate release reads as committed.
+- A run cancel sends `session/cancel` twice, and adapters ignore the second.
+  No check sends a second prompt on a connection after a cancel.
+- A bound root of more than 65536 entry names refuses with
+  `resource-unavailable`. `GET /v1/history` stays the complete read within
+  256 entries and 1 MiB. A parent handle retained during paging can sort
+  into a window already served and appears in the next listing.
+- These limits of Phase B part 2 stay as stated there: the command ledger
+  is not pruned, the pruner evaluates its age trigger only at the open and
+  after a seal, a redirect after an answer drops the answer, the redirect
+  offer after an automatic fail-over can list a rejected target, and a
+  SIGKILL of the frontend proxy group alone leaves the inner worker group
+  alive.
+- The open fess findings of each subtask are in the tracker items that the
+  commit messages of PC1 to PC33 name, from `acat-3dg6` to
+  `acat-pc33-follow-fess-7vx9`.
+
+Phase C repaired the four medium findings of the end-of-part review of
+Phase B part 2. The rows for the floor stop, the quarantine release, the
+legacy ceiling and the adapter cancel in that review table, and the
+corresponding items in its remaining limits, describe the state before
+Phase C.
+
+### Package status
+
+| Package or item | Status | Evidence | Tracker |
+| --- | --- | --- | --- |
+| WM-029 (`acat-wm-029-nlmg`) | Met for function, with its security items deferred | PC9 to PC12, PC16, PC17, gate steps 4, 9 and 11 | Open for the Integrator |
+| WM-033 (`acat-wm-033-4g77`) | Met for function. The `policy-probe` case did not run. | PC13, PC14, gate steps 3, 9 (`tui-endpoints`, `tui-failures`) and 14 | Open for the Integrator |
+| WM-034 (`acat-wm-034-3vqz`) | Met for function. The legacy result retrieval and the stale-draft rule wait for operator decisions. | PC8, PC15 to PC30, gate steps 3, 9 and 11 | Open for the Integrator |
+| WM-035 (`acat-wm-035-9uqq`) | Met for function, with the open 40x12 defect and the 80x24 review fit above | PC31 to PC33, gate steps 9, 10, 11 and 14 | Open for the Integrator |
+| Quarantine inspection and release (WM-042, `acat-wm-042-sdg9`) | Met for the quarantine finding. WM-042 stays partial, because `reload-profiles`, `drain` and `shutdown` still answer `state-conflict`. | PC1 to PC3, gate steps 5 and 8 (`failures-manager`) | Open |
+| Floor stop (`acat-phase-b2-review-findings-x8fv`) | Met | PC4, gate steps 5 and 8 | Open for the Integrator |
+| Legacy windowing (`acat-phase-b2-review-findings-x8fv`) | Met | PC5, PC6, gate step 8 (`pages`) and step 9 (`tui-history`) | Open for the Integrator |
+| Adapter cancel (`acat-phase-b2-review-findings-x8fv`) | Met | PC7, gate step 7 | Open for the Integrator |
+
+### Next action
+
+1. The Integrator commits PC34, records the package state in the tracker
+   and files the remaining limits above.
+2. A short two-lens end-of-phase review reads `cc29f51a..` the PC34
+   commit.
+3. The operator decides the three open questions: the retrieval of a
+   legacy result, the move of a stale draft to the new head, and the read
+   rule during the bounded refresh pause.
+4. Phase D (Emacs service mode) follows under the same directions. The
+   deferred security items wait for the security stage.
+
+Accepted state is unchanged at WM-001 to WM-022 and G0 and G1. Phase C
+closes no gate.
+
 ## Phase B part 2 of 2026-09-30
 
 The resume workflow delivered Phase B part 2 under the operator directions

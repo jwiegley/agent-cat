@@ -8296,7 +8296,7 @@ Pi integration identified two missing shared contracts. Workflow descriptor v3 d
 :LABELS:   ["review","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-10-01 Thu 07:48]
-:MODIFIED: [2026-10-01 Thu 07:48]
+:MODIFIED: [2026-10-01 Thu 09:41]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -8311,6 +8311,20 @@ Non-blocking findings of fess audit fess/pc-PC31-r1.md (2026-10-01) on subtask P
 4. (low) manager/test/service_http.py near lines 8376-8395: resize() treats any new PTY output as the redraw. Its markers 'Input •' and 'Answer •' appear at both sizes, so the draft and answer checks depend on settle(). Fix: wait for a marker that appears only at the new size, such as a border of the new width.
 5. (low) manager/test/service_http.py near lines 5835, 8108 and 8406: a third copy of the mutation_key helper and its deferred-notice regex. Fix: move them into one shared helper.
 6. (low) doc/workflow-manager-handoff.md line 1038: a dated Phase A section still says service mode has no accepted layout at 40x12 or 80x24. The record stays, but the current-state section must describe the 80x24 review fit and the 40x12 refusal. Fix: the Phase C closeout adds this to the current-state section.
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 515,
+    "issue_id": "acat-jdmd",
+    "author": "johnw",
+    "text": "Still open at the Phase C gate (PC34, b698073e); recorded in the handoff section 'Phase C of 2026-10' under Remaining limits.",
+    "created_at": "2026-10-01T16:41:29Z"
+  }
+]
+#+end_src
 
 * DONE [#C] Use the /wf namespace for every Pi extension command
 :PROPERTIES:
@@ -10726,6 +10740,27 @@ drop the unused parameter.
 Also from the implementer: one unused variable was renamed after the last checks. The fess
 reviewer reran BUILD and tui-failures at N8 on the final code (both exit 0).
 
+* TODO [#E] Resolve the non-blocking fess findings of subtask PC34    :review:
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pc34-follow-fess-uuh1
+:LABELS:   ["review","workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-01 Thu 09:41]
+:MODIFIED: [2026-10-01 Thu 09:41]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess audit fess/pc-PC34-r1.md (2026-10-01) on subtask PC34 (Phase C gate and handoff).
+
+1. (low) doc/workflow-manager-handoff.md lines 176-178 and 302: gate step 10 says tui-controls-broken-cancel failed with 'JOURNEY-ASSERT cancel accepted before cancelled'. The control fails because no acceptance appears: Esc closes the confirmation ('cancel was not sent: the confirmation was closed') and the wait times out. It never observes an ordering violation. The PC32 fess medium (acat-pc32-follow-fess-9owj: the positive check accepts acceptance and cancellation in one frame) is covered only by the catch-all limit bullet. Fix: add a remaining-limit bullet that states the real cancel rule (no frame shows Cancelled without the acceptance, and the database holds one cancel command) and names acat-pc32-follow-fess-9owj, and state in step 10 that the control fails because no acceptance appears.
+2. (low, record only) doc/workflow-manager-handoff.md lines 156-160: the 05b rerun followed an invocation fix (work directory renamed to N8), not a code fix. It is disclosed and the failure is kept in failed-r0. No change required.
+
+Evidence: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/PC/PC34/impl-r1 (private).
+
 * TODO [#C] Resolve PC5 fess findings in legacy history windows    :review:
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -10970,7 +11005,7 @@ Deferred security stage for Phase B part 2 (operator direction of 2026-09-30: fu
 :LABELS:   ["review","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-30 Wed 19:20]
-:MODIFIED: [2026-10-01 Thu 04:27]
+:MODIFIED: [2026-10-01 Thu 09:41]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -11048,6 +11083,13 @@ The closeout corrected the documentation that findings 1 to 3 name (manager/STOR
     "author": "johnw",
     "text": "Finding 10 narrowed by PC23: the service TUI now originates a dispatch-window and live redirect through /v1. The ext-pi supervisor and the local TUI live redirect remain as stated.",
     "created_at": "2026-10-01T11:27:44Z"
+  },
+  {
+    "id": 514,
+    "issue_id": "acat-phase-b2-review-findings-x8fv",
+    "author": "johnw",
+    "text": "Items 1 to 4 (floor stop, quarantine release, legacy windowing, adapter cancel) were repaired by PC1 to PC7 and passed the Phase C gate (PC34) on b698073e: manager-admission-check, manager-history-check, service_http pages and failures-manager, and test/control_probe.py at N8. Low items 5 to 11 stay open, so this issue stays open. Evidence: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/PC/PC34/impl-r1 (private).",
+    "created_at": "2026-10-01T16:41:28Z"
   }
 ]
 #+end_src
@@ -18702,7 +18744,7 @@ public or production deployment.
 :LABELS:   ["p6","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-01 Thu 02:51]
+:MODIFIED: [2026-10-01 Thu 09:41]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-029
 :SOURCE_REPO: agent-cat
@@ -18912,6 +18954,13 @@ coordination or SQL into the TUI.
     "author": "johnw",
     "text": "PC20 adds the additive client facade operations prepareCapture (octet-stream POST /v1/captures?requestId=ID with exact bytes, a new key, no If-Match, the captureBytes bound) and captureResponse (202 CaptureReceipt plus Location /v1/commands/{id}); PendingCommand keeps its media type so sendCommand sends any pending command once. Exercised end to end by tui-inputs at N8 (evidence /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/PC/PC20/impl-r1). No direct manager-client-check case yet; see acat-pc20-captures-fess-4twb. Package stays open.",
     "created_at": "2026-10-01T09:51:46Z"
+  },
+  {
+    "id": 509,
+    "issue_id": "acat-wm-029-nlmg",
+    "author": "johnw",
+    "text": "Phase C gate (PC34) on b698073e: every step passed once in the listed order (doc check, ALLBUILD, tui-model-test N1/N8, client vectors and client_native N8, base service_http with CLIENT_CHECK, store/command/admission/history checks N8, control_probe N8, service_http pages/events-lifecycle/live-redirect/person-answers/failures-manager N8, nine PTY modes N8, three new and three Phase A negative controls with literal messages, JOURNEY-PAIR(pc34), ext-pi check/test/integration, acp.sh, tui/ci/tui.sh last, doc check after the handoff edit). Only first failure: 05b invocation (work directory not named N8), kept in failed-r0, rerun passed with no code change. Handoff section 'Phase C of 2026-10' records state, deferred security items and limits. Package left open for closeout review. Evidence: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/PC/PC34/impl-r1 (private).",
+    "created_at": "2026-10-01T16:41:27Z"
   }
 ]
 #+end_src
@@ -19154,7 +19203,7 @@ until WM-039 supplies it.
 :LABELS:   ["p7","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-01 Thu 00:18]
+:MODIFIED: [2026-10-01 Thu 09:41]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-033
 :SOURCE_REPO: agent-cat
@@ -19284,6 +19333,13 @@ to an unapproved local launch.
     "author": "johnw",
     "text": "PC14 (2026-10-01): endpoint switching with generation fencing and no retargeting. agentic-run accepts --tui --service PROFILE [PROFILE ...] with 1 to 8 absolute profiles. E opens an Endpoints view from any service screen (Tab and s, l, m, f, c, i, 1 keep their browser behavior, Esc returns). Enter connects the selected profile in a worker through connectEndpoint. On success the TUI cancels the read, prepare and send workers of the old Client, closes it, advances the PC12 coordinator generation, clears observations, selection, retained results and settled commands, and lists the old session's sending or uncertain commands as unresolved under the old profile. Every worker result is stamped with the active generation and an older stamp is dropped. A failed connection keeps the active endpoint and shows the fixed reason. New service_http.py mode tui-endpoints (two client profiles, two credentials, one manager). Checks passed: Werror build with -ftui-tests of agentic-run, routing-fixed-point-probe, tui-model-test; tui-model-test (17 new switch checks); tui-endpoints at N=8; the Phase A journey at N=8; make -C doc check. Evidence: resume-20260923/PC/PC14; fess/pc-PC14-r1.md (non-blocking), findings filed as a follow-up. Package stays open.",
     "created_at": "2026-10-01T07:18:34Z"
+  },
+  {
+    "id": 510,
+    "issue_id": "acat-wm-033-4g77",
+    "author": "johnw",
+    "text": "Phase C gate (PC34) on b698073e: every step passed once in the listed order (doc check, ALLBUILD, tui-model-test N1/N8, client vectors and client_native N8, base service_http with CLIENT_CHECK, store/command/admission/history checks N8, control_probe N8, service_http pages/events-lifecycle/live-redirect/person-answers/failures-manager N8, nine PTY modes N8, three new and three Phase A negative controls with literal messages, JOURNEY-PAIR(pc34), ext-pi check/test/integration, acp.sh, tui/ci/tui.sh last, doc check after the handoff edit). Only first failure: 05b invocation (work directory not named N8), kept in failed-r0, rerun passed with no code change. Handoff section 'Phase C of 2026-10' records state, deferred security items and limits. Package left open for closeout review. Evidence: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/PC/PC34/impl-r1 (private).",
+    "created_at": "2026-10-01T16:41:27Z"
   }
 ]
 #+end_src
@@ -19295,7 +19351,7 @@ to an unapproved local launch.
 :LABELS:   ["p7","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-01 Thu 07:22]
+:MODIFIED: [2026-10-01 Thu 09:41]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-034
 :SOURCE_REPO: agent-cat
@@ -19521,6 +19577,13 @@ Local-mode behavior remains intact without a duplicated service runtime model.
     "author": "johnw",
     "text": "PC30 (refused credential and quitting with service work intact): a 401, CredentialUnavailable or CredentialChanged refusal now shows 'credential refused', stops mutations and automatic refresh (explicit g reads stay), and never falls back to a local launch. Quitting with q or Ctrl-C leaves service runs running and no TUI process remains. Evidence: Werror build of agentic-run, routing-fixed-point-probe and tui-model-test; tui-model-test at N8 (15 new credentialRefusalTests); tui-failures at N8 (steps 5 and 6: revocation shows the refused state while the held run continues; q and Ctrl-C quits leave the held run running with no process left); Phase A journey at N8; make -C doc check. Fess round 1 non-blocking; findings filed as acat-4xtp. Package stays open.",
     "created_at": "2026-10-01T14:22:45Z"
+  },
+  {
+    "id": 511,
+    "issue_id": "acat-wm-034-3vqz",
+    "author": "johnw",
+    "text": "Phase C gate (PC34) on b698073e: every step passed once in the listed order (doc check, ALLBUILD, tui-model-test N1/N8, client vectors and client_native N8, base service_http with CLIENT_CHECK, store/command/admission/history checks N8, control_probe N8, service_http pages/events-lifecycle/live-redirect/person-answers/failures-manager N8, nine PTY modes N8, three new and three Phase A negative controls with literal messages, JOURNEY-PAIR(pc34), ext-pi check/test/integration, acp.sh, tui/ci/tui.sh last, doc check after the handoff edit). Only first failure: 05b invocation (work directory not named N8), kept in failed-r0, rerun passed with no code change. Handoff section 'Phase C of 2026-10' records state, deferred security items and limits. Package left open for closeout review. Evidence: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/PC/PC34/impl-r1 (private).",
+    "created_at": "2026-10-01T16:41:27Z"
   }
 ]
 #+end_src
@@ -19532,7 +19595,7 @@ Local-mode behavior remains intact without a duplicated service runtime model.
 :LABELS:   ["p7","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-01 Thu 08:52]
+:MODIFIED: [2026-10-01 Thu 09:41]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-035
 :SOURCE_REPO: agent-cat
@@ -19666,6 +19729,13 @@ check fail.
     "author": "johnw",
     "text": "PC33 (failure PTY journeys): tui-failures now has eight steps, adding a stale answer whose draft is kept (412 stale-revision, draft kept, no automatic send) and a delayed-response endpoint switch through a TLS pass-through DelayForwarder listed in https.allowedHosts. New control tui-failures-broken-stale fails with 'JOURNEY-ASSERT stale answer kept draft'. Evidence: Werror BUILD of agentic-run, routing-fixed-point-probe, tui-model-test; tui-failures at N8 exit 0 (8 PASS lines, rerun by fess on final code); broken-stale control nonzero with its literal message; JOURNEY-ONCE(pc33, 8) pass; make -C doc check pass. No frontend defect found. The generation fence is covered by model tests only (follow-up acat-pc33-follow-fess-7vx9).",
     "created_at": "2026-10-01T15:52:54Z"
+  },
+  {
+    "id": 512,
+    "issue_id": "acat-wm-035-9uqq",
+    "author": "johnw",
+    "text": "Phase C gate (PC34) on b698073e: every step passed once in the listed order (doc check, ALLBUILD, tui-model-test N1/N8, client vectors and client_native N8, base service_http with CLIENT_CHECK, store/command/admission/history checks N8, control_probe N8, service_http pages/events-lifecycle/live-redirect/person-answers/failures-manager N8, nine PTY modes N8, three new and three Phase A negative controls with literal messages, JOURNEY-PAIR(pc34), ext-pi check/test/integration, acp.sh, tui/ci/tui.sh last, doc check after the handoff edit). Only first failure: 05b invocation (work directory not named N8), kept in failed-r0, rerun passed with no code change. Handoff section 'Phase C of 2026-10' records state, deferred security items and limits. Package left open for closeout review. Evidence: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/PC/PC34/impl-r1 (private).",
+    "created_at": "2026-10-01T16:41:28Z"
   }
 ]
 #+end_src
@@ -20462,7 +20532,7 @@ Publish precommitted workload and resource ceilings. All core advertised bounds 
 :LABELS:   ["p10","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-30 Wed 21:17]
+:MODIFIED: [2026-10-01 Thu 09:41]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-042
 :SOURCE_REPO: agent-cat
@@ -20624,6 +20694,13 @@ recipe that ignores WAL or unresolved effects.
     "author": "johnw",
     "text": "Advanced by Phase C subtask PC4 (manager-log floor recovery after a crash: orphaned asks answered at restart, lost runs terminal for pruning). The package stays open. Evidence: resume-20260923 PC/PC4/impl-r1 logs (build of agentic-run, routing-fixed-point-probe and manager-store-check; manager-store-check at N8 with the new flowFloorChecks case; manager-command-check flow mode; failures-manager at N8 with TUI_CHECK, asserting the replies through the flow verb; service_http.py storage mode; JOURNEY-ONCE at N8; make -C doc check; all exit 0). The fess audit reran the build and manager-store-check. Fess: non-blocking, findings filed as acat-ksvd.",
     "created_at": "2026-10-01T04:17:57Z"
+  },
+  {
+    "id": 513,
+    "issue_id": "acat-wm-042-sdg9",
+    "author": "johnw",
+    "text": "Phase C gate (PC34) on b698073e: every step passed once in the listed order (doc check, ALLBUILD, tui-model-test N1/N8, client vectors and client_native N8, base service_http with CLIENT_CHECK, store/command/admission/history checks N8, control_probe N8, service_http pages/events-lifecycle/live-redirect/person-answers/failures-manager N8, nine PTY modes N8, three new and three Phase A negative controls with literal messages, JOURNEY-PAIR(pc34), ext-pi check/test/integration, acp.sh, tui/ci/tui.sh last, doc check after the handoff edit). Only first failure: 05b invocation (work directory not named N8), kept in failed-r0, rerun passed with no code change. Handoff section 'Phase C of 2026-10' records state, deferred security items and limits. Package left open for closeout review. Evidence: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/PC/PC34/impl-r1 (private).",
+    "created_at": "2026-10-01T16:41:28Z"
   }
 ]
 #+end_src
