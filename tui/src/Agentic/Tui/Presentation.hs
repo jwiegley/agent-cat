@@ -107,6 +107,8 @@ data ActiveLayer
   | SaveLayer
     -- | The export name editor of the service frontend.
   | ExportLayer
+    -- | The lineage menu of the service frontend.
+  | LineageLayer
     -- | The path editor of a file capture over the service input editor.
   | CaptureFileLayer
   | FilterLayer
@@ -190,6 +192,16 @@ data Presentation = Presentation
     -- latest Ctrl-D.
     presentationExportRun :: !(Maybe Text),
     presentationExportError :: !(Maybe Text),
+    -- | Whether l opens the lineage menu for the run that the screen shows.
+    presentationServiceLineageOffered :: !Bool,
+    -- | The open lineage menu: its parent run, the part that has the keys,
+    -- its eligible operations, its display lines and the refusal of its
+    -- latest key.
+    presentationLineageRun :: !(Maybe Text),
+    presentationLineageMode :: !(Maybe Service.LineageMode),
+    presentationLineageEligible :: ![Text],
+    presentationLineageLines :: ![Text],
+    presentationLineageError :: !(Maybe Text),
     -- | The outcome of the latest mutation key that started nothing. The
     -- status line shows it until the next key press or view change.
     presentationServiceKeyOutcome :: !(Maybe KeyOutcome),
@@ -273,6 +285,12 @@ emptyPresentation model =
       presentationServiceExportable = False,
       presentationExportRun = Nothing,
       presentationExportError = Nothing,
+      presentationServiceLineageOffered = False,
+      presentationLineageRun = Nothing,
+      presentationLineageMode = Nothing,
+      presentationLineageEligible = [],
+      presentationLineageLines = [],
+      presentationLineageError = Nothing,
       presentationServiceKeyOutcome = Nothing,
       presentationServiceOverview = OverviewView [] 0 (Service.overviewStatus Nothing Nothing),
       presentationServiceDecisions = OverviewView [] 0 (Service.decisionsStatus Nothing Nothing),
@@ -470,6 +488,7 @@ layerView presentation width totalHeight mainHeight = case presentationLayer pre
   SteerLayer -> steerView presentation width mainHeight
   SaveLayer -> saveResultView presentation width mainHeight
   ExportLayer -> exportNameView presentation width mainHeight
+  LineageLayer -> lineageView presentation width mainHeight
   CaptureFileLayer -> captureFileView presentation width mainHeight
   FilterLayer -> workflowFilterView presentation width mainHeight
   ConfirmDetailsLayer -> confirmDetailsView presentation width mainHeight
@@ -544,6 +563,8 @@ serviceRequestView presentation request = pane "Manager request" $ viewport Fail
     "Blocking reasons: " <> T.intercalate ", " (Manager.draftReasons request),
     "Missing inputs: " <> (if null missing then "none" else T.intercalate ", " missing),
     "Run: " <> fromMaybe "none" (Manager.draftRun request) ]
+  <> [ "Lineage: " <> operation <> " of run " <> parent <> "; the inputs come from the parent run"
+     | Just parent <- [Manager.draftParent request], Just operation <- [Manager.draftLineage request] ]
   <> presentationServiceObservation presentation
   <> [ "Approval receipt: " <> fromMaybe "none" (presentationServiceApproval presentation),
     "Runtime completion and result verification are not inferred from this request.", "", "Retained operator literals:" ]
@@ -560,8 +581,22 @@ serviceReviewRows preparation tag =
     "Preparation: " <> Manager.preparationId preparation,
     "Profile: " <> Manager.preparationProfile preparation,
     "Expires: " <> Manager.preparationExpiresAt preparation,
-    "If-Match: " <> tag ] <> Service.approvalSelectors preparation
+    "If-Match: " <> tag ] <> lineageRows <> Service.approvalSelectors preparation
       <> ["d shows the complete exact review.", "Only y approves. Enter does not approve."]
+  where
+    -- A lineage review names its parent run, its operation and its fork
+    -- edits. A replacement shows the SHA-256 of its answer, as the review
+    -- states it.
+    lineageRows = case Manager.reviewLineage (Manager.preparationReview preparation) of
+      Nothing -> []
+      Just lineage ->
+        [ "Lineage: " <> Manager.reviewLineageOperation lineage <> " of run " <> Manager.reviewLineageParent lineage,
+          "Lineage edits: " <> case Manager.reviewLineageEdits lineage of
+            [] -> "none"
+            edits -> T.intercalate ", " (map editText edits) ]
+    editText edit = case edit of
+      Manager.ReviewDrop occurrence -> "drop occurrence " <> occurrence
+      Manager.ReviewReplace occurrence digest -> "replace occurrence " <> occurrence <> " (answer SHA-256 " <> digest <> ")"
 
 -- | Whether the complete summary review fits in the service shell, whose
 -- header includes the endpoint identity row where it fits. The rows of the
@@ -1006,6 +1041,18 @@ exportNameView presentation width mainHeight =
           Just failure -> withAttr (attrName "error") (displayTextWrap ("ERROR: " <> failure))
       ]
 
+-- | The lineage menu over the live monitor or the run detail: the choice of
+-- the operation, the fork edits of each occurrence, or the replacement
+-- answer editor of the selected occurrence.
+lineageView :: Presentation -> Int -> Int -> Widget Name
+lineageView presentation width mainHeight =
+  dialog width mainHeight (" Lineage of run " <> fromMaybe "" (presentationLineageRun presentation) <> " ") $
+    vBox $
+      map displayTextWrap (presentationLineageLines presentation)
+        <> [ vLimit 6 (borderWithLabel (displayText " Replacement answer • ") (Edit.renderEditor (displayText . T.unlines) True (presentationEditor presentation)))
+           | presentationLineageMode presentation == Just Service.LineageReplacing ]
+        <> [ withAttr (attrName "error") (displayTextWrap ("ERROR: " <> failure)) | Just failure <- [presentationLineageError presentation] ]
+
 saveResultView :: Presentation -> Int -> Int -> Widget Name
 saveResultView presentation width mainHeight =
   dialog width mainHeight " Save verified result " $
@@ -1139,6 +1186,7 @@ keyHelpLines presentation = case modelScreen model of
     "Right/Left focus details/list", "g reads the run list again", "Esc workflows", "E manager endpoints", "q detach", "? or Esc close this help"]
   ServiceHistoryRunScreen _ -> ["r retrieves the verified result of a succeeded run", "s saves the retrieved result to a new absolute path",
     "e exports the verified result of a succeeded run under a new name",
+    "l opens the lineage menu: restart, resume or fork of the run",
     "g reads the run detail again", "Up/Down scroll", "Esc returns to the history", "E manager endpoints", "q detach", "? or Esc close this help"]
   BrowserScreen ->
     [ "Up/Down       select",
@@ -1178,6 +1226,7 @@ keyHelpLines presentation = case modelScreen model of
           <> ["1 to 9 redirect the occurrence of the redirect line to that offered target" | "1-9 REDIRECT" `elem` presentationServiceRunKeys presentation]
           <> ["s saves the verified result bytes to a new file" | presentationServiceSavable presentation]
           <> ["e exports the verified result under a new name" | presentationServiceExportable presentation]
+          <> ["l opens the lineage menu: restart, resume or fork of the run" | presentationServiceLineageOffered presentation]
           <> ["Esc returns to the manager overview; the manager run continues", "q detaches; the manager run continues", "? or Esc close this help"]
   LiveScreen _ ->
     ["d full run details and error", "Tab focus pane", "Up/Down move or scroll", "j/k select occurrence", "G follow output"]
@@ -1319,6 +1368,11 @@ footerItems presentation width height
   SteerLayer -> ["Esc CLOSE", "Ctrl-D SEND", "Enter newline"]
   SaveLayer -> ["Esc CANCEL", "Ctrl-D SAVE"] <> ["PgUp/PgDn ERROR" | Just _ <- [presentationSaveError presentation]]
   ExportLayer -> ["Esc CANCEL", "Ctrl-D EXPORT"]
+  LineageLayer -> case presentationLineageMode presentation of
+    Just Service.LineageForking -> ["Esc BACK", "Up/Down SELECT", "d DROP", "Enter REPLACE", "k KEEP", "Ctrl-D SEND FORK"]
+    Just Service.LineageReplacing -> ["Esc CANCEL", "Ctrl-D SET ANSWER"]
+    _ -> ["Esc CLOSE"] <> [key <> " " <> T.toUpper name | (key, name) <- [("r","restart"),("s","resume"),("f","fork")],
+      name `elem` presentationLineageEligible presentation]
   CaptureFileLayer -> ["Esc CANCEL", "Ctrl-D CAPTURE FILE"]
   FilterLayer -> ["Enter APPLY", "Esc CANCEL"]
   ConfirmDetailsLayer -> confirmItems True
@@ -1346,7 +1400,7 @@ footerItems presentation width height
       ServiceOverviewScreen -> ["Enter OPEN", "g REFRESH", "Esc WORKFLOWS", browserPaneHint, "? KEYS", "q DETACH", "E ENDPOINTS"]
       ServiceDecisionsScreen -> ["Enter OPEN RUN", "g REFRESH", "Esc WORKFLOWS", browserPaneHint, "? KEYS", "q DETACH", "E ENDPOINTS"]
       ServiceHistoryScreen -> ["Enter OPEN RUN", "g REFRESH", "Home/End", "Esc WORKFLOWS", browserPaneHint, "? KEYS", "q DETACH", "E ENDPOINTS"]
-      ServiceHistoryRunScreen _ -> ["r RETRIEVE RESULT"] <> saveItem <> exportItem <> ["g REFRESH", "Esc HISTORY", "? KEYS", "q DETACH", "E ENDPOINTS"]
+      ServiceHistoryRunScreen _ -> ["r RETRIEVE RESULT"] <> saveItem <> exportItem <> lineageItem <> ["g REFRESH", "Esc HISTORY", "? KEYS", "q DETACH", "E ENDPOINTS"]
       ServiceRequestScreen request ->
         ["g REFRESH", "q DETACH"] <> [serviceBackLabel presentation | presentationServiceMutation presentation == Nothing]
           <> (if Manager.draftPhase request == "draft" && presentationServiceMutation presentation == Nothing
@@ -1381,7 +1435,7 @@ footerItems presentation width height
       LiveScreen _ | presentationService presentation, compact -> ["q DETACH", serviceBackLabel presentation] <> presentationServiceRunKeys presentation
                        <> ["Tab PANE", "d DETAILS", "? KEYS"] <> saveItem
                    | presentationService presentation -> ["q DETACH", serviceBackLabel presentation] <> presentationServiceRunKeys presentation
-                       <> saveItem <> exportItem <> ["g REFRESH", "d DETAILS", compactNavigation, "? KEYS"]
+                       <> saveItem <> exportItem <> lineageItem <> ["g REFRESH", "d DETAILS", compactNavigation, "? KEYS"]
       LiveScreen _ | compact ->
         ["Esc " <> if presentationRunning presentation then "DETACH" else "RUNS", "Tab PANE", "d DETAILS", "? KEYS"]
           <> ["c CANCEL" | presentationRunning presentation]
@@ -1394,6 +1448,7 @@ footerItems presentation width height
       FailureScreen _ -> ["Esc BACK", "Up/Down SCROLL", "PgUp/PgDn", "Home/End", "? KEYS"]
     saveItem = ["s SAVE RESULT" | presentationServiceSavable presentation]
     exportItem = ["e EXPORT" | presentationServiceExportable presentation]
+    lineageItem = ["l LINEAGE" | presentationServiceLineageOffered presentation]
     browserPaneHint = case presentationPaneFocus presentation of
       PrimaryPane -> "Right DETAILS"
       SecondaryPane -> "Left LIST"

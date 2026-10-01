@@ -18,6 +18,7 @@ import Agentic.Runtime
     ControlCommand (..),
     ControlId (..),
     DispatchSnapshot (..),
+    FrontendEdit (..),
     FrontendManifest (..),
     FrontendServer,
     LineageOperation (..),
@@ -150,6 +151,12 @@ data ServiceEvent
   | ServiceResultReady !Int !Text !(Lane.CallOutcome (Maybe Service.VerifiedResult))
     -- | The read of the progress of the accepted export in the command lane.
   | ServiceExportReady !Int !(Lane.CallOutcome Service.ExportProgress)
+    -- | The read of the first page of the lineage collection of this run of
+    -- this profile, which opens the lineage menu.
+  | ServiceLineageMenuReady !Int !Text !Text !(Lane.CallOutcome (Manager.Observed, Service.LineageCollection))
+    -- | The read of the progress of the accepted lineage request in the
+    -- command lane.
+  | ServiceLineageReady !Int !(Lane.CallOutcome Service.LineageProgress)
 
 -- | What started an overview read: the bootstrap of the session, which
 -- shows the profiles afterwards, the explicit g key, or live delivery.
@@ -221,6 +228,9 @@ data AppState = AppState
     stateExportRun :: !(Maybe (Text, Text)),
     stateExportEditor :: !(Edit.Editor Text Name),
     stateExportError :: !(Maybe Text),
+    -- | The open lineage menu and the editor of its replacement answer.
+    stateLineageMenu :: !(Maybe (Service.LineageMenu Manager.Observed)),
+    stateLineageEditor :: !(Edit.Editor Text Name),
     stateNow :: !UTCTime,
     stateRunStartedAt :: !(Maybe UTCTime),
     stateRunPersona :: !(Maybe Text),
@@ -314,6 +324,9 @@ data AppState = AppState
     -- | The run and the outcome of its latest export: a definite refusal of
     -- the send, or the published export receipt with its verified bytes.
     stateServiceExport :: !(Maybe (Text, Service.ExportOutcome)),
+    -- | The parent run and the outcome of its latest lineage request: a
+    -- definite refusal of the send, or the child request that it created.
+    stateServiceLineage :: !(Maybe (Text, Service.LineageOutcome)),
     -- | The sequence number of the latest approval-key press on the review.
     -- It counts approval-key presses only, not every key event.
     stateServiceKeySerial :: !Int,
@@ -411,6 +424,8 @@ runAppWith backend = mask $ \restore -> do
             stateExportRun = Nothing,
             stateExportEditor = blankEditor,
             stateExportError = Nothing,
+            stateLineageMenu = Nothing,
+            stateLineageEditor = blankEditor,
             stateNow = now,
             stateRunStartedAt = Nothing,
             stateRunPersona = Nothing,
@@ -463,6 +478,7 @@ runAppWith backend = mask $ \restore -> do
             stateServiceLastReceipt = Nothing,
             stateServiceControlOutcome = Nothing,
             stateServiceExport = Nothing,
+            stateServiceLineage = Nothing,
             stateServiceKeySerial = 0,
             stateServiceApprovalPress = Nothing,
             stateServiceNotice = Nothing,
@@ -866,6 +882,10 @@ serviceVerifiedResult state = do
 serviceExportLines :: AppState -> Text -> [Text]
 serviceExportLines state run = [line | Just (ident, outcome) <- [stateServiceExport state], ident == run, line <- Service.exportLines outcome]
 
+-- | The lineage line of this run: the outcome of its latest lineage request.
+serviceLineageLines :: AppState -> Text -> [Text]
+serviceLineageLines state run = [line | Just (ident, outcome) <- [stateServiceLineage state], ident == run, line <- Service.lineageLines outcome]
+
 -- | Whether s opens the save dialog: the live monitor shows no decision head
 -- and no run details, or the run detail shows its run, and the verified
 -- result bytes of that run are retained.
@@ -1122,6 +1142,12 @@ refreshServiceRequest client cause = do
     (Just (mutation@Service.Export {}, location), _) | not (serviceSending state) ->
       startServiceRead Lane.SingleResourceRead "reading the export receipt" $ \ticket ->
         ServiceExportReady ticket <$> Lane.serviceCall (Service.observeExport client mutation location)
+    -- The receipt of an accepted lineage request is read with
+    -- 'Service.observeLineageCommand' in the same way, until its child
+    -- request is created and read.
+    (Just (mutation@Service.Lineage {}, location), _) | not (serviceSending state) ->
+      startServiceRead Lane.SingleResourceRead "reading the lineage receipt" $ \ticket ->
+        ServiceLineageReady ticket <$> Lane.serviceCall (Service.observeLineageCommand client mutation location)
     -- A succeeded run with a verified or referenced result is retrieved
     -- through the same single-flight read lane, in place of the composite
     -- read, when 'Lane.retrievalDue' holds: once per run until its verified
@@ -1244,7 +1270,10 @@ handleServiceSent client ticket result = do
           exported = case Lane.attemptMutation attempt of
             Service.Export _ run name -> Just (run, Service.ExportRefused name (Lane.refusalCode failure))
             _ -> stateServiceExport state
-      put state {stateServiceLane = lane, stateServiceControlOutcome = outcome, stateServiceExport = exported,
+          lineaged = case Lane.attemptMutation attempt of
+            Service.Lineage _ run _ choice -> Just (run, Service.LineageRefused (Service.lineageChoiceName choice) (Lane.refusalCode failure))
+            _ -> stateServiceLineage state
+      put state {stateServiceLane = lane, stateServiceControlOutcome = outcome, stateServiceExport = exported, stateServiceLineage = lineaged,
         stateModel = (stateModel state) {modelStatus = label}}
       liftIO (writeIORef (stateServiceUncertainExit state) (isJust (stateServiceApproval state)))
       refreshServiceRequest client Lane.AutomaticRefresh
@@ -1507,6 +1536,8 @@ serviceEventTicket serviceEvent = case serviceEvent of
   ServiceHistoryDetailReady ticket _ _ _ -> ticket
   ServiceResultReady ticket _ _ -> ticket
   ServiceExportReady ticket _ -> ticket
+  ServiceLineageMenuReady ticket _ _ _ -> ticket
+  ServiceLineageReady ticket _ -> ticket
 
 -- | The refresh coordinator of the session.
 serviceRefresh :: AppState -> Manager.Refresh Lane.FetchKey
@@ -1697,6 +1728,63 @@ handleServiceResultCore client serviceEvent = do
                 settleService current {stateServiceLastReceipt = Just receipt} (Lane.Attempt mutation command location) reason
             | otherwise -> put current {stateServiceLastReceipt = Just receipt}
           _ -> put current
+    -- The first page of the lineage collection opens the lineage menu while
+    -- the screen still shows its run.
+    ServiceLineageMenuReady ticket profile run result -> case Lane.readStep ticket result (stateServiceLane state) of
+      (Lane.ReadStale,_) -> pure ()
+      (Lane.ReadFaulted,lane) -> faultService state lane
+      (Lane.ReadRefused problem,lane) -> put state {stateServiceLane = lane,
+        stateModel = (stateModel state) {modelStatus = "lineage menu not opened: " <> Lane.refusalCode problem}}
+      (Lane.ReadDelivered (observed, page),lane) -> do
+        let current = state {stateServiceLane = lane}
+        case serviceLineageSource current of
+          Right (shownProfile, shown) | shownProfile == profile, runIdText (Service.runIdentity shown) == run ->
+            put current {stateLineageMenu = Just (Service.lineageMenu profile observed page shown), stateLineageEditor = blankEditor,
+              stateModel = (stateModel current) {modelStatus = "lineage menu of run " <> run}}
+          _ -> put current {stateModel = (stateModel current) {modelStatus = "lineage menu not opened: the screen no longer shows run " <> run}}
+    -- The progress of the accepted lineage request. A pending receipt is the
+    -- latest receipt, and a refused or unresolved receipt leaves the request
+    -- unresolved without a resend. A created child request completes the
+    -- command, shows the outcome on the lineage line of the parent run, and
+    -- opens the child request by its phase. A declared refusal of the read
+    -- keeps the command, and the next refresh reads its receipt again.
+    ServiceLineageReady ticket result -> case Lane.readStep ticket result (stateServiceLane state) of
+      (Lane.ReadStale,_) -> pure ()
+      (Lane.ReadFaulted,lane) -> faultService state lane
+      (Lane.ReadRefused problem,lane) -> put state {stateServiceLane = lane,
+        stateModel = (stateModel state) {modelStatus = "lineage receipt not read: " <> Lane.refusalCode problem <> "; the next refresh reads it again"}}
+      (Lane.ReadDelivered progress,lane) -> do
+        let current = state {stateServiceLane = lane}
+            pending = case serviceMutation current of
+              Lane.MutationAwaiting mutation command location -> Just (mutation, command, Just location)
+              Lane.MutationUncertain (Lane.Attempt mutation command location) _ -> Just (mutation, command, location)
+              _ -> Nothing
+        case (pending, progress) of
+          (Just (mutation@(Service.Lineage _ run _ choice), _, _), Service.LineageChild receipt child)
+            | Service.receiptMatches mutation receipt -> do
+                put (idleService current) {stateServiceLastReceipt = Just receipt,
+                  stateServiceLineage = Just (run, Service.LineageCreated (Service.lineageChoiceName choice) (Manager.draftId child)),
+                  stateModel = (stateModel current) {modelStatus = "lineage request created; opening request " <> Manager.draftId child}}
+                liftIO (writeIORef (stateServiceUncertainExit current) (isJust (stateServiceApproval current)))
+                openLineageChild client child
+          (Just (mutation@Service.Lineage {}, command, location), Service.LineagePending receipt)
+            | Just reason <- Service.receiptSettlement mutation (Just (mutation, Right receipt)) ->
+                settleService current {stateServiceLastReceipt = Just receipt} (Lane.Attempt mutation command location) reason
+            | otherwise -> put current {stateServiceLastReceipt = Just receipt}
+          _ -> put current
+
+-- | Open the child request that a lineage request created, by its phase,
+-- with the catalogue row of its workflow. A catalogue that does not list the
+-- row is loaded for the profile of the child first.
+openLineageChild :: Manager.Client -> Manager.DraftView -> EventM Name AppState ()
+openLineageChild client child = do
+  state <- get
+  case find (`Service.requestMatches` child) (stateServiceWorkflows state) of
+    Just workflow -> openServiceRequest workflow child
+    Nothing -> case find ((== Manager.draftProfile child) . Service.profileId) (stateServiceProfiles state) of
+      Just profile -> startServiceWorkflows client profile (Just child)
+      Nothing -> put state {stateModel = (stateModel state)
+        {modelStatus = "child request not opened: the manager catalogue lists no profile of request " <> Manager.draftId child}}
 
 handleServiceEventCore :: Manager.Client -> BrickEvent Name AppEvent -> EventM Name AppState ()
 handleServiceEventCore client event = do
@@ -1765,6 +1853,8 @@ handleServiceEventCore client event = do
     VtyEvent key | activeLayer state == CaptureFileLayer -> handleCaptureFileKey client event key
     -- The export name editor takes the text entry keys.
     VtyEvent key | activeLayer state == ExportLayer -> handleServiceExportKey client event key
+    -- The lineage menu takes every key while it is open.
+    VtyEvent key | activeLayer state == LineageLayer -> handleServiceLineageKey client event key
     VtyEvent key | InputScreen index <- modelScreen (stateModel state) -> case key of
       -- Ctrl-T captures the exact editor text as raw UTF-8 bytes instead of
       -- sending it as a literal.
@@ -1912,6 +2002,10 @@ handleServiceEventCore client event = do
             Just _ -> put state {stateModel = (stateModel state) {modelStatus = "run detail read not started: another manager read is in flight; press g again"}}
           -- r on the run detail retrieves the verified result of its run.
           Vty.KChar 'r' | ServiceHistoryRunScreen run <- modelScreen (stateModel state) -> retrieveHistoryResult client run
+          -- l on the live monitor or on a run detail reads the lineage
+          -- collection of the run and opens the lineage menu.
+          Vty.KChar 'l' | LiveScreen _ <- modelScreen (stateModel state) -> openServiceLineage client
+          Vty.KChar 'l' | ServiceHistoryRunScreen _ <- modelScreen (stateModel state) -> openServiceLineage client
           Vty.KChar 'g' -> refreshServiceRequest client Lane.ExplicitRefresh
           Vty.KChar 'x' | Lane.resendOffered (stateServiceLane state) -> put (onLane (\lane -> lane {Lane.laneResendConfirm = True}) state)
           Vty.KChar 'r' | ServiceProfilesScreen {} <- modelScreen (stateModel state) -> startServiceProfiles client
@@ -2221,6 +2315,7 @@ clearServiceSession state =
       stateServiceLastReceipt = Nothing,
       stateServiceControlOutcome = Nothing,
       stateServiceExport = Nothing,
+      stateServiceLineage = Nothing,
       stateServiceApprovalPress = Nothing,
       stateServiceNotice = Nothing,
       stateServiceKeyOutcome = Nothing,
@@ -2238,6 +2333,8 @@ clearServiceSession state =
       stateExportRun = Nothing,
       stateExportEditor = blankEditor,
       stateExportError = Nothing,
+      stateLineageMenu = Nothing,
+      stateLineageEditor = blankEditor,
       stateRunView = emptyRunView,
       statePaneFocus = PrimaryPane,
       stateOutputFollow = True,
@@ -2336,6 +2433,7 @@ toPresentation state =
             <> maybe [] (\shown -> Service.historyDetailLines shown (Lane.retrievalShown run (stateServiceResults state))) detail
             <> [line | Just (ident, line) <- [stateServiceSaved state], ident == run]
             <> serviceExportLines state run
+            <> serviceLineageLines state run
         _ -> [],
       presentationServiceObservation = let installed = stateServiceObservation state in
         Service.observationLines (Lane.refreshPaused (stateNow state) (stateServiceLane state) (stateServiceKeyOutcome state))
@@ -2360,10 +2458,17 @@ toPresentation state =
         Just run -> Service.resultLines run (Lane.retrievalShown (runIdText (Service.runIdentity run)) (stateServiceResults state))
           <> [line | Just (ident, line) <- [stateServiceSaved state], ident == runIdText (Service.runIdentity run)]
           <> serviceExportLines state (runIdText (Service.runIdentity run))
+          <> serviceLineageLines state (runIdText (Service.runIdentity run))
         Nothing -> [],
       presentationServiceExportable = either (const False) (const True) (serviceExportSource state),
       presentationExportError = stateExportError state,
       presentationExportRun = snd <$> stateExportRun state,
+      presentationServiceLineageOffered = either (const False) (const True) (serviceLineageSource state),
+      presentationLineageRun = Service.lineageRun . Service.menuCollection <$> stateLineageMenu state,
+      presentationLineageMode = Service.menuMode <$> stateLineageMenu state,
+      presentationLineageEligible = maybe [] (Service.lineageEligible . Service.menuCollection) (stateLineageMenu state),
+      presentationLineageLines = maybe [] Service.lineageMenuLines (stateLineageMenu state),
+      presentationLineageError = stateLineageMenu state >>= Service.menuError,
       presentationServiceSavable = serviceSavable state,
       presentationServiceRequestLines = maybe [] (serviceRequestLines . snd) (serviceRequest state),
       presentationServiceApprovalOffered = case modelScreen (stateModel state) of
@@ -2408,6 +2513,7 @@ currentEditor state = case activeLayer state of
   SteerLayer -> stateControlEditor state
   SaveLayer -> stateSaveEditor state
   ExportLayer -> stateExportEditor state
+  LineageLayer -> stateLineageEditor state
   CaptureFileLayer -> stateCaptureEditor state
   FilterLayer -> stateFilterEditor state
   _ -> stateEditor state
@@ -2426,6 +2532,7 @@ activeLayer state
   | isJust (stateSteerTiming state) = SteerLayer
   | stateSaveResult state = SaveLayer
   | isJust (stateExportRun state) = ExportLayer
+  | isJust (stateLineageMenu state) = LineageLayer
   | stateCaptureFile state = CaptureFileLayer
   | stateFilterEditing state = FilterLayer
   | ConfirmScreen _ <- screen, stateConfirmDetails state = ConfirmDetailsLayer
@@ -2663,6 +2770,7 @@ handleKey original key = do
     -- export name editor.
     CaptureFileLayer -> pure ()
     ExportLayer -> pure ()
+    LineageLayer -> pure ()
     FilterLayer -> handleFilterKey original key
     ConfirmDetailsLayer -> handleConfirmDetailsKey key
     ConfirmLayer -> handleConfirmKey key
@@ -3022,6 +3130,101 @@ handleServiceExportKey client original key = case key of
     state <- get
     (editor, ()) <- nestEventM (stateExportEditor state) (Edit.handleEditorEvent original)
     put state {stateExportEditor = editor, stateExportError = Nothing}
+
+-- | The profile and the run whose lineage menu @l@ opens from the shown
+-- screen, or the reason why it opens nothing: the installed run of the live
+-- monitor, or the managed run of the installed run detail with the profile
+-- that the installed run list names. A legacy entry has no lineage
+-- authority.
+serviceLineageSource :: AppState -> Either Text (Text, Service.RunObservation)
+serviceLineageSource state = case modelScreen (stateModel state) of
+  LiveScreen _ -> case (serviceRun state, serviceProfile state) of
+    (Just run, Just profile) -> Right (profile, run)
+    _ -> Left "the run is not observed"
+  ServiceHistoryRunScreen shown ->
+    case (Lane.installedRead (stateServiceHistoryDetail state), find ((== shown) . Service.runItemId) (fromMaybe [] (Lane.installedRead (stateServiceHistory state)))) of
+      (Just (Service.ManagedDetail run), Just item) | runIdText (Service.runIdentity run) == shown -> Right (Service.runItemProfile item, run)
+      (Just (Service.LegacyDetail item), _) | Service.runItemId item == shown -> Left "a legacy entry has no lineage authority"
+      _ -> Left "the run detail is not observed"
+  _ -> Left "no run is shown"
+
+-- | Read the first page of the lineage collection of the run that the
+-- screen shows, which opens the lineage menu ('ServiceLineageMenuReady'),
+-- or show why @l@ opens nothing. The explicit key ends a read in flight, as
+-- the confirmation of an exact resend does, and live delivery fetches that
+-- read again.
+openServiceLineage :: Manager.Client -> EventM Name AppState ()
+openServiceLineage client = do
+  state <- get
+  case serviceLineageSource state of
+    Left reason -> put state {stateModel = (stateModel state) {modelStatus = "lineage menu not opened: " <> reason}}
+    Right (profile, run) -> do
+      let ident = runIdText (Service.runIdentity run)
+      put (onLane (\lane -> lane {Lane.laneReadTicket = Nothing}) state)
+      liftIO (cancelWorker state ServiceReadWork)
+      startServiceRead Lane.SingleResourceRead "reading the lineage collection" $ \ticket ->
+        ServiceLineageMenuReady ticket profile ident <$> Lane.serviceCall (Service.observeLineageCollection client ident)
+
+-- | The lineage menu. On the choice of the operation, r and s send a
+-- restart or a resume, and f opens the fork edits. On the fork edits,
+-- Up/Down select an occurrence, d drops its answer, k keeps it, Enter opens
+-- the replacement answer editor, and Ctrl-D sends the fork with its edits.
+-- In the replacement answer editor, Ctrl-D converts the text by the code of
+-- the occurrence ('Service.forkSetReplacement'). An operation that the
+-- lineage collection does not list as eligible is refused here, and nothing
+-- is sent. Esc closes the editor, leaves the fork edits, or closes the menu.
+handleServiceLineageKey :: Manager.Client -> BrickEvent Name AppEvent -> Vty.Event -> EventM Name AppState ()
+handleServiceLineageKey client original key = do
+  state <- get
+  case stateLineageMenu state of
+    Nothing -> pure ()
+    Just menu -> do
+      let set :: Service.LineageMenu Manager.Observed -> EventM Name AppState ()
+          set changed = put state {stateLineageMenu = Just changed}
+          count = length (Service.menuTargets menu)
+      case (Service.menuMode menu, key) of
+        (Service.LineageChoosing, Vty.EvKey Vty.KEsc []) -> put state {stateLineageMenu = Nothing}
+        (Service.LineageChoosing, Vty.EvKey (Vty.KChar 'r') []) -> sendLineage Service.RestartChoice
+        (Service.LineageChoosing, Vty.EvKey (Vty.KChar 's') []) -> sendLineage Service.ResumeChoice
+        (Service.LineageChoosing, Vty.EvKey (Vty.KChar 'f') []) ->
+          case Service.lineageMutation Service.observedBinding menu (Service.lineageForkChoice menu) of
+            Left reason -> set menu {Service.menuError = Just ("fork did not start: " <> reason)}
+            Right _ -> set menu {Service.menuMode = Service.LineageForking, Service.menuError = Nothing}
+        (Service.LineageForking, Vty.EvKey Vty.KEsc []) -> set menu {Service.menuMode = Service.LineageChoosing, Service.menuError = Nothing}
+        (Service.LineageForking, Vty.EvKey Vty.KUp []) -> set menu {Service.menuFocus = max 0 (Service.menuFocus menu - 1)}
+        (Service.LineageForking, Vty.EvKey Vty.KDown []) -> set menu {Service.menuFocus = max 0 (min (count - 1) (Service.menuFocus menu + 1))}
+        (Service.LineageForking, Vty.EvKey (Vty.KChar 'd') []) -> set (Service.forkToggleDrop menu)
+        (Service.LineageForking, Vty.EvKey (Vty.KChar 'k') []) -> set (Service.forkKeep menu)
+        (Service.LineageForking, Vty.EvKey Vty.KEnter []) -> case Service.forkFocused menu of
+          Nothing -> set menu {Service.menuError = Just "no occurrence is selected"}
+          Just target ->
+            let shown = case Map.lookup (Service.forkOccurrence target) (Service.menuEdits menu) of
+                  Just (ReplaceAnswer _ (String text)) | Service.forkCode target == "text" -> text
+                  Just (ReplaceAnswer _ value) -> TE.decodeUtf8 (BL.toStrict (encode value))
+                  _ -> ""
+             in put state {stateLineageMenu = Just menu {Service.menuMode = Service.LineageReplacing, Service.menuError = Nothing},
+                  stateLineageEditor = Edit.editorText InputEditor Nothing shown}
+        (Service.LineageForking, Vty.EvKey (Vty.KChar 'd') [Vty.MCtrl]) -> sendLineage (Service.lineageForkChoice menu)
+        (Service.LineageReplacing, Vty.EvKey Vty.KEsc []) -> set menu {Service.menuMode = Service.LineageForking, Service.menuError = Nothing}
+        (Service.LineageReplacing, Vty.EvKey (Vty.KChar 'd') [Vty.MCtrl]) ->
+          set (Service.forkSetReplacement (editorContents (stateLineageEditor state)) menu)
+        (Service.LineageReplacing, _) -> do
+          (editor, ()) <- nestEventM (stateLineageEditor state) (Edit.handleEditorEvent original)
+          put state {stateLineageEditor = editor, stateLineageMenu = Just menu {Service.menuError = Nothing}}
+        _ -> pure ()
+  where
+    -- Send the lineage request of the menu for this operation through the
+    -- command lane, with the observation of the lineage collection as its
+    -- precondition. A refusal keeps the menu open with its reason.
+    sendLineage choice = serviceMutationKey (Service.lineageChoiceName choice) $ do
+      current <- get
+      case stateLineageMenu current of
+        Nothing -> pure ()
+        Just menu -> case Service.lineageMutation Service.observedBinding menu choice of
+          Left reason -> put current {stateLineageMenu = Just menu {Service.menuError = Just (Service.lineageChoiceName choice <> " did not start: " <> reason)}}
+          Right (mutation, observed) -> do
+            put current {stateLineageMenu = Nothing}
+            beginServiceMutation client mutation (Just observed)
 
 openSaveResult :: EventM Name AppState ()
 openSaveResult = do

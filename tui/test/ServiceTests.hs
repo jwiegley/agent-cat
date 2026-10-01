@@ -5,7 +5,7 @@ module ServiceTests (serviceTests) where
 
 import qualified Agentic.Manager.Client as C
 import Agentic.Runtime (DescriptorCapabilities (..), WorkflowDescriptor (..), WorkflowInputDescriptor (..), WorkflowInputSource (..),
-  OccurrenceId (..), AttemptId (..), RunSnapshot (..), OccurrenceSnapshot (..), AttemptSnapshot (..), ControlAckSnapshot (..),
+  OccurrenceId (..), AttemptId (..), FrontendEdit (..), RunSnapshot (..), OccurrenceSnapshot (..), AttemptSnapshot (..), ControlAckSnapshot (..),
   AttemptState (..), DispatchSnapshot (..),
   PersonAnswering (..), RecoverySnapshot (..), RecoveryOption (..), RunStatus (..), mkRunId, runIdText)
 import Agentic.Tui.Person (PersonPrompt (..))
@@ -175,6 +175,7 @@ serviceTests render = do
   decisionsViewTests render row decisionValue
   historyTests render row
   exportTests render row receiptValue
+  lineageTests render selectedWorkflowRow request preparation (metadata,items)
   draftTests profile request0
   liveDeliveryTests render profile
   where
@@ -481,6 +482,134 @@ exportTests render row receiptValue = do
       ("the export name editor at (100,30) names its run, Ctrl-D and Esc, and shows a refusal",
         all (`T.isInfixOf` editorFrame) ["Export verified result", "run run_21", "Ctrl-D EXPORT", "Esc CANCEL"]
           && "ERROR: the export name must be 1 to 128 ASCII letters" `T.isInfixOf` refusedEditor)
+    ]
+
+-- | Lineage requests: the lineage collection decoder, the local refusal of
+-- an ineligible operation, the Lineage mutation with the entity tag of the
+-- first collection page, the fork edits and their typed replacement answers,
+-- the receipt of a lineage command, the definite 412 refusal, the matching
+-- of a lineage child request and its review, and fixed-size renders of the
+-- lineage menu and the lineage review rows.
+lineageTests :: ((Int,Int) -> Presentation -> T.Text) -> S.Workflow -> C.DraftView -> C.Preparation -> (Value,[Value]) -> IO ()
+lineageTests render row request preparation (metadata,items) = do
+  pageValue <- BS.readFile "test/fixtures/manager/v1/valid/lineages.json" >>= either die pure . eitherDecodeStrict'
+  commandValue <- BS.readFile "test/fixtures/manager/v1/valid/lineage-command.json" >>= either die pure . eitherDecodeStrict'
+  page <- either (die . show) pure (S.decodeLineageCollection pageValue)
+  refused <- either (die . show) pure (S.decodeLineageCollection (put "eligible" (toJSON ([] :: [T.Text])) (put "refusal" (String "quarantined") pageValue)))
+  partial <- either (die . show) pure (S.decodeLineageCollection (put "eligible" (toJSON (["restart"] :: [T.Text])) pageValue))
+  completed <- either (die . show) pure (S.decodeSnapshot metadata (map (put "state" (String "completed") . put "answer" (String "recorded")) items))
+  let tag = "\"view_1\"" :: T.Text
+      location = ("/v1/runs/run_21/lineage-requests", tag)
+      targets = [S.ForkTarget (OccurrenceId 0) "text" "draft" (Just "recorded"), S.ForkTarget (OccurrenceId 1) "flag" "approve" (Just "true")]
+      menu = (S.lineageMenu "profile_main" location page completed) {S.menuTargets = targets}
+      binding = id :: (T.Text, T.Text) -> (T.Text, T.Text)
+      restart = S.Lineage "profile_main" "run_21" tag S.RestartChoice
+      forking = menu {S.menuMode = S.LineageForking}
+      replaced = S.forkSetReplacement "forked answer" forking
+      flagged = S.forkSetReplacement "yes" (S.forkToggleDrop replaced {S.menuFocus = 1})
+      badFlag = S.forkSetReplacement "perhaps" replaced {S.menuFocus = 1, S.menuMode = S.LineageReplacing}
+      effect resource = put "state" (String "effect-observed") (put "effect" (object ["kind" .= ("lineage-created" :: T.Text),
+        "runtimeSequence" .= Null, "address" .= Null, "resource" .= (resource :: T.Text)]) commandValue)
+      restartCommand = put "operation" (String "restart")
+  forkAccepted <- either (die . show) pure (C.decodeObservation commandValue)
+  created <- either (die . show) pure (C.decodeObservation (restartCommand (effect "/v1/requests/req_child")))
+  elsewhere <- either (die . show) pure (C.decodeObservation (restartCommand (effect "/v1/runs/run_21")))
+  checks
+    [ ("the lineage collection keeps its run, revision, eligible operations and refusal",
+        S.lineageRun page == "run_21" && S.lineageRevision page == "view_1" && S.lineageEligible page == ["restart","resume","fork"]
+          && S.lineageRefusal page == Nothing && null (S.lineageChildren page)
+          && S.lineageEligible refused == [] && S.lineageRefusal refused == Just "quarantined"),
+      ("a lineage page with a refusal beside eligible operations, an unknown field or a foreign child refuses",
+        S.decodeLineageCollection (put "refusal" (String "quarantined") pageValue) == Left C.InvalidResponse
+          && S.decodeLineageCollection (put "extra" (Bool True) pageValue) == Left C.InvalidResponse
+          && S.decodeLineageCollection (put "items" (toJSON [put "parentRunId" (String "run_other") (toJSON request)]) pageValue) == Left C.InvalidResponse),
+      ("an eligible restart is a Lineage mutation that carries the entity tag of the first collection page",
+        S.lineageMutation binding menu S.RestartChoice == Right (restart, location)
+          && S.mutationOperation restart == "restart" && S.mutationURI restart == "/v1/runs/run_21/lineage-requests"
+          && S.mutationProfile restart == "profile_main" && S.lineageBody S.RestartChoice == object ["operation" .= ("restart" :: T.Text)]),
+      ("a lineage request needs the submit scope",
+        S.missingScope ["observe","export"] "restart" == Just "submit" && S.missingScope ["observe","submit"] "fork" == Nothing),
+      ("an ineligible operation is refused locally with the eligible operations or the refusal code of the page",
+        S.lineageMutation binding menu {S.menuCollection = partial} S.ResumeChoice
+            == Left "resume is not eligible: the manager lists only restart for run run_21"
+          && S.lineageMutation binding menu {S.menuCollection = refused} S.RestartChoice
+            == Left "restart is not eligible: the manager lists no lineage operation for run run_21; refusal quarantined"),
+      ("a lineage observation of another resource or entity tag starts nothing",
+        either (T.isInfixOf "not the first page") (const False)
+          (S.lineageMutation binding menu {S.menuObserved = ("/v1/runs/run_21/lineage-requests", "\"view_0\"")} S.RestartChoice)),
+      ("the fork targets are the completed occurrences of the run snapshot in occurrence order",
+        map S.forkOccurrence (S.forkTargets completed) == [OccurrenceId 0, OccurrenceId maxBound]
+          && all ((== Just "recorded") . S.forkAnswer) (S.forkTargets completed)),
+      ("a replacement answer is typed by the code of its occurrence and drop toggles",
+        S.lineageForkChoice replaced == S.ForkChoice [ReplaceAnswer (OccurrenceId 0) (String "forked answer")]
+          && S.menuMode replaced == S.LineageForking
+          && S.lineageForkChoice flagged == S.ForkChoice [ReplaceAnswer (OccurrenceId 0) (String "forked answer"), ReplaceAnswer (OccurrenceId 1) (Bool True)]
+          && S.lineageForkChoice (S.forkToggleDrop forking) == S.ForkChoice [DropAnswer (OccurrenceId 0)]
+          && S.lineageForkChoice (S.forkToggleDrop (S.forkToggleDrop forking)) == S.ForkChoice []
+          && S.lineageForkChoice (S.forkKeep replaced) == S.ForkChoice []
+          && S.menuError badFlag == Just "a flag answer must be yes, no, true, or false" && S.menuMode badFlag == S.LineageReplacing),
+      ("a fork body carries its edits in the canonical encoding",
+        S.lineageBody (S.lineageForkChoice flagged) == object ["operation" .= ("fork" :: T.Text), "edits" .=
+          [ object ["occurrenceId" .= ("0" :: T.Text), "operation" .= ("replace" :: T.Text), "answer" .= ("forked answer" :: T.Text)],
+            object ["occurrenceId" .= ("1" :: T.Text), "operation" .= ("replace" :: T.Text), "answer" .= True] ]]),
+      ("the lineage command receipt is bound to its operation, and only an effect that names a request completes it",
+        S.receiptMatches (S.Lineage "profile_main" "run_21" tag (S.ForkChoice [])) forkAccepted
+          && not (S.receiptMatches restart forkAccepted)
+          && S.receiptMatches restart created && S.receiptEffectKind created == Just "lineage-created"
+          && not (S.receiptMatches restart elsewhere))
+    ]
+  -- A 412 stale-revision refusal of a lineage request is definite.
+  let attempt = L.Attempt restart ("pending-lineage" :: T.Text) Nothing
+      sending = L.Lane Nothing (L.MutationSending 9 attempt) False False :: L.Lane T.Text T.Text
+      (refusedStep, refusedLane) = L.sendStep 9 (L.Declared (Left (C.Refused 412 "stale-revision"))) sending
+      child = request {C.draftId = "req_child", C.draftParent = Just "run_21", C.draftLineage = Just "fork",
+        C.draftReadiness = C.Readiness [] [] [] []}
+      review = (C.preparationReview preparation) {C.reviewInputs = [C.ReviewInput "subject" "capture" "6" (T.replicate 64 "a")],
+        C.reviewLineage = Just (C.ReviewLineage "run_21" "fork" [C.ReviewReplace "0" (T.replicate 64 "b")])}
+      childReview = preparation {C.preparationRequest = "req_child", C.preparationReview = review}
+      browser = (initialModel [S.workflowDisplay row] [] (Left "manager owns routing")) {modelStatus = "manager catalogue: profile_main"}
+      detail = (emptyPresentation browser {modelScreen = ServiceHistoryRunScreen "run_21"}) {presentationService = True, presentationNoColor = True,
+        presentationServiceHistoryDetail = ["Run detail: current", "Run: run_21"] <> S.lineageLines (S.LineageCreated "restart" "req_child")}
+      menuFrame shown = render (100,30) detail {presentationLayer = LineageLayer, presentationLineageRun = Just "run_21",
+        presentationLineageMode = Just (S.menuMode shown), presentationLineageEligible = S.lineageEligible (S.menuCollection shown),
+        presentationLineageLines = S.lineageMenuLines shown, presentationLineageError = S.menuError shown}
+      choosing = menuFrame menu
+      ineligible = menuFrame menu {S.menuCollection = refused, S.menuError = Just "restart did not start: restart is not eligible"}
+      forkFrame = menuFrame replaced
+      rows = serviceReviewRows childReview "\"preprev_1\""
+  putStrLn "RENDER lineage menu at (100,30):" >> putStr (T.unpack choosing)
+  putStrLn "RENDER lineage fork edits at (100,30):" >> putStr (T.unpack forkFrame)
+  checks
+    [ ("a 412 stale-revision refusal of a lineage request leaves the lane idle without a resend",
+        case (refusedStep, L.laneMutation refusedLane) of
+          (L.SendRefused refusedAttempt (C.Refused 412 "stale-revision"), L.MutationIdle) ->
+            L.attemptMutation refusedAttempt == restart && not (L.resendOffered refusedLane)
+          _ -> False),
+      ("golden: the lineage line shows the created child request and a refusal",
+        S.lineageLines (S.LineageCreated "restart" "req_child") == ["Lineage restart: created request req_child; it opens for setup and review"]
+          && S.lineageLines (S.LineageRefused "fork" "412 stale-revision")
+            == ["Lineage fork: refused (412 stale-revision); nothing was sent again; l opens the lineage menu again"]),
+      ("a lineage child request declares no input and matches its catalogue row",
+        S.requestMatches row child && not (S.requestMatches row child {C.draftParent = Nothing, C.draftLineage = Nothing})),
+      ("a lineage review agrees only with the parent, the operation and the captured parent inputs of its request",
+        S.reviewMatches Map.empty row child childReview
+          && not (S.reviewMatches Map.empty row child {C.draftLineage = Just "restart"} childReview)
+          && not (S.reviewMatches Map.empty row child childReview {C.preparationReview = review {C.reviewLineage = Nothing}})
+          && not (S.reviewMatches Map.empty row request preparation {C.preparationReview = (C.preparationReview preparation)
+               {C.reviewLineage = Just (C.ReviewLineage "run_21" "restart" [])}})),
+      ("golden: the summary review names the parent run, the operation and the fork edits",
+        "Lineage: fork of run run_21" `elem` rows
+          && ("Lineage edits: replace occurrence 0 (answer SHA-256 " <> T.replicate 64 "b" <> ")") `elem` rows),
+      ("the lineage menu at (100,30) lists the eligible operations and their keys",
+        all (`T.isInfixOf` choosing) ["Lineage of run run_21", "r restart: eligible", "f fork: eligible", "r RESTART", "f FORK", "Esc CLOSE"]),
+      ("the lineage menu at (100,30) shows the refusal of an empty eligible list and the local refusal of a key",
+        all (`T.isInfixOf` ineligible) ["Refusal: quarantined", "r restart: not eligible", "ERROR: restart did not start"]
+          && not ("r RESTART" `T.isInfixOf` ineligible)),
+      ("the fork edits at (100,30) show each occurrence with its edit",
+        all (`T.isInfixOf` forkFrame) ["> occurrence 0 (text): replace with \"forked answer\"", "occurrence 1 (flag): keep", "Ctrl-D SEND FORK"]),
+      ("the run detail at (100,30) shows the lineage line and names l only when it is offered",
+        all (`T.isInfixOf` render (100,30) detail {presentationServiceLineageOffered = True}) ["l LINEAGE", "Lineage restart: created request req_child"]
+          && not ("l LINEAGE" `T.isInfixOf` render (100,30) detail))
     ]
 
 -- | The navigation keys of the service workflow browser, the projection of

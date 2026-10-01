@@ -30,7 +30,11 @@ module Agentic.Tui.Service
     readRequestId, readRequestRun, runtimeStatus, observationLines,
     approvalStatus, receiptSettlement,
     ExportReceipt (..), ExportCollection (..), ExportProgress (..), ExportOutcome (..), exportsURI, exportNameValid,
-    exportSource, exportMutation, observeExports, decodeExportCollection, decodeExportReceipt, observeExport, exportLines
+    exportSource, exportMutation, observeExports, decodeExportCollection, decodeExportReceipt, observeExport, exportLines,
+    LineageChoice (..), lineageChoiceName, LineageCollection (..), LineageProgress (..), LineageOutcome (..), ForkTarget (..),
+    LineageMenu (..), LineageMode (..), lineageURI, lineageBody, decodeLineageCollection, observeLineageCollection, forkTargets,
+    forkReplacement, lineageMenu, lineageMutation, lineageForkChoice, forkToggleDrop, forkKeep, forkSetReplacement,
+    forkFocused, lineageMenuLines, observeLineageCommand, lineageLines
   ) where
 
 import qualified Agentic.Manager.Client as C
@@ -41,7 +45,7 @@ import Agentic.Runtime
     AttemptSnapshot (..), AttemptState (..), AttemptId (..), OccurrenceId (..),
     DispatchSnapshot (..), RecoverySnapshot (..), RecoveryChosen (..), RecoveryOption (..),
     SteerSnapshot (..), ControlAckSnapshot (..), PublicToolUpdate (..), PublicTodoItem (..),
-    PublicUsage (..), FailureClass (..), PersonAnswering (..), RunId (runIdText), mkRunId )
+    PublicUsage (..), FailureClass (..), PersonAnswering (..), RunId (runIdText), mkRunId, FrontendEdit (..) )
 import Agentic.Tui.Person (PersonPrompt (..), personAnswerValue)
 import Agentic.Tui.RunModel (runStatusLabel)
 import Control.Exception (IOException, finally, onException, try)
@@ -53,10 +57,11 @@ import System.Posix.Files (getFdStatus, isRegularFile)
 import System.Posix.IO (OpenFileFlags (cloexec, nonBlock), OpenMode (ReadOnly), closeFd, defaultFileFlags, fdToHandle, openFd)
 import Crypto.Hash (Digest, SHA256, hash)
 import qualified Data.ByteString as BS
+import qualified Data.ByteString.Lazy as BL
 import qualified Data.Map.Strict as Map
 import Data.Time.Clock (UTCTime)
 import Data.Time.Format.ISO8601 (iso8601ParseM)
-import Data.Aeson (Object, Value (..), object, parseJSON, toJSON, withArray, withObject, withText, (.:), (.=))
+import Data.Aeson (Object, Value (..), encode, object, parseJSON, toJSON, withArray, withObject, withText, (.:), (.=))
 import qualified Data.Aeson.Key as Key
 import qualified Data.Aeson.KeyMap as KM
 import Data.Aeson.Types (Parser, parseEither)
@@ -226,6 +231,11 @@ data Mutation
     -- the first page of the export collection of the run, which the
     -- preparation observes ('prepareMutation').
   | Export !Text !Text !Text
+    -- | A lineage request of the parent run for the run profile: profile,
+    -- parent run identifier, the strong entity tag of the first page of the
+    -- lineage collection of the run, and the operation with its fork edits.
+    -- The entity tag is the precondition of the request.
+  | Lineage !Text !Text !Text !LineageChoice
   deriving (Eq, Show)
 
 mutationOperation :: Mutation -> Text
@@ -246,6 +256,7 @@ mutationOperation mutation = case mutation of
   ChooseRecovery {} -> "choose-recovery"
   Redirect {} -> "redirect"
   Export {} -> "export"
+  Lineage _ _ _ choice -> lineageChoiceName choice
 
 mutationURI :: Mutation -> Text
 mutationURI mutation = case mutation of
@@ -265,6 +276,7 @@ mutationURI mutation = case mutation of
   ChooseRecovery _ decision _ _ _ -> "/v1/decisions/" <> decisionId decision
   Redirect _ control _ _ _ -> "/v1/runs/" <> controlRun control <> "/control"
   Export _ run _ -> exportsURI run
+  Lineage _ run _ _ -> lineageURI run
 
 mutationProfile :: Mutation -> Text
 mutationProfile mutation = case mutation of
@@ -284,6 +296,7 @@ mutationProfile mutation = case mutation of
   ChooseRecovery _ decision _ _ _ -> decisionProfile decision
   Redirect profile _ _ _ _ -> profile
   Export profile _ _ -> profile
+  Lineage profile _ _ _ -> profile
 
 requestURI :: C.DraftView -> Text
 requestURI request = "/v1/requests/" <> C.draftId request
@@ -398,6 +411,16 @@ prepareMutation client now mutation observed
             case exports of
               Left failure -> pure (Left failure)
               Right (current, _) -> C.prepareObserved client current (object ["name" .= name])
+      -- The lineage precondition is the observation of the first page of the
+      -- lineage collection that the menu showed. Its strong entity tag is the
+      -- one that the mutation carries, and the page lists the operation as
+      -- eligible.
+      Lineage _ run tag choice -> case observed of
+        Just current | observedBinding current == (lineageURI run, tag),
+          Right page <- decodeLineageCollection (C.observedValue current),
+          lineageRun page == run, lineageChoiceName choice `elem` lineageEligible page ->
+            C.prepareObserved client current (lineageBody choice)
+        _ -> pure (Left C.InvalidResponse)
   where
     needed = case mutation of
       Approve {} -> ["observe","submit","control"]
@@ -471,13 +494,23 @@ observeReceipt client mutation location = do
     unless (receiptMatches mutation receipt && C.referenceURI location == "/v1/commands/" <> C.receiptId receipt) (Left C.InvalidResponse)
     Right receipt
 
+-- | Whether a request belongs to this catalogue row: its workflow, its
+-- descriptor and profile revisions, and the input declarations of the row. A
+-- lineage request ('lineageRequest') declares no input, because its inputs
+-- come from its parent run.
 requestMatches :: Workflow -> C.DraftView -> Bool
 requestMatches row request = C.draftWorkflow request == workflowId row
   && C.draftDescriptorRevision request == workflowRevision row
   && C.draftProfile request == workflowProfile row && C.draftProfileRevision request == workflowProfileRevision row
-  && declarations == [C.InputDeclaration (workflowInputName input) (sourceName (workflowInputSource input))
-                    | input <- workflowInputs (workflowDisplay row)]
+  && if lineageRequest request then null declarations
+     else declarations == [C.InputDeclaration (workflowInputName input) (sourceName (workflowInputSource input))
+                         | input <- workflowInputs (workflowDisplay row)]
   where C.Readiness declarations _ _ _ = C.draftReadiness request
+
+-- | Whether a request is a lineage request: it names a parent run and a
+-- lineage operation.
+lineageRequest :: C.DraftView -> Bool
+lineageRequest request = isJust (C.draftParent request) && isJust (C.draftLineage request)
 
 sourceName :: WorkflowInputSource -> Text
 sourceName source = case source of DescriptorPrompt -> "prompt"; DescriptorCommandTail -> "command-tail"; DescriptorStdin -> "stdin"
@@ -493,6 +526,11 @@ literalInputs request = case C.draftReadiness request of
 -- Logical literals are unchanged. Prompt transport's declared LF is included by Runtime.
 -- A captured input agrees only with a capture receipt of this session, given
 -- by capture identifier, whose size and SHA-256 the review repeats.
+-- The review of a lineage request has the lineage of its request, the
+-- parent run and the operation, and one captured input of the parent run
+-- for each input declaration of the row, in declaration order. The frontend
+-- holds no bytes of the parent inputs, so it shows their size and SHA-256 as
+-- the review states them. The review of a root request has no lineage.
 reviewMatches :: Map.Map Text C.CaptureReceipt -> Workflow -> C.DraftView -> C.Preparation -> Bool
 reviewMatches captures row request preparation = requestMatches row request && requestReady request
   && C.draftPreparation request == Just (C.preparationId preparation)
@@ -502,7 +540,13 @@ reviewMatches captures row request preparation = requestMatches row request && r
   && C.preparationProfileRevision preparation == C.draftProfileRevision request
   && C.preparationDescriptorRevision preparation == C.draftDescriptorRevision request
   && C.reviewWorkflow review == workflowId row && C.reviewProfile review == workflowProfile row
-  && length supplied == length inputs && traverse binding inputs == Just (C.reviewInputs review)
+  && case (C.draftParent request, C.draftLineage request, C.reviewLineage review) of
+       (Just parent, Just operation, Just lineage) -> null supplied
+         && C.reviewLineageParent lineage == parent && C.reviewLineageOperation lineage == operation
+         && [(C.reviewInputName input, C.reviewInputSource input) | input <- C.reviewInputs review]
+              == [(workflowInputName input, "capture") | input <- inputs]
+       (Nothing, Nothing, Nothing) -> length supplied == length inputs && traverse binding inputs == Just (C.reviewInputs review)
+       _ -> False
   where
     review = C.preparationReview preparation
     C.Readiness _ supplied _ _ = C.draftReadiness request
@@ -580,6 +624,12 @@ receiptMatches mutation receipt = C.operationName (C.receiptOperation receipt) =
        (Export {}, Just (Object fields)) ->
          KM.lookup "resource" fields == Just (String ("/v1/exports/export_" <> C.receiptId receipt))
        (Export {}, Just _) -> False
+       -- An effect of a lineage request names the child request that it
+       -- created.
+       (Lineage {}, Just (Object fields)) -> case KM.lookup "resource" fields of
+         Just (String resource) -> maybe False validIdentifier (T.stripPrefix "/v1/requests/" resource)
+         _ -> False
+       (Lineage {}, Just _) -> False
        (_, Just _) | controlMutation mutation -> False
        (Discard request _, Just (Object fields)) -> KM.lookup "resource" fields == Just (String (requestURI request))
        (_, Just (Object fields)) | mutationOperation mutation `elem` requestEffects ->
@@ -771,8 +821,14 @@ text lo hi = withText "bounded text" $ \value -> do
 identifier :: Value -> Parser Text
 identifier value = do
   ident <- text 1 128 value
-  unless (T.all (`elem` (['A'..'Z'] <> ['a'..'z'] <> ['0'..'9'] <> "_-")) ident) (fail "identifier")
+  unless (validIdentifier ident) (fail "identifier")
   pure ident
+
+-- | Whether a text is a public identifier: 1 to 128 ASCII letters, digits,
+-- underscores and hyphens.
+validIdentifier :: Text -> Bool
+validIdentifier ident = T.length ident >= 1 && T.length ident <= 128
+  && T.all (`elem` (['A'..'Z'] <> ['a'..'z'] <> ['0'..'9'] <> "_-")) ident
 
 oneOf :: [Text] -> Value -> Parser Text
 oneOf choices value = do
@@ -1202,6 +1258,260 @@ exportLines outcome = case outcome of
       "Export download: verified " <> T.pack (show (BS.length bytes)) <> " bytes, SHA-256 " <> fromMaybe "none" (exportDigest export),
       "Export preview: " <> T.map (\character -> if character == '\n' then ' ' else character)
         (T.take 120 (TE.decodeUtf8With lenientDecode (BS.take 480 bytes))) ]
+
+-- | The operation of a lineage request of a parent run: a restart, a resume,
+-- or a fork with its edits. Each fork edit drops or replaces the persisted
+-- answer of one occurrence of the parent run.
+data LineageChoice = RestartChoice | ResumeChoice | ForkChoice ![FrontendEdit]
+  deriving (Eq, Show)
+
+-- | The operation name of a lineage choice, which is also the operation of
+-- its command.
+lineageChoiceName :: LineageChoice -> Text
+lineageChoiceName choice = case choice of
+  RestartChoice -> "restart"
+  ResumeChoice -> "resume"
+  ForkChoice _ -> "fork"
+
+-- | The closed body of a lineage request. A fork carries its edits in the
+-- canonical encoding of 'FrontendEdit'.
+lineageBody :: LineageChoice -> Value
+lineageBody choice = object (["operation" .= lineageChoiceName choice] <> case choice of
+  ForkChoice edits -> ["edits" .= edits]
+  _ -> [])
+
+-- | The lineage collection of a run.
+lineageURI :: Text -> Text
+lineageURI run = "/v1/runs/" <> run <> "/lineage-requests"
+
+-- | The first page of the lineage collection of one parent run: the run, the
+-- revision that its strong entity tag carries, the operations that a new
+-- lineage request may name now, the refusal code when it names none, and the
+-- child requests of the run.
+data LineageCollection = LineageCollection
+  { lineageRun :: !Text, lineageRevision :: !Text, lineageEligible :: ![Text],
+    lineageRefusal :: !(Maybe Text), lineageChildren :: ![C.DraftView]
+  } deriving (Eq, Show)
+
+-- | Decode the first page of a lineage collection. The page lists a refusal
+-- exactly when it lists no eligible operation, and every child request names
+-- the run as its parent.
+decodeLineageCollection :: Value -> Either C.ClientFailure LineageCollection
+decodeLineageCollection value = do
+  (run, revision, eligible, refusal, items) <- decode (withObject "lineage page" $ \fields -> do
+    closed ["version","page","items","runId","eligible","refusal"] fields
+    versionOne fields
+    revision <- at (withObject "page" (\page -> at (text 1 256) page "revision")) fields "page"
+    eligible <- at (list 3 (oneOf ["restart","resume","fork"])) fields "eligible" >>= uniqueBy id
+    refusal <- at (nullable (oneOf ["incompatible-parent","ownership-unavailable","quarantined","unsupported-operation"])) fields "refusal"
+    unless (null eligible == isJust refusal) (fail "lineage eligibility")
+    items <- at (list 256 pure) fields "items"
+    run <- at identifier fields "runId"
+    pure (run, revision, eligible, refusal, items)) value
+  children <- traverse decodeRequestItem items
+  unless (all ((== Just run) . C.draftParent) children && Set.size (Set.fromList (map C.draftId children)) == length children)
+    (Left C.InvalidResponse)
+  Right (LineageCollection run revision eligible refusal children)
+
+-- | Observe the first page of the lineage collection of a run through
+-- 'C.observeResource'. Its strong entity tag must carry the collection
+-- revision.
+observeLineageCollection :: C.Client -> Text -> IO (Either C.ClientFailure (C.Observed, LineageCollection))
+observeLineageCollection client run = case C.reference client (lineageURI run) of
+  Left failure -> pure (Left failure)
+  Right location -> do
+    received <- C.observeResource client location
+    pure $ do
+      observed <- received
+      page <- decodeLineageCollection (C.observedValue observed)
+      unless (lineageRun page == run && owned observed (lineageURI run) (lineageRevision page)) (Left C.InvalidResponse)
+      Right (observed, page)
+
+-- | An occurrence of a parent run that a fork edit may name: a completed or
+-- reused occurrence, whose answer the runtime persisted, with its
+-- observation code, its intent and its published answer text.
+data ForkTarget = ForkTarget
+  { forkOccurrence :: !OccurrenceId, forkCode :: !Text, forkIntent :: !Text, forkAnswer :: !(Maybe Text)
+  } deriving (Eq, Show)
+
+-- | The fork targets of a run snapshot, in occurrence order.
+forkTargets :: RunObservation -> [ForkTarget]
+forkTargets run =
+  [ ForkTarget (snapshotOccurrenceId occurrence) (snapshotOccurrenceCode occurrence) (snapshotOccurrenceIntent occurrence)
+      (snapshotOccurrenceAnswer occurrence)
+  | occurrence <- maybe [] (Map.elems . snapshotOccurrences) (runSnapshot run),
+    snapshotOccurrenceState occurrence `elem` [OccurrenceCompletedState, OccurrenceReusedState] ]
+
+-- | The replacement answer of a fork target, converted from the editor text
+-- by the observation code of the occurrence with 'personAnswerValue', as an
+-- answer to a question: text as given, a flag from yes, no, true or false,
+-- an acknowledgement from empty text, and a verdict or a structured answer
+-- from JSON text. The native preparation checks the value against the
+-- persisted code and schema of the occurrence.
+forkReplacement :: ForkTarget -> Text -> Either Text Value
+forkReplacement target = personAnswerValue (if forkCode target == "ack" then "receipt" else forkCode target)
+
+-- | Which part of the lineage menu has the keys: the choice of the
+-- operation, the fork edits of each occurrence, or the replacement answer
+-- editor of the selected occurrence.
+data LineageMode = LineageChoosing | LineageForking | LineageReplacing
+  deriving (Eq, Show)
+
+-- | The lineage menu of one parent run: the run profile, the observation of
+-- the first page of the lineage collection and its decoded page, the fork
+-- targets of the run, the part of the menu that has the keys, the selected
+-- fork target, the fork edits by occurrence and the refusal of the latest
+-- key.
+data LineageMenu observed = LineageMenu
+  { menuProfile :: !Text, menuObserved :: !observed, menuCollection :: !LineageCollection,
+    menuTargets :: ![ForkTarget], menuMode :: !LineageMode, menuFocus :: !Int,
+    menuEdits :: !(Map.Map OccurrenceId FrontendEdit), menuError :: !(Maybe Text)
+  } deriving (Eq, Show)
+
+-- | The lineage menu of this run for this profile, opened on the choice of
+-- the operation without fork edits.
+lineageMenu :: Text -> observed -> LineageCollection -> RunObservation -> LineageMenu observed
+lineageMenu profile observed page run = LineageMenu profile observed page (forkTargets run) LineageChoosing 0 Map.empty Nothing
+
+-- | The lineage mutation of the menu for this operation, with the
+-- observation that becomes its precondition, or the reason why it starts
+-- nothing. The first argument reads the URI and entity tag of an
+-- observation. An operation that the page does not list as eligible is
+-- refused here, before any send, and the refusal names the eligible
+-- operations or the refusal code of the page.
+lineageMutation :: (observed -> (Text, Text)) -> LineageMenu observed -> LineageChoice -> Either Text (Mutation, observed)
+lineageMutation binding menu choice
+  | name `notElem` lineageEligible page = Left $ case lineageEligible page of
+      [] -> name <> " is not eligible: the manager lists no lineage operation for run " <> run
+        <> "; refusal " <> fromMaybe "none" (lineageRefusal page)
+      eligible -> name <> " is not eligible: the manager lists only " <> T.intercalate ", " eligible <> " for run " <> run
+  | binding (menuObserved menu) /= (lineageURI run, tag) = Left ("the lineage observation is not the first page of run " <> run)
+  | otherwise = Right (Lineage (menuProfile menu) run tag choice, menuObserved menu)
+  where
+    page = menuCollection menu
+    run = lineageRun page
+    name = lineageChoiceName choice
+    tag = "\"" <> lineageRevision page <> "\""
+
+-- | The fork of the menu with its edits in occurrence order.
+lineageForkChoice :: LineageMenu observed -> LineageChoice
+lineageForkChoice = ForkChoice . Map.elems . menuEdits
+
+-- | The selected fork target.
+forkFocused :: LineageMenu observed -> Maybe ForkTarget
+forkFocused menu = listToMaybe (drop (menuFocus menu) (menuTargets menu))
+
+-- | Drop the answer of the selected occurrence, or keep it when the menu
+-- already drops it.
+forkToggleDrop :: LineageMenu observed -> LineageMenu observed
+forkToggleDrop menu = case forkFocused menu of
+  Nothing -> menu {menuError = Just "no occurrence is selected"}
+  Just target -> let ident = forkOccurrence target in menu {menuError = Nothing, menuEdits = case Map.lookup ident (menuEdits menu) of
+    Just (DropAnswer _) -> Map.delete ident (menuEdits menu)
+    _ -> Map.insert ident (DropAnswer ident) (menuEdits menu)}
+
+-- | Keep the answer of the selected occurrence without an edit.
+forkKeep :: LineageMenu observed -> LineageMenu observed
+forkKeep menu = case forkFocused menu of
+  Nothing -> menu {menuError = Just "no occurrence is selected"}
+  Just target -> menu {menuError = Nothing, menuEdits = Map.delete (forkOccurrence target) (menuEdits menu)}
+
+-- | Replace the answer of the selected occurrence with the answer that
+-- 'forkReplacement' converts from the editor text, and return to the fork
+-- edits. A text that does not convert keeps the editor open with the reason.
+forkSetReplacement :: Text -> LineageMenu observed -> LineageMenu observed
+forkSetReplacement input menu = case forkFocused menu of
+  Nothing -> menu {menuError = Just "no occurrence is selected"}
+  Just target -> case forkReplacement target input of
+    Left reason -> menu {menuError = Just reason}
+    Right value -> let ident = forkOccurrence target in
+      menu {menuMode = LineageForking, menuError = Nothing, menuEdits = Map.insert ident (ReplaceAnswer ident value) (menuEdits menu)}
+
+-- | The display lines of the lineage menu.
+lineageMenuLines :: LineageMenu observed -> [Text]
+lineageMenuLines menu = case menuMode menu of
+  LineageChoosing ->
+    [ "Parent run: " <> run, "Child requests: " <> T.pack (show (length (lineageChildren page))) ]
+      <> [ "Refusal: " <> code <> "; no lineage operation is eligible" | Just code <- [lineageRefusal page] ]
+      <> [ key <> " " <> name <> ": " <> (if name `elem` lineageEligible page then "eligible" else "not eligible")
+         | (key, name) <- [("r","restart"),("s","resume"),("f","fork")] ]
+      <> [ "A lineage request creates a new draft request. Its review needs a new exact approval." ]
+  LineageForking ->
+    ("Fork of run " <> run <> ": Up/Down select, d drops, Enter replaces, k keeps the answer") :
+      if null (menuTargets menu)
+        then ["The run publishes no completed occurrence. Ctrl-D forks without edits."]
+        else zipWith row [0 ..] (menuTargets menu)
+  LineageReplacing -> case forkFocused menu of
+    Just target ->
+      [ "Replacement answer for occurrence " <> occurrenceText (forkOccurrence target) <> " (" <> forkCode target <> "): " <> hint (forkCode target),
+        "Recorded answer: " <> maybe "not published" bounded (forkAnswer target) ]
+    Nothing -> ["No occurrence is selected."]
+  where
+    page = menuCollection menu
+    run = lineageRun page
+    row :: Int -> ForkTarget -> Text
+    row index target = (if index == menuFocus menu then "> " else "  ") <> "occurrence " <> occurrenceText (forkOccurrence target)
+      <> " (" <> forkCode target <> "): " <> case Map.lookup (forkOccurrence target) (menuEdits menu) of
+        Nothing -> "keep; answer " <> maybe "not published" bounded (forkAnswer target)
+        Just (DropAnswer _) -> "drop"
+        Just (ReplaceAnswer _ value) -> "replace with " <> bounded (jsonText value)
+    hint code = case code of
+      "text" -> "the editor text is the answer"
+      "flag" -> "yes, no, true or false"
+      "ack" -> "empty text"
+      _ -> "a JSON value"
+    bounded value = let single = T.map (\character -> if character == '\n' then ' ' else character) value in
+      if T.length single > 80 then T.take 80 single <> "..." else single
+    jsonText = TE.decodeUtf8With lenientDecode . BL.toStrict . encode
+
+-- | The progress of an accepted lineage request: its command receipt before
+-- the effect @lineage-created@, or the command receipt and the child request
+-- that the effect names.
+data LineageProgress
+  = LineagePending !C.CommandReceipt
+  | LineageChild !C.CommandReceipt !C.DraftView
+  deriving (Eq, Show)
+
+-- | Read the progress of an accepted lineage request from its own command
+-- receipt. After the effect @lineage-created@, the child request that the
+-- effect names is read. It must name the parent run and the operation of the
+-- mutation and belong to its profile.
+observeLineageCommand :: C.Client -> Mutation -> C.Reference -> IO (Either C.ClientFailure LineageProgress)
+observeLineageCommand client mutation location = do
+  received <- observeReceipt client mutation location
+  case (received, mutation) of
+    (Left failure, _) -> pure (Left failure)
+    (Right receipt, Lineage profile run _ choice)
+      | C.stateName (C.receiptState receipt) == "effect-observed", receiptEffectKind receipt == Just "lineage-created",
+        Just (Object fields) <- C.effectValue <$> C.receiptEffect receipt, Just (String resource) <- KM.lookup "resource" fields ->
+          case C.reference client resource of
+            Left failure -> pure (Left failure)
+            Right detail -> do
+              response <- C.getResource client detail
+              pure $ do
+                answered <- response
+                unless (C.responseStatus answered == 200) (Left C.InvalidResponse)
+                child <- decodeRequestItem (C.responseValue answered)
+                unless (requestURI child == resource && C.draftParent child == Just run
+                  && C.draftLineage child == Just (lineageChoiceName choice) && C.draftProfile child == profile) (Left C.InvalidResponse)
+                Right (LineageChild receipt child)
+    (Right receipt, _) -> pure (Right (LineagePending receipt))
+
+-- | The outcome of the latest lineage request of a run, for display: a
+-- definite refusal of its send with the operation and the refusal code, or
+-- the operation and the child request that it created.
+data LineageOutcome
+  = LineageRefused !Text !Text
+  | LineageCreated !Text !Text
+  deriving (Eq, Show)
+
+-- | The display line of the latest lineage request of a run.
+lineageLines :: LineageOutcome -> [Text]
+lineageLines outcome = case outcome of
+  LineageRefused operation code ->
+    ["Lineage " <> operation <> ": refused (" <> code <> "); nothing was sent again; l opens the lineage menu again"]
+  LineageCreated operation child ->
+    ["Lineage " <> operation <> ": created request " <> child <> "; it opens for setup and review"]
 
 decodeControl :: Value -> Either C.ClientFailure ControlView
 decodeControl = decode parseControl

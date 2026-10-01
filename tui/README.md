@@ -345,6 +345,70 @@ protocol description](../doc/api/README.md) states, so they differ from the
 bytes of the source-result artifact. A refused or unresolved export receipt
 leaves the command unresolved, and nothing is sent again automatically.
 
+`l` on the live monitor or on the run detail of a managed run reads the first
+page of the lineage collection `/v1/runs/{id}/lineage-requests` through
+`Agentic.Manager.Client.observeResource`
+(`Agentic.Tui.Service.observeLineageCollection`) and opens the lineage menu
+(`Agentic.Tui.Service.LineageMenu`). The key ends a read in flight, and live
+delivery fetches that read again. For a legacy entry, `l` opens nothing and
+the status line states that a legacy entry has no lineage authority. The
+menu names the parent run, counts its child requests and states for each of
+restart, resume and fork whether the `eligible` list of the page names it.
+When that list is empty, the menu shows the `refusal` code of the page, for
+example `Refusal: quarantined; no lineage operation is eligible`. `r` sends a
+restart and `s` sends a resume. `f` opens the fork edits, which list the
+completed occurrences of the run snapshot (`forkTargets`) with their
+observation code and published answer. There, `Up` and `Down` select an
+occurrence, `d` drops its answer, `k` keeps it, and `Enter` opens the
+replacement answer editor. In that editor, `Ctrl-D` converts the text by the
+observation code of the occurrence with
+`Agentic.Tui.Person.personAnswerValue` (`forkReplacement`), as the answer
+editor converts an answer: text as given, a flag from `yes`, `no`, `true` or
+`false`, an acknowledgement from empty text, and a verdict or a structured
+answer from JSON text. A text that does not convert keeps the editor open
+with its reason. The native preparation checks each replacement against the
+persisted code and schema of the occurrence. `Ctrl-D` on the fork edits
+sends the fork with one edit for each dropped or replaced occurrence. `Esc`
+closes the replacement editor, leaves the fork edits, or closes the menu, and
+sends nothing.
+
+An operation that the `eligible` list does not name is refused before any
+send (`Agentic.Tui.Service.lineageMutation`), and the menu shows the reason,
+for example `restart did not start: restart is not eligible: the manager
+lists no lineage operation for run RUN; refusal quarantined`. An eligible
+operation becomes the mutation `Agentic.Tui.Service.Lineage`, which carries
+the strong entity tag of the first collection page that the menu showed. The
+POST body is `{"operation": "restart"}`, `{"operation": "resume"}` or
+`{"operation": "fork", "edits": EDITS}`, and that entity tag is `If-Match`.
+The request is sent once through the command lane. A 412 `stale-revision`
+refusal, which the manager gives when the revision of the run changed after
+the menu read the page, for example after the verification of its result,
+leaves nothing to resend, and the lineage line of the run states `Lineage
+fork: refused (412 stale-revision); nothing was sent again; l opens the
+lineage menu again`. After the 202 receipt, the frontend reads the lineage
+command receipt with `Agentic.Tui.Service.observeLineageCommand` in place of
+the composite read. When the command records the effect `lineage-created`,
+it reads the child request that the effect names, which must name the parent
+run, the operation and the profile of the mutation. The command then
+completes, the lineage line of the parent run states `Lineage restart:
+created request REQUEST; it opens for setup and review`, and the frontend
+opens the child request by its phase, as `Enter` on a request row of the
+Manager overview does.
+
+A lineage child request declares no input, because its inputs come from the
+parent run, and the request screen states `Lineage: restart of run RUN; the
+inputs come from the parent run`. `Enter` prepares its review. The summary
+review names the parent run, the operation and the fork edits, for example
+`Lineage: fork of run RUN` and `Lineage edits: replace occurrence 0 (answer
+SHA-256 DIGEST)`, and the detail view `d` shows them as JSON.
+`Agentic.Tui.Service.reviewMatches` accepts a lineage review only when its
+lineage names the parent run and the operation of the request and it lists
+one captured parent input for each input declaration of the workflow. The
+frontend holds no bytes of the parent inputs, so the review shows their size
+and SHA-256 as the manager states them. `y` approves the child review as it
+approves any exact review, and the approved child run appears on the live
+monitor.
+
 In the input editor of a request, `Ctrl-D` sends the editor text as a
 literal. `Ctrl-T` captures the exact editor text as raw UTF-8 bytes instead.
 `Ctrl-O` opens a path editor. There, `Ctrl-D` reads the named local file and
@@ -470,7 +534,18 @@ once. The detail shows the export receipt with the state `published` and the
 verified size and SHA-256 digest. The export collection of the run holds that
 one receipt, and the harness download of the export and the published file
 hold the same bytes: the code and value of the verified result as compact
-JSON followed by one LF.
+JSON followed by one LF. On the detail of the earlier run, `l` opens the
+lineage menu with restart, resume and fork eligible, and `r` sends a
+restart. The frontend opens the child request, which names the parent run
+and the operation, and the lineage collection of the run holds that child.
+`Enter` prepares its review, which names the parent run, the operation
+restart and no edits, and `y` approves it. The child run succeeds and names
+the earlier run as its parent and restart as its lineage. On the live
+monitor of that child run, after the frontend retrieved its verified result,
+`l` and `f` open the fork edits, `Enter` and `Ctrl-D` replace the answer of
+occurrence 0 with typed text, and `Ctrl-D` sends the fork. The review of the
+fork child request shows the replacement of occurrence 0 with the SHA-256
+that the preparation states.
 
 The application state keeps the text drafts by identity
 (`Agentic.Tui.ServiceLane.Drafts`): the input editor text of each request and
@@ -712,8 +787,7 @@ the answer conversion against the `resources` section of
 `test/manager_client_vectors.json`, which [the protocol
 description](../doc/api/README.md#pages-and-live-delivery) describes.
 
-Service mode does not support lineage,
-reconnection of the session after a manager restart or a credential
-revocation, or acceptance at 40x12 and 80x24. The
+Service mode does not support reconnection of the session after a manager
+restart or a credential revocation, or acceptance at 40x12 and 80x24. The
 [manual](../doc/agent-cat.texi) entry for `--service` states the complete key
 behavior. Service mode is not an accepted milestone.

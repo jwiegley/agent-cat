@@ -537,6 +537,20 @@ TUI_DECISIONS = "tui-decisions"
 # file must hold the same bytes, and those bytes must be the code and value
 # of the verified result as compact JSON followed by one LF, which is the
 # frozen export document.
+# 8. On the detail of the earlier run, l opens the lineage menu, which lists
+# restart, resume and fork as eligible, and r sends a restart. The TUI opens
+# the child request, which names the parent run and the operation. The
+# lineage collection of the run must hold that one child. Enter prepares its
+# review, which names the parent run, the operation restart and no edits, and
+# y approves it. The child run must succeed, and its run representation must
+# name the earlier run as its parent and restart as its lineage.
+# 9. On the live monitor of the restarted run, after its supervision ended
+# and the TUI retrieved its verified result, l opens the lineage menu and f opens the fork edits. Enter on occurrence 0
+# opens the replacement answer editor, Ctrl-D sets the typed text answer, and
+# Ctrl-D sends the fork with that one replacement. The TUI opens the child
+# request, Enter prepares its review, and the review must show the
+# replacement of occurrence 0 with the SHA-256 that the preparation of the
+# child states.
 # Each step prints its own PASS line. It runs one manager lifetime.
 TUI_HISTORY = "tui-history"
 HISTORY_LEGACY_ENTRIES = 300
@@ -544,7 +558,7 @@ TUI_MODES = {OVERVIEW: (["profile_1", "profile_2"], ["observe", "submit"]), INPU
              TUI_CONTROLS: (["profile_1", "profile_steer", "profile_route"], ["observe", "submit", "control"]),
              TUI_REDIRECT: (["profile_live", "profile_live_effect", "profile_live_stale"], ["observe", "submit", "control"]),
              TUI_DECISIONS: (["profile_1", "profile_2"], ["observe", "submit", "control"]),
-             TUI_HISTORY: (["profile_1"], ["observe", "submit", "export"])}
+             TUI_HISTORY: (["profile_1"], ["observe", "submit", "control", "export"])}
 tui_mode = sys.argv[5] if len(sys.argv) == 6 and sys.argv[5] in TUI_MODES else None
 # The tui-controls and tui-redirect modes configure the control fixture
 # profiles.
@@ -5701,11 +5715,139 @@ def history_checks():
                       "; the TUI showed receipt", receipt["id"], "with the state published and the verified", receipt["bytes"],
                       "bytes with SHA-256", receipt["sha256"], ", and the harness download and the published file hold the code and value",
                       "of the verified result bytes as compact JSON followed by one LF", flush=True)
+
+                # 8. l and r restart the earlier run, and the approved child run succeeds.
+                def shown(text, timeout):
+                    """Wait until the screen shows the text, also when it wraps."""
+                    deadline = time.monotonic() + timeout
+                    while squeeze(text) not in squeeze(session.screen.text()):
+                        assert time.monotonic() < deadline, ("the TUI did not show", text, session.screen.text())
+                        session.pump(0.1)
+                    return session.screen.text()
+
+                def mutation_key(key, expected, timeout):
+                    """Send a mutation key until the screen shows the expected text.
+                    A key that a page-set read deferred, or an approval that a
+                    transient lane state deferred, shows a numbered outcome and
+                    sends nothing, so the key is sent again, as an operator
+                    does."""
+                    deferred = re.compile(r"(Key|Approval key) (\d+): (\S+ deferred during a page-set read|Approval did not start: "
+                                          r"(a manager command is in progress|the displayed review is stale))")
+                    seen = {match.group(2) for match in deferred.finditer(session.screen.text())}
+                    deadline = time.monotonic() + timeout
+                    session.send(key)
+                    while squeeze(expected) not in squeeze(session.screen.text()):
+                        assert time.monotonic() < deadline, ("the TUI did not show", expected, session.screen.text())
+                        fresh = {match.group(2) for match in deferred.finditer(session.screen.text())} - seen
+                        if fresh:
+                            seen |= fresh
+                            session.send(key)
+                        session.pump(0.1)
+                    return session.screen.text()
+
+                def lineage_page(run):
+                    status, value, raw = request("/v1/runs/" + run + "/lineage-requests", harness)
+                    assert status == 200, ("history lineage collection", run, status, value.get("code"))
+                    validate("LineagePage", value, raw)
+                    return value, raw
+
+                def settled(run):
+                    """Wait until the supervision of the run ended."""
+                    return client[1]("/v1/runs/" + run, "Run", lambda value: value["supervision"] not in ("owned", "cleanup-pending"))[0]
+
+                def child_request(run, operation):
+                    """The one child request of the run with this operation."""
+                    page, raw = lineage_page(run)
+                    (work / ("tui-history-lineage-" + operation + ".json")).write_bytes(raw)
+                    children = [item for item in page["items"] if item["lineage"] == operation]
+                    assert len(children) == 1 and children[0]["parentRunId"] == run, ("the lineage collection of the run", run, page["items"])
+                    return children[0]
+
+                def child_review(child):
+                    """The live preparation of the child request."""
+                    deadline = time.monotonic() + 30
+                    while True:
+                        current, _, _ = client[0]("/v1/requests/" + child["id"], "Request")
+                        if current["preparationId"] is not None:
+                            break
+                        assert time.monotonic() < deadline, ("the child request has no preparation", child["id"])
+                        time.sleep(0.1)
+                    preparation, _, raw = client[0]("/v1/preparations/" + current["preparationId"], "Preparation")
+                    (work / ("tui-history-review-" + child["lineage"] + ".json")).write_bytes(raw)
+                    return preparation
+
+                settled(earlier)
+                session.send(b"l")
+                shown("Lineage of run " + earlier, 15)
+                shown("r restart: eligible", 10)
+                assert all(squeeze(line) in squeeze(session.screen.text()) for line in ("s resume: eligible", "f fork: eligible")), (
+                    "the lineage menu does not list every operation as eligible", session.screen.text())
+                save(session, "lineage-menu")
+                mutation_key(b"r", "Lineage: restart of run " + earlier + "; the inputs come from the parent run", 30)
+                session.wait_screen("Enter REQUEST REVIEW", timeout=30)
+                save(session, "restart-request")
+                restart_child = child_request(earlier, "restart")
+                assert restart_child["phase"] == "draft" and squeeze("Request: " + restart_child["id"]) in squeeze(session.screen.text()), (
+                    "the TUI does not show the restart child request", restart_child["id"])
+                mutation_key(b"\r", "Approve exact manager review", 45)
+                shown("Lineage: restart of run " + earlier, 10)
+                shown("Lineage edits: none", 10)
+                save(session, "restart-review")
+                preparation = child_review(restart_child)
+                assert preparation["review"]["lineage"] == {"parentRunId": earlier, "operation": "restart", "edits": []}, (
+                    "the restart review lineage", preparation["review"].get("lineage"))
+                mutation_key(b"y", "Runtime: Succeeded", 90)
+                save(session, "restart-run")
+                associated, _, _ = client[0]("/v1/requests/" + restart_child["id"], "Request")
+                restarted = associated["runId"]
+                assert restarted is not None and restarted != earlier, ("the restart child run", restarted)
+                run_view = settled(restarted)
+                assert run_view["parentRunId"] == earlier and run_view["lineage"] == "restart", (
+                    "the restarted run lineage", run_view["parentRunId"], run_view["lineage"])
+                snapshot, _, raw = client[0]("/v1/runs/" + restarted + "/snapshot", "RunSnapshot")
+                (work / "tui-history-restarted-snapshot.json").write_bytes(raw)
+                assert snapshot["runtime"]["status"] == "succeeded", ("the restarted run status", snapshot["runtime"]["status"])
+                print("PASS tui-history 8: l and r on the detail of run", earlier, "created the child request", restart_child["id"],
+                      "whose request screen and review named the parent and the operation restart; y approved it, and its run", restarted,
+                      "succeeded with parentRunId", earlier, "and lineage restart", flush=True)
+
+                # 9. l, f and one replacement fork the restarted run, and the child review shows the edit.
+                # The retrieval of the verified result records its verification,
+                # which changes the revision of the run and so the entity tag of
+                # its lineage collection. The menu opens after it.
+                session.wait_screen("Result: verified", timeout=30)
+                session.send(b"l")
+                shown("Lineage of run " + restarted, 15)
+                shown("f fork: eligible", 10)
+                session.send(b"f")
+                shown("Fork of run " + restarted, 10)
+                shown("> occurrence 0 (text): keep", 10)
+                session.send(b"\r")
+                shown("Replacement answer for occurrence 0 (text)", 10)
+                replacement = "Forked answer."
+                session.send(replacement.encode())
+                session.send(b"\x04")
+                shown("> occurrence 0 (text): replace with " + json.dumps(replacement), 10)
+                save(session, "fork-edits")
+                mutation_key(b"\x04", "Lineage: fork of run " + restarted + "; the inputs come from the parent run", 30)
+                session.wait_screen("Enter REQUEST REVIEW", timeout=30)
+                fork_child = child_request(restarted, "fork")
+                mutation_key(b"\r", "Approve exact manager review", 45)
+                shown("Lineage: fork of run " + restarted, 10)
+                preparation = child_review(fork_child)
+                lineage = preparation["review"]["lineage"]
+                assert lineage["parentRunId"] == restarted and lineage["operation"] == "fork" and [
+                    (edit["operation"], edit["occurrenceId"]) for edit in lineage["edits"]] == [("replace", "0")], ("the fork review lineage", lineage)
+                shown("Lineage edits: replace occurrence 0 (answer SHA-256 " + lineage["edits"][0]["sha256"] + ")", 10)
+                save(session, "fork-review")
+                print("PASS tui-history 9: l, f, Enter and Ctrl-D on the live monitor of run", restarted, "forked it with one replacement of",
+                      "occurrence 0 as child request", fork_child["id"], "; the TUI review showed the replacement with SHA-256",
+                      lineage["edits"][0]["sha256"], "as the child preparation states it", flush=True)
                 session.send(b"q")
                 assert session.wait_exit(20) == 0
                 session.assert_restored()
-            print("PASS tui-history: the History view of the actual service TUI listed every run across windows, saved a verified result",
-                  "and exported it once", flush=True)
+            print("PASS tui-history: the History view of the actual service TUI listed every run across windows, saved a verified result,",
+                  "exported it once, restarted it to a succeeded child run and forked that run with one replacement", flush=True)
         finally:
             if process.poll() is None:
                 process.terminate()
