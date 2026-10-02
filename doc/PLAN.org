@@ -12626,6 +12626,27 @@ Non-blocking findings of fess pf-PF11-r1 (fess/pf-PF11-r1.md) on subtask PF11 (t
 3. (low) bisim/lakefile.toml lines 45-48, bisim/manager/ManagerCases.lean and bisim/AGENTS.md: the manager-cases executable and the bisim/AGENTS.md rule for cases/ were not requested. Both are justified, because they make the retained files reproducible from Lean values. No fix required. Recorded here for the closeout.
 4. (low) bisim/README.md, the paragraph added after "refusal after a change of the process generation.": one line is not rewrapped. Fix: rewrap the paragraph.
 
+* TODO [#D] Resolve the non-blocking fess findings of subtask PF12
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pf12-fess-followup-zm25
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-02 Fri 14:56]
+:MODIFIED: [2026-10-02 Fri 14:56]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess pf-PF12-r1 (fess/pf-PF12-r1.md) on subtask PF12 (the WM-040 Haskell oracle client, the manager-conformance-check executable, and the admission and cases lanes).
+
+1. (medium) manager/test/ConformanceCheck.hs lines 355-358 and 380, and bisim/manager/README.md line 290: when the chosen candidate is submitted at a slot other than the chosen slot, judge returns Nothing and any non-error reply is accepted. At a held slot the model must refuse, so an oracle or model that admits the oldest eligible candidate into an occupied slot is not detected. Fix: for the chosen candidate at another slot, expect ResponseRefused when the slot is held, and otherwise ResponseAccepted with the expected admission state at that slot. Update the README table row and rerun the admission lane at seed 20261002.
+2. (low) manager/test/Agentic/Manager/Test/Oracle.hs line 841: stop discards the result of waitForProcess, so a nonzero exit or a crash of the oracle after its last reply does not fail the lane. Fix: after a clean close of the input, require ExitSuccess, and otherwise throw OracleClosed with the exit code.
+3. (low) bisim/manager/README.md lines 319-326: oldestEligible counts held reservations at or above the limit after a capacity reduction, and the model has no limit apart from its slots. This is a real conformance gap that the generator avoids and that the README records only as a limit. Fix: an owner decision on the model or the policy for a reduced capacity.
+4. (low) evidence PF/PF12/impl-r1/wrong-slot-control.log: the local mismatch control exercised only the next-state path. No control showed that the lane catches an oracle that accepts a candidate that the policy does not choose. Fix (optional): run a second local control that flips the expected outcome of a non-chosen candidate to accepted, and do not commit it.
+
 * TODO [#D] Resolve the non-blocking fess findings of subtask PF2
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -23301,7 +23322,7 @@ configuration is changed.
 :LABELS:   ["p9","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-02 Fri 14:41]
+:MODIFIED: [2026-10-02 Fri 14:56]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-040
 :SOURCE_REPO: agent-cat
@@ -23492,6 +23513,13 @@ legacy workflow build cannot conceal an unchecked manager development.
     "author": "johnw",
     "text": "PF11 (2026-10-02) adds the pinned encoding agent-cat-manager-conformance/1 in bisim/manager/ManagerConformance/Codec.lean, the manager-oracle NDJSON executable (bisim/manager/ManagerOracle.lean, [[lean_exe]] manager-oracle) and 45 retained cases in bisim/manager/cases (18 accepted, 20 refused, 7 malformed requests that receive an error). Step.exec_eq and step_eq prove that the oracle step equals Agentic.Manager.coordinationStep over the model transitions. bisim/manager/README.md specifies the encoding. Evidence PF/PF11/impl-r1: lean-build exit 0 (--wfail ManagerConformance manager-oracle), cases exit 0 (every case matches its expected response), closure exit 0 (no Agentic.Core module), git status of bisim/corpus and model empty. Fess pf-PF11-r1 is not blocking. Its four low findings are filed as acat-pf11-fess-followup-ckg9. Remaining WM-040 scope: a named manager conformance gate and the comparison against the Haskell manager.",
     "created_at": "2026-10-02T21:41:46Z"
+  },
+  {
+    "id": 667,
+    "issue_id": "acat-wm-040-3olb",
+    "author": "johnw",
+    "text": "PF12 (subtask of WM-040): adds manager/test/Agentic/Manager/Test/Oracle.hs (typed client of manager-oracle in the pinned encoding agent-cat-manager-conformance/1) and the executable manager-conformance-check with the admission and cases lanes. Evidence (private PF/PF12): BUILD(manager-conformance-check) with -Werror passed, with no new package. The admission lane at seed 20261002 with N 500 exited 0 with 201 accepted and 299 refused situations, 4286 submissions and no mismatch against oldestEligible. The cases lane replayed 45 cases in bisim/manager/cases with no mismatch. A local wrong-slot control (not committed) printed MANAGER-CONFORMANCE mismatch and retained counterexample files. A missing oracle exits 1 with the tier1-style message. Fess pf-PF12-r1 is not blocking. Its findings are filed as a follow-up. WM-040 stays open for the closeout.",
+    "created_at": "2026-10-02T21:56:07Z"
   }
 ]
 #+end_src

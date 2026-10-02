@@ -410,7 +410,10 @@ command and draft owners for real edit and withdrawal invalidation. Original
 worker associations remain opaque and are not reconstructed after reopen.
 
 `manager/ci/admission.sh` runs bounded policy properties and real native lifecycle
-checks at N1 and N8. The [approval owner](APPROVAL.md) supplies complete review, exact approval and actual
+checks at N1 and N8. The executable `manager-conformance-check` compares
+`oldestEligible` and the coordination codec with the Lean manager oracle. The
+[manager conformance lanes](../bisim/manager/README.md#the-haskell-lanes)
+describe its `admission` and `cases` lanes. The [approval owner](APPROVAL.md) supplies complete review, exact approval and actual
 accepted-running retention through the original Worker. Its owning gate adds final
 worker/deadline checks and interruption evidence without a new service endpoint.
 

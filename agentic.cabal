@@ -824,3 +824,12 @@ executable manager-history-check
     Agentic.Manager.Worker.State
   build-depends:   agentic, direct-sqlite, deepseq, transformers
   ghc-options:     -threaded -rtsopts
+
+executable manager-conformance-check
+  import:          settings
+  hs-source-dirs:  manager/test manager/src
+  main-is:         ConformanceCheck.hs
+  other-modules:
+    Agentic.Manager.Test.Oracle
+    Agentic.Manager.Admission.Policy
+  ghc-options:     -threaded -rtsopts

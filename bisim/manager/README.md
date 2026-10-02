@@ -235,3 +235,92 @@ Each case in `cases/` is the pair `<name>.request.json` and
 
 The cases contain accepted and refused entries. `ManagerConformance/Cases.lean`
 fixes the outcome of each case and the round trip of each request.
+
+## The Haskell lanes
+
+The executable `manager-conformance-check` of `agentic.cabal` holds the
+Haskell side of the lane. Its module `manager/test/Agentic/Manager/Test/Oracle.hs`
+holds the encoding of this file as typed records, and the connection to one
+`manager-oracle` process. The decoder of the module refuses the same
+malformed requests as the decoder of the oracle.
+
+The executable takes the oracle from `--oracle`, else from the environment
+variable `ORACLE`, else from `bisim/.lake/build/bin/manager-oracle`. It does
+not build the oracle. A missing or non-executable binary stops the lane with
+status 1 and the message `oracle binary not found, and the lane is not green`. A
+closed pipe, a response that is not in the encoding, or no response within 60
+seconds also stops the lane with status 1.
+
+Run each lane from the root of the repository, after the oracle is built.
+
+```sh
+bash test/cabal.sh build manager-conformance-check
+check=$(bash test/cabal.sh list-bin manager-conformance-check)
+"$check" admission --seed 20261002 --n 500 --counterexamples "$TMPDIR/manager-cx"
+"$check" cases --cases bisim/manager/cases --counterexamples "$TMPDIR/manager-cx"
+```
+
+### The admission lane
+
+The lane compares `oldestEligible` of `Agentic.Manager.Admission.Policy`
+with the `admit` decider of the oracle. QuickCheck generators with a fixed
+`QCGen` make the situations from the seed. The default seed is `20261002`,
+and the default number of situations is 500. Each situation has a slot limit
+from one to four, one to four profiles, one to six queued candidates, and
+held reservations. A profile has a subset of four operator keys, or the
+unclassified cohort when the subset is empty, and it can be disabled. A
+candidate has a profile, a distinct queue ordinal, and inputs that are ready,
+missing or invalid. The held reservations occupy distinct slots below the
+limit and hold disjoint keys, as the reservation exclusivity of the model
+requires.
+
+The lane encodes a situation as a coordination state. The slots are
+`slot-0` to `slot-<limit-1>`. An operator key `k` is the string `key:k`, and
+the unclassified cohort is the string `unclassified`. A held reservation has
+the owner `held-<slot>`. Each candidate is a queued request whose profile
+revision is the revision of its profile.
+
+For each candidate at each slot, the lane submits one `admit` entry with the
+stored profile and a lease of the keys of that profile. The responses must
+agree with the choice of `oldestEligible`.
+
+| Choice of `oldestEligible` | Required response |
+| --- | --- |
+| The candidate at the chosen slot | Accepted, with the state that admits the candidate at that slot. |
+| The chosen candidate at another slot | Any response except an error. The model accepts the candidate at any free slot, and the policy chooses the lowest. |
+| Another candidate | Refused. |
+| No candidate | Refused for every candidate and every slot. |
+
+The lane prints the number of situations with a choice (`accepted`) and
+without a choice (`refused`), and the number of responses of each kind. A run
+that does not contain both accepted and refused situations fails.
+
+### The cases lane
+
+The lane replays each request of `bisim/manager/cases`, or of the directory
+that `--cases` names. The response of the oracle must equal the retained
+response byte for byte. The typed decoder must refuse each request whose
+retained response is an error. For every other request, the typed decoder
+must read the request, and the typed encoder must write the request and the
+retained response back to the same bytes.
+
+### Mismatches
+
+A mismatch writes the file `<counterexamples>/<n>.json`, prints
+`MANAGER-CONFORMANCE mismatch`, and makes the lane exit with status 1 after
+the last situation or case. In the admission lane, `<n>` is the index of the
+situation, and the file holds the first disagreeing request of the
+situation. In the cases lane, `<n>` is the name of the case. The file holds
+the seed (`null` for a case), the reason, the request, the expected outcome
+and the response of the oracle. The default directory is
+`manager-conformance-counterexamples` in the temporary directory of the
+system.
+
+### Limits of the admission lane
+
+The lane does not generate a held slot at or above the limit. The policy
+counts every held reservation against the limit, so a reservation that a
+capacity reduction leaves above the limit can exhaust the capacity. The model
+has no limit apart from its set of slots, and it admits a candidate at any
+slot of that set that no reservation holds. The model therefore states no
+outcome for a reduced capacity.
