@@ -7242,7 +7242,7 @@ Request, approval, control, export, and lineage routes pass hostile-input, repla
 :LABELS:   ["wm-release-gate","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-02 Fri 09:19]
+:MODIFIED: [2026-10-02 Fri 09:34]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/G4
 :SOURCE_REPO: agent-cat
@@ -7411,6 +7411,13 @@ Emacs, TUI, and Pi service modes pass their native UI gates and cross-client/cro
     "author": "johnw",
     "text": "Subtask PD29 (2026-10-02, Phase D gate part 2) ran once at N8 the service_http.py modes failures-launched, controls, mixed, mutations-captures, mutations-lineage, pi-client, pi-client-controls, emacs-client, emacs-service, emacs-service-lifecycle and the control emacs-service-broken-answer, and in ext-pi npm run check, npm test (219 passed, 29 skipped) and npm run test:integration (8 passed). The first run on 490b6a21 found two defects, fixed at their owners with fail-first tests: runtime/cbits/process_group.c read a Darwin waitid CLD_STOPPED report as an exit, so the group monitor killed a stopped worker group (failures-launched), and the Emacs client stopped on a 429 storage-quota lineage page-set read (emacs-client, fixed in agent-workflows emacs-native 8c2b780). Every mode then passed once on the fixed trees, and the control failed with 'JOURNEY-ASSERT Emacs answer is JSON false'. Evidence: PD/PD29/impl-r1 (first run in r0-before-fixes, fixture roots pd29-failures-launched.rbaOG7jQ and pd29-emacs-client.BFt4hEyK kept). Fess pd-PD29-r1 not blocking, findings filed as acat-pd29-fess-followup-h43e.",
     "created_at": "2026-10-02T16:19:12Z"
+  },
+  {
+    "id": 632,
+    "issue_id": "acat-g4-pech",
+    "author": "johnw",
+    "text": "Subtask PD30 (2026-10-02, Phase D gate part 3) ran each step once with no code change, on agent-cat 6a4cbeec and agent-workflows emacs-native 8c2b780. In the Emacs worktree: ci/emacs.sh passed (six emacs/*.el files byte-compile without warnings, checkdoc silent, ERT smoke 38/38, wf-smoke 0 failed, vector and transport ERT 96/96), ci/emacs-ui.py local cases passed with 8 PASS lines (the form case at 40x12, 80x24 and 140x36), and ci/emacs-tramp.py passed with the project sshd, so no blocker is recorded. wf was rebuilt incrementally against the current agentic first. In agent-cat: git diff --exit-code a17a015b -- doc/api/openapi.yaml test/manager_client_vectors.json exited 0 with no output, the DataBroker record of runtime/src/Agentic/Runtime/Broker.hs keeps its nine operations in order, bash tui/ci/tui.sh passed under timeout 1200, and the incremental -ftui-tests rebuild of agentic-run and routing-fixed-point-probe exited 0. Evidence: PD/PD30/impl-r1 in the private resume-20260923 directory, a .log and a .exit file for each of the nine steps. Fess pd-PD30-r1 not blocking. Its two low findings are filed as acat-pd30-fess-followup-jwla.",
+    "created_at": "2026-10-02T16:34:22Z"
   }
 ]
 #+end_src
@@ -11746,6 +11753,27 @@ Non-blocking findings of fess audit fess/pd-PD3-r1.md (2026-10-01) on subtask PD
   }
 ]
 #+end_src
+
+* TODO [#D] Resolve the non-blocking fess findings of subtask PD30
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pd30-fess-followup-jwla
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-02 Fri 09:34]
+:MODIFIED: [2026-10-02 Fri 09:34]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess audit fess/pd-PD30-r1.md (2026-10-02) on subtask PD30 (Phase D gate part 3: Emacs checks, contract diff and the TUI suite). The PD30 commit in agent-cat names this issue.
+
+1. (low) PD/PD30/impl-r1/env.sh (WF) and PD/PD7/impl-r1/cabal.project. The wf binary that the Emacs checks use comes from a private stage project and builddir in the PD7 evidence directory. That project is not checked in, and the build did not use -Werror. A later gate cannot reproduce this result from the repositories alone. Fix: record the wf build recipe (the stage project contents and the build flags) in the Phase D handoff notes, or build wf with -Werror for the gate.
+2. (low) PD/PD30/impl-r1/broker-check.py. The DataBroker check is a regex over the source text that exists only in the evidence directory. It checks the field names and their order, not the field types. This is enough for the acceptance item, but it is not a repository check. Fix: keep it as evidence. If the check is to be reused, add it to an owner CI script.
+
+Implementer limitations recorded with PD30: none.
 
 * TODO [#D] Resolve the non-blocking fess findings of subtask PD4
 :PROPERTIES:
@@ -21074,7 +21102,7 @@ coordination or SQL into the TUI.
 :LABELS:   ["p6","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-02 Fri 09:19]
+:MODIFIED: [2026-10-02 Fri 09:34]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-030
 :SOURCE_REPO: agent-cat
@@ -21245,6 +21273,13 @@ separately tested rather than inferred from one newer Emacs build.
     "author": "johnw",
     "text": "Subtask PD29 (2026-10-02) fixes a transport-level defect found by the Phase D gate: the Emacs client now reads again after a 429 storage-quota or 503 storage-unavailable refusal (at most 50 reads 0.2 s apart, reads only, no command resent), in agent-workflows emacs-native 8c2b780. The new ERT test failed first and passes, ci/emacs.sh and the emacs-client mode pass at N8. Evidence: PD/PD29/impl-r1. Follow-ups in acat-pd29-fess-followup-h43e.",
     "created_at": "2026-10-02T16:19:12Z"
+  },
+  {
+    "id": 629,
+    "issue_id": "acat-wm-030-t2l4",
+    "author": "johnw",
+    "text": "Subtask PD30 (2026-10-02, Phase D gate part 3) ran each step once with no code change, on agent-cat 6a4cbeec and agent-workflows emacs-native 8c2b780. In the Emacs worktree: ci/emacs.sh passed (six emacs/*.el files byte-compile without warnings, checkdoc silent, ERT smoke 38/38, wf-smoke 0 failed, vector and transport ERT 96/96), ci/emacs-ui.py local cases passed with 8 PASS lines (the form case at 40x12, 80x24 and 140x36), and ci/emacs-tramp.py passed with the project sshd, so no blocker is recorded. wf was rebuilt incrementally against the current agentic first. In agent-cat: git diff --exit-code a17a015b -- doc/api/openapi.yaml test/manager_client_vectors.json exited 0 with no output, the DataBroker record of runtime/src/Agentic/Runtime/Broker.hs keeps its nine operations in order, bash tui/ci/tui.sh passed under timeout 1200, and the incremental -ftui-tests rebuild of agentic-run and routing-fixed-point-probe exited 0. Evidence: PD/PD30/impl-r1 in the private resume-20260923 directory, a .log and a .exit file for each of the nine steps. Fess pd-PD30-r1 not blocking. Its two low findings are filed as acat-pd30-fess-followup-jwla.",
+    "created_at": "2026-10-02T16:34:21Z"
   }
 ]
 #+end_src
@@ -21256,7 +21291,7 @@ separately tested rather than inferred from one newer Emacs build.
 :LABELS:   ["p6","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-02 Fri 08:12]
+:MODIFIED: [2026-10-02 Fri 09:34]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-031
 :SOURCE_REPO: agent-cat
@@ -21387,6 +21422,13 @@ including its explicit v3 invocation compatibility behavior.
     "author": "johnw",
     "text": "Subtask PD27 (2026-10-02, WM-032 part 3) exercises the WM-031 lineage, export, reconnect and quit presentation of Emacs service mode by keys in emacs-service-lifecycle: the fork and restart children with their exact reviews, the export receipt and verified download, the view state across a manager restart (unreachable, then poll with supervision lost, no command resent), and the pending run after an Emacs quit. No Lisp change was needed. Evidence: PD/PD27/impl-r1, 41 PASS lines at N8. See acat-wm-032-eh4r and acat-pd27-fess-followup-1ueu.",
     "created_at": "2026-10-02T15:12:12Z"
+  },
+  {
+    "id": 630,
+    "issue_id": "acat-wm-031-5yxo",
+    "author": "johnw",
+    "text": "Subtask PD30 (2026-10-02, Phase D gate part 3) ran each step once with no code change, on agent-cat 6a4cbeec and agent-workflows emacs-native 8c2b780. In the Emacs worktree: ci/emacs.sh passed (six emacs/*.el files byte-compile without warnings, checkdoc silent, ERT smoke 38/38, wf-smoke 0 failed, vector and transport ERT 96/96), ci/emacs-ui.py local cases passed with 8 PASS lines (the form case at 40x12, 80x24 and 140x36), and ci/emacs-tramp.py passed with the project sshd, so no blocker is recorded. wf was rebuilt incrementally against the current agentic first. In agent-cat: git diff --exit-code a17a015b -- doc/api/openapi.yaml test/manager_client_vectors.json exited 0 with no output, the DataBroker record of runtime/src/Agentic/Runtime/Broker.hs keeps its nine operations in order, bash tui/ci/tui.sh passed under timeout 1200, and the incremental -ftui-tests rebuild of agentic-run and routing-fixed-point-probe exited 0. Evidence: PD/PD30/impl-r1 in the private resume-20260923 directory, a .log and a .exit file for each of the nine steps. Fess pd-PD30-r1 not blocking. Its two low findings are filed as acat-pd30-fess-followup-jwla.",
+    "created_at": "2026-10-02T16:34:21Z"
   }
 ]
 #+end_src
@@ -21398,7 +21440,7 @@ including its explicit v3 invocation compatibility behavior.
 :LABELS:   ["p6","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-02 Fri 09:19]
+:MODIFIED: [2026-10-02 Fri 09:34]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-032
 :SOURCE_REPO: agent-cat
@@ -21511,6 +21553,13 @@ until WM-039 supplies it.
     "author": "johnw",
     "text": "Subtask PD29 (2026-10-02, Phase D gate part 2) ran once at N8 the service_http.py modes failures-launched, controls, mixed, mutations-captures, mutations-lineage, pi-client, pi-client-controls, emacs-client, emacs-service, emacs-service-lifecycle and the control emacs-service-broken-answer, and in ext-pi npm run check, npm test (219 passed, 29 skipped) and npm run test:integration (8 passed). The first run on 490b6a21 found two defects, fixed at their owners with fail-first tests: runtime/cbits/process_group.c read a Darwin waitid CLD_STOPPED report as an exit, so the group monitor killed a stopped worker group (failures-launched), and the Emacs client stopped on a 429 storage-quota lineage page-set read (emacs-client, fixed in agent-workflows emacs-native 8c2b780). Every mode then passed once on the fixed trees, and the control failed with 'JOURNEY-ASSERT Emacs answer is JSON false'. Evidence: PD/PD29/impl-r1 (first run in r0-before-fixes, fixture roots pd29-failures-launched.rbaOG7jQ and pd29-emacs-client.BFt4hEyK kept). Fess pd-PD29-r1 not blocking, findings filed as acat-pd29-fess-followup-h43e.",
     "created_at": "2026-10-02T16:19:11Z"
+  },
+  {
+    "id": 631,
+    "issue_id": "acat-wm-032-eh4r",
+    "author": "johnw",
+    "text": "Subtask PD30 (2026-10-02, Phase D gate part 3) ran each step once with no code change, on agent-cat 6a4cbeec and agent-workflows emacs-native 8c2b780. In the Emacs worktree: ci/emacs.sh passed (six emacs/*.el files byte-compile without warnings, checkdoc silent, ERT smoke 38/38, wf-smoke 0 failed, vector and transport ERT 96/96), ci/emacs-ui.py local cases passed with 8 PASS lines (the form case at 40x12, 80x24 and 140x36), and ci/emacs-tramp.py passed with the project sshd, so no blocker is recorded. wf was rebuilt incrementally against the current agentic first. In agent-cat: git diff --exit-code a17a015b -- doc/api/openapi.yaml test/manager_client_vectors.json exited 0 with no output, the DataBroker record of runtime/src/Agentic/Runtime/Broker.hs keeps its nine operations in order, bash tui/ci/tui.sh passed under timeout 1200, and the incremental -ftui-tests rebuild of agentic-run and routing-fixed-point-probe exited 0. Evidence: PD/PD30/impl-r1 in the private resume-20260923 directory, a .log and a .exit file for each of the nine steps. Fess pd-PD30-r1 not blocking. Its two low findings are filed as acat-pd30-fess-followup-jwla.",
+    "created_at": "2026-10-02T16:34:22Z"
   }
 ]
 #+end_src
