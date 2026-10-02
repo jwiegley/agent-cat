@@ -333,8 +333,13 @@ then runs `check-quarantine` again and releases the reservation with the
 `owner-released` evidence that it returns. The `failures-launched` mode of
 `manager/test/service_http.py` checks this procedure across two lifetimes with
 one profile and one execution reservation. Before it kills the manager with
-SIGKILL, the harness stops the worker process groups with SIGSTOP. After the
-restart a new request waits with `capacity`. While the stopped inner worker
+SIGKILL, the harness stops the worker process groups with SIGSTOP. The death of
+the manager orphans the process group of the frontend proxy, and because that
+group holds a stopped process the kernel sends it SIGHUP and SIGCONT, so the
+proxy ends. The inner worker leads its own session and receives no signal, so
+its stopped processes stay and keep the owner lock. The harness starts the
+manager with the default action for SIGHUP. After the restart a new request
+waits with `capacity`. While the stopped inner worker
 holds the owner lock, `check-quarantine` reports `cleanup-required` and a
 release refuses with `cleanup-unverified`. After the harness kills the stopped
 groups with SIGKILL and no process of them remains, the run log still holds no

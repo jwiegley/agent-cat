@@ -277,8 +277,10 @@ manager_failure_mode = len(sys.argv) == 6 and sys.argv[5] == MANAGER_FAILURE
 # profile and one execution reservation. A mixed-controls run waits at its
 # person question. The harness lists the worker processes of the manager,
 # stops their process groups with SIGSTOP and kills the manager process with
-# SIGKILL. The stopped inner worker keeps the owner lock of the run, and the
-# run log receives no stop. A restart on the same root and configuration
+# SIGKILL. The kernel then sends SIGHUP and SIGCONT to the orphaned process
+# group of the frontend proxy, which ends. The inner worker leads its own
+# session, so its stopped processes stay and keep the owner lock of the run,
+# and the run log receives no stop. A restart on the same root and configuration
 # quarantines the reservation of the lost run, and a new request waits in the
 # queue with capacity. check-quarantine reports cleanup-required, and
 # release-quarantine refuses with cleanup-unverified, both for the evidence
@@ -8118,9 +8120,13 @@ def manager_failure_checks():
     def serve(index):
         """Start one foreground manager lifetime on the same root and
         configuration and wait for HTTPS readiness."""
+        # The manager and its workers get the default action for SIGHUP, so
+        # that the orphaned-group rule below holds whatever disposition the
+        # harness inherited.
         with (work / f"server-{index}.stdout").open("wb") as output, (work / f"server-{index}.stderr").open("wb") as errors:
             process = subprocess.Popen([str(runner), "--manager", "serve", "--config", str(config),
-                                        "+RTS", "-N" + native, "-RTS"], stdout=output, stderr=errors)
+                                        "+RTS", "-N" + native, "-RTS"], stdout=output, stderr=errors,
+                                       preexec_fn=lambda: signal.signal(signal.SIGHUP, signal.SIG_DFL))
         wait_ready(process)
         return process
 
@@ -8378,7 +8384,20 @@ def manager_failure_checks():
                   len(tree), "worker processes in process groups", targets, flush=True)
 
             # Case 2. SIGSTOP of the worker process groups, then SIGKILL of
-            # the manager process. Every worker process stays, stopped.
+            # the manager process. The frontend proxy is a child of the
+            # manager in its own process group in the session of the
+            # manager. The death of the manager orphans that group, and
+            # because it holds a stopped process the kernel sends it SIGHUP
+            # and SIGCONT, so the proxy ends. The inner frontend worker leads
+            # its own session, so its group was orphaned from the start and
+            # receives no signal. Every process of that session stays,
+            # stopped, and the inner worker keeps the owner lock.
+            listing = subprocess.run(["ps", "-Ao", "pid=,ppid="], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                     text=True, timeout=10, check=True).stdout
+            children = {int(pid) for pid, parent in (line.split() for line in listing.splitlines()) if int(parent) == first.pid}
+            proxies = sorted({pgid for pid, pgid, _ in tree if pid in children})
+            session = sorted(pid for pid, pgid, _ in tree if pgid not in proxies)
+            assert proxies and session, ("the proxy group and the inner worker session", proxies, session, tree)
             for group in targets:
                 os.killpg(group, signal.SIGSTOP)
             deadline = time.monotonic() + 10
@@ -8389,8 +8408,8 @@ def manager_failure_checks():
             first.wait(timeout=25)
             time.sleep(1)
             held = stopped(targets)
-            assert sorted(pid for pid, _ in held) == sorted(pid for pid, _, _ in tree) and all(halted for _, halted in held), (
-                "the stopped worker processes after the manager loss", held, tree)
+            assert sorted(pid for pid, _ in held) == session and all(halted for _, halted in held), (
+                "the stopped worker processes after the manager loss", held, proxies, tree)
         finally:
             ended(first, 0, True)
         assert first.returncode == -signal.SIGKILL, ("the first lifetime did not end by SIGKILL", first.returncode)
@@ -8404,7 +8423,8 @@ def manager_failure_checks():
                     if json.loads(line)["event"]["type"] in ("run.completed", "run.failed", "run.cancelled")]
         assert not terminal_events(), ("the run log of the stopped run holds a terminal record", terminal_events())
         print("PASS failures-launched case 2: after SIGSTOP of process groups", targets, "and SIGKILL of the manager, the",
-              len(held), "worker processes remain stopped and the run log of", run, "holds no terminal record", flush=True)
+              "orphaned proxy group", proxies, "ended, the", len(held), "processes of the inner worker session remain stopped",
+              "and the run log of", run, "holds no terminal record", flush=True)
         lost_reservations = [ident for (ident,) in read_store(
             "SELECT id FROM reservations WHERE request_id=? AND state!='released'", (lost_request["id"],))]
         assert len(lost_reservations) == 1, ("the reservation of the lost run", lost_reservations)
@@ -8449,13 +8469,16 @@ def manager_failure_checks():
                   "reports cleanup-required and release-quarantine refuses with cleanup-unverified for the owner-released",
                   "digest and for a wrong digest, without a change, and request", waiting["id"], "waits with capacity", flush=True)
 
-            # Case 4. SIGKILL of the stopped groups. Once no process of them
-            # remains, the run log still holds no terminal record.
-            for group in targets:
+            # Case 4. SIGKILL of the stopped groups of the inner worker
+            # session. The proxy group ended in case 2. Once no process of
+            # the worker groups remains, the run log still holds no terminal
+            # record.
+            survivors = [group for group in targets if group not in proxies]
+            for group in survivors:
                 os.killpg(group, signal.SIGKILL)
             gone_after = vanished(targets, 1)
             assert not terminal_events(), ("the run log of the killed run holds a terminal record", terminal_events())
-            print("PASS failures-launched case 4: after SIGKILL of the stopped process groups", targets, "no process remained after",
+            print("PASS failures-launched case 4: after SIGKILL of the stopped process groups", survivors, "no process remained after",
                   round(gone_after, 2), "seconds, and the run log of", run, "holds no terminal record", flush=True)
 
             # Case 5. check-quarantine reports clean with the owner-released

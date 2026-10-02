@@ -409,7 +409,10 @@ controlSurfaceBorrowed store proof association approved live = do
         _ -> refuseTransaction StoreIntegrity
       if unchanged && boundary==projectionBoundary snapshot then Just <$> pendingDecisions association else pure Nothing
     pure((\current -> (revision,supervision,snapshot,current)) <$> heads)
-  let available=live && supervision=="owned" && snapshotRunStatus snapshot==RunRunning
+  -- A stored owned label without a live original worker reads as lost, as
+  -- the run resource reports it, until Admission records the transition.
+  let reported=if supervision=="owned" && not live then "lost" else supervision
+      available=live && supervision=="owned" && snapshotRunStatus snapshot==RunRunning
       offer operation occurrence attempt generation timings choices targets=object
         ["operation" .= (operation::Text),"address" .= object(["occurrenceId" .= T.pack(show(occurrenceNumber occurrence))] <>
           maybe [] (\a->["attemptId" .= T.pack(show(attemptNumber a))]) attempt),
@@ -432,7 +435,7 @@ controlSurfaceBorrowed store proof association approved live = do
       offers=if available then ordinary<>mandatory else []
   when(length offers>512)(throwIO Command.ViewTooLarge)
   pure(object ["version" .= (1::Int),"runId" .= associationRun association,"revision" .= (if live then revision else "closed_"<>revision),
-    "supervision" .= supervision,"cancelAllowed" .= available,"offers" .= offers,
+    "supervision" .= (reported::Text),"cancelAllowed" .= available,"offers" .= offers,
     "decisionHeadId" .= case heads of (ident,_,_,_,_,_):_->Just ident;_->Nothing])
 
 -- IDs, occurrence, generation, revision, kind, state in per-run opening order.

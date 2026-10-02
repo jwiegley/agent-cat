@@ -1054,7 +1054,8 @@ serviceFaultChecks work native source python=do
   -- write-ahead logging permits beside the held lock. The first admission poll
   -- opens a write transaction, meets the held lock, and the admission
   -- operation replaces that Store failure with the declared refusal. The
-  -- service keeps the refusal in its fault cell and records it once. No
+  -- Store records the SQLite busy site of that failure, and the service
+  -- keeps the refusal in its fault cell and records it once. No
   -- notification follows, so no second poll runs while the lock is held.
   let pollCaptured=work </> "service-poll-stderr.log"
       faulted service=Service.serviceFault service>>=maybe(threadDelay 1000>>faulted service)pure
@@ -1071,8 +1072,11 @@ serviceFaultChecks work native source python=do
       (recordCount recorded " service admission-poll class=command StorageUnavailable"==1)
     assertion "the admission operation records the Store failure that the poll refusal replaces"
       (recordCount recorded " admission operation class=store StoreUnavailable erased=command StorageUnavailable"==1)
-    assertion "the poll refusal writes only these two private lines"
-      (length(T.lines(TE.decodeUtf8 recorded))==2)
+    assertion "the Store records the SQLite busy site of the poll transaction"
+      (length[line|line<-T.lines(TE.decodeUtf8 recorded),"manager-fault " `T.isPrefixOf` line,
+                   " busy site=store-sqlite-transaction class=sqlite ErrorBusy elapsed=" `T.isInfixOf` line]==1)
+    assertion "the poll refusal writes only these three private lines"
+      (length(T.lines(TE.decodeUtf8 recorded))==3)
   -- A third service prepares one request and approves it through the service.
   -- Before the approval, a separate SQLite connection installs a trigger that
   -- aborts every insert into the ingestion table, so the first runtime
