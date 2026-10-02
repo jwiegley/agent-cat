@@ -8469,7 +8469,7 @@ The STORAGE.md sentence that claimed the manager log ends with the shutdown noti
 :LABELS:   ["workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-10-02 Fri 00:09]
-:MODIFIED: [2026-10-02 Fri 00:22]
+:MODIFIED: [2026-10-02 Fri 00:30]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -8491,6 +8491,13 @@ Non-blocking findings of fess audit fess/pd-PD10-r1.md (2026-10-02) on subtask P
     "author": "johnw",
     "text": "PD11 (agent-workflows emacs-native 697a89c) advances finding 2: wf-manager--overview-kinds now decodes the decision kind, with the resources.decisions vector tests. The run kind is still refused, so finding 2 stays open for the run decoder. Finding 1 is not changed.",
     "created_at": "2026-10-02T07:22:19Z"
+  },
+  {
+    "id": 602,
+    "issue_id": "acat-j1ja",
+    "author": "johnw",
+    "text": "PD12 (agent-workflows emacs-native 5ab23e8) resolves finding 2: wf-manager--overview-kinds now decodes the run kind, with the resources.runs vector tests, so every overview member kind the manager serves is decoded. Finding 1 (the resource vector tests stop at the first failing vector) is not changed, so the issue stays open.",
+    "created_at": "2026-10-02T07:30:09Z"
   }
 ]
 #+end_src
@@ -11269,6 +11276,24 @@ Non-blocking findings of fess audit fess/pd-PD1-r1.md (2026-10-01) on subtask PD
 1. Medium. ext-pi/src/manager/session.ts:898: the live predicate of switchEndpoint checks only that the session is open and that the transport is still the earlier one. If the follow loop of the earlier binding ends (refused or unreachable) while the new overview loads, the switch still commits. The new binding then has no follow loop, followEnd keeps the end of the earlier transport, and ServiceMode.#report returns kind 'failed' with the session still installed and open. The requirement states a failed selection with the session closed and no follow loop. 'connected' is never reported, and the next select recovers. Fix: add this.#followEnd === undefined to the live predicate, so that this case takes the close-and-fail branch at ext-pi/src/service-mode.ts:282-286, and add a unit case.
 2. Low. ext-pi/src/service-mode.ts:282-286: no test runs the branch that closes the session and reports 'failed' when the earlier follow loop ended during a switch. Fix: add a unit case where the earlier transport ends its event stream (refused) while the new overview read is held, and assert kind 'failed', a closed session and no follow loop.
 3. Low. ext-pi/src/manager/session.ts:662-664: the new #fetch generation guard has no test. The assertion that the new transport does not receive run_a1 (ext-pi/test/service-mode.test.ts:268) passes without the guard, because no fetch is queued when the switch commits. Fix: add a case that queues a watched-resource fetch of the earlier binding behind a held read, commits a switch, releases the read, and asserts that the new transport never receives the earlier resource.
+
+* TODO [#D] Resolve the non-blocking fess findings of subtask PD12
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pd12-fess-followup-2tw2
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-02 Fri 00:30]
+:MODIFIED: [2026-10-02 Fri 00:30]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess audit fess/pd-PD12-r1.md (2026-10-02) on subtask PD12 (WM-030 part 5, agent-workflows emacs-native 5ab23e8).
+
+1. (low) emacs/wf-manager.el, wf-manager-decode-control and wf-manager-decode-run. The control and run decoders are checked only against test/manager_client_vectors.json. No live /v1/runs item or control view from a real manager passes through them. Fix: in the later transport subtask that reads /v1/runs and the control route, decode real manager responses through these decoders in a live check.
 
 * TODO [#D] Resolve the non-blocking fess findings of subtask PD2
 :PROPERTIES:
@@ -20565,7 +20590,7 @@ coordination or SQL into the TUI.
 :LABELS:   ["p6","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-02 Fri 00:22]
+:MODIFIED: [2026-10-02 Fri 00:30]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-030
 :SOURCE_REPO: agent-cat
@@ -20673,6 +20698,13 @@ separately tested rather than inferred from one newer Emacs build.
     "author": "johnw",
     "text": "PD11 (WM-030 part 4): agent-workflows emacs-native commit 697a89c adds typed decoders in emacs/wf-manager.el for resources.receipts (36 vectors, the receipt state checked against attempt, acknowledgement, effect and refusal as parseCommandReceipt does) and resources.decisions (20 vectors: question and recovery content, queue, position, generation), and the typed answer builder for resources.answers (22 vectors) of test/manager_client_vectors.json, after ext-pi/src/manager/resources.ts. The answer no to a flag question gives JSON false, and a structured answer is checked against the editor schema and refused with wf-manager-invalid-answer before any body is built. Evidence scope: ci/emacs.sh exited 0 under timeout 900 (4 passes over 4 files, clean byte compilation, silent checkdoc, smoke 38 of 38, transport ERT 33 of 33); the first run failed only on five checkdoc findings, then fixed. Fess pd-PD11-r1 recounted projected/refused tallies (receipts 19/17, decisions 6/14, answers 12/10), reran ci/emacs.sh with exit 0, and is not blocking; two low findings filed as acat-w80s. Limitations: the run overview kind is still refused; no HTTP send path exists yet. WM-030 stays open.",
     "created_at": "2026-10-02T07:22:19Z"
+  },
+  {
+    "id": 601,
+    "issue_id": "acat-wm-030-t2l4",
+    "author": "johnw",
+    "text": "PD12 (WM-030 part 5, agent-workflows emacs-native 5ab23e8): emacs/wf-manager.el decodes the controls of a run and run collection items, with projections that follow ext-pi/src/manager/resources.ts. Runtime, supervision, integrity and verification stay separate fields. Evidence scope: ci/emacs.sh exit 0, 4 passes over 4 files, transport ERT 37 of 37, every vector of resources.controls (16) and resources.runs (24). Not yet checked against a live manager response. The package stays open.",
+    "created_at": "2026-10-02T07:30:09Z"
   }
 ]
 #+end_src
