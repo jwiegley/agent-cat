@@ -126,6 +126,7 @@ registry =
           ("typed-person", row (Needs $ taking (input "input" :> noInputs) typedPersonProgram)),
           ("lineage-typed", row (Needs $ taking (input "input" :> noInputs) lineageTypedProgram)),
           ("mixed-controls", row (Needs $ taking (input "input" :> noInputs) mixedControlProgram)),
+          ("delayed-person", row (Needs $ taking (input "input" :> noInputs) delayedPersonProgram)),
           ("parallel-person", row (Needs $ taking (input "input" :> noInputs) parallelPersonProgram)),
           ("structured-person", row (Needs $ taking (input "input" :> noInputs) structuredPersonProgram)),
           ("prompt-source", row (Needs $ taking (input "input" :> noInputs) sourceProgram)),
@@ -252,6 +253,14 @@ mixedControlProgram :: Text -> Program
 mixedControlProgram body = workflow W.do
   _engine <- confirm (model "controlled" `servedBy` "primary" `fallingBackTo` "spare") [wf|Apply this patch? {body}|]
   _person <- confirm (person "owner") [wf|Independent confirmation? {body}|]
+  stop
+
+-- | A person question whose prompt holds the answer of a model. The runtime
+-- asks the question only after that answer, so a slow engine delays it.
+delayedPersonProgram :: Text -> Program
+delayedPersonProgram body = workflow W.do
+  draft <- ask (model "fixed-point") [wf|Draft a reply: {body}|]
+  _person <- confirm (person "owner") [wf|Delayed confirmation? {draft}|]
   stop
 
 -- Nonempty capture, billed engine work, and typed edits on replayable answers.

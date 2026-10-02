@@ -11573,6 +11573,34 @@ Non-blocking findings of fess audit fess/pd-PD2-r1.md (2026-10-01) on subtask PD
 4. (low) ext-pi/src/manager-ui.ts near 2508-2509: the comment 'The head decision of a run with the reads that its commands bind.' is orphaned above the Reconciliation JSDoc, and type Head has no doc. Fix: move that comment back above type Head.
 5. (low) ext-pi/README.md, added uncertainty and test paragraphs: three lines run past the fill width of the file. Fix: refill the affected paragraphs.
 
+* TODO [#D] Resolve the non-blocking fess findings of subtask PD26
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pd26-fess-followup-14x8
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-02 Fri 07:32]
+:MODIFIED: [2026-10-02 Fri 07:32]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess audit fess/pd-PD26-r1.md (2026-10-02) on subtask PD26 (WM-032 part 2, the Emacs service lifecycle by keys at 140x36, 80x24 and 40x12 in the mode emacs-service-lifecycle). The commits of PD26 in agent-cat and in agent-workflows emacs-native name this issue.
+
+1. (medium) ci/emacs-ui.py lines 809 and 814 (agent-workflows) and manager/test/service_http.py line 13018. The independent-points check puts the first window at point 1 with M-< and requires point 1. erase-buffer also sets every marker to 1, so a regression that resets every window not at the end to point-min passes. The first window is also the selected one, so the check exercises only the buffer-point branch of wf--redraw (emacs/wf.el line 1453), and never a non-selected window in the middle of its buffer. Fix: hold the first window at a recorded middle point (for example M-< then C-n C-n C-n) and require that exact point at the split, at the question and after the answer, or add an ERT test of wf--redraw with a non-selected window in the middle.
+
+2. (low) PD26 implementer limitations. The limitations say that the lifecycle takes about five minutes at N8. The final implementer run took 70 s and the fess rerun took 80 s, because the two 40 s engine turns overlap. Fix: correct the duration where it is recorded.
+
+3. (low) manager/test/service_http.py lines 2676, 6096 and 12736, and ci/emacs-ui.py line 434 (agent-workflows). Helpers that other modes use (one_control, manager_control, steered, run_history, emacs_service_cleanup, service_body and its companions) were refactored. The pi-client-controls, emacs-client-controls and emacs-client modes were not rerun. The evidence file names in client_controls_confirm now come from ControlHarness.label instead of sys.argv[5]. Fix: run those three modes once, or record them as deferred.
+
+4. (low) manager/test/service_http.py. The harness had a text-only PASS string edit after the final implementer runs. The fess rerun of the lifecycle mode passed on the current file. The broken-answer control and the journey were not rerun on the current file. Fix: rerun the broken-answer control once, or let the final gate cover it.
+
+5. (low) cli/test/RoutingFixedPointProbe.hs line 129. The new delayed-person row enlarges the fixture catalogue that every mode reads. The N8 journey and the lifecycle passed, but tui/ci/tui.sh and the other catalogue readers were not run. Fix: run bash tui/ci/tui.sh once in the integration gate.
+
+Implementer limitations recorded with PD26: the fail-over choice is not driven in this mode (the steer was chosen, as the requirement allows); no ERT unit test covers wf--redraw or the editor window placement; only one start ran at N8 and no N1 run was made; security items are out of scope under the functionality-first direction.
+
 * TODO [#D] Resolve the non-blocking fess findings of subtask PD3
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -21107,7 +21135,7 @@ separately tested rather than inferred from one newer Emacs build.
 :LABELS:   ["p6","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-02 Fri 06:24]
+:MODIFIED: [2026-10-02 Fri 07:32]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-031
 :SOURCE_REPO: agent-cat
@@ -21224,6 +21252,13 @@ including its explicit v3 invocation compatibility behavior.
     "author": "johnw",
     "text": "PD24 (WM-031 part 6): agent-workflows emacs-native commit 59f27ed adds service lineage and export in emacs/wf-service.el. wf-restart, wf-resume, wf-fork and wf-rerun (mapped to restart) read GET /v1/runs/{id}/lineage-requests, require the collection ETag to equal the strong revision tag, refuse with nothing sent when the operation is not eligible, and POST one lineage body with the collection ETag as If-Match. Fork edits (keep, drop, replace) come from the snapshot occurrences through wf-service-fork-targets, as forkTargets in ext-pi. After lineage-created the child is enqueued and the exact review opens with Lineage lines that name the parent and the edits; only an approval starts the child. wf-export (key E in a service run view, refused in local mode) checks a single-component name, POSTs /v1/runs/{id}/exports once with the collection ETag, waits for the effect exported, reads the published receipt and verifies the download. An uncertain lineage or export send is reconciled with one collection read and never resent. Local mode keeps lineage over local stores. agent-cat manager/test/service_http.py emacs-client mode adds live lineage steps 25 to 27 at harness version 10. Evidence scope: ci/emacs.sh exited 0 (95 of 95 transport tests); ci/emacs-ui.py local cases passed (8 PASS); emacs-client mode PASS 1 to 27 (restart, resume and fork children name their parents with ReviewRun null before approval; wf-rerun creates a restart child; the export reaches its published receipt and the harness verifies its download); journey N8 passed. Fess pd-PD24-r1 not blocking; five low findings filed as acat-ga56. Limitations: a lineage request during result verification receives 412 stale-revision and is not resent; after an uncertain send the commands report an observed effect but do not continue; the shared run choice also changes wf-control, wf-kill and wf-result and emacs-client-controls was not rerun; security negatives deferred. WM-031 stays open.",
     "created_at": "2026-10-02T13:24:47Z"
+  },
+  {
+    "id": 619,
+    "issue_id": "acat-wm-031-5yxo",
+    "author": "johnw",
+    "text": "Subtask PD26 (2026-10-02) changes the Emacs service presentation of WM-031 in agent-workflows emacs-native. wf--redraw in emacs/wf.el keeps the point of every window on a redraw, and wf--render and wf-service--view-render use it. wf--show-editor and wf--close-editor open the answer and steer editors below the selected window when no pop-up window fits and delete that window on close. Local wf-answer shows the question in another window without selecting it. Evidence: the emacs-service-lifecycle mode of PD26 (PD/PD26/impl-r1), which failed at windows-split before the fix and passes after it. See acat-wm-032-eh4r for the full scope.",
+    "created_at": "2026-10-02T14:32:55Z"
   }
 ]
 #+end_src
@@ -21235,7 +21270,7 @@ including its explicit v3 invocation compatibility behavior.
 :LABELS:   ["p6","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-02 Fri 06:50]
+:MODIFIED: [2026-10-02 Fri 07:32]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-032
 :SOURCE_REPO: agent-cat
@@ -21320,6 +21355,13 @@ until WM-039 supplies it.
     "author": "johnw",
     "text": "PD25 (WM-032 part 1): agent-workflows emacs-native commit 2477a47 adds --service PROFILE REPORT and --service-answer to ci/emacs-ui.py, which drive the Emacs service journey by keys only at 80x24 (wf-service profile selection, wf-run of mixed-controls with the Unicode literal, the exact review and its approval, the run view, the typed answer false, the offered retry, terminal success and the saved verified result), with resize steps at 40x12 and 140x36 during setup, review and answer editing that keep each draft. agent-cat manager/test/service_http.py adds the modes emacs-service and emacs-service-broken-answer (mixed fixture, one execution reservation, Emacs credential with observe, submit, control and export, one-sentence failure when EMACS, WF_EMACS_DIR or WF_EMACS_UI is unset), with harness checks PASS 1 to 9 against its own reads: literal and enqueue, review selectors and program hash at every size, approve and consumed preparation, answer JSON false in snapshot and run store, one retry, run succeeded, saved file mode 0600 equal to the harness download in bytes, size and SHA-256, terminal attributes restored after Emacs exit status 0, and no remaining child with fixture credentials, profile and home removed. Evidence scope: emacs-service exited 0 with 21 PASS lines at N8 (rerun by fess on the final files); emacs-service-broken-answer exited 1 with 'JOURNEY-ASSERT Emacs answer is JSON false'; ci/emacs-ui.py local cases 8 of 8; journey N8 passed. Fess pd-PD25-r1 not blocking; seven low findings filed as acat-pj3o. Limitations: ci/emacs-tramp.py and ci/emacs.sh not rerun; the broken control fails at harness step 4 after the journey; waits read private wf-service state through wf-ui-extra. WM-032 stays open.",
     "created_at": "2026-10-02T13:50:58Z"
+  },
+  {
+    "id": 618,
+    "issue_id": "acat-wm-032-eh4r",
+    "author": "johnw",
+    "text": "Subtask PD26 (2026-10-02, WM-032 part 2) adds the mode emacs-service-lifecycle to manager/test/service_http.py. It drives ci/emacs-ui.py --service --service-case lifecycle of agent-workflows only by keys. At 140x36 it follows two delayed-person runs in two windows with independent points and answers the delayed question of one run while the other runs. At 80x24 it captures an editor buffer as input, cancels the second run with its confirmation, and sends one steer to the captured run of profile_steer. At 40x12 it lists the history over both pages, opens an earlier run and saves its verified result (103 bytes, mode 0600, the same bytes as the harness download). The harness checks one cancel and one steer command row, the steer control and steer records in the run log, each person question after its engine answer, and JSON false in the run store. The Emacs client fixes the window point reset in the service redraw (wf--redraw) and the editor window placement (wf--show-editor, wf--close-editor). Evidence (PD/PD26/impl-r1 in the private resume-20260923 directory): BUILD, emacs-service-lifecycle exit 0 with 26 PASS lines, before-fix.log fails at windows-split against the earlier Lisp, emacs-service-broken-answer fails with 'JOURNEY-ASSERT Emacs answer is JSON false', ci/emacs.sh and the local ci/emacs-ui.py cases pass, and the journey passes at N8. Fess not blocking (fess/pd-PD26-r1.md, which reran the lifecycle mode on the current files with exit 0). Its findings, one medium and four low, are filed as acat-pd26-fess-followup-14x8. The fail-over choice is not driven in this mode.",
+    "created_at": "2026-10-02T14:32:54Z"
   }
 ]
 #+end_src

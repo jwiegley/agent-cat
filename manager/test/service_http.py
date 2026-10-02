@@ -2,6 +2,7 @@
 """Exercise the foreground HTTPS boundary with private local credentials and TLS."""
 from pathlib import Path
 import contextlib
+import datetime
 import hashlib
 import http.client
 import io
@@ -916,12 +917,110 @@ if emacs_client_mode or sys.argv[5:] == [EMACS_CLIENT_CONTROLS]:
 EMACS_SERVICE = "emacs-service"
 EMACS_SERVICE_BROKEN = "emacs-service-broken-answer"
 emacs_service_mode = len(sys.argv) == 6 and sys.argv[5] in (EMACS_SERVICE, EMACS_SERVICE_BROKEN)
+# The emacs-service-lifecycle mode is the lifecycle of the service mode of
+# wf.el in an actual Emacs, at the three sizes 140x36, 80x24 and 40x12. It
+# starts the manager with two execution reservations and three profiles,
+# each with its own resource key: profile_1 and profile_2, whose ACP fixture
+# holds each engine turn for LIFECYCLE_DELAY seconds, and profile_steer, the
+# steer fixture of the pi-client-controls mode. The delayed-person workflow
+# asks a person question whose prompt holds the engine answer, so its
+# question arrives only after the held turn. The mode configures the local
+# retention root of the emacs-client mode with LEGACY_ENTRIES legacy entries,
+# which the manager serves for profile_1, so /v1/runs spans more than one
+# page. It issues through TuiModeFixture the client credential emacs with the
+# scopes observe, submit, control and export of the three profiles, its
+# client profile, and the credential of the harness. It then runs python3
+# WF_EMACS_UI --service with that client profile, a report path and
+# --service-case lifecycle, with the environment of the emacs-service mode.
+# The script starts EMACS -Q -nw at 140x36 with a new HOME and drives the
+# lifecycle only by keys, and it prints one PASS line for each step:
+#
+# 1. At 140x36, M-x wf-service selects the profile, and M-x wf-run creates,
+#    reviews and approves a delayed-person request of profile_1 with
+#    LIFECYCLE_FIRST and then one of profile_2 with LIFECYCLE_SECOND.
+# 2. M-x wf-runs, C-x 1 and C-x 2 show the views of the two runs in two
+#    windows. The window of the first run keeps its point at the start, and
+#    the window of the second run keeps its point at the end.
+# 3. When the delayed question of the first run arrives, a in its window
+#    opens the answer editor below that window, LIFECYCLE_ANSWER is typed,
+#    and C-c C-c sends it. The first run succeeds while the second run runs
+#    on to its own delayed question, and both windows keep their points.
+# 4. At 80x24, the text LIFECYCLE_CAPTURE is typed in the editor buffer
+#    wf-capture, and M-x wf-run creates a captured-input request of
+#    profile_steer whose input the Buffer source of the setup form captures
+#    from that buffer, through the keys of the source menu. Its review is
+#    approved.
+# 5. C-c C-k in the view of the second run and the confirmation yes cancel
+#    that run.
+# 6. c in the view of the captured run lists the offered controls, the steer
+#    choice with the timing interrupt-now opens the steer editor, and C-c C-c
+#    sends LIFECYCLE_STEER. The captured run then succeeds.
+# 7. At 40x12, M-x wf-history lists the runs over every page, RET on the row
+#    of the first run opens its view, and r saves its verified result to a
+#    new file. M-x wf-local closes the session, and C-x C-c ends Emacs.
+#
+# While the script runs, the harness only reads. It then checks the report
+# against its own reads through HTTP and the run log, and each step prints
+# its own PASS line:
+#
+# 1. The two delayed-person requests supplied exactly their typed literals,
+#    each with one enqueue command that reached its effect and one approve
+#    command, and each names the run of the report.
+# 2. The events of the run log of each delayed run show that the runtime
+#    started the person question only after the engine occurrence completed,
+#    at least LIFECYCLE_DELAY - 1 seconds after the start of the run. The
+#    view of the first run showed no pending decision when the two windows
+#    were set up.
+# 3. When the two windows were set up, when the question arrived and when
+#    the first run had succeeded, the window of the first run had its point
+#    at the start and the window of the second run had its point at the end,
+#    and the view lines of both runs changed between those times. The
+#    answer editor opened in a third window, so the window of the second run
+#    kept its view.
+# 4. The one answer command of the question reached effect-observed, the
+#    run store records JSON false and the snapshot publishes the rendered
+#    answer no. The first run succeeded while the second run had not ended.
+# 5. The captured-input request supplied one capture, whose one capture
+#    command the command events name. The program of the captured run asked
+#    for the SHA-256 of the UTF-8 bytes of LIFECYCLE_CAPTURE.
+# 6. The commands of the controls of the second run are exactly one cancel,
+#    and the run ended cancelled.
+# 7. The commands of the controls of the captured run are exactly one steer,
+#    which reached the effect steered for the attempt of the chosen choice.
+#    The run log holds the one control record of the command from the
+#    manager and one steer record, both with the timing interrupt-now and
+#    the typed text, and the run succeeded.
+# 8. The history listed exactly the run identifiers of every page of
+#    /v1/runs, in the order of the collection, over at least two pages, and
+#    RET opened the view of the first run.
+# 9. The saved file has mode 0600 and holds exactly the bytes of the verified
+#    result of the first run that the harness downloads.
+# 10. Emacs ended with exit status 0, and the terminal attributes after its
+#     exit equal the attributes before its start.
+# 11. After the manager stops, no descendant process of the harness remains
+#     and no process names the fixture directory, and the harness removes
+#     the credential files, the client profile and the Emacs home directory.
+#
+# It runs one manager lifetime. The mode fails with one sentence when EMACS,
+# WF_EMACS_DIR or WF_EMACS_UI is unset or names no usable file.
+EMACS_SERVICE_LIFECYCLE = "emacs-service-lifecycle"
+emacs_lifecycle_mode = len(sys.argv) == 6 and sys.argv[5] == EMACS_SERVICE_LIFECYCLE
+# The seconds for which the ACP fixture of profile_1 and profile_2 holds each
+# engine turn.
+LIFECYCLE_DELAY = 40
+# The facts of the lifecycle. The LIFECYCLE_ constants of ci/emacs-ui.py state
+# the same values.
+LIFECYCLE_REPORT_VERSION = 1
+LIFECYCLE_FIRST = "Emacs lifecycle \u03bb: first delayed run"
+LIFECYCLE_SECOND = "Emacs lifecycle \u03bb: second delayed run"
+LIFECYCLE_CAPTURE = "Emacs capture \u03bb \u2713\nsecond line \u96ea\n"
+LIFECYCLE_STEER = "Emacs lifecycle steer \u03bb: focus on the patch."
 EMACS_SERVICE_ANSWER = "true" if len(sys.argv) == 6 and sys.argv[5] == EMACS_SERVICE_BROKEN else "false"
 # SERVICE_LITERAL and SERVICE_REPORT_VERSION of ci/emacs-ui.py state them.
 EMACS_SERVICE_LITERAL = "Emacs service λ: Café ✓ 雪 exact literal"
 EMACS_SERVICE_REPORT_VERSION = 1
 EMACS_SERVICE_FALSE = "JOURNEY-ASSERT Emacs answer is JSON false"
-if emacs_service_mode:
+if emacs_service_mode or emacs_lifecycle_mode:
     emacs_program = os.environ.get("EMACS", "")
     emacs_directory = os.environ.get("WF_EMACS_DIR", "")
     emacs_ui = os.environ.get("WF_EMACS_UI", "")
@@ -1523,9 +1622,9 @@ def lifecycle_elapsed():
     elapsed = time.monotonic() - mode_started
     assert elapsed <= LIFECYCLE_SECONDS, ("the lifecycle mode took longer than its bound", tui_mode, round(elapsed), LIFECYCLE_SECONDS)
     return f"{elapsed:.0f} seconds"
-# The tui-controls, tui-redirect and client-controls modes configure the
-# control fixture profiles.
-control_profiles = control_profiles or tui_mode in (TUI_CONTROLS, TUI_REDIRECT) or client_controls_mode
+# The tui-controls, tui-redirect, client-controls and emacs-service-lifecycle
+# modes configure the control fixture profiles.
+control_profiles = control_profiles or tui_mode in (TUI_CONTROLS, TUI_REDIRECT) or client_controls_mode or emacs_lifecycle_mode
 assert len(sys.argv) == 5 or mixed or boundary or pages_mode or events_mode or captures_mode or discard_mode or exports_mode or lineage_mode or control_profiles or person_mode or endpoints_mode or tui_mode
 assert not tui_approval or os.environ.get("TUI_CHECK")
 assert not (endpoints_mode or tui_mode) or os.environ.get("TUI_CHECK")
@@ -1619,12 +1718,13 @@ if storage_mode:
 # them through --legacy-history as read-only legacy entries.
 LEGACY_ROOT = work / "legacy"
 LEGACY_ENTRIES = 300
-# The tui-history, pi-client and emacs-client modes configure the same
-# retention root and raise the global page-set bound, so that a read of the
-# harness and a read of the client can hold page sets at once.
-if tui_mode == TUI_HISTORY or pi_client_mode or emacs_client_mode:
+# The tui-history, pi-client, emacs-client and emacs-service-lifecycle modes
+# configure the same retention root and raise the global page-set bound, so
+# that a read of the harness and a read of the client can hold page sets at
+# once.
+if tui_mode == TUI_HISTORY or pi_client_mode or emacs_client_mode or emacs_lifecycle_mode:
     configuration["limits"]["globalPageSets"] = 8
-if pages_mode or tui_mode == TUI_HISTORY or pi_client_mode or emacs_client_mode:
+if pages_mode or tui_mode == TUI_HISTORY or pi_client_mode or emacs_client_mode or emacs_lifecycle_mode:
     LEGACY_ROOT.mkdir(mode=0o700)
     configuration["localRetentionRoots"] = [str(LEGACY_ROOT)]
 # The tui-overview, tui-failures and tui-sizes modes also run requests
@@ -1651,7 +1751,7 @@ if tui_mode == OVERVIEW:
     configuration["profiles"][0]["resourceKeys"] = ["overview_one"]
     configuration["profiles"].append(dict(configuration["profiles"][0], id="profile_2",
                                           workspaceLabel="HTTPS second fixture", resourceKeys=["overview_two"]))
-if tui_mode in (INPUTS, TUI_CONTROLS, TUI_REDIRECT, TUI_DECISIONS) or client_controls_mode:
+if tui_mode in (INPUTS, TUI_CONTROLS, TUI_REDIRECT, TUI_DECISIONS) or client_controls_mode or emacs_lifecycle_mode:
     configuration["limits"]["executionReservations"] = 2
 # The two mixed-controls runs of the views step of the emacs-client mode run
 # at once: the manager has two execution reservations, and the runs are of
@@ -1678,7 +1778,7 @@ if control_profiles:
     for launcher_name, program_name, arguments in (
             ("retry-adapter", "retry_adapter.py", []), ("steer-adapter", "steer_adapter.py", []),
             ("spare-adapter", "stub_adapter.py", []), ("hold-adapter", "hold_adapter.py", ["3600"]),
-            ("hold-effect-adapter", "hold_adapter.py", ["8"])):
+            ("hold-effect-adapter", "hold_adapter.py", ["8"]), ("delay-adapter", "hold_adapter.py", [str(LIFECYCLE_DELAY)])):
         launcher = adapters / launcher_name
         program = source / "engine/acp/test" / program_name
         argv = [sys.executable, "-B", str(program)] + arguments
@@ -1727,6 +1827,17 @@ if control_profiles:
         configuration["profiles"] = [dict(profile, resourceKeys=["controls_" + profile["id"]])
                                      for profile in configuration["profiles"]
                                      if profile["id"] in CLIENT_CONTROLS_PROFILES[sys.argv[5]]]
+    # The emacs-service-lifecycle mode keeps profile_steer and replaces the
+    # retry fixture of profile_1 with the delay fixture, which profile_2
+    # shares. Each profile has its own resource key, so that runs of two
+    # profiles hold the two execution reservations at once.
+    if emacs_lifecycle_mode:
+        delay = dict(scripted, targetLabel="Deterministic ACP delay",
+                     targetArguments=["--engine", "acp", "--adapter", "delay-adapter"], environment=fixture_path)
+        configuration["profiles"] = [dict(delay, resourceKeys=["lifecycle_one"]),
+                                     dict(delay, id="profile_2", workspaceLabel="HTTPS second delay fixture",
+                                          resourceKeys=["lifecycle_two"]),
+                                     dict(configuration["profiles"][1], resourceKeys=["lifecycle_steer"])]
 # The tui-decisions mode configures the person-answers fixture too.
 if person_mode or tui_mode == TUI_DECISIONS:
     # The launcher relays its input to the stub adapter. It records its
@@ -2009,6 +2120,8 @@ tui_fixture = (TuiModeFixture(*TUI_MODES[tui_mode]) if tui_mode else
                client_controls_fixture(CLIENT_CONTROLS_MODES[sys.argv[5]]) if client_controls_mode else
                TuiModeFixture(["profile_1"], ["observe", "submit", "control", "export"], client="pi") if pi_client_mode or pi_host_smoke_mode or pi_host_mode or pi_host_model_mode else
                TuiModeFixture(["profile_1"], ["observe", "submit", "control", "export"], client="emacs") if emacs_service_mode else
+               TuiModeFixture(["profile_1", "profile_2", "profile_steer"], ["observe", "submit", "control", "export"],
+                              client="emacs") if emacs_lifecycle_mode else
                TuiModeFixture(["profile_1", "profile_2"], ["observe", "submit", "control", "export"], client="emacs") if emacs_client_mode else None)
 configuration["administrationRoot"] = str(work / "admin")
 config.write_text(json.dumps(configuration))
@@ -2558,6 +2671,23 @@ def command_receipts(cursor, authorized):
         validate("CommandReceipt", receipt, raw)
         receipts.append((resource, receipt))
     return receipts
+
+
+def run_history(authorized):
+    """Every page of /v1/runs in order. Returns the run identifiers in the
+    order of the collection, the number of legacy observer entries and the
+    number of pages."""
+    history, observers, pages, target = [], 0, 0, "/v1/runs"
+    while target is not None:
+        status, value, raw = request(target, authorized)
+        assert status == 200, ("history page", target, status, value.get("code"))
+        validate("RunPage", value, raw)
+        assert value["page"]["index"] == pages, ("history page index", value["page"]["index"], pages)
+        pages += 1
+        history.extend(item["id"] for item in value["items"])
+        observers += sum(1 for item in value["items"] if item["supervision"] == "observer")
+        target = value["page"]["next"]
+    return history, observers, pages
 
 
 def read_flow(name, paths, binary=None):
@@ -5962,6 +6092,42 @@ class ControlHarness:
             if not value["hasMore"]:
                 return records
         raise AssertionError(("run route pages did not end", run))
+
+    def one_control(self, run, operation, command):
+        """The command is the only command of the controls of the run, and it
+        reached its effect. Returns its receipt."""
+        rows = self.command_rows(["/v1/runs/" + run + "/control"])
+        assert [(row[0], row[1], row[2]) for row in rows] == [(command.rsplit("/", 1)[1], operation, "effect-observed")], (
+            "the client did not send exactly one " + operation + " that reached its effect", run, rows)
+        receipt, _, raw = self.client[0](command, "CommandReceipt")
+        (work / (self.label + "-" + operation + "-receipt.json")).write_bytes(raw)
+        return receipt
+
+    @staticmethod
+    def manager_control(records, command):
+        """The one run-log control record of the command from the manager."""
+        found = [record for record in records if record["schema"] == "control" and record["about"].get("command") == command.rsplit("/", 1)[1]]
+        assert len(found) == 1 and found[0]["from"] == "manager", ("the run-log control of the command", command, found)
+        return found[0]
+
+    def steered(self, run, command, occurrence, attempt, text):
+        """The steer command is the only command of the controls of the run,
+        it reached the effect steered for the attempt, and the run log holds
+        its one control record from the manager and one steer record, both
+        with the timing interrupt-now and the text. Returns the control
+        record and the steer records."""
+        receipt = self.one_control(run, "steer", command)
+        assert receipt["effect"]["kind"] == "steered" and receipt["effect"]["address"] == {"occurrenceId": occurrence, "attemptId": attempt}, (
+            "steer effect", receipt["effect"], occurrence, attempt)
+        records = self.run_records(run)
+        (work / (self.label + "-steer-routes.json")).write_text(json.dumps(records, default=str))
+        control = self.manager_control(records, command)
+        assert control["body"]["control"]["command"] == {"type": "steerOccurrence", "timing": "interrupt-now", "text": text}, (
+            "the run-log control of the steer", control["body"])
+        steers = [record for record in records if record["schema"] == "steer"]
+        assert [(str(record["about"].get("occurrence")), record["body"].get("steering"), record["body"].get("text")) for record in steers] == [
+            (occurrence, "interrupt-now", text)], ("the run-log steer records", steers)
+        return control, steers
 
     @staticmethod
     def command_rows(run_resources):
@@ -10691,37 +10857,10 @@ def client_controls_confirm(runs, steer, redirect, store, facts, steer_name, red
     ext-pi/test/manager-controls-live.test.ts. steer_name and redirect_name
     name the client commands in the PASS lines."""
     mode = sys.argv[5]
-    observed = runs.client[0]
-
-    def one_control(run, operation, command):
-        """The command is the only command of the controls of the run, and it
-        reached its effect. Returns its receipt."""
-        rows = runs.command_rows(["/v1/runs/" + run + "/control"])
-        assert [(row[0], row[1], row[2]) for row in rows] == [(command.rsplit("/", 1)[1], operation, "effect-observed")], (
-            "the client did not send exactly one " + operation + " that reached its effect", run, rows)
-        receipt, _, raw = observed(command, "CommandReceipt")
-        (work / (mode + "-" + operation + "-receipt.json")).write_bytes(raw)
-        return receipt
-
-    def manager_control(records, command):
-        """The one run-log control record of the command from the manager."""
-        found = [record for record in records if record["schema"] == "control" and record["about"].get("command") == command.rsplit("/", 1)[1]]
-        assert len(found) == 1 and found[0]["from"] == "manager", ("the run-log control of the command", command, found)
-        return found[0]
 
     # 1. The steer reached the offered attempt, and the run log holds the steer record.
     command, occurrence, attempt = facts["steerCommand"], facts["steerOccurrenceId"], facts["steerAttemptId"]
-    receipt = one_control(steer, "steer", command)
-    assert receipt["effect"]["kind"] == "steered" and receipt["effect"]["address"] == {"occurrenceId": occurrence, "attemptId": attempt}, (
-        "steer effect", receipt["effect"], occurrence, attempt)
-    records = runs.run_records(steer)
-    (work / (mode + "-steer-routes.json")).write_text(json.dumps(records, default=str))
-    control = manager_control(records, command)
-    assert control["body"]["control"]["command"] == {"type": "steerOccurrence", "timing": "interrupt-now", "text": facts["steerText"]}, (
-        "the run-log control of the steer", control["body"])
-    steers = [record for record in records if record["schema"] == "steer"]
-    assert [(str(record["about"].get("occurrence")), record["body"].get("steering"), record["body"].get("text")) for record in steers] == [
-        (occurrence, "interrupt-now", facts["steerText"])], ("the run-log steer records", steers)
+    control, steers = runs.steered(steer, command, occurrence, attempt, facts["steerText"])
     runs.settle(steer, "succeeded")
     print(f"PASS {mode} 1: {steer_name} sent the one steer command", command, "of attempt", attempt, "of occurrence", occurrence,
           "of run", steer, "with the timing interrupt-now and its editor text; it reached the effect steered, the run log holds control",
@@ -10729,7 +10868,7 @@ def client_controls_confirm(runs, steer, redirect, store, facts, steer_name, red
 
     # 2. The live redirect stopped the held attempt, and the spare candidate answered.
     command, occurrence, target = facts["redirectCommand"], facts["redirectOccurrenceId"], facts["redirectTarget"]
-    receipt = one_control(redirect, "redirect", command)
+    receipt = runs.one_control(redirect, "redirect", command)
     assert receipt["effect"]["kind"] == "redirected" and target.endswith("@spare"), ("redirect effect", receipt["effect"], target)
     runs.settle(redirect, "succeeded")
     completed = occurrence_of(runs.snapshot(redirect), occurrence)
@@ -10743,7 +10882,7 @@ def client_controls_confirm(runs, steer, redirect, store, facts, steer_name, red
     assert [(event["controlId"], event["target"]) for event in redirected] == [(command_id, target)], ("occurrence.redirected events", redirected)
     records = runs.run_records(redirect)
     (work / (mode + "-redirect-routes.json")).write_text(json.dumps(records, default=str))
-    control = manager_control(records, command)
+    control = runs.manager_control(records, command)
     questions = model_questions(records, occurrence)
     assert len(questions) == 2 and questions[0]["to"]["to"]["model"].endswith("@primary") and questions[1]["to"] == {"to": {"model": target}}, (
         "live redirect questions", [record["to"] for record in questions])
@@ -11525,16 +11664,7 @@ def emacs_client_checks():
                   "bytes with SHA-256", artifact["sha256"], "and mode 0600 to", saved_path, "which equal the harness download,",
                   "and a second save to the same file was refused and left the file as it was", flush=True)
             # 23. wf-history listed every run of /v1/runs in the order of the collection.
-            history, observers, history_pages, target = [], 0, 0, "/v1/runs"
-            while target is not None:
-                status, value, raw = request(target, harness)
-                assert status == 200, ("history page", target, status, value.get("code"))
-                validate("RunPage", value, raw)
-                assert value["page"]["index"] == history_pages, ("history page index", value["page"]["index"], history_pages)
-                history_pages += 1
-                history.extend(item["id"] for item in value["items"])
-                observers += sum(1 for item in value["items"] if item["supervision"] == "observer")
-                target = value["page"]["next"]
+            history, observers, history_pages = run_history(harness)
             managed = [run, report["literalRunId"], report["capturedRunId"], answered_run, stale_run]
             assert history_pages >= 2 and observers == LEGACY_ENTRIES and len(history) == len(set(history)) \
                 and all(item in history for item in managed), ("the history pages", history_pages, observers, len(history))
@@ -12603,6 +12733,41 @@ def pi_host_checks():
         process.wait(timeout=25)
 
 
+def emacs_service_cleanup(artifacts):
+    """After the manager of an Emacs service mode stopped, require that no
+    child remains, and remove the fixture secrets and the Emacs homes below
+    artifacts. One listing gives the descendants of the harness and the
+    processes whose command names the fixture directory, apart from the
+    listing itself, the harness and its ancestors. Returns the number of
+    removed paths."""
+    listing = subprocess.Popen(["ps", "-Ao", "pid=,ppid=,command="], stdout=subprocess.PIPE, text=True)
+    rows = [line.split(None, 2) for line in listing.communicate(timeout=10)[0].splitlines()]
+    assert listing.returncode == 0, "the process listing failed"
+    parents = {int(row[0]): int(row[1]) for row in rows}
+    ancestors, pid = set(), os.getpid()
+    while pid in parents and pid not in ancestors:
+        ancestors.add(pid)
+        pid = parents[pid]
+    below, grown = {os.getpid()}, True
+    while grown:
+        grown = False
+        for row in rows:
+            if int(row[1]) in below and int(row[0]) not in below:
+                below.add(int(row[0]))
+                grown = True
+    remaining = [row for row in rows if int(row[0]) != listing.pid and int(row[0]) not in ancestors and (
+        int(row[0]) in below or (len(row) == 3 and str(work) in row[2]))]
+    assert not remaining, ("a child of the journey remains", remaining)
+    removed = [work / "credential"] + sorted(work.glob("credential-*")) + [tui_fixture.client_profile] + sorted(artifacts.glob("*/home"))
+    for path in removed:
+        if path.is_dir():
+            shutil.rmtree(path)
+        else:
+            path.unlink()
+    assert not any(path.exists() for path in removed), "a fixture credential or home remains"
+    return len(removed)
+
+
 def emacs_service_checks():
     """The emacs-service and emacs-service-broken-answer modes. See
     EMACS_SERVICE for the steps."""
@@ -12749,39 +12914,209 @@ def emacs_service_checks():
         process.wait(timeout=25)
 
     # 9. No child remains, and the fixture secrets and homes are removed.
-    # One listing gives the descendants of the harness and the processes
-    # whose command names the fixture directory, apart from the listing
-    # itself, the harness and its ancestors.
-    listing = subprocess.Popen(["ps", "-Ao", "pid=,ppid=,command="], stdout=subprocess.PIPE, text=True)
-    rows = [line.split(None, 2) for line in listing.communicate(timeout=10)[0].splitlines()]
-    assert listing.returncode == 0, "the process listing failed"
-    parents = {int(row[0]): int(row[1]) for row in rows}
-    ancestors, pid = set(), os.getpid()
-    while pid in parents and pid not in ancestors:
-        ancestors.add(pid)
-        pid = parents[pid]
-    below, grown = {os.getpid()}, True
-    while grown:
-        grown = False
-        for row in rows:
-            if int(row[1]) in below and int(row[0]) not in below:
-                below.add(int(row[0]))
-                grown = True
-    remaining = [row for row in rows if int(row[0]) != listing.pid and int(row[0]) not in ancestors and (
-        int(row[0]) in below or (len(row) == 3 and str(work) in row[2]))]
-    assert not remaining, ("a child of the journey remains", remaining)
-    removed = [work / "credential"] + sorted(work.glob("credential-*")) + [tui_fixture.client_profile] + sorted(artifacts.glob("*/home"))
-    for path in removed:
-        if path.is_dir():
-            shutil.rmtree(path)
-        else:
-            path.unlink()
-    assert not any(path.exists() for path in removed), "a fixture credential or home remains"
+    removed = emacs_service_cleanup(artifacts)
     print("PASS emacs-service 9: no Emacs, url or fixture process remains after the manager stopped, and the harness removed",
-          len(removed), "credential, client profile and home paths", flush=True)
+          removed, "credential, client profile and home paths", flush=True)
     print(f"PASS {mode}: Emacs selected the profile, set up, reviewed and approved mixed-controls, answered JSON false, sent the",
           "offered retry, followed the run to terminal success and saved the verified result, driven only by keys at 80x24",
           "with resizes to 40x12 and 140x36", flush=True)
+
+
+def emacs_lifecycle_checks():
+    """The emacs-service-lifecycle mode. See EMACS_SERVICE_LIFECYCLE for the
+    steps."""
+    harness = tui_fixture.harness
+    mode = sys.argv[5]
+    artifacts = work / "emacs-service-lifecycle"
+    report_path = work / "emacs-service-lifecycle-report.json"
+    clone_legacy_runs(legacy_frontend_run(), LEGACY_ENTRIES - 1)
+    with (work / "server-0.stdout").open("wb") as output, (work / "server-0.stderr").open("wb") as errors:
+        process = subprocess.Popen([str(runner), "--manager", "serve", "--config", str(config),
+                                    "--legacy-history", f"{LEGACY_ROOT}=profile_1",
+                                    "+RTS", "-N" + native, "-RTS"], stdout=output, stderr=errors)
+    try:
+        wait_ready(process)
+        status, capabilities, _ = request("/v1/capabilities", harness)
+        assert status == 200 and "control" in capabilities["scopes"], ("capabilities", status)
+        status, overview, _ = request("/v1/snapshot", harness)
+        assert status == 200, ("snapshot", status)
+        cursor = overview["cursor"]
+        runs = ControlHarness(harness, capabilities, mode)
+        observed = runs.client[0]
+        environment = {name: os.environ[name] for name in EMACS_ALLOWLIST if name in os.environ}
+        command = [sys.executable, "-B", emacs_ui, "--service", str(tui_fixture.client_profile), str(report_path),
+                   "--service-case", "lifecycle", "--emacs", emacs_program,
+                   "--source", os.path.join(emacs_directory, "wf.el"), "--artifacts", str(artifacts)]
+        with harness_reads_only():
+            completed = subprocess.run(command, env=environment, stdin=subprocess.DEVNULL, timeout=840)
+        report = json.loads(report_path.read_bytes()) if report_path.exists() else {"steps": []}
+        assert completed.returncode == 0, ("the Emacs service lifecycle of " + emacs_ui + " failed", completed.returncode, report["steps"])
+        assert report["version"] == LIFECYCLE_REPORT_VERSION, (
+            f"The {mode} mode requires report version {LIFECYCLE_REPORT_VERSION}, and {emacs_ui} wrote version {report['version']}.")
+        assert report["steps"] == [str(number) for number in range(1, 14)], ("the steps of the lifecycle", report["steps"])
+        assert [report[name] for name in ("first", "second", "capture", "steer", "answer")] == [
+            LIFECYCLE_FIRST, LIFECYCLE_SECOND, LIFECYCLE_CAPTURE, LIFECYCLE_STEER, "false"], "the report names other literals"
+        first, second, captured = report["firstRun"], report["secondRun"], report["capturedRun"]
+        receipts = [receipt for _, receipt in command_receipts(cursor, harness)]
+
+        def store_of(prompt):
+            """The run store and the event envelopes of the one run that
+            started an occurrence with the prompt."""
+            found = []
+            for store in sorted(work.glob("manager/runs/runs/*/runtime")):
+                envelopes = [json.loads(line) for line in (store / "events.ndjson").read_bytes().splitlines()]
+                if any(envelope["event"]["type"] == "occurrence.started" and envelope["event"].get("prompt") == prompt
+                       for envelope in envelopes):
+                    found.append((store, envelopes))
+            assert len(found) == 1, ("the run store of the prompt", prompt, len(found))
+            return found[0]
+
+        def at(envelope):
+            return datetime.datetime.fromisoformat(envelope["timestamp"].replace("Z", "+00:00"))
+
+        # 1. The two delayed requests.
+        for facts, profile, literal in ((first, "profile_1", LIFECYCLE_FIRST), (second, "profile_2", LIFECYCLE_SECOND)):
+            status, catalogue, _ = request("/v1/workflows?profileId=" + profile, harness)
+            assert status == 200, ("catalogue", profile, status)
+            workflow = next(item for item in catalogue["items"] if item["name"] == "delayed-person")
+            created, _, _ = observed("/v1/requests/" + facts["request"], "Request")
+            assert created["profileId"] == profile and created["workflowId"] == workflow["id"] and created["runId"] == facts["run"], (
+                "the delayed request", facts["request"], created["profileId"], created["workflowId"], created["runId"])
+            assert created["readiness"]["supplied"] == [{"name": "input", "source": "literal", "value": literal}], (
+                "the request did not supply exactly the typed literal", created["readiness"]["supplied"])
+            enqueues = [receipt for receipt in receipts if receipt["operation"] == "enqueue" and receipt["resource"] == created["links"]["self"]]
+            approvals = [receipt for receipt in receipts if receipt["operation"] == "approve"
+                         and receipt["resource"] == "/v1/preparations/" + facts["preparation"]]
+            assert len(enqueues) == 1 and enqueues[0]["state"] == "effect-observed" and len(approvals) == 1 \
+                and approvals[0]["state"] not in ("refused", "unresolved"), ("the enqueue and approve commands", enqueues, approvals)
+        print("PASS emacs-service-lifecycle 1: at 140x36 wf-run created requests", first["request"], "of profile_1 and", second["request"],
+              "of profile_2 for delayed-person with exactly the typed literals, each with one enqueue that reached its effect and one",
+              "approve, and they name runs", first["run"], "and", second["run"], flush=True)
+
+        # 2. The delayed questions, from the run log.
+        delays = []
+        for literal in (LIFECYCLE_FIRST, LIFECYCLE_SECOND):
+            store, envelopes = store_of("Draft a reply: " + literal)
+            kinds = [(envelope["event"]["type"], envelope["event"].get("addressee", "")) for envelope in envelopes]
+            engine = kinds.index(("occurrence.started", "model fixed-point"))
+            engine_occurrence = envelopes[engine]["event"]["occurrenceId"]
+            done = next(index for index, envelope in enumerate(envelopes) if envelope["event"]["type"] == "occurrence.completed"
+                        and envelope["event"]["occurrenceId"] == engine_occurrence)
+            asked = kinds.index(("occurrence.started", "person owner"))
+            assert engine < done < asked and envelopes[asked]["event"]["prompt"] == "Delayed confirmation? yes", (
+                "the person question did not follow the engine answer", kinds)
+            delays.append((at(envelopes[asked]) - at(envelopes[0])).total_seconds())
+            assert delays[-1] >= LIFECYCLE_DELAY - 1, ("the person question was not delayed", delays[-1])
+        assert report["splitHeads"] == [None, None], ("a question was pending when the windows were set up", report["splitHeads"])
+        print("PASS emacs-service-lifecycle 2: the run logs show each person question started only after its engine occurrence",
+              "completed,", " and ".join(f"{delay:.1f}" for delay in delays), "seconds after the start of its run, and no decision",
+              "was pending when the two windows were set up", flush=True)
+
+        # 3. The independent windows.
+        for name in ("splitWindows", "askedWindows", "answeredWindows"):
+            windows = report[name]
+            assert windows[0]["point"] == 1 and windows[1]["point"] == windows[1]["maximum"] > 1 \
+                and windows[0]["buffer"] == "*wf service run " + first["run"] + "*" \
+                and windows[1]["buffer"] == "*wf service run " + second["run"] + "*", ("the window points", name, windows)
+        assert all(report["splitLines"][index] != report["answeredLines"][index] for index in (0, 1)), (
+            "a run made no progress while the windows followed it", report["splitLines"], report["answeredLines"])
+        assert report["editorWindows"] == 3, ("the answer editor did not open in its own window", report["editorWindows"])
+        print("PASS emacs-service-lifecycle 3: the window of run", first["run"], "kept its point at the start and the window of run",
+              second["run"], "kept its point at the end when the windows were set up, when the question arrived and after the",
+              "first run succeeded, both views changed meanwhile, and the answer editor opened in a third window", flush=True)
+
+        # 4. The answer and the first run.
+        question = report["question"]
+        answers = [receipt for receipt in receipts if receipt["operation"] == "answer"]
+        assert len(answers) == 1 and answers[0]["resource"] == "/v1/decisions/" + question \
+            and answers[0]["state"] == "effect-observed", ("the answer command", answers)
+        store, _ = store_of("Draft a reply: " + LIFECYCLE_FIRST)
+        recorded = [entry for entry in json.loads((store / "answers.json").read_bytes())["answers"]
+                    if entry["question"].get("prompt") == "Delayed confirmation? yes"]
+        snapshot, _, _ = observed("/v1/runs/" + first["run"] + "/snapshot", "RunSnapshot")
+        item = occurrence_of(snapshot, recorded[0]["occurrenceId"]) if len(recorded) == 1 else None
+        assert [entry["answer"] for entry in recorded] == [False] and item["code"] == "flag" and item["answer"] == "no", (
+            "the delayed question did not record JSON false", recorded, item and item["answer"])
+        assert snapshot["runtime"]["status"] == "succeeded" and "Terminal: succeeded" in report["answeredLines"][0] \
+            and any(line.startswith("Terminal: not yet") for line in report["answeredLines"][1]), (
+            "the first run did not succeed while the second run ran", snapshot["runtime"]["status"], report["answeredLines"][1])
+        print("PASS emacs-service-lifecycle 4: a and false sent the one answer of question", question, "of run", first["run"] + ",",
+              "the run store records JSON false, the snapshot publishes no, and the run succeeded while run", second["run"],
+              "had not ended", flush=True)
+
+        # 5. The captured input.
+        captured_bytes = LIFECYCLE_CAPTURE.encode("utf-8")
+        digest = hashlib.sha256(captured_bytes).hexdigest()
+        request_value, _, _ = observed("/v1/requests/" + captured["request"], "Request")
+        supplied = request_value["readiness"]["supplied"]
+        assert request_value["profileId"] == "profile_steer" and request_value["runId"] == captured["run"] and len(supplied) == 1 \
+            and supplied[0]["name"] == "input" and supplied[0]["source"] == "capture", ("the captured request", request_value["profileId"], supplied)
+        assert len([receipt for receipt in receipts if receipt["operation"] == "capture"]) == 1, "the capture commands"
+        assert LIFECYCLE_CAPTURE in captured["formText"], "the setup form did not show the captured text"
+        store_of("fixed-point source: " + digest)
+        print("PASS emacs-service-lifecycle 5: at 80x24 the Buffer source captured the", len(captured_bytes), "bytes of the editor",
+              "buffer as capture", supplied[0]["captureId"], "of request", captured["request"] + ", with one capture command, and the",
+              "program of run", captured["run"], "asked for their SHA-256", digest, flush=True)
+
+        # 6. The cancel.
+        rows = runs.command_rows(["/v1/runs/" + second["run"] + "/control"])
+        assert [row[1] for row in rows] == ["cancel"] and rows[0][3] is not None \
+            and rows[0][3]["state"] in ("accepted", "queued", "delivered"), ("the cancel was not sent exactly once", rows)
+        runs.ended(second["run"], "cancelled")
+        assert "Terminal: cancelled" in report["cancelledLines"] and "Cancel run " + second["run"] in report["cancelPrompt"], (
+            "the cancel step", report["cancelPrompt"], report["cancelledLines"])
+        print("PASS emacs-service-lifecycle 6: C-c C-k and yes sent the one cancel command", rows[0][0], "of run", second["run"],
+              "after the confirmation, the runtime acknowledgement is", rows[0][3]["state"] + ", and the run ended cancelled", flush=True)
+
+        # 7. The steer.
+        found = re.fullmatch(r"steer occurrence (\d+) attempt (\d+), interrupt-now", report["steerChoice"]["description"])
+        assert found is not None, ("the steer choice", report["steerChoice"])
+        rows = runs.command_rows(["/v1/runs/" + captured["run"] + "/control"])
+        assert [row[1] for row in rows] == ["steer"], ("the steer was not sent exactly once", rows)
+        control, steers = runs.steered(captured["run"], "/v1/commands/" + rows[0][0], found.group(1), found.group(2), LIFECYCLE_STEER)
+        runs.ended(captured["run"], "succeeded")
+        print("PASS emacs-service-lifecycle 7: c and", report["steerChoice"]["label"], "sent the one steer command", rows[0][0],
+              "of attempt", found.group(2), "of occurrence", found.group(1), "of run", captured["run"], "with the timing interrupt-now",
+              "and its editor text. It reached the effect steered, the run log holds control", control["position"], "from the",
+              "manager and steer record", steers[0]["position"], "with the typed text, and the run succeeded", flush=True)
+
+        # 8. The history over every page.
+        history, observers, pages = run_history(harness)
+        assert pages >= 2 and observers == LEGACY_ENTRIES and all(item["run"] in history for item in (first, second, captured)), (
+            "the history pages", pages, observers, len(history))
+        assert report["historyRuns"] == history and report["historyPages"] == pages, (
+            "the wf-history rows differ from every page of /v1/runs", report["historyPages"], len(report["historyRuns"]), len(history))
+        assert report["openedLines"][0].startswith("Service run " + first["run"]), ("the opened view", report["openedLines"][:1])
+        print("PASS emacs-service-lifecycle 8: at 40x12 wf-history listed the", len(history), "runs of all", pages, "pages of",
+              "/v1/runs in the order of the collection, and RET opened the view of run", first["run"], flush=True)
+
+        # 9. The saved result.
+        artifact = verified_download(first["run"], runs.client, harness)
+        saved_path = Path(report["savedPath"])
+        saved = saved_path.read_bytes()
+        assert stat.S_IMODE(os.lstat(saved_path).st_mode) == 0o600, ("the saved file mode", oct(os.lstat(saved_path).st_mode))
+        assert saved == (work / "verified-result.json").read_bytes() and len(saved) == int(artifact["bytes"]) \
+            and hashlib.sha256(saved).hexdigest() == artifact["sha256"], "the saved bytes differ from the harness download"
+        print("PASS emacs-service-lifecycle 9: r saved the", len(saved), "verified bytes of run", first["run"], "to", saved_path,
+              "with mode 0600 and exactly the bytes of the harness download", flush=True)
+
+        # 10. The terminal.
+        assert report["exitStatus"] == 0 and report["terminalAfter"] == report["terminalBefore"], (
+            "the terminal attributes after Emacs", report["exitStatus"])
+        print("PASS emacs-service-lifecycle 10: C-x C-c ended Emacs with exit status 0, and the terminal attributes after its exit",
+              "equal the attributes before its start", flush=True)
+    finally:
+        if process.poll() is None:
+            process.terminate()
+        process.wait(timeout=25)
+
+    # 11. No child remains, and the fixture secrets and homes are removed.
+    removed = emacs_service_cleanup(artifacts)
+    print("PASS emacs-service-lifecycle 11: no Emacs, url or fixture process remains after the manager stopped, and the harness",
+          "removed", removed, "credential, client profile and home paths", flush=True)
+    print(f"PASS {mode}: Emacs followed two delayed runs in two windows with independent points at 140x36, answered a delayed",
+          "question while the other run ran, captured an editor buffer, cancelled after the confirmation and steered at 80x24,",
+          "and listed every history page and saved the verified result of an earlier run at 40x12, driven only by keys", flush=True)
 
 
 def storage_checks():
@@ -13116,7 +13451,7 @@ if person_mode:
     raise SystemExit(0)
 
 
-if control_profiles and tui_mode not in (TUI_CONTROLS, TUI_REDIRECT) and not client_controls_mode:
+if control_profiles and tui_mode not in (TUI_CONTROLS, TUI_REDIRECT) and not client_controls_mode and not emacs_lifecycle_mode:
     facts = control_checks()
     if live_mode:
         live_flow_checks(facts)
@@ -13221,6 +13556,11 @@ if pi_host_mode or pi_host_model_mode:
 
 if emacs_service_mode:
     emacs_service_checks()
+    raise SystemExit(0)
+
+
+if emacs_lifecycle_mode:
+    emacs_lifecycle_checks()
     raise SystemExit(0)
 
 
