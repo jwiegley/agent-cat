@@ -8978,6 +8978,28 @@ From acat-ruz: Mat.CostBounded and starTrunc_le_star are Cost-only for lack of i
 ]
 #+end_src
 
+* TODO [#D] Resolve the non-blocking fess findings of subtask PF13
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-jvju
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-02 Fri 15:42]
+:MODIFIED: [2026-10-02 Fri 15:42]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess pf-PF13-r1 (fess/pf-PF13-r1.md) on subtask PF13 (the WM-040 store projection and the history lane).
+
+1. (medium) bisim/manager/ManagerConformance/Codec.lean line 248, the history aggregate line of manager/test/ConformanceCheck.hs, and bisim/manager/README.md line 447: the oracle accepts every observation entry unconditionally (observe := some s). Across the 41 passing roots, 204 of the 283 accepted ledger commands are observations and only 79 are model transitions. Some roots, such as approval/changed-descriptor and approval/changed-input, have no ledger transition, so their ledger check cannot fail. Fix: print the transition and observation counts in the aggregate line, and state in the README limits that only approve commands and decision-answering commands are checked by the model and that an observation is accepted unconditionally.
+2. (medium) manager/test/Agentic/Manager/Test/Conformance.hs lines 481, 604, 609, 797, 841, 861 and 892: the fold and the projection build reservation leases (reservationLease), consumed preparations and approve intents (preparedOf), and answer values (answerValue) with the same functions from the same rows, and the cleaned evidence comes from the encoder's own leases. The square therefore checks key sets, phases, FIFO order, delivery and the presence of requests.run, not independent content. Fix: add these identities to "Limits of the history lane", and add a control that mutates a compared content field (a slot or key of a held reservation, or a command delivery state) to show whether the lane detects it.
+3. (low) manager/test/Agentic/Manager/Test/Conformance.hs line 613: answerValue falls back to fromMaybe "" (cmBodySha c), so a command with no control intent and no body SHA-256 gets the answer value "" on both sides and passes silently. Fix: emit Unencodable instead of the empty string.
+4. (low) bisim/manager/README.md (Limits of the history lane): 38 of the 39 approvals in the vertical roots take their digest and revisions from the rows, because those roots keep no manager log. Fix: keep the disclosure, and optionally add a vertical fixture that keeps its manager log.
+5. (low) manager/STORAGE.md lines 521-526: the withInspectingStore text sits inside the backup and restoration paragraph, so "A restoration rotates the stream identity" follows unrelated text. Fix: move the new text into its own paragraph.
+
 * DONE [#B] shareT/dupT: make consultation sharing syntactic
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -23322,7 +23344,7 @@ configuration is changed.
 :LABELS:   ["p9","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-02 Fri 14:56]
+:MODIFIED: [2026-10-02 Fri 15:42]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-040
 :SOURCE_REPO: agent-cat
@@ -23520,6 +23542,13 @@ legacy workflow build cannot conceal an unchecked manager development.
     "author": "johnw",
     "text": "PF12 (subtask of WM-040): adds manager/test/Agentic/Manager/Test/Oracle.hs (typed client of manager-oracle in the pinned encoding agent-cat-manager-conformance/1) and the executable manager-conformance-check with the admission and cases lanes. Evidence (private PF/PF12): BUILD(manager-conformance-check) with -Werror passed, with no new package. The admission lane at seed 20261002 with N 500 exited 0 with 201 accepted and 299 refused situations, 4286 submissions and no mismatch against oldestEligible. The cases lane replayed 45 cases in bisim/manager/cases with no mismatch. A local wrong-slot control (not committed) printed MANAGER-CONFORMANCE mismatch and retained counterexample files. A missing oracle exits 1 with the tier1-style message. Fess pf-PF12-r1 is not blocking. Its findings are filed as a follow-up. WM-040 stays open for the closeout.",
     "created_at": "2026-10-02T21:56:07Z"
+  },
+  {
+    "id": 668,
+    "issue_id": "acat-wm-040-3olb",
+    "author": "johnw",
+    "text": "PF13 (store projection and history lane): manager/test/Agentic/Manager/Test/Conformance.hs adds projectCoordination (schema-12 logical rows in one runRead, each mapping a documented named function) and the history encoding. manager-conformance-check history --root folds the stored ledger through manager-oracle and compares the final state with the projection on 6 dimensions, printing 20 excluded fields. Evidence (PF/PF13/impl-r1, private): N8 manager-vertical-check root, 40 manager roots, ledger=277, accepted-entries=577, mismatches=0, exit 0; N8 JOURNEY-ONCE fixture root, ledger=6, accepted-entries=16, exit 0; two mismatch controls exit 1 with history-0.json and history-1.json kept. Fess pf-PF13-r1 not blocking; findings filed as acat-jvju. WM-040 stays open for closeout.",
+    "created_at": "2026-10-02T22:42:22Z"
   }
 ]
 #+end_src

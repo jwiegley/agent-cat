@@ -831,5 +831,21 @@ executable manager-conformance-check
   main-is:         ConformanceCheck.hs
   other-modules:
     Agentic.Manager.Test.Oracle
+    Agentic.Manager.Test.Conformance
     Agentic.Manager.Admission.Policy
+    Agentic.Manager.Configuration
+    Agentic.Manager.Fault.Record
+    Agentic.Manager.Protocol.Draft
+    Agentic.Manager.Protocol.Command
+    Agentic.Manager.Protocol.Json
+    Agentic.Manager.Profile
+    Agentic.Manager.Root
+    Agentic.Manager.Lease
+    Agentic.Manager.Schema
+    Agentic.Manager.Protocol.Preparation
+    Agentic.Manager.Flow
+    Agentic.Manager.Store
+    Agentic.Manager.Store.Admission
+    Agentic.Manager.Worker.State
+  build-depends:   agentic, direct-sqlite, deepseq, transformers
   ghc-options:     -threaded -rtsopts

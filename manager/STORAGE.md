@@ -518,7 +518,12 @@ shows the credentials that such a command changed. The reconciliation counts of
 a serving lifetime name only the rows that its own reconciliation changed, so
 the rows that an administration lifetime reconciled first do not appear in any
 manager log. Offline backup and restoration
-write no manager log. A restoration rotates the stream identity, so the next
+write no manager log. A lifetime that `withInspectingStore` opens is the
+copying lifetime of a backup. It requires the current schema version and
+neither migrates, reconciles a restart nor writes a manager log. The
+`history` lane of `manager-conformance-check` opens a private copy of a
+retained manager root through it, so the rows that the lane reads are the
+rows that the manager committed. A restoration rotates the stream identity, so the next
 serving lifetime writes a new file.
 
 `openManagerFlow` opens the log for appending and creates it when it is absent.

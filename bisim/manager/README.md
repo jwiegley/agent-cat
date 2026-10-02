@@ -242,7 +242,9 @@ The executable `manager-conformance-check` of `agentic.cabal` holds the
 Haskell side of the lane. Its module `manager/test/Agentic/Manager/Test/Oracle.hs`
 holds the encoding of this file as typed records, and the connection to one
 `manager-oracle` process. The decoder of the module refuses the same
-malformed requests as the decoder of the oracle.
+malformed requests as the decoder of the oracle. Its module
+`manager/test/Agentic/Manager/Test/Conformance.hs` holds the store
+projection and the history encoding of the history lane.
 
 The executable takes the oracle from `--oracle`, else from the environment
 variable `ORACLE`, else from `bisim/.lake/build/bin/manager-oracle`. It does
@@ -258,6 +260,7 @@ bash test/cabal.sh build manager-conformance-check
 check=$(bash test/cabal.sh list-bin manager-conformance-check)
 "$check" admission --seed 20261002 --n 500 --counterexamples "$TMPDIR/manager-cx"
 "$check" cases --cases bisim/manager/cases --counterexamples "$TMPDIR/manager-cx"
+"$check" history --root "$ROOT" --counterexamples "$TMPDIR/manager-cx"
 ```
 
 ### The admission lane
@@ -310,7 +313,10 @@ A mismatch writes the file `<counterexamples>/<n>.json`, prints
 `MANAGER-CONFORMANCE mismatch`, and makes the lane exit with status 1 after
 the last situation or case. In the admission lane, `<n>` is the index of the
 situation, and the file holds the first disagreeing request of the
-situation. In the cases lane, `<n>` is the name of the case. The file holds
+situation. In the cases lane, `<n>` is the name of the case. In the history lane, `<n>`
+is `history-<i>`, where `<i>` is the index of the manager root in path
+order, and the file holds the root, the entry or the comparison that
+disagrees, the expected outcome and the outcome of the fold. The file holds
 the seed (`null` for a case), the reason, the request, the expected outcome
 and the response of the oracle. The default directory is
 `manager-conformance-counterexamples` in the temporary directory of the
@@ -324,3 +330,159 @@ capacity reduction leaves above the limit can exhaust the capacity. The model
 has no limit apart from its set of slots, and it admits a candidate at any
 slot of that set that no reservation holds. The model therefore states no
 outcome for a reduced capacity.
+
+### The history lane
+
+The lane checks the coordination facts that a manager stored during real
+work against the model. It takes `--root`, a retained manager root after
+work, or a directory below which such roots lie. A manager root is a
+directory that holds `coordination.sqlite3`. When the given path holds no
+database, the lane checks each manager root below it, in path order. The
+root of a `manager-vertical-check vertical` run holds one manager root for
+each fixture. The fixture root of a `tui-journey` run of
+`manager/test/service_http.py` holds one manager root, `manager`.
+
+#### The private copy
+
+The lane never opens a retained root. For each manager root, it makes a
+private directory in the temporary directory of the system. It copies the
+database with its `-wal` and `-shm` files, the root role file, and the
+directory `flow`, which holds the manager log, when the root has one. It
+writes a private configuration that names the copy and has no runner and no
+profile. It opens the copy through `withInspectingStore` of
+`Agentic.Manager.Store`. That Store lifetime is the copying lifetime of a
+backup. It requires schema version 12, and it neither migrates, reconciles
+a restart nor writes a manager log. The rows that the lane reads are
+therefore the rows that the manager committed. The lane removes the copy
+when the root is done.
+
+#### The projection
+
+`readStored` reads every row that the lane uses in one Store read
+transaction. `projectStored` maps the rows to a coordination state.
+`projectCoordination` does both. Each mapping is a named function of the
+module, and its comment states its assumption.
+
+| Dimension | Stored source and mapping |
+| --- | --- |
+| `generation` | The process generation of the Store lifetime that reads the rows (`transactionGeneration`). The rows hold no current process generation, because it identifies a live process. |
+| `authority` | `service_metadata.authority_epoch`. |
+| `slots` | `slot-0` to `slot-15`, the slot numbers that the schema admits. The configured capacity is configuration, not a row. |
+| `profiles` | Empty. The store holds no profile. The configuration holds the profiles, and each reload gives them fresh revisions. |
+| `requests` | Each `requests` row. The revision, the profile, the profile revision, the phase (`start-pending` is `startPending`) and the queue ordinal are its columns. The required inputs are the names of its `request_inputs` rows. A capture input supplies its capture identity, and a literal input supplies `literal:<digest>`, the hexadecimal digest of its bytes. The invalid inputs are the names in `validation_errors`. The preparation is the preparation of the run of the request, else its live preparation, else none. The run is the `runs` row that names the request. |
+| `reservations` | Each reservation that is held, cleanup-pending or quarantined, by its request. The slot `n` is `slot-<n>`. An operator key `k` of `reservation_resources` is `key:<k>`, and the unclassified cohort is `unclassified`. A released reservation holds no slot and no key, and it is dropped. |
+| `preparations` | Each `preparations` row. The profile is the profile of its request. The run is the manager run that names the preparation, else the native run identity. The authority is the epoch of the approve command that consumed it, else the current epoch. The revision of a consumed preparation is the precondition of the approve command that consumed it, because the store changes the row revision at consumption. The review is the hexadecimal SHA-256 of the stored review bytes. |
+| `runs` | `runs.id` to `runs.request_id`, for each run with a request. |
+| `supervision` | `runs.supervision` of each run. |
+| `decisions` | For each run, its decisions in the state `pending` or `submitting`, in the order of `observed_sequence`. A submitting decision is reserved by its `command_id`. The key has the decision identity, the observed sequence as its revision, the occurrence, the attempt and the generation. The row revision changes with the state, so it is not the key revision. |
+| `commands` | Each command that is not refused and that has a model intent. An approve command has the intent `start` with the consumed preparation in the live phase. A command that answers a decision (an answer or a recovery choice) has the intent `answer` with the run, the key and the SHA-256 of its native control bytes. The state `accepted` is `notAttempted`. The states `dispatch-attempted`, `acknowledged` and `effect-observed` are `attempted`. The state `unresolved` is `uncertain`. The stored acknowledgement gives one acknowledgement, with `failed` as `controlFailed`. The effect is the SHA-256 of the effect evidence. |
+| `captures` | `captures.id` to `captures.sha256`. |
+| `artifacts` | Each artifact by its verification. The reference is the stored private reference text. A verified result artifact has the SHA-256 that its reference names. A verified export receipt artifact has `exports.expected_sha256`, the SHA-256 of the exported document. |
+
+#### The history
+
+`encodeHistory` encodes the rows as a list of entries. Between entries, the
+lane applies environment steps. An environment step writes a fact that no
+transition of the model writes: the authoring and the queueing of a
+request, a live preparation and its run, the supervision of a run, a
+profile, and the closure of a decision by the runtime. The initial state has
+the authority and the generation of the projection, the schema slots and the
+captures, and nothing else.
+
+The lane reads the command ledger in its accepted order, the rowid order of
+`commands`. A refused command is not accepted and has no entry.
+
+- An approve command is preceded by the admission of its reservation, and by
+  an environment step that makes its preparation live, its request in
+  review, its run present and its profile current. The `approve` entry has
+  the precondition of the command as the revision. When the manager log
+  holds the ask of the command, the digest, the request revision, the
+  profile revision and the process generation come from the body of that
+  ask. Otherwise they come from the preparation row and from the generation
+  of the start intent. The entry is followed by its delivery knowledge and by
+  an environment step that makes the run owned.
+- A command that answers a decision is preceded by an `openDecision` entry
+  for each decision of its run, in observed order, up to that decision, and
+  by the closure of each earlier decision that the runtime resolved or
+  invalidated without a command of the fold. The `answer` entry is followed
+  by its delivery knowledge. When the decision row names the command and is
+  resolved, a `resolve` entry with `resolved` follows. When the decision row
+  is submitting under the command, nothing follows. When the decision no
+  longer names the command, a `resolve` entry with `notEffective` follows.
+- Any other accepted command is an `observation` entry for its run or
+  request.
+
+An admission precedes the approval that consumes its reservation, and it
+follows the admission and the release of each earlier reservation of the
+same request. The admitted request has the request revision, the profile
+revision and the queue ordinal of the reservation row. The profile has that
+revision and the keys of the lease. A held reservation has its stored slot
+and keys. A released reservation has no stored slot or key, so its lease
+has no key and the lowest slot that no reservation of the fold and no held
+reservation of the final rows uses. The model accepts an admission at any
+free slot, so the choice does not change an outcome. A released reservation
+is released after the approval that consumes it, or at once when no
+approval consumes it. After the ledger, the lane admits each remaining
+reservation, opens each remaining decision, closes each decision that the
+runtime resolved or invalidated without a command, and verifies each
+verified artifact.
+
+#### Evidence derivations
+
+The lane passes one evidence table with every entry. Each fact comes from a
+stored fact that the manager used.
+
+| Field | Derivation |
+| --- | --- |
+| `live` | The live form of each preparation that an accepted approve command consumed, as its start intent names. The store writes a start intent only in the transaction that consumes a live preparation. |
+| `unexpired` | The same preparation when the `accepted_at` time of the approve command is earlier than `expires_at` of the preparation. |
+| `cleaned` | The owner and the lease of each released reservation, with the lease of the history. The store releases a reservation only after it confirmed the cleanup of its worker, and a trigger refuses the release while a resource claim remains. |
+| `opened` | The run and the key of every decision row. The store writes a decision row only from an observed runtime event. |
+| `resolutions` | For each command that answers a decision: `resolved` when the decision is resolved and names the command, and `notEffective` when the decision no longer names the command. |
+| `verified` | The reference and the SHA-256 of each artifact that the manager verified. |
+
+#### The storage square
+
+The lane folds the history through `manager-oracle` from the initial
+state. The oracle must accept every entry. The accepted ledger commands of
+the fold must be all the accepted commands of the ledger. The final state of
+the fold must then equal the projection of the final rows on the compared
+dimensions.
+
+| Compared dimension | Written by |
+| --- | --- |
+| `reservations` | `admit` and `release`. |
+| `preparations` that are consumed | `approve`. |
+| `requests.run` | `approve`. |
+| `decisions`, without empty FIFOs | `openDecision`, `answer` and `resolve`. An empty FIFO and an absent FIFO are the same pending sequence. |
+| `commands`: client, intent and delivery | `approve`, `answer` and `delivery`. |
+| `artifacts` that are verified | `verify`. |
+
+The lane prints each excluded field by name: `generation`, `authority`,
+`slots`, `profiles`, `runs`, `supervision`, `captures`, the request fields
+other than `run`, requests without a run, preparations that are live or
+invalidated, `commands.acknowledgements`, `commands.effect`, artifacts that
+are referenced or unavailable, and empty FIFOs. The environment steps or the
+configuration write these fields, or the rows do not hold them.
+
+A passing root prints its ledger size, its refused and accepted ledger
+commands, its accepted entries of each kind, its environment steps, and the
+number of approvals whose arguments came from the manager log or from the
+rows. An entry that the oracle does not accept, stored facts that the
+encoding cannot express, or a compared dimension that differs is a
+mismatch. The lane writes its counterexample file, continues with the next
+root, and exits with status 1.
+
+#### Limits of the history lane
+
+The rows keep the final state of each row, not each intermediate state. The
+history is therefore one order that is consistent with the final rows, and
+not the observed interleaving. Because each admission follows the
+environment step that queues its request, no other request is queued in the
+fold at an admission, and the admission entries do not check the oldest
+eligible choice. The admission lane checks that choice. The revision and the
+authority of a consumed preparation come from the approve command, so the
+comparison of those fields with the approve arguments is an identity.
+Without a manager log, the digest and the revisions of an approval also come
+from the rows. The lane does not compare a refused command with a refusal
+of the model.

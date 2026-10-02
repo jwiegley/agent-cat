@@ -1,3 +1,4 @@
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
 
@@ -5,6 +6,7 @@
 --
 -- > manager-conformance-check admission [--seed S] [--n N] [--oracle PATH] [--counterexamples DIR]
 -- > manager-conformance-check cases [--cases DIR] [--oracle PATH] [--counterexamples DIR]
+-- > manager-conformance-check history --root PATH [--oracle PATH] [--counterexamples DIR]
 --
 -- The @admission@ lane generates admission situations from a fixed seed. For
 -- each situation it computes 'oldestEligible', encodes the same situation as
@@ -20,6 +22,15 @@
 -- that the oracle refuses as malformed, and must read every other request
 -- and response back to the same bytes.
 --
+-- The @history@ lane reads each retained manager root at or below
+-- @--root@ through a private copy. "Agentic.Manager.Test.Conformance"
+-- projects its final rows and encodes its command ledger and other stored
+-- facts as a history. The lane folds the history through the oracle from the
+-- initial state. The oracle must accept every entry, and the final state of
+-- the fold must equal the projection of the final rows on the compared
+-- dimensions. The lane prints the compared dimensions and each excluded
+-- field by name.
+--
 -- A mismatch writes a counterexample file, prints
 -- @MANAGER-CONFORMANCE mismatch@, and makes the lane exit with status 1. A
 -- missing oracle binary or a failed transport also exits with status 1.
@@ -32,6 +43,8 @@ import Agentic.Manager.Admission.Policy
     effectiveResources,
     oldestEligible,
   )
+import Agentic.Manager.Flow (readManagerLog)
+import Agentic.Manager.Test.Conformance
 import Agentic.Manager.Test.Oracle
 import Control.Exception (handle)
 import Control.Monad (forM, forM_, unless, when)
@@ -65,11 +78,12 @@ data Options = Options
     optionCount :: !Int,
     optionOracle :: !(Maybe FilePath),
     optionCounterexamples :: !(Maybe FilePath),
-    optionCases :: !FilePath
+    optionCases :: !FilePath,
+    optionRoot :: !(Maybe FilePath)
   }
 
 defaultOptions :: Options
-defaultOptions = Options 20261002 500 Nothing Nothing "bisim/manager/cases"
+defaultOptions = Options 20261002 500 Nothing Nothing "bisim/manager/cases" Nothing
 
 parseOptions :: [String] -> Either String Options
 parseOptions = go defaultOptions
@@ -80,6 +94,7 @@ parseOptions = go defaultOptions
     go o ("--oracle" : v : rest) = go o {optionOracle = Just v} rest
     go o ("--counterexamples" : v : rest) = go o {optionCounterexamples = Just v} rest
     go o ("--cases" : v : rest) = go o {optionCases = v} rest
+    go o ("--root" : v : rest) = go o {optionRoot = Just v} rest
     go _ (other : _) = Left ("unknown or incomplete option " <> other)
     number flag v = maybe (Left (flag <> " needs an integer, not " <> v)) Right (readMaybe v)
 
@@ -87,7 +102,8 @@ usage :: String
 usage =
   unlines
     [ "usage: manager-conformance-check admission [--seed S] [--n N] [--oracle PATH] [--counterexamples DIR]",
-      "       manager-conformance-check cases [--cases DIR] [--oracle PATH] [--counterexamples DIR]"
+      "       manager-conformance-check cases [--cases DIR] [--oracle PATH] [--counterexamples DIR]",
+      "       manager-conformance-check history --root PATH [--oracle PATH] [--counterexamples DIR]"
     ]
 
 main :: IO ()
@@ -97,6 +113,7 @@ main = do
   (lane, rest) <- case args of
     "admission" : rest -> pure (admissionLane, rest)
     "cases" : rest -> pure (casesLane, rest)
+    "history" : rest -> pure (historyLane, rest)
     _ -> hPutStrLn stderr usage >> exitWith (ExitFailure 2)
   options <- either (\e -> hPutStrLn stderr (e <> "\n" <> usage) >> exitWith (ExitFailure 2)) pure (parseOptions rest)
   oracle <- resolveOraclePath (optionOracle options)
@@ -462,3 +479,136 @@ caseMismatch request expected reply =
         <> case expectedResponse of
           Right response | encodeLine response /= expected -> ["the client encodes the retained response differently"]
           _ -> []
+
+-- ---------------------------------------------------------------------------
+-- The history lane
+-- ---------------------------------------------------------------------------
+
+-- | The counts of one fold.
+data Fold = Fold
+  { foldState :: !Coordination,
+    foldLedgerTransitions :: !Int,
+    foldObservations :: !Int,
+    foldStoredTransitions :: !Int,
+    foldEnvironment :: !Int
+  }
+
+historyLane :: Options -> FilePath -> FilePath -> IO ()
+historyLane options path directory = do
+  given <- case optionRoot options of
+    Just root -> pure root
+    Nothing -> hPutStrLn stderr ("manager-conformance-check: history needs --root\n" <> usage) >> exitWith (ExitFailure 2)
+  roots <- retainedRoots given
+  when (null roots) $ do
+    hPutStrLn stderr ("manager-conformance-check: no coordination database at or below " <> given)
+    exitWith (ExitFailure 1)
+  putStrLn ("manager-conformance-check history: root=" <> given <> " manager-roots=" <> show (length roots) <> " oracle=" <> path)
+  putStrLn ("MANAGER-CONFORMANCE history compared-dimensions=" <> show (length comparedDimensions) <> ": " <> T.unpack (T.intercalate "; " comparedDimensions))
+  forM_ excludedFields $ \field -> putStrLn ("MANAGER-CONFORMANCE history excluded field: " <> T.unpack field)
+  results <- withOracle path $ \oracle -> forM (zip [0 :: Int ..] roots) (historyRoot oracle directory)
+  let total f = sum (map f results)
+  putStrLn $
+    "MANAGER-CONFORMANCE history manager-roots=" <> show (length roots)
+      <> " ledger=" <> show (total (\(l, _, _, _) -> l))
+      <> " ledger-accepted=" <> show (total (\(_, a, _, _) -> a))
+      <> " accepted-entries=" <> show (total (\(_, _, e, _) -> e))
+      <> " mismatches=" <> show (total (\(_, _, _, m) -> m))
+  finish "history" (total (\(_, _, _, m) -> m))
+
+-- | Fold the history of one manager root through the oracle and compare the
+-- final state with the projection. The result is the ledger size, the
+-- accepted ledger commands, the accepted entries and the mismatches.
+historyRoot :: Oracle -> FilePath -> (Int, FilePath) -> IO (Int, Int, Int, Int)
+historyRoot oracle directory (number, root) = withRetainedRoot root $ \store flow -> do
+  stored <- readStored store
+  arguments <- case flow of
+    Nothing -> pure Map.empty
+    Just dir -> do
+      let file = dir </> (T.unpack (storedStream stored) <> ".ndjson")
+      present <- doesFileExist file
+      if present then approvalArguments <$> readManagerLog file else pure Map.empty
+  let history = encodeHistory arguments stored
+      projection = projectStored stored
+      evidence = historyEvidence history
+      name = "history-" <> show number
+      ledgerAccepted = historyLedger history - historyRefused history
+      step fold [] = pure (Right fold)
+      step fold ((index, item) : rest) = case item of
+        Environment _ change ->
+          step fold {foldState = change (foldState fold), foldEnvironment = foldEnvironment fold + 1} rest
+        Unencodable reason ->
+          pure (Left (Mismatch ("the stored facts have no encoding: " <> reason) (object ["root" .= root, "item" .= index]) (String "an encodable history") (String reason), fold))
+        Submit kind entry -> do
+          let request = Query (foldState fold) evidence entry
+          (_, response) <- submit oracle request
+          case response of
+            ResponseAccepted next ->
+              step (count kind fold) {foldState = next} rest
+            other ->
+              pure (Left (Mismatch ("the oracle does not accept " <> describe kind) (object ["root" .= root, "item" .= index, "query" .= request]) (String "accepted") (toJSON other), fold))
+      count kind fold = case kind of
+        LedgerTransition _ -> fold {foldLedgerTransitions = foldLedgerTransitions fold + 1}
+        LedgerObservation _ -> fold {foldObservations = foldObservations fold + 1}
+        StoredTransition _ -> fold {foldStoredTransitions = foldStoredTransitions fold + 1}
+      describe = \case
+        LedgerTransition operation -> "the ledger command " <> operation
+        LedgerObservation operation -> "the observation of the ledger command " <> operation
+        StoredTransition transition -> "the stored transition " <> transition
+  folded <- step (Fold (historyInitial history) 0 0 0 0) (zip [0 :: Int ..] (historyItems history))
+  let report fold result =
+        putStrLn $
+          "MANAGER-CONFORMANCE history root=" <> root
+            <> " ledger=" <> show (historyLedger history)
+            <> " ledger-refused=" <> show (historyRefused history)
+            <> " ledger-accepted=" <> show ledgerAccepted
+            <> " accepted-ledger-transitions=" <> show (foldLedgerTransitions fold)
+            <> " accepted-ledger-observations=" <> show (foldObservations fold)
+            <> " accepted-stored-transitions=" <> show (foldStoredTransitions fold)
+            <> " environment-steps=" <> show (foldEnvironment fold)
+            <> " approvals-from-log=" <> show (historyApprovalsFromLog history)
+            <> " approvals-from-rows=" <> show (historyApprovalsFromRows history)
+            <> " result=" <> result
+      accepted fold = foldLedgerTransitions fold + foldObservations fold + foldStoredTransitions fold
+  case folded of
+    Left (mismatch, partial) -> do
+      retain directory Nothing name mismatch
+      report partial "mismatch"
+      pure (historyLedger history, ledgerAccepted, accepted partial, 1)
+    Right fold -> do
+      let expected = comparedView projection
+          actual = comparedView (foldState fold)
+          differing = squareDifferences expected actual
+          commandsAccepted = foldLedgerTransitions fold + foldObservations fold
+      if commandsAccepted /= ledgerAccepted
+        then do
+          retain directory Nothing name $
+            Mismatch "the history does not hold every accepted ledger command" (object ["root" .= root])
+              (toJSON ledgerAccepted) (toJSON commandsAccepted)
+          report fold "mismatch"
+          pure (historyLedger history, ledgerAccepted, accepted fold, 1)
+        else
+          if null differing
+            then do
+              report fold "pass"
+              pure (historyLedger history, ledgerAccepted, accepted fold, 0)
+            else do
+              retain directory Nothing name $
+                Mismatch ("the final oracle state differs from the projection of the final rows in " <> T.intercalate ", " differing)
+                  (object ["root" .= root]) (toJSON expected) (toJSON actual)
+              report fold "mismatch"
+              pure (historyLedger history, ledgerAccepted, accepted fold, 1)
+
+-- | The compared dimensions in which two states differ.
+squareDifferences :: Coordination -> Coordination -> [Text]
+squareDifferences a b =
+  [ name
+    | (name, same) <-
+        [ ("reservations", coordinationReservations a == coordinationReservations b),
+          ("preparations", coordinationPreparations a == coordinationPreparations b),
+          ("requests.run", coordinationRequests a == coordinationRequests b),
+          ("decisions", coordinationDecisions a == coordinationDecisions b),
+          ("commands", coordinationCommands a == coordinationCommands b),
+          ("artifacts", coordinationArtifacts a == coordinationArtifacts b)
+        ],
+      not same
+  ]

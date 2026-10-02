@@ -8,7 +8,7 @@
 -- | A single leased SQLite writer with strict, bounded transaction results.
 module Agentic.Manager.Store
   ( CoordinationStore, StoreIdentity (..), StoreFailure (..), Checkpoint (..),
-    withCoordinationStore, withServingStore, withServingStoreWith, storeManagerFlow, pruneManagerLog, storeIdentity, checkpointStore, withStoreConfiguration, withStoreCatalogues, withStoreRetentionRoot, withStoreRetentionRootLoan, withStoreRetentionRootsLoan, withStoreArtifactResponse, withStoreArtifactResponseWithin, artifactResponsePlaces, artifactResponseWait, artifactResponseDeadline, validateStoreHistoryBindings, revalidateStoreRetentionRoot, storeInvocations, withStoreRequest, outsideRequest, withStoreFiles, withStoreFileLoan, withRecordedRunRoot, withStoreReader, withStoreAdmission, withStoreWorker, StoreWorker, createStoreWorkerGroup, storeWorkerCleanupConfirmed, requestStoreWorkersStop, awaitStoreWorkersStop, retryStoreCleanup, probeStoreCapabilities,
+    withCoordinationStore, withInspectingStore, withServingStore, withServingStoreWith, storeManagerFlow, pruneManagerLog, storeIdentity, checkpointStore, withStoreConfiguration, withStoreCatalogues, withStoreRetentionRoot, withStoreRetentionRootLoan, withStoreRetentionRootsLoan, withStoreArtifactResponse, withStoreArtifactResponseWithin, artifactResponsePlaces, artifactResponseWait, artifactResponseDeadline, validateStoreHistoryBindings, revalidateStoreRetentionRoot, storeInvocations, withStoreRequest, outsideRequest, withStoreFiles, withStoreFileLoan, withRecordedRunRoot, withStoreReader, withStoreAdmission, withStoreWorker, StoreWorker, createStoreWorkerGroup, storeWorkerCleanupConfirmed, requestStoreWorkersStop, awaitStoreWorkersStop, retryStoreCleanup, probeStoreCapabilities,
     withStoreAdministration, tryWithStoreCatalogues, tryWithStoreFiles,
     AuthorizationWatch, withStoreAuthorizationWatch, withStoreConfigurationWatch, withStoreCataloguesWatch, withStoreCatalogueContextWatch, authorizationWatchCurrent, withAuthorizationObservation, withAuthorizationReadObservation, withAuthorizationRequestReadObservation, awaitAuthorizationChange,
     CommitDeadline, withCommitDeadline, withPreparedCommitDeadline, enforceCommitDeadline, enforceAdmissionFence, managerFlowRoom, appendCommandRecord, appendReviewRecord, noticeAfterCommit, PostCommit, noPostCommit, takePostCommit, appendPostCommit, Transaction, execute, query, refuseTransaction, refuseBusy, refuseBusyAt, refuseBusyTransaction, repeatChangedRead, runTransaction, runRead, StoreAdmission (..), runTransactionWithAdmission, runReadWithAdmission, transactionGeneration,
@@ -175,6 +175,15 @@ servingFlow mode = case mode of
 -- restart and writes no manager log.
 withCoordinationStore :: InstalledConfiguration -> (CoordinationStore -> IO a) -> IO a
 withCoordinationStore = withStoreMode AdministeringStore
+
+-- | A Store lifetime that reads a database as its manager left it. It is the
+-- copying lifetime of a backup: it requires the current schema version, and
+-- it neither migrates, reconciles a restart nor writes a manager log. A
+-- conformance check opens a private copy of a retained manager root through
+-- it, so that the rows that the check reads are the rows that the manager
+-- committed.
+withInspectingStore :: InstalledConfiguration -> (CoordinationStore -> IO a) -> IO a
+withInspectingStore = withStoreMode CopyingStore
 
 -- | The Store lifetime of a serving manager. It reconciles a restart and
 -- writes the manager log of its stream: a lifetime notice at open and, when
