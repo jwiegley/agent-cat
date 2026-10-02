@@ -196,6 +196,25 @@ reads the lock, as the
 the run directory after the run ends, and restoration and pruning handle it as
 any other file of the run directory.
 
+The inner worker creates the run directory `runs/<run>` exclusively, then
+`owner.lock`, then the `inputs` directory and `supervisor-manifest.json`. The
+runtime later creates the run store `runs/<run>/runtime`. A worker that ends
+after the launch can therefore leave one of these states:
+
+- No run directory, or a run directory without `owner.lock` and without
+  `supervisor-manifest.json`. The worker ended before it locked the run. The
+  quarantine check gives `owner-never-locked` evidence. The release creates
+  `owner.lock` before it frees the reservation, so the exclusive create of a
+  late worker fails and that worker never starts the run.
+- A free `owner.lock` without a run store. The worker ended after it locked
+  the run and before the runtime created the run store. The quarantine check
+  gives `owner-released` evidence.
+- A held `owner.lock`. The worker or a session leader that inherited the lock
+  still lives. The claim needs cleanup.
+- A `supervisor-manifest.json` without `owner.lock`. The new worker never
+  writes this state, and a worker from before the owner lock wrote it. The
+  claim needs cleanup.
+
 ## Manager loss and restart
 
 When the manager process ends without its orderly close, for example through
@@ -251,8 +270,16 @@ its start intent and its run, and it classifies the claim by these rules:
   `clean`. The evidence facts are the reservation identity, the run identity,
   the position of the record, the SHA-256 digest of the exact bytes of its
   line and the current process generation.
-- Launched, with the owner released. The run store holds no terminal record,
-  and the check opens `runs/<run>/owner.lock` in the recorded run root
+- Launched, with the owner never locked. The run directory `runs/<run>` in
+  the recorded run root is absent, or it holds no `owner.lock`, no
+  `supervisor-manifest.json` and no run store `runtime`. The inner frontend
+  worker ended before it locked the run, as the
+  [owner-lock section](#run-directory-owner-lock) states. The state is
+  `clean`. The evidence facts are the reservation identity, the run identity
+  and the current process generation.
+- Launched, with the owner released. The run store is absent or holds no
+  terminal record, and `owner.lock` is present. The check opens
+  `runs/<run>/owner.lock` in the recorded run root
   read-only, without following a symbolic link, finds a private regular file
   of the effective user with one link, and takes its exclusive, nonblocking
   `flock`. It releases the lock at once. The free lock shows that the inner
@@ -260,16 +287,17 @@ its start intent and its run, and it classifies the claim by these rules:
   ended. The state is `clean`. The evidence facts are the reservation
   identity, the run identity and the current process generation.
 - Launched without a terminal record, with the owner not released. Another
-  process holds the lock, or `owner.lock` is absent, cannot be opened or is
-  not a private regular file. An absent file is no proof, because a worker
-  that started before the owner lock existed created none. The state is
+  process holds the lock, or `owner.lock` cannot be opened or is not a
+  private regular file. An absent `owner.lock` gives this state when
+  `supervisor-manifest.json` or the run store is present, because a worker
+  that started before the owner lock existed created no lock. The state is
   `cleanup-required`.
-- Unreadable. The run store cannot be read, or the identity names a claim that
-  a restoration carried forward. The state is `unverifiable`.
+- Unreadable. The run store exists but cannot be read, or the identity names
+  a claim that a restoration carried forward. The state is `unverifiable`.
 
 The evidence facts of a `clean` claim form one JSON object, encoded with its
 keys in order and without white space. The member `evidence` names the rule:
-`no-launch`, `terminal-record` or `owner-released`. The evidence digest is the lowercase SHA-256
+`no-launch`, `terminal-record`, `owner-released` or `owner-never-locked`. The evidence digest is the lowercase SHA-256
 digest of these bytes, and the evidence identity is `cleanup_` followed by the
 first 32 hexadecimal digits of the digest. Two checks in one lifetime therefore
 return the same identity and digest. The process generation is a fact, so a
@@ -292,12 +320,21 @@ generation is a fact, evidence from an earlier lifetime never matches. A
 launched reservation without a terminal record is therefore releasable once
 the inner worker of its run and the engine session leaders that hold its owner
 lock have ended, and a release while the lock is held refuses with
-`cleanup-unverified`. An
+`cleanup-unverified`. A release with `owner-never-locked` evidence fences the
+run under the held file slot before it frees the reservation: it ensures the
+private run directory `runs/<run>` in the recorded run root and creates
+`runs/<run>/owner.lock` exclusively, then closes the lock. A late inner
+worker then fails its own exclusive create and never starts the run. When a
+late worker created `owner.lock` first, the release classifies the claim
+again and refuses with `cleanup-unverified` unless the claim is `clean` with
+the supplied evidence. A fence stays when the release then refuses, and the
+next check of the claim gives `owner-released` evidence. An
 unknown identity and a reservation that is not quarantined refuse with
 `state-conflict`. A release frees the execution slot and the resource keys of
 the reservation in one transaction and records the release and its receipt in
 the manager log. The run of the reservation stays `lost`, and no run store
-changes. On the live channel the release then notifies the admission
+changes. The fence of an `owner-never-locked` release is the only file that a
+release creates. On the live channel the release then notifies the admission
 controller, so a request that waits with `capacity` is prepared without
 another client command, as after the release of a terminal run. The
 [command contract](COMMANDS.md#local-credential-administration) states the

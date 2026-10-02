@@ -89,10 +89,14 @@ cleanup evidence of that claim with the frozen result `quarantineId`, `state`,
 (evidence `no-launch`), when the run store of its run holds the terminal record
 of the runtime (evidence `terminal-record`), or when its run has no terminal
 record and the check can take the exclusive lock of the `owner.lock` file of
-the run (evidence `owner-released`). The state is `cleanup-required` when its
-run has no terminal record and that lock is held, absent or not a private
-regular file, and `unverifiable` when the run store cannot be read or the
-identity names a claim that a restoration carried forward. A `clean` answer carries the evidence identity, the lowercase
+the run (evidence `owner-released`). It is also `clean` when the run directory
+of its run is absent, or holds no `owner.lock`, no `supervisor-manifest.json`
+and no run store, because the inner frontend worker ended before it locked the
+run (evidence `owner-never-locked`). The state is `cleanup-required` when its
+run has no terminal record and that lock is held or not a private regular
+file, or when `owner.lock` is absent while the supervisor manifest or the run
+store is present. It is `unverifiable` when the run store exists but cannot
+be read or the identity names a claim that a restoration carried forward. A `clean` answer carries the evidence identity, the lowercase
 SHA-256 digest of the canonical JSON facts, and an expiry 600 seconds after the
 check. The other states carry `null` in these three members. The facts include
 the process generation of the answering lifetime, so two checks in one
@@ -116,8 +120,16 @@ digest differs from the supplied values, refuses with `cleanup-unverified`. A
 claim that a restoration carried forward is `unverifiable`, so its release
 refuses with `cleanup-unverified`. A launched claim without a terminal record
 whose `owner.lock` is held is `cleanup-required`, so its release also refuses
-with `cleanup-unverified`. A refusal changes no Store row and appends
-nothing to the manager log. Otherwise one transaction deletes the resource
+with `cleanup-unverified`. A release with `owner-never-locked` evidence fences
+the run under the held file slot before its transaction: it ensures the
+private run directory `runs/<run>` in the recorded run root and creates
+`runs/<run>/owner.lock` exclusively, then closes the lock, so a late inner
+frontend worker fails its own exclusive create and never starts the run. When
+a late worker created `owner.lock` first, the release classifies the claim
+again and refuses with `cleanup-unverified` unless the claim is `clean` with
+the supplied evidence. A refusal changes no Store row and appends
+nothing to the manager log. A fence stays after a refusal, and the next check
+of the claim gives `owner-released` evidence. Otherwise one transaction deletes the resource
 keys of the reservation, sets the reservation `released` with no slot,
 advances the revision of its request, sets a `reserved` request admission to
 `released` and appends the `request.changed` invalidation of the request, as

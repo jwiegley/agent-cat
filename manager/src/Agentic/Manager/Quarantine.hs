@@ -19,7 +19,8 @@ import Agentic.Manager.Protocol.LocalAdmin (AdminFailure (..), adminError, admin
 import Agentic.Manager.Store
 import Agentic.Runtime
   ( FlowLiveness (FlowLive), FlowReport (..), Position (..), PrivateRoot, RunId, closePrivateRoot, mkRunId,
-    openPrivateSubroot, privateRootPath, probePrivateLockAt, readFlow, readFlowLine, runIdText, runLogName )
+    createPrivateLockAt, ensurePrivateDirectoryAt, openPrivateSubroot, privateFileIdentityAt, privateRootPath,
+    probePrivateLockAt, readFlow, readFlowLine, runIdText, runLogName )
 import Control.DeepSeq (NFData (rnf))
 import Control.Exception (IOException, bracket, throwIO, try)
 import Control.Monad (forM, unless)
@@ -29,6 +30,7 @@ import Data.Aeson (Value (Null), object, (.=))
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Key as Key
 import Data.ByteArray.Encoding (Base (Base16), convertToBase)
+import Data.Maybe (isJust)
 import qualified Data.ByteString as BS
 import qualified Data.Text.Encoding as TE
 import Data.Text (Text)
@@ -36,6 +38,8 @@ import qualified Data.Text as T
 import Data.Time.Clock (NominalDiffTime, addUTCTime, getCurrentTime)
 import Data.Time.Format (defaultTimeLocale, formatTime)
 import qualified Database.SQLite3 as SQL
+import System.IO.Error (isAlreadyExistsError)
+import System.Posix.IO (closeFd)
 
 -- | The lifetime that answers @status@: the live channel of a serving
 -- manager, or offline administration while no manager serves.
@@ -89,12 +93,14 @@ storeCheck integrity identities = object ["integrity" .= integrity, "quarantineI
 -- | The answer of @check-quarantine@ for one quarantined claim.
 data QuarantineState
   = -- | Cleanup evidence holds: the reservation never launched a run, the
-    -- run store of its run holds the terminal record of the runtime, or the
-    -- owner lock of its run is free.
+    -- run store of its run holds the terminal record of the runtime, the
+    -- owner lock of its run is free, or its run has no owner lock, no
+    -- supervisor manifest and no run store.
     QuarantineClean
   | -- | The reservation launched a run, its run store holds no terminal
-    -- record, and the owner lock of its run is held, absent or not a
-    -- private regular file.
+    -- record, and the owner lock of its run is held or not a private
+    -- regular file, or is absent while the supervisor manifest or the run
+    -- store of the run is present.
     QuarantineCleanupRequired
   | -- | The run store cannot be read, or the claim is one that a restoration
     -- carried forward, whose run the Store does not record.
@@ -142,7 +148,11 @@ instance NFData Claim where
 -- unknown identity and a reservation that is not quarantined refuse with
 -- 'StateConflict'. The Store file slot and one read transaction are taken in
 -- the lock order file slot, configuration, database. A launched reservation
--- reads the run log of its run with the runtime readers: the first event
+-- first reads which of owner.lock, supervisor-manifest.json and the run
+-- store @runtime@ its run directory holds. Without a run store, an absent
+-- owner lock and an absent supervisor manifest show that the inner frontend
+-- worker ended before it locked the run, and a free owner lock shows that it
+-- ended later. A run store is read with the runtime readers: the first event
 -- record whose event ends the run is the terminal record. Without a terminal
 -- record, the free owner lock of the run shows that its inner frontend worker
 -- has ended.
@@ -150,35 +160,54 @@ inspectQuarantine :: CoordinationStore -> Text -> IO (QuarantineState, Maybe Cle
 inspectQuarantine store ident = withStoreRequest store $ \scoped -> withStoreFiles scoped $ \root -> do
   generation <- storeProcessGeneration <$> storeIdentity scoped
   claim <- runRead scoped (readClaim ident)
-  classify root generation ident claim
+  classifiedPublic <$> classify root generation ident claim
+
+-- The state, the cleanup evidence and the release step of a claim.
+data Classified = Classified
+  { classifiedState :: !QuarantineState,
+    classifiedEvidence :: !(Maybe CleanupEvidence),
+    -- Whether the release must fence the run before it frees the
+    -- reservation: the evidence is @owner-never-locked@.
+    classifiedFence :: !Bool
+  }
+
+classifiedPublic :: Classified -> (QuarantineState, Maybe CleanupEvidence)
+classifiedPublic found = (classifiedState found, classifiedEvidence found)
 
 -- | The state and cleanup evidence of a claim that the Store records, under
 -- the held file slot, with the given process generation.
-classify :: PrivateRoot -> Text -> Text -> Claim -> IO (QuarantineState, Maybe CleanupEvidence)
+classify :: PrivateRoot -> Text -> Text -> Claim -> IO Classified
 classify root generation ident claim =
   case claim of
     ClaimAbsent -> throwIO StateConflict
     ClaimNotQuarantined -> throwIO StateConflict
-    ClaimRestored -> pure (QuarantineUnverifiable, Nothing)
+    ClaimRestored -> pure (Classified QuarantineUnverifiable Nothing False)
     ClaimUnlaunched _ facts ->
-      pure (QuarantineClean, Just (evidence (("evidence", "no-launch") : ("processGeneration", toValue generation) : facts)))
+      pure (clean (("evidence", "no-launch") : ("processGeneration", toValue generation) : facts))
     ClaimLaunched _ run recorded native -> do
-      found <- try @IOException (try @StoreFailure (terminalRecord root recorded native))
-      case found of
-        Right (Right (Just (Position position, bytes))) ->
-          pure (QuarantineClean, Just (evidence
-            [("evidence", "terminal-record"), ("reservationId", toValue ident), ("runId", toValue run),
-             ("position", toValue position), ("recordSha256", toValue (sha256 bytes)),
-             ("processGeneration", toValue generation)]))
-        Right (Right Nothing) -> do
-          released <- ownerReleased root recorded native
-          pure $ if released
-            then (QuarantineClean, Just (evidence
-              [("evidence", "owner-released"), ("reservationId", toValue ident), ("runId", toValue run),
-               ("processGeneration", toValue generation)]))
-            else (QuarantineCleanupRequired, Nothing)
-        _ -> pure (QuarantineUnverifiable, Nothing)
+      let launched kind extra = clean
+            ([("evidence", kind), ("reservationId", toValue ident), ("runId", toValue run)]
+              <> extra <> [("processGeneration", toValue generation)])
+          byOwner = do
+            released <- ownerReleased root recorded native
+            pure $ if released then launched "owner-released" [] else Classified QuarantineCleanupRequired Nothing False
+      present <- try @IOException (try @StoreFailure (runFiles root recorded native))
+      case present of
+        Right (Right files)
+          | not (filesStore files) && not (filesLock files) && not (filesManifest files) ->
+              pure (launched "owner-never-locked" []) {classifiedFence = True}
+          | not (filesStore files) && filesLock files -> byOwner
+          | not (filesStore files) -> pure (Classified QuarantineCleanupRequired Nothing False)
+          | otherwise -> do
+              found <- try @IOException (try @StoreFailure (terminalRecord root recorded native))
+              case found of
+                Right (Right (Just (Position position, bytes))) ->
+                  pure (launched "terminal-record" [("position", toValue position), ("recordSha256", toValue (sha256 bytes))])
+                Right (Right Nothing) -> byOwner
+                _ -> pure (Classified QuarantineUnverifiable Nothing False)
+        _ -> pure (Classified QuarantineUnverifiable Nothing False)
   where
+    clean facts = Classified QuarantineClean (Just (evidence facts)) False
     toValue :: Aeson.ToJSON a => a -> Value
     toValue = Aeson.toJSON
 
@@ -205,7 +234,15 @@ checkQuarantine store ident = answered "check-quarantine" $ do
 -- that lock order, each within its five-second allowance. Under the held file
 -- slot and configuration guard the release reads the claim, computes its
 -- cleanup evidence again with the current process generation, as
--- @check-quarantine@ does, and then commits one transaction. An unknown
+-- @check-quarantine@ does, and then commits one transaction. Before that
+-- transaction, a release with @owner-never-locked@ evidence fences the run:
+-- it ensures the private run directory @runs/<run>@ in the recorded run root
+-- and creates its owner.lock exclusively, so that the exclusive create of a
+-- late inner frontend worker fails and that worker never starts the run. When
+-- a late worker created owner.lock first, the release classifies the claim
+-- again and refuses with 'CleanupUnverified' unless the claim is clean with
+-- the supplied evidence. A fenced run stays fenced when the transaction then
+-- refuses, and its next check gives @owner-released@ evidence. An unknown
 -- identity and a reservation that is not quarantined, a released one
 -- included, refuse with 'StateConflict'. Evidence that is not clean, or whose
 -- identity or digest differs from the supplied values, refuses with
@@ -227,12 +264,21 @@ releaseQuarantine store wake ident suppliedId suppliedDigest = do
       generation <- storeProcessGeneration <$> storeIdentity scoped
       claim <- runRead scoped (readClaim ident)
       found <- classify root generation ident claim
-      request <- case (found, claim) of
+      request <- case (classifiedPublic found, claim) of
         ((QuarantineClean, Just current), ClaimUnlaunched request _)
           | matches current -> pure request
         ((QuarantineClean, Just current), ClaimLaunched request _ _ _)
           | matches current -> pure request
         _ -> throwIO CleanupUnverified
+      case claim of
+        ClaimLaunched _ _ recorded native | classifiedFence found -> do
+          fenced <- fenceRun root recorded native
+          unless fenced $ do
+            again <- classify root generation ident claim
+            case classifiedPublic again of
+              (QuarantineClean, Just current) | matches current -> pure ()
+              _ -> throwIO CleanupUnverified
+        _ -> pure ()
       runTransaction scoped $ do
         unchanged <- (== claim) <$> readClaim ident
         unless unchanged (refuseTransaction CleanupUnverified)
@@ -315,12 +361,38 @@ terminalRecord root recorded native = withRecordedRunRoot root recorded $ \runs 
         | null (reportProblems report) -> pure Nothing
         | otherwise -> ioError (userError "the run store cannot be read")
 
+-- Which of owner.lock, supervisor-manifest.json and the run store @runtime@
+-- the run directory of a run holds in the recorded run root. An absent run
+-- directory holds none of them.
+data RunFiles = RunFiles {filesLock :: !Bool, filesManifest :: !Bool, filesStore :: !Bool}
+
+runFiles :: PrivateRoot -> Text -> RunId -> IO RunFiles
+runFiles root recorded native = withRecordedRunRoot root recorded $ \runs -> do
+  let present name = isJust <$> privateFileIdentityAt runs ["runs", T.unpack (runIdText native), name]
+  RunFiles <$> present "owner.lock" <*> present "supervisor-manifest.json" <*> present "runtime"
+
+-- Fence a run whose inner frontend worker never locked it: ensure the private
+-- run directory in the recorded run root and create its owner.lock
+-- exclusively, as the worker does, then close the lock at once. The result is
+-- 'False' when owner.lock exists already, because a late worker created it.
+fenceRun :: PrivateRoot -> Text -> RunId -> IO Bool
+fenceRun root recorded native = withRecordedRunRoot root recorded $ \runs -> do
+  let directory = ["runs", T.unpack (runIdText native)]
+  ensurePrivateDirectoryAt runs directory
+  created <- try @IOException (createPrivateLockAt runs (directory <> ["owner.lock"]))
+  case created of
+    Right descriptor -> closeFd descriptor >> pure True
+    Left failure
+      | isAlreadyExistsError failure -> pure False
+      | otherwise -> throwIO failure
+
 -- Whether the inner frontend worker of a run has ended: the exclusive lock of
 -- runs/<run>/owner.lock in the recorded run root is free. The probe takes the
 -- lock and releases it at once. A lock that another open description holds, an absent
 -- lock file, and a lock file that cannot be opened as a private regular file
--- give 'False'. An absent file is no proof, because a worker from before the
--- owner lock never created one.
+-- give 'False'. An absent file is no proof here, because a worker from
+-- before the owner lock never created one: 'classify' treats an absent lock
+-- only when the supervisor manifest and the run store are also absent.
 ownerReleased :: PrivateRoot -> Text -> RunId -> IO Bool
 ownerReleased root recorded native = do
   probed <- try @IOException (try @StoreFailure (withRecordedRunRoot root recorded $ \runs ->

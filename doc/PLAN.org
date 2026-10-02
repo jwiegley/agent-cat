@@ -11255,6 +11255,44 @@ Non-blocking findings of fess audit fess/pd-PD3-r1.md (2026-10-01) on subtask PD
 ]
 #+end_src
 
+* TODO [#D] Resolve the non-blocking fess findings of subtask PD4
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pd4-fess-followup-sz0a
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-01 Thu 22:20]
+:MODIFIED: [2026-10-01 Thu 22:20]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess audit fess/pd-PD4-r1.md (2026-10-01) on subtask PD4 (release paths for a launched claim that crashed before the owner lock or before the run store, the pre-lock part of item 4 of acat-phase-e-review-findings-0l73).
+
+1. (low) manager/src/Agentic/Manager/Quarantine.hs near 273-281 and 384-389: the EEXIST branch of fenceRun and the reclassification after it have no test (disclosed). The pd4c late-holder refusal fails at the first classification and never reaches the fence. Once owner.lock exists, the reclassification can never match owner-never-locked evidence, so the "unless clean with the supplied evidence" arm always refuses. Fix: add a test hook or a fixture that creates owner.lock between classification and fence, or record the branch as covered by reasoning only.
+2. (low) manager/src/Agentic/Manager/Quarantine.hs near 369-372, manager/WORKERS.md quarantine rules, doc/workflow-manager-handoff.md near 54: runFiles uses privateFileIdentityAt (nofollow), so a symbolic link at owner.lock, supervisor-manifest.json or runtime raises ELOOP and the claim reads unverifiable. Before this change a non-private lock read cleanup-required, and the documents still say that a lock that is not a private regular file stays cleanup-required. Fix: state the unverifiable result in WORKERS.md, COMMANDS.md and the PE3 row, or map ELOOP to cleanup-required.
+3. (low) manager/WORKERS.md owner-lock section, runtime/src/Agentic/Runtime/Catalogue.hs near 225: a fenced run directory holds only owner.lock. The runtime catalogue lists it as a corrupt entry and the TUI shows "Unreadable run". This is not a regression. Fix: add one sentence to WORKERS.md that states it.
+4. (low) manager/WORKERS.md near 205 (new window list): the first window state omits "and without the run store runtime", which the classify rule requires. Fix: add it to the first bullet.
+5. (low) manager/test/CommandCheck.hs pd4c block: the "run store exists but cannot be read" fixture is an empty runtime directory with mode 0750. It does not separate a permission failure from an empty-store failure. Fix (optional): use a 0700 runtime directory with an unreadable run log.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-pd4-fess-followup-sz0a",
+    "depends_on_id": "acat-phase-e-review-findings-0l73",
+    "type": "discovered-from",
+    "created_at": "2026-10-02T05:20:31.748974Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
 * TODO [#D] Resolve the non-blocking fess findings of subtask PE10
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -12330,7 +12368,7 @@ Deferred security stage for Phase E, Pi service mode (WM-036 to WM-038), under t
 :LABELS:   ["review","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-10-01 Thu 20:45]
-:MODIFIED: [2026-10-01 Thu 22:07]
+:MODIFIED: [2026-10-01 Thu 22:20]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -12377,6 +12415,13 @@ Findings of the Phase E end-of-phase review (two lenses, range 33f84fe4..841ce0c
     "author": "johnw",
     "text": "Subtask PD3 (2026-10-01) partly fixes item 3. Each non-streaming GET route runs under Service.withServiceRequest, so every owner read, every repeatChangedRead attempt and every nested scope of the route share one five-second admission deadline. repeatChangedRead now takes the CoordinationStore and uses its admissionDeadline. SSE streams, artifact downloads (300 s), revalidations, command attempts, dispatch tickets and capture uploads keep fresh allowances. POST routes still give their resolve read, submission and receipt view separate deadlines (acat-pd3-fess-followup-uo4y item 1). manager/STORAGE.md states the rule. Evidence (PD/PD3/impl-r1 in the private resume-20260923 directory): BUILD, manager-command-check N8 with command_contract.py (new routeDeadlineChecks, failing first against the old fresh retry deadline), manager-store-check N8, manager-draft-check N8 with draft_contract.py, manager-history-check N8, manager-admission-check N8, manager-approval-check N8 with approval_contract.py, modes controls, mixed and mutations-captures, journey N8 with no StoreBusy line, make -C doc check. Fess not blocking, findings filed as acat-pd3-fess-followup-uo4y.",
     "created_at": "2026-10-02T05:07:01Z"
+  },
+  {
+    "id": 591,
+    "issue_id": "acat-phase-e-review-findings-0l73",
+    "author": "johnw",
+    "text": "Subtask PD4 (2026-10-01) fixes the pre-lock crash window of item 4 in manager/src/Agentic/Manager/Quarantine.hs. A launched claim whose run directory holds none of owner.lock, supervisor-manifest.json and the run store runtime now reads clean with new evidence owner-never-locked (facts evidence, processGeneration, reservationId, runId). release-quarantine with that evidence fences the run under the held file slot before it frees the reservation: it ensures runs/<run> in the recorded run root and creates owner.lock exclusively, so a late frontend fails its own exclusive create and never starts the run. If the create fails with EEXIST, the release classifies again and refuses with cleanup-unverified. A present owner.lock with no run store now consults ownerReleased (a free lock gives owner-released, a held lock cleanup-required). A manifest without owner.lock stays cleanup-required, and an existing unreadable run store stays unverifiable. manager/WORKERS.md, manager/COMMANDS.md, the handoff open limit and the PE3 row state the rules. Evidence (PD/PD4/impl-r1 in the private resume-20260923 directory): BUILD, manager-command-check N8 with command_contract.py and credential_cli.py (new pd4a, pd4b and pd4c cases, failing first in a prefix run), failures-launched at N8, journey N8, make -C doc check. Fess not blocking, findings filed as acat-pd4-fess-followup-sz0a. Engines outside the owner lock under option C stay open (acat-engine-owner-lock-coverage-9snr), so item 4 stays open with items 5, 6 and 8 to 13.",
+    "created_at": "2026-10-02T05:20:32Z"
   }
 ]
 #+end_src

@@ -51,7 +51,7 @@ for operator authorization.
 | --- | --- | --- |
 | PE1 | `d133764c` | The restart reconciliation keeps the start command of a run with a terminal observation resolved. Its state, revision and receipt do not change, and no `command.changed` event follows (`acat-70ll`). |
 | PE2 | `06c0c0db` | The inner frontend worker holds `runs/<run>/owner.lock` from before the supervisor manifest until it exits. A Runtime `ProcessGroup` session inherits the lock on macOS. Under owner option C, engines that the process library starts (ACP, agent-deck, shell steps) do not hold it. |
-| PE3 | `4b4c589c` | `check-quarantine` and `release-quarantine` accept `owner-released` evidence for a launched claim with no terminal record when `owner.lock` in the recorded run root is free. A held, absent or non-private lock stays `cleanup-required`. |
+| PE3 | `4b4c589c` | `check-quarantine` and `release-quarantine` accept `owner-released` evidence for a launched claim with no terminal record when `owner.lock` in the recorded run root is free, also when the run store is absent. A run directory that is absent, or holds no `owner.lock`, no supervisor manifest and no run store, gives `owner-never-locked` evidence, and its release creates `owner.lock` as a fence before it frees the reservation. A held or non-private lock, and a supervisor manifest without `owner.lock`, stay `cleanup-required`. |
 | PE4 | `58130204` | The `failures-launched` mode of `service_http.py` shows that a crash during a run no longer blocks later runs. After the worker groups end, the release frees the one reservation and a queued request completes. |
 | PE5 | `e8ca40b0` | The TUI fences every overview read by the refresh generation (`overviewStep`, `releaseRead`). A read of an earlier generation installs no rows. |
 | PE6 | `f71a4a05` | At 40x12 the live monitor shows the Terminal and Result lines first. `tui-sizes` asserts the terminal outcome and the verified size and SHA-256 at 40x12, 80x24 and 140x36. |
@@ -326,11 +326,18 @@ Open functional limits of Phase E:
 - Under owner option C, `owner-released` evidence covers the inner worker
   and the session leaders that hold its lock, not engines that the process
   library starts. The inner frontend worker creates `owner.lock` for each
-  run that it starts. Only the manager quarantine check reads the lock.
+  run that it starts. Only the manager quarantine check reads the lock, and
+  only a release with `owner-never-locked` evidence creates one for a run
+  that no worker locked.
 - A frontend that ends after the launch and before it creates `owner.lock`
-  leaves no lock file. Its claim reads `cleanup-required` with no release
-  path, so with one execution reservation that crash still blocks later
-  runs. No document records this window yet.
+  leaves no lock file. Its claim reads `clean` with `owner-never-locked`
+  evidence, and the release creates `owner.lock` as a fence before it frees
+  the reservation, so a late frontend never starts the run. A frontend that
+  ends after `owner.lock` and before the run store leaves a free lock, and its
+  claim reads `clean` with `owner-released` evidence. A supervisor manifest
+  without `owner.lock` stays `cleanup-required`.
+  [manager/WORKERS.md](../manager/WORKERS.md#run-directory-owner-lock)
+  states these windows.
 - A fork review with more than one replacement, and a lineage review with a
   profile identifier of about 70 characters or more, do not fit 80x24.
 - The reconciliation of an uncertain Pi answer cannot observe its effect

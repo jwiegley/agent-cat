@@ -59,10 +59,11 @@ import qualified Database.SQLite3 as SQL
 import qualified Database.SQLite3.Direct as Direct
 import Foreign.Ptr (Ptr)
 import Foreign.C.Types (CInt (..))
-import System.Directory (createDirectory, createDirectoryIfMissing, doesDirectoryExist, doesFileExist, listDirectory, removeDirectoryRecursive, renameDirectory, renameFile)
+import System.Directory (createDirectory, createDirectoryIfMissing, doesDirectoryExist, doesFileExist, listDirectory, removeDirectoryRecursive, removeFile, renameDirectory, renameFile)
 import System.Environment (getArgs)
 import System.FilePath ((</>), takeDirectory)
 import System.IO (BufferMode (LineBuffering), hSetBuffering, stdout)
+import System.IO.Error (isAlreadyExistsError)
 import System.Posix.IO (closeFd)
 import System.Posix.Files (setFileMode, fileMode, fileSize, getFileStatus, getSymbolicLinkStatus)
 import System.Posix.Types (CUid (..))
@@ -1266,6 +1267,14 @@ quarantineChecks root store = do
 -- holds the lock, the claim needs cleanup and the release refuses. Once that
 -- description closes, the claim is clean with owner-released evidence, and
 -- the release frees the reservation.
+--
+-- The crash windows before the run store follow. A run directory that is
+-- absent, or present without owner.lock and supervisor-manifest.json, gives
+-- owner-never-locked evidence, and its release creates runs/<run>/owner.lock
+-- as a fence, so that the exclusive create of a late frontend fails. A
+-- supervisor manifest without owner.lock and a held owner.lock need cleanup.
+-- A free owner.lock without a run store gives owner-released evidence, and a
+-- run store that exists but cannot be read is unverifiable.
 launchedQuarantineChecks :: FilePath -> CoordinationStore -> IO ()
 launchedQuarantineChecks root store = do
   generation <- storeProcessGeneration <$> storeIdentity store
@@ -1330,6 +1339,91 @@ launchedQuarantineChecks root store = do
      "DELETE FROM reservations WHERE id='reservation_pe3'",
      "DELETE FROM requests WHERE id='request_pe3'"]
   removeDirectoryRecursive runPath
+  let windowRun suffix = runsPath </> "runs" </> ("native_" <> suffix)
+      windowAnswer suffix = administerLocally StoreStopped (pure ()) store (Admin.CheckQuarantine ("reservation_" <> T.pack suffix)) >>= adminValue
+      windowRelease suffix suppliedId suppliedDigest = administerLocally StoreStopped (pure ()) store
+        (Admin.ReleaseQuarantine ("reservation_" <> T.pack suffix) suppliedId suppliedDigest) >>= adminValue
+      windowState suffix = withRaw root (\db -> rawRows db ("SELECT state,slot FROM reservations WHERE id='reservation_" <> T.pack suffix <> "'"))
+      windowEvidence kind suffix =
+        let bytes = "{\"evidence\":\"" <> kind <> "\",\"processGeneration\":\"" <> TE.encodeUtf8 generation
+              <> "\",\"reservationId\":\"reservation_" <> TE.encodeUtf8 (T.pack suffix) <> "\",\"runId\":\"run_" <> TE.encodeUtf8 (T.pack suffix) <> "\"}"
+            windowDigest = T.pack (show (hash bytes :: Digest SHA256))
+        in ("cleanup_" <> T.take 32 windowDigest, windowDigest)
+      windowClean label (expectedId, expectedDigest) value = check label (adminField "ok" value == Bool True
+        && adminField "state" (adminField "result" value) == String "clean"
+        && adminField "cleanupEvidenceId" (adminField "result" value) == String expectedId
+        && adminField "cleanupEvidenceDigest" (adminField "result" value) == String expectedDigest)
+      windowStateOnly suffix label expected value = check label (adminField "ok" value == Bool True
+        && adminField "result" value == object ["quarantineId" .= ("reservation_" <> T.pack suffix), "state" .= (expected :: Text),
+             "cleanupEvidenceId" .= Null, "cleanupEvidenceDigest" .= Null, "processGeneration" .= generation, "expiresAt" .= Null])
+      windowReleased suffix label value = do
+        check label (adminField "ok" value == Bool True && adminField "result" value
+          == object ["quarantineId" .= ("reservation_" <> T.pack suffix), "state" .= ("released" :: Text)])
+        windowState suffix >>= check (label <> ": the reservation is released and its slot is free") . (== [[SQL.SQLText "released", SQL.SQLNull]])
+      windowLaunch suffix slot = withRaw root $ \db -> do
+        let name = T.pack suffix
+        rawInsert db "INSERT INTO requests (id,revision,client_id,workflow_id,descriptor_revision,profile_id,profile_revision,phase,admission,blocking_reasons,validation_errors) VALUES (?,'r0','client_1','workflow_1','descriptor_1','profile_1','profile_revision','associated','released',X'5b5d',X'5b5d')"
+          [SQL.SQLText ("request_" <> name)]
+        rawInsert db "INSERT INTO reservations (id,request_id,slot,process_generation,state) VALUES (?,?,?,'process_old','quarantined')"
+          [SQL.SQLText ("reservation_" <> name), SQL.SQLText ("request_" <> name), SQL.SQLInteger slot]
+        rawInsert db "INSERT INTO preparations (id,revision,request_id,request_revision,profile_revision,reservation_id,process_generation,worker_identity,root_identity,native_run_id,expires_at,review_digest,review,private_binding,state,reason) VALUES (?,'p0',?,'r0','profile_revision',?,'process_old','worker_old',?,?,'2999-01-01T00:00:00Z','digest',X'7b7d',X'7b7d','consumed','consumed')"
+          [SQL.SQLText ("preparation_" <> name), SQL.SQLText ("request_" <> name), SQL.SQLText ("reservation_" <> name), SQL.SQLText identity, SQL.SQLText ("native_" <> name)]
+        rawInsert db "INSERT INTO runs (id,revision,control_revision,request_id,preparation_id,profile_id,root_identity,native_run_id,supervision,result_state) VALUES (?,'run_revision','control_revision',?,?,'profile_1',?,?,'lost','absent')"
+          [SQL.SQLText ("run_" <> name), SQL.SQLText ("request_" <> name), SQL.SQLText ("preparation_" <> name), SQL.SQLText identity, SQL.SQLText ("native_" <> name)]
+      windowForget suffix = withRaw root $ \db -> forM_ [("runs", "run_"), ("preparations", "preparation_"), ("reservations", "reservation_"), ("requests", "request_")] $ \(table, prefix) ->
+        rawInsert db ("DELETE FROM " <> table <> " WHERE id=?") [SQL.SQLText (prefix <> T.pack suffix)]
+      lateFrontend suffix = try @IOException $ bracket (Runtime.openPrivateRoot "runs" runsPath) Runtime.closePrivateRoot $ \runs ->
+        Runtime.createPrivateLockAt runs ["runs", "native_" <> suffix, "owner.lock"] >>= closeFd
+      neverLocked = windowEvidence "owner-never-locked"
+  -- Window one: the frontend ended before it created the run directory.
+  windowLaunch "pd4a" 13
+  doesDirectoryExist (windowRun "pd4a") >>= check "the fixture of an absent run directory has no run directory" . not
+  firstAbsent <- windowAnswer "pd4a"
+  windowClean "check-quarantine gives owner-never-locked evidence when the run directory is absent" (neverLocked "pd4a") firstAbsent
+  windowAnswer "pd4a" >>= windowClean "two checks of an absent run directory in one lifetime give the same evidence" (neverLocked "pd4a")
+  windowRelease "pd4a" (fst (neverLocked "pd4a")) (snd (neverLocked "pd4a"))
+    >>= windowReleased "pd4a" "release-quarantine with owner-never-locked evidence frees an absent run directory"
+  doesFileExist (windowRun "pd4a" </> "owner.lock") >>= check "the release fences the run with runs/<run>/owner.lock"
+  lateFrontend "pd4a" >>= check "a late frontend fails its exclusive create of owner.lock after the release"
+    . either isAlreadyExistsError (const False)
+  windowForget "pd4a"
+  -- Window two: the frontend created the run directory and ended before owner.lock.
+  windowLaunch "pd4b" 13
+  createDirectory (windowRun "pd4b") >> setFileMode (windowRun "pd4b") 0o700
+  windowAnswer "pd4b" >>= windowClean "check-quarantine gives owner-never-locked evidence for a run directory without owner.lock and manifest" (neverLocked "pd4b")
+  windowAnswer "pd4b" >>= windowClean "two checks of a run directory without owner.lock give the same evidence" (neverLocked "pd4b")
+  BS.writeFile (windowRun "pd4b" </> "supervisor-manifest.json") "{}" >> setFileMode (windowRun "pd4b" </> "supervisor-manifest.json") 0o600
+  windowAnswer "pd4b" >>= windowStateOnly "pd4b" "check-quarantine reports a supervisor manifest without owner.lock as cleanup-required" "cleanup-required"
+  windowRelease "pd4b" (fst (neverLocked "pd4b")) (snd (neverLocked "pd4b"))
+    >>= unverified "release-quarantine refuses owner-never-locked evidence once a supervisor manifest is present"
+  removeFile (windowRun "pd4b" </> "supervisor-manifest.json")
+  windowRelease "pd4b" (fst (neverLocked "pd4b")) (snd (neverLocked "pd4b"))
+    >>= windowReleased "pd4b" "release-quarantine with owner-never-locked evidence frees a run directory without owner.lock"
+  lateFrontend "pd4b" >>= check "a late frontend fails its exclusive create of owner.lock in the fenced run directory"
+    . either isAlreadyExistsError (const False)
+  windowForget "pd4b"
+  removeDirectoryRecursive (windowRun "pd4b")
+  -- Window three: the frontend created owner.lock and ended before the run store.
+  windowLaunch "pd4c" 13
+  createDirectory (windowRun "pd4c") >> setFileMode (windowRun "pd4c") 0o700
+  lockHeld <- bracket (Runtime.openPrivateRoot "runs" runsPath) Runtime.closePrivateRoot $ \runs ->
+    Runtime.createPrivateLockAt runs ["runs", "native_pd4c", "owner.lock"]
+  windowAnswer "pd4c" >>= windowStateOnly "pd4c" "check-quarantine reports a held owner.lock without a run store as cleanup-required" "cleanup-required"
+  windowRelease "pd4c" (fst (neverLocked "pd4c")) (snd (neverLocked "pd4c"))
+    >>= unverified "release-quarantine refuses owner-never-locked evidence once a late frontend holds owner.lock"
+  closeFd lockHeld
+  let ownerFree = windowEvidence "owner-released" "pd4c"
+  windowAnswer "pd4c" >>= windowClean "check-quarantine gives owner-released evidence for a free owner.lock without a run store" ownerFree
+  windowAnswer "pd4c" >>= windowClean "two checks of a free owner.lock without a run store give the same evidence" ownerFree
+  createDirectory (windowRun "pd4c" </> "runtime") >> setFileMode (windowRun "pd4c" </> "runtime") 0o750
+  windowAnswer "pd4c" >>= windowStateOnly "pd4c" "check-quarantine reports a run store that exists but cannot be read as unverifiable" "unverifiable"
+  windowRelease "pd4c" (fst ownerFree) (snd ownerFree) >>= unverified "release-quarantine refuses a run store that cannot be read with cleanup-unverified"
+  removeDirectoryRecursive (windowRun "pd4c" </> "runtime")
+  windowRelease "pd4c" (fst ownerFree) (snd ownerFree)
+    >>= windowReleased "pd4c" "release-quarantine with owner-released evidence frees a free owner.lock without a run store"
+  windowForget "pd4c"
+  removeDirectoryRecursive (windowRun "pd4c")
+  removeDirectoryRecursive (windowRun "pd4a")
 
 credentialAdministrationChecks :: FilePath -> IO ()
 credentialAdministrationChecks work = withFixture work "credentials" (64*commandCapacity) 20 $ \_ root _ store profile proof -> do
