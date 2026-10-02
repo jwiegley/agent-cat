@@ -7228,7 +7228,7 @@ Request, approval, control, export, and lineage routes pass hostile-input, repla
 :LABELS:   ["wm-release-gate","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-09 Wed 22:34]
+:MODIFIED: [2026-10-02 Fri 08:28]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/G4
 :SOURCE_REPO: agent-cat
@@ -7376,6 +7376,20 @@ Emacs, TUI, and Pi service modes pass their native UI gates and cross-client/cro
     "created_by": "johnw",
     "metadata": "{}",
     "thread_id": ""
+  }
+]
+#+end_src
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 623,
+    "issue_id": "acat-g4-pech",
+    "author": "johnw",
+    "text": "Subtask PD28 (2026-10-02, Phase D gate part 1) ran each gate step once on the final agent-cat tree at 832ea3d3 with no code change: make -C doc check, ALLBUILD, tui-model-test at +RTS -N1 and -N8, JOURNEY-PAIR(pdgate) at N1 and N8, the three N8 negative controls (tui-journey-broken-answer with 'JOURNEY-ASSERT typed answer is not JSON false', tui-consent-control with 'detail-view key approved a review', tui-flow-approve-fault with its literal storage-unavailable refusal), and at N8 the owner checks touched by PD3 and PD4: manager-command-check with command_contract.py and credential_cli.py, manager-store-check main, manager-draft-check with draft_contract.py, manager-history-check, manager-admission-check main and manager-approval-check main with approval_contract.py. Every step passed, or failed only as its recorded control. No defect was found, so nothing was fixed or rerun. Evidence: PD/PD28/impl-r1 in the private resume-20260923 directory, a .log and a .exit file for each of the 14 steps. Fess pd-PD28-r1 not blocking. Its two low evidence findings are filed as acat-pd28-fess-followup-azam.",
+    "created_at": "2026-10-02T15:28:57Z"
   }
 ]
 #+end_src
@@ -11624,6 +11638,28 @@ Non-blocking findings of fess audit fess/pd-PD27-r1.md (2026-10-02) on subtask P
 3. (low) manager/test/service_http.py emacs_lifecycle_checks. The restart child that remains after the manager restart keeps a quarantined reservation until the mode ends. The mode does not release it. Cleanup still passes (PASS 17). Fix: release or settle the lost restart child through the documented quarantine release path before the manager stops.
 
 Implementer limitations recorded with PD27: no failing-first run against an Emacs that resends a command; the fork edit picks occurrence 1 by its known place in delayed-person, confirmed from answers.json; ci/emacs.sh and the local ci/emacs-ui.py cases were not rerun because no Lisp file changed; security items are out of scope under the functionality-first direction.
+
+* TODO [#D] Resolve the non-blocking fess findings of subtask PD28
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pd28-fess-followup-azam
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-02 Fri 08:28]
+:MODIFIED: [2026-10-02 Fri 08:28]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess audit fess/pd-PD28-r1.md (2026-10-02) on subtask PD28 (Phase D gate part 1: build, model test, journey, controls and owner checks). The PD28 commit in agent-cat names this issue.
+
+1. (low) PD/PD28/impl-r1/*.log lines 1 to 3. The implementer said that each step records its bash -c command at the top of its log. No log records its command. Each log starts with the direnv loading line and 'GHCRTS and AGENT_CAT_* absent'. Only the model-test logs print a bin= path. Fix: in later gate runs, write the exact command line as the first line of each step log.
+
+2. (low) PD/PD28/impl-r1/model-test-N1.log and model-test-N8.log. The logs do not prove that +RTS -N1 and -N8 were passed to the model test or to the owner checks. The two model-test logs are byte-identical (198673 bytes). This fits a deterministic test, but it does not show the capability count. The owner-check fixture roots end in /N8, which is only indirect evidence. The fess rerun of tui-model-test +RTS -N8 exited 0. Fix: record the command line (finding 1), and optionally print the RTS capability count, for example with getNumCapabilities, at the start of each check.
+
+Implementer limitations recorded with PD28: the owner checks ran from the binaries that ALLBUILD built, not through the manager/ci/*.sh scripts, which rebuild with other ghc-options and run admission_audit.py, proof_opacity.py and the N1 passes; manager-store-check ran only in its main form at N8 (its quotas, restart, admission-data and terminal-admission forms were not run); manager-admission-check and manager-approval-check ran only in their main forms at N8 (restart-native, shutdown-only, shutdown-native and shutdown-drain were not run); the three negative controls ran at N8 only, as the gate requires; security items are out of scope under the functionality-first direction.
 
 * TODO [#D] Resolve the non-blocking fess findings of subtask PD3
 :PROPERTIES:
@@ -21301,7 +21337,7 @@ including its explicit v3 invocation compatibility behavior.
 :LABELS:   ["p6","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-02 Fri 08:12]
+:MODIFIED: [2026-10-02 Fri 08:28]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-032
 :SOURCE_REPO: agent-cat
@@ -21400,6 +21436,13 @@ until WM-039 supplies it.
     "author": "johnw",
     "text": "Subtask PD27 (2026-10-02, WM-032 part 3) extends the mode emacs-service-lifecycle of manager/test/service_http.py and the lifecycle case of ci/emacs-ui.py of agent-workflows emacs-native, driven only by keys. At 80x24 it creates a fork child of the first run and a restart child of the cancelled second run, each approved after its exact review, and exports the fork child's result with its receipt and a verified download. With the restart child's view open at its question, the harness kills the manager. The view shows Delivery: unreachable without a key, then reconnects without a key after the new manager lifetime and shows Delivery: poll and Supervision: lost. Emacs quits (C-x C-c) while a third run waits at its question. A second Emacs with the same profile finds the question still pending with Supervision: owned, and C-x k kills the view. The harness checks each step through HTTP, the command receipts and the coordination listing: the command ids match across the outage and only the next create and setup follow it, and no cancel or answer names the waiting run at the quit, at the kill or at the end. Evidence (PD/PD27/impl-r1 in the private resume-20260923 directory): BUILD exit 0, emacs-service-lifecycle exit 0 with 41 PASS lines at N8 (fess reran it on the final files with the same result), emacs-service-broken-answer exit 1 with 'JOURNEY-ASSERT Emacs answer is JSON false', and the journey passed at N8. Fess pd-PD27-r1 not blocking. Its three low findings are filed as acat-pd27-fess-followup-1ueu. No Lisp file changed. WM-032 stays open for closeout review.",
     "created_at": "2026-10-02T15:12:12Z"
+  },
+  {
+    "id": 622,
+    "issue_id": "acat-wm-032-eh4r",
+    "author": "johnw",
+    "text": "Subtask PD28 (2026-10-02, Phase D gate part 1) ran each gate step once on the final agent-cat tree at 832ea3d3 with no code change: make -C doc check, ALLBUILD, tui-model-test at +RTS -N1 and -N8, JOURNEY-PAIR(pdgate) at N1 and N8, the three N8 negative controls (tui-journey-broken-answer with 'JOURNEY-ASSERT typed answer is not JSON false', tui-consent-control with 'detail-view key approved a review', tui-flow-approve-fault with its literal storage-unavailable refusal), and at N8 the owner checks touched by PD3 and PD4: manager-command-check with command_contract.py and credential_cli.py, manager-store-check main, manager-draft-check with draft_contract.py, manager-history-check, manager-admission-check main and manager-approval-check main with approval_contract.py. Every step passed, or failed only as its recorded control. No defect was found, so nothing was fixed or rerun. Evidence: PD/PD28/impl-r1 in the private resume-20260923 directory, a .log and a .exit file for each of the 14 steps. Fess pd-PD28-r1 not blocking. Its two low evidence findings are filed as acat-pd28-fess-followup-azam.",
+    "created_at": "2026-10-02T15:28:56Z"
   }
 ]
 #+end_src
