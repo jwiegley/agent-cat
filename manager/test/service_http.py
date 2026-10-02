@@ -74,7 +74,7 @@ consent_control = len(sys.argv) == 6 and sys.argv[5] == "tui-consent-control"
 # runs one manager lifetime and does not enter the restart loop.
 LIFECYCLE = "credential-lifecycle"
 lifecycle = len(sys.argv) == 6 and sys.argv[5] == LIFECYCLE
-mixed = len(sys.argv) == 6 and sys.argv[5] in ("mixed", "mixed-confirm", "tui-approval", "tui-consent-control", APPROVE_FAULT, LIFECYCLE, "pages", "routes", "failures-worker", "failures-manager", "failures-launched", "storage", "pi-client", "pi-client-controls", "emacs-client", "emacs-client-controls", "pi-host-smoke", "pi-host", "pi-host-broken-answer", "pi-host-model", "pi-host-model-decline") + JOURNEYS
+mixed = len(sys.argv) == 6 and sys.argv[5] in ("mixed", "mixed-confirm", "tui-approval", "tui-consent-control", APPROVE_FAULT, LIFECYCLE, "pages", "routes", "failures-worker", "failures-manager", "failures-launched", "storage", "pi-client", "pi-client-controls", "emacs-client", "emacs-client-controls", "pi-host-smoke", "pi-host", "pi-host-broken-answer", "pi-host-model", "pi-host-model-decline", "emacs-service", "emacs-service-broken-answer") + JOURNEYS
 confirm_uncertain = mixed and sys.argv[5] == "mixed-confirm"
 # The boundary mode checks WM-024 through the running protected manager with
 # raw socket and ssl connections: plaintext and TLS 1.2 refusal, request
@@ -857,6 +857,86 @@ if emacs_client_mode or sys.argv[5:] == [EMACS_CLIENT_CONTROLS]:
         raise SystemExit(f"The {sys.argv[5]} mode needs WF_EMACS_DIR, the emacs directory of agent-workflows, and WF_EMACS_DIR is unset.")
     if not os.path.isfile(os.path.join(emacs_directory, "wf-manager-live.el")):
         raise SystemExit(f"The {sys.argv[5]} mode needs wf-manager-live.el in WF_EMACS_DIR, and {emacs_directory} has no such file.")
+# The emacs-service mode is the human path of the service mode of wf.el in an
+# actual Emacs. It starts the manager with the mixed fixture, the one profile
+# profile_1 and one execution reservation, and issues through TuiModeFixture
+# the client credential emacs with the scopes observe, submit, control and
+# export, its client profile, and the credential of the harness. It then runs
+# python3 WF_EMACS_UI --service with that client profile and a report path,
+# where WF_EMACS_UI is ci/emacs-ui.py of agent-workflows. That script starts
+# EMACS -Q -nw in a private pseudo-terminal at 80x24, with a new HOME and
+# wf.el, wf-manager.el and wf-service.el of WF_EMACS_DIR loaded, and drives
+# the journey only by keys: wf-service selects the profile, wf-run opens the
+# setup form of mixed-controls, EMACS_SERVICE_LITERAL is typed and submitted,
+# the exact review is approved with a and yes, wf-runs opens the run view, a
+# opens the answer editor of the question, where EMACS_SERVICE_ANSWER is
+# typed and sent, c sends the offered retry of the recovery decision, the
+# view shows terminal success and the verified result, r saves that result
+# to a new file, wf-local closes the session and C-x C-c ends Emacs. The two
+# heads are handled in the order that the manager presents them. The setup
+# form, the review and the answer editor each pass through 40x12, 140x36 and
+# 80x24 with their text kept. The script prints one PASS line for each step
+# and writes a report whose version is EMACS_SERVICE_REPORT_VERSION. The
+# environment of the script is built from EMACS_ALLOWLIST. While the script
+# runs, the harness only reads.
+#
+# The harness then checks the report against its own reads, and each step
+# prints its own PASS line:
+#
+# 1. The one request of profile_1 and mixed-controls supplied exactly
+#    EMACS_SERVICE_LITERAL, its one enqueue command reached its effect, and
+#    the setup form showed the literal at each size.
+# 2. The review buffer showed the preparation of the request with each
+#    approval selector and the program hash that the harness reads, and its
+#    text was the same at each size.
+# 3. The one approve command of the preparation was accepted, the
+#    preparation is consumed with the selectors of the review, and the
+#    request names the run of the report.
+# 4. The snapshot publishes the answer of the question as the rendered false
+#    answer no, and the run store records the answer as JSON false, or the
+#    mode fails with the literal message EMACS_SERVICE_FALSE. The answer
+#    editor showed the typed answer at each size.
+# 5. The one retry command of the run reached its effect.
+# 6. The run succeeded, and the last lines of the view show the size and the
+#    SHA-256 of the verified result that the harness downloads.
+# 7. The saved file has mode 0600 and holds exactly the bytes of the harness
+#    download.
+# 8. Emacs ended with exit status 0, and the terminal attributes after its
+#    exit equal the attributes before its start.
+# 9. After the manager stops, no descendant process of the harness remains
+#    and no process names the fixture directory, and the harness removes the
+#    credential files, the client profile and the Emacs home directory.
+#
+# It runs one manager lifetime. The mode fails with one sentence when EMACS,
+# WF_EMACS_DIR or WF_EMACS_UI is unset or names no usable file.
+#
+# The emacs-service-broken-answer control follows the emacs-service mode but
+# types true at the question. It must fail with the literal message of
+# step 4.
+EMACS_SERVICE = "emacs-service"
+EMACS_SERVICE_BROKEN = "emacs-service-broken-answer"
+emacs_service_mode = len(sys.argv) == 6 and sys.argv[5] in (EMACS_SERVICE, EMACS_SERVICE_BROKEN)
+EMACS_SERVICE_ANSWER = "true" if len(sys.argv) == 6 and sys.argv[5] == EMACS_SERVICE_BROKEN else "false"
+# SERVICE_LITERAL and SERVICE_REPORT_VERSION of ci/emacs-ui.py state them.
+EMACS_SERVICE_LITERAL = "Emacs service λ: Café ✓ 雪 exact literal"
+EMACS_SERVICE_REPORT_VERSION = 1
+EMACS_SERVICE_FALSE = "JOURNEY-ASSERT Emacs answer is JSON false"
+if emacs_service_mode:
+    emacs_program = os.environ.get("EMACS", "")
+    emacs_directory = os.environ.get("WF_EMACS_DIR", "")
+    emacs_ui = os.environ.get("WF_EMACS_UI", "")
+    if not emacs_program:
+        raise SystemExit(f"The {sys.argv[5]} mode needs EMACS, the Emacs executable, and EMACS is unset.")
+    if not (os.path.isfile(emacs_program) and os.access(emacs_program, os.X_OK)):
+        raise SystemExit(f"The {sys.argv[5]} mode needs EMACS, the Emacs executable, and {emacs_program} is not an executable file.")
+    if not emacs_directory:
+        raise SystemExit(f"The {sys.argv[5]} mode needs WF_EMACS_DIR, the emacs directory of agent-workflows, and WF_EMACS_DIR is unset.")
+    if not os.path.isfile(os.path.join(emacs_directory, "wf-service.el")):
+        raise SystemExit(f"The {sys.argv[5]} mode needs wf-service.el in WF_EMACS_DIR, and {emacs_directory} has no such file.")
+    if not emacs_ui:
+        raise SystemExit(f"The {sys.argv[5]} mode needs WF_EMACS_UI, the ci/emacs-ui.py file of agent-workflows, and WF_EMACS_UI is unset.")
+    if not os.path.isfile(emacs_ui):
+        raise SystemExit(f"The {sys.argv[5]} mode needs WF_EMACS_UI, the ci/emacs-ui.py file of agent-workflows, and {emacs_ui} is not a file.")
 # The Pi host modes start the built Pi fork in a pseudo-terminal through the
 # shared launcher PiHost. The launcher reuses the credential issuance of
 # TuiModeFixture with the mixed fixture, one profile and one execution
@@ -1928,6 +2008,7 @@ if endpoints_mode:
 tui_fixture = (TuiModeFixture(*TUI_MODES[tui_mode]) if tui_mode else
                client_controls_fixture(CLIENT_CONTROLS_MODES[sys.argv[5]]) if client_controls_mode else
                TuiModeFixture(["profile_1"], ["observe", "submit", "control", "export"], client="pi") if pi_client_mode or pi_host_smoke_mode or pi_host_mode or pi_host_model_mode else
+               TuiModeFixture(["profile_1"], ["observe", "submit", "control", "export"], client="emacs") if emacs_service_mode else
                TuiModeFixture(["profile_1", "profile_2"], ["observe", "submit", "control", "export"], client="emacs") if emacs_client_mode else None)
 configuration["administrationRoot"] = str(work / "admin")
 config.write_text(json.dumps(configuration))
@@ -12522,6 +12603,187 @@ def pi_host_checks():
         process.wait(timeout=25)
 
 
+def emacs_service_checks():
+    """The emacs-service and emacs-service-broken-answer modes. See
+    EMACS_SERVICE for the steps."""
+    harness = tui_fixture.harness
+    mode = sys.argv[5]
+    selectors = ("reviewDigest", "requestRevision", "profileRevision", "descriptorRevision", "processGeneration")
+    artifacts = work / "emacs-service"
+    report_path = work / "emacs-service-report.json"
+    with (work / "server-0.stdout").open("wb") as output, (work / "server-0.stderr").open("wb") as errors:
+        process = subprocess.Popen([str(runner), "--manager", "serve", "--config", str(config),
+                                    "+RTS", "-N" + native, "-RTS"], stdout=output, stderr=errors)
+    try:
+        wait_ready(process)
+        status, capabilities, _ = request("/v1/capabilities", harness)
+        assert status == 200, ("capabilities", status)
+        status, profiles, _ = request("/v1/profiles", harness)
+        assert status == 200 and [item["id"] for item in profiles["items"]] == ["profile_1"], ("profiles", status)
+        status, catalogue, _ = request("/v1/workflows?profileId=profile_1", harness)
+        assert status == 200, ("catalogue", status)
+        workflow = next(item for item in catalogue["items"] if item["name"] == "mixed-controls")
+        status, overview, _ = request("/v1/snapshot", harness)
+        assert status == 200 and not overview["items"], ("the overview is not empty before the journey", status)
+        cursor = overview["cursor"]
+        client = mixed_client(capabilities, harness)
+        observed = client[0]
+        environment = {name: os.environ[name] for name in EMACS_ALLOWLIST if name in os.environ}
+        command = [sys.executable, "-B", emacs_ui, "--service", str(tui_fixture.client_profile), str(report_path),
+                   "--service-answer", EMACS_SERVICE_ANSWER, "--emacs", emacs_program,
+                   "--source", os.path.join(emacs_directory, "wf.el"), "--artifacts", str(artifacts)]
+        with harness_reads_only():
+            completed = subprocess.run(command, env=environment, stdin=subprocess.DEVNULL, timeout=840)
+        report = json.loads(report_path.read_bytes()) if report_path.exists() else {"steps": []}
+        assert completed.returncode == 0, ("the Emacs service journey of " + emacs_ui + " failed", completed.returncode, report["steps"])
+        assert report["version"] == EMACS_SERVICE_REPORT_VERSION, (
+            f"The {mode} mode requires report version {EMACS_SERVICE_REPORT_VERSION}, and {emacs_ui} wrote version {report['version']}.")
+        assert report["steps"] == ["1", "2", "3", "4", "5", "6a", "6b", "7", "8", "9"], ("the steps of the journey", report["steps"])
+        assert report["literal"] == EMACS_SERVICE_LITERAL and report["answer"] == EMACS_SERVICE_ANSWER, (
+            "the report names another literal or answer", report["literal"], report["answer"])
+        run = report["run"]
+        base = "/v1/runs/" + run
+        receipts = [receipt for _, receipt in command_receipts(cursor, harness)]
+
+        # 1. The request and its literal.
+        status, listed, _ = request("/v1/requests", harness)
+        assert status == 200 and len(listed["items"]) == 1, ("the requests of the journey", status, listed.get("items"))
+        created = listed["items"][0]
+        request_uri = created["links"]["self"]
+        assert created["id"] == report["reviewRequest"] and created["profileId"] == "profile_1" and created["workflowId"] == workflow["id"], (
+            "the request names another identifier, profile or workflow", created["id"], created["profileId"], created["workflowId"])
+        assert created["readiness"]["supplied"] == [{"name": "input", "source": "literal", "value": EMACS_SERVICE_LITERAL}], (
+            "the request did not supply exactly the typed literal", created["readiness"]["supplied"])
+        enqueues = [receipt for receipt in receipts if receipt["operation"] == "enqueue" and receipt["resource"] == request_uri]
+        assert len(enqueues) == 1 and enqueues[0]["state"] == "effect-observed", ("the enqueue command", enqueues)
+        sizes = [item["size"] for item in report["setupTexts"]]
+        assert sizes == ["40x12", "140x36", "80x24"] and all(EMACS_SERVICE_LITERAL in item["text"] for item in report["setupTexts"]), (
+            "the setup form did not keep the literal at each size", sizes)
+        print("PASS emacs-service 1: wf-service and wf-run chose profile_1 and", workflow["name"], "by keys, request", created["id"],
+              "supplied exactly the typed literal", repr(EMACS_SERVICE_LITERAL) + ", its one enqueue command reached its effect,",
+              "and the setup form kept the literal at", ", ".join(sizes), flush=True)
+
+        # 2. The exact review.
+        preparation_uri = "/v1/preparations/" + report["reviewPreparation"]
+        preparation, _, _ = observed(preparation_uri, "Preparation")
+        text = report["reviewText"]
+        assert f"Review of request {created['id']}, preparation {preparation['id']}" in text, ("the review names another preparation", text[:2000])
+        assert all(f"  {name}: {preparation[name]}\n" in text for name in selectors) \
+            and f"Program SHA-256: {preparation['review']['programHash']}\n" in text \
+            and f"Workflow: {workflow['id']}\n" in text and "Profile: profile_1\n" in text, (
+            "the review buffer does not show the exact review", text[:2000])
+        assert [item["size"] for item in report["reviewTexts"]] == sizes and all(item["text"] == text for item in report["reviewTexts"]), (
+            "the review changed at a resize")
+        print("PASS emacs-service 2: the review buffer showed preparation", preparation["id"], "with review digest", preparation["reviewDigest"],
+              "and each approval selector that the harness reads, the same at", ", ".join(sizes), flush=True)
+
+        # 3. The approval.
+        approvals = [receipt for receipt in receipts if receipt["operation"] == "approve" and receipt["resource"] == preparation_uri]
+        assert len(approvals) == 1 and approvals[0]["state"] not in ("refused", "unresolved"), ("the approve command of the review", approvals)
+        assert preparation["state"] == "consumed", ("the approved preparation", preparation["state"])
+        associated, _, _ = observed(request_uri, "Request")
+        assert associated["runId"] == run, ("the request names another run", associated["runId"], run)
+        assert preparation["reviewDigest"] in report["approvePrompt"], ("the confirmation does not name the review digest", report["approvePrompt"])
+        print("PASS emacs-service 3: a and yes sent the one approve command of preparation", preparation["id"], "after the confirmation",
+              "with its review digest, and request", created["id"], "names run", run, flush=True)
+
+        # 4. The answer of the question.
+        question, recovery = report["question"], report["recovery"]
+        # The manager serves only pending decisions, so the run store names
+        # the occurrence of the person question.
+        entries = [entry for path in work.glob("manager/runs/runs/*/runtime/answers.json")
+                   for entry in json.loads(path.read_bytes())["answers"]
+                   if (entry["question"].get("prompt") or "").startswith("Independent confirmation? " + EMACS_SERVICE_LITERAL)]
+        assert len(entries) == 1, ("the run store holds no single answer of the person question", len(entries))
+        occurrence = entries[0]["occurrenceId"]
+        recorded = [entry["answer"] for entry in entries]
+        snapshot, _, _ = observed(base + "/snapshot", "RunSnapshot")
+        item = next(value for value in snapshot["items"] if value["occurrenceId"] == occurrence)
+        # The snapshot publishes a flag answer as its rendered text, "no" for
+        # false and "yes" for true.
+        assert item["code"] == "flag" and {"no": False, "yes": True}.get(item["answer"], item["answer"]) is False \
+            and recorded == [False], (EMACS_SERVICE_FALSE, item["answer"], recorded)
+        assert [entry["size"] for entry in report["answerTexts"]] == sizes and all(
+            entry["text"] == EMACS_SERVICE_ANSWER for entry in report["answerTexts"]), ("the answer editor lost the typed answer at a resize")
+        answers = [receipt for receipt in receipts if receipt["operation"] == "answer"]
+        assert len(answers) == 1 and answers[0]["resource"] == "/v1/decisions/" + question \
+            and answers[0]["state"] == "effect-observed", ("the answer command", answers)
+        print("PASS emacs-service 4: a and the typed answer", EMACS_SERVICE_ANSWER, "reached question", question + ", kept at",
+              ", ".join(sizes) + ", the snapshot publishes the rendered false answer no, and the run store records JSON false", flush=True)
+
+        # 5. The retry.
+        retries = [receipt for receipt in receipts if receipt["operation"] == "retry"]
+        assert len(retries) == 1 and retries[0]["resource"] == base + "/control" and retries[0]["state"] == "effect-observed", (
+            "the retry command", retries)
+        assert sorted(report["kinds"]) == ["question", "recovery"] and report["heads"] == [
+            question if kind == "question" else recovery for kind in report["kinds"]], ("the handled heads", report["heads"], report["kinds"])
+        print("PASS emacs-service 5: c sent the one offered retry of recovery decision", recovery + ", and its command reached its effect.",
+              "The heads came in the order", " then ".join(report["kinds"]), flush=True)
+
+        # 6. Terminal success and the verified result.
+        snapshot, _, _ = observed(base + "/snapshot", "RunSnapshot")
+        assert snapshot["runtime"] is not None and snapshot["runtime"]["status"] == "succeeded", ("the run did not succeed", snapshot["runtime"])
+        artifact = verified_download(run, client, harness)
+        assert report["finalLines"][-3:] == ["Terminal: succeeded", "Result: verified " + str(int(artifact["bytes"])) + " bytes",
+                                             "Result SHA-256: " + artifact["sha256"]], ("the last lines of the view", report["finalLines"][-3:])
+        print("PASS emacs-service 6: run", run, "succeeded, and its view showed the verified result of", artifact["bytes"],
+              "bytes with the SHA-256", artifact["sha256"], "of the harness download", flush=True)
+
+        # 7. The saved result.
+        saved_path = Path(report["savedPath"])
+        saved = saved_path.read_bytes()
+        assert stat.S_IMODE(os.lstat(saved_path).st_mode) == 0o600, ("the saved file mode", oct(os.lstat(saved_path).st_mode))
+        assert saved == (work / "verified-result.json").read_bytes() and len(saved) == int(artifact["bytes"]) \
+            and hashlib.sha256(saved).hexdigest() == artifact["sha256"], "the saved bytes differ from the harness download"
+        print("PASS emacs-service 7: r saved the", len(saved), "verified bytes of run", run, "to", saved_path,
+              "with mode 0600, the size, the SHA-256 and the exact bytes of the harness download", flush=True)
+
+        # 8. The terminal.
+        assert report["exitStatus"] == 0 and report["terminalAfter"] == report["terminalBefore"], (
+            "the terminal attributes after Emacs", report["exitStatus"])
+        print("PASS emacs-service 8: C-x C-c ended Emacs with exit status 0, and the terminal attributes after its exit equal",
+              "the attributes before its start", flush=True)
+    finally:
+        if process.poll() is None:
+            process.terminate()
+        process.wait(timeout=25)
+
+    # 9. No child remains, and the fixture secrets and homes are removed.
+    # One listing gives the descendants of the harness and the processes
+    # whose command names the fixture directory, apart from the listing
+    # itself, the harness and its ancestors.
+    listing = subprocess.Popen(["ps", "-Ao", "pid=,ppid=,command="], stdout=subprocess.PIPE, text=True)
+    rows = [line.split(None, 2) for line in listing.communicate(timeout=10)[0].splitlines()]
+    assert listing.returncode == 0, "the process listing failed"
+    parents = {int(row[0]): int(row[1]) for row in rows}
+    ancestors, pid = set(), os.getpid()
+    while pid in parents and pid not in ancestors:
+        ancestors.add(pid)
+        pid = parents[pid]
+    below, grown = {os.getpid()}, True
+    while grown:
+        grown = False
+        for row in rows:
+            if int(row[1]) in below and int(row[0]) not in below:
+                below.add(int(row[0]))
+                grown = True
+    remaining = [row for row in rows if int(row[0]) != listing.pid and int(row[0]) not in ancestors and (
+        int(row[0]) in below or (len(row) == 3 and str(work) in row[2]))]
+    assert not remaining, ("a child of the journey remains", remaining)
+    removed = [work / "credential"] + sorted(work.glob("credential-*")) + [tui_fixture.client_profile] + sorted(artifacts.glob("*/home"))
+    for path in removed:
+        if path.is_dir():
+            shutil.rmtree(path)
+        else:
+            path.unlink()
+    assert not any(path.exists() for path in removed), "a fixture credential or home remains"
+    print("PASS emacs-service 9: no Emacs, url or fixture process remains after the manager stopped, and the harness removed",
+          len(removed), "credential, client profile and home paths", flush=True)
+    print(f"PASS {mode}: Emacs selected the profile, set up, reviewed and approved mixed-controls, answered JSON false, sent the",
+          "offered retry, followed the run to terminal success and saved the verified result, driven only by keys at 80x24",
+          "with resizes to 40x12 and 140x36", flush=True)
+
+
 def storage_checks():
     """The storage-error endings through four lifetimes of the real HTTPS
     manager. Each numbered case prints one PASS line."""
@@ -12954,6 +13216,11 @@ if pi_host_smoke_mode:
 
 if pi_host_mode or pi_host_model_mode:
     pi_host_checks()
+    raise SystemExit(0)
+
+
+if emacs_service_mode:
+    emacs_service_checks()
     raise SystemExit(0)
 
 
