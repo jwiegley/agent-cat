@@ -8462,6 +8462,25 @@ Follow-up from the F15 fess audit of the journey flow assertions and the approve
 
 The STORAGE.md sentence that claimed the manager log ends with the shutdown notice, and the handoff description of tui-journey, were corrected when F15 landed.
 
+* TODO [#D] Resolve the non-blocking fess findings of subtask PD10
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-j1ja
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-02 Fri 00:09]
+:MODIFIED: [2026-10-02 Fri 00:09]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess audit fess/pd-PD10-r1.md (2026-10-02) on subtask PD10 (Emacs draft, request and preparation decoders, agent-workflows emacs-native commit 47cc92e).
+
+1. (low) emacs/wf-manager-tests.el:20 and wf-manager-tests--resource-section at :600. The header comment says that a failure names each vector that does not give its stated result. The resource vector tests put should inside the dolist, so they stop at the first failing vector and name only that one. Fix: make wf-manager-tests--resource-section collect every failing label, as wf-manager-tests--wrong does, or change the header comment to say that a resource test names the first failing vector.
+2. (low) emacs/wf-manager.el:1743 (wf-manager--overview-kinds) and :1751 (wf-manager--parse-overview-member). The overview member decoder handles only the request and preparation kinds. The manager also serves run and decision members, so a real overview page with those members refuses them. The gap is documented. Fix: add the run and decision member decoders, with their resources.runs and resources.decisions vector tests, to wf-manager--overview-kinds.
+
 * DONE [#C] Verdict.render/objections defined three times across strata — close the library gap in Question.lean
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -20513,7 +20532,7 @@ coordination or SQL into the TUI.
 :LABELS:   ["p6","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-01 Thu 23:58]
+:MODIFIED: [2026-10-02 Fri 00:09]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-030
 :SOURCE_REPO: agent-cat
@@ -20607,6 +20626,13 @@ separately tested rather than inferred from one newer Emacs build.
     "author": "johnw",
     "text": "PD9 (WM-030 part 2) is committed as 8fe8c73 on the emacs-native branch of agent-workflows (not pushed). emacs/wf-manager.el now has an exact JSON codec (false :false, null :null, absent nil, numbers kept as source text, byte bound of 1048576 checked before parsing, compact UTF-8 encoding in UTF-16 key order) and decoders for invalidations, invalidation events, event batches, route records, cursors, entity tags and problem responses after ext-pi/src/manager/events.ts. Evidence: ci/emacs.sh with WF_MANAGER_VECTORS set to test/manager_client_vectors.json exited 0 (4 passes over 4 files, clean byte compilation, silent checkdoc, smoke 38 of 38, transport ERT 20 of 20). Every vector of events.invalidations, batches, routeRecords, cursors, etags and problems passed. Fess pd-PD9-r1 is not blocking; findings filed as a follow-up. Open in WM-030: the SSE parser, block decoders, HTTP requests and the wf.el connection.\n",
     "created_at": "2026-10-02T06:58:04Z"
+  },
+  {
+    "id": 598,
+    "issue_id": "acat-wm-030-t2l4",
+    "author": "johnw",
+    "text": "PD10 (WM-030 part 3): agent-workflows emacs-native commit 47cc92e adds typed decoders and encoders in emacs/wf-manager.el for resources.drafts (39 vectors), resources.requests (11) and resources.preparations (40) of test/manager_client_vectors.json, following ext-pi/src/manager/resources.ts. The draft record carries the queue position and blocking reasons, supplied inputs carry the capture selector, and the preparation record carries the review digest. Evidence scope: ci/emacs.sh passed under timeout 900 with 4 passes over 4 files (byte-compile clean, checkdoc silent, smoke 38 of 38, transport ERT 26 of 26), and the independent fess rerun also exited 0. Projected and refused tallies match the TypeScript test (12/27, 4/7, 13/27). A weakened-control run failed and named the vector. Fess non-blocking, two low findings filed as acat-j1ja. Limitation: the overview member decoder refuses run and decision kinds until their decoders exist. WM-030 stays open.",
+    "created_at": "2026-10-02T07:09:56Z"
   }
 ]
 #+end_src
