@@ -61,6 +61,62 @@ missing.
 agent-cat owns `ext-pi` and its manager client. The Pi owner owns the host. The
 fork is built for this extension and is not edited by agent-cat work.
 
+## Host acceptance
+
+The `pi-host-smoke` mode of `manager/test/service_http.py` accepts the host.
+It starts the built fork in a pseudo-terminal against a running protected
+manager, and it uses no paid provider and no network outside `127.0.0.1`.
+The shared launcher `PiHost` of the harness starts Pi with this command, from
+the repository root and with `node` from `PATH`:
+
+```sh
+node ext-pi/node_modules/@earendil-works/pi-coding-agent/dist/cli.js \
+  --offline --no-extensions --no-skills --no-prompt-templates --no-themes \
+  --no-context-files --approve \
+  -e ext-pi/src/index.ts -e ext-pi/test/fixtures/faux-model.ts \
+  --provider agent-cat-faux --model faux-1
+```
+
+The launcher builds the environment of Pi from an allowlist and not from the
+environment of the harness. It passes `PATH`, `TERM`, `LANG`, `LC_ALL`,
+`TMPDIR`, `USER`, `LOGNAME` and `SHELL`. It sets `HOME` and
+`PI_CODING_AGENT_DIR` to new directories of the fixture, `PI_TELEMETRY` to
+0, `AGENT_CAT_MANAGER_PROFILES` to a JSON array that holds the client
+profile, `AGENT_CAT_STATE_DIR` to a directory of the fixture, and
+`AGENT_CAT_FAUX_SCRIPT` to the faux script file. No provider key reaches Pi.
+Pi needs no `settings.json` in the new configuration directory, and it
+shows no first-run screen.
+
+`test/fixtures/faux-model.ts` is a Pi extension that registers the local
+provider `agent-cat-faux` with the model `faux-1` through
+`pi.registerProvider` and a `streamSimple` function. It builds its replies
+with the faux helpers of `@earendil-works/pi-ai` and makes no network
+request. `AGENT_CAT_FAUX_SCRIPT` names the script file, and the extension
+refuses to load without it. An empty file gives fixed text replies: reply N
+is `agent-cat faux reply N`. Otherwise the file holds a JSON array of
+replies, and Pi receives them in order, one for each model call. A reply is
+one block or an array of blocks. A block is `{"text": TEXT}` or
+`{"toolCall": {"name": NAME, "arguments": OBJECT}}`, with an optional `id`
+in the tool call. A reply with a tool call stops with `toolUse`. After the
+last scripted reply, the fixed text replies continue.
+`test/faux-model.test.ts` checks the script rules and the registered stream.
+
+The host is accepted when each of these steps passes:
+
+1. The environment of the running Pi process holds `PI_TELEMETRY=0` and no
+   variable whose name ends in `_API_KEY` or starts with `AWS_`.
+2. Pi lists ext-pi and the faux extension as loaded, shows the faux model,
+   and notifies the connection to the manager endpoint.
+3. `/wfm-status` shows the connection to that endpoint with delivery `live`.
+4. One prompt gives the reply `agent-cat faux reply 1` on the screen, and the
+   session file of the new configuration directory records that reply from
+   `agent-cat-faux/faux-1`.
+5. `/quit` ends Pi with exit status 0 and the terminal modes restored.
+6. The modification times of `.pi`, `.pi/agent/sessions` and the session
+   directory of the working directory do not change under the `HOME` of the
+   harness and under the home directory of the account, and an absent
+   directory stays absent.
+
 ## Manager client
 
 `src/manager/` holds the TypeScript manager client. It states the behavior of
@@ -1259,6 +1315,9 @@ the HTTPS harness. From the repository root, with a built
 ```sh
 python3 -B manager/test/service_http.py "$PWD" "$(mktemp -d)" "$(bash test/cabal.sh list-bin -ftui-tests routing-fixed-point-probe)" 8 pi-client
 ```
+
+The host acceptance of the section "Host acceptance" runs in the same way
+with the mode `pi-host-smoke`.
 
 Remote discovery and control use Pi's Chord `SessionDirectory`,
 `SessionManagement`, `AgentController`, and `Transcript` services. Boundary

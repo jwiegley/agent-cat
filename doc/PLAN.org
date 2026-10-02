@@ -11467,6 +11467,42 @@ parses to {}. Fix: mark it optional (required when the workflow declares inputs)
 string contains a semicolon, and the kind ?? "retry" and lineageOperation ?? "restart" fallbacks
 cannot run after needs(). Fix: reword the string and narrow the type explicitly.
 
+* TODO [#D] Resolve the non-blocking fess findings of subtask PE23
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pe23-fess-followup-5uku
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-01 Thu 18:10]
+:MODIFIED: [2026-10-01 Thu 18:10]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess audit fess/pe-PE23-r1.md (2026-10-01) on subtask PE23 (WM-038
+foundation: faux provider and isolated Pi-host launch smoke check).
+
+1. (low) manager/test/service_http.py near 9915-9929 (pi_home_marks): the real-home check compares
+only the directory mtimes of .pi, .pi/agent/sessions and the session directory for this working
+directory. A leaked Pi that rewrote an existing file such as .pi/agent/settings.json, auth.json or
+models.json, or wrote a session under another slug, would not be detected. The implementer
+disclosed this: the operator's own Pi writes to .pi/agent during runs. Fix: add the mtimes (or
+absence) of the individual files under .pi/agent that a leaked Pi would create, if those files are
+stable during a run.
+2. (low) test/tui_probe.py near 141-145: TerminalScreen._csi now ignores every CSI sequence whose
+parameters are not [0-9;]* or that starts with <, = or >, for all TuiSession callers. A
+cursor-moving sequence in colon form is dropped without notice. Fix (optional): ignore only
+sequences whose final byte the emulator does not model, or count the ignored sequences so that a
+test can assert on the count.
+3. (low) manager/test/service_http.py near 9944-9947: step 1 of pi-host-smoke asserts on
+pi.environment, the dict that the harness itself built. The ps eww check that follows reads the
+real process environment, so the step is not vacuous. Fix (optional): drop the dict assertions or
+label them as preconditions.
+4. (low) test/tui_probe.py line 146: a space was dropped in 'values =[int(value) ...'. Fix: restore
+'values = [int(value) ...'.
+
 * TODO [#D] Resolve PE3 fess findings in owner-released quarantine evidence
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -20712,7 +20748,7 @@ check fail.
 :LABELS:   ["p8","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-01 Thu 17:55]
+:MODIFIED: [2026-10-01 Thu 18:10]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-036
 :SOURCE_REPO: agent-cat
@@ -20865,6 +20901,13 @@ invocation tuples or exposing secrets.
     "author": "johnw",
     "text": "PE22 uses the ManagerSession and transport of WM-036 for the agent_cat_workflow service actions. No transport change.",
     "created_at": "2026-10-02T00:55:37Z"
+  },
+  {
+    "id": 566,
+    "issue_id": "acat-wm-036-5ndj",
+    "author": "johnw",
+    "text": "PE23 (2026-10-01): ext-pi/README.md documents host acceptance through the pi-host-smoke mode of manager/test/service_http.py (built Pi fork in a PTY, isolated HOME, faux provider, manager live). See acat-wm-038-mgb7 for the evidence scope.",
+    "created_at": "2026-10-02T01:10:35Z"
   }
 ]
 #+end_src
@@ -21007,7 +21050,7 @@ verified output, and lineage behave consistently with the other clients.
 :LABELS:   ["p8","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-01 Thu 17:55]
+:MODIFIED: [2026-10-01 Thu 18:10]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-038
 :SOURCE_REPO: agent-cat
@@ -21109,6 +21152,13 @@ WM-008 completed handoff 2026-09-12T02:36:23+00:00: Adopt the shared root-role r
     "author": "johnw",
     "text": "PE22: the pi-client live check now drives tool manager-start (confirmed review produces one approve, declined review produces none), tool manager-answer with JSON false, and tool manager-control retry, and asserts that the tool and human paths reach the same manager transitions (set-input, enqueue, approve, answer, retry). Real-host acceptance stays with WM-038.",
     "created_at": "2026-10-02T00:55:36Z"
+  },
+  {
+    "id": 565,
+    "issue_id": "acat-wm-038-mgb7",
+    "author": "johnw",
+    "text": "PE23 (foundation, 2026-10-01): ext-pi/test/fixtures/faux-model.ts registers a deterministic local faux provider (agent-cat-faux, model faux-1, script file named by AGENT_CAT_FAUX_SCRIPT, fixed replies on an empty script, no network). manager/test/service_http.py gains the shared PiHost launcher and the pi-host-smoke mode: the built Pi fork starts in a PTY through test/tui_probe.py TuiSession with an allowlist environment (isolated HOME and PI_CODING_AGENT_DIR, PI_TELEMETRY=0, AGENT_CAT_MANAGER_PROFILES as a JSON array, no provider API key), loads ext-pi and the faux provider, /wfm-status shows delivery live, a faux reply appears and /quit exits 0. Checks passed: npm run check, npm test, build, pi-host-smoke (PASS 1 to 6, rerun by fess), tui-overview, make -C doc check. Evidence: resume-20260923/PE/PE23/impl-r1. Fess not blocking; four low findings filed as acat-pe23-fess-followup-5uku. Scripted tool-call journeys remain for later WM-038 stages.",
+    "created_at": "2026-10-02T01:10:35Z"
   }
 ]
 #+end_src

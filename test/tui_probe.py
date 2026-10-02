@@ -138,7 +138,12 @@ class TerminalScreen:
         private = parameters.startswith("?")
         if private:
             parameters = parameters[1:]
-        values = [int(value) if value else 0 for value in parameters.split(";")] if parameters else []
+        if parameters[:1] in ("<", "=", ">") or not re.fullmatch(r"[0-9;]*", parameters):
+            # Keyboard-protocol queries and modes (for example the CSI > 7 u
+            # of Pi), colon sub-parameters and intermediate bytes neither move
+            # the cursor nor change a cell.
+            return
+        values =[int(value) if value else 0 for value in parameters.split(";")] if parameters else []
         first = values[0] if values else 0
         self.wrap_pending = False
         if final in "Hf":
@@ -250,13 +255,17 @@ class TuiSession:
         command: list[str] | None = None,
         extra_environment: dict[str, str] | None = None,
         explicit_state: bool = True,
+        environment: dict[str, str] | None = None,
     ):
+        # environment replaces the copy of os.environ as the base of the child
+        # environment. TERM, the state variable and extra_environment still
+        # apply above it.
         self.master, self.slave = pty.openpty()
         self.before = termios.tcgetattr(self.slave)
         self.screen = TerminalScreen(rows, columns)
         os.set_blocking(self.master, False)
         fcntl.ioctl(self.slave, termios.TIOCSWINSZ, struct.pack("HHHH", rows, columns, 0, 0))
-        environment = os.environ.copy()
+        environment = dict(os.environ if environment is None else environment)
         environment["TERM"] = "xterm-256color"
         if explicit_state:
             environment["AGENT_CAT_STATE_DIR"] = str(state)
@@ -354,7 +363,9 @@ class TuiSession:
                 return status
         raise AssertionError("TUI did not exit before the timeout")
 
-    def assert_restored(self) -> None:
+    def assert_restored(self, alternate_screen: bool = True) -> None:
+        # A program that draws without the alternate screen, such as Pi,
+        # passes alternate_screen False.
         after = termios.tcgetattr(self.slave)
         pendin = getattr(termios, "PENDIN", 0)
         before_lflag = self.before[3] & ~pendin
@@ -362,7 +373,7 @@ class TuiSession:
         assert self.before[:3] == after[:3], (self.before, after)
         assert before_lflag == after_lflag, (self.before[3], after[3])
         assert self.before[4:] == after[4:], (self.before, after)
-        assert b"\x1b[?1049l" in self.output, ("alternate screen was not restored", len(self.output), bytes(self.output[-500:]))
+        assert not alternate_screen or b"\x1b[?1049l" in self.output, ("alternate screen was not restored", len(self.output), bytes(self.output[-500:]))
         assert b"\x1b[?25h" in self.output, ("cursor was not restored", len(self.output), bytes(self.output[-500:]))
 
     def close(self) -> None:

@@ -74,7 +74,7 @@ consent_control = len(sys.argv) == 6 and sys.argv[5] == "tui-consent-control"
 # runs one manager lifetime and does not enter the restart loop.
 LIFECYCLE = "credential-lifecycle"
 lifecycle = len(sys.argv) == 6 and sys.argv[5] == LIFECYCLE
-mixed = len(sys.argv) == 6 and sys.argv[5] in ("mixed", "mixed-confirm", "tui-approval", "tui-consent-control", APPROVE_FAULT, LIFECYCLE, "pages", "routes", "failures-worker", "failures-manager", "failures-launched", "storage", "pi-client") + JOURNEYS
+mixed = len(sys.argv) == 6 and sys.argv[5] in ("mixed", "mixed-confirm", "tui-approval", "tui-consent-control", APPROVE_FAULT, LIFECYCLE, "pages", "routes", "failures-worker", "failures-manager", "failures-launched", "storage", "pi-client", "pi-host-smoke") + JOURNEYS
 confirm_uncertain = mixed and sys.argv[5] == "mixed-confirm"
 # The boundary mode checks WM-024 through the running protected manager with
 # raw socket and ssl connections: plaintext and TLS 1.2 refusal, request
@@ -435,6 +435,40 @@ endpoints_mode = len(sys.argv) == 6 and sys.argv[5] == ENDPOINTS
 # stale-answer step, and the mode does not require TUI_CHECK. Each step prints its own PASS line. It runs one manager lifetime.
 PI_CLIENT = "pi-client"
 pi_client_mode = len(sys.argv) == 6 and sys.argv[5] == PI_CLIENT
+# The Pi host modes start the built Pi fork in a pseudo-terminal through the
+# shared launcher PiHost. The launcher reuses the credential issuance of
+# TuiModeFixture with the mixed fixture, one profile and one execution
+# reservation, and gives Pi the client profile of the credential pi. Pi runs
+# with node from PATH and the pi-coding-agent CLI that ext-pi/node_modules
+# links into the fork, with --offline, no discovered extension, skill,
+# prompt template, theme or context file, the trust of --approve, the
+# extensions ext-pi/src/index.ts and ext-pi/test/fixtures/faux-model.ts,
+# and the faux provider and model. The faux provider replies from the
+# script file that AGENT_CAT_FAUX_SCRIPT names and makes no network request.
+# The environment of Pi is built from an allowlist and not from the
+# environment of the harness: PATH, TERM, LANG, LC_ALL, TMPDIR, USER, LOGNAME
+# and SHELL, HOME and PI_CODING_AGENT_DIR set to new directories of the
+# fixture, PI_TELEMETRY 0, AGENT_CAT_MANAGER_PROFILES set to a JSON array that
+# holds the client profile, AGENT_CAT_STATE_DIR set to a directory of the
+# fixture, and AGENT_CAT_FAUX_SCRIPT. No provider key reaches Pi.
+#
+# The pi-host-smoke mode starts the manager and then Pi. The launcher must
+# have built the environment of the allowlist, and the environment of the
+# running Pi process, which ps shows, must hold PI_TELEMETRY=0 and no
+# variable whose name ends in _API_KEY or starts with AWS_. Pi must list
+# ext-pi and the faux extension as loaded, show the faux model, and notify
+# the connection to the manager endpoint. /wfm-status must then show the
+# connection to that endpoint with delivery live. One prompt must give the
+# first fixed faux reply on the screen, and the session file of the
+# isolated Pi configuration must record that reply from the faux provider
+# and model. /quit must end Pi with exit status 0 and the terminal modes
+# restored. The modification times of .pi, .pi/agent/sessions and the
+# session directory of the working directory under the HOME of the harness
+# and under the home directory of the account must not change, and an
+# absent directory must stay absent. Each step prints its own PASS line. It
+# runs one manager lifetime.
+PI_HOST_SMOKE = "pi-host-smoke"
+pi_host_smoke_mode = len(sys.argv) == 6 and sys.argv[5] == PI_HOST_SMOKE
 # The TUI modes share one fixture, TuiModeFixture. TUI_MODES names the
 # configured profiles of each mode and the scopes of its TUI credential.
 #
@@ -1306,7 +1340,7 @@ if endpoints_mode:
                         "scopes": scopes, "profileIds": ["profile_1"],
                         "expiresAt": "2999-01-01T00:00:00Z", "outputFile": str(work / ("credential-" + name))})
 tui_fixture = (TuiModeFixture(*TUI_MODES[tui_mode]) if tui_mode else
-               TuiModeFixture(["profile_1"], ["observe", "submit", "control", "export"], client="pi") if pi_client_mode else None)
+               TuiModeFixture(["profile_1"], ["observe", "submit", "control", "export"], client="pi") if pi_client_mode or pi_host_smoke_mode else None)
 configuration["administrationRoot"] = str(work / "admin")
 config.write_text(json.dumps(configuration))
 context = ssl.create_default_context(cafile=str(cert))
@@ -9812,6 +9846,170 @@ def pi_client_checks():
         process.wait(timeout=25)
 
 
+# The variables that the Pi host takes from the environment of the harness.
+PI_HOST_ALLOWLIST = ("PATH", "TERM", "LANG", "LC_ALL", "TMPDIR", "USER", "LOGNAME", "SHELL")
+# The provider, model and fixed reply of ext-pi/test/fixtures/faux-model.ts.
+PI_FAUX_PROVIDER = "agent-cat-faux"
+PI_FAUX_MODEL = "faux-1"
+PI_FAUX_REPLY = "agent-cat faux reply"
+
+
+def provider_key_names(names):
+    """The names of a set of environment variables that name a provider key."""
+    return sorted(name for name in names if name.endswith("_API_KEY") or name.startswith("AWS_"))
+
+
+class PiHost:
+    """The shared Pi launcher of the Pi host modes. It starts the built Pi
+    fork with ext-pi and the faux provider in a new pseudo-terminal, with an
+    environment built from PI_HOST_ALLOWLIST and new HOME, Pi configuration
+    and state directories under work/NAME. script is the text of the faux
+    script file. The client profile defaults to the profile of the credential
+    pi of TuiModeFixture."""
+
+    def __init__(self, name, script="", client_profile=None, rows=36, columns=140):
+        from tui_probe import TuiSession
+        self.root = work / name
+        self.root.mkdir(mode=0o700)
+        self.home, self.agent, self.state = self.root / "home", self.root / "pi-agent", self.root / "state"
+        for directory in (self.home, self.agent, self.state):
+            directory.mkdir(mode=0o700)
+        self.script = self.root / "faux-script.json"
+        self.script.write_text(script)
+        self.client_profile = client_profile or tui_fixture.client_profile
+        self.environment = {name: os.environ[name] for name in PI_HOST_ALLOWLIST if name in os.environ}
+        self.environment.update(HOME=str(self.home), PI_CODING_AGENT_DIR=str(self.agent), PI_TELEMETRY="0",
+                                AGENT_CAT_MANAGER_PROFILES=json.dumps([str(self.client_profile)]),
+                                AGENT_CAT_FAUX_SCRIPT=str(self.script))
+        cli = source / "ext-pi/node_modules/@earendil-works/pi-coding-agent/dist/cli.js"
+        assert cli.is_file(), ("the built Pi fork is not linked into ext-pi/node_modules", str(cli))
+        self.command = ["node", str(cli), "--offline", "--no-extensions", "--no-skills", "--no-prompt-templates",
+                        "--no-themes", "--no-context-files", "--approve",
+                        "-e", str(source / "ext-pi/src/index.ts"), "-e", str(source / "ext-pi/test/fixtures/faux-model.ts"),
+                        "--provider", PI_FAUX_PROVIDER, "--model", PI_FAUX_MODEL]
+        # TuiSession sets TERM and AGENT_CAT_STATE_DIR above this environment.
+        self.session = TuiSession(runner, self.state, rows=rows, columns=columns, command=self.command,
+                                  environment=self.environment)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, _kind, _failure, _traceback):
+        self.session.__exit__(_kind, _failure, _traceback)
+
+    def save_screen(self, label):
+        """Write the current screen to work/NAME/LABEL.screen.txt."""
+        (self.root / (label + ".screen.txt")).write_text(self.session.screen.text())
+
+    def quit(self):
+        """End Pi with /quit, and require exit status 0 and the terminal
+        modes of the pseudo-terminal restored. Pi draws without the
+        alternate screen, so only the modes and the visible cursor apply."""
+        self.session.send(b"/quit\r")
+        status = self.session.wait_exit(20)
+        assert status == 0, ("Pi did not exit with status 0", status)
+        self.session.assert_restored(alternate_screen=False)
+        return status
+
+
+def pi_home_marks():
+    """The modification times of .pi, .pi/agent/sessions and the session
+    directory of the working directory under the HOME of the harness and
+    the home directory of the account, None for an absent path, and the
+    name of that session directory."""
+    import pwd
+    slug = "--" + os.getcwd().strip("/").replace("/", "-") + "--"
+    marks = {}
+    for home in sorted({os.environ["HOME"], pwd.getpwuid(os.getuid()).pw_dir}):
+        for path in (Path(home) / ".pi", Path(home) / ".pi/agent/sessions", Path(home) / ".pi/agent/sessions" / slug):
+            try:
+                marks[str(path)] = os.stat(path).st_mtime_ns
+            except FileNotFoundError:
+                marks[str(path)] = None
+    return marks, slug
+
+
+def pi_host_smoke_checks():
+    """The pi-host-smoke mode. See PI_HOST_SMOKE for the steps."""
+    endpoint = f"https://127.0.0.1:{port}/v1"
+    with (work / "server-0.stdout").open("wb") as output, (work / "server-0.stderr").open("wb") as errors:
+        process = subprocess.Popen([str(runner), "--manager", "serve", "--config", str(config),
+                                    "+RTS", "-N" + native, "-RTS"], stdout=output, stderr=errors)
+    try:
+        wait_ready(process)
+        marks, slug = pi_home_marks()
+        with PiHost("pi-host") as pi:
+            try:
+                environment = pi.environment
+                assert set(environment) <= set(PI_HOST_ALLOWLIST) | {"HOME", "PI_CODING_AGENT_DIR", "PI_TELEMETRY",
+                                                                   "AGENT_CAT_MANAGER_PROFILES", "AGENT_CAT_FAUX_SCRIPT"}, sorted(environment)
+                assert not provider_key_names(environment) and environment["PI_TELEMETRY"] == "0", sorted(environment)
+                assert json.loads(environment["AGENT_CAT_MANAGER_PROFILES"]) == [str(tui_fixture.client_profile)], environment["AGENT_CAT_MANAGER_PROFILES"]
+                shown = process_environment(pi.session.process.pid)
+                assert shown is not None, "the Pi process exited before ps read its environment"
+                names = set(re.findall(rb"(?:^|\s)([A-Za-z_][A-Za-z0-9_]*)=", shown))
+                names = {name.decode() for name in names}
+                assert not provider_key_names(names), ("a provider key reached Pi", provider_key_names(names))
+                assert re.search(rb"(?:^|\s)PI_TELEMETRY=0(?:\s|$)", shown), "PI_TELEMETRY=0 is not in the environment of Pi"
+                print("PASS pi-host-smoke 1: Pi started from the allowlist environment with HOME", pi.home, "and PI_CODING_AGENT_DIR", pi.agent,
+                      "of the fixture, PI_TELEMETRY=0, AGENT_CAT_MANAGER_PROFILES the JSON array of the client profile, and no provider key",
+                      "in the environment of the running process", flush=True)
+
+                screen = pi.session.wait_screen("[Extensions]", timeout=60)
+                deadline = time.monotonic() + 30
+                while not (PI_FAUX_MODEL in screen and squeeze("Manager connected: " + endpoint) in squeeze(screen)):
+                    assert time.monotonic() < deadline and pi.session.process.poll() is None, (
+                        "Pi did not show the faux model and the manager connection", screen)
+                    pi.session.pump(0.1)
+                    screen = pi.session.screen.text()
+                loaded = screen.split("[Extensions]", 1)[1].split("\n")[1]
+                assert {"faux-model.ts", "src"} <= {item.strip() for item in loaded.split(",")}, ("the loaded extensions", loaded)
+                pi.save_screen("started")
+                print("PASS pi-host-smoke 2: Pi loaded ext-pi and the faux extension, selected the faux model", PI_FAUX_MODEL,
+                      "and notified the connection to", endpoint, flush=True)
+
+                live = re.compile(re.escape(squeeze("Connection: connected to " + endpoint + " (endpoint identity")) + r"[^)]*\),deliverylive")
+                deadline = time.monotonic() + 30
+                while True:
+                    pi.session.send(b"/wfm-status\r")
+                    settle = time.monotonic() + 2
+                    while time.monotonic() < settle and not live.search(squeeze(pi.session.screen.text())):
+                        pi.session.pump(0.1)
+                    if live.search(squeeze(pi.session.screen.text())):
+                        break
+                    assert time.monotonic() < deadline and pi.session.process.poll() is None, (
+                        "/wfm-status did not show delivery live", pi.session.screen.text())
+                pi.save_screen("wfm-status")
+                print("PASS pi-host-smoke 3: /wfm-status showed the connection to", endpoint, "with delivery live", flush=True)
+
+                pi.session.send(b"Reply to the agent-cat host check.\r")
+                pi.session.wait_screen(PI_FAUX_REPLY + " 1", timeout=30)
+                pi.save_screen("reply")
+                sessions = sorted(pi.agent.glob("sessions/*/*.jsonl"))
+                assert [path.parent.name for path in sessions] == [slug], ("the isolated session files", [str(path) for path in sessions])
+                replies = [entry["message"] for entry in map(json.loads, sessions[0].read_text().splitlines())
+                           if entry.get("type") == "message" and entry["message"].get("role") == "assistant"]
+                assert [(message["provider"], message["model"], message["content"]) for message in replies] == [
+                    (PI_FAUX_PROVIDER, PI_FAUX_MODEL, [{"type": "text", "text": PI_FAUX_REPLY + " 1"}])], replies
+                print("PASS pi-host-smoke 4: one prompt gave the faux reply", repr(PI_FAUX_REPLY + " 1"), "on the screen, and the session file",
+                      sessions[0].name, "of the isolated configuration records it from", PI_FAUX_PROVIDER + "/" + PI_FAUX_MODEL, flush=True)
+
+                pi.quit()
+                print("PASS pi-host-smoke 5: /quit ended Pi with exit status 0 and the terminal modes restored", flush=True)
+            except BaseException:
+                pi.save_screen("failure")
+                raise
+        after, _ = pi_home_marks()
+        assert after == marks, ("Pi wrote below the .pi directory of a real home", marks, after)
+        print("PASS pi-host-smoke 6: the modification times of", ", ".join(marks), "did not change", flush=True)
+        print("PASS pi-host-smoke: the built Pi fork started in an isolated home with ext-pi and the faux provider, reached the manager",
+              "with live delivery, replied from the faux provider and quit cleanly", flush=True)
+    finally:
+        if process.poll() is None:
+            process.terminate()
+        process.wait(timeout=25)
+
+
 def storage_checks():
     """The storage-error endings through four lifetimes of the real HTTPS
     manager. Each numbered case prints one PASS line."""
@@ -10219,6 +10417,11 @@ if tui_mode in (TUI_SIZES, TUI_SIZES_BROKEN):
 
 if pi_client_mode:
     pi_client_checks()
+    raise SystemExit(0)
+
+
+if pi_host_smoke_mode:
+    pi_host_smoke_checks()
     raise SystemExit(0)
 
 
