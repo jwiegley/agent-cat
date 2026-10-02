@@ -30,8 +30,15 @@ proves that each decider equals its model transition.
 each reduction. It evaluates at least one accepted and one refused closed
 witness for each decider. The admission witnesses include a refusal because
 of an overlapping held reservation, and the approval witnesses include the
-refusal after a change of the process generation. `ManagerConformance` is not
-a default target, so `lake build` keeps its cost. `bisim/corpus` holds the
+refusal after a change of the process generation. `ManagerConformance.Codec` fixes the JSON
+encoding of version `agent-cat-manager-conformance/1`. The executable
+`manager-oracle` evaluates one history entry for each request line with the
+deciders of the library. The executable `manager-cases` writes the retained
+cases of `ManagerConformance.Cases` to `bisim/manager/cases`, which is outside
+`bisim/corpus`. `bisim/manager/README.md` specifies the encoding, the
+representation assumptions and the scope of the oracle. `ManagerConformance`,
+`manager-oracle` and `manager-cases` are not default targets, so `lake build`
+keeps its cost. `bisim/corpus` holds the
 frozen vectors. `bisim/haskell/src` is
 the internal `bisim-support` library of the `agentic` package. It exposes
 `Agentic.Bisim` over the hidden modules `Agentic.Gen`, `Agentic.Guards`, and
@@ -58,9 +65,11 @@ nix develop path:. -c cabal build all
 N=500 SEED=1 ./bisim/ci/tier1.sh
 ```
 
-The command `lake --dir bisim build --wfail ManagerConformance` builds the
-manager conformance library. It reuses the prebuilt Mathlib artifacts and
-elaborates only the manager modules of the model and the library itself.
+The command `lake --dir bisim build --wfail ManagerConformance manager-oracle
+manager-cases` builds the manager conformance library and its two
+executables. It reuses the prebuilt Mathlib artifacts and elaborates only the
+manager modules of the model and the library itself. `bisim/manager/README.md`
+gives the command that replays the retained manager cases through the oracle.
 
 `corpus-gen` must leave every corpus byte unchanged. A diff is a change to the
 specification. The script `tier1.sh` requires the prebuilt oracle and refuses

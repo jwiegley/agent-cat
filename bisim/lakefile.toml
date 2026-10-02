@@ -33,3 +33,16 @@ root = "CorpusGen"
 name = "ManagerConformance"
 srcDir = "manager"
 globs = ["ManagerConformance", "ManagerConformance.+"]
+
+# The manager oracle: a line-delimited JSON process that evaluates one history
+# entry of the manager conformance encoding with the deciders of the library.
+[[lean_exe]]
+name = "manager-oracle"
+srcDir = "manager"
+root = "ManagerOracle"
+
+# The writer of the retained manager cases under bisim/manager/cases.
+[[lean_exe]]
+name = "manager-cases"
+srcDir = "manager"
+root = "ManagerCases"
