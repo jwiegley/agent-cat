@@ -231,11 +231,10 @@ to stay stopped, and signals only those groups in case 4.
   worker. Of the checks before it, `failures-worker` and `controls` ran
   again after it, and steps 9 to 15 ran on the final tree. `mixed` and
   `mutations-lineage` did not run again on the final tree.
-- Fork, resume, steer and redirect against a live manager from `ext-pi`.
-  Only restart runs live (`pi-client` PASS 10 and `pi-host` step 8). The
-  other lineage operations and the controls have unit evidence with a fake
-  transport only. The run plan stated that the `pi-client` path covers
-  fork and resume live, and that statement is not correct.
+- Steer and redirect against a live manager from `ext-pi`. Restart, resume
+  and fork run live (`pi-client` PASS 10 to 12, and `pi-host` step 8 for
+  restart), and `pi-client` PASS 13 follows the two pages of `/v1/runs`.
+  Steer and redirect have unit evidence with a fake transport only.
 - Captured inputs, endpoint switching with two managers, three terminal
   sizes and resize in the actual Pi-host PTY. The `pi-client` live test
   covers captured inputs, a unit test with a fake transport covers the
@@ -367,7 +366,7 @@ fork and resume statement. The other findings stay open:
 | Medium | An uncertain `/wfm-answer` or recovery choice is reconciled through the decision resource, which answers 404 once the decision is not pending, so the command stays uncertain. Nothing is resent. Reconcile through the command resource or the run state. | `ext-pi/src/manager-ui.ts` (`acat-pe18-fess-followup-3ykw`) |
 | Medium | Partly fixed by PD3. Each non-streaming GET route now waits for its locks within one five-second admission deadline, and `repeatChangedRead` uses the deadline of its store. A POST route still gives its resolve read, its submission and its receipt view separate deadlines, so one POST route can wait about 15 seconds under contention (`acat-pd3-fess-followup-uo4y`). | `manager/src/Agentic/Manager/Application.hs`, `manager/src/Agentic/Manager/Store.hs` |
 | Medium | The pre-lock crash window above, and engines outside the owner lock under option C. | `manager/src/Agentic/Manager/Quarantine.hs`, `cli/src/Agentic/Cli/Frontend.hs` (`acat-engine-owner-lock-coverage-9snr`) |
-| Medium | `/wfm-steer`, `/wfm-redirect`, `/wfm-resume`, `/wfm-fork` and the two-page history follow have fake-transport evidence only. | `ext-pi/test/manager-ui-live.test.ts` |
+| Medium | Partly fixed by PD5. `/wfm-resume`, `/wfm-fork` and the two-page history follow now run live in the `pi-client` mode. `/wfm-steer` and `/wfm-redirect` have fake-transport evidence only. | `ext-pi/test/manager-ui-live.test.ts` |
 | Low | `assertLocalStateRoot` runs only in the restore path, so a local launch, preview or lineage preflight can still write under a manager root. | `ext-pi/src/launch.ts`, `ext-pi/src/supervisor.ts` |
 | Low | Reads queued before an endpoint switch are sent to the new endpoint. The generation check discards their results. | `ext-pi/src/manager/session.ts` |
 | Low | A failed catalogue read of one profile stops `/wfm` and the manager start tool for every profile. | `ext-pi/src/manager-ui.ts` |

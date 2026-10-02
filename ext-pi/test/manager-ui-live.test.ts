@@ -66,9 +66,23 @@
  *    `manager-control` retries its recovery after the confirmation of the
  *    control. No tool result names the bearer, the credential path or the
  *    client profile path.
- * 11. `/wfm-history` lists every run of `/v1/runs` over all its pages, in
- *    the order of the collection, with the restart child and its parent.
- * 12. The extension closes.
+ * 11. `/wfm-resume` creates a resume child request of the succeeded run of
+ *    step 2 in the same way as step 9. The approval of its exact review with
+ *    the lineage starts the child run, which succeeds and names the parent
+ *    run and the lineage resume.
+ * 12. `/wfm-fork` forks the succeeded child run of step 9 with one edit:
+ *    the fork edit prompts replace the answer of its first completed text
+ *    occurrence with `FORKED` through the editor. The lineage request carries
+ *    exactly that edit, the exact review shows the replacement by the
+ *    SHA-256 that the preparation states and not by the answer, and the
+ *    approved child run succeeds and names the parent run and the lineage
+ *    fork.
+ * 13. `/wfm-history` lists every run of `/v1/runs` over all its pages, in
+ *    the order of the collection. The harness configures more legacy entries
+ *    than one window holds, so the list spans more than one page and counts
+ *    each legacy entry as an observer entry. The list shows the three
+ *    children with their parents.
+ * 14. The extension closes.
  */
 
 import { createHash } from "node:crypto";
@@ -77,6 +91,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import extension from "../src/index.ts";
+import { forkTargets } from "../src/manager-ui.ts";
 import type { Outcome } from "../src/manager/events.ts";
 import { encodeJson, isJsonObject, jsonMember, type JsonObject, type JsonValue } from "../src/manager/json.ts";
 import { ClientProfile } from "../src/manager/profile.ts";
@@ -123,6 +138,12 @@ const TOOL_ANSWERED = "Pi tool λ: the model answers false.";
 
 /** The literal of the run that `/wfm-cancel` cancels. `PI_UI_CANCELLED` of the harness states it. */
 const CANCELLED = "Pi cancel λ: the run ends cancelled.";
+
+/** The replacement answer of the fork edit. `PI_UI_FORKED` of the harness states it. */
+const FORKED = "Pi fork λ: the replaced answer.";
+
+/** The number of legacy entries in the retention root of the manager. `LEGACY_ENTRIES` of the harness states it. */
+const LEGACY_ENTRIES = 300;
 
 const STEP_MS = 600_000;
 const WAIT_MS = 120_000;
@@ -390,6 +411,61 @@ describe.runIf(PROFILE)("the human path of service mode against a live manager",
 
   /** The POSTs to a resource after an index of `posts`. */
   const postsTo = (resource: string, from = 0): Post[] => posts.slice(from).filter((post) => post.resource === resource);
+
+  /**
+   * Create a child of a terminal run through `/wfm-OPERATION` and its lineage
+   * collection, approve the exact review of the child after the confirmation,
+   * and require that the child run succeeds and names its parent and the
+   * operation. `edits` scripts the select and editor prompts of the fork
+   * edits. Gives the child request, run, preparation, lineage command and
+   * the drawn review.
+   */
+  async function lineageChild(operation: "restart" | "resume" | "fork", parent: string, edits: Script = {})
+    : Promise<{ requestId: string; runId: string; preparationId: string; command: string; review: string }> {
+    // The supervision of the parent run has ended.
+    await until(`/v1/runs/${parent}`, (observed) => {
+      const item = decodeRunItem(observed.value);
+      return item.ok && item.value.content.kind === "known" && !["owned", "cleanup-pending"].includes(item.value.content.supervision);
+    }, `${operation} parent supervision`);
+    const collection = `/v1/runs/${parent}/lineage-requests`;
+    const first = must(await session.get(ref(collection)), "lineage collection");
+    let review = "";
+    script = {
+      ...edits,
+      review: (screen) => {
+        review = screen;
+        return "a";
+      },
+      confirm: () => true,
+    };
+    const before = posts.length;
+    await run(`wfm-${operation}`, parent);
+    const sent = posts.slice(before);
+    expect(sent[0]?.resource, notices.join("\n")).toBe(collection);
+    expect(sent[0]?.ifMatch).toBe(first.etag);
+    // A restart or resume sends only its operation. The fork step checks its exact body with the edits.
+    if (Object.keys(edits).length === 0) expect(String(sent[0]?.body)).toBe(JSON.stringify({ operation }));
+    const prefix = `Lineage: ${operation} of run ${parent} created child request `;
+    const created = notices.find((line) => line.startsWith(prefix));
+    expect(created, notices.join("\n")).toBeDefined();
+    const requestId = created?.slice(prefix.length).split(".")[0] ?? "";
+    // The child is enqueued without set-input, and its one approval starts the child run.
+    expect(sent.slice(1).map((post) => [post.resource, JSON.parse(String(post.body)).operation])).toEqual([
+      [`/v1/requests/${requestId}`, "enqueue"], [expect.stringMatching(/^\/v1\/preparations\//), "approve"],
+    ]);
+    const preparationId = sent[2].resource.slice("/v1/preparations/".length);
+    expect(review.replace(/\s+/g, "")).toContain(`Lineage:${operation}ofrun${parent}`);
+    expect(review.replace(/\s+/g, "")).toContain(`Reviewofrequest${requestId},preparation${preparationId}`);
+    expect(confirmations.at(-1)).toContain(`review digest ${jsonMember(await reviewed(review, preparationId), "reviewDigest")}`);
+    const child = draftOf(must(await session.get(ref(`/v1/requests/${requestId}`)), "child request"));
+    expect([child.parentRunId, child.lineage]).toEqual([parent, operation]);
+    const runId = child.runId ?? "";
+    expect(notices, notices.join("\n")).toContain(`Execution: the manager started run ${runId} for request ${requestId}.`);
+    await succeeded(runId);
+    const item = must(decodeRunItem(must(await session.get(ref(`/v1/runs/${runId}`)), "child run").value), "child run decode");
+    expect(item.content.kind === "known" && [item.content.parentRunId, item.content.lineage]).toEqual([parent, operation]);
+    return { requestId, runId, preparationId, command: acceptedCommand(operation), review };
+  }
 
   beforeAll(async () => {
     session = must(await ManagerSession.connect(must(await ClientProfile.load(PROFILE ?? ""), "profile")), "connect");
@@ -770,43 +846,10 @@ describe.runIf(PROFILE)("the human path of service mode against a live manager",
 
   it("restarts a run through its lineage collection, approves the exact review with its lineage, and the child names its parent", async () => {
     const parent = String(report.literalRunId);
-    // The supervision of the parent run has ended.
-    await until(`/v1/runs/${parent}`, (observed) => {
-      const item = decodeRunItem(observed.value);
-      return item.ok && item.value.content.kind === "known" && !["owned", "cleanup-pending"].includes(item.value.content.supervision);
-    }, "parent supervision");
-    const collection = `/v1/runs/${parent}/lineage-requests`;
-    const first = must(await session.get(ref(collection)), "lineage collection");
-    let review = "";
-    script = {
-      review: (screen) => {
-        review = screen;
-        return "a";
-      },
-      confirm: () => true,
-    };
-    const before = posts.length;
-    await run("wfm-restart", parent);
-    const sent = posts.slice(before);
-    expect([sent[0]?.resource, String(sent[0]?.body), sent[0]?.ifMatch]).toEqual([collection, '{"operation":"restart"}', first.etag]);
-    const created = notices.find((line) => line.startsWith(`Lineage: restart of run ${parent} created child request `));
-    expect(created, notices.join("\n")).toBeDefined();
-    const requestId = created?.slice(`Lineage: restart of run ${parent} created child request `.length).split(".")[0] ?? "";
-    // The child is enqueued without set-input, and its one approval starts the child run.
-    expect(sent.slice(1).map((post) => [post.resource, JSON.parse(String(post.body)).operation])).toEqual([
-      [`/v1/requests/${requestId}`, "enqueue"], [expect.stringMatching(/^\/v1\/preparations\//), "approve"],
-    ]);
-    expect(review.replace(/\s+/g, "")).toContain(`Lineage:restartofrun${parent}`);
-    const child = draftOf(must(await session.get(ref(`/v1/requests/${requestId}`)), "child request"));
-    expect([child.parentRunId, child.lineage]).toEqual([parent, "restart"]);
-    const runId = child.runId ?? "";
-    expect(notices, notices.join("\n")).toContain(`Execution: the manager started run ${runId} for request ${requestId}.`);
-    await succeeded(runId);
-    const item = must(decodeRunItem(must(await session.get(ref(`/v1/runs/${runId}`)), "child run").value), "child run decode");
-    expect(item.content.kind === "known" && [item.content.parentRunId, item.content.lineage]).toEqual([parent, "restart"]);
+    const child = await lineageChild("restart", parent);
     Object.assign(report, {
-      restartParentRunId: parent, restartRequestId: requestId, restartRunId: runId, restartCommand: acceptedCommand("restart"),
-      restartPreparationId: sent[2].resource.slice("/v1/preparations/".length),
+      restartParentRunId: parent, restartRequestId: child.requestId, restartRunId: child.runId, restartCommand: child.command,
+      restartPreparationId: child.preparationId,
     });
   }, STEP_MS);
 
@@ -892,19 +935,75 @@ describe.runIf(PROFILE)("the human path of service mode against a live manager",
     });
   }, STEP_MS);
 
+  it("resumes a succeeded run through its lineage collection, approves the exact review with its lineage, and the child names its parent", async () => {
+    const parent = String(report.capturedRunId);
+    const child = await lineageChild("resume", parent);
+    Object.assign(report, {
+      resumeParentRunId: parent, resumeRequestId: child.requestId, resumeRunId: child.runId, resumeCommand: child.command,
+      resumePreparationId: child.preparationId,
+    });
+  }, STEP_MS);
+
+  it("forks a completed run with one replacement edit, approves the exact review with the edit, and the child names its parent", async () => {
+    const parent = String(report.restartRunId);
+    const snapshot = must(await session.get(ref(`/v1/runs/${parent}/snapshot`)), "fork parent snapshot");
+    const target = forkTargets(snapshot.value as JsonObject).find((item) => item.code === "text");
+    if (target === undefined) throw new Error(`run ${parent} has no completed text occurrence: ${encodeJson(snapshot.value)}`);
+    const occurrence = target.occurrenceId.toString();
+    const titles: string[] = [];
+    let edited = false;
+    const child = await lineageChild("fork", parent, {
+      select: (title, options) => {
+        titles.push(title);
+        if (title === `Fork edits of run ${parent}`) {
+          return edited ? "Send the fork with these edits" : options.find((option) => option.startsWith(`occurrence ${occurrence} (text): keep`));
+        }
+        return title === `Answer of occurrence ${occurrence} of run ${parent}` ? "Replace the answer" : undefined;
+      },
+      editor: (title, prefill) => {
+        expect(title).toBe(`Replacement answer of occurrence ${occurrence} (text)`);
+        expect(prefill).toBe(target.answer ?? "");
+        edited = true;
+        return FORKED;
+      },
+    });
+    expect(edited).toBe(true);
+    expect(titles).toEqual([`Fork edits of run ${parent}`, `Answer of occurrence ${occurrence} of run ${parent}`, `Fork edits of run ${parent}`]);
+    const lineagePost = posts.find((post) => post.resource === `/v1/runs/${parent}/lineage-requests`);
+    expect(JSON.parse(String(lineagePost?.body))).toEqual({ operation: "fork", edits: [{ occurrenceId: occurrence, operation: "replace", answer: FORKED }] });
+    // The review shows the replacement by the SHA-256 that the preparation states, and not the answer.
+    const preparation = must(decodePreparation(must(await session.get(ref(`/v1/preparations/${child.preparationId}`)), "fork preparation").value), "decode");
+    const edits = preparation.review.lineage?.edits ?? [];
+    expect(edits.map((edit) => [edit.operation, edit.occurrenceId.toString()])).toEqual([["replace", occurrence]]);
+    const sha256 = edits[0].operation === "replace" ? edits[0].sha256 : "";
+    expect(child.review.replace(/\s+/g, "")).toContain(`replaceoccurrence${occurrence}withtheanswerofSHA-256${sha256}`);
+    expect(child.review).not.toContain(FORKED);
+    Object.assign(report, {
+      forkParentRunId: parent, forkRequestId: child.requestId, forkRunId: child.runId, forkCommand: child.command,
+      forkPreparationId: child.preparationId, forkOccurrenceId: occurrence, forkSha256: sha256,
+    });
+  }, STEP_MS);
+
   it("lists every run of the history over all pages in the order of the collection", async () => {
     await run("wfm-history");
     const lines = (notices.at(-1) ?? "").split("\n");
     const listed = must(await session.pageSet(ref("/v1/runs")), "runs").items.map((item) => must(decodeRunItem(item), "run item"));
-    expect(lines[0]).toBe(`History: ${listed.length} managed runs and 0 observer entries`);
+    const observers = listed.filter((item) => item.content.kind === "known" && item.content.supervision === "observer").length;
+    // The harness configures more legacy entries than one window holds, so the history spans more than one page.
+    expect(observers).toBe(LEGACY_ENTRIES);
+    expect(lines[0]).toBe(`History: ${listed.length - observers} managed runs and ${observers} observer entries`);
     expect(lines.slice(1).map((line) => line.trim().split(/\s+/)[0])).toEqual(listed.map((item) => item.id));
-    for (const name of ["literalRunId", "capturedRunId", "monitoredRunId", "staleRunId", "cancelledRunId", "restartRunId", "toolRunId"]) {
+    for (const name of ["literalRunId", "capturedRunId", "monitoredRunId", "staleRunId", "cancelledRunId", "restartRunId", "toolRunId",
+      "resumeRunId", "forkRunId"]) {
       expect(listed.map((item) => item.id)).toContain(String(report[name]));
     }
     const line = (runId: unknown) => lines.find((entry) => entry.startsWith(`  ${String(runId)}  `)) ?? "";
-    expect(line(report.restartRunId)).toContain(`succeeded, supervision `);
-    expect(line(report.restartRunId)).toContain(`restart of run ${String(report.restartParentRunId)}`);
+    for (const operation of ["restart", "resume", "fork"]) {
+      expect(line(report[`${operation}RunId`])).toContain(`succeeded, supervision `);
+      expect(line(report[`${operation}RunId`])).toContain(`${operation} of run ${String(report[`${operation}ParentRunId`])}`);
+    }
     expect(line(report.cancelledRunId)).toContain("  cancelled, ");
+    expect(lines.filter((entry) => entry.includes("observer (legacy entry, read only)"))).toHaveLength(observers);
     Object.assign(report, { historyRuns: listed.map((item) => item.id) });
   }, STEP_MS);
 

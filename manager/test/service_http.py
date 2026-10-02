@@ -340,16 +340,21 @@ endpoints_mode = len(sys.argv) == 6 and sys.argv[5] == ENDPOINTS
 # client credential with its client profile for the ext-pi session check, a
 # second client credential pi-ui with its own client profile for the check
 # of the human path, and a separate credential for the harness. Each of them
-# holds the scopes observe, submit, control and export of profile_1. The harness
+# holds the scopes observe, submit, control and export of profile_1. The mode
+# also configures the local retention root of the pages mode: a local
+# frontend run and its copies fill it with LEGACY_ENTRIES legacy entries,
+# more than one window holds, and the manager serves them through
+# --legacy-history, so /v1/runs spans more than one page. The harness
 # starts the manager and reads the overview cursor. It then runs vitest with
 # node from PATH in ext-pi twice, each time with AGENT_CAT_MANAGER_PROFILE
 # set to a client profile and AGENT_CAT_MANAGER_REPORT set to a report file.
 # The first run, ext-pi/test/manager-ui-live.test.ts with the pi-ui
 # profile, drives /wfm, /wfm-review, /wfm-withdraw, /wfm-monitor and
-# /wfm-answer, /wfm-cancel, /wfm-result, /wfm-export, /wfm-restart and
-# /wfm-history of the extension with a fake Pi UI, and then the manager-start,
-# manager-answer and manager-control actions of the agent_cat_workflow tool.
-# vitest must report its twelve steps passed. During its stale-answer step the check writes the decision
+# /wfm-answer, /wfm-cancel, /wfm-result, /wfm-export and /wfm-restart of the
+# extension with a fake Pi UI, then the manager-start, manager-answer and
+# manager-control actions of the agent_cat_workflow tool, and then
+# /wfm-resume, /wfm-fork and /wfm-history. vitest must report its fourteen
+# steps passed. During its stale-answer step the check writes the decision
 # that it is about to answer to the handshake file that
 # AGENT_CAT_MANAGER_HARNESS_ANSWER names. The harness then answers that
 # decision first with JSON false through HTTP with its own credential, waits
@@ -387,14 +392,23 @@ endpoints_mode = len(sys.argv) == 6 and sys.argv[5] == ENDPOINTS
 # one export command of the collection is the command of the report and
 # names that receipt as its effect, and that its own download of the export
 # verifies against the receipt and equals the published file. For
-# /wfm-restart it reads that the one restart command of the lineage
-# collection of the literal run is the command of the report with the effect
-# lineage-created on the child request, that the collection holds only that
-# child, that the one approval of the child preparation consumed it and its
-# review names the parent run, the operation restart and no edits, and that
-# the child run succeeded and names the parent run and the lineage restart.
-# For /wfm-history it reads every page of /v1/runs and requires the run
-# identifiers that the report lists, in the same order. For the tool step it
+# /wfm-restart of the literal run, /wfm-resume of the succeeded run of the
+# captured input and /wfm-fork of the succeeded restart child with one
+# replacement edit, it reads that the one lineage command of the operation in
+# the lineage collection of the parent is the command of the report with the
+# effect lineage-created on the child request, that the collection holds only
+# that child, that the child request names the parent and the operation, that
+# the one approval of the child preparation consumed it and its review names
+# the parent run, the operation and the edits, where the fork edit is the
+# replacement of the reported occurrence with the SHA-256 that it computes
+# from the JSON encoding of PI_UI_FORKED, and that the child run succeeded
+# and names the parent run and the operation. For the fork child it also
+# reads that the supervisor manifest names the parent run store and the edit,
+# and that the run store holds PI_UI_FORKED as the replaced answer of the
+# edited occurrence, where the parent run store holds another answer. For
+# /wfm-history it reads every page of /v1/runs, requires at least two pages
+# and LEGACY_ENTRIES observer entries, and requires the run identifiers that
+# the report lists, each once and in the same order. For the tool step it
 # reads that the request of PI_UI_TOOL_DECLINED, whose exact review the human
 # declined, has no approve command, only the later discard, and is withdrawn.
 # It reads that the request of PI_UI_TOOL_ANSWERED supplied exactly that
@@ -1119,12 +1133,12 @@ if storage_mode:
 # them through --legacy-history as read-only legacy entries.
 LEGACY_ROOT = work / "legacy"
 LEGACY_ENTRIES = 300
-# The tui-history mode configures the same retention root and raises the
-# global page-set bound, so that a read of the harness and a read of the TUI
-# can hold page sets at once.
-if tui_mode == TUI_HISTORY:
+# The tui-history and pi-client modes configure the same retention root and
+# raise the global page-set bound, so that a read of the harness and a read
+# of the client can hold page sets at once.
+if tui_mode == TUI_HISTORY or pi_client_mode:
     configuration["limits"]["globalPageSets"] = 8
-if pages_mode or tui_mode == TUI_HISTORY:
+if pages_mode or tui_mode == TUI_HISTORY or pi_client_mode:
     LEGACY_ROOT.mkdir(mode=0o700)
     configuration["localRetentionRoots"] = [str(LEGACY_ROOT)]
 # The tui-overview, tui-failures and tui-sizes modes also run requests
@@ -1643,6 +1657,8 @@ PI_UI_STALE = "Pi stale λ: the harness answers first."
 PI_UI_CANCELLED = "Pi cancel λ: the run ends cancelled."
 PI_UI_TOOL_DECLINED = "Pi tool λ: the human declines the review."
 PI_UI_TOOL_ANSWERED = "Pi tool λ: the model answers false."
+# The replacement answer of the fork step, as FORKED states it.
+PI_UI_FORKED = "Pi fork λ: the replaced answer."
 
 
 def mixed_client(capabilities, authorized, attempts=None):
@@ -1965,17 +1981,22 @@ def check_run_resources(run, authorized):
         assert status == 404 and problem["code"] == "unavailable-resource", ("unknown export", status, problem.get("code"))
 
 
-def command_ids():
-    """The identifiers of every command row of the coordination database,
-    read through a read-only connection."""
+def read_coordination(statement, parameters=()):
+    """The rows of one query of the coordination database, read through a
+    read-only connection."""
     import sqlite3
     found = sorted((work / "manager").rglob("coordination.sqlite3"))
     assert len(found) == 1, ("coordination database", found)
     connection = sqlite3.connect(found[0].as_uri() + "?mode=ro", uri=True)
     try:
-        return {ident for (ident,) in connection.execute("SELECT id FROM commands")}
+        return [tuple(row) for row in connection.execute(statement, parameters)]
     finally:
         connection.close()
+
+
+def command_ids():
+    """The identifiers of every command row of the coordination database."""
+    return {ident for (ident,) in read_coordination("SELECT id FROM commands")}
 
 
 def command_receipts(cursor, authorized):
@@ -9631,8 +9652,10 @@ def pi_client_checks():
     log_path = work / "pi-client-vitest.log"
     ui_report_path = work / "pi-client-ui-report.json"
     ui_log_path = work / "pi-client-ui-vitest.log"
+    clone_legacy_runs(legacy_frontend_run(), LEGACY_ENTRIES - 1)
     with (work / "server-0.stdout").open("wb") as output, (work / "server-0.stderr").open("wb") as errors:
         process = subprocess.Popen([str(runner), "--manager", "serve", "--config", str(config),
+                                    "--legacy-history", f"{LEGACY_ROOT}=profile_1",
                                     "+RTS", "-N" + native, "-RTS"], stdout=output, stderr=errors)
     try:
         with harness_reads_only():
@@ -9722,7 +9745,7 @@ def pi_client_checks():
                 snapshot, _, _ = observed("/v1/runs/" + run_id + "/snapshot", "RunSnapshot")
                 assert snapshot["runtime"] is not None and snapshot["runtime"]["status"] == "succeeded", ("run status", run_id, snapshot["runtime"])
 
-            ui = vitest("test/manager-ui-live.test.ts", ui_profile, ui_report_path, ui_log_path, 12, work / "pi-client-harness-answer.json")
+            ui = vitest("test/manager-ui-live.test.ts", ui_profile, ui_report_path, ui_log_path, 14, work / "pi-client-harness-answer.json")
             ui_receipts = command_receipts(cursor, harness)
             # The reads of the session check count only the commands after this cursor.
             status, middle, _ = request("/v1/snapshot", harness)
@@ -9861,41 +9884,99 @@ def pi_client_checks():
             print("PASS pi-client 9: /wfm-export sent the one export command", ui["exportCommand"], "of run", ui["exportRunId"],
                   "and the manager published", ui["exportName"], "once as", ui["exportId"], "whose download of", len(exported),
                   "bytes verifies against the SHA-256", export_receipt["sha256"], "of the receipt and equals the published file", flush=True)
-            parent = ui["restartParentRunId"]
-            lineage_uri = "/v1/runs/" + parent + "/lineage-requests"
-            restarts = receipts_of("restart", lineage_uri)
-            assert parent == ui["literalRunId"] and [uri for uri, _ in restarts] == [ui["restartCommand"]] \
-                and restarts[0][1]["state"] == "effect-observed" and restarts[0][1]["effect"]["kind"] == "lineage-created" \
-                and restarts[0][1]["effect"]["resource"] == "/v1/requests/" + ui["restartRequestId"], ("the restart commands", restarts)
-            status, lineage, raw = request(lineage_uri, harness)
-            assert status == 200, ("the lineage collection", status, lineage.get("code"))
-            validate("LineagePage", lineage, raw)
-            assert [(item["id"], item["lineage"], item["parentRunId"]) for item in lineage["items"]] == [(ui["restartRequestId"], "restart", parent)], (
-                "the lineage collection of the parent run", lineage["items"])
-            child, _, _ = observed("/v1/requests/" + ui["restartRequestId"], "Request")
-            assert child["runId"] == ui["restartRunId"] and child["phase"] == "associated", ("the restart child request", child["runId"], child["phase"])
-            child_preparation, _, _ = observed("/v1/preparations/" + ui["restartPreparationId"], "Preparation")
-            child_approvals = receipts_of("approve", "/v1/preparations/" + ui["restartPreparationId"])
-            assert len(child_approvals) == 1 and child_approvals[0][1]["state"] not in ("refused", "unresolved"), ("the approval of the child", child_approvals)
-            assert child_preparation["requestId"] == ui["restartRequestId"] and child_preparation["state"] == "consumed" \
-                and child_preparation["review"]["lineage"] == {"parentRunId": parent, "operation": "restart", "edits": []}, (
-                "the review lineage of the child", child_preparation["state"], child_preparation["review"].get("lineage"))
-            child_run, _, _ = observed("/v1/runs/" + ui["restartRunId"], "Run")
-            assert child_run["parentRunId"] == parent and child_run["lineage"] == "restart", ("the restarted run", child_run["parentRunId"], child_run["lineage"])
-            succeeded(ui["restartRunId"])
-            print("PASS pi-client 10: /wfm-restart sent the one restart command", ui["restartCommand"], "of run", parent, "with child request",
-                  ui["restartRequestId"], ", the approval of its exact review with the restart lineage started run", ui["restartRunId"],
-                  ", which succeeded and names the parent run and the lineage restart", flush=True)
-            history, target = [], "/v1/runs"
+            def lineage_child(operation, number, edits, verify_store=None):
+                """Require that the one lineage command of the operation on the
+                parent run of the report is the command of the report with the
+                effect lineage-created on the child request, that the lineage
+                collection of the parent holds only that child, that the one
+                approval of the child preparation consumed it, that its review
+                names the parent run, the operation and the edits, and that the
+                child run succeeded and names the parent run and the operation.
+                When verify_store is given, it checks the run store of the
+                succeeded child and gives the text that the PASS line adds."""
+                parent = ui[operation + "ParentRunId"]
+                request_id, run_id, preparation_id = ui[operation + "RequestId"], ui[operation + "RunId"], ui[operation + "PreparationId"]
+                lineage_uri = "/v1/runs/" + parent + "/lineage-requests"
+                created = receipts_of(operation, lineage_uri)
+                assert [uri for uri, _ in created] == [ui[operation + "Command"]] \
+                    and created[0][1]["state"] == "effect-observed" and created[0][1]["effect"]["kind"] == "lineage-created" \
+                    and created[0][1]["effect"]["resource"] == "/v1/requests/" + request_id, ("the lineage commands", operation, created)
+                status, lineage, raw = request(lineage_uri, harness)
+                assert status == 200, ("the lineage collection", operation, status, lineage.get("code"))
+                validate("LineagePage", lineage, raw)
+                assert [(item["id"], item["lineage"], item["parentRunId"]) for item in lineage["items"]] == [(request_id, operation, parent)], (
+                    "the lineage collection of the parent run", operation, lineage["items"])
+                child, _, _ = observed("/v1/requests/" + request_id, "Request")
+                assert child["runId"] == run_id and child["phase"] == "associated" and child["parentRunId"] == parent \
+                    and child["lineage"] == operation, ("the child request", operation, child["runId"], child["phase"])
+                child_preparation, _, _ = observed("/v1/preparations/" + preparation_id, "Preparation")
+                child_approvals = receipts_of("approve", "/v1/preparations/" + preparation_id)
+                assert len(child_approvals) == 1 and child_approvals[0][1]["state"] not in ("refused", "unresolved"), (
+                    "the approval of the child", operation, child_approvals)
+                assert child_preparation["requestId"] == request_id and child_preparation["state"] == "consumed" \
+                    and child_preparation["review"]["lineage"] == {"parentRunId": parent, "operation": operation, "edits": edits}, (
+                    "the review lineage of the child", operation, child_preparation["state"], child_preparation["review"].get("lineage"))
+                child_run, _, _ = observed("/v1/runs/" + run_id, "Run")
+                assert child_run["parentRunId"] == parent and child_run["lineage"] == operation, (
+                    "the child run", operation, child_run["parentRunId"], child_run["lineage"])
+                succeeded(run_id)
+                stored = "" if verify_store is None else ", " + verify_store()
+                print(f"PASS pi-client {number}: /wfm-{operation} sent the one {operation} command", ui[operation + "Command"], "of run", parent,
+                      "with child request", request_id, ", the approval of its exact review with the", operation, "lineage" +
+                      ("" if not edits else " and the edits " + json.dumps(edits)), "started run", run_id,
+                      ", which succeeded and names the parent run and the lineage", operation + stored, flush=True)
+
+            assert ui["restartParentRunId"] == ui["literalRunId"], ("the restart parent", ui["restartParentRunId"])
+            lineage_child("restart", 10, [])
+            assert ui["resumeParentRunId"] == ui["capturedRunId"], ("the resume parent", ui["resumeParentRunId"])
+            lineage_child("resume", 11, [])
+            # The fork edit commits to the SHA-256 of the JSON encoding of the replacement answer.
+            fork_sha256 = hashlib.sha256(json.dumps(PI_UI_FORKED, ensure_ascii=False, separators=(",", ":")).encode("utf-8")).hexdigest()
+            assert ui["forkParentRunId"] == ui["restartRunId"] and ui["forkSha256"] == fork_sha256, (
+                "the fork parent and edit", ui["forkParentRunId"], ui["forkSha256"], fork_sha256)
+            fork_edits = [{"occurrenceId": ui["forkOccurrenceId"], "operation": "replace", "sha256": fork_sha256}]
+
+            def fork_store():
+                """Require that the supervisor manifest of the fork child names
+                the parent run store and the edits, and that the run store of
+                the child holds the replacement answer at the edited
+                occurrence, where the parent run store holds another answer."""
+                stores = work / "manager" / "runs" / "runs"
+                [(child_native,)] = read_coordination("SELECT native_run_id FROM runs WHERE id=?", (ui["forkRunId"],))
+                [(parent_native,)] = read_coordination("SELECT native_run_id FROM runs WHERE id=?", (ui["forkParentRunId"],))
+                manifest = json.loads((stores / child_native / "supervisor-manifest.json").read_bytes())
+                assert (manifest["lineage"], manifest["parentRunId"], manifest["lineageEdits"]) == ("fork", parent_native, fork_edits), (
+                    "the supervisor manifest of the fork child", manifest["lineage"], manifest["parentRunId"], manifest["lineageEdits"])
+
+                def answers(native):
+                    return [(entry["answer"], entry.get("replaced", False)) for entry in json.loads(
+                        (stores / native / "runtime" / "answers.json").read_bytes())["answers"] if entry["occurrenceId"] == ui["forkOccurrenceId"]]
+
+                parent_answers, child_answers = answers(parent_native), answers(child_native)
+                assert len(parent_answers) == 1 and parent_answers[0][0] != PI_UI_FORKED and child_answers == [(PI_UI_FORKED, True)], (
+                    "the edited occurrence of the fork child", parent_answers, child_answers)
+                return ("and its run store holds the replacement answer at occurrence " + ui["forkOccurrenceId"] +
+                        " in place of the answer of the parent run")
+
+            lineage_child("fork", 12, fork_edits, fork_store)
+            history, observers, history_pages, target = [], 0, 0, "/v1/runs"
             while target is not None:
                 status, value, raw = request(target, harness)
                 assert status == 200, ("history page", target, status, value.get("code"))
                 validate("RunPage", value, raw)
+                assert value["page"]["index"] == history_pages, ("history page index", value["page"]["index"], history_pages)
+                history_pages += 1
                 history.extend(item["id"] for item in value["items"])
+                observers += sum(1 for item in value["items"] if item["supervision"] == "observer")
                 target = value["page"]["next"]
-            assert history == ui["historyRuns"] and ui["restartRunId"] in history, ("the /wfm-history runs differ from every page of /v1/runs", history, ui["historyRuns"])
-            print("PASS pi-client 11: /wfm-history listed the", len(history), "managed runs of every page of /v1/runs in the order of the collection,",
-                  "the restart child included", flush=True)
+            children = [ui["restartRunId"], ui["resumeRunId"], ui["forkRunId"]]
+            assert history_pages >= 2 and observers == LEGACY_ENTRIES and len(history) == len(set(history)), (
+                "the history pages", history_pages, observers, len(history))
+            assert history == ui["historyRuns"] and all(run in history for run in children), (
+                "the /wfm-history runs differ from every page of /v1/runs", history, ui["historyRuns"])
+            print("PASS pi-client 13: /wfm-history listed the", len(history), "runs of the", history_pages, "pages of /v1/runs, the",
+                  LEGACY_ENTRIES, "legacy entries included, each once in the order of the collection, with the restart, resume and fork children",
+                  flush=True)
             tool_declined = "/v1/preparations/" + ui["toolDeclinedPreparationId"]
             commands = [(receipt["operation"], receipt["state"], (receipt["effect"] or {}).get("kind"))
                         for _, receipt in ui_receipts if receipt["resource"] == tool_declined]
@@ -9903,7 +9984,7 @@ def pi_client_checks():
             withdrawn, _, _ = observed("/v1/requests/" + ui["toolDeclinedRequestId"], "Request")
             assert withdrawn["phase"] == "withdrawn" and withdrawn["runId"] is None and withdrawn["readiness"]["supplied"] == [
                 {"name": "input", "source": "literal", "value": PI_UI_TOOL_DECLINED}], ("the declined tool request", withdrawn["phase"], withdrawn["runId"])
-            print("PASS pi-client 12: the tool start of request", ui["toolDeclinedRequestId"], "whose exact review the human declined has no",
+            print("PASS pi-client 14: the tool start of request", ui["toolDeclinedRequestId"], "whose exact review the human declined has no",
                   "approve command for preparation", ui["toolDeclinedPreparationId"], ", and the later discard and withdraw ended it", flush=True)
             tool_request, _, _ = observed("/v1/requests/" + ui["toolRequestId"], "Request")
             assert tool_request["readiness"]["supplied"] == [{"name": "input", "source": "literal", "value": PI_UI_TOOL_ANSWERED}] \
@@ -9932,28 +10013,28 @@ def pi_client_checks():
             human_path = transitions(ui["monitoredRequestId"], ui["answeredDecisionId"], ui["monitoredRunId"])
             tool_path = transitions(ui["toolRequestId"], ui["toolAnsweredDecisionId"], ui["toolRunId"])
             assert tool_path == human_path == ["set-input", "enqueue", "approve", "answer", "retry"], ("the tool and human transitions", tool_path, human_path)
-            print("PASS pi-client 13: the tool request", ui["toolRequestId"], "supplied exactly its literal, its one confirmed approval consumed preparation",
+            print("PASS pi-client 15: the tool request", ui["toolRequestId"], "supplied exactly its literal, its one confirmed approval consumed preparation",
                   ui["toolPreparationId"], ", the confirmed tool answer", ui["toolAnswerCommand"], "is recorded as JSON false in the run store,",
                   "the confirmed tool retry", ui["toolRetryCommand"], "reached its effect, run", ui["toolRunId"], "succeeded, and the tool and the",
                   "human path reached the same manager transitions", tool_path, flush=True)
             ui_stores = set(run_prompts)
             report = vitest("test/manager-live.test.ts", tui_fixture.client_profile, report_path, log_path, 7)
             assert report["reconnectLastEventId"] == report["reconnectCursor"] and report["pollEvents"] > 0, ("report delivery", report)
-            print("PASS pi-client 14: the ext-pi session ran its seven steps against the protected endpoint, the forced SSE drop",
+            print("PASS pi-client 16: the ext-pi session ran its seven steps against the protected endpoint, the forced SSE drop",
                   "resumed with Last-Event-ID", report["reconnectCursor"], "and", report["events"], "delivered events, of which",
                   report["pollEvents"], "came through polling, equal the polling listing", flush=True)
             status, requests, _ = request("/v1/requests", harness)
             assert status == 200 and sorted(item["id"] for item in requests["items"]) == sorted(
                 [report["requestId"], report["secondRequestId"], ui["literalRequestId"], ui["capturedRequestId"], ui["declinedRequestId"],
-                 ui["monitoredRequestId"], ui["staleRequestId"], ui["cancelledRequestId"], ui["restartRequestId"], ui["toolDeclinedRequestId"],
-                 ui["toolRequestId"]]), (
+                 ui["monitoredRequestId"], ui["staleRequestId"], ui["cancelledRequestId"], ui["restartRequestId"], ui["resumeRequestId"],
+                 ui["forkRequestId"], ui["toolDeclinedRequestId"], ui["toolRequestId"]]), (
                 "the manager holds other than the requests of the two checks", status)
             submitted, _, _ = observed("/v1/requests/" + report["requestId"], "Request")
             expected = [{"name": declaration["name"], "source": "literal", "value": MIXED_TEXT} for declaration in workflow["inputs"]]
             assert submitted["readiness"]["supplied"] == expected, ("the request did not supply exactly the literal", submitted["readiness"])
             assert submitted["runId"] == report["runId"] and submitted["phase"] == "associated", (
                 "the request does not name the run", submitted["runId"], submitted["phase"])
-            print("PASS pi-client 15: request", report["requestId"], "supplied exactly the Unicode literal and names run", report["runId"],
+            print("PASS pi-client 17: request", report["requestId"], "supplied exactly the Unicode literal and names run", report["runId"],
                   flush=True)
             receipts = command_receipts(session_cursor, harness)
             answers = [(uri, receipt) for uri, receipt in receipts if receipt["operation"] == "answer"]
@@ -9975,14 +10056,14 @@ def pi_client_checks():
             recorded = [entry["answer"] for path in answer_files for entry in json.loads(path.read_bytes())["answers"]
                         if entry["occurrenceId"] == occurrence]
             assert recorded == [False], ("the run store does not record the answer as JSON false", occurrence, recorded)
-            print("PASS pi-client 16: the run store records the answer as JSON false, and answer command", report["answerCommand"],
+            print("PASS pi-client 18: the run store records the answer as JSON false, and answer command", report["answerCommand"],
                   "and retry command", report["retryCommand"], "reached their effects", flush=True)
             snapshot, _, _ = observed("/v1/runs/" + report["runId"] + "/snapshot", "RunSnapshot")
             assert snapshot["runtime"] is not None and snapshot["runtime"]["status"] == "succeeded", ("run status", snapshot["runtime"])
             artifact = verified_download(report["runId"], client, harness)
             assert int(artifact["bytes"]) == report["resultBytes"] and artifact["sha256"] == report["resultSha256"], (
                 "the ext-pi result differs from the harness download", artifact["bytes"], artifact["sha256"], report)
-            print("PASS pi-client 17: run", report["runId"], "succeeded, and the verified result of", artifact["bytes"],
+            print("PASS pi-client 19: run", report["runId"], "succeeded, and the verified result of", artifact["bytes"],
                   "bytes has the SHA-256", artifact["sha256"], "of the ext-pi download", flush=True)
             second = report["secondRunId"]
             secondary, _, _ = observed("/v1/requests/" + report["secondRequestId"], "Request")
@@ -9996,7 +10077,7 @@ def pi_client_checks():
             assert control["decisionHeadId"] is not None, ("the second run has no pending decision head", control)
             head, _, _ = observed("/v1/decisions/" + control["decisionHeadId"], "Decision")
             assert head["state"] == "pending" and head["kind"] == "question", ("the question of the second run is not pending", head["state"])
-            print("PASS pi-client 18: after the extension and the session closed during their live streams, run", second,
+            print("PASS pi-client 20: after the extension and the session closed during their live streams, run", second,
                   "is still running under owned supervision, and its question", control["decisionHeadId"], "is pending", flush=True)
         print("PASS pi-client: the /wfm human path and the ext-pi manager session completed their journeys through the protected",
               "HTTPS endpoint, and the harness confirmed each step from manager facts, with no mutation except its first answer of the stale-answer step",

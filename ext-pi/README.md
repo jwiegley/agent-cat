@@ -1005,7 +1005,7 @@ values for which it names none, and the rules of `answerObserved` and
 `test/manager-ui-live.test.ts` runs only when `AGENT_CAT_MANAGER_PROFILE`
 names a client profile. It drives the extension with a fake Pi host, a fake
 UI and a transport that records each POST, against a running manager with the
-mixed fixture, in twelve ordered steps, each with a timeout of 600 seconds. It
+mixed fixture, in fourteen ordered steps, each with a timeout of 600 seconds. It
 enters an exact Unicode literal for `prompt-source` while the check changes
 the request through its own session, so the first `set-input` is refused
 with 412 and the editor opens again with the draft. It approves the displayed
@@ -1032,7 +1032,8 @@ acknowledgement, which names the state and the message of the receipt, and
 that the run ends cancelled. The three steps of results, exports and restart
 that the section "Results, history, lineage and exports in service mode"
 describes follow. The tool step of the section "Commands" follows them, and
-then the history step. The last step closes the extension. The `pi-client` mode of
+then the resume, fork and history steps of the section "Results, history,
+lineage and exports in service mode". The last step closes the extension. The `pi-client` mode of
 `manager/test/service_http.py` runs it before the session check and confirms
 each step against manager facts: the answer commands, the retry command, the
 answers of the run stores as JSON `false`, the verified result, that the
@@ -1161,15 +1162,29 @@ path refuses and leaves the file unchanged. It exports that result once and
 requires the one export POST with the entity tag of the collection, the
 published receipt and its verified download. It restarts the run of its
 first step, approves the review that shows the restart lineage, and requires
-that the child run succeeds and names its parent and the lineage restart. It
-then requires that `/wfm-history` lists every run of every page of
-`/v1/runs` in the order of the collection. The `pi-client` mode of
+that the child run succeeds and names its parent and the lineage restart.
+After the tool step, it resumes the succeeded run of its captured input in
+the same way. It then forks the succeeded restart child with one edit: the
+fork edit prompts replace the answer of the first completed text occurrence
+through the editor. It requires that the one fork POST carries exactly that
+edit, that the review shows the replacement by the SHA-256 that the
+preparation states and not by the answer, and that the approved child run
+succeeds and names its parent and the lineage fork. It then requires that
+`/wfm-history` lists every run of every page of `/v1/runs` in the order of
+the collection, with each legacy entry counted as an observer entry. The
+`pi-client` mode configures more legacy entries than one window holds, so
+this list spans more than one page. The `pi-client` mode of
 `manager/test/service_http.py` confirms each of these steps with its own
 credential: the saved file against its own download, the one published
-export and its download against the published file, the one restart command
-with its child request, the consumed child preparation with the restart
-lineage, the parent and lineage of the child run, and the run identifiers of
-every page of `/v1/runs`.
+export and its download against the published file, and for each of the
+restart, the resume and the fork the one lineage command with its child
+request, the consumed child preparation with its lineage and edits, and the
+parent and lineage of the child run. For the fork it computes the SHA-256 of
+the JSON encoding of the replacement answer and requires that the edit names
+it, and it requires that the run store of the child holds the replacement
+answer at the edited occurrence. It also counts at least two pages of
+`/v1/runs` and every legacy entry, and compares the run identifiers of every
+page with the list of the extension.
 
 ## Source-aware inputs
 
