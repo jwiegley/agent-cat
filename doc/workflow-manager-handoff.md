@@ -89,6 +89,7 @@ service run view show the delivery state `poll`.
 | PD30 | `5be45383` | None | Phase D gate part 3. |
 | PD31 | `91fb0ad4` | `c839f75` | This section, the updates of the Phase E section, and the README of the Emacs worktree. The closeout updates of this section after the reviews are not committed. |
 | PF1 | The PF1 commit | `f9be31a` | The `emacs-service-lifecycle` mode types the steer choice label in the open control prompt and the steer text in the steer editor, and each passes through 40x12, 140x36 and 80x24 with its text kept. Both sides require report version 3. |
+| PF2 | The PF2 commit | `281c5d6` | The `emacs-service-controls` mode sends a fail-over, an abandon and a redirect to the second listed target from the control prompt of the run view by keys at 80x24. The harness confirms each control from manager facts and requires that the session sent only these three, each once. Both sides require report version 1. |
 
 The gate found two defects, and PD29 fixed each at its owner with a test
 that failed first:
@@ -112,9 +113,10 @@ The Emacs modes of `manager/test/service_http.py` run files of the Emacs
 worktree, so each mode needs a matching pair of the two repositories. The
 `emacs-client` and `emacs-client-controls` modes refuse a report whose
 `harnessVersion` differs from 10 with one sentence. The `emacs-service`
-modes require report version 1 and the `emacs-service-lifecycle` mode
-requires report version 3 from `ci/emacs-ui.py`. Each mode needs `EMACS`
-and `WF_EMACS_DIR`, and the `emacs-service` modes also need `WF_EMACS_UI`.
+modes and the `emacs-service-controls` mode require report version 1, and
+the `emacs-service-lifecycle` mode requires report version 3 from
+`ci/emacs-ui.py`. Each mode needs `EMACS` and `WF_EMACS_DIR`, and the
+`emacs-service` modes also need `WF_EMACS_UI`.
 The Integrator recorded these pairs in the commit messages:
 
 | Mode | Pairs recorded in the commit messages (agent-cat with `emacs-native`) |
@@ -123,6 +125,7 @@ The Integrator recorded these pairs in the commit messages:
 | `emacs-client-controls` | `737fe82c` with `0c3b202` (PD22, harness version 8), and `6a4cbeec` with `8c2b780` (PD29) |
 | `emacs-service`, `emacs-service-broken-answer` | `75ce6752` with `2477a47` (PD25), and `6a4cbeec` with `8c2b780` (PD29) |
 | `emacs-service-lifecycle` | `14c97821` with `5425213` (PD26, report version 1), `832ea3d3` with `6745f4b` (PD27, report version 2 with `--service-handshake`), `6a4cbeec` with `8c2b780` (PD29), and the PF1 commit with `f9be31a` (PF1, report version 3 with the resize of the open control prompt and the steer editor) |
+| `emacs-service-controls` | The PF2 commit with `281c5d6` (PF2, report version 1 with `--service-case controls`) |
 
 The PD17 commit message names no `emacs-native` commit. The PD18 commit
 `5de5f83` names the follow-up issue `acat-FOLLOWUP`, which is

@@ -1099,12 +1099,89 @@ LIFECYCLE_FORK_OCCURRENCE = "1"
 LIFECYCLE_FORKED = "yes"
 LIFECYCLE_EXPORT = "emacs-lifecycle-export.json"
 LIFECYCLE_PENDING = "Emacs lifecycle \u03bb: pending at the quit"
+# The emacs-service-controls mode sends three run controls through the view
+# of the service mode of wf.el in an actual Emacs at 80x24. It starts the
+# manager with two execution reservations and the three control fixture
+# profiles of EMACS_CONTROLS_PROFILES: profile_1, the recovery-offering
+# retry adapter, profile_route, whose recovery offers the fail-over to the
+# spare candidate @spare, and profile_live, whose question has two model
+# candidates and whose first candidate is the ACP hold fixture. It issues
+# through TuiModeFixture the client credential emacs with the scopes
+# observe, submit and control of the three profiles, its client profile,
+# and the credential of the harness. It then runs python3 WF_EMACS_UI
+# --service with that client profile, a report path, --service-case
+# controls and a handshake directory. That script starts EMACS -Q -nw in a
+# private pseudo-terminal at 80x24, with a new HOME, and acts only by keys.
+# The harness creates, approves and settles each run with its own
+# credential through ControlHarness, and it names each run in its answer to
+# a handshake of the script when the run is ready. While the script runs,
+# the harness sends a mutation only in its answer to a handshake, and it
+# sends no run control. Each step prints its own PASS line.
+#
+# 1. M-x wf-service selects the client profile.
+# 2. At the handshake failover-ready, the harness starts a profile_route run
+#    and answers its questions with typed false until its head is a recovery
+#    decision that offers the fail-over. M-x wf-runs opens the view of the
+#    run, and c, the label failover:1 of the control prompt and RET send the
+#    fail-over choice. At the handshake failover-sent, the harness requires
+#    that the one command of the decision is a choose-recovery with the
+#    choice failover that reached effect-observed. It settles the run, which
+#    must succeed, and requires that its run log holds a second question of
+#    the occurrence to the model candidate that ends with @spare, with the
+#    answer of that candidate. The view must show Terminal: succeeded.
+# 3. At the handshake abandon-ready, the harness starts a profile_1 run and
+#    answers its questions until its head is a recovery decision. c, the
+#    label abandon and RET send the abandon choice. At the handshake
+#    abandon-sent, the harness requires that the one command of the decision
+#    is a choose-recovery with the choice abandon that reached
+#    effect-observed, and that the run ends failed, as step 4 of the
+#    tui-controls mode requires. The view must show Terminal: failed.
+# 4. At the handshake redirect-ready, the harness starts a profile_live run,
+#    waits until its controls offer the redirect of the dispatch window with
+#    two targets, and answers its person question with typed false, as the
+#    tui-redirect mode does, so that the view of the run has no question
+#    head. c, the redirect label of the second listed target and RET send
+#    the redirect. At the handshake redirect-sent, the harness requires that
+#    the one command of the controls of the run is a redirect to that target
+#    that reached the effect redirected, and that its acknowledgement
+#    accepts it. The acknowledgement of /v1 names the command and no
+#    target, so the harness requires that the runtime sequence of the
+#    effect is the one occurrence.redirected event of events.ndjson, which
+#    names the command and that target, and that the runtime
+#    acknowledgements of the command include the state of the receipt and
+#    delivered. It settles the run, which must succeed with the answer of
+#    that target. The run-log control record of the command from the
+#    manager names that target, and the run log holds one question of the
+#    occurrence, to that target. The view must show Terminal: succeeded.
+# 5. M-x wf-local closes the session, and C-x C-c ends Emacs with exit
+#    status 0 and the terminal attributes of its start.
+# 6. The commands of the session are exactly the three controls, in this
+#    order, each with an entity tag as If-Match that equals the tag of the
+#    read of its resource in the act of the control: the controls of the
+#    run for the redirect, and the decision for a recovery choice, which
+#    the manager serves only while it is pending. The label of each command
+#    is a choice of the control prompt. The control commands of the
+#    coordination database are exactly these three, from the client
+#    credential and with the If-Match of the session as their
+#    precondition, so the harness sent no run control.
+# 7. After the manager stops, no descendant process of the harness remains
+#    and no process names the fixture directory, and the harness removes the
+#    credential files, the client profile and the Emacs home directory.
+#
+# It runs one manager lifetime. The report version is
+# EMACS_CONTROLS_REPORT_VERSION. The mode fails with one sentence when
+# EMACS, WF_EMACS_DIR or WF_EMACS_UI is unset or names no usable file.
+EMACS_SERVICE_CONTROLS = "emacs-service-controls"
+emacs_controls_mode = len(sys.argv) == 6 and sys.argv[5] == EMACS_SERVICE_CONTROLS
+EMACS_CONTROLS_PROFILES = ["profile_1", "profile_route", "profile_live"]
+# CONTROLS_REPORT_VERSION of ci/emacs-ui.py states it.
+EMACS_CONTROLS_REPORT_VERSION = 1
 EMACS_SERVICE_ANSWER = "true" if len(sys.argv) == 6 and sys.argv[5] == EMACS_SERVICE_BROKEN else "false"
 # SERVICE_LITERAL and SERVICE_REPORT_VERSION of ci/emacs-ui.py state them.
 EMACS_SERVICE_LITERAL = "Emacs service λ: Café ✓ 雪 exact literal"
 EMACS_SERVICE_REPORT_VERSION = 1
 EMACS_SERVICE_FALSE = "JOURNEY-ASSERT Emacs answer is JSON false"
-if emacs_service_mode or emacs_lifecycle_mode:
+if emacs_service_mode or emacs_lifecycle_mode or emacs_controls_mode:
     emacs_program = os.environ.get("EMACS", "")
     emacs_directory = os.environ.get("WF_EMACS_DIR", "")
     emacs_ui = os.environ.get("WF_EMACS_UI", "")
@@ -1706,9 +1783,10 @@ def lifecycle_elapsed():
     elapsed = time.monotonic() - mode_started
     assert elapsed <= LIFECYCLE_SECONDS, ("the lifecycle mode took longer than its bound", tui_mode, round(elapsed), LIFECYCLE_SECONDS)
     return f"{elapsed:.0f} seconds"
-# The tui-controls, tui-redirect, client-controls and emacs-service-lifecycle
-# modes configure the control fixture profiles.
-control_profiles = control_profiles or tui_mode in (TUI_CONTROLS, TUI_REDIRECT) or client_controls_mode or emacs_lifecycle_mode
+# The tui-controls, tui-redirect, client-controls, emacs-service-lifecycle
+# and emacs-service-controls modes configure the control fixture profiles.
+control_profiles = (control_profiles or tui_mode in (TUI_CONTROLS, TUI_REDIRECT) or client_controls_mode or emacs_lifecycle_mode
+                    or emacs_controls_mode)
 assert len(sys.argv) == 5 or mixed or boundary or pages_mode or events_mode or captures_mode or discard_mode or exports_mode or lineage_mode or control_profiles or person_mode or endpoints_mode or tui_mode
 assert not tui_approval or os.environ.get("TUI_CHECK")
 assert not (endpoints_mode or tui_mode) or os.environ.get("TUI_CHECK")
@@ -1835,7 +1913,7 @@ if tui_mode == OVERVIEW:
     configuration["profiles"][0]["resourceKeys"] = ["overview_one"]
     configuration["profiles"].append(dict(configuration["profiles"][0], id="profile_2",
                                           workspaceLabel="HTTPS second fixture", resourceKeys=["overview_two"]))
-if tui_mode in (INPUTS, TUI_CONTROLS, TUI_REDIRECT, TUI_DECISIONS) or client_controls_mode or emacs_lifecycle_mode:
+if tui_mode in (INPUTS, TUI_CONTROLS, TUI_REDIRECT, TUI_DECISIONS) or client_controls_mode or emacs_lifecycle_mode or emacs_controls_mode:
     configuration["limits"]["executionReservations"] = 2
 # The two mixed-controls runs of the views step of the emacs-client mode run
 # at once: the manager has two execution reservations, and the runs are of
@@ -1875,7 +1953,7 @@ if control_profiles:
              targetArguments=["--engine", "acp", "--adapter", "retry-adapter"], environment=fixture_path),
         dict(scripted, id="profile_steer", workspaceLabel="HTTPS steer fixture", targetLabel="Deterministic ACP steer",
              targetArguments=["--engine", "acp", "--adapter", "steer-adapter"], environment=fixture_path)]
-    if routing_mode or tui_mode == TUI_CONTROLS:
+    if routing_mode or tui_mode == TUI_CONTROLS or emacs_controls_mode:
         # The route named spare answers the spare candidate of the
         # mixed-controls question. The primary candidate keeps the retry
         # adapter, which offers a recovery after its decoding budget.
@@ -1883,7 +1961,7 @@ if control_profiles:
             dict(scripted, id="profile_route", workspaceLabel="HTTPS route fixture", targetLabel="Deterministic ACP route",
                  targetArguments=["--engine", "acp", "--adapter", "retry-adapter", "--route", "spare=acp:spare-adapter"],
                  environment=fixture_path))
-    if live_mode or tui_mode == TUI_REDIRECT or client_controls_mode:
+    if live_mode or tui_mode == TUI_REDIRECT or client_controls_mode or emacs_controls_mode:
         # The route named spare answers the spare candidate. The first
         # candidate of profile_live holds its turn until a redirect stops it.
         # The first candidate of profile_live_effect answers after eight
@@ -1911,6 +1989,10 @@ if control_profiles:
         configuration["profiles"] = [dict(profile, resourceKeys=["controls_" + profile["id"]])
                                      for profile in configuration["profiles"]
                                      if profile["id"] in CLIENT_CONTROLS_PROFILES[sys.argv[5]]]
+    # The emacs-service-controls mode keeps only the profiles of
+    # EMACS_CONTROLS_PROFILES, so that every credential names only them.
+    if emacs_controls_mode:
+        configuration["profiles"] = [profile for profile in configuration["profiles"] if profile["id"] in EMACS_CONTROLS_PROFILES]
     # The emacs-service-lifecycle mode keeps profile_steer and replaces the
     # retry fixture of profile_1 with the delay fixture, which profile_2
     # shares. Each profile has its own resource key, so that runs of two
@@ -2206,6 +2288,7 @@ tui_fixture = (TuiModeFixture(*TUI_MODES[tui_mode]) if tui_mode else
                TuiModeFixture(["profile_1"], ["observe", "submit", "control", "export"], client="emacs") if emacs_service_mode else
                TuiModeFixture(["profile_1", "profile_2", "profile_steer"], ["observe", "submit", "control", "export"],
                               client="emacs") if emacs_lifecycle_mode else
+               TuiModeFixture(EMACS_CONTROLS_PROFILES, ["observe", "submit", "control"], client="emacs") if emacs_controls_mode else
                TuiModeFixture(["profile_1", "profile_2"], ["observe", "submit", "control", "export"], client="emacs") if emacs_client_mode else None)
 configuration["administrationRoot"] = str(work / "admin")
 config.write_text(json.dumps(configuration))
@@ -13456,6 +13539,248 @@ def emacs_lifecycle_checks():
           flush=True)
 
 
+def emacs_controls_checks():
+    """The emacs-service-controls mode. See EMACS_SERVICE_CONTROLS for the
+    steps."""
+    harness = tui_fixture.harness
+    mode = sys.argv[5]
+    artifacts = work / "emacs-service-controls"
+    report_path = work / "emacs-service-controls-report.json"
+    handshake = work / "emacs-service-controls-handshake"
+    handshake.mkdir(mode=0o700)
+    # The facts of each control, by the name of its handshakes.
+    facts = {}
+
+    def native_command(command):
+        """The native runtime command of the control intent of the command."""
+        found = read_coordination("SELECT native_command FROM control_intents WHERE command_id = ?", (command,))
+        assert len(found) == 1, ("the control intent of the command", command, found)
+        return found[0][0]
+
+    def one_recovery(name, choice):
+        """The one command of the decision of the named control is a
+        choose-recovery with the choice that reached effect-observed.
+        Returns the command identifier and its receipt."""
+        decision = facts[name]["decision"]
+        rows = runs.command_rows(["/v1/decisions/" + decision["id"]])
+        assert [(row[1], row[2]) for row in rows] == [("choose-recovery", "effect-observed")], (
+            "Emacs did not send exactly one recovery choice that reached its effect", name, rows)
+        assert native_command(rows[0][0]) == choice + "Occurrence", ("the native command of the recovery choice", name, native_command(rows[0][0]))
+        receipt, _, raw = observed("/v1/commands/" + rows[0][0], "CommandReceipt")
+        (work / (mode + "-" + name + "-receipt.json")).write_bytes(raw)
+        assert receipt["effect"]["kind"] == "recovery-chosen", ("recovery effect", name, receipt["effect"])
+        assert rows[0][3] is not None and rows[0][3]["command"] == "choose-recovery", ("recovery acknowledgement", name, rows[0][3])
+        return rows[0][0], receipt
+
+    def act(name):
+        """Do the action of the handshake name of the script and return the
+        answer. A -ready handshake starts the run of the control and names
+        it, and a -sent handshake confirms the control and settles the run."""
+        if name in ("failover-ready", "abandon-ready"):
+            control = name.split("-")[0]
+            before = set(work.glob("manager/runs/runs/*/runtime"))
+            run = runs.start("profile_route" if control == "failover" else "profile_1")
+            store = runs.new_store(before)
+            decision = runs.until_recovery(run)
+            assert any(item["choice"] == control for item in decision["choices"]), (control + " not published", decision["choices"])
+            facts[control] = {"run": run, "store": store, "decision": decision}
+            return {"run": run, "decision": decision["id"]}
+        if name == "failover-sent":
+            run, decision = facts["failover"]["run"], facts["failover"]["decision"]
+            facts["failover"]["command"], _ = one_recovery("failover", "failover")
+            runs.settle(run, "succeeded")
+            records = runs.run_records(run)
+            (work / (mode + "-failover-routes.json")).write_text(json.dumps(records, default=str))
+            occurrence = decision["address"]["occurrenceId"]
+            questions = model_questions(records, occurrence)
+            assert len(questions) == 2 and questions[1]["to"]["to"]["model"].endswith("@spare"), (
+                "fail-over questions", [(record["position"], record["to"]) for record in questions])
+            answers = [record for record in records if record["schema"] == "answer" and record.get("replyTo") == questions[1]["position"]]
+            assert len(answers) == 1 and answers[0]["from"] == {"model": questions[1]["to"]["to"]["model"]}, ("spare answer", answers)
+            facts["failover"]["questions"] = questions
+            return {"status": "succeeded"}
+        if name == "abandon-sent":
+            run, decision = facts["abandon"]["run"], facts["abandon"]["decision"]
+            facts["abandon"]["command"], _ = one_recovery("abandon", "abandon")
+            queue, _, _ = observed("/v1/decisions?runId=" + run, "DecisionPage")
+            assert decision["id"] not in [item["id"] for item in queue["items"]], "the abandoned decision is still queued"
+            runs.settle(run, "failed")
+            return {"status": "failed"}
+        if name == "redirect-ready":
+            before = set(work.glob("manager/runs/runs/*/runtime"))
+            run = runs.start("profile_live")
+            store = runs.new_store(before)
+            control = runs.offered(run, lambda value: any(offer["operation"] == "redirect" and len(offer["targets"]) == 2
+                                                          for offer in value["offers"]))
+            window = next(offer for offer in control["offers"] if offer["operation"] == "redirect")
+            assert window["targets"][0].endswith("@primary") and window["targets"][1].endswith("@spare"), ("dispatch targets", window["targets"])
+            # The person question is pending beside the engine question, so the
+            # harness answers it, and the dispatch window is the head of the view.
+            control = runs.offered(run, lambda value: value["decisionHeadId"] is not None)
+            question, tag, _ = observed("/v1/decisions/" + control["decisionHeadId"], "Decision")
+            assert question["kind"] == "question", ("mixed-controls head", question["kind"])
+            runs.client[2]("/v1/decisions/" + question["id"], {"operation": "answer", "occurrenceId": question["address"]["occurrenceId"],
+                                                              "generation": question["generation"], "value": False}, tag)
+            runs.offered(run, lambda value: value["decisionHeadId"] is None and any(
+                offer["operation"] == "redirect" and offer["targets"] == window["targets"] for offer in value["offers"]))
+            facts["redirect"] = {"run": run, "store": store, "window": window}
+            return {"run": run, "occurrence": window["address"]["occurrenceId"], "targets": window["targets"]}
+        assert name == "redirect-sent", ("an unknown handshake of the controls", name)
+        run, store, window = facts["redirect"]["run"], facts["redirect"]["store"], facts["redirect"]["window"]
+        occurrence, target = window["address"]["occurrenceId"], window["targets"][1]
+        rows = runs.command_rows(["/v1/runs/" + run + "/control"])
+        assert [(row[1], row[2]) for row in rows] == [("redirect", "effect-observed")] and native_command(rows[0][0]) == "redirectOccurrence", (
+            "Emacs did not send exactly one redirect that reached its effect", rows)
+        command = "/v1/commands/" + rows[0][0]
+        receipt = runs.one_control(run, "redirect", command)
+        acknowledgement = rows[0][3]
+        assert receipt["effect"]["kind"] == "redirected" and acknowledgement is not None \
+            and acknowledgement["state"] in ("accepted", "queued", "delivered") and acknowledgement["command"] == "redirect", (
+            "redirect effect or acknowledgement", receipt["effect"], acknowledgement)
+        runs.settle(run, "succeeded")
+        completed = occurrence_of(runs.snapshot(run), occurrence)
+        assert completed["state"] == "completed" and completed["source"] == "asked:" + target, (
+            "redirect answer source", completed["state"], completed["source"])
+        _, redirected = attempt_events(store, occurrence)
+        assert [(event["controlId"], event["target"]) for event in redirected] == [(rows[0][0], target)], ("occurrence.redirected events", redirected)
+        # The acknowledgement of /v1 names the command and no target. The
+        # effect of the receipt names the runtime sequence of the one
+        # occurrence.redirected event, which names the command and the
+        # target, and the runtime acknowledgements of the command name it.
+        envelopes = [json.loads(line) for line in (store / "events.ndjson").read_bytes().splitlines()]
+        effected = [envelope for envelope in envelopes if envelope["sequence"] == receipt["effect"]["runtimeSequence"]]
+        assert len(effected) == 1 and effected[0]["event"]["type"] == "occurrence.redirected" \
+            and effected[0]["event"]["controlId"] == rows[0][0] and effected[0]["event"]["target"] == target, (
+            "the runtime event of the redirect effect", effected)
+        acks = [envelope["event"]["state"] for envelope in envelopes if envelope["event"]["type"] == "control.ack"
+                and envelope["event"]["controlId"] == rows[0][0] and envelope["event"]["command"] == "redirectOccurrence"]
+        assert acknowledgement["state"] in acks and "delivered" in acks, ("the runtime acknowledgements of the redirect", acks, acknowledgement)
+        records = runs.run_records(run)
+        (work / (mode + "-redirect-routes.json")).write_text(json.dumps(records, default=str))
+        logged = runs.manager_control(records, command)
+        assert logged["body"]["control"]["command"].get("target") == target, ("the run-log control of the redirect", logged["body"])
+        questions = model_questions(records, occurrence)
+        assert [record["to"] for record in questions] == [{"to": {"model": target}}] and logged["position"] < questions[0]["position"], (
+            "redirected questions", logged["position"], [(record["position"], record["to"]) for record in questions])
+        facts["redirect"].update(command=rows[0][0], acknowledgement=acknowledgement, control=logged, questions=questions,
+                                 sequence=effected[0]["sequence"])
+        return {"status": "succeeded"}
+
+    with (work / "server-0.stdout").open("wb") as output, (work / "server-0.stderr").open("wb") as errors:
+        process = subprocess.Popen([str(runner), "--manager", "serve", "--config", str(config),
+                                    "+RTS", "-N" + native, "-RTS"], stdout=output, stderr=errors)
+    try:
+        wait_ready(process)
+        status, capabilities, _ = request("/v1/capabilities", harness)
+        assert status == 200 and "control" in capabilities["scopes"], ("capabilities", status)
+        runs = ControlHarness(harness, capabilities, mode)
+        observed = runs.client[0]
+        environment = {name: os.environ[name] for name in EMACS_ALLOWLIST if name in os.environ}
+        command = [sys.executable, "-B", emacs_ui, "--service", str(tui_fixture.client_profile), str(report_path),
+                   "--service-case", "controls", "--service-handshake", str(handshake), "--emacs", emacs_program,
+                   "--source", os.path.join(emacs_directory, "wf.el"), "--artifacts", str(artifacts)]
+        handled = []
+        with harness_reads_only():
+            script = subprocess.Popen(command, env=environment, stdin=subprocess.DEVNULL)
+            try:
+                deadline = time.monotonic() + 840
+                while script.poll() is None:
+                    assert time.monotonic() < deadline, "the Emacs service controls did not end in 840 seconds"
+                    for path in sorted(handshake.glob("*.json")):
+                        if path.stem not in handled:
+                            handled.append(path.stem)
+                            with harness_acts():
+                                answered = act(path.stem)
+                            answer = handshake / (path.stem + ".done.new")
+                            answer.write_text(json.dumps(answered))
+                            answer.rename(handshake / (path.stem + ".done"))
+                    time.sleep(0.05)
+            finally:
+                if script.poll() is None:
+                    script.kill()
+                script.wait(timeout=25)
+        report = json.loads(report_path.read_bytes()) if report_path.exists() else {"steps": []}
+        assert script.returncode == 0, ("the Emacs service controls of " + emacs_ui + " failed", script.returncode, report["steps"], handled)
+        assert report["version"] == EMACS_CONTROLS_REPORT_VERSION, (
+            f"The {mode} mode requires report version {EMACS_CONTROLS_REPORT_VERSION}, and {emacs_ui} wrote version {report['version']}.")
+        assert report["steps"] == ["1", "2", "3", "4", "5"], ("the steps of the controls", report["steps"])
+        assert handled == ["failover-ready", "failover-sent", "abandon-ready", "abandon-sent", "redirect-ready", "redirect-sent"], (
+            "the handshakes of the controls", handled)
+        print(f"PASS {mode} 1: M-x wf-service selected the client profile", report["profile"], flush=True)
+
+        # 2 and 3. The fail-over and the abandon.
+        for step, name, label, status in (("2", "failover", "failover:1", "succeeded"), ("3", "abandon", "abandon", "failed")):
+            shown, known = report[name], facts[name]
+            assert shown["run"] == known["run"] and shown["decision"] == known["decision"]["id"] and shown["label"] == label \
+                and label in [choice["label"] for choice in shown["choices"]] \
+                and shown["typedText"] == "Control of run " + known["run"] + ": " + label, ("the " + name + " step", shown)
+            assert "Terminal: " + status in shown["finalLines"], ("the last lines of the " + name + " view", shown["finalLines"])
+            ended, _, _ = observed("/v1/runs/" + known["run"] + "/snapshot", "RunSnapshot")
+            assert ended["runtime"]["status"] == status, ("the " + name + " run", ended["runtime"])
+            spare = (" ; the run log holds question " + str(known["questions"][1]["position"]) + " to "
+                     + known["questions"][1]["to"]["to"]["model"] + " with its answer") if name == "failover" else ""
+            print(f"PASS {mode} {step}: in the view of run", known["run"], "the control prompt listed",
+                  [choice["label"] for choice in shown["choices"]], ", and c,", label, "and RET sent the one choose-recovery command",
+                  known["command"], "with the choice", name, "for decision", known["decision"]["id"] + "; it reached effect-observed"
+                  + spare + ", the run ended", status, ", and the view showed Terminal:", status, flush=True)
+
+        # 4. The redirect to the second listed target.
+        shown, known = report["redirect"], facts["redirect"]
+        target = known["window"]["targets"][1]
+        listed = [choice for choice in shown["choices"] if choice["label"].startswith("redirect:")]
+        assert shown["run"] == known["run"] and shown["target"] == target and len(listed) >= 2 \
+            and shown["label"] == listed[1]["label"] and " to " + target + ", " in listed[1]["description"] \
+            and shown["typedText"] == "Control of run " + known["run"] + ": " + shown["label"], ("the redirect step", shown)
+        assert "Terminal: succeeded" in shown["finalLines"], ("the last lines of the redirect view", shown["finalLines"])
+        print(f"PASS {mode} 4: in the view of run", known["run"], "the control prompt listed", [choice["label"] for choice in shown["choices"]],
+              ", and c,", shown["label"], "and RET sent the one redirect command", known["command"], "of occurrence",
+              known["window"]["address"]["occurrenceId"], "to the second listed target", target, "; it reached the effect redirected",
+              "with the acknowledgement", known["acknowledgement"]["state"], "and the runtime event", known["sequence"],
+              "occurrence.redirected of the command to", target + ", the run-log control", known["control"]["position"],
+              "from the manager names", target, ", question", known["questions"][0]["position"], "went to", target,
+              ", the run succeeded, and the view showed Terminal: succeeded", flush=True)
+
+        # 5. The exit of Emacs.
+        assert report["exitStatus"] == 0 and report["terminalAfter"] == report["terminalBefore"], (
+            "the terminal attributes after Emacs", report["exitStatus"])
+        print(f"PASS {mode} 5: M-x wf-local closed the session, and C-x C-c ended Emacs with exit status 0 and the terminal",
+              "attributes of its start", flush=True)
+
+        # 6. Only the listed controls, each once.
+        expected = [("/v1/decisions/" + facts["failover"]["decision"]["id"], "choose-recovery", "failover"),
+                    ("/v1/decisions/" + facts["abandon"]["decision"]["id"], "choose-recovery", "abandon"),
+                    ("/v1/runs/" + known["run"] + "/control", "redirect", target)]
+        sent = [(item["resource"], json.loads(item["body"])) for item in report["sent"]]
+        assert [(resource, body["operation"], body.get("choice", body.get("target"))) for resource, body in sent] == expected, (
+            "the commands of the session", sent)
+        assert all(isinstance(item["ifMatch"], str) and item["ifMatch"].startswith('"') and item["ifMatch"] == item["readEtag"]
+                   for item in report["sent"]), ("the If-Match of the commands", report["sent"])
+        controls = read_coordination("SELECT id, operation, resource_uri, client_id, precondition FROM commands WHERE operation IN "
+                                     "('cancel', 'steer', 'retry', 'choose-recovery', 'redirect') ORDER BY rowid")
+        harness_clients = {client for (client,) in read_coordination("SELECT DISTINCT client_id FROM commands WHERE operation = 'create'")}
+        assert [(row[2], row[1]) for row in controls] == [(resource, operation) for resource, operation, _ in expected] \
+            and [row[0] for row in controls] == [facts["failover"]["command"], facts["abandon"]["command"], known["command"]] \
+            and len({row[3] for row in controls}) == 1 and controls[0][3] not in harness_clients \
+            and [row[4] for row in controls] == [item["ifMatch"] for item in report["sent"]], (
+            "the control commands of the coordination database", controls, harness_clients)
+        print(f"PASS {mode} 6: the session sent exactly the fail-over, the abandon and the redirect, each once with the entity tag",
+              "of the read of its resource in the act of the control as If-Match, each a choice that the control prompt listed,",
+              "and the control commands of the coordination database are exactly", [row[0] for row in controls],
+              "from the client credential, with those preconditions; the harness sent no run control", flush=True)
+    finally:
+        if process.poll() is None:
+            process.terminate()
+        process.wait(timeout=25)
+        (work / "server-0.exit").write_text(str(process.returncode) + "\n")
+
+    # 7. No child remains, and the fixture secrets and homes are removed.
+    removed = emacs_service_cleanup(artifacts)
+    print(f"PASS {mode} 7: no Emacs, url or fixture process remains after the manager stopped, and the harness removed",
+          removed, "credential, client profile and home paths", flush=True)
+    print(f"PASS {mode}: Emacs sent a fail-over, an abandon and a redirect to the second listed target from the control prompt",
+          "of the run view, each once, driven only by keys at 80x24, and the harness confirmed each from manager facts", flush=True)
+
+
 def storage_checks():
     """The storage-error endings through four lifetimes of the real HTTPS
     manager. Each numbered case prints one PASS line."""
@@ -13788,7 +14113,8 @@ if person_mode:
     raise SystemExit(0)
 
 
-if control_profiles and tui_mode not in (TUI_CONTROLS, TUI_REDIRECT) and not client_controls_mode and not emacs_lifecycle_mode:
+if control_profiles and tui_mode not in (TUI_CONTROLS, TUI_REDIRECT) and not client_controls_mode and not emacs_lifecycle_mode \
+        and not emacs_controls_mode:
     facts = control_checks()
     if live_mode:
         live_flow_checks(facts)
@@ -13898,6 +14224,11 @@ if emacs_service_mode:
 
 if emacs_lifecycle_mode:
     emacs_lifecycle_checks()
+    raise SystemExit(0)
+
+
+if emacs_controls_mode:
+    emacs_controls_checks()
     raise SystemExit(0)
 
 

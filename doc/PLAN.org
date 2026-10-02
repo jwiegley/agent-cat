@@ -12565,6 +12565,27 @@ Also disclosed by the implementer and still open: effect-first owners (capture u
 ]
 #+end_src
 
+* TODO [#D] Resolve the non-blocking fess findings of subtask PF2
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pf2-fess-followup-2u4o
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-02 Fri 11:21]
+:MODIFIED: [2026-10-02 Fri 11:21]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess audit fess/pf-PF2-r1.md (2026-10-02) on subtask PF2 (the mode emacs-service-controls of manager/test/service_http.py and --service-case controls of ci/emacs-ui.py in agent-workflows emacs-native). The PF2 commits in agent-cat and in emacs-native 281c5d6 name this issue.
+
+1. (low) manager/test/service_http.py, abandon step of emacs-service-controls. It requires that the decision left the queue and that the run ended failed, but it omits the check from step 4 of tui-controls that reads /v1/decisions/<id> and requires 404 unavailable-resource or a non-pending state. Fix: add the same decision-resource assertion to the abandon-sent handshake action.
+2. (low) manager/test/service_http.py, the check that the harness sent no other control command lists only five operations (cancel, steer, retry, choose-recovery, redirect). A restart, resume or fork command would not count. By doc/api/README.md these are not run controls, so this is not a defect against the specification. Fix (optional): exclude only the known harness operations (create, approve, answer) and require that every other command belongs to the expected three.
+3. (low) manager/test/service_http.py, the ControlHarness docstring names only tui-controls, tui-redirect and the client-controls modes as its users, and the model_questions docstring is out of date in the same way. Fix: name the current users, or describe them generically.
+4. (low, informational) ci/emacs-ui.py of emacs-native, the advice on wf-service--read and wf-service--control-act records readEtag from the same reads that set If-Match, so ifMatch == readEtag is partly self-referential. The stored precondition and the effect-observed state carry the independent proof, and both are checked. Fix (optional): state in the docstring that the precondition check carries the proof.
+
 * TODO [#C] Phase B part 1 review follow-ups: download quota, id row bound, legacy history, precision gaps
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -12910,7 +12931,7 @@ The other review findings are held by acat-70ll (unresolved approve after a rest
 :LABELS:   ["review","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-10-02 Fri 09:55]
-:MODIFIED: [2026-10-02 Fri 10:56]
+:MODIFIED: [2026-10-02 Fri 11:21]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -12942,6 +12963,13 @@ Findings of the two Phase D reviews (agent-cat a17a015b..91fb0ad4, emacs-native 
     "author": "johnw",
     "text": "Subtask PF1 (2026-10-02) closes item 2 of this issue, the resize of the open control prompt and the steer editor in Emacs service mode. emacs-native f9be31a: the steer step of service_lifecycle_case in ci/emacs-ui.py types the steer choice label in the open control prompt and passes it through 40x12, 140x36 and 80x24 with the minibuffer exactly the prompt of the captured run plus the label (controlPromptTexts), then types LIFECYCLE_STEER in *wf steer* and passes it through the same sizes with the text exactly LIFECYCLE_STEER (steerTexts), and sends C-c C-c after the last size. Report version 3. agent-cat (the PF1 commit): step 7 of emacs_lifecycle_checks in manager/test/service_http.py requires version 3, both size lists and texts, the one steer command at the effect steered and one run-log steer record with interrupt-now and exactly LIFECYCLE_STEER. Evidence: the n=8 emacs-service-lifecycle run passed (exit 0, 22 key steps and checks 1 to 17 PASS), and a version-2 copy of emacs-ui.py failed with the existing version sentence. No product Emacs Lisp changed, because no resize lost text, so ci/emacs.sh did not run. Fess pf-PF1-r1 not blocking; its medium handoff drift and low docstring wrap are fixed in the pair. The two commits form a pair and neither works alone.",
     "created_at": "2026-10-02T17:56:24Z"
+  },
+  {
+    "id": 645,
+    "issue_id": "acat-phase-d-review-findings-raxi",
+    "author": "johnw",
+    "text": "Subtask PF2 (2026-10-02) closes item 1 of acat-phase-d-review-findings-raxi, the fail-over, abandon and PTY redirect by keys in Emacs service mode. emacs-native 281c5d6 adds --service-case controls to ci/emacs-ui.py (report version 1). agent-cat (the PF2 commit) adds the mode emacs-service-controls to manager/test/service_http.py: profile_1, profile_route and profile_live, executionReservations 2, its own dispatch, and an exclusion from the generic control_checks dispatch. At 80x24 by keys: c, failover:1 and RET on the profile_route recovery decision sent one choose-recovery failover that reached effect-observed, the run log holds the question asked again of controlled@spare with its answer, and the run succeeded. c, abandon and RET on a profile_1 run sent one choose-recovery abandon that reached effect-observed, and the run ended failed. After the harness answered the person question through HTTP, c, redirect:2 and RET on the profile_live run sent one redirect to controlled@spare, the second of two listed targets; the occurrence.redirected event at the receipt sequence and the run-log control record name that target, and the run succeeded. The coordination database holds exactly these three controls from the Emacs credential, each stored precondition equals the If-Match sent, and the harness sent no run control. No Emacs, url or fixture process remained after the manager stopped. Evidence: PF/PF2/impl-r1/emacs-service-controls.log (exit 0, 14 PASS lines at N8), py_compile on both scripts, the -ftui-tests BUILD, the N8 tui-journey regression, make -C doc check. No Emacs Lisp changed, so ci/emacs.sh did not run. Limitations: RET is the confirmation, because wf-control confirms only a cancel; the frozen ControlAcknowledgement carries no target, so the target is tied through the receipt sequence and the run log; the other control modes were not rerun. Fess pf-PF2-r1 not blocking; its four low findings are in acat-pf2-fess-followup-2u4o.\n",
+    "created_at": "2026-10-02T18:21:52Z"
   }
 ]
 #+end_src
@@ -21569,7 +21597,7 @@ including its explicit v3 invocation compatibility behavior.
 :LABELS:   ["p6","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-02 Fri 10:56]
+:MODIFIED: [2026-10-02 Fri 11:21]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-032
 :SOURCE_REPO: agent-cat
@@ -21710,6 +21738,13 @@ until WM-039 supplies it.
     "author": "johnw",
     "text": "Subtask PF1 (2026-10-02) closes item 2 of this issue, the resize of the open control prompt and the steer editor in Emacs service mode. emacs-native f9be31a: the steer step of service_lifecycle_case in ci/emacs-ui.py types the steer choice label in the open control prompt and passes it through 40x12, 140x36 and 80x24 with the minibuffer exactly the prompt of the captured run plus the label (controlPromptTexts), then types LIFECYCLE_STEER in *wf steer* and passes it through the same sizes with the text exactly LIFECYCLE_STEER (steerTexts), and sends C-c C-c after the last size. Report version 3. agent-cat (the PF1 commit): step 7 of emacs_lifecycle_checks in manager/test/service_http.py requires version 3, both size lists and texts, the one steer command at the effect steered and one run-log steer record with interrupt-now and exactly LIFECYCLE_STEER. Evidence: the n=8 emacs-service-lifecycle run passed (exit 0, 22 key steps and checks 1 to 17 PASS), and a version-2 copy of emacs-ui.py failed with the existing version sentence. No product Emacs Lisp changed, because no resize lost text, so ci/emacs.sh did not run. Fess pf-PF1-r1 not blocking; its medium handoff drift and low docstring wrap are fixed in the pair. The two commits form a pair and neither works alone. Remaining WM-032 gaps: fail-over or abandon by keys, and a PTY redirect.",
     "created_at": "2026-10-02T17:56:26Z"
+  },
+  {
+    "id": 646,
+    "issue_id": "acat-wm-032-eh4r",
+    "author": "johnw",
+    "text": "Subtask PF2 (2026-10-02, WM-032) closes the remaining WM-032 gap of item 1 of acat-phase-d-review-findings-raxi, the fail-over, abandon and PTY redirect by keys in Emacs service mode. emacs-native 281c5d6 adds --service-case controls to ci/emacs-ui.py (report version 1). agent-cat (the PF2 commit) adds the mode emacs-service-controls to manager/test/service_http.py: profile_1, profile_route and profile_live, executionReservations 2, its own dispatch, and an exclusion from the generic control_checks dispatch. At 80x24 by keys: c, failover:1 and RET on the profile_route recovery decision sent one choose-recovery failover that reached effect-observed, the run log holds the question asked again of controlled@spare with its answer, and the run succeeded. c, abandon and RET on a profile_1 run sent one choose-recovery abandon that reached effect-observed, and the run ended failed. After the harness answered the person question through HTTP, c, redirect:2 and RET on the profile_live run sent one redirect to controlled@spare, the second of two listed targets; the occurrence.redirected event at the receipt sequence and the run-log control record name that target, and the run succeeded. The coordination database holds exactly these three controls from the Emacs credential, each stored precondition equals the If-Match sent, and the harness sent no run control. No Emacs, url or fixture process remained after the manager stopped. Evidence: PF/PF2/impl-r1/emacs-service-controls.log (exit 0, 14 PASS lines at N8), py_compile on both scripts, the -ftui-tests BUILD, the N8 tui-journey regression, make -C doc check. No Emacs Lisp changed, so ci/emacs.sh did not run. Limitations: RET is the confirmation, because wf-control confirms only a cancel; the frozen ControlAcknowledgement carries no target, so the target is tied through the receipt sequence and the run log; the other control modes were not rerun. Fess pf-PF2-r1 not blocking; its four low findings are in acat-pf2-fess-followup-2u4o.\n",
+    "created_at": "2026-10-02T18:21:55Z"
   }
 ]
 #+end_src
