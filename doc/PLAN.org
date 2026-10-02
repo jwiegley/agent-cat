@@ -11601,6 +11601,30 @@ Non-blocking findings of fess audit fess/pd-PD26-r1.md (2026-10-02) on subtask P
 
 Implementer limitations recorded with PD26: the fail-over choice is not driven in this mode (the steer was chosen, as the requirement allows); no ERT unit test covers wf--redraw or the editor window placement; only one start ran at N8 and no N1 run was made; security items are out of scope under the functionality-first direction.
 
+* TODO [#D] Resolve the non-blocking fess findings of subtask PD27
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pd27-fess-followup-1ueu
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-02 Fri 08:11]
+:MODIFIED: [2026-10-02 Fri 08:11]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess audit fess/pd-PD27-r1.md (2026-10-02) on subtask PD27 (WM-032 part 3, the Emacs service lifecycle by keys with lineage, export, manager restart, Emacs quit and view kill in the mode emacs-service-lifecycle). The commits of PD27 in agent-cat and in agent-workflows emacs-native name this issue.
+
+1. (low) manager/test/service_http.py lines 13361 to 13365, and the mode documentation at line 1054. The check marks['start-manager'] == marks['stop-manager'] cannot fail. Both marks are taken while the manager is stopped and not yet restarted, because act() records the mark before it acts (line 13026). The comment says that no command was added while the manager was lost or after its restart until the next setup form, but this check does not carry that claim. The no-resend evidence is the 'after' receipt check at lines 13366 to 13380. Fix: remove the equality check, or reword the comment and the mode documentation so that they say that the post-restart receipt check proves no resend.
+
+2. (low) manager/test/service_http.py lines 13366 to 13416. No fault control shows that the no-resend, no-command-on-quit and no-command-on-kill checks fail against an Emacs that resends a command or sends one on quit or kill. The checks compare real id sets and receipt pairs, so they are not vacuous, but they are not proven against a fault. Fix: optionally add a control mode in which the script, or a modified Emacs hook, sends one extra command after the reconnect or at the view kill, and require that the mode fails with a literal message.
+
+3. (low) manager/test/service_http.py emacs_lifecycle_checks. The restart child that remains after the manager restart keeps a quarantined reservation until the mode ends. The mode does not release it. Cleanup still passes (PASS 17). Fix: release or settle the lost restart child through the documented quarantine release path before the manager stops.
+
+Implementer limitations recorded with PD27: no failing-first run against an Emacs that resends a command; the fork edit picks occurrence 1 by its known place in delayed-person, confirmed from answers.json; ci/emacs.sh and the local ci/emacs-ui.py cases were not rerun because no Lisp file changed; security items are out of scope under the functionality-first direction.
+
 * TODO [#D] Resolve the non-blocking fess findings of subtask PD3
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -21135,7 +21159,7 @@ separately tested rather than inferred from one newer Emacs build.
 :LABELS:   ["p6","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-02 Fri 07:32]
+:MODIFIED: [2026-10-02 Fri 08:12]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-031
 :SOURCE_REPO: agent-cat
@@ -21259,6 +21283,13 @@ including its explicit v3 invocation compatibility behavior.
     "author": "johnw",
     "text": "Subtask PD26 (2026-10-02) changes the Emacs service presentation of WM-031 in agent-workflows emacs-native. wf--redraw in emacs/wf.el keeps the point of every window on a redraw, and wf--render and wf-service--view-render use it. wf--show-editor and wf--close-editor open the answer and steer editors below the selected window when no pop-up window fits and delete that window on close. Local wf-answer shows the question in another window without selecting it. Evidence: the emacs-service-lifecycle mode of PD26 (PD/PD26/impl-r1), which failed at windows-split before the fix and passes after it. See acat-wm-032-eh4r for the full scope.",
     "created_at": "2026-10-02T14:32:55Z"
+  },
+  {
+    "id": 621,
+    "issue_id": "acat-wm-031-5yxo",
+    "author": "johnw",
+    "text": "Subtask PD27 (2026-10-02, WM-032 part 3) exercises the WM-031 lineage, export, reconnect and quit presentation of Emacs service mode by keys in emacs-service-lifecycle: the fork and restart children with their exact reviews, the export receipt and verified download, the view state across a manager restart (unreachable, then poll with supervision lost, no command resent), and the pending run after an Emacs quit. No Lisp change was needed. Evidence: PD/PD27/impl-r1, 41 PASS lines at N8. See acat-wm-032-eh4r and acat-pd27-fess-followup-1ueu.",
+    "created_at": "2026-10-02T15:12:12Z"
   }
 ]
 #+end_src
@@ -21270,7 +21301,7 @@ including its explicit v3 invocation compatibility behavior.
 :LABELS:   ["p6","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-02 Fri 07:32]
+:MODIFIED: [2026-10-02 Fri 08:12]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-032
 :SOURCE_REPO: agent-cat
@@ -21362,6 +21393,13 @@ until WM-039 supplies it.
     "author": "johnw",
     "text": "Subtask PD26 (2026-10-02, WM-032 part 2) adds the mode emacs-service-lifecycle to manager/test/service_http.py. It drives ci/emacs-ui.py --service --service-case lifecycle of agent-workflows only by keys. At 140x36 it follows two delayed-person runs in two windows with independent points and answers the delayed question of one run while the other runs. At 80x24 it captures an editor buffer as input, cancels the second run with its confirmation, and sends one steer to the captured run of profile_steer. At 40x12 it lists the history over both pages, opens an earlier run and saves its verified result (103 bytes, mode 0600, the same bytes as the harness download). The harness checks one cancel and one steer command row, the steer control and steer records in the run log, each person question after its engine answer, and JSON false in the run store. The Emacs client fixes the window point reset in the service redraw (wf--redraw) and the editor window placement (wf--show-editor, wf--close-editor). Evidence (PD/PD26/impl-r1 in the private resume-20260923 directory): BUILD, emacs-service-lifecycle exit 0 with 26 PASS lines, before-fix.log fails at windows-split against the earlier Lisp, emacs-service-broken-answer fails with 'JOURNEY-ASSERT Emacs answer is JSON false', ci/emacs.sh and the local ci/emacs-ui.py cases pass, and the journey passes at N8. Fess not blocking (fess/pd-PD26-r1.md, which reran the lifecycle mode on the current files with exit 0). Its findings, one medium and four low, are filed as acat-pd26-fess-followup-14x8. The fail-over choice is not driven in this mode.",
     "created_at": "2026-10-02T14:32:54Z"
+  },
+  {
+    "id": 620,
+    "issue_id": "acat-wm-032-eh4r",
+    "author": "johnw",
+    "text": "Subtask PD27 (2026-10-02, WM-032 part 3) extends the mode emacs-service-lifecycle of manager/test/service_http.py and the lifecycle case of ci/emacs-ui.py of agent-workflows emacs-native, driven only by keys. At 80x24 it creates a fork child of the first run and a restart child of the cancelled second run, each approved after its exact review, and exports the fork child's result with its receipt and a verified download. With the restart child's view open at its question, the harness kills the manager. The view shows Delivery: unreachable without a key, then reconnects without a key after the new manager lifetime and shows Delivery: poll and Supervision: lost. Emacs quits (C-x C-c) while a third run waits at its question. A second Emacs with the same profile finds the question still pending with Supervision: owned, and C-x k kills the view. The harness checks each step through HTTP, the command receipts and the coordination listing: the command ids match across the outage and only the next create and setup follow it, and no cancel or answer names the waiting run at the quit, at the kill or at the end. Evidence (PD/PD27/impl-r1 in the private resume-20260923 directory): BUILD exit 0, emacs-service-lifecycle exit 0 with 41 PASS lines at N8 (fess reran it on the final files with the same result), emacs-service-broken-answer exit 1 with 'JOURNEY-ASSERT Emacs answer is JSON false', and the journey passed at N8. Fess pd-PD27-r1 not blocking. Its three low findings are filed as acat-pd27-fess-followup-1ueu. No Lisp file changed. WM-032 stays open for closeout review.",
+    "created_at": "2026-10-02T15:12:12Z"
   }
 ]
 #+end_src

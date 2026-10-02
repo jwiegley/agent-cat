@@ -930,9 +930,10 @@ emacs_service_mode = len(sys.argv) == 6 and sys.argv[5] in (EMACS_SERVICE, EMACS
 # page. It issues through TuiModeFixture the client credential emacs with the
 # scopes observe, submit, control and export of the three profiles, its
 # client profile, and the credential of the harness. It then runs python3
-# WF_EMACS_UI --service with that client profile, a report path and
-# --service-case lifecycle, with the environment of the emacs-service mode.
-# The script starts EMACS -Q -nw at 140x36 with a new HOME and drives the
+# WF_EMACS_UI --service with that client profile, a report path,
+# --service-case lifecycle and --service-handshake with the handshake
+# directory below, with the environment of the emacs-service mode. The
+# script starts EMACS -Q -nw at 140x36 with a new HOME and drives the
 # lifecycle only by keys, and it prints one PASS line for each step:
 #
 # 1. At 140x36, M-x wf-service selects the profile, and M-x wf-run creates,
@@ -957,11 +958,42 @@ emacs_service_mode = len(sys.argv) == 6 and sys.argv[5] in (EMACS_SERVICE, EMACS
 #    sends LIFECYCLE_STEER. The captured run then succeeds.
 # 7. At 40x12, M-x wf-history lists the runs over every page, RET on the row
 #    of the first run opens its view, and r saves its verified result to a
-#    new file. M-x wf-local closes the session, and C-x C-c ends Emacs.
+#    new file.
+# 8. At 80x24, F in the view of the first run, the edit choice of occurrence
+#    LIFECYCLE_FORK_OCCURRENCE, the action replace, the typed replacement
+#    LIFECYCLE_FORKED and send create a fork child request, and a and yes
+#    approve its exact review. R in the view of the second run creates a
+#    restart child request in the same way. M-x wf-history and RET on the
+#    row of the fork child open its view, because the fork child can end
+#    before the overview names it. When the fork child has succeeded, E in
+#    its view and the name LIFECYCLE_EXPORT export its verified result, and
+#    the export buffer shows the receipt, the verified download and the
+#    export collection.
+# 9. The view of the restart child waits at its delayed question. The script
+#    then asks the harness through the handshake stop-manager. The harness
+#    reads the preparations of the two lineage children, because a new
+#    lifetime serves no preparation of an earlier lifetime, and it kills
+#    the manager with SIGKILL. With no key, the view must
+#    report the delivery unreachable. The script asks through the handshake
+#    start-manager, and the harness starts a new lifetime on the same root
+#    and configuration. With no key, the view must reconnect with the
+#    delivery poll and show the supervision lost of the restarted manager.
+# 10. M-x wf-run creates and approves a delayed-person request of profile_1
+#     with LIFECYCLE_PENDING, and its view shows its delayed question. After
+#     the handshake quit, C-x C-c quits Emacs while that run waits.
+# 11. A new Emacs -Q -nw at 80x24 with a new HOME selects the same profile
+#     with M-x wf-service, and M-x wf-runs opens the view of the waiting run,
+#     which shows its question and the supervision owned. After the handshake
+#     kill-view, C-x k and RET kill that view. M-x wf-local closes the
+#     session, and C-x C-c ends Emacs.
 #
-# While the script runs, the harness only reads. It then checks the report
-# against its own reads through HTTP and the run log, and each step prints
-# its own PASS line:
+# The handshakes are files in a private directory of the fixture, which the
+# script names with --service-handshake. At each handshake, the harness also
+# records the command identifiers of the coordination database. Apart from
+# the stop and the start of the manager, the harness only reads while the
+# script runs. It then checks the report against its own reads through HTTP,
+# the command receipts, the coordination database and the run log, and each
+# step prints its own PASS line:
 #
 # 1. The two delayed-person requests supplied exactly their typed literals,
 #    each with one enqueue command that reached its effect and one approve
@@ -991,18 +1023,57 @@ emacs_service_mode = len(sys.argv) == 6 and sys.argv[5] in (EMACS_SERVICE, EMACS
 #    manager and one steer record, both with the timing interrupt-now and
 #    the typed text, and the run succeeded.
 # 8. The history listed exactly the run identifiers of every page of
-#    /v1/runs, in the order of the collection, over at least two pages, and
-#    RET opened the view of the first run.
+#    /v1/runs that existed at the history step, in the order of the
+#    collection, over at least two pages, and RET opened the view of the
+#    first run.
 # 9. The saved file has mode 0600 and holds exactly the bytes of the verified
 #    result of the first run that the harness downloads.
-# 10. Emacs ended with exit status 0, and the terminal attributes after its
-#     exit equal the attributes before its start.
-# 11. After the manager stops, no descendant process of the harness remains
-#     and no process names the fixture directory, and the harness removes
-#     the credential files, the client profile and the Emacs home directory.
+# 10. The fork child request has exactly one fork command of the first run,
+#     whose effect lineage-created names it, one enqueue and one approve.
+#     The lineage collection of the first run lists it. Its review buffer
+#     showed its lineage and the SHA-256 of the JSON encoding of true, and
+#     the preparation is consumed with that edit. The replacement minibuffer
+#     started with the published answer no of the person question. The
+#     child run names its parent and the operation, it succeeded, and its
+#     snapshot publishes the answer yes.
+# 11. The restart child request has the same facts for one restart command
+#     of the second run and no edit. The harness reads its preparation and
+#     the state of its approval before the restart.
+# 12. The commands of the export collection of the fork child are exactly one
+#     export, which reached the effect exported. The export LIFECYCLE_EXPORT
+#     is published, its download verifies against its size and SHA-256, and
+#     the export buffer stated that receipt, that verified download and the
+#     export collection.
+# 13. Before the restart, the view showed the question of the restart child
+#     under the supervision owned. After the kill, it showed the delivery
+#     unreachable, kept the question and showed no terminal status. After
+#     the restart, it showed the delivery poll, the supervision lost and the
+#     runtime status that the restarted manager publishes. The harness reads
+#     the supervision lost and the approval of the restart child unresolved,
+#     as manager/WORKERS.md states for a restart. The coordination database
+#     holds the same commands at the two handshakes of the restart. The
+#     commands after the restart are one creation of profile_1 and the
+#     commands of the setup of the waiting run, and none of these repeats the
+#     target and the operation of a command receipt before the restart.
+# 14. The coordination database holds the same commands at the handshake
+#     quit, at the handshake kill-view and after the script ended. No command
+#     names the controls or the question of the waiting run, and no cancel
+#     names another run than the cancelled second run. The manager still owns
+#     the run, and its question is the pending head of its controls. The
+#     first Emacs ended with exit status 0, and the terminal attributes
+#     after its exit equal the attributes before its start.
+# 15. The view of the new Emacs showed the pending question and the
+#     supervision owned.
+# 16. The killed buffer is the view of the waiting run, and the new Emacs
+#     ended with exit status 0 and its terminal attributes restored.
+# 17. After the harness answers the waiting question and the run succeeds,
+#     and after the manager stops, no descendant process of the harness
+#     remains and no process names the fixture directory, and the harness
+#     removes the credential files, the client profile and the two Emacs
+#     home directories.
 #
-# It runs one manager lifetime. The mode fails with one sentence when EMACS,
-# WF_EMACS_DIR or WF_EMACS_UI is unset or names no usable file.
+# It runs two manager lifetimes. The mode fails with one sentence when
+# EMACS, WF_EMACS_DIR or WF_EMACS_UI is unset or names no usable file.
 EMACS_SERVICE_LIFECYCLE = "emacs-service-lifecycle"
 emacs_lifecycle_mode = len(sys.argv) == 6 and sys.argv[5] == EMACS_SERVICE_LIFECYCLE
 # The seconds for which the ACP fixture of profile_1 and profile_2 holds each
@@ -1010,11 +1081,15 @@ emacs_lifecycle_mode = len(sys.argv) == 6 and sys.argv[5] == EMACS_SERVICE_LIFEC
 LIFECYCLE_DELAY = 40
 # The facts of the lifecycle. The LIFECYCLE_ constants of ci/emacs-ui.py state
 # the same values.
-LIFECYCLE_REPORT_VERSION = 1
+LIFECYCLE_REPORT_VERSION = 2
 LIFECYCLE_FIRST = "Emacs lifecycle \u03bb: first delayed run"
 LIFECYCLE_SECOND = "Emacs lifecycle \u03bb: second delayed run"
 LIFECYCLE_CAPTURE = "Emacs capture \u03bb \u2713\nsecond line \u96ea\n"
 LIFECYCLE_STEER = "Emacs lifecycle steer \u03bb: focus on the patch."
+LIFECYCLE_FORK_OCCURRENCE = "1"
+LIFECYCLE_FORKED = "yes"
+LIFECYCLE_EXPORT = "emacs-lifecycle-export.json"
+LIFECYCLE_PENDING = "Emacs lifecycle \u03bb: pending at the quit"
 EMACS_SERVICE_ANSWER = "true" if len(sys.argv) == 6 and sys.argv[5] == EMACS_SERVICE_BROKEN else "false"
 # SERVICE_LITERAL and SERVICE_REPORT_VERSION of ci/emacs-ui.py state them.
 EMACS_SERVICE_LITERAL = "Emacs service λ: Café ✓ 雪 exact literal"
@@ -12929,13 +13004,52 @@ def emacs_lifecycle_checks():
     mode = sys.argv[5]
     artifacts = work / "emacs-service-lifecycle"
     report_path = work / "emacs-service-lifecycle-report.json"
+    handshake = work / "emacs-service-lifecycle-handshake"
+    handshake.mkdir(mode=0o700)
     clone_legacy_runs(legacy_frontend_run(), LEGACY_ENTRIES - 1)
-    with (work / "server-0.stdout").open("wb") as output, (work / "server-0.stderr").open("wb") as errors:
-        process = subprocess.Popen([str(runner), "--manager", "serve", "--config", str(config),
-                                    "--legacy-history", f"{LEGACY_ROOT}=profile_1",
-                                    "+RTS", "-N" + native, "-RTS"], stdout=output, stderr=errors)
-    try:
+
+    def serve(index):
+        """Start one foreground manager lifetime on the same root and
+        configuration and wait for HTTPS readiness."""
+        with (work / f"server-{index}.stdout").open("wb") as output, (work / f"server-{index}.stderr").open("wb") as errors:
+            process = subprocess.Popen([str(runner), "--manager", "serve", "--config", str(config),
+                                        "--legacy-history", f"{LEGACY_ROOT}=profile_1",
+                                        "+RTS", "-N" + native, "-RTS"], stdout=output, stderr=errors)
         wait_ready(process)
+        return process
+
+    # The command identifiers of the coordination database at each
+    # handshake of the script, the preparations of the lineage children and
+    # the command receipts before the restart.
+    marks, prepared, earlier = {}, {}, {}
+
+    def act(name, facts):
+        """Do the action of the handshake name of the script and return the
+        answer. stop-manager reads the preparations of the lineage children
+        that the report names, since a new lifetime serves no preparation of
+        an earlier lifetime, and the command receipts, since the restart
+        makes the start of the lost run unresolved. It then kills the
+        manager with SIGKILL.
+        start-manager starts a new lifetime on the same root and
+        configuration, and quit and kill-view only record the commands."""
+        marks[name] = command_ids()
+        if name == "stop-manager":
+            named = json.loads(report_path.read_bytes())
+            for child in ("forkRun", "restartRun"):
+                prepared[child], _, _ = observed("/v1/preparations/" + named[child]["preparation"], "Preparation")
+            earlier.update((receipt["id"], receipt) for _, receipt in command_receipts(cursor, harness))
+            lifetimes[-1].kill()
+            lifetimes[-1].wait(timeout=25)
+            assert lifetimes[-1].returncode == -signal.SIGKILL, ("the manager did not end by SIGKILL", lifetimes[-1].returncode)
+            return {"lifetime": len(lifetimes) - 1, "status": lifetimes[-1].returncode}
+        if name == "start-manager":
+            lifetimes.append(serve(len(lifetimes)))
+            return {"lifetime": len(lifetimes) - 1}
+        assert name in ("quit", "kill-view"), ("an unknown handshake of the lifecycle", name, facts)
+        return {"commands": len(marks[name])}
+
+    lifetimes = [serve(0)]
+    try:
         status, capabilities, _ = request("/v1/capabilities", harness)
         assert status == 200 and "control" in capabilities["scopes"], ("capabilities", status)
         status, overview, _ = request("/v1/snapshot", harness)
@@ -12945,30 +13059,60 @@ def emacs_lifecycle_checks():
         observed = runs.client[0]
         environment = {name: os.environ[name] for name in EMACS_ALLOWLIST if name in os.environ}
         command = [sys.executable, "-B", emacs_ui, "--service", str(tui_fixture.client_profile), str(report_path),
-                   "--service-case", "lifecycle", "--emacs", emacs_program,
+                   "--service-case", "lifecycle", "--service-handshake", str(handshake), "--emacs", emacs_program,
                    "--source", os.path.join(emacs_directory, "wf.el"), "--artifacts", str(artifacts)]
+        handled = []
         with harness_reads_only():
-            completed = subprocess.run(command, env=environment, stdin=subprocess.DEVNULL, timeout=840)
+            script = subprocess.Popen(command, env=environment, stdin=subprocess.DEVNULL)
+            try:
+                deadline = time.monotonic() + 840
+                while script.poll() is None:
+                    assert time.monotonic() < deadline, "the Emacs service lifecycle did not end in 840 seconds"
+                    for path in sorted(handshake.glob("*.json")):
+                        if path.stem not in handled:
+                            handled.append(path.stem)
+                            answer = handshake / (path.stem + ".done.new")
+                            answer.write_text(json.dumps(act(path.stem, json.loads(path.read_text()))))
+                            answer.rename(handshake / (path.stem + ".done"))
+                    time.sleep(0.05)
+            finally:
+                if script.poll() is None:
+                    script.kill()
+                script.wait(timeout=25)
+        ended = command_ids()
         report = json.loads(report_path.read_bytes()) if report_path.exists() else {"steps": []}
-        assert completed.returncode == 0, ("the Emacs service lifecycle of " + emacs_ui + " failed", completed.returncode, report["steps"])
+        assert script.returncode == 0, ("the Emacs service lifecycle of " + emacs_ui + " failed", script.returncode, report["steps"])
         assert report["version"] == LIFECYCLE_REPORT_VERSION, (
             f"The {mode} mode requires report version {LIFECYCLE_REPORT_VERSION}, and {emacs_ui} wrote version {report['version']}.")
-        assert report["steps"] == [str(number) for number in range(1, 14)], ("the steps of the lifecycle", report["steps"])
-        assert [report[name] for name in ("first", "second", "capture", "steer", "answer")] == [
-            LIFECYCLE_FIRST, LIFECYCLE_SECOND, LIFECYCLE_CAPTURE, LIFECYCLE_STEER, "false"], "the report names other literals"
+        assert report["steps"] == [str(number) for number in range(1, 23)], ("the steps of the lifecycle", report["steps"])
+        assert handled == ["stop-manager", "start-manager", "quit", "kill-view"], ("the handshakes of the lifecycle", handled)
+        assert [report[name] for name in ("first", "second", "capture", "steer", "answer", "forked", "forkOccurrence", "export",
+                                          "pending")] == [
+            LIFECYCLE_FIRST, LIFECYCLE_SECOND, LIFECYCLE_CAPTURE, LIFECYCLE_STEER, "false", LIFECYCLE_FORKED,
+            LIFECYCLE_FORK_OCCURRENCE, LIFECYCLE_EXPORT, LIFECYCLE_PENDING], "the report names other literals"
         first, second, captured = report["firstRun"], report["secondRun"], report["capturedRun"]
+        fork, restart, pending = report["forkRun"], report["restartRun"], report["pendingRun"]
         receipts = [receipt for _, receipt in command_receipts(cursor, harness)]
 
-        def store_of(prompt):
-            """The run store and the event envelopes of the one run that
-            started an occurrence with the prompt."""
+        def stores_of(prompt):
+            """The run store, the event envelopes and the lineage of the
+            supervisor manifest of each run whose events name the prompt."""
             found = []
             for store in sorted(work.glob("manager/runs/runs/*/runtime")):
                 envelopes = [json.loads(line) for line in (store / "events.ndjson").read_bytes().splitlines()]
-                if any(envelope["event"]["type"] == "occurrence.started" and envelope["event"].get("prompt") == prompt
-                       for envelope in envelopes):
-                    found.append((store, envelopes))
-            assert len(found) == 1, ("the run store of the prompt", prompt, len(found))
+                if any(envelope["event"].get("prompt") == prompt for envelope in envelopes):
+                    manifest = json.loads((store.parent / "supervisor-manifest.json").read_bytes())
+                    found.append((store, envelopes, manifest["lineage"]))
+            return found
+
+        def store_of(prompt, child=False):
+            """The run store and the event envelopes of the one run that
+            started an occurrence with the prompt, of a lineage child when
+            child holds and of a run without lineage otherwise."""
+            found = [(store, envelopes) for store, envelopes, lineage in stores_of(prompt) if (lineage is not None) == child
+                     and any(envelope["event"]["type"] == "occurrence.started" and envelope["event"].get("prompt") == prompt
+                             for envelope in envelopes)]
+            assert len(found) == 1, ("the run store of the prompt", prompt, child, len(found))
             return found[0]
 
         def at(envelope):
@@ -13080,14 +13224,17 @@ def emacs_lifecycle_checks():
               "and its editor text. It reached the effect steered, the run log holds control", control["position"], "from the",
               "manager and steer record", steers[0]["position"], "with the typed text, and the run succeeded", flush=True)
 
-        # 8. The history over every page.
+        # 8. The history over every page. The runs of the later steps did
+        # not exist when Emacs listed the history.
         history, observers, pages = run_history(harness)
-        assert pages >= 2 and observers == LEGACY_ENTRIES and all(item["run"] in history for item in (first, second, captured)), (
-            "the history pages", pages, observers, len(history))
-        assert report["historyRuns"] == history and report["historyPages"] == pages, (
-            "the wf-history rows differ from every page of /v1/runs", report["historyPages"], len(report["historyRuns"]), len(history))
+        later = {fork["run"], restart["run"], pending["run"]}
+        assert pages >= 2 and observers == LEGACY_ENTRIES and all(item["run"] in history for item in (first, second, captured)) \
+            and later <= set(history), ("the history pages", pages, observers, len(history))
+        listed = [run for run in history if run not in later]
+        assert report["historyRuns"] == listed and report["historyPages"] == pages, (
+            "the wf-history rows differ from every page of /v1/runs", report["historyPages"], len(report["historyRuns"]), len(listed))
         assert report["openedLines"][0].startswith("Service run " + first["run"]), ("the opened view", report["openedLines"][:1])
-        print("PASS emacs-service-lifecycle 8: at 40x12 wf-history listed the", len(history), "runs of all", pages, "pages of",
+        print("PASS emacs-service-lifecycle 8: at 40x12 wf-history listed the", len(listed), "runs of all", pages, "pages of",
               "/v1/runs in the order of the collection, and RET opened the view of run", first["run"], flush=True)
 
         # 9. The saved result.
@@ -13100,23 +13247,195 @@ def emacs_lifecycle_checks():
         print("PASS emacs-service-lifecycle 9: r saved the", len(saved), "verified bytes of run", first["run"], "to", saved_path,
               "with mode 0600 and exactly the bytes of the harness download", flush=True)
 
-        # 10. The terminal.
-        assert report["exitStatus"] == 0 and report["terminalAfter"] == report["terminalBefore"], (
-            "the terminal attributes after Emacs", report["exitStatus"])
-        print("PASS emacs-service-lifecycle 10: C-x C-c ended Emacs with exit status 0, and the terminal attributes after its exit",
-              "equal the attributes before its start", flush=True)
-    finally:
-        if process.poll() is None:
-            process.terminate()
-        process.wait(timeout=25)
+        # 10 and 11. The lineage children.
+        def lineage_child(facts, preparation, operation, parent, edits):
+            """Require that the child request of facts has exactly one lineage
+            command of the parent, one enqueue and one approve of its exact
+            review, with the effects and facts that the manager states. The
+            preparation and the state of the approval are those that the
+            harness read before the restart. Returns the receipt of the
+            lineage command and the receipt of the approval."""
+            lineage_uri = "/v1/runs/" + parent + "/lineage-requests"
+            created = [receipt for receipt in receipts if receipt["resource"] == lineage_uri]
+            enqueues = [receipt for receipt in receipts if receipt["resource"] == "/v1/requests/" + facts["request"]]
+            approvals = [receipt for receipt in receipts if receipt["resource"] == "/v1/preparations/" + facts["preparation"]]
+            assert [receipt["operation"] for receipt in created + enqueues + approvals] == [operation, "enqueue", "approve"], (
+                "the commands of the child", operation, [(receipt["resource"], receipt["operation"]) for receipt in created + enqueues + approvals])
+            assert created[0]["state"] == "effect-observed" and created[0]["effect"]["kind"] == "lineage-created" \
+                and created[0]["effect"]["resource"] == "/v1/requests/" + facts["request"], (
+                "the lineage command", operation, created[0]["state"], created[0]["effect"])
+            assert earlier[approvals[0]["id"]]["state"] not in ("refused", "unresolved"), (
+                "the approval of the child before the restart", operation, earlier[approvals[0]["id"]]["state"])
+            status, lineage, raw = request(lineage_uri, harness)
+            assert status == 200, ("the lineage collection", operation, status, lineage.get("code"))
+            validate("LineagePage", lineage, raw)
+            assert [(item["lineage"], item["parentRunId"]) for item in lineage["items"] if item["id"] == facts["request"]] == [
+                (operation, parent)], ("the lineage collection of the parent run", operation, lineage["items"])
+            child, _, _ = observed("/v1/requests/" + facts["request"], "Request")
+            assert child["runId"] == facts["run"] and child["phase"] == "associated" and child["parentRunId"] == parent \
+                and child["lineage"] == operation, ("the child request", operation, child["runId"], child["phase"])
+            assert f"Lineage: {operation} of run {parent}\n" in facts["reviewText"] \
+                and f"Review of request {facts['request']}, preparation {facts['preparation']}" in facts["reviewText"], (
+                "the review buffer of the child", operation, facts["reviewText"][:2000])
+            assert preparation["id"] == facts["preparation"] and preparation["requestId"] == facts["request"] and preparation["state"] == "consumed" \
+                and preparation["review"]["lineage"] == {"parentRunId": parent, "operation": operation, "edits": edits}, (
+                "the review lineage of the child", operation, preparation["state"], preparation["review"].get("lineage"))
+            run_value, _, _ = observed("/v1/runs/" + facts["run"], "Run")
+            assert run_value["parentRunId"] == parent and run_value["lineage"] == operation, (
+                "the child run", operation, run_value["parentRunId"], run_value["lineage"])
+            return created[0], approvals[0]
 
-    # 11. No child remains, and the fixture secrets and homes are removed.
+        forked_json = json.dumps(True, separators=(",", ":"))
+        fork_sha256 = hashlib.sha256(forked_json.encode("utf-8")).hexdigest()
+        fork_receipt, _ = lineage_child(fork, prepared["forkRun"], "fork", first["run"],
+                                     [{"occurrenceId": LIFECYCLE_FORK_OCCURRENCE, "operation": "replace", "sha256": fork_sha256}])
+        assert recorded[0]["occurrenceId"] == LIFECYCLE_FORK_OCCURRENCE and fork["forkPrefill"] == "no", (
+            "the replacement minibuffer did not start with the published answer of the person question", recorded[0]["occurrenceId"],
+            fork["forkPrefill"])
+        assert f"  replace occurrence {LIFECYCLE_FORK_OCCURRENCE} with the answer of SHA-256 {fork_sha256}\n" in fork["reviewText"], (
+            "the fork review does not show the SHA-256 of the replacement", fork["reviewText"][:2000])
+        runs.ended(fork["run"], "succeeded")
+        fork_snapshot, _, _ = observed("/v1/runs/" + fork["run"] + "/snapshot", "RunSnapshot")
+        fork_item = occurrence_of(fork_snapshot, LIFECYCLE_FORK_OCCURRENCE)
+        assert fork_item["code"] == "flag" and fork_item["answer"] == "yes", ("the fork child did not answer yes", fork_item.get("answer"))
+        assert "Terminal: succeeded" in report["forkLines"], ("the view of the fork child", report["forkLines"])
+        print("PASS emacs-service-lifecycle 10: at 80x24 F, the replacement", LIFECYCLE_FORKED, "of occurrence", LIFECYCLE_FORK_OCCURRENCE,
+              "and send sent the one fork command", fork_receipt["id"], "of run", first["run"], "whose effect created request",
+              fork["request"] + ". Its exact review showed the lineage and the SHA-256", fork_sha256, "of the replacement, its one",
+              "approve started run", fork["run"], "with the published answer yes, and the run succeeded", flush=True)
+        restart_receipt, restart_approval = lineage_child(restart, prepared["restartRun"], "restart", second["run"], [])
+        print("PASS emacs-service-lifecycle 11: R sent the one restart command", restart_receipt["id"], "of run", second["run"],
+              "whose effect created request", restart["request"] + ", and the one approve of its exact review with the lineage",
+              "started run", restart["run"], flush=True)
+
+        # 12. The export of the fork child.
+        exports_uri = "/v1/runs/" + fork["run"] + "/exports"
+        sent = [receipt for receipt in receipts if receipt["resource"] == exports_uri]
+        assert [receipt["operation"] for receipt in sent] == ["export"] and sent[0]["state"] == "effect-observed" \
+            and sent[0]["effect"]["kind"] == "exported" and sent[0]["effect"]["resource"] == "/v1/exports/export_" + sent[0]["id"], (
+            "the export command", [(receipt["operation"], receipt["state"]) for receipt in sent])
+        status, detail, raw = request(sent[0]["effect"]["resource"], harness)
+        assert status == 200, ("the export receipt", status)
+        validate("ExportReceipt", detail, raw)
+        assert detail["state"] == "published" and detail["name"] == LIFECYCLE_EXPORT and detail["runId"] == fork["run"], (
+            "the export", detail["state"], detail["name"], detail["runId"])
+        status, exports, raw = request(exports_uri, harness)
+        assert status == 200 and [item["id"] for item in exports["items"]] == [detail["id"]], (
+            "the export collection of the run", status, exports.get("items"))
+        connection = http.client.HTTPSConnection("127.0.0.1", port, context=context, timeout=15)
+        try:
+            connection.request("GET", detail["download"], headers=harness | {"Accept": "application/octet-stream"})
+            response = connection.getresponse()
+            exported = response.read(int(detail["bytes"]) + 1)
+            assert response.status == 200, ("the harness download of the export", response.status)
+        finally:
+            connection.close()
+        assert len(exported) == int(detail["bytes"]) and hashlib.sha256(exported).hexdigest() == detail["sha256"], (
+            "the export download differs from its receipt", len(exported), detail["bytes"])
+        assert report["exportText"].startswith(
+            f"Export {LIFECYCLE_EXPORT}: {detail['id']} state published, command {sent[0]['id']}\n"
+            f"Export download: verified {len(exported)} bytes, SHA-256 {detail['sha256']}\n"
+            f"Exports of run {fork['run']}: 1\n"), ("the export buffer", report["exportText"])
+        print("PASS emacs-service-lifecycle 12: E sent the one export command", sent[0]["id"], "of run", fork["run"], "and the",
+              "manager published", LIFECYCLE_EXPORT, "as", detail["id"] + ". Its download of", len(exported), "bytes verifies",
+              "against the SHA-256", detail["sha256"], "and the export buffer states that receipt, the verified download and the",
+              "export collection", flush=True)
+
+        # 13. The manager restart while the view of the restart child was
+        # open at its question.
+        restart_snapshot, _, _ = observed("/v1/runs/" + restart["run"] + "/snapshot", "RunSnapshot")
+        restart_run, _, _ = observed("/v1/runs/" + restart["run"], "Run")
+        published = restart_snapshot["runtime"]["status"] if restart_snapshot["runtime"] is not None else "not yet observed"
+        held_question = report["heldQuestion"]
+        assert report["stopped"] == {"lifetime": 0, "status": -signal.SIGKILL} and report["started"] == {"lifetime": 1}, (
+            "the handshakes of the restart", report["stopped"], report["started"])
+        assert "Supervision: owned" in report["heldLines"] and any(held_question in line for line in report["heldLines"]), (
+            "the view of the restart child before the restart", report["heldLines"])
+        assert "Delivery: unreachable" in report["lostLines"] and any(held_question in line for line in report["lostLines"]) \
+            and not any(line.startswith("Terminal: ") and not line.startswith("Terminal: not yet") for line in report["lostLines"]), (
+            "the view did not keep the run after the loss of the manager", report["lostLines"])
+        assert restart_approval["state"] == "unresolved", ("the start of the lost run after the restart", restart_approval["state"])
+        assert restart_run["supervision"] == "lost" and "Supervision: lost" in report["reconnectedLines"] \
+            and "Delivery: poll" in report["reconnectedLines"] and "Runtime: " + published in report["reconnectedLines"], (
+            "the view of the restarted manager", restart_run["supervision"], published, report["reconnectedLines"])
+        # No command was added while the manager was lost or after its
+        # restart until the next setup form, and no command of the later
+        # steps repeats an earlier command.
+        assert marks["start-manager"] == marks["stop-manager"], (
+            "a command was added while the manager was lost", marks["start-manager"] - marks["stop-manager"])
+        before = [receipt for receipt in receipts if receipt["id"] in marks["stop-manager"]]
+        after = [receipt for receipt in receipts if receipt["id"] not in marks["stop-manager"]]
+        assert {receipt["id"] for receipt in before} == marks["stop-manager"], ("the receipts before the restart", len(before))
+        # A creation receipt names only the request collection, so the one
+        # creation after the restart is the creation of the waiting request
+        # of profile_1. Every other command is its target and its operation.
+        creations = [receipt for receipt in after if receipt["operation"] == "create"]
+        pairs = [(receipt["resource"], receipt["operation"]) for receipt in after if receipt["operation"] != "create"]
+        pending_resources = {"/v1/requests/" + pending["request"], "/v1/preparations/" + pending["preparation"]}
+        assert [(receipt["resource"], receipt["profileId"]) for receipt in creations] == [("/v1/requests", "profile_1")] \
+            and all(resource in pending_resources for resource, _ in pairs) and len(set(pairs)) == len(pairs) \
+            and not set(pairs) & {(receipt["resource"], receipt["operation"]) for receipt in before} \
+            and [operation for _, operation in pairs if operation in ("enqueue", "approve")] == ["enqueue", "approve"], (
+            "a command after the restart is not one command of the setup of run " + pending["run"],
+            [(receipt["resource"], receipt["operation"]) for receipt in after])
+        print("PASS emacs-service-lifecycle 13: the harness killed the manager while the view of run", restart["run"], "waited at",
+              "its question", held_question + ". With no key the view reported the delivery unreachable and kept the question, and",
+              "after the new lifetime it reconnected with the delivery poll, the supervision lost and the runtime status",
+              published, "that the restarted manager publishes, which made the approved start unresolved. The", len(marks["stop-manager"]), "commands before the restart are",
+              "the commands after the reconnect, and the", len(after), "later commands are each sent once for the setup of run",
+              pending["run"], flush=True)
+
+        # 14 to 16. The quit, the new Emacs and the kill of its view.
+        pending_question = report["pendingQuestion"]
+        assert marks["quit"] == marks["kill-view"] == ended, (
+            "the quit of Emacs, the new Emacs or the kill of the view created a command", ended - marks["quit"])
+        assert runs.command_rows(["/v1/runs/" + pending["run"] + "/control", "/v1/decisions/" + pending_question]) == [], (
+            "a command names the run that waited at the quit", pending["run"])
+        assert not [receipt for receipt in receipts if receipt["operation"] == "cancel" and receipt["resource"] != "/v1/runs/" + second["run"] + "/control"], (
+            "a cancel command names another run than the cancelled run")
+        pending_run, _, _ = observed("/v1/runs/" + pending["run"], "Run")
+        pending_control, _, _ = observed("/v1/runs/" + pending["run"] + "/control", "RunControl")
+        pending_decision, _, _ = observed("/v1/decisions/" + pending_question, "Decision")
+        assert pending_run["supervision"] == "owned" and pending_control["decisionHeadId"] == pending_question \
+            and pending_decision["state"] == "pending" and pending_decision["kind"] == "question", (
+            "the run is not pending at its question under the manager", pending_run["supervision"], pending_control["decisionHeadId"],
+            pending_decision["state"])
+        assert report["exitStatus"] == 0 and report["terminalAfter"] == report["terminalBefore"], (
+            "the terminal attributes after the quit of Emacs", report["exitStatus"])
+        print("PASS emacs-service-lifecycle 14: C-x C-c quit Emacs with exit status 0 and the terminal attributes restored while",
+              "run", pending["run"], "waited at its question", pending_question + ". The coordination database holds the same",
+              len(ended), "commands before the quit and after the new Emacs ended, no cancel or answer names the run, and the",
+              "manager still owns the run at its pending question", flush=True)
+        assert "Supervision: owned" in report["foundLines"] and any(pending_question in line for line in report["foundLines"]), (
+            "the new Emacs did not find the pending question", report["foundLines"])
+        print("PASS emacs-service-lifecycle 15: in a new Emacs with the same profile, the view of run", pending["run"], "showed its",
+              "pending question", pending_question, "and the supervision owned", flush=True)
+        assert report["killedBuffer"] == "*wf service run " + pending["run"] + "*" and marks["kill-view"] == ended, (
+            "the kill of the view", report["killedBuffer"])
+        assert report["laterExitStatus"] == 0 and report["laterTerminalAfter"] == report["laterTerminalBefore"], (
+            "the terminal attributes after the new Emacs", report["laterExitStatus"])
+        print("PASS emacs-service-lifecycle 16: C-x k killed the view", report["killedBuffer"], "and sent no command, and the new",
+              "Emacs ended with exit status 0 and the terminal attributes restored", flush=True)
+
+        # The run of the quit ends with the answer of the harness, so that
+        # no run is active when the manager stops.
+        runs.settle(pending["run"], "succeeded")
+    finally:
+        for lifetime in lifetimes:
+            if lifetime.poll() is None:
+                lifetime.terminate()
+            lifetime.wait(timeout=25)
+
+    # 17. No child remains, and the fixture secrets and homes are removed.
     removed = emacs_service_cleanup(artifacts)
-    print("PASS emacs-service-lifecycle 11: no Emacs, url or fixture process remains after the manager stopped, and the harness",
+    print("PASS emacs-service-lifecycle 17: no Emacs, url or fixture process remains after the manager stopped, and the harness",
           "removed", removed, "credential, client profile and home paths", flush=True)
     print(f"PASS {mode}: Emacs followed two delayed runs in two windows with independent points at 140x36, answered a delayed",
           "question while the other run ran, captured an editor buffer, cancelled after the confirmation and steered at 80x24,",
-          "and listed every history page and saved the verified result of an earlier run at 40x12, driven only by keys", flush=True)
+          "listed every history page and saved the verified result of an earlier run at 40x12, made, reviewed and approved a fork",
+          "child and a restart child and exported a result at 80x24, reconnected after a manager restart with no command sent",
+          "again, and left a waiting run to the manager across a quit, a new Emacs and the kill of a view, driven only by keys",
+          flush=True)
 
 
 def storage_checks():
