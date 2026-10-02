@@ -2629,6 +2629,36 @@ Source: fess audit /Users/johnw/Products/agent-cat-workflow-manager/implementati
 ]
 #+end_src
 
+* TODO [#D] Resolve the non-blocking fess findings of subtask PD22
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-8d3g
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-02 Fri 05:11]
+:MODIFIED: [2026-10-02 Fri 05:11]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess audit fess/pd-PD22-r1.md (2026-10-02) on subtask PD22 (WM-031 part 4, agent-workflows emacs-native, controls in Emacs service mode). The emacs-native commit of PD22 names this issue.
+
+1. (medium) emacs/wf-service.el lines 1990 to 2010. No test sends choose-recovery (abandon and failover:N) through wf-control. That path reads the decision again for its ETag, posts the choice to /v1/decisions/{id} and reconciles through wf-manager-recovery-reconciliation. Only the offline listing test covers it, and that test checks neither the body, the If-Match header nor the reconciliation. Fix: add an offline ERT test that chooses failover:1 and abandon through wf-control and asserts the POST target, the decision ETag as If-Match, the exact body {operation, occurrenceId, generation, choice} and one reconciliation read on an uncertain send.
+
+2. (low) manager/test/service_http.py line 10772. Harness step 5 only checks that ifMatch starts with a quote, but PASS 5 and the header comment state that the controls ETag was the If-Match value. The offline tests check that equality for cancel and steer only. Fix: record the controls ETag of each listing read in the report and assert that ifMatch equals it.
+
+3. (low) emacs/wf-service.el lines 1825 and 2012. wf-service--read-optional returns nil on any failed read or decode error. A transport failure on the head-decision read removes every recovery choice without a message, and a failed snapshot read shows "place not published". Fix: treat only the expected 404 of a decision that is no longer pending as absent, and report any other read failure to the user.
+
+4. (low) emacs/wf-service.el lines 1979 to 1989. Only the uncertain steer reconciliation is tested. The uncertain retry (wf-manager-control-passed) and uncertain cancel paths are not tested. Fix: add an offline test that drops the retry POST and checks that one controls read reconciles it with no resend.
+
+5. (low) emacs/wf-manager-live.el line 1297. The emacs-client views step now always waits 61 seconds after the pages step, to stay under the manager limit of 30 ordinary mutations per minute per client. The change is test-only and documented and does not alter the limit, but it adds one minute to every run. Fix: keep it, or replace it with a wait on a 429 Retry-After, and record the trade-off.
+
+6. (low) manager/test/service_http.py lines 5770 and 6193. The tui-controls mode was not run after answer_until_recovery moved into ControlHarness.until_recovery. The tuple arity matches mixed_client by reading, and the method passed in emacs-client-controls. Fix: run the tui-controls mode once at the next integration checkpoint.
+
+Implementer limitations recorded with PD22: choose-recovery through wf-control has offline listing coverage only, the live check covers steer, redirect, retry and cancel; the views step pacing works around the fixed limit of 30 ordinary mutations per minute per client in Agentic.Manager.Client, and no limit was changed; the tui-controls mode was not run. No security hardening was added, per the 2026-09-30 direction.
+
 * DOING [#C] Complete the native Pi workflow client
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -20984,7 +21014,7 @@ separately tested rather than inferred from one newer Emacs build.
 :LABELS:   ["p6","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-02 Fri 04:32]
+:MODIFIED: [2026-10-02 Fri 05:11]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-031
 :SOURCE_REPO: agent-cat
@@ -21080,6 +21110,13 @@ including its explicit v3 invocation compatibility behavior.
     "author": "johnw",
     "text": "PD21 (WM-031 part 3): agent-workflows emacs-native commit 66144b3 adds service run views and answers in emacs/wf-service.el. wf-service-run-mode derives from wf-run-mode. Each view is keyed by endpoint identity and run identifier and watches /v1/runs/{id}, its snapshot, its control and /v1/decisions?runId={id}. The view shows Runtime, Supervision, Verification, Decisions (head first) and Offers on separate lines and ends with Terminal and Result lines; a succeeded run downloads its verified result once. wf-runs lists local and service views. wf-answer opens wf--answer-editor for the head decision, converts the text with wf-manager-answer-value (no to a Bool is JSON false) and posts with the decision ETag as If-Match; a 412 keeps and reports the draft; an uncertain send is reconciled once and never resent. Killing a view sends no command; kill-emacs-hook only closes the transport. agent-cat manager/test/service_http.py emacs-client mode adds live step 14 (views) at harness version 7 with two profiles and two execution reservations. Evidence scope: ci/emacs.sh exited 0 (85 of 85 transport tests, five new tests failed first against HEAD); ci/emacs-ui.py local cases passed; emacs-client mode 22 PASS lines (steps 18 to 21: the false answer stored in answers.json, the 412 that keeps the draft, the kill with no cancel command, two independent views); journey N8 passed. Fess pd-PD21-r1 not blocking; five low findings filed as acat-yopa. Limitations: a recovery head is refused; wf-control, wf-result, wf-kill and lineage stay pending in service mode; views are not re-bound after an endpoint switch; the Verification line can lag the snapshot. WM-031 stays open.",
     "created_at": "2026-10-02T11:32:26Z"
+  },
+  {
+    "id": 614,
+    "issue_id": "acat-wm-031-5yxo",
+    "author": "johnw",
+    "text": "PD22 (WM-031 part 4): agent-workflows emacs-native commit 0c3b202 adds service controls in emacs/wf-service.el. wf-control and wf-kill are service entries in the dispatch table. wf-control reads the controls, the head decision and, when a redirect is offered, the snapshot, one time each, and lists only the offered choices: cancel (owned and cancelAllowed), steer:N, redirect:N with the place of the redirect, retry, abandon and failover:N. A cancel asks wf-confirm-function first and wf-kill reaches the same cancel. A steer opens the editor *wf steer RUN* that sends once. cancel, steer, redirect and retry go to /v1/runs/{id}/control with the control ETag as If-Match; choose-recovery goes to the decision with the decision ETag. Each control is sent once and waits until it settles; an uncertain send is reconciled once and never resent. agent-cat manager/test/service_http.py adds the mode emacs-client-controls with the profile_steer and profile_live fixture through the PD6 setup, and the live ERT wf-manager-live-controls at harness version 8. Evidence scope: ci/emacs.sh exited 0 (88 of 88 transport tests, three new tests failed first against HEAD); ci/emacs-ui.py local cases passed; emacs-client mode 22 PASS lines; emacs-client-controls PASS 1 to 5 (the steer record in the run log, the redirect ends the held attempt and the run succeeds with the spare answer, the retry reaches its effect and terminal success, a declined cancel sends nothing and the confirmed cancel is accepted and the run ends cancelled, one database command per offered control); journey N8 passed. Fess pd-PD22-r1 not blocking; one medium and five low findings filed as acat-8d3g. Limitations: choose-recovery has offline listing coverage only; the views step waits 61 seconds to stay under the limit of 30 ordinary mutations per minute per client; the tui-controls mode was not run after the until_recovery move. WM-031 stays open.",
+    "created_at": "2026-10-02T12:11:56Z"
   }
 ]
 #+end_src

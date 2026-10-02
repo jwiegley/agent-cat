@@ -74,7 +74,7 @@ consent_control = len(sys.argv) == 6 and sys.argv[5] == "tui-consent-control"
 # runs one manager lifetime and does not enter the restart loop.
 LIFECYCLE = "credential-lifecycle"
 lifecycle = len(sys.argv) == 6 and sys.argv[5] == LIFECYCLE
-mixed = len(sys.argv) == 6 and sys.argv[5] in ("mixed", "mixed-confirm", "tui-approval", "tui-consent-control", APPROVE_FAULT, LIFECYCLE, "pages", "routes", "failures-worker", "failures-manager", "failures-launched", "storage", "pi-client", "pi-client-controls", "emacs-client", "pi-host-smoke", "pi-host", "pi-host-broken-answer", "pi-host-model", "pi-host-model-decline") + JOURNEYS
+mixed = len(sys.argv) == 6 and sys.argv[5] in ("mixed", "mixed-confirm", "tui-approval", "tui-consent-control", APPROVE_FAULT, LIFECYCLE, "pages", "routes", "failures-worker", "failures-manager", "failures-launched", "storage", "pi-client", "pi-client-controls", "emacs-client", "emacs-client-controls", "pi-host-smoke", "pi-host", "pi-host-broken-answer", "pi-host-model", "pi-host-model-decline") + JOURNEYS
 confirm_uncertain = mixed and sys.argv[5] == "mixed-confirm"
 # The boundary mode checks WM-024 through the running protected manager with
 # raw socket and ssl connections: plaintext and TLS 1.2 refusal, request
@@ -494,14 +494,65 @@ pi_client_mode = len(sys.argv) == 6 and sys.argv[5] == PI_CLIENT
 # that the run succeeds with the answer of the spare candidate.
 # Each step prints its own PASS line. It runs one manager lifetime.
 PI_CLIENT_CONTROLS = "pi-client-controls"
+# The emacs-client-controls mode runs the test wf-manager-live-controls of
+# emacs/wf-manager-live.el of agent-workflows, which drives wf-control and
+# wf-kill of the service mode of wf.el with keys. It needs EMACS and
+# WF_EMACS_DIR, as the emacs-client mode does, and fails with one sentence
+# that names a missing one before it starts anything. It also configures
+# profile_1, the recovery-offering retry adapter of the controls mode, with
+# its own resource key. It runs EMACS -Q --batch with the environment of the
+# emacs-client mode and with WF_MANAGER_PROFILE set to the client profile of
+# the credential emacs, WF_MANAGER_STEER_RUN and WF_MANAGER_REDIRECT_RUN set
+# to the two held runs of client_controls_hold, WF_MANAGER_HELD and
+# WF_MANAGER_RETRIED set to two handshake files, and WF_MANAGER_REPORT set to
+# a report file. ERT must report its one test passed, and the report must
+# state EMACS_HARNESS_VERSION and the steps steer, redirect, retry and
+# cancel.
+# 1. While the profile_steer run holds its first turn, wf-control lists the
+# offered controls, and the steer editor sends EMACS_CONTROLS_STEER_TEXT with
+# the timing interrupt-now. When the check writes the held handshake file
+# with the facts of the steer and of the redirect, client_controls_confirm
+# confirms the steer as in the pi-client-controls mode.
+# 2. It confirms the live redirect of wf-control to the spare target in the
+# same way, and it settles both runs. The harness then creates and approves
+# a run of profile_1, answers its questions with typed false until its head
+# is a recovery decision, creates and approves a second run of
+# profile_steer, waits until its controls offer a steer and allow a cancel,
+# and writes the handshake file with the suffix .done and the fields
+# retryRunId and cancelRunId.
+# 3. In the view of the profile_1 run, wf-control sends the offered retry.
+# When the check writes the retried handshake file, the harness reads that
+# the retry command of the check is the only command of the controls of
+# the run and reached the effect retried, answers the remaining questions
+# with typed false until the run succeeds, and writes the .done file. The
+# last view lines of the check must include Terminal: succeeded.
+# 4. In the view of the second profile_steer run, wf-kill with the answer no
+# sends nothing, and wf-control then sends the offered cancel after the
+# answer yes. The harness reads that the cancel command of the check is the
+# only command of the controls of the run, with an acknowledgement that
+# accepts it, and that the run ends cancelled. The last view lines of the
+# check must include Terminal: cancelled.
+# 5. The commands of the check are exactly the steer, the redirect, the
+# retry and the cancel, each with the entity tag of the controls as
+# If-Match, and the commands of the controls of the four runs in the
+# coordination database are exactly these four, one for each run, so the
+# check sent only offered controls, each once. Each control was a choice
+# that wf-control listed. The harness sends no run control.
+# Each step prints its own PASS line. It runs one manager lifetime.
+EMACS_CLIENT_CONTROLS = "emacs-client-controls"
 # The client-controls modes and the name of the client credential of each.
-CLIENT_CONTROLS_MODES = {PI_CLIENT_CONTROLS: "pi"}
-CLIENT_CONTROLS_PROFILES = ["profile_steer", "profile_live"]
+CLIENT_CONTROLS_MODES = {PI_CLIENT_CONTROLS: "pi", EMACS_CLIENT_CONTROLS: "emacs"}
+# The profiles of each client-controls mode, in configuration order.
+CLIENT_CONTROLS_PROFILES = {PI_CLIENT_CONTROLS: ["profile_steer", "profile_live"],
+                            EMACS_CLIENT_CONTROLS: ["profile_1", "profile_steer", "profile_live"]}
 CLIENT_CONTROLS_SCOPES = ["observe", "submit", "control"]
 client_controls_mode = len(sys.argv) == 6 and sys.argv[5] in CLIENT_CONTROLS_MODES
 # The steering text of the pi-client-controls mode. STEER_TEXT of
 # ext-pi/test/manager-controls-live.test.ts states it.
 PI_CONTROLS_STEER_TEXT = "Pi steer \u03bb: focus on the patch."
+# The steering text of the emacs-client-controls mode.
+# wf-manager-live-steer-text of emacs/wf-manager-live.el states it.
+EMACS_CONTROLS_STEER_TEXT = "Emacs steer \u03bb: focus on the patch."
 # The emacs-client mode runs the live check of the Emacs transport of the
 # agent-workflows repository against the running protected manager with the
 # mixed fixture and one profile. It needs two variables: EMACS, the Emacs
@@ -522,7 +573,8 @@ PI_CONTROLS_STEER_TEXT = "Pi steer \u03bb: focus on the patch."
 # local port with no listener. It runs EMACS -Q --batch with an environment
 # built from EMACS_ALLOWLIST, with HOME set to a new directory of the fixture
 # and user-emacs-directory set to a directory below it, with -L WF_EMACS_DIR,
-# -l wf-manager-live and -f ert-run-tests-batch-and-exit, and with
+# -l wf-manager-live and ert-run-tests-batch-and-exit of the one test
+# wf-manager-live-session, through emacs_live, and with
 # WF_MANAGER_PROFILE set to the client profile, WF_MANAGER_SECOND_PROFILE set
 # to the profile of the second credential, WF_MANAGER_UNREACHABLE_PROFILE set
 # to the profile with no listener, WF_MANAGER_REPORT set to a report file,
@@ -713,7 +765,7 @@ EMACS_CLIENT = "emacs-client"
 emacs_client_mode = len(sys.argv) == 6 and sys.argv[5] == EMACS_CLIENT
 # The version of the report of emacs/wf-manager-live.el. The constant
 # wf-manager-live-harness-version there states the same version.
-EMACS_HARNESS_VERSION = 7
+EMACS_HARNESS_VERSION = 8
 # The local-only commands of wf.el that the service step runs in service
 # mode. wf-manager-live--local-commands of emacs/wf-manager-live.el states
 # them.
@@ -734,17 +786,17 @@ EMACS_ANSWERED = "Emacs answer \u03bb: explicit false."
 EMACS_STALE = "Emacs stale \u03bb: the harness answers first."
 # The variables that the batch Emacs takes from the environment of the harness.
 EMACS_ALLOWLIST = ("PATH", "LANG", "LC_ALL", "TMPDIR", "USER", "LOGNAME")
-if emacs_client_mode:
+if emacs_client_mode or sys.argv[5:] == [EMACS_CLIENT_CONTROLS]:
     emacs_program = os.environ.get("EMACS", "")
     emacs_directory = os.environ.get("WF_EMACS_DIR", "")
     if not emacs_program:
-        raise SystemExit("The emacs-client mode needs EMACS, the Emacs executable, and EMACS is unset.")
+        raise SystemExit(f"The {sys.argv[5]} mode needs EMACS, the Emacs executable, and EMACS is unset.")
     if not (os.path.isfile(emacs_program) and os.access(emacs_program, os.X_OK)):
-        raise SystemExit(f"The emacs-client mode needs EMACS, the Emacs executable, and {emacs_program} is not an executable file.")
+        raise SystemExit(f"The {sys.argv[5]} mode needs EMACS, the Emacs executable, and {emacs_program} is not an executable file.")
     if not emacs_directory:
-        raise SystemExit("The emacs-client mode needs WF_EMACS_DIR, the emacs directory of agent-workflows, and WF_EMACS_DIR is unset.")
+        raise SystemExit(f"The {sys.argv[5]} mode needs WF_EMACS_DIR, the emacs directory of agent-workflows, and WF_EMACS_DIR is unset.")
     if not os.path.isfile(os.path.join(emacs_directory, "wf-manager-live.el")):
-        raise SystemExit(f"The emacs-client mode needs wf-manager-live.el in WF_EMACS_DIR, and {emacs_directory} has no such file.")
+        raise SystemExit(f"The {sys.argv[5]} mode needs wf-manager-live.el in WF_EMACS_DIR, and {emacs_directory} has no such file.")
 # The Pi host modes start the built Pi fork in a pseudo-terminal through the
 # shared launcher PiHost. The launcher reuses the credential issuance of
 # TuiModeFixture with the mixed fixture, one profile and one execution
@@ -1526,12 +1578,15 @@ if control_profiles:
                 dict(scripted, id="profile_live_stale", workspaceLabel="HTTPS live stale fixture", targetLabel="Deterministic ACP hold",
                      targetArguments=["--engine", "acp", "--adapter", "hold-adapter", "--route", "primary=acp:hold-adapter",
                                       "--route", "spare=acp:hold-adapter"], environment=fixture_path)]
-    # The client-controls modes keep only profile_steer and profile_live. A
-    # run of each holds its turn at once, so each profile has its own
-    # resource key, and both runs hold one of the two execution reservations.
+    # The client-controls modes keep only the profiles of
+    # CLIENT_CONTROLS_PROFILES: profile_steer and profile_live, and profile_1
+    # in the emacs-client-controls mode. Runs of two profiles hold their
+    # turns at once, so each profile has its own resource key, and two runs
+    # hold the two execution reservations.
     if client_controls_mode:
         configuration["profiles"] = [dict(profile, resourceKeys=["controls_" + profile["id"]])
-                                     for profile in configuration["profiles"] if profile["id"] in CLIENT_CONTROLS_PROFILES]
+                                     for profile in configuration["profiles"]
+                                     if profile["id"] in CLIENT_CONTROLS_PROFILES[sys.argv[5]]]
 # The tui-decisions mode configures the person-answers fixture too.
 if person_mode or tui_mode == TUI_DECISIONS:
     # The launcher relays its input to the stub adapter. It records its
@@ -1769,13 +1824,13 @@ class TuiModeFixture:
 
 
 def client_controls_fixture(client):
-    """The credentials of a client-controls mode. The module configures its
-    profiles, profile_steer and profile_live, each with its own resource
-    key, and two execution reservations. This issues the client credential
-    credential-CLIENT with observe, submit and control for both profiles,
-    and the credential of the harness, through TuiModeFixture, whose
-    client_profile names the client credential."""
-    return TuiModeFixture(CLIENT_CONTROLS_PROFILES, CLIENT_CONTROLS_SCOPES, client=client)
+    """The credentials of a client-controls mode. The module configures the
+    profiles of CLIENT_CONTROLS_PROFILES for the mode, each with its own
+    resource key, and two execution reservations. This issues the client
+    credential credential-CLIENT with observe, submit and control for those
+    profiles, and the credential of the harness, through TuiModeFixture,
+    whose client_profile names the client credential."""
+    return TuiModeFixture(CLIENT_CONTROLS_PROFILES[sys.argv[5]], CLIENT_CONTROLS_SCOPES, client=client)
 
 
 issued = administration({"version": 1, "operation": "issue-credential", "label": "HTTPS fixture",
@@ -5712,6 +5767,24 @@ class ControlHarness:
         value, _, _ = self.client[1]("/v1/runs/" + run + "/control", "RunControl", ready)
         return value
 
+    def until_recovery(self, run):
+        """Answer each question head of the run with typed false until the
+        head is a recovery decision. Returns that decision."""
+        observed, _, mutate, _ = self.client
+        deadline = time.monotonic() + 60
+        while True:
+            assert time.monotonic() < deadline, ("recovery head deadline", run)
+            control, _, _ = observed("/v1/runs/" + run + "/control", "RunControl")
+            head = control["decisionHeadId"]
+            if head is None:
+                time.sleep(0.05)
+                continue
+            decision, tag, _ = observed("/v1/decisions/" + head, "Decision")
+            if decision["kind"] == "recovery":
+                return decision
+            mutate("/v1/decisions/" + head, {"operation": "answer", "occurrenceId": decision["address"]["occurrenceId"],
+                                             "generation": decision["generation"], "value": False}, tag)
+
     def settle(self, run, expected):
         """Answer each remaining question head with typed false until the
         run ends, and require the expected terminal status. A recovery head
@@ -5829,23 +5902,6 @@ def tui_control_checks():
                                                      "generation": decision["generation"], "value": False}, tag)
         return offered(run, lambda value: value["decisionHeadId"] is None and value["cancelAllowed"]
                        and any(offer["operation"] == "steer" for offer in value["offers"]))
-
-    def answer_until_recovery(run):
-        """Answer each question head of the run with typed false until the
-        head is a recovery decision. Returns that decision."""
-        deadline = time.monotonic() + 60
-        while True:
-            assert time.monotonic() < deadline, ("recovery head deadline", run)
-            control, control_tag, _ = client[0]("/v1/runs/" + run + "/control", "RunControl")
-            head = control["decisionHeadId"]
-            if head is None:
-                time.sleep(0.05)
-                continue
-            decision, tag, _ = client[0]("/v1/decisions/" + head, "Decision")
-            if decision["kind"] == "recovery":
-                return decision
-            client[2]("/v1/decisions/" + head, {"operation": "answer", "occurrenceId": decision["address"]["occurrenceId"],
-                                               "generation": decision["generation"], "value": False}, tag)
 
     def runtime_labels(start):
         """The runtime labels that the TUI wrote to the PTY after the byte offset start."""
@@ -6134,6 +6190,7 @@ def tui_control_checks():
             runs = ControlHarness(harness, capabilities, tui_mode)
             client = runs.client
             start, snapshot_of, ended, offered, settle = runs.start, runs.snapshot, runs.ended, runs.offered, runs.settle
+            answer_until_recovery = runs.until_recovery
             run_records, command_rows, commands, new_store = runs.run_records, runs.command_rows, runs.commands, runs.new_store
             with tui_fixture.session() as session:
                 session.wait_screen("Manager profiles")
@@ -10586,6 +10643,155 @@ def pi_client_controls_checks():
         (work / "server-0.exit").write_text(str(process.returncode) + "\n")
 
 
+def emacs_live(home, test, log_path, variables):
+    """Start the batch Emacs of an Emacs mode. It runs the ERT test named
+    test of emacs/wf-manager-live.el in WF_EMACS_DIR with Emacs -Q, an
+    environment built from EMACS_ALLOWLIST and variables, HOME set to home
+    and user-emacs-directory set to home/.emacs.d, with its output in the
+    file log_path. Returns the Popen object and the open log file."""
+    environment = {name: os.environ[name] for name in EMACS_ALLOWLIST if name in os.environ}
+    environment.update(HOME=str(home), **variables)
+    command = [emacs_program, "-Q", "--batch",
+               "--eval", "(setq user-emacs-directory " + json.dumps(str(home / ".emacs.d") + "/") + ")",
+               "-L", emacs_directory, "-l", "wf-manager-live",
+               "--eval", "(ert-run-tests-batch-and-exit " + json.dumps(test) + ")"]
+    log = log_path.open("wb")
+    return subprocess.Popen(command, cwd=home, env=environment, stdin=subprocess.DEVNULL,
+                            stdout=log, stderr=subprocess.STDOUT), log
+
+
+def emacs_live_report(child, log_path, report_path, steps):
+    """The report of a finished batch Emacs of an Emacs mode. It refuses a
+    report of another harness version with one sentence, and it requires
+    exit status 0, one passed ERT test and the steps in order."""
+    text = log_path.read_text(errors="replace")
+    report = json.loads(report_path.read_bytes()) if report_path.is_file() else None
+    if report is not None and report.get("harnessVersion") != EMACS_HARNESS_VERSION:
+        raise SystemExit(f"The {sys.argv[5]} mode requires harness version {EMACS_HARNESS_VERSION}, and the report of "
+                         f"wf-manager-live.el states version {report.get('harnessVersion')!r}, so the agent-cat and "
+                         "agent-workflows checkouts are not a matching pair.")
+    assert child.returncode == 0, ("the Emacs live check failed", child.returncode, text[-4000:])
+    assert re.search(r"Ran 1 tests?, 1 results? as expected, 0 unexpected", text) and report is not None, (
+        "the Emacs live check did not run its one test", text[-4000:])
+    assert report["steps"] == steps, ("the Emacs live check did not complete its steps", report["steps"])
+    return report
+
+
+def emacs_client_controls_checks():
+    """The emacs-client-controls mode. See EMACS_CLIENT_CONTROLS for the steps."""
+    harness = tui_fixture.harness
+    mode = EMACS_CLIENT_CONTROLS
+    report_path = work / (mode + "-report.json")
+    log_path = work / (mode + "-ert.log")
+    held_path = work / (mode + "-held.json")
+    retried_path = work / (mode + "-retried.json")
+    home = work / "emacs-home"
+    home.mkdir(mode=0o700)
+    (home / ".emacs.d").mkdir(mode=0o700)
+    with (work / "server-0.stdout").open("wb") as output, (work / "server-0.stderr").open("wb") as errors:
+        process = subprocess.Popen([str(runner), "--manager", "serve", "--config", str(config),
+                                    "+RTS", "-N" + native, "-RTS"], stdout=output, stderr=errors)
+    try:
+        wait_ready(process)
+        status, capabilities, _ = request("/v1/capabilities", harness)
+        assert status == 200 and "control" in capabilities["scopes"], ("capabilities", status)
+        runs = ControlHarness(harness, capabilities, mode)
+        observed = runs.client[0]
+        steer, redirect, store = client_controls_hold(runs)
+        retry = cancel = None
+        retry_receipt = None
+        child, log = emacs_live(home, "wf-manager-live-controls", log_path,
+                                {"WF_MANAGER_PROFILE": str(tui_fixture.client_profile), "WF_MANAGER_STEER_RUN": steer,
+                                 "WF_MANAGER_REDIRECT_RUN": redirect, "WF_MANAGER_HELD": str(held_path),
+                                 "WF_MANAGER_RETRIED": str(retried_path), "WF_MANAGER_REPORT": str(report_path)})
+        try:
+            deadline = time.monotonic() + 600
+            while child.poll() is None:
+                assert time.monotonic() < deadline, "the Emacs live check exceeded 600 seconds"
+                if retry is None and held_path.is_file():
+                    # The check has sent the steer and the redirect. The
+                    # harness confirms both and settles both runs, then
+                    # starts the run of the retry and the run of the cancel.
+                    facts = json.loads(held_path.read_bytes())
+                    assert facts["steerText"] == EMACS_CONTROLS_STEER_TEXT, ("the steering text of the check", facts["steerText"])
+                    client_controls_confirm(runs, steer, redirect, store, facts, "wf-control steer", "wf-control redirect")
+                    retry = runs.start("profile_1")
+                    recovery = runs.until_recovery(retry)
+                    assert any(offer["operation"] == "retry" for offer in runs.offered(retry, lambda value: True)["offers"]), (
+                        "the recovery of the retry run offers no retry", recovery["choices"])
+                    cancel = runs.start("profile_steer")
+                    runs.offered(cancel, lambda value: value["cancelAllowed"] and value["supervision"] == "owned"
+                                 and any(offer["operation"] == "steer" for offer in value["offers"]))
+                    written = held_path.with_name(held_path.name + ".tmp")
+                    written.write_text(json.dumps({"retryRunId": retry, "cancelRunId": cancel}))
+                    os.replace(written, held_path.with_name(held_path.name + ".done"))
+                if retry is not None and retry_receipt is None and retried_path.is_file():
+                    # The check has sent the retry. It is the only command of
+                    # the controls of the run, and it reached its effect.
+                    command = json.loads(retried_path.read_bytes())["retryCommand"]
+                    rows = runs.command_rows(["/v1/runs/" + retry + "/control"])
+                    assert [(row[0], row[1], row[2]) for row in rows] == [(command.rsplit("/", 1)[1], "retry", "effect-observed")], (
+                        "the check did not send exactly one retry that reached its effect", rows)
+                    retry_receipt, _, raw = observed(command, "CommandReceipt")
+                    (work / (mode + "-retry-receipt.json")).write_bytes(raw)
+                    assert retry_receipt["effect"]["kind"] == "retried" \
+                        and retry_receipt["effect"]["address"]["occurrenceId"] == recovery["address"]["occurrenceId"], (
+                        "retry effect", retry_receipt["effect"], recovery["address"])
+                    runs.settle(retry, "succeeded")
+                    retried_path.with_name(retried_path.name + ".done").write_text("{}")
+                time.sleep(0.05)
+        finally:
+            if child.poll() is None:
+                child.kill()
+                child.wait()
+            log.close()
+        report = emacs_live_report(child, log_path, report_path, ["steer", "redirect", "retry", "cancel"])
+        # 3. The retry.
+        assert report["retryRunId"] == retry and "retry" in report["retryChoices"] \
+            and "Terminal: succeeded" in report["retryFinalLines"], ("the retry step", report["retryChoices"], report["retryFinalLines"])
+        print(f"PASS {mode} 3: wf-control listed", report["retryChoices"], "for run", retry, "at its recovery decision", recovery["id"],
+              "and sent the one retry command", report["retryCommand"], "; it reached the effect retried, the run succeeded, and the view",
+              "showed Terminal: succeeded", flush=True)
+        # 4. The declined and the confirmed cancel.
+        rows = runs.command_rows(["/v1/runs/" + cancel + "/control"])
+        assert [(row[0], row[1]) for row in rows] == [(report["cancelCommand"].rsplit("/", 1)[1], "cancel")] \
+            and rows[0][3] is not None and rows[0][3]["state"] in ("accepted", "queued", "delivered"), (
+            "the check did not send exactly one cancel that the runtime accepted", rows)
+        runs.ended(cancel, "cancelled")
+        assert report["declinedSent"] == [] and "cancel" in report["cancelChoices"] \
+            and "Terminal: cancelled" in report["cancelFinalLines"], (
+            "the cancel step", report["declinedSent"], report["cancelChoices"], report["cancelFinalLines"])
+        print(f"PASS {mode} 4: wf-kill with the answer no sent nothing, and wf-control then sent the one cancel command",
+              report["cancelCommand"], "of run", cancel, "after the answer yes; the runtime acknowledgement is", rows[0][3]["state"],
+              ", the run ended cancelled, and the view showed Terminal: cancelled", flush=True)
+        # 5. Only the offered controls, each once.
+        sent = report["controlCommands"]
+        expected = [("/v1/runs/" + run + "/control", operation) for run, operation in
+                    ((steer, "steer"), (redirect, "redirect"), (retry, "retry"), (cancel, "cancel"))]
+        assert [(item["resource"], item["body"]["operation"]) for item in sent] == expected \
+            and all(item["media"] == "application/json" and item["ifMatch"].startswith('"') for item in sent), (
+            "the commands of the check", sent)
+        listings = {"steer": report["steerChoices"], "redirect": report["redirectChoices"],
+                    "retry": report["retryChoices"], "cancel": report["cancelChoices"]}
+        assert all(any(label == operation or label.startswith(operation + ":") for label in listings[operation])
+                   for operation in listings), ("a sent control was not a listed choice", listings)
+        commands = {run: [(row[1], row[2]) for row in runs.command_rows(["/v1/runs/" + run + "/control"])]
+                    for run in (steer, redirect, retry, cancel)}
+        assert [len(rows) for rows in commands.values()] == [1, 1, 1, 1] \
+            and [rows[0][0] for rows in commands.values()] == ["steer", "redirect", "retry", "cancel"], (
+            "the controls of the four runs", commands)
+        print(f"PASS {mode} 5: the check sent exactly the offered steer, redirect, retry and cancel, each once with the entity tag",
+              "of the controls as If-Match, each a choice that wf-control listed, and the coordination database holds exactly",
+              commands, flush=True)
+        print(f"PASS {mode}: wf-control and wf-kill of the service mode of wf.el sent only the offered controls, each once,",
+              "through the protected HTTPS endpoint, and the harness confirmed each from manager facts", flush=True)
+    finally:
+        if process.poll() is None:
+            process.terminate()
+        process.wait(timeout=25)
+        (work / "server-0.exit").write_text(str(process.returncode) + "\n")
+
+
 def emacs_client_checks():
     """The emacs-client mode. See EMACS_CLIENT for the steps."""
     def all_requests():
@@ -10676,23 +10882,17 @@ def emacs_client_checks():
                 written.write_text(json.dumps({"command": command}))
                 os.replace(written, handshake.with_name(handshake.name + ".done"))
 
-            environment = {name: os.environ[name] for name in EMACS_ALLOWLIST if name in os.environ}
-            environment.update(HOME=str(home), WF_MANAGER_PROFILE=str(profile_path),
-                               WF_MANAGER_SECOND_PROFILE=str(second_path),
-                               WF_MANAGER_UNREACHABLE_PROFILE=str(unreachable_path),
-                               WF_MANAGER_REPORT=str(report_path), WF_MANAGER_RUN=str(run_path),
-                               WF_MANAGER_REVOKE=str(revoke_path), WF_MANAGER_FINISH=str(finish_path),
-                               WF_MANAGER_DOWNLOAD=str(download_path), WF_MANAGER_ANSWER=str(answer_path),
-                               WF_MANAGER_DRIVE=str(drive_path))
-            command = [emacs_program, "-Q", "--batch",
-                       "--eval", "(setq user-emacs-directory " + json.dumps(str(home / ".emacs.d") + "/") + ")",
-                       "-L", emacs_directory, "-l", "wf-manager-live", "-f", "ert-run-tests-batch-and-exit"]
             revoked = False
             run = listed = receipts = runs = started = closed = snapshot = driven = views_drive = None
             answered = recovered = 0
-            with log_path.open("wb") as log:
-                child = subprocess.Popen(command, cwd=home, env=environment, stdin=subprocess.DEVNULL,
-                                         stdout=log, stderr=subprocess.STDOUT)
+            child, log = emacs_live(home, "wf-manager-live-session", log_path,
+                                    {"WF_MANAGER_PROFILE": str(profile_path), "WF_MANAGER_SECOND_PROFILE": str(second_path),
+                                     "WF_MANAGER_UNREACHABLE_PROFILE": str(unreachable_path),
+                                     "WF_MANAGER_REPORT": str(report_path), "WF_MANAGER_RUN": str(run_path),
+                                     "WF_MANAGER_REVOKE": str(revoke_path), "WF_MANAGER_FINISH": str(finish_path),
+                                     "WF_MANAGER_DOWNLOAD": str(download_path), "WF_MANAGER_ANSWER": str(answer_path),
+                                     "WF_MANAGER_DRIVE": str(drive_path)})
+            with log:
                 try:
                     deadline = time.monotonic() + 600
                     while child.poll() is None:
@@ -10753,20 +10953,10 @@ def emacs_client_checks():
                     if child.poll() is None:
                         child.kill()
                         child.wait()
-            text = log_path.read_text(errors="replace")
-            if report_path.is_file():
-                report = json.loads(report_path.read_bytes())
-                if report.get("harnessVersion") != EMACS_HARNESS_VERSION:
-                    raise SystemExit(f"The emacs-client mode requires harness version {EMACS_HARNESS_VERSION}, and the report of "
-                                     f"wf-manager-live.el states version {report.get('harnessVersion')!r}, so the agent-cat and "
-                                     "agent-workflows checkouts are not a matching pair.")
-            assert child.returncode == 0, ("the Emacs live check failed", child.returncode, text[-4000:])
-            assert re.search(r"Ran 1 tests?, 1 results? as expected, 0 unexpected", text) and report_path.is_file(), (
-                "the Emacs live check did not run its one test", text[-4000:])
-            assert report["steps"] == ["bind", "draft", "stale", "pages", "overview", "follow", "unreachable", "switch",
-                                       "revoke", "close", "export", "service", "requests", "views"] \
-                and report["prompts"] == 0, (
-                "the Emacs live check did not complete its steps without a prompt", report["steps"], report["prompts"])
+            report = emacs_live_report(child, log_path, report_path,
+                                       ["bind", "draft", "stale", "pages", "overview", "follow", "unreachable", "switch",
+                                        "revoke", "close", "export", "service", "requests", "views"])
+            assert report["prompts"] == 0, ("the Emacs live check prompted", report["prompts"])
             # 1. The binding.
             assert report["scheme"] == "https" and profile["endpoint"].startswith("https://127.0.0.1:"), (
                 "the binding is not over TLS", report["scheme"], profile["endpoint"])
@@ -12499,6 +12689,11 @@ if pi_client_mode:
 
 if sys.argv[5:] == [PI_CLIENT_CONTROLS]:
     pi_client_controls_checks()
+    raise SystemExit(0)
+
+
+if sys.argv[5:] == [EMACS_CLIENT_CONTROLS]:
+    emacs_client_controls_checks()
     raise SystemExit(0)
 
 
