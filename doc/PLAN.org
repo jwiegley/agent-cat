@@ -1531,6 +1531,39 @@ Runtime.Store verifies canonical envelope, reference code, run, size and digest 
 
 Live target precedence: when --engine or --session is present, use only that explicit command-line route table even if --routing is also present. When neither is present, always load routing configuration. Routing-only execution must prove every engine-bound question has a configured model pin and refuse otherwise. Preserve routing-only frontend launch fingerprints and lineage.
 
+* TODO [#D] Resolve the non-blocking fess findings of subtask PD23
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-4ot9
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-02 Fri 05:42]
+:MODIFIED: [2026-10-02 Fri 05:42]
+:OWNER:    johnw
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess audit fess/pd-PD23-r1.md (2026-10-02) on subtask PD23 (WM-031 part 5, agent-workflows emacs-native, results and history in Emacs service mode). The emacs-native commit of PD23 names this issue.
+
+1. (medium) emacs/wf-service.el lines 2302 to 2323 and 1397 to 1400. RET on a legacy observer row of the service history calls wf-service-open-view, which watches every view resource of the run. Neither the live step nor the offline test opens a legacy row: the live step opens a managed run, and the offline test opens only run_21. If a legacy entry answers 404 for a watched resource, the open can fail or show an empty view. Fix: add an offline test, and if cheap a live substep, that opens a legacy observer row and requires a rendered read-only view. Fix the watch behavior for legacy runs if the test shows a problem.
+
+2. (low) emacs/wf-service.el lines 2160 to 2165. A second save to an existing file reads the outputs and downloads the artifact again before the exclusive write refuses. The refusal is correct and the file stays unchanged, but the refusal costs a full download. Fix: optionally check the target before the download, and keep the excl write as the authoritative refusal.
+
+3. (low) manager/test/service_http.py lines 11432 to 11437. Check 24 proves that no read named the run only from Emacs-side advice on wf-manager-get and wf-manager-download (emacs/wf-manager-live.el line 1608). The harness does not confirm it from the manager log, and it does not assert that the new binding is the third credential. Fix: optionally assert from the manager log that no request named the run after the switch, and record the bound credential in the report.
+
+4. (low) emacs/wf-manager-tests.el line 3398. (should (equal (call-interactively #'wf-result) nil)) checks the constant nil that the wf.el service wrapper returns. Fix: drop the equal check, or assert on the returned file name of wf-service--result directly.
+
+5. (low) emacs/wf-service.el line 2268. Every wf-history and every H creates a new buffer with generate-new-buffer, so repeated use stacks *wf service history*<n> buffers. The README documents a new buffer. Fix: reuse one history buffer per endpoint identity, or document the stacking as intended.
+
+6. (low) README.md line 849. The text "read the local stores as before" describes a change instead of the current state. Fix: state the current state, for example "In local mode, wf-history and the observer read the local stores."
+
+7. (low) emacs/wf-service.el wf-service--result-run. Outside a run view, wf-result offers only the runs of open views and overview members. It does not offer the history row at point. Fix: optionally use the history row at point as the run of wf-result in a service history buffer.
+
+Implementer limitations recorded with PD23: wf-service-save-exact creates the file with O_EXCL and mode 0600 but does not use the private-file-plus-hard-link publication of ext-pi saveExact, so a write failure after creation can leave a partial file (deferred as a security-only item, per the 2026-09-30 direction); opening a legacy observer entry from the history is not exercised live; the service run view key text is now two lines.
+
 * TODO [#C] Resolve F12 fess findings in the start, discard and control relays
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -21014,7 +21047,7 @@ separately tested rather than inferred from one newer Emacs build.
 :LABELS:   ["p6","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-02 Fri 05:11]
+:MODIFIED: [2026-10-02 Fri 05:42]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-031
 :SOURCE_REPO: agent-cat
@@ -21117,6 +21150,13 @@ including its explicit v3 invocation compatibility behavior.
     "author": "johnw",
     "text": "PD22 (WM-031 part 4): agent-workflows emacs-native commit 0c3b202 adds service controls in emacs/wf-service.el. wf-control and wf-kill are service entries in the dispatch table. wf-control reads the controls, the head decision and, when a redirect is offered, the snapshot, one time each, and lists only the offered choices: cancel (owned and cancelAllowed), steer:N, redirect:N with the place of the redirect, retry, abandon and failover:N. A cancel asks wf-confirm-function first and wf-kill reaches the same cancel. A steer opens the editor *wf steer RUN* that sends once. cancel, steer, redirect and retry go to /v1/runs/{id}/control with the control ETag as If-Match; choose-recovery goes to the decision with the decision ETag. Each control is sent once and waits until it settles; an uncertain send is reconciled once and never resent. agent-cat manager/test/service_http.py adds the mode emacs-client-controls with the profile_steer and profile_live fixture through the PD6 setup, and the live ERT wf-manager-live-controls at harness version 8. Evidence scope: ci/emacs.sh exited 0 (88 of 88 transport tests, three new tests failed first against HEAD); ci/emacs-ui.py local cases passed; emacs-client mode 22 PASS lines; emacs-client-controls PASS 1 to 5 (the steer record in the run log, the redirect ends the held attempt and the run succeeds with the spare answer, the retry reaches its effect and terminal success, a declined cancel sends nothing and the confirmed cancel is accepted and the run ends cancelled, one database command per offered control); journey N8 passed. Fess pd-PD22-r1 not blocking; one medium and five low findings filed as acat-8d3g. Limitations: choose-recovery has offline listing coverage only; the views step waits 61 seconds to stay under the limit of 30 ordinary mutations per minute per client; the tui-controls mode was not run after the until_recovery move. WM-031 stays open.",
     "created_at": "2026-10-02T12:11:56Z"
+  },
+  {
+    "id": 615,
+    "issue_id": "acat-wm-031-5yxo",
+    "author": "johnw",
+    "text": "PD23 (WM-031 part 5): agent-workflows emacs-native commit 8536023 adds service results and history in emacs/wf-service.el. wf-result reads GET /v1/runs/{id}/outputs, selects the verified artifact, downloads it through wf-manager-session-download and saves the exact unibyte bytes with write-region excl under mode 0600 and no-conversion; a second save to the same file is refused and the file stays unchanged. wf-history reads every page of /v1/runs into wf-service-history-mode (tabulated-list) in collection order, a legacy entry shows observer (legacy entry, read only), each row keeps its endpoint-bound wf-manager-reference, RET reads the run through that reference and opens the read-only run view, and a reference of another endpoint is refused with wrong-endpoint and sends nothing. Local mode keeps wf-history and wf-observer over local stores. agent-cat manager/test/service_http.py emacs-client mode adds LEGACY_ROOT with LEGACY_ENTRIES legacy entries, --legacy-history, globalPageSets 8, a third credential emacs-third and live step 15 (history) at harness version 9. Evidence scope: ci/emacs.sh exited 0 (two new offline tests failed first against HEAD); ci/emacs-ui.py local cases passed; emacs-client mode 24 PASS lines (22: the saved file of 103 bytes equals the harness download in bytes, size and SHA-256 with mode 0600 and a second save refused; 23: wf-history listed 305 runs over 2 pages in collection order, 300 legacy entries included; 24: a profile A row opened after a switch to the third credential is refused and not retargeted); journey N8 passed. Fess pd-PD23-r1 not blocking; one medium and six low findings filed as acat-4ot9. Limitations: the exclusive save does not use the private-file-plus-hard-link publication of ext-pi saveExact (deferred as security-only); opening a legacy observer row is not exercised; wf-result outside a run view does not use the history row at point. WM-031 stays open.",
+    "created_at": "2026-10-02T12:42:54Z"
   }
 ]
 #+end_src

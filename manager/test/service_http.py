@@ -570,7 +570,12 @@ EMACS_CONTROLS_STEER_TEXT = "Emacs steer \u03bb: focus on the patch."
 # harness. It then issues the second client credential emacs-second of the
 # same manager with the same scopes and its client profile, and it writes a
 # third client profile with the second credential whose endpoint names a
-# local port with no listener. It runs EMACS -Q --batch with an environment
+# local port with no listener. It also issues the third client credential
+# emacs-third with the same scopes and its client profile. It configures the
+# local retention root of the pages mode: a local frontend run and its copies
+# fill it with LEGACY_ENTRIES legacy entries, and the manager serves them
+# through --legacy-history, so /v1/runs spans more than one page. It runs
+# EMACS -Q --batch with an environment
 # built from EMACS_ALLOWLIST, with HOME set to a new directory of the fixture
 # and user-emacs-directory set to a directory below it, with -L WF_EMACS_DIR,
 # -l wf-manager-live and ert-run-tests-batch-and-exit of the one test
@@ -581,8 +586,10 @@ EMACS_CONTROLS_STEER_TEXT = "Emacs steer \u03bb: focus on the patch."
 # WF_MANAGER_RUN set to the run handshake file, WF_MANAGER_REVOKE set to
 # the revocation handshake file, WF_MANAGER_FINISH set to the finish
 # handshake file, WF_MANAGER_DOWNLOAD set to the file of the downloaded
-# bytes, WF_MANAGER_ANSWER set to the answer handshake file and
-# WF_MANAGER_DRIVE set to the drive handshake file. ERT must report its one
+# bytes, WF_MANAGER_ANSWER set to the answer handshake file,
+# WF_MANAGER_DRIVE set to the drive handshake file, WF_MANAGER_THIRD_PROFILE
+# set to the profile of the third credential and WF_MANAGER_RESULT set to the
+# new file of the saved result. ERT must report its one
 # test passed. The harness has five actions during the check, and it
 # otherwise only reads.
 # When the check writes the run handshake file, the harness first reads the
@@ -629,14 +636,17 @@ EMACS_CONTROLS_STEER_TEXT = "Emacs steer \u03bb: focus on the patch."
 # fields RequestId, RunId and DecisionId with each of the prefixes answered
 # and stale, staleAnswerRefusal, staleAnswerDraft, harnessAnswerCommand,
 # answeredWaitingLines, staleRecoveryLines, answeredRecoveryLines,
-# killedWatched, viewsCommands, answeredFinalLines, killEmacsClosed and
-# viewsCommandsAfter.
+# killedWatched, viewsCommands, answeredFinalLines, killEmacsClosed,
+# viewsCommandsAfter, historyIdentity, historyRuns, historyPages,
+# historyObservers, historyViewLines, resultFile, resultBytes, resultSha256,
+# resultMode, resultRefusal, resultKept, historySwitchIdentity,
+# historyForeignRefusal, historyForeignReads and historyForeignView.
 # The
 # mode first refuses, with one sentence, a report whose harnessVersion
 # differs from EMACS_HARNESS_VERSION, which detects a mismatched pair of the
 # two repositories. It then requires the steps bind, draft, stale, pages,
 # overview, follow, unreachable, switch, revoke, close, export, service,
-# requests and views in that order and
+# requests, views and history in that order and
 # no prompt, and checks the report against its own reads:
 # 1. The check bound its transport over https with the CA file of the
 # profile, with a 32-digit endpoint identity and the authority epoch of the
@@ -760,12 +770,24 @@ EMACS_CONTROLS_STEER_TEXT = "Emacs steer \u03bb: focus on the patch."
 # the SHA-256 digest of the verified result that the harness downloads, and
 # its runtime, supervision, verification, decisions and offers each have one
 # line.
+# 22. In the history step, wf-result in the view of the answered run saved a
+# regular file with mode 0600 at WF_MANAGER_RESULT whose bytes, size and
+# SHA-256 digest equal the verified result that the harness downloads, and a
+# second save to the same file was refused and left the file as it was.
+# 23. M-x wf-history listed exactly the run identifiers of every page of
+# /v1/runs, in the order of the collection, over at least two pages, with
+# LEGACY_ENTRIES observer entries and the five managed runs of the mode, and
+# RET on the row of the answered run opened its view.
+# 24. After the switch of the session to the third credential, whose endpoint
+# identity differs, RET on the same history row was refused with the
+# wrong-endpoint failure, no read named the run and the session opened no
+# view of the run on the new binding.
 # Each step prints its own PASS line. It runs one manager lifetime.
 EMACS_CLIENT = "emacs-client"
 emacs_client_mode = len(sys.argv) == 6 and sys.argv[5] == EMACS_CLIENT
 # The version of the report of emacs/wf-manager-live.el. The constant
 # wf-manager-live-harness-version there states the same version.
-EMACS_HARNESS_VERSION = 8
+EMACS_HARNESS_VERSION = 9
 # The local-only commands of wf.el that the service step runs in service
 # mode. wf-manager-live--local-commands of emacs/wf-manager-live.el states
 # them.
@@ -1479,12 +1501,12 @@ if storage_mode:
 # them through --legacy-history as read-only legacy entries.
 LEGACY_ROOT = work / "legacy"
 LEGACY_ENTRIES = 300
-# The tui-history and pi-client modes configure the same retention root and
-# raise the global page-set bound, so that a read of the harness and a read
-# of the client can hold page sets at once.
-if tui_mode == TUI_HISTORY or pi_client_mode:
+# The tui-history, pi-client and emacs-client modes configure the same
+# retention root and raise the global page-set bound, so that a read of the
+# harness and a read of the client can hold page sets at once.
+if tui_mode == TUI_HISTORY or pi_client_mode or emacs_client_mode:
     configuration["limits"]["globalPageSets"] = 8
-if pages_mode or tui_mode == TUI_HISTORY or pi_client_mode:
+if pages_mode or tui_mode == TUI_HISTORY or pi_client_mode or emacs_client_mode:
     LEGACY_ROOT.mkdir(mode=0o700)
     configuration["localRetentionRoots"] = [str(LEGACY_ROOT)]
 # The tui-overview, tui-failures and tui-sizes modes also run requests
@@ -10830,14 +10852,20 @@ def emacs_client_checks():
     unreachable_path.write_text(json.dumps({"version": 1, "endpoint": f"https://127.0.0.1:{closed_port}/v1",
                                             "credentialFile": str(work / "credential-emacs-second"), "caFile": str(cert)}))
     unreachable_path.chmod(0o600)
+    saved_path = work / "emacs-client-saved-result.bin"
+    clone_legacy_runs(legacy_frontend_run(), LEGACY_ENTRIES - 1)
     with (work / "server-0.stdout").open("wb") as output, (work / "server-0.stderr").open("wb") as errors:
         process = subprocess.Popen([str(runner), "--manager", "serve", "--config", str(config),
+                                    "--legacy-history", f"{LEGACY_ROOT}=profile_1",
                                     "+RTS", "-N" + native, "-RTS"], stdout=output, stderr=errors)
     try:
         with harness_reads_only():
             wait_ready(process)
             # The second client credential of the same manager and its profile.
             second_path = tui_fixture.renew("emacs-second")
+            # The third client credential, whose profile the history step
+            # switches to.
+            third_path = tui_fixture.renew("emacs-third")
             second_client = {"Authorization": "Bearer " + (work / "credential-emacs-second").read_bytes().decode("ascii")}
             status, capabilities, _ = request("/v1/capabilities", harness)
             assert status == 200, ("capabilities", status)
@@ -10891,7 +10919,8 @@ def emacs_client_checks():
                                      "WF_MANAGER_REPORT": str(report_path), "WF_MANAGER_RUN": str(run_path),
                                      "WF_MANAGER_REVOKE": str(revoke_path), "WF_MANAGER_FINISH": str(finish_path),
                                      "WF_MANAGER_DOWNLOAD": str(download_path), "WF_MANAGER_ANSWER": str(answer_path),
-                                     "WF_MANAGER_DRIVE": str(drive_path)})
+                                     "WF_MANAGER_DRIVE": str(drive_path), "WF_MANAGER_THIRD_PROFILE": str(third_path),
+                                     "WF_MANAGER_RESULT": str(saved_path)})
             with log:
                 try:
                     deadline = time.monotonic() + 600
@@ -10955,7 +10984,7 @@ def emacs_client_checks():
                         child.wait()
             report = emacs_live_report(child, log_path, report_path,
                                        ["bind", "draft", "stale", "pages", "overview", "follow", "unreachable", "switch",
-                                        "revoke", "close", "export", "service", "requests", "views"])
+                                        "revoke", "close", "export", "service", "requests", "views", "history"])
             assert report["prompts"] == 0, ("the Emacs live check prompted", report["prompts"])
             # 1. The binding.
             assert report["scheme"] == "https" and profile["endpoint"].startswith("https://127.0.0.1:"), (
@@ -11353,11 +11382,64 @@ def emacs_client_checks():
             for prefix in ("Runtime: ", "Supervision: ", "Verification: ", "Decisions: ", "Offers: "):
                 assert sum(line.startswith(prefix) for line in final_lines) == 1, ("the line of the view", prefix, final_lines)
             artifact = verified_download(answered_run, views_client, harness)
+            harness_result = (work / "verified-result.json").read_bytes()
             assert final_lines[-3:] == ["Terminal: succeeded", "Result: verified " + str(int(artifact["bytes"])) + " bytes",
                                         "Result SHA-256: " + artifact["sha256"]], ("the outcome lines of the view", final_lines)
             print("PASS emacs-client 21: the views of runs", answered_run, "and", stale_run, "followed their own runs, one at",
                   "its question while the other was at its recovery, and the view of", answered_run, "ended with the Terminal",
                   "line and the Result lines of the verified", int(artifact["bytes"]), "bytes that the harness downloads", flush=True)
+            # 22. wf-result saved the verified result once, with mode 0600.
+            saved_stat = saved_path.lstat()
+            saved = saved_path.read_bytes()
+            assert report["resultFile"] == str(saved_path) and stat.S_ISREG(saved_stat.st_mode) \
+                and stat.S_IMODE(saved_stat.st_mode) == 0o600 and report["resultMode"] == "600", (
+                "the saved file", report["resultFile"], oct(saved_stat.st_mode), report["resultMode"])
+            assert saved == harness_result and len(saved) == int(artifact["bytes"]) == report["resultBytes"] \
+                and hashlib.sha256(saved).hexdigest() == artifact["sha256"] == report["resultSha256"], (
+                "the saved result differs from the harness download", len(saved), report["resultBytes"], report["resultSha256"])
+            assert isinstance(report["resultRefusal"], str) and str(saved_path) + " exists, so the result was not saved" in (
+                report["resultRefusal"]) and report["resultKept"] is True, ("the second save", report["resultRefusal"], report["resultKept"])
+            print("PASS emacs-client 22: in the view of run", answered_run, "that the history opened, wf-result saved", len(saved),
+                  "bytes with SHA-256", artifact["sha256"], "and mode 0600 to", saved_path, "which equal the harness download,",
+                  "and a second save to the same file was refused and left the file as it was", flush=True)
+            # 23. wf-history listed every run of /v1/runs in the order of the collection.
+            history, observers, history_pages, target = [], 0, 0, "/v1/runs"
+            while target is not None:
+                status, value, raw = request(target, harness)
+                assert status == 200, ("history page", target, status, value.get("code"))
+                validate("RunPage", value, raw)
+                assert value["page"]["index"] == history_pages, ("history page index", value["page"]["index"], history_pages)
+                history_pages += 1
+                history.extend(item["id"] for item in value["items"])
+                observers += sum(1 for item in value["items"] if item["supervision"] == "observer")
+                target = value["page"]["next"]
+            managed = [run, report["literalRunId"], report["capturedRunId"], answered_run, stale_run]
+            assert history_pages >= 2 and observers == LEGACY_ENTRIES and len(history) == len(set(history)) \
+                and all(item in history for item in managed), ("the history pages", history_pages, observers, len(history))
+            assert report["historyRuns"] == history and report["historyPages"] == history_pages \
+                and report["historyObservers"] == LEGACY_ENTRIES, (
+                "the wf-history rows differ from every page of /v1/runs", report["historyPages"], report["historyObservers"],
+                len(report["historyRuns"]), len(history))
+            assert report["historyViewLines"][0].startswith("Service run " + answered_run) \
+                and "Terminal: succeeded" in report["historyViewLines"], ("the view that RET opened", report["historyViewLines"])
+            print("PASS emacs-client 23: wf-history listed the", len(history), "runs of the", history_pages, "pages of /v1/runs, the",
+                  LEGACY_ENTRIES, "legacy entries included, each once in the order of the collection, and RET opened the",
+                  "read-only view of run", answered_run, flush=True)
+            # 24. A history row of the first credential, opened after the
+            # switch to the third credential, refused and was not retargeted.
+            assert re.fullmatch(r"[0-9a-f]{32}", report["historyIdentity"]) \
+                and re.fullmatch(r"[0-9a-f]{32}", report["historySwitchIdentity"]) \
+                and report["historySwitchIdentity"] != report["historyIdentity"], (
+                "the identities of the history step", report["historyIdentity"], report["historySwitchIdentity"])
+            foreign = report["historyForeignRefusal"]
+            assert isinstance(foreign, str) and f"The history row of run {answered_run} cannot be opened" in foreign \
+                and "Reference of another endpoint" in foreign, ("the refusal of the row of the first endpoint", foreign)
+            assert report["historyForeignReads"] == [] and report["historyForeignView"] is False, (
+                "the row of the first endpoint was retargeted", report["historyForeignReads"], report["historyForeignView"])
+            print("PASS emacs-client 24: after the switch to credential", tui_fixture.credential_ids["emacs-third"],
+                  "with endpoint identity", report["historySwitchIdentity"], "RET on the history row of run", answered_run,
+                  "of endpoint", report["historyIdentity"], "was refused with wrong-endpoint, and no read and no view of the run",
+                  "followed on the new binding", flush=True)
         print("PASS emacs-client: the Emacs transport bound, created and replayed a draft, received the typed 412 and 401",
               "refusals, assembled the overview over all its pages, followed a run of the harness through event polls, kept its",
               "binding after an unreachable switch, switched to a second credential with generation fencing, closed",
@@ -11365,7 +11447,8 @@ def emacs_client_checks():
               "protected HTTPS endpoint, drove the service mode of wf.el with keys, created, set up, reviewed and",
               "approved two requests whose programs received their literal and captured inputs, declined, discarded",
               "and withdrew a third, followed two runs in two views, answered no as JSON false, kept the draft of a",
-              "412 answer, killed a view with no command, and the harness confirmed each",
+              "412 answer, killed a view with no command, saved a verified result once, listed every run of the",
+              "history over its pages and refused a history row of another endpoint, and the harness confirmed each",
               "step from manager facts",
               flush=True)
     finally:
