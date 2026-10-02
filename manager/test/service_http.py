@@ -518,49 +518,70 @@ PI_CONTROLS_STEER_TEXT = "Pi steer \u03bb: focus on the patch."
 # user-emacs-directory set to a directory below it, with -L WF_EMACS_DIR,
 # -l wf-manager-live and -f ert-run-tests-batch-and-exit, and with
 # WF_MANAGER_PROFILE set to the client profile, WF_MANAGER_REPORT set to a
-# report file and WF_MANAGER_REVOKE set to a handshake file. ERT must report
-# its one test passed. When the check writes the handshake file, the harness
-# revokes the credential emacs through local administration and writes the
-# handshake file with the suffix .done. This revocation is the only action of
-# the harness during the check, which otherwise only reads.
+# report file, WF_MANAGER_RUN set to the run handshake file and
+# WF_MANAGER_REVOKE set to the revocation handshake file. ERT must report its
+# one test passed. The harness has two actions during the check, and it
+# otherwise only reads. When the check writes the run handshake file, the
+# harness first reads the requests and the command receipts after the start
+# cursor, then creates, enqueues and approves one mixed-controls run of
+# profile_1 with its own credential through ControlHarness, and writes the
+# handshake file with the suffix .done and the field runId. When the check
+# writes the revocation handshake file, the harness revokes the credential
+# emacs through local administration and writes that file with the suffix
+# .done. After the check, the harness drives the run to its terminal success.
 # The report is one JSON object. The mode needs these fields: harnessVersion,
 # steps, prompts, scheme, endpointIdentity, authorityEpoch, workflowId,
 # requestId, createStatus, replayStatus, replayEqual, inputName, literal,
 # setInputCommand, setInputState, staleTag, currentTag, staleRefusal,
-# revokedRefusal, processesAfterClose, buffersAfterClose and
-# directoryRemoved. The mode first refuses, with one sentence, a report whose
-# harnessVersion differs from EMACS_HARNESS_VERSION, which detects a
-# mismatched pair of the two repositories. It then requires the steps bind,
-# draft, stale, revoke and close in that order and no prompt, and checks the
-# report against its own reads:
+# pageRequests, overviewPages, overviewRequests, overviewCursor, followRunId,
+# deliveryState, polls, generation, followEnd, revokedRefusal,
+# processesAfterClose, buffersAfterClose and directoryRemoved. The mode first
+# refuses, with one sentence, a report whose harnessVersion differs from
+# EMACS_HARNESS_VERSION, which detects a mismatched pair of the two
+# repositories. It then requires the steps bind, draft, stale, pages,
+# overview, follow, revoke and close in that order and no prompt, and checks
+# the report against its own reads:
 # 1. The check bound its transport over https with the CA file of the
 # profile, with a 32-digit endpoint identity and the authority epoch of the
 # capabilities that the harness reads.
 # 2. The draft POST with an idempotency key gave 201, and the same key gave
-# 201 with the same draft. The harness reads that /v1/requests lists exactly
-# that one request, of the workflow mixed-controls, and that the command
-# events after the start cursor name one create command of /v1/requests and
-# then one set-input command of the request, and no other command.
+# 201 with the same draft. At the run handshake, the harness read that
+# /v1/requests lists exactly that request, of the workflow mixed-controls,
+# and the three drafts of the pages step, and that the command events after
+# the start cursor name one create command of /v1/requests and one set-input
+# command of the request, then one create and one set-input command of each
+# page draft, and no other command.
 # 3. The set-input command of the report reached the effect
 # effect-observed, and the request that the harness reads supplied exactly
 # EMACS_LITERAL and has the entity tag currentTag, which differs from
 # staleTag. The second set-input with staleTag received the typed refusal
 # 412 stale-revision, and the set-input command of the command events is
 # the command of the report, with the state effect-observed.
-# 4. After the revocation, the check received the typed refusal 401
-# unauthenticated with no prompt, and the harness reads 401 with the revoked
-# credential.
-# 5. After the close, no new process and no new buffer of the session remain,
+# 4. Each page draft supplies a literal of EMACS_PAGE_CHARACTERS characters,
+# and the first overview of the session of the check had at least as many
+# pages as page drafts, a valid cursor, and exactly the requests of step 2
+# as its request members.
+# 5. The run of the harness appeared in the overview that the follow loop
+# of the session installed, after at least one polling batch, with the
+# delivery state poll and the generation 0, and the run then reached
+# terminal success.
+# 6. After the revocation, the follow loop of the session ended with
+# refused, the check received the typed refusal 401 unauthenticated with no
+# prompt, and the harness reads 401 with the revoked credential.
+# 7. After the close, no new process and no new buffer of the session remain,
 # and the session directory is gone.
 # Each step prints its own PASS line. It runs one manager lifetime.
 EMACS_CLIENT = "emacs-client"
 emacs_client_mode = len(sys.argv) == 6 and sys.argv[5] == EMACS_CLIENT
 # The version of the report of emacs/wf-manager-live.el. The constant
 # wf-manager-live-harness-version there states the same version.
-EMACS_HARNESS_VERSION = 1
+EMACS_HARNESS_VERSION = 2
 # The literal input of the emacs-client mode. wf-manager-live-literal of
 # emacs/wf-manager-live.el states it.
 EMACS_LITERAL = "Emacs \u03bb \u96ea\U0001F600 input."
+# The characters of the literal input of each draft of the pages step.
+# wf-manager-live--page-characters of emacs/wf-manager-live.el states it.
+EMACS_PAGE_CHARACTERS = 600000
 # The variables that the batch Emacs takes from the environment of the harness.
 EMACS_ALLOWLIST = ("PATH", "LANG", "LC_ALL", "TMPDIR", "USER", "LOGNAME")
 if emacs_client_mode:
@@ -1660,6 +1681,18 @@ def harness_reads_only():
         posts_forbidden = previous
 
 
+@contextlib.contextmanager
+def harness_acts():
+    """Allow harness POSTs inside this block, for an action of the harness
+    that a client check asks for during the check."""
+    global posts_forbidden
+    previous, posts_forbidden = posts_forbidden, False
+    try:
+        yield
+    finally:
+        posts_forbidden = previous
+
+
 def exchange(path, headers=None, method="GET", payload=None):
     assert not (posts_forbidden and method == "POST"), "harness POST while the POST guard is active"
     connection = http.client.HTTPSConnection("127.0.0.1", port, context=context, timeout=7)
@@ -1909,7 +1942,13 @@ def approve_review(created, workflow, client):
         assert item["source"] == "literal" and item["bytes"] == str(len(expected))
         assert item["sha256"] == hashlib.sha256(expected).hexdigest()
     overview, _, raw = observed("/v1/snapshot", "OverviewSnapshot")
-    assert any(item["kind"] == "preparation" and item["preparation"]["id"] == preparation["id"] for item in overview["items"])
+    # The overview of a credential can span pages, as in the emacs-client
+    # mode, so the harness reads every page of the set.
+    items, page = list(overview["items"]), overview
+    while page["page"]["next"] is not None:
+        page, _, _ = observed(page["page"]["next"], "OverviewSnapshot")
+        items += page["items"]
+    assert any(item["kind"] == "preparation" and item["preparation"]["id"] == preparation["id"] for item in items)
     (work / "review-overview.json").write_bytes(raw)
     selectors = ("reviewDigest", "requestRevision", "profileRevision", "descriptorRevision", "processGeneration")
     approval = mutate("/v1/preparations/" + preparation["id"],
@@ -10398,6 +10437,8 @@ def emacs_client_checks():
     log_path = work / "emacs-client-ert.log"
     revoke_path = work / "emacs-client-revoke.json"
     revoked_path = work / "emacs-client-revoke.json.done"
+    run_path = work / "emacs-client-run.json"
+    ran_path = work / "emacs-client-run.json.done"
     home = work / "emacs-home"
     home.mkdir(mode=0o700)
     (home / ".emacs.d").mkdir(mode=0o700)
@@ -10418,18 +10459,39 @@ def emacs_client_checks():
             cursor = overview["cursor"]
             environment = {name: os.environ[name] for name in EMACS_ALLOWLIST if name in os.environ}
             environment.update(HOME=str(home), WF_MANAGER_PROFILE=str(profile_path),
-                               WF_MANAGER_REPORT=str(report_path), WF_MANAGER_REVOKE=str(revoke_path))
+                               WF_MANAGER_REPORT=str(report_path), WF_MANAGER_RUN=str(run_path),
+                               WF_MANAGER_REVOKE=str(revoke_path))
             command = [emacs_program, "-Q", "--batch",
                        "--eval", "(setq user-emacs-directory " + json.dumps(str(home / ".emacs.d") + "/") + ")",
                        "-L", emacs_directory, "-l", "wf-manager-live", "-f", "ert-run-tests-batch-and-exit"]
             revoked = False
+            run = listed = receipts = runs = None
             with log_path.open("wb") as log:
                 child = subprocess.Popen(command, cwd=home, env=environment, stdin=subprocess.DEVNULL,
                                          stdout=log, stderr=subprocess.STDOUT)
                 try:
-                    deadline = time.monotonic() + 300
+                    deadline = time.monotonic() + 420
                     while child.poll() is None:
-                        assert time.monotonic() < deadline, "the Emacs live check exceeded 300 seconds"
+                        assert time.monotonic() < deadline, "the Emacs live check exceeded 420 seconds"
+                        if run is None and run_path.is_file():
+                            # The check has sent all its commands. The harness
+                            # keeps the requests and the command receipts of
+                            # the check, then acts: it creates and approves one
+                            # run with its own credential.
+                            # The page drafts make /v1/requests a page set of
+                            # several pages, so the harness reads every page.
+                            listed, following = [], "/v1/requests"
+                            while following is not None:
+                                status, page, raw = request(following, harness)
+                                assert status == 200, ("requests", following, status)
+                                validate("RequestPage", page, raw)
+                                listed += page["items"]
+                                following = page["page"]["next"]
+                            receipts = command_receipts(cursor, harness)
+                            runs = ControlHarness(harness, capabilities, EMACS_CLIENT)
+                            with harness_acts():
+                                run = runs.start("profile_1")
+                            ran_path.write_text(json.dumps({"runId": run}))
                         if not revoked and revoke_path.is_file():
                             # The one action of the harness during the check.
                             administration({"version": 1, "operation": "revoke-credential",
@@ -10451,7 +10513,8 @@ def emacs_client_checks():
             assert child.returncode == 0, ("the Emacs live check failed", child.returncode, text[-4000:])
             assert re.search(r"Ran 1 tests?, 1 results? as expected, 0 unexpected", text) and report_path.is_file(), (
                 "the Emacs live check did not run its one test", text[-4000:])
-            assert report["steps"] == ["bind", "draft", "stale", "revoke", "close"] and report["prompts"] == 0, (
+            assert report["steps"] == ["bind", "draft", "stale", "pages", "overview", "follow", "revoke", "close"] \
+                and report["prompts"] == 0, (
                 "the Emacs live check did not complete its steps without a prompt", report["steps"], report["prompts"])
             # 1. The binding.
             assert report["scheme"] == "https" and profile["endpoint"].startswith("https://127.0.0.1:"), (
@@ -10466,20 +10529,22 @@ def emacs_client_checks():
             assert [report["createStatus"], report["replayStatus"], report["replayEqual"]] == [201, 201, True], (
                 "the draft POST and its replay", report["createStatus"], report["replayStatus"], report["replayEqual"])
             assert report["workflowId"] == workflow["id"], ("the draft names another workflow", report["workflowId"])
-            status, listed, raw = request("/v1/requests", harness)
-            assert status == 200, ("requests", status)
-            validate("RequestPage", listed, raw)
-            assert [item["id"] for item in listed["items"]] == [request_id] and listed["items"][0]["workflowId"] == workflow["id"], (
-                "the manager does not hold exactly the one draft of the check", [item["id"] for item in listed["items"]])
+            page_requests = report["pageRequests"]
+            assert len(page_requests) == 3 and len(set(page_requests + [request_id])) == 4, ("the page drafts", page_requests)
+            assert sorted(item["id"] for item in listed) == sorted([request_id] + page_requests) \
+                and all(item["workflowId"] == workflow["id"] for item in listed), (
+                "the manager does not hold exactly the drafts of the check", [item["id"] for item in listed])
             # The command events after the start cursor name one create
             # command of the draft and then the set-input command, so the
-            # replay and the stale command left no command.
-            receipts = command_receipts(cursor, harness)
+            # replay and the stale command left no command. The create and
+            # set-input commands of the page drafts follow.
             assert [(receipt["operation"], receipt["resource"]) for _, receipt in receipts] == [
-                ("create", "/v1/requests"), ("set-input", "/v1/requests/" + request_id)], (
+                ("create", "/v1/requests"), ("set-input", "/v1/requests/" + request_id)] + [
+                pair for page in page_requests for pair in (("create", "/v1/requests"), ("set-input", "/v1/requests/" + page))], (
                 "the commands of the check", [(resource, receipt["operation"]) for resource, receipt in receipts])
             print("PASS emacs-client 2: the draft POST with an Idempotency-Key gave 201, the same key gave 201 with the same draft",
-                  request_id, "and the manager holds only that request of workflow mixed-controls and one create command", flush=True)
+                  request_id, "and the manager holds only that request of workflow mixed-controls, the three page drafts and one",
+                  "create command for each", flush=True)
             # 3. The set-input command and the stale If-Match.
             status, current, raw, headers = fetch("/v1/requests/" + request_id, harness)
             assert status == 200, ("request", status)
@@ -10496,20 +10561,46 @@ def emacs_client_checks():
             print("PASS emacs-client 3: set-input command", report["setInputCommand"], "reached its effect and the request supplied",
                   "exactly the literal, and the second set-input with the earlier If-Match", report["staleTag"],
                   "received the typed refusal 412 stale-revision and left no command", flush=True)
-            # 4. The revoked credential.
+            # 4. The page drafts and the overview of all pages.
+            for page in page_requests:
+                status, value, raw = request("/v1/requests/" + page, harness)
+                assert status == 200, ("page draft", page, status)
+                validate("Request", value, raw)
+                assert [(item["source"], len(item["value"])) for item in value["readiness"]["supplied"]] == [
+                    ("literal", EMACS_PAGE_CHARACTERS)], ("the page draft did not supply its literal", page)
+            # Each page draft fills more than half of a page of 1048576 bytes.
+            assert report["overviewPages"] >= len(page_requests), ("the overview did not span the pages", report["overviewPages"])
+            assert report["overviewRequests"] == sorted([request_id] + page_requests), (
+                "the overview of the check names other requests", report["overviewRequests"])
+            assert re.fullmatch(r"[A-Za-z0-9_-]{1,128}\.(0|[1-9][0-9]*)", report["overviewCursor"]), ("overview cursor", report["overviewCursor"])
+            print("PASS emacs-client 4: the session assembled the overview over all its", report["overviewPages"], "pages before it",
+                  "installed it, with the four drafts of the check as its request members and the cursor", report["overviewCursor"], flush=True)
+            # 5. The run of the harness through the follow loop.
+            assert run is not None and report["followRunId"] == run, ("the followed run", run, report["followRunId"])
+            assert [report["deliveryState"], report["generation"]] == ["poll", 0] and report["polls"] >= 1, (
+                "the follow loop", report["deliveryState"], report["generation"], report["polls"])
+            with harness_acts():
+                _, answered, recovered = drive_mixed(run, runs.client, overview=False)
+            print("PASS emacs-client 5: run", run, "of the harness appeared in the overview of the session after",
+                  report["polls"], "polling batches with no read of the check itself, with the delivery state poll and generation 0,",
+                  "and the run then succeeded after", answered, "answer(s) and", recovered, "retry(s) of the harness", flush=True)
+            # 6. The revoked credential.
             assert revoked and report["revokedRefusal"] == [401, "unauthenticated"], ("the revoked read", revoked, report["revokedRefusal"])
+            assert report["followEnd"] == "refused", ("the follow loop after the revocation", report["followEnd"])
             status, refused, _ = request("/v1/snapshot", emacs_client)
             assert status == 401 and refused["code"] == "unauthenticated", ("the harness read with the revoked credential", status)
-            print("PASS emacs-client 4: after the harness revoked credential", tui_fixture.credential_ids["emacs"],
-                  "the next read of batch Emacs received the typed refusal 401 unauthenticated with no prompt", flush=True)
-            # 5. The close.
+            print("PASS emacs-client 6: after the harness revoked credential", tui_fixture.credential_ids["emacs"],
+                  "the follow loop of the session ended refused and the next read of batch Emacs received the typed refusal",
+                  "401 unauthenticated with no prompt", flush=True)
+            # 7. The close.
             assert [report["processesAfterClose"], report["buffersAfterClose"], report["directoryRemoved"]] == [0, [], True], (
                 "the session left a process, a buffer or its directory", report["processesAfterClose"],
                 report["buffersAfterClose"], report["directoryRemoved"])
-            print("PASS emacs-client 5: after the close, no network process, no url.el buffer and no session directory remain",
+            print("PASS emacs-client 7: after the close, no network process, no url.el buffer and no session directory remain",
                   flush=True)
         print("PASS emacs-client: the Emacs transport bound, created and replayed a draft, received the typed 412 and 401",
-              "refusals and closed cleanly against the protected HTTPS endpoint, and the harness confirmed each step from manager facts",
+              "refusals, assembled the overview over all its pages, followed a run of the harness through event polls and closed",
+              "cleanly against the protected HTTPS endpoint, and the harness confirmed each step from manager facts",
               flush=True)
     finally:
         if process.poll() is None:
