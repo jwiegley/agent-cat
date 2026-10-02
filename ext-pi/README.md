@@ -966,7 +966,6 @@ for the control descriptor.
 | `/wf-retry [RUN_ID]` | Retry an occurrence that waits after automatic recovery is spent. |
 | `/wf-recover [RUN_ID]` | Choose one runner-offered retry, fail-over, or abandon action. |
 | `/wf-redirect RUN_ID OCCURRENCE_ID TARGET` | Redirect an occurrence, as the section "Local redirect" states: to a scheduler-reserved target during the thirty-second dispatch window, or to a live candidate of its fail-over chain while its attempt runs. |
-| `/wf-grant` | Issue a one-time scoped grant for model-initiated starts, lineage, or controls. |
 | `/wf-restart PARENT_RUN_ID` | Start a new run from scratch with immutable lineage. |
 | `/wf-resume PARENT_RUN_ID` | Resume a compatible run semantically. |
 | `/wf-fork PARENT_RUN_ID` | Fork a workflow immutably, with drops or replacements of persisted answers. This is distinct from a Pi conversation fork. |
@@ -991,12 +990,36 @@ for the control descriptor.
 | `/wfm-export [RUN_ID [NAME]]` | Service mode: export the verified result of a manager run under a name. |
 
 The `agent_cat_workflow` tool lets a model discover, start, inspect, control,
-restart, resume, or fork runs. Starts from the tool are limited to the
-scripted, tool-free child, and known remote targets. Every mutation requires an
-unused matching grant from `/wf-grant`, and an unresolved or expired grant
-refuses before anything is spent. Controls wait for the terminal acknowledgement
-of agent-cat, and they report `delivered`, `rejected-stale`, `unsupported`, or
-`failed` verbatim. A request is never presented as a success.
+restart, resume, or fork local runs. Starts from the tool are limited to the
+scripted, tool-free child, and known remote targets. The `list`, `status` and
+`inspect` actions only read.
+
+Every mutation from the tool is a model-initiated local mutation, and a human
+must confirm its exact content in Pi before anything is spent or sent. Each
+mutation requires a trusted project and an interactive Pi UI. Without the UI,
+the tool refuses before it discovers the workflow or reads the run. The human
+confirms the following review:
+
+- A `start` shows the launch review of `/wf-launch`: the runner, the working
+  directory, the target, the routing, the containment, the effects and the
+  persistence. The exact value of each input follows as a JSON string, in
+  the order of the descriptor. A start on the owned child or on a remote
+  session first shows the same target confirmation as `/wf-launch`.
+- A `restart`, `resume` or `fork` shows its lineage review: the operation,
+  the parent run, the workflow, the runner, the working directory, the
+  target and its arguments, the containment, the effects, the exact inputs,
+  and each fork edit with its occurrence and its replacement value.
+- A control (`cancel`, `steer`, `retry`, `recover` or `redirect`) shows its
+  kind, the run, and the occurrence, the attempt, the timing, the target and
+  the text that it carries. The target and the text are JSON strings.
+
+A decline sends nothing and launches nothing, and the tool reports the
+decline as an error. No tool parameter grants a mutation. The parameter
+schema leaves additional properties open, so a field that a model adds, such
+as `grantId`, `approved` or `consent`, reaches the tool, and the tool ignores
+it. Controls wait for the terminal acknowledgement of agent-cat, and they
+report `delivered`, `rejected-stale`, `unsupported`, or `failed` verbatim. A
+request is never presented as a success.
 
 ## Local redirect
 
@@ -1198,7 +1221,7 @@ is checked through an actual control exchange rather than a class-name probe.
 
 ## Conventions
 
-Keep this package a strict protocol client. Preserve project trust, explicit
-grants, private files, bounded logs and events, fail-closed reduction, and
+Keep this package a strict protocol client. Preserve project trust, the human
+confirmation of each model-initiated mutation, private files, bounded logs and events, fail-closed reduction, and
 process cleanup. Add runner capability through versioned protocol fields, and
 not through source imports or inference from prose.

@@ -11397,6 +11397,39 @@ Non-blocking findings of fess audit fess/pe-PE20-r1.md (2026-10-01) on subtask P
 
 Also recorded from the implementer limitations: when a lineage or export send is uncertain and the receipt is never observed, the session reconciles it with one read of the collection, and /wfm-* reports that the child or export exists without finding the child request itself. No legacy root is configured in pi-client mode.
 
+* TODO [#D] Resolve the non-blocking fess findings of subtask PE21
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pe21-fess-followup-pixq
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-01 Thu 17:21]
+:MODIFIED: [2026-10-01 Thu 17:21]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess audit fess/pe-PE21-r1.md (2026-10-01) on subtask PE21 (WM-037 model
+path, part 1: removal of the one-time grant and exact human confirmation of each model-initiated
+local start, lineage operation and control in ext-pi/src/index.ts).
+
+1. (low) ext-pi/src/index.ts near 775, 782, 819-842 and 948-950, ext-pi/test/extension.test.ts near
+568-595: no test covers the confirmation for the retry, recover and redirect controls. Only cancel
+and steer are tested end to end. The child and remote target confirmations of a tool start and the
+fork replace-edit review line are also untested. Fix: add one declined and one confirmed tool case
+each for retry, recover and redirect against the fixture runner, and one fork case with a replace
+edit that asserts the review line.
+2. (low) ext-pi/src/index.ts near 950: lineageReview prints a replacement edit as raw
+value=${edit.value}. Input lines and control text are JSON-encoded, so a multi-line replacement
+spreads over several review lines. Fix: use JSON.stringify(edit.value), as inputLines does.
+3. (low) doc/PLAN.org near 20940: the WM-038 work text still says "Test denial/consumption of model
+mutation grants". The mechanism no longer exists. Read the item as denial of a model-initiated
+mutation without a human confirmation (noted on acat-wm-038-mgb7).
+4. (low) ext-pi/README.md near 1224: the rewritten Conventions sentence leaves one line wider than
+the 80-column wrap of the file. Fix: rewrap the paragraph.
+
 * TODO [#D] Resolve PE3 fess findings in owner-released quarantine evidence
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -20799,7 +20832,7 @@ invocation tuples or exposing secrets.
 :LABELS:   ["p8","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-01 Thu 17:11]
+:MODIFIED: [2026-10-01 Thu 17:21]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-037
 :SOURCE_REPO: agent-cat
@@ -20905,6 +20938,13 @@ verified output, and lineage behave consistently with the other clients.
     "author": "johnw",
     "text": "PE20 (WM-037 human path, part 4) is in place: /wfm-result saves the verified result once with exclusive publication (mode 0600, exact bytes, an existing path refused), /wfm-history lists /v1/runs across pages with legacy entries labelled observer, /wfm-restart, /wfm-resume and /wfm-fork create a child request through /runs/{id}/lineage-requests under the first-page ETag and continue it through the PE17 exact review, and /wfm-export publishes the verified result and verifies its download. Evidence: npm run check, npm test (16 files, 192 passed, live-gated skips), the pi-client mode of manager/test/service_http.py (PASS 1 to 16) and make -C doc check passed. Limits: the live history check follows one page (the two-page follow is fake-transport only), and fork and resume have fake-transport evidence only. Fess not blocking. Findings filed as acat-pe20-fess-followup-xsk1. This package stays open for the closeout.",
     "created_at": "2026-10-02T00:11:00Z"
+  },
+  {
+    "id": 560,
+    "issue_id": "acat-wm-037-dz3v",
+    "author": "johnw",
+    "text": "PE21 (model path, part 1): /wf-grant, the grantId tool parameter, grantError and MutationGrants are removed, with ext-pi/src/grants.ts and ext-pi/test/grants.test.ts deleted. Every model-initiated local start, lineage operation and control through agent_cat_workflow now requires a trusted project, an interactive UI and a human confirmation of the exact review or content. A decline or a missing UI sends nothing. An extra model field reaches execute and grants nothing. Evidence (private): PE/PE21/impl-r1 (npm run check, npm test, test:integration, the grep check and make -C doc check, each exit 0; test-first.log). Fess: not blocking, low findings filed as acat-pe21-fess-followup-pixq.",
+    "created_at": "2026-10-02T00:21:46Z"
   }
 ]
 #+end_src
@@ -20916,7 +20956,7 @@ verified output, and lineage behave consistently with the other clients.
 :LABELS:   ["p8","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-01 Thu 10:50]
+:MODIFIED: [2026-10-01 Thu 17:21]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-038
 :SOURCE_REPO: agent-cat
@@ -21004,6 +21044,13 @@ WM-008 completed handoff 2026-09-12T02:36:23+00:00: Adopt the shared root-role r
     "author": "johnw",
     "text": "Status at the Phase E stopping point of 2026-10-01 (closeout commit 5a3d3f4f): not started. The run stopped at PE2 before PE10 to PE28. The deferred Phase E security items are listed in the handoff section 'Phase E stopping point of 2026-10-01'. The package stays open.",
     "created_at": "2026-10-01T17:50:28Z"
+  },
+  {
+    "id": 561,
+    "issue_id": "acat-wm-038-mgb7",
+    "author": "johnw",
+    "text": "PE21 removed the one-time model mutation grant. The work item 'Test denial/consumption of model mutation grants' is read as: test the denial of a model-initiated mutation without a human confirmation of the exact review. PE21 adds local unit coverage of that denial in ext-pi/test/extension.test.ts. The real-host acceptance stays with WM-038.",
+    "created_at": "2026-10-02T00:21:46Z"
   }
 ]
 #+end_src

@@ -6,7 +6,6 @@ import { Type } from "typebox";
 import { discoverRunner, readHelp, readRouting, supportsRoutingInspection } from "./catalogue.ts";
 import { configuredManagerProfiles, configuredRemote, configuredRunners, retentionPolicy, stateDirectory } from "./config.ts";
 import { CurrentSessionBridge } from "./current-bridge.ts";
-import { MutationGrants, type GrantScope } from "./grants.ts";
 import { assertNoCredentialArgs, prepareLaunch, preflightLineage, previewPlan, type LineageEdit, type PreparedLaunch } from "./launch.ts";
 import { formatControl, formatMonitor } from "./monitor.ts";
 import { WorkflowMonitorComponent } from "./monitor-ui.ts";
@@ -14,7 +13,7 @@ import { openRemotePi } from "./pi-remote-runtime.mjs";
 import type { SessionOptions } from "./manager/session.ts";
 import { ManagerRequests, type CommandRecord } from "./manager-ui.ts";
 import { ServiceMode, type ServiceSelection } from "./service-mode.ts";
-import { RunSupervisor } from "./supervisor.ts";
+import { RunSupervisor, type OwnedRun } from "./supervisor.ts";
 import type { ClientMode, ControlAckSnapshot, RoutingInspection, RunnerConfig, RunSnapshot, TargetKind, WorkflowDescriptor } from "./types.ts";
 
 /**
@@ -29,7 +28,6 @@ export default function agentCatExtension(pi: ExtensionAPI, hooks: ExtensionHook
   let service: ServiceMode | undefined;
   const requests = new ManagerRequests(() => service);
   const currentBridge = new CurrentSessionBridge(pi, () => lastContext);
-  const grants = new MutationGrants();
   const supervise = (prepared: PreparedLaunch, ctx: ExtensionContext, workflow: string) => {
     const run = supervisor.start(prepared);
     let recorded = false;
@@ -48,26 +46,43 @@ export default function agentCatExtension(pi: ExtensionAPI, hooks: ExtensionHook
     return run;
   };
 
-  const launchLineage = async (operation: "restart" | "resume" | "fork", parentRunId: string, ctx: ExtensionContext, suppliedInputs?: Record<string, string>, suppliedEdits?: LineageEdit[]) => {
-    if (!ctx.isProjectTrusted()) return ctx.ui.notify(`${operation} requires a trusted project`, "error");
-    if (!suppliedInputs && !ctx.hasUI) return ctx.ui.notify(`${operation} requires interactive approval`, "error");
+  /**
+   * Starts a lineage child of a local run. Without `model`, the human
+   * confirms the operation and enters the inputs and the fork edits. With
+   * `model`, the inputs and the edits come from the model, and the child
+   * starts only after the human confirms the exact lineage review. The
+   * result is the started run, the text of a refusal or a decline, or
+   * `undefined` when the human stops the collection.
+   */
+  const launchLineage = async (
+    operation: "restart" | "resume" | "fork",
+    parentRunId: string,
+    ctx: ExtensionContext,
+    model?: { readonly inputs: Record<string, string>; readonly edits: LineageEdit[] },
+  ): Promise<OwnedRun | string | undefined> => {
+    const refuse = (message: string): string => {
+      ctx.ui.notify(message, "error");
+      return message;
+    };
+    if (!ctx.isProjectTrusted()) return refuse(`${operation} requires a trusted project`);
+    if (!ctx.hasUI) return refuse(`${operation} requires interactive approval`);
     const parent = supervisor.get(parentRunId);
-    if (!parent) return ctx.ui.notify(`Unknown parent run ${parentRunId}`, "error");
+    if (!parent) return refuse(`Unknown parent run ${parentRunId}`);
     if (!["succeeded", "failed", "cancelled", "orphaned"].includes(parent.snapshot.status)) {
-      return ctx.ui.notify("Lineage operations require a terminal or orphaned parent run", "error");
+      return refuse("Lineage operations require a terminal or orphaned parent run");
     }
     const selected = (await discover(ctx)).find(
       ({ runner, descriptor }) => runner.id === parent.manifest.runnerId && descriptor.name === parent.manifest.workflow,
     );
-    if (!selected) return ctx.ui.notify("The parent workflow runner is no longer configured", "error");
-    let inputs = suppliedInputs;
+    if (!selected) return refuse("The parent workflow runner is no longer configured");
+    let inputs = model?.inputs;
     if (!inputs) {
       if (!(await ctx.ui.confirm(`${operation} workflow run?`, `${operation} creates a new workflow run and never mutates the parent. Inputs will be collected again.`))) return;
       inputs = await collectInputs(ctx, selected.descriptor);
       if (!inputs) return;
     }
-    let edits = suppliedEdits ?? [];
-    if (operation === "fork" && suppliedEdits === undefined) {
+    let edits = model?.edits ?? [];
+    if (operation === "fork" && model === undefined) {
       const collected = await collectForkEdits(ctx, parent.snapshot);
       if (collected === undefined) return;
       edits = collected;
@@ -76,19 +91,23 @@ export default function agentCatExtension(pi: ExtensionAPI, hooks: ExtensionHook
     const targetKind = parent.manifest.targetKind;
     let targetSpec: { args: string[]; env: NodeJS.ProcessEnv } | undefined;
     if (targetKind === "current") {
-      if (!currentBridge.supported) return ctx.ui.notify("Current-session lineage requires Pi ExtensionAPI.startTaskTurn", "error");
-      if (currentBridge.busy) return ctx.ui.notify("The current Pi session is already assigned to a workflow", "error");
+      if (!currentBridge.supported) return refuse("Current-session lineage requires Pi ExtensionAPI.startTaskTurn");
+      if (currentBridge.busy) return refuse("The current Pi session is already assigned to a workflow");
       targetSpec = currentBridge.target();
     } else if (targetKind === "child") targetSpec = ownedChildTarget();
     else if (targetKind === "remote") targetSpec = remote ? await selectRemoteTarget(ctx, remote) : undefined;
     else targetSpec = { args: [...parent.manifest.targetArgs], env: {} };
-    if (!targetSpec) return ctx.ui.notify("The parent's remote target is no longer configured", "error");
+    if (!targetSpec) return refuse("The parent's remote target is no longer configured");
+    if (model !== undefined) {
+      const review = lineageReview({ operation, parentRunId, runner: selected.runner, descriptor: selected.descriptor, cwd: ctx.cwd, targetKind, targetArgs: targetSpec.args, inputs, edits });
+      if (!(await ctx.ui.confirm(`${operation} workflow run?`, review))) return declinedText(operation);
+    }
     const stateDir = stateDirectory();
     const parentRuntimeDir = join(parent.storeDir, "runtime");
     try {
       await preflightLineage({ runner: selected.runner, descriptor: selected.descriptor, cwd: ctx.cwd, stateDir, inputs, targetArgs: targetSpec.args, operation, parentRuntimeDir, edits });
     } catch (error) {
-      return ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");
+      return refuse(error instanceof Error ? error.message : String(error));
     }
     const prepared = await prepareLaunch({
       runner: selected.runner,
@@ -245,15 +264,12 @@ export default function agentCatExtension(pi: ExtensionAPI, hooks: ExtensionHook
       const selected = selectWorkflow(catalogue, args.trim());
       if (!selected) return ctx.ui.notify(`Unknown workflow: ${args.trim()}`, "error");
       const remote = configuredRemote();
-      const targets = ["scripted (offline, no commands)"];
-      if (supportsRoutingInspection(selected.descriptor)) targets.push("routing configuration (live, full pin coverage)");
-      targets.push(
-        "native ACP adapter (live, agent-cat scratch)",
-        "native agent-deck session (live, external pane)",
-      );
-      if (currentBridge.supported) targets.push("current Pi session (live, current project, not sandboxed)");
-      targets.push("owned Pi child (live, agent-cat scratch, no tools)");
-      if (remote) targets.push("authenticated remote Pi session (live, remote workspace, not sandboxed)");
+      const targets: string[] = [TARGET_LABEL.scripted];
+      if (supportsRoutingInspection(selected.descriptor)) targets.push(TARGET_LABEL.routing);
+      targets.push(TARGET_LABEL.acp, TARGET_LABEL.deck);
+      if (currentBridge.supported) targets.push(TARGET_LABEL.current);
+      targets.push(TARGET_LABEL.child);
+      if (remote) targets.push(TARGET_LABEL.remote);
       const target = await ctx.ui.select("Execution target", targets);
       if (!target) return;
       let routingSelection: RoutingLaunchSelection;
@@ -304,33 +320,21 @@ export default function agentCatExtension(pi: ExtensionAPI, hooks: ExtensionHook
       } else if (target.startsWith("owned")) {
         targetKind = "child";
         if (selected.descriptor.capabilities.effectful === true) return ctx.ui.notify("Owned child targets run without tools; use the current session for effectful workflows", "error");
-        if (!(await ctx.ui.confirm("Create owned Pi child?", "Workflow questions will use the default configured model and may incur provider charges. Tools are disabled."))) return;
+        if (!(await ctx.ui.confirm(...TARGET_CONFIRMATION.child))) return;
         targetSpec = ownedChildTarget();
       } else if (target.startsWith("authenticated remote")) {
         targetKind = "remote";
         if (!remote) throw new Error("remote target disappeared");
         const remoteTarget = await selectRemoteTarget(ctx, remote);
         if (!remoteTarget) return;
-        if (!(await ctx.ui.confirm("Use authenticated remote Pi session?", "This acquires an exclusive session lease and workflow questions may incur provider charges."))) return;
+        if (!(await ctx.ui.confirm(...TARGET_CONFIRMATION.remote))) return;
         targetSpec = remoteTarget;
       } else {
         targetSpec = { args: ["--scripted"], env: {} };
       }
       if (routingSelection.args.length > 0) targetSpec = { ...targetSpec, args: [...targetSpec.args, ...routingSelection.args] };
-      const containment = target.startsWith("routing configuration")
-        ? "configured engines; full pin coverage required"
-        : target.startsWith("owned")
-          ? "agent-cat scratch directory; Pi tools disabled"
-          : target.startsWith("native ACP")
-            ? "agent-cat scratch directory; adapter is not an OS sandbox"
-            : target.startsWith("native agent-deck")
-              ? "external agent-deck pane/workspace; not a sandbox"
-              : target.startsWith("current")
-                ? "current Pi project workspace; not sandboxed"
-                : target.startsWith("authenticated remote")
-                  ? "authenticated remote Pi workspace; not sandboxed"
-                  : "offline scripted table; no command execution";
-      if (!(await ctx.ui.confirm("Launch agent-cat workflow?", `runner=${selected.runner.executable}\ncwd=${ctx.cwd}\ntarget=${target}\nrouting=${routingSelection.inspection?.persona.name ?? "not used"}\ncontainment=${containment}\neffects=${selected.descriptor.capabilities.effects ?? "unknown"}\npersistence=private full prompts/answers plus input hashes`))) return;
+      const review = launchReview({ runner: selected.runner, descriptor: selected.descriptor, cwd: ctx.cwd, targetKind, routing: routingSelection.inspection?.persona.name });
+      if (!(await ctx.ui.confirm("Launch agent-cat workflow?", review))) return;
       const inputs = await collectInputs(ctx, selected.descriptor);
       if (!inputs) return;
       const prepared = await prepareLaunch({
@@ -714,27 +718,13 @@ function parseLineageEdits(value: string | undefined): LineageEdit[] {
   return edits;
 }
 
-function grantError(scope: string) {
-  return { content: [{ type: "text" as const, text: `${scope} requires an unused matching grantId from /wf-grant` }], details: {}, isError: true };
-}
-
-  pi.registerCommand("wf-grant", {
-    description: "Issue a one-time scoped grant for model-initiated workflow mutation",
-    handler: async (_args, ctx) => {
-      if (!ctx.hasUI) return ctx.ui.notify("grant issuance requires interactive UI", "error");
-      if (!ctx.isProjectTrusted()) return ctx.ui.notify("grant issuance requires a trusted project", "error");
-      const scope = await ctx.ui.select("One-time model grant", ["start", "lineage", "control", "all"] as const);
-      if (scope !== "start" && scope !== "lineage" && scope !== "control" && scope !== "all") return;
-      if (!(await ctx.ui.confirm("Issue one-time workflow grant?", `scope=${scope}; expires in 10 minutes and is consumed on first use`))) return;
-      const grantId = grants.issue(scope as GrantScope);
-      ctx.ui.notify(`One-time ${scope} grant: ${grantId}`, "info");
-    },
-  });
-
+  // The parameter schema leaves additional properties open. A field that
+  // the model adds, such as grantId, approved or consent, reaches execute,
+  // and execute reads none of them, so it never replaces the confirmation.
   pi.registerTool({
     name: "agent_cat_workflow",
     label: "agent-cat workflow",
-    description: "Discover, launch, inspect, control, restart, resume, or fork agent-cat workflows. Every model-initiated mutation requires a one-time /wf-grant token.",
+    description: "Discover, launch, inspect, control, restart, resume, or fork agent-cat workflows. A start, a restart, resume or fork, and a control each require a trusted project, an interactive Pi UI, and a human confirmation of its exact review in Pi. No parameter replaces that confirmation, and a declined review sends nothing.",
     parameters: Type.Object({
       action: Type.Union([
         Type.Literal("list"), Type.Literal("status"), Type.Literal("inspect"), Type.Literal("start"), Type.Literal("restart"), Type.Literal("resume"), Type.Literal("fork"),
@@ -745,7 +735,6 @@ function grantError(scope: string) {
       workflow: Type.Optional(Type.String()),
       inputsJson: Type.Optional(Type.String()),
       launchTarget: Type.Optional(Type.Union([Type.Literal("scripted"), Type.Literal("child"), Type.Literal("remote")])),
-      grantId: Type.Optional(Type.String()),
       forkEditsJson: Type.Optional(Type.String()),
       occurrenceId: Type.Optional(Type.String()),
       attemptId: Type.Optional(Type.String()),
@@ -771,9 +760,9 @@ function grantError(scope: string) {
         return { content: [{ type: "text", text: formatMonitor(run.snapshot) }], details: {} };
       }
       if (params.action === "start") {
-        if (!ctx.isProjectTrusted()) return { content: [{ type: "text", text: "start requires a trusted project" }], details: {}, isError: true };
-        if (!grants.consume(params.grantId, "start")) return grantError("start");
-        if (!params.workflow) return { content: [{ type: "text", text: "start requires workflow" }], details: {}, isError: true };
+        if (!ctx.isProjectTrusted()) return toolRefusal("start requires a trusted project");
+        if (!ctx.hasUI) return toolRefusal(uiRequiredText("start"));
+        if (!params.workflow) return toolRefusal("start requires workflow");
         try {
           const selected = selectWorkflow(await discover(ctx), params.workflow);
           if (!selected) throw new Error(`Unknown workflow: ${params.workflow}`);
@@ -783,14 +772,18 @@ function grantError(scope: string) {
           let targetSpec: { args: string[]; env: NodeJS.ProcessEnv };
           if (launchTarget === "child") {
             if (selected.descriptor.capabilities.effectful === true) throw new Error("tool-free child target refuses effectful workflow");
+            if (!(await ctx.ui.confirm(...TARGET_CONFIRMATION.child))) return toolRefusal(declinedText("start"));
             targetSpec = ownedChildTarget();
           } else if (launchTarget === "remote") {
             const remote = configuredRemote();
             if (!remote) throw new Error("remote target is not configured");
             const selectedRemote = await selectRemoteTarget(ctx, remote);
             if (!selectedRemote) throw new Error("no remote session selected");
+            if (!(await ctx.ui.confirm(...TARGET_CONFIRMATION.remote))) return toolRefusal(declinedText("start"));
             targetSpec = selectedRemote;
           } else targetSpec = { args: ["--scripted"], env: {} };
+          const review = launchReview({ runner: selected.runner, descriptor: selected.descriptor, cwd: ctx.cwd, targetKind, inputs });
+          if (!(await ctx.ui.confirm("Launch agent-cat workflow?", review))) return toolRefusal(declinedText("start"));
           const prepared = await prepareLaunch({ runner: selected.runner, descriptor: selected.descriptor, cwd: ctx.cwd, stateDir: stateDirectory(), inputs, targetKind, targetArgs: targetSpec.args });
           Object.assign(prepared.env, targetSpec.env);
           const run = supervise(prepared, ctx, selected.descriptor.name);
@@ -800,25 +793,32 @@ function grantError(scope: string) {
         }
       }
       if (params.action === "restart" || params.action === "resume" || params.action === "fork") {
-        if (!ctx.isProjectTrusted()) return { content: [{ type: "text", text: `${params.action} requires a trusted project` }], details: {}, isError: true };
-        if (!grants.consume(params.grantId, "lineage")) return grantError("lineage");
-        if (!params.parentRunId) return { content: [{ type: "text", text: `${params.action} requires parentRunId` }], details: {}, isError: true };
+        if (!ctx.isProjectTrusted()) return toolRefusal(`${params.action} requires a trusted project`);
+        if (!ctx.hasUI) return toolRefusal(uiRequiredText(params.action));
+        if (!params.parentRunId) return toolRefusal(`${params.action} requires parentRunId`);
         try {
           const edits = params.action === "fork" ? parseLineageEdits(params.forkEditsJson) : [];
-          const run = await launchLineage(params.action, params.parentRunId, ctx, parseInputsJson(params.inputsJson), edits);
+          const run = await launchLineage(params.action, params.parentRunId, ctx, { inputs: parseInputsJson(params.inputsJson), edits });
+          if (typeof run === "string") throw new Error(run);
           if (!run) throw new Error(`${params.action} was not launched`);
           return { content: [{ type: "text", text: `Started ${params.action} child ${run.manifest.runId}` }], details: {} };
         } catch (error) {
           return { content: [{ type: "text", text: error instanceof Error ? error.message : String(error) }], details: {}, isError: true };
         }
       }
-      if (!params.runId) return { content: [{ type: "text", text: `${params.action} requires runId` }], details: {}, isError: true };
-      if (!ctx.isProjectTrusted()) return { content: [{ type: "text", text: `${params.action} requires a trusted project` }], details: {}, isError: true };
+      if (!params.runId) return toolRefusal(`${params.action} requires runId`);
+      if (!ctx.isProjectTrusted()) return toolRefusal(`${params.action} requires a trusted project`);
+      if (!ctx.hasUI) return toolRefusal(uiRequiredText(params.action));
       const run = supervisor.get(params.runId);
-      if (!run) return { content: [{ type: "text", text: `Unknown run ${params.runId}` }], details: {}, isError: true };
-      if (!grants.consume(params.grantId, "control")) return grantError("control");
+      if (!run) return toolRefusal(`Unknown run ${params.runId}`);
+      const runId = params.runId;
+      // Each control is sent only after the human confirms its exact kind,
+      // run, occurrence, attempt, target and text.
+      const confirmed = (kind: string, fields: ReadonlyArray<readonly [string, string]> = []) =>
+        ctx.ui.confirm("Send workflow control?", [`kind=${kind}`, `run=${runId}`, ...fields.map(([name, value]) => `${name}=${value}`)].join("\n"));
       if (params.action === "redirect") {
-        if (!params.occurrenceId || !params.target) return { content: [{ type: "text", text: "redirect requires occurrenceId and target" }], details: {}, isError: true };
+        if (!params.occurrenceId || !params.target) return toolRefusal("redirect requires occurrenceId and target");
+        if (!(await confirmed("redirect", [["occurrence", params.occurrenceId], ["target", JSON.stringify(params.target)]]))) return toolRefusal(declinedText("redirect control"));
         try {
           const ack = await run.redirect(params.occurrenceId, params.target);
           return controlToolResult("redirect", ack, run.snapshot, params.occurrenceId);
@@ -827,7 +827,8 @@ function grantError(scope: string) {
         }
       }
       if (params.action === "recover") {
-        if (!params.occurrenceId || !params.recoveryChoice) return { content: [{ type: "text", text: "recover requires occurrenceId and recoveryChoice" }], details: {}, isError: true };
+        if (!params.occurrenceId || !params.recoveryChoice) return toolRefusal("recover requires occurrenceId and recoveryChoice");
+        if (!(await confirmed(params.recoveryChoice, [["occurrence", params.occurrenceId]]))) return toolRefusal(declinedText(`${params.recoveryChoice} control`));
         try {
           return controlToolResult(params.recoveryChoice, await run.recover(params.occurrenceId, params.recoveryChoice));
         } catch (error) {
@@ -835,7 +836,8 @@ function grantError(scope: string) {
         }
       }
       if (params.action === "retry") {
-        if (!params.occurrenceId) return { content: [{ type: "text", text: "retry requires occurrenceId" }], details: {}, isError: true };
+        if (!params.occurrenceId) return toolRefusal("retry requires occurrenceId");
+        if (!(await confirmed("retry", [["occurrence", params.occurrenceId]]))) return toolRefusal(declinedText("retry control"));
         try {
           return controlToolResult("retry", await run.retry(params.occurrenceId));
         } catch (error) {
@@ -844,18 +846,120 @@ function grantError(scope: string) {
       }
       if (params.action === "steer") {
         if (!params.occurrenceId || !params.attemptId || !params.text || !params.timing) {
-          return { content: [{ type: "text", text: "steer requires occurrenceId, attemptId, text, and timing" }], details: {}, isError: true };
+          return toolRefusal("steer requires occurrenceId, attemptId, text, and timing");
         }
+        const steering = [["occurrence", params.occurrenceId], ["attempt", params.attemptId], ["timing", params.timing], ["text", JSON.stringify(params.text)]] as const;
+        if (!(await confirmed("steer", steering))) return toolRefusal(declinedText("steer control"));
         try {
           return controlToolResult("steer", await run.steer(params.occurrenceId, params.attemptId, params.text, params.timing));
         } catch (error) {
           return { content: [{ type: "text", text: error instanceof Error ? error.message : String(error) }], details: {}, isError: true };
         }
       }
+      if (!(await confirmed("cancel"))) return toolRefusal(declinedText("cancel control"));
       await run.cancel("cancelled by model tool");
       return { content: [{ type: "text", text: `Cancellation requested for ${params.runId}` }], details: {} };
     },
   });
+}
+
+/** The label of each local execution target in the launch review. */
+const TARGET_LABEL: Readonly<Record<TargetKind, string>> = {
+  scripted: "scripted (offline, no commands)",
+  routing: "routing configuration (live, full pin coverage)",
+  acp: "native ACP adapter (live, agent-cat scratch)",
+  deck: "native agent-deck session (live, external pane)",
+  current: "current Pi session (live, current project, not sandboxed)",
+  child: "owned Pi child (live, agent-cat scratch, no tools)",
+  remote: "authenticated remote Pi session (live, remote workspace, not sandboxed)",
+};
+
+/** The containment of each local execution target in the launch review. */
+const TARGET_CONTAINMENT: Readonly<Record<TargetKind, string>> = {
+  scripted: "offline scripted table; no command execution",
+  routing: "configured engines; full pin coverage required",
+  acp: "agent-cat scratch directory; adapter is not an OS sandbox",
+  deck: "external agent-deck pane/workspace; not a sandbox",
+  current: "current Pi project workspace; not sandboxed",
+  child: "agent-cat scratch directory; Pi tools disabled",
+  remote: "authenticated remote Pi workspace; not sandboxed",
+};
+
+/** The target confirmation that a launch on a live Pi target shows before its launch review. */
+const TARGET_CONFIRMATION = {
+  child: ["Create owned Pi child?", "Workflow questions will use the default configured model and may incur provider charges. Tools are disabled."],
+  remote: ["Use authenticated remote Pi session?", "This acquires an exclusive session lease and workflow questions may incur provider charges."],
+} as const;
+
+/** The exact values of the inputs, in the order of the descriptor, as review lines. */
+function inputLines(descriptor: WorkflowDescriptor, inputs: Record<string, string>): string[] {
+  return descriptor.inputs.filter(({ name }) => Object.hasOwn(inputs, name)).map(({ name }) => `input ${name}=${JSON.stringify(inputs[name])}`);
+}
+
+/**
+ * The launch review of a local start. `/wf-launch` shows it before it
+ * collects the inputs. The start action of the tool shows the same review
+ * with the exact inputs of the model appended.
+ */
+function launchReview(review: {
+  readonly runner: RunnerConfig;
+  readonly descriptor: WorkflowDescriptor;
+  readonly cwd: string;
+  readonly targetKind: TargetKind;
+  readonly routing?: string;
+  readonly inputs?: Record<string, string>;
+}): string {
+  return [
+    `runner=${review.runner.executable}`,
+    `cwd=${review.cwd}`,
+    `target=${TARGET_LABEL[review.targetKind]}`,
+    `routing=${review.routing ?? "not used"}`,
+    `containment=${TARGET_CONTAINMENT[review.targetKind]}`,
+    `effects=${review.descriptor.capabilities.effects ?? "unknown"}`,
+    "persistence=private full prompts/answers plus input hashes",
+    ...(review.inputs ? inputLines(review.descriptor, review.inputs) : []),
+  ].join("\n");
+}
+
+/** The exact review of a model-initiated lineage operation: the parent, the target, the inputs and the fork edits. */
+function lineageReview(review: {
+  readonly operation: "restart" | "resume" | "fork";
+  readonly parentRunId: string;
+  readonly runner: RunnerConfig;
+  readonly descriptor: WorkflowDescriptor;
+  readonly cwd: string;
+  readonly targetKind: TargetKind;
+  readonly targetArgs: readonly string[];
+  readonly inputs: Record<string, string>;
+  readonly edits: readonly LineageEdit[];
+}): string {
+  return [
+    `operation=${review.operation}`,
+    `parent=${review.parentRunId}`,
+    `workflow=${review.runner.id}:${review.descriptor.name}`,
+    `runner=${review.runner.executable}`,
+    `cwd=${review.cwd}`,
+    `target=${TARGET_LABEL[review.targetKind]}`,
+    `target arguments=${JSON.stringify(review.targetArgs)}`,
+    `containment=${TARGET_CONTAINMENT[review.targetKind]}`,
+    `effects=${review.descriptor.capabilities.effects ?? "unknown"}`,
+    ...inputLines(review.descriptor, review.inputs),
+    ...review.edits.map((edit) => edit.type === "drop"
+      ? `edit drop occurrence ${edit.occurrenceId}`
+      : `edit replace occurrence ${edit.occurrenceId} value=${edit.value}`),
+  ].join("\n");
+}
+
+function uiRequiredText(action: string): string {
+  return `${action} requires an interactive Pi UI for the human confirmation of its exact review. Nothing was sent.`;
+}
+
+function declinedText(action: string): string {
+  return `The human declined the ${action}. Nothing was sent.`;
+}
+
+function toolRefusal(text: string) {
+  return { content: [{ type: "text" as const, text }], details: {}, isError: true };
 }
 
 const SERVICE_UNCONFIGURED = "Service mode is not configured. Set AGENT_CAT_MANAGER_PROFILE or AGENT_CAT_MANAGER_PROFILES.";

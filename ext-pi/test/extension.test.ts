@@ -3,6 +3,7 @@ import { access, mkdir, mkdtemp, readFile, readdir, rm, stat, utimes, writeFile 
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { Value } from "typebox/value";
 import extension, { parseWorkflowCommand } from "../src/index.ts";
 import { MANAGER_ROLE_MARKER, ROOT_ROLE_FILE } from "../src/root-role.ts";
 
@@ -274,7 +275,7 @@ describe("Pi extension lifecycle", () => {
       const notices: string[] = [];
       const ctx = { hasUI: false, cwd: process.cwd(), mode, ui: { notify: (message: string) => notices.push(message) } };
       expect([...commands.keys()].sort()).toEqual([
-        "wf", "wf-cancel", "wf-diff", "wf-fork", "wf-grant", "wf-help", "wf-launch", "wf-monitor",
+        "wf", "wf-cancel", "wf-diff", "wf-fork", "wf-help", "wf-launch", "wf-monitor",
         "wf-plan", "wf-recover", "wf-redirect", "wf-restart", "wf-resume", "wf-retry", "wf-status", "wf-steer",
         "wfm", "wfm-answer", "wfm-cancel", "wfm-discard", "wfm-endpoints", "wfm-export", "wfm-fork", "wfm-history", "wfm-monitor",
         "wfm-redirect", "wfm-restart", "wfm-result", "wfm-resume", "wfm-review", "wfm-status", "wfm-steer", "wfm-withdraw",
@@ -466,18 +467,20 @@ describe("Pi extension lifecycle", () => {
     }
   });
 
-  it("uses one-time grants for model starts and lineage operations", async () => {
+  it("requires a human confirmation of the exact review for every model-initiated mutation", async () => {
   const directory = await mkdtemp(join(tmpdir(), "agent-cat-extension-tool-"));
   created.push(directory);
   const previousRunner = process.env.AGENT_CAT_RUNNER;
   const previousState = process.env.AGENT_CAT_STATE_DIR;
+  const previousHang = process.env.FIXTURE_HANG;
   process.env.AGENT_CAT_RUNNER = resolve("test/fixtures/runner.mjs");
   process.env.AGENT_CAT_STATE_DIR = join(directory, "state");
   try {
     const commands = new Map<string, { handler: (args: string, ctx: unknown) => Promise<void> }>();
     const events = new Map<string, Array<(event: unknown, ctx: unknown) => Promise<unknown>>>();
     let tool: any;
-    let grantScope = "start";
+    let answer = false;
+    const reviews: Array<{ title: string; body: string }> = [];
     const notices: string[] = [];
     const entries: unknown[] = [];
     extension({
@@ -486,18 +489,48 @@ describe("Pi extension lifecycle", () => {
       on: (name: string, handler: (event: unknown, ctx: unknown) => Promise<unknown>) => events.set(name, [...(events.get(name) ?? []), handler]),
     } as never);
     const ui = {
-      select: async (title: string) => title === "One-time model grant" ? grantScope : undefined,
-      confirm: async () => true, notify: (message: string) => notices.push(message), setWidget: () => {}, setStatus: () => {},
+      select: async (title: string) => title === "Execution target" ? "scripted (offline, no commands)" : undefined,
+      editor: async () => "x",
+      confirm: async (title: string, body: string) => { reviews.push({ title, body }); return answer; },
+      notify: (message: string) => notices.push(message), setWidget: () => {}, setStatus: () => {},
     };
     const ctx = { cwd: directory, mode: "tui", hasUI: true, isProjectTrusted: () => true, ui, isIdle: () => true, abort: () => {}, sessionManager: { getBranch: () => [] } };
+    const runs = async () => (await readdir(join(directory, "state", "runs")).catch(() => [])).length;
+    const status = async () => JSON.parse((await tool.execute("status", { action: "status" }, undefined, undefined, ctx)).content[0].text) as Array<{ runId: string; status: string }>;
     for (const handler of events.get("session_start") ?? []) await handler({}, ctx);
+
+    // No command and no tool parameter issues or carries a grant.
     expect(tool.name).toBe("agent_cat_workflow");
-    expect(tool.description).toContain("/wf-grant");
-    await commands.get("wf-grant")!.handler("", ctx);
-    const startGrant = notices.at(-1)!.match(/grant-[0-9a-f-]+/)![0];
-    const untrustedStart = await tool.execute("untrusted-start", { action: "start", workflow: "agent-cat:fixture", inputsJson: '{"subject":"x"}', launchTarget: "scripted", grantId: startGrant }, undefined, undefined, { ...ctx, isProjectTrusted: () => false });
+    expect(commands.has("wf-grant")).toBe(false);
+    expect(tool.description).not.toContain("grant");
+    expect(tool.description).toContain("confirm");
+    expect(Object.keys(tool.parameters.properties)).not.toContain("grantId");
+    expect(tool.parameters.additionalProperties).not.toBe(false);
+    const extra = { action: "start", workflow: "agent-cat:fixture", inputsJson: '{"subject":"x"}', launchTarget: "scripted", grantId: "grant-model", approved: true, consent: "yes" };
+    expect(Value.Check(tool.parameters, extra)).toBe(true);
+
+    // The human /wf-launch review of the same launch, declined.
+    await commands.get("wf-launch")!.handler("agent-cat:fixture", ctx);
+    const humanReview = reviews.at(-1)!;
+    expect(humanReview.title).toBe("Launch agent-cat workflow?");
+    expect(humanReview.body).toContain("target=scripted (offline, no commands)");
+
+    const untrustedStart = await tool.execute("untrusted-start", extra, undefined, undefined, { ...ctx, isProjectTrusted: () => false });
     expect(untrustedStart).toMatchObject({ isError: true, content: [{ text: expect.stringContaining("trusted project") }] });
-    const started = await tool.execute("start", { action: "start", workflow: "agent-cat:fixture", inputsJson: '{"subject":"x"}', launchTarget: "scripted", grantId: startGrant }, undefined, undefined, ctx);
+    const reviewCount = reviews.length;
+    const headless = await tool.execute("headless-start", extra, undefined, undefined, { ...ctx, hasUI: false });
+    expect(headless).toMatchObject({ isError: true, content: [{ text: expect.stringContaining("interactive Pi UI") }] });
+    expect(reviews.length).toBe(reviewCount);
+
+    // A declined start launches nothing, whatever extra field the model sends.
+    const declined = await tool.execute("declined-start", extra, undefined, undefined, ctx);
+    expect(declined).toMatchObject({ isError: true, content: [{ text: expect.stringContaining("declined") }] });
+    expect(reviews.at(-1)).toEqual({ title: "Launch agent-cat workflow?", body: `${humanReview.body}\ninput subject="x"` });
+    expect(await runs()).toBe(0);
+    expect(await status()).toEqual([]);
+
+    answer = true;
+    const started = await tool.execute("start", extra, undefined, undefined, ctx);
     expect(started.isError).not.toBe(true);
     const parentRunId = started.content[0].text.match(/[0-9a-f-]{36}/)![0];
     await until(() => entries.length === 1);
@@ -505,25 +538,26 @@ describe("Pi extension lifecycle", () => {
     expect(inspected.content[0].text).toContain(parentRunId);
     const untrustedInspect = await tool.execute("inspect-untrusted", { action: "inspect", runId: parentRunId }, undefined, undefined, { ...ctx, isProjectTrusted: () => false });
     expect(untrustedInspect.isError).toBe(true);
-    const reusedGrant = await tool.execute("again", { action: "start", workflow: "agent-cat:fixture", inputsJson: '{"subject":"x"}', grantId: startGrant }, undefined, undefined, ctx);
-    expect(reusedGrant).toMatchObject({ isError: true, content: [{ text: expect.stringContaining("/wf-grant") }] });
-    grantScope = "control";
-    await commands.get("wf-grant")!.handler("", ctx);
-    const controlGrant = notices.at(-1)!.match(/grant-[0-9a-f-]+/)![0];
-    const untrustedControl = await tool.execute("untrusted", { action: "cancel", runId: parentRunId, grantId: controlGrant }, undefined, undefined, { ...ctx, isProjectTrusted: () => false });
-    expect(untrustedControl).toMatchObject({ isError: true, content: [{ text: expect.stringContaining("trusted project") }] });
-    const trustedControl = await tool.execute("trusted", { action: "cancel", runId: parentRunId, grantId: controlGrant }, undefined, undefined, ctx);
-    expect(trustedControl.isError).not.toBe(true);
-    grantScope = "lineage";
-    await commands.get("wf-grant")!.handler("", ctx);
-    const lineageGrant = notices.at(-1)!.match(/grant-[0-9a-f-]+/)![0];
-    const resumed = await tool.execute("resume", { action: "resume", parentRunId, inputsJson: '{"subject":"x"}', grantId: lineageGrant }, undefined, undefined, ctx);
+
+    // Lineage shows its exact review, and a decline launches nothing.
+    answer = false;
+    const declinedResume = await tool.execute("declined-resume", { action: "resume", parentRunId, inputsJson: '{"subject":"x"}', grantId: "grant-model" }, undefined, undefined, ctx);
+    expect(declinedResume).toMatchObject({ isError: true, content: [{ text: expect.stringContaining("declined") }] });
+    expect(reviews.at(-1)!.title).toBe("resume workflow run?");
+    expect(reviews.at(-1)!.body).toContain(`operation=resume\nparent=${parentRunId}\nworkflow=agent-cat:fixture`);
+    expect(reviews.at(-1)!.body).toContain('input subject="x"');
+    expect(await runs()).toBe(1);
+    const headlessResume = await tool.execute("headless-resume", { action: "resume", parentRunId, inputsJson: '{"subject":"x"}' }, undefined, undefined, { ...ctx, hasUI: false });
+    expect(headlessResume.isError).toBe(true);
+    expect(await runs()).toBe(1);
+    answer = true;
+    const resumed = await tool.execute("resume", { action: "resume", parentRunId, inputsJson: '{"subject":"x"}' }, undefined, undefined, ctx);
     expect(resumed.isError).not.toBe(true);
     await until(() => entries.length === 2);
-    await commands.get("wf-grant")!.handler("", ctx);
-    const forkGrant = notices.at(-1)!.match(/grant-[0-9a-f-]+/)![0];
-    const forked = await tool.execute("fork", { action: "fork", parentRunId, inputsJson: '{"subject":"x"}', forkEditsJson: '[{"type":"drop","occurrenceId":"0"}]', grantId: forkGrant }, undefined, undefined, ctx);
+    const forked = await tool.execute("fork", { action: "fork", parentRunId, inputsJson: '{"subject":"x"}', forkEditsJson: '[{"type":"drop","occurrenceId":"0"}]' }, undefined, undefined, ctx);
     expect(forked.isError).not.toBe(true);
+    expect(reviews.at(-1)!.title).toBe("fork workflow run?");
+    expect(reviews.at(-1)!.body).toContain("edit drop occurrence 0");
     const forkRunId = forked.content[0].text.match(/[0-9a-f-]{36}/)![0];
     await until(() => entries.length === 3);
     const forkManifest = JSON.parse(await readFile(join(directory, "state", "runs", forkRunId, "supervisor-manifest.json"), "utf8"));
@@ -531,10 +565,37 @@ describe("Pi extension lifecycle", () => {
     await commands.get("wf-diff")!.handler(forkRunId, ctx);
     expect(notices.at(-1)).toContain("answer edits:");
     expect(notices.at(-1)).toContain("occurrence 0:");
+
+    // A control shows its exact content, and a declined control is not delivered.
+    process.env.FIXTURE_HANG = "1";
+    const hanging = await tool.execute("hanging", extra, undefined, undefined, ctx);
+    const hangingRunId = hanging.content[0].text.match(/[0-9a-f-]{36}/)![0];
+    const running = async () => (await status()).find((run) => run.runId === hangingRunId)?.status;
+    await untilAsync(async () => (await tool.execute("inspect", { action: "inspect", runId: hangingRunId }, undefined, undefined, ctx)).content[0].text.includes("attempt 0:0: running"));
+    answer = false;
+    const declinedCancel = await tool.execute("declined-cancel", { action: "cancel", runId: hangingRunId, grantId: "grant-model", approved: true }, undefined, undefined, ctx);
+    expect(declinedCancel).toMatchObject({ isError: true, content: [{ text: expect.stringContaining("declined") }] });
+    expect(reviews.at(-1)).toEqual({ title: "Send workflow control?", body: `kind=cancel\nrun=${hangingRunId}` });
+    const headlessCancel = await tool.execute("headless-cancel", { action: "cancel", runId: hangingRunId }, undefined, undefined, { ...ctx, hasUI: false });
+    expect(headlessCancel.isError).toBe(true);
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 100));
+    expect(await running()).toBe("running");
+    answer = true;
+    const steered = await tool.execute("steer", { action: "steer", runId: hangingRunId, occurrenceId: "0", attemptId: "0:0", text: "focus\non tests", timing: "next-boundary" }, undefined, undefined, ctx);
+    expect(steered).toMatchObject({ content: [{ text: expect.stringContaining("steer delivered") }] });
+    expect(steered.isError).not.toBe(true);
+    expect(reviews.at(-1)).toEqual({
+      title: "Send workflow control?",
+      body: `kind=steer\nrun=${hangingRunId}\noccurrence=0\nattempt=0:0\ntiming=next-boundary\ntext="focus\\non tests"`,
+    });
+    const cancelled = await tool.execute("cancel", { action: "cancel", runId: hangingRunId }, undefined, undefined, ctx);
+    expect(cancelled.isError).not.toBe(true);
+    await untilAsync(async () => (await running()) === "cancelled");
     for (const handler of events.get("session_shutdown") ?? []) await handler({}, ctx);
   } finally {
     if (previousRunner === undefined) delete process.env.AGENT_CAT_RUNNER; else process.env.AGENT_CAT_RUNNER = previousRunner;
     if (previousState === undefined) delete process.env.AGENT_CAT_STATE_DIR; else process.env.AGENT_CAT_STATE_DIR = previousState;
+    if (previousHang === undefined) delete process.env.FIXTURE_HANG; else process.env.FIXTURE_HANG = previousHang;
   }
 });
 });
@@ -542,6 +603,14 @@ describe("Pi extension lifecycle", () => {
 async function until(predicate: () => boolean): Promise<void> {
   for (let count = 0; count < 200; count += 1) {
     if (predicate()) return;
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 10));
+  }
+  throw new Error("condition not reached");
+}
+
+async function untilAsync(predicate: () => Promise<boolean>): Promise<void> {
+  for (let count = 0; count < 200; count += 1) {
+    if (await predicate()) return;
     await new Promise((resolvePromise) => setTimeout(resolvePromise, 10));
   }
   throw new Error("condition not reached");

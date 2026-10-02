@@ -98,8 +98,7 @@ Every ext-pi source file has a distinct place in the comparison:
 | `reducer.ts` | fail-closed pure protocol-v1 snapshot reducer | Cross-language counterpart to `Agentic.Runtime.Snapshot` |
 | `monitor.ts` | pure selected/collapsed textual monitor projection | Compact fallback and semantic comparison for the richer Brick projection |
 | `monitor-ui.ts` | Pi terminal component and key handling | Remains Pi-native; shares no Brick widget code |
-| `grants.ts` | one-time model mutation grants | Pi trust policy only; absent from local operator TUI |
-| `index.ts` | extension registration, commands/tools, input and route collection, target selection | Pi composition root; TUI performs only its local equivalents |
+| `index.ts` | extension registration, commands/tools, input and route collection, target selection, and the human confirmation of each model-initiated mutation | Pi composition root; TUI performs only its local equivalents |
 | `current-bridge.ts` | exclusive current-Pi-session ACP bridge | Pi-only target |
 | `pi-child-acp.mjs` | tool-free owned-child ACP bridge | Pi-only target |
 | `pi-remote-acp.mjs` | authenticated/discovered remote-session ACP bridge | Pi-only target |
@@ -357,7 +356,7 @@ Three alternatives were considered:
 | Add a daemon or shared supervisor service | One owner for multiple frontends | New lifecycle, authentication, deployment, protocol, and recovery system before one local TUI needs it | Reject |
 | Launch the same executable in machine mode | Reuses descriptor, event, control, persistence, preflight, and exit contracts; isolates terminal output | Requires a small Haskell process supervisor and protocol-v2 work for richer data | Adopt |
 
-The Haskell supervisor should remain smaller than ext-pi's. It does not need remote Pi targets, model-grant tools, cross-process extension attachment, or Pi transcript integration. It does need direct argv spawning, process-group cancellation, bounded/redacted diagnostics, exact sequence validation, private stores, control acknowledgement, and restart reconstruction.
+The Haskell supervisor should remain smaller than ext-pi's. It does not need remote Pi targets, model-initiated mutation tools, cross-process extension attachment, or Pi transcript integration. It does need direct argv spawning, process-group cancellation, bounded/redacted diagnostics, exact sequence validation, private stores, control acknowledgement, and restart reconstruction.
 
 ## 7. User experience
 
@@ -561,7 +560,7 @@ The two interfaces should share facts and protocols, not rendering code. Brick a
 | Help and plan | runner subprocess | runner subprocess | CLI output/JSON |
 | Input collection | Brick editors/forms | Pi input UI and `/wf` source binding | descriptor input order/source |
 | Persona/model display | local routing pane | Pi picker/status text | new sanitized routing-inspection JSON |
-| Launch approval | local explicit confirmation | Pi trust, UI approval, and grants | neither overrides runtime policy |
+| Launch approval | local explicit confirmation | Pi trust and UI approval, also for each model-initiated mutation | neither overrides runtime policy |
 | Execution | machine child | machine child | agent-cat runtime |
 | Monitoring | Brick snapshot projection | Pi `MonitorModel` | machine protocol + shared vectors |
 | Steering/recovery/redirect | local controls | Pi commands/tools | control protocol and terminal ack |
@@ -578,7 +577,7 @@ The two interfaces should share facts and protocols, not rendering code. Brick a
 2. Both frontends consume sanitized routing inspection without reading routing YAML.
 3. Frontend manifest version 2 and result references permit read-only cross-frontend restoration when an operator configures one state root.
 4. ext-pi negotiates protocol version 2 with descriptor-v3 runners and retains version 1 for older runners.
-5. Pi-specific grants, project trust, remote targets, current-session turns, and transcript references remain in ext-pi. Terminal keymaps, viewports, and themes remain in `tui`.
+5. Pi project trust, the human confirmation of model-initiated mutations, remote targets, current-session turns, and transcript references remain in ext-pi. Terminal keymaps, viewports, and themes remain in `tui`.
 
 A shared daemon is not warranted. The process protocol already supplies the needed boundary.
 
@@ -630,7 +629,7 @@ This ledger is the complete non-`tui` change surface. “No change” rows are i
 | `engine/agent-deck/src/Agentic/AgentDeck.hs` | No configuration or synthetic telemetry API is required; continue verifying persona-resolved provider/model/thinking/output against session metadata and emit only observed text. | Existing deck behavior remains exact. | Existing 10-scenario deck gate plus persona-resolved metadata mismatch cases. |
 | `agentic.cabal`; root `flake.nix` | **Implemented:** add `tui/src`, expose only `Agentic.Tui`, hide implementation modules, and add Brick, Vty, vty-unix, and async. HTTP and cryptographic dependencies serve bounded routing, and the TLS dependency serves the HTTPS manager client. The evidence gate declined tree-sitter, cmark, and microlens because no implemented path needs them. | One physical/public package remains; downstream closure grows but dependency name stays `agentic`. | Cabal build/test, Nix shell, Haddock, Darwin/Linux evidence, and agent-workflows' pinned Nix build. |
 | `cli/ci/policies.sh` and protocol/routing gates | Add import bans for `tui` and frozen descriptor/protocol/store compatibility assertions. | Boundaries become stricter without changing runtime behavior. | Deliberate negative fixtures for every forbidden import edge and old-client fixture playback. |
-| `ext-pi/src/{catalogue,types,launch,reducer,supervisor,index,monitor,monitor-ui}.ts` | **Implemented:** consume descriptors v1-v3 and sanitized routing, negotiate protocol v2 with v3 runners, retain v1 fallback, share frontend-manifest v2, restore foreign owners read-only, and render persisted public progress. | Pi-specific trust, grants, targets, retention, legacy manifests/stores, and v1 runners remain supported. | Typecheck, 78-unit suite, shared fixtures, 68 MiB streaming restore, and eight non-paid native/current/child integrations. |
+| `ext-pi/src/{catalogue,types,launch,reducer,supervisor,index,monitor,monitor-ui}.ts` | **Implemented:** consume descriptors v1-v3 and sanitized routing, negotiate protocol v2 with v3 runners, retain v1 fallback, share frontend-manifest v2, restore foreign owners read-only, and render persisted public progress. | Pi-specific trust, model-mutation confirmation, targets, retention, legacy manifests/stores, and v1 runners remain supported. | Typecheck, 78-unit suite, shared fixtures, 68 MiB streaming restore, and eight non-paid native/current/child integrations. |
 | README, CLI/runtime/ext-pi guides, manual, protocol/schema documents | Publish commands, keymap, stores, schema, precedence, security, compatibility, migration, rollback, and platform limits from one canonical section each. | Existing commands remain documented as before; proposals become normative only with their implementation phase. | `make -C doc check`, manual Haskell check, help/JSON comparison, link/source coverage. |
 | `~/src/agent-workflows` | No Haskell source adaptation expected; consume the enlarged `agentic` closure and inherit `wf --tui`. | Package dependency remains `agentic`; help grows only by explicit top-level options. | Cabal/Nix builds and workflows, Taskmaster, Emacs, and cookbook gates. |
 | DSL, plan, cost, workflow source, Lean model/bisimulation | No TUI, persona, endpoint, secret, discovery, or presentation type enters these owners. | Denotation, authored programs, corpus, hashes, and cost folds remain unchanged. | Frozen corpus/manual hashes, Tier 0/1, bisimulation, examples, and source-import policy gates. |
@@ -773,9 +772,9 @@ Each completed phase remains independently reviewable and leaves existing non-TU
 
 **Delivered:** ext-pi negotiated protocol v2, strict fallback, verified result artifacts, bounded journal restoration, and the versioned frontend manifest while preserving descriptor-v1/v2/protocol-v1 compatibility.
 
-**Risks:** old runners being asked for v2, mixed manifest/store versions misclassified as corrupt, foreign owners becoming controllable, and Pi trust/grant/remote behavior regressing. Negotiation, legacy fixtures, owner tests, and the full ext-pi integration suite gate release.
+**Risks:** old runners being asked for v2, mixed manifest/store versions misclassified as corrupt, foreign owners becoming controllable, and Pi trust, confirmation or remote behavior regressing. Negotiation, legacy fixtures, owner tests, and the full ext-pi integration suite gate release.
 
-**Acceptance:** both interfaces report the same selected persona, concrete realization, provenance, controls, terminal result, and failures for one fixture run; Pi-only trust/grant/remote behavior remains unchanged.
+**Acceptance:** both interfaces report the same selected persona, concrete realization, provenance, controls, terminal result, and failures for one fixture run; Pi-only trust, confirmation and remote behavior remains unchanged.
 
 ### Phase 6 — Rich progress and rendering
 
