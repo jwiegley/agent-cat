@@ -12586,6 +12586,25 @@ Also disclosed by the implementer and still open: effect-first owners (capture u
 ]
 #+end_src
 
+* TODO [#D] Resolve the non-blocking fess findings of subtask PF10
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pf10-fess-followup-0xvr
+:LABELS:   []
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-02 Fri 14:21]
+:MODIFIED: [2026-10-02 Fri 14:21]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess pf-PF10-r1 (fess/pf-PF10-r1.md):
+
+1. (low) bisim/manager/ManagerConformance/Checks.lean lines 10-11: the module docstring says that the axiom footprint of each equality is fixed. The file now also pins the footprints of the reduction lemmas eligible_iff, canAdmit_iff and canApprove_iff. bisim/README.md lines 29-30 state this correctly. Fix: change the docstring to say that the footprints of each equality and each reduction are fixed under #guard_msgs.
+2. (low) bisim/manager/ManagerConformance/Checks.lean line 7 and bisim/README.md line 35: the edits left ragged line wraps. Fix: rewrap Checks.lean lines 5-8 and README.md lines 33-36.
+
 * TODO [#D] Resolve the non-blocking fess findings of subtask PF2
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -12788,7 +12807,7 @@ Non-blocking findings of fess pf-PF8-r1 (fess/pf-PF8-r1.md):
 :LABELS:   []
 :ISSUE_TYPE: task
 :CREATED:  [2026-10-02 Fri 14:13]
-:MODIFIED: [2026-10-02 Fri 14:13]
+:MODIFIED: [2026-10-02 Fri 14:21]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -12801,6 +12820,20 @@ Non-blocking findings of fess pf-PF9-r1 (fess/pf-PF9-r1.md):
 2. (low) PF/PF9/impl-r1/lean-build.log: a no-op rerun overwrote the log of the build that elaborated the modules. The closure claim is confirmed by olean dates and closure.log instead. Fix: in later stages, write each build to its own log name.
 3. (low) bisim/manager/ManagerConformance/Checks.lean lines 50-63: the accepted answer witness checks only the decision FIFO, not the receipt inserted into commands, and no accepted resolve witness covers .notEffective. Fix: add an accepted answer witness on commands.lookup "command-1" and an accepted .notEffective resolve witness.
 4. (low) bisim/manager/ManagerConformance/Exec.lean lines 66-72: the Decidable instances for live and unexpired are unused by the five deciders of PF9. Fix: keep them for later admit and approve deciders, or remove them.
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 665,
+    "issue_id": "acat-pf9-fess-followup-f3k0",
+    "author": "johnw",
+    "text": "Finding 4 is settled by PF10: the Decidable instances for live and unexpired in Exec.lean are now used by approveExec in bisim/manager/ManagerConformance/Admission.lean. Findings 1 to 3 remain open.",
+    "created_at": "2026-10-02T21:21:27Z"
+  }
+]
+#+end_src
 
 * TODO [#C] Phase B part 1 review follow-ups: download quota, id row bound, legacy history, precision gaps
 :PROPERTIES:
@@ -23247,7 +23280,7 @@ configuration is changed.
 :LABELS:   ["p9","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-02 Fri 14:13]
+:MODIFIED: [2026-10-02 Fri 14:21]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-040
 :SOURCE_REPO: agent-cat
@@ -23424,6 +23457,13 @@ legacy workflow build cannot conceal an unchecked manager development.
     "author": "johnw",
     "text": "Subtask PF9 (2026-10-02) adds the Lean side of the manager conformance bridge. bisim/lakefile.toml declares the separate library ManagerConformance (srcDir manager, globs ManagerConformance and ManagerConformance.+). Conformance, conformance-oracle, corpus-gen and defaultTargets are unchanged. ManagerConformance.Exec instantiates the coordination model at String identities and values, defines EvidenceTable with toEvidence, gives Decidable instances for the evidence predicates, and defines openDecisionExec, answerExec, resolveExec, releaseExec and verifyExec. The theorems openDecisionExec_eq, answerExec_eq, resolveExec_eq, releaseExec_eq and verifyExec_eq prove that each decider equals its model transition. ManagerConformance.Checks pins each axiom footprint at [propext, Classical.choice, Quot.sound] under #guard_msgs and evaluates 13 closed #guard witnesses, with at least one accepted and one refused case per decider. No sorry, native_decide or custom axiom. No model file changed. Evidence: PF/PF9/impl-r1/lean-build.log (lake --dir bisim build --wfail ManagerConformance, exit 0, 694 jobs), closure.log (PASS, no Agentic.Core import in the closure), frozen.txt (empty for bisim/corpus and model), mathlib-rev.txt (both mathlib checkouts at c5ea0035, 8101 oleans, no nested build directory), witness-mutant.log (two wrong witnesses fail, exit 1). Limitations: the first build rebuilt 12 mathlib modules on the Finmap path because of a trace-schema mismatch with the main checkout; no Haskell-side comparison uses the deciders yet, which remains WM-040 work. Fess pf-PF9-r1 not blocking; its findings are in acat-pf9-fess-followup-f3k0.\n",
     "created_at": "2026-10-02T21:13:11Z"
+  },
+  {
+    "id": 664,
+    "issue_id": "acat-wm-040-3olb",
+    "author": "johnw",
+    "text": "PF10 (WM-040 admission and approval deciders) is committed. bisim/manager/ManagerConformance/Admission.lean gives finite forms of eligible, canAdmit and canApprove under toEvidence, proved equivalences (held_iff, eligible_iff, canAdmit_iff, lease_iff, canApprove_iff), Decidable instances through decidable_of_iff, and the deciders admitExec and approveExec with admitExec_eq and approveExec_eq proved against Coordination.admit and Coordination.approve, with no sorry, native_decide or added axiom. Checks.lean pins the five footprints at [propext, Classical.choice, Quot.sound] and adds 8 witnesses: accepted admission, refusals on queue order, key overlap and slot overlap with a held reservation, an accepted admission of an independent profile, an accepted approval, the generation-changed refusal and the no-evidence refusal. Evidence scope: PF/PF10/impl-r1 (lean-build.log exit 0 with 695 jobs under --wfail, lean-build-first.log, closure.log PASS with no Agentic.Core module, frozen.txt empty for bisim/corpus and model, witness-mutant.log). Fess pf-PF10-r1 is not blocking. Open: no Haskell-side comparison uses the deciders yet.\n",
+    "created_at": "2026-10-02T21:21:23Z"
   }
 ]
 #+end_src

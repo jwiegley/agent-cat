@@ -20,11 +20,19 @@ the manager model imports. It never imports a module of `Agentic.Core` or the
 root module of the model. It instantiates the coordination model at string
 identities and values, defines a finite evidence table, and gives an
 executable decider for each of the transitions `openDecision`, `answer`,
-`resolve`, `release` and `verify`. A theorem proves that each decider equals
-its model transition. `ManagerConformance.Checks` fixes the axiom footprint of
-each equality and evaluates one accepted and one refused closed witness for
-each decider. `ManagerConformance` is not a default target, so `lake build`
-keeps its cost. `bisim/corpus` holds the frozen vectors. `bisim/haskell/src` is
+`resolve`, `release` and `verify`. `ManagerConformance.Admission` reduces the
+quantifiers of the admission and approval guards to the finite entries of the
+requests, profiles, slots and reservations of the state. It proves each
+reduction, gives `Decidable` instances for `eligible`, `canAdmit` and
+`canApprove`, and defines the deciders of `admit` and `approve`. A theorem
+proves that each decider equals its model transition.
+`ManagerConformance.Checks` fixes the axiom footprint of each equality and of
+each reduction. It evaluates at least one accepted and one refused closed
+witness for each decider. The admission witnesses include a refusal because
+of an overlapping held reservation, and the approval witnesses include the
+refusal after a change of the process generation. `ManagerConformance` is not
+a default target, so `lake build` keeps its cost. `bisim/corpus` holds the
+frozen vectors. `bisim/haskell/src` is
 the internal `bisim-support` library of the `agentic` package. It exposes
 `Agentic.Bisim` over the hidden modules `Agentic.Gen`, `Agentic.Guards`, and
 `Agentic.Oracle`. `bisim/haskell/tier0` is the `tier0` executable, which
