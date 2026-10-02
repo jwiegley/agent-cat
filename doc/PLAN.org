@@ -15093,6 +15093,36 @@ Source: fess audit /Users/johnw/Products/agent-cat-workflow-manager/implementati
 ]
 #+end_src
 
+* TODO [#D] Resolve the non-blocking fess findings of subtask PD18
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-uvn3
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-02 Fri 02:53]
+:MODIFIED: [2026-10-02 Fri 02:53]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess audit fess/pd-PD18-r1.md (2026-10-02) on subtask PD18 (WM-030 part 11, agent-workflows emacs-native 5de5f83, commands, reconciliation and verified download). The emacs-native commit 5de5f83 names this issue with the placeholder acat-FOLLOWUP in its message.
+
+1. (medium) emacs/wf-manager.el wf-manager--sent-of, emacs/wf-manager-tests.el:2686, emacs/wf-manager-live.el:741. No test checks the refused result of wf-manager-session-send for a 412 stale-revision reply, or the uncertain result for a 202 reply whose receipt does not name its Location. Fix: add offline router cases for both, each with one POST.
+
+2. (medium) emacs/wf-manager.el wf-manager-recovery-reconciliation and the recovery branch of wf-manager-control-passed. No test calls the recovery reconciliation. Fix: add an offline uncertain choose-recovery case that reconciles from the controls, with a nil head (effect-observed) and a head that still names the decision (uncertain).
+
+3. (low) emacs/wf-manager-tests.el wf-manager-session-uncertain-answer-control-fallback. The only negative is a stopped run with no head. Fix: add a running run whose head still names decision_3 and a stopped run with a later head, each asserting uncertain.
+
+4. (low) emacs/wf-manager-tests.el wf-manager-stored-answer-text-rules. Only the flag code is covered. Fix: add cases for the text, receipt and verdict codes (objection joining, the semicolon and whitespace rules, the 500-character bound), with the shared ext-pi vectors where they exist.
+
+5. (low) emacs/wf-manager.el file commentary and the wf-manager-control-passed docstring, and the README.md row of wf-manager-session-answer-reconciliation, say that the head names "a later decision". The code checks for a non-nil head that differs from the decision. Fix: say "another decision" in those three places.
+
+6. (low) ci/emacs.sh:45, emacs/wf-manager-tests.el:45 and README.md (command-test and live-check paragraphs). Lines edited after the final gate run were not refilled. Fix: refill them to the surrounding fill column.
+
+7. (low, deferred) The raw-byte capture command of ext-pi (prepareCapture, POST /v1/captures) is not ported to emacs/wf-manager.el. Fix: port it in a later WM-030 part.
+
 * TODO [#E] Handoff: cite the fix116b records for the 116-118 squash    :documentation:
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -20721,7 +20751,7 @@ coordination or SQL into the TUI.
 :LABELS:   ["p6","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-02 Fri 02:30]
+:MODIFIED: [2026-10-02 Fri 02:53]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-030
 :SOURCE_REPO: agent-cat
@@ -20871,6 +20901,13 @@ separately tested rather than inferred from one newer Emacs build.
     "author": "johnw",
     "text": "PD17 (WM-030 part 10, agent-workflows emacs-native on top of 1fb68e7 and agent-cat manager/test/service_http.py mode emacs-client): wf-manager-session-switch keeps the PD1 rule. It commits a new binding only after the complete overview loads through the new transport with references stamped by the new endpoint identity. Otherwise the session keeps the earlier binding, its watched resources and its polling, and a synchronous connect or TLS failure (CA mismatch, transport that cannot open) is delivered once from a timer as a typed failure. A reference of the earlier binding gives a wrong-endpoint refusal and is never retargeted. wf-manager-session-close cancels every pending request and timer and sends no manager command. The emacs-client mode adds a second client credential and profile of the same manager and live steps for the delayed earlier-generation GET, the unreachable switch, the successful switch with wrong-endpoint refusal, and close. Evidence scope (PD/PD17/impl-r2): ci/emacs.sh exit 0 (4 passes over 5 files, transport ERT 67 of 67, new CA-mismatch tests failing before the fix in ca-tests-r0-before.log and passing in ca-tests-r1-after.log); the emacs-client mode exit 0; JOURNEY N8 exit 0. Fess pd-PD17-r2 not blocking; one medium and several low findings filed as acat-6vh7. Limitations: the connect and TLS handshake run synchronously inside url-retrieve; the live delayed-GET step uses advice on a completed read; the live close runs after the follow loop has ended. The package stays open.",
     "created_at": "2026-10-02T09:30:11Z"
+  },
+  {
+    "id": 609,
+    "issue_id": "acat-wm-030-t2l4",
+    "author": "johnw",
+    "text": "PD18 (WM-030 part 11): agent-workflows emacs-native commit 5de5f83 extends the session of emacs/wf-manager.el with commands sent once with exact bytes, idempotency key and If-Match (delivered, refused or uncertain), the receipt read at its Location, one-read reconciliation of an uncertain command with no resend (PD13 machine and PD2 rules: snapshot occurrence first, control view only for a running run whose head names another decision), and a verified download that checks media type, headers, size and SHA-256 over the unibyte body. agent-cat manager/test/service_http.py mode emacs-client adds the live command receipt and download steps. Evidence scope: ci/emacs.sh exited 0 (smoke 38 of 38, transport 72 of 72, offline uncertain sends with one POST each reconciling to effect-observed and to uncertain); emacs-client mode PASS 1 to 11 (receipt read, download byte for byte, wrong digest and wrong size refused); journey N8 passed. Fess pd-PD18-r1 not blocking; two medium and five low findings filed as acat-uvn3 (the emacs-native commit message names it acat-FOLLOWUP). Limitations: capture command not ported; uncertain send tested offline only. WM-030 stays open.",
+    "created_at": "2026-10-02T09:53:30Z"
   }
 ]
 #+end_src

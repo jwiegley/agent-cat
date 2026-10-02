@@ -523,9 +523,11 @@ PI_CONTROLS_STEER_TEXT = "Pi steer \u03bb: focus on the patch."
 # WF_MANAGER_PROFILE set to the client profile, WF_MANAGER_SECOND_PROFILE set
 # to the profile of the second credential, WF_MANAGER_UNREACHABLE_PROFILE set
 # to the profile with no listener, WF_MANAGER_REPORT set to a report file,
-# WF_MANAGER_RUN set to the run handshake file and WF_MANAGER_REVOKE set to
-# the revocation handshake file. ERT must report its one test passed. The
-# harness has two actions during the check, and it otherwise only reads.
+# WF_MANAGER_RUN set to the run handshake file, WF_MANAGER_REVOKE set to
+# the revocation handshake file, WF_MANAGER_FINISH set to the finish
+# handshake file and WF_MANAGER_DOWNLOAD set to the file of the downloaded
+# bytes. ERT must report its one test passed. The harness has three actions
+# during the check, and it otherwise only reads.
 # When the check writes the run handshake file, the harness first reads the
 # requests and the command receipts after the start
 # cursor, then creates, enqueues and approves one mixed-controls run of
@@ -534,8 +536,11 @@ PI_CONTROLS_STEER_TEXT = "Pi steer \u03bb: focus on the patch."
 # the command receipts after the start cursor again. When the check writes the
 # revocation handshake file, the harness revokes the second credential
 # emacs-second through local administration and writes that file with the
-# suffix .done. After the check, the harness reads the run and the command
-# receipts, and it then drives the run to its terminal success.
+# suffix .done. When the check writes the finish handshake file, the harness
+# reads the run and the command receipts after the start cursor, drives the
+# run to its terminal success, waits until the supervision of the run
+# settles, reads the command receipts again and writes that file with the
+# suffix .done.
 # The report is one JSON object. The mode needs these fields: harnessVersion,
 # steps, prompts, scheme, endpointIdentity, authorityEpoch, workflowId,
 # requestId, createStatus, replayStatus, replayEqual, inputName, literal,
@@ -546,11 +551,13 @@ PI_CONTROLS_STEER_TEXT = "Pi steer \u03bb: focus on the patch."
 # switchGeneration, switchOverviewRequests, switchOverviewRuns, overviewItems,
 # resolvedReferences, delayedReads, delayedOverwrote, earlierRefusal,
 # switchDelivery, followEnd, revokedRefusal, processesAfterClose,
-# buffersAfterClose, timersAfterClose, bufferKilled and directoryRemoved. The
+# buffersAfterClose, timersAfterClose, bufferKilled, directoryRemoved,
+# exportSent, exportCommand, exportState, exportResource, exportDownload,
+# downloadBytes, downloadSha256, wrongDigestRefusal and wrongSizeRefusal. The
 # mode first refuses, with one sentence, a report whose harnessVersion
 # differs from EMACS_HARNESS_VERSION, which detects a mismatched pair of the
 # two repositories. It then requires the steps bind, draft, stale, pages,
-# overview, follow, unreachable, switch, revoke and close in that order and
+# overview, follow, unreachable, switch, revoke, close and export in that order and
 # no prompt, and checks the report against its own reads:
 # 1. The check bound its transport over https with the CA file of the
 # profile, with a 32-digit endpoint identity and the authority epoch of the
@@ -593,17 +600,29 @@ PI_CONTROLS_STEER_TEXT = "Pi steer \u03bb: focus on the patch."
 # credential.
 # 9. After the kill of a buffer that holds a session reference and the close,
 # no new process, buffer or timer of the session remains, and the transport
-# directories of both bindings are gone. The run of the harness has not
-# ended, and the command receipts after the start cursor are exactly those
-# that the harness read after it started the run, so the check sent no
-# command, and no cancel command exists.
+# directories of both bindings are gone. At the finish handshake, the run of
+# the harness has not ended, and the command receipts after the start cursor
+# are exactly those that the harness read after it started the run, so the
+# check sent no command, and no cancel command exists.
 # 10. The harness then drives the run to its terminal success.
+# 11. A new session of the first credential sent one export command of the
+# run, which the session prepared with the entity tag of the export
+# collection, and its 202 reply was delivered with its receipt. The command
+# receipts after the start cursor are those that the harness read after it
+# drove the run and then exactly that command. The harness reads its receipt
+# at its Location: the operation export of /v1/runs/{id}/exports, the state
+# effect-observed and the effect exported with the resource of the report.
+# The export is published, and the bytes that the check downloaded with the
+# verified download of the session equal the bytes that the harness
+# downloads from the download resource of the export, with the size and the
+# SHA-256 digest of the export. The downloads with a wrong digest and with a
+# wrong size each gave wf-manager-invalid-response.
 # Each step prints its own PASS line. It runs one manager lifetime.
 EMACS_CLIENT = "emacs-client"
 emacs_client_mode = len(sys.argv) == 6 and sys.argv[5] == EMACS_CLIENT
 # The version of the report of emacs/wf-manager-live.el. The constant
 # wf-manager-live-harness-version there states the same version.
-EMACS_HARNESS_VERSION = 3
+EMACS_HARNESS_VERSION = 4
 # The literal input of the emacs-client mode. wf-manager-live-literal of
 # emacs/wf-manager-live.el states it.
 EMACS_LITERAL = "Emacs \u03bb \u96ea\U0001F600 input."
@@ -10478,6 +10497,9 @@ def emacs_client_checks():
     revoked_path = work / "emacs-client-revoke.json.done"
     run_path = work / "emacs-client-run.json"
     ran_path = work / "emacs-client-run.json.done"
+    finish_path = work / "emacs-client-finish.json"
+    finished_path = work / "emacs-client-finish.json.done"
+    download_path = work / "emacs-client-download.bin"
     home = work / "emacs-home"
     home.mkdir(mode=0o700)
     (home / ".emacs.d").mkdir(mode=0o700)
@@ -10511,12 +10533,14 @@ def emacs_client_checks():
                                WF_MANAGER_SECOND_PROFILE=str(second_path),
                                WF_MANAGER_UNREACHABLE_PROFILE=str(unreachable_path),
                                WF_MANAGER_REPORT=str(report_path), WF_MANAGER_RUN=str(run_path),
-                               WF_MANAGER_REVOKE=str(revoke_path))
+                               WF_MANAGER_REVOKE=str(revoke_path), WF_MANAGER_FINISH=str(finish_path),
+                               WF_MANAGER_DOWNLOAD=str(download_path))
             command = [emacs_program, "-Q", "--batch",
                        "--eval", "(setq user-emacs-directory " + json.dumps(str(home / ".emacs.d") + "/") + ")",
                        "-L", emacs_directory, "-l", "wf-manager-live", "-f", "ert-run-tests-batch-and-exit"]
             revoked = False
-            run = listed = receipts = runs = started = None
+            run = listed = receipts = runs = started = closed = snapshot = driven = None
+            answered = recovered = 0
             with log_path.open("wb") as log:
                 child = subprocess.Popen(command, cwd=home, env=environment, stdin=subprocess.DEVNULL,
                                          stdout=log, stderr=subprocess.STDOUT)
@@ -10536,6 +10560,22 @@ def emacs_client_checks():
                                 run = runs.start("profile_1")
                             started = command_receipts(cursor, harness)
                             ran_path.write_text(json.dumps({"runId": run}))
+                        if run is not None and closed is None and finish_path.is_file():
+                            # The check has closed its first session. The
+                            # harness keeps the run and the command receipts,
+                            # then drives the run to its terminal success, so
+                            # that the check can export its result.
+                            closed = command_receipts(cursor, harness)
+                            snapshot = runs.snapshot(run)
+                            with harness_acts():
+                                _, answered, recovered = drive_mixed(run, runs.client, overview=False)
+                            # The release of the worker after the terminal
+                            # status changes the supervision of the run and
+                            # with it the revision of the export collection.
+                            runs.client[1]("/v1/runs/" + run, "Run",
+                                           lambda value: value["supervision"] not in ("owned", "cleanup-pending"))
+                            driven = command_receipts(cursor, harness)
+                            finished_path.write_text("{}")
                         if not revoked and revoke_path.is_file():
                             # The one action of the harness during the check.
                             administration({"version": 1, "operation": "revoke-credential",
@@ -10558,7 +10598,7 @@ def emacs_client_checks():
             assert re.search(r"Ran 1 tests?, 1 results? as expected, 0 unexpected", text) and report_path.is_file(), (
                 "the Emacs live check did not run its one test", text[-4000:])
             assert report["steps"] == ["bind", "draft", "stale", "pages", "overview", "follow", "unreachable", "switch",
-                                       "revoke", "close"] \
+                                       "revoke", "close", "export"] \
                 and report["prompts"] == 0, (
                 "the Emacs live check did not complete its steps without a prompt", report["steps"], report["prompts"])
             # 1. The binding.
@@ -10669,10 +10709,8 @@ def emacs_client_checks():
                     report["bufferKilled"], report["directoryRemoved"]] == [0, [], 0, True, True], (
                 "the session left a process, a buffer, a timer or a directory", report["processesAfterClose"],
                 report["buffersAfterClose"], report["timersAfterClose"], report["bufferKilled"], report["directoryRemoved"])
-            snapshot = runs.snapshot(run)
             assert snapshot["runtime"] is None or snapshot["runtime"]["status"] not in ControlHarness.TERMINAL, (
                 "the run ended during the check", snapshot["runtime"])
-            closed = command_receipts(cursor, harness)
             assert [(resource, receipt["operation"]) for resource, receipt in closed] == [
                 (resource, receipt["operation"]) for resource, receipt in started], (
                 "the check sent a command after the run handshake", [(resource, receipt["operation"]) for resource, receipt in closed])
@@ -10681,14 +10719,54 @@ def emacs_client_checks():
                   "process, url.el buffer, timer or transport directory remains, run", run, "has not ended, and the",
                   len(closed), "command receipts after the start cursor are those of the run handshake with no cancel command",
                   flush=True)
-            with harness_acts():
-                _, answered, recovered = drive_mixed(run, runs.client, overview=False)
             print("PASS emacs-client 10: run", run, "then succeeded after", answered, "answer(s) and", recovered,
                   "retry(s) of the harness", flush=True)
+            # 11. The export command, its receipt and the verified download.
+            command_uri = report["exportCommand"]
+            assert report["exportSent"] == "delivered" and re.fullmatch(r"/v1/commands/[A-Za-z0-9_-]{1,128}", command_uri), (
+                "the export send", report["exportSent"], command_uri)
+            final = command_receipts(cursor, harness)
+            assert [resource for resource, _ in final] == [resource for resource, _ in driven] + [command_uri], (
+                "the commands after the drive", [resource for resource, _ in final][len(driven):])
+            status, receipt, raw = request(command_uri, harness)
+            assert status == 200, ("export receipt", status)
+            validate("CommandReceipt", receipt, raw)
+            assert receipt["operation"] == "export" and receipt["resource"] == "/v1/runs/" + run + "/exports" \
+                and receipt["state"] == "effect-observed" == report["exportState"], (
+                "the export receipt", receipt["operation"], receipt["resource"], receipt["state"])
+            assert receipt["effect"]["kind"] == "exported" and receipt["effect"]["resource"] == report["exportResource"], (
+                "the export effect", receipt["effect"], report["exportResource"])
+            status, detail, raw = request(report["exportResource"], harness)
+            assert status == 200, ("export", status)
+            validate("ExportReceipt", detail, raw)
+            assert detail["state"] == "published" and detail["runId"] == run and detail["commandId"] == receipt["id"] \
+                and detail["download"] == report["exportDownload"], ("the export", detail["state"], detail["download"])
+            connection = http.client.HTTPSConnection("127.0.0.1", port, context=context, timeout=15)
+            try:
+                connection.request("GET", detail["download"], headers=harness | {"Accept": "application/octet-stream"})
+                response = connection.getresponse()
+                downloaded = response.read(int(detail["bytes"]) + 1)
+                assert response.status == 200 and response.getheader("Content-Type") == "application/octet-stream", (
+                    "the harness download", response.status)
+            finally:
+                connection.close()
+            (work / "emacs-client-harness-download.bin").write_bytes(downloaded)
+            assert len(downloaded) == int(detail["bytes"]) and hashlib.sha256(downloaded).hexdigest() == detail["sha256"], (
+                "the harness download differs from the export", len(downloaded), detail["bytes"])
+            assert download_path.read_bytes() == downloaded and report["downloadBytes"] == len(downloaded) \
+                and report["downloadSha256"] == detail["sha256"], ("the Emacs download differs from the harness download",
+                                                                    report["downloadBytes"], report["downloadSha256"])
+            assert [report["wrongDigestRefusal"], report["wrongSizeRefusal"]] == ["wf-manager-invalid-response"] * 2, (
+                "the downloads with a wrong digest or size", report["wrongDigestRefusal"], report["wrongSizeRefusal"])
+            print("PASS emacs-client 11: export command", command_uri, "of run", run, "reached its receipt with the state",
+                  "effect-observed and the effect", report["exportResource"], "which the harness read, the verified download of",
+                  detail["download"], "matched the harness download of", len(downloaded), "bytes byte for byte, and a wrong",
+                  "digest and a wrong size were each refused with wf-manager-invalid-response", flush=True)
         print("PASS emacs-client: the Emacs transport bound, created and replayed a draft, received the typed 412 and 401",
               "refusals, assembled the overview over all its pages, followed a run of the harness through event polls, kept its",
-              "binding after an unreachable switch, switched to a second credential with generation fencing, and closed",
-              "cleanly against the protected HTTPS endpoint, and the harness confirmed each step from manager facts",
+              "binding after an unreachable switch, switched to a second credential with generation fencing, closed",
+              "cleanly, sent an export command whose receipt it read, and downloaded and verified the export against the",
+              "protected HTTPS endpoint, and the harness confirmed each step from manager facts",
               flush=True)
     finally:
         if process.poll() is None:
