@@ -8469,7 +8469,7 @@ The STORAGE.md sentence that claimed the manager log ends with the shutdown noti
 :LABELS:   ["workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-10-02 Fri 00:09]
-:MODIFIED: [2026-10-02 Fri 00:09]
+:MODIFIED: [2026-10-02 Fri 00:22]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -8480,6 +8480,20 @@ Non-blocking findings of fess audit fess/pd-PD10-r1.md (2026-10-02) on subtask P
 
 1. (low) emacs/wf-manager-tests.el:20 and wf-manager-tests--resource-section at :600. The header comment says that a failure names each vector that does not give its stated result. The resource vector tests put should inside the dolist, so they stop at the first failing vector and name only that one. Fix: make wf-manager-tests--resource-section collect every failing label, as wf-manager-tests--wrong does, or change the header comment to say that a resource test names the first failing vector.
 2. (low) emacs/wf-manager.el:1743 (wf-manager--overview-kinds) and :1751 (wf-manager--parse-overview-member). The overview member decoder handles only the request and preparation kinds. The manager also serves run and decision members, so a real overview page with those members refuses them. The gap is documented. Fix: add the run and decision member decoders, with their resources.runs and resources.decisions vector tests, to wf-manager--overview-kinds.
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 600,
+    "issue_id": "acat-j1ja",
+    "author": "johnw",
+    "text": "PD11 (agent-workflows emacs-native 697a89c) advances finding 2: wf-manager--overview-kinds now decodes the decision kind, with the resources.decisions vector tests. The run kind is still refused, so finding 2 stays open for the run decoder. Finding 1 is not changed.",
+    "created_at": "2026-10-02T07:22:19Z"
+  }
+]
+#+end_src
 
 * DONE [#C] Verdict.render/objections defined three times across strata — close the library gap in Question.lean
 :PROPERTIES:
@@ -15183,6 +15197,25 @@ deep-review + validated (both medium). Parse.lean:447-451 reads the two idents w
 ]
 #+end_src
 
+* TODO [#D] Resolve the non-blocking fess findings of subtask PD11
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-w80s
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-02 Fri 00:22]
+:MODIFIED: [2026-10-02 Fri 00:22]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess audit fess/pd-PD11-r1.md (2026-10-02) on subtask PD11 (Emacs receipt, decision and typed answer codecs, agent-workflows emacs-native commit 697a89c).
+
+1. (low) emacs/wf-manager-tests.el (wf-manager-tests--answer-outcome, wf-manager-answers-refuse-before-a-body). The acceptance item "refuse before any send" holds only by structure: wf-manager-answer-value signals before wf-manager-answer-body is called. emacs/wf-manager.el has no HTTP send path yet, as the README states. Fix: when the HTTP answer command arrives, add an ERT test that a refused answer makes no request.
+2. (low) emacs/wf-manager.el (wf-manager-answer-body). wf-manager-answer-body accepts any VALUE without a check, as answerBody in ext-pi does. Only the callers make sure that a checked value reaches a body. Fix: make the future send path build its value only through wf-manager-answer-value, or let the send function take the input text and call wf-manager-answer-value itself.
+
 * TODO [#D] Resolve the non-blocking fess findings of subtask PC29    :review:
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -20532,7 +20565,7 @@ coordination or SQL into the TUI.
 :LABELS:   ["p6","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-02 Fri 00:09]
+:MODIFIED: [2026-10-02 Fri 00:22]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-030
 :SOURCE_REPO: agent-cat
@@ -20633,6 +20666,13 @@ separately tested rather than inferred from one newer Emacs build.
     "author": "johnw",
     "text": "PD10 (WM-030 part 3): agent-workflows emacs-native commit 47cc92e adds typed decoders and encoders in emacs/wf-manager.el for resources.drafts (39 vectors), resources.requests (11) and resources.preparations (40) of test/manager_client_vectors.json, following ext-pi/src/manager/resources.ts. The draft record carries the queue position and blocking reasons, supplied inputs carry the capture selector, and the preparation record carries the review digest. Evidence scope: ci/emacs.sh passed under timeout 900 with 4 passes over 4 files (byte-compile clean, checkdoc silent, smoke 38 of 38, transport ERT 26 of 26), and the independent fess rerun also exited 0. Projected and refused tallies match the TypeScript test (12/27, 4/7, 13/27). A weakened-control run failed and named the vector. Fess non-blocking, two low findings filed as acat-j1ja. Limitation: the overview member decoder refuses run and decision kinds until their decoders exist. WM-030 stays open.",
     "created_at": "2026-10-02T07:09:56Z"
+  },
+  {
+    "id": 599,
+    "issue_id": "acat-wm-030-t2l4",
+    "author": "johnw",
+    "text": "PD11 (WM-030 part 4): agent-workflows emacs-native commit 697a89c adds typed decoders in emacs/wf-manager.el for resources.receipts (36 vectors, the receipt state checked against attempt, acknowledgement, effect and refusal as parseCommandReceipt does) and resources.decisions (20 vectors: question and recovery content, queue, position, generation), and the typed answer builder for resources.answers (22 vectors) of test/manager_client_vectors.json, after ext-pi/src/manager/resources.ts. The answer no to a flag question gives JSON false, and a structured answer is checked against the editor schema and refused with wf-manager-invalid-answer before any body is built. Evidence scope: ci/emacs.sh exited 0 under timeout 900 (4 passes over 4 files, clean byte compilation, silent checkdoc, smoke 38 of 38, transport ERT 33 of 33); the first run failed only on five checkdoc findings, then fixed. Fess pd-PD11-r1 recounted projected/refused tallies (receipts 19/17, decisions 6/14, answers 12/10), reran ci/emacs.sh with exit 0, and is not blocking; two low findings filed as acat-w80s. Limitations: the run overview kind is still refused; no HTTP send path exists yet. WM-030 stays open.",
+    "created_at": "2026-10-02T07:22:19Z"
   }
 ]
 #+end_src
