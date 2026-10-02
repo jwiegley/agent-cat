@@ -13295,6 +13295,40 @@ From acat-ozh: both carriers are complete-because-suprema-attained with parallel
 ]
 #+end_src
 
+* TODO [#D] Resolve the non-blocking fess findings of subtask PD7
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-s1wf
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-01 Thu 23:31]
+:MODIFIED: [2026-10-01 Thu 23:31]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess audit fess/pd-PD7-r1.md (2026-10-01) on subtask PD7 (Emacs client checks re-established against the tui frontend protocol, agent-workflows emacs-native commit 1efebf9).
+
+1. (low) /Users/johnw/src/agent-workflows-emacs-native/README.md, about lines 448 to 452. The new TRAMP passage gives ~/.local/bin/wf as an example of a short remote wf-program, and no check ran with that value. The direct-async command of TRAMP quotes the program and sets a fixed PATH without ~/.local/bin, so a quoted tilde does not expand. The passage also says that wf-program must name a short path, but the docstring at emacs/wf.el:65-68 recommends the plain name. Fix: use a short absolute path as the example, or verify the tilde form through the SSH gate, and state that a plain name works when the remote PATH holds wf.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-s1wf",
+    "depends_on_id": "acat-wm-030-t2l4",
+    "type": "discovered-from",
+    "created_at": "2026-10-02T06:31:49.500590Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
 * TODO [#D] Rename the TUI notice survival and hint checks
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -20436,7 +20470,7 @@ coordination or SQL into the TUI.
 :LABELS:   ["p6","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-09 Wed 22:34]
+:MODIFIED: [2026-10-01 Thu 23:31]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-030
 :SOURCE_REPO: agent-cat
@@ -20502,6 +20536,20 @@ separately tested rather than inferred from one newer Emacs build.
     "created_by": "johnw",
     "metadata": "{}",
     "thread_id": ""
+  }
+]
+#+end_src
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 594,
+    "issue_id": "acat-wm-030-t2l4",
+    "author": "johnw",
+    "text": "Subtask PD7 (2026-10-01) re-establishes the existing Emacs client checks against the frontend protocol of the agent-cat tui worktree, as a baseline for Phase D. It does not add HTTP, credential or live-delivery support. In agent-workflows emacs-native commit 1efebf9, wf builds against the tui agentic (GHC 9.10.3, stage project file, own builddir, offline) after a local helper fills the new rowTools field of Agentic.Cli Row with an empty list. The frontend protocol needed no wf.el change: session v1 with runtime protocol 2, the prepared fields and the frame shapes match. Through the direnv shell of the Emacs worktree with GNU Emacs 30.2: ci/emacs.sh passed (clean byte compilation, silent checkdoc, ERT 38 of 38), ci/emacs-ui.py passed (form at 40x12, 80x24 and 140x36, human, recovery, history, multiwindow), and ci/emacs-tramp.py passed against a loopback OpenSSH 10.5p1 sshd after the runner got a short fixture link (TRAMP 512-byte pipe limit). A smoke race in wf-native-stderr-survives-stop-and-continue was fixed. Evidence: the PD7 stage logs under the private evidence directory. Fess not blocking; low finding filed as acat-s1wf.",
+    "created_at": "2026-10-02T06:31:49Z"
   }
 ]
 #+end_src
@@ -20592,7 +20640,7 @@ including its explicit v3 invocation compatibility behavior.
 :LABELS:   ["p6","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-09 Wed 22:34]
+:MODIFIED: [2026-10-01 Thu 23:31]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-032
 :SOURCE_REPO: agent-cat
@@ -20656,6 +20704,20 @@ until WM-039 supplies it.
     "created_by": "johnw",
     "metadata": "{}",
     "thread_id": ""
+  }
+]
+#+end_src
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 595,
+    "issue_id": "acat-wm-032-eh4r",
+    "author": "johnw",
+    "text": "Subtask PD7 (2026-10-01) re-establishes the existing local and TRAMP Emacs checks against the tui worktree (agent-workflows emacs-native commit 1efebf9): ci/emacs.sh, ci/emacs-ui.py and ci/emacs-tramp.py pass with GNU Emacs 30.2 against the real wf and the tui control fixture. This is the baseline only. Service-mode acceptance remains open. Details on acat-wm-030-t2l4.",
+    "created_at": "2026-10-02T06:31:50Z"
   }
 ]
 #+end_src
