@@ -472,11 +472,17 @@ endpoint of a loaded profile:
   resource below `/v1/`. Every read, command and download checks that
   identity, and a reference of another binding gives `WrongEndpoint`.
   `switchEndpoint` binds the session to the endpoint of another profile with
-  a new identity and new capabilities, advances the refresh generation,
-  clears the watched resources and reads the overview again. A reference of
-  the earlier binding is never sent to the new endpoint. A read or a page
-  that arrives from the earlier transport after the switch gives
-  `WrongEndpoint`.
+  a new identity and new capabilities. It reads the complete overview
+  through the new transport first, and each member reference of that
+  overview carries the new identity. Only after that read succeeds does the
+  switch commit: it advances the refresh generation, clears the watched
+  resources, installs the new overview, closes the earlier transport, and
+  the follow loop continues from the cursor of the new overview. When the
+  capability read or the overview read fails, the switch closes the new
+  transport, sends nothing more to it, and keeps the earlier binding, its
+  watched resources and its follow loop. A reference of the earlier binding
+  is never sent to the new endpoint. A read or a page that arrives from the
+  earlier transport after the switch gives `WrongEndpoint`.
 - `pageSet` assembles one complete page set, as `getPageSet` does, and
   `loadOverview` assembles the overview of `/v1/snapshot` with its `cursor`,
   its `oldestCursor` and its decoded members, as `loadOverview` does.
@@ -727,13 +733,18 @@ connection or of the observations, and the live monitor uses it.
 The status widget lists active local runs and active service runs in
 separate sections, and the status line counts each kind.
 
-A switch with `/wfm-endpoints` uses `ManagerSession.switchEndpoint`. The new
-binding gets a new endpoint identity, the refresh generation advances, and
-the observations of the earlier endpoint are cleared. A read of the earlier
-endpoint that arrives after the switch is never installed, and a stored
-reference of the earlier endpoint gives `WrongEndpoint` and is never sent to
-the new endpoint. When the new profile refuses, the earlier endpoint stays
-active, and the extension reports the reason.
+A switch with `/wfm-endpoints` uses `ManagerSession.switchEndpoint`. The
+switch commits only after the complete overview of the new endpoint loads.
+The new binding then gets a new endpoint identity, the refresh generation
+advances, and the observations of the earlier endpoint are cleared. A read
+of the earlier endpoint that arrives after the switch is never installed,
+and a stored reference of the earlier endpoint gives `WrongEndpoint` and is
+never sent to the new endpoint. When the new profile refuses, or the first
+overview read of the new endpoint fails, the earlier endpoint stays active
+with its follow loop, and the extension reports the reason. When the follow
+loop of the earlier endpoint ends during the switch, the session closes and
+the selection fails. Service mode never reports a connection after the
+follow loop of its session has ended.
 
 These conditions give a refusal state, which `/wfm-status` and a
 notification show. No refusal state sends a command:
@@ -1009,7 +1020,10 @@ UI and an injected fake transport. It requires that restore reaches only the
 local state directory, that the manager capabilities offer no local target,
 that shutdown and reload close the transport without a POST, that a late
 overview of the earlier endpoint is never installed after a switch and a
-stored reference of that endpoint is refused, and that a 401, an unsupported
+stored reference of that endpoint is refused, that a switch whose first
+overview read fails keeps the earlier binding and its follow loop and
+closes the new transport, that the overview of a committed switch carries
+the new endpoint identity, and that a 401, an unsupported
 profile, an unsupported capability version and an unreachable manager show
 their refusal states. It requires that a credential which the manager
 refuses during the session gives one notification and that a later `/wfm`

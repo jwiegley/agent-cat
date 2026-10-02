@@ -434,12 +434,18 @@ export class ManagerSession {
 
   /** A reference of the current binding, or `InvalidEndpoint` for a resource that is not below `/v1/`. */
   reference(uri: string): Outcome<Reference> {
-    return validResource(uri) ? { ok: true, value: { endpoint: this.#identity, uri } } : failed("InvalidEndpoint");
+    return referenceOf(this.#identity, uri);
   }
 
-  #check(reference: Reference): Outcome<undefined> {
+  #check(reference: Reference, identity: string = this.#identity): Outcome<undefined> {
     if (this.#closed) return failed("ClientClosed");
-    return reference.endpoint === this.#identity ? { ok: true, value: undefined } : failed("WrongEndpoint");
+    return reference.endpoint === identity ? { ok: true, value: undefined } : failed("WrongEndpoint");
+  }
+
+  /** The current binding, which stays live while its transport is the transport of the session. */
+  #current(): Binding {
+    const transport = this.#transport;
+    return { transport, identity: this.#identity, live: () => transport === this.#transport };
   }
 
   /** One read of a resource of the current binding. A status other than 200 gives `InvalidResponse`. */
@@ -463,6 +469,11 @@ export class ManagerSession {
    * page that arrives after `switchEndpoint` gives `WrongEndpoint`.
    */
   async pageSet(first: Reference): Promise<Outcome<{ metadata: JsonObject; items: JsonValue[] }>> {
+    return this.#pageSet(this.#current(), first);
+  }
+
+  /** One complete page set of a binding. A page that arrives after the binding stops being live gives `WrongEndpoint`. */
+  async #pageSet(binding: Binding, first: Reference): Promise<Outcome<{ metadata: JsonObject; items: JsonValue[] }>> {
     const scope = pageScope(first.uri);
     if (scope === undefined) return INVALID;
     const items: JsonValue[] = [];
@@ -472,11 +483,11 @@ export class ManagerSession {
     let used = 0;
     for (let index = 0; ; index += 1) {
       if (pageScope(location.uri) !== scope) return INVALID;
-      const checked = this.#check(location);
+      const checked = this.#check(location, binding.identity);
       if (!checked.ok) return checked;
-      const transport = this.#transport;
-      const response = await transport.get(location.uri);
-      if (transport !== this.#transport) return failed("WrongEndpoint");
+      if (!binding.live()) return failed("WrongEndpoint");
+      const response = await binding.transport.get(location.uri);
+      if (!binding.live()) return failed("WrongEndpoint");
       if (!response.ok) return response;
       const { status, value, bytes } = response.value;
       if (status !== 200 || !isJsonObject(value)) return INVALID;
@@ -506,9 +517,19 @@ export class ManagerSession {
    * item decodes as an overview member.
    */
   async loadOverview(): Promise<Outcome<Overview>> {
-    const first = this.reference(OVERVIEW);
+    return this.#loadOverview(this.#current());
+  }
+
+  /**
+   * The overview of a binding. Every member reference carries the endpoint
+   * identity of that binding, so the overview of a new binding that
+   * `switchEndpoint` reads before its commit passes the endpoint check after
+   * the commit.
+   */
+  async #loadOverview(binding: Binding): Promise<Outcome<Overview>> {
+    const first = referenceOf(binding.identity, OVERVIEW);
     if (!first.ok) return first;
-    const set = await this.pageSet(first.value);
+    const set = await this.#pageSet(binding, first.value);
     if (!set.ok) return set;
     const fields = exactFields(set.value.metadata, ["version", "snapshotVersion", "cursor", "oldestCursor"]);
     const version = fields === undefined ? undefined : jsonMember(fields, "version");
@@ -524,7 +545,7 @@ export class ManagerSession {
       if (!member.ok) return member;
       const { id, revision } = memberIdentity(member.value);
       if (!validId(id) || !validRevision(revision)) return INVALID;
-      const reference = this.reference(`/v1/${MEMBER_COLLECTIONS[member.value.kind]}/${id}`);
+      const reference = referenceOf(binding.identity, `/v1/${MEMBER_COLLECTIONS[member.value.kind]}/${id}`);
       if (!reference.ok) return INVALID;
       items.push({ member: member.value, reference: reference.value, revision });
     }
@@ -638,6 +659,9 @@ export class ManagerSession {
   }
 
   async #fetch(key: string, generation: number): Promise<void> {
+    // A fetch of an earlier generation is discarded unread, so no watched
+    // resource of an earlier binding reaches the endpoint of a later one.
+    if (generation !== this.#refresh.generation) return;
     if (key === OVERVIEW) {
       const overview = await this.loadOverview();
       this.#complete(key, generation, overview, () => {
@@ -854,28 +878,42 @@ export class ManagerSession {
 
   /**
    * Bind the session to the endpoint of another loaded profile. The new
-   * binding reads its capabilities, receives a new endpoint identity and
-   * advances the refresh generation, so every read in flight is discarded
-   * and every reference of the earlier binding gives `WrongEndpoint`. The
-   * watched resources, the installed reads and the overview are cleared,
-   * the overview is read again, and the follow loop continues from its
-   * cursor. A refused connection keeps the earlier binding.
+   * binding reads its capabilities, receives a new endpoint identity, and
+   * reads its complete overview through its own transport, with every
+   * member reference of that overview bound to the new identity. Only then
+   * does the switch commit: it advances the refresh generation, so every
+   * read in flight is discarded and every reference of the earlier binding
+   * gives `WrongEndpoint`, it clears the watched resources and the
+   * installed reads, installs the new overview, closes the earlier
+   * transport, and the follow loop continues from the cursor of the new
+   * overview. A refused connection, a failed overview read, a close or
+   * another switch before the commit closes the new transport and keeps
+   * the earlier binding, its watched resources and its follow loop
+   * unchanged, and the switch gives the failure.
    */
   async switchEndpoint(profile: ClientProfile): Promise<Outcome<Overview>> {
     if (this.#closed) return failed("ClientClosed");
+    const earlier = this.#transport;
     const bound = await ManagerSession.#bind(profile, this.#options);
     if (!bound.ok) return bound;
-    const earlier = this.#transport;
-    this.#transport = bound.value.transport;
+    const { transport, identity, capabilities } = bound.value;
+    const live = () => !this.#closed && this.#transport === earlier;
+    const overview = await this.#loadOverview({ transport, identity, live });
+    if (!overview.ok || !live()) {
+      transport.close();
+      if (this.#closed) return failed("ClientClosed");
+      return overview.ok ? failed("WrongEndpoint") : overview;
+    }
+    this.#transport = transport;
     this.#endpoint = profile.endpoint.url;
-    this.#identity = bound.value.identity;
-    this.#capabilities = bound.value.capabilities;
+    this.#identity = identity;
+    this.#capabilities = capabilities;
     this.#deliveryState = "connecting";
     this.#refresh = advanceGeneration(this.#refresh);
     this.#watched.clear();
+    this.#watched.add(OVERVIEW);
     this.#installed.clear();
-    this.#overview = undefined;
-    const overview = await this.#bootstrap();
+    this.#overview = overview;
     earlier.close();
     this.#wake();
     return overview;
@@ -888,6 +926,17 @@ export class ManagerSession {
     this.#wake();
     if (this.#following !== undefined) await this.#following;
   }
+}
+
+/**
+ * One binding of a session: its transport, its endpoint identity, and
+ * whether it is still the binding that its reads belong to.
+ */
+type Binding = { readonly transport: SessionTransport; readonly identity: string; readonly live: () => boolean };
+
+/** A reference of an endpoint identity, or `InvalidEndpoint` for a resource that is not below `/v1/`. */
+function referenceOf(identity: string, uri: string): Outcome<Reference> {
+  return validResource(uri) ? { ok: true, value: { endpoint: identity, uri } } : failed("InvalidEndpoint");
 }
 
 function memberIdentity(member: OverviewMember): { id: string; revision: string } {

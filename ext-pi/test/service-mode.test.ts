@@ -9,7 +9,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest
 import extension from "../src/index.ts";
 import { isJsonObject, jsonMember, parseJson, type JsonValue } from "../src/manager/json.ts";
 import {
-  capabilities, clientProfiles, control, decision, manager, ok, overview, request, run, transports, UNREACHABLE, type PostRoute, type Reply,
+  capabilities, clientProfiles, control, decision, manager, ok, overview, request, run, transports, UNREACHABLE, type PostRoute, type Reply, type Route,
 } from "./fixtures/fake-manager.ts";
 import { MANAGER_ROLE_MARKER, ROOT_ROLE_FILE } from "../src/root-role.ts";
 import { ServiceMode } from "../src/service-mode.ts";
@@ -203,6 +203,76 @@ describe("service mode of the extension", () => {
     expect(service.active).toBe(1);
     expect(service.connection).toMatchObject({ kind: "connected", endpoint: "https://beta.test:8443/v1" });
     expect(service.runs().map((view) => view.runId)).toEqual(["run_b1"]);
+    await service.close();
+    expect(fake.made.every((made) => made.closed)).toBe(true);
+    expect(fake.made.flatMap((made) => made.posts)).toEqual([]);
+  });
+
+  it("commits a switch only after the overview of the new endpoint loads, and otherwise keeps the earlier binding", async () => {
+    const answering = (items: unknown[]): Route => (resource, count) =>
+      resource.startsWith("/v1/runs/") ? ok({ version: 1 }, '"rev-1"') : manager(items)(resource, count);
+    const fake = transports({
+      "alpha.test": answering([run("run_a1", "running")]),
+      // Gamma grants its capabilities, and its first overview read fails.
+      "gamma.test": (resource) => resource === "/v1/capabilities" ? ok(capabilities()) : UNREACHABLE,
+      "beta.test": answering([run("run_b1", "running")]),
+    });
+    const service = new ServiceMode([profile("alpha", "alpha.test"), profile("gamma", "gamma.test"), profile("beta", "beta.test")],
+      { session: { transport: fake.transport } });
+    // No outcome reports a connection while the follow loop has ended.
+    const reports: string[] = [];
+    service.subscribe(() => {
+      if (service.connection.kind === "connected" && service.session?.followEnd !== undefined) reports.push(service.connection.identity);
+    });
+    expect((await service.start()).kind).toBe("connected");
+    const session = service.session!;
+    const [alpha] = fake.made;
+    const before = { endpoint: session.endpoint, identity: session.identity, generation: session.generation };
+    const watched = session.reference("/v1/runs/run_a1");
+    if (!watched.ok) throw new Error("reference refused");
+    const reads = (transport: { gets: string[] }, uri: string) => transport.gets.filter((get) => get === uri).length;
+    expect(session.watch(watched.value).ok).toBe(true);
+    await until(() => reads(alpha, "/v1/runs/run_a1") === 1);
+
+    const kept = await service.select(1);
+    expect(kept).toMatchObject({
+      kind: "kept", reason: "the manager does not answer",
+      connection: { kind: "connected", endpoint: "https://alpha.test:8443/v1", identity: before.identity },
+    });
+    expect(service.active).toBe(0);
+    expect(session.followEnd).toBeUndefined();
+    expect({ endpoint: session.endpoint, identity: session.identity, generation: session.generation }).toEqual(before);
+    expect(service.runs().map((view) => [view.runId, view.endpoint])).toEqual([["run_a1", before.identity]]);
+    // The new transport of the refused switch is closed, and nothing reaches it later.
+    const gamma = fake.made[1];
+    expect(gamma.closed).toBe(true);
+    expect(gamma.gets).toEqual(["/v1/capabilities", "/v1/snapshot"]);
+    expect(alpha.closed).toBe(false);
+    // The follow loop of alpha still runs, and its watched resource is read again.
+    alpha.emit("s.2", "/v1/runs/run_a1");
+    await until(() => reads(alpha, "/v1/runs/run_a1") === 2);
+    expect((await session.get(watched.value)).ok).toBe(true);
+    expect(gamma.gets).toEqual(["/v1/capabilities", "/v1/snapshot"]);
+
+    // A switch whose overview loads commits the new binding with that overview.
+    const switched = await service.select(2);
+    expect(switched).toMatchObject({ kind: "connected", connection: { kind: "connected", endpoint: "https://beta.test:8443/v1" } });
+    const beta = fake.made[2];
+    expect(alpha.closed).toBe(true);
+    expect(session.followEnd).toBeUndefined();
+    expect(session.identity).not.toBe(before.identity);
+    const installed = session.overview;
+    if (installed === undefined || !installed.ok) throw new Error("overview not installed");
+    expect(installed.value.items.map((item) => [item.reference.uri, item.reference.endpoint])).toEqual([["/v1/runs/run_b1", session.identity]]);
+    expect((await session.get(installed.value.items[0].reference)).ok).toBe(true);
+    expect(await session.get(watched.value)).toEqual({ ok: false, failure: { kind: "WrongEndpoint" } });
+    expect(beta.gets).not.toContain("/v1/runs/run_a1");
+    // The follow loop continues on beta.
+    expect(session.watch(installed.value.items[0].reference).ok).toBe(true);
+    await until(() => reads(beta, "/v1/runs/run_b1") === 2);
+    beta.emit("s.2", "/v1/runs/run_b1");
+    await until(() => reads(beta, "/v1/runs/run_b1") === 3);
+    expect(reports).toEqual([]);
     await service.close();
     expect(fake.made.every((made) => made.closed)).toBe(true);
     expect(fake.made.flatMap((made) => made.posts)).toEqual([]);

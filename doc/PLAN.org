@@ -676,6 +676,27 @@ Non-blocking findings of fess audit fess/pc-PC28-r1.md (2026-10-01) on subtask P
 4. (low) tui/src/Agentic/Tui/Service.hs forkReplacement: verdict and structured replacements are free JSON text and do not use the PC25 structured editor, because the run snapshot publishes no EditorSchema for an occurrence. The native preparation checks the replacement against the persisted code and schema. Fix: use the PC25 editor when an occurrence schema is published.
 5. (low) tui/src/Agentic/Tui/Service.hs forkReplacement: the code maps the snapshot code 'ack' to the question code 'receipt', so the replacement answer is null. No check in this change verifies that mapping against the native preparation. Fix: add a model test or a fixture case with a replacement of an ack occurrence.
 
+* TODO [#D] PE28 Phase E gate fess follow-ups
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-2hnb
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-01 Thu 20:35]
+:MODIFIED: [2026-10-01 Thu 20:35]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking fess findings from PE28 (fess/pe-PE28-r1.md):
+1. (medium) State.hs:412-414, manager/CONTROLS.md, handoff 'Open functional limits': the lost rule covers every run without a live original worker, finished runs included; the snapshot view (Observation.hs) divergence lasts until restart reconciliation, not 'a short time'. Reword the comment and docs; consider aligning Observation.hs.
+2. (low) handoff PE28 table row says 'two defects', the paragraph says three. Change to three.
+3. (low) handoff 'Checks not run' bullet: state precisely that steps 3 to 7 preceded the State.hs edit and step 8 was split; optionally rerun manager-command-check and manager-store-check N8.
+4. (low) doc/PLAN.org still names the replaced 'Phase E stopping point of 2026-10-01' section in tracker text.
+5. (low) manager/test/service_http.py:8128-8129 uses preexec_fn to reset SIGHUP; set SIG_DFL in the harness before Popen if the harness is threaded.
+
 * DONE [#B] Capture request intent in the mathematical core
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -2230,7 +2251,7 @@ Transform matrices need DecidableEq o (Classical.propDecidable) while Mat/Panel 
 :LABELS:   ["workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-30 Wed 20:47]
-:MODIFIED: [2026-10-01 Thu 10:50]
+:MODIFIED: [2026-10-01 Thu 20:45]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -2265,6 +2286,13 @@ Further limitations recorded by the implementer: only N8 was run; the cleanup-re
     "author": "johnw",
     "text": "Phase E closeout commit 5a3d3f4f records item 1 as met by PE1 (d133764c) in the handoff. Items 2 to 6 stay open, so the issue stays open.",
     "created_at": "2026-10-01T17:50:27Z"
+  },
+  {
+    "id": 576,
+    "issue_id": "acat-70ll",
+    "author": "johnw",
+    "text": "Phase E closeout (commit a17a015b): item 1 (restart reclassifies the approve of a terminal run) met by PE1 at d133764c (uncertainCommands in Store.hs). Items 2 to 6 have no Phase E change, so the issue stays open.",
+    "created_at": "2026-10-02T03:45:28Z"
   }
 ]
 #+end_src
@@ -3020,7 +3048,7 @@ Agent-deck 1.15 falsely reports delivery=typed for fast Pi/DeepSeek turns after 
 :LABELS:   ["workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-29 Tue 13:46]
-:MODIFIED: [2026-10-01 Thu 13:44]
+:MODIFIED: [2026-10-01 Thu 20:45]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -3078,6 +3106,13 @@ Non-blocking findings of fess audit fess/fast-A10A11-r1.md (2026-09-29) on subta
     "author": "johnw",
     "text": "PE9: finding 3 is addressed. One five-second admission deadline (Store/Admission.hs Deadline) now covers the file slot, the configuration guard and the Store gate of one Store request; the Drafts 'timed 5000000' stays an operation bound. manager-store-check gains stacked cases that refuse after about five seconds without running the action, and a case that is admitted within the deadline and runs once. Finding 2: the false 'fail-fast' name was already renamed in 6e63a8b1, and the remaining contention check names state what they check. Checks passed: build, manager-store-check N8, manager-command-check N8 with command_contract.py, manager-draft-check N8 with draft_contract.py, manager-artifact-check (capabilities 8), journey N8 with no StoreBusy line, make -C doc check. Evidence: PE/PE9/impl-r2 in the private resume-20260923 directory. Open remainder of PE9 is acat-pe9-fess-followup-k551. Findings 1 and 4-8 stay open.",
     "created_at": "2026-10-01T20:44:08Z"
+  },
+  {
+    "id": 580,
+    "issue_id": "acat-a10a11-fess-followup-33k1",
+    "author": "johnw",
+    "text": "Phase E closeout (commit a17a015b): item 3 (stacked five-second allowances) met by PE9 at 6ed7b0fd for one Store request; the route-level residual is item 3 of acat-phase-e-review-findings-0l73. The other items stay open.",
+    "created_at": "2026-10-02T03:45:29Z"
   }
 ]
 #+end_src
@@ -3165,7 +3200,7 @@ Acceptance: the four corrections are made and make -C doc check passes.
 :LABELS:   ["workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-29 Tue 11:50]
-:MODIFIED: [2026-10-01 Thu 13:44]
+:MODIFIED: [2026-10-01 Thu 20:45]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -3216,6 +3251,13 @@ Acceptance: each item is fixed with a check, or recorded as not needed with a re
     "author": "johnw",
     "text": "PE9: finding 1 is addressed. The first observation of a protected view (withAuthorizationRequestReadObservation) uses the rest of the request deadline, and the credential read, configuration watch and first observation run under one withStoreRequest. Later revalidations still start a fresh deadline. Evidence: PE/PE9/impl-r2 in the private resume-20260923 directory. Findings 2-6 stay open; the PE9 remainder is acat-pe9-fess-followup-k551.",
     "created_at": "2026-10-01T20:44:08Z"
+  },
+  {
+    "id": 581,
+    "issue_id": "acat-a5s2b-fess-followup-s9rl",
+    "author": "johnw",
+    "text": "Phase E closeout (commit a17a015b): PE9 at 6ed7b0fd carries one admission deadline through the stacked Store locks of one Store request; the review lenses rate the Phase A polish remainder met. The items of this issue are not individually closed by Phase E evidence, so it stays open.",
+    "created_at": "2026-10-02T03:45:30Z"
   }
 ]
 #+end_src
@@ -3227,7 +3269,7 @@ Acceptance: each item is fixed with a check, or recorded as not needed with a re
 :LABELS:   ["workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-29 Tue 12:34]
-:MODIFIED: [2026-10-01 Thu 12:45]
+:MODIFIED: [2026-10-01 Thu 20:45]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -3285,6 +3327,13 @@ Non-blocking findings of fess audit fess/fast-A6A7-r1.md (2026-09-29) on subtask
     "author": "johnw",
     "text": "Finding 2 is addressed by subtask PE8 (2026-10-01), outcome (a). Every StoreBusy site on the command and read paths now writes a private fault line naming the site, the elapsed wait and the remaining allowance. Before the fix, the journey pair plus one N8 start showed five busy lines, all on GET /v1/runs/{id}/control at state-control-revision (4 in N1) and state-control-boundary (1 in N8), elapsed=0ms remaining=4999ms: an ingestion commit fell between the parts of State.controlSurfaceBorrowed. The new Store helper repeatChangedRead repeats that read, the decision read and the availability read within one five-second allowance. After the fix, JOURNEY-PAIR showed no fault lines. The original answer POST and GET /v1/requests/{id} refusals did not reproduce; their remaining immediate site, state-control-validation inside the command transaction, still refuses and now records its line. Checks: build, manager-store-check N8, manager-command-check N8 with command_contract.py (409 PASS), journeys, make -C doc check. Evidence: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/PE/PE8/impl-r1. Stacked allowances remain with PE9.",
     "created_at": "2026-10-01T19:45:17Z"
+  },
+  {
+    "id": 579,
+    "issue_id": "acat-a6a7-fess-followup-1exm",
+    "author": "johnw",
+    "text": "Phase E closeout (commit a17a015b): item 2 (early StoreBusy on the answer route) diagnosed and fixed by PE8 at a5fedb1b; the review lenses rate the Phase A polish remainder met. The other items stay open.",
+    "created_at": "2026-10-02T03:45:29Z"
   }
 ]
 #+end_src
@@ -8478,7 +8527,7 @@ Pi integration identified two missing shared contracts. Workflow descriptor v3 d
 :LABELS:   ["review","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-10-01 Thu 07:48]
-:MODIFIED: [2026-10-01 Thu 11:51]
+:MODIFIED: [2026-10-01 Thu 20:45]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -8511,6 +8560,13 @@ Non-blocking findings of fess audit fess/pc-PC31-r1.md (2026-10-01) on subtask P
     "author": "johnw",
     "text": "PE6 (2026-10-01): item 1 rendering defect fixed. At 40x12 the live monitor of a terminal run shows the Terminal and Result lines first (serviceMonitorLines in tui/src/Agentic/Tui/Presentation.hs; outcomeLines and previewLines in tui/src/Agentic/Tui/Service.hs). New 40x12 model test in tui/test/ServiceTests.hs (failed before the fix). tui-sizes step 6 now asserts 'Terminal: succeeded' and the verified size and SHA-256 against the harness download at 40x12, 80x24 and 140x36. Checks passed: Werror -ftui-tests build of agentic-run, routing-fixed-point-probe, tui-model-test; tui-model-test at N8; tui-sizes at N8; tui-sizes-broken-draft (nonzero with its literal); Phase A journey at N8; make -C doc check. Evidence: resume-20260923 PE6 stage directory; fess/pe-PE6-r1.md (non-blocking). The d-at-40x12 part of item 1 and items 2 to 6 are not addressed by PE6, so the issue stays open.",
     "created_at": "2026-10-01T18:51:51Z"
+  },
+  {
+    "id": 577,
+    "issue_id": "acat-jdmd",
+    "author": "johnw",
+    "text": "Phase E closeout (commit a17a015b): item 1 (40x12 live monitor Terminal and Result lines) met by PE6 at f71a4a05, item 2 (80x24 review fit) met by PE7 at c8ee3200. Items 3 to 6 have no Phase E change, so the issue stays open.",
+    "created_at": "2026-10-02T03:45:28Z"
   }
 ]
 #+end_src
@@ -10709,7 +10765,7 @@ Non-blocking findings of fess audit fess/pc-PC16-r2.md (2026-10-01) on subtask P
 :LABELS:   ["review","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-10-01 Thu 01:39]
-:MODIFIED: [2026-10-01 Thu 11:39]
+:MODIFIED: [2026-10-01 Thu 20:45]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -10735,6 +10791,13 @@ Non-blocking findings of fess audit fess/pc-PC17-r1.md (2026-10-01) on subtask P
     "author": "johnw",
     "text": "Items 1 and 2 resolved by Phase E subtask PE5. The ServiceOverviewReady handler in tui/src/Agentic/Tui/App.hs now calls Lane.overviewStep (tui/src/Agentic/Tui/ServiceLane.hs) for every overview origin (ExplicitOverview, BootstrapOverview, LiveOverview). A result of an earlier refresh generation frees the read lane, installs no rows, changes no model and starts no event worker. The queued resnapshot OverviewFetch then starts through pumpServiceFetches at the new generation and installs and starts the worker from its cursor. Two new model tests in tui/test/ServiceTests.hs (followTests) fail with the fence disabled and pass with it. doc/tui-design.md, tui/README.md and doc/agent-cat.texi state the fence. Evidence: resume-20260923 PE/PE5 logs (-ftui-tests build of agentic-run, routing-fixed-point-probe and tui-model-test; tui-model-test at N8 with 962 PASS; tui-overview and tui-endpoints at N8; JOURNEY-ONCE at N8; make -C doc check; all exit 0; integrator rerun of make -C doc check exit 0). Fess non-blocking (fess/pe-PE5-r1.md), findings filed as acat-pe5-overview-fence-fess-zd0c. Items 3 to 6 stay open, so the issue stays open.",
     "created_at": "2026-10-01T18:39:46Z"
+  },
+  {
+    "id": 578,
+    "issue_id": "acat-pc17-follow-fess-jd40",
+    "author": "johnw",
+    "text": "Phase E closeout (commit a17a015b): items 1 and 2 (overview fence for every origin and the matching documents) met by PE5 at e8ca40b0. Items 3 to 6 have no recorded Phase E change, so the issue stays open.",
+    "created_at": "2026-10-02T03:45:29Z"
   }
 ]
 #+end_src
@@ -11110,6 +11173,26 @@ Non-blocking findings of fess audit fess/pc-PC9-r1.md (2026-09-30) on subtask PC
 5. (low) The comment on members says it gives a failure that names the vector, but members returns [] for a missing field (manager/test/ClientCheck.hs near 114). A typo in an expected key silently becomes "expects nothing". Correct the comment and make the expected and stream keys required.
 6. (low) The vectors command in doc/api/README.md (near 798) calls list-bin without a build step. Add the BUILD command for manager-client-check before it.
 7. (low) The implementer summary said 102 named vectors. The file has 105 vectors, 83 of them named, and the 117 PASS lines are 105 vector checks plus 12 SSE decode checks. The integration record uses the corrected count.
+
+* TODO [#D] Resolve the non-blocking fess findings of subtask PD1
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pd1-fess-followup-5511
+:LABELS:   []
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-01 Thu 21:18]
+:MODIFIED: [2026-10-01 Thu 21:18]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess audit fess/pd-PD1-r1.md (2026-10-01) on subtask PD1 (ext-pi endpoint switch commits only after the new overview loads, item 1 and item 7 of acat-phase-e-review-findings-0l73).
+
+1. Medium. ext-pi/src/manager/session.ts:898: the live predicate of switchEndpoint checks only that the session is open and that the transport is still the earlier one. If the follow loop of the earlier binding ends (refused or unreachable) while the new overview loads, the switch still commits. The new binding then has no follow loop, followEnd keeps the end of the earlier transport, and ServiceMode.#report returns kind 'failed' with the session still installed and open. The requirement states a failed selection with the session closed and no follow loop. 'connected' is never reported, and the next select recovers. Fix: add this.#followEnd === undefined to the live predicate, so that this case takes the close-and-fail branch at ext-pi/src/service-mode.ts:282-286, and add a unit case.
+2. Low. ext-pi/src/service-mode.ts:282-286: no test runs the branch that closes the session and reports 'failed' when the earlier follow loop ended during a switch. Fix: add a unit case where the earlier transport ends its event stream (refused) while the new overview read is held, and assert kind 'failed', a closed session and no follow loop.
+3. Low. ext-pi/src/manager/session.ts:662-664: the new #fetch generation guard has no test. The assertion that the new transport does not receive run_a1 (ext-pi/test/service-mode.test.ts:268) passes without the guard, because no fetch is queued when the switch commits. Fix: add a case that queues a watched-resource fetch of the earlier binding behind a held read, commits a switch, releases the read, and asserts that the new transport never receives the earlier resource.
 
 * TODO [#D] Resolve the non-blocking fess findings of subtask PE10
 :PROPERTIES:
@@ -12014,7 +12097,7 @@ Deferred security stage for Phase C (operator direction of 2026-09-30: functiona
 :LABELS:   ["review","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-10-01 Thu 09:51]
-:MODIFIED: [2026-10-01 Thu 13:44]
+:MODIFIED: [2026-10-01 Thu 20:45]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -12089,6 +12172,108 @@ The other review findings are held by acat-70ll (unresolved approve after a rest
     "author": "johnw",
     "text": "PE9: the stacked Store admission allowances now share one five-second deadline per Store request (command submission, preflight, first observation of a protected view). Journey N8 passed with no StoreBusy line. Evidence: PE/PE9/impl-r2 in the private resume-20260923 directory. Remainder: acat-pe9-fess-followup-k551.",
     "created_at": "2026-10-01T20:44:09Z"
+  },
+  {
+    "id": 575,
+    "issue_id": "acat-phase-c-review-findings-hwxy",
+    "author": "johnw",
+    "text": "Phase E closeout (commit a17a015b): the review lenses rate the functional findings of the Phase C review met. Item 1 met by PE1 to PE4 under owner option C (engine coverage in acat-engine-owner-lock-coverage-9snr, pre-lock crash window recorded in acat-phase-e-review-findings-0l73 item 4). Item 2 met by PE7 (residual fit limits in acat-phase-e-review-findings-0l73 item 10). Item 3 (lost run listed as live in the Manager overview, Overview.hs filters on terminal_observed=0) has no Phase E change and stays open. Item 4 stays held by acat-pc7-acp-cancel-fess-3lb2. The issue stays open for item 3.",
+    "created_at": "2026-10-02T03:45:28Z"
+  }
+]
+#+end_src
+
+* TODO [#C] Deferred security stage after Phase E    :deferred:security:
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-phase-e-deferred-security-5jl4
+:LABELS:   ["deferred","security","workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-01 Thu 20:45]
+:MODIFIED: [2026-10-01 Thu 20:45]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Deferred security stage for Phase E, Pi service mode (WM-036 to WM-038), under the operator direction of 2026-09-30 (functionality first, security in a later stage). acat-wm-036-5ndj, acat-wm-037-dz3v and acat-wm-038-mgb7 are met for function at closeout commit a17a015b with these items deferred. They stay open only because acat-wm-035-9uqq (WM-035), a functional dependency of WM-036, is open. The list matches section "Deferred security items" under "Phase E of 2026-10" in doc/workflow-manager-handoff.md. The Phase C and Phase B part 2 items stay in acat-phase-c-deferred-security-5eso and acat-phase-b2-deferred-security-k1hl.
+
+- Name Constraints parity in the TypeScript client, and the per-response
+  credential check of the Haskell client. The `ext-pi` client uses the
+  default TLS validation of Node with the profile CA file only. This goes
+  with the remaining Name Constraints work, patch B18 included.
+- Credential-file hardening in TypeScript beyond the functional checks of
+  private mode, owner and size: an `O_NOFOLLOW` open, a link-count check and
+  descriptor reads that are safe against a change between check and use.
+- Strict JSON in the TypeScript client: refusal of duplicate members and of
+  deep nesting in SSE data and answers.
+- Secret-marker scans that show that the bearer never appears in Pi
+  transcripts, tool results, notifications, logs or crash output.
+- A separate model credential, so that the manager log records a
+  model-initiated action under its own principal.
+- Hostile tool-argument and prompt-injection negatives for the
+  `agent_cat_workflow` tool beyond the functional checks that a grant or
+  approval field never grants.
+- Hostile-input and transport negatives for the TypeScript client beyond
+  the shared vectors: malformed SSE frames, slow streams, cross-origin
+  credential forwarding and proxy environment probes.
+- Revocation-during-stream matrices for `ext-pi`.
+- Redaction projections of manager data in Pi transcript entries and
+  widgets.
+- A threat model for Pi service mode and a security gate for WM-036 to
+  WM-038.
+- An analysis of owner-lock spoofing for the quarantine evidence of PE3. A
+  process of the same account could hold or release `owner.lock`, and an
+  engine could close the inherited descriptor early.
+- A review of the test hooks in shipped extension code. The stream hooks of
+  PE25 register only when `AGENT_CAT_PI_TEST_HOOKS` is 1.
+- The mode check of the root-role marker file in `ext-pi`.
+- The G2 observation-only witness, the hostile-input and transport
+  negatives of WM-024 and WM-028, and every item of the deferred security
+  stage of the Phase C section below and of section 8 of the
+  remaining-scope report.
+
+* TODO [#C] Phase E end-of-phase review findings    :review:
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-phase-e-review-findings-0l73
+:LABELS:   ["review","workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-01 Thu 20:45]
+:MODIFIED: [2026-10-01 Thu 21:18]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Findings of the Phase E end-of-phase review (two lenses, range 33f84fe4..841ce0c7, both "approve with notes", no critical or high finding) that remain open after closeout commit a17a015b. The section "End-of-phase review" under "Phase E of 2026-10" in doc/workflow-manager-handoff.md is the source. The next run fixes the functional items at their owners.
+
+1. (Medium) An endpoint switch that binds but whose overview read fails reports the new endpoint as connected, and no event delivery runs until the user selects a profile again. (`ext-pi/src/service-mode.ts`, `ext-pi/src/manager/session.ts`)
+2. (Medium) An uncertain `/wfm-answer` or recovery choice is reconciled through the decision resource, which answers 404 once the decision is not pending, so the command stays uncertain. Nothing is resent. Reconcile through the command resource or the run state. (`ext-pi/src/manager-ui.ts` (`acat-pe18-fess-followup-3ykw`))
+3. (Medium) The admission deadline covers one Store request, not one route. `repeatChangedRead` and about 29 owner reads inside protected views start fresh allowances, so a protected read can wait longer than the 7-second client timeout under contention. `manager/STORAGE.md` states this. (`manager/src/Agentic/Manager/Store.hs`)
+4. (Medium) The pre-lock crash window above, and engines outside the owner lock under option C. (`manager/src/Agentic/Manager/Quarantine.hs`, `cli/src/Agentic/Cli/Frontend.hs` (`acat-engine-owner-lock-coverage-9snr`))
+5. (Medium) `/wfm-steer`, `/wfm-redirect`, `/wfm-resume`, `/wfm-fork` and the two-page history follow have fake-transport evidence only. (`ext-pi/test/manager-ui-live.test.ts`)
+6. (Low) `assertLocalStateRoot` runs only in the restore path, so a local launch, preview or lineage preflight can still write under a manager root. (`ext-pi/src/launch.ts`, `ext-pi/src/supervisor.ts`)
+7. (Low) Reads queued before an endpoint switch are sent to the new endpoint. The generation check discards their results. (`ext-pi/src/manager/session.ts`)
+8. (Low) A failed catalogue read of one profile stops `/wfm` and the manager start tool for every profile. (`ext-pi/src/manager-ui.ts`)
+9. (Low) A malformed manager profile setting makes `session_start` skip the local restore and the bridge start. (`ext-pi/src/index.ts`)
+10. (Low) A fork review with more than one replacement, and a lineage review with a profile identifier of about 70 characters or more, do not fit 80x24. (`tui/src/Agentic/Tui/Presentation.hs`)
+11. (Low) Cabal does not track the include of `runtime/cbits/private_sync.c` in `manager/test/draft_sync_fault.c`, so a stale object can fail the link. (`agentic.cabal`, `manager/test/draft_sync_fault.c`)
+12. (Low) Whether the frontend proxy survives a manager crash depends on the inherited SIGHUP disposition. The product code does not fix it. (`manager/test/service_http.py`, `manager/WORKERS.md`)
+13. (Low) The `ext-pi` devDependency pins differ from the tested fork (PE27). (`ext-pi/package.json`)
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 586,
+    "issue_id": "acat-phase-e-review-findings-0l73",
+    "author": "johnw",
+    "text": "Subtask PD1 (2026-10-01) fixes item 1 and item 7 in ext-pi/src/manager/session.ts and ext-pi/src/service-mode.ts. switchEndpoint commits a new binding only after its complete overview loads through the new transport, stamped with the new endpoint identity. On failure it closes the new transport and keeps the earlier binding, its watched resources and its follow loop, and ServiceMode.select reports 'kept'. No path reports 'connected' while followEnd is set. #fetch drops a fetch of an earlier generation without sending it. Evidence: npm run check, the three targeted vitest suites and npm test passed (integration suites skipped without AGENT_CAT_E2E_RUNNER). The new unit case failed before the fix. Fess not blocking, findings filed as acat-pd1-fess-followup-5511. Items 2 to 6 and 8 to 13 stay open.",
+    "created_at": "2026-10-02T04:18:16Z"
   }
 ]
 #+end_src
@@ -20655,7 +20840,7 @@ Local-mode behavior remains intact without a duplicated service runtime model.
 :LABELS:   ["p7","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-01 Thu 12:16]
+:MODIFIED: [2026-10-01 Thu 20:45]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-035
 :SOURCE_REPO: agent-cat
@@ -20810,6 +20995,13 @@ check fail.
     "author": "johnw",
     "text": "PE7 met the 80x24 lineage review fit (item 2 of acat-phase-c-review-findings-hwxy): restart, resume and fork with one replacement and a 128-character profile review fit 80x24, tui-history approves the restart child at 80x24. Evidence: PE/PE7/impl-r1. Fess lows: acat-pe7-fess-followup-uqv7.",
     "created_at": "2026-10-01T19:16:58Z"
+  },
+  {
+    "id": 585,
+    "issue_id": "acat-wm-035-9uqq",
+    "author": "johnw",
+    "text": "Phase E closeout (commit a17a015b): the two open functional items of this package from the Phase C closeout are met. PE6 (f71a4a05) shows the Terminal and Result lines of the live monitor at 40x12 (acat-jdmd item 1), and PE7 (c8ee3200) fits a lineage review with one replacement and a 128-character profile review at 80x24 (item 2 of acat-phase-c-review-findings-hwxy). Residual fit limits: acat-phase-e-review-findings-0l73 item 10. No review verdict for WM-035 was given in Phase E, so it stays open for the next review; WM-036 to WM-038 wait on it.",
+    "created_at": "2026-10-02T03:45:48Z"
   }
 ]
 #+end_src
@@ -20821,7 +21013,7 @@ check fail.
 :LABELS:   ["p8","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-01 Thu 18:10]
+:MODIFIED: [2026-10-01 Thu 20:45]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-036
 :SOURCE_REPO: agent-cat
@@ -20981,6 +21173,20 @@ invocation tuples or exposing secrets.
     "author": "johnw",
     "text": "PE23 (2026-10-01): ext-pi/README.md documents host acceptance through the pi-host-smoke mode of manager/test/service_http.py (built Pi fork in a PTY, isolated HOME, faux provider, manager live). See acat-wm-038-mgb7 for the evidence scope.",
     "created_at": "2026-10-02T01:10:35Z"
+  },
+  {
+    "id": 572,
+    "issue_id": "acat-wm-036-5ndj",
+    "author": "johnw",
+    "text": "PE28 Phase E gate ran once on the final tree; every step passed (three after real fixes: AdmissionCheck expected busy line, State.hs control view reports lost without a live original worker, failures-launched SIGHUP/orphaned process group harness). All seven negative controls failed with literal messages; /v1 contract and client vectors unchanged against cb62e35e; ext-pi 200 unit and 8 integration tests passed. Evidence: PE/PE28/impl-r1. Handoff section 'Phase E of 2026-10'. Package closeout is left to review.",
+    "created_at": "2026-10-02T03:35:05Z"
+  },
+  {
+    "id": 582,
+    "issue_id": "acat-wm-036-5ndj",
+    "author": "johnw",
+    "text": "Delivered by PE10 to PE16 and PE22. Phase E closeout (commit a17a015b): both review lenses of 33f84fe4..841ce0c7 rate this package met for function (\"approve with notes\", no critical or high finding), and the Phase E gate PE28 passed on 841ce0c7. Evidence: PE/PE10 to PE/PE28 in the private resume-20260923 directory, section \"Phase E of 2026-10\" of doc/workflow-manager-handoff.md. Tested host: built Pi fork ~/src/fork/pi at 7857926ee with the @earendil-works packages at 0.99.1 linked; source acceptance only, no installation, production adoption or deployment. The remaining package items are security items deferred by the operator direction of 2026-09-30, listed in acat-phase-e-deferred-security-5jl4. Non-blocking review notes: acat-phase-e-review-findings-0l73. PE27 (devDependency pins) awaits operator authorization. Not closed: obr refuses the close because the dependency acat-wm-035-9uqq (WM-035) is open, and WM-035 is a functional package outside this run's verdicts, so no forced close. Close once WM-035 closes.",
+    "created_at": "2026-10-02T03:45:47Z"
   }
 ]
 #+end_src
@@ -20992,7 +21198,7 @@ invocation tuples or exposing secrets.
 :LABELS:   ["p8","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-01 Thu 19:07]
+:MODIFIED: [2026-10-01 Thu 20:45]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-037
 :SOURCE_REPO: agent-cat
@@ -21126,6 +21332,20 @@ verified output, and lineage behave consistently with the other clients.
     "author": "johnw",
     "text": "PE25: ext-pi now gives one notice when a connected session becomes refused or unreachable (no command is sent), shows the export receipt, verified download and listing in one notice, and has test-only stream hooks (/wfm-debug-reconnect, /wfm-debug-events) under AGENT_CAT_PI_TEST_HOOKS=1. Evidence: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/PE/PE25/impl-r1. Follow-ups: acat-pe25-fess-followup-g1cl.",
     "created_at": "2026-10-02T02:07:40Z"
+  },
+  {
+    "id": 573,
+    "issue_id": "acat-wm-037-dz3v",
+    "author": "johnw",
+    "text": "PE28 Phase E gate ran once on the final tree; every step passed (three after real fixes: AdmissionCheck expected busy line, State.hs control view reports lost without a live original worker, failures-launched SIGHUP/orphaned process group harness). All seven negative controls failed with literal messages; /v1 contract and client vectors unchanged against cb62e35e; ext-pi 200 unit and 8 integration tests passed. Evidence: PE/PE28/impl-r1. Handoff section 'Phase E of 2026-10'. Package closeout is left to review.",
+    "created_at": "2026-10-02T03:35:06Z"
+  },
+  {
+    "id": 583,
+    "issue_id": "acat-wm-037-dz3v",
+    "author": "johnw",
+    "text": "Delivered by PE17 to PE22. Phase E closeout (commit a17a015b): both review lenses of 33f84fe4..841ce0c7 rate this package met for function (\"approve with notes\", no critical or high finding), and the Phase E gate PE28 passed on 841ce0c7. Evidence: PE/PE10 to PE/PE28 in the private resume-20260923 directory, section \"Phase E of 2026-10\" of doc/workflow-manager-handoff.md. Tested host: built Pi fork ~/src/fork/pi at 7857926ee with the @earendil-works packages at 0.99.1 linked; source acceptance only, no installation, production adoption or deployment. The remaining package items are security items deferred by the operator direction of 2026-09-30, listed in acat-phase-e-deferred-security-5jl4. Non-blocking review notes: acat-phase-e-review-findings-0l73. PE27 (devDependency pins) awaits operator authorization. Not closed: it depends on acat-wm-036-5ndj, which stays open only behind acat-wm-035-9uqq. Close with WM-036.",
+    "created_at": "2026-10-02T03:45:48Z"
   }
 ]
 #+end_src
@@ -21137,7 +21357,7 @@ verified output, and lineage behave consistently with the other clients.
 :LABELS:   ["p8","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-01 Thu 19:25]
+:MODIFIED: [2026-10-01 Thu 20:45]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-038
 :SOURCE_REPO: agent-cat
@@ -21267,6 +21487,20 @@ WM-008 completed handoff 2026-09-12T02:36:23+00:00: Adopt the shared root-role r
     "author": "johnw",
     "text": "PE26 (model path, 2026-10-01): manager/test/service_http.py gains the pi-host-model mode on the PE23 PiHost launcher, separate from pi-host. The faux model calls agent_cat_workflow: a manager-start carrying grantId 'grant-forged' and approved true starts nothing until the human approves the exact review by key (step 1 declines by key, no approve command and no run; the declined request is withdrawn by /wfm-withdraw); the repeated start is approved by key and the run starts; model manager-answer false and manager-control retry are each confirmed by key and reach the human-path transitions, and the run succeeds with JSON false in the run store; a model local start with launchTarget scripted and a grantId shows the local launch review and, declined, creates no run under AGENT_CAT_STATE_DIR; /wf-grant gives an unknown-command notice (ext-pi/src/index.ts input handler now stops unregistered /wf, /wfm, wf-* and wfm-* names). Control pi-host-model-decline fails with 'JOURNEY-ASSERT model start approved after exact review'. Checks passed: pi-host-model (N=8, rerun by fess), pi-host-model-decline (exit 1 with the literal, rerun by fess), npm test, make -C doc check. Evidence: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/PE/PE26/impl-r1. Fess pe-PE26-r1: not blocking; one medium and two low findings in acat-pe26-fess-followup-c33h.",
     "created_at": "2026-10-02T02:25:11Z"
+  },
+  {
+    "id": 574,
+    "issue_id": "acat-wm-038-mgb7",
+    "author": "johnw",
+    "text": "PE28 Phase E gate ran once on the final tree; every step passed (three after real fixes: AdmissionCheck expected busy line, State.hs control view reports lost without a live original worker, failures-launched SIGHUP/orphaned process group harness). All seven negative controls failed with literal messages; /v1 contract and client vectors unchanged against cb62e35e; ext-pi 200 unit and 8 integration tests passed. Evidence: PE/PE28/impl-r1. Handoff section 'Phase E of 2026-10'. Package closeout is left to review.",
+    "created_at": "2026-10-02T03:35:06Z"
+  },
+  {
+    "id": 584,
+    "issue_id": "acat-wm-038-mgb7",
+    "author": "johnw",
+    "text": "Delivered by PE21 to PE26. Phase E closeout (commit a17a015b): both review lenses of 33f84fe4..841ce0c7 rate this package met for function (\"approve with notes\", no critical or high finding), and the Phase E gate PE28 passed on 841ce0c7. Evidence: PE/PE10 to PE/PE28 in the private resume-20260923 directory, section \"Phase E of 2026-10\" of doc/workflow-manager-handoff.md. Tested host: built Pi fork ~/src/fork/pi at 7857926ee with the @earendil-works packages at 0.99.1 linked; source acceptance only, no installation, production adoption or deployment. The remaining package items are security items deferred by the operator direction of 2026-09-30, listed in acat-phase-e-deferred-security-5jl4. Non-blocking review notes: acat-phase-e-review-findings-0l73. PE27 (devDependency pins) awaits operator authorization. Not closed: it depends on acat-wm-037-dz3v, which stays open only behind acat-wm-035-9uqq through WM-036. Close with WM-037.",
+    "created_at": "2026-10-02T03:45:48Z"
   }
 ]
 #+end_src

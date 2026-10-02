@@ -15,10 +15,12 @@
  * `src/manager-ui.ts` send commands through its session, and the live
  * monitor of `/wfm-monitor` follows its changes through `subscribe`.
  * `close` closes the transport, and the work of the manager continues under
- * its own supervision. A switch between profiles uses `ManagerSession.switchEndpoint`, which advances the
- * refresh generation, discards every read of the earlier binding that is in
- * flight, and refuses every reference of the earlier binding with
- * `WrongEndpoint`.
+ * its own supervision. A switch between profiles uses
+ * `ManagerSession.switchEndpoint`, which commits the new binding only after
+ * its complete overview loads. The commit advances the refresh generation,
+ * discards every read of the earlier binding that is in flight, and refuses
+ * every reference of the earlier binding with `WrongEndpoint`. A switch that
+ * does not commit keeps the earlier binding and its follow loop.
  *
  * @packageDocumentation
  */
@@ -239,8 +241,12 @@ export class ServiceMode {
   /**
    * Select the profile at an index. Selections run one at a time. With a
    * following session, the session switches to the new endpoint, and a
-   * refused switch keeps the earlier binding. Otherwise a new session
-   * connects, and the earlier session closes.
+   * refused switch, which includes a failed first overview read, keeps the
+   * earlier binding. When the earlier binding cannot stay active, because
+   * its follow loop ended during the switch, the session closes and the
+   * selection fails. Otherwise a new session connects, and the earlier
+   * session closes. A selection reports `connected` only while the follow
+   * loop of the session runs.
    */
   select(index: number): Promise<ServiceSelection> {
     if (!Number.isInteger(index) || index < 0 || index >= this.profiles.length) {
@@ -271,10 +277,15 @@ export class ServiceMode {
       const before = current.identity;
       const switched = await current.switchEndpoint(loaded.value);
       if (this.#closed) return { kind: "closed" };
-      if (!switched.ok && current.identity === before) return this.#failed(index, switched.failure, true);
+      if (!switched.ok) {
+        if (current.identity === before && current.followEnd === undefined) return this.#failed(index, switched.failure, true);
+        this.#session = undefined;
+        await current.close();
+        if (this.#closed) return { kind: "closed" };
+        return this.#failed(index, switched.failure, false);
+      }
       this.#active = index;
-      this.#install();
-      return { kind: "connected", connection: this.#connection };
+      return this.#report();
     }
     const connected = await ManagerSession.connect(loaded.value, { ...this.#options.session, onChange: () => this.#install() });
     if (this.#closed) {
@@ -291,8 +302,14 @@ export class ServiceMode {
       await session.close();
       return this.#failed(index, overview.failure, false);
     }
+    return this.#report();
+  }
+
+  /** Install the session state, and report the selection as `connected` only when the installed connection is. */
+  #report(): ServiceSelection {
     this.#install();
-    return { kind: "connected", connection: this.#connection };
+    const connection = this.#connection;
+    return connection.kind === "connected" ? { kind: "connected", connection } : { kind: "failed", connection };
   }
 
   #failed(index: number, failure: ClientFailure, kept: boolean): ServiceSelection {
@@ -311,14 +328,16 @@ export class ServiceMode {
   /**
    * Install the connection and the observations from the session. Only the
    * overview of the current binding is installed, and the session installs
-   * an overview only when its refresh generation is current.
+   * an overview only when its refresh generation is current. A session whose
+   * follow loop has ended is never `connected`.
    */
   #install(): void {
     const session = this.#session;
     if (this.#closed || session === undefined) return;
     const end = session.followEnd;
-    if (end !== undefined && end.kind !== "closed") {
+    if (end !== undefined) {
       const problem = end.kind === "refused" ? connectionProblem(end.failure)
+        : end.kind === "closed" ? { kind: "unreachable" as const, reason: "the event stream of the manager closed" }
         : { kind: "unreachable" as const, reason: "the manager refused the event cursor, and a new overview failed" };
       this.#connection = { kind: problem.kind, profile: this.profiles[this.#active], reason: problem.reason };
       this.#clear();
