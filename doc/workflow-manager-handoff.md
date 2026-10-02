@@ -11,10 +11,15 @@ the commit of the Phase C closeout. PE1 to PE9 repair the functional
 findings of the Phase C review and the two open Phase A polish items.
 PE10 to PE26 deliver WM-036 to WM-038, Pi service mode through `ext-pi`
 and the built Pi fork. PE27 needs operator authorization and did not run.
-PE28 ran the Phase E gate on the final tree. Every gate step passed, three
-of them after a fix of a defect that the gate found, and every negative
-control failed with its literal message. This section describes the
-current state. Where any section below differs, this section supersedes
+PE28 ran the Phase E gate on the final tree and landed as `841ce0c7`.
+Every gate step passed, three of them after a fix of a defect that the gate
+found, and every negative control failed with its literal message. Two
+end-of-phase review lenses then read `33f84fe4..841ce0c7` and returned
+"approve with notes" with no critical or high finding. The run did not
+stop early. The closeout of the run updated this section and corrected the
+wording of the owned-to-lost rule in `manager/CONTROLS.md` and in a comment
+of `manager/src/Agentic/Manager/State.hs`, with no change of behavior. This
+section describes the current state. Where any section below differs, this section supersedes
 it, and the sections below remain as chronology. The evidence of each
 subtask is under `PE/<subtask>/impl-r1` (or `impl-r2`) in the resume
 directory, and the audits are under `fess/`.
@@ -71,7 +76,7 @@ for operator authorization.
 | PE25 | `6dc9df78` | The `pi-host` mode adds the restart child, the export, a stream reconnect with no gap, reload and quit with the run still owned, and a revoked credential. |
 | PE26 | `3a35f60d` | The `pi-host-model` mode drives the model path separately: a declined forged-grant start sends nothing, and approved model starts, answers and retries complete. |
 | PE27 | None | Needs operator authorization. See the package status below. |
-| PE28 | Uncommitted | The Phase E gate. It also fixes two defects that the gate found, listed below. |
+| PE28 | `841ce0c7` | The Phase E gate. It also fixes three defects that the gate found, listed below. |
 
 The gate found three defects, and PE28 fixed each at its owner:
 
@@ -83,7 +88,9 @@ The gate found three defects, and PE28 fixed each at its owner:
   `lost` when the stored label is `owned` and Admission holds no live
   original worker, which is the rule of the run resource. The offers and
   `cancelAllowed` do not change. `manager/CONTROLS.md` states the rule.
-  The snapshot view still reports the stored label.
+  The rule covers every run with no live original worker, a finished run
+  included, because Admission records no transition for a run that finished
+  normally. The snapshot view still reports the stored label.
 - The admission check expected two private fault lines for a refused
   admission poll. Since PE8 the Store also writes the `store-sqlite-transaction`
   busy line, which `manager/STORAGE.md` documents. The check in
@@ -217,11 +224,25 @@ to stay stopped, and signals only those groups in case 4.
 - The other TUI PTY modes (`tui-inputs`, `tui-controls`, `tui-redirect`,
   `tui-decisions`) and their controls, because no Phase E change touches
   them. They passed in the Phase C gate.
-- Steps 1 to 8 ran before the change to the control view in
+- Steps 3 to 7 and the step 8 modes other than `failures-worker` ran
+  before the change to the control view in
   `manager/src/Agentic/Manager/State.hs`. The change affects only the
   `supervision` field of the control view of a run with no live original
   worker. Of the checks before it, `failures-worker` and `controls` ran
-  again after it, and every later step ran on the final tree.
+  again after it, and steps 9 to 15 ran on the final tree. `mixed` and
+  `mutations-lineage` did not run again on the final tree.
+- Fork, resume, steer and redirect against a live manager from `ext-pi`.
+  Only restart runs live (`pi-client` PASS 10 and `pi-host` step 8). The
+  other lineage operations and the controls have unit evidence with a fake
+  transport only. The run plan stated that the `pi-client` path covers
+  fork and resume live, and that statement is not correct.
+- Captured inputs, endpoint switching with two managers, three terminal
+  sizes and resize in the actual Pi-host PTY. The `pi-client` live test
+  covers captured inputs, a unit test with a fake transport covers the
+  endpoint switch, and the Pi host owns its terminal layout.
+- The closeout ran only `make -C doc check`, before and after its edit
+  (`Z/CLOSEOUT-pe-final`). Its edits change documentation and one Haskell
+  comment, so it ran no build.
 - The owner lock on the spawn path of other platforms, which local macOS
   validation does not cover.
 
@@ -298,13 +319,18 @@ above. This run changed no tracker item.
 
 Open functional limits of Phase E:
 
-- The snapshot view still reports the stored supervision label, so for a
-  short time after a worker loss it can read `owned` while the run and
-  control views read `lost`.
+- The snapshot view still reports the stored supervision label. For a run
+  whose worker was lost, and for every run that finished normally, it reads
+  `owned` while the run and control views read `lost`, until the next
+  restart reconciliation changes the label.
 - Under owner option C, `owner-released` evidence covers the inner worker
   and the session leaders that hold its lock, not engines that the process
-  library starts. `ext-pi` local runs and local TUI runs carry no
-  `owner.lock`.
+  library starts. The inner frontend worker creates `owner.lock` for each
+  run that it starts. Only the manager quarantine check reads the lock.
+- A frontend that ends after the launch and before it creates `owner.lock`
+  leaves no lock file. Its claim reads `cleanup-required` with no release
+  path, so with one execution reservation that crash still blocks later
+  runs. No document records this window yet.
 - A fork review with more than one replacement, and a lineage review with a
   profile identifier of about 70 characters or more, do not fit 80x24.
 - The reconciliation of an uncertain Pi answer cannot observe its effect
@@ -316,15 +342,47 @@ Open functional limits of Phase E:
 - The Pi editor trims submitted text and expands tabs, so the Pi-host
   literal has no edge white space or tab.
 
+### End-of-phase review
+
+Two lenses read `33f84fe4..841ce0c7`, a package lens and a working lens.
+Both returned "approve with notes" with no critical or high finding, and
+both rate every package of the phase met for function: the functional
+findings of the Phase C review, the Phase A polish remainder, WM-036,
+WM-037 and WM-038. The working lens ran the journey pair at N1 and N8 on
+`841ce0c7` after an incremental `-ftui-tests` build, and both passed. No
+fix round ran. The closeout applied the documentation corrections of the
+review: the owned-to-lost wording, the PE28 row, the step range and the
+fork and resume statement. The other findings stay open:
+
+| Severity | Finding | Location |
+| --- | --- | --- |
+| Medium | An endpoint switch that binds but whose overview read fails reports the new endpoint as connected, and no event delivery runs until the user selects a profile again. | `ext-pi/src/service-mode.ts`, `ext-pi/src/manager/session.ts` |
+| Medium | An uncertain `/wfm-answer` or recovery choice is reconciled through the decision resource, which answers 404 once the decision is not pending, so the command stays uncertain. Nothing is resent. Reconcile through the command resource or the run state. | `ext-pi/src/manager-ui.ts` (`acat-pe18-fess-followup-3ykw`) |
+| Medium | The admission deadline covers one Store request, not one route. `repeatChangedRead` and about 29 owner reads inside protected views start fresh allowances, so a protected read can wait longer than the 7-second client timeout under contention. `manager/STORAGE.md` states this. | `manager/src/Agentic/Manager/Store.hs` |
+| Medium | The pre-lock crash window above, and engines outside the owner lock under option C. | `manager/src/Agentic/Manager/Quarantine.hs`, `cli/src/Agentic/Cli/Frontend.hs` (`acat-engine-owner-lock-coverage-9snr`) |
+| Medium | `/wfm-steer`, `/wfm-redirect`, `/wfm-resume`, `/wfm-fork` and the two-page history follow have fake-transport evidence only. | `ext-pi/test/manager-ui-live.test.ts` |
+| Low | `assertLocalStateRoot` runs only in the restore path, so a local launch, preview or lineage preflight can still write under a manager root. | `ext-pi/src/launch.ts`, `ext-pi/src/supervisor.ts` |
+| Low | Reads queued before an endpoint switch are sent to the new endpoint. The generation check discards their results. | `ext-pi/src/manager/session.ts` |
+| Low | A failed catalogue read of one profile stops `/wfm` and the manager start tool for every profile. | `ext-pi/src/manager-ui.ts` |
+| Low | A malformed manager profile setting makes `session_start` skip the local restore and the bridge start. | `ext-pi/src/index.ts` |
+| Low | A fork review with more than one replacement, and a lineage review with a profile identifier of about 70 characters or more, do not fit 80x24. | `tui/src/Agentic/Tui/Presentation.hs` |
+| Low | Cabal does not track the include of `runtime/cbits/private_sync.c` in `manager/test/draft_sync_fault.c`, so a stale object can fail the link. | `agentic.cabal`, `manager/test/draft_sync_fault.c` |
+| Low | Whether the frontend proxy survives a manager crash depends on the inherited SIGHUP disposition. The product code does not fix it. | `manager/test/service_http.py`, `manager/WORKERS.md` |
+| Low | The `ext-pi` devDependency pins differ from the tested fork (PE27). | `ext-pi/package.json` |
+
 ### Next action
 
-1. The Integrator commits the PE28 tree (the gate fixes and this section)
-   and records the package status above in the tracker.
+1. The Integrator commits the closeout edits of this section,
+   `manager/CONTROLS.md` and `manager/src/Agentic/Manager/State.hs`, and
+   records the package status above in the tracker.
 2. The operator decides PE27, the devDependency pins.
-3. Phase D, Emacs service mode (WM-030 to WM-032), follows on the
-   authorized `emacs-native` branch. Phase F (its functional parts) and
-   Phase G follow under the same directions. The security stage waits for
-   the operator to schedule it.
+3. The next run takes the functional parts of Phase F (WM-039 to WM-041)
+   and Phase G (WM-042 to WM-044) under the functionality-first and fast
+   rules, with the open functional findings above at their owners. Phase D,
+   Emacs service mode (WM-030 to WM-032), runs on the `emacs-native` branch
+   of agent-workflows that the operator decisions of 2026-10-01 authorize,
+   once the operator confirms that this ownership answer stands for the
+   run. The security stage waits for the operator to schedule it.
 
 ## Phase C of 2026-10
 

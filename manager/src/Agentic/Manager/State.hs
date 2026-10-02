@@ -410,7 +410,8 @@ controlSurfaceBorrowed store proof association approved live = do
       if unchanged && boundary==projectionBoundary snapshot then Just <$> pendingDecisions association else pure Nothing
     pure((\current -> (revision,supervision,snapshot,current)) <$> heads)
   -- A stored owned label without a live original worker reads as lost, as
-  -- the run resource reports it, until Admission records the transition.
+  -- the run resource reports it. This covers every such run, including a
+  -- finished run whose label Admission never changes.
   let reported=if supervision=="owned" && not live then "lost" else supervision
       available=live && supervision=="owned" && snapshotRunStatus snapshot==RunRunning
       offer operation occurrence attempt generation timings choices targets=object
