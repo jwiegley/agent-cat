@@ -180,6 +180,14 @@ export default function agentCatExtension(pi: ExtensionAPI, hooks: ExtensionHook
       ctx.ui.notify("The current session is exclusively assigned to an agent-cat workflow; cancel that run before sending another prompt", "warning");
       return { action: "handled" };
     }
+    // Pi runs a registered command before the input handlers and sends other
+    // text to the model. An unregistered name of the agent-cat commands, such
+    // as /wf-grant, therefore stops here with a notice and is not a prompt.
+    const command = /^\/(wfm?(?:-\S*)?)(?:\s|$)/.exec(event.text)?.[1];
+    if (command !== undefined && !pi.getCommands().some((item) => item.name === command)) {
+      ctx.ui.notify(`Unknown command /${command}. Nothing was sent to the model. /wf-help lists the agent-cat commands.`, "error");
+      return { action: "handled" };
+    }
     return { action: "continue" };
   });
   pi.on("session_shutdown", async () => {

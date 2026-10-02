@@ -85,7 +85,9 @@ environment of the harness. It passes `PATH`, `TERM`, `LANG`, `LC_ALL`,
 profile, `AGENT_CAT_STATE_DIR` to a directory of the fixture, and
 `AGENT_CAT_FAUX_SCRIPT` to the faux script file. The first Pi of the
 `pi-host` mode also receives `AGENT_CAT_PI_TEST_HOOKS` set to 1, which
-registers the stream test hooks of the section "Service mode". No provider
+registers the stream test hooks of the section "Service mode". The Pi of
+the `pi-host-model` mode also receives `AGENT_CAT_RUNNER` set to the
+absolute path of the runner of the harness, for its local start. No provider
 key reaches Pi. Pi needs no `settings.json` in the new configuration directory, and it
 shows no first-run screen.
 
@@ -99,8 +101,14 @@ is `agent-cat faux reply N`. Otherwise the file holds a JSON array of
 replies, and Pi receives them in order, one for each model call. A reply is
 one block or an array of blocks. A block is `{"text": TEXT}` or
 `{"toolCall": {"name": NAME, "arguments": OBJECT}}`, with an optional `id`
-in the tool call. A reply with a tool call stops with `toolUse`. After the
-last scripted reply, the fixed text replies continue.
+in the tool call. A tool call can also hold `"fromResult": {ARGUMENT:
+PATTERN}`, where each PATTERN is a regular expression with one capture
+group. The provider searches the text of the tool results of the model
+context, from the newest to the oldest, and sets ARGUMENT to the captured
+text of the first match. A scripted model thus reads a run identifier from
+an earlier tool result, as a real model does. A pattern that matches no tool
+result fails the model call. A reply with a tool call stops with `toolUse`.
+After the last scripted reply, the fixed text replies continue.
 `test/faux-model.test.ts` checks the script rules and the registered stream.
 
 The host is accepted when each of these steps passes:
@@ -197,6 +205,52 @@ manager through the `Captured file` source.
 The `pi-host-broken-answer` control follows the `pi-host` mode but types
 `true` at the question. It must fail with the literal message
 `JOURNEY-ASSERT Pi answer is JSON false`.
+
+The `pi-host-model` mode accepts the model path of service mode in the host,
+separately from the human path. It uses the same manager fixture and
+launcher. The faux script makes the model call the `agent_cat_workflow`
+tool once for each prompt that the harness types, and the model ends each
+turn with the text `Model turn N ended.`. The model reads the run identifier
+from the result of its start through `fromResult`. The harness confirms or
+declines each confirmation by keys, and it only reads over HTTP with its own
+credential. The model path is accepted when each of these steps passes:
+
+1. The model calls `manager-start` of `mixed-controls` with the inputs
+   literal and the extra fields `grantId` `grant-forged` and `approved`
+   `true`. Pi shows `Create manager request?` with the profile, the workflow
+   and the literal, and Enter on `Yes` creates the request. Pi then shows
+   the exact review with its five selectors. The key `a` opens
+   `Approve this exact review?`, and the harness declines it with the arrow
+   key and Enter on `No`. The manager holds no `approve` command, and the
+   request stays in review with no run. The request in review holds the
+   resources of `profile_1`, so `/wfm-withdraw REQUEST` then withdraws it.
+2. The model calls the same `manager-start` again. The harness confirms the
+   request, and the key `a` and Enter on `Yes` approve the exact review. The
+   request names a run, and the manager holds exactly one `approve` command,
+   which names the second preparation.
+3. When the run waits at its question, the model calls `manager-answer` with
+   the value `false`. `Send manager answer?` shows the decision, the run and
+   `value=false`, and Enter on `Yes` sends it. The one `answer` command
+   reaches its effect, and the snapshot publishes the rendered false answer
+   `no`.
+4. When the run waits at its recovery head, the model calls
+   `manager-control` with `retry`. `Send manager control?` shows
+   `kind=retry`, the run and the decision, and Enter on `Yes` sends it. The
+   one `retry` command reaches its effect, the run succeeds, and the run
+   store records the answer as JSON `false`.
+5. The model calls the local `start` of `mixed-controls` with
+   `launchTarget` `scripted` and a `grantId`. Pi shows the local exact
+   launch review `Launch agent-cat workflow?` with the target and the
+   literal, and the harness declines it. The directory `runs` under
+   `AGENT_CAT_STATE_DIR` of Pi holds no run.
+6. The typed command `/wf-grant` gives the unknown-command notice of the
+   section "Commands". The session file of Pi records no prompt with it and
+   no further model reply, the manager holds no new command, and `/quit`
+   ends Pi with exit status 0.
+
+The `pi-host-model-decline` control follows the `pi-host-model` mode but
+also declines the approval confirmation of step 2. It must fail with the
+literal message `JOURNEY-ASSERT model start approved after exact review`.
 
 ## Manager client
 
@@ -1150,6 +1204,15 @@ for the control descriptor.
 | `/wfm-fork [RUN_ID]` | Service mode: fork a manager run with dropped or replaced answers through an approved child request. |
 | `/wfm-export [RUN_ID [NAME]]` | Service mode: export the verified result of a manager run under a name. |
 
+Pi runs a registered command before the input handlers of the extensions,
+and it sends other text to the model as a prompt. The input handler of the
+extension therefore stops an unregistered name of the agent-cat commands:
+`/wf`, `/wfm`, or a name that starts with `wf-` or `wfm-`, such as
+`/wf-grant`. It shows `Unknown command /NAME. Nothing was sent to the model.
+/wf-help lists the agent-cat commands.`, and the text does not reach the
+model. A prompt template or a skill of the same name continues, because Pi
+lists it as a command.
+
 The `agent_cat_workflow` tool lets a model discover, start, inspect, control,
 restart, resume, or fork local runs, and, in service mode, act on manager
 runs. Starts from the tool are limited to the scripted, tool-free child, and
@@ -1418,8 +1481,9 @@ python3 -B manager/test/service_http.py "$PWD" "$(mktemp -d)" "$(bash test/cabal
 ```
 
 The host acceptance of the section "Host acceptance" runs in the same way
-with the modes `pi-host-smoke` and `pi-host`, and its control with the mode
-`pi-host-broken-answer`.
+with the modes `pi-host-smoke`, `pi-host` and `pi-host-model`, and its
+controls with the modes `pi-host-broken-answer` and
+`pi-host-model-decline`.
 
 Remote discovery and control use Pi's Chord `SessionDirectory`,
 `SessionManagement`, `AgentController`, and `Transcript` services. Boundary

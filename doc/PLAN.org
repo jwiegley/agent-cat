@@ -11556,6 +11556,26 @@ comparison removes white space and checks for a substring, so lists such as '12 
 look the same. Fix: parse the "Events delivered after the drop" row into a list of integers and
 compare it exactly with the sequence numbers of ids[:count].
 
+* TODO [#D] Resolve the non-blocking fess findings of subtask PE26
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pe26-fess-followup-c33h
+:LABELS:   []
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-01 Thu 19:25]
+:MODIFIED: [2026-10-01 Thu 19:25]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess audit fess/pe-PE26-r1.md (2026-10-01) on subtask PE26 (WM-038 model path, pi-host-model mode of manager/test/service_http.py).
+
+1. Medium. manager/test/service_http.py:10491-10500: the assertion `assert second["runId"] is not None, PI_HOST_MODEL_STARTED` is evaluated only in the pi-host-model-decline branch. The main path goes to approve_shown, which uses other messages, so the control fails on its own branch and does not show that the main success check detects a missing approval. Fix: select approve or decline by keys, then on a path that both modes share read the request and assert runId is not None with PI_HOST_MODEL_STARTED before approve_shown.
+2. Low. manager/test/service_http.py:10472-10476: step 1 adds a human /wfm-withdraw that the requirement does not name. The cause is product behavior: a declined model start leaves a request in review that holds the resources of profile_1, so a repeated start waits with profile-busy. Fix: decide whether a declined review confirmation should leave the request holding profile resources, and remove the withdraw step if the behavior changes.
+3. Low. ext-pi/src/index.ts:183-190: the input handler now stops any unregistered /wf, /wfm, /wf-* or /wfm-* text with an unknown-command notice. The human pi-host journey, pi-client and npm run test:integration did not run after this change. Fix: run the pi-host mode, pi-client and npm run test:integration once during the next integration pass.
+
 * TODO [#D] Resolve PE3 fess findings in owner-released quarantine evidence
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -21117,7 +21137,7 @@ verified output, and lineage behave consistently with the other clients.
 :LABELS:   ["p8","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-01 Thu 19:07]
+:MODIFIED: [2026-10-01 Thu 19:25]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-038
 :SOURCE_REPO: agent-cat
@@ -21240,6 +21260,13 @@ WM-008 completed handoff 2026-09-12T02:36:23+00:00: Adopt the shared root-role r
     "author": "johnw",
     "text": "PE25 (human path, remaining host items): the pi-host mode of manager/test/service_http.py now has 13 steps (164 s). Step 8 restart child with lineage review approved by key, child succeeds with parentRunId and lineage restart; step 9 export published in Pi verifies; step 10 forced stream drop through the test-only /wfm-debug-reconnect resumes with Last-Event-ID and no gap; steps 11-12 reload and quit leave the held run running under owned supervision; step 13 revoked credential shows the refused state with no new command. Checks passed: npm run check and npm test, pi-host (N=8), JOURNEY-ONCE(8), make -C doc check; pi-host-broken-answer control failed as required; pi-client passes. Evidence: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/PE/PE25/impl-r1. Fess pe-PE25-r1: no blocking findings, three low findings in acat-pe25-fess-followup-g1cl.",
     "created_at": "2026-10-02T02:07:40Z"
+  },
+  {
+    "id": 571,
+    "issue_id": "acat-wm-038-mgb7",
+    "author": "johnw",
+    "text": "PE26 (model path, 2026-10-01): manager/test/service_http.py gains the pi-host-model mode on the PE23 PiHost launcher, separate from pi-host. The faux model calls agent_cat_workflow: a manager-start carrying grantId 'grant-forged' and approved true starts nothing until the human approves the exact review by key (step 1 declines by key, no approve command and no run; the declined request is withdrawn by /wfm-withdraw); the repeated start is approved by key and the run starts; model manager-answer false and manager-control retry are each confirmed by key and reach the human-path transitions, and the run succeeds with JSON false in the run store; a model local start with launchTarget scripted and a grantId shows the local launch review and, declined, creates no run under AGENT_CAT_STATE_DIR; /wf-grant gives an unknown-command notice (ext-pi/src/index.ts input handler now stops unregistered /wf, /wfm, wf-* and wfm-* names). Control pi-host-model-decline fails with 'JOURNEY-ASSERT model start approved after exact review'. Checks passed: pi-host-model (N=8, rerun by fess), pi-host-model-decline (exit 1 with the literal, rerun by fess), npm test, make -C doc check. Evidence: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/PE/PE26/impl-r1. Fess pe-PE26-r1: not blocking; one medium and two low findings in acat-pe26-fess-followup-c33h.",
+    "created_at": "2026-10-02T02:25:11Z"
   }
 ]
 #+end_src

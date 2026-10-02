@@ -29,6 +29,21 @@ describe("faux model fixture", () => {
     expect(fauxReply(script, 3).content).toEqual([{ type: "text", text: `${FAUX_FIXED_REPLY} 3` }]);
   });
 
+  it("sets a fromResult argument from the newest tool result that the pattern matches", () => {
+    const script = parseFauxScript(JSON.stringify([
+      { toolCall: { name: "agent_cat_workflow", arguments: { action: "manager-answer", answer: "false" }, id: "call-1", fromResult: { runId: "started run (run_[0-9a-f]+)" } } },
+    ]));
+    const result = (text: string) => ({ role: "toolResult" as const, toolCallId: "t", toolName: "agent_cat_workflow", content: [{ type: "text" as const, text }], isError: false, timestamp: 0 });
+    const messages = [result("Execution: the manager started run run_0a for request req_1."), result("Execution: the manager started run run_1b for request req_2."),
+      result("Answer false reached decision dec_1 of run run_1b.")];
+    expect(fauxReply(script, 1, messages).content).toEqual([
+      { type: "toolCall", id: "call-1", name: "agent_cat_workflow", arguments: { action: "manager-answer", answer: "false", runId: "run_1b" } },
+    ]);
+    expect(() => fauxReply(script, 1, [result("no run here")])).toThrow(/no tool result matches/);
+    expect(() => parseFauxScript(JSON.stringify([{ toolCall: { name: "x", arguments: {}, fromResult: { runId: "run_[0-9]+" } } }]))).toThrow(/one capture group/);
+    expect(() => parseFauxScript(JSON.stringify([{ toolCall: { name: "x", arguments: {}, fromResult: { runId: 1 } } }]))).toThrow(/not text/);
+  });
+
   it("refuses a script that is not an array of text and tool-call blocks", () => {
     expect(() => parseFauxScript("{}")).toThrow(/JSON array/);
     expect(() => parseFauxScript(JSON.stringify([{ text: "a", extra: 1 }]))).toThrow(/neither/);

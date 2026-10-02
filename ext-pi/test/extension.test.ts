@@ -493,6 +493,7 @@ describe("Pi extension lifecycle", () => {
       registerEntryRenderer: () => {}, registerCommand: (name: string, command: unknown) => commands.set(name, command as never),
       registerTool: (definition: unknown) => { tool = definition; }, appendEntry: (_type: string, data: unknown) => entries.push(data), sendUserMessage: () => {},
       on: (name: string, handler: (event: unknown, ctx: unknown) => Promise<unknown>) => events.set(name, [...(events.get(name) ?? []), handler]),
+      getCommands: () => [...commands.keys(), "wf-template"].map((name) => ({ name })),
     } as never);
     const ui = {
       select: async (title: string) => title === "Execution target" ? "scripted (offline, no commands)" : undefined,
@@ -508,6 +509,18 @@ describe("Pi extension lifecycle", () => {
     // No command and no tool parameter issues or carries a grant.
     expect(tool.name).toBe("agent_cat_workflow");
     expect(commands.has("wf-grant")).toBe(false);
+    // An unregistered command of the agent-cat names is handled with a notice
+    // and never reaches the model as a prompt. Other text continues.
+    const typed = async (text: string) => {
+      const results: unknown[] = [];
+      for (const handler of events.get("input") ?? []) results.push(await handler({ type: "input", text, source: "interactive" }, ctx));
+      return results;
+    };
+    expect(await typed("/wf-grant grant-model")).toEqual([{ action: "handled" }]);
+    expect(notices.at(-1)).toBe("Unknown command /wf-grant. Nothing was sent to the model. /wf-help lists the agent-cat commands.");
+    expect(await typed("/wfm-approve")).toEqual([{ action: "handled" }]);
+    expect(notices.at(-1)).toContain("Unknown command /wfm-approve.");
+    for (const text of ["/wf-template x", "/wfx", "approve the run"]) expect(await typed(text)).toEqual([{ action: "continue" }]);
     expect(tool.description).not.toContain("grant");
     expect(tool.description).toContain("confirm");
     expect(Object.keys(tool.parameters.properties)).not.toContain("grantId");
