@@ -2318,6 +2318,28 @@ Further limitations recorded by the implementer: only N8 was run; the cleanup-re
 ]
 #+end_src
 
+* TODO [#D] Resolve the non-blocking fess findings of subtask PD9
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-74xn
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-01 Thu 23:58]
+:MODIFIED: [2026-10-01 Thu 23:58]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess audit fess/pd-PD9-r1.md (2026-10-01) on subtask PD9 (Emacs exact JSON codec and event decoders, agent-workflows emacs-native commit 8fe8c73).
+
+1. (medium) emacs/wf-manager.el:530 and :545, Package-Requires at :8. wf-manager--json-insert inserts (json-serialize value) into the unibyte buffer of wf-manager-json-encode. Emacs 30 returns a unibyte string, but Emacs 29, the declared minimum, returns a multibyte string, so non-ASCII characters can become single wrong bytes. Not reproduced (no Emacs 29 available). Fix: encode a multibyte result with encode-coding-string 'utf-8, or raise Package-Requires to 30.1, or run the ERT pass under Emacs 29.
+2. (low) emacs/wf-manager-tests.el:421-440. A failure names the vector only when a decoder returns a value or signals wf-manager-invalid-response. Any other signal, such as overflow-error, aborts the test without a label. Fix: wrap each per-vector call in condition-case in wf-manager-tests--wrong and record the label with the unexpected error.
+3. (low) emacs/wf-manager.el:428 (wf-manager--json-mark). The hand-written pre-lexer that keeps number source text is a second tokenizer to maintain. Justified and documented. Fix: if it changes, add a vector-independent test that compares it with json-parse-string on the accepted grammar.
+4. (low) emacs/wf-manager-tests.el:520. The problems vector test calls the private wf-manager--bounded-integer. Fix: use a public helper or wf-manager-json-equal.
+5. (low) wf-manager-json-decode refuses a lone surrogate escape such as \ud800, which ext-pi JSON.parse accepts. No vector covers it. Fix: record the divergence, or add a shared vector that settles the intended behavior.
+
 * DONE [#D] gateT: generalize Bool to a grant-lattice parameter
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -20491,7 +20513,7 @@ coordination or SQL into the TUI.
 :LABELS:   ["p6","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-01 Thu 23:42]
+:MODIFIED: [2026-10-01 Thu 23:58]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-030
 :SOURCE_REPO: agent-cat
@@ -20578,6 +20600,13 @@ separately tested rather than inferred from one newer Emacs build.
     "author": "johnw",
     "text": "PD8 (WM-030 part 1) committed in agent-workflows emacs-native as 0b5c3e9: emacs/wf-manager.el loads the version 1 client profile (version, endpoint, credentialFile, caFile) after ext-pi/src/manager/profile.ts, with https /v1 endpoint rules, absolute paths, the 16384/1048576/32-512 byte bounds and private-file rules for the credential, and typed refusal conditions (FIELD REASON). The bearer is read once at load and used only for the Authorization header. Evidence scope: ci/emacs.sh with GNU Emacs 30.2 passed, 4 passes over 4 files, 0 failed (byte compilation, checkdoc, ERT 8 of 8, smoke). Fess not blocking (fess/pd-PD8-r1.md), four low findings filed as a follow-up. Remaining WM-030 scope: HTTP transport with TLS validation against caFile, SSE delivery. Deferred under functionality first: redaction of the printed profile record, lstat/read race.",
     "created_at": "2026-10-02T06:42:48Z"
+  },
+  {
+    "id": 597,
+    "issue_id": "acat-wm-030-t2l4",
+    "author": "johnw",
+    "text": "PD9 (WM-030 part 2) is committed as 8fe8c73 on the emacs-native branch of agent-workflows (not pushed). emacs/wf-manager.el now has an exact JSON codec (false :false, null :null, absent nil, numbers kept as source text, byte bound of 1048576 checked before parsing, compact UTF-8 encoding in UTF-16 key order) and decoders for invalidations, invalidation events, event batches, route records, cursors, entity tags and problem responses after ext-pi/src/manager/events.ts. Evidence: ci/emacs.sh with WF_MANAGER_VECTORS set to test/manager_client_vectors.json exited 0 (4 passes over 4 files, clean byte compilation, silent checkdoc, smoke 38 of 38, transport ERT 20 of 20). Every vector of events.invalidations, batches, routeRecords, cursors, etags and problems passed. Fess pd-PD9-r1 is not blocking; findings filed as a follow-up. Open in WM-030: the SSE parser, block decoders, HTTP requests and the wf.el connection.\n",
+    "created_at": "2026-10-02T06:58:04Z"
   }
 ]
 #+end_src
