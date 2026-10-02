@@ -35,6 +35,14 @@
  * execution facts, and the commands report them separately. No command is
  * sent again by itself.
  *
+ * The `manager-...` actions of the `agent_cat_workflow` tool call the same
+ * functions with the values of the model: `ModelStart`, `ModelDecision`,
+ * `ModelSteer`, `ModelRedirect` and `ModelForkEdit`. Each function then asks
+ * for a human confirmation of the exact content of each model-initiated
+ * mutation, and a decline sends nothing. `toolContext` gives the
+ * notifications of the call to the tool result. Each function gives whether
+ * the command reached its effect.
+ *
  * @packageDocumentation
  */
 
@@ -112,6 +120,88 @@ type WorkflowRow = {
 
 /** The choice of the review component. */
 export type ReviewChoice = "approve" | "decline" | "discard" | "withdraw";
+
+/**
+ * The values that a model gives to a model-initiated start through the
+ * `agent_cat_workflow` tool: the workflow name, the profile when the manager
+ * offers more than one ready profile, and the exact literal of each declared
+ * input. The human path collects the same values through the Pi dialogs.
+ *
+ * @public
+ */
+export type ModelStart = {
+  readonly workflow: string;
+  readonly profileId: string | undefined;
+  readonly inputs: Readonly<Record<string, string>>;
+};
+
+/**
+ * The values that a model gives to a model-initiated decision command: the
+ * typed text of an answer, which `answerValue` types as the editor text of
+ * the human path, or a recovery choice and its fail-over target.
+ *
+ * @public
+ */
+export type ModelDecision =
+  | { readonly kind: "answer"; readonly text: string }
+  | { readonly kind: "recovery"; readonly choice: RecoveryOption["choice"]; readonly target: string | undefined };
+
+/**
+ * The values that a model gives to a model-initiated steer or redirect. The
+ * occurrence and the attempt are decimal text, as the controls of the run
+ * publish them.
+ *
+ * @public
+ */
+export type ModelSteer = { readonly occurrenceId: string; readonly attemptId: string; readonly timing: string; readonly text: string };
+
+/** @public */
+export type ModelRedirect = { readonly occurrenceId: string; readonly target: string };
+
+/**
+ * One fork edit that a model gives: drop the answer of an occurrence, or
+ * replace it with text that `forkReplacementValue` types by the code of the
+ * occurrence, as the editor text of the human path.
+ *
+ * @public
+ */
+export type ModelForkEdit =
+  | { readonly type: "drop"; readonly occurrenceId: string }
+  | { readonly type: "replace"; readonly occurrenceId: string; readonly value: string };
+
+/**
+ * A context for one action of the `agent_cat_workflow` tool. It is the Pi
+ * context of the call, except that each notification also becomes one entry
+ * of `lines`, in order. The tool result gives these lines to the model, and
+ * the human sees each notification as it happens.
+ *
+ * @public
+ */
+export function toolContext(ctx: ExtensionContext): { readonly ctx: ExtensionContext; readonly lines: string[] } {
+  const lines: string[] = [];
+  const notify: ExtensionContext["ui"]["notify"] = (message, level) => {
+    lines.push(message);
+    ctx.ui.notify(message, level);
+  };
+  const ui = Object.create(ctx.ui, { notify: { value: notify } }) as ExtensionContext["ui"];
+  return { ctx: Object.create(ctx, { ui: { value: ui } }) as ExtensionContext, lines };
+}
+
+/** Notify the reason that a command stops, and give `false`. */
+function stopped(ctx: ExtensionContext, message: string, level: "info" | "warning" | "error" = "error"): false {
+  ctx.ui.notify(message, level);
+  return false;
+}
+
+/** Notify that the human declined a model-initiated mutation, and give `false`. */
+function declined(ctx: ExtensionContext, what: string): false {
+  return stopped(ctx, `The human declined the ${what}. Nothing was sent.`, "warning");
+}
+
+/** The exact content of a model-initiated run control, as its confirmation shows it. */
+function controlContent(kind: string, runId: string, fields: ReadonlyArray<readonly [string, string]>): string {
+  return [`kind=${kind}`, `run=${runId}`, ...fields.map(([name, value]) => `${name}=${value}`)].join("\n");
+}
 
 /** The longest wait for the receipt of one command to settle, in milliseconds. */
 const EFFECT_WAIT_MS = 120_000;
@@ -1188,24 +1278,28 @@ export class ManagerRequests {
    * `/wfm-cancel [RUN_ID]`: cancel a service run after a confirmation, only
    * when its controls allow the cancel. The receipt records the runtime
    * acknowledgement, and the snapshot of the run then states its terminal
-   * status, which the command reports.
+   * status, which the command reports. With `model`, the confirmation
+   * shows the kind and the run of the model-initiated cancel. Gives whether
+   * the runtime accepted the cancel.
    */
-  async cancel(ctx: ExtensionContext, args: string): Promise<void> {
+  async cancel(ctx: ExtensionContext, args: string, model = false): Promise<boolean> {
     const session = this.#session(ctx);
     const service = this.#service();
-    if (session === undefined || service === undefined) return;
-    if (!ctx.hasUI) return ctx.ui.notify("/wfm-cancel requires the interactive Pi interface", "error");
+    if (session === undefined || service === undefined) return false;
+    if (!ctx.hasUI) return stopped(ctx, "/wfm-cancel requires the interactive Pi interface");
     const runId = await this.#chooseRun(ctx, args, this.#liveRuns(service), "Run to cancel");
-    if (runId === undefined) return;
+    if (runId === undefined) return false;
     const read = await this.#controls(ctx, session, runId);
-    if (read === undefined) return;
-    if (!cancelOffered(read.control)) return ctx.ui.notify(`The manager offers no cancel for run ${runId}. Nothing was sent.`, "warning");
-    if (!(await ctx.ui.confirm("Cancel manager run?", runId))) return ctx.ui.notify(`No cancel was sent for run ${runId}.`, "info");
+    if (read === undefined) return false;
+    if (!cancelOffered(read.control)) return stopped(ctx, `The manager offers no cancel for run ${runId}. Nothing was sent.`, "warning");
+    if (model) {
+      if (!(await ctx.ui.confirm("Send manager control?", controlContent("cancel", runId, [])))) return declined(ctx, "cancel control");
+    } else if (!(await ctx.ui.confirm("Cancel manager run?", runId))) return stopped(ctx, `No cancel was sent for run ${runId}.`, "info");
     const receipt = await this.#runControl(ctx, session, "cancel", read.observed, { operation: "cancel" });
     const ack = receipt === undefined ? undefined : acknowledgementOf(receipt);
-    if (ack === undefined || !ACCEPTING.includes(ack.state)) return;
+    if (ack === undefined || !ACCEPTING.includes(ack.state)) return false;
     const snapshot = session.reference(`/v1/runs/${runId}/snapshot`);
-    if (!snapshot.ok) return;
+    if (!snapshot.ok) return true;
     const ended = await session.waitFor(snapshot.value, (observed) => {
       const status = isJsonObject(observed.value) ? snapshotStatus(observed.value) : undefined;
       return status !== undefined && TERMINAL_STATUSES.includes(status);
@@ -1214,38 +1308,60 @@ export class ManagerRequests {
     ctx.ui.notify(status === undefined
       ? `Execution: run ${runId} has not reached a terminal status yet. /wfm-monitor ${runId} shows the run.`
       : `Execution: run ${runId} is ${status}.`, status === "cancelled" ? "info" : "warning");
+    return true;
   }
 
   /**
    * `/wfm-steer [RUN_ID]`: steer the attempt of a steer offer of the run
    * with text from the editor and one of the timings of the offer. Empty
-   * text sends nothing. The steer completes on the effect `steered`.
+   * text sends nothing. The steer completes on the effect `steered`. With
+   * `model`, the attempt, the timing and the text come from the model, they
+   * must agree with a steer offer, and the confirmation shows the kind, the
+   * run, the occurrence, the attempt, the timing and the text. Gives whether
+   * the steer reached its effect.
    */
-  async steer(ctx: ExtensionContext, args: string): Promise<void> {
+  async steer(ctx: ExtensionContext, args: string, model?: ModelSteer): Promise<boolean> {
     const session = this.#session(ctx);
     const service = this.#service();
-    if (session === undefined || service === undefined) return;
-    if (!ctx.hasUI) return ctx.ui.notify("/wfm-steer requires the interactive Pi interface", "error");
+    if (session === undefined || service === undefined) return false;
+    if (!ctx.hasUI) return stopped(ctx, "/wfm-steer requires the interactive Pi interface");
     const runId = await this.#chooseRun(ctx, args, this.#liveRuns(service), "Run to steer");
-    if (runId === undefined) return;
+    if (runId === undefined) return false;
     const read = await this.#controls(ctx, session, runId);
-    if (read === undefined) return;
+    if (read === undefined) return false;
     const offers = steerOffers(read.control);
-    if (offers.length === 0) return ctx.ui.notify(`The manager offers no steer for run ${runId}. Nothing was sent.`, "warning");
+    if (offers.length === 0) return stopped(ctx, `The manager offers no steer for run ${runId}. Nothing was sent.`, "warning");
     const labels = offers.map((offer) => `occurrence ${offer.occurrenceId} attempt ${offer.attemptId}`);
-    const chosen = labels.length === 1 ? labels[0] : await ctx.ui.select("Attempt to steer", labels);
-    if (chosen === undefined) return ctx.ui.notify(`No steer was sent for run ${runId}.`, "info");
+    let chosen: string | undefined;
+    let message: string | undefined;
+    let timing: string | undefined;
+    if (model !== undefined) {
+      chosen = `occurrence ${model.occurrenceId} attempt ${model.attemptId}`;
+      const offered = offers.find((offer) => `occurrence ${offer.occurrenceId} attempt ${offer.attemptId}` === chosen);
+      if (offered === undefined) return stopped(ctx, `The manager offers no steer for ${chosen} of run ${runId}. It offers ${labels.join(", ")}. Nothing was sent.`, "warning");
+      if (!offered.timings.some((item) => item === model.timing)) {
+        return stopped(ctx, `The steer offer of ${chosen} has the timings ${offered.timings.join(", ")}, not ${model.timing}. Nothing was sent.`, "warning");
+      }
+      if (!model.text.trim()) return stopped(ctx, `The steering text is empty. No steer was sent for run ${runId}.`, "warning");
+      const content = controlContent("steer", runId, [["occurrence", model.occurrenceId], ["attempt", model.attemptId], ["timing", model.timing], ["text", JSON.stringify(model.text)]]);
+      if (!(await ctx.ui.confirm("Send manager control?", content))) return declined(ctx, "steer control");
+      [message, timing] = [model.text, model.timing];
+    } else {
+      chosen = labels.length === 1 ? labels[0] : await ctx.ui.select("Attempt to steer", labels);
+      if (chosen === undefined) return stopped(ctx, `No steer was sent for run ${runId}.`, "info");
+      message = await ctx.ui.editor(`Steering text for ${chosen} of run ${runId}`);
+      if (message === undefined || !message.trim()) return stopped(ctx, `The steering text is empty. No steer was sent for run ${runId}.`, "info");
+      const choice = offers[labels.indexOf(chosen)];
+      timing = choice.timings.length === 1 ? choice.timings[0] : await ctx.ui.select("Steering timing", [...choice.timings]);
+    }
     const offer = offers[labels.indexOf(chosen)];
-    const message = await ctx.ui.editor(`Steering text for ${chosen} of run ${runId}`);
-    if (message === undefined || !message.trim()) return ctx.ui.notify(`The steering text is empty. No steer was sent for run ${runId}.`, "info");
-    const timing = offer.timings.length === 1 ? offer.timings[0] : await ctx.ui.select("Steering timing", [...offer.timings]);
-    if (timing !== "interrupt-now" && timing !== "next-boundary") return ctx.ui.notify(`No steer was sent for run ${runId}.`, "info");
+    if (timing !== "interrupt-now" && timing !== "next-boundary") return stopped(ctx, `No steer was sent for run ${runId}.`, "info");
     const receipt = await this.#runControl(ctx, session, "steer", read.observed, {
       operation: "steer", occurrenceId: offer.occurrenceId.toString(), attemptId: String(offer.attemptId), timing, text: message,
     });
-    if (receipt !== undefined && effectKind(receipt) === "steered") {
-      ctx.ui.notify(`Steer ${timing} reached ${chosen} of run ${runId}.`, "info");
-    }
+    if (receipt === undefined || effectKind(receipt) !== "steered") return false;
+    ctx.ui.notify(`Steer ${timing} reached ${chosen} of run ${runId}.`, "info");
+    return true;
   }
 
   /**
@@ -1254,24 +1370,28 @@ export class ManagerRequests {
    * redirect while the dispatch window of the occurrence is open, and the
    * live redirect for the attempt in flight of an occurrence that is not an
    * effect. One read of the run snapshot names the place of each offer. The
-   * redirect completes on the effect `redirected`.
+   * redirect completes on the effect `redirected`. With `model`, the
+   * occurrence and the target come from the model, they must agree with a
+   * redirect offer, and the confirmation shows the kind, the run, the
+   * occurrence, the target and its place. Gives whether the redirect reached
+   * its effect.
    */
-  async redirect(ctx: ExtensionContext, args: string): Promise<void> {
+  async redirect(ctx: ExtensionContext, args: string, model?: ModelRedirect): Promise<boolean> {
     const session = this.#session(ctx);
     const service = this.#service();
-    if (session === undefined || service === undefined) return;
-    if (!ctx.hasUI) return ctx.ui.notify("/wfm-redirect requires the interactive Pi interface", "error");
+    if (session === undefined || service === undefined) return false;
+    if (!ctx.hasUI) return stopped(ctx, "/wfm-redirect requires the interactive Pi interface");
     const runId = await this.#chooseRun(ctx, args, this.#liveRuns(service), "Run to redirect");
-    if (runId === undefined) return;
+    if (runId === undefined) return false;
     const read = await this.#controls(ctx, session, runId);
-    if (read === undefined) return;
+    if (read === undefined) return false;
     const offers = redirectOffers(read.control);
-    if (offers.length === 0) return ctx.ui.notify(`The manager offers no redirect for run ${runId}. Nothing was sent.`, "warning");
+    if (offers.length === 0) return stopped(ctx, `The manager offers no redirect for run ${runId}. Nothing was sent.`, "warning");
     const snapshotRef = session.reference(`/v1/runs/${runId}/snapshot`);
-    if (!snapshotRef.ok) return;
+    if (!snapshotRef.ok) return false;
     const snapshot = await session.get(snapshotRef.value);
     if (!snapshot.ok || !isJsonObject(snapshot.value.value)) {
-      return ctx.ui.notify(`The snapshot of run ${runId} could not be read: ${failureText(snapshot.ok ? null : snapshot.failure)}. Nothing was sent.`, "error");
+      return stopped(ctx, `The snapshot of run ${runId} could not be read: ${failureText(snapshot.ok ? null : snapshot.failure)}. Nothing was sent.`);
     }
     const snapshotValue = snapshot.value.value;
     const choices = offers.flatMap((offer) => {
@@ -1279,15 +1399,27 @@ export class ManagerRequests {
       return offer.targets.map((target) => ({ offer, target, place, label: `${target}  occurrence ${offer.occurrenceId}, ${placeText(place)}` }));
     });
     const labels = choices.map((choice) => choice.label);
-    const selected = await ctx.ui.select(`Redirect target of run ${runId}`, labels);
-    if (selected === undefined) return ctx.ui.notify(`No redirect was sent for run ${runId}.`, "info");
-    const choice = choices[labels.indexOf(selected)];
+    let choice: (typeof choices)[number];
+    if (model !== undefined) {
+      const offered = choices.find((item) => item.offer.occurrenceId.toString() === model.occurrenceId && item.target === model.target);
+      if (offered === undefined) {
+        return stopped(ctx, `The manager offers no redirect of occurrence ${model.occurrenceId} of run ${runId} to ${JSON.stringify(model.target)}. `
+          + `It offers ${labels.join("; ")}. Nothing was sent.`, "warning");
+      }
+      const content = controlContent("redirect", runId, [["occurrence", model.occurrenceId], ["target", JSON.stringify(model.target)], ["place", placeText(offered.place)]]);
+      if (!(await ctx.ui.confirm("Send manager control?", content))) return declined(ctx, "redirect control");
+      choice = offered;
+    } else {
+      const selected = await ctx.ui.select(`Redirect target of run ${runId}`, labels);
+      if (selected === undefined) return stopped(ctx, `No redirect was sent for run ${runId}.`, "info");
+      choice = choices[labels.indexOf(selected)];
+    }
     const receipt = await this.#runControl(ctx, session, "redirect", read.observed,
       { operation: "redirect", occurrenceId: choice.offer.occurrenceId.toString(), target: choice.target });
-    if (receipt !== undefined && effectKind(receipt) === "redirected") {
-      const from = choice.place.kind === "attempt" ? ` from attempt ${choice.place.attemptId}` : "";
-      ctx.ui.notify(`Redirected occurrence ${choice.offer.occurrenceId} of run ${runId}${from} to ${choice.target}.`, "info");
-    }
+    if (receipt === undefined || effectKind(receipt) !== "redirected") return false;
+    const from = choice.place.kind === "attempt" ? ` from attempt ${choice.place.attemptId}` : "";
+    ctx.ui.notify(`Redirected occurrence ${choice.offer.occurrenceId} of run ${runId}${from} to ${choice.target}.`, "info");
+    return true;
   }
 
   /** The terminal service runs of the active binding, for the selection of a result, export or lineage command. */
@@ -1353,25 +1485,52 @@ export class ManagerRequests {
    * user names through `saveExact`. A relative path names a file below the
    * current directory of Pi. An existing path refuses the save, and nothing
    * is written.
+   *
+   * With `model`, the path comes from the model. A model-initiated save is a
+   * local mutation, so it is written only after the human confirms the path,
+   * the size and the SHA-256 in Pi. Without a path, the command gives the
+   * verified bytes as UTF-8 text when they are valid UTF-8, and saves
+   * nothing. Gives whether the result was retrieved and, when a path was
+   * named, saved.
    */
-  async result(ctx: ExtensionContext, args: string): Promise<void> {
+  async result(ctx: ExtensionContext, args: string, model?: { readonly path: string | undefined }): Promise<boolean> {
     const session = this.#session(ctx);
     const service = this.#service();
-    if (session === undefined || service === undefined) return;
+    if (session === undefined || service === undefined) return false;
     const { run, rest } = runAndRest(args);
     const runId = await this.#chooseRun(ctx, run, this.#terminalRuns(service), "Run whose result to save");
-    if (runId === undefined) return;
+    if (runId === undefined) return false;
     const verified = await this.#verifiedResult(ctx, session, runId);
-    if (verified === undefined) return;
-    const named = rest || (ctx.hasUI ? await ctx.ui.input(`Path of a new file for the verified ${verified.bytes.length} bytes of run ${runId}`) : undefined);
+    if (verified === undefined) return false;
+    const summary = `Run ${runId}: verified ${verified.bytes.length} bytes, SHA-256 ${verified.sha256}.`;
+    const named = model !== undefined ? model.path
+      : rest || (ctx.hasUI ? await ctx.ui.input(`Path of a new file for the verified ${verified.bytes.length} bytes of run ${runId}`) : undefined);
     if (!named) {
-      return ctx.ui.notify(`Run ${runId}: verified ${verified.bytes.length} bytes, SHA-256 ${verified.sha256}. No path was named, so nothing was saved.`, "info");
+      if (model === undefined) ctx.ui.notify(`${summary} No path was named, so nothing was saved.`, "info");
+      else {
+        let decoded: string | undefined;
+        try {
+          decoded = new TextDecoder("utf-8", { fatal: true }).decode(verified.bytes);
+        } catch {
+          decoded = undefined;
+        }
+        ctx.ui.notify(decoded === undefined ? `${summary} The bytes are not UTF-8 text, so the result gives no text. Nothing was saved.`
+          : `${summary} Nothing was saved. The exact UTF-8 text follows.\n${decoded}`, "info");
+      }
+      return true;
     }
     const path = resolve(ctx.cwd, named);
+    if (model !== undefined) {
+      if (!ctx.hasUI) return stopped(ctx, "A save of a manager result requires an interactive Pi UI for the human confirmation of its path. Nothing was written.");
+      if (!(await ctx.ui.confirm("Save manager result?", `run=${runId}\npath=${path}\nbytes=${verified.bytes.length}\nsha256=${verified.sha256}`))) {
+        return declined(ctx, `save of the result of run ${runId}`);
+      }
+    }
     const saved = await saveExact(path, verified.bytes);
-    if (!saved.saved) return ctx.ui.notify(`The result of run ${runId} was not saved to ${path}: ${saved.reason}. Nothing was written there.`, "error");
+    if (!saved.saved) return stopped(ctx, `The result of run ${runId} was not saved to ${path}: ${saved.reason}. Nothing was written there.`);
     const leftover = saved.leftover === null ? "" : ` The private file ${saved.leftover} could not be removed.`;
     ctx.ui.notify(`Saved the verified ${verified.bytes.length} bytes of run ${runId} to ${path}, SHA-256 ${verified.sha256}.${leftover}`, "info");
+    return true;
   }
 
   /**
@@ -1402,32 +1561,45 @@ export class ManagerRequests {
    * the occurrence. The child inputs come from the parent run, so the child
    * is enqueued at once, and its exact review, with its lineage rows, opens
    * in the review component. Only an explicit approval starts the child run.
+   *
+   * With `model`, the fork edits come from the model and are typed as the
+   * editor text of the human path. The lineage request is sent only after
+   * the human confirms the operation, the run and each edit in Pi, and the
+   * child run starts only after the human approves its exact review. Gives
+   * whether the child run started.
    */
-  async lineage(ctx: ExtensionContext, operation: LineageOperation, args: string): Promise<void> {
+  async lineage(ctx: ExtensionContext, operation: LineageOperation, args: string,
+    model?: { readonly edits: readonly ModelForkEdit[] }): Promise<boolean> {
     const session = this.#session(ctx);
     const service = this.#service();
-    if (session === undefined || service === undefined) return;
-    if (!ctx.hasUI) return ctx.ui.notify(`/wfm-${operation} requires the interactive Pi interface`, "error");
+    if (session === undefined || service === undefined) return false;
+    if (!ctx.hasUI) return stopped(ctx, `/wfm-${operation} requires the interactive Pi interface`);
+    if (model !== undefined && operation !== "fork" && model.edits.length > 0) return stopped(ctx, `A ${operation} takes no fork edits. Nothing was sent.`, "warning");
     const runId = await this.#chooseRun(ctx, args, this.#terminalRuns(service), `Run to ${operation}`);
-    if (runId === undefined) return;
+    if (runId === undefined) return false;
     const collection = session.reference(`/v1/runs/${runId}/lineage-requests`);
-    if (!collection.ok) return;
+    if (!collection.ok) return false;
     const observed = await session.get(collection.value);
     const page = observed.ok ? decodeLineageCollection(observed.value.value) : observed;
     if (!observed.ok || !page.ok || page.value.runId !== runId || observed.value.etag !== `"${page.value.revision}"`) {
-      return ctx.ui.notify(`The lineage collection of run ${runId} could not be read: ${failureText(page.ok ? null : page.failure)}. Nothing was sent.`, "error");
+      return stopped(ctx, `The lineage collection of run ${runId} could not be read: ${failureText(page.ok ? null : page.failure)}. Nothing was sent.`);
     }
     const { eligible, refusal } = page.value;
     if (!eligible.includes(operation)) {
-      return ctx.ui.notify(eligible.length === 0
+      return stopped(ctx, eligible.length === 0
         ? `${operation} is not eligible: the manager lists no lineage operation for run ${runId}; refusal ${refusal ?? "none"}. Nothing was sent.`
         : `${operation} is not eligible: the manager lists only ${eligible.join(", ")} for run ${runId}. Nothing was sent.`, "warning");
     }
     let edits: ForkEdit[] = [];
     if (operation === "fork") {
-      const chosen = await this.#forkEdits(ctx, session, runId);
-      if (chosen === undefined) return;
+      const chosen = model === undefined ? await this.#forkEdits(ctx, session, runId) : await this.#modelForkEdits(ctx, session, runId, model.edits);
+      if (chosen === undefined) return false;
       edits = chosen;
+    }
+    if (model !== undefined) {
+      const content = [`operation=${operation}`, `run=${runId}`, ...edits.map((edit) => edit.operation === "drop"
+        ? `edit drop occurrence ${edit.occurrenceId}` : `edit replace occurrence ${edit.occurrenceId} value=${encodeJson(edit.answer)}`)];
+      if (!(await ctx.ui.confirm(`${operation} manager run?`, content.join("\n")))) return declined(ctx, `${operation} of run ${runId}`);
     }
     const known = new Set(page.value.children.map((child) => child.id));
     const sent = await this.#command(ctx, session, operation, collection.value.uri,
@@ -1435,16 +1607,60 @@ export class ManagerRequests {
         const current = decodeLineageCollection(value);
         return current.ok && current.value.children.some((child) => !known.has(child.id) && child.lineage === operation);
       });
-    if (sent.kind !== "receipt" || sent.state !== "effect-observed") return;
+    if (sent.kind !== "receipt" || sent.state !== "effect-observed") return false;
     const resource = sent.receipt === undefined ? undefined : effectResource(sent.receipt);
     if (sent.receipt === undefined || effectKind(sent.receipt) !== "lineage-created" || resource === undefined || !resource.startsWith("/v1/requests/")) {
-      return ctx.ui.notify(`The ${operation} of run ${runId} created a child request. /wfm-review continues it.`, "info");
+      return stopped(ctx, `The ${operation} of run ${runId} created a child request. /wfm-review continues it.`, "info");
     }
     const child = session.reference(resource);
-    if (!child.ok) return;
+    if (!child.ok) return false;
     ctx.ui.notify(`Lineage: ${operation} of run ${runId} created child request ${resource.slice("/v1/requests/".length)}. `
       + "Its inputs come from the parent run.", "info");
-    await this.#continue(ctx, session, child.value);
+    return this.#continue(ctx, session, child.value);
+  }
+
+  /** The fork targets of one read of the snapshot of a run, or `undefined` after a notification. */
+  async #forkTargets(ctx: ExtensionContext, session: ManagerSession, runId: string): Promise<ForkTarget[] | undefined> {
+    const reference = session.reference(`/v1/runs/${runId}/snapshot`);
+    if (!reference.ok) return undefined;
+    const snapshot = await session.get(reference.value);
+    if (!snapshot.ok || !isJsonObject(snapshot.value.value)) {
+      return void ctx.ui.notify(`The snapshot of run ${runId} could not be read: ${failureText(snapshot.ok ? null : snapshot.failure)}. Nothing was sent.`, "error");
+    }
+    const targets = forkTargets(snapshot.value.value);
+    if (targets.length === 0) return void ctx.ui.notify(`Run ${runId} has no completed occurrence whose answer a fork edits. Nothing was sent.`, "warning");
+    return targets;
+  }
+
+  /**
+   * The fork edits of a model, typed by the code of each occurrence of the
+   * snapshot as `#forkEdits` types the editor text. An edit of an occurrence
+   * that the snapshot does not list, a second edit of one occurrence, and a
+   * refused replacement give `undefined` after a notification.
+   */
+  async #modelForkEdits(ctx: ExtensionContext, session: ManagerSession, runId: string, edits: readonly ModelForkEdit[])
+    : Promise<ForkEdit[] | undefined> {
+    const targets = await this.#forkTargets(ctx, session, runId);
+    if (targets === undefined) return undefined;
+    const typed = new Map<string, ForkEdit>();
+    for (const edit of edits) {
+      const target = targets.find((item) => item.occurrenceId.toString() === edit.occurrenceId);
+      if (target === undefined) {
+        return void ctx.ui.notify(`Run ${runId} has no completed occurrence ${edit.occurrenceId}. A fork edits only `
+          + `${targets.map((item) => item.occurrenceId).join(", ")}. Nothing was sent.`, "warning");
+      }
+      if (typed.has(edit.occurrenceId)) return void ctx.ui.notify(`Occurrence ${edit.occurrenceId} has more than one edit. Nothing was sent.`, "warning");
+      if (edit.type === "drop") typed.set(edit.occurrenceId, { operation: "drop", occurrenceId: target.occurrenceId });
+      else {
+        const answer = forkReplacementValue(target.code, edit.value);
+        if (!answer.ok) {
+          return void ctx.ui.notify(`The replacement of occurrence ${edit.occurrenceId} (${target.code}) is refused before any send: ${answer.failure.reason}. `
+            + "Nothing was sent.", "warning");
+        }
+        typed.set(edit.occurrenceId, { operation: "replace", occurrenceId: target.occurrenceId, answer: answer.value });
+      }
+    }
+    return [...typed.values()];
   }
 
   /**
@@ -1455,14 +1671,8 @@ export class ManagerRequests {
    * when the user sends the fork, and `undefined` when the user stops.
    */
   async #forkEdits(ctx: ExtensionContext, session: ManagerSession, runId: string): Promise<ForkEdit[] | undefined> {
-    const reference = session.reference(`/v1/runs/${runId}/snapshot`);
-    if (!reference.ok) return undefined;
-    const snapshot = await session.get(reference.value);
-    if (!snapshot.ok || !isJsonObject(snapshot.value.value)) {
-      return void ctx.ui.notify(`The snapshot of run ${runId} could not be read: ${failureText(snapshot.ok ? null : snapshot.failure)}. Nothing was sent.`, "error");
-    }
-    const targets = forkTargets(snapshot.value.value);
-    if (targets.length === 0) return void ctx.ui.notify(`Run ${runId} has no completed occurrence whose answer a fork edits. Nothing was sent.`, "warning");
+    const targets = await this.#forkTargets(ctx, session, runId);
+    if (targets === undefined) return undefined;
     const edits = new Map<bigint, ForkEdit>();
     const send = "Send the fork with these edits";
     const stop = "Stop without a fork";
@@ -1501,51 +1711,62 @@ export class ManagerRequests {
    * receipt that the effect names, downloads the exported bytes and checks
    * them against the size and SHA-256 of the receipt, and lists the export
    * collection of the run.
+   *
+   * With `model`, the name comes from the arguments that the model gives,
+   * and the export is sent only after the human confirms its scope, the
+   * verified result of the run, and its name in Pi. Gives whether the
+   * exported bytes verified.
    */
-  async export(ctx: ExtensionContext, args: string): Promise<void> {
+  async export(ctx: ExtensionContext, args: string, model = false): Promise<boolean> {
     const session = this.#session(ctx);
     const service = this.#service();
-    if (session === undefined || service === undefined) return;
+    if (session === undefined || service === undefined) return false;
     const { run, rest } = runAndRest(args);
     const runId = await this.#chooseRun(ctx, run, this.#terminalRuns(service), "Run whose result to export");
-    if (runId === undefined) return;
-    const name = rest || (ctx.hasUI ? await ctx.ui.input(`Export name for the verified result of run ${runId}`) : undefined);
-    if (!name) return ctx.ui.notify(`No export name was named for run ${runId}. Nothing was sent.`, "info");
+    if (runId === undefined) return false;
+    const name = rest || (ctx.hasUI && !model ? await ctx.ui.input(`Export name for the verified result of run ${runId}`) : undefined);
+    if (!name) return stopped(ctx, `No export name was named for run ${runId}. Nothing was sent.`, "info");
     if (!exportNameValid(name)) {
-      return ctx.ui.notify("The export name must be 1 to 128 ASCII letters, digits, dots, underscores or hyphens that start with a letter or a digit. "
+      return stopped(ctx, "The export name must be 1 to 128 ASCII letters, digits, dots, underscores or hyphens that start with a letter or a digit. "
         + "Nothing was sent.", "warning");
     }
     const collection = session.reference(`/v1/runs/${runId}/exports`);
-    if (!collection.ok) return;
+    if (!collection.ok) return false;
     const observed = await session.get(collection.value);
     const page = observed.ok ? decodeExportCollection(observed.value.value) : observed;
     if (!observed.ok || !page.ok || page.value.runId !== runId || observed.value.etag !== `"${page.value.revision}"`) {
-      return ctx.ui.notify(`The export collection of run ${runId} could not be read: ${failureText(page.ok ? null : page.failure)}. Nothing was sent.`, "error");
+      return stopped(ctx, `The export collection of run ${runId} could not be read: ${failureText(page.ok ? null : page.failure)}. Nothing was sent.`);
+    }
+    if (model) {
+      if (!ctx.hasUI) return stopped(ctx, "A model-initiated export requires an interactive Pi UI for the human confirmation of its scope and name. Nothing was sent.");
+      if (!(await ctx.ui.confirm("Export manager result?", `scope=verified result of run ${runId}\nname=${name}`))) return declined(ctx, `export ${name} of run ${runId}`);
     }
     const sent = await this.#command(ctx, session, "export", collection.value.uri,
       session.prepare(collection.value, { name }, observed.value.etag), true, (value) => {
         const current = decodeExportCollection(value);
         return current.ok && current.value.items.some((item) => item.name === name && item.state === "published");
       });
-    if (sent.kind !== "receipt" || sent.state !== "effect-observed") return;
+    if (sent.kind !== "receipt" || sent.state !== "effect-observed") return false;
     if (sent.receipt === undefined || effectKind(sent.receipt) !== "exported" || effectResource(sent.receipt) !== `/v1/exports/export_${sent.receipt.id}`) {
-      return this.#listExports(ctx, session, runId);
+      await this.#listExports(ctx, session, runId);
+      return false;
     }
     const command = sent.receipt.id;
     const detail = session.reference(`/v1/exports/export_${command}`);
-    if (!detail.ok) return;
+    if (!detail.ok) return false;
     const read = await session.get(detail.value);
     const receipt = read.ok ? decodeExportReceipt(read.value.value) : read;
     if (!receipt.ok || receipt.value.id !== `export_${command}` || receipt.value.commandId !== command || receipt.value.runId !== runId
       || receipt.value.name !== name || receipt.value.state !== "published" || receipt.value.bytes === null || receipt.value.sha256 === null
       || receipt.value.download === null) {
-      return ctx.ui.notify(`The export receipt export_${command} does not state the published export: ${failureText(receipt.ok ? null : receipt.failure)}`, "error");
+      return stopped(ctx, `The export receipt export_${command} does not state the published export: ${failureText(receipt.ok ? null : receipt.failure)}`);
     }
     const location = session.reference(receipt.value.download);
     const bytes = location.ok ? await session.download(location.value, receipt.value.bytes, receipt.value.sha256) : location;
-    if (!bytes.ok) return ctx.ui.notify(`The export ${name} of run ${runId} did not verify: ${failureText(bytes.failure)}`, "error");
+    if (!bytes.ok) return stopped(ctx, `The export ${name} of run ${runId} did not verify: ${failureText(bytes.failure)}`);
     ctx.ui.notify(exportLines(receipt.value, bytes.value.length).join("\n"), "info");
     await this.#listExports(ctx, session, runId);
+    return true;
   }
 
   /** Read the export collection of a run once and list its receipts. */
@@ -1581,48 +1802,107 @@ export class ManagerRequests {
     return { observed: observed.value, request: request.value };
   }
 
+  /** The ready profiles of the credential and the catalogue of each, as complete page sets, or `undefined` after a notification. */
+  async #catalogue(ctx: ExtensionContext, session: ManagerSession): Promise<Array<{ profile: ProfileRow; workflows: WorkflowRow[] }> | undefined> {
+    const profiles = await this.#collection(session, "/v1/profiles");
+    if (!profiles.ok) return void ctx.ui.notify(`The manager profiles could not be read: ${failureText(profiles.failure)}`, "error");
+    const rows = profiles.value.map(profileRow).filter((row): row is ProfileRow => row !== undefined && row.ready);
+    if (rows.length === 0) return void ctx.ui.notify("The manager offers no ready profile to this credential", "error");
+    const listed: Array<{ profile: ProfileRow; workflows: WorkflowRow[] }> = [];
+    for (const profile of rows) {
+      const catalogue = await this.#collection(session, `/v1/workflows?profileId=${profile.id}`);
+      if (!catalogue.ok) return void ctx.ui.notify(`The catalogue of ${profile.id} could not be read: ${failureText(catalogue.failure)}`, "error");
+      listed.push({ profile, workflows: catalogue.value.map(workflowRow).filter((row): row is WorkflowRow => row !== undefined && row.profileId === profile.id) });
+    }
+    return listed;
+  }
+
+  /**
+   * The catalogue of the manager in one notification: each ready profile
+   * with its workspace and target, and each workflow of its catalogue with
+   * its declared inputs. The command sends nothing. Gives whether the
+   * catalogue was read.
+   */
+  async catalogue(ctx: ExtensionContext): Promise<boolean> {
+    const session = this.#session(ctx);
+    if (session === undefined) return false;
+    const listed = await this.#catalogue(ctx, session);
+    if (listed === undefined) return false;
+    const lines = listed.flatMap(({ profile, workflows }) => [
+      `Profile ${profile.id}  ${profile.workspace}  ${profile.target}`,
+      ...(workflows.length === 0 ? ["  no workflow"] : workflows.map((row) =>
+        `  ${row.name}  inputs ${row.inputs.map((input) => `${input.name} (${input.source})`).join(", ") || "none"}${row.blurb ? `  ${row.blurb}` : ""}`)),
+    ]);
+    ctx.ui.notify(lines.join("\n"), "info");
+    return true;
+  }
+
   /**
    * `/wfm [WORKFLOW]`: select a profile and a workflow, create a request,
    * collect its inputs, enqueue it, follow its admission, and open its
    * review.
+   *
+   * With `model`, the profile, the workflow and the exact literal of each
+   * declared input come from the model. The model must name every declared
+   * input and no other. The request is created only after the human
+   * confirms the profile, the workflow, its revisions and each input value
+   * in Pi. The request then follows the human path: `set-input` of each
+   * literal, `enqueue`, and the exact review, whose approval needs its own
+   * confirmation. Gives whether the manager started the run.
    */
-  async start(ctx: ExtensionContext, args: string): Promise<void> {
+  async start(ctx: ExtensionContext, args: string, model?: ModelStart): Promise<boolean> {
     const session = this.#session(ctx);
-    if (session === undefined) return;
-    if (!ctx.hasUI) return ctx.ui.notify("/wfm requires the interactive Pi interface", "error");
-    const profiles = await this.#collection(session, "/v1/profiles");
-    if (!profiles.ok) return ctx.ui.notify(`The manager profiles could not be read: ${failureText(profiles.failure)}`, "error");
-    const rows = profiles.value.map(profileRow).filter((row): row is ProfileRow => row !== undefined && row.ready);
-    if (rows.length === 0) return ctx.ui.notify("The manager offers no ready profile to this credential", "error");
-    let profile = rows[0];
-    if (rows.length > 1) {
-      const labels = rows.map((row) => `${row.id}  ${row.workspace}  ${row.target}`);
+    if (session === undefined) return false;
+    if (!ctx.hasUI) return stopped(ctx, "/wfm requires the interactive Pi interface");
+    const listed = await this.#catalogue(ctx, session);
+    if (listed === undefined) return false;
+    let chosenProfile = listed[0];
+    if (model?.profileId !== undefined) {
+      const named = listed.find((row) => row.profile.id === model.profileId);
+      if (named === undefined) return stopped(ctx, `The manager offers no ready profile ${model.profileId}. Nothing was sent.`, "warning");
+      chosenProfile = named;
+    } else if (listed.length > 1) {
+      if (model !== undefined) {
+        return stopped(ctx, `The manager offers the ready profiles ${listed.map((row) => row.profile.id).join(", ")}. Name one with profileId. Nothing was sent.`, "warning");
+      }
+      const labels = listed.map(({ profile }) => `${profile.id}  ${profile.workspace}  ${profile.target}`);
       const chosen = await ctx.ui.select("Manager profile", labels);
-      if (chosen === undefined) return;
-      profile = rows[labels.indexOf(chosen)];
+      if (chosen === undefined) return false;
+      chosenProfile = listed[labels.indexOf(chosen)];
     }
-    const catalogue = await this.#collection(session, `/v1/workflows?profileId=${profile.id}`);
-    if (!catalogue.ok) return ctx.ui.notify(`The catalogue of ${profile.id} could not be read: ${failureText(catalogue.failure)}`, "error");
-    const workflows = catalogue.value.map(workflowRow).filter((row): row is WorkflowRow => row !== undefined && row.profileId === profile.id);
-    const name = args.trim();
+    const { profile, workflows } = chosenProfile;
+    const name = model?.workflow ?? args.trim();
     let workflow: WorkflowRow | undefined;
     if (name) {
       workflow = workflows.find((row) => row.name === name);
-      if (workflow === undefined) return ctx.ui.notify(`The catalogue of ${profile.id} has no workflow ${name}`, "error");
+      if (workflow === undefined) return stopped(ctx, `The catalogue of ${profile.id} has no workflow ${name}`);
     } else {
       const labels = workflows.map((row) => (row.blurb ? `${row.name}  ${row.blurb}` : row.name));
       const chosen = await ctx.ui.select(`Workflow of ${profile.id}`, labels);
-      if (chosen === undefined) return;
+      if (chosen === undefined) return false;
       workflow = workflows[labels.indexOf(chosen)];
     }
+    if (model !== undefined) {
+      const declared = workflow.inputs.map((input) => input.name);
+      const given = Object.keys(model.inputs);
+      if (given.length !== declared.length || declared.some((input) => !Object.hasOwn(model.inputs, input))) {
+        return stopped(ctx, `The inputs of ${workflow.name} must be exactly: ${declared.join(", ") || "(none)"}. Nothing was sent.`, "warning");
+      }
+      const content = [
+        `profile=${profile.id}`, `workspace=${profile.workspace}`, `target=${profile.target}`, `workflow=${workflow.name} (${workflow.id})`,
+        `descriptorRevision=${workflow.revision}`, `profileRevision=${workflow.profileRevision}`,
+        ...declared.map((input) => `input ${input}=${JSON.stringify(model.inputs[input])} (literal)`),
+      ];
+      if (!(await ctx.ui.confirm("Create manager request?", content.join("\n")))) return declined(ctx, `request of ${workflow.name}`);
+    }
     const requests = session.reference("/v1/requests");
-    if (!requests.ok) return;
+    if (!requests.ok) return false;
     const created = await this.#command(ctx, session, "create", requests.value.uri, session.prepare(requests.value, {
       workflowId: workflow.id, descriptorRevision: workflow.revision, profileId: workflow.profileId, profileRevision: workflow.profileRevision,
     }, null));
-    if (created.kind !== "created") return;
+    if (created.kind !== "created") return false;
     ctx.ui.notify(admissionLine(created.request), "info");
-    await this.#continue(ctx, session, created.location);
+    return this.#continue(ctx, session, created.location, model?.inputs);
   }
 
   /**
@@ -1635,7 +1915,7 @@ export class ManagerRequests {
     if (session === undefined) return;
     if (!ctx.hasUI) return ctx.ui.notify("/wfm-review requires the interactive Pi interface", "error");
     const reference = await this.#chooseRequest(ctx, session, args, OPEN_PHASES, "Request to continue");
-    if (reference !== undefined) await this.#continue(ctx, session, reference);
+    if (reference !== undefined) await this.#continue(ctx, session, reference, undefined);
   }
 
   /** `/wfm-withdraw [REQUEST_ID]`: withdraw a request before its start intent. */
@@ -1675,16 +1955,13 @@ export class ManagerRequests {
     const runId = await this.#chooseRun(ctx, args, service.runs().map((run) => ({ runId: run.runId, label: `${run.runId}  ${run.status}  ${run.workflowId ?? "unreadable manifest"}` })),
       "Run to monitor");
     if (runId === undefined) return;
+    if (ctx.mode !== "tui") {
+      await this.#inspect(ctx, session, runId);
+      return;
+    }
     const opened = ServiceMonitor.open(session, runId);
     if (!opened.ok) return ctx.ui.notify(`Run ${runId} cannot be monitored: ${failureText(opened.failure)}`, "error");
     const monitor = opened.value;
-    if (ctx.mode !== "tui") {
-      const started = monitor.start(() => {});
-      if (!started.ok) return ctx.ui.notify(`Run ${runId} cannot be watched: ${failureText(started.failure)}`, "error");
-      await monitor.settled(EFFECT_WAIT_MS);
-      monitor.close();
-      return ctx.ui.notify(monitor.lines().join("\n"), "info");
-    }
     await ctx.ui.custom<void>((tui, theme, _keys, done) => {
       let unsubscribe = () => {};
       const component = new ServiceMonitorComponent(tui, theme, monitor, () => {
@@ -1700,6 +1977,31 @@ export class ManagerRequests {
       if (!started.ok) ctx.ui.notify(`Run ${runId} cannot be watched: ${failureText(started.failure)}`, "error");
       return component;
     });
+  }
+
+  /**
+   * The monitor lines of a run in one notification, after the first reads,
+   * as `/wfm-monitor` gives them outside the Pi TUI. The command sends
+   * nothing. Gives whether the run was watched.
+   */
+  async inspect(ctx: ExtensionContext, args: string): Promise<boolean> {
+    const session = this.#session(ctx);
+    const service = this.#service();
+    if (session === undefined || service === undefined) return false;
+    const runId = await this.#chooseRun(ctx, args, service.runs().map((run) => ({ runId: run.runId, label: run.runId })), "Run to inspect");
+    return runId !== undefined && this.#inspect(ctx, session, runId);
+  }
+
+  async #inspect(ctx: ExtensionContext, session: ManagerSession, runId: string): Promise<boolean> {
+    const opened = ServiceMonitor.open(session, runId);
+    if (!opened.ok) return stopped(ctx, `Run ${runId} cannot be monitored: ${failureText(opened.failure)}`);
+    const monitor = opened.value;
+    const started = monitor.start(() => {});
+    if (!started.ok) return stopped(ctx, `Run ${runId} cannot be watched: ${failureText(started.failure)}`);
+    await monitor.settled(EFFECT_WAIT_MS);
+    monitor.close();
+    ctx.ui.notify(monitor.lines().join("\n"), "info");
+    return true;
   }
 
   /** The kept answer draft of a decision of the active binding. */
@@ -1720,21 +2022,34 @@ export class ManagerRequests {
    * `unavailable-resource`, since the manager serves only pending
    * decisions. A
    * recovery decision offers only the choices of `recoveryActions`.
+   *
+   * With `model`, the typed text of an answer, or a recovery choice and its
+   * target, comes from the model, and the head must be a question or a
+   * recovery decision to match. The command is sent only after the human
+   * confirms the decision and the typed value, or the recovery choice, in
+   * Pi. Gives whether the answer or the choice reached its effect.
    */
-  async answer(ctx: ExtensionContext, args: string): Promise<void> {
+  async answer(ctx: ExtensionContext, args: string, model?: ModelDecision): Promise<boolean> {
     const session = this.#session(ctx);
     const service = this.#service();
-    if (session === undefined || service === undefined) return;
-    if (!ctx.hasUI) return ctx.ui.notify("/wfm-answer requires the interactive Pi interface", "error");
+    if (session === undefined || service === undefined) return false;
+    if (!ctx.hasUI) return stopped(ctx, "/wfm-answer requires the interactive Pi interface");
     const heads = service.decisions().filter((decision) => decision.state === "pending");
     const runId = await this.#chooseRun(ctx, args,
       heads.map((decision) => ({ runId: decision.runId, label: `${decision.runId}  ${decision.kind}  ${decision.decisionId}` })), "Run whose decision to answer");
-    if (runId === undefined) return;
+    if (runId === undefined) return false;
     for (;;) {
       const head = await this.#head(ctx, session, runId);
-      if (head === undefined) return;
-      if (head.decision.content.kind === "recovery") return this.#recover(ctx, session, head);
-      if (!(await this.#answerQuestion(ctx, session, head))) return;
+      if (head === undefined) return false;
+      const recovery = head.decision.content.kind === "recovery";
+      if (model !== undefined && recovery !== (model.kind === "recovery")) {
+        return stopped(ctx, recovery
+          ? `The head decision ${head.decision.id} of run ${runId} is a recovery decision. A recovery choice answers it. Nothing was sent.`
+          : `The head decision ${head.decision.id} of run ${runId} is a question. A typed answer answers it. Nothing was sent.`, "warning");
+      }
+      if (recovery) return this.#recover(ctx, session, head, model?.kind === "recovery" ? model : undefined);
+      const answered = await this.#answerQuestion(ctx, session, head, model?.kind === "answer" ? model.text : undefined);
+      if (answered !== "again") return answered;
     }
   }
 
@@ -1792,21 +2107,30 @@ export class ManagerRequests {
   }
 
   /**
-   * Answer a question head once through the typed editor. Gives `true` when
-   * a 412 left the same decision pending at the head, so the editor opens
-   * again with the draft, and `false` otherwise.
+   * Answer a question head once through the typed editor, or with the typed
+   * text of a model after the human confirms the decision and the typed
+   * value. Gives `again` when a 412 left the same decision pending at the
+   * head, so the editor opens again with the draft, and otherwise whether
+   * the answer reached its effect. A model answer that receives 412 is not
+   * sent again.
    */
-  async #answerQuestion(ctx: ExtensionContext, session: ManagerSession, head: Head): Promise<boolean> {
+  async #answerQuestion(ctx: ExtensionContext, session: ManagerSession, head: Head, supplied: string | undefined): Promise<boolean | "again"> {
     const { decision, runId } = head;
     if (decision.content.kind !== "question") return false;
     if (!decisionOffers(head.control, decision).some((offer) => offer.operation === "answer")) {
-      ctx.ui.notify(`The manager offers no answer for decision ${decision.id} of run ${runId}. Nothing was sent.`, "warning");
-      return false;
+      return stopped(ctx, `The manager offers no answer for decision ${decision.id} of run ${runId}. Nothing was sent.`, "warning");
     }
     const key = answerKey(session, decision.id);
     let value: JsonValue;
     let typed: string;
-    for (;;) {
+    if (supplied !== undefined) {
+      const answer = answerValue(decision, supplied);
+      if (!answer.ok) return stopped(ctx, `The answer is refused before any send: ${answer.failure.reason}. Nothing was sent.`, "warning");
+      [value, typed] = [answer.value, supplied];
+      const content = [`decision=${decision.id}`, `run=${runId}`, `code=${codeLabel(decision)}`, `prompt=${JSON.stringify(decision.content.prompt)}`,
+        `value=${encodeJson(value)}`];
+      if (!(await ctx.ui.confirm("Send manager answer?", content.join("\n")))) return declined(ctx, `answer of decision ${decision.id}`);
+    } else for (;;) {
       const entered = await ctx.ui.editor(`Answer of decision ${decision.id} (${codeLabel(decision)}): ${oneLine(decision.content.prompt)}`,
         this.#answerDrafts.get(key));
       if (entered === undefined) {
@@ -1829,37 +2153,58 @@ export class ManagerRequests {
         return current.ok && current.value.state !== "pending";
       });
     if (sent.kind === "refused" && sent.failure.kind === "Refused" && sent.failure.status === 412) {
+      if (supplied !== undefined) {
+        return stopped(ctx, `Decision ${decision.id} changed before the answer arrived (412 stale-revision). Nothing was sent again.`, "warning");
+      }
       ctx.ui.notify(`Decision ${decision.id} changed before the answer arrived (412 stale-revision). Nothing was sent again. `
         + `The draft ${JSON.stringify(typed)} is kept.`, "warning");
       // The manager serves only pending decisions, so a decision that was
       // answered elsewhere reads as 404 unavailable-resource.
       const again = await session.get(target);
       const current = again.ok ? decodeDecision(again.value.value) : again;
-      if (current.ok && current.value.state === "pending" && current.value.position === 0) return true;
+      if (current.ok && current.value.state === "pending" && current.value.position === 0) return "again";
       const reason = current.ok ? `state ${current.value.state}, position ${current.value.position}` : failureText(current.failure);
       ctx.ui.notify(`Decision ${decision.id} is no longer the pending head (${reason}), so the kept draft is not sent. `
         + `/wfm-answer ${runId} acts on the next head.`, "info");
       return false;
     }
-    if (sent.kind === "receipt" && sent.state === "effect-observed") {
-      this.#answerDrafts.delete(key);
-      ctx.ui.notify(`Answer ${encodeJson(value)} reached decision ${decision.id} of run ${runId}.`, "info");
-    }
-    return false;
+    if (sent.kind !== "receipt" || sent.state !== "effect-observed") return false;
+    this.#answerDrafts.delete(key);
+    ctx.ui.notify(`Answer ${encodeJson(value)} reached decision ${decision.id} of run ${runId}.`, "info");
+    return true;
   }
 
-  /** Send one recovery choice that the manager offers for a recovery head, after the selection of the user. */
-  async #recover(ctx: ExtensionContext, session: ManagerSession, head: Head): Promise<void> {
+  /**
+   * Send one recovery choice that the manager offers for a recovery head,
+   * after the selection of the user, or the choice of a model after the
+   * human confirms its kind, run, decision, occurrence and choice. A model
+   * choice must name exactly one offered choice. Gives whether the choice
+   * reached its effect.
+   */
+  async #recover(ctx: ExtensionContext, session: ManagerSession, head: Head,
+    model: Extract<ModelDecision, { kind: "recovery" }> | undefined): Promise<boolean> {
     const { decision, runId } = head;
-    if (decision.content.kind !== "recovery") return;
+    if (decision.content.kind !== "recovery") return false;
     const actions = recoveryActions(head.control, decision);
     if (actions.length === 0) {
-      return ctx.ui.notify(`The manager offers no recovery choice for decision ${decision.id} of run ${runId}. Nothing was sent.`, "warning");
+      return stopped(ctx, `The manager offers no recovery choice for decision ${decision.id} of run ${runId}. Nothing was sent.`, "warning");
     }
     const labels = actions.map((action) => action.label);
-    const selected = await ctx.ui.select(`Recovery of decision ${decision.id} (${decision.content.gap}): ${oneLine(decision.content.message)}`, labels);
-    if (selected === undefined) return ctx.ui.notify(`No recovery choice was sent for decision ${decision.id}.`, "info");
-    const action = actions[labels.indexOf(selected)];
+    let action: RecoveryAction;
+    if (model !== undefined) {
+      const matching = actions.filter((item) => item.option.choice === model.choice && (model.target === undefined || item.option.target === model.target));
+      if (matching.length !== 1) {
+        return stopped(ctx, `${matching.length === 0 ? "The manager offers no such recovery choice" : "More than one offered choice matches; name the target"} `
+          + `for decision ${decision.id} of run ${runId}. It offers ${labels.join(", ")}. Nothing was sent.`, "warning");
+      }
+      action = matching[0];
+      const content = controlContent(model.choice, runId, [["decision", decision.id], ["occurrence", decision.occurrenceId.toString()], ["choice", action.label]]);
+      if (!(await ctx.ui.confirm("Send manager control?", content))) return declined(ctx, `${model.choice} control`);
+    } else {
+      const selected = await ctx.ui.select(`Recovery of decision ${decision.id} (${decision.content.gap}): ${oneLine(decision.content.message)}`, labels);
+      if (selected === undefined) return stopped(ctx, `No recovery choice was sent for decision ${decision.id}.`, "info");
+      action = actions[labels.indexOf(selected)];
+    }
     const address = { occurrenceId: decision.occurrenceId.toString(), generation: decision.generation };
     const sent = action.operation === "retry"
       ? await this.#command(ctx, session, "retry", head.controlObserved.reference.uri,
@@ -1873,9 +2218,9 @@ export class ManagerRequests {
           const current = decodeDecision(observed);
           return current.ok && current.value.state !== "pending";
         });
-    if (sent.kind === "receipt" && sent.state === "effect-observed") {
-      ctx.ui.notify(`Recovery ${action.label} reached decision ${decision.id} of run ${runId}.`, "info");
-    }
+    if (sent.kind !== "receipt" || sent.state !== "effect-observed") return false;
+    ctx.ui.notify(`Recovery ${action.label} reached decision ${decision.id} of run ${runId}.`, "info");
+    return true;
   }
 
   async #chooseRequest(ctx: ExtensionContext, session: ManagerSession, args: string, phases: readonly string[], title: string)
@@ -1903,25 +2248,31 @@ export class ManagerRequests {
     return selected === undefined ? undefined : open[labels.indexOf(selected)].reference;
   }
 
-  /** Continue a request from its current phase until its review is answered or the user stops. */
-  async #continue(ctx: ExtensionContext, session: ManagerSession, reference: Reference): Promise<void> {
+  /**
+   * Continue a request from its current phase until its review is answered
+   * or the user stops. `inputs` are the confirmed literals of a model start,
+   * which `#collect` supplies in place of the dialogs. Gives whether the
+   * manager started the run.
+   */
+  async #continue(ctx: ExtensionContext, session: ManagerSession, reference: Reference,
+    inputs?: Readonly<Record<string, string>>): Promise<boolean> {
     const read = await this.#read(ctx, session, reference);
-    if (read === undefined) return;
+    if (read === undefined) return false;
     let { request } = read;
     if (request.phase === "draft") {
-      if (!(await this.#collect(ctx, session, reference))) return;
+      if (!(await this.#collect(ctx, session, reference, inputs))) return false;
       const supplied = await this.#read(ctx, session, reference);
-      if (supplied === undefined) return;
+      if (supplied === undefined) return false;
       if (supplied.request.readiness.missing.length > 0 || supplied.request.readiness.errors.length > 0) {
-        return ctx.ui.notify(admissionLine(supplied.request), "warning");
+        return stopped(ctx, admissionLine(supplied.request), "warning");
       }
       const enqueued = await this.#command(ctx, session, "enqueue", reference.uri,
         session.prepare(reference, { operation: "enqueue" }, supplied.observed.etag));
-      if (enqueued.kind !== "receipt" || enqueued.state !== "effect-observed") return;
+      if (enqueued.kind !== "receipt" || enqueued.state !== "effect-observed") return false;
       request = supplied.request;
     }
-    if (!OPEN_PHASES.includes(request.phase)) return ctx.ui.notify(admissionLine(request), "info");
-    await this.#awaitReview(ctx, session, reference);
+    if (!OPEN_PHASES.includes(request.phase)) return stopped(ctx, admissionLine(request), "info");
+    return this.#awaitReview(ctx, session, reference);
   }
 
   /**
@@ -1934,8 +2285,13 @@ export class ManagerRequests {
    * changed during editing refuses it with 412, and the editor opens again
    * for the same input with the draft. Gives whether every input was
    * supplied.
+   *
+   * With `inputs`, each missing input is the confirmed literal of a model
+   * start. A refusal with 412 then stops the collection, and nothing is sent
+   * again.
    */
-  async #collect(ctx: ExtensionContext, session: ManagerSession, reference: Reference): Promise<boolean> {
+  async #collect(ctx: ExtensionContext, session: ManagerSession, reference: Reference,
+    inputs: Readonly<Record<string, string>> | undefined): Promise<boolean> {
     let again: { readonly name: string; readonly source: (typeof SOURCES)[number] } | undefined;
     for (;;) {
       const read = await this.#read(ctx, session, reference);
@@ -1947,7 +2303,9 @@ export class ManagerRequests {
       if (name === undefined) return true;
       const declaration = request.readiness.declarations.find((item) => item.name === name);
       const key = draftKey(session, request.id, name);
-      const chosen = again?.name === name ? again.source
+      const modelValue = inputs !== undefined && Object.hasOwn(inputs, name) ? inputs[name] : undefined;
+      if (inputs !== undefined && modelValue === undefined) return stopped(ctx, `The model gave no value for the input ${name} of request ${request.id}. Nothing more was sent.`, "warning");
+      const chosen = modelValue !== undefined ? "Literal text" : again?.name === name ? again.source
         : await ctx.ui.select(`Input ${name} (declared source ${declaration?.source ?? "prompt"})`, [...SOURCES]);
       const source = SOURCES.find((item) => item === chosen);
       if (source === undefined) return false;
@@ -1967,9 +2325,9 @@ export class ManagerRequests {
         if (captured === undefined) return false;
         input = { name, source: "capture", captureId: captured };
       } else {
-        const value = await ctx.ui.editor(`Input ${name}: exact ${source === "Literal text" ? "literal" : "captured"} text`, this.#drafts.get(key));
+        const value = modelValue ?? await ctx.ui.editor(`Input ${name}: exact ${source === "Literal text" ? "literal" : "captured"} text`, this.#drafts.get(key));
         if (value === undefined) return false;
-        this.#drafts.set(key, value);
+        if (modelValue === undefined) this.#drafts.set(key, value);
         if (source === "Literal text") input = { name, source: "literal", value };
         else {
           const captured = await this.#capture(ctx, session, request.id, Buffer.from(value, "utf8"));
@@ -1982,6 +2340,9 @@ export class ManagerRequests {
       const set = await this.#command(ctx, session, "set-input", reference.uri,
         session.prepare(reference, { operation: "set-input", input }, observed.etag));
       if (set.kind === "refused" && set.failure.kind === "Refused" && set.failure.status === 412) {
+        if (modelValue !== undefined) {
+          return stopped(ctx, `Request ${request.id} changed before the input ${name} arrived (412). Nothing was sent again. /wfm-review continues the request.`, "warning");
+        }
         ctx.ui.notify(`Request ${request.id} changed while the editor was open. The draft of ${name} is kept, and the editor opens again.`, "warning");
         again = { name, source };
         continue;
@@ -1998,8 +2359,8 @@ export class ManagerRequests {
     return captured.kind === "captured" ? captured.captureId : undefined;
   }
 
-  /** Follow a request until its preparation is live, then show its review. */
-  async #awaitReview(ctx: ExtensionContext, session: ManagerSession, reference: Reference): Promise<void> {
+  /** Follow a request until its preparation is live, then show its review. Gives whether the manager started the run. */
+  async #awaitReview(ctx: ExtensionContext, session: ManagerSession, reference: Reference): Promise<boolean> {
     let shown = "";
     const waited = await session.waitFor(reference, (observed) => {
       const decoded = decodeDraftView(observed.value);
@@ -2011,26 +2372,26 @@ export class ManagerRequests {
       }
       return (decoded.value.phase === "review" && decoded.value.preparationId !== null) || !OPEN_PHASES.includes(decoded.value.phase);
     }, REVIEW_WAIT_MS);
-    if (!waited.ok) return ctx.ui.notify(`The request did not reach review: ${failureText(waited.failure)}. /wfm-review continues it.`, "warning");
+    if (!waited.ok) return stopped(ctx, `The request did not reach review: ${failureText(waited.failure)}. /wfm-review continues it.`, "warning");
     const request = decodeDraftView(waited.value.value);
-    if (!request.ok || request.value.phase !== "review" || request.value.preparationId === null) return;
+    if (!request.ok || request.value.phase !== "review" || request.value.preparationId === null) return false;
     const target = session.reference(`/v1/preparations/${request.value.preparationId}`);
-    if (!target.ok) return;
+    if (!target.ok) return false;
     const live = await session.waitFor(target.value, (observed) => {
       const preparation = decodePreparation(observed.value);
       return preparation.ok;
     }, EFFECT_WAIT_MS);
-    if (!live.ok) return ctx.ui.notify(`The preparation could not be read: ${failureText(live.failure)}`, "error");
-    await this.#review(ctx, session, reference, live.value);
+    if (!live.ok) return stopped(ctx, `The preparation could not be read: ${failureText(live.failure)}`);
+    return this.#review(ctx, session, reference, live.value);
   }
 
-  /** Show the review of one read of a live preparation and act on the choice of the user. */
-  async #review(ctx: ExtensionContext, session: ManagerSession, requestRef: Reference, observed: Observed): Promise<void> {
+  /** Show the review of one read of a live preparation and act on the choice of the user. Gives whether the manager started the run. */
+  async #review(ctx: ExtensionContext, session: ManagerSession, requestRef: Reference, observed: Observed): Promise<boolean> {
     const decoded = decodePreparation(observed.value);
-    if (!decoded.ok) return ctx.ui.notify("The preparation does not decode", "error");
+    if (!decoded.ok) return stopped(ctx, "The preparation does not decode");
     const preparation = decoded.value;
-    if (preparation.state !== "live") return ctx.ui.notify(`Preparation ${preparation.id} is ${preparation.state} (${preparation.reason ?? "no reason"})`, "warning");
-    if (observed.etag === null) return ctx.ui.notify("The preparation has no entity tag, so no approval can bind it", "error");
+    if (preparation.state !== "live") return stopped(ctx, `Preparation ${preparation.id} is ${preparation.state} (${preparation.reason ?? "no reason"})`, "warning");
+    if (observed.etag === null) return stopped(ctx, "The preparation has no entity tag, so no approval can bind it");
     const etag = observed.etag;
     const lines = reviewLines(preparation, etag);
     let choice: ReviewChoice | undefined;
@@ -2049,24 +2410,31 @@ export class ManagerRequests {
       if (!confirmed) choice = "decline";
     }
     if (choice === "decline" || choice === undefined) {
-      return ctx.ui.notify(`Review declined. No approval was sent. Request ${preparation.requestId} stays in review, and /wfm-review opens it again.`, "info");
+      return stopped(ctx, `Review declined. No approval was sent. Request ${preparation.requestId} stays in review, and /wfm-review opens it again.`, "info");
     }
     const target = session.reference(`/v1/preparations/${preparation.id}`);
-    if (!target.ok) return;
-    if (choice === "discard") return this.#discard(ctx, session, target.value, etag, preparation.requestId);
-    if (choice === "withdraw") return this.#withdraw(ctx, session, requestRef);
+    if (!target.ok) return false;
+    if (choice === "discard") {
+      await this.#discard(ctx, session, target.value, etag, preparation.requestId);
+      return false;
+    }
+    if (choice === "withdraw") {
+      await this.#withdraw(ctx, session, requestRef);
+      return false;
+    }
     const approved = await this.#command(ctx, session, "approve", target.value.uri, session.prepare(target.value,
       { operation: "approve", ...Object.fromEntries(SELECTORS.map((name) => [name, preparation[name]])) }, etag), false);
-    if (approved.kind !== "receipt" || approved.state === "refused") return;
+    if (approved.kind !== "receipt" || approved.state === "refused") return false;
     const started = await session.waitFor(requestRef, (value) => {
       const request = decodeDraftView(value.value);
       return request.ok && request.value.runId !== null;
     }, START_WAIT_MS);
     const request = started.ok ? decodeDraftView(started.value.value) : undefined;
     if (request === undefined || !request.ok || request.value.runId === null) {
-      return ctx.ui.notify(`Request ${preparation.requestId} names no run yet. /wfm-status shows the service runs.`, "warning");
+      return stopped(ctx, `Request ${preparation.requestId} names no run yet. /wfm-status shows the service runs.`, "warning");
     }
     ctx.ui.notify(`Execution: the manager started run ${request.value.runId} for request ${request.value.id}.`, "info");
+    return true;
   }
 
   async #discard(ctx: ExtensionContext, session: ManagerSession, target: Reference, etag: string | null, requestId: string): Promise<void> {

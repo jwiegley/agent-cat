@@ -561,14 +561,17 @@ decision under its own supervision, and a later session start reads them
 again from the overview. A connection that completes after the close is
 closed at once.
 
-The local commands, `/wf`, `/wf-launch`, the other `/wf-...` commands and the
-actions of the `agent_cat_workflow` tool, work in both modes and act only on
-local runs.
+The local commands, `/wf`, `/wf-launch` and the other `/wf-...` commands, and
+the local actions of the `agent_cat_workflow` tool, work in both modes and act
+only on local runs. The `manager-...` actions of the tool act on manager runs
+through the session of the active binding, as the section "Commands" states.
 
 ## Requests and review in service mode
 
 `src/manager-ui.ts` holds `ManagerRequests`, the human path of service mode.
-It uses the native Pi dialogs `ctx.ui.select`, `ctx.ui.editor`,
+The `manager-...` actions of the `agent_cat_workflow` tool call the same
+functions of `ManagerRequests` with the values of the model, as the section
+"Commands" states. It uses the native Pi dialogs `ctx.ui.select`, `ctx.ui.editor`,
 `ctx.ui.input` and `ctx.ui.confirm`, and a `ReviewComponent` of `pi-tui`
 through `ctx.ui.custom`. Each command acts through the session of the active
 binding and refuses while the manager is not connected.
@@ -759,7 +762,7 @@ a redirect offer in a snapshot, and when a control receipt settles.
 `test/manager-ui-live.test.ts` runs only when `AGENT_CAT_MANAGER_PROFILE`
 names a client profile. It drives the extension with a fake Pi host, a fake
 UI and a transport that records each POST, against a running manager with the
-mixed fixture, in eleven ordered steps, each with a timeout of 600 seconds. It
+mixed fixture, in twelve ordered steps, each with a timeout of 600 seconds. It
 enters an exact Unicode literal for `prompt-source` while the check changes
 the request through its own session, so the first `set-input` is refused
 with 412 and the editor opens again with the draft. It approves the displayed
@@ -783,9 +786,10 @@ mixed-controls run, which waits at its question, cancels it through
 `/wfm-cancel`, requires that the one cancel POST is `{"operation":"cancel"}`,
 that the receipt notification comes before the notification of the runtime
 acknowledgement, which names the state and the message of the receipt, and
-that the run ends cancelled. The four steps that the section "Results,
-history, lineage and exports in service mode" describes follow. The last
-step closes the extension. The `pi-client` mode of
+that the run ends cancelled. The three steps of results, exports and restart
+that the section "Results, history, lineage and exports in service mode"
+describes follow. The tool step of the section "Commands" follows them, and
+then the history step. The last step closes the extension. The `pi-client` mode of
 `manager/test/service_http.py` runs it before the session check and confirms
 each step against manager facts: the answer commands, the retry command, the
 answers of the run stores as JSON `false`, the verified result, that the
@@ -990,15 +994,15 @@ for the control descriptor.
 | `/wfm-export [RUN_ID [NAME]]` | Service mode: export the verified result of a manager run under a name. |
 
 The `agent_cat_workflow` tool lets a model discover, start, inspect, control,
-restart, resume, or fork local runs. Starts from the tool are limited to the
-scripted, tool-free child, and known remote targets. The `list`, `status` and
-`inspect` actions only read.
+restart, resume, or fork local runs, and, in service mode, act on manager
+runs. Starts from the tool are limited to the scripted, tool-free child, and
+known remote targets. The `list`, `status` and `inspect` actions only read.
 
-Every mutation from the tool is a model-initiated local mutation, and a human
-must confirm its exact content in Pi before anything is spent or sent. Each
+Every mutation from the tool is a model-initiated mutation, and a human must
+confirm its exact content in Pi before anything is spent or sent. Each
 mutation requires a trusted project and an interactive Pi UI. Without the UI,
-the tool refuses before it discovers the workflow or reads the run. The human
-confirms the following review:
+the tool refuses before it discovers the workflow, reads the run or sends a
+manager request. The human confirms the following review:
 
 - A `start` shows the launch review of `/wf-launch`: the runner, the working
   directory, the target, the routing, the containment, the effects and the
@@ -1013,13 +1017,65 @@ confirms the following review:
   kind, the run, and the occurrence, the attempt, the timing, the target and
   the text that it carries. The target and the text are JSON strings.
 
+The service actions call the functions of the matching `/wfm...` commands of
+`ManagerRequests`, so a tool action and a human command reach the same manager
+transitions, each after its own checks. The model gives the values that the
+human command collects through the Pi dialogs:
+
+| Action | Parameters | Confirmation in Pi |
+|---|---|---|
+| `manager-list` | none | None. It lists each ready profile with its workspace and target, and each workflow with its declared inputs. |
+| `manager-status` | none | None. It gives the text of `/wfm-status` without the client profile path. |
+| `manager-inspect` | `runId` | None. It gives the monitor lines of `/wfm-monitor` outside the Pi TUI. |
+| `manager-result` | `runId`, optional `path` | None without `path`: it gives the size, the SHA-256 and the exact UTF-8 text of the verified result. With `path`, `Save manager result?` shows the run, the absolute path, the size and the SHA-256, and only then `saveExact` writes the file. |
+| `manager-start` | `workflow`, `inputsJson`, optional `profileId` | `Create manager request?` shows the profile, its workspace and target, the workflow, its two revisions, and each input as a JSON string. The inputs must be exactly the declared inputs. After the create, each `set-input` of a literal and the `enqueue`, the exact review of `/wfm` opens, and its approval needs the confirmation `Approve this exact review?`. |
+| `manager-answer` | `runId`, `answer` | `Send manager answer?` shows the decision, the run, the code, the prompt and the typed value that `answerValue` gives for the text, for example `value=false` for `false`. |
+| `manager-control` | `runId`, `controlKind`, and the fields of the kind | `Send manager control?` shows `kind=KIND`, the run, and the fields of the kind. A `cancel` has no fields. A `steer` shows the occurrence, the attempt, the timing and the text. A `redirect` shows the occurrence, the target and its place. A `retry`, `failover` or `abandon` shows the decision, the occurrence and the offered choice, and `target` names one fail-over target. |
+| `manager-lineage` | `runId`, `lineageOperation`, optional `forkEditsJson` | `OPERATION manager run?` shows the operation, the run and each fork edit with its typed value. After the lineage request, the exact review of the child request opens, and its approval needs its own confirmation. |
+| `manager-export` | `runId`, `name` | `Export manager result?` shows the scope, the verified result of the run, and the name. |
+
+A service mutation sends only what the controls, the decision or the
+collections of the manager offer. A steer, a redirect or a recovery choice
+that no offer matches, an answer to a recovery decision, a recovery choice
+for a question, and inputs other than the declared inputs refuse before the
+confirmation and send nothing. A model command that receives 412 is not sent
+again. The fork edits of `manager-lineage` are a JSON array of
+`{"type":"drop","occurrenceId":"N"}` and
+`{"type":"replace","occurrenceId":"N","value":"TEXT"}`, where
+`forkReplacementValue` types `TEXT` by the code of the occurrence, as in
+`/wfm-fork`. The notifications of the command, in order, are the text of the
+result. The result is an error unless the command reached its effect: the
+started run, the answer or the choice, the control, the child run, the
+verified export or the retrieved result. The bearer, the credential path and
+the client profile path never appear in a tool parameter or a tool result.
+
 A decline sends nothing and launches nothing, and the tool reports the
-decline as an error. No tool parameter grants a mutation. The parameter
+decline as an error. A declined review of `manager-start` or
+`manager-lineage` sends no approval and leaves the request in review, as
+`/wfm-review` states. No tool parameter grants a mutation. The parameter
 schema leaves additional properties open, so a field that a model adds, such
 as `grantId`, `approved` or `consent`, reaches the tool, and the tool ignores
 it. Controls wait for the terminal acknowledgement of agent-cat, and they
 report `delivered`, `rejected-stale`, `unsupported`, or `failed` verbatim. A
 request is never presented as a success.
+
+`test/extension.test.ts` drives the service actions with the fake transport of
+`test/fixtures/fake-manager.ts`. It requires that `manager-start` without a UI
+refuses before any request, that a declined request confirmation sends
+nothing, that a declined review sends no approve POST, that a confirmed review
+sends one approve POST with the selectors of the preparation, that `/wfm`
+sends the same operations, that `manager-answer` sends JSON `false` only after
+the confirmation of the typed value, and that no tool result contains the
+bearer, the credential path or the profile path. The tool step of
+`test/manager-ui-live.test.ts` starts mixed-controls twice through
+`manager-start`, declines the first exact review and approves the second,
+answers the question through `manager-answer` with `false`, and retries the
+recovery through `manager-control`. The `pi-client` mode of
+`manager/test/service_http.py` confirms that the declined review has no
+approve command, that the run store records JSON `false`, that the run
+succeeded, and that the tool request reached the same manager transitions as
+the request of the human path: `set-input`, `enqueue`, `approve`, `answer` and
+`retry`.
 
 ## Local redirect
 

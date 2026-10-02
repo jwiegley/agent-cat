@@ -11430,6 +11430,43 @@ mutation without a human confirmation (noted on acat-wm-038-mgb7).
 4. (low) ext-pi/README.md near 1224: the rewritten Conventions sentence leaves one line wider than
 the 80-column wrap of the file. Fix: rewrap the paragraph.
 
+* TODO [#D] Resolve the non-blocking fess findings of subtask PE22
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pe22-fess-followup-tsa8
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-01 Thu 17:55]
+:MODIFIED: [2026-10-01 Thu 17:55]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess audit fess/pe-PE22-r1.md (2026-10-01) on subtask PE22 (WM-037 model
+path, part 2: service actions of the agent_cat_workflow tool with exact human consent).
+
+1. (medium) ext-pi/test/extension.test.ts near 841-884, ext-pi/test/manager-ui-live.test.ts near
+813-895: only manager-start, manager-answer and manager-control retry are tested through the tool.
+manager-control cancel, steer, redirect, failover and abandon, manager-lineage, manager-export and
+manager-result with a path have no tool-level test. Fix: add one fake-transport case per action that
+asserts the exact confirmation body, zero POSTs on a decline and exactly one POST on a confirmation.
+2. (medium) ext-pi/src/manager-ui.ts #catalogue near 1806, used by start near 1828: human /wfm now
+reads /v1/workflows for every ready profile before the user picks one, so one failing catalogue
+stops the start and each start costs N reads. Fix: in start, read the profile list and fetch only
+the chosen profile's catalogue. Keep the full read for manager-list.
+3. (low) ext-pi/src/index.ts needs() near 196, manager-ui.ts near 1859 and #chooseRun near 2057:
+needs() treats only undefined as missing, so workflow "" or runId "" opens a human select instead of
+a refusal. Fix: treat empty strings as missing.
+4. (low) ext-pi/src/index.ts near 1093-1095: uiRequiredText says "human confirmation of its exact
+review" for every mutation, including answer, control and export. Fix: say "exact content".
+5. (low) ext-pi/README.md manager-start row: inputsJson is listed as required, but a missing value
+parses to {}. Fix: mark it optional (required when the workflow declares inputs).
+6. (low) ext-pi/src/manager-ui.ts #recover and ext-pi/src/index.ts near 246 and 252: a runtime
+string contains a semicolon, and the kind ?? "retry" and lineageOperation ?? "restart" fallbacks
+cannot run after needs(). Fix: reword the string and narrow the type explicitly.
+
 * TODO [#D] Resolve PE3 fess findings in owner-released quarantine evidence
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -20675,7 +20712,7 @@ check fail.
 :LABELS:   ["p8","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-01 Thu 15:31]
+:MODIFIED: [2026-10-01 Thu 17:55]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-036
 :SOURCE_REPO: agent-cat
@@ -20821,6 +20858,13 @@ invocation tuples or exposing secrets.
     "author": "johnw",
     "text": "PE16 (service mode lifecycle) integrated. ext-pi/src/service-mode.ts holds manager runs, requests and decision heads as ServiceRunView, ServiceRequestView and ServiceDecisionView keyed by endpoint identity, separate from OwnedRun and RestoredRun. session_start restores only the local state directory and then connects one ManagerSession. session_shutdown and reload close the transport and send no POST. /wfm-status and /wfm-endpoints are added, the widget lists local and service runs separately, and pageSet now fences a late page of the earlier endpoint. Checks passed: npm run check, npm test, npm run test:integration, the pi-client mode of manager/test/service_http.py (a second run stays running under owned supervision after the session closes, confirmed over HTTP), make -C doc check. Evidence: PE/PE16/impl-r1 in the private resume-20260923 directory. Fess not blocking; findings filed as acat-pe16-fess-followup-ugfy. Pi-side commands (WM-037) are not yet in place, so WM-036 stays open.",
     "created_at": "2026-10-01T22:31:44Z"
+  },
+  {
+    "id": 564,
+    "issue_id": "acat-wm-036-5ndj",
+    "author": "johnw",
+    "text": "PE22 uses the ManagerSession and transport of WM-036 for the agent_cat_workflow service actions. No transport change.",
+    "created_at": "2026-10-02T00:55:37Z"
   }
 ]
 #+end_src
@@ -20832,7 +20876,7 @@ invocation tuples or exposing secrets.
 :LABELS:   ["p8","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-01 Thu 17:21]
+:MODIFIED: [2026-10-01 Thu 17:55]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-037
 :SOURCE_REPO: agent-cat
@@ -20945,6 +20989,13 @@ verified output, and lineage behave consistently with the other clients.
     "author": "johnw",
     "text": "PE21 (model path, part 1): /wf-grant, the grantId tool parameter, grantError and MutationGrants are removed, with ext-pi/src/grants.ts and ext-pi/test/grants.test.ts deleted. Every model-initiated local start, lineage operation and control through agent_cat_workflow now requires a trusted project, an interactive UI and a human confirmation of the exact review or content. A decline or a missing UI sends nothing. An extra model field reaches execute and grants nothing. Evidence (private): PE/PE21/impl-r1 (npm run check, npm test, test:integration, the grep check and make -C doc check, each exit 0; test-first.log). Fess: not blocking, low findings filed as acat-pe21-fess-followup-pixq.",
     "created_at": "2026-10-02T00:21:46Z"
+  },
+  {
+    "id": 562,
+    "issue_id": "acat-wm-037-dz3v",
+    "author": "johnw",
+    "text": "PE22 (model path, part 2): the agent_cat_workflow tool gains the service actions manager-list, manager-status, manager-inspect, manager-result, manager-start, manager-answer, manager-control, manager-lineage and manager-export. The /wfm commands and the tool actions call the same ManagerRequests methods. Each model-initiated service mutation shows its exact content (exact review for start and lineage, typed value for an answer, kind, run and fields for a control, scope and name for an export) in a human confirmation before any send. A decline or a missing UI sends nothing. No tool result contains the bearer, the credential path or the profile path. Evidence (private): PE/PE22 (npm run check, npm test, pi-client PASS 1-18 rerun by fess on the final tree, make -C doc check, each exit 0). Fess: not blocking, findings filed as a follow-up.",
+    "created_at": "2026-10-02T00:55:36Z"
   }
 ]
 #+end_src
@@ -20956,7 +21007,7 @@ verified output, and lineage behave consistently with the other clients.
 :LABELS:   ["p8","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-01 Thu 17:21]
+:MODIFIED: [2026-10-01 Thu 17:55]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-038
 :SOURCE_REPO: agent-cat
@@ -21051,6 +21102,13 @@ WM-008 completed handoff 2026-09-12T02:36:23+00:00: Adopt the shared root-role r
     "author": "johnw",
     "text": "PE21 removed the one-time model mutation grant. The work item 'Test denial/consumption of model mutation grants' is read as: test the denial of a model-initiated mutation without a human confirmation of the exact review. PE21 adds local unit coverage of that denial in ext-pi/test/extension.test.ts. The real-host acceptance stays with WM-038.",
     "created_at": "2026-10-02T00:21:46Z"
+  },
+  {
+    "id": 563,
+    "issue_id": "acat-wm-038-mgb7",
+    "author": "johnw",
+    "text": "PE22: the pi-client live check now drives tool manager-start (confirmed review produces one approve, declined review produces none), tool manager-answer with JSON false, and tool manager-control retry, and asserts that the tool and human paths reach the same manager transitions (set-input, enqueue, approve, answer, retry). Real-host acceptance stays with WM-038.",
+    "created_at": "2026-10-02T00:55:36Z"
   }
 ]
 #+end_src

@@ -2,10 +2,16 @@ import { createHash } from "node:crypto";
 import { access, mkdir, mkdtemp, readFile, readdir, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { Value } from "typebox/value";
 import extension, { parseWorkflowCommand } from "../src/index.ts";
+import { isJsonObject, jsonMember, parseJson, type JsonValue } from "../src/manager/json.ts";
+import { requiredScopes, type Operation } from "../src/manager/resources.ts";
 import { MANAGER_ROLE_MARKER, ROOT_ROLE_FILE } from "../src/root-role.ts";
+import {
+  capabilities, clientProfiles, control, decision, manager, ok, run, transports, type Reply,
+} from "./fixtures/fake-manager.ts";
 
 const created: string[] = [];
 afterEach(async () => Promise.all(created.splice(0).map((path) => rm(path, { recursive: true, force: true }))));
@@ -598,6 +604,284 @@ describe("Pi extension lifecycle", () => {
     if (previousHang === undefined) delete process.env.FIXTURE_HANG; else process.env.FIXTURE_HANG = previousHang;
   }
 });
+});
+
+describe("service actions of the agent_cat_workflow tool", () => {
+  let profiles: Awaited<ReturnType<typeof clientProfiles>>;
+  beforeAll(async () => {
+    profiles = await clientProfiles("agent-cat-extension-service-");
+  });
+  afterAll(async () => {
+    await profiles.remove();
+  });
+  const saved = { profile: process.env.AGENT_CAT_MANAGER_PROFILE, state: process.env.AGENT_CAT_STATE_DIR };
+  afterEach(() => {
+    if (saved.profile === undefined) delete process.env.AGENT_CAT_MANAGER_PROFILE; else process.env.AGENT_CAT_MANAGER_PROFILE = saved.profile;
+    if (saved.state === undefined) delete process.env.AGENT_CAT_STATE_DIR; else process.env.AGENT_CAT_STATE_DIR = saved.state;
+  });
+
+  const SHA = "a".repeat(64);
+  const PAGE = () => ({ setId: "set_1", revision: "rev_1", expiresAt: new Date(Date.now() + 60000).toISOString(), index: 0, totalItems: 1, next: null });
+
+  /** A command receipt of the fake manager. */
+  function receipt(id: string, operation: Operation, resource: string, state: string, effect: unknown): unknown {
+    return {
+      version: 1, id, profileId: "profile_1", operation, requiredScopes: [...requiredScopes(operation)], resource, state,
+      acceptedAt: "2026-10-01T12:00:00Z", dispatchAttemptedAt: null, acknowledgement: null, effect, refusal: null,
+      links: { self: `/v1/commands/${id}`, resource },
+    };
+  }
+
+  function accepted(value: unknown, status = 202): Reply {
+    const location = status === 201 ? `/v1/requests/${String((value as { id: string }).id)}` : `/v1/commands/${String((value as { id: string }).id)}`;
+    const text = JSON.stringify(value);
+    return { ok: true, value: { status, value: parseJson(text) as JsonValue, etag: null, location, bytes: Buffer.byteLength(text) } };
+  }
+
+  /**
+   * A stateful fake manager with one ready profile, one workflow `review`
+   * with the input `subject`, and the running run run_a1 whose head is the
+   * flag question decision_a1. Each create makes a new request req_tN, an
+   * enqueue moves it to review with the live preparation prep_tN, and an
+   * approval starts run run_tN.
+   */
+  async function serviceHost() {
+    process.env.AGENT_CAT_MANAGER_PROFILE = profiles.profile("tool", "alpha.test");
+    process.env.AGENT_CAT_STATE_DIR = await mkdtemp(join(profiles.directory, "state-"));
+    const requests = new Map<string, { phase: string; supplied: unknown[]; revision: number; runId: string | null }>();
+    const settled = new Map<string, unknown>();
+    let commands = 0;
+    const view = (id: string) => {
+      const state = requests.get(id)!;
+      return {
+        version: 1, id, revision: `${id}_rev_${state.revision}`, workflowId: "wf_review", descriptorRevision: "catalogue_17", profileId: "profile_1",
+        profileRevision: "profile_rev_4", phase: state.phase,
+        readiness: {
+          declarations: [{ name: "subject", source: "command-tail", description: null, required: true, schema: { type: "string" } }],
+          supplied: state.supplied, missing: state.supplied.length > 0 ? [] : ["subject"], errors: [],
+        },
+        admission: state.phase === "draft" ? { state: "not-queued", position: null, reasons: state.supplied.length > 0 ? [] : ["missing-inputs"] }
+          : { state: "reserved", position: null, reasons: [] },
+        preparationId: state.phase === "draft" ? null : `prep_${id.slice(4)}`, runId: state.runId, parentRunId: null, lineage: null,
+        links: { self: `/v1/requests/${id}` },
+      };
+    };
+    const preparation = (id: string) => ({
+      version: 1, id, revision: `${id}_rev`, requestId: `req_${id.slice(5)}`, requestRevision: "request_rev_2", profileId: "profile_1",
+      profileRevision: "profile_rev_4", descriptorRevision: "catalogue_17", state: "live", expiresAt: "2026-10-01T12:10:00Z", reviewDigest: SHA,
+      processGeneration: "process_A",
+      review: {
+        programHash: SHA, personAnswering: "local-control", policy: { kind: "scripted" }, workflowId: "wf_review", profileId: "profile_1",
+        workspaceLabel: "Review workspace", targetLabel: "Deterministic worker", inputs: [{ name: "subject", source: "literal", bytes: "8", sha256: SHA }],
+        plan: "Review the supplied subject.", runFacts: [], pins: [], warnings: [], resultCode: "receipt",
+      },
+      reason: null,
+    });
+    const head = (decision("decision_a1", "run_a1") as { decision: Record<string, unknown> }).decision;
+    const base = manager([run("run_a1", "running"), decision("decision_a1", "run_a1")]);
+    const fake = transports({
+      "alpha.test": (resource, count) => {
+        if (resource === "/v1/capabilities") return ok(capabilities({}, ["observe", "submit", "control"]));
+        if (resource === "/v1/profiles") {
+          return ok({ version: 1, page: PAGE(), items: [{ id: "profile_1", workspaceLabel: "Review workspace", targetLabel: "Deterministic worker", readiness: "ready" }] });
+        }
+        if (resource === "/v1/workflows?profileId=profile_1") {
+          return ok({
+            version: 1, page: PAGE(), items: [{
+              id: "wf_review", name: "review", blurb: "Review a subject", revision: "catalogue_17", profileId: "profile_1", profileRevision: "profile_rev_4",
+              inputs: [{ name: "subject", source: "command-tail", description: null, required: true, schema: { type: "string" } }],
+            }],
+          });
+        }
+        const request = /^\/v1\/requests\/(req_t[0-9]+)$/.exec(resource);
+        if (request !== null && requests.has(request[1])) return ok(view(request[1]), `"${request[1]}_rev_${requests.get(request[1])!.revision}"`);
+        const prepared = /^\/v1\/preparations\/(prep_t[0-9]+)$/.exec(resource);
+        if (prepared !== null) return ok(preparation(prepared[1]), `"${prepared[1]}_rev"`);
+        if (settled.has(resource)) return ok(settled.get(resource));
+        if (resource === "/v1/decisions?runId=run_a1") return ok({ version: 1, page: PAGE(), items: [head] });
+        if (resource === "/v1/decisions/decision_a1") return ok(head, '"decision_a1_rev"');
+        if (resource === "/v1/runs/run_a1/control") return ok(control("run_a1", "decision_a1"), '"control_rev"');
+        return base(resource, count);
+      },
+    }, [], {
+      "alpha.test": (resource, body) => {
+        const operation = isJsonObject(body) ? jsonMember(body, "operation") : undefined;
+        if (resource === "/v1/requests") {
+          const id = `req_t${requests.size + 1}`;
+          requests.set(id, { phase: "draft", supplied: [], revision: 1, runId: null });
+          return accepted(view(id), 201);
+        }
+        commands += 1;
+        const id = `cmd_${commands}`;
+        const send = (op: Operation, effect: unknown): Reply => {
+          settled.set(`/v1/commands/${id}`, receipt(id, op, resource, "effect-observed", effect));
+          return accepted(receipt(id, op, resource, "accepted", null));
+        };
+        const request = /^\/v1\/requests\/(req_t[0-9]+)$/.exec(resource);
+        if (request !== null && operation === "set-input") {
+          const state = requests.get(request[1])!;
+          state.supplied = [jsonMember(body as never, "input")];
+          state.revision += 1;
+          return send("set-input", { kind: "input-changed", runtimeSequence: null, address: null, resource });
+        }
+        if (request !== null && operation === "enqueue") {
+          const state = requests.get(request[1])!;
+          state.phase = "review";
+          state.revision += 1;
+          return send("enqueue", { kind: "enqueued", runtimeSequence: null, address: null, resource });
+        }
+        const prepared = /^\/v1\/preparations\/prep_(t[0-9]+)$/.exec(resource);
+        if (prepared !== null && operation === "approve") {
+          const state = requests.get(`req_${prepared[1]}`)!;
+          state.phase = "associated";
+          state.runId = `run_${prepared[1]}`;
+          state.revision += 1;
+          setTimeout(() => fake.made[0].emit(`s.${commands + 1}`, `/v1/requests/req_${prepared[1]}`), 0);
+          return send("approve", null);
+        }
+        if (resource === "/v1/decisions/decision_a1" && operation === "answer") {
+          return send("answer", { kind: "answer-accepted", runtimeSequence: "12", address: { occurrenceId: "0" }, resource });
+        }
+        return undefined;
+      },
+    });
+    const commandsMap = new Map<string, { handler: (args: string, ctx: unknown) => Promise<void> }>();
+    const events = new Map<string, Array<(event: unknown, ctx: unknown) => Promise<unknown>>>();
+    let tool: any;
+    extension({
+      registerEntryRenderer: () => {}, registerCommand: (name: string, command: unknown) => commandsMap.set(name, command as never),
+      registerTool: (definition: unknown) => { tool = definition; }, appendEntry: () => {}, sendUserMessage: () => {},
+      on: (name: string, handler: (event: unknown, ctx: unknown) => Promise<unknown>) => events.set(name, [...(events.get(name) ?? []), handler]),
+    } as never, { manager: { transport: fake.transport } });
+    const confirmations: Array<{ title: string; body: string }> = [];
+    const answers: boolean[] = [];
+    const notices: string[] = [];
+    const ui = {
+      select: async (_title: string, choices: string[]) => choices.includes("Approve this review") ? "Approve this review" : choices[0],
+      editor: async () => "Exact λ subject",
+      input: async () => undefined,
+      confirm: async (title: string, body: string) => {
+        confirmations.push({ title, body });
+        const answer = answers.shift();
+        if (answer === undefined) throw new Error(`unexpected confirmation ${title}`);
+        return answer;
+      },
+      notify: (message: string) => notices.push(message), setWidget: () => {}, setStatus: () => {}, custom: async () => undefined,
+    };
+    const ctx = { cwd: profiles.directory, mode: "rpc", hasUI: true, isProjectTrusted: () => true, ui, isIdle: () => true, abort: () => {}, sessionManager: { getBranch: () => [] } };
+    for (const handler of events.get("session_start") ?? []) await handler({}, ctx);
+    for (let count = 0; ; count += 1) {
+      await commandsMap.get("wfm-status")!.handler("", ctx);
+      if (notices.at(-1)?.includes("delivery live")) break;
+      if (count > 500) throw new Error(`no connection: ${notices.join("\n")}`);
+      await new Promise((wake) => setTimeout(wake, 10));
+    }
+    const execute = async (params: Record<string, unknown>, context: unknown = ctx) =>
+      tool.execute("call", params, undefined, undefined, context) as Promise<{ isError?: boolean; content: Array<{ text: string }> }>;
+    return { commands: commandsMap, events, ctx, made: () => fake.made[0], confirmations, answers, notices, execute };
+  }
+
+  it("starts a manager run only after the human confirms the request and its exact review, and a decline or a missing UI sends nothing", async () => {
+    const pi = await serviceHost();
+    const start = { action: "manager-start", workflow: "review", inputsJson: '{"subject":"Exact λ subject"}', grantId: "grant-model", approved: true };
+    const posts = () => pi.made().bodies.map((post, index) => [pi.made().posts[index], JSON.parse(post.body).operation ?? "create"]);
+    const credential = readFileSync(profiles.credentialFile, "utf8");
+    const results: string[] = [];
+    const call = async (params: Record<string, unknown>, context?: unknown) => {
+      const result = await pi.execute(params, context);
+      results.push(result.content.map((item) => item.text).join("\n"));
+      return result;
+    };
+
+    // Without a UI the tool refuses before any request.
+    const gets = pi.made().gets.length;
+    const headless = await call(start, { ...pi.ctx, hasUI: false });
+    expect(headless).toMatchObject({ isError: true, content: [{ text: expect.stringContaining("interactive Pi UI") }] });
+    expect(pi.made().gets.length).toBe(gets);
+    expect(pi.made().posts).toEqual([]);
+    expect(pi.confirmations).toEqual([]);
+
+    // A declined request sends nothing.
+    pi.answers.push(false);
+    const declined = await call(start);
+    expect(declined).toMatchObject({ isError: true, content: [{ text: expect.stringContaining("The human declined the request of review. Nothing was sent.") }] });
+    expect(pi.confirmations.at(-1)).toEqual({
+      title: "Create manager request?",
+      body: [
+        "profile=profile_1", "workspace=Review workspace", "target=Deterministic worker", "workflow=review (wf_review)", "descriptorRevision=catalogue_17",
+        "profileRevision=profile_rev_4", 'input subject="Exact λ subject" (literal)',
+      ].join("\n"),
+    });
+    expect(pi.made().posts).toEqual([]);
+
+    // A declined review sends no approve POST, and the request stays in review.
+    pi.answers.push(true, false);
+    const unapproved = await call(start);
+    expect(unapproved.isError).toBe(true);
+    expect(unapproved.content[0].text).toContain("Review declined. No approval was sent. Request req_t1 stays in review");
+    expect(pi.confirmations.at(-1)?.title).toBe("Approve this exact review?");
+    expect(pi.confirmations.at(-1)?.body).toContain("review digest " + SHA);
+    expect(posts()).toEqual([["/v1/requests", "create"], ["/v1/requests/req_t1", "set-input"], ["/v1/requests/req_t1", "enqueue"]]);
+    expect(JSON.parse(pi.made().bodies[1].body)).toEqual({ operation: "set-input", input: { name: "subject", source: "literal", value: "Exact λ subject" } });
+
+    // A confirmed review sends one approve POST, and the manager starts the run.
+    pi.answers.push(true, true);
+    const before = pi.made().posts.length;
+    const approved = await call(start);
+    expect(approved.isError).not.toBe(true);
+    expect(approved.content[0].text).toContain("Execution: the manager started run run_t2 for request req_t2.");
+    const tool = posts().slice(before);
+    expect(tool).toEqual([["/v1/requests", "create"], ["/v1/requests/req_t2", "set-input"], ["/v1/requests/req_t2", "enqueue"], ["/v1/preparations/prep_t2", "approve"]]);
+    expect(JSON.parse(pi.made().bodies.at(-1)!.body)).toEqual({
+      operation: "approve", reviewDigest: SHA, requestRevision: "request_rev_2", profileRevision: "profile_rev_4", descriptorRevision: "catalogue_17",
+      processGeneration: "process_A",
+    });
+
+    // The human /wfm reaches the same manager transitions.
+    pi.answers.push(true);
+    const human = pi.made().posts.length;
+    await pi.commands.get("wfm")!.handler("review", pi.ctx);
+    expect(posts().slice(human).map(([, operation]) => operation)).toEqual(tool.map(([, operation]) => operation));
+    expect(pi.notices).toContain("Execution: the manager started run run_t3 for request req_t3.");
+
+    // The read actions need no confirmation and name no client profile path.
+    const confirmed = pi.confirmations.length;
+    const status = await call({ action: "manager-status" });
+    expect(status.content[0].text).toMatch(/^Service mode: profile 1 of 1\nConnection: connected to https:\/\/alpha\.test:8443\/v1/);
+    expect((await call({ action: "manager-list" })).content[0].text).toBe("Profile profile_1  Review workspace  Deterministic worker\n  review  inputs subject (command-tail)  Review a subject");
+    expect(pi.confirmations.length).toBe(confirmed);
+    for (const text of results) {
+      expect(text).not.toContain(credential);
+      expect(text).not.toContain(profiles.credentialFile);
+      expect(text).not.toContain(profiles.directory);
+    }
+    for (const handler of pi.events.get("session_shutdown") ?? []) await handler({}, pi.ctx);
+  });
+
+  it("answers a manager decision with JSON false only after the human confirms the typed value", async () => {
+    const pi = await serviceHost();
+    const answer = { action: "manager-answer", runId: "run_a1", answer: "false" };
+    expect((await pi.execute(answer, { ...pi.ctx, hasUI: false })).isError).toBe(true);
+    pi.answers.push(false);
+    const declined = await pi.execute(answer);
+    expect(declined).toMatchObject({ isError: true, content: [{ text: expect.stringContaining("The human declined the answer of decision decision_a1. Nothing was sent.") }] });
+    expect(pi.confirmations.at(-1)).toEqual({
+      title: "Send manager answer?",
+      body: 'decision=decision_a1\nrun=run_a1\ncode=flag: yes, no, true or false\nprompt="Proceed?"\nvalue=false',
+    });
+    expect(pi.made().posts).toEqual([]);
+    pi.answers.push(true);
+    const sent = await pi.execute(answer);
+    expect(sent.isError).not.toBe(true);
+    expect(sent.content[0].text).toContain("Answer false reached decision decision_a1 of run run_a1.");
+    expect(pi.made().posts).toEqual(["/v1/decisions/decision_a1"]);
+    expect(pi.made().bodies).toEqual([{ body: '{"generation":"generation_3","occurrenceId":"0","operation":"answer","value":false}', ifMatch: '"decision_a1_rev"' }]);
+    // A recovery choice for a question head sends nothing.
+    const wrong = await pi.execute({ action: "manager-control", runId: "run_a1", controlKind: "retry" });
+    expect(wrong).toMatchObject({ isError: true, content: [{ text: expect.stringContaining("is a question") }] });
+    expect(pi.made().posts).toEqual(["/v1/decisions/decision_a1"]);
+    for (const handler of pi.events.get("session_shutdown") ?? []) await handler({}, pi.ctx);
+  });
 });
 
 async function until(predicate: () => boolean): Promise<void> {

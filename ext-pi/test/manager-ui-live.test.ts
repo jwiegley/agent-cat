@@ -56,9 +56,19 @@
  *    exact review shows the lineage, `a` and the confirmation approve it,
  *    and the child run succeeds and names the parent run and the lineage
  *    restart.
- * 10. `/wfm-history` lists every run of `/v1/runs` over all its pages, in
+ * 10. The `agent_cat_workflow` tool starts mixed-controls twice through
+ *    `manager-start`. The human confirms the request each time. The first
+ *    exact review is declined, so no approve command exists, and the human
+ *    then discards the preparation and withdraws the request. The second
+ *    review is approved after its confirmation, and the manager starts the
+ *    run. `manager-answer` answers its Bool question with `false` after the
+ *    confirmation of the typed value, which sends JSON `false`, and
+ *    `manager-control` retries its recovery after the confirmation of the
+ *    control. No tool result names the bearer, the credential path or the
+ *    client profile path.
+ * 11. `/wfm-history` lists every run of `/v1/runs` over all its pages, in
  *    the order of the collection, with the restart child and its parent.
- * 11. The extension closes.
+ * 12. The extension closes.
  */
 
 import { createHash } from "node:crypto";
@@ -104,6 +114,12 @@ const ANSWERED = "Pi answer λ: explicit false.";
 
 /** The literal of the run whose question the harness answers first. `PI_UI_STALE` of the harness states it. */
 const STALE = "Pi stale λ: the harness answers first.";
+
+/** The literal of the tool start whose review the human declines. `PI_UI_TOOL_DECLINED` of the harness states it. */
+const TOOL_DECLINED = "Pi tool λ: the human declines the review.";
+
+/** The literal of the tool start that the human approves. `PI_UI_TOOL_ANSWERED` of the harness states it. */
+const TOOL_ANSWERED = "Pi tool λ: the model answers false.";
 
 /** The literal of the run that `/wfm-cancel` cancels. `PI_UI_CANCELLED` of the harness states it. */
 const CANCELLED = "Pi cancel λ: the run ends cancelled.";
@@ -161,6 +177,7 @@ describe.runIf(PROFILE)("the human path of service mode against a live manager",
   const commands = new Map<string, { handler: (args: string, ctx: unknown) => Promise<void> }>();
   const events = new Map<string, Array<(event: unknown, ctx: unknown) => Promise<unknown>>>();
   let script: Script = {};
+  let tool: { execute: (id: string, params: unknown, signal: unknown, update: unknown, ctx: unknown) => Promise<{ isError?: boolean; content: Array<{ text: string }> }> } | undefined;
   let state = "";
   let previousState: string | undefined;
   const report: Record<string, unknown> = {};
@@ -381,7 +398,7 @@ describe.runIf(PROFILE)("the human path of service mode against a live manager",
     previousState = process.env.AGENT_CAT_STATE_DIR;
     process.env.AGENT_CAT_STATE_DIR = state;
     extension({
-      registerEntryRenderer: () => {}, registerTool: () => {}, appendEntry: () => {}, sendUserMessage: () => {},
+      registerEntryRenderer: () => {}, registerTool: (definition: unknown) => { tool = definition as typeof tool; }, appendEntry: () => {}, sendUserMessage: () => {},
       registerCommand: (name: string, value: unknown) => commands.set(name, value as never),
       on: (name: string, handler: (event: unknown, ctx: unknown) => Promise<unknown>) => events.set(name, [...(events.get(name) ?? []), handler]),
     } as never, { manager: { transport: recording(posts) } });
@@ -793,13 +810,95 @@ describe.runIf(PROFILE)("the human path of service mode against a live manager",
     });
   }, STEP_MS);
 
+  it("starts, answers and retries a run through the tool only after each human confirmation, and a declined review sends no approve", async () => {
+    const results: string[] = [];
+    const call = async (params: Record<string, unknown>) => {
+      const result = await tool!.execute("live", params, undefined, undefined, ctx);
+      results.push(result.content.map((item) => item.text).join("\n"));
+      return result;
+    };
+    const asked: string[] = [];
+    const confirm = (answer: boolean) => (title: string, message: string) => (asked.push(`${title}\n${message}`), answer);
+
+    // The human confirms the request and declines its exact review.
+    script = { confirm: confirm(true), review: () => "\u001b" };
+    const declined = await call({ action: "manager-start", workflow: "mixed-controls", inputsJson: JSON.stringify({ input: TOOL_DECLINED }) });
+    expect(declined.isError, results.at(-1)).toBe(true);
+    expect(results.at(-1)).toContain("Review declined. No approval was sent.");
+    expect(asked.at(-1)).toContain(`input input=${JSON.stringify(TOOL_DECLINED)} (literal)`);
+    const declinedRequestId = createdRequest();
+    const declinedPreparationId = await preparationOf(declinedRequestId);
+    expect(postsTo(`/v1/preparations/${declinedPreparationId}`)).toEqual([]);
+    script = { review: () => "d" };
+    await run("wfm-review", declinedRequestId);
+    script = {};
+    await run("wfm-withdraw", declinedRequestId);
+    expect(notices, notices.join("\n")).toContain(`Request ${declinedRequestId} is withdrawn.`);
+
+    // The human confirms the request and approves its exact review.
+    script = { confirm: confirm(true), review: () => "a" };
+    const before = posts.length;
+    const started = await call({ action: "manager-start", workflow: "mixed-controls", inputsJson: JSON.stringify({ input: TOOL_ANSWERED }) });
+    expect(started.isError, results.at(-1)).not.toBe(true);
+    const requestId = createdRequest();
+    const request = draftOf(must(await session.get(ref(`/v1/requests/${requestId}`)), "tool request"));
+    expect(request.readiness.supplied).toEqual([{ source: "literal", name: "input", value: TOOL_ANSWERED }]);
+    const runId = request.runId ?? "";
+    expect(results.at(-1)).toContain(`Execution: the manager started run ${runId} for request ${requestId}.`);
+    const approvals = posts.slice(before).filter((post) => post.resource.startsWith("/v1/preparations/"));
+    expect(approvals.map((post) => JSON.parse(String(post.body)).operation)).toEqual(["approve"]);
+    const preparationId = approvals[0].resource.slice("/v1/preparations/".length);
+
+    // The model answers false and retries the recovery, each after a confirmation.
+    const handled = new Set<string>();
+    let answerCommand = "";
+    let retryCommand = "";
+    let answeredDecision = "";
+    for (let head = await nextHead(runId, handled); head !== undefined; head = await nextHead(runId, handled)) {
+      const { decision } = head;
+      handled.add(decision.id);
+      const from = posts.length;
+      script = { confirm: confirm(true) };
+      if (decision.content.kind === "question") {
+        const answered = await call({ action: "manager-answer", runId, answer: "false" });
+        expect(answered.isError, results.at(-1)).not.toBe(true);
+        expect(asked.at(-1)).toContain(`Send manager answer?\ndecision=${decision.id}\nrun=${runId}\n`);
+        expect(asked.at(-1)).toContain("\nvalue=false");
+        const sent = postsTo(`/v1/decisions/${decision.id}`, from);
+        expect(sent.map((post) => JSON.parse(String(post.body)))).toEqual([{
+          operation: "answer", occurrenceId: decision.occurrenceId.toString(), generation: decision.generation, value: false,
+        }]);
+        answerCommand = acceptedCommand("answer");
+        answeredDecision = decision.id;
+      } else {
+        const retried = await call({ action: "manager-control", runId, controlKind: "retry" });
+        expect(retried.isError, results.at(-1)).not.toBe(true);
+        expect(asked.at(-1)).toContain(`Send manager control?\nkind=retry\nrun=${runId}\ndecision=${decision.id}`);
+        expect(postsTo(`/v1/runs/${runId}/control`, from).map((post) => JSON.parse(String(post.body)).operation)).toEqual(["retry"]);
+        retryCommand = acceptedCommand("retry");
+      }
+    }
+    expect(handled.size).toBe(2);
+    await succeeded(runId);
+    // No tool result names the bearer, the credential path or the client profile path.
+    const fields = JSON.parse(readFileSync(PROFILE ?? "", "utf8")) as { credentialFile: string };
+    const bearer = readFileSync(fields.credentialFile, "utf8").trim();
+    for (const text of results) {
+      for (const secret of [bearer, fields.credentialFile, PROFILE ?? ""]) expect(text).not.toContain(secret);
+    }
+    Object.assign(report, {
+      toolDeclinedRequestId: declinedRequestId, toolDeclinedPreparationId: declinedPreparationId, toolRequestId: requestId, toolRunId: runId,
+      toolPreparationId: preparationId, toolAnsweredDecisionId: answeredDecision, toolAnswerCommand: answerCommand, toolRetryCommand: retryCommand,
+    });
+  }, STEP_MS);
+
   it("lists every run of the history over all pages in the order of the collection", async () => {
     await run("wfm-history");
     const lines = (notices.at(-1) ?? "").split("\n");
     const listed = must(await session.pageSet(ref("/v1/runs")), "runs").items.map((item) => must(decodeRunItem(item), "run item"));
     expect(lines[0]).toBe(`History: ${listed.length} managed runs and 0 observer entries`);
     expect(lines.slice(1).map((line) => line.trim().split(/\s+/)[0])).toEqual(listed.map((item) => item.id));
-    for (const name of ["literalRunId", "capturedRunId", "monitoredRunId", "staleRunId", "cancelledRunId", "restartRunId"]) {
+    for (const name of ["literalRunId", "capturedRunId", "monitoredRunId", "staleRunId", "cancelledRunId", "restartRunId", "toolRunId"]) {
       expect(listed.map((item) => item.id)).toContain(String(report[name]));
     }
     const line = (runId: unknown) => lines.find((entry) => entry.startsWith(`  ${String(runId)}  `)) ?? "";

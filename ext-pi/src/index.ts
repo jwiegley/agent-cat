@@ -2,7 +2,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
-import { Type } from "typebox";
+import { Type, type Static } from "typebox";
 import { discoverRunner, readHelp, readRouting, supportsRoutingInspection } from "./catalogue.ts";
 import { configuredManagerProfiles, configuredRemote, configuredRunners, retentionPolicy, stateDirectory } from "./config.ts";
 import { CurrentSessionBridge } from "./current-bridge.ts";
@@ -11,7 +11,7 @@ import { formatControl, formatMonitor } from "./monitor.ts";
 import { WorkflowMonitorComponent } from "./monitor-ui.ts";
 import { openRemotePi } from "./pi-remote-runtime.mjs";
 import type { SessionOptions } from "./manager/session.ts";
-import { ManagerRequests, type CommandRecord } from "./manager-ui.ts";
+import { ManagerRequests, toolContext, type CommandRecord, type ModelForkEdit } from "./manager-ui.ts";
 import { ServiceMode, type ServiceSelection } from "./service-mode.ts";
 import { RunSupervisor, type OwnedRun } from "./supervisor.ts";
 import type { ClientMode, ControlAckSnapshot, RoutingInspection, RunnerConfig, RunSnapshot, TargetKind, WorkflowDescriptor } from "./types.ts";
@@ -422,7 +422,7 @@ export default function agentCatExtension(pi: ExtensionAPI, hooks: ExtensionHook
 
   pi.registerCommand("wfm", {
     description: "Create a manager request: select a workflow, enter its exact inputs, enqueue it, and review and approve it",
-    handler: async (args, ctx) => requests.start(ctx, args),
+    handler: async (args, ctx) => { await requests.start(ctx, args); },
   });
 
   pi.registerCommand("wfm-review", {
@@ -447,27 +447,27 @@ export default function agentCatExtension(pi: ExtensionAPI, hooks: ExtensionHook
 
   pi.registerCommand("wfm-answer", {
     description: "Answer the head decision of a manager run with a typed answer, or send a recovery choice that the manager offers",
-    handler: async (args, ctx) => requests.answer(ctx, args),
+    handler: async (args, ctx) => { await requests.answer(ctx, args); },
   });
 
   pi.registerCommand("wfm-cancel", {
     description: "Cancel a manager run after confirmation when its controls allow the cancel, and report the receipt and the runtime acknowledgement",
-    handler: async (args, ctx) => requests.cancel(ctx, args),
+    handler: async (args, ctx) => { await requests.cancel(ctx, args); },
   });
 
   pi.registerCommand("wfm-steer", {
     description: "Steer the attempt of a manager run that its controls offer, and report the receipt and the runtime acknowledgement",
-    handler: async (args, ctx) => requests.steer(ctx, args),
+    handler: async (args, ctx) => { await requests.steer(ctx, args); },
   });
 
   pi.registerCommand("wfm-redirect", {
     description: "Redirect an occurrence of a manager run to an offered target, in its dispatch window or for its attempt in flight, and report the receipt and the runtime acknowledgement",
-    handler: async (args, ctx) => requests.redirect(ctx, args),
+    handler: async (args, ctx) => { await requests.redirect(ctx, args); },
   });
 
   pi.registerCommand("wfm-result", {
     description: "Retrieve the verified result of a manager run and save its exact bytes to a new file with mode 0600",
-    handler: async (args, ctx) => requests.result(ctx, args),
+    handler: async (args, ctx) => { await requests.result(ctx, args); },
   });
 
   pi.registerCommand("wfm-history", {
@@ -478,13 +478,13 @@ export default function agentCatExtension(pi: ExtensionAPI, hooks: ExtensionHook
   for (const operation of ["restart", "resume", "fork"] as const) {
     pi.registerCommand(`wfm-${operation}`, {
       description: `Create a ${operation} child request of a manager run, show its exact review with its lineage, and approve it to start the child run`,
-      handler: async (args, ctx) => requests.lineage(ctx, operation, args),
+      handler: async (args, ctx) => { await requests.lineage(ctx, operation, args); },
     });
   }
 
   pi.registerCommand("wfm-export", {
     description: "Export the verified result of a manager run under a name, verify the exported bytes, and list the exports of the run",
-    handler: async (args, ctx) => requests.export(ctx, args),
+    handler: async (args, ctx) => { await requests.export(ctx, args); },
   });
 
   pi.registerCommand("wfm-endpoints", {
@@ -654,23 +654,6 @@ export default function agentCatExtension(pi: ExtensionAPI, hooks: ExtensionHook
     },
   });
 
-function parseInputsJson(value: string | undefined, descriptor?: WorkflowDescriptor): Record<string, string> {
-  let parsed: unknown = {};
-  if (value) {
-    try { parsed = JSON.parse(value); } catch { throw new Error("inputsJson is not valid JSON"); }
-  }
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed) || !Object.values(parsed).every((entry) => typeof entry === "string")) {
-    throw new Error("inputsJson must be a JSON object of string values");
-  }
-  const inputs = parsed as Record<string, string>;
-  if (descriptor) {
-    const expected = descriptor.inputs.map(({ name }) => name).sort();
-    const actual = Object.keys(inputs).sort();
-    if (expected.length !== actual.length || expected.some((name, index) => name !== actual[index])) throw new Error(`inputs must be exactly: ${descriptor.inputs.map(({ name }) => name).join(", ") || "(none)"}`);
-  }
-  return inputs;
-}
-
 async function collectForkEdits(ctx: ExtensionContext, snapshot: RunSnapshot): Promise<LineageEdit[] | undefined> {
   const editable = [...snapshot.occurrences.values()].filter((occurrence) => occurrence.answer !== undefined);
   if (editable.length === 0) return [];
@@ -724,26 +707,12 @@ function parseLineageEdits(value: string | undefined): LineageEdit[] {
   pi.registerTool({
     name: "agent_cat_workflow",
     label: "agent-cat workflow",
-    description: "Discover, launch, inspect, control, restart, resume, or fork agent-cat workflows. A start, a restart, resume or fork, and a control each require a trusted project, an interactive Pi UI, and a human confirmation of its exact review in Pi. No parameter replaces that confirmation, and a declined review sends nothing.",
-    parameters: Type.Object({
-      action: Type.Union([
-        Type.Literal("list"), Type.Literal("status"), Type.Literal("inspect"), Type.Literal("start"), Type.Literal("restart"), Type.Literal("resume"), Type.Literal("fork"),
-        Type.Literal("cancel"), Type.Literal("steer"), Type.Literal("retry"), Type.Literal("recover"), Type.Literal("redirect"),
-      ]),
-      runId: Type.Optional(Type.String()),
-      parentRunId: Type.Optional(Type.String()),
-      workflow: Type.Optional(Type.String()),
-      inputsJson: Type.Optional(Type.String()),
-      launchTarget: Type.Optional(Type.Union([Type.Literal("scripted"), Type.Literal("child"), Type.Literal("remote")])),
-      forkEditsJson: Type.Optional(Type.String()),
-      occurrenceId: Type.Optional(Type.String()),
-      attemptId: Type.Optional(Type.String()),
-      text: Type.Optional(Type.String()),
-      timing: Type.Optional(Type.Union([Type.Literal("interrupt-now"), Type.Literal("next-boundary")])),
-      recoveryChoice: Type.Optional(Type.Union([Type.Literal("retry"), Type.Literal("failover"), Type.Literal("abandon")])),
-      target: Type.Optional(Type.String()),
-    }),
+    description: "Discover, launch, inspect, control, restart, resume, or fork agent-cat workflows: local runs through list, status, inspect, start, restart, resume, fork and the controls, and manager runs in service mode through manager-list, manager-status, manager-inspect, manager-result, manager-start, manager-answer, manager-control, manager-lineage and manager-export. "
+      + "Each mutation requires a trusted project, an interactive Pi UI, and a human confirmation of its exact content in Pi: a manager start shows its request and then its exact review, an answer its typed value, a control its kind, target and text, a lineage operation its edits and then its exact review, and an export its scope and name. "
+      + "No parameter replaces that confirmation, and a declined confirmation sends nothing. The tool never takes or gives a credential.",
+    parameters: TOOL_PARAMETERS,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      if (params.action.startsWith("manager-")) return managerAction(requests, service, params, ctx);
       if (params.action === "list") {
         const catalogue = lastContext ? await discover(lastContext) : [];
         return { content: [{ type: "text", text: catalogue.map(({ runner, descriptor }) => `${runner.id}:${descriptor.name} — ${descriptor.blurb}`).join("\n") || "No configured workflows" }], details: {} };
@@ -863,6 +832,177 @@ function parseLineageEdits(value: string | undefined): LineageEdit[] {
   });
 }
 
+/**
+ * The parameters of the `agent_cat_workflow` tool. The schema leaves
+ * additional properties open, and no parameter carries a credential, a
+ * credential path or a client profile.
+ */
+const TOOL_PARAMETERS = Type.Object({
+  action: Type.Union([
+    Type.Literal("list"), Type.Literal("status"), Type.Literal("inspect"), Type.Literal("start"), Type.Literal("restart"), Type.Literal("resume"), Type.Literal("fork"),
+    Type.Literal("cancel"), Type.Literal("steer"), Type.Literal("retry"), Type.Literal("recover"), Type.Literal("redirect"),
+    Type.Literal("manager-list"), Type.Literal("manager-status"), Type.Literal("manager-inspect"), Type.Literal("manager-result"),
+    Type.Literal("manager-start"), Type.Literal("manager-answer"), Type.Literal("manager-control"), Type.Literal("manager-lineage"), Type.Literal("manager-export"),
+  ]),
+  runId: Type.Optional(Type.String()),
+  parentRunId: Type.Optional(Type.String()),
+  workflow: Type.Optional(Type.String()),
+  profileId: Type.Optional(Type.String()),
+  inputsJson: Type.Optional(Type.String()),
+  launchTarget: Type.Optional(Type.Union([Type.Literal("scripted"), Type.Literal("child"), Type.Literal("remote")])),
+  forkEditsJson: Type.Optional(Type.String()),
+  occurrenceId: Type.Optional(Type.String()),
+  attemptId: Type.Optional(Type.String()),
+  text: Type.Optional(Type.String()),
+  answer: Type.Optional(Type.String()),
+  timing: Type.Optional(Type.Union([Type.Literal("interrupt-now"), Type.Literal("next-boundary")])),
+  recoveryChoice: Type.Optional(Type.Union([Type.Literal("retry"), Type.Literal("failover"), Type.Literal("abandon")])),
+  controlKind: Type.Optional(Type.Union([
+    Type.Literal("cancel"), Type.Literal("steer"), Type.Literal("retry"), Type.Literal("failover"), Type.Literal("abandon"), Type.Literal("redirect"),
+  ])),
+  lineageOperation: Type.Optional(Type.Union([Type.Literal("restart"), Type.Literal("resume"), Type.Literal("fork")])),
+  target: Type.Optional(Type.String()),
+  name: Type.Optional(Type.String()),
+  path: Type.Optional(Type.String()),
+});
+
+type ToolParameters = Static<typeof TOOL_PARAMETERS>;
+
+/**
+ * One service action of the tool. Each action calls the function of the
+ * matching human command of `ManagerRequests` with the values of the model,
+ * so a tool action and a human command reach the same manager transitions.
+ * A mutation first requires a trusted project and an interactive Pi UI, and
+ * it refuses before any request without them. The function of the command
+ * then asks for the human confirmation of the exact content. The
+ * notifications of the command are the text of the result. They name no
+ * bearer, no credential path and no client profile path.
+ */
+async function managerAction(requests: ManagerRequests, service: ServiceMode | undefined, params: ToolParameters, ctx: ExtensionContext) {
+  const action = params.action;
+  const read = ["manager-list", "manager-status", "manager-inspect"].includes(action) || (action === "manager-result" && params.path === undefined);
+  if (action !== "manager-list" && action !== "manager-status" && !ctx.isProjectTrusted()) return toolRefusal(`${action} requires a trusted project`);
+  if (!read && !ctx.hasUI) return toolRefusal(uiRequiredText(action));
+  if (action === "manager-status") {
+    if (service === undefined) return toolRefusal(SERVICE_UNCONFIGURED);
+    return { content: [{ type: "text" as const, text: formatServiceStatus(service, requests.records(), false) }], details: {} };
+  }
+  const needs = (fields: ReadonlyArray<keyof ToolParameters>): string | undefined => {
+    const missing = fields.filter((field) => params[field] === undefined);
+    return missing.length === 0 ? undefined : `${action} requires ${missing.join(", ")}`;
+  };
+  const call = toolContext(ctx);
+  const runId = params.runId ?? "";
+  let reached: boolean;
+  try {
+    switch (action) {
+      case "manager-list":
+        reached = await requests.catalogue(call.ctx);
+        break;
+      case "manager-inspect": {
+        const missing = needs(["runId"]);
+        if (missing !== undefined) return toolRefusal(missing);
+        reached = await requests.inspect(call.ctx, runId);
+        break;
+      }
+      case "manager-result": {
+        const missing = needs(["runId"]);
+        if (missing !== undefined) return toolRefusal(missing);
+        reached = await requests.result(call.ctx, runId, { path: params.path });
+        break;
+      }
+      case "manager-start": {
+        const missing = needs(["workflow"]);
+        if (missing !== undefined) return toolRefusal(missing);
+        reached = await requests.start(call.ctx, "", { workflow: params.workflow ?? "", profileId: params.profileId, inputs: parseInputsJson(params.inputsJson) });
+        break;
+      }
+      case "manager-answer": {
+        const missing = needs(["runId", "answer"]);
+        if (missing !== undefined) return toolRefusal(missing);
+        reached = await requests.answer(call.ctx, runId, { kind: "answer", text: params.answer ?? "" });
+        break;
+      }
+      case "manager-control": {
+        const missing = needs(["runId", "controlKind"]);
+        if (missing !== undefined) return toolRefusal(missing);
+        const kind = params.controlKind;
+        if (kind === "cancel") reached = await requests.cancel(call.ctx, runId, true);
+        else if (kind === "steer") {
+          const absent = needs(["occurrenceId", "attemptId", "timing", "text"]);
+          if (absent !== undefined) return toolRefusal(absent);
+          reached = await requests.steer(call.ctx, runId,
+            { occurrenceId: params.occurrenceId ?? "", attemptId: params.attemptId ?? "", timing: params.timing ?? "", text: params.text ?? "" });
+        } else if (kind === "redirect") {
+          const absent = needs(["occurrenceId", "target"]);
+          if (absent !== undefined) return toolRefusal(absent);
+          reached = await requests.redirect(call.ctx, runId, { occurrenceId: params.occurrenceId ?? "", target: params.target ?? "" });
+        } else reached = await requests.answer(call.ctx, runId, { kind: "recovery", choice: kind ?? "retry", target: params.target });
+        break;
+      }
+      case "manager-lineage": {
+        const missing = needs(["runId", "lineageOperation"]);
+        if (missing !== undefined) return toolRefusal(missing);
+        reached = await requests.lineage(call.ctx, params.lineageOperation ?? "restart", runId, { edits: parseModelForkEdits(params.forkEditsJson) });
+        break;
+      }
+      case "manager-export": {
+        const missing = needs(["runId", "name"]);
+        if (missing !== undefined) return toolRefusal(missing);
+        reached = await requests.export(call.ctx, `${runId} ${params.name ?? ""}`, true);
+        break;
+      }
+      default:
+        return toolRefusal(`Unknown action ${action}`);
+    }
+  } catch (error) {
+    return toolRefusal(error instanceof Error ? error.message : String(error));
+  }
+  const text = call.lines.join("\n") || `${action} gave no report.`;
+  return { content: [{ type: "text" as const, text }], details: {}, ...(reached ? {} : { isError: true }) };
+}
+
+/**
+ * The fork edits of a model for a manager run: a JSON array of
+ * `{"type":"drop","occurrenceId":"N"}` and
+ * `{"type":"replace","occurrenceId":"N","value":"TEXT"}`, where `TEXT` is
+ * the answer text that the code of the occurrence types.
+ */
+function parseModelForkEdits(value: string | undefined): ModelForkEdit[] {
+  if (!value) return [];
+  let parsed: unknown;
+  try { parsed = JSON.parse(value); } catch { throw new Error("forkEditsJson is not valid JSON"); }
+  if (!Array.isArray(parsed)) throw new Error("forkEditsJson must be an array");
+  return parsed.map((entry): ModelForkEdit => {
+    if (typeof entry !== "object" || entry === null || Array.isArray(entry)) throw new Error("fork edit is not an object");
+    const edit = entry as Record<string, unknown>;
+    if ((edit.type !== "drop" && edit.type !== "replace") || typeof edit.occurrenceId !== "string" || !/^(0|[1-9][0-9]*)$/.test(edit.occurrenceId)) {
+      throw new Error("fork edit requires type and decimal occurrenceId");
+    }
+    if (edit.type === "drop") return { type: "drop", occurrenceId: edit.occurrenceId };
+    if (typeof edit.value !== "string") throw new Error("replacement fork edit requires value text");
+    return { type: "replace", occurrenceId: edit.occurrenceId, value: edit.value };
+  });
+}
+
+/** The inputs of a model: a JSON object of string values, exactly the declared inputs when a descriptor is given. */
+function parseInputsJson(value: string | undefined, descriptor?: WorkflowDescriptor): Record<string, string> {
+  let parsed: unknown = {};
+  if (value) {
+    try { parsed = JSON.parse(value); } catch { throw new Error("inputsJson is not valid JSON"); }
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed) || !Object.values(parsed).every((entry) => typeof entry === "string")) {
+    throw new Error("inputsJson must be a JSON object of string values");
+  }
+  const inputs = parsed as Record<string, string>;
+  if (descriptor) {
+    const expected = descriptor.inputs.map(({ name }) => name).sort();
+    const actual = Object.keys(inputs).sort();
+    if (expected.length !== actual.length || expected.some((name, index) => name !== actual[index])) throw new Error(`inputs must be exactly: ${descriptor.inputs.map(({ name }) => name).join(", ") || "(none)"}`);
+  }
+  return inputs;
+}
+
 /** The label of each local execution target in the launch review. */
 const TARGET_LABEL: Readonly<Record<TargetKind, string>> = {
   scripted: "scripted (offline, no commands)",
@@ -966,15 +1106,20 @@ const SERVICE_UNCONFIGURED = "Service mode is not configured. Set AGENT_CAT_MANA
 
 const SERVICE_TERMINAL = ["succeeded", "failed", "cancelled", "orphaned"];
 
-function connectionLine(service: ServiceMode): string {
+/**
+ * The connection line of the status. `paths` false names a profile by its
+ * number instead of its path, as a tool result does.
+ */
+function connectionLine(service: ServiceMode, paths: boolean): string {
   const connection = service.connection;
+  const profile = (path: string): string => paths ? path : `profile ${service.profiles.indexOf(path) + 1}`;
   switch (connection.kind) {
-    case "connecting": return `Connection: connecting to ${connection.profile}`;
+    case "connecting": return `Connection: connecting to ${profile(connection.profile)}`;
     case "connected":
       return `Connection: connected to ${connection.endpoint} (endpoint identity ${connection.identity}), delivery ${connection.delivery}`
         + (connection.overview === "loaded" ? "" : ", overview unavailable");
-    case "refused": return `Connection: refused for ${connection.profile}: ${connection.reason}. No manager command is sent.`;
-    case "unreachable": return `Connection: unreachable for ${connection.profile}: ${connection.reason}. No manager command is sent. /wfm-endpoints connects again.`;
+    case "refused": return `Connection: refused for ${profile(connection.profile)}: ${connection.reason}. No manager command is sent.`;
+    case "unreachable": return `Connection: unreachable for ${profile(connection.profile)}: ${connection.reason}. No manager command is sent. /wfm-endpoints connects again.`;
     case "closed": return "Connection: closed. The manager keeps its runs under its own supervision.";
   }
 }
@@ -983,12 +1128,14 @@ function connectionLine(service: ServiceMode): string {
  * The text of `/wfm-status`: the profile, the connection, the capabilities,
  * the service observations, and the command records of the active binding.
  * The command records state command outcomes, and the observations state
- * execution, so the two are listed separately.
+ * execution, so the two are listed separately. With `paths` false, the
+ * text names no client profile path, as the `manager-status` action of the
+ * tool gives it to the model.
  */
-export function formatServiceStatus(service: ServiceMode, commands: readonly CommandRecord[] = []): string {
+export function formatServiceStatus(service: ServiceMode, commands: readonly CommandRecord[] = [], paths = true): string {
   const lines = [
-    `Service mode: profile ${service.active + 1} of ${service.profiles.length}, ${service.profiles[service.active]}`,
-    connectionLine(service),
+    `Service mode: profile ${service.active + 1} of ${service.profiles.length}${paths ? `, ${service.profiles[service.active]}` : ""}`,
+    connectionLine(service, paths),
   ];
   const capabilities = service.capabilities;
   if (capabilities !== undefined && service.connection.kind === "connected") lines.push(`Manager capabilities: ${capabilities}`);

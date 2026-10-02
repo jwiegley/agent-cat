@@ -345,8 +345,9 @@ endpoints_mode = len(sys.argv) == 6 and sys.argv[5] == ENDPOINTS
 # The first run, ext-pi/test/manager-ui-live.test.ts with the pi-ui
 # profile, drives /wfm, /wfm-review, /wfm-withdraw, /wfm-monitor and
 # /wfm-answer, /wfm-cancel, /wfm-result, /wfm-export, /wfm-restart and
-# /wfm-history of the extension with a fake Pi UI. vitest must report its
-# eleven steps passed. During its stale-answer step the check writes the decision
+# /wfm-history of the extension with a fake Pi UI, and then the manager-start,
+# manager-answer and manager-control actions of the agent_cat_workflow tool.
+# vitest must report its twelve steps passed. During its stale-answer step the check writes the decision
 # that it is about to answer to the handshake file that
 # AGENT_CAT_MANAGER_HARNESS_ANSWER names. The harness then answers that
 # decision first with JSON false through HTTP with its own credential, waits
@@ -391,7 +392,17 @@ endpoints_mode = len(sys.argv) == 6 and sys.argv[5] == ENDPOINTS
 # review names the parent run, the operation restart and no edits, and that
 # the child run succeeded and names the parent run and the lineage restart.
 # For /wfm-history it reads every page of /v1/runs and requires the run
-# identifiers that the report lists, in the same order. The harness then takes
+# identifiers that the report lists, in the same order. For the tool step it
+# reads that the request of PI_UI_TOOL_DECLINED, whose exact review the human
+# declined, has no approve command, only the later discard, and is withdrawn.
+# It reads that the request of PI_UI_TOOL_ANSWERED supplied exactly that
+# literal, that its one confirmed approval consumed its preparation, that the
+# one tool answer command and the one tool retry command of the report
+# reached their effects, that the run store records the answer as JSON false,
+# and that the run succeeded. It also requires that the commands of the tool
+# request, its preparation, its answered decision and its run controls name
+# the same operations in the same order as those of the monitored request of
+# the human path: set-input, enqueue, approve, answer and retry. The harness then takes
 # a new cursor, and the reads of the session check count only the commands
 # after it.
 # The second run, ext-pi/test/manager-live.test.ts with the first client
@@ -1459,6 +1470,8 @@ PI_UI_CAPTURED = "  Captured Ünïcode λ\r\nsecond line\n"
 PI_UI_ANSWERED = "Pi answer λ: explicit false."
 PI_UI_STALE = "Pi stale λ: the harness answers first."
 PI_UI_CANCELLED = "Pi cancel λ: the run ends cancelled."
+PI_UI_TOOL_DECLINED = "Pi tool λ: the human declines the review."
+PI_UI_TOOL_ANSWERED = "Pi tool λ: the model answers false."
 
 
 def mixed_client(capabilities, authorized, attempts=None):
@@ -9514,7 +9527,7 @@ def pi_client_checks():
                 snapshot, _, _ = observed("/v1/runs/" + run_id + "/snapshot", "RunSnapshot")
                 assert snapshot["runtime"] is not None and snapshot["runtime"]["status"] == "succeeded", ("run status", run_id, snapshot["runtime"])
 
-            ui = vitest("test/manager-ui-live.test.ts", ui_profile, ui_report_path, ui_log_path, 11, work / "pi-client-harness-answer.json")
+            ui = vitest("test/manager-ui-live.test.ts", ui_profile, ui_report_path, ui_log_path, 12, work / "pi-client-harness-answer.json")
             ui_receipts = command_receipts(cursor, harness)
             # The reads of the session check count only the commands after this cursor.
             status, middle, _ = request("/v1/snapshot", harness)
@@ -9688,23 +9701,64 @@ def pi_client_checks():
             assert history == ui["historyRuns"] and ui["restartRunId"] in history, ("the /wfm-history runs differ from every page of /v1/runs", history, ui["historyRuns"])
             print("PASS pi-client 11: /wfm-history listed the", len(history), "managed runs of every page of /v1/runs in the order of the collection,",
                   "the restart child included", flush=True)
+            tool_declined = "/v1/preparations/" + ui["toolDeclinedPreparationId"]
+            commands = [(receipt["operation"], receipt["state"], (receipt["effect"] or {}).get("kind"))
+                        for _, receipt in ui_receipts if receipt["resource"] == tool_declined]
+            assert commands == [("discard", "effect-observed", "discarded")], ("the commands of the declined tool review", commands)
+            withdrawn, _, _ = observed("/v1/requests/" + ui["toolDeclinedRequestId"], "Request")
+            assert withdrawn["phase"] == "withdrawn" and withdrawn["runId"] is None and withdrawn["readiness"]["supplied"] == [
+                {"name": "input", "source": "literal", "value": PI_UI_TOOL_DECLINED}], ("the declined tool request", withdrawn["phase"], withdrawn["runId"])
+            print("PASS pi-client 12: the tool start of request", ui["toolDeclinedRequestId"], "whose exact review the human declined has no",
+                  "approve command for preparation", ui["toolDeclinedPreparationId"], ", and the later discard and withdraw ended it", flush=True)
+            tool_request, _, _ = observed("/v1/requests/" + ui["toolRequestId"], "Request")
+            assert tool_request["readiness"]["supplied"] == [{"name": "input", "source": "literal", "value": PI_UI_TOOL_ANSWERED}] \
+                and tool_request["runId"] == ui["toolRunId"] and tool_request["phase"] == "associated", ("the tool request", tool_request["runId"], tool_request["phase"])
+            tool_preparation, _, _ = observed("/v1/preparations/" + ui["toolPreparationId"], "Preparation")
+            tool_approvals = receipts_of("approve", "/v1/preparations/" + ui["toolPreparationId"])
+            assert len(tool_approvals) == 1 and tool_approvals[0][1]["state"] not in ("refused", "unresolved") and tool_preparation["state"] == "consumed" \
+                and tool_preparation["requestId"] == ui["toolRequestId"], ("the approval of the tool review", tool_approvals, tool_preparation["state"])
+            tool_answers = receipts_of("answer", "/v1/decisions/" + ui["toolAnsweredDecisionId"])
+            tool_retries = receipts_of("retry", "/v1/runs/" + ui["toolRunId"] + "/control")
+            assert [uri for uri, _ in tool_answers] == [ui["toolAnswerCommand"]] and [uri for uri, _ in tool_retries] == [ui["toolRetryCommand"]] \
+                and all(receipt["state"] == "effect-observed" for _, receipt in tool_answers + tool_retries), (
+                "the answer and retry commands of the tool run", [uri for uri, _ in tool_answers], [uri for uri, _ in tool_retries], ui)
+            assert person_answers(PI_UI_TOOL_ANSWERED) == [False], ("the run store of the tool run", person_answers(PI_UI_TOOL_ANSWERED))
+            succeeded(ui["toolRunId"])
+
+            def transitions(request_id, decision_id, run_id):
+                """The operations of the commands of a request, its approved preparation, its answered decision and the controls of its
+                run, in receipt order. An associated request names no preparation, so the approval names it."""
+                approved = [receipt["resource"] for _, receipt in ui_receipts
+                            if receipt["operation"] == "approve" and observed(receipt["resource"], "Preparation")[0]["requestId"] == request_id]
+                assert len(approved) == 1, ("the approvals of request", request_id, approved)
+                resources = ("/v1/requests/" + request_id, approved[0], "/v1/decisions/" + decision_id, "/v1/runs/" + run_id + "/control")
+                return [receipt["operation"] for _, receipt in ui_receipts if receipt["resource"] in resources]
+
+            human_path = transitions(ui["monitoredRequestId"], ui["answeredDecisionId"], ui["monitoredRunId"])
+            tool_path = transitions(ui["toolRequestId"], ui["toolAnsweredDecisionId"], ui["toolRunId"])
+            assert tool_path == human_path == ["set-input", "enqueue", "approve", "answer", "retry"], ("the tool and human transitions", tool_path, human_path)
+            print("PASS pi-client 13: the tool request", ui["toolRequestId"], "supplied exactly its literal, its one confirmed approval consumed preparation",
+                  ui["toolPreparationId"], ", the confirmed tool answer", ui["toolAnswerCommand"], "is recorded as JSON false in the run store,",
+                  "the confirmed tool retry", ui["toolRetryCommand"], "reached its effect, run", ui["toolRunId"], "succeeded, and the tool and the",
+                  "human path reached the same manager transitions", tool_path, flush=True)
             ui_stores = set(run_prompts)
             report = vitest("test/manager-live.test.ts", tui_fixture.client_profile, report_path, log_path, 7)
             assert report["reconnectLastEventId"] == report["reconnectCursor"] and report["pollEvents"] > 0, ("report delivery", report)
-            print("PASS pi-client 12: the ext-pi session ran its seven steps against the protected endpoint, the forced SSE drop",
+            print("PASS pi-client 14: the ext-pi session ran its seven steps against the protected endpoint, the forced SSE drop",
                   "resumed with Last-Event-ID", report["reconnectCursor"], "and", report["events"], "delivered events, of which",
                   report["pollEvents"], "came through polling, equal the polling listing", flush=True)
             status, requests, _ = request("/v1/requests", harness)
             assert status == 200 and sorted(item["id"] for item in requests["items"]) == sorted(
                 [report["requestId"], report["secondRequestId"], ui["literalRequestId"], ui["capturedRequestId"], ui["declinedRequestId"],
-                 ui["monitoredRequestId"], ui["staleRequestId"], ui["cancelledRequestId"], ui["restartRequestId"]]), (
+                 ui["monitoredRequestId"], ui["staleRequestId"], ui["cancelledRequestId"], ui["restartRequestId"], ui["toolDeclinedRequestId"],
+                 ui["toolRequestId"]]), (
                 "the manager holds other than the requests of the two checks", status)
             submitted, _, _ = observed("/v1/requests/" + report["requestId"], "Request")
             expected = [{"name": declaration["name"], "source": "literal", "value": MIXED_TEXT} for declaration in workflow["inputs"]]
             assert submitted["readiness"]["supplied"] == expected, ("the request did not supply exactly the literal", submitted["readiness"])
             assert submitted["runId"] == report["runId"] and submitted["phase"] == "associated", (
                 "the request does not name the run", submitted["runId"], submitted["phase"])
-            print("PASS pi-client 13: request", report["requestId"], "supplied exactly the Unicode literal and names run", report["runId"],
+            print("PASS pi-client 15: request", report["requestId"], "supplied exactly the Unicode literal and names run", report["runId"],
                   flush=True)
             receipts = command_receipts(session_cursor, harness)
             answers = [(uri, receipt) for uri, receipt in receipts if receipt["operation"] == "answer"]
@@ -9726,14 +9780,14 @@ def pi_client_checks():
             recorded = [entry["answer"] for path in answer_files for entry in json.loads(path.read_bytes())["answers"]
                         if entry["occurrenceId"] == occurrence]
             assert recorded == [False], ("the run store does not record the answer as JSON false", occurrence, recorded)
-            print("PASS pi-client 14: the run store records the answer as JSON false, and answer command", report["answerCommand"],
+            print("PASS pi-client 16: the run store records the answer as JSON false, and answer command", report["answerCommand"],
                   "and retry command", report["retryCommand"], "reached their effects", flush=True)
             snapshot, _, _ = observed("/v1/runs/" + report["runId"] + "/snapshot", "RunSnapshot")
             assert snapshot["runtime"] is not None and snapshot["runtime"]["status"] == "succeeded", ("run status", snapshot["runtime"])
             artifact = verified_download(report["runId"], client, harness)
             assert int(artifact["bytes"]) == report["resultBytes"] and artifact["sha256"] == report["resultSha256"], (
                 "the ext-pi result differs from the harness download", artifact["bytes"], artifact["sha256"], report)
-            print("PASS pi-client 15: run", report["runId"], "succeeded, and the verified result of", artifact["bytes"],
+            print("PASS pi-client 17: run", report["runId"], "succeeded, and the verified result of", artifact["bytes"],
                   "bytes has the SHA-256", artifact["sha256"], "of the ext-pi download", flush=True)
             second = report["secondRunId"]
             secondary, _, _ = observed("/v1/requests/" + report["secondRequestId"], "Request")
@@ -9747,7 +9801,7 @@ def pi_client_checks():
             assert control["decisionHeadId"] is not None, ("the second run has no pending decision head", control)
             head, _, _ = observed("/v1/decisions/" + control["decisionHeadId"], "Decision")
             assert head["state"] == "pending" and head["kind"] == "question", ("the question of the second run is not pending", head["state"])
-            print("PASS pi-client 16: after the extension and the session closed during their live streams, run", second,
+            print("PASS pi-client 18: after the extension and the session closed during their live streams, run", second,
                   "is still running under owned supervision, and its question", control["decisionHeadId"], "is pending", flush=True)
         print("PASS pi-client: the /wfm human path and the ext-pi manager session completed their journeys through the protected",
               "HTTPS endpoint, and the harness confirmed each step from manager facts, with no mutation except its first answer of the stale-answer step",
