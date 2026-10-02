@@ -509,9 +509,12 @@ PI_CONTROLS_STEER_TEXT = "Pi steer \u03bb: focus on the patch."
 # checkout, which must hold wf-manager.el and the live check
 # wf-manager-live.el. When one is unset, or the directory has no
 # wf-manager-live.el, the mode fails with one sentence that names the missing
-# item before it starts anything. The mode issues through TuiModeFixture one
-# client credential emacs with the scopes observe, submit, control and export
-# of profile_1, its version 1 client profile with the fields version,
+# item before it starts anything. The manager has two execution reservations
+# and the two profiles profile_1 and profile_2, each with its own resource
+# key, so that one run of each profile runs at once. The mode issues through
+# TuiModeFixture one client credential emacs with the scopes observe, submit,
+# control and export of both profiles, its version 1 client profile with the
+# fields version,
 # endpoint, credentialFile and caFile, and a separate credential for the
 # harness. It then issues the second client credential emacs-second of the
 # same manager with the same scopes and its client profile, and it writes a
@@ -525,9 +528,11 @@ PI_CONTROLS_STEER_TEXT = "Pi steer \u03bb: focus on the patch."
 # to the profile with no listener, WF_MANAGER_REPORT set to a report file,
 # WF_MANAGER_RUN set to the run handshake file, WF_MANAGER_REVOKE set to
 # the revocation handshake file, WF_MANAGER_FINISH set to the finish
-# handshake file and WF_MANAGER_DOWNLOAD set to the file of the downloaded
-# bytes. ERT must report its one test passed. The harness has three actions
-# during the check, and it otherwise only reads.
+# handshake file, WF_MANAGER_DOWNLOAD set to the file of the downloaded
+# bytes, WF_MANAGER_ANSWER set to the answer handshake file and
+# WF_MANAGER_DRIVE set to the drive handshake file. ERT must report its one
+# test passed. The harness has five actions during the check, and it
+# otherwise only reads.
 # When the check writes the run handshake file, the harness first reads the
 # requests and the command receipts after the start
 # cursor, then creates, enqueues and approves one mixed-controls run of
@@ -541,6 +546,15 @@ PI_CONTROLS_STEER_TEXT = "Pi steer \u03bb: focus on the patch."
 # run to its terminal success, waits until the supervision of the run
 # settles, reads the command receipts again and writes that file with the
 # suffix .done.
+# When the check writes the answer handshake file, which names a decision, the
+# harness answers that decision with JSON false with its own credential,
+# waits until the command reaches effect-observed, and writes that file with
+# the suffix .done and the field command. When the check writes the drive
+# handshake file, which names the two runs of the views step, the harness
+# reads the command receipts after the start cursor and the snapshot of the
+# stale run, drives both runs to their terminal success with drive_mixed,
+# reads the command receipts again and writes that file with the suffix
+# .done.
 # The report is one JSON object. The mode needs these fields: harnessVersion,
 # steps, prompts, scheme, endpointIdentity, authorityEpoch, workflowId,
 # requestId, createStatus, replayStatus, replayEqual, inputName, literal,
@@ -559,12 +573,18 @@ PI_CONTROLS_STEER_TEXT = "Pi steer \u03bb: focus on the patch."
 # serviceLocal, editorBefore, editorAfter, editorRedrawn, the fields
 # RequestId, PreparationId, ReviewDigest, Etag, ReviewText, RunId and
 # Outcomes with each of the prefixes literal, captured and declined,
-# capturedBytes, capturedSha256, declinedSentAfterNo and requestCommands.
+# capturedBytes, capturedSha256, declinedSentAfterNo, requestCommands, the
+# fields RequestId, RunId and DecisionId with each of the prefixes answered
+# and stale, staleAnswerRefusal, staleAnswerDraft, harnessAnswerCommand,
+# answeredWaitingLines, staleRecoveryLines, answeredRecoveryLines,
+# killedWatched, viewsCommands, answeredFinalLines, killEmacsClosed and
+# viewsCommandsAfter.
 # The
 # mode first refuses, with one sentence, a report whose harnessVersion
 # differs from EMACS_HARNESS_VERSION, which detects a mismatched pair of the
 # two repositories. It then requires the steps bind, draft, stale, pages,
-# overview, follow, unreachable, switch, revoke, close, export, service and requests in that order and
+# overview, follow, unreachable, switch, revoke, close, export, service,
+# requests and views in that order and
 # no prompt, and checks the report against its own reads:
 # 1. The check bound its transport over https with the CA file of the
 # profile, with a 32-digit endpoint identity and the authority epoch of the
@@ -633,9 +653,10 @@ PI_CONTROLS_STEER_TEXT = "Pi steer \u03bb: focus on the patch."
 # local-only command of EMACS_LOCAL_COMMANDS refused with a message that
 # names it, wf-plan and wf-cost name the review of wf-run, and the check
 # counted no process start and no request of them. The command receipts
-# after the export command of step 11 are exactly the commands of
-# requestCommands of step 13, and the manager holds the requests of step 7
-# and the three requests of step 13, so the service step sent no command.
+# after the export command of step 11 begin with exactly the commands of
+# requestCommands of step 13, and the manager holds the requests of step 7,
+# the three requests of step 13 and the two requests of the views step, so
+# the service step sent no command.
 # M-x wf-diagnostics showed the endpoint of the profile, each
 # scope of the capabilities and the delivery state poll, and M-x wf-local
 # closed the session.
@@ -663,12 +684,36 @@ PI_CONTROLS_STEER_TEXT = "Pi steer \u03bb: focus on the patch."
 # discarded, and the withdraw key withdrew the request, which has no run.
 # 17. The value of the input of the first setup form was MIXED_TEXT before
 # and after M-x wf-refresh, and the refresh drew new widgets.
+# 18. In the views step, the one answer command of the answered decision
+# reached effect-observed, the one answer body that the check sent to it has
+# the value JSON false and an If-Match, and the run store records JSON false
+# for the question of the run of EMACS_ANSWERED.
+# 19. The harness answered the stale decision once, and its command is the
+# only command of that decision. The check sent one answer to it, the
+# decision now reads 404 unavailable-resource, the report states the 412
+# refusal, the kept draft no and that the decision is no longer the pending
+# head, and the run store records the JSON false of the harness for the run
+# of EMACS_STALE.
+# 20. The command receipts of the views step before the drive are exactly the
+# commands that the check sent, without its refused stale answer, and the one
+# answer command of the harness. The session no longer watched a resource of
+# the killed view, the stale run had not ended at the drive handshake, no
+# cancel command exists, every command after the drive is a retry of the
+# harness and no command follows them, the function of kill-emacs-hook closed
+# the transport with no command, and the stale run then succeeded.
+# 21. The view of the answered run named only its run and its question while
+# the view of the stale run named only its run and its recovery decision,
+# and the view of the answered run then showed its recovery decision. Its
+# last lines are Terminal: succeeded and the Result lines with the size and
+# the SHA-256 digest of the verified result that the harness downloads, and
+# its runtime, supervision, verification, decisions and offers each have one
+# line.
 # Each step prints its own PASS line. It runs one manager lifetime.
 EMACS_CLIENT = "emacs-client"
 emacs_client_mode = len(sys.argv) == 6 and sys.argv[5] == EMACS_CLIENT
 # The version of the report of emacs/wf-manager-live.el. The constant
 # wf-manager-live-harness-version there states the same version.
-EMACS_HARNESS_VERSION = 6
+EMACS_HARNESS_VERSION = 7
 # The local-only commands of wf.el that the service step runs in service
 # mode. wf-manager-live--local-commands of emacs/wf-manager-live.el states
 # them.
@@ -682,6 +727,11 @@ EMACS_PAGE_CHARACTERS = 600000
 # The text of the file that the captured input of the requests step uploads.
 # wf-manager-live-captured of emacs/wf-manager-live.el states it.
 EMACS_CAPTURED = "Emacs captured \u00dcn\u00efcode \u03bb\r\nsecond line\n"
+# The literals of the two mixed-controls runs of the views step.
+# wf-manager-live-answered and wf-manager-live-stale of
+# emacs/wf-manager-live.el state them.
+EMACS_ANSWERED = "Emacs answer \u03bb: explicit false."
+EMACS_STALE = "Emacs stale \u03bb: the harness answers first."
 # The variables that the batch Emacs takes from the environment of the harness.
 EMACS_ALLOWLIST = ("PATH", "LANG", "LC_ALL", "TMPDIR", "USER", "LOGNAME")
 if emacs_client_mode:
@@ -1411,6 +1461,14 @@ if tui_mode == OVERVIEW:
                                           workspaceLabel="HTTPS second fixture", resourceKeys=["overview_two"]))
 if tui_mode in (INPUTS, TUI_CONTROLS, TUI_REDIRECT, TUI_DECISIONS) or client_controls_mode:
     configuration["limits"]["executionReservations"] = 2
+# The two mixed-controls runs of the views step of the emacs-client mode run
+# at once: the manager has two execution reservations, and the runs are of
+# two profiles with their own resource keys, as in the tui-overview mode.
+if emacs_client_mode:
+    configuration["limits"]["executionReservations"] = 2
+    configuration["profiles"][0]["resourceKeys"] = ["emacs_one"]
+    configuration["profiles"].append(dict(configuration["profiles"][0], id="profile_2",
+                                          workspaceLabel="HTTPS second fixture", resourceKeys=["emacs_two"]))
 # The restart quarantines the reservation of the lost run, or of a request
 # in review, with its execution slot and resource keys, until the operator
 # releases it with cleanup evidence. The failures-manager and
@@ -1755,7 +1813,7 @@ if endpoints_mode:
 tui_fixture = (TuiModeFixture(*TUI_MODES[tui_mode]) if tui_mode else
                client_controls_fixture(CLIENT_CONTROLS_MODES[sys.argv[5]]) if client_controls_mode else
                TuiModeFixture(["profile_1"], ["observe", "submit", "control", "export"], client="pi") if pi_client_mode or pi_host_smoke_mode or pi_host_mode or pi_host_model_mode else
-               TuiModeFixture(["profile_1"], ["observe", "submit", "control", "export"], client="emacs") if emacs_client_mode else None)
+               TuiModeFixture(["profile_1", "profile_2"], ["observe", "submit", "control", "export"], client="emacs") if emacs_client_mode else None)
 configuration["administrationRoot"] = str(work / "admin")
 config.write_text(json.dumps(configuration))
 context = ssl.create_default_context(cafile=str(cert))
@@ -10553,6 +10611,8 @@ def emacs_client_checks():
     finish_path = work / "emacs-client-finish.json"
     finished_path = work / "emacs-client-finish.json.done"
     download_path = work / "emacs-client-download.bin"
+    answer_path = work / "emacs-client-answer.json"
+    drive_path = work / "emacs-client-drive.json"
     home = work / "emacs-home"
     home.mkdir(mode=0o700)
     (home / ".emacs.d").mkdir(mode=0o700)
@@ -10581,18 +10641,54 @@ def emacs_client_checks():
             status, overview, _ = request("/v1/snapshot", harness)
             assert status == 200 and not overview["items"], ("the overview is not empty before the check", status)
             cursor = overview["cursor"]
+            views_client = mixed_client(capabilities, harness)
+            harness_answers = []
+
+            def harness_answer(handshake):
+                """Answer the decision that the handshake file names with JSON
+                false with the harness credential, wait until the command
+                reaches its effect, and write the command to the file with the
+                suffix .done."""
+                named = json.loads(handshake.read_bytes())["decision"]
+                decision, tag, _ = views_client[0](named, "Decision")
+                assert decision["state"] == "pending" and decision["kind"] == "question", (
+                    "the named decision", decision["state"], decision["kind"])
+                body = {"operation": "answer", "occurrenceId": decision["address"]["occurrenceId"],
+                        "generation": decision["generation"], "value": False}
+                key = capabilities["authorityEpoch"] + "." + secrets.token_urlsafe(16)
+                with harness_acts():
+                    status, receipt, raw = request(named, harness | {"Content-Type": "application/json", "Idempotency-Key": key,
+                                                                     "If-Match": tag},
+                                                   method="POST", payload=json.dumps(body, separators=(",", ":")).encode())
+                assert status == 202, ("the harness answer", status, receipt.get("code"))
+                validate("CommandReceipt", receipt, raw)
+                command = receipt["links"]["self"]
+                deadline = time.monotonic() + 40
+                while True:
+                    settled, _, _ = views_client[0](command, "CommandReceipt")
+                    if settled["state"] in ("effect-observed", "refused", "unresolved"):
+                        break
+                    assert time.monotonic() < deadline, ("the harness answer did not settle", settled["state"])
+                    time.sleep(0.05)
+                assert settled["state"] == "effect-observed", ("the harness answer", settled["state"], settled.get("refusal"))
+                harness_answers.append((named, command))
+                written = handshake.with_name(handshake.name + ".tmp")
+                written.write_text(json.dumps({"command": command}))
+                os.replace(written, handshake.with_name(handshake.name + ".done"))
+
             environment = {name: os.environ[name] for name in EMACS_ALLOWLIST if name in os.environ}
             environment.update(HOME=str(home), WF_MANAGER_PROFILE=str(profile_path),
                                WF_MANAGER_SECOND_PROFILE=str(second_path),
                                WF_MANAGER_UNREACHABLE_PROFILE=str(unreachable_path),
                                WF_MANAGER_REPORT=str(report_path), WF_MANAGER_RUN=str(run_path),
                                WF_MANAGER_REVOKE=str(revoke_path), WF_MANAGER_FINISH=str(finish_path),
-                               WF_MANAGER_DOWNLOAD=str(download_path))
+                               WF_MANAGER_DOWNLOAD=str(download_path), WF_MANAGER_ANSWER=str(answer_path),
+                               WF_MANAGER_DRIVE=str(drive_path))
             command = [emacs_program, "-Q", "--batch",
                        "--eval", "(setq user-emacs-directory " + json.dumps(str(home / ".emacs.d") + "/") + ")",
                        "-L", emacs_directory, "-l", "wf-manager-live", "-f", "ert-run-tests-batch-and-exit"]
             revoked = False
-            run = listed = receipts = runs = started = closed = snapshot = driven = None
+            run = listed = receipts = runs = started = closed = snapshot = driven = views_drive = None
             answered = recovered = 0
             with log_path.open("wb") as log:
                 child = subprocess.Popen(command, cwd=home, env=environment, stdin=subprocess.DEVNULL,
@@ -10629,6 +10725,23 @@ def emacs_client_checks():
                                            lambda value: value["supervision"] not in ("owned", "cleanup-pending"))
                             driven = command_receipts(cursor, harness)
                             finished_path.write_text("{}")
+                        if answer_path.is_file() and not harness_answers:
+                            # The check has opened the editor of the stale
+                            # decision, and the harness answers it first.
+                            harness_answer(answer_path)
+                        if views_drive is None and drive_path.is_file():
+                            # The check has killed the view of the stale run.
+                            # The harness keeps the command receipts and the
+                            # snapshot of that run, then drives both runs of
+                            # the views step to their terminal success.
+                            named = json.loads(drive_path.read_bytes())
+                            before = command_receipts(cursor, harness)
+                            stale_snapshot, _, _ = views_client[0]("/v1/runs/" + named["staleRunId"] + "/snapshot", "RunSnapshot")
+                            with harness_acts():
+                                for run_id in (named["answeredRunId"], named["staleRunId"]):
+                                    drive_mixed(run_id, views_client, overview=False)
+                            views_drive = (named, before, stale_snapshot, command_receipts(cursor, harness))
+                            drive_path.with_name(drive_path.name + ".done").write_text("{}")
                         if not revoked and revoke_path.is_file():
                             # The one action of the harness during the check.
                             administration({"version": 1, "operation": "revoke-credential",
@@ -10651,7 +10764,7 @@ def emacs_client_checks():
             assert re.search(r"Ran 1 tests?, 1 results? as expected, 0 unexpected", text) and report_path.is_file(), (
                 "the Emacs live check did not run its one test", text[-4000:])
             assert report["steps"] == ["bind", "draft", "stale", "pages", "overview", "follow", "unreachable", "switch",
-                                       "revoke", "close", "export", "service", "requests"] \
+                                       "revoke", "close", "export", "service", "requests", "views"] \
                 and report["prompts"] == 0, (
                 "the Emacs live check did not complete its steps without a prompt", report["steps"], report["prompts"])
             # 1. The binding.
@@ -10735,7 +10848,8 @@ def emacs_client_checks():
             assert report["switchGeneration"] > report["generation"], ("the generation of the switch", report["switchGeneration"])
             # The run of the harness adds its own request to the drafts of the check.
             # The requests step creates three more requests after this step.
-            created = [report["literalRequestId"], report["capturedRequestId"], report["declinedRequestId"]]
+            created = [report["literalRequestId"], report["capturedRequestId"], report["declinedRequestId"],
+                       report["answeredRequestId"], report["staleRequestId"]]
             held = sorted(item["id"] for item in all_requests() if item["id"] not in created)
             assert len(held) == 5 and set([request_id] + page_requests) <= set(held), ("the requests after the check", held)
             assert report["switchOverviewRequests"] == held and report["switchOverviewRuns"] == [run], (
@@ -10842,8 +10956,9 @@ def emacs_client_checks():
                                                       report["serviceLocalCalls"])
             # The commands after the export command are those of the requests
             # step, which step 13 states.
-            later = [receipt for _, receipt in final[len(driven) + 1:]]
             sent = report["requestCommands"]
+            requests_end = len(driven) + 1 + len(sent)
+            later = [receipt for _, receipt in final[len(driven) + 1:requests_end]]
             operations = ["create" if item["resource"] == "/v1/requests" else
                           "capture" if item["resource"].startswith("/v1/captures?") else item["body"]["operation"]
                           for item in sent]
@@ -10958,13 +11073,109 @@ def emacs_client_checks():
                 "the setup form after the refresh", report["editorBefore"], report["editorAfter"], report["editorRedrawn"])
             print("PASS emacs-client 17: wf-refresh in the open setup form read the request again and drew new widgets,",
                   "and the typed literal stayed exactly MIXED_TEXT before and after the refresh", flush=True)
+            # 18. The answer no of the views step reached its decision as JSON false.
+            assert views_drive is not None, "the views step did not ask the harness to drive its runs"
+            named, before_drive, stale_snapshot, after_drive = views_drive
+            answered_run, stale_run = report["answeredRunId"], report["staleRunId"]
+            assert named == {"answeredRunId": answered_run, "staleRunId": stale_run}, ("the drive handshake", named)
+            answered_decision = "/v1/decisions/" + report["answeredDecisionId"]
+            stale_decision = "/v1/decisions/" + report["staleDecisionId"]
+            views_sent = report["viewsCommands"]
+            views_receipts = final[requests_end:]
+
+            def person_answers(literal):
+                """The answers of the person question of every run whose input is the literal, from the run stores."""
+                return [entry["answer"] for path in work.glob("manager/runs/runs/*/runtime/answers.json")
+                        for entry in json.loads(path.read_bytes())["answers"]
+                        if (entry["question"].get("prompt") or "").startswith("Independent confirmation? " + literal)]
+
+            answers = [(uri, receipt) for uri, receipt in views_receipts
+                       if receipt["operation"] == "answer" and receipt["resource"] == answered_decision]
+            assert len(answers) == 1 and answers[0][1]["state"] == "effect-observed", (
+                "the answer command of the answered run", [(uri, receipt["state"]) for uri, receipt in answers])
+            bodies = [item for item in views_sent if item["resource"] == answered_decision]
+            assert len(bodies) == 1 and bodies[0]["body"]["operation"] == "answer" and bodies[0]["body"]["value"] is False \
+                and isinstance(bodies[0]["ifMatch"], str), ("the answer body of the run view", bodies)
+            assert person_answers(EMACS_ANSWERED) == [False], ("the run store does not record JSON false", person_answers(EMACS_ANSWERED))
+            print("PASS emacs-client 18: in the run view of run", answered_run, "wf-answer sent the answer no to decision",
+                  report["answeredDecisionId"], "as JSON false with the entity tag", bodies[0]["ifMatch"], "as If-Match, its command",
+                  answers[0][0], "reached effect-observed, and the run store records JSON false", flush=True)
+            # 19. The decision that the harness answered first gave 412, and the draft stayed.
+            assert harness_answers == [(stale_decision, report["harnessAnswerCommand"])], ("the harness answer", harness_answers)
+            preempted = [(uri, receipt) for uri, receipt in views_receipts if receipt["resource"] == stale_decision]
+            assert [uri for uri, _ in preempted] == [report["harnessAnswerCommand"]] \
+                and preempted[0][1]["state"] == "effect-observed", (
+                "the commands of the preempted decision", [(uri, receipt["state"]) for uri, receipt in preempted])
+            stale_posts = [item for item in views_sent if item["resource"] == stale_decision]
+            assert len(stale_posts) == 1 and stale_posts[0]["body"]["value"] is False, ("the stale answer of the run view", stale_posts)
+            status, resolved, _ = request(stale_decision, harness)
+            assert status == 404 and resolved["code"] == "unavailable-resource", ("the preempted decision is still served", status)
+            refusal = report["staleAnswerRefusal"]
+            assert isinstance(refusal, str) and (
+                f"Decision {report['staleDecisionId']} changed before the answer arrived (412 stale-revision).  "
+                "Nothing was sent again.  The draft \"no\" is kept.") in refusal \
+                and "no longer the pending head (404 unavailable-resource), so the kept draft is not sent" in refusal, (
+                "the report of the stale answer", refusal)
+            assert report["staleAnswerDraft"] == "no", ("the kept draft", report["staleAnswerDraft"])
+            assert person_answers(EMACS_STALE) == [False], ("the run store of the preempted run", person_answers(EMACS_STALE))
+            print("PASS emacs-client 19: the harness answered decision", report["staleDecisionId"], "first with command",
+                  report["harnessAnswerCommand"], "while the answer editor was open, the one answer of the run view received",
+                  "412 stale-revision and left no command, and the draft no was kept and reported", flush=True)
+            # 20. The kill of the view of a running run sent no command.
+            def pair(item):
+                resource = item["resource"]
+                operation = "create" if resource == "/v1/requests" else item["body"]["operation"]
+                return operation, resource
+
+            expected = [pair(item) for item in views_sent if item is not stale_posts[0]]
+            before = [(uri, receipt) for uri, receipt in before_drive[requests_end:]]
+            assert [(receipt["operation"], receipt["resource"]) for uri, receipt in before
+                    if uri != report["harnessAnswerCommand"]] == expected \
+                and [uri for uri, _ in before].count(report["harnessAnswerCommand"]) == 1, (
+                "the commands of the views step", [(receipt["operation"], receipt["resource"]) for _, receipt in before], expected)
+            assert report["killedWatched"] is False, "the session still watches a resource of the killed view"
+            assert stale_snapshot["runtime"] is not None and stale_snapshot["runtime"]["status"] not in (
+                "succeeded", "failed", "cancelled", "orphaned"), ("the stale run ended after the kill", stale_snapshot["runtime"])
+            assert not any(receipt["operation"] == "cancel" for _, receipt in final), "a cancel command exists"
+            assert [uri for uri, _ in final] == [uri for uri, _ in after_drive] \
+                and all(receipt["operation"] == "retry" for _, receipt in after_drive[len(before_drive):]), (
+                "a command after the drive", [receipt["operation"] for _, receipt in final[len(before_drive):]])
+            assert report["killEmacsClosed"] is True and report["viewsCommandsAfter"] == views_sent, (
+                "the function of kill-emacs-hook", report["killEmacsClosed"])
+            ended, _, _ = views_client[0]("/v1/runs/" + stale_run + "/snapshot", "RunSnapshot")
+            assert ended["runtime"] is not None and ended["runtime"]["status"] == "succeeded", ("the stale run", ended["runtime"])
+            print("PASS emacs-client 20: after the kill of the view of run", stale_run, "the run was still",
+                  stale_snapshot["runtime"]["status"], "with no cancel command and no command of the check, and it then",
+                  "succeeded, and the function of kill-emacs-hook closed only the transport", flush=True)
+            # 21. Two run views followed their own runs, and the view ends with the Terminal and Result lines.
+            waiting, stale_lines = report["answeredWaitingLines"], report["staleRecoveryLines"]
+            answered_id, stale_id = report["answeredDecisionId"], report["staleDecisionId"]
+            assert waiting[0].startswith("Service run " + answered_run) \
+                and any(line.startswith("  Head " + answered_id + ": pending question") for line in waiting) \
+                and not any(stale_run in line or stale_id in line for line in waiting), ("the view of the answered run", waiting)
+            assert stale_lines[0].startswith("Service run " + stale_run) \
+                and any(line.startswith("  Head ") and ": pending recovery" in line for line in stale_lines) \
+                and not any(answered_run in line or answered_id in line or stale_id in line for line in stale_lines), (
+                "the view of the stale run", stale_lines)
+            assert any(line.startswith("  Head ") and ": pending recovery" in line for line in report["answeredRecoveryLines"]), (
+                "the view of the answered run after the answer", report["answeredRecoveryLines"])
+            final_lines = report["answeredFinalLines"]
+            for prefix in ("Runtime: ", "Supervision: ", "Verification: ", "Decisions: ", "Offers: "):
+                assert sum(line.startswith(prefix) for line in final_lines) == 1, ("the line of the view", prefix, final_lines)
+            artifact = verified_download(answered_run, views_client, harness)
+            assert final_lines[-3:] == ["Terminal: succeeded", "Result: verified " + str(int(artifact["bytes"])) + " bytes",
+                                        "Result SHA-256: " + artifact["sha256"]], ("the outcome lines of the view", final_lines)
+            print("PASS emacs-client 21: the views of runs", answered_run, "and", stale_run, "followed their own runs, one at",
+                  "its question while the other was at its recovery, and the view of", answered_run, "ended with the Terminal",
+                  "line and the Result lines of the verified", int(artifact["bytes"]), "bytes that the harness downloads", flush=True)
         print("PASS emacs-client: the Emacs transport bound, created and replayed a draft, received the typed 412 and 401",
               "refusals, assembled the overview over all its pages, followed a run of the harness through event polls, kept its",
               "binding after an unreachable switch, switched to a second credential with generation fencing, closed",
               "cleanly, sent an export command whose receipt it read, downloaded and verified the export against the",
               "protected HTTPS endpoint, drove the service mode of wf.el with keys, created, set up, reviewed and",
               "approved two requests whose programs received their literal and captured inputs, declined, discarded",
-              "and withdrew a third, and the harness confirmed each",
+              "and withdrew a third, followed two runs in two views, answered no as JSON false, kept the draft of a",
+              "412 answer, killed a view with no command, and the harness confirmed each",
               "step from manager facts",
               flush=True)
     finally:

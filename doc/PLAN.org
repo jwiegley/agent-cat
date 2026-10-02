@@ -20984,7 +20984,7 @@ separately tested rather than inferred from one newer Emacs build.
 :LABELS:   ["p6","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-02 Fri 03:49]
+:MODIFIED: [2026-10-02 Fri 04:32]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-031
 :SOURCE_REPO: agent-cat
@@ -21073,6 +21073,13 @@ including its explicit v3 invocation compatibility behavior.
     "author": "johnw",
     "text": "PD20 (WM-031 part 2): agent-workflows emacs-native commit dc258f1 ports setup, captures, request and review to service mode in emacs/wf-service.el. wf-run creates a request with POST /v1/requests and opens the local wf--setup-mode form for the missing inputs. Literal and Multiline inputs go through set-input with their exact text. File, Buffer and Region inputs upload exact UTF-8 bytes through POST /v1/captures and are bound with set-input by captureId. The request is then enqueued. wf-refresh in an open form reads the request again and keeps every draft and the point. The review buffer wf-service-review-mode renders the exact preparation of GET /v1/preparations/{id} with admission, queue position, blocking reasons, the five selectors, the ETag and the consent facts. a asks wf-confirm-function and only a yes posts approve with the selectors and If-Match; a no or q sends nothing; d discards, w withdraws, g reads again. agent-cat manager/test/service_http.py emacs-client mode adds live step 13 (requests) at harness version 6. Evidence scope: ci/emacs.sh exited 0 (80 of 80 transport tests); ci/emacs-ui.py local cases passed; emacs-client mode PASS 1 to 17 (MIXED_TEXT reached the run program exactly, the captured input SHA-256 matched, the review showed the digest and selectors and the only approve carried them, a declined review sent no approve and its discard reached discarded, drafts survived a refresh); journey N8 passed. Fess pd-PD20-r1 not blocking; one medium and four low findings and one verification gap filed as acat-f7xu. Limitations: uncertain commands stop and are not reconciled yet; a 412 on set-input does not reopen the form; a cancelled form leaves a draft request; refresh is on request only and the waits are synchronous. WM-031 stays open.",
     "created_at": "2026-10-02T10:49:23Z"
+  },
+  {
+    "id": 613,
+    "issue_id": "acat-wm-031-5yxo",
+    "author": "johnw",
+    "text": "PD21 (WM-031 part 3): agent-workflows emacs-native commit 66144b3 adds service run views and answers in emacs/wf-service.el. wf-service-run-mode derives from wf-run-mode. Each view is keyed by endpoint identity and run identifier and watches /v1/runs/{id}, its snapshot, its control and /v1/decisions?runId={id}. The view shows Runtime, Supervision, Verification, Decisions (head first) and Offers on separate lines and ends with Terminal and Result lines; a succeeded run downloads its verified result once. wf-runs lists local and service views. wf-answer opens wf--answer-editor for the head decision, converts the text with wf-manager-answer-value (no to a Bool is JSON false) and posts with the decision ETag as If-Match; a 412 keeps and reports the draft; an uncertain send is reconciled once and never resent. Killing a view sends no command; kill-emacs-hook only closes the transport. agent-cat manager/test/service_http.py emacs-client mode adds live step 14 (views) at harness version 7 with two profiles and two execution reservations. Evidence scope: ci/emacs.sh exited 0 (85 of 85 transport tests, five new tests failed first against HEAD); ci/emacs-ui.py local cases passed; emacs-client mode 22 PASS lines (steps 18 to 21: the false answer stored in answers.json, the 412 that keeps the draft, the kill with no cancel command, two independent views); journey N8 passed. Fess pd-PD21-r1 not blocking; five low findings filed as acat-yopa. Limitations: a recovery head is refused; wf-control, wf-result, wf-kill and lineage stay pending in service mode; views are not re-bound after an endpoint switch; the Verification line can lag the snapshot. WM-031 stays open.",
+    "created_at": "2026-10-02T11:32:26Z"
   }
 ]
 #+end_src
@@ -23976,6 +23983,34 @@ Update manual and generated indexes together; make -C doc check and make -C doc 
   }
 ]
 #+end_src
+
+* TODO [#D] Resolve the non-blocking fess findings of subtask PD21
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-yopa
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-02 Fri 04:32]
+:MODIFIED: [2026-10-02 Fri 04:32]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess audit fess/pd-PD21-r1.md (2026-10-02) on subtask PD21 (WM-031 part 3, agent-workflows emacs-native, run views and answers in Emacs service mode). The emacs-native commit of PD21 names this issue.
+
+1. (low) emacs/wf-service.el lines 1514 to 1516. When wf-manager-answer-value refuses the typed text, the user-error says "The draft is kept". The puthash into wf-service--answer-drafts runs only after the conversion succeeds, so wf-service-answer-draft does not hold that text. Only the open editor keeps it. Fix: store the draft before the conversion, or change the message to say that the editor keeps the text.
+
+2. (low) manager/test/service_http.py lines 11099 and 11120. person_answers(...) == [False] uses Python equality, and 0 == False holds, so a stored JSON 0 also passes the run-store check. The POST body check uses "is False" and is strict. Fix: assert identity, for example all(a is False for a in answers) and len(answers) == 1.
+
+3. (low) emacs/wf-service.el line 1345. wf-service-open-view registers the buffer in wf-service--views before it watches the four resources. A wf-manager-error on a later watch refuses and leaves a registered view with only some resources watched. Fix: watch all resources before registering the view, or unwatch them and unregister the view on failure.
+
+4. (low) emacs/wf-service.el lines 251 and 1298. Every session change, including each polling batch, redraws every view with erase-buffer and decodes every installed read again. The behavior is correct, but the cost grows with the number of views. Fix: redraw only the views whose watched resources changed, or only when the lines differ.
+
+5. (low) emacs/wf-service.el run views. Open views are not re-bound after an endpoint switch and show a wrong-endpoint failure. The Verification line comes from the run resource, so it can lag the snapshot. Fix: re-bind views on a switch, and take the verification from the snapshot.
+
+Implementer limitations recorded with PD21: wf-answer refuses a recovery head and sends nothing; wf-control, wf-result, wf-kill and the lineage commands remain pending in service mode; the emacs-client fixture now has two execution reservations and a second profile, profile_2, because the manager refuses a second concurrent run of one profile with profile-busy. No security hardening was added, per the 2026-09-30 direction.
 
 * DONE [#B] Shortest-list 4: delete the four standard-library replications
 :PROPERTIES:
