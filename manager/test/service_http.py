@@ -1226,7 +1226,7 @@ EMACS_SERVICE_FALSE = "JOURNEY-ASSERT Emacs answer is JSON false"
 #    profile. The harness names the run and its question in its answer to
 #    the handshake witness-ready. M-x wf-runs opens the view of the run, and
 #    the view must show the pending question as its head. a opens the answer
-#    editor of that head, and Emacs types CROSS_ANSWER. The handshake
+#    editor of that head, and Emacs types CROSS_EMACS_ANSWER. The handshake
 #    open-answer gives the harness the view lines, the editor text and the
 #    commands of the session, which must be none. Steps 4 to 6 run before
 #    the harness answers open-answer, while the editor stays open.
@@ -1242,21 +1242,21 @@ EMACS_SERVICE_FALSE = "JOURNEY-ASSERT Emacs answer is JSON false"
 #
 # 6. A second Pi process starts through PiHost with the client profile of
 #    the pi credential. /wfm-answer RUN opens the answer editor of the
-#    question head, Pi types CROSS_ANSWER, and Enter sends it. The harness
+#    question head, Pi types CROSS_PI_ANSWER, and Enter sends it. The harness
 #    waits until the one answer command of that decision reaches
 #    effect-observed. It must name the client of the pi credential. /quit
 #    ends Pi with exit status 0, and the harness then answers open-answer.
 # 7. C-c C-c sends the open editor of Emacs once. The manager refuses it
 #    with 412 stale-revision. Emacs must record that refusal as its
 #    problem, show it in *Messages*, keep the editor with its text and send
-#    nothing more for three seconds. M-x wf-local closes the session, and
-#    C-x C-c ends Emacs with exit status 0 and the terminal attributes of
-#    its start. The report must have version CROSS_EMACS_REPORT_VERSION and
+#    nothing more for three seconds. The handshake save-result then gives
+#    the harness the refusal and the commands of the session, which must
 #    hold exactly one sent command, the answer JSON false to the decision.
-#    The coordination database must hold exactly one answer command for the
+#    Steps 8 to 10 run before the harness answers save-result. The
+#    coordination database must hold exactly one answer command for the
 #    decision, of the pi client in state effect-observed, and no command of
 #    the emacs client. answers.json of the run store must record JSON false
-#    for the occurrence of the question.
+#    for the occurrence of the question, or the mode fails with CROSS_FALSE.
 # 8. The harness creates, enqueues and approves a mixed-controls request of
 #    profile_2 with its own credential. The resource key cross_two and the
 #    second execution reservation admit it: the requests of both runs must
@@ -1278,26 +1278,65 @@ EMACS_SERVICE_FALSE = "JOURNEY-ASSERT Emacs answer is JSON false"
 #    selects profile_1, O opens the Manager overview, the arrow keys focus
 #    the running row of the first run, and Enter opens its live monitor at
 #    the recovery. r sends the offered retry, as in the tui-journey mode,
-#    until the monitor shows terminal success. Esc returns to the overview,
-#    and q quits the TUI with exit status 0 and the terminal restored. The
-#    coordination database must hold exactly one retry command of the run,
-#    of the tui client in state effect-observed. The run must succeed, and
-#    the harness downloads its verified result.
-# 11. After the manager stops, the flow verb of TUI_CHECK reads the manager
+#    until the monitor shows terminal success and the SHA-256 of the
+#    verified result. s and a typed new path save that result. Esc returns
+#    to the overview, and q quits the TUI with exit status 0 and the
+#    terminal restored. The coordination database must hold exactly one
+#    retry command of the run, of the tui client in state effect-observed.
+#    The run must succeed, and the harness downloads its verified result
+#    with verified_download. The monitor must show the size and the
+#    SHA-256 of that download, and the saved file must have mode 0600 and
+#    hold exactly its bytes.
+# 11. The harness answers save-result with a new path. M-x wf-runs opens the
+#    view of the first run again, which must show terminal success and the
+#    SHA-256 of the harness download, and r saves the verified result to
+#    the path. M-x wf-local closes the session, and C-x C-c ends Emacs with
+#    exit status 0 and the terminal attributes of its start. The report
+#    must have version CROSS_EMACS_REPORT_VERSION, and the saved file must
+#    have mode 0600 and hold exactly the bytes of the harness download.
+# 12. A third Pi process starts through PiHost with the client profile of
+#    the pi credential. /wfm-result RUN retrieves the verified result of the
+#    first run, and Enter on the empty path saves nothing. Pi must show the
+#    size and the SHA-256 of the harness download. /quit ends Pi with exit
+#    status 0.
+# 13. After the manager stops, the flow verb of TUI_CHECK reads the manager
 #    log and the two run stores. The enqueue and the retry of the first
 #    run are from the principal of the tui credential, and its approve and
 #    its answer are from the principal of the pi credential. The one start
 #    relay of the approval follows it in the manager log and delivers the
 #    run-log start of the first run. The consent of that start relay
 #    verifies.
-# 12. No descendant process of the harness remains and no process names the
+# 14. The mode writes the identity record cross-client-witness.json to the
+#    fixture. For each step it lists the acting client, the identifier of
+#    the process that acted, the run identifiers, and each new command with
+#    its client identifier, its operation, its resource, the request, run,
+#    preparation and decision that the command correlates, the position of
+#    its record in the manager log, the manager lifetime of that record and
+#    the acceptedAt and dispatchAttemptedAt timestamps of its receipt. Every
+#    command of the coordination database must be in exactly one step and
+#    have exactly one manager-log record in the one lifetime. The actors
+#    of the steps must be the TUI for steps 1 and 10, Pi for steps 2, 6
+#    and 12, Emacs for steps 3, 7 and 11, and the harness for steps 4, 5,
+#    8 and 9. Each command must be from the credential of the actor of its
+#    step, except that the winning command of the step 8 race is from the
+#    credential that won the race, which is either the emacs or the tui
+#    credential. A step of Emacs lists no command. The record holds no
+#    bearer of the fixture and no run of 16 bytes of the result. A command
+#    of the record has only the fields named above, its identifier, its
+#    credential name, its state and the link of its receipt.
+# 15. No descendant process of the harness remains and no process names the
 #    fixture directory, and the harness removes the credential files, the
-#    client profiles and the home directories of the two Pi processes and
-#    of Emacs.
+#    client profiles and the home directories of the three Pi processes and
+#    of Emacs. The final PASS line names the client processes of the TUI,
+#    Emacs and Pi and the four credentials.
 #
-# The cross-client-lifecycle and cross-client-lineage modes and the
-# cross-client-broken-answer control are not yet implemented. Each prints
-# that it is not yet implemented and exits with status 2.
+# The cross-client-broken-answer control is the cross-client mode with one
+# change: Pi types true instead of false in step 6. The mode must fail at
+# the run-store check of step 7 with CROSS_FALSE.
+#
+# The cross-client-lifecycle and cross-client-lineage modes are not yet
+# implemented. Each prints that it is not yet implemented and exits with
+# status 2.
 CROSS_CLIENT = "cross-client"
 CROSS_CLIENT_LIFECYCLE = "cross-client-lifecycle"
 CROSS_CLIENT_LINEAGE = "cross-client-lineage"
@@ -1305,9 +1344,15 @@ CROSS_CLIENT_BROKEN = "cross-client-broken-answer"
 cross_client_mode = len(sys.argv) == 6 and sys.argv[5] in (CROSS_CLIENT, CROSS_CLIENT_LIFECYCLE, CROSS_CLIENT_LINEAGE, CROSS_CLIENT_BROKEN)
 WITNESS_SECONDS = 900
 CROSS_LITERAL_1 = "Cross-client λ: Café ✓ 雪, created in the TUI"
-# WITNESS_REPORT_VERSION and WITNESS_ANSWER of ci/emacs-ui.py state them.
-CROSS_EMACS_REPORT_VERSION = 2
-CROSS_ANSWER = "false"
+# WITNESS_REPORT_VERSION and WITNESS_ANSWER of ci/emacs-ui.py state the
+# report version and the Emacs answer.
+CROSS_EMACS_REPORT_VERSION = 3
+CROSS_EMACS_ANSWER = "false"
+# The answer that Pi types in step 6, which the control changes.
+CROSS_PI_ANSWER = "true" if len(sys.argv) == 6 and sys.argv[5] == CROSS_CLIENT_BROKEN else "false"
+CROSS_FALSE = "CROSS-ASSERT the cross-client answer is JSON false"
+# The version of the identity record cross-client-witness.json.
+CROSS_RECORD_VERSION = 1
 if emacs_service_mode or emacs_lifecycle_mode or emacs_controls_mode or cross_client_mode:
     emacs_program = os.environ.get("EMACS", "")
     emacs_directory = os.environ.get("WF_EMACS_DIR", "")
@@ -13946,7 +13991,8 @@ def emacs_controls_checks():
 
 
 def cross_client_checks():
-    """The cross-client mode, legs 1 and 2. See CROSS_CLIENT for the steps."""
+    """The cross-client mode and its control: legs 1 and 2, the outputs of
+    the leg 1 run and the identity record. See CROSS_CLIENT for the steps."""
     harness = tui_fixture.harness
     mode = sys.argv[5]
     endpoint = f"https://127.0.0.1:{port}/v1"
@@ -13956,6 +14002,26 @@ def cross_client_checks():
     handshake.mkdir(mode=0o700)
     selectors = ("reviewDigest", "requestRevision", "profileRevision", "descriptorRevision", "processGeneration")
     clients = tui_fixture.client_ids
+    tui_saved, emacs_saved = work / "cross-client-tui-result.bin", work / "cross-client-emacs-result.bin"
+    # The process identifiers of each client, and the steps of the identity
+    # record, each with the commands that are new at its end.
+    pids = {"tui": [], "emacs": [], "pi": []}
+    steps = []
+    # The command of the step 8 race that took effect, and the credential
+    # that sent it. Either the emacs or the tui credential can win.
+    race_command = None
+
+    def step_done(step, actor, runs_of_step):
+        """Record the end of a step for the identity record: the acting
+        client, the process that acted, the runs and the commands that are
+        new. The process of the harness is this process. The one Emacs
+        process is known only from its report, so the steps of Emacs get
+        it in step 14."""
+        known = {ident for entry in steps for ident in entry["commands"]}
+        rows = read_coordination("SELECT id FROM commands ORDER BY rowid")
+        process_id = os.getpid() if actor == "harness" else pids[actor][-1] if actor in ("tui", "pi") else None
+        steps.append({"step": step, "actor": actor, "pid": process_id, "runs": list(runs_of_step),
+                      "commands": [ident for (ident,) in rows if ident not in known]})
 
     def principal(name):
         """The manager-log principal of the credential name."""
@@ -14027,6 +14093,7 @@ def cross_client_checks():
             # 1. The TUI creates and enqueues the request by keys and quits at the review.
             with tui_fixture.session() as tui:
                 session = tui
+                pids["tui"].append(tui.process.pid)
                 tui.wait_screen("Manager profiles")
                 tui.wait_screen("profile_1")
                 tui.send(b"\r")
@@ -14070,11 +14137,13 @@ def cross_client_checks():
                   "enqueued it, showed the exact review of preparation", preparation["id"], "and quit with q, without y, with exit",
                   "status 0 and the terminal restored; the request waits in review, the preparation is live, and no approve command exists",
                   flush=True)
+            step_done("1", "tui", [])
 
             # 2. Pi opens the request of the TUI and approves its exact review.
             pi = PiHost("cross-client-pi", client_profile=tui_fixture.client_profiles["pi"])
             with pi:
                 session = pi.session
+                pids["pi"].append(session.process.pid)
                 session.wait_screen("[Extensions]", timeout=60)
                 shown(["Manager connected: " + endpoint], 30, "Pi did not notify the manager connection")
                 session.send(("/wfm-review " + submitted["id"] + "\r").encode())
@@ -14103,6 +14172,7 @@ def cross_client_checks():
                   "and showed the exact review of the request of the TUI with", ", ".join(selectors) + ",", repr(program), "and workflow",
                   workflow["id"] + "; a and Yes sent the one approve command", approved[0]["id"], "of preparation", preparation["id"] + ",",
                   "the preparation is consumed, request", submitted["id"], "names run", run + ", and /quit ended Pi with status 0", flush=True)
+            step_done("2", "pi", [run])
 
             # 3. Emacs observes the run at its question head, opens the answer
             # editor and types false. Steps 4 to 6 run inside its handshake
@@ -14140,13 +14210,14 @@ def cross_client_checks():
                     and facts["kind"] == "question", ("the head of the Emacs view", facts["head"], facts["kind"])
                 assert len(question_lines) == 1 and facts["viewLines"][0].startswith("Service run " + run), (
                     "the Emacs view did not show the pending question of the run", facts["viewLines"])
-                assert facts["editorBuffer"].startswith("*wf answer JSON") and facts["editorText"] == CROSS_ANSWER, (
+                assert facts["editorBuffer"].startswith("*wf answer JSON") and facts["editorText"] == CROSS_EMACS_ANSWER, (
                     "the answer editor of Emacs does not hold the typed answer", facts["editorBuffer"], facts["editorText"])
                 assert facts["sent"] == [], ("the Emacs session sent a command before the race", facts["sent"])
                 print(f"PASS {mode} 3: Emacs with credential", tui_fixture.credential_ids["emacs"], "opened the view of run", run,
                       "with M-x wf-runs at 80x24 and showed its pending question as the head:", repr(question_lines[0].strip()) + ";",
                       "a opened the answer editor", facts["editorBuffer"], "with the typed text", repr(facts["editorText"]) + ",",
                       "and the session sent no command", flush=True)
+                step_done("3", "emacs", [run])
 
                 # 4. The clients of the commands.
                 rows = read_coordination("SELECT id, operation, client_id, resource_uri FROM commands ORDER BY rowid")
@@ -14164,6 +14235,7 @@ def cross_client_checks():
                       clients["pi"], "of the pi credential, and no command names client", clients["emacs"], "of the emacs credential or",
                       clients["harness"], "of the harness", flush=True)
                 commands.update(enqueue=enqueue[0], approve=approve[0])
+                step_done("4", "harness", [])
 
                 # 5. The run still waits at its question.
                 snapshot, _, _ = observed("/v1/runs/" + run + "/snapshot", "RunSnapshot")
@@ -14173,17 +14245,19 @@ def cross_client_checks():
                     and decision["state"] == "pending", ("the run left its question", snapshot["runtime"], run_view["supervision"], decision["state"])
                 print(f"PASS {mode} 5: run", run, "still runs under owned supervision at its pending question", question["id"],
                       "while the answer editor of Emacs is open", flush=True)
+                step_done("5", "harness", [run])
 
                 # 6. Pi answers the same head with false, and the answer takes effect.
                 pi_answer = PiHost("cross-client-pi-answer", client_profile=tui_fixture.client_profiles["pi"])
                 with pi_answer:
                     session = pi_answer.session
+                    pids["pi"].append(session.process.pid)
                     session.wait_screen("[Extensions]", timeout=60)
                     shown(["Manager connected: " + endpoint], 30, "Pi did not notify the manager connection")
                     session.send(("/wfm-answer " + run + "\r").encode())
                     shown(["Answer of decision " + question["id"]], 30, "/wfm-answer opened no answer editor")
-                    session.send(CROSS_ANSWER.encode())
-                    shown([CROSS_ANSWER], 15, "Pi does not show the typed answer")
+                    session.send(CROSS_PI_ANSWER.encode())
+                    shown([CROSS_PI_ANSWER], 15, "Pi does not show the typed answer")
                     pi_answer.save_screen("answer")
                     session.send(b"\r")
                     shown(["reached decision " + question["id"]], 45, "Pi did not report the answer")
@@ -14197,31 +14271,223 @@ def cross_client_checks():
                 session = None
                 commands["answer"] = found[0][0]
                 print(f"PASS {mode} 6: Pi with credential", tui_fixture.credential_ids["pi"], "ran /wfm-answer", run,
-                      "while the answer editor of Emacs was open and sent the typed answer", CROSS_ANSWER, "to question", question["id"]
+                      "while the answer editor of Emacs was open and sent the typed answer", CROSS_PI_ANSWER, "to question", question["id"]
                       + "; its answer command", found[0][0], "of client", clients["pi"], "reached effect-observed, and /quit ended Pi with status 0",
                       flush=True)
+                step_done("6", "pi", [run])
                 return {}
 
             commands = {}
-            handlers = {"witness-ready": lambda facts: {"run": run, "question": question["id"]}, "open-answer": open_answer}
             environment = {name: os.environ[name] for name in EMACS_ALLOWLIST if name in os.environ}
             command = [sys.executable, "-B", emacs_ui, "--service", str(tui_fixture.client_profiles["emacs"]), str(report_path),
                        "--service-case", "witness", "--service-handshake", str(handshake), "--emacs", emacs_program,
                        "--source", os.path.join(emacs_directory, "wf.el"), "--artifacts", str(artifacts)]
+            order = ["witness-ready", "open-answer", "save-result"]
             handled = []
             script = subprocess.Popen(command, env=environment, stdin=subprocess.DEVNULL)
+
+            def handshake_facts(name, timeout):
+                """Wait until the Emacs witness asks for the handshake name,
+                which must be the next of order, and give its facts."""
+                assert name == order[len(handled)], ("a handshake out of order", name, handled)
+                path = handshake / (name + ".json")
+                deadline = time.monotonic() + timeout
+                while not path.exists():
+                    early = [item.stem for item in handshake.glob("*.json") if item.stem not in handled]
+                    assert not early, ("an unknown or early handshake of the witness", early, name, handled)
+                    assert script.poll() is None, ("the Emacs witness ended before the handshake", name, script.returncode)
+                    assert time.monotonic() < deadline, ("the Emacs witness did not ask for the handshake", name)
+                    time.sleep(0.05)
+                handled.append(name)
+                return json.loads(path.read_text())
+
+            def handshake_answer(name, reply):
+                """Answer the handshake name with the JSON reply, which appears complete by a rename."""
+                staged = handshake / (name + ".done.new")
+                staged.write_text(json.dumps(reply))
+                staged.rename(handshake / (name + ".done"))
+
             try:
-                deadline = time.monotonic() + 480
+                handshake_facts("witness-ready", 240)
+                handshake_answer("witness-ready", {"run": run, "question": question["id"]})
+                handshake_answer("open-answer", open_answer(handshake_facts("open-answer", 240)))
+                facts = handshake_facts("save-result", 240)
+                assert facts["run"] == run, ("the save-result handshake names another run", facts["run"])
+
+                # 7. The later send of Emacs is refused, and the answer of Pi is the only one.
+                sent = facts["sent"]
+                assert len(sent) == 1 and sent[0]["resource"].endswith("/v1/decisions/" + question["id"]) and sent[0]["ifMatch"], (
+                    "the Emacs session sent other than one answer of the question", sent)
+                body = json.loads(sent[0]["body"])
+                assert body["operation"] == "answer" and body["value"] is False, ("the answer that Emacs sent", body)
+                assert facts["sentAfterRefusal"] == sent and facts["sentQuiet"] == sent, (
+                    "the Emacs session sent again after the refusal", facts["sentAfterRefusal"], facts["sentQuiet"])
+                refusal = facts["refusal"]
+                assert "412 stale-revision" in refusal and question["id"] in refusal and "Nothing was sent again" in refusal, (
+                    "the Emacs session did not show the refusal of the manager", refusal)
+                assert refusal[:60] in facts["messagesAfter"] and facts["editorKept"] is True, (
+                    "the refusal is not in *Messages*, or the editor lost its text", facts["editorKept"])
+                found = answer_rows(question["id"])
+                assert found == [(commands["answer"], clients["pi"], "effect-observed")], (
+                    "the coordination database holds other than the one answer of Pi for the question", found)
+                emacs_rows = read_coordination("SELECT id, operation FROM commands WHERE client_id = ?", (clients["emacs"],))
+                assert emacs_rows == [], ("the refused answer of Emacs left a command", emacs_rows)
+                stored = recorded_answers(first_store, occurrence)
+                assert stored == [False], (CROSS_FALSE, stored)
+                print(f"PASS {mode} 7: after the answer of Pi took effect, C-c C-c sent the open editor of Emacs once, and Emacs showed",
+                      "the refusal of the manager:", repr(refusal[:120]) + ";", "the session sent nothing more and kept its draft, the",
+                      "coordination database holds only the answer", commands["answer"], "of client", clients["pi"], "for decision",
+                      question["id"], "in state effect-observed and no command of the emacs credential, and answers.json of",
+                      first_store.parent.name, "records JSON false", flush=True)
+                step_done("7", "emacs", [run])
+
+                # 8. A second run of profile_2 is admitted beside the first, and
+                # two concurrent answers to its question head take effect once.
+                with harness_acts():
+                    runs = ControlHarness(harness, capabilities, mode)
+                    before = set(work.glob("manager/runs/runs/*/runtime"))
+                    second = runs.start("profile_2")
+                    second_store = runs.new_store(before)
+                    admitted = []
+                    for identifier in (run, second):
+                        run_view, _, _ = observed("/v1/runs/" + identifier, "Run")
+                        owner, _, _ = observed("/v1/requests/" + run_view["requestId"], "Request")
+                        snapshot, _, _ = observed("/v1/runs/" + identifier + "/snapshot", "RunSnapshot")
+                        assert owner["admission"]["state"] == "reserved" and run_view["supervision"] == "owned" \
+                            and snapshot["runtime"] is not None and snapshot["runtime"]["status"] == "running", (
+                            "the two runs do not hold their reservations at once", identifier, owner["admission"], run_view["supervision"])
+                        admitted.append((identifier, owner["profileId"]))
+                    control, _, _ = until("/v1/runs/" + second + "/control", "RunControl", lambda value: value["decisionHeadId"] is not None)
+                    head = control["decisionHeadId"]
+                    decision, decision_tag, _ = observed("/v1/decisions/" + head, "Decision")
+                    assert decision["kind"] == "question" and decision["state"] == "pending" and decision["position"] == 0, (
+                        "the head of the second run is not its pending question", decision["kind"], decision["state"])
+                    race = {"operation": "answer", "occurrenceId": decision["address"]["occurrenceId"], "generation": decision["generation"],
+                            "value": False}
+                    payload = json.dumps(race, separators=(",", ":")).encode()
+                    barrier = threading.Barrier(2)
+                    outcomes = {}
+
+                    def race_answer(name):
+                        credential = {"Authorization": "Bearer " + (work / ("credential-" + name)).read_bytes().decode("ascii")}
+                        headers = credential | {"Content-Type": "application/json", "If-Match": decision_tag,
+                                                "Idempotency-Key": capabilities["authorityEpoch"] + "." + secrets.token_urlsafe(16)}
+                        barrier.wait(timeout=10)
+                        status, value, raw, _ = exchange("/v1/decisions/" + head, headers, method="POST", payload=payload)
+                        validate("Problem" if status >= 400 else "CommandReceipt", value, raw)
+                        outcomes[name] = (status, value)
+
+                    threads = [threading.Thread(target=race_answer, args=(name,)) for name in ("emacs", "tui")]
+                    for thread in threads:
+                        thread.start()
+                    for thread in threads:
+                        thread.join(timeout=30)
+                    assert len(outcomes) == 2, ("the concurrent answers did not return", sorted(outcomes))
+                    accepted = [(name, value) for name, (status, value) in outcomes.items() if status == 202]
+                    refused = [(name, status, value) for name, (status, value) in outcomes.items() if status != 202]
+                    assert len(accepted) == 1 and len(refused) == 1, ("the concurrent answers", {name: status for name, (status, _) in outcomes.items()})
+                    winner, receipt = accepted[0]
+                    race_command = {"id": receipt["id"], "credential": winner}
+                    loser, refused_status, problem = refused[0]
+                    assert refused_status == 412 and problem["code"] == "stale-revision", ("the refusal of the later answer", refused_status, problem["code"])
+                    effected, _, raw = runs.client[1](receipt["links"]["self"], "CommandReceipt",
+                        lambda value: value["state"] in ("effect-observed", "refused", "unresolved"))
+                    (work / "cross-client-race-command.json").write_bytes(raw)
+                    assert effected["state"] == "effect-observed" and effected["effect"]["kind"] == "answer-accepted", (
+                        "the winning answer", effected["state"], effected["effect"])
+                    found = answer_rows(head)
+                    assert found == [(receipt["id"], clients[winner], "effect-observed")], (
+                        "the coordination database holds other than the one winning answer", found)
+                    stored = recorded_answers(second_store, decision["address"]["occurrenceId"])
+                    assert stored == [False], ("answers.json of the second run does not record one JSON false", stored)
+                    print(f"PASS {mode} 8: run", second, "of profile_2, which the harness created, enqueued and approved, was admitted while run",
+                          run, "held its reservation (" + ", ".join(f"{identifier} of {profile} reserved" for identifier, profile in admitted) + ");",
+                          "of two concurrent answers to its head", head, "at generation", decision["generation"], "the", winner,
+                          "credential's command", receipt["id"], "reached effect-observed with answer-accepted, the", loser,
+                          "credential received", refused_status, problem["code"] + ", the coordination database holds only that answer,",
+                          "and answers.json of", second_store.parent.name, "records one JSON false", flush=True)
+                    step_done("8", "harness", [run, second])
+
+                    # 9. The harness settles the second run, which releases its reservation.
+                    _, answered, recovered = drive_mixed(second, runs.client, overview=False)
+                    assert (answered, recovered) == (0, 1), ("the harness settled the second run with other controls", answered, recovered)
+                    runs.ended(second, "succeeded")
+                    second_request = observed("/v1/runs/" + second, "Run")[0]["requestId"]
+                    released, _, _ = runs.client[1]("/v1/requests/" + second_request, "Request",
+                                                    lambda value: value["admission"]["state"] == "released")
+                print(f"PASS {mode} 9: the harness sent the offered retry of run", second, "with its own credential, the run succeeded,",
+                      "and request", second_request, "released its reservation", flush=True)
+                step_done("9", "harness", [second])
+
+                # 10. The TUI sends the offered retry of the first run by key and saves its verified result with s.
+                recovery = runs.offered(run, lambda value: value["decisionHeadId"] not in (None, question["id"]))["decisionHeadId"]
+                recovery_decision, _, _ = observed("/v1/decisions/" + recovery, "Decision")
+                assert recovery_decision["kind"] == "recovery" and recovery_decision["state"] == "pending", (
+                    "the next head of the first run is not its recovery", recovery_decision["kind"], recovery_decision["state"])
+                control_uri = "/v1/runs/" + run + "/control"
+                with tui_fixture.session() as tui:
+                    session = tui
+                    pids["tui"].append(tui.process.pid)
+                    tui.wait_screen("Manager profiles")
+                    tui.wait_screen("profile_1")
+                    tui.send(b"\r")
+                    tui.wait_screen("Manager workflows")
+                    tui.send(b"O")
+                    tui.wait_screen("Manager overview")
+                    focus_row(tui, "run Running", "Run:" + run, 30)
+                    tui.send(b"\r")
+                    shown(["Recovery required", "r RETRY"], 30, "the TUI did not show the recovery of the first run")
+                    (work / "cross-client-tui-recovery.screen.txt").write_text(tui.screen.text())
+                    mutation_key(tui, b"r", "Terminal: succeeded", 120)
+                    monitor = shown(["Terminal: succeeded", "Result SHA-256: "], 45, "the TUI showed no verified result")
+                    (work / "cross-client-tui-succeeded.screen.txt").write_text(monitor)
+                    tui.send(b"s")
+                    tui.wait_screen("Save verified result", timeout=15)
+                    tui.send(str(tui_saved).encode())
+                    tui.send(b"\x04")
+                    tui.wait_screen("Saved the verified", timeout=15)
+                    (work / "cross-client-tui-saved.screen.txt").write_text(tui.screen.text())
+                    tui.wait_screen("s SAVE RESULT", timeout=15)
+                    tui.send(b"\x1b")
+                    tui.wait_screen("Manager overview", timeout=10)
+                    tui.send(b"q")
+                    assert tui.wait_exit(20) == 0, "the TUI did not exit with status 0 after the retry"
+                    tui.assert_restored()
+                session = None
+                retries = read_coordination("SELECT id, client_id, state FROM commands WHERE operation = 'retry' AND resource_uri = ?", (control_uri,))
+                assert len(retries) == 1 and retries[0][1:] == (clients["tui"], "effect-observed"), (
+                    "the TUI did not send the one retry of the first run", retries, clients)
+                commands["retry"] = retries[0][0]
+                runs.ended(run, "succeeded")
+                artifact = verified_download(run, runs.client, harness)
+                downloaded = (work / "verified-result.json").read_bytes()
+                size = int(artifact["bytes"])
+                for row in ("Result: verified " + str(size) + " bytes", "Result SHA-256: " + artifact["sha256"]):
+                    assert squeeze(row) in squeeze(monitor), ("the live monitor of the TUI does not show the verified result", row)
+
+                def saved_exactly(path, who):
+                    """Require that path is a regular file with mode 0600 that
+                    holds exactly the bytes of the harness download."""
+                    status = os.lstat(path)
+                    assert stat.S_ISREG(status.st_mode) and stat.S_IMODE(status.st_mode) == 0o600, (
+                        "the result that " + who + " saved is not a regular file with mode 0600", oct(status.st_mode))
+                    saved = path.read_bytes()
+                    assert saved == downloaded and len(saved) == size and hashlib.sha256(saved).hexdigest() == artifact["sha256"], (
+                        "the result that " + who + " saved differs from the harness download", len(saved))
+
+                saved_exactly(tui_saved, "the TUI")
+                print(f"PASS {mode} 10: a new TUI with credential", tui_fixture.credential_ids["tui"], "opened run", run, "from the Manager",
+                      "overview at its recovery decision", recovery, "and r sent the one retry", retries[0][0], "of client", clients["tui"] + ";",
+                      "it reached effect-observed, the run succeeded, the monitor showed the verified", size, "bytes and SHA-256",
+                      artifact["sha256"], "of the harness download, s saved them to", tui_saved, "with mode 0600 and the exact bytes,",
+                      "and q ended the TUI with status 0 and the terminal restored", flush=True)
+                step_done("10", "tui", [run])
+
+                # 11. Emacs saves the verified result with r in the view of the run.
+                handshake_answer("save-result", {"path": str(emacs_saved)})
+                deadline = time.monotonic() + 240
                 while script.poll() is None:
-                    assert time.monotonic() < deadline, "the Emacs witness did not end in 480 seconds"
-                    for path in sorted(handshake.glob("*.json")):
-                        if path.stem not in handled:
-                            assert path.stem == list(handlers)[len(handled)], ("an unknown or early handshake of the witness", path.stem, handled)
-                            handled.append(path.stem)
-                            reply = handlers[path.stem](json.loads(path.read_text()))
-                            answer = handshake / (path.stem + ".done.new")
-                            answer.write_text(json.dumps(reply))
-                            answer.rename(handshake / (path.stem + ".done"))
+                    assert time.monotonic() < deadline, "the Emacs witness did not end in 240 seconds after save-result"
                     time.sleep(0.05)
             finally:
                 if script.poll() is None:
@@ -14231,156 +14497,66 @@ def cross_client_checks():
             assert script.returncode == 0, ("the Emacs witness of " + emacs_ui + " failed", script.returncode, report["steps"], handled)
             assert report["version"] == CROSS_EMACS_REPORT_VERSION, (
                 f"The {mode} mode requires report version {CROSS_EMACS_REPORT_VERSION}, and {emacs_ui} wrote version {report['version']}.")
-            assert report["steps"] == ["1", "2", "3", "4", "5"] and handled == list(handlers), ("the steps of the witness", report["steps"], handled)
+            assert report["steps"] == ["1", "2", "3", "4", "5", "6"] and handled == order, ("the steps of the witness", report["steps"], handled)
             assert report["profile"] == str(tui_fixture.client_profiles["emacs"]) and report["run"] == run \
                 and report["question"] == question["id"], ("the run of the Emacs view", report["run"], report["question"])
-
-            # 7. The later send of Emacs is refused, and the answer of Pi is the only one.
-            sent = report["sent"]
-            assert len(sent) == 1 and sent[0]["resource"].endswith("/v1/decisions/" + question["id"]) and sent[0]["ifMatch"], (
-                "the Emacs session sent other than one answer of the question", sent)
-            body = json.loads(sent[0]["body"])
-            assert body["operation"] == "answer" and body["value"] is False, ("the answer that Emacs sent", body)
-            assert report["sentAfterRefusal"] == sent and report["sentQuiet"] == sent, (
-                "the Emacs session sent again after the refusal", report["sentAfterRefusal"], report["sentQuiet"])
-            refusal = report["refusal"]
-            assert "412 stale-revision" in refusal and question["id"] in refusal and "Nothing was sent again" in refusal, (
-                "the Emacs session did not show the refusal of the manager", refusal)
-            assert refusal[:60] in report["messagesAfter"] and report["editorKept"] is True, (
-                "the refusal is not in *Messages*, or the editor lost its text", report["editorKept"])
+            assert report["sent"] == facts["sent"], ("the Emacs session sent a command after save-result", report["sent"])
             assert report["exitStatus"] == 0 and report["terminalAfter"] == report["terminalBefore"], (
                 "the terminal attributes after Emacs", report["exitStatus"])
-            found = answer_rows(question["id"])
-            assert found == [(commands["answer"], clients["pi"], "effect-observed")], (
-                "the coordination database holds other than the one answer of Pi for the question", found)
-            emacs_rows = read_coordination("SELECT id, operation FROM commands WHERE client_id = ?", (clients["emacs"],))
-            assert emacs_rows == [], ("the refused answer of Emacs left a command", emacs_rows)
-            stored = recorded_answers(first_store, occurrence)
-            assert stored == [False], ("answers.json of the run does not record the one JSON false", stored)
-            print(f"PASS {mode} 7: after the answer of Pi took effect, C-c C-c sent the open editor of Emacs once, and Emacs showed",
-                  "the refusal of the manager:", repr(refusal[:120]) + ";", "the session sent nothing more and kept its draft, C-x C-c ended",
-                  "Emacs with status 0 and the terminal attributes of its start, the coordination database holds only the answer",
-                  commands["answer"], "of client", clients["pi"], "for decision", question["id"], "in state effect-observed and no command",
-                  "of the emacs credential, and answers.json of", first_store.parent.name, "records JSON false", flush=True)
+            pids["emacs"].append(report["emacsPid"])
+            assert report["savedPath"] == str(emacs_saved) and "Terminal: succeeded" in report["resultLines"] \
+                and "Result SHA-256: " + artifact["sha256"] in report["resultLines"], (
+                "the view of Emacs does not show the verified result of the harness download", report["resultLines"])
+            assert str(size) + " bytes" in report["savedMessage"] and artifact["sha256"] in report["savedMessage"], (
+                "Emacs did not report the size and the SHA-256 of the saved result", report["savedMessage"])
+            saved_exactly(emacs_saved, "Emacs")
+            print(f"PASS {mode} 11: Emacs with credential", tui_fixture.credential_ids["emacs"], "showed terminal success and",
+                  repr("Result SHA-256: " + artifact["sha256"]), "in the view of run", run + ", r saved the verified result to", emacs_saved,
+                  "with mode 0600 and the exact", size, "bytes of the harness download, and C-x C-c ended Emacs with status 0 and the",
+                  "terminal attributes of its start", flush=True)
+            step_done("11", "emacs", [run])
 
-            # 8. A second run of profile_2 is admitted beside the first, and
-            # two concurrent answers to its question head take effect once.
-            with harness_acts():
-                runs = ControlHarness(harness, capabilities, mode)
-                before = set(work.glob("manager/runs/runs/*/runtime"))
-                second = runs.start("profile_2")
-                second_store = runs.new_store(before)
-                admitted = []
-                for identifier in (run, second):
-                    run_view, _, _ = observed("/v1/runs/" + identifier, "Run")
-                    owner, _, _ = observed("/v1/requests/" + run_view["requestId"], "Request")
-                    snapshot, _, _ = observed("/v1/runs/" + identifier + "/snapshot", "RunSnapshot")
-                    assert owner["admission"]["state"] == "reserved" and run_view["supervision"] == "owned" \
-                        and snapshot["runtime"] is not None and snapshot["runtime"]["status"] == "running", (
-                        "the two runs do not hold their reservations at once", identifier, owner["admission"], run_view["supervision"])
-                    admitted.append((identifier, owner["profileId"]))
-                control, _, _ = until("/v1/runs/" + second + "/control", "RunControl", lambda value: value["decisionHeadId"] is not None)
-                head = control["decisionHeadId"]
-                decision, decision_tag, _ = observed("/v1/decisions/" + head, "Decision")
-                assert decision["kind"] == "question" and decision["state"] == "pending" and decision["position"] == 0, (
-                    "the head of the second run is not its pending question", decision["kind"], decision["state"])
-                race = {"operation": "answer", "occurrenceId": decision["address"]["occurrenceId"], "generation": decision["generation"],
-                        "value": False}
-                payload = json.dumps(race, separators=(",", ":")).encode()
-                barrier = threading.Barrier(2)
-                outcomes = {}
-
-                def race_answer(name):
-                    credential = {"Authorization": "Bearer " + (work / ("credential-" + name)).read_bytes().decode("ascii")}
-                    headers = credential | {"Content-Type": "application/json", "If-Match": decision_tag,
-                                            "Idempotency-Key": capabilities["authorityEpoch"] + "." + secrets.token_urlsafe(16)}
-                    barrier.wait(timeout=10)
-                    status, value, raw, _ = exchange("/v1/decisions/" + head, headers, method="POST", payload=payload)
-                    validate("Problem" if status >= 400 else "CommandReceipt", value, raw)
-                    outcomes[name] = (status, value)
-
-                threads = [threading.Thread(target=race_answer, args=(name,)) for name in ("emacs", "tui")]
-                for thread in threads:
-                    thread.start()
-                for thread in threads:
-                    thread.join(timeout=30)
-                assert len(outcomes) == 2, ("the concurrent answers did not return", sorted(outcomes))
-                accepted = [(name, value) for name, (status, value) in outcomes.items() if status == 202]
-                refused = [(name, status, value) for name, (status, value) in outcomes.items() if status != 202]
-                assert len(accepted) == 1 and len(refused) == 1, ("the concurrent answers", {name: status for name, (status, _) in outcomes.items()})
-                winner, receipt = accepted[0]
-                loser, refused_status, problem = refused[0]
-                assert refused_status == 412 and problem["code"] == "stale-revision", ("the refusal of the later answer", refused_status, problem["code"])
-                effected, _, raw = runs.client[1](receipt["links"]["self"], "CommandReceipt",
-                    lambda value: value["state"] in ("effect-observed", "refused", "unresolved"))
-                (work / "cross-client-race-command.json").write_bytes(raw)
-                assert effected["state"] == "effect-observed" and effected["effect"]["kind"] == "answer-accepted", (
-                    "the winning answer", effected["state"], effected["effect"])
-                found = answer_rows(head)
-                assert found == [(receipt["id"], clients[winner], "effect-observed")], (
-                    "the coordination database holds other than the one winning answer", found)
-                stored = recorded_answers(second_store, decision["address"]["occurrenceId"])
-                assert stored == [False], ("answers.json of the second run does not record one JSON false", stored)
-                print(f"PASS {mode} 8: run", second, "of profile_2, which the harness created, enqueued and approved, was admitted while run",
-                      run, "held its reservation (" + ", ".join(f"{identifier} of {profile} reserved" for identifier, profile in admitted) + ");",
-                      "of two concurrent answers to its head", head, "at generation", decision["generation"], "the", winner,
-                      "credential's command", receipt["id"], "reached effect-observed with answer-accepted, the", loser,
-                      "credential received", refused_status, problem["code"] + ", the coordination database holds only that answer,",
-                      "and answers.json of", second_store.parent.name, "records one JSON false", flush=True)
-
-                # 9. The harness settles the second run, which releases its reservation.
-                _, answered, recovered = drive_mixed(second, runs.client, overview=False)
-                assert (answered, recovered) == (0, 1), ("the harness settled the second run with other controls", answered, recovered)
-                runs.ended(second, "succeeded")
-                second_request = observed("/v1/runs/" + second, "Run")[0]["requestId"]
-                released, _, _ = runs.client[1]("/v1/requests/" + second_request, "Request",
-                                                lambda value: value["admission"]["state"] == "released")
-            print(f"PASS {mode} 9: the harness sent the offered retry of run", second, "with its own credential, the run succeeded,",
-                  "and request", second_request, "released its reservation", flush=True)
-
-            # 10. The TUI sends the offered retry of the first run by key.
-            recovery = runs.offered(run, lambda value: value["decisionHeadId"] not in (None, question["id"]))["decisionHeadId"]
-            recovery_decision, _, _ = observed("/v1/decisions/" + recovery, "Decision")
-            assert recovery_decision["kind"] == "recovery" and recovery_decision["state"] == "pending", (
-                "the next head of the first run is not its recovery", recovery_decision["kind"], recovery_decision["state"])
-            control_uri = "/v1/runs/" + run + "/control"
-            with tui_fixture.session() as tui:
-                session = tui
-                tui.wait_screen("Manager profiles")
-                tui.wait_screen("profile_1")
-                tui.send(b"\r")
-                tui.wait_screen("Manager workflows")
-                tui.send(b"O")
-                tui.wait_screen("Manager overview")
-                focus_row(tui, "run Running", "Run:" + run, 30)
-                tui.send(b"\r")
-                shown(["Recovery required", "r RETRY"], 30, "the TUI did not show the recovery of the first run")
-                (work / "cross-client-tui-recovery.screen.txt").write_text(tui.screen.text())
-                mutation_key(tui, b"r", "Terminal: succeeded", 120)
-                (work / "cross-client-tui-succeeded.screen.txt").write_text(tui.screen.text())
-                tui.send(b"\x1b")
-                tui.wait_screen("Manager overview", timeout=10)
-                tui.send(b"q")
-                assert tui.wait_exit(20) == 0, "the TUI did not exit with status 0 after the retry"
-                tui.assert_restored()
+            # 12. Pi shows the verified result with /wfm-result.
+            pi_result = PiHost("cross-client-pi-result", client_profile=tui_fixture.client_profiles["pi"])
+            with pi_result:
+                session = pi_result.session
+                pids["pi"].append(session.process.pid)
+                session.wait_screen("[Extensions]", timeout=60)
+                shown(["Manager connected: " + endpoint], 30, "Pi did not notify the manager connection")
+                session.send(("/wfm-result " + run + "\r").encode())
+                shown(["Path of a new file for the verified " + str(size) + " bytes of run " + run], 150,
+                      "/wfm-result opened no path dialog for the verified result")
+                session.send(b"\r")
+                shown_result = "Run " + run + ": verified " + str(size) + " bytes, SHA-256 " + artifact["sha256"] + "."
+                shown([shown_result, "No path was named, so nothing was saved."], 30, "Pi did not show the verified result")
+                pi_result.save_screen("result")
+                pi_result.quit()
             session = None
-            retries = read_coordination("SELECT id, client_id, state FROM commands WHERE operation = 'retry' AND resource_uri = ?", (control_uri,))
-            assert len(retries) == 1 and retries[0][1:] == (clients["tui"], "effect-observed"), (
-                "the TUI did not send the one retry of the first run", retries, clients)
-            commands["retry"] = retries[0][0]
-            runs.ended(run, "succeeded")
-            artifact = verified_download(run, runs.client, harness)
-            print(f"PASS {mode} 10: a new TUI with credential", tui_fixture.credential_ids["tui"], "opened run", run, "from the Manager",
-                  "overview at its recovery decision", recovery, "and r sent the one retry", retries[0][0], "of client", clients["tui"] + ";",
-                  "it reached effect-observed, the run succeeded with the verified result of", artifact["bytes"], "bytes and SHA-256",
-                  artifact["sha256"] + ", and q ended the TUI with status 0 and the terminal restored", flush=True)
+            print(f"PASS {mode} 12: Pi with credential", tui_fixture.credential_ids["pi"], "ran /wfm-result", run, "and showed",
+                  repr(shown_result), "with the size and the SHA-256 of the harness download, and /quit ended Pi with status 0", flush=True)
+            step_done("12", "pi", [run])
+
+            # The receipt of every command, for the identity record.
+            rows = read_coordination("SELECT id, client_id, operation, resource_uri, request_id, run_id, preparation_id, decision_id, state "
+                                     "FROM commands ORDER BY rowid")
+            receipts = {}
+            for ident, client, operation, resource, request_id, run_id, preparation_id, decision_id, state in rows:
+                status, receipt, raw = request("/v1/commands/" + ident, harness)
+                assert status == 200, ("the receipt of a command", ident, status)
+                validate("CommandReceipt", receipt, raw)
+                assert receipt["id"] == ident and receipt["operation"] == operation and receipt["resource"] == resource, (
+                    "the receipt differs from its command row", ident, receipt["operation"], receipt["resource"])
+                receipts[ident] = {"id": ident, "client": client, "operation": operation, "resource": resource, "requestId": request_id,
+                                   "runId": run_id, "preparationId": preparation_id, "decisionId": decision_id, "state": receipt["state"],
+                                   "receipt": receipt["links"]["self"], "acceptedAt": receipt["acceptedAt"],
+                                   "dispatchAttemptedAt": receipt["dispatchAttemptedAt"]}
     finally:
         if process.poll() is None:
             process.terminate()
         process.wait(timeout=25)
         (work / "server-0.exit").write_text(str(process.returncode) + "\n")
 
-    # 11. The manager log names the senders, and the start relay follows the approval.
+    # 13. The manager log names the senders, and the start relay follows the approval.
     flow_dir = work / "manager" / "flow"
     logs = sorted(flow_dir.glob("*.ndjson"))
     stores = sorted(work.glob("manager/runs/runs/*/runtime"))
@@ -14410,22 +14586,90 @@ def cross_client_checks():
     consent = [item for item in summary["consent"] if item["command"] == approval["position"]]
     assert len(consent) == 1 and consent[0]["verified"] and not consent[0]["problems"] \
         and consent[0]["relay"] == at(manager_path, start["position"]), ("the consent of the start relay", consent)
-    print(f"PASS {mode} 11: the manager log holds the enqueue", commands["enqueue"], "and the retry", commands["retry"], "from",
+    print(f"PASS {mode} 13: the manager log holds the enqueue", commands["enqueue"], "and the retry", commands["retry"], "from",
           principal("tui"), "and the approve", commands["approve"], "and the answer", commands["answer"], "from", principal("pi"),
           "; the start relay at position", start["position"], "follows the approval at position", approval["position"], "and delivers",
           "run-log start 0 of", store.parent.name + ", and its consent verifies", flush=True)
 
-    # 12. No child remains, and the fixture secrets and homes are removed.
+    # 14. The identity record of the witness.
+    lifetimes = summary["joins"]["lifetimes"]
+    assert len(lifetimes) == 1 and lifetimes[0]["shutdown"] is not None, ("the witness has other than one manager lifetime", lifetimes)
+    notice = next(record for record in manager if record["position"] == lifetimes[0]["lifetime"]["position"])
+    assert notice["schema"] == "notice" and notice["body"]["notice"] == "lifetime", ("the lifetime notice of the manager log", notice["schema"])
+    lifetime = {"processGeneration": notice["body"]["processGeneration"], "lifetimePosition": lifetimes[0]["lifetime"]["position"],
+                "shutdownPosition": lifetimes[0]["shutdown"]}
+    assert preparation["processGeneration"] == lifetime["processGeneration"], (
+        "the preparation names another process generation than the lifetime notice", preparation["processGeneration"])
+    for ident, entry in receipts.items():
+        records_of = [record for record in manager if record["schema"] == "command" and record["about"].get("command") == ident]
+        assert len(records_of) == 1 and lifetime["lifetimePosition"] < records_of[0]["position"] < lifetime["shutdownPosition"], (
+            "a command has other than one manager-log record in the lifetime", ident, [record["position"] for record in records_of])
+        entry.update(managerLogPosition=records_of[0]["position"], processGeneration=lifetime["processGeneration"])
+    listed = [ident for entry in steps for ident in entry["commands"]]
+    assert sorted(listed) == sorted(receipts) and len(set(listed)) == len(listed), (
+        "the steps do not list each command once", listed, sorted(receipts))
+    names = {clients[name]: name for name in clients}
+    for entry in steps:
+        if entry["actor"] == "emacs":
+            entry["pid"] = pids["emacs"][0]
+        entry["commands"] = [receipts[ident] | {"credential": names[receipts[ident]["client"]]} for ident in entry["commands"]]
+    identity = {"version": CROSS_RECORD_VERSION, "mode": mode, "endpoint": endpoint, "tls": negotiated,
+                "authorityEpoch": capabilities["authorityEpoch"], "lifetime": lifetime,
+                "credentials": {name: {"credentialId": tui_fixture.credential_ids[name], "client": clients[name]}
+                                for name in CrossClientFixture.CLIENTS + ("harness",)},
+                "processes": pids | {"harness": [os.getpid()]}, "steps": steps}
+    encoded = json.dumps(identity, ensure_ascii=False, indent=2).encode()
+    bearers = [path.read_bytes().strip() for path in [work / "credential"] + sorted(work.glob("credential-*"))]
+    assert len(bearers) >= 4 and all(bearers), ("the bearers of the fixture", len(bearers))
+    assert not [secret for secret in bearers if secret in encoded], "the identity record holds a bearer"
+    window = 16
+    fragments = [downloaded[at:at + window] for at in range(len(downloaded) - window + 1)]
+    assert len(downloaded) >= window and not [fragment for fragment in fragments if fragment in encoded], (
+        "the identity record holds bytes of the result")
+    record_keys = {"id", "client", "credential", "operation", "resource", "requestId", "runId", "preparationId", "decisionId",
+                   "state", "receipt", "acceptedAt", "dispatchAttemptedAt", "managerLogPosition", "processGeneration"}
+    assert all(set(command) == record_keys for entry in steps for command in entry["commands"]), (
+        "a command of the identity record has other fields", [sorted(set(command) ^ record_keys)
+                                                              for entry in steps for command in entry["commands"]])
+    record_path = work / "cross-client-witness.json"
+    record_path.write_bytes(encoded)
+    actors = {entry["step"]: entry["actor"] for entry in steps}
+    by_client = {name: [entry["id"] for step in steps for entry in step["commands"] if entry["credential"] == name] for name in clients}
+    assert all(entry["pid"] is not None for entry in steps), ("a step names no process", [entry["step"] for entry in steps])
+    expected_actors = {"1": "tui", "2": "pi", "3": "emacs", "4": "harness", "5": "harness", "6": "pi", "7": "emacs",
+                       "8": "harness", "9": "harness", "10": "tui", "11": "emacs", "12": "pi"}
+    assert actors == expected_actors, ("the steps name other actors", actors)
+    assert race_command is not None and race_command["id"] in [command["id"] for entry in steps if entry["step"] == "8" for command in entry["commands"]], (
+        "step 8 does not list the command of the answer race", race_command)
+    senders = {command["id"]: (race_command["credential"] if command["id"] == race_command["id"] else entry["actor"],
+                               command["credential"]) for entry in steps for command in entry["commands"]}
+    assert all(expected == found for expected, found in senders.values()), (
+        "a command of a step is from another credential than the actor of the step",
+        {ident: pair for ident, pair in senders.items() if pair[0] != pair[1]})
+    assert not [command for entry in steps if entry["actor"] == "emacs" for command in entry["commands"]], (
+        "a step of Emacs lists a command", [entry["step"] for entry in steps if entry["actor"] == "emacs" and entry["commands"]])
+    print(f"PASS {mode} 14: wrote", record_path, "with", len(steps), "steps and", len(receipts), "commands in manager lifetime",
+          lifetime["processGeneration"], "(" + ", ".join(f"{name}: {len(found)}" for name, found in by_client.items()) + " commands,",
+          "with the race command", race_command["id"], "from the", race_command["credential"], "credential);",
+          "each command is in one step with its client, its correlated request, run, preparation and decision, its manager-log",
+          "position and its receipt timestamps, and the record holds no bearer and no result bytes", flush=True)
+
+    # 15. No child remains, and the fixture secrets and homes are removed.
+    hosts = (pi, pi_answer, pi_result)
     removed = emacs_service_cleanup(artifacts, [tui_fixture.client_profiles[name] for name in CrossClientFixture.CLIENTS]
-                                    + [host.home for host in (pi, pi_answer)] + [host.agent for host in (pi, pi_answer)]
-                                    + [host.state for host in (pi, pi_answer)])
-    print(f"PASS {mode} 12: all clients quit, the manager stopped, no TUI, Emacs, Pi or fixture process remains, and the harness",
+                                    + [host.home for host in hosts] + [host.agent for host in hosts] + [host.state for host in hosts])
+    print(f"PASS {mode} 15: all clients quit, the manager stopped, no TUI, Emacs, Pi or fixture process remains, and the harness",
           "removed", removed, "credential, client profile and home paths", flush=True)
     elapsed = time.monotonic() - mode_started
     assert elapsed <= WITNESS_SECONDS, ("the witness took longer than its budget", round(elapsed), WITNESS_SECONDS)
+    credentials = ", ".join(f"{name} {tui_fixture.credential_ids[name]} of client {clients[name]}"
+                            for name in CrossClientFixture.CLIENTS + ("harness",))
     print(f"PASS {mode}: the TUI created, Pi approved and Emacs observed one run, Pi won the answer race against the open editor",
-          "of Emacs, two concurrent HTTP answers took effect once, and the TUI sent the retry to terminal success, each client with its",
-          f"own credential, over one manager at {endpoint} that negotiates {negotiated}, in {elapsed:.0f} seconds", flush=True)
+          "of Emacs, two concurrent HTTP answers took effect once, the TUI sent the retry to terminal success, and the TUI and Emacs",
+          "saved and Pi showed its verified result with the SHA-256 of the harness download; the client processes were the TUI",
+          "(pids " + ", ".join(map(str, pids["tui"])) + "), Emacs (pid " + ", ".join(map(str, pids["emacs"])) + ") and Pi (pids",
+          ", ".join(map(str, pids["pi"])) + "), and the four credentials were", credentials + ", over one manager at", endpoint,
+          f"that negotiates {negotiated}, in {elapsed:.0f} seconds", flush=True)
 
 
 def storage_checks():
@@ -14761,10 +15005,10 @@ if person_mode:
 
 
 # The cross-client witness modes are not control-profile modes. Only the
-# cross-client mode is implemented, and each other witness mode exits with
-# status 2.
+# cross-client mode and its control are implemented, and each other witness
+# mode exits with status 2.
 if cross_client_mode:
-    if sys.argv[5] != CROSS_CLIENT:
+    if sys.argv[5] not in (CROSS_CLIENT, CROSS_CLIENT_BROKEN):
         print(f"The {sys.argv[5]} mode is not yet implemented.", flush=True)
         raise SystemExit(2)
     cross_client_checks()
