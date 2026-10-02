@@ -2,6 +2,250 @@
 
 <!-- handoff-id: wm023-20260923; status: paused-unaccepted-wip; accepted: WM-001..WM-022,G0,G1; resume-branch: workflow-manager-checkpoint-20260923; fess: every-subtask -->
 
+## Phase F part 1 of 2026-10-02
+
+The resume workflow ran the first part of its Phase F plan under the
+operator directions of 2026-09-29 for fast validation and of 2026-09-30
+for functionality first, and under the operator decisions of 2026-10-01
+for the Emacs client and of 2026-10-02 for the Lean builds of WM-040 and
+the `ext-pi` pins. The plan has 24 subtasks. PF1 and PF2 close the two
+medium findings of the Phase D review. PF3 applies the PE27 decision. PF4
+to PF8 build the WM-039 cross-client witness, PF9 to PF15 the WM-040
+manager conformance bridge, PF16 to PF20 the WM-041 capacity and failure
+evidence, and PF21 to PF24 run the Phase F gate.
+
+PF1 to PF6 landed in this repository as commits `214f3ff0` to `1e27a1aa`
+after `77b256fd`, the record of the Phase D review. PF1, PF2 and PF4 to
+PF6 have matching local commits `f9be31a` to `613d70e` on the
+`emacs-native` branch of agent-workflows in
+`~/src/agent-workflows-emacs-native`, after `c839f75`. That branch now
+holds 28 local commits, `1efebf9` to `613d70e`, and none of them is
+pushed. The run stopped at PF7 with an escalation to the owner, which the
+section "Stop at PF7" below states. PF8 to PF24 did not start, so WM-040
+and WM-041 have no delivered work and the Phase F gate did not run.
+
+This section describes the current state. Where any section below differs,
+this section supersedes it, and the sections below remain as chronology.
+The evidence of each subtask is under `PF/<subtask>/impl-r1` in the resume
+directory (`impl-r2` for PF6), and the audits are `fess/pf-PF1-r1.md` to
+`fess/pf-PF6-r1.md` and `fess/pf-PF6-r2.md`. PF7 has evidence under
+`PF/PF7/impl-r1` and no audit.
+
+Accepted state is unchanged at WM-001 to WM-022 and G0 and G1. This run
+closes no package and no gate. The Integrator closes tracker items.
+
+### Delivered behavior
+
+| Subtask | agent-cat commit | `emacs-native` commit | Delivered behavior |
+| --- | --- | --- | --- |
+| PF1 | `214f3ff0` | `f9be31a` | In the `emacs-service-lifecycle` mode, the open control prompt with the typed steer choice label and the steer editor with the typed steer text each pass through 40x12, 140x36 and 80x24, and the text stays exact. Both sides require report version 3. No Emacs Lisp of the product changed, because no resize lost text. |
+| PF2 | `2d02134f` | `281c5d6` | The new `emacs-service-controls` mode sends, by keys at 80x24, a `choose-recovery` fail-over on a `profile_route` run, a `choose-recovery` abandon on a `profile_1` run and a redirect to the second of two listed targets on a `profile_live` run. The harness confirms each effect through HTTP, the coordination database, `events.ndjson` and the run log, and requires that the session sent only these three controls, each once. |
+| PF3 | `67d1b234` | None | The devDependency strings of `@earendil-works/pi-client`, `pi-coding-agent`, `pi-server` and `pi-tui` in `ext-pi/package.json` and `ext-pi/package-lock.json` read 0.99.1, the release of the Pi fork. No install ran, and `node_modules` still links the fork. The `ext-pi` README states this. |
+| PF4 | `2ccc38fd` | `360adc1` | The `cross-client` mode runs leg 1 of WM-039 on one TLS manager with four credentials and four client identifiers: the TUI creates and enqueues a request by keys at 80x24, Pi approves its exact review with `/wfm-review`, and Emacs shows the run at its pending question and sends no command. |
+| PF5 | `d889f241` | `6656266` | Leg 2. Emacs opens the answer editor of the question head and types `false`, Pi answers the same head first with `/wfm-answer`, and the later Emacs send receives 412 `stale-revision` with no second send. Of two concurrent HTTP answers to the head of a second run, with the emacs and tui credentials, one takes effect and the other receives 412. A new TUI sends the offered retry of the first run, which then succeeds. |
+| PF6 | `1e27a1aa` | `613d70e` | The TUI, Emacs and Pi each show or save the verified result of the first run. The two saved files have mode 0600 and the exact bytes of the harness download. The mode writes `cross-client-witness.json`, the identity record of each step, command, client and manager lifetime, with no bearer and no result bytes. The `cross-client-broken-answer` control fails with `CROSS-ASSERT the cross-client answer is JSON false`. |
+
+### Stop at PF7
+
+PF7 adds the `cross-client-lifecycle` mode: disconnect and reconnect of
+each client, a credential rotation with its overlap and cutoff, the
+revocation of a fifth credential, and an ordinary restart of the manager.
+Its requirement assumed that an ordinary restart by the termination signal
+quarantines the reservation of the owned run, so that a new request on the
+same resource key waits until a quarantine release. The grounded behavior
+is different. The orderly close ends each worker, confirms its cleanup and
+releases the reservation with the pending kind `closed`. After the restart
+`check-store` lists no quarantine, and a new `profile_1` request on the key
+`cross_one` reaches review at once. A quarantine follows only a loss of the
+manager without its orderly close, for example through SIGKILL, as the
+`tui-failures` mode shows.
+
+The owner question is which form the lifecycle witness takes:
+
+- (a) Keep the restart by the termination signal and accept the immediate
+  admission in place of the quarantine release. The mode does this now,
+  and every other acceptance item passes.
+- (b) Keep that restart for the lost run, then add a second loss: SIGKILL
+  while a new `profile_1` run is held, to show the wait for the busy
+  profile and the release of the quarantine. This adds about one run and
+  one restart.
+- (c) Use SIGKILL for the restart and drop the acceptance item "status 0
+  and shutdown notice".
+
+The owner also confirms one product change. In `withManagerSignals` of
+`cli/src/Agentic/Cli.hs`, a stop of `--manager serve` by the termination
+signal now exits with status 0 after its cleanup. Before the change the
+process ended through the interrupt with exit status -2. A stop by the
+keyboard signal still propagates the interrupt.
+
+The PF7 work is not committed. In this repository it changes
+`cli/src/Agentic/Cli.hs`, `manager/test/service_http.py`,
+`manager/STORAGE.md`, `manager/WORKERS.md` and the Emacs mode paragraph of
+the section "Phase D of 2026-10". In the Emacs worktree it changes
+`ci/emacs-ui.py` (the case `--service-case witness-lifecycle`, report
+version 1) and `README.md`. On these trees the incremental build passed,
+`py_compile` passed, `cross-client-lifecycle` passed at N8 in its seventh
+run with nine numbered PASS lines, seven key-step PASS lines and the final
+PASS line in 154 seconds (form (a)), and the N8 `tui-journey` regression
+passed. The six earlier runs failed while the mode was being written, and
+their logs stay under `PF/PF7/impl-r1`.
+
+### Checks run
+
+Each subtask ran its own checks once, and its commit message names them:
+
+- PF1: `py_compile`, the `-ftui-tests` build of `agentic-run` and
+  `routing-fixed-point-probe`, `emacs-service-lifecycle` at N8 (22 key
+  steps and checks 1 to 17), a version 2 copy of `ci/emacs-ui.py` that
+  failed with the version sentence, and `make -C doc check`.
+- PF2: `py_compile`, the build, `emacs-service-controls` at N8 with 14 PASS
+  lines, the N8 `tui-journey` regression and `make -C doc check`.
+- PF3: the `readlink` listings of `node_modules/@earendil-works` before and
+  after, which are the same, `npm run check`, and `npm test` with 219
+  passed and 29 skipped.
+- PF4: `py_compile`, the build, `cross-client` at N8 with seven PASS lines,
+  and the N8 `tui-journey` regression.
+- PF5: `py_compile`, the build, and `cross-client` at N8 with twelve PASS
+  lines in 133 seconds.
+- PF6: `py_compile`, the build, `cross-client` at N8 with fifteen PASS
+  lines and the final line in 77 seconds, and `cross-client-broken-answer`
+  with its literal message.
+- PF7: the checks of the section above, on the uncommitted trees.
+- The closeout ran `make -C doc check` after its edit.
+
+### Checks not run
+
+- The Phase F gate, PF21 to PF24, did not run. No ALLBUILD of this run, no
+  `tui-model-test`, no journey pair at N1, no journey control, no N8 owner
+  check, no conformance lane, no contract diff, no Emacs or `ext-pi` suite
+  run and no `bash tui/ci/tui.sh` ran on the final trees of this run. The
+  three journey controls and the N8 owner checks have therefore still not
+  run on a tree with the Runtime fix of PD29.
+- `ci/emacs.sh` did not run, because no Emacs Lisp changed. `npm run
+  test:integration` and the Pi-host modes did not run after PF3.
+- Only N8 ran for the new modes. Each race outcome of the witness was seen
+  live once. `tui-failures` was not run again after PF5 moved three helper
+  functions to module level.
+- The checks that the operator directions remove from routine validation
+  (`cli/ci/policies.sh`, `manager/ci/approval.sh`, `manager/ci/controls.sh`,
+  the `admission_audit.py` mutation audits, mutant suites, `-fforce-recomp`
+  builds, bisim tier checks and stability samples), and the other unrun
+  regression checks of the Phase D section.
+- The run plan also drops these items of Phase F as functionality: the
+  cross-machine evidence of WM-039 and the proxy test of a reference
+  deployment (local only), an approval in Emacs of a request of another
+  client (Emacs opens a review only for its own requests, a client gap for
+  a later Emacs task), two truly simultaneous answers from two UI processes
+  (the HTTP race covers concurrency), a restore and the page and event
+  expiry inside the witness (WM-042 and the existing `pages` and
+  `events-lifecycle` modes), randomized store-backed histories and some
+  implementation-guard refusals of WM-040, the full default build of the
+  model, root replacement, partial frames, a true ENOSPC disk-full,
+  Linux containment, repeated measurements and randomized schedules of
+  WM-041, and the Emacs 29.1 minimum-version check. The section "Phase D of
+  2026-10" keeps the earlier list of checks not run.
+
+### Deferred security items
+
+None of these items ran. They wait for the security stage, with every
+deferred item of the sections below and of section 8 of the remaining-scope
+report:
+
+- WM-039: negative matrices of the differences in authorization across the
+  three client credentials, on each route and each scope, beyond the
+  functional rule that each client uses its own credential.
+- WM-039: revocation and rotation during a POST, an artifact download, a
+  pagination and an event stream, beyond the functional rotation with a
+  cutoff and the single revocation of PF7.
+- WM-039: the authority fencing after a restore from an older backup, in
+  which old credentials, cursors and authority keys fail.
+- WM-039: scans that show that the client, server and runner identities
+  and the witness record disclose no content and no credential.
+- WM-039: TLS hardening of the witness, with Name Constraints parity in the
+  TypeScript and Emacs clients, the credential checks on each response and
+  negatives with a wrong CA.
+- WM-041: hostile and slow input (header floods, slow bodies, connection
+  exhaustion), partial and malformed frames, the framing-limit negatives of
+  the `boundary` mode, and a review that no unresolved security finding of
+  high impact hides behind a passing throughput result.
+- WM-041: the replacement of the root under a running manager, a
+  confinement property that `manager/STORAGE.md` does not guarantee.
+- WM-040: conformance of the authorization and credential transitions
+  (credential scopes, revocation and the binding of cursors to the
+  authorization revision), which the abstract coordination model does not
+  contain.
+- A threat model and a security gate for the cross-client witness, and the
+  observation-only witness of G2.
+
+### Authorizations
+
+No authorization is pending from this run. PE27 was decided on 2026-10-02
+and applied in PF3. The operator authorized local Lean and oracle builds
+for WM-040 on 2026-10-02, one at a time under a timeout of 1800 seconds.
+No Lean or oracle build ran in this run.
+
+### Package status and open tracker items
+
+| Package or item | Status | Tracker |
+| --- | --- | --- |
+| WM-030 | Met for function, as in the Phase D section. The minimum-version item is open, because no check runs Emacs 29.1. | `acat-wm-030-t2l4` open for the Integrator |
+| WM-031 | Met for function, as in the Phase D section. | `acat-wm-031-5yxo` open for the Integrator |
+| WM-032 | Met for function. PF1 closes the resize of the open control prompt and the steer editor, and PF2 closes the fail-over, abandon and PTY redirect by keys. | `acat-wm-032-eh4r` open for the Integrator |
+| Phase D review findings | Both medium findings are closed by PF1 and PF2. The low findings stay open (below). | `acat-phase-d-review-findings-raxi` |
+| PE27 | Done in PF3. | `acat-phase-e-review-findings-0l73` |
+| WM-039 | Partial. Legs 1 and 2, the outputs, the identity record and the broken-answer control are committed. The lifecycle mode is uncommitted and waits for the owner answer of PF7. The `cross-client-lineage` mode prints that it is not yet implemented and exits with status 2. | `acat-wm-039-0vfi` |
+| WM-040 | Not started. | `acat-wm-040-3olb` |
+| WM-041 | Not started. | `acat-wm-041-17ax` |
+| G3, G4 | Open. G4 needs the complete WM-039 witness. G3 needs WM-040 and WM-041. | `acat-g4-pech` and `acat-g3-v1iz` |
+
+The fess follow-up issues of PF2 to PF6 stay open:
+`acat-pf2-fess-followup-2u4o`, `acat-pf3-fess-followup-ann7`,
+`acat-pf4-fess-followup-u737`, `acat-pf5-fess-followup-5kr9` and
+`acat-pf6-fess-followup-hrzg`. PF1 filed none, because its commits fix
+its two findings. This closeout changed no tracker item.
+
+### Open findings
+
+- The low findings of the Phase D review stay open: the unrun journey
+  controls and owner checks, the 503 `storage-unavailable` responses of
+  `GET /v1/snapshot` with the class `unexpected InvalidRequest`, the Emacs
+  service-mode limits, the POST route deadlines and the two stopped
+  processes, which the section "Phase D of 2026-10" lists.
+- `acat-pf3-fess-followup-ann7`: `manager/README.md` and the Phase E
+  section of this handoff still name the earlier Pi pins 0.84.3 and
+  0.85.1.
+- The `ext-pi` bridge socket path of the cross-client fixtures exceeds the
+  macOS limit of a socket path when the fixture path is longer
+  (`acat-pf6-fess-followup-hrzg`).
+- The witness requires that the question precedes the recovery as the head
+  of the leg 1 run, and the loser of the HTTP race must receive 412.
+- The frozen `ControlAcknowledgement` has no target, so the
+  `emacs-service-controls` harness ties the redirect target through the
+  receipt sequence and the run log. `wf-control` confirms only a cancel, so
+  RET is the confirmation of the other controls.
+- Emacs opens a review only for a request that Emacs set up or forked, so
+  it cannot approve a request of another client.
+- PIDs 111 and 9444, stopped `routing-fixed-point-probe` processes with
+  parent 1, were still present at 2026-10-02T20:12Z. Nobody in this run
+  signalled them.
+
+### Next action
+
+1. The owner answers the PF7 question, form (a), (b) or (c), and confirms
+   or refuses the change of `withManagerSignals`.
+2. The Integrator commits this closeout and the remaining-scope report.
+   Then, under the owner answer, the Integrator commits the PF7 work in
+   both trees as a pair, or the next run revises it first.
+3. The next run completes PF7 and continues with PF8 (the
+   `cross-client-lineage` mode and the witness documentation), PF9 to PF15
+   (WM-040, with the authorized Lean builds one at a time), PF16 to PF20
+   (WM-041) and the Phase F gate PF21 to PF24, under the
+   functionality-first and fast rules.
+4. Phase G (WM-042 to WM-044 and G5) follows the Phase F gate, under the
+   same rules. The security stage waits for the operator to schedule it.
+5. The operator or the Integrator ends PIDs 111 and 9444 with
+   `kill -CONT` and then `kill -KILL`.
+
 ## Phase D of 2026-10
 
 The resume workflow completed Phase D under the operator directions of
@@ -88,11 +332,11 @@ service run view show the delivery state `poll`.
 | PD29 | `6a4cbeec` | `8c2b780` | Phase D gate part 2. It also fixes the two defects listed below. |
 | PD30 | `5be45383` | None | Phase D gate part 3. |
 | PD31 | `91fb0ad4` | `c839f75` | This section, the updates of the Phase E section, and the README of the Emacs worktree. The closeout updates of this section after the reviews are not committed. |
-| PF1 | The PF1 commit | `f9be31a` | The `emacs-service-lifecycle` mode types the steer choice label in the open control prompt and the steer text in the steer editor, and each passes through 40x12, 140x36 and 80x24 with its text kept. Both sides require report version 3. |
-| PF2 | The PF2 commit | `281c5d6` | The `emacs-service-controls` mode sends a fail-over, an abandon and a redirect to the second listed target from the control prompt of the run view by keys at 80x24. The harness confirms each control from manager facts and requires that the session sent only these three, each once. Both sides require report version 1. |
-| PF4 | The PF4 commit | `360adc1` | The `cross-client` mode runs leg 1 of the WM-039 witness: the TUI creates and enqueues a request by keys, Pi approves its exact review with `/wfm-review`, and Emacs shows the run at its pending question and sends no command. Each client has its own credential and client identifier on one manager. The `cross-client-lifecycle` and `cross-client-lineage` modes and the `cross-client-broken-answer` control print that they are not yet implemented and exit with status 2. Both sides require report version 1. |
-| PF5 | The PF5 commit | `6656266` | The `cross-client` mode adds leg 2 of the WM-039 witness. Emacs opens the answer editor of the question head and types `false`, Pi answers the same head with `/wfm-answer`, and the later send of Emacs receives 412 `stale-revision`, which Emacs shows without a second send. A second run of `profile_2` is admitted beside the first, and of two concurrent HTTP answers to its head, with the emacs and tui credentials, one takes effect and the other receives 412 `stale-revision`. A new TUI sends the offered retry of the first run, which succeeds. Both sides require report version 2. |
-| PF6 | The PF6 commit | `613d70e` | The `cross-client` mode adds the outputs of the first run and the identity record of the WM-039 witness. The TUI saves the verified result with `s`, Emacs saves it with `r` in the run view after the handshake `save-result`, and Pi shows it with `/wfm-result`. Both saved files have mode 0600 and the exact bytes of the harness download, and Pi shows the same SHA-256. The mode writes `cross-client-witness.json`, which lists for each step the acting client and process, the runs, and each command with its client, its correlated resources, its manager-log position, the manager lifetime and its receipt timestamps, with no bearer and no result bytes. Each command must be from the credential of the actor of its step, except the winning answer of the step 8 race, which is from the emacs or the tui credential. The `cross-client-broken-answer` control makes Pi answer `true` and must fail with `CROSS-ASSERT the cross-client answer is JSON false`. Both sides require report version 3. |
+| PF1 | `214f3ff0` | `f9be31a` | The `emacs-service-lifecycle` mode types the steer choice label in the open control prompt and the steer text in the steer editor, and each passes through 40x12, 140x36 and 80x24 with its text kept. Both sides require report version 3. |
+| PF2 | `2d02134f` | `281c5d6` | The `emacs-service-controls` mode sends a fail-over, an abandon and a redirect to the second listed target from the control prompt of the run view by keys at 80x24. The harness confirms each control from manager facts and requires that the session sent only these three, each once. Both sides require report version 1. |
+| PF4 | `2ccc38fd` | `360adc1` | The `cross-client` mode runs leg 1 of the WM-039 witness: the TUI creates and enqueues a request by keys, Pi approves its exact review with `/wfm-review`, and Emacs shows the run at its pending question and sends no command. Each client has its own credential and client identifier on one manager. The `cross-client-lifecycle` and `cross-client-lineage` modes and the `cross-client-broken-answer` control print that they are not yet implemented and exit with status 2. Both sides require report version 1. |
+| PF5 | `d889f241` | `6656266` | The `cross-client` mode adds leg 2 of the WM-039 witness. Emacs opens the answer editor of the question head and types `false`, Pi answers the same head with `/wfm-answer`, and the later send of Emacs receives 412 `stale-revision`, which Emacs shows without a second send. A second run of `profile_2` is admitted beside the first, and of two concurrent HTTP answers to its head, with the emacs and tui credentials, one takes effect and the other receives 412 `stale-revision`. A new TUI sends the offered retry of the first run, which succeeds. Both sides require report version 2. |
+| PF6 | `1e27a1aa` | `613d70e` | The `cross-client` mode adds the outputs of the first run and the identity record of the WM-039 witness. The TUI saves the verified result with `s`, Emacs saves it with `r` in the run view after the handshake `save-result`, and Pi shows it with `/wfm-result`. Both saved files have mode 0600 and the exact bytes of the harness download, and Pi shows the same SHA-256. The mode writes `cross-client-witness.json`, which lists for each step the acting client and process, the runs, and each command with its client, its correlated resources, its manager-log position, the manager lifetime and its receipt timestamps, with no bearer and no result bytes. Each command must be from the credential of the actor of its step, except the winning answer of the step 8 race, which is from the emacs or the tui credential. The `cross-client-broken-answer` control makes Pi answer `true` and must fail with `CROSS-ASSERT the cross-client answer is JSON false`. Both sides require report version 3. |
 
 The gate found two defects, and PD29 fixed each at its owner with a test
 that failed first:
@@ -117,7 +361,9 @@ worktree, so each mode needs a matching pair of the two repositories. The
 `emacs-client` and `emacs-client-controls` modes refuse a report whose
 `harnessVersion` differs from 10 with one sentence. The `emacs-service`
 modes and the `emacs-service-controls` mode require report version 1, the
-`cross-client` modes require report version 3, and the
+`cross-client` mode and its control require report version 3, the
+`cross-client-lifecycle` mode requires report version 1 from
+`--service-case witness-lifecycle`, and the
 `emacs-service-lifecycle` mode requires report version 3 from
 `ci/emacs-ui.py`. Each mode needs `EMACS` and `WF_EMACS_DIR`,
 and the `emacs-service` modes and the `cross-client` modes also need
@@ -129,9 +375,9 @@ The Integrator recorded these pairs in the commit messages:
 | `emacs-client` | `75bf4058` with `4804e3e` (PD15), `8d62cf7d` with `1fb68e7` (PD16), `682439d1` with `5de5f83` (PD18), `db9b9c75` with `70fecf9` (PD19, harness version 5), `6707f6a1` with `dc258f1` (PD20, version 6), `c4f4091e` with `66144b3` (PD21, version 7), `93280369` with `8536023` (PD23, version 9), `a6f54044` with `59f27ed` (PD24, version 10), and `6a4cbeec` with `8c2b780` (PD29) |
 | `emacs-client-controls` | `737fe82c` with `0c3b202` (PD22, harness version 8), and `6a4cbeec` with `8c2b780` (PD29) |
 | `emacs-service`, `emacs-service-broken-answer` | `75ce6752` with `2477a47` (PD25), and `6a4cbeec` with `8c2b780` (PD29) |
-| `emacs-service-lifecycle` | `14c97821` with `5425213` (PD26, report version 1), `832ea3d3` with `6745f4b` (PD27, report version 2 with `--service-handshake`), `6a4cbeec` with `8c2b780` (PD29), and the PF1 commit with `f9be31a` (PF1, report version 3 with the resize of the open control prompt and the steer editor) |
-| `emacs-service-controls` | The PF2 commit with `281c5d6` (PF2, report version 1 with `--service-case controls`) |
-| `cross-client`, `cross-client-broken-answer` | The PF4 commit with `360adc1` (PF4, report version 1 with `--service-case witness`), the PF5 commit with `6656266` (PF5, report version 2 with the handshake `open-answer`), and the PF6 commit with `613d70e` (PF6, report version 3 with the handshake `save-result`) |
+| `emacs-service-lifecycle` | `14c97821` with `5425213` (PD26, report version 1), `832ea3d3` with `6745f4b` (PD27, report version 2 with `--service-handshake`), `6a4cbeec` with `8c2b780` (PD29), and `214f3ff0` with `f9be31a` (PF1, report version 3 with the resize of the open control prompt and the steer editor) |
+| `emacs-service-controls` | `2d02134f` with `281c5d6` (PF2, report version 1 with `--service-case controls`) |
+| `cross-client`, `cross-client-broken-answer` | `2ccc38fd` with `360adc1` (PF4, report version 1 with `--service-case witness`), `d889f241` with `6656266` (PF5, report version 2 with the handshake `open-answer`), and `1e27a1aa` with `613d70e` (PF6, report version 3 with the handshake `save-result`) |
 
 The PD17 commit message names no `emacs-native` commit. The PD18 commit
 `5de5f83` names the follow-up issue `acat-FOLLOWUP`, which is
