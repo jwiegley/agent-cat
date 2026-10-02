@@ -11372,6 +11372,31 @@ Non-blocking findings of the fess audit of Phase E subtask PE2 (run owner lock, 
 ]
 #+end_src
 
+* TODO [#D] Resolve the non-blocking fess findings of subtask PE20
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pe20-fess-followup-xsk1
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-01 Thu 17:10]
+:MODIFIED: [2026-10-01 Thu 17:10]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess audit fess/pe-PE20-r1.md (2026-10-01) on subtask PE20 (WM-037 human path, part 4: /wfm-result, /wfm-history, /wfm-restart, /wfm-resume, /wfm-fork and /wfm-export in ext-pi/src/manager-ui.ts, the export and lineage decoders in ext-pi/src/manager/resources.ts, and steps 8 to 11 of the pi-client mode).
+
+1. (medium) ext-pi/test/manager-ui-live.test.ts near 796, ext-pi/test/service-mode.test.ts near 709: the acceptance item "History lists the managed runs of the profile across pages" has live evidence for one page only. The pi-client fixture holds 6 runs on one /v1/runs page. Only a fake two-page transport covers the multi-page follow and the observer label. Fix: lower the /v1/runs page size in the pi-client fixture, or add runs until a second page exists, so that the live /wfm-history step and harness PASS 11 follow at least two pages.
+2. (low) ext-pi/src/manager-ui.ts near 1457-1460: #forkEdits reads only the first page of /v1/runs/{id}/snapshot. RunSnapshot is paged (at most 256 Occurrence items on a page), and the TUI forkTargets (tui/src/Agentic/Tui/Service.hs near 1366) uses the complete snapshot. A run with more than 256 occurrences therefore offers an incomplete list of fork targets. The earlier snapshot reads near lines 663, 1207 and 1270 have the same limitation. Fix: read the snapshot as a page set (session.pageSet) before forkTargets is computed.
+3. (low) ext-pi/test/service-mode.test.ts near 736 and the forkTargets case of ext-pi/test/manager-ui.test.ts: the fake snapshots carry only occurrenceId, state, code, intent and answer, while Occurrence and RunSnapshot in doc/api/openapi.yaml require more fields. forkTargets parses loosely, so the tests pass against a partial shape. Fork and resume never ran against a live manager. Fix: build the fake snapshot from a schema-valid RunSnapshot fixture, or add a live fork step to the pi-client mode.
+4. (low) ext-pi/src/manager-ui.ts near 1440-1441: when the receipt is effect-observed but the effect kind is not lineage-created, or the resource is not /v1/requests/..., the command still says that it created a child request. Fix: state the effect kind and resource observed, and claim a child request only for lineage-created.
+5. (low) ext-pi/src/manager-ui.ts near 1414, 1519, 1536 and 1554 (and #run, #forkEdits): when session.reference refuses, the command returns without a notification. The same pattern exists near 1167, 1208 and 1271 (see also acat-pe18-fess-followup-3ykw item 3). Fix: notify the refusal reason.
+6. (low) manager/test/service_http.py (the PASS pi-client 8 line): the line says that a second save to the same path refused, but the harness does not check the refusal itself. It relies on the vitest step, which the harness requires to pass. Fix: reword the line, or have the vitest report carry the refusal text and assert it in the harness.
+
+Also recorded from the implementer limitations: when a lineage or export send is uncertain and the receipt is never observed, the session reconciles it with one read of the collection, and /wfm-* reports that the child or export exists without finding the child request itself. No legacy root is configured in pi-client mode.
+
 * TODO [#D] Resolve PE3 fess findings in owner-released quarantine evidence
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -20774,7 +20799,7 @@ invocation tuples or exposing secrets.
 :LABELS:   ["p8","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-01 Thu 16:49]
+:MODIFIED: [2026-10-01 Thu 17:11]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-037
 :SOURCE_REPO: agent-cat
@@ -20873,6 +20898,13 @@ verified output, and lineage behave consistently with the other clients.
     "author": "johnw",
     "text": "PE19 (WM-037 human path, part 3) integrated. Service mode: ext-pi/src/manager-ui.ts adds /wfm-cancel, /wfm-steer (interrupt-now or next-boundary) and /wfm-redirect (dispatch-window redirect and live redirect of the attempt in flight). Each reads /v1/runs/RUN/control once, sends only what the control resource offers with the control ETag as If-Match, and reports the receipt and then the acknowledgement verbatim. Cancel then waits for the terminal snapshot. Local mode: OwnedRun.redirect in ext-pi/src/supervisor.ts sends a live redirect for a running attempt with expectedAttemptId null, lets the runtime decide, and reports the acknowledgement verbatim (rejected-stale with its message, the stopped attempt after occurrence.redirected). Outside the dispatch window and without a running attempt it refuses before any send. Checks passed: npm run check, npm test (186 passed, 19 live-gated skips), npm run test:integration (4 files, 8 tests), the pi-client mode of manager/test/service_http.py (PASS 1 to 12, step 7: /wfm-cancel sent one cancel command, the receipt records an accepting acknowledgement and the run ended cancelled), make -C doc check. Evidence: PE/PE19 in the private resume-20260923 directory. Fess not blocking; findings filed as acat-9fbh. /wfm-steer and /wfm-redirect have unit evidence only. WM-037 stays open.",
     "created_at": "2026-10-01T23:49:48Z"
+  },
+  {
+    "id": 559,
+    "issue_id": "acat-wm-037-dz3v",
+    "author": "johnw",
+    "text": "PE20 (WM-037 human path, part 4) is in place: /wfm-result saves the verified result once with exclusive publication (mode 0600, exact bytes, an existing path refused), /wfm-history lists /v1/runs across pages with legacy entries labelled observer, /wfm-restart, /wfm-resume and /wfm-fork create a child request through /runs/{id}/lineage-requests under the first-page ETag and continue it through the PE17 exact review, and /wfm-export publishes the verified result and verifies its download. Evidence: npm run check, npm test (16 files, 192 passed, live-gated skips), the pi-client mode of manager/test/service_http.py (PASS 1 to 16) and make -C doc check passed. Limits: the live history check follows one page (the two-page follow is fake-transport only), and fork and resume have fake-transport evidence only. Fess not blocking. Findings filed as acat-pe20-fess-followup-xsk1. This package stays open for the closeout.",
+    "created_at": "2026-10-02T00:11:00Z"
   }
 ]
 #+end_src

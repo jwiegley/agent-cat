@@ -276,12 +276,13 @@ describe("Pi extension lifecycle", () => {
       expect([...commands.keys()].sort()).toEqual([
         "wf", "wf-cancel", "wf-diff", "wf-fork", "wf-grant", "wf-help", "wf-launch", "wf-monitor",
         "wf-plan", "wf-recover", "wf-redirect", "wf-restart", "wf-resume", "wf-retry", "wf-status", "wf-steer",
-        "wfm", "wfm-answer", "wfm-cancel", "wfm-discard", "wfm-endpoints", "wfm-monitor", "wfm-redirect", "wfm-review", "wfm-status",
-        "wfm-steer", "wfm-withdraw",
+        "wfm", "wfm-answer", "wfm-cancel", "wfm-discard", "wfm-endpoints", "wfm-export", "wfm-fork", "wfm-history", "wfm-monitor",
+        "wfm-redirect", "wfm-restart", "wfm-result", "wfm-resume", "wfm-review", "wfm-status", "wfm-steer", "wfm-withdraw",
       ]);
       await commands.get("wf")!.handler("fixture", ctx);
       expect(notices.at(-1)).toContain("requires interactive approval");
-      for (const name of ["wfm", "wfm-review", "wfm-withdraw", "wfm-discard", "wfm-monitor", "wfm-answer", "wfm-cancel", "wfm-steer", "wfm-redirect"]) {
+      for (const name of ["wfm", "wfm-review", "wfm-withdraw", "wfm-discard", "wfm-monitor", "wfm-answer", "wfm-cancel", "wfm-steer", "wfm-redirect",
+        "wfm-result", "wfm-history", "wfm-restart", "wfm-resume", "wfm-fork", "wfm-export"]) {
         await commands.get(name)!.handler("", ctx);
         expect(notices.at(-1)).toContain("Service mode is not configured");
       }

@@ -1853,3 +1853,183 @@ export function answerValue(decision: DecisionView, input: string): AnswerOutcom
 export function answerBody(decision: DecisionView, value: JsonValue): JsonObject {
   return { operation: "answer", occurrenceId: decimalText(decision.occurrenceId), generation: decision.generation, value };
 }
+
+// ---------------------------------------------------------------------------
+// Exports and lineage requests of a run (Agentic.Tui.Service).
+
+/** The states of an export receipt. @public */
+export const EXPORT_STATES = ["published", "unresolved"] as const;
+
+/** The largest exported document, in bytes. */
+const EXPORT_BYTES = 67108864n;
+
+/**
+ * One export receipt, as `/v1/exports/{id}` and the export collection of its
+ * run represent it. A published receipt states the size, the SHA-256 digest
+ * and the download link of the exported bytes. It is metadata, not a
+ * download capability.
+ *
+ * @public
+ */
+export type ExportReceipt = {
+  readonly id: string;
+  readonly runId: string;
+  readonly commandId: string;
+  readonly name: string;
+  readonly code: JsonValue;
+  readonly state: (typeof EXPORT_STATES)[number];
+  readonly sha256: string | null;
+  readonly bytes: bigint | null;
+  readonly download: string | null;
+};
+
+/**
+ * The first page of the export collection of one run: the run, the
+ * collection revision that its strong entity tag carries, and its receipts.
+ *
+ * @public
+ */
+export type ExportCollection = { readonly runId: string; readonly revision: string; readonly items: readonly ExportReceipt[] };
+
+/** The refusal codes of a lineage collection that lists no eligible operation. @public */
+export const LINEAGE_REFUSALS = ["incompatible-parent", "ownership-unavailable", "quarantined", "unsupported-operation"] as const;
+
+/**
+ * The first page of the lineage collection of one parent run: the run, the
+ * revision that its strong entity tag carries, the operations that a new
+ * lineage request may name now, the refusal code when it names none, and the
+ * child requests of the run.
+ *
+ * @public
+ */
+export type LineageCollection = {
+  readonly runId: string;
+  readonly revision: string;
+  readonly eligible: readonly LineageOperation[];
+  readonly refusal: (typeof LINEAGE_REFUSALS)[number] | null;
+  readonly children: readonly DraftView[];
+};
+
+/**
+ * One edit of a fork: drop the persisted answer of an occurrence of the
+ * parent run, or replace it with a typed answer.
+ *
+ * @public
+ */
+export type ForkEdit =
+  | { readonly operation: "drop"; readonly occurrenceId: bigint }
+  | { readonly operation: "replace"; readonly occurrenceId: bigint; readonly answer: JsonValue };
+
+/**
+ * Whether a name is a valid export name: one ASCII component of 1 to 128
+ * letters, digits, dots, underscores and hyphens that starts with a letter
+ * or a digit. The manager checks the name again.
+ *
+ * @public
+ */
+export function exportNameValid(name: string): boolean {
+  return /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(name);
+}
+
+/** The revision of the `page` member of a collection page, 1 to 256 characters. */
+function pageRevision(fields: JsonObject): string | undefined {
+  const page = jsonMember(fields, "page");
+  return page !== undefined && isJsonObject(page) ? boundedText(jsonMember(page, "revision"), 1, 256) : undefined;
+}
+
+function parseExportReceipt(value: JsonValue): ExportReceipt | undefined {
+  const fields = exact(value, ["version", "id", "runId", "commandId", "name", "code", "state", "sha256", "bytes", "download"]);
+  if (fields === undefined || !versionOne(fields)) return undefined;
+  const id = identifier(jsonMember(fields, "id"));
+  const runId = identifier(jsonMember(fields, "runId"));
+  const commandId = identifier(jsonMember(fields, "commandId"));
+  const name = textOf(jsonMember(fields, "name"));
+  const code = observationCode(jsonMember(fields, "code"), DECISION_DEPTH);
+  const state = oneOf(jsonMember(fields, "state"), EXPORT_STATES);
+  const sha256 = nullable(jsonMember(fields, "sha256"), (item) => (typeof item === "string" && validDigest(item) ? item : undefined));
+  const bytes = nullable(jsonMember(fields, "bytes"), (item) => {
+    const size = word64Text(item);
+    return size !== undefined && size <= EXPORT_BYTES ? size : undefined;
+  });
+  const download = nullable(jsonMember(fields, "download"), resourceLink);
+  if (id === undefined || runId === undefined || commandId === undefined || name === undefined || !exportNameValid(name)
+    || code === undefined || state === undefined || sha256 === undefined || bytes === undefined || download === undefined) return undefined;
+  return { id, runId, commandId, name, code, state, sha256, bytes, download };
+}
+
+/** Decode one export receipt, or refuse with `InvalidResponse`. @public */
+export function decodeExportReceipt(value: JsonValue): Outcome<ExportReceipt> {
+  return decided(parseExportReceipt(value));
+}
+
+/**
+ * Decode the first page of the export collection of a run, or refuse with
+ * `InvalidResponse`. Every receipt must belong to the run of the page.
+ *
+ * @public
+ */
+export function decodeExportCollection(value: JsonValue): Outcome<ExportCollection> {
+  const fields = exact(value, ["version", "page", "items", "runId"]);
+  if (fields === undefined || !versionOne(fields)) return INVALID_RESPONSE;
+  const runId = identifier(jsonMember(fields, "runId"));
+  const revision = pageRevision(fields);
+  const items = listOf(jsonMember(fields, "items"), parseExportReceipt, 256);
+  if (runId === undefined || revision === undefined || items === undefined || !unique(items.map((item) => item.id))
+    || !items.every((item) => item.runId === runId)) return INVALID_RESPONSE;
+  return { ok: true, value: { runId, revision, items } };
+}
+
+/**
+ * Decode the first page of the lineage collection of a run, or refuse with
+ * `InvalidResponse`. The page lists a refusal exactly when it lists no
+ * eligible operation, and every child request names the run as its parent.
+ *
+ * @public
+ */
+export function decodeLineageCollection(value: JsonValue): Outcome<LineageCollection> {
+  const fields = exact(value, ["version", "page", "items", "runId", "eligible", "refusal"]);
+  if (fields === undefined || !versionOne(fields)) return INVALID_RESPONSE;
+  const runId = identifier(jsonMember(fields, "runId"));
+  const revision = pageRevision(fields);
+  const eligible = listOf(jsonMember(fields, "eligible"), (item) => oneOf(item, LINEAGE_OPERATIONS), 3);
+  const refusal = nullable(jsonMember(fields, "refusal"), (item) => oneOf(item, LINEAGE_REFUSALS));
+  const children = listOf(jsonMember(fields, "items"), parseDraftView, 256);
+  if (runId === undefined || revision === undefined || eligible === undefined || !unique(eligible) || refusal === undefined
+    || (eligible.length === 0) !== (refusal !== null) || children === undefined || !unique(children.map((child) => child.id))
+    || !children.every((child) => child.parentRunId === runId)) return INVALID_RESPONSE;
+  return { ok: true, value: { runId, revision, eligible, refusal, children } };
+}
+
+/**
+ * The closed body of a lineage request: the operation, and for a fork its
+ * edits in occurrence order, with each occurrence as canonical decimal text.
+ * A restart and a resume carry no edits.
+ *
+ * @public
+ */
+export function lineageBody(operation: LineageOperation, edits: readonly ForkEdit[] = []): JsonObject {
+  if (operation !== "fork") return { operation };
+  const ordered = [...edits].sort((a, b) => (a.occurrenceId < b.occurrenceId ? -1 : a.occurrenceId > b.occurrenceId ? 1 : 0));
+  return {
+    operation,
+    edits: ordered.map((edit): JsonObject => edit.operation === "drop"
+      ? { occurrenceId: decimalText(edit.occurrenceId), operation: "drop" }
+      : { occurrenceId: decimalText(edit.occurrenceId), operation: "replace", answer: edit.answer }),
+  };
+}
+
+/**
+ * The replacement answer of a fork edit, converted from the editor text by
+ * the observation code of the occurrence of the parent run, as an answer to
+ * a question: text as given, a flag from yes, no, true or false, an
+ * acknowledgement (`ack`) from empty text, and a verdict or a structured
+ * answer from JSON text. The native preparation checks the value against
+ * the persisted code and schema of the occurrence.
+ *
+ * @public
+ */
+export function forkReplacementValue(code: string, input: string): AnswerOutcome {
+  if (code === "ack") return personAnswerValue("receipt", input);
+  if (code === "structured") return jsonAnswer(input);
+  return personAnswerValue(code, input);
+}

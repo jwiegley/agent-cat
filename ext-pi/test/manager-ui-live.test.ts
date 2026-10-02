@@ -43,13 +43,28 @@
  *    `/wfm-cancel` sends one cancel to the controls of the run after the
  *    confirmation, reports the receipt and then the runtime acknowledgement
  *    verbatim, and the run ends cancelled.
- * 7. The extension closes.
+ * 7. `/wfm-result` retrieves the verified result of the run of step 4 and
+ *    saves it to a new file with mode 0600 whose bytes have the size and
+ *    SHA-256 that the monitor showed. A second save to the same path refuses
+ *    and leaves the file unchanged. The harness compares the file with its
+ *    own download.
+ * 8. `/wfm-export` exports the same verified result once under a new name
+ *    with the entity tag of the export collection as `If-Match`, shows the
+ *    published receipt and its verified download, and lists the export.
+ * 9. `/wfm-restart` creates a restart child request of the run of step 1
+ *    through its lineage collection. The child is enqueued at once, its
+ *    exact review shows the lineage, `a` and the confirmation approve it,
+ *    and the child run succeeds and names the parent run and the lineage
+ *    restart.
+ * 10. `/wfm-history` lists every run of `/v1/runs` over all its pages, in
+ *    the order of the collection, with the restart child and its parent.
+ * 11. The extension closes.
  */
 
 import { createHash } from "node:crypto";
-import { existsSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import extension from "../src/index.ts";
 import type { Outcome } from "../src/manager/events.ts";
@@ -60,7 +75,9 @@ import {
   decodeControl,
   decodeDecision,
   decodeDraftView,
+  decodeExportCollection,
   decodePreparation,
+  decodeRunItem,
   type ControlView,
   type DecisionView,
   type DraftView,
@@ -130,6 +147,7 @@ type Script = {
   select?: (title: string, options: string[]) => string | undefined;
   editor?: (title: string, prefill: string | undefined) => Promise<string | undefined> | string | undefined;
   confirm?: (title: string, message: string) => boolean;
+  input?: (title: string) => string | undefined;
   /** The key for a drawn component, or `undefined` to keep it open until its next drawing. */
   review?: (screen: string) => string | undefined;
 };
@@ -163,7 +181,8 @@ describe.runIf(PROFILE)("the human path of service mode against a live manager",
         return script.editor(title, prefill);
       },
       input: async (title: string) => {
-        throw new Error(`unexpected input ${title}`);
+        if (script.input === undefined) throw new Error(`unexpected input ${title}`);
+        return script.input(title);
       },
       confirm: async (title: string, message: string) => {
         confirmations.push(`${title} ${message}`);
@@ -675,6 +694,119 @@ describe.runIf(PROFILE)("the human path of service mode against a live manager",
     }, `cancelled run ${runId}`);
     expect(jsonMember(jsonMember(terminal.value as JsonObject, "runtime") as JsonObject, "status")).toBe("cancelled");
     Object.assign(report, { cancelledRequestId: requestId, cancelledRunId: runId, cancelCommand });
+  }, STEP_MS);
+
+  it("saves the verified result once with mode 0600 and refuses a second save to the same path", async () => {
+    const runId = String(report.monitoredRunId);
+    const bytes = Number(report.resultBytes);
+    const sha256 = String(report.resultSha256);
+    // The harness reads the saved file, so it lies beside the report.
+    const path = join(REPORT === undefined ? state : dirname(REPORT), "pi-client-ui-saved-result.bin");
+    expect(existsSync(path)).toBe(false);
+    const titles: string[] = [];
+    script = { input: (title) => (titles.push(title), path) };
+    const before = posts.length;
+    await run("wfm-result", runId);
+    expect(titles).toEqual([`Path of a new file for the verified ${bytes} bytes of run ${runId}`]);
+    expect(notices.at(-1), notices.join("\n")).toBe(`Saved the verified ${bytes} bytes of run ${runId} to ${path}, SHA-256 ${sha256}.`);
+    const saved = readFileSync(path);
+    expect(lstatSync(path).isFile() && (lstatSync(path).mode & 0o777)).toBe(0o600);
+    expect(saved.length).toBe(bytes);
+    expect(createHash("sha256").update(saved).digest("hex")).toBe(sha256);
+    // A second save to the same path refuses, and the file keeps its bytes.
+    script = {};
+    await run("wfm-result", `${runId} ${path}`);
+    expect(notices.at(-1)).toMatch(new RegExp(`^The result of run ${runId} was not saved to ${path.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}: EEXIST`));
+    expect(readFileSync(path).equals(saved)).toBe(true);
+    expect(posts.length).toBe(before);
+    Object.assign(report, { savedRunId: runId, savedPath: path });
+  }, STEP_MS);
+
+  it("exports the verified result once, shows the published receipt and its verified download, and lists the export", async () => {
+    const runId = String(report.monitoredRunId);
+    const name = "pi-client-ui-export.json";
+    const collection = `/v1/runs/${runId}/exports`;
+    const first = must(await session.get(ref(collection)), "export collection");
+    expect(must(decodeExportCollection(first.value), "export collection decode").items).toEqual([]);
+    script = {};
+    const before = posts.length;
+    await run("wfm-export", `${runId} ${name}`);
+    const sent = posts.slice(before);
+    expect(sent.map((post) => [post.resource, String(post.body), post.ifMatch]), notices.join("\n")).toEqual([[collection, JSON.stringify({ name }), first.etag]]);
+    const command = acceptedCommand("export");
+    const commandId = command.slice("/v1/commands/".length);
+    const published = must(decodeExportCollection(must(await session.get(ref(collection)), "published collection").value), "published decode");
+    expect(published.items).toHaveLength(1);
+    const receipt = published.items[0];
+    expect([receipt.id, receipt.commandId, receipt.name, receipt.state]).toEqual([`export_${commandId}`, commandId, name, "published"]);
+    const exported = must(await session.download(ref(receipt.download ?? ""), receipt.bytes ?? 0n, receipt.sha256 ?? ""), "export download");
+    const shown = notices.slice(-2);
+    expect(shown[0], notices.join("\n")).toBe([
+      `Export ${name}: export_${commandId} state published, command ${commandId}`,
+      `Export download: verified ${exported.length} bytes, SHA-256 ${receipt.sha256}`,
+    ].join("\n"));
+    expect(shown[1]).toBe(`Exports of run ${runId}: 1\n  ${name}  export_${commandId}  published  ${receipt.bytes} bytes  SHA-256 ${receipt.sha256}`);
+    Object.assign(report, {
+      exportRunId: runId, exportName: name, exportId: receipt.id, exportCommand: command, exportBytes: exported.length, exportSha256: receipt.sha256,
+    });
+  }, STEP_MS);
+
+  it("restarts a run through its lineage collection, approves the exact review with its lineage, and the child names its parent", async () => {
+    const parent = String(report.literalRunId);
+    // The supervision of the parent run has ended.
+    await until(`/v1/runs/${parent}`, (observed) => {
+      const item = decodeRunItem(observed.value);
+      return item.ok && item.value.content.kind === "known" && !["owned", "cleanup-pending"].includes(item.value.content.supervision);
+    }, "parent supervision");
+    const collection = `/v1/runs/${parent}/lineage-requests`;
+    const first = must(await session.get(ref(collection)), "lineage collection");
+    let review = "";
+    script = {
+      review: (screen) => {
+        review = screen;
+        return "a";
+      },
+      confirm: () => true,
+    };
+    const before = posts.length;
+    await run("wfm-restart", parent);
+    const sent = posts.slice(before);
+    expect([sent[0]?.resource, String(sent[0]?.body), sent[0]?.ifMatch]).toEqual([collection, '{"operation":"restart"}', first.etag]);
+    const created = notices.find((line) => line.startsWith(`Lineage: restart of run ${parent} created child request `));
+    expect(created, notices.join("\n")).toBeDefined();
+    const requestId = created?.slice(`Lineage: restart of run ${parent} created child request `.length).split(".")[0] ?? "";
+    // The child is enqueued without set-input, and its one approval starts the child run.
+    expect(sent.slice(1).map((post) => [post.resource, JSON.parse(String(post.body)).operation])).toEqual([
+      [`/v1/requests/${requestId}`, "enqueue"], [expect.stringMatching(/^\/v1\/preparations\//), "approve"],
+    ]);
+    expect(review.replace(/\s+/g, "")).toContain(`Lineage:restartofrun${parent}`);
+    const child = draftOf(must(await session.get(ref(`/v1/requests/${requestId}`)), "child request"));
+    expect([child.parentRunId, child.lineage]).toEqual([parent, "restart"]);
+    const runId = child.runId ?? "";
+    expect(notices, notices.join("\n")).toContain(`Execution: the manager started run ${runId} for request ${requestId}.`);
+    await succeeded(runId);
+    const item = must(decodeRunItem(must(await session.get(ref(`/v1/runs/${runId}`)), "child run").value), "child run decode");
+    expect(item.content.kind === "known" && [item.content.parentRunId, item.content.lineage]).toEqual([parent, "restart"]);
+    Object.assign(report, {
+      restartParentRunId: parent, restartRequestId: requestId, restartRunId: runId, restartCommand: acceptedCommand("restart"),
+      restartPreparationId: sent[2].resource.slice("/v1/preparations/".length),
+    });
+  }, STEP_MS);
+
+  it("lists every run of the history over all pages in the order of the collection", async () => {
+    await run("wfm-history");
+    const lines = (notices.at(-1) ?? "").split("\n");
+    const listed = must(await session.pageSet(ref("/v1/runs")), "runs").items.map((item) => must(decodeRunItem(item), "run item"));
+    expect(lines[0]).toBe(`History: ${listed.length} managed runs and 0 observer entries`);
+    expect(lines.slice(1).map((line) => line.trim().split(/\s+/)[0])).toEqual(listed.map((item) => item.id));
+    for (const name of ["literalRunId", "capturedRunId", "monitoredRunId", "staleRunId", "cancelledRunId", "restartRunId"]) {
+      expect(listed.map((item) => item.id)).toContain(String(report[name]));
+    }
+    const line = (runId: unknown) => lines.find((entry) => entry.startsWith(`  ${String(runId)}  `)) ?? "";
+    expect(line(report.restartRunId)).toContain(`succeeded, supervision `);
+    expect(line(report.restartRunId)).toContain(`restart of run ${String(report.restartParentRunId)}`);
+    expect(line(report.cancelledRunId)).toContain("  cancelled, ");
+    Object.assign(report, { historyRuns: listed.map((item) => item.id) });
   }, STEP_MS);
 
   it("closes the extension and writes the report", async () => {

@@ -508,8 +508,9 @@ process and no local run store, and it grants no supervision or control
 authority. A decision head is the decision at position 0 of the queue of its
 run. `ServiceMode` itself sends no manager command. Only the commands of the
 sections "Requests and review in service mode", "Live monitor and
-decisions in service mode" and "Run controls in service mode" send
-commands, through the session of the active binding. `ServiceMode.subscribe` calls a listener after each change of the
+decisions in service mode", "Run controls in service mode" and "Results,
+history, lineage and exports in service mode" send commands, through the
+session of the active binding. `ServiceMode.subscribe` calls a listener after each change of the
 connection or of the observations, and the live monitor uses it.
 
 | Command | Purpose |
@@ -525,6 +526,12 @@ connection or of the observations, and the live monitor uses it.
 | `/wfm-cancel [RUN_ID]` | Cancel a run after a confirmation, when its controls allow the cancel, as the section "Run controls in service mode" states. |
 | `/wfm-steer [RUN_ID]` | Steer an attempt that the controls of the run offer for steering. |
 | `/wfm-redirect [RUN_ID]` | Redirect an occurrence to a target that the controls of the run offer, in its dispatch window or for its attempt in flight. |
+| `/wfm-result [RUN_ID [PATH]]` | Retrieve the verified result of a succeeded run and save its exact bytes to a new file, as the section "Results, history, lineage and exports in service mode" states. |
+| `/wfm-history` | List every run of `/v1/runs` over all its pages, with legacy entries labelled observer. |
+| `/wfm-restart [RUN_ID]` | Create a restart child request of a run, show its exact review with its lineage, and start the child run after an approval. |
+| `/wfm-resume [RUN_ID]` | Create a resume child request of a run, show its exact review with its lineage, and start the child run after an approval. |
+| `/wfm-fork [RUN_ID]` | Collect fork edits, create a fork child request of a run, show its exact review with its lineage, and start the child run after an approval. |
+| `/wfm-export [RUN_ID [NAME]]` | Export the verified result of a run under a name, verify the exported bytes, and list the exports of the run. |
 
 The status widget lists active local runs and active service runs in
 separate sections, and the status line counts each kind.
@@ -752,7 +759,7 @@ a redirect offer in a snapshot, and when a control receipt settles.
 `test/manager-ui-live.test.ts` runs only when `AGENT_CAT_MANAGER_PROFILE`
 names a client profile. It drives the extension with a fake Pi host, a fake
 UI and a transport that records each POST, against a running manager with the
-mixed fixture, in seven ordered steps, each with a timeout of 600 seconds. It
+mixed fixture, in eleven ordered steps, each with a timeout of 600 seconds. It
 enters an exact Unicode literal for `prompt-source` while the check changes
 the request through its own session, so the first `set-input` is refused
 with 412 and the editor opens again with the draft. It approves the displayed
@@ -776,7 +783,9 @@ mixed-controls run, which waits at its question, cancels it through
 `/wfm-cancel`, requires that the one cancel POST is `{"operation":"cancel"}`,
 that the receipt notification comes before the notification of the runtime
 acknowledgement, which names the state and the message of the receipt, and
-that the run ends cancelled. The last step closes the extension. The `pi-client` mode of
+that the run ends cancelled. The four steps that the section "Results,
+history, lineage and exports in service mode" describes follow. The last
+step closes the extension. The `pi-client` mode of
 `manager/test/service_http.py` runs it before the session check and confirms
 each step against manager facts: the answer commands, the retry command, the
 answers of the run stores as JSON `false`, the verified result, that the
@@ -805,6 +814,99 @@ the decision stays pending and after it changed. The last step of `test/manager-
 second run, closes the extension and the session during their live
 streams, and the `pi-client` mode of `manager/test/service_http.py` then
 confirms over HTTP that the run is still running under owned supervision.
+
+## Results, history, lineage and exports in service mode
+
+`/wfm-result`, `/wfm-restart`, `/wfm-resume`, `/wfm-fork` and `/wfm-export`
+act on a run that the arguments name, or offer the terminal service runs of
+the overview. Each command that sends a command follows the send rules of
+the section "Requests and review in service mode".
+
+`/wfm-result [RUN_ID [PATH]]` reads `/v1/runs/RUN_ID` once. A legacy entry,
+a run that did not succeed and a run without a referenced or verified result
+retrieve nothing, and the command states the reason. The command then waits
+until `/v1/runs/RUN_ID/outputs` states a verified result whose artifact is
+the one that its verification names, at most 120 seconds. A read of the
+outputs makes the manager verify a referenced result.
+`ManagerSession.download` downloads the artifact and checks the exact bytes
+against the size and SHA-256 of that verification. The command then asks
+for the path of a new file, unless the arguments name one. A relative path
+names a file below the current directory of Pi. `saveExact` publishes the
+bytes as `Agentic.Tui.Save` does. It writes them to a new private file in
+the destination directory with an exclusive create, mode 0600, no symbolic
+link, a full write and an fsync, and a hard link then publishes that file at
+the path. A link never replaces an existing entry, so an existing file,
+directory or symbolic link at the path refuses the save, the notification
+names the cause (for example `EEXIST`), and the entry stays as it is. A
+failure before the link removes the private file. A save reports the size,
+the path and the SHA-256, for example `Saved the verified 103 bytes of run
+RUN_ID to PATH, SHA-256 DIGEST.`
+
+`/wfm-history` reads every page of `/v1/runs` as one page set and gives one
+notification. The first line counts the managed runs and the observer
+entries. Each run then has one line in the order of the collection: its
+identifier, workflow, profile and runtime status, its supervision, its
+lineage (for example `restart of run PARENT`), and the verification state of
+its result. A legacy entry, which has `observer` supervision, reads
+`observer (legacy entry, read only)`.
+
+`/wfm-restart`, `/wfm-resume` and `/wfm-fork` read the first page of
+`/v1/runs/RUN_ID/lineage-requests` once. An operation that the page does not
+list as eligible sends nothing, and the notification names the eligible
+operations or the refusal code of the page. `/wfm-fork` first reads the run
+snapshot and lists each completed or reused occurrence with its code, its
+current edit and its intent. For each occurrence the user keeps, drops or
+replaces the answer. A replacement opens the editor with the published
+answer, and `forkReplacementValue` types the text by the code of the
+occurrence: text as given, a flag from yes, no, true or false, an
+acknowledgement from empty text, and a verdict or a structured answer from
+JSON text. A refused text opens the editor again with the text, and nothing
+is sent. The command then sends `{"operation":"restart"}`,
+`{"operation":"resume"}` or `{"operation":"fork","edits":EDITS}` to the
+lineage collection with the entity tag of its first page as `If-Match`. On
+the effect `lineage-created`, it states the child request, enqueues it
+without `set-input`, because its inputs come from the parent run, and opens
+its exact review in the review component. The review shows the lineage
+operation, the parent run and each edit. Only an approval of that review
+starts the child run, whose `parentRunId` and `lineage` name the parent run
+and the operation.
+
+`/wfm-export [RUN_ID [NAME]]` asks for the name unless the arguments name
+it. A name that is not 1 to 128 ASCII letters, digits, dots, underscores or
+hyphens that start with a letter or a digit sends nothing. The command reads
+the first page of `/v1/runs/RUN_ID/exports` once and sends `{"name":NAME}`
+with the entity tag of that page as `If-Match`. On the effect `exported`, it
+reads the export receipt `/v1/exports/export_COMMAND` that the effect names.
+The receipt must be the published export of this command, run and name. The
+command downloads the exported bytes and checks them against the size and
+SHA-256 of the receipt, states the receipt and the verified download, and
+then lists the export collection of the run.
+
+`test/manager-ui.test.ts` checks that `saveExact` publishes the exact bytes
+with mode 0600, refuses an existing path, a symbolic link, a relative path
+and a missing directory, and leaves no private file. It also checks the fork
+targets of a snapshot, the typed replacements, the lineage bodies, and the
+decoders of the export and lineage collections. `test/service-mode.test.ts`
+requires that `/wfm-history` reads both pages of a two-page `/v1/runs` and
+labels the legacy entry observer, that `/wfm-fork` sends one fork with a
+typed replacement and a drop and the entity tag of the lineage collection
+after a refused replacement text, and that an ineligible restart and an
+invalid export name send nothing. `test/manager-ui-live.test.ts` saves the
+verified result of its monitored run, requires mode 0600 and the size and
+SHA-256 that the monitor showed, and requires that a second save to the same
+path refuses and leaves the file unchanged. It exports that result once and
+requires the one export POST with the entity tag of the collection, the
+published receipt and its verified download. It restarts the run of its
+first step, approves the review that shows the restart lineage, and requires
+that the child run succeeds and names its parent and the lineage restart. It
+then requires that `/wfm-history` lists every run of every page of
+`/v1/runs` in the order of the collection. The `pi-client` mode of
+`manager/test/service_http.py` confirms each of these steps with its own
+credential: the saved file against its own download, the one published
+export and its download against the published file, the one restart command
+with its child request, the consumed child preparation with the restart
+lineage, the parent and lineage of the child run, and the run identifiers of
+every page of `/v1/runs`.
 
 ## Source-aware inputs
 
@@ -881,6 +983,12 @@ for the control descriptor.
 | `/wfm-cancel [RUN_ID]` | Service mode: cancel a manager run when its controls allow it. |
 | `/wfm-steer [RUN_ID]` | Service mode: steer an attempt that the controls of a manager run offer. |
 | `/wfm-redirect [RUN_ID]` | Service mode: redirect an occurrence of a manager run to an offered target. |
+| `/wfm-result [RUN_ID [PATH]]` | Service mode: save the verified result of a manager run to a new file with mode 0600. |
+| `/wfm-history` | Service mode: list every manager run over all pages, with legacy entries labelled observer. |
+| `/wfm-restart [RUN_ID]` | Service mode: restart a manager run through an approved child request. |
+| `/wfm-resume [RUN_ID]` | Service mode: resume a manager run through an approved child request. |
+| `/wfm-fork [RUN_ID]` | Service mode: fork a manager run with dropped or replaced answers through an approved child request. |
+| `/wfm-export [RUN_ID [NAME]]` | Service mode: export the verified result of a manager run under a name. |
 
 The `agent_cat_workflow` tool lets a model discover, start, inspect, control,
 restart, resume, or fork runs. Starts from the tool are limited to the

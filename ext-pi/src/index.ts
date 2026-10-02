@@ -461,6 +461,28 @@ export default function agentCatExtension(pi: ExtensionAPI, hooks: ExtensionHook
     handler: async (args, ctx) => requests.redirect(ctx, args),
   });
 
+  pi.registerCommand("wfm-result", {
+    description: "Retrieve the verified result of a manager run and save its exact bytes to a new file with mode 0600",
+    handler: async (args, ctx) => requests.result(ctx, args),
+  });
+
+  pi.registerCommand("wfm-history", {
+    description: "List every run of the manager history over all pages, with legacy entries labelled observer",
+    handler: async (_args, ctx) => requests.history(ctx),
+  });
+
+  for (const operation of ["restart", "resume", "fork"] as const) {
+    pi.registerCommand(`wfm-${operation}`, {
+      description: `Create a ${operation} child request of a manager run, show its exact review with its lineage, and approve it to start the child run`,
+      handler: async (args, ctx) => requests.lineage(ctx, operation, args),
+    });
+  }
+
+  pi.registerCommand("wfm-export", {
+    description: "Export the verified result of a manager run under a name, verify the exported bytes, and list the exports of the run",
+    handler: async (args, ctx) => requests.export(ctx, args),
+  });
+
   pi.registerCommand("wfm-endpoints", {
     description: "Choose the active manager client profile",
     handler: async (args, ctx) => {

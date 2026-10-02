@@ -1,7 +1,13 @@
+import { lstatSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { describe, expect, it, vi } from "vitest";
 import {
   acknowledgementLine,
+  exportLines,
+  forkTargets,
+  saveExact,
   admissionLine,
   cancelOffered,
   controlSettled,
@@ -18,7 +24,20 @@ import {
   type ServiceMonitor,
 } from "../src/manager-ui.ts";
 import { parseJson, type JsonObject } from "../src/manager/json.ts";
-import { decodeCommandReceipt, decodeControl, decodeDecision, type CommandReceipt, type ControlView, type DecisionView, type DraftView, type Preparation } from "../src/manager/resources.ts";
+import {
+  decodeCommandReceipt,
+  decodeControl,
+  decodeDecision,
+  decodeExportCollection,
+  decodeLineageCollection,
+  forkReplacementValue,
+  lineageBody,
+  type CommandReceipt,
+  type ControlView,
+  type DecisionView,
+  type DraftView,
+  type Preparation,
+} from "../src/manager/resources.ts";
 
 const DIGEST = "a".repeat(64);
 
@@ -256,5 +275,76 @@ describe("manager run controls", () => {
     expect(controlSettled("cancel", receiptOf("cancel", "dispatch-attempted", null))).toBe(false);
     expect(acknowledgementLine(receiptOf("redirect", "acknowledged", "rejected-stale"))).toBe("Acknowledgement of command cmd_4: rejected-stale: runtime says rejected-stale");
     expect(acknowledgementLine(receiptOf("cancel", "dispatch-attempted", null))).toBe("Command cmd_4 has no runtime acknowledgement (receipt dispatch-attempted).");
+  });
+});
+
+describe("manager results, lineage and exports", () => {
+  it("publishes the exact bytes once with mode 0600 and refuses an existing path, a symbolic link and a relative path", async () => {
+    const root = mkdtempSync(join(tmpdir(), "agent-cat-save-"));
+    try {
+      const bytes = Buffer.from('{"code":"text","value":"Café λ"}\n', "utf8");
+      const path = join(root, "result.json");
+      expect(await saveExact(path, bytes)).toEqual({ saved: true, leftover: null });
+      expect(readFileSync(path).equals(bytes)).toBe(true);
+      expect(lstatSync(path).mode & 0o777).toBe(0o600);
+      const second = await saveExact(path, Buffer.from("other"));
+      expect(second.saved).toBe(false);
+      expect(!second.saved && second.reason).toContain("EEXIST");
+      expect(readFileSync(path).equals(bytes)).toBe(true);
+      writeFileSync(join(root, "target"), "kept");
+      symlinkSync(join(root, "target"), join(root, "link"));
+      expect((await saveExact(join(root, "link"), bytes)).saved).toBe(false);
+      expect(readFileSync(join(root, "target"), "utf8")).toBe("kept");
+      expect(await saveExact("relative.json", bytes)).toEqual({ saved: false, reason: "the destination must be one absolute single-line file path" });
+      expect((await saveExact(join(root, "missing", "result.json"), bytes)).saved).toBe(false);
+      // No private file remains after a save or a refusal.
+      expect(readdirSync(root).sort()).toEqual(["link", "result.json", "target"]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("names the completed and reused occurrences of a snapshot as fork targets and types each replacement by its code", () => {
+    const snapshot = parseJson(JSON.stringify({
+      items: [
+        { occurrenceId: "3", state: "reused", code: "ack", intent: "Acknowledge", answer: null },
+        { occurrenceId: "1", state: "completed", code: "structured", intent: "Plan", answer: "{\"ok\":true}" },
+        { occurrenceId: "2", state: "failed", code: "text", intent: "Failed", answer: null },
+      ],
+    })) as JsonObject;
+    expect(forkTargets(snapshot)).toEqual([
+      { occurrenceId: 1n, code: "structured", intent: "Plan", answer: '{"ok":true}' },
+      { occurrenceId: 3n, code: "ack", intent: "Acknowledge", answer: null },
+    ]);
+    expect(forkReplacementValue("text", "  as given ")).toEqual({ ok: true, value: "  as given " });
+    expect(forkReplacementValue("flag", " Yes ")).toEqual({ ok: true, value: true });
+    expect(forkReplacementValue("ack", "")).toEqual({ ok: true, value: null });
+    expect(forkReplacementValue("ack", "x").ok).toBe(false);
+    expect(forkReplacementValue("structured", "not json").ok).toBe(false);
+    expect(lineageBody("restart", [{ operation: "drop", occurrenceId: 1n }])).toEqual({ operation: "restart" });
+    expect(lineageBody("fork", [{ operation: "replace", occurrenceId: 3n, answer: null }, { operation: "drop", occurrenceId: 1n }])).toEqual({
+      operation: "fork", edits: [{ occurrenceId: "1", operation: "drop" }, { occurrenceId: "3", operation: "replace", answer: null }],
+    });
+  });
+
+  it("decodes the export and lineage collections and refuses a page whose eligibility and refusal disagree", () => {
+    const page = { setId: "set_1", revision: "rev_1", expiresAt: "2026-10-01T12:00:00Z", index: 0, totalItems: 1, next: null };
+    const receipt = {
+      version: 1, id: "export_cmd_9", runId: "run_1", commandId: "cmd_9", name: "result.json", code: "text", state: "published",
+      sha256: DIGEST, bytes: "33", download: "/v1/artifacts/artifact_2",
+    };
+    const exports = decodeExportCollection(parseJson(JSON.stringify({ version: 1, page, items: [receipt], runId: "run_1" })));
+    expect(exports.ok && exports.value.revision).toBe("rev_1");
+    expect(exports.ok && exportLines(exports.value.items[0], 33)).toEqual([
+      "Export result.json: export_cmd_9 state published, command cmd_9", `Export download: verified 33 bytes, SHA-256 ${DIGEST}`,
+    ]);
+    expect(decodeExportCollection(parseJson(JSON.stringify({ version: 1, page, items: [{ ...receipt, runId: "run_2" }], runId: "run_1" }))).ok).toBe(false);
+    expect(decodeExportCollection(parseJson(JSON.stringify({ version: 1, page, items: [{ ...receipt, name: "../x" }], runId: "run_1" }))).ok).toBe(false);
+    const lineage = (eligible: string[], refusal: string | null) =>
+      decodeLineageCollection(parseJson(JSON.stringify({ version: 1, page, items: [], runId: "run_1", eligible, refusal })));
+    expect(lineage(["restart", "fork"], null)).toEqual({ ok: true, value: { runId: "run_1", revision: "rev_1", eligible: ["restart", "fork"], refusal: null, children: [] } });
+    expect(lineage([], "quarantined").ok).toBe(true);
+    expect(lineage([], null).ok).toBe(false);
+    expect(lineage(["restart"], "quarantined").ok).toBe(false);
   });
 });

@@ -337,14 +337,16 @@ endpoints_mode = len(sys.argv) == 6 and sys.argv[5] == ENDPOINTS
 # reservation. It reuses the credential issuance of TuiModeFixture: one
 # client credential with its client profile for the ext-pi session check, a
 # second client credential pi-ui with its own client profile for the check
-# of the human path, and a separate credential for the harness. The harness
+# of the human path, and a separate credential for the harness. Each of them
+# holds the scopes observe, submit, control and export of profile_1. The harness
 # starts the manager and reads the overview cursor. It then runs vitest with
 # node from PATH in ext-pi twice, each time with AGENT_CAT_MANAGER_PROFILE
 # set to a client profile and AGENT_CAT_MANAGER_REPORT set to a report file.
 # The first run, ext-pi/test/manager-ui-live.test.ts with the pi-ui
 # profile, drives /wfm, /wfm-review, /wfm-withdraw, /wfm-monitor and
-# /wfm-answer and /wfm-cancel of the extension with a fake Pi UI. vitest must
-# report its seven steps passed. During its stale-answer step the check writes the decision
+# /wfm-answer, /wfm-cancel, /wfm-result, /wfm-export, /wfm-restart and
+# /wfm-history of the extension with a fake Pi UI. vitest must report its
+# eleven steps passed. During its stale-answer step the check writes the decision
 # that it is about to answer to the handshake file that
 # AGENT_CAT_MANAGER_HARNESS_ANSWER names. The harness then answers that
 # decision first with JSON false through HTTP with its own credential, waits
@@ -374,7 +376,22 @@ endpoints_mode = len(sys.argv) == 6 and sys.argv[5] == ENDPOINTS
 # succeeded after a retry or failed after an abandon. For the run of
 # PI_UI_CANCELLED it reads that the one cancel command of the report is the
 # only cancel command of the controls of the run, that its receipt records an
-# accepting runtime acknowledgement, and that the run ended cancelled. The harness then takes
+# accepting runtime acknowledgement, and that the run ended cancelled. For
+# /wfm-result it reads that the saved file of the report is a regular file
+# with mode 0600 whose bytes equal its own download of the verified result
+# of the monitored run. For /wfm-export it reads that the export collection
+# of that run holds exactly the published receipt of the report, that the
+# one export command of the collection is the command of the report and
+# names that receipt as its effect, and that its own download of the export
+# verifies against the receipt and equals the published file. For
+# /wfm-restart it reads that the one restart command of the lineage
+# collection of the literal run is the command of the report with the effect
+# lineage-created on the child request, that the collection holds only that
+# child, that the one approval of the child preparation consumed it and its
+# review names the parent run, the operation restart and no edits, and that
+# the child run succeeded and names the parent run and the lineage restart.
+# For /wfm-history it reads every page of /v1/runs and requires the run
+# identifiers that the report lists, in the same order. The harness then takes
 # a new cursor, and the reads of the session check count only the commands
 # after it.
 # The second run, ext-pi/test/manager-live.test.ts with the first client
@@ -1278,7 +1295,7 @@ if endpoints_mode:
                         "scopes": scopes, "profileIds": ["profile_1"],
                         "expiresAt": "2999-01-01T00:00:00Z", "outputFile": str(work / ("credential-" + name))})
 tui_fixture = (TuiModeFixture(*TUI_MODES[tui_mode]) if tui_mode else
-               TuiModeFixture(["profile_1"], ["observe", "submit", "control"], client="pi") if pi_client_mode else None)
+               TuiModeFixture(["profile_1"], ["observe", "submit", "control", "export"], client="pi") if pi_client_mode else None)
 configuration["administrationRoot"] = str(work / "admin")
 config.write_text(json.dumps(configuration))
 context = ssl.create_default_context(cafile=str(cert))
@@ -9497,7 +9514,7 @@ def pi_client_checks():
                 snapshot, _, _ = observed("/v1/runs/" + run_id + "/snapshot", "RunSnapshot")
                 assert snapshot["runtime"] is not None and snapshot["runtime"]["status"] == "succeeded", ("run status", run_id, snapshot["runtime"])
 
-            ui = vitest("test/manager-ui-live.test.ts", ui_profile, ui_report_path, ui_log_path, 7, work / "pi-client-harness-answer.json")
+            ui = vitest("test/manager-ui-live.test.ts", ui_profile, ui_report_path, ui_log_path, 11, work / "pi-client-harness-answer.json")
             ui_receipts = command_receipts(cursor, harness)
             # The reads of the session check count only the commands after this cursor.
             status, middle, _ = request("/v1/snapshot", harness)
@@ -9601,23 +9618,93 @@ def pi_client_checks():
             print("PASS pi-client 7: /wfm-cancel sent the one cancel command", ui["cancelCommand"], "of run", cancelled,
                   "whose receipt records the runtime acknowledgement", cancel_receipt["acknowledgement"]["state"],
                   repr(cancel_receipt["acknowledgement"]["message"]), "and the run ended cancelled", flush=True)
+            saved_path = Path(ui["savedPath"])
+            saved_status = os.lstat(saved_path)
+            assert ui["savedRunId"] == monitored and stat.S_ISREG(saved_status.st_mode) and stat.S_IMODE(saved_status.st_mode) == 0o600, (
+                "the saved result", ui["savedRunId"], oct(saved_status.st_mode))
+            artifact = verified_download(monitored, client, harness)
+            saved = saved_path.read_bytes()
+            assert saved == (work / "verified-result.json").read_bytes() and len(saved) == int(artifact["bytes"]) \
+                and hashlib.sha256(saved).hexdigest() == artifact["sha256"], "the saved bytes differ from the harness download"
+            print("PASS pi-client 8: /wfm-result saved the verified result of run", monitored, "once to", saved_path, "with mode 0600 and the",
+                  len(saved), "bytes of the harness download, and a second save to the same path refused", flush=True)
+            exports_uri = "/v1/runs/" + ui["exportRunId"] + "/exports"
+            status, exports, raw = request(exports_uri, harness)
+            assert status == 200, ("the export collection", status, exports.get("code"))
+            validate("ExportPage", exports, raw)
+            assert [(item["id"], item["name"], item["state"]) for item in exports["items"]] == [(ui["exportId"], ui["exportName"], "published")], (
+                "the export was not published once", exports["items"])
+            export_receipt = exports["items"][0]
+            assert int(export_receipt["bytes"]) == ui["exportBytes"] and export_receipt["sha256"] == ui["exportSha256"], ("the export receipt", export_receipt, ui)
+            exported_commands = receipts_of("export", exports_uri)
+            assert [uri for uri, _ in exported_commands] == [ui["exportCommand"]] and exported_commands[0][1]["state"] == "effect-observed" \
+                and exported_commands[0][1]["effect"]["resource"] == "/v1/exports/" + ui["exportId"], ("the export commands", exported_commands)
+            connection = http.client.HTTPSConnection("127.0.0.1", port, context=context, timeout=15)
+            try:
+                connection.request("GET", export_receipt["download"], headers=harness | {"Accept": "application/octet-stream"})
+                response = connection.getresponse()
+                exported = response.read(int(export_receipt["bytes"]) + 1)
+                assert response.status == 200, ("the export download", response.status)
+            finally:
+                connection.close()
+            assert len(exported) == int(export_receipt["bytes"]) and hashlib.sha256(exported).hexdigest() == export_receipt["sha256"], (
+                "the export download differs from its receipt")
+            assert (work / "manager" / "runs" / "exports" / ui["exportName"]).read_bytes() == exported, "the export download differs from the published file"
+            print("PASS pi-client 9: /wfm-export sent the one export command", ui["exportCommand"], "of run", ui["exportRunId"],
+                  "and the manager published", ui["exportName"], "once as", ui["exportId"], "whose download of", len(exported),
+                  "bytes verifies against the SHA-256", export_receipt["sha256"], "of the receipt and equals the published file", flush=True)
+            parent = ui["restartParentRunId"]
+            lineage_uri = "/v1/runs/" + parent + "/lineage-requests"
+            restarts = receipts_of("restart", lineage_uri)
+            assert parent == ui["literalRunId"] and [uri for uri, _ in restarts] == [ui["restartCommand"]] \
+                and restarts[0][1]["state"] == "effect-observed" and restarts[0][1]["effect"]["kind"] == "lineage-created" \
+                and restarts[0][1]["effect"]["resource"] == "/v1/requests/" + ui["restartRequestId"], ("the restart commands", restarts)
+            status, lineage, raw = request(lineage_uri, harness)
+            assert status == 200, ("the lineage collection", status, lineage.get("code"))
+            validate("LineagePage", lineage, raw)
+            assert [(item["id"], item["lineage"], item["parentRunId"]) for item in lineage["items"]] == [(ui["restartRequestId"], "restart", parent)], (
+                "the lineage collection of the parent run", lineage["items"])
+            child, _, _ = observed("/v1/requests/" + ui["restartRequestId"], "Request")
+            assert child["runId"] == ui["restartRunId"] and child["phase"] == "associated", ("the restart child request", child["runId"], child["phase"])
+            child_preparation, _, _ = observed("/v1/preparations/" + ui["restartPreparationId"], "Preparation")
+            child_approvals = receipts_of("approve", "/v1/preparations/" + ui["restartPreparationId"])
+            assert len(child_approvals) == 1 and child_approvals[0][1]["state"] not in ("refused", "unresolved"), ("the approval of the child", child_approvals)
+            assert child_preparation["requestId"] == ui["restartRequestId"] and child_preparation["state"] == "consumed" \
+                and child_preparation["review"]["lineage"] == {"parentRunId": parent, "operation": "restart", "edits": []}, (
+                "the review lineage of the child", child_preparation["state"], child_preparation["review"].get("lineage"))
+            child_run, _, _ = observed("/v1/runs/" + ui["restartRunId"], "Run")
+            assert child_run["parentRunId"] == parent and child_run["lineage"] == "restart", ("the restarted run", child_run["parentRunId"], child_run["lineage"])
+            succeeded(ui["restartRunId"])
+            print("PASS pi-client 10: /wfm-restart sent the one restart command", ui["restartCommand"], "of run", parent, "with child request",
+                  ui["restartRequestId"], ", the approval of its exact review with the restart lineage started run", ui["restartRunId"],
+                  ", which succeeded and names the parent run and the lineage restart", flush=True)
+            history, target = [], "/v1/runs"
+            while target is not None:
+                status, value, raw = request(target, harness)
+                assert status == 200, ("history page", target, status, value.get("code"))
+                validate("RunPage", value, raw)
+                history.extend(item["id"] for item in value["items"])
+                target = value["page"]["next"]
+            assert history == ui["historyRuns"] and ui["restartRunId"] in history, ("the /wfm-history runs differ from every page of /v1/runs", history, ui["historyRuns"])
+            print("PASS pi-client 11: /wfm-history listed the", len(history), "managed runs of every page of /v1/runs in the order of the collection,",
+                  "the restart child included", flush=True)
             ui_stores = set(run_prompts)
             report = vitest("test/manager-live.test.ts", tui_fixture.client_profile, report_path, log_path, 7)
             assert report["reconnectLastEventId"] == report["reconnectCursor"] and report["pollEvents"] > 0, ("report delivery", report)
-            print("PASS pi-client 8: the ext-pi session ran its seven steps against the protected endpoint, the forced SSE drop",
+            print("PASS pi-client 12: the ext-pi session ran its seven steps against the protected endpoint, the forced SSE drop",
                   "resumed with Last-Event-ID", report["reconnectCursor"], "and", report["events"], "delivered events, of which",
                   report["pollEvents"], "came through polling, equal the polling listing", flush=True)
             status, requests, _ = request("/v1/requests", harness)
             assert status == 200 and sorted(item["id"] for item in requests["items"]) == sorted(
                 [report["requestId"], report["secondRequestId"], ui["literalRequestId"], ui["capturedRequestId"], ui["declinedRequestId"],
-                 ui["monitoredRequestId"], ui["staleRequestId"], ui["cancelledRequestId"]]), (
+                 ui["monitoredRequestId"], ui["staleRequestId"], ui["cancelledRequestId"], ui["restartRequestId"]]), (
                 "the manager holds other than the requests of the two checks", status)
             submitted, _, _ = observed("/v1/requests/" + report["requestId"], "Request")
             expected = [{"name": declaration["name"], "source": "literal", "value": MIXED_TEXT} for declaration in workflow["inputs"]]
             assert submitted["readiness"]["supplied"] == expected, ("the request did not supply exactly the literal", submitted["readiness"])
             assert submitted["runId"] == report["runId"] and submitted["phase"] == "associated", (
                 "the request does not name the run", submitted["runId"], submitted["phase"])
-            print("PASS pi-client 9: request", report["requestId"], "supplied exactly the Unicode literal and names run", report["runId"],
+            print("PASS pi-client 13: request", report["requestId"], "supplied exactly the Unicode literal and names run", report["runId"],
                   flush=True)
             receipts = command_receipts(session_cursor, harness)
             answers = [(uri, receipt) for uri, receipt in receipts if receipt["operation"] == "answer"]
@@ -9639,14 +9726,14 @@ def pi_client_checks():
             recorded = [entry["answer"] for path in answer_files for entry in json.loads(path.read_bytes())["answers"]
                         if entry["occurrenceId"] == occurrence]
             assert recorded == [False], ("the run store does not record the answer as JSON false", occurrence, recorded)
-            print("PASS pi-client 10: the run store records the answer as JSON false, and answer command", report["answerCommand"],
+            print("PASS pi-client 14: the run store records the answer as JSON false, and answer command", report["answerCommand"],
                   "and retry command", report["retryCommand"], "reached their effects", flush=True)
             snapshot, _, _ = observed("/v1/runs/" + report["runId"] + "/snapshot", "RunSnapshot")
             assert snapshot["runtime"] is not None and snapshot["runtime"]["status"] == "succeeded", ("run status", snapshot["runtime"])
             artifact = verified_download(report["runId"], client, harness)
             assert int(artifact["bytes"]) == report["resultBytes"] and artifact["sha256"] == report["resultSha256"], (
                 "the ext-pi result differs from the harness download", artifact["bytes"], artifact["sha256"], report)
-            print("PASS pi-client 11: run", report["runId"], "succeeded, and the verified result of", artifact["bytes"],
+            print("PASS pi-client 15: run", report["runId"], "succeeded, and the verified result of", artifact["bytes"],
                   "bytes has the SHA-256", artifact["sha256"], "of the ext-pi download", flush=True)
             second = report["secondRunId"]
             secondary, _, _ = observed("/v1/requests/" + report["secondRequestId"], "Request")
@@ -9660,7 +9747,7 @@ def pi_client_checks():
             assert control["decisionHeadId"] is not None, ("the second run has no pending decision head", control)
             head, _, _ = observed("/v1/decisions/" + control["decisionHeadId"], "Decision")
             assert head["state"] == "pending" and head["kind"] == "question", ("the question of the second run is not pending", head["state"])
-            print("PASS pi-client 12: after the extension and the session closed during their live streams, run", second,
+            print("PASS pi-client 16: after the extension and the session closed during their live streams, run", second,
                   "is still running under owned supervision, and its question", control["decisionHeadId"], "is pending", flush=True)
         print("PASS pi-client: the /wfm human path and the ext-pi manager session completed their journeys through the protected",
               "HTTPS endpoint, and the harness confirmed each step from manager facts, with no mutation except its first answer of the stale-answer step",

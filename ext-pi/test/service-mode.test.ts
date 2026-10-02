@@ -668,6 +668,127 @@ describe("service mode of the extension", () => {
     });
   });
 
+  describe("history, lineage and exports of /wfm-history, /wfm-fork and /wfm-export", () => {
+    const PAGE = { setId: "set_runs", revision: "runs_rev", index: 0, totalItems: 3 };
+
+    function runItem(id: string, fields: Record<string, unknown> = {}): unknown {
+      return { ...(run(id, "succeeded") as { run: Record<string, unknown> }).run, ...fields };
+    }
+
+    const LEGACY = runItem("run_z9", {
+      requestId: null, manifest: { kind: "legacy" }, runtime: null, supervision: "observer", verification: { state: "verified", artifactId: "artifact_4" },
+      limitations: ["legacy"],
+    });
+
+    /** The extension over one manager with these extra routes and an optional POST route. */
+    async function served(routes: Record<string, unknown>, postRoute?: PostRoute) {
+      const { local } = await localState();
+      process.env.AGENT_CAT_STATE_DIR = local;
+      process.env.AGENT_CAT_MANAGER_PROFILE = profile("history", "alpha.test");
+      const base = manager([run("run_a1", "succeeded")]);
+      const fake = transports({
+        "alpha.test": (resource, count) => {
+          const route = routes[resource];
+          if (route !== undefined) return ok(route, `"${resource.split("/").at(-1)}_rev"`);
+          return base(resource, count);
+        },
+      }, [], postRoute === undefined ? {} : { "alpha.test": postRoute });
+      const pi = host({ manager: { transport: fake.transport } });
+      await pi.fire("session_start");
+      await until(async () => (await pi.status()).includes("delivery live"));
+      return { pi, made: () => fake.made[0] };
+    }
+
+    function lineagePage(eligible: string[], refusal: string | null): unknown {
+      return {
+        version: 1, runId: "run_a1", eligible, refusal, items: [],
+        page: { setId: "set_l", revision: "lineage-requests_rev", expiresAt: new Date(Date.now() + 60000).toISOString(), index: 0, totalItems: 0, next: null },
+      };
+    }
+
+    it("lists every run over all pages of /v1/runs and labels the legacy entry observer", async () => {
+      const expiresAt = new Date(Date.now() + 60000).toISOString();
+      const { pi, made } = await served({
+        "/v1/runs": { version: 1, items: [runItem("run_a1")], page: { ...PAGE, expiresAt, next: "/v1/runs?pageToken=page_2" } },
+        "/v1/runs?pageToken=page_2": {
+          version: 1, items: [runItem("run_b2", { requestId: "req_c1", parentRunId: "run_a1", lineage: "restart" }), LEGACY],
+          page: { ...PAGE, expiresAt, index: 1, next: null },
+        },
+      });
+      await pi.commands.get("wfm-history")!.handler("", pi.ctx);
+      expect(made().gets.filter((uri) => uri.startsWith("/v1/runs"))).toEqual(["/v1/runs", "/v1/runs?pageToken=page_2"]);
+      expect(pi.notices.at(-1)).toEqual({
+        level: "info",
+        message: [
+          "History: 2 managed runs and 1 observer entries",
+          "  run_a1  wf_review  profile profile_1  succeeded, supervision owned, result absent",
+          "  run_b2  wf_review  profile profile_1  succeeded, supervision owned, restart of run run_a1, result absent",
+          "  run_z9  wf_review  profile profile_1  no runtime evidence, observer (legacy entry, read only), result verified",
+        ].join("\n"),
+      });
+      expect(made().posts).toEqual([]);
+      await pi.fire("session_shutdown");
+    });
+
+    it("sends a fork with a typed replacement and a drop, bound to the lineage collection, and sends it once", async () => {
+      const { pi, made } = await served({
+        "/v1/runs/run_a1/lineage-requests": lineagePage(["restart", "resume", "fork"], null),
+        "/v1/runs/run_a1/snapshot": {
+          items: [
+            { occurrenceId: "1", state: "completed", code: "text", intent: "Summarize", answer: "old summary" },
+            { occurrenceId: "0", state: "completed", code: "flag", intent: "Confirm", answer: "true" },
+            { occurrenceId: "2", state: "running", code: "text", intent: "Later", answer: null },
+          ],
+        },
+      }, () => ({ ok: false, failure: { kind: "Refused", status: 412, code: "stale-revision" } }));
+      const asked: string[] = [];
+      let lists = 0;
+      Object.assign(pi.ctx.ui, {
+        select: async (title: string, choices: string[]) => {
+          asked.push(`${title}: ${choices.join(" | ")}`);
+          if (title.startsWith("Answer of occurrence 0")) return "Replace the answer";
+          if (title.startsWith("Answer of occurrence 1")) return "Drop the answer";
+          lists += 1;
+          return lists === 1 ? choices[0] : lists === 2 ? choices[1] : "Send the fork with these edits";
+        },
+        editor: async (title: string, prefill: string) => {
+          asked.push(`${title} [${prefill}]`);
+          return prefill === "true" ? "maybe" : "no";
+        },
+      });
+      await pi.commands.get("wfm-fork")!.handler("run_a1", pi.ctx);
+      expect(asked).toEqual([
+        "Fork edits of run run_a1: occurrence 0 (flag): keep; Confirm | occurrence 1 (text): keep; Summarize | Send the fork with these edits | Stop without a fork",
+        "Answer of occurrence 0 of run run_a1: Keep the answer | Drop the answer | Replace the answer",
+        "Replacement answer of occurrence 0 (flag) [true]",
+        "Replacement answer of occurrence 0 (flag) [maybe]",
+        "Fork edits of run run_a1: occurrence 0 (flag): replace with false; Confirm | occurrence 1 (text): keep; Summarize | Send the fork with these edits | Stop without a fork",
+        "Answer of occurrence 1 of run run_a1: Keep the answer | Drop the answer | Replace the answer",
+        "Fork edits of run run_a1: occurrence 0 (flag): replace with false; Confirm | occurrence 1 (text): drop; Summarize | Send the fork with these edits | Stop without a fork",
+      ]);
+      expect(pi.notices.some((notice) => notice.message.startsWith("The replacement is refused before any send: a flag answer must be yes, no, true, or false."))).toBe(true);
+      expect(made().posts).toEqual(["/v1/runs/run_a1/lineage-requests"]);
+      expect(made().bodies).toEqual([{
+        body: '{"edits":[{"answer":false,"occurrenceId":"0","operation":"replace"},{"occurrenceId":"1","operation":"drop"}],"operation":"fork"}',
+        ifMatch: '"lineage-requests_rev"',
+      }]);
+      expect(pi.notices.at(-1)).toEqual({ message: "Command fork refused: 412 stale-revision", level: "warning" });
+      await pi.fire("session_shutdown");
+    });
+
+    it("sends no lineage request that the collection does not list as eligible and no export with an invalid name", async () => {
+      const { pi, made } = await served({ "/v1/runs/run_a1/lineage-requests": lineagePage([], "quarantined") });
+      await pi.commands.get("wfm-restart")!.handler("run_a1", pi.ctx);
+      expect(pi.notices.at(-1)).toEqual({
+        message: "restart is not eligible: the manager lists no lineage operation for run run_a1; refusal quarantined. Nothing was sent.", level: "warning",
+      });
+      await pi.commands.get("wfm-export")!.handler("run_a1 ../escape", pi.ctx);
+      expect(pi.notices.at(-1)?.message).toContain("The export name must be 1 to 128 ASCII letters");
+      expect(made().posts).toEqual([]);
+      await pi.fire("session_shutdown");
+    });
+  });
+
   it("closes a connection that completes after close", async () => {
     let release: (reply: Reply) => void = () => {};
     const held = new Promise<Reply>((resolve) => {

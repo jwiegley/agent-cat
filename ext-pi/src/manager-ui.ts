@@ -20,6 +20,14 @@
  * when the controls of the run offer it, and each reports the command
  * receipt and then the runtime acknowledgement verbatim.
  *
+ * `/wfm-result` retrieves the verified result of a succeeded run and saves
+ * the exact bytes to a new file through `saveExact`. `/wfm-history` lists
+ * every run of `/v1/runs` over all its pages. `/wfm-restart`, `/wfm-resume`
+ * and `/wfm-fork` create a child request through the lineage collection of
+ * a run, enqueue it and show its exact review with the lineage, and only an
+ * approval starts the child run. `/wfm-export` exports the verified result
+ * of a run, verifies the exported bytes and lists the exports of the run.
+ *
  * Every command goes through the `ManagerSession` of the active service
  * binding, and each send is recorded as a `CommandRecord`. A record states
  * only the outcome of the command (accepted, refused or uncertain) and the
@@ -30,7 +38,10 @@
  * @packageDocumentation
  */
 
-import { readFile } from "node:fs/promises";
+import { randomBytes } from "node:crypto";
+import { constants } from "node:fs";
+import { link, open, readFile, unlink, type FileHandle } from "node:fs/promises";
+import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import type { ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
 import { matchesKey, truncateToWidth, wrapTextWithAnsi, type Component, type TUI } from "@earendil-works/pi-tui";
 import type { ClientFailure, Outcome } from "./manager/events.ts";
@@ -42,18 +53,29 @@ import {
   decodeControl,
   decodeDecision,
   decodeDraftView,
+  decodeExportCollection,
+  decodeExportReceipt,
   decodeInputDeclaration,
+  decodeLineageCollection,
   decodePreparation,
+  decodeRunItem,
+  exportNameValid,
+  forkReplacementValue,
+  lineageBody,
   requiredScopes,
   type CommandReceipt,
   type ControlOffer,
   type ControlView,
   type DecisionView,
   type DraftView,
+  type ExportReceipt,
+  type ForkEdit,
   type InputDeclaration,
+  type LineageOperation,
   type Operation,
   type Preparation,
   type RecoveryOption,
+  type RunItem,
 } from "./manager/resources.ts";
 import type { ManagerSession, Observed, PendingCommand, Reference } from "./manager/session.ts";
 import type { ServiceMode } from "./service-mode.ts";
@@ -577,13 +599,19 @@ export function outcomeLines(state: MonitorState): string[] {
   }
 }
 
-/** The size and download of the verified result output of a run, or `undefined`. */
+/**
+ * The size, SHA-256 and download of the verified result output of a run, or
+ * `undefined`. The artifact must be the one that the verification of the
+ * output names.
+ */
 function verifiedArtifact(outputs: JsonValue): { download: string; bytes: bigint; sha256: string } | undefined {
   const items = memberOf(outputs, "items");
   if (items === undefined || !isJsonArray(items)) return undefined;
   for (const item of items) {
-    if (memberOf(item, "kind") !== "result" || memberOf(memberOf(item, "verification"), "state") !== "verified") continue;
+    const verification = memberOf(item, "verification");
+    if (memberOf(item, "kind") !== "result" || memberOf(verification, "state") !== "verified") continue;
     const artifact = memberOf(item, "artifact");
+    if (text(memberOf(artifact, "id")) === undefined || memberOf(artifact, "id") !== memberOf(verification, "artifactId")) continue;
     const download = text(memberOf(artifact, "download"));
     const sha256 = text(memberOf(artifact, "sha256"));
     const size = memberOf(artifact, "bytes");
@@ -794,6 +822,186 @@ export class ServiceMonitorComponent implements Component {
   }
 
   invalidate(): void {}
+}
+
+// ---------------------------------------------------------------------------
+// Results, history, lineage and exports.
+
+/**
+ * The outcome of `saveExact`: the destination holds the exact bytes, with
+ * the private file removed or left at `leftover`, or nothing was published
+ * and `reason` states why.
+ *
+ * @public
+ */
+export type SaveOutcome =
+  | { readonly saved: true; readonly leftover: string | null }
+  | { readonly saved: false; readonly reason: string };
+
+function errorText(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/** Remove a file, and give the failure text when the removal fails. */
+async function removeFile(path: string): Promise<string | undefined> {
+  try {
+    await unlink(path);
+    return undefined;
+  } catch (error) {
+    return errorText(error);
+  }
+}
+
+/**
+ * Publish exactly these bytes as a new file at one absolute path, as
+ * `Agentic.Tui.Save` does. The bytes go to a new private file in the
+ * destination directory first: an exclusive create with mode 0600 that does
+ * not follow a symbolic link, a full write and an fsync. A hard link then
+ * publishes that file at the destination. A link never replaces an existing
+ * entry, so an existing file, directory or symbolic link at the destination
+ * refuses the save and stays as it is. A failure before the link removes the
+ * private file. After the link, the destination holds the exact bytes and
+ * the save succeeds. When the private file cannot then be removed, the
+ * outcome names it.
+ *
+ * @public
+ */
+export async function saveExact(path: string, bytes: Uint8Array): Promise<SaveOutcome> {
+  if (!isAbsolute(path) || path.endsWith(sep) || basename(path) === "" || /[\0\n\r]/.test(path)) {
+    return { saved: false, reason: "the destination must be one absolute single-line file path" };
+  }
+  const temporary = join(dirname(path), `.${basename(path)}.${randomBytes(12).toString("hex")}.partial`);
+  let handle: FileHandle;
+  try {
+    handle = await open(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
+  } catch (error) {
+    return { saved: false, reason: errorText(error) };
+  }
+  let failure: string | undefined;
+  try {
+    await handle.chmod(0o600);
+    await handle.writeFile(bytes);
+    await handle.sync();
+  } catch (error) {
+    failure = errorText(error);
+  }
+  try {
+    await handle.close();
+  } catch (error) {
+    failure ??= errorText(error);
+  }
+  if (failure === undefined) {
+    try {
+      await link(temporary, path);
+    } catch (error) {
+      failure = errorText(error);
+    }
+  }
+  const removal = await removeFile(temporary);
+  if (failure !== undefined) {
+    return { saved: false, reason: removal === undefined ? failure : `${failure}; the private file ${temporary} remains (${removal})` };
+  }
+  return { saved: true, leftover: removal === undefined ? null : temporary };
+}
+
+/** The runtime status of a run item, or the reason that it has none. */
+function itemStatus(run: RunItem): string {
+  if (run.content.kind === "unreadable") return `unreadable (${run.content.category})`;
+  return run.content.runtime?.status ?? "no runtime evidence";
+}
+
+/**
+ * The line of one run of the history: its identifier, workflow, profile,
+ * runtime status and supervision, its lineage, and the verification of its
+ * result. A legacy entry has `observer` supervision and is labelled as a
+ * read-only observer entry.
+ *
+ * @public
+ */
+export function historyLine(run: RunItem): string {
+  if (run.content.kind === "unreadable") return `  ${run.id}  profile ${run.profileId}  ${itemStatus(run)}`;
+  const { content } = run;
+  const parts = [`  ${run.id}  ${content.workflowId}  profile ${run.profileId}  ${itemStatus(run)}`];
+  parts.push(content.supervision === "observer" ? "observer (legacy entry, read only)" : `supervision ${content.supervision}`);
+  if (content.lineage !== null && content.parentRunId !== null) parts.push(`${content.lineage} of run ${content.parentRunId}`);
+  parts.push(`result ${content.verification.state}`);
+  return parts.join(", ");
+}
+
+/**
+ * The lines of the history: a count of the managed runs and of the observer
+ * entries, then one `historyLine` for each run in the order of the
+ * collection.
+ *
+ * @public
+ */
+export function historyLines(runs: readonly RunItem[]): string[] {
+  const observers = runs.filter((run) => run.content.kind === "known" && run.content.supervision === "observer").length;
+  return [`History: ${runs.length - observers} managed runs and ${observers} observer entries`, ...runs.map(historyLine)];
+}
+
+/**
+ * An occurrence of a parent run that a fork edit may name: a completed or
+ * reused occurrence, whose answer the runtime persisted, with its
+ * observation code, its intent and its published answer text.
+ *
+ * @public
+ */
+export type ForkTarget = { readonly occurrenceId: bigint; readonly code: string; readonly intent: string; readonly answer: string | null };
+
+/**
+ * The fork targets of a run snapshot, in occurrence order.
+ *
+ * @public
+ */
+export function forkTargets(snapshot: JsonObject): ForkTarget[] {
+  const items = jsonMember(snapshot, "items");
+  if (items === undefined || !isJsonArray(items)) return [];
+  const targets: ForkTarget[] = [];
+  for (const item of items) {
+    const id = text(memberOf(item, "occurrenceId"));
+    const state = text(memberOf(item, "state"));
+    const code = text(memberOf(item, "code"));
+    if (id === undefined || !/^(?:0|[1-9][0-9]*)$/.test(id) || code === undefined || (state !== "completed" && state !== "reused")) continue;
+    targets.push({ occurrenceId: BigInt(id), code, intent: text(memberOf(item, "intent")) ?? "", answer: text(memberOf(item, "answer")) ?? null });
+  }
+  return targets.sort((a, b) => (a.occurrenceId < b.occurrenceId ? -1 : a.occurrenceId > b.occurrenceId ? 1 : 0));
+}
+
+/** The text of the fork edit of an occurrence for its selection label. */
+function editLabel(edit: ForkEdit | undefined): string {
+  if (edit === undefined) return "keep";
+  return edit.operation === "drop" ? "drop" : `replace with ${encodeJson(edit.answer)}`;
+}
+
+/**
+ * The lines of one export receipt and of its verified download.
+ *
+ * @public
+ */
+export function exportLines(receipt: ExportReceipt, downloaded: number): string[] {
+  return [
+    `Export ${receipt.name}: ${receipt.id} state ${receipt.state}, command ${receipt.commandId}`,
+    `Export download: verified ${downloaded} bytes, SHA-256 ${receipt.sha256 ?? "none"}`,
+  ];
+}
+
+/** The line of one receipt of the export collection of a run. */
+function exportItemLine(receipt: ExportReceipt): string {
+  const size = receipt.bytes === null ? "no size" : `${receipt.bytes} bytes`;
+  return `  ${receipt.name}  ${receipt.id}  ${receipt.state}  ${size}  SHA-256 ${receipt.sha256 ?? "none"}`;
+}
+
+/** The effect resource of a receipt, or `undefined`. */
+function effectResource(receipt: CommandReceipt): string | undefined {
+  return receipt.effect !== null && isJsonObject(receipt.effect) ? text(jsonMember(receipt.effect, "resource")) : undefined;
+}
+
+/** The run argument and the rest of the arguments of a command: `RUN REST`. */
+function runAndRest(args: string): { run: string; rest: string } {
+  const trimmed = args.trim();
+  const space = trimmed.search(/\s/);
+  return space < 0 ? { run: trimmed, rest: "" } : { run: trimmed.slice(0, space), rest: trimmed.slice(space).trim() };
 }
 
 /**
@@ -1080,6 +1288,274 @@ export class ManagerRequests {
       const from = choice.place.kind === "attempt" ? ` from attempt ${choice.place.attemptId}` : "";
       ctx.ui.notify(`Redirected occurrence ${choice.offer.occurrenceId} of run ${runId}${from} to ${choice.target}.`, "info");
     }
+  }
+
+  /** The terminal service runs of the active binding, for the selection of a result, export or lineage command. */
+  #terminalRuns(service: ServiceMode): { runId: string; label: string }[] {
+    return service.runs().filter((run) => TERMINAL_STATUSES.includes(run.status))
+      .map((run) => ({ runId: run.runId, label: `${run.runId}  ${run.status}  ${run.workflowId ?? "unreadable manifest"}` }));
+  }
+
+  /** One read of `/v1/runs/{id}`, decoded, or `undefined` after a notification. */
+  async #run(ctx: ExtensionContext, session: ManagerSession, runId: string): Promise<RunItem | undefined> {
+    const reference = session.reference(`/v1/runs/${runId}`);
+    if (!reference.ok) return undefined;
+    const observed = await session.get(reference.value);
+    const run = observed.ok ? decodeRunItem(observed.value.value) : observed;
+    if (!run.ok || run.value.id !== runId) {
+      ctx.ui.notify(`Run ${runId} could not be read: ${failureText(run.ok ? null : run.failure)}`, "error");
+      return undefined;
+    }
+    return run.value;
+  }
+
+  /**
+   * The verified result bytes of a succeeded managed run. The run must have
+   * succeeded with a referenced or verified result. The outputs of the run
+   * are read until the manager states a verified result, whose artifact is
+   * the one that the verification names. `ManagerSession.download` then
+   * checks the downloaded bytes against that size and SHA-256.
+   */
+  async #verifiedResult(ctx: ExtensionContext, session: ManagerSession, runId: string)
+    : Promise<{ bytes: Buffer; sha256: string } | undefined> {
+    const run = await this.#run(ctx, session, runId);
+    if (run === undefined) return undefined;
+    if (run.content.kind === "unreadable") return void ctx.ui.notify(`Run ${runId} is unreadable (${run.content.category}). Nothing was saved.`, "warning");
+    const { content } = run;
+    if (content.supervision === "observer") {
+      return void ctx.ui.notify(`Run ${runId} is a legacy entry. A legacy entry publishes no size and digest for its result, so nothing was retrieved.`, "warning");
+    }
+    if (content.runtime?.status !== "succeeded") {
+      return void ctx.ui.notify(`Run ${runId} is ${itemStatus(run)}. Only a succeeded run has a verified result. Nothing was retrieved.`, "warning");
+    }
+    if (content.verification.state !== "verified" && content.verification.state !== "referenced") {
+      return void ctx.ui.notify(`Run ${runId} has no verified result: verification is ${content.verification.state}. Nothing was retrieved.`, "warning");
+    }
+    const outputs = session.reference(`/v1/runs/${runId}/outputs`);
+    if (!outputs.ok) return undefined;
+    // Reading the outputs makes the manager verify a referenced result, and
+    // the change of the run reads them again.
+    const read = await session.waitFor(outputs.value, (observed) => verifiedArtifact(observed.value) !== undefined, EFFECT_WAIT_MS);
+    const artifact = read.ok ? verifiedArtifact(read.value.value) : undefined;
+    if (!read.ok || artifact === undefined) {
+      return void ctx.ui.notify(`The manager states no verified result for run ${runId}: ${failureText(read.ok ? null : read.failure)}. Nothing was retrieved.`, "error");
+    }
+    const location = session.reference(artifact.download);
+    const bytes = location.ok ? await session.download(location.value, artifact.bytes, artifact.sha256) : location;
+    if (!bytes.ok) return void ctx.ui.notify(`The result of run ${runId} was not retrieved: ${failureText(bytes.failure)}. Nothing was saved.`, "error");
+    return { bytes: bytes.value, sha256: artifact.sha256 };
+  }
+
+  /**
+   * `/wfm-result [RUN_ID [PATH]]`: retrieve the verified result of a
+   * succeeded run, check its size and SHA-256 against the verification of
+   * the manager, and save the exact bytes to a new file at the path that the
+   * user names through `saveExact`. A relative path names a file below the
+   * current directory of Pi. An existing path refuses the save, and nothing
+   * is written.
+   */
+  async result(ctx: ExtensionContext, args: string): Promise<void> {
+    const session = this.#session(ctx);
+    const service = this.#service();
+    if (session === undefined || service === undefined) return;
+    const { run, rest } = runAndRest(args);
+    const runId = await this.#chooseRun(ctx, run, this.#terminalRuns(service), "Run whose result to save");
+    if (runId === undefined) return;
+    const verified = await this.#verifiedResult(ctx, session, runId);
+    if (verified === undefined) return;
+    const named = rest || (ctx.hasUI ? await ctx.ui.input(`Path of a new file for the verified ${verified.bytes.length} bytes of run ${runId}`) : undefined);
+    if (!named) {
+      return ctx.ui.notify(`Run ${runId}: verified ${verified.bytes.length} bytes, SHA-256 ${verified.sha256}. No path was named, so nothing was saved.`, "info");
+    }
+    const path = resolve(ctx.cwd, named);
+    const saved = await saveExact(path, verified.bytes);
+    if (!saved.saved) return ctx.ui.notify(`The result of run ${runId} was not saved to ${path}: ${saved.reason}. Nothing was written there.`, "error");
+    const leftover = saved.leftover === null ? "" : ` The private file ${saved.leftover} could not be removed.`;
+    ctx.ui.notify(`Saved the verified ${verified.bytes.length} bytes of run ${runId} to ${path}, SHA-256 ${verified.sha256}.${leftover}`, "info");
+  }
+
+  /**
+   * `/wfm-history`: every run of `/v1/runs` over all its pages, managed runs
+   * and legacy entries in the identifier order of the collection, each with
+   * `historyLine`.
+   */
+  async history(ctx: ExtensionContext): Promise<void> {
+    const session = this.#session(ctx);
+    if (session === undefined) return;
+    const listed = await this.#collection(session, "/v1/runs");
+    if (!listed.ok) return ctx.ui.notify(`The run history could not be read: ${failureText(listed.failure)}`, "error");
+    const runs: RunItem[] = [];
+    for (const item of listed.value) {
+      const run = decodeRunItem(item);
+      if (!run.ok) return ctx.ui.notify(`The run history could not be read: ${failureText(run.failure)}`, "error");
+      runs.push(run.value);
+    }
+    ctx.ui.notify(historyLines(runs).join("\n"), "info");
+  }
+
+  /**
+   * `/wfm-restart`, `/wfm-resume` and `/wfm-fork [RUN_ID]`: create a child
+   * request of a run through its lineage collection, with the entity tag of
+   * the first page as `If-Match`, only when the page lists the operation as
+   * eligible. A fork first collects its edits: drop or replace the answer of
+   * each completed occurrence, where a replacement is typed by the code of
+   * the occurrence. The child inputs come from the parent run, so the child
+   * is enqueued at once, and its exact review, with its lineage rows, opens
+   * in the review component. Only an explicit approval starts the child run.
+   */
+  async lineage(ctx: ExtensionContext, operation: LineageOperation, args: string): Promise<void> {
+    const session = this.#session(ctx);
+    const service = this.#service();
+    if (session === undefined || service === undefined) return;
+    if (!ctx.hasUI) return ctx.ui.notify(`/wfm-${operation} requires the interactive Pi interface`, "error");
+    const runId = await this.#chooseRun(ctx, args, this.#terminalRuns(service), `Run to ${operation}`);
+    if (runId === undefined) return;
+    const collection = session.reference(`/v1/runs/${runId}/lineage-requests`);
+    if (!collection.ok) return;
+    const observed = await session.get(collection.value);
+    const page = observed.ok ? decodeLineageCollection(observed.value.value) : observed;
+    if (!observed.ok || !page.ok || page.value.runId !== runId || observed.value.etag !== `"${page.value.revision}"`) {
+      return ctx.ui.notify(`The lineage collection of run ${runId} could not be read: ${failureText(page.ok ? null : page.failure)}. Nothing was sent.`, "error");
+    }
+    const { eligible, refusal } = page.value;
+    if (!eligible.includes(operation)) {
+      return ctx.ui.notify(eligible.length === 0
+        ? `${operation} is not eligible: the manager lists no lineage operation for run ${runId}; refusal ${refusal ?? "none"}. Nothing was sent.`
+        : `${operation} is not eligible: the manager lists only ${eligible.join(", ")} for run ${runId}. Nothing was sent.`, "warning");
+    }
+    let edits: ForkEdit[] = [];
+    if (operation === "fork") {
+      const chosen = await this.#forkEdits(ctx, session, runId);
+      if (chosen === undefined) return;
+      edits = chosen;
+    }
+    const known = new Set(page.value.children.map((child) => child.id));
+    const sent = await this.#command(ctx, session, operation, collection.value.uri,
+      session.prepare(collection.value, lineageBody(operation, edits), observed.value.etag), true, (value) => {
+        const current = decodeLineageCollection(value);
+        return current.ok && current.value.children.some((child) => !known.has(child.id) && child.lineage === operation);
+      });
+    if (sent.kind !== "receipt" || sent.state !== "effect-observed") return;
+    const resource = sent.receipt === undefined ? undefined : effectResource(sent.receipt);
+    if (sent.receipt === undefined || effectKind(sent.receipt) !== "lineage-created" || resource === undefined || !resource.startsWith("/v1/requests/")) {
+      return ctx.ui.notify(`The ${operation} of run ${runId} created a child request. /wfm-review continues it.`, "info");
+    }
+    const child = session.reference(resource);
+    if (!child.ok) return;
+    ctx.ui.notify(`Lineage: ${operation} of run ${runId} created child request ${resource.slice("/v1/requests/".length)}. `
+      + "Its inputs come from the parent run.", "info");
+    await this.#continue(ctx, session, child.value);
+  }
+
+  /**
+   * Collect the edits of a fork of a run from its snapshot: for each
+   * completed or reused occurrence, keep, drop or replace its answer. A
+   * replacement opens the editor and is typed by `forkReplacementValue`, and
+   * a refused text opens the editor again with the text. Gives the edits
+   * when the user sends the fork, and `undefined` when the user stops.
+   */
+  async #forkEdits(ctx: ExtensionContext, session: ManagerSession, runId: string): Promise<ForkEdit[] | undefined> {
+    const reference = session.reference(`/v1/runs/${runId}/snapshot`);
+    if (!reference.ok) return undefined;
+    const snapshot = await session.get(reference.value);
+    if (!snapshot.ok || !isJsonObject(snapshot.value.value)) {
+      return void ctx.ui.notify(`The snapshot of run ${runId} could not be read: ${failureText(snapshot.ok ? null : snapshot.failure)}. Nothing was sent.`, "error");
+    }
+    const targets = forkTargets(snapshot.value.value);
+    if (targets.length === 0) return void ctx.ui.notify(`Run ${runId} has no completed occurrence whose answer a fork edits. Nothing was sent.`, "warning");
+    const edits = new Map<bigint, ForkEdit>();
+    const send = "Send the fork with these edits";
+    const stop = "Stop without a fork";
+    for (;;) {
+      const labels = targets.map((target) => `occurrence ${target.occurrenceId} (${target.code}): ${editLabel(edits.get(target.occurrenceId))}; ${oneLine(target.intent)}`);
+      const selected = await ctx.ui.select(`Fork edits of run ${runId}`, [...labels, send, stop]);
+      if (selected === send) return [...edits.values()];
+      if (selected === undefined || selected === stop) return void ctx.ui.notify(`No fork was sent for run ${runId}.`, "info");
+      const target = targets[labels.indexOf(selected)];
+      const action = await ctx.ui.select(`Answer of occurrence ${target.occurrenceId} of run ${runId}`, ["Keep the answer", "Drop the answer", "Replace the answer"]);
+      if (action === "Keep the answer") edits.delete(target.occurrenceId);
+      else if (action === "Drop the answer") edits.set(target.occurrenceId, { operation: "drop", occurrenceId: target.occurrenceId });
+      else if (action === "Replace the answer") {
+        const current = edits.get(target.occurrenceId);
+        let draft = current?.operation === "replace" ? (typeof current.answer === "string" && target.code === "text" ? current.answer : encodeJson(current.answer))
+          : target.answer ?? "";
+        for (;;) {
+          const entered = await ctx.ui.editor(`Replacement answer of occurrence ${target.occurrenceId} (${target.code})`, draft);
+          if (entered === undefined) break;
+          draft = entered;
+          const answer = forkReplacementValue(target.code, entered);
+          if (answer.ok) {
+            edits.set(target.occurrenceId, { operation: "replace", occurrenceId: target.occurrenceId, answer: answer.value });
+            break;
+          }
+          ctx.ui.notify(`The replacement is refused before any send: ${answer.failure.reason}. The editor opens again with the text.`, "warning");
+        }
+      }
+    }
+  }
+
+  /**
+   * `/wfm-export [RUN_ID [NAME]]`: export the verified result of a run as
+   * `NAME` with the entity tag of the first page of its export collection as
+   * `If-Match`. After the effect `exported`, the command reads the export
+   * receipt that the effect names, downloads the exported bytes and checks
+   * them against the size and SHA-256 of the receipt, and lists the export
+   * collection of the run.
+   */
+  async export(ctx: ExtensionContext, args: string): Promise<void> {
+    const session = this.#session(ctx);
+    const service = this.#service();
+    if (session === undefined || service === undefined) return;
+    const { run, rest } = runAndRest(args);
+    const runId = await this.#chooseRun(ctx, run, this.#terminalRuns(service), "Run whose result to export");
+    if (runId === undefined) return;
+    const name = rest || (ctx.hasUI ? await ctx.ui.input(`Export name for the verified result of run ${runId}`) : undefined);
+    if (!name) return ctx.ui.notify(`No export name was named for run ${runId}. Nothing was sent.`, "info");
+    if (!exportNameValid(name)) {
+      return ctx.ui.notify("The export name must be 1 to 128 ASCII letters, digits, dots, underscores or hyphens that start with a letter or a digit. "
+        + "Nothing was sent.", "warning");
+    }
+    const collection = session.reference(`/v1/runs/${runId}/exports`);
+    if (!collection.ok) return;
+    const observed = await session.get(collection.value);
+    const page = observed.ok ? decodeExportCollection(observed.value.value) : observed;
+    if (!observed.ok || !page.ok || page.value.runId !== runId || observed.value.etag !== `"${page.value.revision}"`) {
+      return ctx.ui.notify(`The export collection of run ${runId} could not be read: ${failureText(page.ok ? null : page.failure)}. Nothing was sent.`, "error");
+    }
+    const sent = await this.#command(ctx, session, "export", collection.value.uri,
+      session.prepare(collection.value, { name }, observed.value.etag), true, (value) => {
+        const current = decodeExportCollection(value);
+        return current.ok && current.value.items.some((item) => item.name === name && item.state === "published");
+      });
+    if (sent.kind !== "receipt" || sent.state !== "effect-observed") return;
+    if (sent.receipt === undefined || effectKind(sent.receipt) !== "exported" || effectResource(sent.receipt) !== `/v1/exports/export_${sent.receipt.id}`) {
+      return this.#listExports(ctx, session, runId);
+    }
+    const command = sent.receipt.id;
+    const detail = session.reference(`/v1/exports/export_${command}`);
+    if (!detail.ok) return;
+    const read = await session.get(detail.value);
+    const receipt = read.ok ? decodeExportReceipt(read.value.value) : read;
+    if (!receipt.ok || receipt.value.id !== `export_${command}` || receipt.value.commandId !== command || receipt.value.runId !== runId
+      || receipt.value.name !== name || receipt.value.state !== "published" || receipt.value.bytes === null || receipt.value.sha256 === null
+      || receipt.value.download === null) {
+      return ctx.ui.notify(`The export receipt export_${command} does not state the published export: ${failureText(receipt.ok ? null : receipt.failure)}`, "error");
+    }
+    const location = session.reference(receipt.value.download);
+    const bytes = location.ok ? await session.download(location.value, receipt.value.bytes, receipt.value.sha256) : location;
+    if (!bytes.ok) return ctx.ui.notify(`The export ${name} of run ${runId} did not verify: ${failureText(bytes.failure)}`, "error");
+    ctx.ui.notify(exportLines(receipt.value, bytes.value.length).join("\n"), "info");
+    await this.#listExports(ctx, session, runId);
+  }
+
+  /** Read the export collection of a run once and list its receipts. */
+  async #listExports(ctx: ExtensionContext, session: ManagerSession, runId: string): Promise<void> {
+    const collection = session.reference(`/v1/runs/${runId}/exports`);
+    if (!collection.ok) return;
+    const observed = await session.get(collection.value);
+    const page = observed.ok ? decodeExportCollection(observed.value.value) : observed;
+    if (!page.ok) return ctx.ui.notify(`The export collection of run ${runId} could not be read: ${failureText(page.failure)}`, "error");
+    ctx.ui.notify([`Exports of run ${runId}: ${page.value.items.length}`, ...page.value.items.map(exportItemLine)].join("\n"), "info");
   }
 
   /** The complete page set of a collection, read again after a transient page-set refusal. */
