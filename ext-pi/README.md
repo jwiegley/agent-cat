@@ -50,10 +50,13 @@ packages are these, each at version 0.99.1:
 to `packages/agent`. The supported toolchain is Node 22.23.3, TypeScript 5.9.3,
 and vitest 4.1.9.
 
-The links are never replaced by a registry install. The `devDependencies` pins
-of `package.json` and `package-lock.json` name older registry versions. They
-differ from the supported set, and they are not used to install the host.
-`test/host-versions.test.ts` enumerates every linked package, resolves it and
+The links are never replaced by a registry install. The `devDependencies`
+strings of `package.json`, and of the root entry of `package-lock.json`, name
+the fork release 0.99.1 for `pi-client`, `pi-coding-agent`, `pi-server` and
+`pi-tui`. The `node_modules/@earendil-works` entries of `package-lock.json`
+keep their registry descriptions. They are not an install source.
+`node_modules` links the fork, and `test/host-versions.test.ts` enforces the
+supported set. The test enumerates every linked package, resolves it and
 `pi-agent-core` through the Node resolver, and fails when a version is outside
 the supported set, a linked package is not listed, or a listed package is
 missing.

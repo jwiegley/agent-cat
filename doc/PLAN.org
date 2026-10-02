@@ -12586,6 +12586,43 @@ Non-blocking findings of fess audit fess/pf-PF2-r1.md (2026-10-02) on subtask PF
 3. (low) manager/test/service_http.py, the ControlHarness docstring names only tui-controls, tui-redirect and the client-controls modes as its users, and the model_questions docstring is out of date in the same way. Fix: name the current users, or describe them generically.
 4. (low, informational) ci/emacs-ui.py of emacs-native, the advice on wf-service--read and wf-service--control-act records readEtag from the same reads that set If-Match, so ifMatch == readEtag is partly self-referential. The stored precondition and the effect-observed state carry the independent proof, and both are checked. Fix (optional): state in the docstring that the precondition check carries the proof.
 
+* TODO [#D] Resolve the non-blocking fess findings of subtask PF3
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pf3-fess-followup-ann7
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-02 Fri 11:28]
+:MODIFIED: [2026-10-02 Fri 11:28]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess audit fess/pf-PF3-r1.md (2026-10-02) on subtask PF3 (PE27, the ext-pi devDependency version strings at 0.99.1). The PF3 commit names this issue. The PF3 acceptance limited the diff to ext-pi/package.json, ext-pi/package-lock.json and ext-pi/README.md, so these places were not edited.
+
+1. (medium) manager/README.md:252-253 says that the Pi package pins coding-agent 0.85.1 for development and that the installed host reports that version. The pins now name 0.99.1, and the linked host reports 0.99.1. Rewrite the sentence. The 0.85.1 support-policy minimum on line 245 stays.
+2. (medium) doc/workflow-manager-handoff.md lines 274, 391, 411, 443, 476, 700, 780 and 787 still say that PE27 waits for operator authorization or that the pins differ from the fork. Record that PE27 is done: pins at 0.99.1, lock node_modules entries unchanged, no install.
+3. (low) ext-pi/README.md:53-62. By design the lock is internally inconsistent: the root devDependencies say 0.99.1 and the node_modules/@earendil-works entries say 0.84.3 or 0.85.1, so npm ci would refuse the lock. Optionally add one sentence that npm ci and npm install are not supported for this package and that the links stay the install method.
+4. (low) manager/test/__pycache__/ is an untracked bytecode directory from earlier work. Remove it or add it to .gitignore in a housekeeping change.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-pf3-fess-followup-ann7",
+    "depends_on_id": "acat-phase-e-review-findings-0l73",
+    "type": "discovered-from",
+    "created_at": "2026-10-02T18:28:29.472708Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
 * TODO [#C] Phase B part 1 review follow-ups: download quota, id row bound, legacy history, precision gaps
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -13046,7 +13083,7 @@ Deferred security stage for Phase E, Pi service mode (WM-036 to WM-038), under t
 :LABELS:   ["review","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-10-01 Thu 20:45]
-:MODIFIED: [2026-10-02 Fri 09:56]
+:MODIFIED: [2026-10-02 Fri 11:28]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -13128,6 +13165,13 @@ Findings of the Phase E end-of-phase review (two lenses, range 33f84fe4..841ce0c
     "author": "johnw",
     "text": "Phase D closeout status: Met in the packages review, Partial in the working-state review. PD1 to PD6 fixed findings 1, 2, 3, 5 and the pre-lock crash window of 4. The low rows 6 to 12 and the engine coverage of the owner lock (acat-engine-owner-lock-coverage-9snr) stay open. Evidence: doc/workflow-manager-handoff.md section 'Phase D of 2026-10' (Review of Phase D), the review rerun of the journey pair on 91fb0ad4 (N1 and N8 pass) and the closeout make -C doc check (exit 0). Findings are tracked in acat-phase-d-review-findings-raxi.",
     "created_at": "2026-10-02T16:56:14Z"
+  },
+  {
+    "id": 647,
+    "issue_id": "acat-phase-e-review-findings-0l73",
+    "author": "johnw",
+    "text": "Subtask PF3 (2026-10-02) applies operator decision PE27 of 2026-10-02 and fixes item 13. In ext-pi/package.json and packages[\"\"].devDependencies of ext-pi/package-lock.json, pi-client, pi-coding-agent, pi-server and pi-tui now read 0.99.1 (were 0.84.3, 0.85.1, 0.84.3, 0.84.3). peerDependencies stay \"*\". Every node_modules/@earendil-works lock entry is unchanged (JSON comparison against HEAD). No npm install, ci or update ran, and the readlink listings of node_modules/@earendil-works are identical before and after, all pointing into ~/src/fork/pi/packages. ext-pi/README.md states the current behavior. npm run check exit 0, npm test exit 0 with 219 passed and 29 skipped, the Phase D gate count. Evidence: PF/PF3/impl-r1 in the private resume-20260923 directory. Non-blocking fess notes (documentation drift in manager/README.md and the handoff): acat-pf3-fess-followup-ann7.",
+    "created_at": "2026-10-02T18:28:13Z"
   }
 ]
 #+end_src
@@ -22520,7 +22564,7 @@ invocation tuples or exposing secrets.
 :LABELS:   ["p8","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-01 Thu 20:45]
+:MODIFIED: [2026-10-02 Fri 11:28]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-037
 :SOURCE_REPO: agent-cat
@@ -22668,6 +22712,13 @@ verified output, and lineage behave consistently with the other clients.
     "author": "johnw",
     "text": "Delivered by PE17 to PE22. Phase E closeout (commit a17a015b): both review lenses of 33f84fe4..841ce0c7 rate this package met for function (\"approve with notes\", no critical or high finding), and the Phase E gate PE28 passed on 841ce0c7. Evidence: PE/PE10 to PE/PE28 in the private resume-20260923 directory, section \"Phase E of 2026-10\" of doc/workflow-manager-handoff.md. Tested host: built Pi fork ~/src/fork/pi at 7857926ee with the @earendil-works packages at 0.99.1 linked; source acceptance only, no installation, production adoption or deployment. The remaining package items are security items deferred by the operator direction of 2026-09-30, listed in acat-phase-e-deferred-security-5jl4. Non-blocking review notes: acat-phase-e-review-findings-0l73. PE27 (devDependency pins) awaits operator authorization. Not closed: it depends on acat-wm-036-5ndj, which stays open only behind acat-wm-035-9uqq. Close with WM-036.",
     "created_at": "2026-10-02T03:45:48Z"
+  },
+  {
+    "id": 648,
+    "issue_id": "acat-wm-037-dz3v",
+    "author": "johnw",
+    "text": "Subtask PF3 (2026-10-02) applies operator decision PE27 of 2026-10-02 and fixes item 13. In ext-pi/package.json and packages[\"\"].devDependencies of ext-pi/package-lock.json, pi-client, pi-coding-agent, pi-server and pi-tui now read 0.99.1 (were 0.84.3, 0.85.1, 0.84.3, 0.84.3). peerDependencies stay \"*\". Every node_modules/@earendil-works lock entry is unchanged (JSON comparison against HEAD). No npm install, ci or update ran, and the readlink listings of node_modules/@earendil-works are identical before and after, all pointing into ~/src/fork/pi/packages. ext-pi/README.md states the current behavior. npm run check exit 0, npm test exit 0 with 219 passed and 29 skipped, the Phase D gate count. Evidence: PF/PF3/impl-r1 in the private resume-20260923 directory. Non-blocking fess notes (documentation drift in manager/README.md and the handoff): acat-pf3-fess-followup-ann7.",
+    "created_at": "2026-10-02T18:28:15Z"
   }
 ]
 #+end_src
