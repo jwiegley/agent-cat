@@ -8,13 +8,16 @@
 #include <libproc.h>
 #endif
 
-/* Observe this child without releasing its PID for reuse. */
+/* Observe this child without releasing its PID for reuse. Darwin's waitid
+   also reports a stopped child for WEXITED alone, with CLD_STOPPED, so only
+   the three termination codes count as an exit. */
 int agentic_child_exited(int pid)
 {
     siginfo_t info = {0};
     if (waitid(P_PID, (id_t)pid, &info, WEXITED | WNOHANG | WNOWAIT) < 0)
         return -1;
-    return info.si_pid != 0;
+    return info.si_pid != 0 &&
+           (info.si_code == CLD_EXITED || info.si_code == CLD_KILLED || info.si_code == CLD_DUMPED);
 }
 
 /* The caller must retain the original, unreaped session leader. */

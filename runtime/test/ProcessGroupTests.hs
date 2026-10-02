@@ -4,14 +4,16 @@
 
 -- | Spawn contracts of 'createProcessGroup': inherited descriptors, closed
 -- standard descriptors, nonblocking parent pipe ends, session leadership,
--- executable resolution, exec errors, the inherited owner lock and spawn cost.
+-- stopped leaders, executable resolution, exec errors, the inherited owner
+-- lock and spawn cost.
 module ProcessGroupTests (processGroupTests, spawnCostCheck, spawnCostProbe) where
 
-import Agentic.Runtime (ProcessGroup, closeGroupPipes, createProcessGroup, groupErrors, groupInput, groupOutput, groupPid, terminateProcessGroup, waitProcessGroup)
+import Agentic.Runtime (ProcessGroup, closeGroupPipes, createProcessGroup, groupErrors, groupInput, groupOutcome, groupOutput, groupPid, processGroupLive, terminateProcessGroup, waitProcessGroup)
 #if defined(darwin_HOST_OS)
-import Agentic.Runtime (lockPrivateDescriptor, processGroupLive, setInheritedOwnerLock)
+import Agentic.Runtime (lockPrivateDescriptor, setInheritedOwnerLock)
 #endif
 import Control.Concurrent (threadDelay)
+import Control.Concurrent.MVar (tryReadMVar)
 import Control.Exception (IOException, bracket, finally, try)
 import Control.Monad (forM, forM_, unless)
 import qualified Data.ByteString.Char8 as BC
@@ -26,6 +28,7 @@ import System.IO (hClose, hFlush, hPutStrLn, stderr, stdout)
 import System.Posix.Files (setFileMode)
 import System.Posix.IO (FdOption (CloseOnExec, NonBlockingRead), OpenMode (ReadOnly), closeFd, defaultFileFlags, dup, dupTo, openFd, queryFdOption)
 import System.Posix.Process (getProcessGroupIDOf, getProcessID)
+import System.Posix.Signals (sigCONT, sigSTOP, signalProcessGroup)
 import System.Posix.Resource (Resource (ResourceOpenFiles), ResourceLimit (ResourceLimit), ResourceLimits (..), getResourceLimit, setResourceLimit)
 import System.Posix.Temp (mkdtemp)
 import System.Posix.Types (CPid (..), Fd (..), ProcessID)
@@ -108,6 +111,7 @@ processGroupTests = do
   nonblockingCheck
   closedStandardChecks
   sessionCheck
+  stoppedCheck
   base <- getTemporaryDirectory
   bracket (mkdtemp (base </> "process-group-")) removePathForcibly $ \work -> do
     directory <- canonicalizePath work
@@ -117,7 +121,7 @@ processGroupTests = do
     ownerLockCheck directory
 #endif
   spawnCostCheck
-  putStrLn ("PASS process group: stdio-only descriptors, nonblocking parent pipe ends, closed standard descriptors, session leader, execvp and find_executable resolution, exec error class/errno/file, inherited owner lock, spawn cost below one second for " <> show timedSpawns <> " spawns at soft RLIMIT_NOFILE " <> show highDescriptorLimit)
+  putStrLn ("PASS process group: stdio-only descriptors, nonblocking parent pipe ends, closed standard descriptors, session leader, stopped leader lives, execvp and find_executable resolution, exec error class/errno/file, inherited owner lock, spawn cost below one second for " <> show timedSpawns <> " spawns at soft RLIMIT_NOFILE " <> show highDescriptorLimit)
 
 expect :: String -> Bool -> IO ()
 expect label condition = unless condition $ do
@@ -236,6 +240,25 @@ sessionCheck = do
     processGroup <- getProcessGroupIDOf pid
     expect "spawned child leads its own session" (session == pid && session /= parent)
     expect "spawned child leads its own process group" (processGroup == pid)
+
+-- | A stopped session leader is a live process. Darwin's @waitid@ with only
+-- @WEXITED@ also reports a stopped child, with @CLD_STOPPED@, so the group
+-- monitor must not read that report as an exit. The check stops the group
+-- for many monitor polls and requires that the leader still lives with no
+-- published outcome, and then continues it before the cleanup ends it.
+stoppedCheck :: IO ()
+stoppedCheck = do
+  let command = (proc "/bin/sleep" ["30"]) {std_in = NoStream, std_out = NoStream, std_err = NoStream}
+  bracket (createProcessGroup command) (\group -> terminateProcessGroup 2000000 group `finally` closeGroupPipes group) $ \group -> do
+    signalProcessGroup sigSTOP (groupPid group)
+    threadDelay 300000
+    live <- processGroupLive group
+    outcome <- tryReadMVar (groupOutcome group)
+    -- The continue fails with ESRCH when the monitor has already ended the
+    -- group, and the expectations below then report why.
+    _ <- try @IOException (signalProcessGroup sigCONT (groupPid group))
+    expect "a stopped session leader has no published outcome" (null outcome)
+    expect "a stopped session leader lives" live
 
 #if defined(darwin_HOST_OS)
 -- | A lock descriptor that 'setInheritedOwnerLock' names reaches the session

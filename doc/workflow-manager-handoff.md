@@ -180,15 +180,19 @@ The gate ran once on the final tree under the operator direction of
 15. `make -C doc check` passed after the edit of this section
     (`15-doc-check-final`).
 
-The `failures-launched` defect was in the harness. On macOS the death of
-the manager orphans the process group of the frontend proxy. Because that
-group holds a stopped process, the kernel sends it SIGHUP and SIGCONT, and
-the proxy ends. The PE4 run passed. The cause is not established, and an
-inherited disposition that ignored SIGHUP is the likely one. The
-harness now starts the manager with the default action for SIGHUP, expects
-the proxy group to end, requires every process of the inner worker session
-to stay stopped, and signals only those groups in case 4.
-`manager/WORKERS.md` and the header comment of the mode state the rule.
+The `failures-launched` defect was in the Runtime. On macOS `waitid` with
+`WEXITED` alone also reports a stopped child, and `agentic_child_exited`
+read that report as an exit. The group monitor of the manager then ended a
+stopped frontend proxy group with SIGKILL when it saw the stop before the
+harness killed the manager. The PD29 gate run found this cause. The proxy
+leads its own session, so the kernel sends it no signal when the manager
+dies. `agentic_child_exited` now counts only the three termination codes as
+an exit, and `runtime-contract-test --process-group-test` checks that a
+stopped session leader lives with no published outcome. The harness waits
+one second after the stop, requires every worker process to stay stopped
+before and after the death of the manager, and signals every worker group
+in case 4. `manager/WORKERS.md` and the header comment of the mode state the
+rule.
 
 ### Operator decisions of 2026-10-01
 
@@ -368,7 +372,6 @@ fork and resume statement. The other findings stay open:
 | Low | A malformed manager profile setting makes `session_start` skip the local restore and the bridge start. | `ext-pi/src/index.ts` |
 | Low | A fork review with more than one replacement, and a lineage review with a profile identifier of about 70 characters or more, do not fit 80x24. | `tui/src/Agentic/Tui/Presentation.hs` |
 | Low | Cabal does not track the include of `runtime/cbits/private_sync.c` in `manager/test/draft_sync_fault.c`, so a stale object can fail the link. | `agentic.cabal`, `manager/test/draft_sync_fault.c` |
-| Low | Whether the frontend proxy survives a manager crash depends on the inherited SIGHUP disposition. The product code does not fix it. | `manager/test/service_http.py`, `manager/WORKERS.md` |
 | Low | The `ext-pi` devDependency pins differ from the tested fork (PE27). | `ext-pi/package.json` |
 
 ### Next action
