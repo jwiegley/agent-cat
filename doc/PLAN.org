@@ -10178,6 +10178,28 @@ Interior sits on a lawless LE (Interior.id must take refl as an argument); it is
 ]
 #+end_src
 
+* TODO [#D] Resolve the non-blocking fess findings of subtask PD14
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-ns5n
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-02 Fri 00:59]
+:MODIFIED: [2026-10-02 Fri 00:59]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess audit fess/pd-PD14-r1.md (2026-10-02) on subtask PD14 (WM-030 part 7, agent-workflows emacs-native 543c16f).
+
+1. (medium) emacs/wf-manager.el:3404,3497,3619-3650 and emacs/wf-manager-tests.el:1705. Every transport test binds wf-manager--scheme to "http", so the production https path (GnuTLS with gnutls-trustfiles set to the profile caFile, gnutls-verify-error t, and the NSM advice after the handshake) never runs. The NSM test calls wf-manager--nsm-verify directly. Fix: add one HTTPS exercise, a GET of /v1/capabilities against the local protected manager or a local TLS listener with a test CA, through wf-manager-connect in batch Emacs, that shows no prompt and a checked capability binding.
+2. (low) emacs/wf-manager.el:3674,3708,4079. wf-manager--send pushes the exchange onto the transport before url-retrieve and catches only file-error. Another synchronous error leaves the exchange pending, so a later wf-manager-transport-close calls the callback a second time, and wf-manager-connect leaks its transport and temporary directory. Fix: remove the exchange (and close the transport in wf-manager-connect) on any other synchronous signal, or push the exchange only after url-retrieve returns.
+3. (low) README.md:757 and emacs/wf-manager.el:3417,3614. The README says the session directory holds the NSM settings file and an empty url.el cache directory, but no code creates either one. Fix: say that the directory is where url.el and nsm would write these files, or create the cache directory in wf-manager-transport-open.
+4. (low) emacs/wf-manager.el:3497. The global :around advice on nsm-verify-connection is added on each transport open and never removed. Fix: remove it when the last transport closes, or record why it stays in the module commentary.
+5. (low) Evidence: the failing-first run is recorded only in impl-r1/notes.txt, with no saved log. Fix: keep a failing log in later rounds when one exists.
+
 * DONE [#B] Shortest-list 6: ONE star — CsumIsSup mixin, kstar x := csum (x ^ .)
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -20611,7 +20633,7 @@ coordination or SQL into the TUI.
 :LABELS:   ["p6","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-02 Fri 00:37]
+:MODIFIED: [2026-10-02 Fri 00:59]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-030
 :SOURCE_REPO: agent-cat
@@ -20733,6 +20755,13 @@ separately tested rather than inferred from one newer Emacs build.
     "author": "johnw",
     "text": "PD13 (WM-030 part 6, agent-workflows emacs-native b681c1a): emacs/wf-manager.el adds a pure refresh coordinator after ext-pi/src/manager/refresh.ts (per-resource single-flight reads, dirty coalescing, a generation that a resnapshot or endpoint switch advances so that an earlier-generation completion installs nothing), the reconnection backoff and jitter, and the reconciliation of an uncertain command by one read of the receipt, the target or a supplied reconciliation read (the PD2 rule). No report carries a send; an uncertain report keeps the same record. Evidence scope: ci/emacs.sh exit 0, 4 passes over 4 files, transport ERT 43 of 43, every vector of refresh.sequences (13 cases, 87 steps), backoff (4), jitter (5) and reconciliation (17). Fess pd-PD13-r1 not blocking; three low findings filed as a follow-up. Limitations: no I/O yet; not connected to HTTP, SSE or wf.el; wf-manager-transport-unavailable is not signalled by any code yet. The package stays open.",
     "created_at": "2026-10-02T07:37:37Z"
+  },
+  {
+    "id": 604,
+    "issue_id": "acat-wm-030-t2l4",
+    "author": "johnw",
+    "text": "PD14 (WM-030 part 7, agent-workflows emacs-native 543c16f): emacs/wf-manager.el adds an asynchronous HTTP transport through url-retrieve over GnuTLS. Cancellable exchanges with one callback after return; url.el settings applied as let-bindings and buffer-local values (one Accept, no other negotiation header, no redirects, keepalive, cookies, cache or resend, no url-auth or NSM prompt); one Authorization header, Idempotency-Key <authorityEpoch>.<nonce>; bounded response; typed 401 refusal and problem decoding; close kills processes and buffers; capability binding by GET /v1/capabilities after checkCapabilities; events use the bounded poll mode of /v1/events (decision recorded in README). Evidence scope: ci/emacs.sh exit 0, 4 passes over 4 files, transport ERT 58 of 58 (15 new) against a local plain HTTP listener. Fess pd-PD14-r1 not blocking; findings filed as a follow-up. Limitations: the https/GnuTLS/NSM path did not run against a TLS server; no live manager run; follow loop, capture upload and artifact download not yet present; TLS 1.3 pin and cryptographic nonce deferred as security-only. The package stays open.",
+    "created_at": "2026-10-02T07:59:46Z"
   }
 ]
 #+end_src
