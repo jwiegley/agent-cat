@@ -755,7 +755,10 @@ The Store ends an orderly close with a shutdown notice that names the process
 generation. A close is orderly when the Store is not poisoned and the action of
 the lifetime returned or the operator stopped it. The command line delivers the
 termination and keyboard signals of `--manager serve` to the owner thread
-as `UserInterrupt`, which is how a serving manager stops. A lifetime whose
+as `UserInterrupt`, which is how a serving manager stops. After the cleanup
+of a stop by the termination signal, the process exits with status 0. A stop
+by the keyboard signal propagates the interrupt, so the process ends as an
+interrupted command. A lifetime whose
 action failed in any other way, a poisoned Store, a
 close that cannot prove worker cleanup and a later retry of that close write no
 shutdown notice, so the log of such a lifetime ends without its stop. The

@@ -980,7 +980,7 @@ legacyHistoryOptions options = do
 managerServeCmd :: Registry -> FilePath -> [(FilePath, Text)] -> IO ()
 managerServeCmd reg path legacy = do
   unless (isAbsolute path) (die reg 1 "manager --config requires an absolute file")
-  withManagerSignals (do
+  withManagerSignals $ (do
     configuration <- loadManagerConfiguration reg path >>= either throwIO pure
     Manager.serveManager configuration legacy)
     `catches`
@@ -993,15 +993,24 @@ managerServeCmd reg path legacy = do
       ]
 
 -- Interrupt the foreground owner so its original brackets perform cleanup.
--- Signals do not reconstruct workers from process identifiers.
-withManagerSignals :: IO a -> IO a
+-- Signals do not reconstruct workers from process identifiers. When the
+-- termination signal stopped the owner, the process exits with status 0
+-- after that cleanup. The keyboard signal propagates the interrupt, so the
+-- process ends as an interrupted command.
+withManagerSignals :: IO () -> IO ()
 withManagerSignals action = do
   owner <- myThreadId
-  let install signal = Signals.installHandler signal
-        (Signals.CatchOnce (throwTo owner UserInterrupt)) Nothing
+  terminated <- newIORef False
+  let install signal mark = Signals.installHandler signal
+        (Signals.CatchOnce (mark >> throwTo owner UserInterrupt)) Nothing
       restore signal previous = void (Signals.installHandler signal previous Nothing)
-  bracket (install Signals.softwareTermination) (restore Signals.softwareTermination) $ \_ ->
-    bracket (install Signals.keyboardSignal) (restore Signals.keyboardSignal) $ \_ -> action
+  stopped <- try $
+    bracket (install Signals.softwareTermination (writeIORef terminated True)) (restore Signals.softwareTermination) $ \_ ->
+      bracket (install Signals.keyboardSignal (pure ())) (restore Signals.keyboardSignal) $ \_ -> action
+  case stopped of
+    Right () -> pure ()
+    Left UserInterrupt -> readIORef terminated >>= \byTermination -> if byTermination then exitSuccess else throwIO UserInterrupt
+    Left other -> throwIO other
 
 runOrdinaryCommand :: DataBroker -> Registry -> [Text] -> IO ()
 runOrdinaryCommand broker reg args =

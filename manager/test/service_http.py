@@ -1334,9 +1334,96 @@ EMACS_SERVICE_FALSE = "JOURNEY-ASSERT Emacs answer is JSON false"
 # change: Pi types true instead of false in step 6. The mode must fail at
 # the run-store check of step 7 with CROSS_FALSE.
 #
-# The cross-client-lifecycle and cross-client-lineage modes are not yet
-# implemented. Each prints that it is not yet implemented and exits with
-# status 2.
+# The cross-client-lifecycle mode: disconnection and reconnection,
+# rotation and revocation, an ordinary restart with the lost run and the
+# admission of a new request of its resource key, and a manager loss with the
+# release of the quarantine. Emacs runs python3 WF_EMACS_UI --service with
+# the client profile of the emacs credential, --service-case
+# witness-lifecycle and a handshake directory, and it starts two Emacs
+# processes in turn.
+#
+# 1. Pi starts through PiHost with the client profile of the pi credential.
+#    /wfm, Enter on profile_1, the arrow keys and Enter on mixed-controls,
+#    Enter on the literal source and the typed literal CROSS_LITERAL_2
+#    create and enqueue a request, and a and Yes approve its exact review.
+#    Every command so far names the client of the pi credential. A TUI with
+#    the client profile of the tui credential opens the run from its
+#    Manager overview at the pending person question. The first Emacs
+#    opens the view of the run, which shows the question as its head under
+#    the supervision owned with the cancel choice, and the session sends
+#    no command.
+# 2. Ctrl-C, which the live monitor names DETACH, ends the TUI, C-x C-c
+#    quits Emacs, and /quit ends Pi. Each exits with status 0 and its terminal
+#    restored. The commands are the same before and after the three closes,
+#    and the run is still owned with its question pending as the head.
+# 3. rotate-credential rotates the emacs credential into
+#    credential-emacs-rotated with the same client, and the harness writes
+#    its client profile. In the overlap both credentials read the run.
+#    After the cutoff the old credential receives 401 unauthenticated, and
+#    the rotated one still reads. A fifth credential, extra, reads once,
+#    and after revoke-credential its next read receives 401
+#    unauthenticated.
+# 4. SIGTERM ends the manager with status 0, and its log ends with the
+#    shutdown notice. A new lifetime on the same root and configuration
+#    publishes the run as lost with the lost-supervision limitation, the
+#    last runtime status running and no cancel, and the approve command of
+#    the run is unresolved. The harness writes the published state before
+#    and after the restart to cross-lifecycle-restart-state.json.
+# 5. A second Emacs with the client profile of the rotated credential, a
+#    new Pi with /wfm-monitor and a new TUI from its Manager overview each
+#    show the run with the supervision lost, the published runtime status
+#    and no cancel offer. No command was added since the stop.
+# 6. The orderly close released the reservation of the run with the
+#    pending kind closed, and check-store reports no quarantine. In the new
+#    TUI, Esc twice returns to the workflow browser, and the keys of step 1
+#    of the cross-client mode create a mixed-controls request of profile_1
+#    with the literal CROSS_LITERAL_3 and enqueue it. The key cross_one is
+#    free, so the request reaches review, and the TUI shows its exact
+#    review. Its create, set-input and enqueue commands name the client of
+#    the tui credential, and no command follows its enqueue until the
+#    review.
+# 7. /wfm-review REQUEST and a and Yes in Pi approve the exact review. The
+#    new run waits at its person question with a held reservation of the
+#    key cross_one. The TUI follows its request into the live monitor of
+#    the run, and the second Emacs opens its view, which shows the question
+#    as its head under the supervision owned. /quit ends Pi.
+# 8. SIGKILL ends the second lifetime while the run is held. Without a key,
+#    the TUI header shows the unreachable manager and the Emacs view the
+#    delivery unreachable. A third lifetime on the same root and
+#    configuration publishes the run as lost without a cancel, and
+#    check-store lists one quarantine, the reservation of the run with the
+#    key cross_one. Without a key, the TUI and the second Emacs show the
+#    supervision lost, and a new Pi with /wfm-monitor shows it too. No
+#    command was added since the kill.
+# 9. The TUI quits, and a new TUI creates a mixed-controls request of
+#    profile_1 with the literal CROSS_LITERAL_4 and enqueues it. The request
+#    waits queued with the one reason profile-busy, which the TUI and
+#    /wfm-review REQUEST in Pi show. The harness runs check-quarantine until
+#    it reports clean, at most 60 seconds, and release-quarantine with that
+#    evidence identity and digest releases the reservation. The request then
+#    reaches review, and the TUI shows its exact review, with no command
+#    after its enqueue.
+# 10. a and Yes in Pi approve the exact review. At the person question of
+#    the new run, the second Emacs opens its view, a opens the answer
+#    editor, Emacs types false and C-c C-c sends it once. The answer
+#    command names the client of the emacs credential and reaches
+#    effect-observed. /wfm-answer RUN and Retry in Pi send the retry of the
+#    recovery. The run succeeds, and the new TUI, which follows its request
+#    into the live monitor of the run, shows the terminal status and the
+#    size and the SHA-256 of the harness download, and answers.json of the
+#    run store records JSON false, or the mode fails with CROSS_FALSE.
+# 11. After SIGTERM ends the third lifetime with status 0, the flow verb of
+#    TUI_CHECK verifies the manager log and the run stores and exits with
+#    status 2, because the second lifetime has no shutdown notice. The log
+#    holds three lifetimes, and only the second lacks its shutdown notice.
+#    No command is undecided. Each command has exactly one record, in the
+#    lifetime that accepted it, and no two commands other than creates have
+#    the same target and operation. The answer of Emacs is from the rotated
+#    credential.
+# 12. The cleanup of step 15 of the cross-client mode closes the mode.
+#
+# The cross-client-lineage mode is not yet implemented. It prints that it
+# is not yet implemented and exits with status 2.
 CROSS_CLIENT = "cross-client"
 CROSS_CLIENT_LIFECYCLE = "cross-client-lifecycle"
 CROSS_CLIENT_LINEAGE = "cross-client-lineage"
@@ -1344,6 +1431,12 @@ CROSS_CLIENT_BROKEN = "cross-client-broken-answer"
 cross_client_mode = len(sys.argv) == 6 and sys.argv[5] in (CROSS_CLIENT, CROSS_CLIENT_LIFECYCLE, CROSS_CLIENT_LINEAGE, CROSS_CLIENT_BROKEN)
 WITNESS_SECONDS = 900
 CROSS_LITERAL_1 = "Cross-client λ: Café ✓ 雪, created in the TUI"
+CROSS_LITERAL_2 = "Cross-client λ: Café ✓ 雪, created in Pi"
+CROSS_LITERAL_3 = "Cross-client λ: Café ✓ 雪, queued after the restart"
+CROSS_LITERAL_4 = "Cross-client λ: Café ✓ 雪, queued behind the quarantine"
+# WITNESS_LIFECYCLE_REPORT_VERSION of ci/emacs-ui.py states the report
+# version of the cross-client-lifecycle mode.
+CROSS_LIFECYCLE_REPORT_VERSION = 2
 # WITNESS_REPORT_VERSION and WITNESS_ANSWER of ci/emacs-ui.py state the
 # report version and the Emacs answer.
 CROSS_EMACS_REPORT_VERSION = 3
@@ -14672,6 +14765,706 @@ def cross_client_checks():
           f"that negotiates {negotiated}, in {elapsed:.0f} seconds", flush=True)
 
 
+def cross_client_lifecycle_checks():
+    """The cross-client-lifecycle mode: disconnection and reconnection,
+    rotation and revocation, an ordinary restart with the lost run and the
+    admission of a new request of its resource key, and a manager loss with
+    the release of the quarantine. See CROSS_CLIENT_LIFECYCLE for the
+    steps."""
+    harness = tui_fixture.harness
+    mode = sys.argv[5]
+    endpoint = f"https://127.0.0.1:{port}/v1"
+    artifacts = work / "cross-lifecycle-emacs"
+    report_path = work / "cross-lifecycle-emacs-report.json"
+    handshake = work / "cross-lifecycle-handshake"
+    handshake.mkdir(mode=0o700)
+    selectors = ("reviewDigest", "requestRevision", "profileRevision", "descriptorRevision", "processGeneration")
+    clients, credentials = tui_fixture.client_ids, tui_fixture.credential_ids
+    flow_dir = work / "manager" / "flow"
+    pids = {"tui": [], "emacs": [], "pi": []}
+    hosts = []
+    # The pseudo-terminals of the TUI and Pi processes that run at the
+    # moment. Node writes to a terminal synchronously, so every helper that
+    # waits reads all of them.
+    sessions = []
+
+    def serve(index):
+        """Start one foreground manager lifetime on the same root and
+        configuration and wait for HTTPS readiness."""
+        with (work / f"server-{index}.stdout").open("wb") as output, (work / f"server-{index}.stderr").open("wb") as errors:
+            process = subprocess.Popen([str(runner), "--manager", "serve", "--config", str(config),
+                                        "+RTS", "-N" + native, "-RTS"], stdout=output, stderr=errors)
+        wait_ready(process)
+        return process
+
+    def pump_all(wait=0.1):
+        assert all(session.process.poll() is None for session in sessions), (
+            "a client process ended while the harness waited", [session.process.poll() for session in sessions])
+        if not sessions:
+            time.sleep(wait)
+        for session in sessions:
+            session.pump(wait / len(sessions))
+
+    def until(path, schema, ready, timeout=45):
+        """Read the resource until ready holds, and read the pseudo-terminals between the reads."""
+        deadline = time.monotonic() + timeout
+        while True:
+            value, tag, raw = observed(path, schema)
+            if ready(value):
+                return value, tag, raw
+            assert time.monotonic() < deadline, ("observation deadline", path, [session.screen.text() for session in sessions])
+            pump_all()
+
+    def shown(session, needles, timeout, what):
+        """Pump until the screen of the session shows every needle, compared
+        without white space so that wrapped rows join, and give the screen."""
+        deadline = time.monotonic() + timeout
+        while True:
+            screen = session.screen.text()
+            if all(squeeze(needle) in squeeze(screen) for needle in needles):
+                session.settle()
+                return session.screen.text()
+            assert time.monotonic() < deadline, (what, needles, screen)
+            pump_all()
+
+    def opened(session):
+        sessions.append(session)
+        return session
+
+    def closed(session):
+        sessions.remove(session)
+
+    def pi_host(name, profile):
+        host = PiHost(name, client_profile=profile)
+        hosts.append(host)
+        pids["pi"].append(host.session.process.pid)
+        opened(host.session)
+        shown(host.session, ["[Extensions]"], 60, "Pi did not start")
+        shown(host.session, ["Manager connected: " + endpoint], 30, "Pi did not notify the manager connection")
+        return host
+
+    def pi_quit(host):
+        closed(host.session)
+        host.quit()
+        host.session.__exit__(None, None, None)
+
+    def tui_session():
+        tui = tui_fixture.session()
+        pids["tui"].append(tui.process.pid)
+        opened(tui)
+        tui.wait_screen("Manager profiles")
+        tui.wait_screen("profile_1")
+        tui.send(b"\r")
+        tui.wait_screen("Manager workflows")
+        return tui
+
+    def tui_quit(tui, what, key=b"q"):
+        tui.send(key)
+        closed(tui)
+        assert tui.wait_exit(20) == 0, "the TUI did not exit with status 0 " + what
+        tui.assert_restored()
+        tui.close()
+
+    def save(session, label):
+        (work / ("cross-lifecycle-" + label + ".screen.txt")).write_text(session.screen.text())
+
+    def tui_open_run(tui, run, needles, label):
+        """Open the overview from the workflow browser, focus the row of run
+        and open its live monitor until it shows every needle."""
+        tui.send(b"O")
+        tui.wait_screen("Manager overview")
+        deadline = time.monotonic() + 60
+        while True:
+            try:
+                focus_row(tui, "run", "Run:" + run, 5)
+                break
+            except AssertionError:
+                assert time.monotonic() < deadline, ("the overview does not list the run", run, tui.screen.text())
+                tui.send(b"g")
+                pump_all(0.5)
+        tui.send(b"\r")
+        screen = shown(tui, needles, 60, "the live monitor of the TUI did not show " + label)
+        save(tui, label)
+        return screen
+
+    def published(run):
+        """The supervision, limitations, runtime status and cancel offer that the manager publishes for run."""
+        run_view, _, run_raw = observed("/v1/runs/" + run, "Run")
+        snapshot, _, _ = observed("/v1/runs/" + run + "/snapshot", "RunSnapshot")
+        control, _, control_raw = observed("/v1/runs/" + run + "/control", "RunControl")
+        return {"supervision": run_view["supervision"], "limitations": run_view["limitations"],
+                "runtime": snapshot["runtime"]["status"] if snapshot["runtime"] is not None else None,
+                "cancelAllowed": control["cancelAllowed"], "controlSupervision": control["supervision"],
+                "decisionHeadId": control["decisionHeadId"], "offers": [offer["operation"] for offer in control["offers"]]}
+
+    def answer_rows(decision):
+        return read_coordination("SELECT id, client_id, state FROM commands WHERE operation = 'answer' AND resource_uri = ? "
+                                 "ORDER BY rowid", ("/v1/decisions/" + decision,))
+
+    def pending_question(run):
+        queue, _, _ = until("/v1/decisions?runId=" + run, "DecisionPage",
+                            lambda value: any(item["state"] == "pending" and item["kind"] == "question" for item in value["items"]), 120)
+        question = next(item for item in queue["items"] if item["state"] == "pending" and item["kind"] == "question")
+        control, _, _ = until("/v1/runs/" + run + "/control", "RunControl", lambda value: value["decisionHeadId"] is not None)
+        assert control["decisionHeadId"] == question["id"], ("the head of the run is not its person question", control["decisionHeadId"])
+        return question
+
+    def known_requests():
+        status, listed, _ = request("/v1/requests", harness)
+        assert status == 200, ("requests", status)
+        return {item["id"] for item in listed["items"]}
+
+    def new_request(known):
+        snapshot, _, _ = until("/v1/snapshot", "OverviewSnapshot", lambda value: any(
+            item["kind"] == "request" and item["request"]["id"] not in known and item["request"]["readiness"]["supplied"]
+            for item in value["items"]))
+        return next(item["request"] for item in snapshot["items"] if item["kind"] == "request" and item["request"]["id"] not in known)
+
+    def pi_review_and_approve(pi, created, request_uri, label):
+        """Show the exact review of the request in Pi and approve it with a
+        and Yes. Give the displayed preparation and the run."""
+        current, _, _ = until(request_uri, "Request", lambda value: value["phase"] == "review" and value["preparationId"] is not None)
+        preparation_uri = "/v1/preparations/" + current["preparationId"]
+        preparation, _, _ = observed(preparation_uri, "Preparation")
+        shown(pi.session, ["Review of request " + created["id"] + ", preparation " + preparation["id"], "a approve after confirmation",
+                           "Workflow: " + workflow["id"], "Profile: profile_1"] + [name + ": " + str(preparation[name]) for name in selectors],
+              45, "Pi showed no exact review of request " + created["id"])
+        pi.save_screen(label + "-review")
+        pi.session.send(b"a")
+        shown(pi.session, ["Approve this exact review?", preparation["reviewDigest"], "→ Yes"], 15, "a opened no approval confirmation")
+        pi.session.send(b"\r")
+        associated, _, _ = until(request_uri, "Request", lambda value: value["runId"] is not None)
+        run = associated["runId"]
+        shown(pi.session, ["Execution: the manager started run " + run], 45, "Pi did not report the started run")
+        consumed, _, _ = observed(preparation_uri, "Preparation")
+        approvals = read_coordination("SELECT id, client_id FROM commands WHERE operation = 'approve' AND resource_uri = ?", (preparation_uri,))
+        assert consumed["state"] == "consumed" and all(consumed[name] == preparation[name] for name in selectors), (
+            "the consumed preparation differs from the review that Pi showed", consumed["state"])
+        assert len(approvals) == 1 and approvals[0][1] == clients["pi"], ("the approve command of Pi", approvals, clients["pi"])
+        return preparation, run, approvals[0][0]
+
+    order = ["observe-ready", "quit", "quitted", "reconnected", "held", "unreachable", "quarantined", "answered"]
+    handled = []
+    script = None
+
+    def handshake_facts(name, timeout):
+        """Wait until the Emacs script asks for the handshake name, which must be the next of order, and give its facts."""
+        assert name == order[len(handled)], ("a handshake out of order", name, handled)
+        path = handshake / (name + ".json")
+        deadline = time.monotonic() + timeout
+        while not path.exists():
+            early = [item.stem for item in handshake.glob("*.json") if item.stem not in handled]
+            assert not early, ("an unknown or early handshake of the Emacs script", early, name, handled)
+            assert script.poll() is None, ("the Emacs script ended before the handshake", name, script.returncode)
+            assert time.monotonic() < deadline, ("the Emacs script did not ask for the handshake", name)
+            pump_all(0.05)
+        handled.append(name)
+        return json.loads(path.read_text())
+
+    def handshake_answer(name, reply):
+        staged = handshake / (name + ".done.new")
+        staged.write_text(json.dumps(reply))
+        staged.rename(handshake / (name + ".done"))
+
+    lifetimes = [serve(0)]
+    try:
+        with harness_reads_only():
+            status, capabilities, _ = request("/v1/capabilities", harness)
+            assert status == 200, ("capabilities", status)
+            status, catalogue, _ = request("/v1/workflows?profileId=profile_1", harness)
+            assert status == 200, ("catalogue", status)
+            index = next(i for i, item in enumerate(catalogue["items"]) if item["name"] == "mixed-controls")
+            workflow = catalogue["items"][index]
+            status, overview, _ = request("/v1/snapshot", harness)
+            assert status == 200 and not overview["items"], ("the overview is not empty before the witness", status)
+            client = mixed_client(capabilities, harness)
+            observed = client[0]
+            environment = {name: os.environ[name] for name in EMACS_ALLOWLIST if name in os.environ}
+            script = subprocess.Popen([sys.executable, "-B", emacs_ui, "--service", str(tui_fixture.client_profiles["emacs"]),
+                                       str(report_path), "--service-case", "witness-lifecycle", "--service-handshake", str(handshake),
+                                       "--emacs", emacs_program, "--source", os.path.join(emacs_directory, "wf.el"),
+                                       "--artifacts", str(artifacts)], env=environment, stdin=subprocess.DEVNULL)
+            try:
+                # 1. Pi creates, enqueues and approves the request, and the TUI observes the run.
+                pi = pi_host("cross-lifecycle-pi", tui_fixture.client_profiles["pi"])
+                known = known_requests()
+                pi.session.send(b"/wfm\r")
+                shown(pi.session, ["Manager profile", "profile_1", "profile_2"], 30, "/wfm showed no profile selection")
+                pi.session.send(b"\r")
+                shown(pi.session, ["Workflow of profile_1", "mixed-controls"], 30, "/wfm showed no workflow selection of profile_1")
+                pi.session.send(b"\x1b[B" * index)
+                shown(pi.session, ["→ mixed-controls"], 10, "the arrow keys did not select mixed-controls")
+                pi.session.send(b"\r")
+                shown(pi.session, ["Input input (declared source", "→ Literal text"], 30, "/wfm showed no input source selection")
+                pi.session.send(b"\r")
+                shown(pi.session, ["Input input: exact literal text"], 15, "/wfm opened no literal editor")
+                pi.session.send(CROSS_LITERAL_2.encode())
+                shown(pi.session, [CROSS_LITERAL_2], 15, "Pi does not show the typed literal")
+                pi.save_screen("literal")
+                pi.session.send(b"\r")
+                created = new_request(known)
+                request_uri = created["links"]["self"]
+                assert created["profileId"] == "profile_1" and created["workflowId"] == workflow["id"], (
+                    "the Pi request names another profile or workflow", created["profileId"], created["workflowId"])
+                assert created["readiness"]["supplied"] == [{"name": "input", "source": "literal", "value": CROSS_LITERAL_2}], (
+                    "the Pi request did not supply exactly the typed literal", created["readiness"]["supplied"])
+                preparation, run, approve = pi_review_and_approve(pi, created, request_uri, "first")
+                question = pending_question(run)
+                rows = read_coordination("SELECT id, operation, client_id FROM commands ORDER BY rowid")
+                assert [row[1] for row in rows if row[1] in ("create", "enqueue", "approve")] == ["create", "enqueue", "approve"] \
+                    and all(row[2] == clients["pi"] for row in rows), ("the commands of the first request do not all name the pi client", rows, clients)
+                tui = tui_session()
+                monitor = tui_open_run(tui, run, ["Your answer", "Observation: current", "Runtime: Running", CROSS_LITERAL_2,
+                                                  "Ctrl-C DETACH"], "observed")
+                assert "supervision" not in monitor, ("the TUI does not show the run under owned supervision", monitor)
+                handshake_facts("observe-ready", 300)
+                handshake_answer("observe-ready", {"run": run, "question": question["id"]})
+                facts = handshake_facts("quit", 300)
+                assert facts["run"] == run and facts["head"] == question["id"] and facts["kind"] == "question" \
+                    and "Supervision: owned" in facts["viewLines"] and "cancel" in facts["choices"] and facts["sent"] == [], (
+                    "the Emacs view of the run before the quit", facts)
+                print(f"PASS {mode} 1: Pi with credential", credentials["pi"], "created request", created["id"], "of profile_1 and",
+                      workflow["name"], "through /wfm by keys with exactly the literal", repr(CROSS_LITERAL_2) + ", enqueued it and",
+                      "approved preparation", preparation["id"], "with the one approve", approve + "; the", len(rows), "commands",
+                      [row[1] for row in rows], "name client", clients["pi"], "of the pi credential, the Manager overview of the TUI",
+                      "opened run", run, "at its question", question["id"], "and the view of Emacs showed it under the supervision",
+                      "owned with the cancel choice", flush=True)
+
+                # 2. All three clients close while the run waits at its question.
+                before_quit = command_ids()
+                tui_quit(tui, "after the detach", b"\x03")
+                handshake_answer("quit", {})
+                quitted = handshake_facts("quitted", 120)
+                assert quitted["exitStatus"] == 0 and quitted["terminalRestored"] is True, ("the quit of Emacs", quitted)
+                pi.save_screen("before-quit")
+                pi_quit(pi)
+                after_quit = command_ids()
+                held = published(run)
+                decision, _, _ = observed("/v1/decisions/" + question["id"], "Decision")
+                assert after_quit == before_quit, ("a client sent a command when it closed", sorted(after_quit - before_quit))
+                assert held["supervision"] == "owned" and held["decisionHeadId"] == question["id"] and decision["state"] == "pending", (
+                    "the manager does not keep the run owned at its pending question", held, decision["state"])
+                print(f"PASS {mode} 2: Ctrl-C detached the TUI from the live monitor with status 0 and the terminal restored,",
+                      "C-x C-c quit Emacs with status 0 and the terminal attributes restored, and /quit ended Pi with status 0; the",
+                      len(after_quit), "commands are the same before and after the three closes, and run", run, "is still owned",
+                      "with its question", question["id"], "pending as the head", flush=True)
+
+                # 3. Rotation of the emacs credential, and revocation of a fifth credential.
+                old_emacs = {"Authorization": "Bearer " + (work / "credential-emacs").read_bytes().decode("ascii")}
+                rotated = administration({"version": 1, "operation": "rotate-credential", "credentialId": credentials["emacs"],
+                                          "expiresAt": "2999-01-01T00:00:00Z", "outputFile": str(work / "credential-emacs-rotated")})
+                rotated_at = time.monotonic()
+                rotated_id = rotated["result"]["credential"]["credentialId"]
+                assert rotated["result"]["previousCredentialId"] == credentials["emacs"] \
+                    and rotated["result"]["credential"]["clientId"] == clients["emacs"], ("the rotation of the emacs credential", rotated["result"])
+                rotated_profile = tui_fixture.write_profile("emacs-rotated")
+                new_emacs = {"Authorization": "Bearer " + (work / "credential-emacs-rotated").read_bytes().decode("ascii")}
+                for name, authorized in (("old", old_emacs), ("rotated", new_emacs)):
+                    status, value, _ = request("/v1/runs/" + run, authorized)
+                    assert status == 200, ("a read with the " + name + " emacs credential in the overlap", status, value.get("code"))
+                tui_fixture.issue("extra", ["observe"])
+                extra = {"Authorization": "Bearer " + (work / "credential-extra").read_bytes().decode("ascii")}
+                status, value, _ = request("/v1/runs/" + run, extra)
+                assert status == 200, ("a read with the extra credential", status, value.get("code"))
+                administration({"version": 1, "operation": "revoke-credential", "credentialId": credentials["extra"]})
+                status, revoked, _ = request("/v1/runs/" + run, extra)
+                assert status == 401 and revoked["code"] == "unauthenticated", ("the read after the revocation", status, revoked.get("code"))
+                while True:
+                    status, value, _ = request("/v1/runs/" + run, old_emacs)
+                    if status == 401:
+                        break
+                    assert status == 200 and time.monotonic() < rotated_at + 75, ("the old emacs credential before its cutoff", status)
+                    time.sleep(0.5)
+                cutoff = time.monotonic() - rotated_at
+                assert value["code"] == "unauthenticated", ("the refusal of the old emacs credential", value["code"])
+                status, value, _ = request("/v1/runs/" + run, new_emacs)
+                assert status == 200, ("the rotated emacs credential after the cutoff", status, value.get("code"))
+                print(f"PASS {mode} 3: rotate-credential gave credential", rotated_id, "of client", clients["emacs"], "after",
+                      credentials["emacs"] + ", and both read run", run, "in the overlap; the old credential was refused with 401",
+                      f"unauthenticated {cutoff:.1f} seconds after the rotation while the rotated credential still reads, and the",
+                      "fifth credential", credentials["extra"], "read once and was refused with 401 unauthenticated on the next read",
+                      "after revoke-credential", flush=True)
+
+                # 4. An ordinary restart of the manager.
+                earlier = {ident: (resource, operation) for ident, resource, operation in
+                           read_coordination("SELECT id, resource_uri, operation FROM commands")}
+                lifetimes[0].send_signal(signal.SIGTERM)
+                lifetimes[0].wait(timeout=25)
+                (work / "server-0.exit").write_text(str(lifetimes[0].returncode) + "\n")
+                assert lifetimes[0].returncode == 0, ("SIGTERM did not end the manager with status 0", lifetimes[0].returncode)
+                logs = sorted(flow_dir.glob("*.ndjson"))
+                assert len(logs) == 1, ("the manager logs", logs)
+                logged_lines = logs[0].read_bytes().splitlines()
+                last = json.loads(logged_lines[-1])
+                assert last["schema"] == "notice" and last["body"]["inline"]["notice"] == "shutdown", (
+                    "the manager log of the first lifetime does not end with its shutdown notice", last["schema"], last["body"])
+                lifetimes.append(serve(1))
+                restarted = published(run)
+                approve_state = read_coordination("SELECT state FROM commands WHERE id = ?", (approve,))[0][0]
+                (work / "cross-lifecycle-restart-state.json").write_text(json.dumps(
+                    {"run": run, "held": held, "restarted": restarted, "approveState": approve_state}, indent=2))
+                print(f"{mode} RESTART STATE run", run, "before", held, "after", restarted, "approve", approve_state, flush=True)
+                assert restarted["supervision"] == "lost" and "lost-supervision" in restarted["limitations"] \
+                    and restarted["controlSupervision"] == "lost" and restarted["cancelAllowed"] is False, (
+                    "the restarted manager does not publish the run as lost without a cancel", restarted)
+                print(f"PASS {mode} 4: SIGTERM ended the manager with status 0 and the shutdown notice of",
+                      last["body"]["inline"]["processGeneration"], "at position", len(logged_lines) - 1, "of its log, and a new lifetime on the same root and configuration publishes run", run, "with the supervision",
+                      restarted["supervision"] + ", the limitation lost-supervision, the runtime status", restarted["runtime"],
+                      "and no cancel", flush=True)
+
+                # 5. A new Emacs with the rotated profile, a new Pi and a new TUI show the lost run.
+                status, catalogue, _ = request("/v1/workflows?profileId=profile_1", harness)
+                assert status == 200, ("catalogue after the restart", status)
+                index = next(i for i, item in enumerate(catalogue["items"]) if item["name"] == "mixed-controls")
+                workflow = catalogue["items"][index]
+                handshake_answer("quitted", {"profile": str(rotated_profile)})
+                # The name keeps the bridge socket path of ext-pi, which
+                # macOS truncates to 104 bytes, off every existing path of
+                # the Pi host, as for the first Pi.
+                pi = pi_host("cross-lifecycle-pi-2", tui_fixture.client_profiles["pi"])
+                pi.session.send(("/wfm-monitor " + run + "\r").encode())
+                runtime = restarted["runtime"] or "not yet observed"
+                shown(pi.session, ["Service run " + run, "Runtime: " + runtime + "; supervision lost", "Offers: none"], 60,
+                      "the Pi monitor did not show the lost run")
+                pi.save_screen("lost")
+                pi.session.send(b"q")
+                pi.session.settle()
+                tui = tui_session()
+                label = next((label for label, status in LABEL_STATUS.items() if status == restarted["runtime"]), None)
+                lost_screen = tui_open_run(tui, run, ["supervision lost"], "lost")
+                assert (label is None and "Runtime: not yet observed; supervision lost" in lost_screen) or (
+                    squeeze("Runtime: " + str(label) + "; supervision lost") in squeeze(lost_screen)), (
+                    "the TUI does not show the runtime status of the lost run", restarted["runtime"], lost_screen)
+                assert "c CANCEL" not in lost_screen, ("the TUI offers a cancel of the lost run", lost_screen)
+                facts = handshake_facts("reconnected", 300)
+                assert facts["run"] == run and "Supervision: lost" in facts["viewLines"] and "Runtime: " + runtime in facts["viewLines"] \
+                    and "Offers: none" in facts["viewLines"] and "cancel" not in facts["choices"] and facts["sent"] == [], (
+                    "the view of the second Emacs does not show the lost run", facts)
+                assert command_ids() == set(earlier), ("a command was added across the restart and the reconnection",
+                                                       sorted(command_ids() - set(earlier)))
+                print(f"PASS {mode} 5: a new Emacs with the rotated credential", rotated_id + ", a new Pi and a new TUI each show run",
+                      run, "with the supervision lost, the runtime status", runtime, "and no cancel offer, as the restarted",
+                      "manager publishes it, and the", len(earlier), "commands of the first lifetime are the only commands", flush=True)
+
+                # 6. The orderly close released the reservation of the lost
+                # run, so a new request of the same resource key is admitted
+                # at once and reaches review without a client command.
+                checked = administration({"version": 1, "operation": "check-store"})["result"]
+                assert checked["integrity"] == "valid" and checked["quarantineIds"] == [], ("check-store after the orderly close", checked)
+                closed_reservations = read_coordination("SELECT state, pending_kind FROM reservations WHERE request_id = ?", (created["id"],))
+                assert closed_reservations == [("released", "closed")], (
+                    "the orderly close did not release the reservation of the lost run", closed_reservations)
+                tui.send(b"\x1b")
+                shown(tui, ["Manager overview"], 10, "Esc did not return to the overview")
+                tui.send(b"\x1b")
+                shown(tui, ["Manager workflows"], 10, "Esc did not return to the workflow browser")
+                known = known_requests()
+                tui.send(b"\x1b[B" * index + b"\r")
+                shown(tui, ["request validator current"], 20, "the TUI opened no input editor")
+                tui.send(b"\x1b[200~" + CROSS_LITERAL_3.encode() + b"\x1b[201~")
+                tui.send(b"\x04")
+                queued = new_request(known)
+                queued_uri = queued["links"]["self"]
+                assert queued["readiness"]["supplied"] == [{"name": "input", "source": "literal", "value": CROSS_LITERAL_3}], (
+                    "the TUI request did not supply exactly the typed literal", queued["readiness"]["supplied"])
+                shown(tui, ["REQUEST REVIEW"], 20, "the TUI showed no request review")
+                tui.send(b"\r")
+                enqueued = until(queued_uri, "Request", lambda value: value["phase"] != "draft")[0]
+                enqueue_rows = read_coordination("SELECT id, client_id FROM commands WHERE operation = 'enqueue' AND resource_uri = ?", (queued_uri,))
+                assert len(enqueue_rows) == 1 and enqueue_rows[0][1] == clients["tui"], ("the enqueue of the TUI", enqueue_rows)
+                after_enqueue = command_ids()
+                reviewed, _, _ = until(queued_uri, "Request", lambda value: value["phase"] == "review" and value["preparationId"] is not None, 60)
+                shown(tui, ["Approve exact manager review", "Request: " + queued["id"]], 45, "the TUI showed no exact review of its request")
+                save(tui, "review")
+                assert command_ids() == after_enqueue, ("a command was added between the enqueue and the review",
+                                                        sorted(command_ids() - after_enqueue))
+                creations = read_coordination("SELECT operation, client_id FROM commands WHERE request_id = ? ORDER BY rowid", (queued["id"],))
+                assert [operation for operation, _ in creations] == ["create", "set-input", "enqueue"] \
+                    and all(client_id == clients["tui"] for _, client_id in creations), ("the commands of the TUI request", creations)
+                print(f"PASS {mode} 6: check-store reports no quarantine and the orderly close released the reservation of run", run,
+                      "with the pending kind closed; the TUI created request", queued["id"], "of profile_1 with exactly the literal",
+                      repr(CROSS_LITERAL_3), "and enqueued it, it left the draft phase as", enqueued["phase"], "with the reasons",
+                      enqueued["admission"]["reasons"], "and the key cross_one free, and it reached review with preparation",
+                      reviewed["preparationId"], "without a client command after its enqueue", flush=True)
+
+                # 7. Pi approves the request of the TUI, and its run is held
+                # at its question while it holds the key cross_one.
+                pi.session.send(("/wfm-review " + queued["id"] + "\r").encode())
+                second_preparation, second, second_approve = pi_review_and_approve(pi, queued, queued_uri, "second")
+                second_question = pending_question(second)
+                # The TUI follows its request into the live monitor of its run.
+                shown(tui, ["Your answer", "Observation: current", "Run: " + second, CROSS_LITERAL_3], 60,
+                      "the live monitor of the TUI did not show the held run " + second)
+                save(tui, "held")
+                handshake_answer("reconnected", {"run": second, "question": second_question["id"]})
+                facts = handshake_facts("held", 300)
+                assert facts["run"] == second and facts["head"] == second_question["id"] and facts["kind"] == "question" \
+                    and "Supervision: owned" in facts["viewLines"] and "cancel" in facts["choices"] and facts["sent"] == [], (
+                    "the Emacs view of the held run", facts)
+                held_reservation = read_coordination("SELECT id, state FROM reservations WHERE request_id = ? AND state != 'released'",
+                                                     (queued["id"],))
+                claims = read_coordination("SELECT resource_key FROM reservation_resources WHERE reservation_id = ?",
+                                           (held_reservation[0][0],)) if len(held_reservation) == 1 else []
+                assert len(held_reservation) == 1 and held_reservation[0][1] == "held" and claims == [("cross_one",)], (
+                    "the run of the TUI request does not hold the key cross_one", held_reservation, claims)
+                pi.save_screen("second-held")
+                pi_quit(pi)
+                print(f"PASS {mode} 7: Pi ran /wfm-review", queued["id"], "and approved preparation", second_preparation["id"],
+                      "with the one approve", second_approve, "of client", clients["pi"] + "; run", second, "is held at its question",
+                      second_question["id"], "with reservation", held_reservation[0][0], "holding the key cross_one, the TUI shows",
+                      "it in its live monitor, the second Emacs shows it under the supervision owned, and /quit ended Pi", flush=True)
+
+                # 8. A manager loss by SIGKILL while the run is held, and a
+                # new lifetime on the same root and configuration.
+                second_lifetime = command_ids()
+                lifetimes[1].kill()
+                lifetimes[1].wait(timeout=25)
+                (work / "server-1.exit").write_text(str(lifetimes[1].returncode) + "\n")
+                assert lifetimes[1].returncode == -signal.SIGKILL, ("the second lifetime did not end by SIGKILL", lifetimes[1].returncode)
+                shown(tui, ["manager unreachable since", "Observation: stale ("], 30, "the TUI did not report the lost manager")
+                save(tui, "unreachable")
+                handshake_answer("held", {})
+                facts = handshake_facts("unreachable", 120)
+                assert facts["run"] == second and "Delivery: unreachable" in facts["viewLines"] and facts["sent"] == [], (
+                    "the Emacs view of the held run after the kill", facts)
+                lifetimes.append(serve(2))
+                handshake_answer("unreachable", {})
+                killed = published(second)
+                assert killed["supervision"] == "lost" and "lost-supervision" in killed["limitations"] \
+                    and killed["controlSupervision"] == "lost" and killed["cancelAllowed"] is False, (
+                    "the third lifetime does not publish the held run as lost without a cancel", killed)
+                checked = administration({"version": 1, "operation": "check-store"})["result"]
+                assert checked["integrity"] == "valid" and checked["quarantineIds"] == [held_reservation[0][0]], (
+                    "check-store after the manager loss", checked, held_reservation)
+                quarantine = checked["quarantineIds"][0]
+                assert read_coordination("SELECT state FROM reservations WHERE id = ?", (quarantine,)) == [("quarantined",)] \
+                    and read_coordination("SELECT resource_key FROM reservation_resources WHERE reservation_id = ?", (quarantine,)) \
+                    == [("cross_one",)], ("the quarantined reservation does not keep the key cross_one", quarantine)
+                killed_label = next((label for label, status in LABEL_STATUS.items() if status == killed["runtime"]), None)
+                killed_runtime = killed["runtime"] or "not yet observed"
+                tui_lost = shown(tui, ["supervision lost", "Observation: current"], 60, "the TUI did not reconnect to the third lifetime")
+                assert "manager unreachable" not in tui_lost and "c CANCEL" not in tui_lost and (
+                    (killed_label is None and "Runtime: not yet observed; supervision lost" in tui_lost)
+                    or squeeze("Runtime: " + str(killed_label) + "; supervision lost") in squeeze(tui_lost)), (
+                    "the TUI does not show the held run as the third lifetime publishes it", killed, tui_lost)
+                save(tui, "killed-lost")
+                facts = handshake_facts("quarantined", 300)
+                assert facts["run"] == second and "Supervision: lost" in facts["viewLines"] \
+                    and "Runtime: " + killed_runtime in facts["viewLines"] and "Offers: none" in facts["viewLines"] \
+                    and "cancel" not in facts["choices"] and facts["sent"] == [], ("the Emacs view of the run after the manager loss", facts)
+                status, catalogue, _ = request("/v1/workflows?profileId=profile_1", harness)
+                assert status == 200, ("catalogue after the manager loss", status)
+                index = next(i for i, item in enumerate(catalogue["items"]) if item["name"] == "mixed-controls")
+                workflow = catalogue["items"][index]
+                pi = pi_host("cross-lifecycle-pi-3", tui_fixture.client_profiles["pi"])
+                pi.session.send(("/wfm-monitor " + second + "\r").encode())
+                shown(pi.session, ["Service run " + second, "Runtime: " + killed_runtime + "; supervision lost", "Offers: none"], 60,
+                      "the Pi monitor did not show the run lost by the manager loss")
+                pi.save_screen("killed-lost")
+                pi.session.send(b"q")
+                pi.session.settle()
+                assert command_ids() == second_lifetime, ("a command was added across the manager loss",
+                                                          sorted(command_ids() - second_lifetime))
+                print(f"PASS {mode} 8: SIGKILL ended the second lifetime while run", second, "was held; the TUI reported the",
+                      "unreachable manager and the second Emacs the delivery unreachable with no key; the third lifetime publishes",
+                      "the run with the supervision lost, the runtime status", killed_runtime, "and no cancel, which the TUI, the",
+                      "second Emacs and a new Pi each show, check-store lists the one quarantine", quarantine, "with the key",
+                      "cross_one, and no command was added", flush=True)
+
+                # 9. A new request of the key cross_one waits with
+                # profile-busy until release-quarantine, and then reaches
+                # review without a client command.
+                tui.send(b"\x1b")
+                shown(tui, ["Manager overview"], 10, "Esc did not return to the overview")
+                tui_quit(tui, "after the manager loss")
+                tui = tui_session()
+                known = known_requests()
+                tui.send(b"\x1b[B" * index + b"\r")
+                shown(tui, ["request validator current"], 20, "the TUI opened no input editor")
+                tui.send(b"\x1b[200~" + CROSS_LITERAL_4.encode() + b"\x1b[201~")
+                tui.send(b"\x04")
+                third_request = new_request(known)
+                third_uri = third_request["links"]["self"]
+                assert third_request["readiness"]["supplied"] == [{"name": "input", "source": "literal", "value": CROSS_LITERAL_4}], (
+                    "the TUI request did not supply exactly the typed literal", third_request["readiness"]["supplied"])
+                shown(tui, ["REQUEST REVIEW"], 20, "the TUI showed no request review")
+                tui.send(b"\r")
+                waiting = until(third_uri, "Request", lambda value: value["phase"] == "queued"
+                                and value["admission"]["reasons"] == ["profile-busy"], 30)[0]
+                after_enqueue = command_ids()
+                creations = read_coordination("SELECT operation, client_id FROM commands WHERE request_id = ? ORDER BY rowid",
+                                              (third_request["id"],))
+                assert [operation for operation, _ in creations] == ["create", "set-input", "enqueue"] \
+                    and all(client_id == clients["tui"] for _, client_id in creations), ("the commands of the third TUI request", creations)
+                shown(tui, ["Phase: queued", "Blocking reasons: profile-busy"], 30, "the TUI does not show the profile-busy wait")
+                save(tui, "profile-busy")
+                pi.session.send(("/wfm-review " + third_request["id"] + "\r").encode())
+                shown(pi.session, ["Request " + third_request["id"] + ": queued", "waiting for profile-busy"], 30,
+                      "Pi does not show the profile-busy wait")
+                pi.save_screen("profile-busy")
+                deadline = time.monotonic() + 60
+                checks = 0
+                while True:
+                    evidence = administration({"version": 1, "operation": "check-quarantine", "quarantineId": quarantine})["result"]
+                    checks += 1
+                    if evidence["state"] == "clean":
+                        break
+                    assert evidence["state"] == "cleanup-required" and time.monotonic() < deadline, ("check-quarantine", evidence)
+                    pump_all(0.5)
+                still, _, _ = observed(third_uri, "Request")
+                assert still["phase"] == "queued" and still["admission"]["reasons"] == ["profile-busy"], (
+                    "the request did not wait with profile-busy until the release", still["phase"], still["admission"]["reasons"])
+                released = administration({"version": 1, "operation": "release-quarantine", "quarantineId": quarantine,
+                                           "cleanupEvidenceId": evidence["cleanupEvidenceId"],
+                                           "cleanupEvidenceDigest": evidence["cleanupEvidenceDigest"]})["result"]
+                assert released == {"quarantineId": quarantine, "state": "released"}, ("release-quarantine", released)
+                third_reviewed, _, _ = until(third_uri, "Request", lambda value: value["phase"] == "review"
+                                             and value["preparationId"] is not None, 60)
+                shown(tui, ["Approve exact manager review", "Request: " + third_request["id"]], 45,
+                      "the TUI showed no exact review of its request after the release")
+                save(tui, "released-review")
+                assert command_ids() == after_enqueue, ("a command was added between the enqueue and the review",
+                                                        sorted(command_ids() - after_enqueue))
+                print(f"PASS {mode} 9: the TUI created request", third_request["id"], "of profile_1 with exactly the literal",
+                      repr(CROSS_LITERAL_4), "and enqueued it; it waited queued with", waiting["admission"]["reasons"], "in the TUI",
+                      "and in Pi behind quarantine", quarantine + "; after", checks, "check-quarantine reads it reported clean with",
+                      evidence["cleanupEvidenceId"], "and release-quarantine with that identity and digest released it, and the",
+                      "request reached review with preparation", third_reviewed["preparationId"], "without a client command after its",
+                      "enqueue", flush=True)
+
+                # 10. Pi approves, the second Emacs answers false, and Pi sends the retry.
+                stores_before = set(work.glob("manager/runs/runs/*/runtime"))
+                third_preparation, third, third_approve = pi_review_and_approve(pi, third_request, third_uri, "third")
+                third_store = ControlHarness.new_store(stores_before)
+                third_question = pending_question(third)
+                handshake_answer("quarantined", {"run": third, "question": third_question["id"]})
+                facts = handshake_facts("answered", 300)
+                sent = facts["sent"]
+                assert len(sent) == 1 and sent[0]["resource"].endswith("/v1/decisions/" + third_question["id"]) \
+                    and json.loads(sent[0]["body"])["value"] is False, ("the second Emacs sent other than the one answer false", sent)
+                deadline = time.monotonic() + 45
+                while not ((found := answer_rows(third_question["id"])) and found[0][2] == "effect-observed"):
+                    assert time.monotonic() < deadline and len(found) <= 1, ("the answer of Emacs did not reach its effect", found)
+                    pump_all()
+                assert len(found) == 1 and found[0][1] == clients["emacs"], ("the answer command of Emacs", found, clients["emacs"])
+                recovery = until("/v1/runs/" + third + "/control", "RunControl",
+                                 lambda value: value["decisionHeadId"] not in (None, third_question["id"]), 120)[0]["decisionHeadId"]
+                recovery_decision, _, _ = observed("/v1/decisions/" + recovery, "Decision")
+                assert recovery_decision["kind"] == "recovery", ("the next head of the third run", recovery_decision["kind"])
+                pi.session.send(("/wfm-answer " + third + "\r").encode())
+                shown(pi.session, ["Recovery of decision " + recovery], 30, "/wfm-answer opened no recovery selection")
+                for _ in range(8):
+                    if "→ Retry" in pi.session.screen.text():
+                        break
+                    pi.session.send(b"\x1b[B")
+                    pi.session.settle()
+                shown(pi.session, ["→ Retry"], 10, "the recovery selection offers no Retry")
+                pi.session.send(b"\r")
+                shown(pi.session, ["Recovery Retry reached decision " + recovery], 45, "Pi did not report the retry")
+                until("/v1/runs/" + third + "/snapshot", "RunSnapshot",
+                      lambda value: value["runtime"] is not None and value["runtime"]["status"] in ("succeeded", "failed", "cancelled"), 120)
+                retries = read_coordination("SELECT id, client_id, state FROM commands WHERE operation = 'retry' AND resource_uri = ?",
+                                            ("/v1/runs/" + third + "/control",))
+                assert len(retries) == 1 and retries[0][1:] == (clients["pi"], "effect-observed"), ("the retry of Pi", retries)
+                artifact = verified_download(third, client, harness)
+                handshake_answer("answered", {})
+                # The TUI follows its own request into the live monitor of its run.
+                shown(tui, ["Terminal: succeeded", "Result SHA-256: " + artifact["sha256"],
+                            "Result: verified " + str(int(artifact["bytes"])) + " bytes"], 60,
+                      "the live monitor of the TUI did not show the verified result of run " + third)
+                save(tui, "succeeded")
+                tui.send(b"\x1b")
+                shown(tui, ["Manager overview"], 10, "Esc did not return to the overview")
+                tui_quit(tui, "after the terminal run")
+                pi_quit(pi)
+                recorded = [entry["answer"] for entry in json.loads((third_store / "answers.json").read_bytes())["answers"]
+                            if entry["occurrenceId"] == third_question["address"]["occurrenceId"]]
+                assert recorded == [False], (CROSS_FALSE, recorded)
+                print(f"PASS {mode} 10: Pi approved preparation", third_preparation["id"], "with the one approve", third_approve,
+                      "of client", clients["pi"] + "; the second Emacs answered question", third_question["id"], "of run", third,
+                      "with false by keys, and its answer", found[0][0], "of client", clients["emacs"], "reached effect-observed;",
+                      "Pi sent the retry", retries[0][0], "of recovery", recovery, "with its control choice, the run succeeded, the",
+                      "TUI showed the terminal status and the verified", artifact["bytes"], "bytes with SHA-256", artifact["sha256"],
+                      "and answers.json records JSON false", flush=True)
+                deadline = time.monotonic() + 120
+                while script.poll() is None:
+                    assert time.monotonic() < deadline, "the Emacs script did not end after the handshake answered"
+                    time.sleep(0.05)
+            finally:
+                if script.poll() is None:
+                    script.kill()
+                script.wait(timeout=25)
+                for session in list(sessions):
+                    sessions.remove(session)
+                    session.__exit__(None, None, None)
+            report = json.loads(report_path.read_bytes()) if report_path.exists() else {"steps": [], "version": None}
+            assert script.returncode == 0, ("the Emacs script of " + emacs_ui + " failed", script.returncode, report["steps"], handled)
+            assert report["version"] == CROSS_LIFECYCLE_REPORT_VERSION, (
+                f"The {mode} mode requires report version {CROSS_LIFECYCLE_REPORT_VERSION}, and {emacs_ui} wrote version {report['version']}.")
+            assert report["steps"] == [str(number) for number in range(1, 11)] and handled == order, ("the steps of Emacs", report["steps"], handled)
+            assert report["firstExitStatus"] == 0 and report["firstTerminalAfter"] == report["firstTerminalBefore"] \
+                and report["laterExitStatus"] == 0 and report["laterTerminalAfter"] == report["laterTerminalBefore"], (
+                "the exits of the two Emacs processes", report["firstExitStatus"], report["laterExitStatus"])
+            assert report["firstSent"] == [] and report["laterSent"] == sent, ("the commands of the Emacs sessions", report["firstSent"], report["laterSent"])
+            pids["emacs"] += [report["emacsPid"], report["laterPid"]]
+    finally:
+        for lifetime in lifetimes:
+            if lifetime.poll() is None:
+                lifetime.send_signal(signal.SIGTERM)
+            lifetime.wait(timeout=25)
+        (work / f"server-{len(lifetimes) - 1}.exit").write_text(str(lifetimes[-1].returncode) + "\n")
+    assert len(lifetimes) == 3 and lifetimes[-1].returncode == 0, (
+        "SIGTERM did not end the third lifetime with status 0", [lifetime.returncode for lifetime in lifetimes])
+
+    # 11. The manager log: three lifetimes, the killed one without its
+    # shutdown notice, each command once, the senders, and no command sent
+    # again.
+    logs = sorted(flow_dir.glob("*.ndjson"))
+    stores = sorted(work.glob("manager/runs/runs/*/runtime"))
+    status, records, summary = read_flow("cross-lifecycle-flow", [flow_dir] + stores)
+    assert status == 2 and summary["verified"] and not summary["problems"], ("the flow verb did not verify the logs", status, summary["problems"])
+    assert summary["states"]["undecided"] == [], ("undecided commands after the restarts", summary["states"]["undecided"])
+    lifetimes_read = summary["joins"]["lifetimes"]
+    assert len(lifetimes_read) == 3 and [item["shutdown"] is not None for item in lifetimes_read] == [True, False, True], (
+        "the manager lifetimes", lifetimes_read)
+    assert summary["states"]["lifetimeWithoutShutdown"] == [lifetimes_read[1]["lifetime"]], (
+        "the lifetimes without a shutdown notice", summary["states"]["lifetimeWithoutShutdown"])
+    manager = [record for record in records if record["log"] == str(logs[0])]
+    rows = read_coordination("SELECT id, resource_uri, operation, client_id FROM commands ORDER BY rowid")
+    boundaries = [item["lifetime"]["position"] for item in lifetimes_read[1:]]
+    for ident, resource, operation, _ in rows:
+        logged = [record for record in manager if record["schema"] == "command" and record["about"].get("command") == ident]
+        assert len(logged) == 1, ("a command has other than one manager-log record", ident, operation, len(logged))
+        accepted_in = sum(logged[0]["position"] > boundary for boundary in boundaries)
+        expected = 0 if ident in earlier else 1 if ident in second_lifetime else 2
+        assert accepted_in == expected, ("a command is in another lifetime", ident, operation, accepted_in, expected)
+    targets = [(resource, operation) for _, resource, operation, _ in rows if operation != "create"]
+    assert len(set(targets)) == len(targets), ("a command repeats the target and the operation of an earlier command", targets)
+    answer_record = next(record for record in manager if record["schema"] == "command" and record["about"].get("command") == found[0][0])
+    assert answer_record["from"] == {"principal": "credential", "credentialId": rotated_id, "client": clients["emacs"]}, (
+        "the answer of Emacs is not from the rotated credential", answer_record["from"])
+    print(f"PASS {mode} 11: the manager log holds three lifetimes, the second without its shutdown notice, and the flow verb",
+          "reports it as the one lifetime without a shutdown and no undecided command; each of the", len(rows), "commands has",
+          "one record in the lifetime that accepted it (", len(earlier), len(second_lifetime) - len(earlier),
+          len(rows) - len(second_lifetime), "), no command repeats the target and the operation of an earlier command, and the",
+          "answer", found[0][0], "is from credential", rotated_id, "of client", clients["emacs"], flush=True)
+
+    # 12. No child remains, and the fixture secrets and homes are removed.
+    removed = emacs_service_cleanup(artifacts, [tui_fixture.client_profiles[name] for name in CrossClientFixture.CLIENTS]
+                                    + [rotated_profile] + [host.home for host in hosts] + [host.agent for host in hosts]
+                                    + [host.state for host in hosts])
+    print(f"PASS {mode} 12: all clients quit, the manager stopped, no TUI, Emacs, Pi or fixture process remains, and the harness",
+          "removed", removed, "credential, client profile and home paths", flush=True)
+    elapsed = time.monotonic() - mode_started
+    assert elapsed <= WITNESS_SECONDS, ("the witness took longer than its budget", round(elapsed), WITNESS_SECONDS)
+    print(f"PASS {mode}: Pi created and approved a run that the TUI and Emacs observed, the three clients closed without a command,",
+          "the emacs credential was rotated and a fifth credential revoked, SIGTERM restarted the manager, a new TUI, Pi and Emacs",
+          "showed the run lost, a new request of its resource key was admitted at once and held, SIGKILL lost the manager, a",
+          "further request waited with profile-busy until release-quarantine, and Pi, the rotated Emacs and the TUI took it to a",
+          "verified result; the client processes were the TUI (pids " + ", ".join(map(str, pids["tui"])) + "), Emacs",
+          "(pids " + ", ".join(map(str, pids["emacs"])) + ") and Pi (pids " + ", ".join(map(str, pids["pi"])) + "),",
+          f"in {elapsed:.0f} seconds", flush=True)
+
 def storage_checks():
     """The storage-error endings through four lifetimes of the real HTTPS
     manager. Each numbered case prints one PASS line."""
@@ -15004,14 +15797,16 @@ if person_mode:
     raise SystemExit(0)
 
 
-# The cross-client witness modes are not control-profile modes. Only the
-# cross-client mode and its control are implemented, and each other witness
-# mode exits with status 2.
+# The cross-client witness modes are not control-profile modes. The
+# cross-client-lineage mode is not yet implemented and exits with status 2.
 if cross_client_mode:
-    if sys.argv[5] not in (CROSS_CLIENT, CROSS_CLIENT_BROKEN):
+    if sys.argv[5] == CROSS_CLIENT_LINEAGE:
         print(f"The {sys.argv[5]} mode is not yet implemented.", flush=True)
         raise SystemExit(2)
-    cross_client_checks()
+    if sys.argv[5] == CROSS_CLIENT_LIFECYCLE:
+        cross_client_lifecycle_checks()
+    else:
+        cross_client_checks()
     raise SystemExit(0)
 
 

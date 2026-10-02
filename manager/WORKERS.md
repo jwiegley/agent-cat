@@ -217,6 +217,23 @@ after the launch can therefore leave one of these states:
 
 ## Manager loss and restart
 
+When the operator stops the manager with the termination signal, the orderly
+close ends the worker of each started run and confirms its cleanup, and the
+reservation of the run is released with the pending kind `closed`. The
+shutdown notice then ends the manager log of the lifetime, and the process
+exits with status 0. A restart on the same root and configuration makes each
+such run `lost`, with the `lost-supervision` limitation, its last validated
+runtime status and no cancel, and the start of the run becomes `unresolved`.
+No reservation is quarantined, so a request of the same resource keys is
+admitted at once. The `cross-client-lifecycle` mode of
+`manager/test/service_http.py` checks these facts with the TUI, Emacs and Pi
+clients. It then holds a new run of the same resource key at its question
+and kills the manager with SIGKILL. After the restart the reservation of
+that run is quarantined, a further request of the key waits with
+`profile-busy`, which the TUI and Pi show, and the release with the clean
+evidence of `check-quarantine` lets the request reach review without a
+client command, as the paragraphs below describe.
+
 When the manager process ends without its orderly close, for example through
 SIGKILL, the worker pipes of each started run lose their manager end. The inner
 frontend worker reads the end of its control input. The runtime then cancels
