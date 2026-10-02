@@ -553,11 +553,14 @@ PI_CONTROLS_STEER_TEXT = "Pi steer \u03bb: focus on the patch."
 # switchDelivery, followEnd, revokedRefusal, processesAfterClose,
 # buffersAfterClose, timersAfterClose, bufferKilled, directoryRemoved,
 # exportSent, exportCommand, exportState, exportResource, exportDownload,
-# downloadBytes, downloadSha256, wrongDigestRefusal and wrongSizeRefusal. The
+# downloadBytes, downloadSha256, wrongDigestRefusal, wrongSizeRefusal,
+# serviceIdentity, serviceProfiles, serviceWorkflows, serviceRunRefusal,
+# serviceHelp, serviceRefusals, serviceLocalCalls, serviceDiagnostics and
+# serviceLocal. The
 # mode first refuses, with one sentence, a report whose harnessVersion
 # differs from EMACS_HARNESS_VERSION, which detects a mismatched pair of the
 # two repositories. It then requires the steps bind, draft, stale, pages,
-# overview, follow, unreachable, switch, revoke, close and export in that order and
+# overview, follow, unreachable, switch, revoke, close, export and service in that order and
 # no prompt, and checks the report against its own reads:
 # 1. The check bound its transport over https with the CA file of the
 # profile, with a 32-digit endpoint identity and the authority epoch of the
@@ -617,12 +620,29 @@ PI_CONTROLS_STEER_TEXT = "Pi steer \u03bb: focus on the patch."
 # downloads from the download resource of the export, with the size and the
 # SHA-256 digest of the export. The downloads with a wrong digest and with a
 # wrong size each gave wf-manager-invalid-response.
+# 12. The service step drove the commands of wf.el with keys in batch Emacs.
+# M-x wf-run listed exactly the ready profiles of /v1/profiles and the
+# workflow names of /v1/workflows?profileId= of the selected profile, as the
+# harness reads them, and then refused with its stated message. M-x wf-help
+# showed the help text of the catalogue item of mixed-controls. Each
+# local-only command of EMACS_LOCAL_COMMANDS refused with a message that
+# names it, wf-plan and wf-cost name the review of wf-run, and the check
+# counted no process start and no request of them. The command receipts
+# after the start cursor end with the export command of step 11, and the
+# manager holds the same requests as after step 7, so the service step sent
+# no command. M-x wf-diagnostics showed the endpoint of the profile, each
+# scope of the capabilities and the delivery state poll, and M-x wf-local
+# closed the session.
 # Each step prints its own PASS line. It runs one manager lifetime.
 EMACS_CLIENT = "emacs-client"
 emacs_client_mode = len(sys.argv) == 6 and sys.argv[5] == EMACS_CLIENT
 # The version of the report of emacs/wf-manager-live.el. The constant
 # wf-manager-live-harness-version there states the same version.
-EMACS_HARNESS_VERSION = 4
+EMACS_HARNESS_VERSION = 5
+# The local-only commands of wf.el that the service step runs in service
+# mode. wf-manager-live--local-commands of emacs/wf-manager-live.el states
+# them.
+EMACS_LOCAL_COMMANDS = ("wf-plan", "wf-cost", "wf-lineage-compare", "wf-observer-result", "wf-observer-refresh")
 # The literal input of the emacs-client mode. wf-manager-live-literal of
 # emacs/wf-manager-live.el states it.
 EMACS_LITERAL = "Emacs \u03bb \u96ea\U0001F600 input."
@@ -10598,7 +10618,7 @@ def emacs_client_checks():
             assert re.search(r"Ran 1 tests?, 1 results? as expected, 0 unexpected", text) and report_path.is_file(), (
                 "the Emacs live check did not run its one test", text[-4000:])
             assert report["steps"] == ["bind", "draft", "stale", "pages", "overview", "follow", "unreachable", "switch",
-                                       "revoke", "close", "export"] \
+                                       "revoke", "close", "export", "service"] \
                 and report["prompts"] == 0, (
                 "the Emacs live check did not complete its steps without a prompt", report["steps"], report["prompts"])
             # 1. The binding.
@@ -10762,11 +10782,50 @@ def emacs_client_checks():
                   "effect-observed and the effect", report["exportResource"], "which the harness read, the verified download of",
                   detail["download"], "matched the harness download of", len(downloaded), "bytes byte for byte, and a wrong",
                   "digest and a wrong size were each refused with wf-manager-invalid-response", flush=True)
+            # 12. The service step.
+            status, listed_profiles, raw = request("/v1/profiles", harness)
+            assert status == 200 and listed_profiles["page"]["next"] is None, ("profiles", status)
+            validate("ProfilePage", listed_profiles, raw)
+            ready = sorted(item["id"] for item in listed_profiles["items"] if item["readiness"] == "ready")
+            assert report["serviceProfiles"] == ready and ready, ("the profiles that wf-run listed", report["serviceProfiles"], ready)
+            status, listed_workflows, raw = request("/v1/workflows?profileId=" + ready[0], harness)
+            assert status == 200 and listed_workflows["page"]["next"] is None, ("workflows", status)
+            validate("WorkflowPage", listed_workflows, raw)
+            names = sorted(item["name"] for item in listed_workflows["items"])
+            assert report["serviceWorkflows"] == names, ("the workflows that wf-run listed", report["serviceWorkflows"], names)
+            assert report["serviceRunRefusal"] == f"Service mode does not yet create a request of mixed-controls in {ready[0]}", (
+                "the refusal of wf-run", report["serviceRunRefusal"])
+            help_text = next(item["help"] for item in listed_workflows["items"] if item["name"] == "mixed-controls")
+            assert report["serviceHelp"].endswith(help_text) and "mixed-controls" in report["serviceHelp"], (
+                "the help text of wf-help", report["serviceHelp"][:400])
+            refusals = report["serviceRefusals"]
+            assert sorted(refusals) == sorted(EMACS_LOCAL_COMMANDS) and all(
+                isinstance(refusals[name], str) and refusals[name].startswith(name + " works only in local mode")
+                for name in EMACS_LOCAL_COMMANDS), ("the refusals of the local-only commands", refusals)
+            assert all(re.search(r"the review of .wf-run.", refusals[name]) for name in ("wf-plan", "wf-cost")), (
+                "wf-plan and wf-cost do not name the review of wf-run", refusals)
+            assert report["serviceLocalCalls"] == 0, ("the local-only commands started a process or sent a request",
+                                                      report["serviceLocalCalls"])
+            assert [resource for resource, _ in final][-1] == command_uri and sorted(item["id"] for item in all_requests()) == held, (
+                "the service step sent a command", [resource for resource, _ in final][len(driven):])
+            diagnostics = report["serviceDiagnostics"]
+            assert f"Endpoint: {profile['endpoint']}\n" in diagnostics \
+                and f"Scopes: {', '.join(capabilities['scopes'])}\n" in diagnostics \
+                and "Delivery state: poll\n" in diagnostics \
+                and f"Endpoint identity: {report['serviceIdentity']}\n" in diagnostics, ("the diagnostics of wf-diagnostics", diagnostics)
+            assert report["serviceLocal"] is True, ("wf-local", report["serviceLocal"])
+            print("PASS emacs-client 12: in service mode, keys drove wf-service, and wf-run listed the profiles", ready,
+                  "and the", len(names), "workflows of the catalogue that the harness reads and then refused with its stated",
+                  "message, wf-help showed the catalogue help text, the", len(EMACS_LOCAL_COMMANDS), "local-only commands",
+                  "refused with their messages and sent nothing, the command receipts end with the export command,",
+                  "wf-diagnostics showed the endpoint, the scopes", capabilities["scopes"], "and the delivery state poll,",
+                  "and wf-local closed the session", flush=True)
         print("PASS emacs-client: the Emacs transport bound, created and replayed a draft, received the typed 412 and 401",
               "refusals, assembled the overview over all its pages, followed a run of the harness through event polls, kept its",
               "binding after an unreachable switch, switched to a second credential with generation fencing, closed",
-              "cleanly, sent an export command whose receipt it read, and downloaded and verified the export against the",
-              "protected HTTPS endpoint, and the harness confirmed each step from manager facts",
+              "cleanly, sent an export command whose receipt it read, downloaded and verified the export against the",
+              "protected HTTPS endpoint, and drove the service mode of wf.el with keys, and the harness confirmed each",
+              "step from manager facts",
               flush=True)
     finally:
         if process.poll() is None:

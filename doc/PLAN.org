@@ -10630,6 +10630,34 @@ From acat-ubt: convFold handles certain members only; the general List (MSemirin
 ]
 #+end_src
 
+* TODO [#D] Resolve the non-blocking fess findings of subtask PD19
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-olgd
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-02 Fri 03:17]
+:MODIFIED: [2026-10-02 Fri 03:17]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess audit fess/pd-PD19-r1.md (2026-10-02) on subtask PD19 (WM-031 part 1, agent-workflows emacs-native, explicit service mode, catalogue and the command dispatch table). The emacs-native commit of PD19 names this issue.
+
+1. (medium) emacs/wf-service.el wf-service--number and wf-service--rows (maxFold, paths), and the README.md Service mode row of wf-run. The manager encodes maxFold and paths as decimal strings (NaturalDecimal, manager/src/Agentic/Manager/Profile.hs decimal, doc/api/openapi.yaml). wf-service--number accepts only JSON numbers, so every service-mode wf-run and wf-help candidate shows "at most — over nil paths". The live check compares names only. Fix: parse the decimal string with string-to-number after a digit check, keep nil for JSON null, and add an ERT test or a live assertion on the annotation text.
+
+2. (low) emacs/wf-service.el wf-service-commands. wf-kill (cancel control with confirmation) and wf-rerun (restart lineage request) are plain pending refusals whose message does not name the mapping. Fix: implement the mappings in PD22 and PD24, and optionally name the planned equivalent in the pending message.
+
+3. (low) emacs/wf-manager-tests.el wf-service-local-mode-is-the-default. The assertion (should-not (wf--service 'wf-plan)) with a nil dispatch is true by construction. Fix: remove it, or check that a local command reaches its local body, for example through an advice on wf--call.
+
+4. (low) emacs/wf-manager-live.el wf-manager-live--spawners. url-retrieve is counted while the follow loop polls through url-retrieve, so a poll during the minibuffer of a local-only command can fail step 12 falsely. Fix: count only requests that are not the event poll, or pause the follow loop while the local-only commands run.
+
+5. (low) emacs/wf-service.el wf-service--switch. The await has no cancel function, so a C-g during a switch leaves it in flight and the callback later changes the state. Fix: return a cancel that ends the switch, or document the behavior.
+
+6. (low) emacs/wf-service.el wf-service--rows. The profile identifier is joined into /v1/workflows?profileId= without URL encoding. Fix: use url-hexify-string.
+
 * TODO [#C] Resolve F14 fess findings in the manager-log reader and consent check
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -20751,7 +20779,7 @@ coordination or SQL into the TUI.
 :LABELS:   ["p6","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-02 Fri 02:53]
+:MODIFIED: [2026-10-02 Fri 03:17]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-030
 :SOURCE_REPO: agent-cat
@@ -20908,6 +20936,13 @@ separately tested rather than inferred from one newer Emacs build.
     "author": "johnw",
     "text": "PD18 (WM-030 part 11): agent-workflows emacs-native commit 5de5f83 extends the session of emacs/wf-manager.el with commands sent once with exact bytes, idempotency key and If-Match (delivered, refused or uncertain), the receipt read at its Location, one-read reconciliation of an uncertain command with no resend (PD13 machine and PD2 rules: snapshot occurrence first, control view only for a running run whose head names another decision), and a verified download that checks media type, headers, size and SHA-256 over the unibyte body. agent-cat manager/test/service_http.py mode emacs-client adds the live command receipt and download steps. Evidence scope: ci/emacs.sh exited 0 (smoke 38 of 38, transport 72 of 72, offline uncertain sends with one POST each reconciling to effect-observed and to uncertain); emacs-client mode PASS 1 to 11 (receipt read, download byte for byte, wrong digest and wrong size refused); journey N8 passed. Fess pd-PD18-r1 not blocking; two medium and five low findings filed as acat-uvn3 (the emacs-native commit message names it acat-FOLLOWUP). Limitations: capture command not ported; uncertain send tested offline only. WM-030 stays open.",
     "created_at": "2026-10-02T09:53:30Z"
+  },
+  {
+    "id": 611,
+    "issue_id": "acat-wm-030-t2l4",
+    "author": "johnw",
+    "text": "PD19 (WM-031 part 1) uses the WM-030 session, switch and close of emacs/wf-manager.el from emacs/wf-service.el (agent-workflows emacs-native 70fecf9). The emacs-client live steps 1 to 11 still pass with step 12 added. WM-030 stays open.",
+    "created_at": "2026-10-02T10:17:30Z"
   }
 ]
 #+end_src
@@ -20919,7 +20954,7 @@ separately tested rather than inferred from one newer Emacs build.
 :LABELS:   ["p6","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-09 Wed 22:34]
+:MODIFIED: [2026-10-02 Fri 03:17]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-031
 :SOURCE_REPO: agent-cat
@@ -20987,6 +21022,20 @@ including its explicit v3 invocation compatibility behavior.
     "created_by": "johnw",
     "metadata": "{}",
     "thread_id": ""
+  }
+]
+#+end_src
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 610,
+    "issue_id": "acat-wm-031-5yxo",
+    "author": "johnw",
+    "text": "PD19 (WM-031 part 1): agent-workflows emacs-native commit 70fecf9 adds emacs/wf-service.el with the defcustom wf-manager-profiles, M-x wf-service (bind one profile and start a session, or switch an existing one so a failed switch keeps the earlier binding) and M-x wf-local (close the session, local mode is the default again), and the dispatch table wf-service-commands that states the service behavior of every public command of emacs/wf.el. In service mode wf-run reads the catalogue from /v1/profiles and /v1/workflows?profileId= through wf--read-row and then refuses (request creation comes later), wf-help shows the catalogue help, wf-diagnostics shows endpoint, identity, epoch, scopes, delivery state poll, generation and last problem, pending commands (wf-runs, wf-answer, wf-control, wf-result, wf-kill, wf-history, wf-history-open, wf-restart, wf-resume, wf-fork, wf-rerun, wf-refresh) refuse until PD20 to PD24, and the five local-only commands refuse and send nothing. agent-cat manager/test/service_http.py emacs-client mode adds live step 12 (service) at harness version 5. Evidence scope: ci/emacs.sh exited 0 with three new offline service tests that failed first against the earlier wf.el; ci/emacs-ui.py local cases passed; emacs-client mode PASS 1 to 12; journey N8 passed. Fess pd-PD19-r1 not blocking; one medium and five low findings filed as acat-olgd. Limitations: the dispatch is global; wf-kill and wf-rerun mappings deferred to PD22 and PD24; the catalogue is read fresh on each call and a 429 is not retried. WM-031 stays open.",
+    "created_at": "2026-10-02T10:17:30Z"
   }
 ]
 #+end_src
