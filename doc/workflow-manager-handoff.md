@@ -17,7 +17,14 @@ branch is pushed. PD28 to PD30 ran the Phase D gate. PD29 fixed two defects
 that the gate found, one in the Runtime and one in the Emacs client
 (`8c2b780` on `emacs-native`). PD31 wrote this section, updated the Phase E
 section below and brought the README of the Emacs worktree to the final
-state of service mode. The run did not stop early. This section describes
+state of service mode, as `91fb0ad4` in this repository and `c839f75` on
+`emacs-native`. The `emacs-native` branch thus holds 23 local commits,
+`1efebf9` to `c839f75`. Two reviews of the packages and of the working
+state then examined `a17a015b..91fb0ad4` and `d5d7430..c839f75`. Each
+approved with notes, and the section "Review of Phase D" below records
+their findings. The closeout stage of the run updated this section after
+the reviews. The run did not stop early, and no authorization is pending
+from this run. This section describes
 the current state. Where any section below differs, this section supersedes
 it, and the sections below remain as chronology. The evidence of each
 subtask is under `PD/<subtask>/impl-r1` in the resume directory
@@ -30,7 +37,7 @@ closes no package and no gate. The Integrator closes tracker items.
 
 | Component | Version or value |
 | --- | --- |
-| Emacs worktree | `~/src/agent-workflows-emacs-native`, branch `emacs-native` at `8c2b780`, local commits only |
+| Emacs worktree | `~/src/agent-workflows-emacs-native`, branch `emacs-native` at `c839f75`, local commits only. `c839f75` changes only the README after the gate tree `8c2b780`. |
 | GNU Emacs | 30.2, the Emacs of the direnv development shell of the Emacs worktree. Every Emacs check of Phase D ran this build. |
 | Declared minimum | `Package-Requires: ((emacs "29.1"))` in `emacs/wf.el`, `emacs/wf-manager.el` and `emacs/wf-service.el`. No check runs Emacs 29.1. |
 | Event delivery | `poll`, the bounded polling mode of `/v1/events`. No server-sent events. |
@@ -80,7 +87,7 @@ service run view show the delivery state `poll`.
 | PD28 | `490b6a21` | None | Phase D gate part 1. |
 | PD29 | `6a4cbeec` | `8c2b780` | Phase D gate part 2. It also fixes the two defects listed below. |
 | PD30 | `5be45383` | None | Phase D gate part 3. |
-| PD31 | Uncommitted | Uncommitted | This section, the updates of the Phase E section, and the README of the Emacs worktree. |
+| PD31 | `91fb0ad4` | `c839f75` | This section, the updates of the Phase E section, and the README of the Emacs worktree. The closeout updates of this section after the reviews are not committed. |
 
 The gate found two defects, and PD29 fixed each at its owner with a test
 that failed first:
@@ -172,6 +179,12 @@ Each step has a `.log` and an `.exit` file under `PD/PD28/impl-r1`,
    order. `bash tui/ci/tui.sh` passed, and the incremental `-ftui-tests`
    build of `agentic-run` and `routing-fixed-point-probe` then passed.
 5. PD31 ran `make -C doc check` after the edit of this section.
+6. The working-state review ran the journey pair once more on agent-cat
+   `91fb0ad4`, which holds the Runtime fix of PD29. It passed at N1 and N8
+   with fixture root `review-pd.Df4d252m`.
+7. The closeout stage ran `make -C doc check` after its edit of this
+   section. The log and the exit file are under `PD/closeout` in the
+   resume directory.
 
 ### Checks not run
 
@@ -179,8 +192,9 @@ Each step has a `.log` and an `.exit` file under `PD/PD28/impl-r1`,
   validation, as the Phase E section lists them, and every N1 run other
   than `tui-model-test` and the journey pair.
 - The PD28 steps ran on `832ea3d3`, before the Runtime fix of PD29. The
-  journey pair, its three controls and the owner checks did not run again
-  on the final tree. The build, `runtime-contract-test`, the twelve modes
+  three controls of the journey and the owner checks did not run again on
+  the final tree. The journey pair ran again in the review, as gate step 6
+  states. The build, `runtime-contract-test`, the twelve modes
   of step 3, the `ext-pi` suites and `bash tui/ci/tui.sh`, which runs
   `tui-model-test` and the local TUI probes, ran after the fix.
 - The `service_http.py` modes `routes`, `pages`, `mutations-discard`,
@@ -228,9 +242,21 @@ items ran in Phase D:
 - Security negatives for the lineage and export routes from Emacs, and
   hostile-input and transport negatives for the Emacs client beyond the
   shared vectors.
+- url.el hardening beyond the functional bindings: isolation of the cookie
+  jar, probes of the proxy environment, the policy of the network security
+  manager, and negatives for redirects and for credentials sent to another
+  origin.
+- Matrices for a revocation during a poll in Emacs and during a stream in
+  `ext-pi`, and redaction projections of manager data in Emacs buffers and
+  in Pi transcript entries.
+- An analysis of a spoofed owner lock for the `owner-never-locked` evidence
+  and the release fence of PD4. A process of the same account can create,
+  hold or remove `runs/<run>/owner.lock`.
 - A threat model for Emacs service mode and a security gate for WM-030 to
   WM-032.
-- Every deferred security item of the Phase E section.
+- Every deferred security item of the Phase E section, the
+  observation-only witness of G2, the hostile-input and transport negatives
+  of WM-024 and WM-028, and section 8 of the remaining-scope report.
 
 ### Package status and open tracker items
 
@@ -281,18 +307,93 @@ Open functional limits of Phase D:
   and the class `unexpected InvalidRequest`. The modes pass. The cause is
   not established.
 - A POST route still gives its Store requests separate admission deadlines
-  (`acat-pd3-fess-followup-uo4y`).
+  (`acat-pd3-fess-followup-uo4y`). No check measures the worst case of each
+  POST route.
+- An uncertain send of create, set-input, capture, enqueue, approve,
+  discard or withdraw in Emacs service mode stops with "outcome is
+  uncertain. Nothing was sent again" and does not reconcile. The user
+  refreshes the view to learn the outcome. Controls, answers, lineage and
+  export reconcile with one read.
+- A service command waits in the foreground in an `accept-process-output`
+  loop, for up to 120 seconds for a receipt or a run, and a repeated read
+  adds pauses of 0.2 seconds. During the wait only `C-g` ends the command.
+  Timers and process filters continue, so other views continue to update.
+  The follow loop and the view refreshes are asynchronous.
+- A watched run snapshot is a page set, and Emacs and `ext-pi` read only
+  its first page. For a run whose snapshot has more than one page, the view
+  and the fork targets see only the first page, and the incomplete page set
+  holds one of the two page-set slots of the client until it expires.
+- `wf-lineage-compare`, `wf-observer-result` and `wf-observer-refresh` have
+  no service equivalent and refuse in service mode, as the README of the
+  Emacs worktree states.
+- Two stopped frontend processes of `routing-fixed-point-probe`, PIDs 111
+  and 9444 with parent 1, remain from the Phase E `failures-launched`
+  fixtures of 2026-10-01. A later count of processes can see them. The PD29
+  change to `failures-launched` ends every worker group, which prevents new
+  leaks of this kind. Nobody in this run signalled them.
+
+### Review of Phase D
+
+Two reviews examined agent-cat `a17a015b..91fb0ad4` and `emacs-native`
+`d5d7430..c839f75`. Each gave the verdict "approve with notes" and found no
+critical and no high finding.
+
+| Package | Packages review | Working-state review |
+| --- | --- | --- |
+| Phase E review functional findings | Met | Partial, because the low rows of the Phase E review and the engine coverage of the owner lock stay open |
+| WM-030 Emacs transport and parsing | Met | Met |
+| WM-031 Emacs service UI | Met | Met |
+| WM-032 Emacs checks and native interaction | Partial | Partial |
+
+The two medium findings both concern WM-032:
+
+1. No service-mode check sends a fail-over. `emacs-client-controls` lists
+   `failover:1` among the choices and then sends the retry. The code path
+   is the one of the retry, `wf-service--control-act`, so only the check is
+   missing. A redirect runs only in the batch ERT live check, not by keys
+   in the PTY.
+2. WM-032 requires a resize while each editor is open. The setup form, the
+   review and the answer editor resize in service mode. The steer editor
+   and the control prompt never resize while open in service mode.
+
+The low findings are these:
+
+- The PD31 row of the table above named PD31 as uncommitted. This closeout
+  corrected the row and the range of `emacs-native`.
+- The three journey controls and the owner checks did not run on a tree
+  with the Runtime fix of PD29. The journey pair did, in gate step 6.
+- The 503 `storage-unavailable` responses of `GET /v1/snapshot` with the
+  class `unexpected InvalidRequest` need a diagnosis. A probable cause is a
+  peer that closed its connection after the response started, which
+  `classifyFault` in `manager/src/Agentic/Manager/Fault.hs` then labels as
+  an unexpected storage fault. The transient re-read of the Emacs client
+  can hide a real fault of the overview.
+- The uncertain sends without reconciliation, the foreground waits, the
+  first-page read of a run snapshot, the commands without a service
+  equivalent, the POST deadlines and the two stopped processes, all listed
+  as open functional limits above.
+- The dropped-check record of the workflow named GNU Emacs 31.1.50 as the
+  only Emacs. Every Emacs check of Phase D ran GNU Emacs 30.2, as the table
+  "Tested Emacs client" states.
 
 ### Next action
 
-1. The Integrator commits this section, the updates of the Phase E section
-   and the README of the Emacs worktree on `emacs-native`, and records the
-   package status above in the tracker.
-2. The operator decides PE27, the devDependency pins.
-3. The next run takes the functional parts of Phase F (WM-039 to WM-041)
-   and Phase G (WM-042 to WM-044) under the functionality-first and fast
-   rules, with the open functional findings above at their owners. The
-   security stage waits for the operator to schedule it.
+1. The Integrator commits the closeout updates of this section and of the
+   remaining-scope report, and records the package status above in the
+   tracker.
+2. The operator or the Integrator ends PIDs 111 and 9444 with `kill -CONT`
+   and then `kill -KILL`.
+3. The operator decides PE27, the devDependency pins.
+4. The next run first closes the WM-032 gaps of the review: one
+   lifecycle step that chooses fail-over or abandon by keys and confirms
+   the effect through HTTP, one PTY redirect with a fixture of two
+   candidates, and one resize of the steer editor that keeps its text. It
+   then runs the three journey controls and the N8 owner checks once on
+   the final tree.
+5. The run then takes the functional parts of Phase F (WM-039 to WM-041)
+   and then Phase G (WM-042 to WM-044) under the functionality-first and
+   fast rules, with the open functional findings above at their owners.
+   The security stage waits for the operator to schedule it.
 
 ## Phase E of 2026-10
 

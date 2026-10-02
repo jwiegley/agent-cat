@@ -7265,7 +7265,7 @@ Request, approval, control, export, and lineage routes pass hostile-input, repla
 :LABELS:   ["wm-release-gate","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-02 Fri 09:45]
+:MODIFIED: [2026-10-02 Fri 09:56]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/G4
 :SOURCE_REPO: agent-cat
@@ -7448,6 +7448,13 @@ Emacs, TUI, and Pi service modes pass their native UI gates and cross-client/cro
     "author": "johnw",
     "text": "PD31 (Phase D current-state documentation closeout, 2026-10-02): doc/workflow-manager-handoff.md now opens with the section 'Phase D of 2026-10'. It records the delivered behavior of PD1 to PD31 with the commits of both repositories, the paired commits that each Emacs mode of manager/test/service_http.py needs, the PD28 to PD30 gate results, the checks not run, the deferred security items, and the package status (WM-030 met for function except the minimum-version item, WM-031 met for function, WM-032 met for function except fail-over and abandon by keys, steer-editor resize and a PTY redirect, G4 open). The README of the Emacs worktree describes service mode, the poll transport, and GNU Emacs 30.2 as the tested version (Package-Requires keeps emacs 29.1 as an unchecked declared minimum). make -C doc check passed. Evidence: PD/PD31/impl-r1 and fess/pd-PD31-r1.md (not blocking, low findings in acat-3a9t). This package stays open for the closeout review.",
     "created_at": "2026-10-02T16:45:38Z"
+  },
+  {
+    "id": 641,
+    "issue_id": "acat-g4-pech",
+    "author": "johnw",
+    "text": "Phase D closeout: the Emacs client of G4 is in place with WM-030 and WM-031 Met and WM-032 Partial. G4 stays open until the WM-032 gaps close and WM-039 supplies cross-machine acceptance. Evidence: doc/workflow-manager-handoff.md section 'Phase D of 2026-10' (Review of Phase D), the review rerun of the journey pair on 91fb0ad4 (N1 and N8 pass) and the closeout make -C doc check (exit 0). Findings are tracked in acat-phase-d-review-findings-raxi.",
+    "created_at": "2026-10-02T16:56:14Z"
   }
 ]
 #+end_src
@@ -12896,6 +12903,35 @@ The other review findings are held by acat-70ll (unresolved approve after a rest
 ]
 #+end_src
 
+* TODO [#C] Phase D end-of-phase review findings    :review:
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-phase-d-review-findings-raxi
+:LABELS:   ["review","workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-02 Fri 09:55]
+:MODIFIED: [2026-10-02 Fri 09:55]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Findings of the two Phase D reviews (agent-cat a17a015b..91fb0ad4, emacs-native d5d7430..c839f75). Both gave "approve with notes" and found no critical and no high finding. The section "Review of Phase D" under "Phase D of 2026-10" in doc/workflow-manager-handoff.md is the source. The next run fixes these items at their owners.
+
+1. (Medium, WM-032) No service-mode check sends a fail-over or an abandon by keys. emacs-client-controls lists failover:1 and then sends the retry. A redirect runs only in the batch ERT live check, not by keys in the PTY.
+2. (Medium, WM-032) The steer editor and the control prompt never resize while open in service mode.
+3. (Low) The three journey controls and the N8 owner checks have not run on a tree with the PD29 Runtime fix.
+4. (Low) The 503 storage-unavailable responses of GET /v1/snapshot with the class "unexpected InvalidRequest" need a diagnosis (manager/src/Agentic/Manager/Fault.hs classifyFault).
+5. (Low, WM-031) An uncertain create, set-input, capture, enqueue, approve, discard or withdraw send in Emacs service mode does not reconcile.
+6. (Low, WM-030/WM-031) A service command waits in the foreground for up to 120 seconds, and only C-g ends the wait.
+7. (Low) Emacs and ext-pi read only the first page of a run snapshot page set.
+8. (Low, WM-031) wf-lineage-compare, wf-observer-result and wf-observer-refresh have no service equivalent.
+9. (Low) No check measures the worst case of each POST route deadline (acat-pd3-fess-followup-uo4y).
+10. (Low) Stopped orphan processes PIDs 111 and 9444 remain from the Phase E failures-launched fixtures.
+11. (Low, WM-030) No check runs the declared minimum Emacs 29.1.
+12. (Low) The dropped-check record of the workflow named GNU Emacs 31.1.50. Every Phase D Emacs check ran GNU Emacs 30.2.
+
 * TODO [#C] Deferred security stage after Phase E    :deferred:security:
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -12903,7 +12939,7 @@ The other review findings are held by acat-70ll (unresolved approve after a rest
 :LABELS:   ["deferred","security","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-10-01 Thu 20:45]
-:MODIFIED: [2026-10-01 Thu 20:45]
+:MODIFIED: [2026-10-02 Fri 09:56]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -12947,6 +12983,20 @@ Deferred security stage for Phase E, Pi service mode (WM-036 to WM-038), under t
   stage of the Phase C section below and of section 8 of the
   remaining-scope report.
 
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 642,
+    "issue_id": "acat-phase-e-deferred-security-5jl4",
+    "author": "johnw",
+    "text": "Phase D adds these deferred security items (operator direction of 2026-09-30): url.el hardening beyond the functional bindings (cookie jar isolation, proxy environment probes, network security manager policy, redirect and cross-origin credential negatives); revocation matrices during an Emacs poll and an ext-pi stream; redaction projections of manager data in Emacs buffers and Pi transcript entries; an analysis of a spoofed owner lock for the owner-never-locked evidence and the PD4 release fence; security negatives for the lineage and export routes from Emacs and hostile-input and transport negatives for the Emacs client; a threat model for Emacs service mode and a security gate for WM-030 to WM-032. Source: handoff section 'Phase D of 2026-10', deferred security items.",
+    "created_at": "2026-10-02T16:56:15Z"
+  }
+]
+#+end_src
+
 * TODO [#C] Phase E end-of-phase review findings    :review:
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -12954,7 +13004,7 @@ Deferred security stage for Phase E, Pi service mode (WM-036 to WM-038), under t
 :LABELS:   ["review","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-10-01 Thu 20:45]
-:MODIFIED: [2026-10-02 Fri 09:19]
+:MODIFIED: [2026-10-02 Fri 09:56]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -13029,6 +13079,13 @@ Findings of the Phase E end-of-phase review (two lenses, range 33f84fe4..841ce0c
     "author": "johnw",
     "text": "Subtask PD29 (2026-10-02) resolves item 12. The cause was in the Runtime, not the SIGHUP disposition: Darwin waitid with WEXITED also reports a stopped child with CLD_STOPPED, and agentic_child_exited read it as an exit, so the group monitor killed a stopped worker group. runtime/cbits/process_group.c now counts only CLD_EXITED, CLD_KILLED and CLD_DUMPED. The new stoppedCheck of runtime-contract-test --process-group-test failed first and passes, and failures-launched passes at N8 without the SIGHUP preexec. The handoff open-limits row is removed. Evidence: PD/PD29/impl-r1.",
     "created_at": "2026-10-02T16:19:12Z"
+  },
+  {
+    "id": 640,
+    "issue_id": "acat-phase-e-review-findings-0l73",
+    "author": "johnw",
+    "text": "Phase D closeout status: Met in the packages review, Partial in the working-state review. PD1 to PD6 fixed findings 1, 2, 3, 5 and the pre-lock crash window of 4. The low rows 6 to 12 and the engine coverage of the owner lock (acat-engine-owner-lock-coverage-9snr) stay open. Evidence: doc/workflow-manager-handoff.md section 'Phase D of 2026-10' (Review of Phase D), the review rerun of the journey pair on 91fb0ad4 (N1 and N8 pass) and the closeout make -C doc check (exit 0). Findings are tracked in acat-phase-d-review-findings-raxi.",
+    "created_at": "2026-10-02T16:56:14Z"
   }
 ]
 #+end_src
@@ -21132,7 +21189,7 @@ coordination or SQL into the TUI.
 :LABELS:   ["p6","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-02 Fri 09:45]
+:MODIFIED: [2026-10-02 Fri 09:56]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-030
 :SOURCE_REPO: agent-cat
@@ -21317,6 +21374,13 @@ separately tested rather than inferred from one newer Emacs build.
     "author": "johnw",
     "text": "PD31 (Phase D current-state documentation closeout, 2026-10-02): doc/workflow-manager-handoff.md now opens with the section 'Phase D of 2026-10'. It records the delivered behavior of PD1 to PD31 with the commits of both repositories, the paired commits that each Emacs mode of manager/test/service_http.py needs, the PD28 to PD30 gate results, the checks not run, the deferred security items, and the package status (WM-030 met for function except the minimum-version item, WM-031 met for function, WM-032 met for function except fail-over and abandon by keys, steer-editor resize and a PTY redirect, G4 open). The README of the Emacs worktree describes service mode, the poll transport, and GNU Emacs 30.2 as the tested version (Package-Requires keeps emacs 29.1 as an unchecked declared minimum). make -C doc check passed. Evidence: PD/PD31/impl-r1 and fess/pd-PD31-r1.md (not blocking, low findings in acat-3a9t). This package stays open for the closeout review.",
     "created_at": "2026-10-02T16:45:35Z"
+  },
+  {
+    "id": 637,
+    "issue_id": "acat-wm-030-t2l4",
+    "author": "johnw",
+    "text": "Phase D closeout status: both review lenses gave Met. The package stays open because functional items remain, not only deferred security items: no check runs the declared minimum Emacs 29.1 (the criterion requires the minimum-version claim to be tested separately), and a service command waits in the foreground for up to 120 seconds, which conflicts with 'without blocking editing'. Deferred security items (url.el hardening, revocation during a poll, redaction in Emacs buffers, the Emacs threat model and security gate) are listed in the handoff and stay with the deferred security stage. Evidence: doc/workflow-manager-handoff.md section 'Phase D of 2026-10' (Review of Phase D), the review rerun of the journey pair on 91fb0ad4 (N1 and N8 pass) and the closeout make -C doc check (exit 0). Findings are tracked in acat-phase-d-review-findings-raxi.",
+    "created_at": "2026-10-02T16:56:12Z"
   }
 ]
 #+end_src
@@ -21328,7 +21392,7 @@ separately tested rather than inferred from one newer Emacs build.
 :LABELS:   ["p6","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-02 Fri 09:45]
+:MODIFIED: [2026-10-02 Fri 09:56]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-031
 :SOURCE_REPO: agent-cat
@@ -21473,6 +21537,13 @@ including its explicit v3 invocation compatibility behavior.
     "author": "johnw",
     "text": "PD31 (Phase D current-state documentation closeout, 2026-10-02): doc/workflow-manager-handoff.md now opens with the section 'Phase D of 2026-10'. It records the delivered behavior of PD1 to PD31 with the commits of both repositories, the paired commits that each Emacs mode of manager/test/service_http.py needs, the PD28 to PD30 gate results, the checks not run, the deferred security items, and the package status (WM-030 met for function except the minimum-version item, WM-031 met for function, WM-032 met for function except fail-over and abandon by keys, steer-editor resize and a PTY redirect, G4 open). The README of the Emacs worktree describes service mode, the poll transport, and GNU Emacs 30.2 as the tested version (Package-Requires keeps emacs 29.1 as an unchecked declared minimum). make -C doc check passed. Evidence: PD/PD31/impl-r1 and fess/pd-PD31-r1.md (not blocking, low findings in acat-3a9t). This package stays open for the closeout review.",
     "created_at": "2026-10-02T16:45:36Z"
+  },
+  {
+    "id": 638,
+    "issue_id": "acat-wm-031-5yxo",
+    "author": "johnw",
+    "text": "Phase D closeout status: both review lenses gave Met. The package stays open because functional items remain: an uncertain create, set-input, capture, enqueue, approve, discard or withdraw send does not reconcile, a service run view reads only the first snapshot page, and wf-lineage-compare and the observer commands have no service equivalent. Deferred security items stay with the deferred security stage. Evidence: doc/workflow-manager-handoff.md section 'Phase D of 2026-10' (Review of Phase D), the review rerun of the journey pair on 91fb0ad4 (N1 and N8 pass) and the closeout make -C doc check (exit 0). Findings are tracked in acat-phase-d-review-findings-raxi.",
+    "created_at": "2026-10-02T16:56:13Z"
   }
 ]
 #+end_src
@@ -21484,7 +21555,7 @@ including its explicit v3 invocation compatibility behavior.
 :LABELS:   ["p6","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-02 Fri 09:45]
+:MODIFIED: [2026-10-02 Fri 09:56]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-032
 :SOURCE_REPO: agent-cat
@@ -21611,6 +21682,13 @@ until WM-039 supplies it.
     "author": "johnw",
     "text": "PD31 (Phase D current-state documentation closeout, 2026-10-02): doc/workflow-manager-handoff.md now opens with the section 'Phase D of 2026-10'. It records the delivered behavior of PD1 to PD31 with the commits of both repositories, the paired commits that each Emacs mode of manager/test/service_http.py needs, the PD28 to PD30 gate results, the checks not run, the deferred security items, and the package status (WM-030 met for function except the minimum-version item, WM-031 met for function, WM-032 met for function except fail-over and abandon by keys, steer-editor resize and a PTY redirect, G4 open). The README of the Emacs worktree describes service mode, the poll transport, and GNU Emacs 30.2 as the tested version (Package-Requires keeps emacs 29.1 as an unchecked declared minimum). make -C doc check passed. Evidence: PD/PD31/impl-r1 and fess/pd-PD31-r1.md (not blocking, low findings in acat-3a9t). This package stays open for the closeout review.",
     "created_at": "2026-10-02T16:45:37Z"
+  },
+  {
+    "id": 639,
+    "issue_id": "acat-wm-032-eh4r",
+    "author": "johnw",
+    "text": "Phase D closeout status: Partial in both review lenses. Open: no fail-over or abandon by keys in service mode, no PTY redirect, and no resize of the steer editor or control prompt while open. The three journey controls and the N8 owner checks have not run on a tree with the PD29 Runtime fix. Cross-machine acceptance waits for WM-039. Evidence: doc/workflow-manager-handoff.md section 'Phase D of 2026-10' (Review of Phase D), the review rerun of the journey pair on 91fb0ad4 (N1 and N8 pass) and the closeout make -C doc check (exit 0). Findings are tracked in acat-phase-d-review-findings-raxi.",
+    "created_at": "2026-10-02T16:56:13Z"
   }
 ]
 #+end_src
