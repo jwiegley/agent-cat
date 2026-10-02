@@ -555,12 +555,16 @@ PI_CONTROLS_STEER_TEXT = "Pi steer \u03bb: focus on the patch."
 # exportSent, exportCommand, exportState, exportResource, exportDownload,
 # downloadBytes, downloadSha256, wrongDigestRefusal, wrongSizeRefusal,
 # serviceIdentity, serviceProfiles, serviceWorkflows, serviceRunRefusal,
-# serviceHelp, serviceRefusals, serviceLocalCalls, serviceDiagnostics and
-# serviceLocal. The
+# serviceHelp, serviceRefusals, serviceLocalCalls, serviceDiagnostics,
+# serviceLocal, editorBefore, editorAfter, editorRedrawn, the fields
+# RequestId, PreparationId, ReviewDigest, Etag, ReviewText, RunId and
+# Outcomes with each of the prefixes literal, captured and declined,
+# capturedBytes, capturedSha256, declinedSentAfterNo and requestCommands.
+# The
 # mode first refuses, with one sentence, a report whose harnessVersion
 # differs from EMACS_HARNESS_VERSION, which detects a mismatched pair of the
 # two repositories. It then requires the steps bind, draft, stale, pages,
-# overview, follow, unreachable, switch, revoke, close, export and service in that order and
+# overview, follow, unreachable, switch, revoke, close, export, service and requests in that order and
 # no prompt, and checks the report against its own reads:
 # 1. The check bound its transport over https with the CA file of the
 # profile, with a 32-digit endpoint identity and the authority epoch of the
@@ -623,22 +627,48 @@ PI_CONTROLS_STEER_TEXT = "Pi steer \u03bb: focus on the patch."
 # 12. The service step drove the commands of wf.el with keys in batch Emacs.
 # M-x wf-run listed exactly the ready profiles of /v1/profiles and the
 # workflow names of /v1/workflows?profileId= of the selected profile, as the
-# harness reads them, and then refused with its stated message. M-x wf-help
+# harness reads them, and C-g in the workflow prompt then ended it with no
+# refusal before any request existed. M-x wf-help
 # showed the help text of the catalogue item of mixed-controls. Each
 # local-only command of EMACS_LOCAL_COMMANDS refused with a message that
 # names it, wf-plan and wf-cost name the review of wf-run, and the check
 # counted no process start and no request of them. The command receipts
-# after the start cursor end with the export command of step 11, and the
-# manager holds the same requests as after step 7, so the service step sent
-# no command. M-x wf-diagnostics showed the endpoint of the profile, each
+# after the export command of step 11 are exactly the commands of
+# requestCommands of step 13, and the manager holds the requests of step 7
+# and the three requests of step 13, so the service step sent no command.
+# M-x wf-diagnostics showed the endpoint of the profile, each
 # scope of the capabilities and the delivery state poll, and M-x wf-local
 # closed the session.
+# 13. In the requests step, the keys selected the profile again and ran
+# M-x wf-run three times. The first request, of prompt-source, supplied
+# exactly MIXED_TEXT through the Multiline source of the setup form with one
+# set-input command of that literal, and its run succeeded with MIXED_TEXT
+# as the input of its program, which the harness reads in the run store.
+# 14. The review buffer of the first review showed every approval selector
+# and the review digest of the preparation that the harness reads, the
+# entity tag of the report as If-Match and the program digest. The
+# preparation is consumed. Each of the two approved preparations has
+# exactly one approve command, which is not refused, and the one approve
+# body that the check sent names the selectors of the preparation, with the
+# entity tag of its review as If-Match. Both approved reviews record the
+# outcomes approve and run.
+# 15. The second request, of captured-input, supplied one capture. The one
+# capture upload of the check was application/octet-stream with no If-Match
+# and the size and SHA-256 of EMACS_CAPTURED, the command events name one
+# capture command, and the run succeeded with that SHA-256 as the input of
+# its program.
+# 16. The answer no to the approval of the third review sent nothing. Its
+# preparation has exactly one command, the discard, which reached the
+# effect discarded, the preparation is invalidated with the reason
+# discarded, and the withdraw key withdrew the request, which has no run.
+# 17. The value of the input of the first setup form was MIXED_TEXT before
+# and after M-x wf-refresh, and the refresh drew new widgets.
 # Each step prints its own PASS line. It runs one manager lifetime.
 EMACS_CLIENT = "emacs-client"
 emacs_client_mode = len(sys.argv) == 6 and sys.argv[5] == EMACS_CLIENT
 # The version of the report of emacs/wf-manager-live.el. The constant
 # wf-manager-live-harness-version there states the same version.
-EMACS_HARNESS_VERSION = 5
+EMACS_HARNESS_VERSION = 6
 # The local-only commands of wf.el that the service step runs in service
 # mode. wf-manager-live--local-commands of emacs/wf-manager-live.el states
 # them.
@@ -649,6 +679,9 @@ EMACS_LITERAL = "Emacs \u03bb \u96ea\U0001F600 input."
 # The characters of the literal input of each draft of the pages step.
 # wf-manager-live--page-characters of emacs/wf-manager-live.el states it.
 EMACS_PAGE_CHARACTERS = 600000
+# The text of the file that the captured input of the requests step uploads.
+# wf-manager-live-captured of emacs/wf-manager-live.el states it.
+EMACS_CAPTURED = "Emacs captured \u00dcn\u00efcode \u03bb\r\nsecond line\n"
 # The variables that the batch Emacs takes from the environment of the harness.
 EMACS_ALLOWLIST = ("PATH", "LANG", "LC_ALL", "TMPDIR", "USER", "LOGNAME")
 if emacs_client_mode:
@@ -10565,9 +10598,9 @@ def emacs_client_checks():
                 child = subprocess.Popen(command, cwd=home, env=environment, stdin=subprocess.DEVNULL,
                                          stdout=log, stderr=subprocess.STDOUT)
                 try:
-                    deadline = time.monotonic() + 420
+                    deadline = time.monotonic() + 600
                     while child.poll() is None:
-                        assert time.monotonic() < deadline, "the Emacs live check exceeded 420 seconds"
+                        assert time.monotonic() < deadline, "the Emacs live check exceeded 600 seconds"
                         if run is None and run_path.is_file():
                             # The check has sent all its commands. The harness
                             # keeps the requests and the command receipts of
@@ -10618,7 +10651,7 @@ def emacs_client_checks():
             assert re.search(r"Ran 1 tests?, 1 results? as expected, 0 unexpected", text) and report_path.is_file(), (
                 "the Emacs live check did not run its one test", text[-4000:])
             assert report["steps"] == ["bind", "draft", "stale", "pages", "overview", "follow", "unreachable", "switch",
-                                       "revoke", "close", "export", "service"] \
+                                       "revoke", "close", "export", "service", "requests"] \
                 and report["prompts"] == 0, (
                 "the Emacs live check did not complete its steps without a prompt", report["steps"], report["prompts"])
             # 1. The binding.
@@ -10701,7 +10734,9 @@ def emacs_client_checks():
             assert report["switchEpoch"] == capabilities["authorityEpoch"], ("the epoch of the second binding", report["switchEpoch"])
             assert report["switchGeneration"] > report["generation"], ("the generation of the switch", report["switchGeneration"])
             # The run of the harness adds its own request to the drafts of the check.
-            held = sorted(item["id"] for item in all_requests())
+            # The requests step creates three more requests after this step.
+            created = [report["literalRequestId"], report["capturedRequestId"], report["declinedRequestId"]]
+            held = sorted(item["id"] for item in all_requests() if item["id"] not in created)
             assert len(held) == 5 and set([request_id] + page_requests) <= set(held), ("the requests after the check", held)
             assert report["switchOverviewRequests"] == held and report["switchOverviewRuns"] == [run], (
                 "the overview of the second binding", report["switchOverviewRequests"], report["switchOverviewRuns"])
@@ -10746,7 +10781,7 @@ def emacs_client_checks():
             assert report["exportSent"] == "delivered" and re.fullmatch(r"/v1/commands/[A-Za-z0-9_-]{1,128}", command_uri), (
                 "the export send", report["exportSent"], command_uri)
             final = command_receipts(cursor, harness)
-            assert [resource for resource, _ in final] == [resource for resource, _ in driven] + [command_uri], (
+            assert [resource for resource, _ in final][:len(driven) + 1] == [resource for resource, _ in driven] + [command_uri], (
                 "the commands after the drive", [resource for resource, _ in final][len(driven):])
             status, receipt, raw = request(command_uri, harness)
             assert status == 200, ("export receipt", status)
@@ -10793,8 +10828,7 @@ def emacs_client_checks():
             validate("WorkflowPage", listed_workflows, raw)
             names = sorted(item["name"] for item in listed_workflows["items"])
             assert report["serviceWorkflows"] == names, ("the workflows that wf-run listed", report["serviceWorkflows"], names)
-            assert report["serviceRunRefusal"] == f"Service mode does not yet create a request of mixed-controls in {ready[0]}", (
-                "the refusal of wf-run", report["serviceRunRefusal"])
+            assert report["serviceRunRefusal"] is None, ("the end of wf-run after the listings", report["serviceRunRefusal"])
             help_text = next(item["help"] for item in listed_workflows["items"] if item["name"] == "mixed-controls")
             assert report["serviceHelp"].endswith(help_text) and "mixed-controls" in report["serviceHelp"], (
                 "the help text of wf-help", report["serviceHelp"][:400])
@@ -10806,8 +10840,17 @@ def emacs_client_checks():
                 "wf-plan and wf-cost do not name the review of wf-run", refusals)
             assert report["serviceLocalCalls"] == 0, ("the local-only commands started a process or sent a request",
                                                       report["serviceLocalCalls"])
-            assert [resource for resource, _ in final][-1] == command_uri and sorted(item["id"] for item in all_requests()) == held, (
-                "the service step sent a command", [resource for resource, _ in final][len(driven):])
+            # The commands after the export command are those of the requests
+            # step, which step 13 states.
+            later = [receipt for _, receipt in final[len(driven) + 1:]]
+            sent = report["requestCommands"]
+            operations = ["create" if item["resource"] == "/v1/requests" else
+                          "capture" if item["resource"].startswith("/v1/captures?") else item["body"]["operation"]
+                          for item in sent]
+            assert [receipt["operation"] for receipt in later] == operations, (
+                "the service step sent a command", [receipt["operation"] for receipt in later], operations)
+            assert sorted(item["id"] for item in all_requests()) == sorted(held + created), (
+                "the requests after the service step", sorted(item["id"] for item in all_requests()))
             diagnostics = report["serviceDiagnostics"]
             assert f"Endpoint: {profile['endpoint']}\n" in diagnostics \
                 and f"Scopes: {', '.join(capabilities['scopes'])}\n" in diagnostics \
@@ -10815,16 +10858,113 @@ def emacs_client_checks():
                 and f"Endpoint identity: {report['serviceIdentity']}\n" in diagnostics, ("the diagnostics of wf-diagnostics", diagnostics)
             assert report["serviceLocal"] is True, ("wf-local", report["serviceLocal"])
             print("PASS emacs-client 12: in service mode, keys drove wf-service, and wf-run listed the profiles", ready,
-                  "and the", len(names), "workflows of the catalogue that the harness reads and then refused with its stated",
-                  "message, wf-help showed the catalogue help text, the", len(EMACS_LOCAL_COMMANDS), "local-only commands",
-                  "refused with their messages and sent nothing, the command receipts end with the export command,",
+                  "and the", len(names), "workflows of the catalogue that the harness reads, and C-g then ended it with no request",
+                  "and no refusal, wf-help showed the catalogue help text, the", len(EMACS_LOCAL_COMMANDS), "local-only commands",
+                  "refused with their messages and sent nothing, the commands after the export command are exactly",
+                  "those of the requests step,",
                   "wf-diagnostics showed the endpoint, the scopes", capabilities["scopes"], "and the delivery state poll,",
                   "and wf-local closed the session", flush=True)
+            # 13. The requests step: the literal reached the run program.
+            selectors = ("reviewDigest", "requestRevision", "profileRevision", "descriptorRevision", "processGeneration")
+            client = mixed_client(capabilities, harness)
+            observed = client[0]
+
+            def terminal(run_id):
+                snapshot, _, _ = client[1]("/v1/runs/" + run_id + "/snapshot", "RunSnapshot",
+                    lambda value: value["runtime"] is not None and value["runtime"]["status"] in ("succeeded", "failed", "cancelled"))
+                assert snapshot["runtime"]["status"] == "succeeded", ("run status", run_id, snapshot["runtime"]["status"])
+
+            def prompts():
+                return [entry["question"].get("prompt") or "" for path in work.glob("manager/runs/runs/*/runtime/answers.json")
+                        for entry in json.loads(path.read_bytes())["answers"]]
+
+            literal, _, _ = observed("/v1/requests/" + report["literalRequestId"], "Request")
+            assert literal["readiness"]["supplied"] == [{"name": "input", "source": "literal", "value": MIXED_TEXT}], (
+                "the request did not supply exactly the literal", literal["readiness"]["supplied"])
+            assert literal["runId"] == report["literalRunId"] and literal["phase"] == "associated", (
+                "the literal request", literal["runId"], literal["phase"])
+            terminal(report["literalRunId"])
+            assert any(prompt.startswith("fixed-point source: " + MIXED_TEXT) for prompt in prompts()), (
+                "the program did not receive the literal", prompts())
+            literal_set = [item for item in sent if item["resource"] == "/v1/requests/" + report["literalRequestId"]
+                           and item["body"].get("operation") == "set-input"]
+            assert [item["body"]["input"] for item in literal_set] == [{"name": "input", "source": "literal", "value": MIXED_TEXT}], (
+                "the set-input of the literal", literal_set)
+            print("PASS emacs-client 13: in the setup form of wf-run, the keys typed the Unicode literal through the Multiline source,",
+                  "the one set-input command sent its exact text, request", report["literalRequestId"], "supplied exactly MIXED_TEXT,",
+                  "and run", report["literalRunId"], "succeeded with the literal as the input of its program", flush=True)
+            # 14. The review buffer showed the exact review, and the only
+            # approve command carries its selectors and entity tag.
+            preparation, _, _ = observed("/v1/preparations/" + report["literalPreparationId"], "Preparation")
+            text = report["literalReviewText"]
+            assert preparation["state"] == "consumed" and preparation["reviewDigest"] == report["literalReviewDigest"], (
+                "the literal preparation", preparation["state"], preparation["reviewDigest"])
+            assert all(f"  {name}: {preparation[name]}\n" in text for name in selectors) \
+                and f"  If-Match: {report['literalEtag']}\n" in text \
+                and f"Program SHA-256: {preparation['review']['programHash']}\n" in text, (
+                "the review buffer does not show the exact review", text[:2000])
+            for prefix in ("literal", "captured"):
+                resource = "/v1/preparations/" + report[prefix + "PreparationId"]
+                approvals = [receipt for receipt in later if receipt["operation"] == "approve" and receipt["resource"] == resource]
+                assert len(approvals) == 1 and approvals[0]["state"] not in ("refused", "unresolved"), (
+                    "the approve command of the displayed review", prefix, approvals)
+                approved, _, _ = observed(resource, "Preparation")
+                bodies = [item for item in sent if item["resource"] == resource]
+                assert bodies == [{"resource": resource, "media": "application/json", "ifMatch": report[prefix + "Etag"],
+                                   "body": {"operation": "approve", **{name: approved[name] for name in selectors}}}], (
+                    "the approve command does not name the exact review selectors", prefix, bodies)
+                assert report[prefix + "Outcomes"] == ["approve", "run"], ("the review outcomes", prefix, report[prefix + "Outcomes"])
+            print("PASS emacs-client 14: the review buffer of preparation", report["literalPreparationId"], "showed review digest",
+                  report["literalReviewDigest"], "with every selector and the entity tag", report["literalEtag"], "that the harness",
+                  "reads, and the one approve command of each of the two approved reviews carried its selectors and the entity tag",
+                  "of its review as If-Match after the confirmation", flush=True)
+            # 15. The capture reached the run program.
+            captured, _, _ = observed("/v1/requests/" + report["capturedRequestId"], "Request")
+            captured_bytes = EMACS_CAPTURED.encode("utf-8")
+            captured_digest = hashlib.sha256(captured_bytes).hexdigest()
+            supplied = captured["readiness"]["supplied"]
+            assert len(supplied) == 1 and supplied[0]["source"] == "capture" and supplied[0]["name"] == "input", (
+                "the captured-input request does not supply a capture", supplied)
+            uploads = [item for item in sent if item["resource"] == "/v1/captures?requestId=" + report["capturedRequestId"]]
+            assert uploads == [{"resource": uploads[0]["resource"], "media": "application/octet-stream", "ifMatch": None,
+                                "body": {"bytes": len(captured_bytes), "sha256": captured_digest}}], ("the capture upload", uploads)
+            assert report["capturedSha256"] == captured_digest and report["capturedBytes"] == len(captured_bytes), (
+                "the captured file", report["capturedSha256"], report["capturedBytes"])
+            capture_receipts = [receipt for receipt in later if receipt["operation"] == "capture"]
+            assert len(capture_receipts) == 1, ("the capture commands", capture_receipts)
+            assert captured["runId"] == report["capturedRunId"], ("captured request run", captured["runId"])
+            terminal(report["capturedRunId"])
+            assert "fixed-point source: " + captured_digest in prompts(), ("the program did not receive the captured bytes", prompts())
+            print("PASS emacs-client 15: the File source uploaded", len(captured_bytes), "exact bytes with SHA-256", captured_digest,
+                  "through POST /v1/captures as application/octet-stream, set-input bound capture", supplied[0]["captureId"],
+                  "of request", report["capturedRequestId"], "and run", report["capturedRunId"],
+                  "succeeded with that SHA-256 as the input of its program", flush=True)
+            # 16. The declined review sent nothing, and its discard reached the effect.
+            declined = "/v1/preparations/" + report["declinedPreparationId"]
+            commands = [(receipt["operation"], receipt["state"], (receipt["effect"] or {}).get("kind"))
+                        for receipt in later if receipt["resource"] == declined]
+            assert commands == [("discard", "effect-observed", "discarded")], ("the commands of the declined preparation", commands)
+            assert report["declinedSentAfterNo"] == [] and report["declinedOutcomes"] == ["discard", "withdraw"], (
+                "the declined review", report["declinedSentAfterNo"], report["declinedOutcomes"])
+            withdrawn, _, _ = observed("/v1/requests/" + report["declinedRequestId"], "Request")
+            discarded, _, _ = observed(declined, "Preparation")
+            assert withdrawn["phase"] == "withdrawn" and withdrawn["runId"] is None and discarded["state"] == "invalidated" \
+                and discarded["reason"] == "discarded", ("the declined request", withdrawn["phase"], discarded["state"], discarded["reason"])
+            print("PASS emacs-client 16: the answer no to the approval of preparation", report["declinedPreparationId"],
+                  "sent nothing, so the preparation has no approve command, the discard key reached the effect discarded,",
+                  "and the withdraw key withdrew request", report["declinedRequestId"], flush=True)
+            # 17. The editor contents survived a refresh during setup.
+            assert report["editorBefore"] == report["editorAfter"] == MIXED_TEXT and report["editorRedrawn"] is True, (
+                "the setup form after the refresh", report["editorBefore"], report["editorAfter"], report["editorRedrawn"])
+            print("PASS emacs-client 17: wf-refresh in the open setup form read the request again and drew new widgets,",
+                  "and the typed literal stayed exactly MIXED_TEXT before and after the refresh", flush=True)
         print("PASS emacs-client: the Emacs transport bound, created and replayed a draft, received the typed 412 and 401",
               "refusals, assembled the overview over all its pages, followed a run of the harness through event polls, kept its",
               "binding after an unreachable switch, switched to a second credential with generation fencing, closed",
               "cleanly, sent an export command whose receipt it read, downloaded and verified the export against the",
-              "protected HTTPS endpoint, and drove the service mode of wf.el with keys, and the harness confirmed each",
+              "protected HTTPS endpoint, drove the service mode of wf.el with keys, created, set up, reviewed and",
+              "approved two requests whose programs received their literal and captured inputs, declined, discarded",
+              "and withdrew a third, and the harness confirmed each",
               "step from manager facts",
               flush=True)
     finally:

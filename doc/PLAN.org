@@ -6415,6 +6415,36 @@ Ownership map before moves
 
 Replaces the hand-rolled Cost supremum machinery and the dyadic Prob workaround; unlocks the real-valued probability carrier (resolves the acat-467/kwb deferrals), sum-product Markov read-outs, and the numeric expectation module. SqZero may survive as a construction over Mathlib semirings (check Mathlib for dual numbers: TrivSqZeroExt exists!).
 
+* TODO [#D] Resolve the non-blocking fess findings of subtask PD20
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-f7xu
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-02 Fri 03:49]
+:MODIFIED: [2026-10-02 Fri 03:49]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess audit fess/pd-PD20-r1.md (2026-10-02) on subtask PD20 (WM-031 part 2, agent-workflows emacs-native, setup, captures, request and review in Emacs service mode). The emacs-native commit of PD20 names this issue.
+
+1. (medium) emacs/wf-manager.el defconst wf-manager-capture-bytes and wf-manager-session-prepare-capture. The capture limit is the constant 67108864, but its docstring says that it is the captureBytes limit of the capabilities. ext-pi prepareCapture (ext-pi/src/manager/session.ts) reads limits.captureBytes from the capabilities and refuses when that limit is absent. With a manager that advertises a smaller limit, the Emacs client sends the upload and the manager refuses it. Fix: read limits.captureBytes from the session capabilities, as ext-pi does, or correct the docstring and the README entry to say that the limit is fixed.
+
+2. (low) emacs/wf.el wf-refresh. The docstring says only "Forget every cached row listing". In service mode the command reads the request of a setup form again and redraws the form, and outside a setup form it shows a message. Fix: add a service-mode paragraph to the docstring that matches the README row.
+
+3. (low) manager/test/service_http.py step 12 (serviceRunRefusal is None) and emacs/wf-manager-live.el. The assertion that the refusal is null after C-g cannot tell "C-g ended wf-run" apart from "wf-run returned silently". The receipt and request-set comparisons prove that step 12 sent no command. Fix: record a positive signal that wf-run stopped at the workflow prompt (for example an advice counter on wf-service--create equal to zero), or soften the PASS 12 wording.
+
+4. (low) emacs/wf-service.el wf-service--settle, wf-service--await-review and wf-service--await-run. wf-run and the approve, discard and withdraw keys poll synchronously for up to 120 seconds inside the command. Fix: follow the request asynchronously through the session follow loop with the session-invalidation work of WM-031.
+
+5. (low) emacs/wf-service.el wf-service-review-text. The docstring says that the text is the review as reviewLines of ext-pi/src/manager-ui.ts shows it, but the header line is Emacs's own. Fix: align the header with ext-pi reviewLines, or state in the docstring that only the consent facts mirror reviewLines.
+
+6. (gap) PD/PD20/impl-r1/emacs-client.log. The final live emacs-client run predates the last edit of wf-manager-live.el, which the implementer calls comment-only. The audit rerun of ci/emacs.sh passed. Real queue positions and blocking reasons are checked only offline. Fix: none required; a later emacs-client run covers it.
+
+Implementer limitations recorded with PD20: an uncertain create, capture, set-input, enqueue, approve, discard or withdraw stops with a message and is not reconciled through wf-manager-session-reconcile yet; a 412 on set-input does not reopen the setup form with its draft; a cancelled setup form leaves its request as a draft; the setup form and the review buffer refresh only on request.
+
 * DONE [#D] DSL reference page: elaboration contract, three named hazards, determinism law, edit-preservation statement
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -20954,7 +20984,7 @@ separately tested rather than inferred from one newer Emacs build.
 :LABELS:   ["p6","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-02 Fri 03:17]
+:MODIFIED: [2026-10-02 Fri 03:49]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-031
 :SOURCE_REPO: agent-cat
@@ -21036,6 +21066,13 @@ including its explicit v3 invocation compatibility behavior.
     "author": "johnw",
     "text": "PD19 (WM-031 part 1): agent-workflows emacs-native commit 70fecf9 adds emacs/wf-service.el with the defcustom wf-manager-profiles, M-x wf-service (bind one profile and start a session, or switch an existing one so a failed switch keeps the earlier binding) and M-x wf-local (close the session, local mode is the default again), and the dispatch table wf-service-commands that states the service behavior of every public command of emacs/wf.el. In service mode wf-run reads the catalogue from /v1/profiles and /v1/workflows?profileId= through wf--read-row and then refuses (request creation comes later), wf-help shows the catalogue help, wf-diagnostics shows endpoint, identity, epoch, scopes, delivery state poll, generation and last problem, pending commands (wf-runs, wf-answer, wf-control, wf-result, wf-kill, wf-history, wf-history-open, wf-restart, wf-resume, wf-fork, wf-rerun, wf-refresh) refuse until PD20 to PD24, and the five local-only commands refuse and send nothing. agent-cat manager/test/service_http.py emacs-client mode adds live step 12 (service) at harness version 5. Evidence scope: ci/emacs.sh exited 0 with three new offline service tests that failed first against the earlier wf.el; ci/emacs-ui.py local cases passed; emacs-client mode PASS 1 to 12; journey N8 passed. Fess pd-PD19-r1 not blocking; one medium and five low findings filed as acat-olgd. Limitations: the dispatch is global; wf-kill and wf-rerun mappings deferred to PD22 and PD24; the catalogue is read fresh on each call and a 429 is not retried. WM-031 stays open.",
     "created_at": "2026-10-02T10:17:30Z"
+  },
+  {
+    "id": 612,
+    "issue_id": "acat-wm-031-5yxo",
+    "author": "johnw",
+    "text": "PD20 (WM-031 part 2): agent-workflows emacs-native commit dc258f1 ports setup, captures, request and review to service mode in emacs/wf-service.el. wf-run creates a request with POST /v1/requests and opens the local wf--setup-mode form for the missing inputs. Literal and Multiline inputs go through set-input with their exact text. File, Buffer and Region inputs upload exact UTF-8 bytes through POST /v1/captures and are bound with set-input by captureId. The request is then enqueued. wf-refresh in an open form reads the request again and keeps every draft and the point. The review buffer wf-service-review-mode renders the exact preparation of GET /v1/preparations/{id} with admission, queue position, blocking reasons, the five selectors, the ETag and the consent facts. a asks wf-confirm-function and only a yes posts approve with the selectors and If-Match; a no or q sends nothing; d discards, w withdraws, g reads again. agent-cat manager/test/service_http.py emacs-client mode adds live step 13 (requests) at harness version 6. Evidence scope: ci/emacs.sh exited 0 (80 of 80 transport tests); ci/emacs-ui.py local cases passed; emacs-client mode PASS 1 to 17 (MIXED_TEXT reached the run program exactly, the captured input SHA-256 matched, the review showed the digest and selectors and the only approve carried them, a declined review sent no approve and its discard reached discarded, drafts survived a refresh); journey N8 passed. Fess pd-PD20-r1 not blocking; one medium and four low findings and one verification gap filed as acat-f7xu. Limitations: uncertain commands stop and are not reconciled yet; a 412 on set-input does not reopen the form; a cancelled form leaves a draft request; refresh is on request only and the waits are synchronous. WM-031 stays open.",
+    "created_at": "2026-10-02T10:49:23Z"
   }
 ]
 #+end_src
