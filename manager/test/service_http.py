@@ -640,13 +640,18 @@ EMACS_CONTROLS_STEER_TEXT = "Emacs steer \u03bb: focus on the patch."
 # viewsCommandsAfter, historyIdentity, historyRuns, historyPages,
 # historyObservers, historyViewLines, resultFile, resultBytes, resultSha256,
 # resultMode, resultRefusal, resultKept, historySwitchIdentity,
-# historyForeignRefusal, historyForeignReads and historyForeignView.
+# historyForeignRefusal, historyForeignReads, historyForeignView, the
+# fields ParentRunId, RequestId, PreparationId, RunId, ReviewText,
+# ReviewRun, Outcomes, RunParent and RunLineage with each of the prefixes
+# restart, resume, fork and rerun, forkOccurrenceId, forkPrefill,
+# forkTargetAnswer, serviceExportRunId, serviceExportName,
+# serviceExportText, serviceExportCommand and lineageCommands.
 # The
 # mode first refuses, with one sentence, a report whose harnessVersion
 # differs from EMACS_HARNESS_VERSION, which detects a mismatched pair of the
 # two repositories. It then requires the steps bind, draft, stale, pages,
 # overview, follow, unreachable, switch, revoke, close, export, service,
-# requests, views and history in that order and
+# requests, views, lineage and history in that order and
 # no prompt, and checks the report against its own reads:
 # 1. The check bound its transport over https with the CA file of the
 # profile, with a 32-digit endpoint identity and the authority epoch of the
@@ -717,8 +722,9 @@ EMACS_CONTROLS_STEER_TEXT = "Emacs steer \u03bb: focus on the patch."
 # counted no process start and no request of them. The command receipts
 # after the export command of step 11 begin with exactly the commands of
 # requestCommands of step 13, and the manager holds the requests of step 7,
-# the three requests of step 13 and the two requests of the views step, so
-# the service step sent no command.
+# the three requests of step 13, the two requests of the views step and the
+# four child requests of the lineage step, so the service step sent no
+# command.
 # M-x wf-diagnostics showed the endpoint of the profile, each
 # scope of the capabilities and the delivery state poll, and M-x wf-local
 # closed the session.
@@ -761,8 +767,9 @@ EMACS_CONTROLS_STEER_TEXT = "Emacs steer \u03bb: focus on the patch."
 # answer command of the harness. The session no longer watched a resource of
 # the killed view, the stale run had not ended at the drive handshake, no
 # cancel command exists, every command after the drive is a retry of the
-# harness and no command follows them, the function of kill-emacs-hook closed
-# the transport with no command, and the stale run then succeeded.
+# harness, only the commands of the lineage step follow them, the function
+# of kill-emacs-hook closed the transport with no command, and the stale run
+# then succeeded.
 # 21. The view of the answered run named only its run and its question while
 # the view of the stale run named only its run and its recovery decision,
 # and the view of the answered run then showed its recovery decision. Its
@@ -782,12 +789,38 @@ EMACS_CONTROLS_STEER_TEXT = "Emacs steer \u03bb: focus on the patch."
 # identity differs, RET on the same history row was refused with the
 # wrong-endpoint failure, no read named the run and the session opened no
 # view of the run on the new binding.
+# 25. In the lineage step, M-x wf-restart on the history row of the literal
+# run of step 13, S in the view of the captured run of step 15 and F in the
+# view of the restart child each created one child request. The command
+# receipts after the drive and its retries are exactly the commands of the
+# lineage step in order: for each child the lineage command of the parent,
+# the enqueue of the child and the approve of its preparation, and then the
+# export of step 27. Each lineage command reached effect-observed with the
+# effect lineage-created on the child request, and the lineage collection of
+# the parent lists the child. A restart and a resume body name only the
+# operation. The fork body replaces the answer of the reported occurrence
+# with EMACS_FORKED, the replacement minibuffer started with the published
+# answer of that occurrence, and the review of the fork shows the SHA-256 of
+# the JSON encoding of EMACS_FORKED and not the answer. Each child request
+# names its parent and its operation and no run when its review opened, its
+# review buffer showed the lineage line, its preparation is consumed by its
+# one approve command and its review names the parent, the operation and the
+# edits, and its run succeeded and names the parent and the operation.
+# 26. The key g, which runs wf-rerun, in the view of the captured run
+# created a restart child of that run in the same way.
+# 27. M-x wf-export on the history row of the answered run of the views step
+# sent one export command whose Location the report names. It reached
+# effect-observed with the effect exported, the export
+# EMACS_SERVICE_EXPORT is published in the export collection of the run, the
+# bytes that the harness downloads verify against its size and SHA-256, and
+# the export buffer of the check states that receipt, that verified size and
+# digest and the export collection.
 # Each step prints its own PASS line. It runs one manager lifetime.
 EMACS_CLIENT = "emacs-client"
 emacs_client_mode = len(sys.argv) == 6 and sys.argv[5] == EMACS_CLIENT
 # The version of the report of emacs/wf-manager-live.el. The constant
 # wf-manager-live-harness-version there states the same version.
-EMACS_HARNESS_VERSION = 9
+EMACS_HARNESS_VERSION = 10
 # The local-only commands of wf.el that the service step runs in service
 # mode. wf-manager-live--local-commands of emacs/wf-manager-live.el states
 # them.
@@ -806,6 +839,11 @@ EMACS_CAPTURED = "Emacs captured \u00dcn\u00efcode \u03bb\r\nsecond line\n"
 # emacs/wf-manager-live.el state them.
 EMACS_ANSWERED = "Emacs answer \u03bb: explicit false."
 EMACS_STALE = "Emacs stale \u03bb: the harness answers first."
+# The replacement answer of the fork edit of the lineage step and the name of
+# its export. wf-manager-live-forked and wf-manager-live-service-export of
+# emacs/wf-manager-live.el state them.
+EMACS_FORKED = "Emacs fork \u03bb: the replaced answer."
+EMACS_SERVICE_EXPORT = "emacs-service-export.json"
 # The variables that the batch Emacs takes from the environment of the harness.
 EMACS_ALLOWLIST = ("PATH", "LANG", "LC_ALL", "TMPDIR", "USER", "LOGNAME")
 if emacs_client_mode or sys.argv[5:] == [EMACS_CLIENT_CONTROLS]:
@@ -10984,7 +11022,8 @@ def emacs_client_checks():
                         child.wait()
             report = emacs_live_report(child, log_path, report_path,
                                        ["bind", "draft", "stale", "pages", "overview", "follow", "unreachable", "switch",
-                                        "revoke", "close", "export", "service", "requests", "views", "history"])
+                                        "revoke", "close", "export", "service", "requests", "views", "lineage",
+                                        "history"])
             assert report["prompts"] == 0, ("the Emacs live check prompted", report["prompts"])
             # 1. The binding.
             assert report["scheme"] == "https" and profile["endpoint"].startswith("https://127.0.0.1:"), (
@@ -11068,7 +11107,8 @@ def emacs_client_checks():
             # The run of the harness adds its own request to the drafts of the check.
             # The requests step creates three more requests after this step.
             created = [report["literalRequestId"], report["capturedRequestId"], report["declinedRequestId"],
-                       report["answeredRequestId"], report["staleRequestId"]]
+                       report["answeredRequestId"], report["staleRequestId"]] + [
+                           report[prefix + "RequestId"] for prefix in ("restart", "resume", "rerun", "fork")]
             held = sorted(item["id"] for item in all_requests() if item["id"] not in created)
             assert len(held) == 5 and set([request_id] + page_requests) <= set(held), ("the requests after the check", held)
             assert report["switchOverviewRequests"] == held and report["switchOverviewRuns"] == [run], (
@@ -11356,7 +11396,8 @@ def emacs_client_checks():
             assert stale_snapshot["runtime"] is not None and stale_snapshot["runtime"]["status"] not in (
                 "succeeded", "failed", "cancelled", "orphaned"), ("the stale run ended after the kill", stale_snapshot["runtime"])
             assert not any(receipt["operation"] == "cancel" for _, receipt in final), "a cancel command exists"
-            assert [uri for uri, _ in final] == [uri for uri, _ in after_drive] \
+            lineage_receipts = final[len(after_drive):]
+            assert [uri for uri, _ in final[:len(after_drive)]] == [uri for uri, _ in after_drive] \
                 and all(receipt["operation"] == "retry" for _, receipt in after_drive[len(before_drive):]), (
                 "a command after the drive", [receipt["operation"] for _, receipt in final[len(before_drive):]])
             assert report["killEmacsClosed"] is True and report["viewsCommandsAfter"] == views_sent, (
@@ -11440,6 +11481,126 @@ def emacs_client_checks():
                   "with endpoint identity", report["historySwitchIdentity"], "RET on the history row of run", answered_run,
                   "of endpoint", report["historyIdentity"], "was refused with wrong-endpoint, and no read and no view of the run",
                   "followed on the new binding", flush=True)
+            # 25 to 27. The lineage step: its commands are the commands
+            # after the drive and its retries, in order.
+            lineage_sent = report["lineageCommands"]
+
+            def lineage_operation(item):
+                return "export" if item["resource"].endswith("/exports") else item["body"]["operation"]
+
+            assert [(receipt["resource"], receipt["operation"]) for _, receipt in lineage_receipts] == [
+                (item["resource"], lineage_operation(item)) for item in lineage_sent] \
+                and [uri for uri, _ in lineage_receipts] == [item["location"] for item in lineage_sent], (
+                "the commands of the lineage step", [(receipt["resource"], receipt["operation"]) for _, receipt in lineage_receipts],
+                [(item["resource"], item["location"]) for item in lineage_sent])
+            fork_sha256 = hashlib.sha256(json.dumps(EMACS_FORKED, ensure_ascii=False, separators=(",", ":")).encode("utf-8")).hexdigest()
+            fork_edits = [{"occurrenceId": report["forkOccurrenceId"], "operation": "replace", "sha256": fork_sha256}]
+
+            def lineage_child(prefix, operation, parent, edits, index):
+                """Require that the three commands of the child at index are its
+                lineage command, its enqueue and the approve of its exact
+                review, with the effects and facts that the manager states."""
+                request_id, run_id, preparation_id = (report[prefix + "RequestId"], report[prefix + "RunId"],
+                                                      report[prefix + "PreparationId"])
+                lineage_uri = "/v1/runs/" + parent + "/lineage-requests"
+                assert report[prefix + "ParentRunId"] == parent, ("the parent of the child", prefix, report[prefix + "ParentRunId"])
+                sent = lineage_sent[3 * index:3 * index + 3]
+                body = {"operation": operation} if not edits else {
+                    "operation": "fork", "edits": [{"occurrenceId": report["forkOccurrenceId"], "operation": "replace",
+                                                    "answer": EMACS_FORKED}]}
+                assert [(item["resource"], item["body"]) for item in sent] == [
+                    (lineage_uri, body), ("/v1/requests/" + request_id, {"operation": "enqueue"}),
+                    ("/v1/preparations/" + preparation_id, sent[2]["body"])] \
+                    and sent[2]["body"]["operation"] == "approve" and all(isinstance(item["ifMatch"], str) for item in sent), (
+                    "the commands of the child", prefix, sent)
+                created_receipt = lineage_receipts[3 * index][1]
+                assert created_receipt["state"] == "effect-observed" and created_receipt["effect"]["kind"] == "lineage-created" \
+                    and created_receipt["effect"]["resource"] == "/v1/requests/" + request_id, (
+                    "the lineage command", prefix, created_receipt["state"], created_receipt["effect"])
+                approval = lineage_receipts[3 * index + 2][1]
+                assert approval["operation"] == "approve" and approval["state"] not in ("refused", "unresolved"), (
+                    "the approval of the child", prefix, approval["state"])
+                status, lineage, raw = request(lineage_uri, harness)
+                assert status == 200, ("the lineage collection", prefix, status, lineage.get("code"))
+                validate("LineagePage", lineage, raw)
+                assert [(item["lineage"], item["parentRunId"]) for item in lineage["items"] if item["id"] == request_id] == [
+                    (operation, parent)], ("the lineage collection of the parent run", prefix, lineage["items"])
+                child, _, _ = observed("/v1/requests/" + request_id, "Request")
+                assert child["runId"] == run_id and child["phase"] == "associated" and child["parentRunId"] == parent \
+                    and child["lineage"] == operation, ("the child request", prefix, child["runId"], child["phase"])
+                assert report[prefix + "ReviewRun"] is None and report[prefix + "Outcomes"] == ["approve", "run"], (
+                    "the review of the child before its approval", prefix, report[prefix + "ReviewRun"], report[prefix + "Outcomes"])
+                text = report[prefix + "ReviewText"]
+                assert f"Lineage: {operation} of run {parent}\n" in text and f"Review of request {request_id}, preparation {preparation_id}" in text, (
+                    "the review buffer of the child", prefix, text[:2000])
+                child_preparation, _, _ = observed("/v1/preparations/" + preparation_id, "Preparation")
+                assert child_preparation["requestId"] == request_id and child_preparation["state"] == "consumed" \
+                    and child_preparation["review"]["lineage"] == {"parentRunId": parent, "operation": operation, "edits": edits}, (
+                    "the review lineage of the child", prefix, child_preparation["state"], child_preparation["review"].get("lineage"))
+                child_run, _, _ = observed("/v1/runs/" + run_id, "Run")
+                assert child_run["parentRunId"] == parent and child_run["lineage"] == operation \
+                    and [report[prefix + "RunParent"], report[prefix + "RunLineage"]] == [parent, operation], (
+                    "the child run", prefix, child_run["parentRunId"], child_run["lineage"])
+                terminal(run_id)
+                return request_id, run_id
+
+            restart = lineage_child("restart", "restart", report["literalRunId"], [], 0)
+            resume = lineage_child("resume", "resume", report["capturedRunId"], [], 1)
+            rerun = lineage_child("rerun", "restart", report["capturedRunId"], [], 2)
+            fork = lineage_child("fork", "fork", restart[1], fork_edits, 3)
+            fork_text = report["forkReviewText"]
+            assert f"  replace occurrence {report['forkOccurrenceId']} with the answer of SHA-256 {fork_sha256}\n" in fork_text \
+                and EMACS_FORKED not in fork_text, ("the fork review shows the answer and not its SHA-256", fork_text[:2000])
+            assert report["forkPrefill"] == (report["forkTargetAnswer"] or ""), (
+                "the replacement minibuffer did not start with the published answer", report["forkPrefill"], report["forkTargetAnswer"])
+            print("PASS emacs-client 25: M-x wf-restart on the history row of run", report["literalRunId"], "S in the view of run",
+                  report["capturedRunId"], "and F in the view of the restart child", restart[1], "created the child requests", restart[0],
+                  resume[0], "and", fork[0], "through the lineage collection of each parent, each child named its parent and its",
+                  "operation and no run until the one approve command of its exact review with its lineage, the fork replaced",
+                  "occurrence", report["forkOccurrenceId"], "with the SHA-256", fork_sha256, "and the child runs", restart[1], resume[1],
+                  "and", fork[1], "succeeded and name their parents", flush=True)
+            print("PASS emacs-client 26: g, which runs wf-rerun, in the view of run", report["capturedRunId"],
+                  "created the restart child request", rerun[0], "whose approved run", rerun[1], "succeeded and names the parent run",
+                  "and the lineage restart", flush=True)
+            # 27. The export of the lineage step.
+            exported_run = report["serviceExportRunId"]
+            export_item, export_receipt = lineage_sent[-1], lineage_receipts[-1][1]
+            assert exported_run == answered_run and report["serviceExportName"] == EMACS_SERVICE_EXPORT \
+                and len(lineage_sent) == 13 and export_item["resource"] == "/v1/runs/" + exported_run + "/exports" \
+                and export_item["body"] == {"name": EMACS_SERVICE_EXPORT} and isinstance(export_item["ifMatch"], str) \
+                and export_item["location"] == report["serviceExportCommand"], ("the export command of the lineage step", export_item)
+            assert export_receipt["state"] == "effect-observed" and export_receipt["effect"]["kind"] == "exported" \
+                and export_receipt["effect"]["resource"] == "/v1/exports/export_" + export_receipt["id"], (
+                "the export receipt", export_receipt["state"], export_receipt["effect"])
+            status, detail, raw = request(export_receipt["effect"]["resource"], harness)
+            assert status == 200, ("the export of the lineage step", status)
+            validate("ExportReceipt", detail, raw)
+            assert detail["state"] == "published" and detail["name"] == EMACS_SERVICE_EXPORT and detail["runId"] == exported_run, (
+                "the export of the lineage step", detail["state"], detail["name"])
+            status, exports, raw = request("/v1/runs/" + exported_run + "/exports", harness)
+            assert status == 200 and [item["id"] for item in exports["items"] if item["name"] == EMACS_SERVICE_EXPORT] == [detail["id"]], (
+                "the export collection of the run", status, exports.get("items"))
+            connection = http.client.HTTPSConnection("127.0.0.1", port, context=context, timeout=15)
+            try:
+                connection.request("GET", detail["download"], headers=harness | {"Accept": "application/octet-stream"})
+                response = connection.getresponse()
+                exported = response.read(int(detail["bytes"]) + 1)
+                assert response.status == 200, ("the harness download of the export", response.status)
+            finally:
+                connection.close()
+            assert len(exported) == int(detail["bytes"]) and hashlib.sha256(exported).hexdigest() == detail["sha256"], (
+                "the export download differs from its receipt", len(exported), detail["bytes"])
+            text = report["serviceExportText"]
+            assert text.startswith(f"Export {EMACS_SERVICE_EXPORT}: {detail['id']} state published, command {export_receipt['id']}\n"
+                                   f"Export download: verified {len(exported)} bytes, SHA-256 {detail['sha256']}\n"
+                                   f"Exports of run {exported_run}: {len(exports['items'])}\n") \
+                and f"  {EMACS_SERVICE_EXPORT}  {detail['id']}  published  {len(exported)} bytes  SHA-256 {detail['sha256']}\n" in text, (
+                "the export buffer", text)
+            print("PASS emacs-client 27: M-x wf-export on the history row of run", exported_run, "sent the one export command",
+                  report["serviceExportCommand"], "which reached the effect exported, the manager published",
+                  EMACS_SERVICE_EXPORT, "as", detail["id"], "whose download of", len(exported), "bytes verifies against the SHA-256",
+                  detail["sha256"], "and the export buffer states that receipt, the verified download and the export collection",
+                  flush=True)
         print("PASS emacs-client: the Emacs transport bound, created and replayed a draft, received the typed 412 and 401",
               "refusals, assembled the overview over all its pages, followed a run of the harness through event polls, kept its",
               "binding after an unreachable switch, switched to a second credential with generation fencing, closed",
@@ -11447,9 +11608,10 @@ def emacs_client_checks():
               "protected HTTPS endpoint, drove the service mode of wf.el with keys, created, set up, reviewed and",
               "approved two requests whose programs received their literal and captured inputs, declined, discarded",
               "and withdrew a third, followed two runs in two views, answered no as JSON false, kept the draft of a",
-              "412 answer, killed a view with no command, saved a verified result once, listed every run of the",
-              "history over its pages and refused a history row of another endpoint, and the harness confirmed each",
-              "step from manager facts",
+              "412 answer, killed a view with no command, created restart, resume, fork and rerun children whose",
+              "runs started only after the approval of their exact reviews, exported a verified result, saved a",
+              "verified result once, listed every run of the history over its pages and refused a history row of",
+              "another endpoint, and the harness confirmed each step from manager facts",
               flush=True)
     finally:
         if process.poll() is None:

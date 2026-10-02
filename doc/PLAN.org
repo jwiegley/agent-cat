@@ -7511,6 +7511,34 @@ Full failure/capacity evidence, operational procedures, reproducible packages, r
 ]
 #+end_src
 
+* TODO [#D] Resolve the non-blocking fess findings of subtask PD24
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-ga56
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-02 Fri 06:24]
+:MODIFIED: [2026-10-02 Fri 06:24]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess audit fess/pd-PD24-r1.md (2026-10-02) on subtask PD24 (WM-031 part 6, agent-workflows emacs-native, lineage and export in Emacs service mode). The emacs-native commit of PD24 names this issue.
+
+1. (low) manager/test/service_http.py line 11553. The assertion message is inverted. It says "the fork review shows the answer and not its SHA-256", but the check requires the SHA-256 and the absence of the answer. Fix: change the message to "the fork review must show the SHA-256 and not the answer".
+
+2. (low) emacs/wf-service.el line 2380. wf-service--reconciled-command repeats the delivered, refused and uncertain pcase and the reconciliation messages of wf-service--control-command (line 1885). The two copies can drift. Fix: have wf-service--control-command use the shared helper, or extract the common reconciliation of an uncertain send.
+
+3. (low) emacs/wf-service.el line 2295. In ext-pi, the lineage commands offer only terminal runs (manager-ui.ts line 1616, #terminalRuns). The Emacs fallback chooser offers every known run. The manager eligibility page still refuses before anything is sent, so the difference is in user experience only. Fix: optionally filter the completing-read choices to terminal runs for the lineage commands.
+
+4. (low) emacs/wf-service.el line 2295. The shared run chooser wf-service--run-here was not requested. It also changes how wf-control, wf-kill and wf-result choose a run (the history row at point is now accepted). The emacs-client-controls mode was not run after the change. Fix: run the emacs-client-controls mode once, or record the change as an accepted scope extension.
+
+5. (low) emacs/wf.el (docstring-only diff). Requirement (c), the explicit v3 invocation compatibility behavior in local mode, has no targeted check. The evidence is that the wf.el code is unchanged apart from docstrings and that the 8 local emacs-ui cases pass. Fix: name the existing local case that covers the v3 lineage invocation, or add one when a later change touches wf--lineage.
+
+Implementer limitations recorded with PD24: the offline fork ERT test replaces wf-service--open-review with a stub, so the real child review and its approval are proved only by the live lineage step; a lineage request sent while a run view retrieves the verified result of that run receives 412 stale-revision and is not sent again; after an uncertain send whose effect one collection read observes, wf-lineage and wf-export report the effect but do not continue, as ext-pi does; security, hostile-input and authorization negatives for the lineage and export routes are deferred under the 2026-09-30 direction.
+
 * DONE [#C] Prose refuted by code: HANDOFF 4.6 elaboration claim, 'nineteen' kernel proofs, stale cost figures
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -21047,7 +21075,7 @@ separately tested rather than inferred from one newer Emacs build.
 :LABELS:   ["p6","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-02 Fri 05:42]
+:MODIFIED: [2026-10-02 Fri 06:24]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-031
 :SOURCE_REPO: agent-cat
@@ -21157,6 +21185,13 @@ including its explicit v3 invocation compatibility behavior.
     "author": "johnw",
     "text": "PD23 (WM-031 part 5): agent-workflows emacs-native commit 8536023 adds service results and history in emacs/wf-service.el. wf-result reads GET /v1/runs/{id}/outputs, selects the verified artifact, downloads it through wf-manager-session-download and saves the exact unibyte bytes with write-region excl under mode 0600 and no-conversion; a second save to the same file is refused and the file stays unchanged. wf-history reads every page of /v1/runs into wf-service-history-mode (tabulated-list) in collection order, a legacy entry shows observer (legacy entry, read only), each row keeps its endpoint-bound wf-manager-reference, RET reads the run through that reference and opens the read-only run view, and a reference of another endpoint is refused with wrong-endpoint and sends nothing. Local mode keeps wf-history and wf-observer over local stores. agent-cat manager/test/service_http.py emacs-client mode adds LEGACY_ROOT with LEGACY_ENTRIES legacy entries, --legacy-history, globalPageSets 8, a third credential emacs-third and live step 15 (history) at harness version 9. Evidence scope: ci/emacs.sh exited 0 (two new offline tests failed first against HEAD); ci/emacs-ui.py local cases passed; emacs-client mode 24 PASS lines (22: the saved file of 103 bytes equals the harness download in bytes, size and SHA-256 with mode 0600 and a second save refused; 23: wf-history listed 305 runs over 2 pages in collection order, 300 legacy entries included; 24: a profile A row opened after a switch to the third credential is refused and not retargeted); journey N8 passed. Fess pd-PD23-r1 not blocking; one medium and six low findings filed as acat-4ot9. Limitations: the exclusive save does not use the private-file-plus-hard-link publication of ext-pi saveExact (deferred as security-only); opening a legacy observer row is not exercised; wf-result outside a run view does not use the history row at point. WM-031 stays open.",
     "created_at": "2026-10-02T12:42:54Z"
+  },
+  {
+    "id": 616,
+    "issue_id": "acat-wm-031-5yxo",
+    "author": "johnw",
+    "text": "PD24 (WM-031 part 6): agent-workflows emacs-native commit 59f27ed adds service lineage and export in emacs/wf-service.el. wf-restart, wf-resume, wf-fork and wf-rerun (mapped to restart) read GET /v1/runs/{id}/lineage-requests, require the collection ETag to equal the strong revision tag, refuse with nothing sent when the operation is not eligible, and POST one lineage body with the collection ETag as If-Match. Fork edits (keep, drop, replace) come from the snapshot occurrences through wf-service-fork-targets, as forkTargets in ext-pi. After lineage-created the child is enqueued and the exact review opens with Lineage lines that name the parent and the edits; only an approval starts the child. wf-export (key E in a service run view, refused in local mode) checks a single-component name, POSTs /v1/runs/{id}/exports once with the collection ETag, waits for the effect exported, reads the published receipt and verifies the download. An uncertain lineage or export send is reconciled with one collection read and never resent. Local mode keeps lineage over local stores. agent-cat manager/test/service_http.py emacs-client mode adds live lineage steps 25 to 27 at harness version 10. Evidence scope: ci/emacs.sh exited 0 (95 of 95 transport tests); ci/emacs-ui.py local cases passed (8 PASS); emacs-client mode PASS 1 to 27 (restart, resume and fork children name their parents with ReviewRun null before approval; wf-rerun creates a restart child; the export reaches its published receipt and the harness verifies its download); journey N8 passed. Fess pd-PD24-r1 not blocking; five low findings filed as acat-ga56. Limitations: a lineage request during result verification receives 412 stale-revision and is not resent; after an uncertain send the commands report an observed effect but do not continue; the shared run choice also changes wf-control, wf-kill and wf-result and emacs-client-controls was not rerun; security negatives deferred. WM-031 stays open.",
+    "created_at": "2026-10-02T13:24:47Z"
   }
 ]
 #+end_src
