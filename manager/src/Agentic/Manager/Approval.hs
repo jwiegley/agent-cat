@@ -168,7 +168,7 @@ acceptApprovalWithDelivery dispatch (ReviewedPreparation store live preparation 
       builder context command _ catalogues = do
         unless(currentCatalogue catalogues (P.preparationProfile preparation) (P.preparationProfileRevision preparation) (P.preparationDescriptorRevision preparation) (P.reviewWorkflow(P.preparationReview preparation)))(Left StaleRevision)
         Right $ Mutation (P.preparationProfileRevision preparation) version $ do
-          unless(selectors==P.ApprovalRequest (P.preparationDigest preparation) (P.preparationRequestRevision preparation) (P.preparationProfileRevision preparation) (P.preparationDescriptorRevision preparation) (P.preparationGeneration preparation))(refuseTransaction StateConflict)
+          unless(selectors==P.approvalSelectors preparation)(refuseTransaction StateConflict)
           unless(reviewRequestRevision context==P.preparationRequestRevision preparation && reviewProfileRevision context==P.preparationProfileRevision preparation && reviewGeneration context==P.preparationGeneration preparation)(refuseTransaction StateConflict)
           checkReservation context
           parents <- query "SELECT parent_run_id FROM requests WHERE id=?" [text(reviewRequest context)]

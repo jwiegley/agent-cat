@@ -5,7 +5,7 @@
 
 -- | Bounded public review facts and exact approval requests, without execution authority.
 module Agentic.Manager.Protocol.Preparation
-  ( ReviewInput (..), ReviewEdit (..), ReviewLineage (..), Review (..), Preparation (..), ApprovalRequest (..),
+  ( ReviewInput (..), ReviewEdit (..), ReviewLineage (..), Review (..), Preparation (..), ApprovalRequest (..), approvalSelectors,
     PublicPolicy, policyValue, policyRouteNames, projectPolicy, decodeApproval, decodeDiscard, validDigest, observationCodeNames ) where
 
 import Agentic.Manager.Protocol.Command (CommandFailure (..), validId, validTimestamp)
@@ -145,6 +145,13 @@ instance FromJSON ApprovalRequest where
     digest<-o .: "reviewDigest";request<-o .: "requestRevision";profile<-o .: "profileRevision";descriptor<-o .: "descriptorRevision";generation<-o .: "processGeneration"
     unless(validDigest digest && all validId[request,profile,descriptor,generation])(fail "approval selectors")
     pure(ApprovalRequest digest request profile descriptor generation)
+
+-- | The selectors that an approval of the preparation must submit: its
+-- review digest, request revision, profile revision, descriptor revision and
+-- process generation.
+approvalSelectors :: Preparation -> ApprovalRequest
+approvalSelectors p = ApprovalRequest (preparationDigest p) (preparationRequestRevision p) (preparationProfileRevision p)
+  (preparationDescriptorRevision p) (preparationGeneration p)
 
 decodeApproval :: BS.ByteString -> Either CommandFailure ApprovalRequest
 decodeApproval bytes

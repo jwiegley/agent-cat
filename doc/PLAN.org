@@ -12669,6 +12669,28 @@ Non-blocking findings of fess pf-PF12-r1 (fess/pf-PF12-r1.md) on subtask PF12 (t
 3. (low) bisim/manager/README.md lines 319-326: oldestEligible counts held reservations at or above the limit after a capacity reduction, and the model has no limit apart from its slots. This is a real conformance gap that the generator avoids and that the README records only as a limit. Fix: an owner decision on the model or the policy for a reduced capacity.
 4. (low) evidence PF/PF12/impl-r1/wrong-slot-control.log: the local mismatch control exercised only the next-state path. No control showed that the lane catches an oracle that accepts a candidate that the policy does not choose. Fix (optional): run a second local control that flips the expected outcome of a non-chosen candidate to accepted, and do not commit it.
 
+* TODO [#D] Resolve the non-blocking fess findings of subtask PF14
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pf14-fess-followup-zyqm
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-02 Fri 16:08]
+:MODIFIED: [2026-10-02 Fri 16:08]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess pf-PF14-r1 (fess/pf-PF14-r1.md) on subtask PF14 (the WM-040 refusals lane).
+
+1. (medium) manager/test/Agentic/Manager/Test/Refusals.hs lines 431-443 and bisim/manager/README.md (Guard comparisons, approve-stale rows): approvalProbe appends _stale to one selector field and requires inequality with approvalSelectors of the stored preparation. The base probe already requires equality and the record has a derived Eq, so the variant probe cannot fail. The probe does not reach the revision checks of Approval.hs line 169 (currentCatalogue) and line 172 (the context revision comparison). Fix: run those checks against a store copy with an advanced request or profile revision, or reword the README row and the classGuard text to say that the base probe carries the evidence.
+2. (medium) Refusals.hs line 175 (queueOf) and decisionProbe: the harness maps decisionCommand to 'submitting', writes it into the rows and passes it to decisionHeadRefusal. The StaleRevision outcome of answer-uncertain comes from the harness mapping, not from a manager transition. Fix: state in the README that the probe checks the head order and the reserved-head refusal for an assumed 'submitting' state, and not that the manager reaches that state on uncertain delivery.
+3. (low) manager/test/ConformanceCheck.hs line 722, Oracle.hs line 753, Refusals.hs line 266: ResponseRefused carries no reason, and only admit-key-overlap has a control entry. approve-consumed starts from visitAfter, where the request state has also moved, so the oracle could refuse it through another guard. Fix: add a control entry for approve-consumed, or record in the README that the cause of an oracle refusal is not attributed.
+4. (low) ConformanceCheck.hs line 730, Conformance.hs line 699: an approve ask that does not decode is dropped, and a body whose digest does not match yields Nothing, so the variant becomes oracle-only instead of a mismatch. The lane fails only when a whole guarded class has zero guard comparisons. No downgrade happened in the runs (38/38 and 1/1). Fix: report a mismatch when a root has a manager log or a stored body_sha256 for an approve command but no selectors can be recovered.
+5. (low) manager/src/Agentic/Manager/State.hs line 721 against decisionProbe: the probe calls decisionQueueIds, while submitControl reads pendingDecisions. Both use the pendingQueue SQL today. Fix: have submitControl and the probe use one function, or have the probe call pendingDecisions.
+
 * TODO [#D] Resolve the non-blocking fess findings of subtask PF2
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -23344,7 +23366,7 @@ configuration is changed.
 :LABELS:   ["p9","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-02 Fri 15:42]
+:MODIFIED: [2026-10-02 Fri 16:08]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-040
 :SOURCE_REPO: agent-cat
@@ -23549,6 +23571,13 @@ legacy workflow build cannot conceal an unchecked manager development.
     "author": "johnw",
     "text": "PF13 (store projection and history lane): manager/test/Agentic/Manager/Test/Conformance.hs adds projectCoordination (schema-12 logical rows in one runRead, each mapping a documented named function) and the history encoding. manager-conformance-check history --root folds the stored ledger through manager-oracle and compares the final state with the projection on 6 dimensions, printing 20 excluded fields. Evidence (PF/PF13/impl-r1, private): N8 manager-vertical-check root, 40 manager roots, ledger=277, accepted-entries=577, mismatches=0, exit 0; N8 JOURNEY-ONCE fixture root, ledger=6, accepted-entries=16, exit 0; two mismatch controls exit 1 with history-0.json and history-1.json kept. Fess pf-PF13-r1 not blocking; findings filed as acat-jvju. WM-040 stays open for closeout.",
     "created_at": "2026-10-02T22:42:22Z"
+  },
+  {
+    "id": 669,
+    "issue_id": "acat-wm-040-3olb",
+    "author": "johnw",
+    "text": "PF14 (refusals lane): manager-conformance-check refusals --root derives seven refused variant classes from the PF13 history (answer-not-head, answer-uncertain, approve-consumed, approve-stale-request-revision, approve-stale-profile-revision, admit-key-overlap, admit-slot-overlap) and requires that manager-oracle refuses each. Guards on a private store copy: State.decisionQueueIds/decisionHeadIds/decisionHeadRefusal, Protocol.Preparation.approvalSelectors, Admission.Policy.oldestEligible; approve-consumed is oracle-only. Two behavior-preserving refactors extract decisionHeadRefusal and approvalSelectors. Evidence (PF/PF14/impl-r1, private): N8 vertical root, 40 manager roots, variants=271 guard-compared=233 oracle-only=38 unchanged-roots=40 mismatches=0, exit 0; journey roots (PF13 and a new JOURNEY-ONCE N8), variants=8 guard-compared=7 oracle-only=1 mismatches=0, exit 0; descriptor control exit 1 with 2 mismatches and counterexamples kept; history lane regression on 40 roots passed. Fess pf-PF14-r1 not blocking; findings filed as acat-pf14-fess-followup-zyqm. WM-040 stays open for closeout.",
+    "created_at": "2026-10-02T23:08:14Z"
   }
 ]
 #+end_src

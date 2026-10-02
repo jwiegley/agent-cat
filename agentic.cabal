@@ -832,6 +832,16 @@ executable manager-conformance-check
   other-modules:
     Agentic.Manager.Test.Oracle
     Agentic.Manager.Test.Conformance
+    Agentic.Manager.Test.Refusals
+    Agentic.Manager.State
+    Agentic.Manager.Admission
+    Agentic.Manager.Authorization
+    Agentic.Manager.Commands
+    Agentic.Manager.Drafts
+    Agentic.Manager.Fault
+    Agentic.Manager.Lineage
+    Agentic.Manager.Protocol.Artifact
+    Agentic.Manager.Worker
     Agentic.Manager.Admission.Policy
     Agentic.Manager.Configuration
     Agentic.Manager.Fault.Record

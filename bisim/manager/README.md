@@ -244,7 +244,9 @@ holds the encoding of this file as typed records, and the connection to one
 `manager-oracle` process. The decoder of the module refuses the same
 malformed requests as the decoder of the oracle. Its module
 `manager/test/Agentic/Manager/Test/Conformance.hs` holds the store
-projection and the history encoding of the history lane.
+projection and the history encoding of the history lane. Its module
+`manager/test/Agentic/Manager/Test/Refusals.hs` holds the variants and the
+guard probes of the refusals lane.
 
 The executable takes the oracle from `--oracle`, else from the environment
 variable `ORACLE`, else from `bisim/.lake/build/bin/manager-oracle`. It does
@@ -261,6 +263,7 @@ check=$(bash test/cabal.sh list-bin manager-conformance-check)
 "$check" admission --seed 20261002 --n 500 --counterexamples "$TMPDIR/manager-cx"
 "$check" cases --cases bisim/manager/cases --counterexamples "$TMPDIR/manager-cx"
 "$check" history --root "$ROOT" --counterexamples "$TMPDIR/manager-cx"
+"$check" refusals --root "$ROOT" --counterexamples "$TMPDIR/manager-cx"
 ```
 
 ### The admission lane
@@ -316,7 +319,10 @@ situation, and the file holds the first disagreeing request of the
 situation. In the cases lane, `<n>` is the name of the case. In the history lane, `<n>`
 is `history-<i>`, where `<i>` is the index of the manager root in path
 order, and the file holds the root, the entry or the comparison that
-disagrees, the expected outcome and the outcome of the fold. The file holds
+disagrees, the expected outcome and the outcome of the fold. In the
+refusals lane, `<n>` is `refusals-<i>-<j>`, where `<j>` is the index of the
+variant in the root, and the file holds the root, the class, the label, the
+refused request and every problem of the variant. The file holds
 the seed (`null` for a case), the reason, the request, the expected outcome
 and the response of the oracle. The default directory is
 `manager-conformance-counterexamples` in the temporary directory of the
@@ -486,3 +492,75 @@ comparison of those fields with the approve arguments is an identity.
 Without a manager log, the digest and the revisions of an approval also come
 from the rows. The lane does not compare a refused command with a refusal
 of the model.
+
+### The refusals lane
+
+The lane checks that the model and the manager refuse the same transitions.
+It takes `--root` as the history lane does, and it reads each manager root
+through the same private copy. It folds the history of each root through
+`manager-oracle`, and it derives refused variants from the accepted entries
+of the fold with `manager/test/Agentic/Manager/Test/Refusals.hs`. The oracle
+must accept every entry of the history, as in the history lane.
+
+#### Variant classes
+
+Each variant has a state, a list of prefix entries, and a refused entry. The
+oracle must accept each prefix entry in order from the state, and it must
+then refuse the refused entry. A refused entry uses a fresh command identity
+with the suffix `_not_head`, `_while_uncertain` or `_second`, and a newer
+revision has the suffix `_stale`.
+
+| Class | Source entry | Variant |
+| --- | --- | --- |
+| `answer-not-head` | An `answer` | From the state before the answer, an answer to a decision of the same run that is not the head of its pending FIFO. The decision is the second decision of the FIFO. When the FIFO holds one decision, it is the next decision of the run that the history opens later, and the prefix opens it. A run whose history opens no later decision gives no variant. |
+| `answer-uncertain` | An `answer` | From the state after the answer, the prefix records `uncertain` delivery for the command of the answer. The variant then answers the head again with another command. |
+| `approve-consumed` | An `approve` | From the state after the approval, the same approval of the consumed preparation with another command. |
+| `approve-stale-request-revision` | An `approve` | From the state before the approval, the request has a newer revision, in the state and in the approval, and the prepared review keeps its request revision. |
+| `approve-stale-profile-revision` | An `approve` | From the state before the approval, the profile has a newer revision, in the state and in the approval, and the prepared review keeps its profile revision. |
+| `admit-key-overlap` | An `admit` | From the state before the admission, the reservation `conformance-holder` holds the keys of the lease at the lowest free slot. A lease of a released reservation has no stored key. The variant then gives the lease and the profile the cohort `unclassified`, and the oracle must accept that admission without the holder. |
+| `admit-slot-overlap` | An `admit` | From the state before the admission, the reservation `conformance-holder` holds the slot of the lease and no key. |
+
+#### Guard comparisons
+
+A class with an implementation guard has probes. Each variant has a probe of
+the refused entry and a probe of its base, the accepted entry of the
+history. The guard must refuse the variant and admit the base.
+
+| Class | Guard | Probe |
+| --- | --- | --- |
+| `answer-not-head`, `answer-uncertain` | `decisionQueueIds`, `decisionHeadIds` and `decisionHeadRefusal` of `Agentic.Manager.State`. `decisionHeadRefusal` is the head check of the validation of a mandatory decision control. | A writable Store transaction on the private copy writes the pending FIFO of the run: each decision of the FIFO is `pending`, or `submitting` when a command reserves it, and every other decision of the run is `resolved`. The transaction reads the queue and the heads with the guards, and it then throws, so it rolls back. The queue must equal the FIFO of the oracle. For the variant, `decisionHeadRefusal` must give `DecisionNotHead` or `StaleRevision`, and `decisionHeadIds` must not name a decision that is not the head. For the base, `decisionHeadRefusal` must give no refusal. |
+| `approve-stale-request-revision`, `approve-stale-profile-revision` | `approvalSelectors` of `Agentic.Manager.Protocol.Preparation`, which the selector comparison of `Agentic.Manager.Approval` uses. | The stored preparation of the private copy, read with the columns of the preparation projection, against the submitted selectors. The submitted selectors are the body of the approve ask of the manager log, read with `decodeApproval`. A root without a manager log keeps only the SHA-256 of the approval body. When the approve body of the stored selectors, in the compact encoding with its fields in increasing order of their names, has that SHA-256, that body is the submitted body. The variant changes the request revision or the profile revision of the submitted selectors, and the comparison must refuse it. The base must agree. |
+| `admit-key-overlap`, `admit-slot-overlap` | `oldestEligible` of `Agentic.Manager.Admission.Policy`. | The held leases are the reservations of the state of the variant, and the candidate is the admitted request with the keys of its profile. The limit is the number of slots of the state. For the key overlap, the policy must choose nothing. For the slot overlap, the policy must not choose the candidate at that slot. For the base, the policy must choose the candidate. |
+
+The class `approve-consumed` is compared with the oracle only. Its guard is
+the stored preparation check of `acceptApproval`, which requires the state
+`live`. That check runs inside the start command of the original live
+preparation, and only a worker holds that preparation. An approval variant
+whose root holds no submitted selectors of its command is also compared
+with the oracle only.
+
+#### Output
+
+The lane prints the guard of each class, or the reason that the class is
+compared with the oracle only. It prints one line for each manager root, the
+number of variants of each class with the number that it compared with a
+guard, and one line for each variant that it compared with the oracle only.
+The lane computes the SHA-256 of each file of each retained root before and
+after the lane, and a changed file is a mismatch.
+
+A variant that the oracle accepts, a prefix or a control entry that the
+oracle refuses, an error response, a probe that does not meet its
+expectation, a history that the oracle does not accept, or a changed root is
+a mismatch. The lane writes its counterexample file, prints `MANAGER-CONFORMANCE
+mismatch`, and exits with status 1. A run that derives no variant of a class,
+or that compares no variant of a guarded class with its guard, also fails.
+
+#### Limits of the refusals lane
+
+The variants are derived from the accepted entries of one history. They are
+not the commands that the manager refused during its work. The decision
+probe writes the FIFO of the oracle into the rows of the run, so it checks
+the head order and the reservation check of the manager on those rows, and
+not the order in which the manager observed the decisions. The admission
+probe uses the reservations of the history state, because the rows keep only
+the final reservations.

@@ -7,6 +7,7 @@
 -- > manager-conformance-check admission [--seed S] [--n N] [--oracle PATH] [--counterexamples DIR]
 -- > manager-conformance-check cases [--cases DIR] [--oracle PATH] [--counterexamples DIR]
 -- > manager-conformance-check history --root PATH [--oracle PATH] [--counterexamples DIR]
+-- > manager-conformance-check refusals --root PATH [--oracle PATH] [--counterexamples DIR]
 --
 -- The @admission@ lane generates admission situations from a fixed seed. For
 -- each situation it computes 'oldestEligible', encodes the same situation as
@@ -31,6 +32,14 @@
 -- dimensions. The lane prints the compared dimensions and each excluded
 -- field by name.
 --
+-- The @refusals@ lane folds the same history and derives refused variants
+-- from its accepted entries with "Agentic.Manager.Test.Refusals". The oracle
+-- must refuse each variant. For a class with an implementation guard, the
+-- guard must also refuse the variant and admit its base, on the private copy
+-- of the root or on inputs from the history. The lane requires that each
+-- retained root is unchanged, prints its counts by class, and lists each
+-- variant that it compares with the oracle only.
+--
 -- A mismatch writes a counterexample file, prints
 -- @MANAGER-CONFORMANCE mismatch@, and makes the lane exit with status 1. A
 -- missing oracle binary or a failed transport also exits with status 1.
@@ -44,9 +53,14 @@ import Agentic.Manager.Admission.Policy
     oldestEligible,
   )
 import Agentic.Manager.Flow (readManagerLog)
+import Agentic.Manager.Protocol.Preparation (ApprovalRequest)
+import Agentic.Manager.Store (CoordinationStore)
 import Agentic.Manager.Test.Conformance
 import Agentic.Manager.Test.Oracle
+import Agentic.Manager.Test.Refusals
 import Control.Exception (handle)
+import Crypto.Hash (Digest, SHA256, hash)
+import Data.IORef (modifyIORef', newIORef, readIORef)
 import Control.Monad (forM, forM_, unless, when)
 import Data.Aeson (FromJSON, Value (..), eitherDecodeStrict', object, toJSON, (.=))
 import qualified Data.ByteString as BS
@@ -59,7 +73,7 @@ import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
 import Numeric.Natural (Natural)
-import System.Directory (createDirectoryIfMissing, doesFileExist, getTemporaryDirectory, listDirectory)
+import System.Directory (createDirectoryIfMissing, doesDirectoryExist, doesFileExist, getTemporaryDirectory, listDirectory)
 import System.Environment (getArgs)
 import System.Exit (ExitCode (..), exitWith)
 import System.FilePath ((</>))
@@ -103,7 +117,8 @@ usage =
   unlines
     [ "usage: manager-conformance-check admission [--seed S] [--n N] [--oracle PATH] [--counterexamples DIR]",
       "       manager-conformance-check cases [--cases DIR] [--oracle PATH] [--counterexamples DIR]",
-      "       manager-conformance-check history --root PATH [--oracle PATH] [--counterexamples DIR]"
+      "       manager-conformance-check history --root PATH [--oracle PATH] [--counterexamples DIR]",
+      "       manager-conformance-check refusals --root PATH [--oracle PATH] [--counterexamples DIR]"
     ]
 
 main :: IO ()
@@ -114,6 +129,7 @@ main = do
     "admission" : rest -> pure (admissionLane, rest)
     "cases" : rest -> pure (casesLane, rest)
     "history" : rest -> pure (historyLane, rest)
+    "refusals" : rest -> pure (refusalsLane, rest)
     _ -> hPutStrLn stderr usage >> exitWith (ExitFailure 2)
   options <- either (\e -> hPutStrLn stderr (e <> "\n" <> usage) >> exitWith (ExitFailure 2)) pure (parseOptions rest)
   oracle <- resolveOraclePath (optionOracle options)
@@ -521,40 +537,11 @@ historyLane options path directory = do
 historyRoot :: Oracle -> FilePath -> (Int, FilePath) -> IO (Int, Int, Int, Int)
 historyRoot oracle directory (number, root) = withRetainedRoot root $ \store flow -> do
   stored <- readStored store
-  arguments <- case flow of
-    Nothing -> pure Map.empty
-    Just dir -> do
-      let file = dir </> (T.unpack (storedStream stored) <> ".ndjson")
-      present <- doesFileExist file
-      if present then approvalArguments <$> readManagerLog file else pure Map.empty
-  let history = encodeHistory arguments stored
-      projection = projectStored stored
-      evidence = historyEvidence history
+  (history, _) <- rootHistory store flow
+  let projection = projectStored stored
       name = "history-" <> show number
       ledgerAccepted = historyLedger history - historyRefused history
-      step fold [] = pure (Right fold)
-      step fold ((index, item) : rest) = case item of
-        Environment _ change ->
-          step fold {foldState = change (foldState fold), foldEnvironment = foldEnvironment fold + 1} rest
-        Unencodable reason ->
-          pure (Left (Mismatch ("the stored facts have no encoding: " <> reason) (object ["root" .= root, "item" .= index]) (String "an encodable history") (String reason), fold))
-        Submit kind entry -> do
-          let request = Query (foldState fold) evidence entry
-          (_, response) <- submit oracle request
-          case response of
-            ResponseAccepted next ->
-              step (count kind fold) {foldState = next} rest
-            other ->
-              pure (Left (Mismatch ("the oracle does not accept " <> describe kind) (object ["root" .= root, "item" .= index, "query" .= request]) (String "accepted") (toJSON other), fold))
-      count kind fold = case kind of
-        LedgerTransition _ -> fold {foldLedgerTransitions = foldLedgerTransitions fold + 1}
-        LedgerObservation _ -> fold {foldObservations = foldObservations fold + 1}
-        StoredTransition _ -> fold {foldStoredTransitions = foldStoredTransitions fold + 1}
-      describe = \case
-        LedgerTransition operation -> "the ledger command " <> operation
-        LedgerObservation operation -> "the observation of the ledger command " <> operation
-        StoredTransition transition -> "the stored transition " <> transition
-  folded <- step (Fold (historyInitial history) 0 0 0 0) (zip [0 :: Int ..] (historyItems history))
+  folded <- foldHistory oracle root history (const (pure ()))
   let report fold result =
         putStrLn $
           "MANAGER-CONFORMANCE history root=" <> root
@@ -597,6 +584,213 @@ historyRoot oracle directory (number, root) = withRetainedRoot root $ \store flo
                   (object ["root" .= root]) (toJSON expected) (toJSON actual)
               report fold "mismatch"
               pure (historyLedger history, ledgerAccepted, accepted fold, 1)
+
+-- ---------------------------------------------------------------------------
+-- The refusals lane
+-- ---------------------------------------------------------------------------
+
+-- | How a variant was compared.
+data Comparison = GuardCompared | OracleOnly !Text
+  deriving (Eq, Show)
+
+-- | The outcome of one variant.
+data Outcome = Outcome
+  { outcomeRoot :: !FilePath,
+    outcomeClass :: !VariantClass,
+    outcomeLabel :: !Text,
+    outcomeComparison :: !Comparison,
+    outcomeMismatch :: !Bool
+  }
+
+refusalsLane :: Options -> FilePath -> FilePath -> IO ()
+refusalsLane options path directory = do
+  given <- case optionRoot options of
+    Just root -> pure root
+    Nothing -> hPutStrLn stderr ("manager-conformance-check: refusals needs --root\n" <> usage) >> exitWith (ExitFailure 2)
+  roots <- retainedRoots given
+  when (null roots) $ do
+    hPutStrLn stderr ("manager-conformance-check: no coordination database at or below " <> given)
+    exitWith (ExitFailure 1)
+  putStrLn ("manager-conformance-check refusals: root=" <> given <> " manager-roots=" <> show (length roots) <> " oracle=" <> path)
+  forM_ [minBound .. maxBound] $ \c ->
+    putStrLn $
+      "MANAGER-CONFORMANCE refusals class " <> T.unpack (className c) <> ": "
+        <> either (("compared with the oracle only, because " <>) . T.unpack) (("guard " <>) . T.unpack) (classGuard c)
+  before <- mapM rootDigest roots
+  results <- withOracle path (\oracle -> forM (zip [0 :: Int ..] roots) (refusalsRoot oracle directory))
+  let outcomes = concatMap fst results
+      unfolded = length [() | (_, False) <- results]
+  after <- mapM rootDigest roots
+  changed <- fmap concat . forM (zip3 [0 :: Int ..] roots (zip before after)) $ \(number, root, (b, a)) ->
+    if b == a
+      then pure []
+      else do
+        retain directory Nothing ("refusals-" <> show number <> "-unchanged") $
+          Mismatch "the retained root changed during the lane" (object ["root" .= root]) (toJSON (map snd b)) (toJSON (map snd a))
+        pure [root]
+  let ofClass c = [o | o <- outcomes, outcomeClass o == c]
+      compared os = length [() | o <- os, outcomeComparison o == GuardCompared]
+      absent = [c | c <- [minBound .. maxBound], null (ofClass c)]
+      unguarded = [c | c <- [minBound .. maxBound], either (const False) (const True) (classGuard c), not (null (ofClass c)), compared (ofClass c) == 0]
+      mismatches = length (filter outcomeMismatch outcomes) + length changed + unfolded
+  forM_ [minBound .. maxBound] $ \c ->
+    putStrLn $
+      "MANAGER-CONFORMANCE refusals class=" <> T.unpack (className c)
+        <> " variants=" <> show (length (ofClass c))
+        <> " guard-compared=" <> show (compared (ofClass c))
+        <> " oracle-only=" <> show (length (ofClass c) - compared (ofClass c))
+  forM_ [(o, reason) | o <- outcomes, OracleOnly reason <- [outcomeComparison o]] $ \(o, reason) ->
+    putStrLn $
+      "MANAGER-CONFORMANCE refusals oracle-only variant: " <> T.unpack (className (outcomeClass o)) <> " " <> T.unpack (outcomeLabel o)
+        <> " root=" <> outcomeRoot o <> " (" <> T.unpack reason <> ")"
+  putStrLn $
+    "MANAGER-CONFORMANCE refusals manager-roots=" <> show (length roots)
+      <> " variants=" <> show (length outcomes)
+      <> " guard-compared=" <> show (compared outcomes)
+      <> " oracle-only=" <> show (length outcomes - compared outcomes)
+      <> " unchanged-roots=" <> show (length roots - length changed)
+      <> " mismatches=" <> show mismatches
+  unless (null absent) $ do
+    putStrLn ("MANAGER-CONFORMANCE refusals FAIL: the roots derive no variant of " <> T.unpack (T.intercalate ", " (map className absent)))
+    exitWith (ExitFailure 1)
+  unless (null unguarded) $ do
+    putStrLn ("MANAGER-CONFORMANCE refusals FAIL: no variant of " <> T.unpack (T.intercalate ", " (map className unguarded)) <> " is compared with its guard")
+    exitWith (ExitFailure 1)
+  finish "refusals" mismatches
+
+-- | The SHA-256 of each regular file at or below a retained root, in path
+-- order.
+rootDigest :: FilePath -> IO [(FilePath, Text)]
+rootDigest root = do
+  names <- sort <$> listDirectory root
+  concat <$> forM names (\name -> do
+    let entry = root </> name
+    directory <- doesDirectoryExist entry
+    if directory
+      then rootDigest entry
+      else do
+        bytes <- BS.readFile entry
+        pure [(entry, T.pack (show (hash bytes :: Digest SHA256)))])
+
+-- | Fold the history of one manager root, derive the refused variants of
+-- its accepted entries, and check each variant with the oracle and with its
+-- guard. The flag is false when the oracle does not accept the history.
+refusalsRoot :: Oracle -> FilePath -> (Int, FilePath) -> IO ([Outcome], Bool)
+refusalsRoot oracle directory (number, root) = withRetainedRoot root $ \store flow -> do
+  (history, selectors) <- rootHistory store flow
+  collected <- newIORef []
+  folded <- foldHistory oracle root history (\visit -> modifyIORef' collected (reverse (deriveVariants visit) <>))
+  case folded of
+    Left (mismatch, _) -> do
+      retain directory Nothing ("refusals-" <> show number <> "-history") mismatch
+      putStrLn ("MANAGER-CONFORMANCE refusals root=" <> root <> " result=mismatch: the history is not accepted")
+      pure ([], False)
+    Right _ -> do
+      variants <- reverse <$> readIORef collected
+      outcomes <- forM (zip [0 :: Int ..] variants) $ \(index, variant) ->
+        checkVariant oracle store selectors (historyEvidence history) directory ("refusals-" <> show number <> "-" <> show index) root variant
+      let compared = length [() | o <- outcomes, outcomeComparison o == GuardCompared]
+      putStrLn $
+        "MANAGER-CONFORMANCE refusals root=" <> root
+          <> " variants=" <> show (length outcomes)
+          <> " guard-compared=" <> show compared
+          <> " oracle-only=" <> show (length outcomes - compared)
+          <> " result=" <> (if any outcomeMismatch outcomes then "mismatch" else "pass")
+      pure (outcomes, True)
+
+-- | The oracle must accept the control entry and each prefix entry, and must
+-- refuse the variant entry. Each probe of the guard must meet its
+-- expectation.
+checkVariant :: Oracle -> CoordinationStore -> Map.Map Text ApprovalRequest -> Evidence -> FilePath -> String -> FilePath -> Variant -> IO Outcome
+checkVariant oracle store selectors evidence directory name root Variant {..} = do
+  control <- forM variantControl $ \(state, entry) -> snd <$> submit oracle (Query state evidence entry)
+  let prefix state [] = pure (Right state)
+      prefix state (entry : rest) = do
+        (_, response) <- submit oracle (Query state evidence entry)
+        case response of
+          ResponseAccepted next -> prefix next rest
+          other -> pure (Left (entry, other))
+  reached <- prefix variantState variantPrefix
+  final <- case reached of
+    Right state -> Just . (,) (Query state evidence variantEntry) . snd <$> submit oracle (Query state evidence variantEntry)
+    Left _ -> pure Nothing
+  probes <- mapM (runProbe store selectors) variantProbes
+  let oracleProblems =
+        [ "the oracle does not accept the control entry of the variant" | Just response <- [control], not (accepted response) ]
+          <> [ "the oracle does not accept the prefix entry " <> T.pack (show entry) | Left (entry, _) <- [reached] ]
+          <> case final of
+            Just (_, ResponseAccepted _) -> ["the oracle accepts the refused variant"]
+            Just (_, ResponseError message) -> ["the oracle refuses a well-formed request: " <> message]
+            _ -> []
+      guardProblems = [problem | Just (Left problem) <- probes]
+      comparison = case classGuard variantClass of
+        Left reason -> OracleOnly reason
+        Right _
+          | null variantProbes -> OracleOnly "the variant has no probe"
+          | any (== Nothing) (map (fmap (const ())) probes) -> OracleOnly "the root holds no submitted selectors of the command"
+          | otherwise -> GuardCompared
+      problems = oracleProblems <> map ("the guard disagrees: " <>) guardProblems
+  case problems of
+    [] -> pure ()
+    first : _ ->
+      retain directory Nothing name $
+        Mismatch
+          (className variantClass <> " " <> variantLabel <> ": " <> first)
+          (object ["root" .= root, "class" .= className variantClass, "label" .= variantLabel, "query" .= fmap fst final, "problems" .= problems])
+          (String "the oracle and the guard refuse the variant")
+          (maybe Null (toJSON . snd) final)
+  pure (Outcome root variantClass variantLabel comparison (not (null problems)))
+  where
+    accepted = \case
+      ResponseAccepted _ -> True
+      _ -> False
+
+-- | Fold a history through the oracle from its initial state. Each
+-- environment step changes the state before the next entry. The visitor sees
+-- each accepted entry with the state before it, the state after it and the
+-- items that follow it. The result is the final fold, or the first entry
+-- that the oracle does not accept, or stored facts without an encoding, with
+-- the fold before it.
+foldHistory :: Oracle -> FilePath -> History -> (Visit -> IO ()) -> IO (Either (Mismatch, Fold) Fold)
+foldHistory oracle root history visit = step (Fold (historyInitial history) 0 0 0 0) (zip [0 :: Int ..] (historyItems history))
+  where
+    evidence = historyEvidence history
+    step fold [] = pure (Right fold)
+    step fold ((index, item) : rest) = case item of
+      Environment _ change ->
+        step fold {foldState = change (foldState fold), foldEnvironment = foldEnvironment fold + 1} rest
+      Unencodable reason ->
+        pure (Left (Mismatch ("the stored facts have no encoding: " <> reason) (object ["root" .= root, "item" .= index]) (String "an encodable history") (String reason), fold))
+      Submit kind entry -> do
+        let request = Query (foldState fold) evidence entry
+        (_, response) <- submit oracle request
+        case response of
+          ResponseAccepted next -> do
+            visit (Visit index (foldState fold) entry next (map snd rest))
+            step (count kind fold) {foldState = next} rest
+          other ->
+            pure (Left (Mismatch ("the oracle does not accept " <> describe kind) (object ["root" .= root, "item" .= index, "query" .= request]) (String "accepted") (toJSON other), fold))
+    count kind fold = case kind of
+      LedgerTransition _ -> fold {foldLedgerTransitions = foldLedgerTransitions fold + 1}
+      LedgerObservation _ -> fold {foldObservations = foldObservations fold + 1}
+      StoredTransition _ -> fold {foldStoredTransitions = foldStoredTransitions fold + 1}
+    describe = \case
+      LedgerTransition operation -> "the ledger command " <> operation
+      LedgerObservation operation -> "the observation of the ledger command " <> operation
+      StoredTransition transition -> "the stored transition " <> transition
+
+-- | The final rows and the manager log of a retained root through its
+-- private copy: the history, and the approval selectors of the manager log.
+rootHistory :: CoordinationStore -> Maybe FilePath -> IO (History, Map.Map Text ApprovalRequest)
+rootHistory store flow = do
+  stored <- readStored store
+  report <- case flow of
+    Nothing -> pure Nothing
+    Just dir -> do
+      let file = dir </> (T.unpack (storedStream stored) <> ".ndjson")
+      present <- doesFileExist file
+      if present then Just <$> readManagerLog file else pure Nothing
+  pure (encodeHistory (maybe Map.empty approvalArguments report) stored, maybe Map.empty approvalSelectorsOf report)
 
 -- | The compared dimensions in which two states differ.
 squareDifferences :: Coordination -> Coordination -> [Text]

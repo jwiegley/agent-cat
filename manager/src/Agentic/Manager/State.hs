@@ -5,7 +5,7 @@ module Agentic.Manager.State
   ( RunAssociation (..), ingestAcceptedStart, ingestRuntimeEnvelope, restoreRunProjection, observeRetainedTerminal,
     submitRunControl, submitDecisionControl, dispatchRunControl, dispatchDecisionControl, replayControl,
     resolveRun, resolveRunIn, resolveDecision, readControlSurface, readClosedControlSurface, readDecision, readDecisionHeads,
-    decisionHeadIds, decisionQueueIds,
+    decisionHeadIds, decisionQueueIds, decisionHeadRefusal,
     withControlSurface, withClosedControlSurface, withDecision, decisionInView,
     authorizeObservation, requireProjection, withProfileProjection, withProfileProjectionSource,
     ProjectionCut, captureProjectionCut, restoreProjectionCut, publicRecoveryOptionValue
@@ -466,6 +466,19 @@ decisionQueueIds bound association = do
     [SQL.SQLText ident] | Command.validId ident -> pure ident
     _ -> refuseTransaction StoreIntegrity) rows
 
+-- | The refusal of a mandatory decision control by the pending FIFO queue of
+-- its run. The queue holds the identifiers of the pending decisions in
+-- per-run opening order, as 'decisionQueueIds' reads them, and the state is
+-- the stored state of the addressed decision. A decision that is not the head
+-- of the queue refuses with 'Command.DecisionNotHead'. A head that a command
+-- reserves, in the state @submitting@, refuses with 'Command.StaleRevision'.
+-- Otherwise the result is 'Nothing'.
+decisionHeadRefusal :: [Text] -> Text -> Text -> Maybe Command.CommandFailure
+decisionHeadRefusal queue ident state
+  | take 1 queue /= [ident] = Just Command.DecisionNotHead
+  | state /= "pending" = Just Command.StaleRevision
+  | otherwise = Nothing
+
 -- A pending decision that no earlier pending decision of its run precedes.
 pendingHeadCondition :: Text
 pendingHeadCondition = "d.state IN ('pending','submitting') AND NOT EXISTS(SELECT 1 FROM decisions earlier WHERE earlier.run_id=d.run_id AND earlier.state IN ('pending','submitting') AND (length(earlier.observed_sequence)<length(d.observed_sequence) OR (length(earlier.observed_sequence)=length(d.observed_sequence) AND earlier.observed_sequence<d.observed_sequence)))"
@@ -714,8 +727,7 @@ submitControl dispatch accepted proof decision key precondition body = do
                   case (mandatory,chosen) of
                     (True,[(ident,_,_,_,_,state)])
                       | maybe False (/=ident) decision -> pure(Left Command.InvalidRequest)
-                      | case pending of (headId,_,_,_,_,_):_->headId/=ident;_->True -> pure(Left Command.DecisionNotHead)
-                      | state/="pending" -> pure(Left Command.StaleRevision)
+                      | Just refusal <- decisionHeadRefusal [headId|(headId,_,_,_,_,_)<-pending] ident state -> pure(Left refusal)
                       | otherwise -> reserveControl association snapshot (approvedRoutes prepared) candidate operation (Just ident) base
                     (True,_) -> pure(Left Command.StaleRevision)
                     (False,_) | isJust decision -> pure(Left Command.InvalidRequest)

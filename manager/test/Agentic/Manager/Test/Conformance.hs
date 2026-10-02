@@ -35,6 +35,7 @@ module Agentic.Manager.Test.Conformance
     -- * History
     ApprovalArguments (..),
     approvalArguments,
+    approvalSelectorsOf,
     HistoryItem (..),
     ItemKind (..),
     History (..),
@@ -51,6 +52,7 @@ import Agentic.Manager.Configuration (closeConfiguration, installConfiguration, 
 import Agentic.Manager.Flow (CommandBody (..), ManagerLogReport (..), ManagerValue (CommandValue))
 import Agentic.Manager.Profile (Diagnostic (InvalidConfiguration, InvalidReply))
 import Agentic.Manager.Protocol.Command (Operation (Approve), encoded)
+import qualified Agentic.Manager.Protocol.Preparation as P
 import Agentic.Manager.Store (CoordinationStore, query, runRead, transactionGeneration, withInspectingStore)
 import Agentic.Manager.Test.Oracle
 import Agentic.Runtime (About (..), FlowEntry (..), Record (..))
@@ -681,21 +683,33 @@ data ApprovalArguments = ApprovalArguments
 
 -- | The approval arguments of each approve ask of a manager log, by command.
 approvalArguments :: ManagerLogReport -> Map.Map Text ApprovalArguments
-approvalArguments report =
+approvalArguments = Map.mapMaybe arguments . approvalAsks
+  where
+    arguments = \case
+      Object o -> ApprovalArguments <$> field o "reviewDigest" <*> field o "requestRevision" <*> field o "profileRevision" <*> field o "processGeneration"
+      _ -> Nothing
+    field o name = case KM.lookup (Key.fromText name) o of
+      Just (String t) -> Just t
+      _ -> Nothing
+
+-- | The selectors of each approve ask of a manager log, by command, as the
+-- approval decoder 'P.decodeApproval' of the manager reads the body. An ask
+-- whose body that decoder refuses has no entry.
+approvalSelectorsOf :: ManagerLogReport -> Map.Map Text P.ApprovalRequest
+approvalSelectorsOf = Map.mapMaybe (either (const Nothing) Just . P.decodeApproval . encodeLine) . approvalAsks
+
+-- | The body value of each approve ask of a manager log, by command.
+approvalAsks :: ManagerLogReport -> Map.Map Text Value
+approvalAsks report =
   Map.fromList
-    [ (command, arguments)
+    [ (command, value)
       | entry <- managerLogEntries report,
         Just record <- [entryRecord entry],
         Just command <- [aboutCommand (recAbout record)],
         Just (CommandValue body) <- [Map.lookup (entryPosition entry) (managerLogValues report)],
         commandBodyOperation body == Approve,
-        Just (Object o) <- [commandBodyValue body],
-        Just arguments <- [ApprovalArguments <$> field o "reviewDigest" <*> field o "requestRevision" <*> field o "profileRevision" <*> field o "processGeneration"]
+        Just value <- [commandBodyValue body]
     ]
-  where
-    field o name = case KM.lookup (Key.fromText name) o of
-      Just (String t) -> Just t
-      _ -> Nothing
 
 -- ---------------------------------------------------------------------------
 -- History
