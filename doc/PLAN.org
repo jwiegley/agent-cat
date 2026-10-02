@@ -2244,6 +2244,27 @@ Acceptance: the view comparison uses the screen constructor rather than the requ
 
 Transform matrices need DecidableEq o (Classical.propDecidable) while Mat/Panel take instance hypotheses; two Decidable instances are propositionally but not definitionally equal — law proofs will need Subsingleton (Decidable _) congruence unless one convention is fixed up front.
 
+* TODO [#D] Resolve the non-blocking fess findings of subtask PD8
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-6xor
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-01 Thu 23:42]
+:MODIFIED: [2026-10-01 Thu 23:42]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess audit fess/pd-PD8-r1.md (2026-10-01) on subtask PD8 (Emacs client profile loader, agent-workflows emacs-native commit 0b5c3e9).
+
+1. (low) emacs/wf-manager.el:212 and emacs/wf-manager-tests.el:143. The loader refuses "version": 1.0 because it uses (eql v 1). ext-pi/src/manager/profile.ts:161 uses boundedInteger(version, 1n, 1n), which accepts 1.0 and 1e0. Fix: accept any JSON number equal to 1 and move 1.0 to an accepted case.
+2. (low) emacs/wf-manager.el:249-251. The IPv6 bracket pattern accepts https://[:]/v1 with host ":", which profile.ts refuses. Fix: validate the bracket contents as an IPv6 address, and add https://[:]/v1 to the endpoint refusal list in emacs/wf-manager-tests.el.
+3. (low) The PD8 limitation says the endpoint parser is only slightly stricter than profile.ts. It is also looser in one case (finding 2), and the version check is stricter (finding 1). Fix: correct the statement when findings 1 and 2 are fixed.
+4. (low) Verification gap. The repeated-field refusal depends on json-parse-string keeping duplicate keys in the alist. This holds on Emacs 30.2, the only version tested. Package-Requires declares Emacs 29.1. Fix: run the refuses-fields test on Emacs 29, or raise Package-Requires to Emacs 30.1.
+
 * TODO [#C] Resolve PC3 fess findings in release-quarantine
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -20470,7 +20491,7 @@ coordination or SQL into the TUI.
 :LABELS:   ["p6","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-01 Thu 23:31]
+:MODIFIED: [2026-10-01 Thu 23:42]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-030
 :SOURCE_REPO: agent-cat
@@ -20550,6 +20571,13 @@ separately tested rather than inferred from one newer Emacs build.
     "author": "johnw",
     "text": "Subtask PD7 (2026-10-01) re-establishes the existing Emacs client checks against the frontend protocol of the agent-cat tui worktree, as a baseline for Phase D. It does not add HTTP, credential or live-delivery support. In agent-workflows emacs-native commit 1efebf9, wf builds against the tui agentic (GHC 9.10.3, stage project file, own builddir, offline) after a local helper fills the new rowTools field of Agentic.Cli Row with an empty list. The frontend protocol needed no wf.el change: session v1 with runtime protocol 2, the prepared fields and the frame shapes match. Through the direnv shell of the Emacs worktree with GNU Emacs 30.2: ci/emacs.sh passed (clean byte compilation, silent checkdoc, ERT 38 of 38), ci/emacs-ui.py passed (form at 40x12, 80x24 and 140x36, human, recovery, history, multiwindow), and ci/emacs-tramp.py passed against a loopback OpenSSH 10.5p1 sshd after the runner got a short fixture link (TRAMP 512-byte pipe limit). A smoke race in wf-native-stderr-survives-stop-and-continue was fixed. Evidence: the PD7 stage logs under the private evidence directory. Fess not blocking; low finding filed as acat-s1wf.",
     "created_at": "2026-10-02T06:31:49Z"
+  },
+  {
+    "id": 596,
+    "issue_id": "acat-wm-030-t2l4",
+    "author": "johnw",
+    "text": "PD8 (WM-030 part 1) committed in agent-workflows emacs-native as 0b5c3e9: emacs/wf-manager.el loads the version 1 client profile (version, endpoint, credentialFile, caFile) after ext-pi/src/manager/profile.ts, with https /v1 endpoint rules, absolute paths, the 16384/1048576/32-512 byte bounds and private-file rules for the credential, and typed refusal conditions (FIELD REASON). The bearer is read once at load and used only for the Authorization header. Evidence scope: ci/emacs.sh with GNU Emacs 30.2 passed, 4 passes over 4 files, 0 failed (byte compilation, checkdoc, ERT 8 of 8, smoke). Fess not blocking (fess/pd-PD8-r1.md), four low findings filed as a follow-up. Remaining WM-030 scope: HTTP transport with TLS validation against caFile, SSE delivery. Deferred under functionality first: redaction of the printed profile record, lstat/read race.",
+    "created_at": "2026-10-02T06:42:48Z"
   }
 ]
 #+end_src
