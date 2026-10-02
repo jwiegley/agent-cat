@@ -12910,7 +12910,7 @@ The other review findings are held by acat-70ll (unresolved approve after a rest
 :LABELS:   ["review","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-10-02 Fri 09:55]
-:MODIFIED: [2026-10-02 Fri 09:55]
+:MODIFIED: [2026-10-02 Fri 10:56]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -12931,6 +12931,20 @@ Findings of the two Phase D reviews (agent-cat a17a015b..91fb0ad4, emacs-native 
 10. (Low) Stopped orphan processes PIDs 111 and 9444 remain from the Phase E failures-launched fixtures.
 11. (Low, WM-030) No check runs the declared minimum Emacs 29.1.
 12. (Low) The dropped-check record of the workflow named GNU Emacs 31.1.50. Every Phase D Emacs check ran GNU Emacs 30.2.
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 643,
+    "issue_id": "acat-phase-d-review-findings-raxi",
+    "author": "johnw",
+    "text": "Subtask PF1 (2026-10-02) closes item 2 of this issue, the resize of the open control prompt and the steer editor in Emacs service mode. emacs-native f9be31a: the steer step of service_lifecycle_case in ci/emacs-ui.py types the steer choice label in the open control prompt and passes it through 40x12, 140x36 and 80x24 with the minibuffer exactly the prompt of the captured run plus the label (controlPromptTexts), then types LIFECYCLE_STEER in *wf steer* and passes it through the same sizes with the text exactly LIFECYCLE_STEER (steerTexts), and sends C-c C-c after the last size. Report version 3. agent-cat (the PF1 commit): step 7 of emacs_lifecycle_checks in manager/test/service_http.py requires version 3, both size lists and texts, the one steer command at the effect steered and one run-log steer record with interrupt-now and exactly LIFECYCLE_STEER. Evidence: the n=8 emacs-service-lifecycle run passed (exit 0, 22 key steps and checks 1 to 17 PASS), and a version-2 copy of emacs-ui.py failed with the existing version sentence. No product Emacs Lisp changed, because no resize lost text, so ci/emacs.sh did not run. Fess pf-PF1-r1 not blocking; its medium handoff drift and low docstring wrap are fixed in the pair. The two commits form a pair and neither works alone.",
+    "created_at": "2026-10-02T17:56:24Z"
+  }
+]
+#+end_src
 
 * TODO [#C] Deferred security stage after Phase E    :deferred:security:
 :PROPERTIES:
@@ -21555,7 +21569,7 @@ including its explicit v3 invocation compatibility behavior.
 :LABELS:   ["p6","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-02 Fri 09:56]
+:MODIFIED: [2026-10-02 Fri 10:56]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-032
 :SOURCE_REPO: agent-cat
@@ -21689,6 +21703,13 @@ until WM-039 supplies it.
     "author": "johnw",
     "text": "Phase D closeout status: Partial in both review lenses. Open: no fail-over or abandon by keys in service mode, no PTY redirect, and no resize of the steer editor or control prompt while open. The three journey controls and the N8 owner checks have not run on a tree with the PD29 Runtime fix. Cross-machine acceptance waits for WM-039. Evidence: doc/workflow-manager-handoff.md section 'Phase D of 2026-10' (Review of Phase D), the review rerun of the journey pair on 91fb0ad4 (N1 and N8 pass) and the closeout make -C doc check (exit 0). Findings are tracked in acat-phase-d-review-findings-raxi.",
     "created_at": "2026-10-02T16:56:13Z"
+  },
+  {
+    "id": 644,
+    "issue_id": "acat-wm-032-eh4r",
+    "author": "johnw",
+    "text": "Subtask PF1 (2026-10-02) closes item 2 of this issue, the resize of the open control prompt and the steer editor in Emacs service mode. emacs-native f9be31a: the steer step of service_lifecycle_case in ci/emacs-ui.py types the steer choice label in the open control prompt and passes it through 40x12, 140x36 and 80x24 with the minibuffer exactly the prompt of the captured run plus the label (controlPromptTexts), then types LIFECYCLE_STEER in *wf steer* and passes it through the same sizes with the text exactly LIFECYCLE_STEER (steerTexts), and sends C-c C-c after the last size. Report version 3. agent-cat (the PF1 commit): step 7 of emacs_lifecycle_checks in manager/test/service_http.py requires version 3, both size lists and texts, the one steer command at the effect steered and one run-log steer record with interrupt-now and exactly LIFECYCLE_STEER. Evidence: the n=8 emacs-service-lifecycle run passed (exit 0, 22 key steps and checks 1 to 17 PASS), and a version-2 copy of emacs-ui.py failed with the existing version sentence. No product Emacs Lisp changed, because no resize lost text, so ci/emacs.sh did not run. Fess pf-PF1-r1 not blocking; its medium handoff drift and low docstring wrap are fixed in the pair. The two commits form a pair and neither works alone. Remaining WM-032 gaps: fail-over or abandon by keys, and a PTY redirect.",
+    "created_at": "2026-10-02T17:56:26Z"
   }
 ]
 #+end_src

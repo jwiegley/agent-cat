@@ -37,14 +37,14 @@ closes no package and no gate. The Integrator closes tracker items.
 
 | Component | Version or value |
 | --- | --- |
-| Emacs worktree | `~/src/agent-workflows-emacs-native`, branch `emacs-native` at `c839f75`, local commits only. `c839f75` changes only the README after the gate tree `8c2b780`. |
+| Emacs worktree | `~/src/agent-workflows-emacs-native`, branch `emacs-native` at `f9be31a`, local commits only. `c839f75` changes only the README after the gate tree `8c2b780`, and `f9be31a` is the PF1 side of the lifecycle pair. |
 | GNU Emacs | 30.2, the Emacs of the direnv development shell of the Emacs worktree. Every Emacs check of Phase D ran this build. |
 | Declared minimum | `Package-Requires: ((emacs "29.1"))` in `emacs/wf.el`, `emacs/wf-manager.el` and `emacs/wf-service.el`. No check runs Emacs 29.1. |
 | Event delivery | `poll`, the bounded polling mode of `/v1/events`. No server-sent events. |
 | `wf` build | GHC 9.10.3, built against the `agentic` package of this worktree from a stage project file with its own build directory |
 | OpenSSH of the TRAMP gate | 10.5p1 |
 | Live harness version | 10 (`EMACS_HARNESS_VERSION` in `manager/test/service_http.py` and `wf-manager-live-harness-version` in `emacs/wf-manager-live.el`) |
-| Key-driven report versions | 1 for the service journey and 2 for the service lifecycle of `ci/emacs-ui.py` |
+| Key-driven report versions | 1 for the service journey and 3 for the service lifecycle of `ci/emacs-ui.py` |
 
 GNU Emacs 31.1.50, the Emacs application on the `PATH` outside the direnv
 shell, ran no check. url.el gives a response to its caller only when the
@@ -88,6 +88,7 @@ service run view show the delivery state `poll`.
 | PD29 | `6a4cbeec` | `8c2b780` | Phase D gate part 2. It also fixes the two defects listed below. |
 | PD30 | `5be45383` | None | Phase D gate part 3. |
 | PD31 | `91fb0ad4` | `c839f75` | This section, the updates of the Phase E section, and the README of the Emacs worktree. The closeout updates of this section after the reviews are not committed. |
+| PF1 | The PF1 commit | `f9be31a` | The `emacs-service-lifecycle` mode types the steer choice label in the open control prompt and the steer text in the steer editor, and each passes through 40x12, 140x36 and 80x24 with its text kept. Both sides require report version 3. |
 
 The gate found two defects, and PD29 fixed each at its owner with a test
 that failed first:
@@ -112,7 +113,7 @@ worktree, so each mode needs a matching pair of the two repositories. The
 `emacs-client` and `emacs-client-controls` modes refuse a report whose
 `harnessVersion` differs from 10 with one sentence. The `emacs-service`
 modes require report version 1 and the `emacs-service-lifecycle` mode
-requires report version 2 from `ci/emacs-ui.py`. Each mode needs `EMACS`
+requires report version 3 from `ci/emacs-ui.py`. Each mode needs `EMACS`
 and `WF_EMACS_DIR`, and the `emacs-service` modes also need `WF_EMACS_UI`.
 The Integrator recorded these pairs in the commit messages:
 
@@ -121,7 +122,7 @@ The Integrator recorded these pairs in the commit messages:
 | `emacs-client` | `75bf4058` with `4804e3e` (PD15), `8d62cf7d` with `1fb68e7` (PD16), `682439d1` with `5de5f83` (PD18), `db9b9c75` with `70fecf9` (PD19, harness version 5), `6707f6a1` with `dc258f1` (PD20, version 6), `c4f4091e` with `66144b3` (PD21, version 7), `93280369` with `8536023` (PD23, version 9), `a6f54044` with `59f27ed` (PD24, version 10), and `6a4cbeec` with `8c2b780` (PD29) |
 | `emacs-client-controls` | `737fe82c` with `0c3b202` (PD22, harness version 8), and `6a4cbeec` with `8c2b780` (PD29) |
 | `emacs-service`, `emacs-service-broken-answer` | `75ce6752` with `2477a47` (PD25), and `6a4cbeec` with `8c2b780` (PD29) |
-| `emacs-service-lifecycle` | `14c97821` with `5425213` (PD26, report version 1), `832ea3d3` with `6745f4b` (PD27, report version 2 with `--service-handshake`), and `6a4cbeec` with `8c2b780` (PD29) |
+| `emacs-service-lifecycle` | `14c97821` with `5425213` (PD26, report version 1), `832ea3d3` with `6745f4b` (PD27, report version 2 with `--service-handshake`), `6a4cbeec` with `8c2b780` (PD29), and the PF1 commit with `f9be31a` (PF1, report version 3 with the resize of the open control prompt and the steer editor) |
 
 The PD17 commit message names no `emacs-native` commit. The PD18 commit
 `5de5f83` names the follow-up issue `acat-FOLLOWUP`, which is
@@ -264,7 +265,7 @@ items ran in Phase D:
 | --- | --- | --- |
 | WM-030 | Met for function by PD8 to PD18 and PD29, with the `poll` delivery named. The minimum-version item is open, because no check runs Emacs 29.1. Security items deferred. | `acat-wm-030-t2l4` open for the Integrator |
 | WM-031 | Met for function by PD19 to PD24 and PD26. Local mode passes its local and TRAMP gates. Security items deferred. | `acat-wm-031-5yxo` open for the Integrator |
-| WM-032 | Met for function by PD25 to PD27, except that no service-mode check drives the fail-over or abandon choice, resizes the steer editor, or drives a redirect in the PTY. The broken-answer control fails with its literal message. | `acat-wm-032-eh4r` open for the Integrator |
+| WM-032 | Met for function by PD25 to PD27, and PF1, except that no service-mode check drives the fail-over or abandon choice or drives a redirect in the PTY. The broken-answer control fails with its literal message. | `acat-wm-032-eh4r` open for the Integrator |
 | G4 | Open. It also needs the cross-client witness of WM-039. | `acat-g4-pech` |
 | Phase E review findings | PD1 fixes items 1 and 7, PD2 item 2, PD5 and PD6 item 5, and PD29 item 12. PD3 fixes item 3 for GET routes. PD4 fixes the pre-lock window of item 4, and engine coverage stays open. Items 6, 8 to 11 and 13 stay open. | `acat-phase-e-review-findings-0l73` |
 | PE27, `ext-pi` devDependency pins | Needs operator authorization, unchanged from the Phase E section | None |
@@ -352,9 +353,10 @@ The two medium findings both concern WM-032:
    is the one of the retry, `wf-service--control-act`, so only the check is
    missing. A redirect runs only in the batch ERT live check, not by keys
    in the PTY.
-2. WM-032 requires a resize while each editor is open. The setup form, the
-   review and the answer editor resize in service mode. The steer editor
-   and the control prompt never resize while open in service mode.
+2. WM-032 requires a resize while each editor is open. PF1 closes this
+   finding. The setup form, the review, the answer editor, the open control
+   prompt and the steer editor now each resize while open in service mode
+   with their text kept.
 
 The low findings are these:
 
@@ -384,12 +386,12 @@ The low findings are these:
 2. The operator or the Integrator ends PIDs 111 and 9444 with `kill -CONT`
    and then `kill -KILL`.
 3. The operator decides PE27, the devDependency pins.
-4. The next run first closes the WM-032 gaps of the review: one
-   lifecycle step that chooses fail-over or abandon by keys and confirms
-   the effect through HTTP, one PTY redirect with a fixture of two
-   candidates, and one resize of the steer editor that keeps its text. It
-   then runs the three journey controls and the N8 owner checks once on
-   the final tree.
+4. The next run first closes the two remaining WM-032 gaps of the review:
+   one lifecycle step that chooses fail-over or abandon by keys and
+   confirms the effect through HTTP, and one PTY redirect with a fixture of
+   two candidates. PF1 closed the third gap, the resize of the steer
+   editor. The run then runs the three journey controls and the N8 owner
+   checks once on the final tree.
 5. The run then takes the functional parts of Phase F (WM-039 to WM-041)
    and then Phase G (WM-042 to WM-044) under the functionality-first and
    fast rules, with the open functional findings above at their owners.

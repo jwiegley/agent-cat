@@ -955,9 +955,13 @@ emacs_service_mode = len(sys.argv) == 6 and sys.argv[5] in (EMACS_SERVICE, EMACS
 #    approved.
 # 5. C-c C-k in the view of the second run and the confirmation yes cancel
 #    that run.
-# 6. c in the view of the captured run lists the offered controls, the steer
-#    choice with the timing interrupt-now opens the steer editor, and C-c C-c
-#    sends LIFECYCLE_STEER. The captured run then succeeds.
+# 6. c in the view of the captured run lists the offered controls, and the
+#    label of the steer choice with the timing interrupt-now is typed in the
+#    open control prompt. The prompt passes through 40x12, 140x36 and 80x24
+#    with the typed label kept, and RET opens the steer editor.
+#    LIFECYCLE_STEER is typed in the editor, which passes through the same
+#    sizes with that text kept, and C-c C-c after the last size sends it. The
+#    captured run then succeeds.
 # 7. At 40x12, M-x wf-history lists the runs over every page, RET on the row
 #    of the first run opens its view, and r saves its verified result to a
 #    new file.
@@ -1019,11 +1023,14 @@ emacs_service_mode = len(sys.argv) == 6 and sys.argv[5] in (EMACS_SERVICE, EMACS
 #    for the SHA-256 of the UTF-8 bytes of LIFECYCLE_CAPTURE.
 # 6. The commands of the controls of the second run are exactly one cancel,
 #    and the run ended cancelled.
-# 7. The commands of the controls of the captured run are exactly one steer,
+# 7. The open control prompt held the prompt of the captured run and the
+#    typed label of the chosen choice at 40x12, 140x36 and 80x24, and the
+#    steer editor held exactly LIFECYCLE_STEER at the same sizes. The
+#    commands of the controls of the captured run are exactly one steer,
 #    which reached the effect steered for the attempt of the chosen choice.
 #    The run log holds the one control record of the command from the
 #    manager and one steer record, both with the timing interrupt-now and
-#    the typed text, and the run succeeded.
+#    exactly LIFECYCLE_STEER, and the run succeeded.
 # 8. The history listed exactly the run identifiers of every page of
 #    /v1/runs that existed at the history step, in the order of the
 #    collection, over at least two pages, and RET opened the view of the
@@ -1083,7 +1090,7 @@ emacs_lifecycle_mode = len(sys.argv) == 6 and sys.argv[5] == EMACS_SERVICE_LIFEC
 LIFECYCLE_DELAY = 40
 # The facts of the lifecycle. The LIFECYCLE_ constants of ci/emacs-ui.py state
 # the same values.
-LIFECYCLE_REPORT_VERSION = 2
+LIFECYCLE_REPORT_VERSION = 3
 LIFECYCLE_FIRST = "Emacs lifecycle \u03bb: first delayed run"
 LIFECYCLE_SECOND = "Emacs lifecycle \u03bb: second delayed run"
 LIFECYCLE_CAPTURE = "Emacs capture \u03bb \u2713\nsecond line \u96ea\n"
@@ -13215,11 +13222,22 @@ def emacs_lifecycle_checks():
         # 7. The steer.
         found = re.fullmatch(r"steer occurrence (\d+) attempt (\d+), interrupt-now", report["steerChoice"]["description"])
         assert found is not None, ("the steer choice", report["steerChoice"])
+        sizes = ["40x12", "140x36", "80x24"]
+        control_prompt = "Control of run " + captured["run"] + ": " + report["steerChoice"]["label"]
+        assert [item["size"] for item in report["controlPromptTexts"]] == sizes \
+            and all(item["text"] == control_prompt for item in report["controlPromptTexts"]), (
+            "the open control prompt did not keep the typed label at each size", report["controlPromptTexts"])
+        assert [item["size"] for item in report["steerTexts"]] == sizes \
+            and all(item["text"] == LIFECYCLE_STEER for item in report["steerTexts"]), (
+            "the steer editor did not keep exactly the typed text at each size", report["steerTexts"])
         rows = runs.command_rows(["/v1/runs/" + captured["run"] + "/control"])
         assert [row[1] for row in rows] == ["steer"], ("the steer was not sent exactly once", rows)
         control, steers = runs.steered(captured["run"], "/v1/commands/" + rows[0][0], found.group(1), found.group(2), LIFECYCLE_STEER)
         runs.ended(captured["run"], "succeeded")
-        print("PASS emacs-service-lifecycle 7: c and", report["steerChoice"]["label"], "sent the one steer command", rows[0][0],
+        print("PASS emacs-service-lifecycle 7: the open control prompt kept the typed label", report["steerChoice"]["label"],
+              "at", ", ".join(item["size"] for item in report["controlPromptTexts"]) + ", the steer editor kept exactly its",
+              "typed text at", ", ".join(item["size"] for item in report["steerTexts"]) + ", and c and",
+              report["steerChoice"]["label"], "sent the one steer command", rows[0][0],
               "of attempt", found.group(2), "of occurrence", found.group(1), "of run", captured["run"], "with the timing interrupt-now",
               "and its editor text. It reached the effect steered, the run log holds control", control["position"], "from the",
               "manager and steer record", steers[0]["position"], "with the typed text, and the run succeeded", flush=True)
