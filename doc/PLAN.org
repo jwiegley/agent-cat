@@ -817,6 +817,29 @@ Non-blocking findings from fess b1-B3-r1 (/Users/johnw/Products/agent-cat-workfl
 ]
 #+end_src
 
+* TODO [#D] Resolve the non-blocking fess findings of subtask PD31
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-3a9t
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-02 Fri 09:45]
+:MODIFIED: [2026-10-02 Fri 09:45]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess audit fess/pd-PD31-r1.md (2026-10-02) on subtask PD31 (Phase D current-state documentation closeout). The PD31 commits in agent-cat and in agent-workflows emacs-native name this issue.
+
+1. (low) doc/workflow-manager-handoff.md (Tested Emacs client) and the README.md of the Emacs worktree. The task named GNU Emacs 31.1.50 as the tested version. The documents record GNU Emacs 30.2, because every PD29 and PD30 environment sets EMACS to the Nix emacs-30.2 of the Emacs worktree direnv shell, and the logs show "GNU Emacs 30.2". The emacs 31.1.50 is only the emacs on the PATH outside direnv. Fix: have the operator confirm 30.2 as the recorded tested version, or run the Emacs checks with EMACS set to 31.1.50 before 31.1.50 is recorded.
+2. (low) doc/workflow-manager-handoff.md, about lines 657 to 663. The sentence "Phase D fixed six of the findings, and the table below no longer lists them" names five removed findings and then PD4. The table still lists the PD4 pre-lock row, rewritten to cover engines only. The SIGHUP finding was not a row at HEAD, because PD29 had already removed it. Fix: say that five rows are gone and that the PD4 row is rewritten to cover engines only.
+3. (low) Cosmetic line wraps in the README.md of the Emacs worktree (about lines 354 to 355 and 800: a short broken line "The configured / runner must provide the" and an overlong line in the profile paragraph) and in the handoff "Checks not run" bullet that ends "and their controls,". Fix: rewrap the paragraphs.
+4. (low, no change needed) doc/workflow-manager-handoff.md, PD17 row. The emacs-native commit 1f50ff1 for PD17 comes from the emacs-native log order, because the PD17 commit message 2b666265 names no emacs-native commit. The audit found it consistent with git log. The PD31 commit message of agent-cat records the pair 2b666265 with 1f50ff1.
+
+Implementer limitations recorded with PD31: the Emacs version deviation above; the paired-commit table lists only pairs that commit messages record; doc/check-prose.py checks only the Texinfo manual, so the handoff and README prose were checked by hand; the Emacs worktree has no Markdown check, so ci/emacs.sh did not run for a README-only change.
+
 * DONE [#C] Run the current Chord checks from the Pi integration launcher
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -7242,7 +7265,7 @@ Request, approval, control, export, and lineage routes pass hostile-input, repla
 :LABELS:   ["wm-release-gate","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-02 Fri 09:34]
+:MODIFIED: [2026-10-02 Fri 09:45]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/G4
 :SOURCE_REPO: agent-cat
@@ -7418,6 +7441,13 @@ Emacs, TUI, and Pi service modes pass their native UI gates and cross-client/cro
     "author": "johnw",
     "text": "Subtask PD30 (2026-10-02, Phase D gate part 3) ran each step once with no code change, on agent-cat 6a4cbeec and agent-workflows emacs-native 8c2b780. In the Emacs worktree: ci/emacs.sh passed (six emacs/*.el files byte-compile without warnings, checkdoc silent, ERT smoke 38/38, wf-smoke 0 failed, vector and transport ERT 96/96), ci/emacs-ui.py local cases passed with 8 PASS lines (the form case at 40x12, 80x24 and 140x36), and ci/emacs-tramp.py passed with the project sshd, so no blocker is recorded. wf was rebuilt incrementally against the current agentic first. In agent-cat: git diff --exit-code a17a015b -- doc/api/openapi.yaml test/manager_client_vectors.json exited 0 with no output, the DataBroker record of runtime/src/Agentic/Runtime/Broker.hs keeps its nine operations in order, bash tui/ci/tui.sh passed under timeout 1200, and the incremental -ftui-tests rebuild of agentic-run and routing-fixed-point-probe exited 0. Evidence: PD/PD30/impl-r1 in the private resume-20260923 directory, a .log and a .exit file for each of the nine steps. Fess pd-PD30-r1 not blocking. Its two low findings are filed as acat-pd30-fess-followup-jwla.",
     "created_at": "2026-10-02T16:34:22Z"
+  },
+  {
+    "id": 636,
+    "issue_id": "acat-g4-pech",
+    "author": "johnw",
+    "text": "PD31 (Phase D current-state documentation closeout, 2026-10-02): doc/workflow-manager-handoff.md now opens with the section 'Phase D of 2026-10'. It records the delivered behavior of PD1 to PD31 with the commits of both repositories, the paired commits that each Emacs mode of manager/test/service_http.py needs, the PD28 to PD30 gate results, the checks not run, the deferred security items, and the package status (WM-030 met for function except the minimum-version item, WM-031 met for function, WM-032 met for function except fail-over and abandon by keys, steer-editor resize and a PTY redirect, G4 open). The README of the Emacs worktree describes service mode, the poll transport, and GNU Emacs 30.2 as the tested version (Package-Requires keeps emacs 29.1 as an unchecked declared minimum). make -C doc check passed. Evidence: PD/PD31/impl-r1 and fess/pd-PD31-r1.md (not blocking, low findings in acat-3a9t). This package stays open for the closeout review.",
+    "created_at": "2026-10-02T16:45:38Z"
   }
 ]
 #+end_src
@@ -21102,7 +21132,7 @@ coordination or SQL into the TUI.
 :LABELS:   ["p6","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-02 Fri 09:34]
+:MODIFIED: [2026-10-02 Fri 09:45]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-030
 :SOURCE_REPO: agent-cat
@@ -21280,6 +21310,13 @@ separately tested rather than inferred from one newer Emacs build.
     "author": "johnw",
     "text": "Subtask PD30 (2026-10-02, Phase D gate part 3) ran each step once with no code change, on agent-cat 6a4cbeec and agent-workflows emacs-native 8c2b780. In the Emacs worktree: ci/emacs.sh passed (six emacs/*.el files byte-compile without warnings, checkdoc silent, ERT smoke 38/38, wf-smoke 0 failed, vector and transport ERT 96/96), ci/emacs-ui.py local cases passed with 8 PASS lines (the form case at 40x12, 80x24 and 140x36), and ci/emacs-tramp.py passed with the project sshd, so no blocker is recorded. wf was rebuilt incrementally against the current agentic first. In agent-cat: git diff --exit-code a17a015b -- doc/api/openapi.yaml test/manager_client_vectors.json exited 0 with no output, the DataBroker record of runtime/src/Agentic/Runtime/Broker.hs keeps its nine operations in order, bash tui/ci/tui.sh passed under timeout 1200, and the incremental -ftui-tests rebuild of agentic-run and routing-fixed-point-probe exited 0. Evidence: PD/PD30/impl-r1 in the private resume-20260923 directory, a .log and a .exit file for each of the nine steps. Fess pd-PD30-r1 not blocking. Its two low findings are filed as acat-pd30-fess-followup-jwla.",
     "created_at": "2026-10-02T16:34:21Z"
+  },
+  {
+    "id": 633,
+    "issue_id": "acat-wm-030-t2l4",
+    "author": "johnw",
+    "text": "PD31 (Phase D current-state documentation closeout, 2026-10-02): doc/workflow-manager-handoff.md now opens with the section 'Phase D of 2026-10'. It records the delivered behavior of PD1 to PD31 with the commits of both repositories, the paired commits that each Emacs mode of manager/test/service_http.py needs, the PD28 to PD30 gate results, the checks not run, the deferred security items, and the package status (WM-030 met for function except the minimum-version item, WM-031 met for function, WM-032 met for function except fail-over and abandon by keys, steer-editor resize and a PTY redirect, G4 open). The README of the Emacs worktree describes service mode, the poll transport, and GNU Emacs 30.2 as the tested version (Package-Requires keeps emacs 29.1 as an unchecked declared minimum). make -C doc check passed. Evidence: PD/PD31/impl-r1 and fess/pd-PD31-r1.md (not blocking, low findings in acat-3a9t). This package stays open for the closeout review.",
+    "created_at": "2026-10-02T16:45:35Z"
   }
 ]
 #+end_src
@@ -21291,7 +21328,7 @@ separately tested rather than inferred from one newer Emacs build.
 :LABELS:   ["p6","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-02 Fri 09:34]
+:MODIFIED: [2026-10-02 Fri 09:45]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-031
 :SOURCE_REPO: agent-cat
@@ -21429,6 +21466,13 @@ including its explicit v3 invocation compatibility behavior.
     "author": "johnw",
     "text": "Subtask PD30 (2026-10-02, Phase D gate part 3) ran each step once with no code change, on agent-cat 6a4cbeec and agent-workflows emacs-native 8c2b780. In the Emacs worktree: ci/emacs.sh passed (six emacs/*.el files byte-compile without warnings, checkdoc silent, ERT smoke 38/38, wf-smoke 0 failed, vector and transport ERT 96/96), ci/emacs-ui.py local cases passed with 8 PASS lines (the form case at 40x12, 80x24 and 140x36), and ci/emacs-tramp.py passed with the project sshd, so no blocker is recorded. wf was rebuilt incrementally against the current agentic first. In agent-cat: git diff --exit-code a17a015b -- doc/api/openapi.yaml test/manager_client_vectors.json exited 0 with no output, the DataBroker record of runtime/src/Agentic/Runtime/Broker.hs keeps its nine operations in order, bash tui/ci/tui.sh passed under timeout 1200, and the incremental -ftui-tests rebuild of agentic-run and routing-fixed-point-probe exited 0. Evidence: PD/PD30/impl-r1 in the private resume-20260923 directory, a .log and a .exit file for each of the nine steps. Fess pd-PD30-r1 not blocking. Its two low findings are filed as acat-pd30-fess-followup-jwla.",
     "created_at": "2026-10-02T16:34:21Z"
+  },
+  {
+    "id": 634,
+    "issue_id": "acat-wm-031-5yxo",
+    "author": "johnw",
+    "text": "PD31 (Phase D current-state documentation closeout, 2026-10-02): doc/workflow-manager-handoff.md now opens with the section 'Phase D of 2026-10'. It records the delivered behavior of PD1 to PD31 with the commits of both repositories, the paired commits that each Emacs mode of manager/test/service_http.py needs, the PD28 to PD30 gate results, the checks not run, the deferred security items, and the package status (WM-030 met for function except the minimum-version item, WM-031 met for function, WM-032 met for function except fail-over and abandon by keys, steer-editor resize and a PTY redirect, G4 open). The README of the Emacs worktree describes service mode, the poll transport, and GNU Emacs 30.2 as the tested version (Package-Requires keeps emacs 29.1 as an unchecked declared minimum). make -C doc check passed. Evidence: PD/PD31/impl-r1 and fess/pd-PD31-r1.md (not blocking, low findings in acat-3a9t). This package stays open for the closeout review.",
+    "created_at": "2026-10-02T16:45:36Z"
   }
 ]
 #+end_src
@@ -21440,7 +21484,7 @@ including its explicit v3 invocation compatibility behavior.
 :LABELS:   ["p6","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-02 Fri 09:34]
+:MODIFIED: [2026-10-02 Fri 09:45]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-032
 :SOURCE_REPO: agent-cat
@@ -21560,6 +21604,13 @@ until WM-039 supplies it.
     "author": "johnw",
     "text": "Subtask PD30 (2026-10-02, Phase D gate part 3) ran each step once with no code change, on agent-cat 6a4cbeec and agent-workflows emacs-native 8c2b780. In the Emacs worktree: ci/emacs.sh passed (six emacs/*.el files byte-compile without warnings, checkdoc silent, ERT smoke 38/38, wf-smoke 0 failed, vector and transport ERT 96/96), ci/emacs-ui.py local cases passed with 8 PASS lines (the form case at 40x12, 80x24 and 140x36), and ci/emacs-tramp.py passed with the project sshd, so no blocker is recorded. wf was rebuilt incrementally against the current agentic first. In agent-cat: git diff --exit-code a17a015b -- doc/api/openapi.yaml test/manager_client_vectors.json exited 0 with no output, the DataBroker record of runtime/src/Agentic/Runtime/Broker.hs keeps its nine operations in order, bash tui/ci/tui.sh passed under timeout 1200, and the incremental -ftui-tests rebuild of agentic-run and routing-fixed-point-probe exited 0. Evidence: PD/PD30/impl-r1 in the private resume-20260923 directory, a .log and a .exit file for each of the nine steps. Fess pd-PD30-r1 not blocking. Its two low findings are filed as acat-pd30-fess-followup-jwla.",
     "created_at": "2026-10-02T16:34:22Z"
+  },
+  {
+    "id": 635,
+    "issue_id": "acat-wm-032-eh4r",
+    "author": "johnw",
+    "text": "PD31 (Phase D current-state documentation closeout, 2026-10-02): doc/workflow-manager-handoff.md now opens with the section 'Phase D of 2026-10'. It records the delivered behavior of PD1 to PD31 with the commits of both repositories, the paired commits that each Emacs mode of manager/test/service_http.py needs, the PD28 to PD30 gate results, the checks not run, the deferred security items, and the package status (WM-030 met for function except the minimum-version item, WM-031 met for function, WM-032 met for function except fail-over and abandon by keys, steer-editor resize and a PTY redirect, G4 open). The README of the Emacs worktree describes service mode, the poll transport, and GNU Emacs 30.2 as the tested version (Package-Requires keeps emacs 29.1 as an unchecked declared minimum). make -C doc check passed. Evidence: PD/PD31/impl-r1 and fess/pd-PD31-r1.md (not blocking, low findings in acat-3a9t). This package stays open for the closeout review.",
+    "created_at": "2026-10-02T16:45:37Z"
   }
 ]
 #+end_src

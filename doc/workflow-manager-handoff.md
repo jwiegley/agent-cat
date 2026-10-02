@@ -2,6 +2,298 @@
 
 <!-- handoff-id: wm023-20260923; status: paused-unaccepted-wip; accepted: WM-001..WM-022,G0,G1; resume-branch: workflow-manager-checkpoint-20260923; fess: every-subtask -->
 
+## Phase D of 2026-10
+
+The resume workflow completed Phase D under the operator directions of
+2026-09-29 for fast validation and of 2026-09-30 for functionality first,
+and under the operator decisions of 2026-10-01 for the Emacs client. PD1 to
+PD30 landed in this repository as commits `86556364` to `5be45383` after
+`a17a015b`, the commit of the Phase E closeout. PD1 to PD6 repair the
+functional findings of the Phase E review. PD7 to PD27 deliver WM-030 to
+WM-032, Emacs service mode, as local commits `1efebf9` to `6745f4b` on the
+`emacs-native` branch of agent-workflows in
+`~/src/agent-workflows-emacs-native`, after `d5d7430`. No commit of that
+branch is pushed. PD28 to PD30 ran the Phase D gate. PD29 fixed two defects
+that the gate found, one in the Runtime and one in the Emacs client
+(`8c2b780` on `emacs-native`). PD31 wrote this section, updated the Phase E
+section below and brought the README of the Emacs worktree to the final
+state of service mode. The run did not stop early. This section describes
+the current state. Where any section below differs, this section supersedes
+it, and the sections below remain as chronology. The evidence of each
+subtask is under `PD/<subtask>/impl-r1` in the resume directory
+(`impl-r2` for PD5 and PD17), and the audits are under `fess/pd-*`.
+
+Accepted state is unchanged at WM-001 to WM-022 and G0 and G1. This run
+closes no package and no gate. The Integrator closes tracker items.
+
+### Tested Emacs client
+
+| Component | Version or value |
+| --- | --- |
+| Emacs worktree | `~/src/agent-workflows-emacs-native`, branch `emacs-native` at `8c2b780`, local commits only |
+| GNU Emacs | 30.2, the Emacs of the direnv development shell of the Emacs worktree. Every Emacs check of Phase D ran this build. |
+| Declared minimum | `Package-Requires: ((emacs "29.1"))` in `emacs/wf.el`, `emacs/wf-manager.el` and `emacs/wf-service.el`. No check runs Emacs 29.1. |
+| Event delivery | `poll`, the bounded polling mode of `/v1/events`. No server-sent events. |
+| `wf` build | GHC 9.10.3, built against the `agentic` package of this worktree from a stage project file with its own build directory |
+| OpenSSH of the TRAMP gate | 10.5p1 |
+| Live harness version | 10 (`EMACS_HARNESS_VERSION` in `manager/test/service_http.py` and `wf-manager-live-harness-version` in `emacs/wf-manager-live.el`) |
+| Key-driven report versions | 1 for the service journey and 2 for the service lifecycle of `ci/emacs-ui.py` |
+
+GNU Emacs 31.1.50, the Emacs application on the `PATH` outside the direnv
+shell, ran no check. url.el gives a response to its caller only when the
+response is complete, so the transport cannot read an open event stream.
+The client therefore reads `/v1/events` in the polling mode, which WM-030
+permits when the client names it. The buffer of `wf-diagnostics` and each
+service run view show the delivery state `poll`.
+
+### Delivered behavior
+
+| Subtask | agent-cat commit | `emacs-native` commit | Delivered behavior |
+| --- | --- | --- | --- |
+| PD1 | `86556364` | None | An `ext-pi` endpoint switch commits only after the complete overview of the new endpoint loads through the new transport. A failed switch closes the new transport and keeps the earlier binding, its watched resources and its follow loop, and no path reports `connected` while the follow loop has ended. A fetch of an earlier generation is not sent to the new endpoint. |
+| PD2 | `f69a0995` | None | An uncertain `/wfm-answer` reconciles from the run snapshot when the snapshot stores the sent text, and otherwise from the control view of a running run whose head names a later decision. A recovery choice reconciles from the control view. Nothing is sent again. |
+| PD3 | `4f0bb829` | None | Each non-streaming GET route waits for all its Store requests within one five-second admission deadline, and `repeatChangedRead` uses the deadline of its store. |
+| PD4 | `fe8053ff` | None | A launched claim whose run directory has no `owner.lock`, no supervisor manifest and no run store reads `clean` with `owner-never-locked` evidence. Its release creates `owner.lock` as a fence before it frees the reservation. A free `owner.lock` with no run store gives `owner-released` evidence. |
+| PD5 | `ff2c349f` | None | The `pi-client` mode runs `/wfm-resume`, `/wfm-fork` and the two-page `/wfm-history` follow live against the protected manager. |
+| PD6 | `d03784e2` | None | The new `pi-client-controls` mode runs `/wfm-steer` and `/wfm-redirect` live through the fake Pi UI. |
+| PD7 | `7d20caa3` | `1efebf9` | `wf` builds against the `agentic` package of this worktree. `ci/emacs.sh`, `ci/emacs-ui.py` and `ci/emacs-tramp.py` pass again. The frontend protocol needed no change in `wf.el`. |
+| PD8 | `4ceff269` | `0b5c3e9` | `emacs/wf-manager.el` loads a version 1 client profile and reads its credential once, with a typed refusal for each invalid field. |
+| PD9 | `951e5df0` | `8fe8c73` | The exact JSON codec keeps false, null and an absent member distinct and keeps the source text of numbers. The event decoders follow `ext-pi/src/manager/events.ts`. |
+| PD10 | `5076dc0d` | `47cc92e` | Decoders for drafts, requests and preparations follow `ext-pi/src/manager/resources.ts`. |
+| PD11 | `6c3c08c4` | `697a89c` | Decoders for receipts and decisions and the typed answer builder. The answer "no" to a flag question is JSON false. |
+| PD12 | `9b9f1ce9` | `5ab23e8` | Decoders for controls and run collection items. A run keeps runtime, supervision, integrity and verification as four fields. |
+| PD13 | `f425816a` | `b681c1a` | The refresh coordinator with generation fencing, the reconnection backoff and jitter, and the reconciliation of an uncertain command. |
+| PD14 | `239eb87c` | `543c16f` | The asynchronous HTTP transport through `url-retrieve` over GnuTLS, with one Accept and one Authorization header, no prompt, bounded responses, typed problems and the capability binding. |
+| PD15 | `75bf4058` | `4804e3e` | The `emacs-client` mode checks the transport live over TLS. The check found two defects that offline tests did not show, and both are fixed: the network security manager refused the self-signed certificate of the manager after GnuTLS had verified it, and url-http refused a multibyte header value, so a command with a non-ASCII body failed. |
+| PD16 | `8d62cf7d` | `1fb68e7` | A session assembles the complete overview over all its pages and follows the events with polling batches. |
+| PD17 | `2b666265` | `1f50ff1` | A session switches endpoints with generation fencing and keeps the earlier binding when the switch fails. A close leaves no process or timer and sends no command. |
+| PD18 | `682439d1` | `5de5f83` | A session sends each command once with its exact bytes, reads its receipt, reconciles an uncertain command with one read, and gives artifact bytes only after their size and SHA-256 digest agree. |
+| PD19 | `db9b9c75` | `70fecf9` | `emacs/wf-service.el` adds explicit service mode, `M-x wf-service` and `M-x wf-local`, and the dispatch table `wf-service-commands`. Each local-only command refuses in service mode and sends nothing. |
+| PD20 | `6707f6a1` | `dc258f1` | In service mode `wf-run` creates a request, sets literal and captured inputs, enqueues it and shows the exact review of the manager. Only `a` and a yes send `approve`. |
+| PD21 | `c4f4091e` | `66144b3` | Service run views follow their own runs. `wf-answer` sends typed answers with the entity tag of the decision and keeps the draft after a 412. A view kill sends no command. |
+| PD22 | `737fe82c` | `0c3b202` | `wf-control` and `wf-kill` send only offered controls: cancel after a confirmation, steer, redirect, retry and the recovery choices. |
+| PD23 | `93280369` | `8536023` | `wf-result` saves a verified result to a new file with mode 0600, and `wf-history` lists every page of `/v1/runs`. A history row of another endpoint refuses. |
+| PD24 | `a6f54044` | `59f27ed` | `wf-restart`, `wf-resume`, `wf-fork` and `wf-rerun` create lineage children that start only after an approval of their exact review. `wf-export` exports a verified result and verifies the download. |
+| PD25 | `75ce6752` | `2477a47` | The `emacs-service` mode drives the service journey by keys at 80x24 with resizes to 40x12 and 140x36. The `emacs-service-broken-answer` control fails with its literal message. |
+| PD26 | `14c97821` | `5425213` | The `emacs-service-lifecycle` mode drives two windows that follow two runs, a delayed question, a buffer capture, a cancel, a steer and the history by keys. A redraw keeps the point of each window, and an editor opens in a new window and deletes that window on close. |
+| PD27 | `832ea3d3` | `6745f4b` | The lifecycle adds fork and restart children, the export, a manager restart with a run view open, and an Emacs quit while a run waits. No command is sent again, and the quit and a view kill send no command. |
+| PD28 | `490b6a21` | None | Phase D gate part 1. |
+| PD29 | `6a4cbeec` | `8c2b780` | Phase D gate part 2. It also fixes the two defects listed below. |
+| PD30 | `5be45383` | None | Phase D gate part 3. |
+| PD31 | Uncommitted | Uncommitted | This section, the updates of the Phase E section, and the README of the Emacs worktree. |
+
+The gate found two defects, and PD29 fixed each at its owner with a test
+that failed first:
+
+- On macOS `waitid` with `WEXITED` also reports a stopped child, and
+  `agentic_child_exited` in `runtime/cbits/process_group.c` read that report
+  as an exit. The group monitor of the manager then ended a stopped worker
+  group. The function now counts only `CLD_EXITED`, `CLD_KILLED` and
+  `CLD_DUMPED`. The section "Gate of Phase E" below states the effect on
+  `failures-launched`.
+- The Emacs client stopped when the manager refused a page-set read of a
+  lineage collection with 429 `storage-quota`, which the manager gives to a
+  client that already holds two active page sets. A read of a service
+  command that the manager refuses with 429 `storage-quota` or 503
+  `storage-unavailable` is now read again after 0.2 seconds, at most 50
+  reads in all. A read is never a command, so nothing is sent again.
+
+### Emacs modes and their paired commits
+
+The Emacs modes of `manager/test/service_http.py` run files of the Emacs
+worktree, so each mode needs a matching pair of the two repositories. The
+`emacs-client` and `emacs-client-controls` modes refuse a report whose
+`harnessVersion` differs from 10 with one sentence. The `emacs-service`
+modes require report version 1 and the `emacs-service-lifecycle` mode
+requires report version 2 from `ci/emacs-ui.py`. Each mode needs `EMACS`
+and `WF_EMACS_DIR`, and the `emacs-service` modes also need `WF_EMACS_UI`.
+The Integrator recorded these pairs in the commit messages:
+
+| Mode | Pairs recorded in the commit messages (agent-cat with `emacs-native`) |
+| --- | --- |
+| `emacs-client` | `75bf4058` with `4804e3e` (PD15), `8d62cf7d` with `1fb68e7` (PD16), `682439d1` with `5de5f83` (PD18), `db9b9c75` with `70fecf9` (PD19, harness version 5), `6707f6a1` with `dc258f1` (PD20, version 6), `c4f4091e` with `66144b3` (PD21, version 7), `93280369` with `8536023` (PD23, version 9), `a6f54044` with `59f27ed` (PD24, version 10), and `6a4cbeec` with `8c2b780` (PD29) |
+| `emacs-client-controls` | `737fe82c` with `0c3b202` (PD22, harness version 8), and `6a4cbeec` with `8c2b780` (PD29) |
+| `emacs-service`, `emacs-service-broken-answer` | `75ce6752` with `2477a47` (PD25), and `6a4cbeec` with `8c2b780` (PD29) |
+| `emacs-service-lifecycle` | `14c97821` with `5425213` (PD26, report version 1), `832ea3d3` with `6745f4b` (PD27, report version 2 with `--service-handshake`), and `6a4cbeec` with `8c2b780` (PD29) |
+
+The PD17 commit message names no `emacs-native` commit. The PD18 commit
+`5de5f83` names the follow-up issue `acat-FOLLOWUP`, which is
+`acat-uvn3`. The gate ran every Emacs mode on agent-cat `6a4cbeec` with
+`emacs-native` `8c2b780`, and that pair, or a later commit of this branch
+with `8c2b780`, is the pair to use. With an earlier `emacs-native` commit,
+the `emacs-client` lineage step can fail on the 429 refusal above, as it
+did in the first PD29 run.
+
+### Gate of Phase D
+
+The gate ran each step once under the operator direction of 2026-09-29.
+Each step has a `.log` and an `.exit` file under `PD/PD28/impl-r1`,
+`PD/PD29/impl-r1` or `PD/PD30/impl-r1`.
+
+1. PD28, on agent-cat `832ea3d3`: `make -C doc check`, the incremental
+   Werror build of all targets with `-ftui-tests` and `tui-model-test`,
+   `tui-model-test` at N1 and N8, and the journey pair at N1 and N8 (fixture
+   root `pdgate.N5tbybYv`) passed. Each control failed at N8 with its literal
+   message: `tui-journey-broken-answer` ("JOURNEY-ASSERT typed answer is not
+   JSON false"), `tui-consent-control` ("detail-view key approved a review")
+   and `tui-flow-approve-fault` (its literal storage-unavailable refusal).
+   At N8 `manager-command-check` with `command_contract.py` and
+   `credential_cli.py`, `manager-store-check`, `manager-draft-check` with
+   `draft_contract.py`, `manager-history-check`, `manager-admission-check`
+   and `manager-approval-check` with `approval_contract.py` passed in their
+   main forms.
+2. PD29, first run on agent-cat `490b6a21` with `emacs-native` `6745f4b`:
+   ten modes passed, `failures-launched` failed with "the stopped worker
+   processes after the manager loss" (fixture root
+   `pd29-failures-launched.rbaOG7jQ`), and `emacs-client` failed on the 429
+   refusal of a lineage read (fixture root `pd29-emacs-client.BFt4hEyK`).
+   The run is kept under `PD/PD29/impl-r1/r0-before-fixes`.
+3. PD29, on the fixed trees (agent-cat `6a4cbeec` and `emacs-native`
+   `8c2b780`): the build, `runtime-contract-test` and its
+   `--process-group-test` passed, and `ci/emacs.sh` passed. At N8 these
+   modes passed: `failures-launched` (6 PASS lines), `controls`, `mixed`,
+   `mutations-captures`, `mutations-lineage`, `pi-client` (21),
+   `pi-client-controls`, `emacs-client` (28), `emacs-client-controls`,
+   `emacs-service` (21) and `emacs-service-lifecycle` (41). The control
+   `emacs-service-broken-answer` failed with "JOURNEY-ASSERT Emacs answer is
+   JSON false". In `ext-pi`, `npm run check` passed, `npm test` passed with
+   16 files and 219 tests, and 29 live-gated tests in 5 files skipped, and
+   `npm run test:integration` passed with 4 files and 8 tests. `make -C doc
+   check` passed.
+4. PD30, on agent-cat `6a4cbeec` and `emacs-native` `8c2b780`: `wf` was
+   rebuilt against the current `agentic`. `ci/emacs.sh` passed with
+   warning-free byte compilation of six files, silent checkdoc, ERT smoke
+   38 of 38 and vector and transport ERT 96 of 96. The local cases of
+   `ci/emacs-ui.py` passed with 8 PASS lines, the form case at 40x12, 80x24
+   and 140x36 included, and `ci/emacs-tramp.py` passed against a loopback
+   sshd. `git diff --exit-code a17a015b -- doc/api/openapi.yaml
+   test/manager_client_vectors.json` was empty, and the `DataBroker` record
+   in `runtime/src/Agentic/Runtime/Broker.hs` keeps its nine operations in
+   order. `bash tui/ci/tui.sh` passed, and the incremental `-ftui-tests`
+   build of `agentic-run` and `routing-fixed-point-probe` then passed.
+5. PD31 ran `make -C doc check` after the edit of this section.
+
+### Checks not run
+
+- The checks that the operator direction of 2026-09-29 removes from routine
+  validation, as the Phase E section lists them, and every N1 run other
+  than `tui-model-test` and the journey pair.
+- The PD28 steps ran on `832ea3d3`, before the Runtime fix of PD29. The
+  journey pair, its three controls and the owner checks did not run again
+  on the final tree. The build, `runtime-contract-test`, the twelve modes
+  of step 3, the `ext-pi` suites and `bash tui/ci/tui.sh`, which runs
+  `tui-model-test` and the local TUI probes, ran after the fix.
+- The `service_http.py` modes `routes`, `pages`, `mutations-discard`,
+  `mutations-exports`, `controls-routing`, `failures-worker`,
+  `failures-manager` and `storage`, the TUI service PTY modes and their
+  controls,
+  `manager-worker-check`, `test/control_probe.py`, `manager-client-check
+  vectors` and `client_native.py`. The vector file and the contract did not
+  change.
+- The Pi-host modes `pi-host-smoke`, `pi-host`, `pi-host-model` and their
+  controls, which did not run after the `ext-pi` changes of PD1 and PD2.
+  `npm test`, the integration suites, `pi-client` and `pi-client-controls`
+  ran after them.
+- Emacs 29.1, the declared minimum, and every Emacs version other than
+  30.2. Linux and remote hosts. The service modes ran at N8 only.
+- The fail-over and abandon choices of a recovery decision in service mode.
+  Only offline tests send `choose-recovery`. No service-mode check resizes
+  the steer editor. A redirect runs live in `emacs-client-controls` through
+  keyboard macros in batch Emacs, not in the PTY.
+- `cli/ci/routing-config.sh`, `cli/ci/examples.sh`,
+  `engine/agent-deck/ci/deck.sh`, `manager/ci/vertical.sh`,
+  `manager/ci/supervision.sh`, `engine/acp/ci/acp.sh` and
+  `engine/acp/ci/route-live.sh`, for the reasons of the Phase E section.
+
+### Deferred security items
+
+The operator direction of 2026-09-30 defers security work. None of these
+items ran in Phase D:
+
+- Scans that show that the bearer never appears in Custom displays,
+  buffers, histories, `*Messages*`, process arguments or process errors of
+  Emacs. The profile record keeps the bearer in its `credential` slot, and
+  a printed record is not redacted.
+- Credential-file hardening in Emacs Lisp: the gap between the `lstat`
+  check and the read of a private file.
+- A nesting-depth bound in the exact JSON decoder of Emacs.
+- A TLS 1.3 pin and a cryptographic nonce source for idempotency keys.
+- A live negative with a wrong CA file in `emacs-client`. The transport
+  binds `network-security-level` to `low` for its own processes, and the
+  GnuTLS verification against the profile CA file is the trust decision. An
+  offline ERT test refuses a server of another CA.
+- Name Constraints parity in the Emacs client, with the Name Constraints
+  work of the Phase E section.
+- An exclusive save of a result that publishes through a hard link.
+- Security negatives for the lineage and export routes from Emacs, and
+  hostile-input and transport negatives for the Emacs client beyond the
+  shared vectors.
+- A threat model for Emacs service mode and a security gate for WM-030 to
+  WM-032.
+- Every deferred security item of the Phase E section.
+
+### Package status and open tracker items
+
+| Package or item | Status | Tracker |
+| --- | --- | --- |
+| WM-030 | Met for function by PD8 to PD18 and PD29, with the `poll` delivery named. The minimum-version item is open, because no check runs Emacs 29.1. Security items deferred. | `acat-wm-030-t2l4` open for the Integrator |
+| WM-031 | Met for function by PD19 to PD24 and PD26. Local mode passes its local and TRAMP gates. Security items deferred. | `acat-wm-031-5yxo` open for the Integrator |
+| WM-032 | Met for function by PD25 to PD27, except that no service-mode check drives the fail-over or abandon choice, resizes the steer editor, or drives a redirect in the PTY. The broken-answer control fails with its literal message. | `acat-wm-032-eh4r` open for the Integrator |
+| G4 | Open. It also needs the cross-client witness of WM-039. | `acat-g4-pech` |
+| Phase E review findings | PD1 fixes items 1 and 7, PD2 item 2, PD5 and PD6 item 5, and PD29 item 12. PD3 fixes item 3 for GET routes. PD4 fixes the pre-lock window of item 4, and engine coverage stays open. Items 6, 8 to 11 and 13 stay open. | `acat-phase-e-review-findings-0l73` |
+| PE27, `ext-pi` devDependency pins | Needs operator authorization, unchanged from the Phase E section | None |
+
+The fess follow-up issues of PD1 to PD30 stay open:
+`acat-pd1-fess-followup-5511`, `acat-pd2-fess-followup-mrk9`,
+`acat-pd3-fess-followup-uo4y`, `acat-pd4-fess-followup-sz0a`,
+`acat-pd5-fess-followup-z3dh`, `acat-qte9`, `acat-s1wf`, `acat-6xor`,
+`acat-74xn`, `acat-j1ja`, `acat-w80s`, `acat-pd12-fess-followup-2tw2`,
+`acat-pd13-fess-followup-c1o3`, `acat-ns5n`, `acat-nkp9`, `acat-s6zt`,
+`acat-6vh7`, `acat-uvn3`, `acat-olgd`, `acat-f7xu`, `acat-yopa`,
+`acat-8d3g`, `acat-4ot9`, `acat-ga56`, `acat-pj3o`,
+`acat-pd26-fess-followup-14x8`, `acat-pd27-fess-followup-1ueu`,
+`acat-pd28-fess-followup-azam`, `acat-pd29-fess-followup-h43e` and
+`acat-pd30-fess-followup-jwla`. This closeout changed no tracker item.
+
+Open functional limits of Phase D:
+
+- Emacs reads events only in the `poll` delivery. The TCP connect and the
+  TLS handshake of each request block Emacs until they end, which takes
+  milliseconds on 127.0.0.1.
+- The dispatch of service mode is global. In service mode a command acts on
+  the manager also in the view of a local run.
+- `wf-answer` refuses a recovery head. `wf-control` sends the recovery
+  choices.
+- A cancel, a steer and a redirect show their effect only in their receipt,
+  so their reconciliation without a receipt location stays uncertain.
+- The snapshot stores a one-line preview of at most 500 code points of an
+  answer. A structured answer and a longer text therefore reconcile from the
+  control view, in `ext-pi` and in Emacs, and an uncertain answer of a
+  cancelling run stays uncertain.
+- A lineage request sent while a run view retrieves the verified result of
+  that run can receive 412 `stale-revision`, because the retrieval changes
+  the revision of the run. A second run of the command reads the collection
+  again.
+- The client reads the bearer once, when the profile loads. After a
+  rotation the profile must load again.
+- In the `emacs-client` fixtures, the standard error of the manager records
+  `GET /v1/snapshot` responses with public status 503 `storage-unavailable`
+  and the class `unexpected InvalidRequest`. The modes pass. The cause is
+  not established.
+- A POST route still gives its Store requests separate admission deadlines
+  (`acat-pd3-fess-followup-uo4y`).
+
+### Next action
+
+1. The Integrator commits this section, the updates of the Phase E section
+   and the README of the Emacs worktree on `emacs-native`, and records the
+   package status above in the tracker.
+2. The operator decides PE27, the devDependency pins.
+3. The next run takes the functional parts of Phase F (WM-039 to WM-041)
+   and Phase G (WM-042 to WM-044) under the functionality-first and fast
+   rules, with the open functional findings above at their owners. The
+   security stage waits for the operator to schedule it.
+
 ## Phase E of 2026-10
 
 The resume workflow completed Phase E under the operator directions of
@@ -234,7 +526,8 @@ rule.
   `supervision` field of the control view of a run with no live original
   worker. Of the checks before it, `failures-worker` and `controls` ran
   again after it, and steps 9 to 15 ran on the final tree. `mixed` and
-  `mutations-lineage` did not run again on the final tree.
+  `mutations-lineage` did not run again in Phase E. The Phase D gate ran
+  both at N8 (PD29).
 - Captured inputs, endpoint switching with two managers, three terminal
   sizes and resize in the actual Pi-host PTY. The `pi-client` live test
   covers captured inputs, a unit test with a fake transport covers the
@@ -339,12 +632,15 @@ Open functional limits of Phase E:
   states these windows.
 - A fork review with more than one replacement, and a lineage review with a
   profile identifier of about 70 characters or more, do not fit 80x24.
-- The reconciliation of an uncertain Pi answer cannot observe its effect
-  live, because the manager answers 404 for a decision that is no longer
-  pending (`acat-pe18-fess-followup-3ykw`).
-- `/wfm-steer`, `/wfm-redirect`, `/wfm-resume`, `/wfm-fork` and the
-  two-page history follow have fake-transport evidence only. A model start
-  supplies literal inputs only.
+- An uncertain Pi answer reconciles from the run snapshot or the control
+  view since PD2. The snapshot stores a one-line preview of at most 500 code
+  points, so a structured answer and a longer text reconcile from the
+  control view, and an uncertain answer of a cancelling run stays
+  uncertain (`acat-pd2-fess-followup-mrk9`).
+- `/wfm-resume`, `/wfm-fork` and the two-page history follow run live in
+  the `pi-client` mode since PD5, and `/wfm-steer` and `/wfm-redirect` run
+  live in the `pi-client-controls` mode since PD6. A model start supplies
+  literal inputs only.
 - The Pi editor trims submitted text and expands tabs, so the Pi-host
   literal has no edge white space or tab.
 
@@ -358,16 +654,19 @@ WM-037 and WM-038. The working lens ran the journey pair at N1 and N8 on
 `841ce0c7` after an incremental `-ftui-tests` build, and both passed. No
 fix round ran. The closeout applied the documentation corrections of the
 review: the owned-to-lost wording, the PE28 row, the step range and the
-fork and resume statement. The other findings stay open:
+fork and resume statement. Phase D fixed six of the findings, and the
+table below no longer lists them: PD1 fixed the endpoint switch whose
+overview read fails and the reads queued before a switch, PD2 the
+reconciliation of an uncertain answer through the decision resource, PD5
+and PD6 the fake-transport evidence of the Pi lineage, history and control
+commands, and PD29 the SIGHUP dependence of the frontend proxy. PD4 fixed
+the pre-lock crash window. The other findings stay open:
 
 | Severity | Finding | Location |
 | --- | --- | --- |
-| Medium | An endpoint switch that binds but whose overview read fails reports the new endpoint as connected, and no event delivery runs until the user selects a profile again. | `ext-pi/src/service-mode.ts`, `ext-pi/src/manager/session.ts` |
-| Medium | An uncertain `/wfm-answer` or recovery choice is reconciled through the decision resource, which answers 404 once the decision is not pending, so the command stays uncertain. Nothing is resent. Reconcile through the command resource or the run state. | `ext-pi/src/manager-ui.ts` (`acat-pe18-fess-followup-3ykw`) |
 | Medium | Partly fixed by PD3. Each non-streaming GET route now waits for its locks within one five-second admission deadline, and `repeatChangedRead` uses the deadline of its store. A POST route still gives its resolve read, its submission and its receipt view separate deadlines, so one POST route can wait about 15 seconds under contention (`acat-pd3-fess-followup-uo4y`). | `manager/src/Agentic/Manager/Application.hs`, `manager/src/Agentic/Manager/Store.hs` |
-| Medium | The pre-lock crash window above, and engines outside the owner lock under option C. | `manager/src/Agentic/Manager/Quarantine.hs`, `cli/src/Agentic/Cli/Frontend.hs` (`acat-engine-owner-lock-coverage-9snr`) |
+| Medium | Engines outside the owner lock under option C. | `manager/src/Agentic/Manager/Quarantine.hs`, `cli/src/Agentic/Cli/Frontend.hs` (`acat-engine-owner-lock-coverage-9snr`) |
 | Low | `assertLocalStateRoot` runs only in the restore path, so a local launch, preview or lineage preflight can still write under a manager root. | `ext-pi/src/launch.ts`, `ext-pi/src/supervisor.ts` |
-| Low | Reads queued before an endpoint switch are sent to the new endpoint. The generation check discards their results. | `ext-pi/src/manager/session.ts` |
 | Low | A failed catalogue read of one profile stops `/wfm` and the manager start tool for every profile. | `ext-pi/src/manager-ui.ts` |
 | Low | A malformed manager profile setting makes `session_start` skip the local restore and the bridge start. | `ext-pi/src/index.ts` |
 | Low | A fork review with more than one replacement, and a lineage review with a profile identifier of about 70 characters or more, do not fit 80x24. | `tui/src/Agentic/Tui/Presentation.hs` |
@@ -376,17 +675,13 @@ fork and resume statement. The other findings stay open:
 
 ### Next action
 
-1. The Integrator commits the closeout edits of this section,
-   `manager/CONTROLS.md` and `manager/src/Agentic/Manager/State.hs`, and
-   records the package status above in the tracker.
+1. The closeout edits of this section, `manager/CONTROLS.md` and
+   `manager/src/Agentic/Manager/State.hs` are committed as `a17a015b`. The
+   tracker records of the package status above wait for the Integrator.
 2. The operator decides PE27, the devDependency pins.
-3. The next run takes the functional parts of Phase F (WM-039 to WM-041)
-   and Phase G (WM-042 to WM-044) under the functionality-first and fast
-   rules, with the open functional findings above at their owners. Phase D,
-   Emacs service mode (WM-030 to WM-032), runs on the `emacs-native` branch
-   of agent-workflows that the operator decisions of 2026-10-01 authorize,
-   once the operator confirms that this ownership answer stands for the
-   run. The security stage waits for the operator to schedule it.
+3. Phase D, Emacs service mode (WM-030 to WM-032), ran on the
+   `emacs-native` branch of agent-workflows after this phase. The "Next
+   action" of the Phase D section above gives the next step.
 
 ## Phase C of 2026-10
 
