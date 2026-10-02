@@ -74,7 +74,7 @@ consent_control = len(sys.argv) == 6 and sys.argv[5] == "tui-consent-control"
 # runs one manager lifetime and does not enter the restart loop.
 LIFECYCLE = "credential-lifecycle"
 lifecycle = len(sys.argv) == 6 and sys.argv[5] == LIFECYCLE
-mixed = len(sys.argv) == 6 and sys.argv[5] in ("mixed", "mixed-confirm", "tui-approval", "tui-consent-control", APPROVE_FAULT, LIFECYCLE, "pages", "routes", "failures-worker", "failures-manager", "failures-launched", "storage", "pi-client", "pi-client-controls", "pi-host-smoke", "pi-host", "pi-host-broken-answer", "pi-host-model", "pi-host-model-decline") + JOURNEYS
+mixed = len(sys.argv) == 6 and sys.argv[5] in ("mixed", "mixed-confirm", "tui-approval", "tui-consent-control", APPROVE_FAULT, LIFECYCLE, "pages", "routes", "failures-worker", "failures-manager", "failures-launched", "storage", "pi-client", "pi-client-controls", "emacs-client", "pi-host-smoke", "pi-host", "pi-host-broken-answer", "pi-host-model", "pi-host-model-decline") + JOURNEYS
 confirm_uncertain = mixed and sys.argv[5] == "mixed-confirm"
 # The boundary mode checks WM-024 through the running protected manager with
 # raw socket and ssl connections: plaintext and TLS 1.2 refusal, request
@@ -502,6 +502,78 @@ client_controls_mode = len(sys.argv) == 6 and sys.argv[5] in CLIENT_CONTROLS_MOD
 # The steering text of the pi-client-controls mode. STEER_TEXT of
 # ext-pi/test/manager-controls-live.test.ts states it.
 PI_CONTROLS_STEER_TEXT = "Pi steer \u03bb: focus on the patch."
+# The emacs-client mode runs the live check of the Emacs transport of the
+# agent-workflows repository against the running protected manager with the
+# mixed fixture and one profile. It needs two variables: EMACS, the Emacs
+# executable, and WF_EMACS_DIR, the emacs directory of an agent-workflows
+# checkout, which must hold wf-manager.el and the live check
+# wf-manager-live.el. When one is unset, or the directory has no
+# wf-manager-live.el, the mode fails with one sentence that names the missing
+# item before it starts anything. The mode issues through TuiModeFixture one
+# client credential emacs with the scopes observe, submit, control and export
+# of profile_1, its version 1 client profile with the fields version,
+# endpoint, credentialFile and caFile, and a separate credential for the
+# harness. It runs EMACS -Q --batch with an environment built from
+# EMACS_ALLOWLIST, with HOME set to a new directory of the fixture and
+# user-emacs-directory set to a directory below it, with -L WF_EMACS_DIR,
+# -l wf-manager-live and -f ert-run-tests-batch-and-exit, and with
+# WF_MANAGER_PROFILE set to the client profile, WF_MANAGER_REPORT set to a
+# report file and WF_MANAGER_REVOKE set to a handshake file. ERT must report
+# its one test passed. When the check writes the handshake file, the harness
+# revokes the credential emacs through local administration and writes the
+# handshake file with the suffix .done. This revocation is the only action of
+# the harness during the check, which otherwise only reads.
+# The report is one JSON object. The mode needs these fields: harnessVersion,
+# steps, prompts, scheme, endpointIdentity, authorityEpoch, workflowId,
+# requestId, createStatus, replayStatus, replayEqual, inputName, literal,
+# setInputCommand, setInputState, staleTag, currentTag, staleRefusal,
+# revokedRefusal, processesAfterClose, buffersAfterClose and
+# directoryRemoved. The mode first refuses, with one sentence, a report whose
+# harnessVersion differs from EMACS_HARNESS_VERSION, which detects a
+# mismatched pair of the two repositories. It then requires the steps bind,
+# draft, stale, revoke and close in that order and no prompt, and checks the
+# report against its own reads:
+# 1. The check bound its transport over https with the CA file of the
+# profile, with a 32-digit endpoint identity and the authority epoch of the
+# capabilities that the harness reads.
+# 2. The draft POST with an idempotency key gave 201, and the same key gave
+# 201 with the same draft. The harness reads that /v1/requests lists exactly
+# that one request, of the workflow mixed-controls, and that the command
+# events after the start cursor name one create command of /v1/requests and
+# then one set-input command of the request, and no other command.
+# 3. The set-input command of the report reached the effect
+# effect-observed, and the request that the harness reads supplied exactly
+# EMACS_LITERAL and has the entity tag currentTag, which differs from
+# staleTag. The second set-input with staleTag received the typed refusal
+# 412 stale-revision, and the set-input command of the command events is
+# the command of the report, with the state effect-observed.
+# 4. After the revocation, the check received the typed refusal 401
+# unauthenticated with no prompt, and the harness reads 401 with the revoked
+# credential.
+# 5. After the close, no new process and no new buffer of the session remain,
+# and the session directory is gone.
+# Each step prints its own PASS line. It runs one manager lifetime.
+EMACS_CLIENT = "emacs-client"
+emacs_client_mode = len(sys.argv) == 6 and sys.argv[5] == EMACS_CLIENT
+# The version of the report of emacs/wf-manager-live.el. The constant
+# wf-manager-live-harness-version there states the same version.
+EMACS_HARNESS_VERSION = 1
+# The literal input of the emacs-client mode. wf-manager-live-literal of
+# emacs/wf-manager-live.el states it.
+EMACS_LITERAL = "Emacs \u03bb \u96ea\U0001F600 input."
+# The variables that the batch Emacs takes from the environment of the harness.
+EMACS_ALLOWLIST = ("PATH", "LANG", "LC_ALL", "TMPDIR", "USER", "LOGNAME")
+if emacs_client_mode:
+    emacs_program = os.environ.get("EMACS", "")
+    emacs_directory = os.environ.get("WF_EMACS_DIR", "")
+    if not emacs_program:
+        raise SystemExit("The emacs-client mode needs EMACS, the Emacs executable, and EMACS is unset.")
+    if not (os.path.isfile(emacs_program) and os.access(emacs_program, os.X_OK)):
+        raise SystemExit(f"The emacs-client mode needs EMACS, the Emacs executable, and {emacs_program} is not an executable file.")
+    if not emacs_directory:
+        raise SystemExit("The emacs-client mode needs WF_EMACS_DIR, the emacs directory of agent-workflows, and WF_EMACS_DIR is unset.")
+    if not os.path.isfile(os.path.join(emacs_directory, "wf-manager-live.el")):
+        raise SystemExit(f"The emacs-client mode needs wf-manager-live.el in WF_EMACS_DIR, and {emacs_directory} has no such file.")
 # The Pi host modes start the built Pi fork in a pseudo-terminal through the
 # shared launcher PiHost. The launcher reuses the credential issuance of
 # TuiModeFixture with the mixed fixture, one profile and one execution
@@ -1466,7 +1538,8 @@ class TuiModeFixture:
     for the harness through local administration, so that the requests of the
     harness spend nothing of the per-client bounds of the TUI credential
     (sseReadersPerClient 2 and ordinaryMutationsPerMinute 30). The pi-client
-    mode names its client credential pi instead of tui. session()
+    mode names its client credential pi instead of tui, and the emacs-client
+    mode names it emacs. session()
     starts the TUI through TuiSession, at 80x24 by default. credential_ids
     holds the credential identifier of each issued credential, and renew()
     issues a new TUI credential with its own client profile."""
@@ -1560,7 +1633,8 @@ if endpoints_mode:
                         "expiresAt": "2999-01-01T00:00:00Z", "outputFile": str(work / ("credential-" + name))})
 tui_fixture = (TuiModeFixture(*TUI_MODES[tui_mode]) if tui_mode else
                client_controls_fixture(CLIENT_CONTROLS_MODES[sys.argv[5]]) if client_controls_mode else
-               TuiModeFixture(["profile_1"], ["observe", "submit", "control", "export"], client="pi") if pi_client_mode or pi_host_smoke_mode or pi_host_mode or pi_host_model_mode else None)
+               TuiModeFixture(["profile_1"], ["observe", "submit", "control", "export"], client="pi") if pi_client_mode or pi_host_smoke_mode or pi_host_mode or pi_host_model_mode else
+               TuiModeFixture(["profile_1"], ["observe", "submit", "control", "export"], client="emacs") if emacs_client_mode else None)
 configuration["administrationRoot"] = str(work / "admin")
 config.write_text(json.dumps(configuration))
 context = ssl.create_default_context(cafile=str(cert))
@@ -10315,6 +10389,135 @@ def pi_client_controls_checks():
         (work / "server-0.exit").write_text(str(process.returncode) + "\n")
 
 
+def emacs_client_checks():
+    """The emacs-client mode. See EMACS_CLIENT for the steps."""
+    harness = tui_fixture.harness
+    profile_path = tui_fixture.client_profile
+    profile = json.loads(profile_path.read_bytes())
+    report_path = work / "emacs-client-report.json"
+    log_path = work / "emacs-client-ert.log"
+    revoke_path = work / "emacs-client-revoke.json"
+    revoked_path = work / "emacs-client-revoke.json.done"
+    home = work / "emacs-home"
+    home.mkdir(mode=0o700)
+    (home / ".emacs.d").mkdir(mode=0o700)
+    emacs_client = {"Authorization": "Bearer " + Path(profile["credentialFile"]).read_bytes().decode("ascii")}
+    with (work / "server-0.stdout").open("wb") as output, (work / "server-0.stderr").open("wb") as errors:
+        process = subprocess.Popen([str(runner), "--manager", "serve", "--config", str(config),
+                                    "+RTS", "-N" + native, "-RTS"], stdout=output, stderr=errors)
+    try:
+        with harness_reads_only():
+            wait_ready(process)
+            status, capabilities, _ = request("/v1/capabilities", harness)
+            assert status == 200, ("capabilities", status)
+            status, catalogue, _ = request("/v1/workflows?profileId=profile_1", harness)
+            assert status == 200, ("catalogue", status)
+            workflow = next(item for item in catalogue["items"] if item["name"] == "mixed-controls")
+            status, overview, _ = request("/v1/snapshot", harness)
+            assert status == 200 and not overview["items"], ("the overview is not empty before the check", status)
+            cursor = overview["cursor"]
+            environment = {name: os.environ[name] for name in EMACS_ALLOWLIST if name in os.environ}
+            environment.update(HOME=str(home), WF_MANAGER_PROFILE=str(profile_path),
+                               WF_MANAGER_REPORT=str(report_path), WF_MANAGER_REVOKE=str(revoke_path))
+            command = [emacs_program, "-Q", "--batch",
+                       "--eval", "(setq user-emacs-directory " + json.dumps(str(home / ".emacs.d") + "/") + ")",
+                       "-L", emacs_directory, "-l", "wf-manager-live", "-f", "ert-run-tests-batch-and-exit"]
+            revoked = False
+            with log_path.open("wb") as log:
+                child = subprocess.Popen(command, cwd=home, env=environment, stdin=subprocess.DEVNULL,
+                                         stdout=log, stderr=subprocess.STDOUT)
+                try:
+                    deadline = time.monotonic() + 300
+                    while child.poll() is None:
+                        assert time.monotonic() < deadline, "the Emacs live check exceeded 300 seconds"
+                        if not revoked and revoke_path.is_file():
+                            # The one action of the harness during the check.
+                            administration({"version": 1, "operation": "revoke-credential",
+                                            "credentialId": tui_fixture.credential_ids["emacs"]})
+                            revoked = True
+                            revoked_path.write_text("{}")
+                        time.sleep(0.05)
+                finally:
+                    if child.poll() is None:
+                        child.kill()
+                        child.wait()
+            text = log_path.read_text(errors="replace")
+            if report_path.is_file():
+                report = json.loads(report_path.read_bytes())
+                if report.get("harnessVersion") != EMACS_HARNESS_VERSION:
+                    raise SystemExit(f"The emacs-client mode requires harness version {EMACS_HARNESS_VERSION}, and the report of "
+                                     f"wf-manager-live.el states version {report.get('harnessVersion')!r}, so the agent-cat and "
+                                     "agent-workflows checkouts are not a matching pair.")
+            assert child.returncode == 0, ("the Emacs live check failed", child.returncode, text[-4000:])
+            assert re.search(r"Ran 1 tests?, 1 results? as expected, 0 unexpected", text) and report_path.is_file(), (
+                "the Emacs live check did not run its one test", text[-4000:])
+            assert report["steps"] == ["bind", "draft", "stale", "revoke", "close"] and report["prompts"] == 0, (
+                "the Emacs live check did not complete its steps without a prompt", report["steps"], report["prompts"])
+            # 1. The binding.
+            assert report["scheme"] == "https" and profile["endpoint"].startswith("https://127.0.0.1:"), (
+                "the binding is not over TLS", report["scheme"], profile["endpoint"])
+            assert re.fullmatch(r"[0-9a-f]{32}", report["endpointIdentity"]), ("endpoint identity", report["endpointIdentity"])
+            assert report["authorityEpoch"] == capabilities["authorityEpoch"], (
+                "the binding names another authority epoch", report["authorityEpoch"])
+            print("PASS emacs-client 1: batch Emacs bound GET /v1/capabilities over TLS with the profile CA", profile["caFile"],
+                  "with no prompt, endpoint identity", report["endpointIdentity"], "and authority epoch", report["authorityEpoch"], flush=True)
+            # 2. The draft and its replay.
+            request_id = report["requestId"]
+            assert [report["createStatus"], report["replayStatus"], report["replayEqual"]] == [201, 201, True], (
+                "the draft POST and its replay", report["createStatus"], report["replayStatus"], report["replayEqual"])
+            assert report["workflowId"] == workflow["id"], ("the draft names another workflow", report["workflowId"])
+            status, listed, raw = request("/v1/requests", harness)
+            assert status == 200, ("requests", status)
+            validate("RequestPage", listed, raw)
+            assert [item["id"] for item in listed["items"]] == [request_id] and listed["items"][0]["workflowId"] == workflow["id"], (
+                "the manager does not hold exactly the one draft of the check", [item["id"] for item in listed["items"]])
+            # The command events after the start cursor name one create
+            # command of the draft and then the set-input command, so the
+            # replay and the stale command left no command.
+            receipts = command_receipts(cursor, harness)
+            assert [(receipt["operation"], receipt["resource"]) for _, receipt in receipts] == [
+                ("create", "/v1/requests"), ("set-input", "/v1/requests/" + request_id)], (
+                "the commands of the check", [(resource, receipt["operation"]) for resource, receipt in receipts])
+            print("PASS emacs-client 2: the draft POST with an Idempotency-Key gave 201, the same key gave 201 with the same draft",
+                  request_id, "and the manager holds only that request of workflow mixed-controls and one create command", flush=True)
+            # 3. The set-input command and the stale If-Match.
+            status, current, raw, headers = fetch("/v1/requests/" + request_id, harness)
+            assert status == 200, ("request", status)
+            validate("Request", current, raw)
+            assert current["readiness"]["supplied"] == [{"name": report["inputName"], "source": "literal", "value": EMACS_LITERAL}], (
+                "the request did not supply exactly the literal", current["readiness"]["supplied"])
+            assert report["literal"] == EMACS_LITERAL, ("the report names another literal", report["literal"])
+            assert headers.get("etag") == report["currentTag"] and report["currentTag"] != report["staleTag"], (
+                "entity tags", headers.get("etag"), report["currentTag"], report["staleTag"])
+            assert report["setInputState"] == "effect-observed" and report["staleRefusal"] == [412, "stale-revision"], (
+                "the set-input command and the stale refusal", report["setInputState"], report["staleRefusal"])
+            assert receipts[1][0] == report["setInputCommand"] and receipts[1][1]["state"] == "effect-observed", (
+                "the set-input command", receipts[1][0], receipts[1][1]["state"])
+            print("PASS emacs-client 3: set-input command", report["setInputCommand"], "reached its effect and the request supplied",
+                  "exactly the literal, and the second set-input with the earlier If-Match", report["staleTag"],
+                  "received the typed refusal 412 stale-revision and left no command", flush=True)
+            # 4. The revoked credential.
+            assert revoked and report["revokedRefusal"] == [401, "unauthenticated"], ("the revoked read", revoked, report["revokedRefusal"])
+            status, refused, _ = request("/v1/snapshot", emacs_client)
+            assert status == 401 and refused["code"] == "unauthenticated", ("the harness read with the revoked credential", status)
+            print("PASS emacs-client 4: after the harness revoked credential", tui_fixture.credential_ids["emacs"],
+                  "the next read of batch Emacs received the typed refusal 401 unauthenticated with no prompt", flush=True)
+            # 5. The close.
+            assert [report["processesAfterClose"], report["buffersAfterClose"], report["directoryRemoved"]] == [0, [], True], (
+                "the session left a process, a buffer or its directory", report["processesAfterClose"],
+                report["buffersAfterClose"], report["directoryRemoved"])
+            print("PASS emacs-client 5: after the close, no network process, no url.el buffer and no session directory remain",
+                  flush=True)
+        print("PASS emacs-client: the Emacs transport bound, created and replayed a draft, received the typed 412 and 401",
+              "refusals and closed cleanly against the protected HTTPS endpoint, and the harness confirmed each step from manager facts",
+              flush=True)
+    finally:
+        if process.poll() is None:
+            process.terminate()
+        process.wait(timeout=25)
+        (work / "server-0.exit").write_text(str(process.returncode) + "\n")
+
+
 # The variables that the Pi host takes from the environment of the harness.
 PI_HOST_ALLOWLIST = ("PATH", "TERM", "LANG", "LC_ALL", "TMPDIR", "USER", "LOGNAME", "SHELL")
 # The provider, model and fixed reply of ext-pi/test/fixtures/faux-model.ts.
@@ -11629,6 +11832,11 @@ if pi_client_mode:
 
 if sys.argv[5:] == [PI_CLIENT_CONTROLS]:
     pi_client_controls_checks()
+    raise SystemExit(0)
+
+
+if emacs_client_mode:
+    emacs_client_checks()
     raise SystemExit(0)
 
 

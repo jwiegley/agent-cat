@@ -10093,6 +10093,26 @@ From acat-ubt: only total_msSmul exists; S<K> deserves Gate's set (msSmul s (msS
 ]
 #+end_src
 
+* TODO [#D] Resolve the non-blocking fess findings of subtask PD15
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-nkp9
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-02 Fri 01:19]
+:MODIFIED: [2026-10-02 Fri 01:19]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess audit fess/pd-PD15-r1.md (2026-10-02) on subtask PD15 (WM-030 part 8, agent-workflows emacs-native 4804e3e, agent-cat manager/test/service_http.py mode emacs-client).
+
+1. (low) emacs/wf-manager-live.el:166 and manager/test/service_http.py:10457. The report field scheme comes from the global defvar wf-manager--scheme ("https"), not from the URL that the transport used, so the harness assertion report["scheme"] == "https" is tautological. TLS is proven otherwise (https endpoint, TLS-only manager, successful binding). Fix: take the scheme from the transport request URL, or record the GnuTLS peer status of the connection, and have the harness assert that value.
+
+2. (low, security, deferred under the 2026-09-30 functionality-first direction) emacs/wf-manager.el:3488 with 3654-3657. The transport binds network-security-level to low for its processes, so GnuTLS (gnutls-verify-error t, profile caFile as the only trust file) is the only trust check. No check shows that a wrong caFile is refused. Fix: in the security stage, add a live or offline negative check that a caFile without the server certificate fails the binding.
+
 * DONE [#B] Combinator stratum for Term: the vocabulary workflows are written in
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -10185,7 +10205,7 @@ Interior sits on a lawless LE (Interior.id must take refl as an argument); it is
 :LABELS:   ["workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-10-02 Fri 00:59]
-:MODIFIED: [2026-10-02 Fri 00:59]
+:MODIFIED: [2026-10-02 Fri 01:19]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -10199,6 +10219,20 @@ Non-blocking findings of fess audit fess/pd-PD14-r1.md (2026-10-02) on subtask P
 3. (low) README.md:757 and emacs/wf-manager.el:3417,3614. The README says the session directory holds the NSM settings file and an empty url.el cache directory, but no code creates either one. Fix: say that the directory is where url.el and nsm would write these files, or create the cache directory in wf-manager-transport-open.
 4. (low) emacs/wf-manager.el:3497. The global :around advice on nsm-verify-connection is added on each transport open and never removed. Fix: remove it when the last transport closes, or record why it stays in the module commentary.
 5. (low) Evidence: the failing-first run is recorded only in impl-r1/notes.txt, with no saved log. Fix: keep a failing log in later rounds when one exists.
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 606,
+    "issue_id": "acat-ns5n",
+    "author": "johnw",
+    "text": "PD15 (agent-workflows emacs-native 4804e3e) runs the production https path live: the emacs-client mode of manager/test/service_http.py binds the transport over GnuTLS with the profile caFile against the TLS manager and passed at N8. This covers the runtime part of finding 1. No offline HTTPS test was added, so the finding stays open with the remaining findings.",
+    "created_at": "2026-10-02T08:19:31Z"
+  }
+]
+#+end_src
 
 * DONE [#B] Shortest-list 6: ONE star — CsumIsSup mixin, kstar x := csum (x ^ .)
 :PROPERTIES:
@@ -20633,7 +20667,7 @@ coordination or SQL into the TUI.
 :LABELS:   ["p6","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-02 Fri 00:59]
+:MODIFIED: [2026-10-02 Fri 01:19]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-030
 :SOURCE_REPO: agent-cat
@@ -20762,6 +20796,13 @@ separately tested rather than inferred from one newer Emacs build.
     "author": "johnw",
     "text": "PD14 (WM-030 part 7, agent-workflows emacs-native 543c16f): emacs/wf-manager.el adds an asynchronous HTTP transport through url-retrieve over GnuTLS. Cancellable exchanges with one callback after return; url.el settings applied as let-bindings and buffer-local values (one Accept, no other negotiation header, no redirects, keepalive, cookies, cache or resend, no url-auth or NSM prompt); one Authorization header, Idempotency-Key <authorityEpoch>.<nonce>; bounded response; typed 401 refusal and problem decoding; close kills processes and buffers; capability binding by GET /v1/capabilities after checkCapabilities; events use the bounded poll mode of /v1/events (decision recorded in README). Evidence scope: ci/emacs.sh exit 0, 4 passes over 4 files, transport ERT 58 of 58 (15 new) against a local plain HTTP listener. Fess pd-PD14-r1 not blocking; findings filed as a follow-up. Limitations: the https/GnuTLS/NSM path did not run against a TLS server; no live manager run; follow loop, capture upload and artifact download not yet present; TLS 1.3 pin and cryptographic nonce deferred as security-only. The package stays open.",
     "created_at": "2026-10-02T07:59:46Z"
+  },
+  {
+    "id": 605,
+    "issue_id": "acat-wm-030-t2l4",
+    "author": "johnw",
+    "text": "PD15 (WM-030 part 8, agent-workflows emacs-native 4804e3e and agent-cat manager/test/service_http.py mode emacs-client): emacs/wf-manager-live.el runs one live session in batch Emacs (-Q, isolated HOME and user-emacs-directory) against the manager with the mixed fixture and an emacs credential (observe, submit, control, export on profile_1) with its version 1 client profile. Steps: GET /v1/capabilities binds over TLS with the profile CA and no prompt; a draft POST with Idempotency-Key gives 201 and the replay gives the same draft (exactly one create and one set-input command after the start cursor); a stale If-Match gives a typed 412; the credential revoked mid-session gives a typed 401 on GET /v1/snapshot; close leaves no network process or url buffer. The report carries harnessVersion 1 and the mode refuses a mismatch with one sentence; unset EMACS or WF_EMACS_DIR or a missing wf-manager-live.el fails with one sentence. Two live defects fixed in wf-manager.el: the NSM refused the self-signed certificate after GnuTLS verification (network-security-level bound to low for transport processes only), and url-http refused multibyte header values (headers encoded to unibyte); each has a test that failed before the fix. Evidence scope: ci/emacs.sh passed; build of agentic-run and routing-fixed-point-probe with -ftui-tests passed; emacs-client mode passed at N8 (fess reran it, PASS for all five steps); unset-variable mode failed with its one sentence; JOURNEY N8 passed. Fess pd-PD15-r1 not blocking; two low findings filed as acat-nkp9 (one security item deferred). Limitations: emacs-client mode not run at N1; a pre-revoked credential path not exercised. The package stays open.",
+    "created_at": "2026-10-02T08:19:31Z"
   }
 ]
 #+end_src
