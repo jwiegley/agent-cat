@@ -11295,6 +11295,27 @@ Non-blocking findings of fess audit fess/pd-PD12-r1.md (2026-10-02) on subtask P
 
 1. (low) emacs/wf-manager.el, wf-manager-decode-control and wf-manager-decode-run. The control and run decoders are checked only against test/manager_client_vectors.json. No live /v1/runs item or control view from a real manager passes through them. Fix: in the later transport subtask that reads /v1/runs and the control route, decode real manager responses through these decoders in a live check.
 
+* TODO [#D] Resolve the non-blocking fess findings of subtask PD13
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pd13-fess-followup-c1o3
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-02 Fri 00:37]
+:MODIFIED: [2026-10-02 Fri 00:37]
+:OWNER:    johnw
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess audit fess/pd-PD13-r1.md (2026-10-02) on subtask PD13 (WM-030 part 6, agent-workflows emacs-native b681c1a).
+
+1. (low) README.md:634 of agent-workflows (definition at emacs/wf-manager.el:150, only use at emacs/wf-manager-tests.el:1119). The condition table says wf-manager-transport-unavailable means "The manager could not be reached" with data (KIND REASON). No code signals this condition yet, and the data shape comes from the test fixture. Fix: have the README say that no code signals the condition until the HTTP layer exists, or settle the data shape when that layer lands.
+2. (low) emacs/wf-manager.el, wf-manager-jittered-microseconds, the (not (numberp fraction)) clause. No test covers the non-number fraction branch or the NaN case its docstring mentions, because no vector exercises it. Fix: add a small ERT case for a non-number fraction and for a NaN fraction.
+3. (low) emacs/wf-manager-tests.el:21. The new header comment line is 111 columns because it was not refilled. Fix: refill the comment paragraph.
+
 * TODO [#D] Resolve the non-blocking fess findings of subtask PD2
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -20590,7 +20611,7 @@ coordination or SQL into the TUI.
 :LABELS:   ["p6","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-02 Fri 00:30]
+:MODIFIED: [2026-10-02 Fri 00:37]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-030
 :SOURCE_REPO: agent-cat
@@ -20705,6 +20726,13 @@ separately tested rather than inferred from one newer Emacs build.
     "author": "johnw",
     "text": "PD12 (WM-030 part 5, agent-workflows emacs-native 5ab23e8): emacs/wf-manager.el decodes the controls of a run and run collection items, with projections that follow ext-pi/src/manager/resources.ts. Runtime, supervision, integrity and verification stay separate fields. Evidence scope: ci/emacs.sh exit 0, 4 passes over 4 files, transport ERT 37 of 37, every vector of resources.controls (16) and resources.runs (24). Not yet checked against a live manager response. The package stays open.",
     "created_at": "2026-10-02T07:30:09Z"
+  },
+  {
+    "id": 603,
+    "issue_id": "acat-wm-030-t2l4",
+    "author": "johnw",
+    "text": "PD13 (WM-030 part 6, agent-workflows emacs-native b681c1a): emacs/wf-manager.el adds a pure refresh coordinator after ext-pi/src/manager/refresh.ts (per-resource single-flight reads, dirty coalescing, a generation that a resnapshot or endpoint switch advances so that an earlier-generation completion installs nothing), the reconnection backoff and jitter, and the reconciliation of an uncertain command by one read of the receipt, the target or a supplied reconciliation read (the PD2 rule). No report carries a send; an uncertain report keeps the same record. Evidence scope: ci/emacs.sh exit 0, 4 passes over 4 files, transport ERT 43 of 43, every vector of refresh.sequences (13 cases, 87 steps), backoff (4), jitter (5) and reconciliation (17). Fess pd-PD13-r1 not blocking; three low findings filed as a follow-up. Limitations: no I/O yet; not connected to HTTP, SSE or wf.el; wf-manager-transport-unavailable is not signalled by any code yet. The package stays open.",
+    "created_at": "2026-10-02T07:37:37Z"
   }
 ]
 #+end_src
