@@ -12691,6 +12691,29 @@ Non-blocking findings of fess pf-PF14-r1 (fess/pf-PF14-r1.md) on subtask PF14 (t
 4. (low) ConformanceCheck.hs line 730, Conformance.hs line 699: an approve ask that does not decode is dropped, and a body whose digest does not match yields Nothing, so the variant becomes oracle-only instead of a mismatch. The lane fails only when a whole guarded class has zero guard comparisons. No downgrade happened in the runs (38/38 and 1/1). Fix: report a mismatch when a root has a manager log or a stored body_sha256 for an approve command but no selectors can be recovered.
 5. (low) manager/src/Agentic/Manager/State.hs line 721 against decisionProbe: the probe calls decisionQueueIds, while submitControl reads pendingDecisions. Both use the pendingQueue SQL today. Fix: have submitControl and the probe use one function, or have the probe call pendingDecisions.
 
+* TODO [#D] Resolve the non-blocking fess findings of subtask PF15
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pf15-fess-followup-zpyo
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-02 Fri 16:36]
+:MODIFIED: [2026-10-02 Fri 16:36]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess pf-PF15-r1 (fess/pf-PF15-r1.md) on subtask PF15 (the WM-040 conformance gate script bisim/ci/manager.sh and its three controls).
+
+1. (medium) bisim/ci/manager.sh lines 75-90, 292-298, 365-367: control_result reports a detected break for any nonzero lane status. It does not require 'MANAGER-CONFORMANCE mismatch' in the lane output or a kept counterexample, so an oracle crash, a decode error or a timeout exit of 124 counts as detected in control-oracle and control-case. Fix: capture the lane output, require the literal message and a counterexample count above 0, and exit 3 on any other nonzero outcome.
+2. (medium) bisim/ci/manager.sh lines 331-347: control-model counts any failure of the ManagerConformance build as detected. The helper prints the declaration at each Exec.lean error, but nothing requires it to be answerExec_eq, and it still exits nonzero after 'fails without an error in Exec.lean'. Fix: require that the set of mapped declarations is exactly {answerExec_eq}, otherwise exit 3.
+3. (low) bisim/ci/manager.sh line 341: the regex that maps an error line to its declaration matches only lines that begin with 'theorem' or 'def'. It misses private, attributed, lemma and instance declarations. Fix: allow optional modifiers and attributes and the lemma and instance keywords.
+4. (low) bisim/ci/manager.sh lines 54-56: tree_digest hashes git status --porcelain and git diff HEAD only. A change to the contents of an untracked file does not change the digest. Fix: also hash the contents of untracked files (git ls-files -o --exclude-standard -z | xargs -0 shasum).
+5. (low) bisim/ci/manager.sh lines 145, 151, 186, 193: the counterexample directory is created inside a command substitution in an argument, so a mktemp failure does not trip set -e and the lane receives an empty --counterexamples path. Fix: assign the directory to a local variable first.
+6. (low) bisim/ci/manager.sh lines 257-320: when setup fails, setup_failed exits before require_tree runs and before the cloned Lake packages are removed, so the README sentence on package removal holds on the normal path only. Fix: use an EXIT trap that runs the cleanup and the tree check on every path.
+
 * TODO [#D] Resolve the non-blocking fess findings of subtask PF2
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -23366,7 +23389,7 @@ configuration is changed.
 :LABELS:   ["p9","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-02 Fri 16:08]
+:MODIFIED: [2026-10-02 Fri 16:36]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-040
 :SOURCE_REPO: agent-cat
@@ -23578,6 +23601,13 @@ legacy workflow build cannot conceal an unchecked manager development.
     "author": "johnw",
     "text": "PF14 (refusals lane): manager-conformance-check refusals --root derives seven refused variant classes from the PF13 history (answer-not-head, answer-uncertain, approve-consumed, approve-stale-request-revision, approve-stale-profile-revision, admit-key-overlap, admit-slot-overlap) and requires that manager-oracle refuses each. Guards on a private store copy: State.decisionQueueIds/decisionHeadIds/decisionHeadRefusal, Protocol.Preparation.approvalSelectors, Admission.Policy.oldestEligible; approve-consumed is oracle-only. Two behavior-preserving refactors extract decisionHeadRefusal and approvalSelectors. Evidence (PF/PF14/impl-r1, private): N8 vertical root, 40 manager roots, variants=271 guard-compared=233 oracle-only=38 unchanged-roots=40 mismatches=0, exit 0; journey roots (PF13 and a new JOURNEY-ONCE N8), variants=8 guard-compared=7 oracle-only=1 mismatches=0, exit 0; descriptor control exit 1 with 2 mismatches and counterexamples kept; history lane regression on 40 roots passed. Fess pf-PF14-r1 not blocking; findings filed as acat-pf14-fess-followup-zyqm. WM-040 stays open for closeout.",
     "created_at": "2026-10-02T23:08:14Z"
+  },
+  {
+    "id": 670,
+    "issue_id": "acat-wm-040-3olb",
+    "author": "johnw",
+    "text": "PF15: bisim/ci/manager.sh adds the WM-040 gate with one subcommand per step (closure, lean, build, cases, admission, vertical, history, refusals, corpus) and three controls. Evidence PF/PF15/impl-r1: all nine steps exited 0 (cases 45 with 0 mismatches; vertical N8 with the RestartParent, ResumeParent and ForkParent comparisons). control-oracle exited 1 with MANAGER-CONFORMANCE mismatch and 14 counterexamples kept. control-model built the copied Agentic.Manager, then failed at Exec.lean:161 inside answerExec_eq. control-case exited 1 with MANAGER-CONFORMANCE mismatch for answer-head. No control changed the tree, and git status --short bisim/corpus stayed empty. make -C doc check passed. compareNativeRuns compares answers, effects, checkpoint, bills, policy and manifest lineage, and the restart, resume and fork children are compared, now documented in bisim/manager/README.md. Fess pf-PF15-r1 not blocking; findings filed as acat-pf15-fess-followup-zpyo. WM-040 stays open for the closeout.",
+    "created_at": "2026-10-02T23:36:54Z"
   }
 ]
 #+end_src

@@ -414,7 +414,9 @@ checks at N1 and N8. The executable `manager-conformance-check` compares
 `oldestEligible`, the coordination codec and the stored coordination
 history of retained manager roots with the Lean manager oracle. The
 [manager conformance lanes](../bisim/manager/README.md#the-haskell-lanes)
-describe its `admission`, `cases` and `history` lanes. The [approval owner](APPROVAL.md) supplies complete review, exact approval and actual
+describe its `admission`, `cases`, `history` and `refusals` lanes, and
+`bisim/ci/manager.sh` runs them as the steps of the manager conformance gate.
+The [approval owner](APPROVAL.md) supplies complete review, exact approval and actual
 accepted-running retention through the original Worker. Its owning gate adds final
 worker/deadline checks and interruption evidence without a new service endpoint.
 

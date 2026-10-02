@@ -23,6 +23,82 @@ The import closure contains `Agentic.Manager.*`, Lean core, and the closure
 of `Mathlib.Data.Finmap`. It contains no `Agentic.Core` module and not the
 root module of the model.
 
+## Source directories and entry modules
+
+| Directory | Entry module | Target | Role |
+| --- | --- | --- | --- |
+| `model/Agentic/Manager` | `Agentic.Manager.Meaning`, which imports `Agentic.Manager.Coordination` and `Agentic.Manager.History` | The model globs of `model/lakefile.toml` | The coordination model. |
+| `bisim/manager` | `ManagerConformance` | The library `ManagerConformance` of `bisim/lakefile.toml` | The deciders, the proved equalities, the encoding and the retained cases. |
+| `bisim/manager` | `ManagerOracle` | The executable `manager-oracle` | The oracle process. |
+| `bisim/manager` | `ManagerCases` | The executable `manager-cases` | The writer of `cases/`. |
+| `manager/test` | `ConformanceCheck.hs`, with `Agentic.Manager.Test.Oracle`, `Agentic.Manager.Test.Conformance` and `Agentic.Manager.Test.Refusals` | The executable `manager-conformance-check` of `agentic.cabal` | The Haskell lanes. |
+| `cli/test`, `manager/test` | `ManagerApprovalProbe.hs`, with `VerticalCheck` | The executable `manager-vertical-check` of `agentic.cabal` | The direct-versus-managed vertical check. |
+| `bisim/ci` | `manager.sh` | None | The gate and its controls. |
+
+## The gate
+
+`bisim/ci/manager.sh` is the gate of the manager conformance lane. Each
+subcommand runs one step, so that each step runs under its own timeout.
+Without a subcommand, or with an unknown subcommand, the script prints the
+order of the steps and exits with status 2. Run the steps from the root of
+the repository, through the project environment, in this order.
+
+```sh
+timeout 300 bash bisim/ci/manager.sh closure
+timeout 1800 bash bisim/ci/manager.sh lean
+timeout 900 bash bisim/ci/manager.sh build
+for step in cases admission vertical history refusals corpus; do
+  timeout 900 bash bisim/ci/manager.sh "$step"
+done
+```
+
+| Step | Command and requirement |
+| --- | --- |
+| `closure` | The script follows the imports of each Lean file of `bisim/manager` and `model/Agentic/Manager`. The step fails when the closure holds an `Agentic` module outside `Agentic.Manager`, or an external import outside Lean core and `Mathlib.Data.Finmap`. |
+| `lean` | `lake --dir bisim build --wfail ManagerConformance manager-oracle`. Run this step alone, never beside another Lean build or a Cabal build. |
+| `build` | `bash test/cabal.sh build manager-conformance-check manager-vertical-check routing-fixed-point-probe`, with `-Werror -threaded -rtsopts`. |
+| `cases` | The cases lane on `bisim/manager/cases`. |
+| `admission` | The admission lane at the seed `20261002` with 500 situations. |
+| `vertical` | `manager-vertical-check vertical` with `+RTS -N8`, in a new directory `manager-vertical.XXXXXX/N8` of `$TMPDIR`. The log must hold the line `PASS WM022 non-network vertical lifecycle` and the lines of the restart, resume and fork comparisons. The step then records the directory as the vertical root. |
+| `history` | The history lane on the vertical root. |
+| `refusals` | The refusals lane on the vertical root. |
+| `corpus` | `git status --short bisim/corpus` must be empty. |
+
+The steps keep their state in the directory that `MANAGER_GATE_STATE`
+names, by default `$TMPDIR/agent-cat-manager-gate`. The state holds the file
+`vertical-root` and one counterexample directory `counterexamples/<step>.XXXXXX`
+for each run of a lane. A step that needs a binary or the vertical root and
+does not find it exits with status 1 and names the step that supplies it. The
+lanes use the oracle `bisim/.lake/build/bin/manager-oracle`, and no step
+builds a target of another step.
+
+## The controls
+
+Each control breaks one part of the lane in a copy, in a new directory of
+`$TMPDIR`, and runs the part of the gate that must detect it. A control never
+edits the worktree. It compares the output of `git status --porcelain` and
+`git diff HEAD` before and after its run, and it exits with status 4 on a
+difference. A setup step that fails prints `CONTROL <name> setup failed` and
+exits with status 3. Otherwise the control exits with the status of the broken lane or
+build, so a detected control exits with a status other than 0. A control
+that exits with status 0 was not detected, and the gate is not green. Run the
+controls after the steps, one at a time, and never beside a Cabal build.
+
+```sh
+timeout 1800 bash bisim/ci/manager.sh control-oracle
+timeout 1800 bash bisim/ci/manager.sh control-model
+timeout 300 bash bisim/ci/manager.sh control-case
+```
+
+| Control | Change in the copy | Required failure |
+| --- | --- | --- |
+| `control-oracle` | The copy holds `bisim/manager`, the Lake configuration with the real model at its absolute path, and a clone of `bisim/.lake/packages` made with `/bin/cp -Rc`. In `answerExec`, the head check `head.key = key` becomes `head.key ≠ key`. The copy loses `answerExec_eq` and the declarations that use it or the head check: `Step.exec_eq`, `step_eq` and the `#guard` of an accepted answer in `Codec.lean`. The control builds the `manager-oracle` of the copy under a timeout of 1800 seconds. | The cases lane and the history lane on the vertical root, each with the broken oracle under a timeout of 300 seconds, print `MANAGER-CONFORMANCE mismatch`. The control lists the counterexample files that it keeps. |
+| `control-model` | The copy holds a clone of `model`, with its sources and its `.lake` state, made with `/bin/cp -Rc`, and the copy of `bisim` above with its relative path to the copied model. `Coordination.answer` loses the condition `head.key = key`. The copy loses the three theorems that state the condition: `Coordination.answer_fifo`, `Coordination.answer_nonhead` and `Coordination.answer_reserved`. Only `model/test/ManagerChecks.lean`, which is outside the closure, uses them, and no other theorem of the copied `Agentic.Manager` files fails. | `Agentic.Manager.History`, `Agentic.Manager.Coordination` and `Agentic.Manager.Meaning` of the copy build with `--wfail`. The build of `ManagerConformance` against the copied model then fails, and the control names the declaration at each error position in `Exec.lean`, which is `answerExec_eq`. |
+| `control-case` | The copy of `bisim/manager/cases` changes the authority of the expected state of the accepted case `answer-head` from `authority-1` to `authority-2`. | The cases lane on the copy, with the real oracle, prints `MANAGER-CONFORMANCE mismatch` for `answer-head`. |
+
+The copies keep their sources, logs and counterexamples. The controls remove
+the cloned Lake packages after the run.
+
 ## Build and run
 
 Run each command from the root of the repository, through the project
@@ -87,6 +163,61 @@ The oracle does not evaluate the runtime fold of observations, the HTTP
 service, SQLite storage, process containment, delivery to a worker, or a
 physical engine effect. A response of the oracle makes no claim about these
 boundaries.
+
+## Theorems and axiom footprints
+
+The theorems below hold in `ManagerConformance`. `State` is
+`Coordination String String`, and `HistoryEntry` is
+`Entry Step String String`. `ManagerConformance/Checks.lean` fixes the axiom
+footprint of each theorem with `#guard_msgs`, so a changed footprint fails
+the `lean` step. Each footprint is `propext`, `Classical.choice` and
+`Quot.sound`. No theorem depends on `sorryAx` or on an axiom of its own.
+
+```lean
+theorem openDecisionExec_eq (s : State) (t : EvidenceTable) (run : String)
+    (key : DecisionKey String) :
+    openDecisionExec s t run key = s.openDecision t.toEvidence run key
+theorem answerExec_eq (s : State) (command client run : String) (key : DecisionKey String)
+    (value : String) :
+    answerExec s command client run key value = s.answer command client run key value
+theorem resolveExec_eq (s : State) (t : EvidenceTable) (run command : String)
+    (key : DecisionKey String) (resolution : Resolution) :
+    resolveExec s t run command key resolution =
+      s.resolve t.toEvidence run command key resolution
+theorem releaseExec_eq (s : State) (t : EvidenceTable) (owner : String) :
+    releaseExec s t owner = s.release t.toEvidence owner
+theorem verifyExec_eq (s : State) (t : EvidenceTable) (artifact reference value : String) :
+    verifyExec s t artifact reference value = s.verify t.toEvidence artifact reference value
+theorem eligible_iff (s : State) (id : String) (r : Request String) (profile : Profile String)
+    (lease : Reservation String) :
+    s.eligible id r profile lease ↔ EligibleFin s id r profile lease
+theorem canAdmit_iff (s : State) (id : String) (r : Request String) (profile : Profile String)
+    (lease : Reservation String) :
+    s.canAdmit id r profile lease ↔ CanAdmitFin s id r profile lease
+theorem canApprove_iff (s : State) (t : EvidenceTable)
+    (command preparation revision digest : String) (p : Prepared String String)
+    (r : Request String) (profile : Profile String) :
+    s.canApprove t.toEvidence command preparation revision digest p r profile ↔
+      CanApproveFin s t command preparation revision digest p r profile
+theorem admitExec_eq (s : State) (id : String) (r : Request String) (profile : Profile String)
+    (lease : Reservation String) :
+    admitExec s id r profile lease = s.admit id r profile lease
+theorem approveExec_eq (s : State) (t : EvidenceTable)
+    (command client preparation revision digest : String) (p : Prepared String String)
+    (r : Request String) (profile : Profile String) :
+    approveExec s t command client preparation revision digest p r profile =
+      s.approve t.toEvidence command client preparation revision digest p r profile
+theorem Step.exec_eq (t : EvidenceTable) (step : Step) :
+    step.exec t = step.model t.toEvidence
+theorem step_eq (t : EvidenceTable) (s : State) (entry : HistoryEntry) :
+    step t s entry =
+      coordinationStep observe (some s) (Sum.map (Step.model t.toEvidence) id entry)
+```
+
+`EligibleFin`, `CanAdmitFin` and `CanApproveFin` of
+`ManagerConformance/Admission.lean` replace each quantifier of the model
+guards with the finite entries of the state. The model theorems of
+`Agentic.Manager` and their footprints are listed in `model/README.md`.
 
 ## The encoding
 
@@ -564,3 +695,56 @@ the head order and the reservation check of the manager on those rows, and
 not the order in which the manager observed the decisions. The admission
 probe uses the reservations of the history state, because the rows keep only
 the final reservations.
+
+## Direct-versus-managed evidence
+
+The `vertical` step runs `manager-vertical-check vertical`. For each
+workflow of the check, it executes one run through the manager and one direct
+run as independently owned runtime processes. `compareNativeRuns` of
+`manager/test/VerticalCheck.hs` then compares the two runs. A physical run
+identity, an owner, a creation time, a control identity, a sequence number
+and a timestamp may differ, and each correspondence is a bijection. Every
+other fact must be equal.
+
+| Dimension | Comparison |
+| --- | --- |
+| Answers | The typed answers, the questions and the memo flags of `readAnswerRecords`, and the verified typed value of each question and result artifact. |
+| Effects | The effect records of `readEffectRecords`. |
+| Checkpoint | The semantic checkpoint of `readCheckpoint`. |
+| Bills | The fresh and memoized costs and the result reference of the terminal `RunCompletedV2` event. |
+| Policy | The frozen policy of the run record, the native program, target and policy of the runtime manifest, and the frontend manifest. |
+| Lineage | The parent of the frontend manifest and of the runtime manifest. Both runs have no parent, or the two parents are a pair of the identity table, which the earlier comparison of the parent runs filled. |
+| Journal | Each event, in the physical order or in the declared independent lanes. |
+
+The comparison also requires that a changed answer or a changed bill of the
+observed events fails. The section `lineage` of the vertical check derives a
+restart, a resume and a fork child from the managed parent and from the
+direct parent, for the frontend manifest versions 1, 2 and 3. It compares
+each pair of children with `compareNativeRuns`, so each child comparison
+checks the lineage through the parents of `recordManifest` and the answers.
+The section `routed` does the same for a routed policy. The `vertical` step
+requires the lines of the restart, resume and fork comparisons in its log.
+
+## Boundaries outside the claim
+
+The theorems prove that each decider equals its model transition, and that
+the step of the oracle is the coordination step of the model. The lanes
+compare the implementation with the oracle on finite inputs: the generated
+admission situations, the retained cases, and the histories and refused
+variants of the retained manager roots. The storage square is a check of
+each retained root on the compared dimensions, and not a theorem about every
+store. Neither the theorems nor the lanes make a claim about the following
+physical boundaries.
+
+- The HTTP service: the routes, the transport, authentication and the
+  protocol of `/v1`.
+- The SQLite commit: durability, atomicity, the write-ahead log and the
+  locks. The history lane assumes that the rows of its private copy are the
+  rows that the manager committed.
+- Process containment: the process groups, signals, cleanup and resource
+  claims of a worker.
+- Engine effects: the requests to a model, the effects of a tool, and the
+  bytes that an engine writes.
+
+The representation assumptions of the encoding and the mappings of the
+projection, stated above, are the assumptions of every comparison.

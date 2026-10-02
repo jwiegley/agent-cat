@@ -60,7 +60,14 @@ remains an implementation obligation. This package has no SQLite `stepStorage`
 to which that equation could apply. The proved refinement concerns abstract
 finite-map materialization. Runtime ingestion, storage realization, lifecycle
 and authorization coverage, and their conformance bridge remain separate
-obligations rather than consequences of the abstract proofs.
+obligations rather than consequences of the abstract proofs. The manager
+conformance lane of WM-040, in `../bisim/manager` with the gate
+`../bisim/ci/manager.sh`, now provides the implementation comparison. It
+proves that executable deciders equal the transitions of this model, and it
+compares the admission policy, retained cases and stored manager histories
+of the implementation with those deciders. It does not prove the storage
+equation for every store, and it makes no claim about the HTTP service, the
+SQLite commit, process containment or engine effects.
 
 `test/ManagerChecks.lean` supplies positive mathematical witnesses and refusal
 cases. It also checks the following exact axiom footprints with `#guard_msgs`.

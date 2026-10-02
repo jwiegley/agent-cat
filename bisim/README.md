@@ -71,6 +71,53 @@ executables. It reuses the prebuilt Mathlib artifacts and elaborates only the
 manager modules of the model and the library itself. `bisim/manager/README.md`
 gives the command that replays the retained manager cases through the oracle.
 
+### The manager conformance gate
+
+The sources of the manager conformance lane are in four directories.
+`model/Agentic/Manager` holds the model, with the entry module
+`Agentic.Manager.Meaning`. `bisim/manager` holds the library
+`ManagerConformance` and the entry modules `ManagerOracle` of
+`manager-oracle` and `ManagerCases` of `manager-cases`. `manager/test` holds
+`ConformanceCheck.hs` of `manager-conformance-check` and `VerticalCheck.hs`,
+and `cli/test` holds `ManagerApprovalProbe.hs` of `manager-vertical-check`.
+
+The script `bisim/ci/manager.sh` is the gate of the lane. Each subcommand
+runs one step under its own timeout, and the script without a subcommand
+prints the order of the steps and exits with status 2.
+
+```sh
+timeout 300 bash bisim/ci/manager.sh closure
+timeout 1800 bash bisim/ci/manager.sh lean
+timeout 900 bash bisim/ci/manager.sh build
+for step in cases admission vertical history refusals corpus; do
+  timeout 900 bash bisim/ci/manager.sh "$step"
+done
+timeout 1800 bash bisim/ci/manager.sh control-oracle
+timeout 1800 bash bisim/ci/manager.sh control-model
+timeout 300 bash bisim/ci/manager.sh control-case
+```
+
+The step `closure` checks the import closure, and `lean` builds
+`ManagerConformance` and `manager-oracle` alone. The step `build` builds the
+Haskell executables, and `cases`, `admission`, `history` and `refusals` run
+the lanes. The step `vertical` runs the direct-versus-managed check at N8 and
+records its root for `history` and `refusals`, and `corpus` requires that
+`git status --short bisim/corpus` is empty. Each control works on a copy
+under `$TMPDIR` and must fail: `control-oracle` with a broken oracle,
+`control-model` with a broken model, and `control-case` with a changed
+retained case.
+
+The library proves that each decider equals its model transition, that the
+finite guards are equivalent to the model guards, and that the step of the
+oracle is the coordination step of the model. Each of these twelve theorems
+has the axiom footprint `propext`, `Classical.choice` and `Quot.sound`, which
+`ManagerConformance/Checks.lean` fixes. Every identity and value is an opaque
+string, and the oracle trusts the evidence table that its caller supplies.
+The theorems and the lanes make no claim about the HTTP service, the SQLite
+commit, process containment or engine effects. `bisim/manager/README.md`
+states the theorems, the representation assumptions, the controls and these
+boundaries in full.
+
 `corpus-gen` must leave every corpus byte unchanged. A diff is a change to the
 specification. The script `tier1.sh` requires the prebuilt oracle and refuses
 to build it, which preserves the one-build rule for the expensive model. The
