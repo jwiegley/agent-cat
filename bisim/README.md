@@ -13,7 +13,18 @@ executable.
 local path, and it imports only the cheap closure of the model. It never
 imports `Agentic.Core.DslFlagship` or `Agentic.Core.HardenPatch`. It builds
 the `Conformance` library and the executables `conformance-oracle` and
-`corpus-gen`. `bisim/corpus` holds the frozen vectors. `bisim/haskell/src` is
+`corpus-gen`. The same package builds the separate library
+`ManagerConformance` from `bisim/manager`. That library imports only
+`Agentic.Manager.*` and Lean core, with the `Mathlib.Data.Finmap` closure that
+the manager model imports. It never imports a module of `Agentic.Core` or the
+root module of the model. It instantiates the coordination model at string
+identities and values, defines a finite evidence table, and gives an
+executable decider for each of the transitions `openDecision`, `answer`,
+`resolve`, `release` and `verify`. A theorem proves that each decider equals
+its model transition. `ManagerConformance.Checks` fixes the axiom footprint of
+each equality and evaluates one accepted and one refused closed witness for
+each decider. `ManagerConformance` is not a default target, so `lake build`
+keeps its cost. `bisim/corpus` holds the frozen vectors. `bisim/haskell/src` is
 the internal `bisim-support` library of the `agentic` package. It exposes
 `Agentic.Bisim` over the hidden modules `Agentic.Gen`, `Agentic.Guards`, and
 `Agentic.Oracle`. `bisim/haskell/tier0` is the `tier0` executable, which
@@ -25,6 +36,7 @@ executables need cost and workflow definitions, so they live under
 
 ```text
 bisim/lean -> model                        (Lake path dependency, tests only)
+bisim/manager -> model Agentic.Manager.*   (Lake path dependency, tests only)
 bisim-support -> dsl, plan
 cli/verification -> bisim-support, cost, dsl, plan
 ```
@@ -37,6 +49,10 @@ nix develop path:. -c cabal build all
 ./bisim/ci/tier0.sh
 N=500 SEED=1 ./bisim/ci/tier1.sh
 ```
+
+The command `lake --dir bisim build --wfail ManagerConformance` builds the
+manager conformance library. It reuses the prebuilt Mathlib artifacts and
+elaborates only the manager modules of the model and the library itself.
 
 `corpus-gen` must leave every corpus byte unchanged. A diff is a change to the
 specification. The script `tier1.sh` requires the prebuilt oracle and refuses

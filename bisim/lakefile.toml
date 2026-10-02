@@ -22,3 +22,14 @@ root = "ConformanceOracle"
 name = "corpus-gen"
 srcDir = "lean"
 root = "CorpusGen"
+
+# The manager conformance library: executable deciders of the coordination
+# transitions and their proved equalities with the model. It imports only
+# Agentic.Manager.* and Lean core, with the Mathlib.Data.Finmap closure that
+# the manager model imports. It never imports Agentic.Core.DslFlagship, any
+# other Agentic.Core module, or the root module of the model. It is not a default
+# target, so `lake build` and the corpus tools keep their cost.
+[[lean_lib]]
+name = "ManagerConformance"
+srcDir = "manager"
+globs = ["ManagerConformance", "ManagerConformance.+"]

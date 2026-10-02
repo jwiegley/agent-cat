@@ -7169,7 +7169,7 @@ Protected HTTP access exposes authorized catalogue, history, snapshots, verified
 :LABELS:   ["wm-release-gate","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-09 Wed 22:34]
+:MODIFIED: [2026-10-02 Fri 13:16]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/G3
 :SOURCE_REPO: agent-cat
@@ -7258,6 +7258,20 @@ Request, approval, control, export, and lineage routes pass hostile-input, repla
 ]
 #+end_src
 
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 657,
+    "issue_id": "acat-g3-v1iz",
+    "author": "johnw",
+    "text": "Evidence scope: Phase F part 1 closeout (handoff section 'Phase F part 1 of 2026-10-02', remaining-scope report revision 2; evidence under resume-20260923/PF and Z/CLOSEOUT-pf). Open. The Phase F gate (PF21 to PF24) did not run.",
+    "created_at": "2026-10-02T20:16:21Z"
+  }
+]
+#+end_src
+
 * TODO [#B] WM-G4: Verify three-client acceptance
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -7265,7 +7279,7 @@ Request, approval, control, export, and lineage routes pass hostile-input, repla
 :LABELS:   ["wm-release-gate","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-02 Fri 09:56]
+:MODIFIED: [2026-10-02 Fri 13:16]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/G4
 :SOURCE_REPO: agent-cat
@@ -7455,6 +7469,13 @@ Emacs, TUI, and Pi service modes pass their native UI gates and cross-client/cro
     "author": "johnw",
     "text": "Phase D closeout: the Emacs client of G4 is in place with WM-030 and WM-031 Met and WM-032 Partial. G4 stays open until the WM-032 gaps close and WM-039 supplies cross-machine acceptance. Evidence: doc/workflow-manager-handoff.md section 'Phase D of 2026-10' (Review of Phase D), the review rerun of the journey pair on 91fb0ad4 (N1 and N8 pass) and the closeout make -C doc check (exit 0). Findings are tracked in acat-phase-d-review-findings-raxi.",
     "created_at": "2026-10-02T16:56:14Z"
+  },
+  {
+    "id": 658,
+    "issue_id": "acat-g4-pech",
+    "author": "johnw",
+    "text": "Evidence scope: Phase F part 1 closeout (handoff section 'Phase F part 1 of 2026-10-02', remaining-scope report revision 2; evidence under resume-20260923/PF and Z/CLOSEOUT-pf). Open. WM-039 partial; the Phase F gate did not run.",
+    "created_at": "2026-10-02T20:16:21Z"
   }
 ]
 #+end_src
@@ -12660,6 +12681,127 @@ Non-blocking findings of fess audit fess/pf-PF4-r1.md (2026-10-02) on subtask PF
 ]
 #+end_src
 
+* TODO [#D] Resolve the non-blocking fess findings of subtask PF5
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pf5-fess-followup-5kr9
+:LABELS:   []
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-02 Fri 12:07]
+:MODIFIED: [2026-10-02 Fri 12:07]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking fess findings of subtask PF5 (WM-039 leg 2), all low:
+
+1. Fixed at integration: the emacs-native column of the PF5 row in doc/workflow-manager-handoff.md named a placeholder. It now names 6656266.
+2. manager/test/service_http.py, cross_client_checks step 8: the HTTP race accepts only HTTP 412 stale-revision for the losing answer. A loser admitted with 202 and later refused in its receipt (recordRefusal in manager/src/Agentic/Manager/Commands.hs) would fail the test although the manager behaved correctly. Accept that outcome too, or document why the If-Match check always serializes at admission.
+3. manager/test/service_http.py step 7 and emacs-native ci/emacs-ui.py witness step 4: sentQuiet == sent is nearly self-equal, because both are taken after the quiet window. Compare sentQuiet with sentAfterRefusal, or drop the clause.
+4. manager/test/service_http.py: details, focus_row and mutation_key moved to module level, and the tui-failures mode was not rerun. Run it once.
+5. Carried from PF4: cross-client-lifecycle, cross-client-lineage and cross-client-broken-answer still exit 2 as not implemented. They belong to later WM-039 subtasks.
+
+* TODO [#D] Resolve the non-blocking fess findings of subtask PF6
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pf6-fess-followup-hrzg
+:LABELS:   []
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-02 Fri 12:38]
+:MODIFIED: [2026-10-02 Fri 14:01]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess pf-PF6-r2 (PF/PF6 review report fess/pf-PF6-r2.md):
+
+1. (medium, pre-existing) The ext-pi bridge socket path is fixture + /cross-client-pi/state/bridge/current-<pid>-<uuid>.sock. On macOS a socket path over 104 bytes is cut off, so a fixture tag slightly longer than pf6- (for example pf6r2-) makes Pi fail at step 2 with EADDRINUSE ("Pi did not notify the manager connection"). The pf6- tag passes only because the cut-off path names nothing that exists. Fix: give PiHost a shorter state directory, or give ext-pi a short socket location (for example under a short mkdtemp).
+2. (low, done) The py_compile check left an untracked ci/__pycache__ in emacs-native, and its .gitignore does not ignore __pycache__. The Integrator deleted the directory before the commit. Optional: add __pycache__ to .gitignore, or set PYTHONPYCACHEPREFIX for py_compile.
+3. (low) manager/test/service_http.py, step 14: assert actors == expected_actors compares the literal actor strings that the harness passes to step_done itself, so it cannot fail. The real check is the credential-against-actor sender check. Describe the table as a self-consistency guard, or remove it.
+4. (low) emacs-native README.md, witness section: the sentence "the coordination database holds no command of the Emacs credential" holds only at step 7, before the race. When the emacs credential wins the step 8 race, the database later holds an emacs-credential command. Reword it to say that the refused answer of the Emacs session left no command.
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 662,
+    "issue_id": "acat-pf6-fess-followup-hrzg",
+    "author": "johnw",
+    "text": "PF8 hit the same bridge socket-path limit (attempt a1 EADDRINUSE). The lineage mode works around it with the Pi host name lineage-pi. Recorded as item 4 of acat-pf8-fess-followup-qx8r.",
+    "created_at": "2026-10-02T21:01:05Z"
+  }
+]
+#+end_src
+
+* TODO [#D] Resolve the non-blocking fess findings of subtask PF7
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pf7-fess-followup-nk1h
+:LABELS:   []
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-02 Fri 13:33]
+:MODIFIED: [2026-10-02 Fri 13:33]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess pf-PF7-r1 (fess/pf-PF7-r1.md):
+
+1. (medium) manager/test/service_http.py near lines 1369-1370 and 15103-15106, and manager/WORKERS.md lines 226-229: the mode comment and WORKERS.md say that the approve (start) command of the lost run is unresolved after the SIGTERM restart, and WORKERS.md says the cross-client-lifecycle mode checks it. The harness only prints approve_state and never asserts it. The grounding run printed "approve unresolved". Fix: add assert approve_state == "unresolved" after the print, or remove the claim.
+2. (low) emacs-native ci/emacs-ui.py lines 1563-1567: after the SIGKILL restart the Emacs view briefly showed "Supervision: lost" with the stale "Offers: redirect, answer, cancel" and a cancel choice (evidence impl-r1/cross-client-lifecycle-b1.log). The test now waits for "Offers: none". Fix: refresh the control resource with the run resource after a reconnect in wf-service, or record it as a known Emacs limitation.
+3. (low) manager/WORKERS.md lines 220-235 against 246-250: the new paragraph says an orderly close quarantines no reservation, and the general restart paragraph says without qualification that the reservation of each owned run becomes quarantined. Fix: limit the second paragraph to a lifetime without its orderly close.
+4. (low) step 9 of cross-client-lifecycle: Emacs has no view of an arbitrary queued request, so only the TUI and Pi show the profile-busy wait. Fix: add an Emacs request view, or accept the scope.
+5. (low) manager/test/service_http.py lines 15330 and 15448: PASS-line wording "1 check-quarantine reads" and "( 4 4 6 )". Fix: correct the wording in the next edit of the mode.
+
+* TODO [#D] Resolve the non-blocking fess findings of subtask PF8
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pf8-fess-followup-qx8r
+:LABELS:   []
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-02 Fri 14:00]
+:MODIFIED: [2026-10-02 Fri 14:00]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess pf-PF8-r1 (fess/pf-PF8-r1.md):
+
+1. (low) manager/test/service_http.py lines 1468-1469, the witness-lineage section of the emacs-native README, and emacs-native ci/emacs-ui.py lines 526-530: the text says the rows of the Emacs history buffer equal every page of /v1/runs. The check compares wf-service--history-runs, the model list behind the buffer, not the rendered rows, and search-forward proves only that the rows exist. Fix: reword to "the runs of the history", or read the rendered rows in order.
+2. (low) emacs-native emacs/wf-service.el lines 1298-1299 and emacs/wf-manager-tests.el lines 3171-3181: no ERT case covers "Lineage: unreadable (CATEGORY)". The new test was not first run against the old code. Fix: add an ERT case with unreadable-run content.
+3. (low) emacs-native README.md, view line list item 2: it names only the child form and "Lineage: root", and omits "Lineage: unreadable (...)" and "Lineage: not yet observed". Fix: list all four forms.
+4. (low) manager/test/service_http.py, cross_client_lineage_checks step 4, PiHost("lineage-pi"): the short host name exists only to keep the ext-pi bridge socket path under the macOS limit (attempt a1 failed with EADDRINUSE). Fix the socket-path length in ext-pi or the harness. This is the same root cause as acat-pf6-fess-followup-hrzg.
+
+* TODO [#D] Resolve the non-blocking fess findings of subtask PF9
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pf9-fess-followup-f3k0
+:LABELS:   []
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-02 Fri 14:13]
+:MODIFIED: [2026-10-02 Fri 14:13]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess pf-PF9-r1 (fess/pf-PF9-r1.md):
+
+1. (medium) bisim/.lake/packages/mathlib/.lake/build: the acceptance item "the Lean build reused it without rebuilding mathlib" holds only in part. The first build after the merge rebuilt 12 mathlib modules on the Finmap import path (Data/Finmap, Part, Finset/{Sigma,Union,Option}, List/{Sigma,AList,Lookmap}, Set/{Sigma,Lattice,Lattice/Image}, Order/CompleteLattice/Finset). The traces of the main checkout use a different schema and their depHash does not match. Only ignored build state changed, and later builds rebuilt nothing. Fix: record this as a known deviation. No code change is needed.
+2. (low) PF/PF9/impl-r1/lean-build.log: a no-op rerun overwrote the log of the build that elaborated the modules. The closure claim is confirmed by olean dates and closure.log instead. Fix: in later stages, write each build to its own log name.
+3. (low) bisim/manager/ManagerConformance/Checks.lean lines 50-63: the accepted answer witness checks only the decision FIFO, not the receipt inserted into commands, and no accepted resolve witness covers .notEffective. Fix: add an accepted answer witness on commands.lookup "command-1" and an accepted .notEffective resolve witness.
+4. (low) bisim/manager/ManagerConformance/Exec.lean lines 66-72: the Decidable instances for live and unexpired are unused by the five deciders of PF9. Fix: keep them for later admit and approve deciders, or remove them.
+
 * TODO [#C] Phase B part 1 review follow-ups: download quota, id row bound, legacy history, precision gaps
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -13005,7 +13147,7 @@ The other review findings are held by acat-70ll (unresolved approve after a rest
 :LABELS:   ["review","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-10-02 Fri 09:55]
-:MODIFIED: [2026-10-02 Fri 11:21]
+:MODIFIED: [2026-10-02 Fri 13:16]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -13044,6 +13186,13 @@ Findings of the two Phase D reviews (agent-cat a17a015b..91fb0ad4, emacs-native 
     "author": "johnw",
     "text": "Subtask PF2 (2026-10-02) closes item 1 of acat-phase-d-review-findings-raxi, the fail-over, abandon and PTY redirect by keys in Emacs service mode. emacs-native 281c5d6 adds --service-case controls to ci/emacs-ui.py (report version 1). agent-cat (the PF2 commit) adds the mode emacs-service-controls to manager/test/service_http.py: profile_1, profile_route and profile_live, executionReservations 2, its own dispatch, and an exclusion from the generic control_checks dispatch. At 80x24 by keys: c, failover:1 and RET on the profile_route recovery decision sent one choose-recovery failover that reached effect-observed, the run log holds the question asked again of controlled@spare with its answer, and the run succeeded. c, abandon and RET on a profile_1 run sent one choose-recovery abandon that reached effect-observed, and the run ended failed. After the harness answered the person question through HTTP, c, redirect:2 and RET on the profile_live run sent one redirect to controlled@spare, the second of two listed targets; the occurrence.redirected event at the receipt sequence and the run-log control record name that target, and the run succeeded. The coordination database holds exactly these three controls from the Emacs credential, each stored precondition equals the If-Match sent, and the harness sent no run control. No Emacs, url or fixture process remained after the manager stopped. Evidence: PF/PF2/impl-r1/emacs-service-controls.log (exit 0, 14 PASS lines at N8), py_compile on both scripts, the -ftui-tests BUILD, the N8 tui-journey regression, make -C doc check. No Emacs Lisp changed, so ci/emacs.sh did not run. Limitations: RET is the confirmation, because wf-control confirms only a cancel; the frozen ControlAcknowledgement carries no target, so the target is tied through the receipt sequence and the run log; the other control modes were not rerun. Fess pf-PF2-r1 not blocking; its four low findings are in acat-pf2-fess-followup-2u4o.\n",
     "created_at": "2026-10-02T18:21:52Z"
+  },
+  {
+    "id": 659,
+    "issue_id": "acat-phase-d-review-findings-raxi",
+    "author": "johnw",
+    "text": "Evidence scope: Phase F part 1 closeout (handoff section 'Phase F part 1 of 2026-10-02', remaining-scope report revision 2; evidence under resume-20260923/PF and Z/CLOSEOUT-pf). Both medium WM-032 findings are fixed by PF1 (214f3ff0) and PF2 (2d02134f).",
+    "created_at": "2026-10-02T20:16:22Z"
   }
 ]
 #+end_src
@@ -21678,7 +21827,7 @@ including its explicit v3 invocation compatibility behavior.
 :LABELS:   ["p6","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-02 Fri 11:21]
+:MODIFIED: [2026-10-02 Fri 13:16]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-032
 :SOURCE_REPO: agent-cat
@@ -21826,6 +21975,13 @@ until WM-039 supplies it.
     "author": "johnw",
     "text": "Subtask PF2 (2026-10-02, WM-032) closes the remaining WM-032 gap of item 1 of acat-phase-d-review-findings-raxi, the fail-over, abandon and PTY redirect by keys in Emacs service mode. emacs-native 281c5d6 adds --service-case controls to ci/emacs-ui.py (report version 1). agent-cat (the PF2 commit) adds the mode emacs-service-controls to manager/test/service_http.py: profile_1, profile_route and profile_live, executionReservations 2, its own dispatch, and an exclusion from the generic control_checks dispatch. At 80x24 by keys: c, failover:1 and RET on the profile_route recovery decision sent one choose-recovery failover that reached effect-observed, the run log holds the question asked again of controlled@spare with its answer, and the run succeeded. c, abandon and RET on a profile_1 run sent one choose-recovery abandon that reached effect-observed, and the run ended failed. After the harness answered the person question through HTTP, c, redirect:2 and RET on the profile_live run sent one redirect to controlled@spare, the second of two listed targets; the occurrence.redirected event at the receipt sequence and the run-log control record name that target, and the run succeeded. The coordination database holds exactly these three controls from the Emacs credential, each stored precondition equals the If-Match sent, and the harness sent no run control. No Emacs, url or fixture process remained after the manager stopped. Evidence: PF/PF2/impl-r1/emacs-service-controls.log (exit 0, 14 PASS lines at N8), py_compile on both scripts, the -ftui-tests BUILD, the N8 tui-journey regression, make -C doc check. No Emacs Lisp changed, so ci/emacs.sh did not run. Limitations: RET is the confirmation, because wf-control confirms only a cancel; the frozen ControlAcknowledgement carries no target, so the target is tied through the receipt sequence and the run log; the other control modes were not rerun. Fess pf-PF2-r1 not blocking; its four low findings are in acat-pf2-fess-followup-2u4o.\n",
     "created_at": "2026-10-02T18:21:55Z"
+  },
+  {
+    "id": 652,
+    "issue_id": "acat-wm-032-eh4r",
+    "author": "johnw",
+    "text": "Evidence scope: Phase F part 1 closeout (handoff section 'Phase F part 1 of 2026-10-02', remaining-scope report revision 2; evidence under resume-20260923/PF and Z/CLOSEOUT-pf). PF1 (214f3ff0 / f9be31a) and PF2 (2d02134f / 281c5d6) close both medium WM-032 findings of the Phase D review. Status: met for function; remains open until the closeout review.",
+    "created_at": "2026-10-02T20:16:18Z"
   }
 ]
 #+end_src
@@ -22922,7 +23078,7 @@ WM-008 completed handoff 2026-09-12T02:36:23+00:00: Adopt the shared root-role r
 :LABELS:   ["p9","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-02 Fri 11:48]
+:MODIFIED: [2026-10-02 Fri 14:01]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-039
 :SOURCE_REPO: agent-cat
@@ -23045,6 +23201,41 @@ configuration is changed.
     "author": "johnw",
     "text": "Subtask PF4 (2026-10-02) lands leg 1 of the WM-039 witness on loopback TLS (local macOS only; the cross-machine part of this package stays open). manager/test/service_http.py adds the modes cross-client, cross-client-lifecycle, cross-client-lineage and the control cross-client-broken-answer, each with its own dispatch ahead of the generic control_profiles dispatch, executionReservations 2 with profile_1 (resourceKeys cross_one) and profile_2 (cross_two), and the retry adapter. CrossClientFixture subclasses TuiModeFixture and issues four credentials (tui, emacs, pi, harness) with four distinct client identifiers on one manager. Leg 1: the TUI at 80x24 creates a mixed-controls request on profile_1 with exactly CROSS_LITERAL_1 by keys, enqueues it and quits at the review without approving. Pi (PiHost, pi client profile) runs /wfm-review <request>, shows the five selectors, the program SHA-256 and the workflow equal to the preparation the harness reads, and sends one approve; the preparation is consumed. Emacs (emacs-native 360adc1, --service-case witness, report version 1) opens the run with wf-runs, shows its pending question and sends no command. The commands table holds create, set-input and enqueue from the tui client and approve from the pi client, none from emacs or harness. The manager log read with the flow verb names the enqueue and approve senders as two principals, and the one start relay follows the approval. The run stays waiting at its question. Cleanup left no process and removed 12 fixture paths. Evidence: PF/PF4/impl-r1/cross-client.log (exit 0, seven PASS lines at N8, 48 s), py_compile on both scripts, the -ftui-tests BUILD, and the N8 tui-journey regression. The three pending modes exit 2 with \"not yet implemented\" until PF5 to PF8. Limitations: client-side TLS 1.3 is inferred from the harness probe (TLSv1.3) and the shared endpoint; only N8 ran. Fess pf-PF4-r1 not blocking; its four low findings are in the PF4 follow-up issue.\n",
     "created_at": "2026-10-02T18:48:43Z"
+  },
+  {
+    "id": 650,
+    "issue_id": "acat-wm-039-0vfi",
+    "author": "johnw",
+    "text": "PF5 (leg 2 of the cross-client witness, local loopback TLS on one manager, N8 only): the cross-client mode of manager/test/service_http.py, paired with emacs-native 6656266, passed with twelve PASS lines in 133 seconds. Race across clients: Pi answered the question head with /wfm-answer to effect-observed, the later Emacs send of its open editor received 412 stale-revision, Emacs showed it and sent nothing more, the database held one effect-observed answer from the pi client, and answers.json held [false]. HTTP race: a second profile_2 run was admitted on the second execution reservation beside the first, and of two concurrent POST answers with the emacs and tui credentials one took effect and the other received 412 stale-revision with no second effect. Retry: a new TUI sent the offered retry by key, the single retry names the tui client, and the leg 1 run reached terminal success with a verified download. Cross-machine, credential rotation, restart, backup restoration and the remaining modes are not covered. Follow-up: acat-pf5-fess-followup-5kr9.",
+    "created_at": "2026-10-02T19:07:38Z"
+  },
+  {
+    "id": 651,
+    "issue_id": "acat-wm-039-0vfi",
+    "author": "johnw",
+    "text": "Subtask PF6 (2026-10-02) completes the cross-client mode with the leg 1 outputs, the identity record and the broken-answer control (local macOS loopback TLS only; the cross-machine part stays open). Outputs: the TUI saves the verified result with s, Emacs (emacs-native 613d70e, handshake save-result, report version 3) saves it with r in the run view, and Pi shows it with /wfm-result. Both saved files have mode 0600 and equal the bytes, size and SHA-256 of the harness verified_download, and Pi shows the same SHA-256. The mode writes cross-client-witness.json with 12 steps and 12 commands, each with client, correlated request/run/preparation/decision, manager-log position, manager lifetime and receipt timestamps, no bearer and no 16-byte run of the result. Each command is from its step actor credential, except the step 8 race winner (emacs or tui). The final PASS line names the TUI, Emacs and Pi processes and the four credentials. The control cross-client-broken-answer makes Pi answer true and fails with ('CROSS-ASSERT the cross-client answer is JSON false', [True]). Evidence: PF/PF6/impl-r2/cross-client.log (exit 0, 15 numbered PASS lines plus the final line at N8, 77 s; emacs won the race), cross-client-broken-answer.log (exit 1, literal message), py-compile and build logs, cross-client-witness.json. Cleanup left no process and removed 18 fixture paths. Fess pf-PF6-r2 not blocking; findings in acat-pf6-fess-followup-hrzg. Limitations: only N8 ran; each race outcome was seen live once; the ext-pi socket path depends on a short fixture path.",
+    "created_at": "2026-10-02T19:38:07Z"
+  },
+  {
+    "id": 653,
+    "issue_id": "acat-wm-039-0vfi",
+    "author": "johnw",
+    "text": "Evidence scope: Phase F part 1 closeout (handoff section 'Phase F part 1 of 2026-10-02', remaining-scope report revision 2; evidence under resume-20260923/PF and Z/CLOSEOUT-pf). Partial. PF4 to PF6 (2ccc38fd, d889f241, 1e27a1aa; emacs-native 360adc1, 6656266, 613d70e) deliver the cross-client mode legs 1 and 2, outputs, identity record and broken-answer control. PF7 (cross-client-lifecycle) escalated to the owner: an orderly SIGTERM restart releases the reservation (pending_kind closed) instead of quarantining it; owner chooses form (a), (b) or (c) and confirms the withManagerSignals exit-status change in cli/src/Agentic/Cli.hs. PF7 work stays uncommitted in both trees. PF8 not started. Security items deferred per 2026-09-30.",
+    "created_at": "2026-10-02T20:16:19Z"
+  },
+  {
+    "id": 660,
+    "issue_id": "acat-wm-039-0vfi",
+    "author": "johnw",
+    "text": "PF7 (Phase F part 2, decision b of 2026-10-02): the cross-client-lifecycle mode of manager/test/service_http.py, with emacs-native ci/emacs-ui.py, passed one N8 run in 159 seconds with 12 numbered PASS lines, 10 Emacs key-step PASS lines and the final PASS line (private evidence impl-r1/cross-client-lifecycle.log, exit 0). Scope: Pi creates, enqueues and approves a profile_1 run and all 4 commands name the pi client; the TUI and Emacs observe it. With all three clients closed no command is added and the run stays owned with its question pending. The emacs credential is rotated with an overlap and the old one gets 401 after its cutoff; a revoked extra credential is refused on its next read. SIGTERM ends the manager with status 0 and a shutdown notice (cli withManagerSignals change, documented in manager/STORAGE.md and manager/WORKERS.md); the orderly close releases the reservation as closed, the three new clients show the run lost with no cancel, and a new request of cross_one reaches review at once. A SIGKILL loss of a held profile_1 run quarantines its reservation; a later request waits with profile-busy in the TUI and Pi until check-quarantine reports clean and release-quarantine runs, then reaches review without a client command. Pi approves, the second Emacs answers false with the rotated credential, Pi retries, and the TUI shows the verified result. No earlier non-create command repeats its target and operation. Loopback only; no cross-machine or TLS evidence. Limitation: Emacs has no view of a queued request. Fess not blocking; findings filed as acat-pf7-fess-followup-nk1h. WM-039 stays open for the closeout.",
+    "created_at": "2026-10-02T20:33:30Z"
+  },
+  {
+    "id": 661,
+    "issue_id": "acat-wm-039-0vfi",
+    "author": "johnw",
+    "text": "PF8 (cross-client-lineage): the mode in manager/test/service_http.py runs with its own CrossClientFixture. The harness creates and settles two parents through HTTP. The TUI History view, Pi /wfm-history and Emacs wf-history list the runs in the order of every page of GET /v1/runs. The TUI forks the first parent by keys and quits at the lineage review without y, Pi approves the exact lineage review with /wfm-review, and Emacs shows 'Lineage: fork of run P' and the child success with the Result SHA-256 of the harness download. The child names its parent and the fork operation, its fork and enqueue commands name the tui client and its approve command names the pi client, /v1/runs/<parent>/lineage-requests lists exactly the child, and the verified result downloads. The mode writes cross-client-lineage-witness.json (WitnessRecord, shared with the cross-client mode). Evidence: one N8 run passed in 66 seconds with all numbered PASS lines; make -C doc check passed; the cross-client and tui-history regressions passed after the refactor. emacs-native cc56b94 adds the Emacs lineage line and the witness-lineage case. The witness is local single-machine evidence only; cross-machine acceptance stays open. Follow-up: acat-pf8-fess-followup-qx8r.",
+    "created_at": "2026-10-02T21:01:05Z"
   }
 ]
 #+end_src
@@ -23056,7 +23247,7 @@ configuration is changed.
 :LABELS:   ["p9","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-09 Wed 22:34]
+:MODIFIED: [2026-10-02 Fri 14:13]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-040
 :SOURCE_REPO: agent-cat
@@ -23216,6 +23407,27 @@ legacy workflow build cannot conceal an unchecked manager development.
 ]
 #+end_src
 
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 654,
+    "issue_id": "acat-wm-040-3olb",
+    "author": "johnw",
+    "text": "Evidence scope: Phase F part 1 closeout (handoff section 'Phase F part 1 of 2026-10-02', remaining-scope report revision 2; evidence under resume-20260923/PF and Z/CLOSEOUT-pf). Not started (PF9 to PF15 did not run). Lean builds authorized 2026-10-02; none ran. Security items deferred per 2026-09-30.",
+    "created_at": "2026-10-02T20:16:19Z"
+  },
+  {
+    "id": 663,
+    "issue_id": "acat-wm-040-3olb",
+    "author": "johnw",
+    "text": "Subtask PF9 (2026-10-02) adds the Lean side of the manager conformance bridge. bisim/lakefile.toml declares the separate library ManagerConformance (srcDir manager, globs ManagerConformance and ManagerConformance.+). Conformance, conformance-oracle, corpus-gen and defaultTargets are unchanged. ManagerConformance.Exec instantiates the coordination model at String identities and values, defines EvidenceTable with toEvidence, gives Decidable instances for the evidence predicates, and defines openDecisionExec, answerExec, resolveExec, releaseExec and verifyExec. The theorems openDecisionExec_eq, answerExec_eq, resolveExec_eq, releaseExec_eq and verifyExec_eq prove that each decider equals its model transition. ManagerConformance.Checks pins each axiom footprint at [propext, Classical.choice, Quot.sound] under #guard_msgs and evaluates 13 closed #guard witnesses, with at least one accepted and one refused case per decider. No sorry, native_decide or custom axiom. No model file changed. Evidence: PF/PF9/impl-r1/lean-build.log (lake --dir bisim build --wfail ManagerConformance, exit 0, 694 jobs), closure.log (PASS, no Agentic.Core import in the closure), frozen.txt (empty for bisim/corpus and model), mathlib-rev.txt (both mathlib checkouts at c5ea0035, 8101 oleans, no nested build directory), witness-mutant.log (two wrong witnesses fail, exit 1). Limitations: the first build rebuilt 12 mathlib modules on the Finmap path because of a trace-schema mismatch with the main checkout; no Haskell-side comparison uses the deciders yet, which remains WM-040 work. Fess pf-PF9-r1 not blocking; its findings are in acat-pf9-fess-followup-f3k0.\n",
+    "created_at": "2026-10-02T21:13:11Z"
+  }
+]
+#+end_src
+
 * TODO [#B] WM-041: Complete capacity, security, and fault-injection evidence    :p9:
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -23223,7 +23435,7 @@ legacy workflow build cannot conceal an unchecked manager development.
 :LABELS:   ["p9","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-09 Wed 22:34]
+:MODIFIED: [2026-10-02 Fri 13:16]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-041
 :SOURCE_REPO: agent-cat
@@ -23348,6 +23560,20 @@ workloads rather than extrapolating unmeasured capacity.
 ]
 #+end_src
 
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 655,
+    "issue_id": "acat-wm-041-17ax",
+    "author": "johnw",
+    "text": "Evidence scope: Phase F part 1 closeout (handoff section 'Phase F part 1 of 2026-10-02', remaining-scope report revision 2; evidence under resume-20260923/PF and Z/CLOSEOUT-pf). Not started (PF16 to PF20 did not run). Security items deferred per 2026-09-30.",
+    "created_at": "2026-10-02T20:16:20Z"
+  }
+]
+#+end_src
+
 * TODO [#B] WM-041 core checkpoint: establish pre-G3 capacity and safety evidence    :p9:
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -23355,7 +23581,7 @@ workloads rather than extrapolating unmeasured capacity.
 :LABELS:   ["p9","wm-checkpoint","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-09 Wed 22:34]
+:MODIFIED: [2026-10-02 Fri 13:16]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-041-core
 :SOURCE_REPO: agent-cat
@@ -23456,6 +23682,20 @@ Publish precommitted workload and resource ceilings. All core advertised bounds 
     "created_by": "johnw",
     "metadata": "{}",
     "thread_id": ""
+  }
+]
+#+end_src
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 656,
+    "issue_id": "acat-wm-041-core-3vvz",
+    "author": "johnw",
+    "text": "Evidence scope: Phase F part 1 closeout (handoff section 'Phase F part 1 of 2026-10-02', remaining-scope report revision 2; evidence under resume-20260923/PF and Z/CLOSEOUT-pf). Not started in Phase F part 1.",
+    "created_at": "2026-10-02T20:16:20Z"
   }
 ]
 #+end_src
