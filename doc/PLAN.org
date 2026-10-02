@@ -11503,6 +11503,28 @@ label them as preconditions.
 4. (low) test/tui_probe.py line 146: a space was dropped in 'values =[int(value) ...'. Fix: restore
 'values = [int(value) ...'.
 
+* TODO [#D] Resolve the non-blocking fess findings of subtask PE24
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pe24-fess-followup-sql6
+:LABELS:   []
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-01 Thu 18:25]
+:MODIFIED: [2026-10-01 Thu 18:25]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess audit fess/pe-PE24-r1.md (2026-10-01) on subtask PE24 (WM-038 human path, pi-host mode of manager/test/service_http.py). All are low.
+
+1. manager/test/service_http.py:10230: step 4 treats every head that is not a question as a recovery head. An unexpected decision kind fails with "/wfm-answer opened no recovery selection" and does not name the kind. Fix: assert decision['kind'] in ('question', 'recovery') before the branch, with a message that names the kind.
+2. manager/test/service_http.py:10212: typed(answer) only confirms that the text "false" is somewhere on the screen, and it can already be there. The manager-side checks still prove the answer. Fix: anchor the needle to the answer-editor row, or remove the screen check.
+3. manager/test/service_http.py:10079: "/wfm selects profile_1" is not driven by keys. With one ready profile, Pi chooses it without a dialog. Fix: accept as recorded, or add a second ready profile so that the selection is driven by keys.
+4. ext-pi/README.md (Host acceptance): the host-path literal has no leading or trailing white space and no tab, because the Pi editor trims submitted text (fork packages/tui/src/components/editor.ts:1365). Only the fake-host pi-client path covers those characters. Fix: none needed now; optionally cover through the Captured file source on the host later.
+5. test/tui_probe.py:291,410: pi-host-smoke was not rerun after the TuiSession cleanup change. Fix: rerun pi-host-smoke once during the next integration pass.
+
 * TODO [#D] Resolve PE3 fess findings in owner-released quarantine evidence
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -20919,7 +20941,7 @@ invocation tuples or exposing secrets.
 :LABELS:   ["p8","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-01 Thu 17:55]
+:MODIFIED: [2026-10-01 Thu 18:25]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-037
 :SOURCE_REPO: agent-cat
@@ -21039,6 +21061,13 @@ verified output, and lineage behave consistently with the other clients.
     "author": "johnw",
     "text": "PE22 (model path, part 2): the agent_cat_workflow tool gains the service actions manager-list, manager-status, manager-inspect, manager-result, manager-start, manager-answer, manager-control, manager-lineage and manager-export. The /wfm commands and the tool actions call the same ManagerRequests methods. Each model-initiated service mutation shows its exact content (exact review for start and lineage, typed value for an answer, kind, run and fields for a control, scope and name for an export) in a human confirmation before any send. A decline or a missing UI sends nothing. No tool result contains the bearer, the credential path or the profile path. Evidence (private): PE/PE22 (npm run check, npm test, pi-client PASS 1-18 rerun by fess on the final tree, make -C doc check, each exit 0). Fess: not blocking, findings filed as a follow-up.",
     "created_at": "2026-10-02T00:55:36Z"
+  },
+  {
+    "id": 568,
+    "issue_id": "acat-wm-037-dz3v",
+    "author": "johnw",
+    "text": "PE24 (2026-10-01): the native Pi UI of service mode (create, exact approval, typed answer, retry, monitor, result save, history) is exercised by keys in the built Pi host through the pi-host mode of manager/test/service_http.py. See acat-wm-038-mgb7 for the evidence scope.",
+    "created_at": "2026-10-02T01:25:40Z"
   }
 ]
 #+end_src
@@ -21050,7 +21079,7 @@ verified output, and lineage behave consistently with the other clients.
 :LABELS:   ["p8","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-01 Thu 18:10]
+:MODIFIED: [2026-10-01 Thu 18:25]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-038
 :SOURCE_REPO: agent-cat
@@ -21159,6 +21188,13 @@ WM-008 completed handoff 2026-09-12T02:36:23+00:00: Adopt the shared root-role r
     "author": "johnw",
     "text": "PE23 (foundation, 2026-10-01): ext-pi/test/fixtures/faux-model.ts registers a deterministic local faux provider (agent-cat-faux, model faux-1, script file named by AGENT_CAT_FAUX_SCRIPT, fixed replies on an empty script, no network). manager/test/service_http.py gains the shared PiHost launcher and the pi-host-smoke mode: the built Pi fork starts in a PTY through test/tui_probe.py TuiSession with an allowlist environment (isolated HOME and PI_CODING_AGENT_DIR, PI_TELEMETRY=0, AGENT_CAT_MANAGER_PROFILES as a JSON array, no provider API key), loads ext-pi and the faux provider, /wfm-status shows delivery live, a faux reply appears and /quit exits 0. Checks passed: npm run check, npm test, build, pi-host-smoke (PASS 1 to 6, rerun by fess), tui-overview, make -C doc check. Evidence: resume-20260923/PE/PE23/impl-r1. Fess not blocking; four low findings filed as acat-pe23-fess-followup-5uku. Scripted tool-call journeys remain for later WM-038 stages.",
     "created_at": "2026-10-02T01:10:35Z"
+  },
+  {
+    "id": 567,
+    "issue_id": "acat-wm-038-mgb7",
+    "author": "johnw",
+    "text": "PE24 (human path, 2026-10-01): manager/test/service_http.py gains the pi-host mode on the PE23 PiHost launcher. The built Pi fork in a PTY with an isolated HOME and Pi configuration completes, by keys against the actual manager: /wfm create of mixed-controls on profile_1 with a Unicode literal, exact review and approval by key, monitor question, typed JSON false answer, offered Retry, terminal success with a verified result whose SHA-256 equals the harness download, /wfm-result save (mode 0600, exact bytes) and /wfm-history. The harness performs no mutation while Pi drives (harness_reads_only). Control pi-host-broken-answer fails with 'JOURNEY-ASSERT Pi answer is JSON false'. Checks passed: pi-host (rerun by fess), pi-host-broken-answer (exit 1 with the literal), make -C doc check. Evidence: resume-20260923/PE/PE24/impl-r1. Fess not blocking; five low findings filed as acat-pe24-fess-followup-sql6. Limitation: the Pi editor trims submitted text and expands tabs, so the host literal has no edge white space or tab.",
+    "created_at": "2026-10-02T01:25:40Z"
   }
 ]
 #+end_src

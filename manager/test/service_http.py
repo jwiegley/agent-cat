@@ -74,7 +74,7 @@ consent_control = len(sys.argv) == 6 and sys.argv[5] == "tui-consent-control"
 # runs one manager lifetime and does not enter the restart loop.
 LIFECYCLE = "credential-lifecycle"
 lifecycle = len(sys.argv) == 6 and sys.argv[5] == LIFECYCLE
-mixed = len(sys.argv) == 6 and sys.argv[5] in ("mixed", "mixed-confirm", "tui-approval", "tui-consent-control", APPROVE_FAULT, LIFECYCLE, "pages", "routes", "failures-worker", "failures-manager", "failures-launched", "storage", "pi-client", "pi-host-smoke") + JOURNEYS
+mixed = len(sys.argv) == 6 and sys.argv[5] in ("mixed", "mixed-confirm", "tui-approval", "tui-consent-control", APPROVE_FAULT, LIFECYCLE, "pages", "routes", "failures-worker", "failures-manager", "failures-launched", "storage", "pi-client", "pi-host-smoke", "pi-host", "pi-host-broken-answer") + JOURNEYS
 confirm_uncertain = mixed and sys.argv[5] == "mixed-confirm"
 # The boundary mode checks WM-024 through the running protected manager with
 # raw socket and ssl connections: plaintext and TLS 1.2 refusal, request
@@ -469,6 +469,53 @@ pi_client_mode = len(sys.argv) == 6 and sys.argv[5] == PI_CLIENT
 # runs one manager lifetime.
 PI_HOST_SMOKE = "pi-host-smoke"
 pi_host_smoke_mode = len(sys.argv) == 6 and sys.argv[5] == PI_HOST_SMOKE
+# The pi-host mode is the human path of the actual Pi host. It starts the
+# manager and then Pi through PiHost, and Pi completes the path by keys in
+# the pseudo-terminal. While Pi runs, the harness only reads, with its own
+# credential, and each step prints its own PASS line with the facts that the
+# harness read over HTTP:
+#
+# 1. /wfm opens the workflow selection of profile_1, the one ready profile,
+#    and the arrow keys and Enter select mixed-controls. Enter selects
+#    "Literal text" for the input, the Unicode literal PI_HOST_LITERAL is
+#    typed into the input editor, and Enter submits it. The request of
+#    profile_1 and mixed-controls must supply exactly the literal and must
+#    leave the draft phase through its enqueue command.
+# 2. The exact review must show the preparation and the five approval
+#    selectors with the values that the harness reads. The key a and then
+#    Enter on Yes of the confirmation approve it. The request must name a
+#    run, the preparation must be consumed, and the manager must hold
+#    exactly one approve command of the preparation.
+# 3. /wfm-monitor RUN must show the run running with its question, the
+#    prompt "Independent confirmation?" with the literal, and q closes it.
+# 4. /wfm-answer RUN acts on each head in the order that the manager
+#    presents them. At the question, PI_HOST_ANSWER is typed into the answer
+#    editor and Enter sends it. When the answer has reached its effect, the
+#    snapshot must publish the answer of the question occurrence as the
+#    rendered false answer no, or the mode fails with the literal message
+#    "JOURNEY-ASSERT Pi answer is JSON false". At the recovery head, the
+#    arrow keys move to the offered Retry and Enter sends it.
+# 5. /wfm-monitor RUN must show terminal success and the Result lines of the
+#    verified result, whose size and SHA-256 must equal the download of the
+#    harness. The run store must record the answer as JSON false.
+# 6. /wfm-result RUN opens the path dialog, and the typed path of a new file
+#    receives the result. The file must have mode 0600 and hold exactly the
+#    bytes of the harness download.
+# 7. /wfm-history must list the run as the one managed run, succeeded and
+#    with a verified result.
+#
+# /quit must then end Pi with exit status 0. The Pi editor trims the
+# submitted text and expands each tab to four spaces, so the literal has no
+# leading or trailing white space and no tab. It runs one manager lifetime.
+#
+# The pi-host-broken-answer control follows the pi-host mode but types true
+# at the question. It must fail with the literal message of step 4.
+PI_HOST = "pi-host"
+PI_HOST_BROKEN = "pi-host-broken-answer"
+pi_host_mode = len(sys.argv) == 6 and sys.argv[5] in (PI_HOST, PI_HOST_BROKEN)
+PI_HOST_ANSWER = b"true" if len(sys.argv) == 6 and sys.argv[5] == PI_HOST_BROKEN else b"false"
+PI_HOST_LITERAL = "Pi host λ: Café ✓ exact literal"
+PI_HOST_FALSE = "JOURNEY-ASSERT Pi answer is JSON false"
 # The TUI modes share one fixture, TuiModeFixture. TUI_MODES names the
 # configured profiles of each mode and the scopes of its TUI credential.
 #
@@ -1340,7 +1387,7 @@ if endpoints_mode:
                         "scopes": scopes, "profileIds": ["profile_1"],
                         "expiresAt": "2999-01-01T00:00:00Z", "outputFile": str(work / ("credential-" + name))})
 tui_fixture = (TuiModeFixture(*TUI_MODES[tui_mode]) if tui_mode else
-               TuiModeFixture(["profile_1"], ["observe", "submit", "control", "export"], client="pi") if pi_client_mode or pi_host_smoke_mode else None)
+               TuiModeFixture(["profile_1"], ["observe", "submit", "control", "export"], client="pi") if pi_client_mode or pi_host_smoke_mode or pi_host_mode else None)
 configuration["administrationRoot"] = str(work / "admin")
 config.write_text(json.dumps(configuration))
 context = ssl.create_default_context(cafile=str(cert))
@@ -9890,6 +9937,7 @@ class PiHost:
         # TuiSession sets TERM and AGENT_CAT_STATE_DIR above this environment.
         self.session = TuiSession(runner, self.state, rows=rows, columns=columns, command=self.command,
                                   environment=self.environment)
+        self.session.alternate_screen = False
 
     def __enter__(self):
         return self
@@ -9900,6 +9948,10 @@ class PiHost:
     def save_screen(self, label):
         """Write the current screen to work/NAME/LABEL.screen.txt."""
         (self.root / (label + ".screen.txt")).write_text(self.session.screen.text())
+
+    def save_output(self):
+        """Write the retained PTY output of Pi to work/NAME/output.bin."""
+        (self.root / "output.bin").write_bytes(bytes(self.session.output))
 
     def quit(self):
         """End Pi with /quit, and require exit status 0 and the terminal
@@ -10004,6 +10056,238 @@ def pi_host_smoke_checks():
         print("PASS pi-host-smoke 6: the modification times of", ", ".join(marks), "did not change", flush=True)
         print("PASS pi-host-smoke: the built Pi fork started in an isolated home with ext-pi and the faux provider, reached the manager",
               "with live delivery, replied from the faux provider and quit cleanly", flush=True)
+    finally:
+        if process.poll() is None:
+            process.terminate()
+        process.wait(timeout=25)
+
+
+def pi_host_checks():
+    """The pi-host and pi-host-broken-answer modes. See PI_HOST for the steps."""
+    harness = tui_fixture.harness
+    endpoint = f"https://127.0.0.1:{port}/v1"
+    answer = PI_HOST_ANSWER.decode()
+    with (work / "server-0.stdout").open("wb") as output, (work / "server-0.stderr").open("wb") as errors:
+        process = subprocess.Popen([str(runner), "--manager", "serve", "--config", str(config),
+                                    "+RTS", "-N" + native, "-RTS"], stdout=output, stderr=errors)
+    try:
+        with harness_reads_only():
+            wait_ready(process)
+            status, capabilities, _ = request("/v1/capabilities", harness)
+            assert status == 200, ("capabilities", status)
+            status, profiles, _ = request("/v1/profiles", harness)
+            assert status == 200 and [item["id"] for item in profiles["items"]] == ["profile_1"], ("profiles", status)
+            status, catalogue, _ = request("/v1/workflows?profileId=profile_1", harness)
+            assert status == 200, ("catalogue", status)
+            index = next(i for i, item in enumerate(catalogue["items"]) if item["name"] == "mixed-controls")
+            workflow = catalogue["items"][index]
+            status, overview, _ = request("/v1/snapshot", harness)
+            assert status == 200 and not overview["items"], ("the overview is not empty before the check", status)
+            cursor = overview["cursor"]
+            client = mixed_client(capabilities, harness)
+            observed = client[0]
+            with PiHost("pi-host") as pi:
+                session = pi.session
+
+                def shown(needles, timeout, what):
+                    """Pump until the screen shows every needle, compared
+                    without white space so that wrapped rows join, and give
+                    the screen."""
+                    deadline = time.monotonic() + timeout
+                    while True:
+                        screen = session.screen.text()
+                        if all(squeeze(needle) in squeeze(screen) for needle in needles):
+                            session.settle()
+                            return session.screen.text()
+                        assert time.monotonic() < deadline and session.process.poll() is None, (what, needles, screen)
+                        session.pump(0.1)
+
+                def until(path, schema, ready, timeout=40):
+                    """Read the resource until ready holds, and pump the
+                    pseudo-terminal between the reads. Node writes to a
+                    terminal synchronously, so Pi stops while its output is
+                    not read."""
+                    deadline = time.monotonic() + timeout
+                    while True:
+                        value, tag, raw = observed(path, schema)
+                        if ready(value):
+                            return value, tag, raw
+                        assert time.monotonic() < deadline and session.process.poll() is None, (
+                            "observation deadline", path, session.screen.text())
+                        session.pump(0.1)
+
+                def typed(text, what):
+                    """Type the text and wait until the screen shows it."""
+                    session.send(text.encode())
+                    return shown([text], 15, what)
+
+                try:
+                    session.wait_screen("[Extensions]", timeout=60)
+                    shown(["Manager connected: " + endpoint], 30, "Pi did not notify the manager connection")
+                    # 1. Workflow selection, the literal and the enqueue.
+                    session.send(b"/wfm\r")
+                    shown(["Workflow of profile_1", "mixed-controls"], 30, "/wfm showed no workflow selection of profile_1")
+                    pi.save_screen("workflows")
+                    session.send(b"\x1b[B" * index)
+                    shown(["→ mixed-controls"], 10, "the arrow keys did not select mixed-controls")
+                    session.send(b"\r")
+                    shown(["Input input (declared source", "→ Literal text"], 30, "/wfm showed no input source selection")
+                    session.send(b"\r")
+                    shown(["Input input: exact literal text"], 15, "/wfm opened no literal editor")
+                    typed(PI_HOST_LITERAL, "the typed literal is not shown")
+                    pi.save_screen("literal")
+                    session.send(b"\r")
+
+                    def enqueued(value):
+                        items = [item["request"] for item in value["items"] if item["kind"] == "request"]
+                        return len(items) == 1 and items[0]["phase"] != "draft"
+
+                    snapshot, _, _ = until("/v1/snapshot", "OverviewSnapshot", enqueued)
+                    request_uri = next(item["request"] for item in snapshot["items"] if item["kind"] == "request")["links"]["self"]
+                    created, _, _ = observed(request_uri, "Request")
+                    assert created["profileId"] == "profile_1" and created["workflowId"] == workflow["id"], (
+                        "the request names another profile or workflow", created["profileId"], created["workflowId"])
+                    assert created["readiness"]["supplied"] == [{"name": "input", "source": "literal", "value": PI_HOST_LITERAL}], (
+                        "the request did not supply exactly the typed literal", created["readiness"]["supplied"])
+                    receipts = command_receipts(cursor, harness)
+                    enqueues = [receipt for _, receipt in receipts if receipt["operation"] == "enqueue" and receipt["resource"] == request_uri]
+                    assert len(enqueues) == 1 and enqueues[0]["state"] == "effect-observed", ("the enqueue command", enqueues)
+                    print("PASS pi-host 1: /wfm selected profile_1 and", workflow["name"], "by keys, request", created["id"],
+                          "supplied exactly the typed literal", repr(PI_HOST_LITERAL), "and its one enqueue command reached its effect", flush=True)
+
+                    # 2. The exact review and its approval by key.
+                    current, _, _ = until(request_uri, "Request", lambda value: value["phase"] == "review" and value["preparationId"] is not None)
+                    preparation_uri = "/v1/preparations/" + current["preparationId"]
+                    preparation, _, _ = observed(preparation_uri, "Preparation")
+                    selectors = ("reviewDigest", "requestRevision", "profileRevision", "descriptorRevision", "processGeneration")
+                    review = shown(["Review of request " + created["id"] + ", preparation " + preparation["id"], "a approve after confirmation"]
+                                   + [name + ": " + str(preparation[name]) for name in selectors], 45, "Pi showed no exact review with its selectors")
+                    pi.save_screen("review")
+                    assert squeeze("Workflow: " + workflow["id"]) in squeeze(review) and squeeze("Profile: profile_1") in squeeze(review), (
+                        "the review does not name the workflow and the profile", review)
+                    session.send(b"a")
+                    shown(["Approve this exact review?", preparation["reviewDigest"], "→ Yes"], 15, "a opened no approval confirmation")
+                    pi.save_screen("approve")
+                    session.send(b"\r")
+                    associated, _, _ = until(request_uri, "Request", lambda value: value["runId"] is not None)
+                    run = associated["runId"]
+                    base = "/v1/runs/" + run
+                    shown(["Execution: the manager started run " + run], 45, "Pi did not report the started run")
+                    consumed, _, _ = observed(preparation_uri, "Preparation")
+                    approvals = [receipt for _, receipt in command_receipts(cursor, harness)
+                                 if receipt["operation"] == "approve" and receipt["resource"] == preparation_uri]
+                    assert consumed["state"] == "consumed" and len(approvals) == 1 and approvals[0]["state"] not in ("refused", "unresolved"), (
+                        "the approval of the displayed review", consumed["state"], approvals)
+                    assert all(consumed[name] == preparation[name] for name in selectors), "the consumed preparation differs from the displayed review"
+                    print("PASS pi-host 2: Pi showed the exact review of preparation", preparation["id"], "with its five selectors, review digest",
+                          preparation["reviewDigest"] + ", a and Yes sent its one approve command, and request", created["id"], "names run", run, flush=True)
+
+                    # 3. The live monitor shows the question.
+                    question = "Independent confirmation? " + PI_HOST_LITERAL
+                    session.send(("/wfm-monitor " + run + "\r").encode())
+                    shown(["Service run " + run + ", workflow mixed-controls", "Runtime: running", question], 90,
+                          "the monitor did not show the running run with its question")
+                    pi.save_screen("monitor-question")
+                    session.send(b"q")
+                    session.settle()
+                    print("PASS pi-host 3: /wfm-monitor showed run", run, "running with its question", repr(question), flush=True)
+
+                    # 4. The typed answer and the offered retry, in the order of the manager.
+                    order = []
+                    question_occurrence = None
+                    deadline = time.monotonic() + 150
+                    while len(order) < 2:
+                        assert time.monotonic() < deadline and session.process.poll() is None, ("the decision heads did not appear", order)
+                        control, _, _ = observed(base + "/control", "RunControl")
+                        head = control["decisionHeadId"]
+                        decision = observed("/v1/decisions/" + head, "Decision")[0] if head is not None else None
+                        if decision is None or decision["kind"] in order:
+                            session.pump(0.2)
+                            continue
+                        occurrence = decision["address"]["occurrenceId"]
+                        session.send(("/wfm-answer " + run + "\r").encode())
+                        if decision["kind"] == "question":
+                            question_occurrence = occurrence
+                            shown(["Answer of decision " + head], 30, "/wfm-answer opened no answer editor")
+                            typed(answer, "the typed answer is not shown")
+                            pi.save_screen("answer")
+                            session.send(b"\r")
+                            shown(["reached decision " + head], 45, "Pi did not report the answer")
+                            until(base + "/control", "RunControl", lambda value: value["decisionHeadId"] != head)
+                            item = None
+                            answer_deadline = time.monotonic() + 45
+                            while item is None or item["answer"] is None:
+                                assert time.monotonic() < answer_deadline, ("the answered occurrence publishes no answer", item)
+                                after, _, _ = observed(base + "/snapshot", "RunSnapshot")
+                                item = next(value for value in after["items"] if value["occurrenceId"] == occurrence)
+                                session.pump(0.2)
+                            # The snapshot publishes a flag answer as its rendered text,
+                            # "no" for false and "yes" for true.
+                            assert item["code"] == "flag" and {"no": False, "yes": True}.get(item["answer"], item["answer"]) is False, PI_HOST_FALSE
+                            print("PASS pi-host 4a: /wfm-answer sent the typed answer", answer, "to question", head,
+                                  "and the occurrence publishes the rendered false answer no", flush=True)
+                        else:
+                            shown(["Recovery of decision " + head], 30, "/wfm-answer opened no recovery selection")
+                            for _ in range(8):
+                                if "→ Retry" in session.screen.text():
+                                    break
+                                session.send(b"\x1b[B")
+                                session.settle()
+                            shown(["→ Retry"], 10, "the recovery selection offers no Retry")
+                            pi.save_screen("recovery")
+                            session.send(b"\r")
+                            shown(["Recovery Retry reached decision " + head], 45, "Pi did not report the retry")
+                            until(base + "/control", "RunControl", lambda value: value["decisionHeadId"] != head)
+                            print("PASS pi-host 4b: /wfm-answer chose the offered Retry of recovery decision", head, flush=True)
+                        order.append(decision["kind"])
+                    print("PASS pi-host 4: Pi answered the heads in the manager order", " then ".join(order), flush=True)
+
+                    # 5. Terminal success and the verified result.
+                    until(base + "/snapshot", "RunSnapshot", lambda value: value["runtime"] is not None and value["runtime"]["status"] == "succeeded")
+                    artifact = verified_download(run, client, harness)
+                    session.send(("/wfm-monitor " + run + "\r").encode())
+                    shown(["Terminal: succeeded", "Result: verified " + str(int(artifact["bytes"])) + " bytes",
+                           "Result SHA-256: " + artifact["sha256"]], 60, "the monitor did not show the verified result")
+                    pi.save_screen("monitor-result")
+                    session.send(b"q")
+                    session.settle()
+                    recorded = [entry["answer"] for path in work.glob("manager/runs/runs/*/runtime/answers.json")
+                                for entry in json.loads(path.read_bytes())["answers"] if entry["occurrenceId"] == question_occurrence]
+                    assert len(recorded) == 1 and recorded[0] is False, (PI_HOST_FALSE, recorded)
+                    print("PASS pi-host 5: /wfm-monitor showed terminal success and the verified result of", artifact["bytes"],
+                          "bytes with the SHA-256", artifact["sha256"], "of the harness download, and the run store records JSON false", flush=True)
+
+                    # 6. The verified save.
+                    saved_path = work / "pi-host-saved-result.json"
+                    session.send(("/wfm-result " + run + "\r").encode())
+                    shown(["Path of a new file for the verified " + str(int(artifact["bytes"])) + " bytes of run " + run], 30,
+                          "/wfm-result opened no path dialog")
+                    typed(str(saved_path), "the typed path is not shown")
+                    session.send(b"\r")
+                    shown(["Saved the verified " + str(int(artifact["bytes"])) + " bytes of run " + run], 30, "Pi did not report the save")
+                    pi.save_screen("saved")
+                    saved = saved_path.read_bytes()
+                    assert stat.S_IMODE(os.lstat(saved_path).st_mode) == 0o600, ("the saved file mode", oct(os.lstat(saved_path).st_mode))
+                    assert saved == (work / "verified-result.json").read_bytes() and hashlib.sha256(saved).hexdigest() == artifact["sha256"], (
+                        "the saved bytes differ from the harness download")
+                    print("PASS pi-host 6: /wfm-result saved the", len(saved), "verified bytes of run", run, "to", saved_path,
+                          "with mode 0600 and the exact bytes of the harness download", flush=True)
+
+                    # 7. The history.
+                    session.send(b"/wfm-history\r")
+                    shown(["History: 1 managed runs and 0 observer entries",
+                           run + " " + workflow["id"] + " profile profile_1 succeeded, supervision", "result verified"], 30,
+                          "/wfm-history did not list the run as a succeeded managed run")
+                    pi.save_screen("history")
+                    print("PASS pi-host 7: /wfm-history listed run", run, "of", workflow["id"], "as the one managed run, succeeded with a verified result",
+                          flush=True)
+                    pi.quit()
+                except BaseException:
+                    pi.save_screen("failure")
+                    pi.save_output()
+                    raise
+        print("PASS pi-host: the built Pi fork created, approved, answered with JSON false, retried, monitored to terminal success,",
+              "saved the verified result and listed the history through the actual manager, driven by keys", flush=True)
     finally:
         if process.poll() is None:
             process.terminate()
@@ -10422,6 +10706,11 @@ if pi_client_mode:
 
 if pi_host_smoke_mode:
     pi_host_smoke_checks()
+    raise SystemExit(0)
+
+
+if pi_host_mode:
+    pi_host_checks()
     raise SystemExit(0)
 
 

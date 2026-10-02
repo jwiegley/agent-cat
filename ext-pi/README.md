@@ -117,6 +117,52 @@ The host is accepted when each of these steps passes:
    harness and under the home directory of the account, and an absent
    directory stays absent.
 
+The `pi-host` mode of the same harness accepts the human path of service
+mode in the host. It starts the manager with the mixed fixture, one profile
+and one execution reservation, and then Pi through `PiHost`. Pi completes
+the path by keys in the pseudo-terminal. While Pi runs, the harness sends no
+command. It reads each fact over HTTP with its own credential, and each step
+prints its own `PASS` line. The human path is accepted when each of these
+steps passes:
+
+1. `/wfm` opens the workflow selection of `profile_1`, the one ready
+   profile, and the arrow keys and Enter select `mixed-controls`. Enter
+   selects `Literal text` for the input, the literal
+   `Pi host λ: Café ✓ exact literal` is typed into the input editor, and
+   Enter submits it. The request of `profile_1` and `mixed-controls`
+   supplies exactly the literal, and its one `enqueue` command reaches its
+   effect.
+2. The exact review shows the preparation and its five approval selectors
+   with the values that the harness reads. The key `a` and then Enter on
+   `Yes` of the confirmation approve it. The request names a run, the
+   preparation is consumed, and the manager holds exactly one `approve`
+   command of the preparation.
+3. `/wfm-monitor RUN` shows the run running with its question, and `q`
+   closes the monitor.
+4. `/wfm-answer RUN` acts on each head in the order that the manager
+   presents them. At the question, `false` is typed into the answer editor
+   and Enter sends it. The snapshot then publishes the answer of the
+   question occurrence as the rendered false answer `no`. At the recovery
+   head, the arrow keys move to the offered `Retry`, and Enter sends it.
+5. `/wfm-monitor RUN` shows terminal success and the Result lines of the
+   verified result. Their size and SHA-256 equal the download of the
+   harness, and the run store records the answer as JSON `false`.
+6. `/wfm-result RUN` opens the path dialog, and the typed path of a new file
+   receives the result. The file has mode 0600 and holds exactly the bytes
+   of the harness download.
+7. `/wfm-history` lists the run as the one managed run, succeeded and with a
+   verified result.
+8. `/quit` ends Pi with exit status 0.
+
+The Pi editor trims the submitted text and expands each tab to four spaces.
+A literal that the human path types therefore has no leading or trailing
+white space and no tab. Exact text with such characters reaches the
+manager through the `Captured file` source.
+
+The `pi-host-broken-answer` control follows the `pi-host` mode but types
+`true` at the question. It must fail with the literal message
+`JOURNEY-ASSERT Pi answer is JSON false`.
+
 ## Manager client
 
 `src/manager/` holds the TypeScript manager client. It states the behavior of
@@ -1317,7 +1363,8 @@ python3 -B manager/test/service_http.py "$PWD" "$(mktemp -d)" "$(bash test/cabal
 ```
 
 The host acceptance of the section "Host acceptance" runs in the same way
-with the mode `pi-host-smoke`.
+with the modes `pi-host-smoke` and `pi-host`, and its control with the mode
+`pi-host-broken-answer`.
 
 Remote discovery and control use Pi's Chord `SessionDirectory`,
 `SessionManagement`, `AgentController`, and `Transcript` services. Boundary

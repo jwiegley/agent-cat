@@ -288,6 +288,9 @@ class TuiSession:
             os.close(self.slave)
             raise
         self.output = bytearray()
+        # A program that draws without the alternate screen, such as Pi,
+        # sets this to False, so that the cleanup checks only the modes.
+        self.alternate_screen = True
 
     def pump(self, wait: float = 0.05) -> None:
         readable, _, _ = select.select([self.master], [], [], wait)
@@ -404,7 +407,7 @@ class TuiSession:
                     raise cleanup_failure from unjoined
             try:
                 if stopping:
-                    self.assert_restored()
+                    self.assert_restored(self.alternate_screen)
             except BaseException as restoration:
                 if cleanup_failure is None:
                     raise
