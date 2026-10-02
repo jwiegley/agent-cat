@@ -513,34 +513,45 @@ PI_CONTROLS_STEER_TEXT = "Pi steer \u03bb: focus on the patch."
 # client credential emacs with the scopes observe, submit, control and export
 # of profile_1, its version 1 client profile with the fields version,
 # endpoint, credentialFile and caFile, and a separate credential for the
-# harness. It runs EMACS -Q --batch with an environment built from
-# EMACS_ALLOWLIST, with HOME set to a new directory of the fixture and
-# user-emacs-directory set to a directory below it, with -L WF_EMACS_DIR,
+# harness. It then issues the second client credential emacs-second of the
+# same manager with the same scopes and its client profile, and it writes a
+# third client profile with the second credential whose endpoint names a
+# local port with no listener. It runs EMACS -Q --batch with an environment
+# built from EMACS_ALLOWLIST, with HOME set to a new directory of the fixture
+# and user-emacs-directory set to a directory below it, with -L WF_EMACS_DIR,
 # -l wf-manager-live and -f ert-run-tests-batch-and-exit, and with
-# WF_MANAGER_PROFILE set to the client profile, WF_MANAGER_REPORT set to a
-# report file, WF_MANAGER_RUN set to the run handshake file and
-# WF_MANAGER_REVOKE set to the revocation handshake file. ERT must report its
-# one test passed. The harness has two actions during the check, and it
-# otherwise only reads. When the check writes the run handshake file, the
-# harness first reads the requests and the command receipts after the start
+# WF_MANAGER_PROFILE set to the client profile, WF_MANAGER_SECOND_PROFILE set
+# to the profile of the second credential, WF_MANAGER_UNREACHABLE_PROFILE set
+# to the profile with no listener, WF_MANAGER_REPORT set to a report file,
+# WF_MANAGER_RUN set to the run handshake file and WF_MANAGER_REVOKE set to
+# the revocation handshake file. ERT must report its one test passed. The
+# harness has two actions during the check, and it otherwise only reads.
+# When the check writes the run handshake file, the harness first reads the
+# requests and the command receipts after the start
 # cursor, then creates, enqueues and approves one mixed-controls run of
 # profile_1 with its own credential through ControlHarness, and writes the
-# handshake file with the suffix .done and the field runId. When the check
-# writes the revocation handshake file, the harness revokes the credential
-# emacs through local administration and writes that file with the suffix
-# .done. After the check, the harness drives the run to its terminal success.
+# handshake file with the suffix .done and the field runId, and it then reads
+# the command receipts after the start cursor again. When the check writes the
+# revocation handshake file, the harness revokes the second credential
+# emacs-second through local administration and writes that file with the
+# suffix .done. After the check, the harness reads the run and the command
+# receipts, and it then drives the run to its terminal success.
 # The report is one JSON object. The mode needs these fields: harnessVersion,
 # steps, prompts, scheme, endpointIdentity, authorityEpoch, workflowId,
 # requestId, createStatus, replayStatus, replayEqual, inputName, literal,
 # setInputCommand, setInputState, staleTag, currentTag, staleRefusal,
 # pageRequests, overviewPages, overviewRequests, overviewCursor, followRunId,
-# deliveryState, polls, generation, followEnd, revokedRefusal,
-# processesAfterClose, buffersAfterClose and directoryRemoved. The mode first
-# refuses, with one sentence, a report whose harnessVersion differs from
-# EMACS_HARNESS_VERSION, which detects a mismatched pair of the two
-# repositories. It then requires the steps bind, draft, stale, pages,
-# overview, follow, revoke and close in that order and no prompt, and checks
-# the report against its own reads:
+# deliveryState, polls, generation, unreachableFailure, unreachableKept,
+# pollsBeforeUnreachable, pollsAfterUnreachable, switchIdentity, switchEpoch,
+# switchGeneration, switchOverviewRequests, switchOverviewRuns, overviewItems,
+# resolvedReferences, delayedReads, delayedOverwrote, earlierRefusal,
+# switchDelivery, followEnd, revokedRefusal, processesAfterClose,
+# buffersAfterClose, timersAfterClose, bufferKilled and directoryRemoved. The
+# mode first refuses, with one sentence, a report whose harnessVersion
+# differs from EMACS_HARNESS_VERSION, which detects a mismatched pair of the
+# two repositories. It then requires the steps bind, draft, stale, pages,
+# overview, follow, unreachable, switch, revoke and close in that order and
+# no prompt, and checks the report against its own reads:
 # 1. The check bound its transport over https with the CA file of the
 # profile, with a 32-digit endpoint identity and the authority epoch of the
 # capabilities that the harness reads.
@@ -565,17 +576,34 @@ PI_CONTROLS_STEER_TEXT = "Pi steer \u03bb: focus on the patch."
 # of the session installed, after at least one polling batch, with the
 # delivery state poll and the generation 0, and the run then reached
 # terminal success.
-# 6. After the revocation, the follow loop of the session ended with
-# refused, the check received the typed refusal 401 unauthenticated with no
-# prompt, and the harness reads 401 with the revoked credential.
-# 7. After the close, no new process and no new buffer of the session remain,
-# and the session directory is gone.
+# 6. The switch to the profile with no listener failed with
+# wf-manager-transport-unavailable, the session kept its binding, and its
+# follow loop sent at least two more polling batches.
+# 7. The switch to the second profile committed with a new endpoint identity
+# and the authority epoch of the capabilities, and it advanced the
+# generation. Its overview has exactly the requests of step 2, the request of
+# the run of the harness and that run, and each of its member references read
+# 200. A delayed read of
+# the earlier generation arrived after the commit and changed nothing, a
+# reference of the first binding gave wrong-endpoint for a watch and for the
+# current read, and the second binding polls.
+# 8. After the revocation of the second credential, the follow loop of the
+# session ended with refused, the check received the typed refusal 401
+# unauthenticated with no prompt, and the harness reads 401 with the revoked
+# credential.
+# 9. After the kill of a buffer that holds a session reference and the close,
+# no new process, buffer or timer of the session remains, and the transport
+# directories of both bindings are gone. The run of the harness has not
+# ended, and the command receipts after the start cursor are exactly those
+# that the harness read after it started the run, so the check sent no
+# command, and no cancel command exists.
+# 10. The harness then drives the run to its terminal success.
 # Each step prints its own PASS line. It runs one manager lifetime.
 EMACS_CLIENT = "emacs-client"
 emacs_client_mode = len(sys.argv) == 6 and sys.argv[5] == EMACS_CLIENT
 # The version of the report of emacs/wf-manager-live.el. The constant
 # wf-manager-live-harness-version there states the same version.
-EMACS_HARNESS_VERSION = 2
+EMACS_HARNESS_VERSION = 3
 # The literal input of the emacs-client mode. wf-manager-live-literal of
 # emacs/wf-manager-live.el states it.
 EMACS_LITERAL = "Emacs \u03bb \u96ea\U0001F600 input."
@@ -10430,6 +10458,17 @@ def pi_client_controls_checks():
 
 def emacs_client_checks():
     """The emacs-client mode. See EMACS_CLIENT for the steps."""
+    def all_requests():
+        # The page drafts make /v1/requests a page set of several pages, so
+        # the harness reads every page.
+        listed, following = [], "/v1/requests"
+        while following is not None:
+            status, page, raw = request(following, harness)
+            assert status == 200, ("requests", following, status)
+            validate("RequestPage", page, raw)
+            listed += page["items"]
+            following = page["page"]["next"]
+        return listed
     harness = tui_fixture.harness
     profile_path = tui_fixture.client_profile
     profile = json.loads(profile_path.read_bytes())
@@ -10442,13 +10481,23 @@ def emacs_client_checks():
     home = work / "emacs-home"
     home.mkdir(mode=0o700)
     (home / ".emacs.d").mkdir(mode=0o700)
-    emacs_client = {"Authorization": "Bearer " + Path(profile["credentialFile"]).read_bytes().decode("ascii")}
+    # A local port that a listener held and released has no listener.
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.bind(("127.0.0.1", 0))
+        closed_port = probe.getsockname()[1]
+    unreachable_path = work / "client-profile-emacs-unreachable.json"
+    unreachable_path.write_text(json.dumps({"version": 1, "endpoint": f"https://127.0.0.1:{closed_port}/v1",
+                                            "credentialFile": str(work / "credential-emacs-second"), "caFile": str(cert)}))
+    unreachable_path.chmod(0o600)
     with (work / "server-0.stdout").open("wb") as output, (work / "server-0.stderr").open("wb") as errors:
         process = subprocess.Popen([str(runner), "--manager", "serve", "--config", str(config),
                                     "+RTS", "-N" + native, "-RTS"], stdout=output, stderr=errors)
     try:
         with harness_reads_only():
             wait_ready(process)
+            # The second client credential of the same manager and its profile.
+            second_path = tui_fixture.renew("emacs-second")
+            second_client = {"Authorization": "Bearer " + (work / "credential-emacs-second").read_bytes().decode("ascii")}
             status, capabilities, _ = request("/v1/capabilities", harness)
             assert status == 200, ("capabilities", status)
             status, catalogue, _ = request("/v1/workflows?profileId=profile_1", harness)
@@ -10459,13 +10508,15 @@ def emacs_client_checks():
             cursor = overview["cursor"]
             environment = {name: os.environ[name] for name in EMACS_ALLOWLIST if name in os.environ}
             environment.update(HOME=str(home), WF_MANAGER_PROFILE=str(profile_path),
+                               WF_MANAGER_SECOND_PROFILE=str(second_path),
+                               WF_MANAGER_UNREACHABLE_PROFILE=str(unreachable_path),
                                WF_MANAGER_REPORT=str(report_path), WF_MANAGER_RUN=str(run_path),
                                WF_MANAGER_REVOKE=str(revoke_path))
             command = [emacs_program, "-Q", "--batch",
                        "--eval", "(setq user-emacs-directory " + json.dumps(str(home / ".emacs.d") + "/") + ")",
                        "-L", emacs_directory, "-l", "wf-manager-live", "-f", "ert-run-tests-batch-and-exit"]
             revoked = False
-            run = listed = receipts = runs = None
+            run = listed = receipts = runs = started = None
             with log_path.open("wb") as log:
                 child = subprocess.Popen(command, cwd=home, env=environment, stdin=subprocess.DEVNULL,
                                          stdout=log, stderr=subprocess.STDOUT)
@@ -10478,24 +10529,17 @@ def emacs_client_checks():
                             # keeps the requests and the command receipts of
                             # the check, then acts: it creates and approves one
                             # run with its own credential.
-                            # The page drafts make /v1/requests a page set of
-                            # several pages, so the harness reads every page.
-                            listed, following = [], "/v1/requests"
-                            while following is not None:
-                                status, page, raw = request(following, harness)
-                                assert status == 200, ("requests", following, status)
-                                validate("RequestPage", page, raw)
-                                listed += page["items"]
-                                following = page["page"]["next"]
+                            listed = all_requests()
                             receipts = command_receipts(cursor, harness)
                             runs = ControlHarness(harness, capabilities, EMACS_CLIENT)
                             with harness_acts():
                                 run = runs.start("profile_1")
+                            started = command_receipts(cursor, harness)
                             ran_path.write_text(json.dumps({"runId": run}))
                         if not revoked and revoke_path.is_file():
                             # The one action of the harness during the check.
                             administration({"version": 1, "operation": "revoke-credential",
-                                            "credentialId": tui_fixture.credential_ids["emacs"]})
+                                            "credentialId": tui_fixture.credential_ids["emacs-second"]})
                             revoked = True
                             revoked_path.write_text("{}")
                         time.sleep(0.05)
@@ -10513,7 +10557,8 @@ def emacs_client_checks():
             assert child.returncode == 0, ("the Emacs live check failed", child.returncode, text[-4000:])
             assert re.search(r"Ran 1 tests?, 1 results? as expected, 0 unexpected", text) and report_path.is_file(), (
                 "the Emacs live check did not run its one test", text[-4000:])
-            assert report["steps"] == ["bind", "draft", "stale", "pages", "overview", "follow", "revoke", "close"] \
+            assert report["steps"] == ["bind", "draft", "stale", "pages", "overview", "follow", "unreachable", "switch",
+                                       "revoke", "close"] \
                 and report["prompts"] == 0, (
                 "the Emacs live check did not complete its steps without a prompt", report["steps"], report["prompts"])
             # 1. The binding.
@@ -10579,27 +10624,70 @@ def emacs_client_checks():
             assert run is not None and report["followRunId"] == run, ("the followed run", run, report["followRunId"])
             assert [report["deliveryState"], report["generation"]] == ["poll", 0] and report["polls"] >= 1, (
                 "the follow loop", report["deliveryState"], report["generation"], report["polls"])
-            with harness_acts():
-                _, answered, recovered = drive_mixed(run, runs.client, overview=False)
             print("PASS emacs-client 5: run", run, "of the harness appeared in the overview of the session after",
-                  report["polls"], "polling batches with no read of the check itself, with the delivery state poll and generation 0,",
-                  "and the run then succeeded after", answered, "answer(s) and", recovered, "retry(s) of the harness", flush=True)
-            # 6. The revoked credential.
+                  report["polls"], "polling batches with no read of the check itself, with the delivery state poll and generation 0",
+                  flush=True)
+            # 6. The switch to the profile with no listener.
+            assert report["unreachableFailure"] == "wf-manager-transport-unavailable" and report["unreachableKept"] is True, (
+                "the unreachable switch", report["unreachableFailure"], report["unreachableKept"])
+            assert report["pollsAfterUnreachable"] >= report["pollsBeforeUnreachable"] + 2, (
+                "the follow loop after the unreachable switch", report["pollsBeforeUnreachable"], report["pollsAfterUnreachable"])
+            print("PASS emacs-client 6: the switch to port", closed_port, "with no listener failed with",
+                  "wf-manager-transport-unavailable, and the session kept its binding and polled from",
+                  report["pollsBeforeUnreachable"], "to", report["pollsAfterUnreachable"], "batches", flush=True)
+            # 7. The switch to the second profile.
+            assert re.fullmatch(r"[0-9a-f]{32}", report["switchIdentity"]) and report["switchIdentity"] != report["endpointIdentity"], (
+                "the identity of the second binding", report["switchIdentity"], report["endpointIdentity"])
+            assert report["switchEpoch"] == capabilities["authorityEpoch"], ("the epoch of the second binding", report["switchEpoch"])
+            assert report["switchGeneration"] > report["generation"], ("the generation of the switch", report["switchGeneration"])
+            # The run of the harness adds its own request to the drafts of the check.
+            held = sorted(item["id"] for item in all_requests())
+            assert len(held) == 5 and set([request_id] + page_requests) <= set(held), ("the requests after the check", held)
+            assert report["switchOverviewRequests"] == held and report["switchOverviewRuns"] == [run], (
+                "the overview of the second binding", report["switchOverviewRequests"], report["switchOverviewRuns"])
+            assert report["resolvedReferences"] == report["overviewItems"] >= 5, (
+                "the references of the second overview", report["resolvedReferences"], report["overviewItems"])
+            assert report["delayedReads"] >= 1 and report["delayedOverwrote"] is False, (
+                "the delayed read of the earlier generation", report["delayedReads"], report["delayedOverwrote"])
+            assert report["earlierRefusal"] == ["wf-manager-wrong-endpoint", "wf-manager-wrong-endpoint"] \
+                and report["switchDelivery"] == "poll", ("the earlier reference", report["earlierRefusal"], report["switchDelivery"])
+            print("PASS emacs-client 7: the switch to the second credential", tui_fixture.credential_ids["emacs-second"],
+                  "committed with endpoint identity", report["switchIdentity"], "and generation", report["switchGeneration"],
+                  "after its overview of", report["overviewItems"], "members loaded, every member reference read 200,",
+                  report["delayedReads"], "delayed read(s) of the earlier generation changed nothing, a reference of the first binding",
+                  "was refused as wrong-endpoint, and the second binding polls", flush=True)
+            # 8. The revoked second credential.
             assert revoked and report["revokedRefusal"] == [401, "unauthenticated"], ("the revoked read", revoked, report["revokedRefusal"])
             assert report["followEnd"] == "refused", ("the follow loop after the revocation", report["followEnd"])
-            status, refused, _ = request("/v1/snapshot", emacs_client)
+            status, refused, _ = request("/v1/snapshot", second_client)
             assert status == 401 and refused["code"] == "unauthenticated", ("the harness read with the revoked credential", status)
-            print("PASS emacs-client 6: after the harness revoked credential", tui_fixture.credential_ids["emacs"],
+            print("PASS emacs-client 8: after the harness revoked credential", tui_fixture.credential_ids["emacs-second"],
                   "the follow loop of the session ended refused and the next read of batch Emacs received the typed refusal",
                   "401 unauthenticated with no prompt", flush=True)
-            # 7. The close.
-            assert [report["processesAfterClose"], report["buffersAfterClose"], report["directoryRemoved"]] == [0, [], True], (
-                "the session left a process, a buffer or its directory", report["processesAfterClose"],
-                report["buffersAfterClose"], report["directoryRemoved"])
-            print("PASS emacs-client 7: after the close, no network process, no url.el buffer and no session directory remain",
+            # 9. The kill of the reference buffer and the close.
+            assert [report["processesAfterClose"], report["buffersAfterClose"], report["timersAfterClose"],
+                    report["bufferKilled"], report["directoryRemoved"]] == [0, [], 0, True, True], (
+                "the session left a process, a buffer, a timer or a directory", report["processesAfterClose"],
+                report["buffersAfterClose"], report["timersAfterClose"], report["bufferKilled"], report["directoryRemoved"])
+            snapshot = runs.snapshot(run)
+            assert snapshot["runtime"] is None or snapshot["runtime"]["status"] not in ControlHarness.TERMINAL, (
+                "the run ended during the check", snapshot["runtime"])
+            closed = command_receipts(cursor, harness)
+            assert [(resource, receipt["operation"]) for resource, receipt in closed] == [
+                (resource, receipt["operation"]) for resource, receipt in started], (
+                "the check sent a command after the run handshake", [(resource, receipt["operation"]) for resource, receipt in closed])
+            assert not any(receipt["operation"] == "cancel" for _, receipt in closed), "a cancel command exists"
+            print("PASS emacs-client 9: after the kill of a buffer that holds a session reference and the close, no network",
+                  "process, url.el buffer, timer or transport directory remains, run", run, "has not ended, and the",
+                  len(closed), "command receipts after the start cursor are those of the run handshake with no cancel command",
                   flush=True)
+            with harness_acts():
+                _, answered, recovered = drive_mixed(run, runs.client, overview=False)
+            print("PASS emacs-client 10: run", run, "then succeeded after", answered, "answer(s) and", recovered,
+                  "retry(s) of the harness", flush=True)
         print("PASS emacs-client: the Emacs transport bound, created and replayed a draft, received the typed 412 and 401",
-              "refusals, assembled the overview over all its pages, followed a run of the harness through event polls and closed",
+              "refusals, assembled the overview over all its pages, followed a run of the harness through event polls, kept its",
+              "binding after an unreachable switch, switched to a second credential with generation fencing, and closed",
               "cleanly against the protected HTTPS endpoint, and the harness confirmed each step from manager facts",
               flush=True)
     finally:

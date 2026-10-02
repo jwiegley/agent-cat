@@ -2244,6 +2244,36 @@ Acceptance: the view comparison uses the screen constructor rather than the requ
 
 Transform matrices need DecidableEq o (Classical.propDecidable) while Mat/Panel take instance hypotheses; two Decidable instances are propositionally but not definitionally equal — law proofs will need Subsingleton (Decidable _) congruence unless one convention is fixed up front.
 
+* TODO [#D] Resolve the non-blocking fess findings of subtask PD17
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-6vh7
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-02 Fri 02:30]
+:MODIFIED: [2026-10-02 Fri 02:30]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess audit fess/pd-PD17-r2.md (2026-10-02) on subtask PD17 (WM-030 part 10, agent-workflows emacs-native endpoint switch and session close, agent-cat manager/test/service_http.py mode emacs-client).
+
+1. (medium) emacs/wf-manager-live.el:707-715. The live close step runs after the revoke step, which waits until the follow loop has ended with refused. When wf-manager-session-close runs live, no poll timer and no request is pending, so the live run never shows close cancelling an active poll or a pending GET against the real manager. Only the offline test wf-manager-session-close-ends-switch covers that. Fix: close a session whose follow loop is still active (close before the revocation, or start and close a short second session after it) and assert that no process or timer remains.
+
+2. (low) emacs/wf-manager.el:3790-3792. The error clause of wf-manager--send turns any signal whose condition is exactly error, raised anywhere inside url-retrieve or wf-manager--retrieve, into (wf-manager-transport-unavailable "connection" ...). An unrelated plain error from url.el would be reported as a connection failure. Fix: also match the message text (Certificate validation failed, Could not create connection) and signal other plain errors again, or keep the clause and its comment.
+
+3. (low) emacs/wf-manager.el:3744. The exchange is pushed onto wf-manager-transport-exchanges before the condition-case, so the re-signal path leaves it in the list with no timer and no callback. Fix: remove the exchange from the transport list before signalling again.
+
+4. (low) manager/test/service_http.py:530,586. Two fragment lines remain in the emacs-client comment block ("# requests and the command receipts after the start" and "# 200. A delayed read of"). Fix: reflow those two paragraphs.
+
+5. (low) emacs/wf-manager.el:3369,3387,4219,4314. New commentary and docstring lines run past the fill column (87, 96, 115 and 88 columns). Fix: refill those paragraphs.
+
+6. (low, accepted limitations) The live delayed-GET step holds a read that has already completed, through advice on wf-manager--session-complete, rather than delaying a real network GET. The kill-buffer check cannot fail, because the client has no kill-buffer hook. The unreachable-port bind-and-release race in the harness remains. The synchronous connect blocks Emacs until the system connect timeout, as the README states. A later item can add a non-blocking TLS open.
+
+7. (low, integrator note) emacs/wf-manager-tests.el embeds a throwaway EC private key and its self-signed certificate for 127.0.0.1 (wf-manager-tests--other-key, wf-manager-tests--other-certificate) for the CA-mismatch test. The key protects nothing and no fixture trusts it, but a secret scanner can flag it on a later push. Fix: generate the key and certificate at test time with python3 or openssl from PATH, and remove the constants.
+
 * TODO [#D] Resolve the non-blocking fess findings of subtask PD8
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -20691,7 +20721,7 @@ coordination or SQL into the TUI.
 :LABELS:   ["p6","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-02 Fri 01:44]
+:MODIFIED: [2026-10-02 Fri 02:30]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-030
 :SOURCE_REPO: agent-cat
@@ -20834,6 +20864,13 @@ separately tested rather than inferred from one newer Emacs build.
     "author": "johnw",
     "text": "PD16 (WM-030 part 9, agent-workflows emacs-native 1fb68e7 and agent-cat manager/test/service_http.py mode emacs-client): emacs/wf-manager.el adds the endpoint-bound session after ManagerSession of ext-pi. The overview page set of /v1/snapshot is assembled completely by following next tokens before it is installed, and a 410 view-expired restarts the assembly (at most 3 times). Member references carry the endpoint identity of the connection. The follow loop polls /v1/events from the overview cursor with JSON batches on timers and the PD13 backoff; an invalidation marks the watched resources dirty; a 410 cursor refusal advances the generation, reads the overview again and invalidates every watched resource; a 401 ends the loop with refused. Watched resources are read through the PD13 coordinator, and an earlier-generation read installs nothing. Evidence scope: ci/emacs.sh exit 0 (transport ERT 63 of 63, four new offline tests on the local listener: two-page overview with a view-expired restart and exact request order, the restart bound, a cursor-expired refusal with a late generation-0 read that installs nothing, and two invalidations during one read giving exactly one later read); the emacs-client mode passed at N8 with the live overview over all pages, a harness-created run appearing after an event poll, and delivery state poll (fess reran it against the final tree: exit 0, 8 PASS lines); JOURNEY N8 passed. Fess pd-PD16-r1 not blocking; one medium and three low findings filed as acat-s6zt. Limitations: an overview read that fails after a 410 ends the loop with resnapshot (no retry); no endpoint switch and no SSE delivery in Emacs (poll only). The package stays open.",
     "created_at": "2026-10-02T08:44:34Z"
+  },
+  {
+    "id": 608,
+    "issue_id": "acat-wm-030-t2l4",
+    "author": "johnw",
+    "text": "PD17 (WM-030 part 10, agent-workflows emacs-native on top of 1fb68e7 and agent-cat manager/test/service_http.py mode emacs-client): wf-manager-session-switch keeps the PD1 rule. It commits a new binding only after the complete overview loads through the new transport with references stamped by the new endpoint identity. Otherwise the session keeps the earlier binding, its watched resources and its polling, and a synchronous connect or TLS failure (CA mismatch, transport that cannot open) is delivered once from a timer as a typed failure. A reference of the earlier binding gives a wrong-endpoint refusal and is never retargeted. wf-manager-session-close cancels every pending request and timer and sends no manager command. The emacs-client mode adds a second client credential and profile of the same manager and live steps for the delayed earlier-generation GET, the unreachable switch, the successful switch with wrong-endpoint refusal, and close. Evidence scope (PD/PD17/impl-r2): ci/emacs.sh exit 0 (4 passes over 5 files, transport ERT 67 of 67, new CA-mismatch tests failing before the fix in ca-tests-r0-before.log and passing in ca-tests-r1-after.log); the emacs-client mode exit 0; JOURNEY N8 exit 0. Fess pd-PD17-r2 not blocking; one medium and several low findings filed as acat-6vh7. Limitations: the connect and TLS handshake run synchronously inside url-retrieve; the live delayed-GET step uses advice on a completed read; the live close runs after the follow loop has ended. The package stays open.",
+    "created_at": "2026-10-02T09:30:11Z"
   }
 ]
 #+end_src
