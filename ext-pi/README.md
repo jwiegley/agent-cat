@@ -83,8 +83,10 @@ environment of the harness. It passes `PATH`, `TERM`, `LANG`, `LC_ALL`,
 `PI_CODING_AGENT_DIR` to new directories of the fixture, `PI_TELEMETRY` to
 0, `AGENT_CAT_MANAGER_PROFILES` to a JSON array that holds the client
 profile, `AGENT_CAT_STATE_DIR` to a directory of the fixture, and
-`AGENT_CAT_FAUX_SCRIPT` to the faux script file. No provider key reaches Pi.
-Pi needs no `settings.json` in the new configuration directory, and it
+`AGENT_CAT_FAUX_SCRIPT` to the faux script file. The first Pi of the
+`pi-host` mode also receives `AGENT_CAT_PI_TEST_HOOKS` set to 1, which
+registers the stream test hooks of the section "Service mode". No provider
+key reaches Pi. Pi needs no `settings.json` in the new configuration directory, and it
 shows no first-run screen.
 
 `test/fixtures/faux-model.ts` is a Pi extension that registers the local
@@ -152,7 +154,40 @@ steps passes:
    of the harness download.
 7. `/wfm-history` lists the run as the one managed run, succeeded and with a
    verified result.
-8. `/quit` ends Pi with exit status 0.
+8. When the lineage collection of the run lists `restart`,
+   `/wfm-restart RUN` creates the child request with one `restart` command.
+   Pi shows the exact review of the child, and `j` scrolls it to the row
+   `Lineage: restart of run RUN`. The review of the manager names the
+   lineage `restart` of that run with no edits. The key `a` and `Yes`
+   approve it, Pi acts on the heads of the child run as in step 4, and the
+   child run succeeds with `parentRunId` RUN and the lineage `restart`.
+9. `/wfm-export RUN pi-host-export.json` publishes the export. Pi shows its
+   receipt and its verified size and SHA-256. The export collection of the
+   run holds that one published export, and its download and the published
+   file hold the same bytes.
+10. A second request of the same workflow, created and approved as in steps
+    1 and 2, starts a run that waits at its question. The harness starts its
+    own view again by reading a new overview. `/wfm-debug-reconnect` drops
+    the event stream of Pi after its last delivered event, and Pi answers
+    the question with `/wfm-answer`. The run then waits at its recovery
+    head, which `/wfm-monitor` shows. `/wfm-debug-events` must show that
+    the first connection after the drop sent that event in `Last-Event-ID`,
+    and that the events which Pi received after the drop are, by sequence
+    number, the events that the harness reads from its own cursor after the
+    drop position, including the event of the recovery head.
+11. `/reload` reloads the extensions. `/wfm-status` then shows delivery
+    `live` and the second run running under `owned` supervision, and the
+    harness reads the run running at its pending recovery head.
+12. `/quit` ends Pi with exit status 0, and the harness reads the second run
+    still running at its pending head under `owned` supervision.
+13. Pi starts again with the same client profile and connects. The harness
+    revokes the credential of Pi through local administration. Pi shows
+    `Manager refused: the manager refused the credential (401
+    unauthenticated). No manager command is sent.`, `/wfm` reports that the
+    manager is not connected, and `/wfm-status` shows the refused
+    connection. The command ledger of the manager holds no new command, the
+    second run still runs at its pending head, and `/quit` ends Pi with exit
+    status 0.
 
 The Pi editor trims the submitted text and expands each tab to four spaces.
 A literal that the human path types therefore has no leading or trailing
@@ -656,6 +691,22 @@ notification show. No refusal state sends a command:
 | `refused` | A refused credential (401 or 403), at connection or during the event stream. |
 | `unreachable` | A manager that does not answer, or a 5xx refusal at connection. `/wfm-endpoints` connects again. |
 
+A connection that becomes `refused` or `unreachable` after it was connected,
+for example when the manager revokes the credential and ends the event
+stream, gives one notification:
+`Manager refused: REASON. No manager command is sent.` A later `/wfm`
+command then reports that the manager is not connected and sends nothing.
+
+When `AGENT_CAT_PI_TEST_HOOKS` is 1, the extension also registers two stream
+test hooks. No other value registers them, and neither hook sends a manager
+command. `/wfm-debug-reconnect` closes the open event stream of the active
+session through `ManagerSession.forceReconnect`, as a lost connection does,
+and states the last delivered event. The follow loop then connects again
+with that event in `Last-Event-ID`. `/wfm-debug-events` lists the
+connections after the last drop with their `Last-Event-ID` cursors, and the
+events delivered after the drop in order, by stream and sequence number.
+The `pi-host` mode of the HTTPS harness uses them.
+
 `session_shutdown`, which Pi also emits before an extension reload, closes
 service mode. Service mode closes the transport and the event stream of its
 session and sends no command. The manager keeps every run, request and
@@ -906,7 +957,11 @@ that shutdown and reload close the transport without a POST, that a late
 overview of the earlier endpoint is never installed after a switch and a
 stored reference of that endpoint is refused, and that a 401, an unsupported
 profile, an unsupported capability version and an unreachable manager show
-their refusal states. It requires that `/wfm-redirect` sends the live
+their refusal states. It requires that a credential which the manager
+refuses during the session gives one notification and that a later `/wfm`
+sends nothing, and that the stream test hooks exist only when
+`AGENT_CAT_PI_TEST_HOOKS` is 1 and list the events delivered after a drop.
+It requires that `/wfm-redirect` sends the live
 redirect of an attempt in flight with the control entity tag and reports
 the receipt and then the delivered acknowledgement, that a rejected-stale
 acknowledgement of a dispatch-window redirect is reported verbatim, that
@@ -985,8 +1040,8 @@ with the entity tag of that page as `If-Match`. On the effect `exported`, it
 reads the export receipt `/v1/exports/export_COMMAND` that the effect names.
 The receipt must be the published export of this command, run and name. The
 command downloads the exported bytes and checks them against the size and
-SHA-256 of the receipt, states the receipt and the verified download, and
-then lists the export collection of the run.
+SHA-256 of the receipt. One notice then states the receipt, the verified
+download and the export collection of the run.
 
 `test/manager-ui.test.ts` checks that `saveExact` publishes the exact bytes
 with mode 0600, refuses an existing path, a symbolic link, a relative path

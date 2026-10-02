@@ -1764,19 +1764,28 @@ export class ManagerRequests {
     const location = session.reference(receipt.value.download);
     const bytes = location.ok ? await session.download(location.value, receipt.value.bytes, receipt.value.sha256) : location;
     if (!bytes.ok) return stopped(ctx, `The export ${name} of run ${runId} did not verify: ${failureText(bytes.failure)}`);
-    ctx.ui.notify(exportLines(receipt.value, bytes.value.length).join("\n"), "info");
-    await this.#listExports(ctx, session, runId);
+    // One notice states the receipt, the verified download and the export
+    // list, so that the host shows them together.
+    const listing = await this.#exportListing(session, runId);
+    if (listing === undefined) return true;
+    ctx.ui.notify([...exportLines(receipt.value, bytes.value.length), ...listing.lines].join("\n"), listing.ok ? "info" : "error");
     return true;
   }
 
   /** Read the export collection of a run once and list its receipts. */
   async #listExports(ctx: ExtensionContext, session: ManagerSession, runId: string): Promise<void> {
+    const listing = await this.#exportListing(session, runId);
+    if (listing !== undefined) ctx.ui.notify(listing.lines.join("\n"), listing.ok ? "info" : "error");
+  }
+
+  /** The lines of one read of the export collection of a run, or of its failure, or `undefined` for a reference of another binding. */
+  async #exportListing(session: ManagerSession, runId: string): Promise<{ readonly ok: boolean; readonly lines: string[] } | undefined> {
     const collection = session.reference(`/v1/runs/${runId}/exports`);
-    if (!collection.ok) return;
+    if (!collection.ok) return undefined;
     const observed = await session.get(collection.value);
     const page = observed.ok ? decodeExportCollection(observed.value.value) : observed;
-    if (!page.ok) return ctx.ui.notify(`The export collection of run ${runId} could not be read: ${failureText(page.failure)}`, "error");
-    ctx.ui.notify([`Exports of run ${runId}: ${page.value.items.length}`, ...page.value.items.map(exportItemLine)].join("\n"), "info");
+    if (!page.ok) return { ok: false, lines: [`The export collection of run ${runId} could not be read: ${failureText(page.failure)}`] };
+    return { ok: true, lines: [`Exports of run ${runId}: ${page.value.items.length}`, ...page.value.items.map(exportItemLine)] };
   }
 
   /** The complete page set of a collection, read again after a transient page-set refusal. */

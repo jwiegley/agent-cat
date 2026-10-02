@@ -32,7 +32,9 @@ afterAll(async () => {
   await profiles.remove();
 });
 
-const ENVIRONMENT = ["AGENT_CAT_MANAGER_PROFILE", "AGENT_CAT_MANAGER_PROFILES", "AGENT_CAT_STATE_DIR", "AGENT_CAT_RUNNER", "AGENTDECK_INSTANCE_ID"];
+const ENVIRONMENT = [
+  "AGENT_CAT_MANAGER_PROFILE", "AGENT_CAT_MANAGER_PROFILES", "AGENT_CAT_STATE_DIR", "AGENT_CAT_RUNNER", "AGENTDECK_INSTANCE_ID", "AGENT_CAT_PI_TEST_HOOKS",
+];
 const saved = Object.fromEntries(ENVIRONMENT.map((name) => [name, process.env[name]]));
 
 afterEach(() => {
@@ -242,6 +244,57 @@ describe("service mode of the extension", () => {
     expect(fake.made.flatMap((made) => made.gets)).toEqual(["/v1/capabilities"]);
     expect(fake.made.flatMap((made) => made.posts)).toEqual([]);
     expect(fake.made[0].closed).toBe(true);
+    await pi.fire("session_shutdown");
+  });
+
+  it("notifies a credential that the manager refuses during the session, and a later /wfm starts nothing", async () => {
+    const { local } = await localState();
+    process.env.AGENT_CAT_STATE_DIR = local;
+    process.env.AGENT_CAT_MANAGER_PROFILE = profile("revoked", "alpha.test");
+    const fake = transports({ "alpha.test": manager([run("run_a1", "running")]) });
+    const pi = host({ manager: { transport: fake.transport } });
+    await pi.fire("session_start");
+    await until(async () => (await pi.status()).includes("delivery live"));
+    const before = pi.notices.length;
+    // The manager revokes the credential, and the follow loop ends with the refusal.
+    fake.made[0].end({ kind: "refused", cursor: "s.1", failure: { kind: "Refused", status: 401, code: "unauthenticated" } });
+    await until(() => pi.notices.slice(before).some((notice) => notice.level === "error"));
+    expect(pi.notices.slice(before)).toEqual([{
+      message: "Manager refused: the manager refused the credential (401 unauthenticated). No manager command is sent.", level: "error",
+    }]);
+    await pi.commands.get("wfm")!.handler("", pi.ctx);
+    expect(pi.notices.at(-1)).toEqual({ message: "The manager is not connected. /wfm-status states the connection.", level: "error" });
+    const text = await pi.status();
+    expect(text).toContain("the manager refused the credential (401 unauthenticated). No manager command is sent.");
+    expect(text).toContain("Service runs: none");
+    expect(fake.made.flatMap((made) => made.posts)).toEqual([]);
+    await pi.fire("session_shutdown");
+  });
+
+  it("offers the stream test hooks only when AGENT_CAT_PI_TEST_HOOKS is 1, and lists the events delivered after a forced drop", async () => {
+    const { local } = await localState();
+    process.env.AGENT_CAT_STATE_DIR = local;
+    process.env.AGENT_CAT_MANAGER_PROFILE = profile("hooks", "alpha.test");
+    const plain = host({ manager: { transport: transports({ "alpha.test": manager([]) }).transport } });
+    expect([plain.commands.has("wfm-debug-reconnect"), plain.commands.has("wfm-debug-events")]).toEqual([false, false]);
+    process.env.AGENT_CAT_PI_TEST_HOOKS = "1";
+    const fake = transports({ "alpha.test": manager([run("run_a1", "running")]) });
+    const pi = host({ manager: { transport: fake.transport } });
+    await pi.fire("session_start");
+    await until(async () => (await pi.status()).includes("delivery live"));
+    const [made] = fake.made;
+    made.emit("s.2", "/v1/runs/run_a1");
+    await pi.commands.get("wfm-debug-reconnect")!.handler("", pi.ctx);
+    expect(made.drops).toBe(1);
+    expect(pi.notices.at(-1)).toEqual({ message: "Test hook: dropped the event stream after event s.2", level: "info" });
+    made.emit("s.3", "/v1/runs/run_a1");
+    made.emit("s.5", "/v1/runs/run_a1");
+    await pi.commands.get("wfm-debug-events")!.handler("", pi.ctx);
+    expect(pi.notices.at(-1)).toEqual({
+      message: "Test hook: event stream dropped after event s.2\nConnections after the drop: none\nEvents delivered after the drop: 2 of stream s: 3 5",
+      level: "info",
+    });
+    expect(made.posts).toEqual([]);
     await pi.fire("session_shutdown");
   });
 

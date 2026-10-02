@@ -757,12 +757,12 @@ describe.runIf(PROFILE)("the human path of service mode against a live manager",
     const receipt = published.items[0];
     expect([receipt.id, receipt.commandId, receipt.name, receipt.state]).toEqual([`export_${commandId}`, commandId, name, "published"]);
     const exported = must(await session.download(ref(receipt.download ?? ""), receipt.bytes ?? 0n, receipt.sha256 ?? ""), "export download");
-    const shown = notices.slice(-2);
-    expect(shown[0], notices.join("\n")).toBe([
+    expect(notices.at(-1), notices.join("\n")).toBe([
       `Export ${name}: export_${commandId} state published, command ${commandId}`,
       `Export download: verified ${exported.length} bytes, SHA-256 ${receipt.sha256}`,
+      `Exports of run ${runId}: 1`,
+      `  ${name}  export_${commandId}  published  ${receipt.bytes} bytes  SHA-256 ${receipt.sha256}`,
     ].join("\n"));
-    expect(shown[1]).toBe(`Exports of run ${runId}: 1\n  ${name}  export_${commandId}  published  ${receipt.bytes} bytes  SHA-256 ${receipt.sha256}`);
     Object.assign(report, {
       exportRunId: runId, exportName: name, exportId: receipt.id, exportCommand: command, exportBytes: exported.length, exportSha256: receipt.sha256,
     });

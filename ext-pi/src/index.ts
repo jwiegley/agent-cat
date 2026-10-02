@@ -4,7 +4,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { Text } from "@earendil-works/pi-tui";
 import { Type, type Static } from "typebox";
 import { discoverRunner, readHelp, readRouting, supportsRoutingInspection } from "./catalogue.ts";
-import { configuredManagerProfiles, configuredRemote, configuredRunners, retentionPolicy, stateDirectory } from "./config.ts";
+import { configuredManagerProfiles, configuredRemote, configuredRunners, retentionPolicy, stateDirectory, testHooksEnabled } from "./config.ts";
 import { CurrentSessionBridge } from "./current-bridge.ts";
 import { assertNoCredentialArgs, prepareLaunch, preflightLineage, previewPlan, type LineageEdit, type PreparedLaunch } from "./launch.ts";
 import { formatControl, formatMonitor } from "./monitor.ts";
@@ -12,8 +12,9 @@ import { WorkflowMonitorComponent } from "./monitor-ui.ts";
 import { openRemotePi } from "./pi-remote-runtime.mjs";
 import type { SessionOptions } from "./manager/session.ts";
 import { ManagerRequests, toolContext, type CommandRecord, type ModelForkEdit } from "./manager-ui.ts";
-import { ServiceMode, type ServiceSelection } from "./service-mode.ts";
+import { ServiceMode, type ServiceConnection, type ServiceSelection } from "./service-mode.ts";
 import { RunSupervisor, type OwnedRun } from "./supervisor.ts";
+import { StreamLog } from "./test-hooks.ts";
 import type { ClientMode, ControlAckSnapshot, RoutingInspection, RunnerConfig, RunSnapshot, TargetKind, WorkflowDescriptor } from "./types.ts";
 
 /**
@@ -27,6 +28,10 @@ export default function agentCatExtension(pi: ExtensionAPI, hooks: ExtensionHook
   let lastContext: ExtensionContext | undefined;
   let service: ServiceMode | undefined;
   const requests = new ManagerRequests(() => service);
+  // The stream test hooks record the event connections of every session of
+  // this extension instance. They exist only when testHooksEnabled holds.
+  const streamLog = testHooksEnabled() ? new StreamLog() : undefined;
+  const sessionOptions = streamLog === undefined ? hooks.manager : streamLog.options(hooks.manager);
   const currentBridge = new CurrentSessionBridge(pi, () => lastContext);
   const supervise = (prepared: PreparedLaunch, ctx: ExtensionContext, workflow: string) => {
     const run = supervisor.start(prepared);
@@ -147,10 +152,22 @@ export default function agentCatExtension(pi: ExtensionAPI, hooks: ExtensionHook
     await service?.close();
     service = undefined;
     if (mode.kind === "service") {
+      // The kind of the last connection that this session saw. A connection
+      // that ends refused or unreachable after it was connected, for example
+      // after the manager revoked the credential, is notified once.
+      let seen: ServiceConnection["kind"] = "connecting";
       const started: ServiceMode = new ServiceMode(mode.profiles, {
-        session: hooks.manager,
+        session: sessionOptions,
         onChange: () => {
-          if (lastContext !== undefined && service === started) updateWidget(lastContext, supervisor, started);
+          if (lastContext === undefined || service !== started) return;
+          updateWidget(lastContext, supervisor, started);
+          const connection = started.connection;
+          const was = seen;
+          seen = connection.kind;
+          if (was === "connected" && (connection.kind === "refused" || connection.kind === "unreachable")) {
+            lastContext.ui.notify(`Manager ${connection.kind}: ${connection.reason}. No manager command is sent.`,
+              connection.kind === "refused" ? "error" : "warning");
+          }
         },
       });
       service = started;
@@ -486,6 +503,23 @@ export default function agentCatExtension(pi: ExtensionAPI, hooks: ExtensionHook
     description: "Export the verified result of a manager run under a name, verify the exported bytes, and list the exports of the run",
     handler: async (args, ctx) => { await requests.export(ctx, args); },
   });
+
+  if (streamLog !== undefined) {
+    pi.registerCommand("wfm-debug-reconnect", {
+      description: "Test hook: close the manager event stream as a lost connection does; the follow loop reconnects from the last delivered event",
+      handler: async (_args, ctx) => {
+        const session = service?.connection.kind === "connected" ? service.session : undefined;
+        if (session === undefined) return ctx.ui.notify("The manager is not connected. /wfm-status states the connection.", "error");
+        const at = streamLog.drop();
+        session.forceReconnect();
+        ctx.ui.notify(`Test hook: dropped the event stream after event ${at}`, "info");
+      },
+    });
+    pi.registerCommand("wfm-debug-events", {
+      description: "Test hook: list the event stream connections and the delivered events after the last forced drop",
+      handler: async (_args, ctx) => ctx.ui.notify(streamLog.lines().join("\n"), "info"),
+    });
+  }
 
   pi.registerCommand("wfm-endpoints", {
     description: "Choose the active manager client profile",

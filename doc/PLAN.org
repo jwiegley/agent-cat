@@ -11525,6 +11525,37 @@ Non-blocking findings of fess audit fess/pe-PE24-r1.md (2026-10-01) on subtask P
 4. ext-pi/README.md (Host acceptance): the host-path literal has no leading or trailing white space and no tab, because the Pi editor trims submitted text (fork packages/tui/src/components/editor.ts:1365). Only the fake-host pi-client path covers those characters. Fix: none needed now; optionally cover through the Captured file source on the host later.
 5. test/tui_probe.py:291,410: pi-host-smoke was not rerun after the TuiSession cleanup change. Fix: rerun pi-host-smoke once during the next integration pass.
 
+* TODO [#D] Resolve the non-blocking fess findings of subtask PE25
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pe25-fess-followup-g1cl
+:LABELS:   []
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-01 Thu 19:07]
+:MODIFIED: [2026-10-01 Thu 19:07]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess audit fess/pe-PE25-r1.md (2026-10-01) on subtask PE25 (WM-038 human
+path, lineage, export, reconnect, reload, quit and revocation steps of the pi-host mode). All are low.
+
+1. ext-pi/src/manager-ui.ts:1769-1770: after the export has published and verified,
+`if (listing === undefined) return true;` returns with no notice, for example when the listing
+reference fails with WrongEndpoint. A failed listing read also gives the combined notice the level
+error, although the export succeeded. Fix: show the receipt and verified-download lines when the
+listing is undefined, and keep the level info for the receipt part.
+2. ext-pi/README.md (paragraph after the refusal-state table); ext-pi/src/index.ts:167-169: the
+README names only "Manager refused: REASON. No manager command is sent." The code also gives
+"Manager unreachable: REASON. No manager command is sent." at the level warning. Fix: name both
+notice forms and their levels in the README.
+3. manager/test/service_http.py, pi_host_checks step 10 (the `listed in block` assertion): the gap
+comparison removes white space and checks for a substring, so lists such as '12 13' and '121 3'
+look the same. Fix: parse the "Events delivered after the drop" row into a list of integers and
+compare it exactly with the sequence numbers of ids[:count].
+
 * TODO [#D] Resolve PE3 fess findings in owner-released quarantine evidence
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -20941,7 +20972,7 @@ invocation tuples or exposing secrets.
 :LABELS:   ["p8","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-01 Thu 18:25]
+:MODIFIED: [2026-10-01 Thu 19:07]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-037
 :SOURCE_REPO: agent-cat
@@ -21068,6 +21099,13 @@ verified output, and lineage behave consistently with the other clients.
     "author": "johnw",
     "text": "PE24 (2026-10-01): the native Pi UI of service mode (create, exact approval, typed answer, retry, monitor, result save, history) is exercised by keys in the built Pi host through the pi-host mode of manager/test/service_http.py. See acat-wm-038-mgb7 for the evidence scope.",
     "created_at": "2026-10-02T01:25:40Z"
+  },
+  {
+    "id": 570,
+    "issue_id": "acat-wm-037-dz3v",
+    "author": "johnw",
+    "text": "PE25: ext-pi now gives one notice when a connected session becomes refused or unreachable (no command is sent), shows the export receipt, verified download and listing in one notice, and has test-only stream hooks (/wfm-debug-reconnect, /wfm-debug-events) under AGENT_CAT_PI_TEST_HOOKS=1. Evidence: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/PE/PE25/impl-r1. Follow-ups: acat-pe25-fess-followup-g1cl.",
+    "created_at": "2026-10-02T02:07:40Z"
   }
 ]
 #+end_src
@@ -21079,7 +21117,7 @@ verified output, and lineage behave consistently with the other clients.
 :LABELS:   ["p8","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-01 Thu 18:25]
+:MODIFIED: [2026-10-01 Thu 19:07]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-038
 :SOURCE_REPO: agent-cat
@@ -21195,6 +21233,13 @@ WM-008 completed handoff 2026-09-12T02:36:23+00:00: Adopt the shared root-role r
     "author": "johnw",
     "text": "PE24 (human path, 2026-10-01): manager/test/service_http.py gains the pi-host mode on the PE23 PiHost launcher. The built Pi fork in a PTY with an isolated HOME and Pi configuration completes, by keys against the actual manager: /wfm create of mixed-controls on profile_1 with a Unicode literal, exact review and approval by key, monitor question, typed JSON false answer, offered Retry, terminal success with a verified result whose SHA-256 equals the harness download, /wfm-result save (mode 0600, exact bytes) and /wfm-history. The harness performs no mutation while Pi drives (harness_reads_only). Control pi-host-broken-answer fails with 'JOURNEY-ASSERT Pi answer is JSON false'. Checks passed: pi-host (rerun by fess), pi-host-broken-answer (exit 1 with the literal), make -C doc check. Evidence: resume-20260923/PE/PE24/impl-r1. Fess not blocking; five low findings filed as acat-pe24-fess-followup-sql6. Limitation: the Pi editor trims submitted text and expands tabs, so the host literal has no edge white space or tab.",
     "created_at": "2026-10-02T01:25:40Z"
+  },
+  {
+    "id": 569,
+    "issue_id": "acat-wm-038-mgb7",
+    "author": "johnw",
+    "text": "PE25 (human path, remaining host items): the pi-host mode of manager/test/service_http.py now has 13 steps (164 s). Step 8 restart child with lineage review approved by key, child succeeds with parentRunId and lineage restart; step 9 export published in Pi verifies; step 10 forced stream drop through the test-only /wfm-debug-reconnect resumes with Last-Event-ID and no gap; steps 11-12 reload and quit leave the held run running under owned supervision; step 13 revoked credential shows the refused state with no new command. Checks passed: npm run check and npm test, pi-host (N=8), JOURNEY-ONCE(8), make -C doc check; pi-host-broken-answer control failed as required; pi-client passes. Evidence: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/PE/PE25/impl-r1. Fess pe-PE25-r1: no blocking findings, three low findings in acat-pe25-fess-followup-g1cl.",
+    "created_at": "2026-10-02T02:07:40Z"
   }
 ]
 #+end_src

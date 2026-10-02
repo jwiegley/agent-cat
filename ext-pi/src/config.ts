@@ -78,6 +78,14 @@ export function configuredRemote(env: NodeJS.ProcessEnv = process.env): { socket
   return { socket, sessionId };
 }
 
+/**
+ * Whether the stream test hooks of service mode are enabled. Only the value
+ * `1` of `AGENT_CAT_PI_TEST_HOOKS` enables them. The Pi host harness sets it.
+ */
+export function testHooksEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.AGENT_CAT_PI_TEST_HOOKS === "1";
+}
+
 export function retentionPolicy(env: NodeJS.ProcessEnv = process.env): { days: number; maxRuns: number } {
   return {
     days: natural(env.AGENT_CAT_RETENTION_DAYS, 30, "AGENT_CAT_RETENTION_DAYS"),

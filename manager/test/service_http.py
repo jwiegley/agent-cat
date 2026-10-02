@@ -503,10 +503,44 @@ pi_host_smoke_mode = len(sys.argv) == 6 and sys.argv[5] == PI_HOST_SMOKE
 #    bytes of the harness download.
 # 7. /wfm-history must list the run as the one managed run, succeeded and
 #    with a verified result.
+# 8. When the lineage collection of the run lists restart, /wfm-restart RUN
+#    must create one child request with one restart command. Pi must show
+#    the exact review of the child, and j scrolls it to the row
+#    "Lineage: restart of run RUN". The preparation must name the lineage
+#    restart of the run with no edits. The key a and Yes approve it, Pi acts
+#    on the heads of the child run as in step 4, and the child run must
+#    succeed with parentRunId RUN and the lineage restart.
+# 9. /wfm-export RUN pi-host-export.json must publish one export. Pi must
+#    show its receipt and its verified size and SHA-256, and the download of
+#    the harness and the published file must hold the same bytes.
+# 10. A second request, created and approved as in steps 1 and 2, starts a
+#    run that waits at its question. The harness starts its own view again
+#    by reading a new overview. /wfm-debug-reconnect, a test hook that
+#    AGENT_CAT_PI_TEST_HOOKS enables in this Pi, drops the event stream of
+#    Pi, and Pi answers the question. The run must then wait at its recovery
+#    head, and /wfm-monitor must show it. /wfm-debug-events must show that
+#    the first connection after the drop resumed from the last delivered
+#    event, and that the events delivered after the drop equal, by sequence
+#    number, the events that the harness reads from its own cursor after
+#    the drop position, including the event of the recovery head. Each
+#    authorization view names its own stream, and the views share the
+#    sequence numbers.
+# 11. /reload reloads the extensions. /wfm-status must show delivery live
+#    and the second run running under owned supervision, and the harness
+#    must read it running at its pending head.
+# 12. /quit must end Pi with exit status 0, and the harness must read the
+#    second run still running at its pending head under owned supervision.
+# 13. Pi starts again with the same client profile. The harness revokes the
+#    credential of Pi through local administration. Pi must show the refused
+#    credential, /wfm must start nothing, /wfm-status must show the refused
+#    connection, the command ledger must hold no new command, the second run
+#    must still run at its pending head, and /quit must end Pi with exit
+#    status 0.
 #
-# /quit must then end Pi with exit status 0. The Pi editor trims the
-# submitted text and expands each tab to four spaces, so the literal has no
-# leading or trailing white space and no tab. It runs one manager lifetime.
+# The Pi editor trims the submitted text and expands each tab to four
+# spaces, so the literal has no leading or trailing white space and no tab.
+# Pi redraws its screen, so a notice that several notices follow at once is
+# read from the output of Pi. It runs one manager lifetime.
 #
 # The pi-host-broken-answer control follows the pi-host mode but types true
 # at the question. It must fail with the literal message of step 4.
@@ -1873,6 +1907,19 @@ def check_run_resources(run, authorized):
     for credential in (authorized, other_authorized):
         status, problem, _ = request("/v1/exports/export_absent", credential)
         assert status == 404 and problem["code"] == "unavailable-resource", ("unknown export", status, problem.get("code"))
+
+
+def command_ids():
+    """The identifiers of every command row of the coordination database,
+    read through a read-only connection."""
+    import sqlite3
+    found = sorted((work / "manager").rglob("coordination.sqlite3"))
+    assert len(found) == 1, ("coordination database", found)
+    connection = sqlite3.connect(found[0].as_uri() + "?mode=ro", uri=True)
+    try:
+        return {ident for (ident,) in connection.execute("SELECT id FROM commands")}
+    finally:
+        connection.close()
 
 
 def command_receipts(cursor, authorized):
@@ -8767,16 +8814,6 @@ def tui_failure_checks():
         wait_ready(process)
         return process
 
-    def command_ids():
-        """The identifiers of every command row of the coordination database."""
-        found = sorted((work / "manager").rglob("coordination.sqlite3"))
-        assert len(found) == 1, ("coordination database", found)
-        connection = sqlite3.connect(found[0].as_uri() + "?mode=ro", uri=True)
-        try:
-            return {ident for (ident,) in connection.execute("SELECT id FROM commands")}
-        finally:
-            connection.close()
-
     def header(session):
         return " ".join(session.screen.lines()[:3])
 
@@ -9912,9 +9949,10 @@ class PiHost:
     environment built from PI_HOST_ALLOWLIST and new HOME, Pi configuration
     and state directories under work/NAME. script is the text of the faux
     script file. The client profile defaults to the profile of the credential
-    pi of TuiModeFixture."""
+    pi of TuiModeFixture. test_hooks sets AGENT_CAT_PI_TEST_HOOKS to 1, which
+    registers the stream test hooks of ext-pi."""
 
-    def __init__(self, name, script="", client_profile=None, rows=36, columns=140):
+    def __init__(self, name, script="", client_profile=None, rows=36, columns=140, test_hooks=False):
         from tui_probe import TuiSession
         self.root = work / name
         self.root.mkdir(mode=0o700)
@@ -9928,6 +9966,8 @@ class PiHost:
         self.environment.update(HOME=str(self.home), PI_CODING_AGENT_DIR=str(self.agent), PI_TELEMETRY="0",
                                 AGENT_CAT_MANAGER_PROFILES=json.dumps([str(self.client_profile)]),
                                 AGENT_CAT_FAUX_SCRIPT=str(self.script))
+        if test_hooks:
+            self.environment["AGENT_CAT_PI_TEST_HOOKS"] = "1"
         cli = source / "ext-pi/node_modules/@earendil-works/pi-coding-agent/dist/cli.js"
         assert cli.is_file(), ("the built Pi fork is not linked into ext-pi/node_modules", str(cli))
         self.command = ["node", str(cli), "--offline", "--no-extensions", "--no-skills", "--no-prompt-templates",
@@ -10067,6 +10107,7 @@ def pi_host_checks():
     harness = tui_fixture.harness
     endpoint = f"https://127.0.0.1:{port}/v1"
     answer = PI_HOST_ANSWER.decode()
+    terminal = ("succeeded", "failed", "cancelled", "orphaned")
     with (work / "server-0.stdout").open("wb") as output, (work / "server-0.stderr").open("wb") as errors:
         process = subprocess.Popen([str(runner), "--manager", "serve", "--config", str(config),
                                     "+RTS", "-N" + native, "-RTS"], stdout=output, stderr=errors)
@@ -10086,99 +10127,229 @@ def pi_host_checks():
             cursor = overview["cursor"]
             client = mixed_client(capabilities, harness)
             observed = client[0]
-            with PiHost("pi-host") as pi:
-                session = pi.session
+            selectors = ("reviewDigest", "requestRevision", "profileRevision", "descriptorRevision", "processGeneration")
+            # The pseudo-terminal of the Pi process that the helpers below
+            # drive. The last step starts Pi again and rebinds it.
+            session = None
 
-                def shown(needles, timeout, what):
-                    """Pump until the screen shows every needle, compared
-                    without white space so that wrapped rows join, and give
-                    the screen."""
-                    deadline = time.monotonic() + timeout
-                    while True:
-                        screen = session.screen.text()
-                        if all(squeeze(needle) in squeeze(screen) for needle in needles):
+            def shown(needles, timeout, what):
+                """Pump until the screen shows every needle, compared
+                without white space so that wrapped rows join, and give
+                the screen."""
+                deadline = time.monotonic() + timeout
+                while True:
+                    screen = session.screen.text()
+                    if all(squeeze(needle) in squeeze(screen) for needle in needles):
+                        session.settle()
+                        return session.screen.text()
+                    assert time.monotonic() < deadline and session.process.poll() is None, (what, needles, screen)
+                    session.pump(0.1)
+
+            def until(path, schema, ready, timeout=40):
+                """Read the resource until ready holds, and pump the
+                pseudo-terminal between the reads. Node writes to a
+                terminal synchronously, so Pi stops while its output is
+                not read."""
+                deadline = time.monotonic() + timeout
+                while True:
+                    value, tag, raw = observed(path, schema)
+                    if ready(value):
+                        return value, tag, raw
+                    assert time.monotonic() < deadline and session.process.poll() is None, (
+                        "observation deadline", path, session.screen.text())
+                    session.pump(0.1)
+
+            def typed(text, what):
+                """Type the text and wait until the screen shows it."""
+                session.send(text.encode())
+                return shown([text], 15, what)
+
+            def printed(needles, after, timeout, what):
+                """Pump until the output of Pi after the byte offset, without
+                its control sequences and white space, holds every needle,
+                and give that text. Pi redraws its screen, so a notice can
+                leave the screen before the harness reads it."""
+                deadline = time.monotonic() + timeout
+                while True:
+                    text = squeeze(re.sub(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[@-Z\\-_]", "",
+                                          bytes(session.output[after:]).decode("utf-8", "replace")))
+                    if all(squeeze(needle) in text for needle in needles):
+                        session.settle()
+                        return text
+                    assert time.monotonic() < deadline and session.process.poll() is None, (what, needles, session.screen.text())
+                    session.pump(0.1)
+
+            def still_running(run, head):
+                """Read through the harness credential that the run still
+                runs at its pending head under owned supervision."""
+                snapshot, _, _ = observed("/v1/runs/" + run + "/snapshot", "RunSnapshot")
+                control, _, _ = observed("/v1/runs/" + run + "/control", "RunControl")
+                run_view, _, _ = observed("/v1/runs/" + run, "Run")
+                decision, _, _ = observed("/v1/decisions/" + head, "Decision")
+                assert snapshot["runtime"] is not None and snapshot["runtime"]["status"] == "running", ("the held run does not run", snapshot["runtime"])
+                assert control["decisionHeadId"] == head and decision["state"] == "pending" and run_view["supervision"] == "owned", (
+                    "the held run left its head or its supervision", control["decisionHeadId"], decision["state"], run_view["supervision"])
+
+            def create_and_approve(label):
+                """Create a request of profile_1 and mixed-controls that
+                supplies the typed literal through /wfm by keys, and
+                approve its exact review by key and the confirmation. Give
+                the request, the displayed preparation and the run."""
+                status, listed, _ = request("/v1/requests", harness)
+                assert status == 200, ("requests", status)
+                known = {item["id"] for item in listed["items"]}
+                session.send(b"/wfm\r")
+                shown(["Workflow of profile_1", "mixed-controls"], 30, "/wfm showed no workflow selection of profile_1")
+                pi.save_screen(label + "-workflows")
+                session.send(b"\x1b[B" * index)
+                shown(["→ mixed-controls"], 10, "the arrow keys did not select mixed-controls")
+                session.send(b"\r")
+                shown(["Input input (declared source", "→ Literal text"], 30, "/wfm showed no input source selection")
+                session.send(b"\r")
+                shown(["Input input: exact literal text"], 15, "/wfm opened no literal editor")
+                typed(PI_HOST_LITERAL, "the typed literal is not shown")
+                pi.save_screen(label + "-literal")
+                session.send(b"\r")
+
+                def enqueued(value):
+                    items = [item["request"] for item in value["items"] if item["kind"] == "request" and item["request"]["id"] not in known]
+                    return len(items) == 1 and items[0]["phase"] != "draft"
+
+                snapshot, _, _ = until("/v1/snapshot", "OverviewSnapshot", enqueued)
+                request_uri = next(item["request"] for item in snapshot["items"]
+                                   if item["kind"] == "request" and item["request"]["id"] not in known)["links"]["self"]
+                created, _, _ = observed(request_uri, "Request")
+                assert created["profileId"] == "profile_1" and created["workflowId"] == workflow["id"], (
+                    "the request names another profile or workflow", created["profileId"], created["workflowId"])
+                assert created["readiness"]["supplied"] == [{"name": "input", "source": "literal", "value": PI_HOST_LITERAL}], (
+                    "the request did not supply exactly the typed literal", created["readiness"]["supplied"])
+                enqueues = [receipt for _, receipt in command_receipts(cursor, harness)
+                            if receipt["operation"] == "enqueue" and receipt["resource"] == request_uri]
+                assert len(enqueues) == 1 and enqueues[0]["state"] == "effect-observed", ("the enqueue command", enqueues)
+                current, _, _ = until(request_uri, "Request", lambda value: value["phase"] == "review" and value["preparationId"] is not None)
+                preparation_uri = "/v1/preparations/" + current["preparationId"]
+                preparation, _, _ = observed(preparation_uri, "Preparation")
+                review = shown(["Review of request " + created["id"] + ", preparation " + preparation["id"], "a approve after confirmation"]
+                               + [name + ": " + str(preparation[name]) for name in selectors], 45, "Pi showed no exact review with its selectors")
+                pi.save_screen(label + "-review")
+                assert squeeze("Workflow: " + workflow["id"]) in squeeze(review) and squeeze("Profile: profile_1") in squeeze(review), (
+                    "the review does not name the workflow and the profile", review)
+                run = approve_shown(request_uri, preparation_uri, preparation, label)
+                return created, preparation, run
+
+            def approve_shown(request_uri, preparation_uri, preparation, label):
+                """Approve the displayed review with a and Yes, and give the
+                run that the request then names. The manager must hold
+                exactly one approve command of the preparation."""
+                session.send(b"a")
+                shown(["Approve this exact review?", preparation["reviewDigest"], "→ Yes"], 15, "a opened no approval confirmation")
+                pi.save_screen(label + "-approve")
+                session.send(b"\r")
+                associated, _, _ = until(request_uri, "Request", lambda value: value["runId"] is not None)
+                run = associated["runId"]
+                shown(["Execution: the manager started run " + run], 45, "Pi did not report the started run")
+                consumed, _, _ = observed(preparation_uri, "Preparation")
+                approvals = [receipt for _, receipt in command_receipts(cursor, harness)
+                             if receipt["operation"] == "approve" and receipt["resource"] == preparation_uri]
+                assert consumed["state"] == "consumed" and len(approvals) == 1 and approvals[0]["state"] not in ("refused", "unresolved"), (
+                    "the approval of the displayed review", consumed["state"], approvals)
+                assert all(consumed[name] == preparation[name] for name in selectors), "the consumed preparation differs from the displayed review"
+                return run
+
+            def answer_heads(run, kinds, report=False):
+                """Act in Pi on each head of the run in the order that the
+                manager presents them, until each of the kinds has had its
+                turn or the run ends. At a question the typed answer is
+                sent, and at a recovery head the offered Retry. Give the
+                kinds in the order handled, the occurrence of the question
+                and the handled heads."""
+                base = "/v1/runs/" + run
+                order, heads = [], []
+                question_occurrence = None
+                deadline = time.monotonic() + 150
+                while not set(kinds) <= set(order):
+                    assert time.monotonic() < deadline and session.process.poll() is None, ("the decision heads did not appear", run, order)
+                    snapshot, _, _ = observed(base + "/snapshot", "RunSnapshot")
+                    if snapshot["runtime"] is not None and snapshot["runtime"]["status"] in terminal:
+                        break
+                    control, _, _ = observed(base + "/control", "RunControl")
+                    head = control["decisionHeadId"]
+                    decision = observed("/v1/decisions/" + head, "Decision")[0] if head is not None else None
+                    if decision is None or decision["kind"] in order:
+                        session.pump(0.2)
+                        continue
+                    occurrence = decision["address"]["occurrenceId"]
+                    session.send(("/wfm-answer " + run + "\r").encode())
+                    if decision["kind"] == "question":
+                        question_occurrence = occurrence
+                        shown(["Answer of decision " + head], 30, "/wfm-answer opened no answer editor")
+                        typed(answer, "the typed answer is not shown")
+                        pi.save_screen("answer")
+                        session.send(b"\r")
+                        shown(["reached decision " + head], 45, "Pi did not report the answer")
+                        until(base + "/control", "RunControl", lambda value: value["decisionHeadId"] != head)
+                        item = None
+                        answer_deadline = time.monotonic() + 45
+                        while item is None or item["answer"] is None:
+                            assert time.monotonic() < answer_deadline, ("the answered occurrence publishes no answer", item)
+                            after, _, _ = observed(base + "/snapshot", "RunSnapshot")
+                            item = next(value for value in after["items"] if value["occurrenceId"] == occurrence)
+                            session.pump(0.2)
+                        # The snapshot publishes a flag answer as its rendered text,
+                        # "no" for false and "yes" for true.
+                        assert item["code"] == "flag" and {"no": False, "yes": True}.get(item["answer"], item["answer"]) is False, PI_HOST_FALSE
+                        if report:
+                            print("PASS pi-host 4a: /wfm-answer sent the typed answer", answer, "to question", head,
+                                  "and the occurrence publishes the rendered false answer no", flush=True)
+                    else:
+                        shown(["Recovery of decision " + head], 30, "/wfm-answer opened no recovery selection")
+                        for _ in range(8):
+                            if "→ Retry" in session.screen.text():
+                                break
+                            session.send(b"\x1b[B")
                             session.settle()
-                            return session.screen.text()
-                        assert time.monotonic() < deadline and session.process.poll() is None, (what, needles, screen)
-                        session.pump(0.1)
+                        shown(["→ Retry"], 10, "the recovery selection offers no Retry")
+                        pi.save_screen("recovery")
+                        session.send(b"\r")
+                        shown(["Recovery Retry reached decision " + head], 45, "Pi did not report the retry")
+                        until(base + "/control", "RunControl", lambda value: value["decisionHeadId"] != head)
+                        if report:
+                            print("PASS pi-host 4b: /wfm-answer chose the offered Retry of recovery decision", head, flush=True)
+                    order.append(decision["kind"])
+                    heads.append(head)
+                return order, question_occurrence, heads
 
-                def until(path, schema, ready, timeout=40):
-                    """Read the resource until ready holds, and pump the
-                    pseudo-terminal between the reads. Node writes to a
-                    terminal synchronously, so Pi stops while its output is
-                    not read."""
-                    deadline = time.monotonic() + timeout
-                    while True:
-                        value, tag, raw = observed(path, schema)
-                        if ready(value):
-                            return value, tag, raw
-                        assert time.monotonic() < deadline and session.process.poll() is None, (
-                            "observation deadline", path, session.screen.text())
-                        session.pump(0.1)
+            def events_after(after):
+                """The events of /v1/events after the cursor, over every
+                polling batch, read through the harness credential."""
+                events = []
+                for _ in range(256):
+                    status, batch, raw, _ = fetch("/v1/events?after=" + after, harness | {"Accept": "application/json"})
+                    assert status == 200, ("event read", status, batch.get("code"))
+                    validate("EventBatch", batch, raw)
+                    events += batch["events"]
+                    after = batch["cursor"]
+                    if not batch["hasMore"]:
+                        return events
+                raise AssertionError("event pages")
 
-                def typed(text, what):
-                    """Type the text and wait until the screen shows it."""
-                    session.send(text.encode())
-                    return shown([text], 15, what)
+            def row_after(prefix):
+                """The rest of the last screen row that starts with the prefix."""
+                rows = [line.strip() for line in session.screen.lines() if line.strip().startswith(prefix)]
+                assert rows, ("no screen row starts with", prefix, session.screen.text())
+                return rows[-1][len(prefix):].strip()
 
+            with PiHost("pi-host", test_hooks=True) as pi:
+                session = pi.session
                 try:
                     session.wait_screen("[Extensions]", timeout=60)
                     shown(["Manager connected: " + endpoint], 30, "Pi did not notify the manager connection")
-                    # 1. Workflow selection, the literal and the enqueue.
-                    session.send(b"/wfm\r")
-                    shown(["Workflow of profile_1", "mixed-controls"], 30, "/wfm showed no workflow selection of profile_1")
-                    pi.save_screen("workflows")
-                    session.send(b"\x1b[B" * index)
-                    shown(["→ mixed-controls"], 10, "the arrow keys did not select mixed-controls")
-                    session.send(b"\r")
-                    shown(["Input input (declared source", "→ Literal text"], 30, "/wfm showed no input source selection")
-                    session.send(b"\r")
-                    shown(["Input input: exact literal text"], 15, "/wfm opened no literal editor")
-                    typed(PI_HOST_LITERAL, "the typed literal is not shown")
-                    pi.save_screen("literal")
-                    session.send(b"\r")
-
-                    def enqueued(value):
-                        items = [item["request"] for item in value["items"] if item["kind"] == "request"]
-                        return len(items) == 1 and items[0]["phase"] != "draft"
-
-                    snapshot, _, _ = until("/v1/snapshot", "OverviewSnapshot", enqueued)
-                    request_uri = next(item["request"] for item in snapshot["items"] if item["kind"] == "request")["links"]["self"]
-                    created, _, _ = observed(request_uri, "Request")
-                    assert created["profileId"] == "profile_1" and created["workflowId"] == workflow["id"], (
-                        "the request names another profile or workflow", created["profileId"], created["workflowId"])
-                    assert created["readiness"]["supplied"] == [{"name": "input", "source": "literal", "value": PI_HOST_LITERAL}], (
-                        "the request did not supply exactly the typed literal", created["readiness"]["supplied"])
-                    receipts = command_receipts(cursor, harness)
-                    enqueues = [receipt for _, receipt in receipts if receipt["operation"] == "enqueue" and receipt["resource"] == request_uri]
-                    assert len(enqueues) == 1 and enqueues[0]["state"] == "effect-observed", ("the enqueue command", enqueues)
+                    # 1 and 2. Workflow selection, the literal, the enqueue, the
+                    # exact review and its approval by key.
+                    created, preparation, run = create_and_approve("first")
+                    base = "/v1/runs/" + run
                     print("PASS pi-host 1: /wfm selected profile_1 and", workflow["name"], "by keys, request", created["id"],
                           "supplied exactly the typed literal", repr(PI_HOST_LITERAL), "and its one enqueue command reached its effect", flush=True)
-
-                    # 2. The exact review and its approval by key.
-                    current, _, _ = until(request_uri, "Request", lambda value: value["phase"] == "review" and value["preparationId"] is not None)
-                    preparation_uri = "/v1/preparations/" + current["preparationId"]
-                    preparation, _, _ = observed(preparation_uri, "Preparation")
-                    selectors = ("reviewDigest", "requestRevision", "profileRevision", "descriptorRevision", "processGeneration")
-                    review = shown(["Review of request " + created["id"] + ", preparation " + preparation["id"], "a approve after confirmation"]
-                                   + [name + ": " + str(preparation[name]) for name in selectors], 45, "Pi showed no exact review with its selectors")
-                    pi.save_screen("review")
-                    assert squeeze("Workflow: " + workflow["id"]) in squeeze(review) and squeeze("Profile: profile_1") in squeeze(review), (
-                        "the review does not name the workflow and the profile", review)
-                    session.send(b"a")
-                    shown(["Approve this exact review?", preparation["reviewDigest"], "→ Yes"], 15, "a opened no approval confirmation")
-                    pi.save_screen("approve")
-                    session.send(b"\r")
-                    associated, _, _ = until(request_uri, "Request", lambda value: value["runId"] is not None)
-                    run = associated["runId"]
-                    base = "/v1/runs/" + run
-                    shown(["Execution: the manager started run " + run], 45, "Pi did not report the started run")
-                    consumed, _, _ = observed(preparation_uri, "Preparation")
-                    approvals = [receipt for _, receipt in command_receipts(cursor, harness)
-                                 if receipt["operation"] == "approve" and receipt["resource"] == preparation_uri]
-                    assert consumed["state"] == "consumed" and len(approvals) == 1 and approvals[0]["state"] not in ("refused", "unresolved"), (
-                        "the approval of the displayed review", consumed["state"], approvals)
-                    assert all(consumed[name] == preparation[name] for name in selectors), "the consumed preparation differs from the displayed review"
                     print("PASS pi-host 2: Pi showed the exact review of preparation", preparation["id"], "with its five selectors, review digest",
                           preparation["reviewDigest"] + ", a and Yes sent its one approve command, and request", created["id"], "names run", run, flush=True)
 
@@ -10193,53 +10364,8 @@ def pi_host_checks():
                     print("PASS pi-host 3: /wfm-monitor showed run", run, "running with its question", repr(question), flush=True)
 
                     # 4. The typed answer and the offered retry, in the order of the manager.
-                    order = []
-                    question_occurrence = None
-                    deadline = time.monotonic() + 150
-                    while len(order) < 2:
-                        assert time.monotonic() < deadline and session.process.poll() is None, ("the decision heads did not appear", order)
-                        control, _, _ = observed(base + "/control", "RunControl")
-                        head = control["decisionHeadId"]
-                        decision = observed("/v1/decisions/" + head, "Decision")[0] if head is not None else None
-                        if decision is None or decision["kind"] in order:
-                            session.pump(0.2)
-                            continue
-                        occurrence = decision["address"]["occurrenceId"]
-                        session.send(("/wfm-answer " + run + "\r").encode())
-                        if decision["kind"] == "question":
-                            question_occurrence = occurrence
-                            shown(["Answer of decision " + head], 30, "/wfm-answer opened no answer editor")
-                            typed(answer, "the typed answer is not shown")
-                            pi.save_screen("answer")
-                            session.send(b"\r")
-                            shown(["reached decision " + head], 45, "Pi did not report the answer")
-                            until(base + "/control", "RunControl", lambda value: value["decisionHeadId"] != head)
-                            item = None
-                            answer_deadline = time.monotonic() + 45
-                            while item is None or item["answer"] is None:
-                                assert time.monotonic() < answer_deadline, ("the answered occurrence publishes no answer", item)
-                                after, _, _ = observed(base + "/snapshot", "RunSnapshot")
-                                item = next(value for value in after["items"] if value["occurrenceId"] == occurrence)
-                                session.pump(0.2)
-                            # The snapshot publishes a flag answer as its rendered text,
-                            # "no" for false and "yes" for true.
-                            assert item["code"] == "flag" and {"no": False, "yes": True}.get(item["answer"], item["answer"]) is False, PI_HOST_FALSE
-                            print("PASS pi-host 4a: /wfm-answer sent the typed answer", answer, "to question", head,
-                                  "and the occurrence publishes the rendered false answer no", flush=True)
-                        else:
-                            shown(["Recovery of decision " + head], 30, "/wfm-answer opened no recovery selection")
-                            for _ in range(8):
-                                if "→ Retry" in session.screen.text():
-                                    break
-                                session.send(b"\x1b[B")
-                                session.settle()
-                            shown(["→ Retry"], 10, "the recovery selection offers no Retry")
-                            pi.save_screen("recovery")
-                            session.send(b"\r")
-                            shown(["Recovery Retry reached decision " + head], 45, "Pi did not report the retry")
-                            until(base + "/control", "RunControl", lambda value: value["decisionHeadId"] != head)
-                            print("PASS pi-host 4b: /wfm-answer chose the offered Retry of recovery decision", head, flush=True)
-                        order.append(decision["kind"])
+                    order, question_occurrence, _ = answer_heads(run, ("question", "recovery"), report=True)
+                    assert sorted(order) == ["question", "recovery"], ("the heads of the run", order)
                     print("PASS pi-host 4: Pi answered the heads in the manager order", " then ".join(order), flush=True)
 
                     # 5. Terminal success and the verified result.
@@ -10281,13 +10407,216 @@ def pi_host_checks():
                     pi.save_screen("history")
                     print("PASS pi-host 7: /wfm-history listed run", run, "of", workflow["id"], "as the one managed run, succeeded with a verified result",
                           flush=True)
+
+                    # 8. The restart child, its lineage review and its approval by key.
+                    lineage_uri = base + "/lineage-requests"
+                    until(lineage_uri, "LineagePage", lambda value: "restart" in value["eligible"], timeout=60)
+                    session.send(("/wfm-restart " + run + "\r").encode())
+                    deadline = time.monotonic() + 45
+                    while True:
+                        status, listed, _ = request("/v1/requests", harness)
+                        assert status == 200, ("requests", status)
+                        children = [item["id"] for item in listed["items"] if item["parentRunId"] == run]
+                        if children:
+                            break
+                        assert time.monotonic() < deadline and session.process.poll() is None, ("/wfm-restart created no child", session.screen.text())
+                        session.pump(0.2)
+                    assert len(children) == 1, ("the restart children of the run", children)
+                    child_id = children[0]
+                    child_uri = "/v1/requests/" + child_id
+                    child, _, _ = until(child_uri, "Request", lambda value: value["phase"] == "review" and value["preparationId"] is not None)
+                    assert child["parentRunId"] == run and child["lineage"] == "restart", ("the child request", child["parentRunId"], child["lineage"])
+                    child_preparation_uri = "/v1/preparations/" + child["preparationId"]
+                    child_preparation, _, _ = observed(child_preparation_uri, "Preparation")
+                    assert child_preparation["review"]["lineage"] == {"parentRunId": run, "operation": "restart", "edits": []}, (
+                        "the lineage of the child review", child_preparation["review"].get("lineage"))
+                    shown(["Review of request " + child_id + ", preparation " + child_preparation["id"]], 45, "Pi showed no review of the child")
+                    # The lineage line ends the review, so j scrolls to it.
+                    lineage_row = "Lineage: restart of run " + run
+                    deadline = time.monotonic() + 15
+                    while not any(line.strip() == lineage_row for line in session.screen.lines()):
+                        assert time.monotonic() < deadline, ("the child review shows no lineage row", session.screen.text())
+                        session.send(b"j")
+                        session.settle()
+                    pi.save_screen("restart-review")
+                    child_run = approve_shown(child_uri, child_preparation_uri, child_preparation, "restart")
+                    answer_heads(child_run, ("question", "recovery"))
+                    until("/v1/runs/" + child_run + "/snapshot", "RunSnapshot",
+                          lambda value: value["runtime"] is not None and value["runtime"]["status"] in terminal, timeout=90)
+                    child_view, _, _ = observed("/v1/runs/" + child_run, "Run")
+                    child_snapshot, _, _ = observed("/v1/runs/" + child_run + "/snapshot", "RunSnapshot")
+                    assert child_snapshot["runtime"]["status"] == "succeeded", ("the child run did not succeed", child_snapshot["runtime"])
+                    assert child_view["parentRunId"] == run and child_view["lineage"] == "restart", (
+                        "the child run lineage", child_view["parentRunId"], child_view["lineage"])
+                    restarts = [receipt for _, receipt in command_receipts(cursor, harness)
+                                if receipt["operation"] == "restart" and receipt["resource"] == lineage_uri]
+                    assert len(restarts) == 1 and restarts[0]["state"] == "effect-observed" and restarts[0]["effect"]["kind"] == "lineage-created" \
+                        and restarts[0]["effect"]["resource"] == child_uri, ("the restart command", restarts)
+                    print("PASS pi-host 8: /wfm-restart created child request", child_id, "with one restart command, Pi showed its exact review",
+                          "with the row", repr(lineage_row) + ", a and Yes approved preparation", child_preparation["id"], "and child run", child_run,
+                          "succeeded with parentRunId", run, "and lineage restart", flush=True)
+
+                    # 9. The export and its verified download.
+                    export_name = "pi-host-export.json"
+                    offset = len(session.output)
+                    session.send(("/wfm-export " + run + " " + export_name + "\r").encode())
+                    screen = printed(["Export " + export_name + ": export_", "state published", "Export download: verified ",
+                                      "Exports of run " + run + ": 1"], offset, 45, "Pi did not report the published export")
+                    pi.save_screen("export")
+                    status, exports, raw = request(base + "/exports", harness)
+                    assert status == 200, ("export collection", status, exports.get("code"))
+                    validate("ExportPage", exports, raw)
+                    assert len(exports["items"]) == 1, ("the export was not published once", exports["items"])
+                    receipt = exports["items"][0]
+                    assert receipt["name"] == export_name and receipt["state"] == "published" and receipt["runId"] == run, receipt
+                    assert squeeze("Export " + export_name + ": " + receipt["id"] + " state published") in squeeze(screen), (
+                        "Pi does not show the published export receipt", receipt["id"])
+                    assert squeeze("Export download: verified " + str(receipt["bytes"]) + " bytes, SHA-256 " + receipt["sha256"]) in squeeze(screen), (
+                        "Pi does not show the verified size and SHA-256 of the export", receipt["bytes"], receipt["sha256"])
+                    connection = http.client.HTTPSConnection("127.0.0.1", port, context=context, timeout=15)
+                    try:
+                        connection.request("GET", receipt["download"], headers=harness | {"Accept": "application/octet-stream"})
+                        response = connection.getresponse()
+                        exported = response.read(int(receipt["bytes"]) + 1)
+                        assert response.status == 200 and response.getheader("Content-Type") == "application/octet-stream", (
+                            "export download", response.status)
+                    finally:
+                        connection.close()
+                    assert len(exported) == int(receipt["bytes"]) and hashlib.sha256(exported).hexdigest() == receipt["sha256"], (
+                        "the export download differs from its receipt")
+                    assert (work / "manager" / "runs" / "exports" / export_name).read_bytes() == exported, (
+                        "the export download differs from the published file")
+                    print("PASS pi-host 9: /wfm-export published", receipt["id"], "named", export_name, "and Pi showed its verified",
+                          receipt["bytes"], "bytes with the SHA-256", receipt["sha256"] + ", which equal the harness download and the published file",
+                          flush=True)
+
+                    # 10. A second request held at its question, a forced drop of
+                    # the event stream of Pi, and the next events of the run.
+                    created2, preparation2, run2 = create_and_approve("second")
+                    held, _, _ = until("/v1/runs/" + run2 + "/control", "RunControl", lambda value: value["decisionHeadId"] is not None, timeout=90)
+                    question2 = held["decisionHeadId"]
+                    assert observed("/v1/decisions/" + question2, "Decision")[0]["kind"] == "question", ("the first head of the second run",)
+                    # The harness starts its own view again by reading a new overview.
+                    status, view, raw = request("/v1/snapshot", harness)
+                    assert status == 200, ("overview", status)
+                    validate("OverviewSnapshot", view, raw)
+                    assert [item["run"]["id"] for item in view["items"] if item["kind"] == "run" and item["run"]["id"] == run2] == [run2], (
+                        "the new overview does not list the second run")
+                    session.send(b"/wfm-debug-reconnect\r")
+                    shown(["Test hook: dropped the event stream after event "], 15, "/wfm-debug-reconnect did not report the drop")
+                    drop_at = row_after("Test hook: dropped the event stream after event ")
+                    order2, _, _ = answer_heads(run2, ("question",))
+                    assert order2 == ["question"], ("the heads of the second run", order2)
+                    recovering, _, _ = until("/v1/runs/" + run2 + "/control", "RunControl",
+                                             lambda value: value["decisionHeadId"] not in (None, question2), timeout=60)
+                    recovery2 = recovering["decisionHeadId"]
+                    assert observed("/v1/decisions/" + recovery2, "Decision")[0]["kind"] == "recovery", ("the second head of the second run",)
+                    session.send(("/wfm-monitor " + run2 + "\r").encode())
+                    shown(["Service run " + run2 + ", workflow mixed-controls", "Runtime: running", "Decisions: 1 pending",
+                           "Head " + recovery2 + ": pending recovery"], 60, "the monitor did not show the next head of the second run")
+                    pi.save_screen("monitor-after-drop")
+                    session.send(b"q")
+                    session.settle()
+                    deadline = time.monotonic() + 30
+                    while True:
+                        session.send(b"/wfm-debug-events\r")
+                        shown(["Test hook: event stream dropped after event " + drop_at], 15, "/wfm-debug-events did not list the events")
+                        rows = [line.strip() for line in session.screen.lines()]
+                        first = max(i for i, line in enumerate(rows) if line.startswith("Test hook: event stream dropped after event "))
+                        block = squeeze("".join(rows[first:]))
+                        assert squeeze("Events delivered after the drop: ") in block, ("/wfm-debug-events shows no event count", rows[first:])
+                        delivered = re.search(re.escape(squeeze("Events delivered after the drop: ")) + r"([0-9]+)of", block)
+                        count = int(delivered.group(1)) if delivered else 0
+                        # A cursor belongs to the authorization view of its
+                        # credential, so the harness reads from its own cursor
+                        # and keeps the events after the drop position.
+                        events = [event for event in events_after(cursor)
+                                  if int(event["id"].rsplit(".", 1)[1]) > int(drop_at.rsplit(".", 1)[1])]
+                        ids = [event["id"] for event in events]
+                        next_head = [i for i, event in enumerate(events)
+                                     if event["event"] == "decision.changed" and event["data"]["resource"] == "/v1/decisions/" + recovery2]
+                        if next_head and next_head[0] < count:
+                            break
+                        assert time.monotonic() < deadline, ("Pi did not receive the event of the next head", count, ids)
+                        session.pump(0.5)
+                    pi.save_screen("events-after-drop")
+                    assert squeeze("Connections after the drop: stream " + drop_at) in block, (
+                        "the first connection after the drop did not resume from the last delivered event", drop_at, block)
+                    # Each authorization view names its own stream, and the
+                    # views share the sequence numbers of the durable log.
+                    assert all(event_id.rsplit(".", 1)[0] == cursor.rsplit(".", 1)[0] for event_id in ids), ("the events of another stream", ids)
+                    listed = squeeze("Events delivered after the drop: " + str(count) + " of stream " + drop_at.rsplit(".", 1)[0] + ": "
+                                     + " ".join(event_id.rsplit(".", 1)[1] for event_id in ids[:count]))
+                    assert count <= len(ids) and listed in block, (
+                        "the events delivered after the drop differ from the events of the manager", ids, block)
+                    print("PASS pi-host 10: request", created2["id"], "started run", run2, "at question", question2 + ",",
+                          "the harness read a new overview, /wfm-debug-reconnect dropped the stream of Pi after event", drop_at,
+                          "and the stream resumed with Last-Event-ID", drop_at + ", the Pi answer moved the run to recovery head", recovery2,
+                          "which the monitor showed, and the", count, "events that Pi received after the drop equal the events of the manager",
+                          "from that cursor, without a gap", flush=True)
+
+                    # 11. The reload of the extension.
+                    session.send(b"/reload\r")
+                    shown(["Reloaded keybindings, extensions"], 60, "Pi did not reload the extensions")
+                    live = re.compile(re.escape(squeeze("Connection: connected to " + endpoint + " (endpoint identity")) + r"[^)]*\),deliverylive")
+                    status_row = squeeze("  " + run2 + "  running  owned supervision  " + workflow["id"])
+                    deadline = time.monotonic() + 30
+                    while True:
+                        session.send(b"/wfm-status\r")
+                        settle = time.monotonic() + 2
+                        while time.monotonic() < settle and not (live.search(squeeze(session.screen.text()))
+                                                                 and status_row in squeeze(session.screen.text())):
+                            session.pump(0.1)
+                        if live.search(squeeze(session.screen.text())) and status_row in squeeze(session.screen.text()):
+                            break
+                        assert time.monotonic() < deadline and session.process.poll() is None, (
+                            "/wfm-status after the reload did not show the second run with delivery live", session.screen.text())
+                    pi.save_screen("reloaded")
+                    still_running(run2, recovery2)
+                    print("PASS pi-host 11: /reload reloaded ext-pi, /wfm-status showed delivery live and run", run2,
+                          "running under owned supervision, and the harness read it running at its pending head", recovery2, flush=True)
+
+                    # 12. Quit.
                     pi.quit()
+                    still_running(run2, recovery2)
+                    print("PASS pi-host 12: /quit ended Pi with exit status 0, and run", run2, "still runs under owned supervision at its pending head",
+                          recovery2, flush=True)
+                except BaseException:
+                    pi.save_screen("failure")
+                    pi.save_output()
+                    raise
+
+            # 13. Pi starts again with the same client profile, and the harness
+            # revokes its credential.
+            with PiHost("pi-host-again") as pi:
+                session = pi.session
+                try:
+                    session.wait_screen("[Extensions]", timeout=60)
+                    shown(["Manager connected: " + endpoint], 30, "Pi did not connect again with the same client profile")
+                    commands_before = command_ids()
+                    administration({"version": 1, "operation": "revoke-credential", "credentialId": tui_fixture.credential_ids["pi"]})
+                    refusal = "the manager refused the credential (401 unauthenticated). No manager command is sent."
+                    shown(["Manager refused: " + refusal], 30, "Pi did not show the refused credential")
+                    pi.save_screen("revoked")
+                    session.send(b"/wfm\r")
+                    shown(["The manager is not connected. /wfm-status states the connection."], 15, "/wfm did not refuse to start")
+                    session.send(b"/wfm-status\r")
+                    shown(["Connection: refused for " + str(tui_fixture.client_profile) + ": " + refusal], 15,
+                          "/wfm-status did not show the refused connection")
+                    pi.save_screen("revoked-status")
+                    assert command_ids() == commands_before, "Pi sent a command after its credential was refused"
+                    still_running(run2, recovery2)
+                    pi.quit()
+                    print("PASS pi-host 13: Pi connected again with the same client profile, the harness revoked its credential, Pi showed",
+                          repr("Manager refused: " + refusal) + ", /wfm started nothing, the ledger holds no new command, and run", run2,
+                          "still runs at its pending head", flush=True)
                 except BaseException:
                     pi.save_screen("failure")
                     pi.save_output()
                     raise
         print("PASS pi-host: the built Pi fork created, approved, answered with JSON false, retried, monitored to terminal success,",
-              "saved the verified result and listed the history through the actual manager, driven by keys", flush=True)
+              "saved the verified result, listed the history, restarted with lineage, exported, resumed its event stream without a gap,",
+              "reloaded and quit with a held run under manager supervision, and refused a revoked credential, driven by keys", flush=True)
     finally:
         if process.poll() is None:
             process.terminate()

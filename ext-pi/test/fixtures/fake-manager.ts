@@ -68,9 +68,10 @@ export class FakeTransport implements SessionTransport {
     return UNREACHABLE;
   }
 
-  followEvents(_start: string, deliver: (item: StreamItem, via: Delivery) => void, options: FollowOptions = {}): Promise<FollowEnd> {
+  followEvents(start: string, deliver: (item: StreamItem, via: Delivery) => void, options: FollowOptions = {}): Promise<FollowEnd> {
     if (this.closed) return Promise.resolve({ kind: "closed" });
     this.#deliver = deliver;
+    options.connected?.("stream", start);
     options.state?.("live");
     return new Promise((resolve) => {
       this.#end = resolve;
@@ -85,7 +86,17 @@ export class FakeTransport implements SessionTransport {
     throw new Error("the fake transport does not download");
   }
 
-  dropStream(): void {}
+  /** The number of `dropStream` calls. The fake stream stays open. */
+  drops = 0;
+
+  dropStream(): void {
+    this.drops += 1;
+  }
+
+  /** End the follow loop as the manager does, for example with a credential refusal. */
+  end(end: FollowEnd): void {
+    this.#end?.(end);
+  }
 
   close(): void {
     this.closed = true;
