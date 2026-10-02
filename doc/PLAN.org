@@ -12623,6 +12623,43 @@ Non-blocking findings of fess audit fess/pf-PF3-r1.md (2026-10-02) on subtask PF
 ]
 #+end_src
 
+* TODO [#D] Resolve the non-blocking fess findings of subtask PF4
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pf4-fess-followup-u737
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-02 Fri 11:48]
+:MODIFIED: [2026-10-02 Fri 11:48]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess audit fess/pf-PF4-r1.md (2026-10-02) on subtask PF4 (leg 1 of the WM-039 cross-client witness in manager/test/service_http.py and --service-case witness of ci/emacs-ui.py in agent-workflows emacs-native 360adc1). The PF4 commit names this issue.
+
+1. (low) The py_compile check ran without -B and left an untracked manager/test/__pycache__/ directory, which .gitignore does not cover. The Integrator removed it before the PF4 commit. Run py_compile with PYTHONDONTWRITEBYTECODE=1, or add the directory to .gitignore.
+2. (low) cross_client_checks step 6 asserts principal("tui") != principal("pi"). CrossClientFixture.__init__ already asserts four distinct client identifiers, so this is tautological. Remove it, or compare the logged from values of the enqueue and the approve.
+3. (low) service_witness_case in ci/emacs-ui.py (emacs-native) records report["sent"] with service_extra(session.state).get("sent", []). A missing record would make the harness check report["sent"] == [] pass vacuously. The PF2 controls case has the same pattern. Index the key directly so a missing record fails.
+4. (low) The placeholder modes cross-client-lifecycle, cross-client-lineage and cross-client-broken-answer run the full module-level setup (EMACS checks, CrossClientFixture credentials, configuration) before they exit 2, and leave credential files in the fixture work directory. PF6 to PF8 replace them. Optionally exit before the fixture is built.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-pf4-fess-followup-u737",
+    "depends_on_id": "acat-wm-039-0vfi",
+    "type": "discovered-from",
+    "created_at": "2026-10-02T18:48:54.153329Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
 * TODO [#C] Phase B part 1 review follow-ups: download quota, id row bound, legacy history, precision gaps
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -22885,7 +22922,7 @@ WM-008 completed handoff 2026-09-12T02:36:23+00:00: Adopt the shared root-role r
 :LABELS:   ["p9","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-09 Wed 22:34]
+:MODIFIED: [2026-10-02 Fri 11:48]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-039
 :SOURCE_REPO: agent-cat
@@ -22994,6 +23031,20 @@ configuration is changed.
     "created_by": "johnw",
     "metadata": "{}",
     "thread_id": ""
+  }
+]
+#+end_src
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 649,
+    "issue_id": "acat-wm-039-0vfi",
+    "author": "johnw",
+    "text": "Subtask PF4 (2026-10-02) lands leg 1 of the WM-039 witness on loopback TLS (local macOS only; the cross-machine part of this package stays open). manager/test/service_http.py adds the modes cross-client, cross-client-lifecycle, cross-client-lineage and the control cross-client-broken-answer, each with its own dispatch ahead of the generic control_profiles dispatch, executionReservations 2 with profile_1 (resourceKeys cross_one) and profile_2 (cross_two), and the retry adapter. CrossClientFixture subclasses TuiModeFixture and issues four credentials (tui, emacs, pi, harness) with four distinct client identifiers on one manager. Leg 1: the TUI at 80x24 creates a mixed-controls request on profile_1 with exactly CROSS_LITERAL_1 by keys, enqueues it and quits at the review without approving. Pi (PiHost, pi client profile) runs /wfm-review <request>, shows the five selectors, the program SHA-256 and the workflow equal to the preparation the harness reads, and sends one approve; the preparation is consumed. Emacs (emacs-native 360adc1, --service-case witness, report version 1) opens the run with wf-runs, shows its pending question and sends no command. The commands table holds create, set-input and enqueue from the tui client and approve from the pi client, none from emacs or harness. The manager log read with the flow verb names the enqueue and approve senders as two principals, and the one start relay follows the approval. The run stays waiting at its question. Cleanup left no process and removed 12 fixture paths. Evidence: PF/PF4/impl-r1/cross-client.log (exit 0, seven PASS lines at N8, 48 s), py_compile on both scripts, the -ftui-tests BUILD, and the N8 tui-journey regression. The three pending modes exit 2 with \"not yet implemented\" until PF5 to PF8. Limitations: client-side TLS 1.3 is inferred from the harness probe (TLSv1.3) and the shared endpoint; only N8 ran. Fess pf-PF4-r1 not blocking; its four low findings are in the PF4 follow-up issue.\n",
+    "created_at": "2026-10-02T18:48:43Z"
   }
 ]
 #+end_src
