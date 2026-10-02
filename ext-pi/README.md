@@ -990,6 +990,28 @@ give one more notification. After an accepting cancel acknowledgement, the
 command waits for the terminal status of the run snapshot and states it, for
 example `Execution: run RUN_ID is cancelled.`
 
+`test/manager-controls-live.test.ts` runs only when
+`AGENT_CAT_MANAGER_PROFILE` names a client profile and
+`AGENT_CAT_MANAGER_STEER_RUN` and `AGENT_CAT_MANAGER_REDIRECT_RUN` name two
+running runs. It drives the extension with the fake Pi host of
+`test/fixtures/live-pi.ts`, which `test/manager-ui-live.test.ts` also uses,
+against a running manager, in three ordered steps. While the steer run holds
+its first turn, `/wfm-steer` must send the one offered steer with the timing
+`interrupt-now` and the editor text, the receipt must reach the effect
+`steered`, and the steer notification must follow. When the dispatch window
+of the redirect run has closed and its first candidate holds its turn, the
+controls must offer the live redirect to the spare target only.
+`/wfm-redirect` must list exactly that target with its attempt in flight,
+send the redirect, reach the effect `redirected` and report the redirect
+from that attempt. The last step requires that the steer and the redirect
+are the only POSTs of the extension, closes the extension and writes the
+report. The `pi-client-controls` mode of `manager/test/service_http.py`
+creates and approves both runs with the credential of the harness, runs the
+check and confirms each control against manager facts: the one command of
+the controls of each run and its effect, the steer record and the control
+record of the run log through `GET /v1/runs/{id}/routes`, the stopped
+attempt, the question to the spare target and the success of both runs.
+
 `test/manager-ui.test.ts` checks that the review lists every selector and
 consent fact, that the component wraps the review within the width and
 reaches every line by scrolling, and the choice of each key. It also checks

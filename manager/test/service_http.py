@@ -74,7 +74,7 @@ consent_control = len(sys.argv) == 6 and sys.argv[5] == "tui-consent-control"
 # runs one manager lifetime and does not enter the restart loop.
 LIFECYCLE = "credential-lifecycle"
 lifecycle = len(sys.argv) == 6 and sys.argv[5] == LIFECYCLE
-mixed = len(sys.argv) == 6 and sys.argv[5] in ("mixed", "mixed-confirm", "tui-approval", "tui-consent-control", APPROVE_FAULT, LIFECYCLE, "pages", "routes", "failures-worker", "failures-manager", "failures-launched", "storage", "pi-client", "pi-host-smoke", "pi-host", "pi-host-broken-answer", "pi-host-model", "pi-host-model-decline") + JOURNEYS
+mixed = len(sys.argv) == 6 and sys.argv[5] in ("mixed", "mixed-confirm", "tui-approval", "tui-consent-control", APPROVE_FAULT, LIFECYCLE, "pages", "routes", "failures-worker", "failures-manager", "failures-launched", "storage", "pi-client", "pi-client-controls", "pi-host-smoke", "pi-host", "pi-host-broken-answer", "pi-host-model", "pi-host-model-decline") + JOURNEYS
 confirm_uncertain = mixed and sys.argv[5] == "mixed-confirm"
 # The boundary mode checks WM-024 through the running protected manager with
 # raw socket and ssl connections: plaintext and TLS 1.2 refusal, request
@@ -451,6 +451,57 @@ endpoints_mode = len(sys.argv) == 6 and sys.argv[5] == ENDPOINTS
 # stale-answer step, and the mode does not require TUI_CHECK. Each step prints its own PASS line. It runs one manager lifetime.
 PI_CLIENT = "pi-client"
 pi_client_mode = len(sys.argv) == 6 and sys.argv[5] == PI_CLIENT
+# The client-controls modes send the run controls steer and redirect through
+# a service client against the running protected manager. They configure two
+# control fixture profiles, as the tui-controls and tui-redirect modes do:
+# profile_steer runs the steerable ACP adapter, which holds its first turn
+# until a steer, and profile_live runs the ACP hold fixture as its first
+# model candidate, with the ACP stub fixture as its spare candidate. The
+# manager has two execution reservations. client_controls_fixture issues
+# through TuiModeFixture one client credential, named by the mode, with
+# observe, submit and control for both profiles, and a separate credential
+# for the harness. Each profile has its own resource key, so that a run of
+# each holds an execution reservation at once. The harness creates and
+# approves one mixed-controls run of each profile with its own credential
+# through client_controls_hold, and
+# client_controls_confirm then confirms the controls of the client from
+# manager facts, settles both runs with typed false answers and prints the
+# PASS lines. It reads each run log through GET /v1/runs/{id}/routes. The
+# client sends no other mutation, and the harness sends no run control.
+#
+# The pi-client-controls mode runs ext-pi/test/manager-controls-live.test.ts
+# with node from PATH in ext-pi, through the fake Pi UI, with
+# AGENT_CAT_MANAGER_PROFILE set to the client profile of the credential pi,
+# AGENT_CAT_MANAGER_STEER_RUN and AGENT_CAT_MANAGER_REDIRECT_RUN set to the
+# two held runs, and AGENT_CAT_MANAGER_REPORT set to a report file. vitest
+# must report its three steps passed.
+# 1. While the profile_steer run holds its first turn, /wfm-steer sends the
+# one offered steer with the timing interrupt-now and the editor text
+# PI_CONTROLS_STEER_TEXT. The harness reads that the steer command of the
+# report is the only command of the controls of the run and reached the
+# effect steered for the offered attempt, and that the run log holds the one
+# control record of the command from the manager and one steer record, both
+# with the timing and the typed text. The run then succeeds.
+# 2. When the dispatch window of the profile_live run has closed and its
+# first candidate holds its turn, the controls offer the live redirect to the
+# spare target only, and /wfm-redirect sends it. The harness reads that the
+# redirect command of the report is the only command of the controls of the
+# run and reached the effect redirected, that occurrence.redirected names
+# the command and the spare target, that the held attempt ended
+# attempt.failed with a message that names the command, that the run log
+# holds the question to the first target, the control record of the command
+# from the manager and the question to the spare target in that order, and
+# that the run succeeds with the answer of the spare candidate.
+# Each step prints its own PASS line. It runs one manager lifetime.
+PI_CLIENT_CONTROLS = "pi-client-controls"
+# The client-controls modes and the name of the client credential of each.
+CLIENT_CONTROLS_MODES = {PI_CLIENT_CONTROLS: "pi"}
+CLIENT_CONTROLS_PROFILES = ["profile_steer", "profile_live"]
+CLIENT_CONTROLS_SCOPES = ["observe", "submit", "control"]
+client_controls_mode = len(sys.argv) == 6 and sys.argv[5] in CLIENT_CONTROLS_MODES
+# The steering text of the pi-client-controls mode. STEER_TEXT of
+# ext-pi/test/manager-controls-live.test.ts states it.
+PI_CONTROLS_STEER_TEXT = "Pi steer \u03bb: focus on the patch."
 # The Pi host modes start the built Pi fork in a pseudo-terminal through the
 # shared launcher PiHost. The launcher reuses the credential issuance of
 # TuiModeFixture with the mixed fixture, one profile and one execution
@@ -1037,9 +1088,9 @@ def lifecycle_elapsed():
     elapsed = time.monotonic() - mode_started
     assert elapsed <= LIFECYCLE_SECONDS, ("the lifecycle mode took longer than its bound", tui_mode, round(elapsed), LIFECYCLE_SECONDS)
     return f"{elapsed:.0f} seconds"
-# The tui-controls and tui-redirect modes configure the control fixture
-# profiles.
-control_profiles = control_profiles or tui_mode in (TUI_CONTROLS, TUI_REDIRECT)
+# The tui-controls, tui-redirect and client-controls modes configure the
+# control fixture profiles.
+control_profiles = control_profiles or tui_mode in (TUI_CONTROLS, TUI_REDIRECT) or client_controls_mode
 assert len(sys.argv) == 5 or mixed or boundary or pages_mode or events_mode or captures_mode or discard_mode or exports_mode or lineage_mode or control_profiles or person_mode or endpoints_mode or tui_mode
 assert not tui_approval or os.environ.get("TUI_CHECK")
 assert not (endpoints_mode or tui_mode) or os.environ.get("TUI_CHECK")
@@ -1142,8 +1193,9 @@ if pages_mode or tui_mode == TUI_HISTORY or pi_client_mode:
     LEGACY_ROOT.mkdir(mode=0o700)
     configuration["localRetentionRoots"] = [str(LEGACY_ROOT)]
 # The tui-overview, tui-failures and tui-sizes modes also run requests
-# through the mixed fixture.
-if mixed or tui_mode in (OVERVIEW, TUI_FAILURES, TUI_SIZES, TUI_SIZES_BROKEN):
+# through the mixed fixture. The client-controls modes run the mixed-controls
+# workflow through the control fixture profiles instead.
+if (mixed and not client_controls_mode) or tui_mode in (OVERVIEW, TUI_FAILURES, TUI_SIZES, TUI_SIZES_BROKEN):
     adapters = work / "adapters"
     adapters.mkdir(mode=0o700)
     launcher = adapters / "mixed-adapter"
@@ -1164,7 +1216,7 @@ if tui_mode == OVERVIEW:
     configuration["profiles"][0]["resourceKeys"] = ["overview_one"]
     configuration["profiles"].append(dict(configuration["profiles"][0], id="profile_2",
                                           workspaceLabel="HTTPS second fixture", resourceKeys=["overview_two"]))
-if tui_mode in (INPUTS, TUI_CONTROLS, TUI_REDIRECT, TUI_DECISIONS):
+if tui_mode in (INPUTS, TUI_CONTROLS, TUI_REDIRECT, TUI_DECISIONS) or client_controls_mode:
     configuration["limits"]["executionReservations"] = 2
 # The restart quarantines the reservation of the lost run, or of a request
 # in review, with its execution slot and resource keys, until the operator
@@ -1204,7 +1256,7 @@ if control_profiles:
             dict(scripted, id="profile_route", workspaceLabel="HTTPS route fixture", targetLabel="Deterministic ACP route",
                  targetArguments=["--engine", "acp", "--adapter", "retry-adapter", "--route", "spare=acp:spare-adapter"],
                  environment=fixture_path))
-    if live_mode or tui_mode == TUI_REDIRECT:
+    if live_mode or tui_mode == TUI_REDIRECT or client_controls_mode:
         # The route named spare answers the spare candidate. The first
         # candidate of profile_live holds its turn until a redirect stops it.
         # The first candidate of profile_live_effect answers after eight
@@ -1223,6 +1275,12 @@ if control_profiles:
                 dict(scripted, id="profile_live_stale", workspaceLabel="HTTPS live stale fixture", targetLabel="Deterministic ACP hold",
                      targetArguments=["--engine", "acp", "--adapter", "hold-adapter", "--route", "primary=acp:hold-adapter",
                                       "--route", "spare=acp:hold-adapter"], environment=fixture_path)]
+    # The client-controls modes keep only profile_steer and profile_live. A
+    # run of each holds its turn at once, so each profile has its own
+    # resource key, and both runs hold one of the two execution reservations.
+    if client_controls_mode:
+        configuration["profiles"] = [dict(profile, resourceKeys=["controls_" + profile["id"]])
+                                     for profile in configuration["profiles"] if profile["id"] in CLIENT_CONTROLS_PROFILES]
 # The tui-decisions mode configures the person-answers fixture too.
 if person_mode or tui_mode == TUI_DECISIONS:
     # The launcher relays its input to the stub adapter. It records its
@@ -1458,6 +1516,16 @@ class TuiModeFixture:
         return TuiSession(runner, self.client_state, rows=rows, columns=columns, command=command, explicit_state=False)
 
 
+def client_controls_fixture(client):
+    """The credentials of a client-controls mode. The module configures its
+    profiles, profile_steer and profile_live, each with its own resource
+    key, and two execution reservations. This issues the client credential
+    credential-CLIENT with observe, submit and control for both profiles,
+    and the credential of the harness, through TuiModeFixture, whose
+    client_profile names the client credential."""
+    return TuiModeFixture(CLIENT_CONTROLS_PROFILES, CLIENT_CONTROLS_SCOPES, client=client)
+
+
 issued = administration({"version": 1, "operation": "issue-credential", "label": "HTTPS fixture",
                          "scopes": ["observe", "submit"] + (["control", "export"] if mixed else ["control"] if captures_mode or discard_mode or lineage_mode or control_profiles or person_mode else ["control", "export"] if exports_mode else []),
                          "profileIds": CONTROL_PROFILES or (["profile_1", "profile_plain"] if person_mode else
@@ -1491,6 +1559,7 @@ if endpoints_mode:
                         "scopes": scopes, "profileIds": ["profile_1"],
                         "expiresAt": "2999-01-01T00:00:00Z", "outputFile": str(work / ("credential-" + name))})
 tui_fixture = (TuiModeFixture(*TUI_MODES[tui_mode]) if tui_mode else
+               client_controls_fixture(CLIENT_CONTROLS_MODES[sys.argv[5]]) if client_controls_mode else
                TuiModeFixture(["profile_1"], ["observe", "submit", "control", "export"], client="pi") if pi_client_mode or pi_host_smoke_mode or pi_host_mode or pi_host_model_mode else None)
 configuration["administrationRoot"] = str(work / "admin")
 config.write_text(json.dumps(configuration))
@@ -5325,31 +5394,132 @@ def attempt_events(store, occurrence):
     return attempts, redirected
 
 
-def tui_control_checks():
-    """The tui-controls and tui-redirect modes. See TUI_CONTROLS and
-    TUI_REDIRECT for the steps. Both share the helpers below."""
-    harness = tui_fixture.harness
-    terminal = ("succeeded", "failed", "cancelled")
+class ControlHarness:
+    """The harness side of the modes that send run controls through a
+    client: tui-controls, tui-redirect and the client-controls modes. It
+    creates, approves and settles runs with the credential of the harness,
+    and reads their facts. label names the evidence files that ended
+    writes. client holds the read and mutation steps of mixed_client."""
 
-    def save(session, name):
-        (work / (tui_mode + "-" + name + ".screen.txt")).write_text(session.screen.text())
+    TERMINAL = ("succeeded", "failed", "cancelled")
 
-    def start(profile, name="mixed-controls"):
+    def __init__(self, harness, capabilities, label):
+        self.harness, self.capabilities, self.label = harness, capabilities, label
+        self.client = mixed_client(capabilities, harness)
+
+    def start(self, profile, name="mixed-controls"):
         """Create, enqueue and approve one request of the named workflow of
         the profile through HTTP with the credential of the harness. Returns
         the run."""
-        status, catalogue, _ = request("/v1/workflows?profileId=" + profile, harness)
+        status, catalogue, _ = request("/v1/workflows?profileId=" + profile, self.harness)
         assert status == 200, ("control catalogue", profile, status)
         workflow = next(item for item in catalogue["items"] if item["name"] == name)
         body = {"workflowId": workflow["id"], "descriptorRevision": workflow["revision"],
                 "profileId": workflow["profileId"], "profileRevision": workflow["profileRevision"]}
-        key = capabilities["authorityEpoch"] + "." + secrets.token_urlsafe(16)
-        status, created, raw = request("/v1/requests", harness | {"Content-Type": "application/json", "Idempotency-Key": key},
+        key = self.capabilities["authorityEpoch"] + "." + secrets.token_urlsafe(16)
+        status, created, raw = request("/v1/requests", self.harness | {"Content-Type": "application/json", "Idempotency-Key": key},
                                        method="POST", payload=json.dumps(body, separators=(",", ":")).encode())
         assert status == 201, ("control request creation", profile, status, created.get("code"))
         validate("Request", created, raw)
-        _, run = approve_mixed(created, workflow, client)
+        _, run = approve_mixed(created, workflow, self.client)
         return run
+
+    def snapshot(self, run):
+        value, _, _ = self.client[0]("/v1/runs/" + run + "/snapshot", "RunSnapshot")
+        return value
+
+    def ended(self, run, expected):
+        """Wait until the run is terminal, keep its snapshot and require the
+        expected terminal status."""
+        value, _, raw = self.client[1]("/v1/runs/" + run + "/snapshot", "RunSnapshot",
+            lambda value: value["runtime"] is not None and value["runtime"]["status"] in self.TERMINAL)
+        (work / (self.label + "-" + run + "-terminal.json")).write_bytes(raw)
+        assert value["runtime"]["status"] == expected, ("control run terminal status", run, value["runtime"]["status"], expected)
+
+    def offered(self, run, ready):
+        """The controls of the run once the predicate holds."""
+        value, _, _ = self.client[1]("/v1/runs/" + run + "/control", "RunControl", ready)
+        return value
+
+    def settle(self, run, expected):
+        """Answer each remaining question head with typed false until the
+        run ends, and require the expected terminal status. A recovery head
+        fails the step."""
+        observed, _, mutate, _ = self.client
+        deadline = time.monotonic() + 90
+        while True:
+            value = self.snapshot(run)
+            if value["runtime"] is not None and value["runtime"]["status"] in self.TERMINAL:
+                break
+            assert time.monotonic() < deadline, ("settle deadline", run)
+            control, _, _ = observed("/v1/runs/" + run + "/control", "RunControl")
+            head = control["decisionHeadId"]
+            if head is None:
+                time.sleep(0.05)
+                continue
+            decision, tag, _ = observed("/v1/decisions/" + head, "Decision")
+            assert decision["kind"] == "question", ("an unexpected recovery head", run, decision["kind"])
+            mutate("/v1/decisions/" + head, {"operation": "answer", "occurrenceId": decision["address"]["occurrenceId"],
+                                             "generation": decision["generation"], "value": False}, tag)
+        self.ended(run, expected)
+
+    def run_records(self, run):
+        """Every run-log record of the run that GET /v1/runs/{id}/routes
+        serves to the credential of the harness, over all batches."""
+        records, cursor = [], None
+        for _ in range(1024):
+            target = f"/v1/runs/{run}/routes" + ("" if cursor is None else "?after=" + cursor)
+            status, value, raw = request(target, self.harness | {"Accept": "application/json"})
+            assert status == 200, ("run route batch", run, status, value.get("code"))
+            validate("RouteBatch", value, raw)
+            records += value["records"]
+            cursor = value["cursor"]
+            if not value["hasMore"]:
+                return records
+        raise AssertionError(("run route pages did not end", run))
+
+    @staticmethod
+    def command_rows(run_resources):
+        """The identifier, operation, state and runtime acknowledgement of
+        each command of these resources in the coordination database, in
+        acceptance order, read through a read-only connection."""
+        import sqlite3
+        found = sorted((work / "manager").rglob("coordination.sqlite3"))
+        assert len(found) == 1, ("coordination database", found)
+        connection = sqlite3.connect(found[0].as_uri() + "?mode=ro", uri=True)
+        try:
+            marks = ",".join("?" * len(run_resources))
+            return [(row[0], row[1], row[2], None if row[3] is None else json.loads(row[3])) for row in connection.execute(
+                "SELECT id, operation, state, acknowledgement FROM commands WHERE resource_uri IN (" + marks + ") ORDER BY rowid",
+                run_resources).fetchall()]
+        finally:
+            connection.close()
+
+    @classmethod
+    def commands(cls, run_resources):
+        """The operations of the commands of these resources."""
+        return [row[1] for row in cls.command_rows(run_resources)]
+
+    @staticmethod
+    def new_store(before):
+        """The one run store that is not in before, once it exists."""
+        deadline = time.monotonic() + 20
+        while True:
+            stores = sorted(set(work.glob("manager/runs/runs/*/runtime")) - before)
+            if len(stores) == 1:
+                return stores[0]
+            assert len(stores) == 0 and time.monotonic() < deadline, ("new run store", stores)
+            time.sleep(0.05)
+
+
+def tui_control_checks():
+    """The tui-controls and tui-redirect modes. See TUI_CONTROLS and
+    TUI_REDIRECT for the steps. Both share the helpers below and those of
+    ControlHarness."""
+    harness = tui_fixture.harness
+
+    def save(session, name):
+        (work / (tui_mode + "-" + name + ".screen.txt")).write_text(session.screen.text())
 
     def details(screen):
         return "".join(line.split("\u2502", 1)[1].strip() for line in screen.splitlines() if "\u2502" in line)
@@ -5376,20 +5546,6 @@ def tui_control_checks():
         """Esc from the live monitor back to the overview."""
         session.send(b"\x1b")
         return session.wait_screen("Manager overview", timeout=10)
-
-    def snapshot_of(run):
-        value, _, _ = client[0]("/v1/runs/" + run + "/snapshot", "RunSnapshot")
-        return value
-
-    def ended(run, expected):
-        value, _, raw = client[1]("/v1/runs/" + run + "/snapshot", "RunSnapshot",
-            lambda value: value["runtime"] is not None and value["runtime"]["status"] in terminal)
-        (work / (tui_mode + "-" + run + "-terminal.json")).write_bytes(raw)
-        assert value["runtime"]["status"] == expected, ("control run terminal status", run, value["runtime"]["status"], expected)
-
-    def offered(run, ready):
-        value, _, _ = client[1]("/v1/runs/" + run + "/control", "RunControl", ready)
-        return value
 
     def answer_person(run):
         """Answer the person question of a held profile_steer run with typed
@@ -5419,60 +5575,6 @@ def tui_control_checks():
                 return decision
             client[2]("/v1/decisions/" + head, {"operation": "answer", "occurrenceId": decision["address"]["occurrenceId"],
                                                "generation": decision["generation"], "value": False}, tag)
-
-    def settle(run, expected):
-        """Answer each remaining question head with typed false until the
-        run ends, and require the expected terminal status. A recovery head
-        fails the step."""
-        deadline = time.monotonic() + 90
-        while True:
-            value = snapshot_of(run)
-            if value["runtime"] is not None and value["runtime"]["status"] in terminal:
-                break
-            assert time.monotonic() < deadline, ("settle deadline", run)
-            control, _, _ = client[0]("/v1/runs/" + run + "/control", "RunControl")
-            head = control["decisionHeadId"]
-            if head is None:
-                time.sleep(0.05)
-                continue
-            decision, tag, _ = client[0]("/v1/decisions/" + head, "Decision")
-            assert decision["kind"] == "question", ("an unexpected recovery head", run, decision["kind"])
-            client[2]("/v1/decisions/" + head, {"operation": "answer", "occurrenceId": decision["address"]["occurrenceId"],
-                                               "generation": decision["generation"], "value": False}, tag)
-        ended(run, expected)
-
-    def run_records(run):
-        records, cursor = [], None
-        for _ in range(1024):
-            target = f"/v1/runs/{run}/routes" + ("" if cursor is None else "?after=" + cursor)
-            status, value, raw = request(target, harness | {"Accept": "application/json"})
-            assert status == 200, ("run route batch", run, status, value.get("code"))
-            validate("RouteBatch", value, raw)
-            records += value["records"]
-            cursor = value["cursor"]
-            if not value["hasMore"]:
-                return records
-        raise AssertionError(("run route pages did not end", run))
-
-    def command_rows(run_resources):
-        """The identifier, operation, state and runtime acknowledgement of
-        each command of these resources in the coordination database, in
-        acceptance order, read through a read-only connection."""
-        import sqlite3
-        found = sorted((work / "manager").rglob("coordination.sqlite3"))
-        assert len(found) == 1, ("coordination database", found)
-        connection = sqlite3.connect(found[0].as_uri() + "?mode=ro", uri=True)
-        try:
-            marks = ",".join("?" * len(run_resources))
-            return [(row[0], row[1], row[2], None if row[3] is None else json.loads(row[3])) for row in connection.execute(
-                "SELECT id, operation, state, acknowledgement FROM commands WHERE resource_uri IN (" + marks + ") ORDER BY rowid",
-                run_resources).fetchall()]
-        finally:
-            connection.close()
-
-    def commands(run_resources):
-        """The operations of the commands of these resources."""
-        return [row[1] for row in command_rows(run_resources)]
 
     def runtime_labels(start):
         """The runtime labels that the TUI wrote to the PTY after the byte offset start."""
@@ -5528,15 +5630,6 @@ def tui_control_checks():
                 assert time.monotonic() < deadline and session.process.poll() is None, (
                     failure or "the TUI screen did not show the expected text", expect, session.screen.text())
             assert deferred <= 20, ("the key was deferred too often", operation, session.screen.text())
-
-    def new_store(before):
-        deadline = time.monotonic() + 20
-        while True:
-            stores = sorted(set(work.glob("manager/runs/runs/*/runtime")) - before)
-            if len(stores) == 1:
-                return stores[0]
-            assert len(stores) == 0 and time.monotonic() < deadline, ("new run store", stores)
-            time.sleep(0.05)
 
     def store_flow(name, store):
         completed = subprocess.run([str(runner), "flow", str(store)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60)
@@ -5767,7 +5860,10 @@ def tui_control_checks():
             wait_ready(process)
             status, capabilities, _ = request("/v1/capabilities", harness)
             assert status == 200 and "control" in capabilities["scopes"]
-            client = mixed_client(capabilities, harness)
+            runs = ControlHarness(harness, capabilities, tui_mode)
+            client = runs.client
+            start, snapshot_of, ended, offered, settle = runs.start, runs.snapshot, runs.ended, runs.offered, runs.settle
+            run_records, command_rows, commands, new_store = runs.run_records, runs.command_rows, runs.commands, runs.new_store
             with tui_fixture.session() as session:
                 session.wait_screen("Manager profiles")
                 session.wait_screen(TUI_MODES[tui_mode][0][0])
@@ -9645,6 +9741,35 @@ def size_checks():
         process.wait(timeout=25)
 
 
+def run_vitest(test_file, environment, report_file, log_file, steps, poll=None):
+    """Run one live check of ext-pi with node from PATH in ext-pi, with the
+    variables of environment and AGENT_CAT_MANAGER_REPORT set to report_file
+    added to the environment of the harness, and give its report. poll, when
+    given, runs about every 50 milliseconds while the check runs. The check
+    must exit with status 0 within 720 seconds, vitest must report its steps
+    passed, and the report file must exist."""
+    environment = dict(os.environ, AGENT_CAT_MANAGER_REPORT=str(report_file), **environment)
+    with log_file.open("wb") as log:
+        child = subprocess.Popen(["node", "node_modules/vitest/vitest.mjs", "run", test_file],
+                                 cwd=source / "ext-pi", env=environment, stdout=log, stderr=subprocess.STDOUT)
+        try:
+            deadline = time.monotonic() + 720
+            while child.poll() is None:
+                assert time.monotonic() < deadline, ("the ext-pi live check exceeded 720 seconds", test_file)
+                if poll is not None:
+                    poll()
+                time.sleep(0.05)
+        finally:
+            if child.poll() is None:
+                child.kill()
+                child.wait()
+    text = re.sub(r"\x1b\[[0-9;]*m", "", log_file.read_text(errors="replace"))
+    assert child.returncode == 0, ("the ext-pi live check failed", test_file, child.returncode, text[-4000:])
+    assert re.search(r"Tests\s+%d passed \(%d\)" % (steps, steps), text) and report_file.is_file(), (
+        "the ext-pi live check did not run its steps", test_file, text[-4000:])
+    return json.loads(report_file.read_bytes())
+
+
 def pi_client_checks():
     """The pi-client mode. See PI_CLIENT for the steps."""
     harness = tui_fixture.harness
@@ -9713,28 +9838,15 @@ def pi_client_checks():
                 """Run one live check of ext-pi with the client profile and give
                 its report. With a handshake file, answer the decision that the
                 check names there first, once."""
-                environment = dict(os.environ, AGENT_CAT_MANAGER_PROFILE=str(profile), AGENT_CAT_MANAGER_REPORT=str(report_file))
+                environment = {"AGENT_CAT_MANAGER_PROFILE": str(profile)}
                 if handshake is not None:
                     environment["AGENT_CAT_MANAGER_HARNESS_ANSWER"] = str(handshake)
-                with log_file.open("wb") as log:
-                    child = subprocess.Popen(["node", "node_modules/vitest/vitest.mjs", "run", test_file],
-                                             cwd=source / "ext-pi", env=environment, stdout=log, stderr=subprocess.STDOUT)
-                    try:
-                        deadline = time.monotonic() + 720
-                        while child.poll() is None:
-                            assert time.monotonic() < deadline, ("the ext-pi live check exceeded 720 seconds", test_file)
-                            if handshake is not None and handshake.is_file() and not harness_answers:
-                                harness_answer(handshake)
-                            time.sleep(0.05)
-                    finally:
-                        if child.poll() is None:
-                            child.kill()
-                            child.wait()
-                text = re.sub(r"\x1b\[[0-9;]*m", "", log_file.read_text(errors="replace"))
-                assert child.returncode == 0, ("the ext-pi live check failed", test_file, child.returncode, text[-4000:])
-                assert re.search(r"Tests\s+%d passed \(%d\)" % (steps, steps), text) and report_file.is_file(), (
-                    "the ext-pi live check did not run its steps", test_file, text[-4000:])
-                return json.loads(report_file.read_bytes())
+
+                def poll():
+                    if handshake is not None and handshake.is_file() and not harness_answers:
+                        harness_answer(handshake)
+
+                return run_vitest(test_file, environment, report_file, log_file, steps, poll)
 
             def prompts():
                 """The question prompt of every answer of every run store, by run store."""
@@ -10086,6 +10198,121 @@ def pi_client_checks():
         if process.poll() is None:
             process.terminate()
         process.wait(timeout=25)
+
+
+def client_controls_hold(runs):
+    """Create and approve the two held runs of a client-controls mode with
+    the credential of the harness: a mixed-controls run of profile_steer,
+    once its controls offer a steer, and then a mixed-controls run of
+    profile_live. Returns the steer run, the redirect run and the run store
+    of the redirect run."""
+    steer = runs.start("profile_steer")
+    runs.offered(steer, lambda value: any(offer["operation"] == "steer" for offer in value["offers"]))
+    before = set(work.glob("manager/runs/runs/*/runtime"))
+    redirect = runs.start("profile_live")
+    return steer, redirect, runs.new_store(before)
+
+
+def client_controls_confirm(runs, steer, redirect, store, facts, steer_name, redirect_name):
+    """Confirm the steer and the redirect that the client of a
+    client-controls mode sent for the runs of client_controls_hold, settle
+    both runs and print one PASS line for each. facts names the steer
+    command, occurrence, attempt and text, and the redirect command,
+    occurrence, attempt and target, with the keys of the report of
+    ext-pi/test/manager-controls-live.test.ts. steer_name and redirect_name
+    name the client commands in the PASS lines."""
+    mode = sys.argv[5]
+    observed = runs.client[0]
+
+    def one_control(run, operation, command):
+        """The command is the only command of the controls of the run, and it
+        reached its effect. Returns its receipt."""
+        rows = runs.command_rows(["/v1/runs/" + run + "/control"])
+        assert [(row[0], row[1], row[2]) for row in rows] == [(command.rsplit("/", 1)[1], operation, "effect-observed")], (
+            "the client did not send exactly one " + operation + " that reached its effect", run, rows)
+        receipt, _, raw = observed(command, "CommandReceipt")
+        (work / (mode + "-" + operation + "-receipt.json")).write_bytes(raw)
+        return receipt
+
+    def manager_control(records, command):
+        """The one run-log control record of the command from the manager."""
+        found = [record for record in records if record["schema"] == "control" and record["about"].get("command") == command.rsplit("/", 1)[1]]
+        assert len(found) == 1 and found[0]["from"] == "manager", ("the run-log control of the command", command, found)
+        return found[0]
+
+    # 1. The steer reached the offered attempt, and the run log holds the steer record.
+    command, occurrence, attempt = facts["steerCommand"], facts["steerOccurrenceId"], facts["steerAttemptId"]
+    receipt = one_control(steer, "steer", command)
+    assert receipt["effect"]["kind"] == "steered" and receipt["effect"]["address"] == {"occurrenceId": occurrence, "attemptId": attempt}, (
+        "steer effect", receipt["effect"], occurrence, attempt)
+    records = runs.run_records(steer)
+    (work / (mode + "-steer-routes.json")).write_text(json.dumps(records, default=str))
+    control = manager_control(records, command)
+    assert control["body"]["control"]["command"] == {"type": "steerOccurrence", "timing": "interrupt-now", "text": facts["steerText"]}, (
+        "the run-log control of the steer", control["body"])
+    steers = [record for record in records if record["schema"] == "steer"]
+    assert [(str(record["about"].get("occurrence")), record["body"].get("steering"), record["body"].get("text")) for record in steers] == [
+        (occurrence, "interrupt-now", facts["steerText"])], ("the run-log steer records", steers)
+    runs.settle(steer, "succeeded")
+    print(f"PASS {mode} 1: {steer_name} sent the one steer command", command, "of attempt", attempt, "of occurrence", occurrence,
+          "of run", steer, "with the timing interrupt-now and its editor text; it reached the effect steered, the run log holds control",
+          control["position"], "from the manager and steer record", steers[0]["position"], "with the typed text, and the run succeeded", flush=True)
+
+    # 2. The live redirect stopped the held attempt, and the spare candidate answered.
+    command, occurrence, target = facts["redirectCommand"], facts["redirectOccurrenceId"], facts["redirectTarget"]
+    receipt = one_control(redirect, "redirect", command)
+    assert receipt["effect"]["kind"] == "redirected" and target.endswith("@spare"), ("redirect effect", receipt["effect"], target)
+    runs.settle(redirect, "succeeded")
+    completed = occurrence_of(runs.snapshot(redirect), occurrence)
+    assert completed["state"] == "completed" and completed["source"] == "asked:" + target, (
+        "live redirect answer source", completed["state"], completed["source"])
+    attempts, redirected = attempt_events(store, occurrence)
+    command_id = command.rsplit("/", 1)[1]
+    assert [event["type"] for event in attempts] == ["attempt.started", "attempt.failed", "attempt.started", "attempt.completed"], (
+        "live redirect attempts", attempts)
+    assert command_id in attempts[1]["message"], ("the stopped attempt does not name the redirect command", attempts[1])
+    assert [(event["controlId"], event["target"]) for event in redirected] == [(command_id, target)], ("occurrence.redirected events", redirected)
+    records = runs.run_records(redirect)
+    (work / (mode + "-redirect-routes.json")).write_text(json.dumps(records, default=str))
+    control = manager_control(records, command)
+    questions = model_questions(records, occurrence)
+    assert len(questions) == 2 and questions[0]["to"]["to"]["model"].endswith("@primary") and questions[1]["to"] == {"to": {"model": target}}, (
+        "live redirect questions", [record["to"] for record in questions])
+    assert questions[0]["position"] < control["position"] < questions[1]["position"], (
+        "the run-log control is not between the two questions", questions[0]["position"], control["position"], questions[1]["position"])
+    print(f"PASS {mode} 2: {redirect_name} sent the one live redirect command", command, "of occurrence", occurrence, "of run", redirect,
+          "from attempt", facts["redirectAttemptId"], "to", target, "; it reached the effect redirected, the held attempt ended attempt.failed",
+          "naming the command, the run log holds question", questions[0]["position"], "to", questions[0]["to"]["to"]["model"], ", control",
+          control["position"], "from the manager and question", questions[1]["position"], "to", target, ", and the run succeeded with the",
+          "answer of", target, flush=True)
+
+
+def pi_client_controls_checks():
+    """The pi-client-controls mode. See PI_CLIENT_CONTROLS for the steps."""
+    harness = tui_fixture.harness
+    with (work / "server-0.stdout").open("wb") as output, (work / "server-0.stderr").open("wb") as errors:
+        process = subprocess.Popen([str(runner), "--manager", "serve", "--config", str(config),
+                                    "+RTS", "-N" + native, "-RTS"], stdout=output, stderr=errors)
+    try:
+        wait_ready(process)
+        status, capabilities, _ = request("/v1/capabilities", harness)
+        assert status == 200 and "control" in capabilities["scopes"], ("capabilities", status)
+        runs = ControlHarness(harness, capabilities, PI_CLIENT_CONTROLS)
+        steer, redirect, store = client_controls_hold(runs)
+        report = run_vitest("test/manager-controls-live.test.ts",
+                            {"AGENT_CAT_MANAGER_PROFILE": str(tui_fixture.client_profile),
+                             "AGENT_CAT_MANAGER_STEER_RUN": steer, "AGENT_CAT_MANAGER_REDIRECT_RUN": redirect},
+                            work / "pi-client-controls-report.json", work / "pi-client-controls-vitest.log", 3)
+        assert [report["steerRunId"], report["redirectRunId"], report["steerText"]] == [steer, redirect, PI_CONTROLS_STEER_TEXT], (
+            "the report names other runs or another steering text", report)
+        client_controls_confirm(runs, steer, redirect, store, report, "/wfm-steer", "/wfm-redirect")
+        print("PASS pi-client-controls: /wfm-steer and /wfm-redirect of the ext-pi extension sent only the offered controls, each once,",
+              "through the protected HTTPS endpoint, and the harness confirmed both from manager facts", flush=True)
+    finally:
+        if process.poll() is None:
+            process.terminate()
+        process.wait(timeout=25)
+        (work / "server-0.exit").write_text(str(process.returncode) + "\n")
 
 
 # The variables that the Pi host takes from the environment of the harness.
@@ -11322,7 +11549,7 @@ if person_mode:
     raise SystemExit(0)
 
 
-if control_profiles and tui_mode not in (TUI_CONTROLS, TUI_REDIRECT):
+if control_profiles and tui_mode not in (TUI_CONTROLS, TUI_REDIRECT) and not client_controls_mode:
     facts = control_checks()
     if live_mode:
         live_flow_checks(facts)
@@ -11397,6 +11624,11 @@ if tui_mode in (TUI_SIZES, TUI_SIZES_BROKEN):
 
 if pi_client_mode:
     pi_client_checks()
+    raise SystemExit(0)
+
+
+if sys.argv[5:] == [PI_CLIENT_CONTROLS]:
+    pi_client_controls_checks()
     raise SystemExit(0)
 
 

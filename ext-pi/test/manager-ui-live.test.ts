@@ -7,7 +7,8 @@
  * identifiers of the check there, and the harness checks each of them
  * against manager facts that it reads with its own credential.
  *
- * The extension runs in service mode with a fake Pi host whose fake UI
+ * The extension runs in service mode with the fake Pi host of
+ * `test/fixtures/live-pi.ts`, whose fake UI
  * answers each select, editor, confirmation and custom component. A
  * recording transport keeps every POST that the extension sends. The steps
  * share one extension:
@@ -86,14 +87,12 @@
  */
 
 import { createHash } from "node:crypto";
-import { existsSync, lstatSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, lstatSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import extension from "../src/index.ts";
 import { forkTargets } from "../src/manager-ui.ts";
 import type { Outcome } from "../src/manager/events.ts";
-import { encodeJson, isJsonObject, jsonMember, type JsonObject, type JsonValue } from "../src/manager/json.ts";
+import { encodeJson, isJsonObject, jsonMember, type JsonObject } from "../src/manager/json.ts";
 import { ClientProfile } from "../src/manager/profile.ts";
 import {
   decodeCommandReceipt,
@@ -107,9 +106,8 @@ import {
   type DecisionView,
   type DraftView,
 } from "../src/manager/resources.ts";
-import { ManagerSession, type Observed, type Reference, type SessionTransport } from "../src/manager/session.ts";
-import { ManagerTransport, type CommandHeaders, type TransportOptions } from "../src/manager/transport.ts";
-import type { Component } from "@earendil-works/pi-tui";
+import { ManagerSession, type Observed, type Reference } from "../src/manager/session.ts";
+import { LivePi, type Post, type Script } from "./fixtures/live-pi.ts";
 
 const PROFILE = process.env.AGENT_CAT_MANAGER_PROFILE;
 const REPORT = process.env.AGENT_CAT_MANAGER_REPORT;
@@ -149,112 +147,18 @@ const STEP_MS = 600_000;
 const WAIT_MS = 120_000;
 const SELECTORS = ["reviewDigest", "requestRevision", "profileRevision", "descriptorRevision", "processGeneration"] as const;
 
-type Post = { readonly resource: string; readonly body: string | Buffer; readonly ifMatch: string | null };
-
 function must<Value>(outcome: Outcome<Value>, step: string): Value {
   if (!outcome.ok) throw new Error(`${step}: ${JSON.stringify(outcome.failure)}`);
   return outcome.value;
 }
 
-/** A transport that records each POST and delegates to `ManagerTransport`. */
-function recording(posts: Post[]): (profile: ClientProfile, options: TransportOptions) => SessionTransport {
-  return (profile, options) => {
-    const transport = new ManagerTransport(profile, options);
-    return {
-      get: (resource) => transport.get(resource),
-      post: (resource: string, body: JsonValue, command: CommandHeaders) => {
-        posts.push({ resource, body: encodeJson(body), ifMatch: command.ifMatch });
-        return transport.post(resource, body, command);
-      },
-      postBytes: (resource: string, bytes: Uint8Array, command: CommandHeaders) => {
-        posts.push({ resource, body: Buffer.from(bytes), ifMatch: command.ifMatch });
-        return transport.postBytes(resource, bytes, command);
-      },
-      followEvents: (start, deliver, follow) => transport.followEvents(start, deliver, follow),
-      pollEvents: (cursor) => transport.pollEvents(cursor),
-      downloadVerified: (resource, size, sha256) => transport.downloadVerified(resource, size, sha256),
-      dropStream: () => transport.dropStream(),
-      close: () => transport.close(),
-    };
-  };
-}
-
-/** The scripted answers of the fake UI for one command. */
-type Script = {
-  select?: (title: string, options: string[]) => string | undefined;
-  editor?: (title: string, prefill: string | undefined) => Promise<string | undefined> | string | undefined;
-  confirm?: (title: string, message: string) => boolean;
-  input?: (title: string) => string | undefined;
-  /** The key for a drawn component, or `undefined` to keep it open until its next drawing. */
-  review?: (screen: string) => string | undefined;
-};
-
 describe.runIf(PROFILE)("the human path of service mode against a live manager", () => {
   let session: ManagerSession;
-  const posts: Post[] = [];
-  const notices: string[] = [];
-  const screens: string[] = [];
-  const confirmations: string[] = [];
-  const commands = new Map<string, { handler: (args: string, ctx: unknown) => Promise<void> }>();
-  const events = new Map<string, Array<(event: unknown, ctx: unknown) => Promise<unknown>>>();
-  let script: Script = {};
-  let tool: { execute: (id: string, params: unknown, signal: unknown, update: unknown, ctx: unknown) => Promise<{ isError?: boolean; content: Array<{ text: string }> }> } | undefined;
-  let state = "";
-  let previousState: string | undefined;
+  const pi = new LivePi();
+  const { posts, notices, screens, confirmations, ctx } = pi;
   const report: Record<string, unknown> = {};
 
-  const ctx = {
-    cwd: "", mode: "tui", hasUI: true, isProjectTrusted: () => true,
-    ui: {
-      notify: (message: string) => notices.push(message),
-      setWidget: () => {},
-      setStatus: () => {},
-      select: async (title: string, options: string[]) => {
-        const chosen = script.select?.(title, options);
-        if (chosen === undefined) throw new Error(`unexpected select ${title}: ${options.join(" | ")}`);
-        return chosen;
-      },
-      editor: async (title: string, prefill?: string) => {
-        if (script.editor === undefined) throw new Error(`unexpected editor ${title}`);
-        return script.editor(title, prefill);
-      },
-      input: async (title: string) => {
-        if (script.input === undefined) throw new Error(`unexpected input ${title}`);
-        return script.input(title);
-      },
-      confirm: async (title: string, message: string) => {
-        confirmations.push(`${title} ${message}`);
-        if (script.confirm === undefined) throw new Error(`unexpected confirmation ${title}`);
-        return script.confirm(title, message);
-      },
-      custom: <T>(factory: (tui: unknown, theme: unknown, keys: unknown, done: (value: T) => void) => unknown) =>
-        new Promise<T>((resolve, reject) => {
-          // Each drawing gives the screen to the script, which answers with a key or keeps the component open.
-          let open = true;
-          let component: Component | undefined;
-          const show = () => {
-            if (!open || component === undefined) return;
-            const screen = component.render(120).join("\n");
-            screens.push(screen);
-            if (script.review === undefined) {
-              open = false;
-              return reject(new Error(`unexpected component: ${screen}`));
-            }
-            const key = script.review(screen);
-            if (key !== undefined) component.handleInput?.(key);
-          };
-          const tui = { terminal: { rows: 400 }, requestRender: () => setImmediate(show) };
-          const theme = { fg: (_color: string, value: string) => value };
-          component = factory(tui, theme, {}, (value) => {
-            open = false;
-            resolve(value);
-          }) as Component;
-          show();
-        }),
-    },
-  };
-
-  const run = (name: string, args = "") => commands.get(name)!.handler(args, ctx);
+  const run = (name: string, args = "") => pi.run(name, args);
   const ref = (uri: string): Reference => must(session.reference(uri), `reference ${uri}`);
 
   /** Read a resource every 250 milliseconds until the predicate holds. */
@@ -278,10 +182,7 @@ describe.runIf(PROFILE)("the human path of service mode against a live manager",
     return id;
   }
 
-  async function status(): Promise<string> {
-    await run("wfm-status");
-    return notices.at(-1) ?? "";
-  }
+  const status = (): Promise<string> => pi.status();
 
   async function succeeded(runId: string): Promise<void> {
     const terminal = await until(`/v1/runs/${runId}/snapshot`, (observed) => {
@@ -329,7 +230,7 @@ describe.runIf(PROFILE)("the human path of service mode against a live manager",
 
   /** Create a mixed-controls request with a literal through /wfm, approve its review, and give its request and run. */
   async function startMixed(literal: string): Promise<{ requestId: string; runId: string }> {
-    script = {
+    pi.script = {
       select: (title) => (title.startsWith("Input input") ? "Literal text" : undefined),
       editor: () => literal,
       review: () => "a",
@@ -346,7 +247,7 @@ describe.runIf(PROFILE)("the human path of service mode against a live manager",
   /** Open /wfm-monitor of a run until a drawing satisfies the predicate, and give that drawing. */
   async function monitored(runId: string, ready: (screen: string) => boolean, step: string): Promise<string> {
     let seen: string | undefined;
-    script = {
+    pi.script = {
       review: (screen) => {
         if (!ready(screen)) return undefined;
         seen = screen;
@@ -410,7 +311,7 @@ describe.runIf(PROFILE)("the human path of service mode against a live manager",
   }
 
   /** The POSTs to a resource after an index of `posts`. */
-  const postsTo = (resource: string, from = 0): Post[] => posts.slice(from).filter((post) => post.resource === resource);
+  const postsTo = (resource: string, from = 0): Post[] => pi.postsTo(resource, from);
 
   /**
    * Create a child of a terminal run through `/wfm-OPERATION` and its lineage
@@ -430,7 +331,7 @@ describe.runIf(PROFILE)("the human path of service mode against a live manager",
     const collection = `/v1/runs/${parent}/lineage-requests`;
     const first = must(await session.get(ref(collection)), "lineage collection");
     let review = "";
-    script = {
+    pi.script = {
       ...edits,
       review: (screen) => {
         review = screen;
@@ -469,33 +370,17 @@ describe.runIf(PROFILE)("the human path of service mode against a live manager",
 
   beforeAll(async () => {
     session = must(await ManagerSession.connect(must(await ClientProfile.load(PROFILE ?? ""), "profile")), "connect");
-    state = mkdtempSync(join(tmpdir(), "agent-cat-pi-ui-state-"));
-    ctx.cwd = state;
-    previousState = process.env.AGENT_CAT_STATE_DIR;
-    process.env.AGENT_CAT_STATE_DIR = state;
-    extension({
-      registerEntryRenderer: () => {}, registerTool: (definition: unknown) => { tool = definition as typeof tool; }, appendEntry: () => {}, sendUserMessage: () => {},
-      registerCommand: (name: string, value: unknown) => commands.set(name, value as never),
-      on: (name: string, handler: (event: unknown, ctx: unknown) => Promise<unknown>) => events.set(name, [...(events.get(name) ?? []), handler]),
-    } as never, { manager: { transport: recording(posts) } });
-    for (const handler of events.get("session_start") ?? []) await handler({ type: "session_start" }, ctx);
-    const deadline = Date.now() + WAIT_MS;
-    while (!(await status()).includes("delivery live")) {
-      if (Date.now() > deadline) throw new Error(`the extension did not connect: ${notices.at(-1)}`);
-      await new Promise((wake) => setTimeout(wake, 100));
-    }
+    await pi.open("agent-cat-pi-ui-state-", WAIT_MS);
   }, STEP_MS);
 
   afterAll(async () => {
     await session?.close();
-    if (previousState === undefined) delete process.env.AGENT_CAT_STATE_DIR;
-    else process.env.AGENT_CAT_STATE_DIR = previousState;
-    if (state) rmSync(state, { recursive: true, force: true });
+    pi.restore();
   });
 
   it("enters an exact literal, keeps the draft over a changed request, approves the displayed review and starts the run", async () => {
     let editors = 0;
-    script = {
+    pi.script = {
       select: (title, options) => title.startsWith("Workflow of ") ? options.find((option) => option.startsWith("prompt-source"))
         : title.startsWith("Input input") ? "Literal text" : undefined,
       editor: async (_title, prefill) => {
@@ -556,7 +441,7 @@ describe.runIf(PROFILE)("the human path of service mode against a live manager",
   }, STEP_MS);
 
   it("captures exact editor text through /v1/captures and the run receives the captured bytes", async () => {
-    script = {
+    pi.script = {
       select: (title) => (title.startsWith("Input input") ? "Captured text" : undefined),
       editor: () => CAPTURED,
       review: () => "a",
@@ -584,7 +469,7 @@ describe.runIf(PROFILE)("the human path of service mode against a live manager",
   }, STEP_MS);
 
   it("declines a review without a send, then discards the preparation and withdraws the request", async () => {
-    script = {
+    pi.script = {
       select: (title) => (title.startsWith("Input input") ? "Literal text" : undefined),
       editor: () => DECLINED,
       review: () => "\u001b",
@@ -604,12 +489,12 @@ describe.runIf(PROFILE)("the human path of service mode against a live manager",
     await reviewed(screens.at(-1) ?? "", preparationId);
 
     // The same review opens again, and d discards its preparation.
-    script = { review: () => "d" };
+    pi.script = { review: () => "d" };
     await run("wfm-review", requestId);
     const discards = posts.filter((post) => post.resource === `/v1/preparations/${preparationId}`);
     expect(discards.map((post) => JSON.parse(String(post.body)))).toEqual([{ operation: "discard" }]);
     expect(notices, notices.join("\n")).toContain(`Request ${requestId} is a draft again. /wfm-review prepares a new review.`);
-    script = {};
+    pi.script = {};
     await run("wfm-withdraw", requestId);
     expect(notices, notices.join("\n")).toContain(`Request ${requestId} is withdrawn.`);
     const withdrawn = draftOf(await until(`/v1/requests/${requestId}`, (observed) => draftOf(observed).phase === "withdrawn", "withdrawn"));
@@ -635,7 +520,7 @@ describe.runIf(PROFILE)("the human path of service mode against a live manager",
       const before = posts.length;
       if (decision.content.kind === "question") {
         const titles: string[] = [];
-        script = {
+        pi.script = {
           editor: (title, prefill) => {
             titles.push(title);
             expect(prefill).toBeUndefined();
@@ -657,7 +542,7 @@ describe.runIf(PROFILE)("the human path of service mode against a live manager",
         const offered = offeredChoices(control, decision);
         expect(offered).toContain("Retry");
         let shown: string[] = [];
-        script = {
+        pi.script = {
           select: (title, options) => {
             expect(title).toContain(`Recovery of decision ${decision.id}`);
             shown = options;
@@ -705,7 +590,7 @@ describe.runIf(PROFILE)("the human path of service mode against a live manager",
       const before = posts.length;
       if (decision.content.kind === "question") {
         let editors = 0;
-        script = {
+        pi.script = {
           editor: async (_title, prefill) => {
             editors += 1;
             expect(prefill).toBeUndefined();
@@ -728,7 +613,7 @@ describe.runIf(PROFILE)("the human path of service mode against a live manager",
         const offered = offeredChoices(control, decision);
         recovery = staleDecision !== "" && offered.includes("Abandon") ? "Abandon" : "Retry";
         let shown: string[] = [];
-        script = {
+        pi.script = {
           select: (_title, options) => {
             shown = options;
             return recovery;
@@ -759,7 +644,7 @@ describe.runIf(PROFILE)("the human path of service mode against a live manager",
     const before = posts.length;
     const noticed = notices.length;
     const asked: string[] = [];
-    script = {
+    pi.script = {
       confirm: (title, message) => {
         asked.push(`${title} ${message}`);
         return true;
@@ -794,10 +679,10 @@ describe.runIf(PROFILE)("the human path of service mode against a live manager",
     const bytes = Number(report.resultBytes);
     const sha256 = String(report.resultSha256);
     // The harness reads the saved file, so it lies beside the report.
-    const path = join(REPORT === undefined ? state : dirname(REPORT), "pi-client-ui-saved-result.bin");
+    const path = join(REPORT === undefined ? pi.state : dirname(REPORT), "pi-client-ui-saved-result.bin");
     expect(existsSync(path)).toBe(false);
     const titles: string[] = [];
-    script = { input: (title) => (titles.push(title), path) };
+    pi.script = { input: (title) => (titles.push(title), path) };
     const before = posts.length;
     await run("wfm-result", runId);
     expect(titles).toEqual([`Path of a new file for the verified ${bytes} bytes of run ${runId}`]);
@@ -807,7 +692,7 @@ describe.runIf(PROFILE)("the human path of service mode against a live manager",
     expect(saved.length).toBe(bytes);
     expect(createHash("sha256").update(saved).digest("hex")).toBe(sha256);
     // A second save to the same path refuses, and the file keeps its bytes.
-    script = {};
+    pi.script = {};
     await run("wfm-result", `${runId} ${path}`);
     expect(notices.at(-1)).toMatch(new RegExp(`^The result of run ${runId} was not saved to ${path.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}: EEXIST`));
     expect(readFileSync(path).equals(saved)).toBe(true);
@@ -821,7 +706,7 @@ describe.runIf(PROFILE)("the human path of service mode against a live manager",
     const collection = `/v1/runs/${runId}/exports`;
     const first = must(await session.get(ref(collection)), "export collection");
     expect(must(decodeExportCollection(first.value), "export collection decode").items).toEqual([]);
-    script = {};
+    pi.script = {};
     const before = posts.length;
     await run("wfm-export", `${runId} ${name}`);
     const sent = posts.slice(before);
@@ -856,7 +741,7 @@ describe.runIf(PROFILE)("the human path of service mode against a live manager",
   it("starts, answers and retries a run through the tool only after each human confirmation, and a declined review sends no approve", async () => {
     const results: string[] = [];
     const call = async (params: Record<string, unknown>) => {
-      const result = await tool!.execute("live", params, undefined, undefined, ctx);
+      const result = await pi.tool!.execute("live", params, undefined, undefined, ctx);
       results.push(result.content.map((item) => item.text).join("\n"));
       return result;
     };
@@ -864,7 +749,7 @@ describe.runIf(PROFILE)("the human path of service mode against a live manager",
     const confirm = (answer: boolean) => (title: string, message: string) => (asked.push(`${title}\n${message}`), answer);
 
     // The human confirms the request and declines its exact review.
-    script = { confirm: confirm(true), review: () => "\u001b" };
+    pi.script = { confirm: confirm(true), review: () => "\u001b" };
     const declined = await call({ action: "manager-start", workflow: "mixed-controls", inputsJson: JSON.stringify({ input: TOOL_DECLINED }) });
     expect(declined.isError, results.at(-1)).toBe(true);
     expect(results.at(-1)).toContain("Review declined. No approval was sent.");
@@ -872,14 +757,14 @@ describe.runIf(PROFILE)("the human path of service mode against a live manager",
     const declinedRequestId = createdRequest();
     const declinedPreparationId = await preparationOf(declinedRequestId);
     expect(postsTo(`/v1/preparations/${declinedPreparationId}`)).toEqual([]);
-    script = { review: () => "d" };
+    pi.script = { review: () => "d" };
     await run("wfm-review", declinedRequestId);
-    script = {};
+    pi.script = {};
     await run("wfm-withdraw", declinedRequestId);
     expect(notices, notices.join("\n")).toContain(`Request ${declinedRequestId} is withdrawn.`);
 
     // The human confirms the request and approves its exact review.
-    script = { confirm: confirm(true), review: () => "a" };
+    pi.script = { confirm: confirm(true), review: () => "a" };
     const before = posts.length;
     const started = await call({ action: "manager-start", workflow: "mixed-controls", inputsJson: JSON.stringify({ input: TOOL_ANSWERED }) });
     expect(started.isError, results.at(-1)).not.toBe(true);
@@ -901,7 +786,7 @@ describe.runIf(PROFILE)("the human path of service mode against a live manager",
       const { decision } = head;
       handled.add(decision.id);
       const from = posts.length;
-      script = { confirm: confirm(true) };
+      pi.script = { confirm: confirm(true) };
       if (decision.content.kind === "question") {
         const answered = await call({ action: "manager-answer", runId, answer: "false" });
         expect(answered.isError, results.at(-1)).not.toBe(true);
@@ -1008,7 +893,7 @@ describe.runIf(PROFILE)("the human path of service mode against a live manager",
   }, STEP_MS);
 
   it("closes the extension and writes the report", async () => {
-    for (const handler of events.get("session_shutdown") ?? []) await handler({ type: "session_shutdown" }, ctx);
+    await pi.close();
     expect(await status()).toContain("Connection: closed. The manager keeps its runs under its own supervision.");
     if (REPORT !== undefined) writeFileSync(REPORT, `${JSON.stringify(report)}\n`, { mode: 0o600 });
   }, STEP_MS);

@@ -12404,7 +12404,7 @@ Deferred security stage for Phase E, Pi service mode (WM-036 to WM-038), under t
 :LABELS:   ["review","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-10-01 Thu 20:45]
-:MODIFIED: [2026-10-01 Thu 22:43]
+:MODIFIED: [2026-10-01 Thu 23:11]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -12465,6 +12465,13 @@ Findings of the Phase E end-of-phase review (two lenses, range 33f84fe4..841ce0c
     "author": "johnw",
     "text": "Subtask PD5 (2026-10-01) partly fixes item 5. The pi-client mode of manager/test/service_http.py and ext-pi/test/manager-ui-live.test.ts now run /wfm-resume and /wfm-fork live against the protected manager on succeeded runs of the mixed fixture. Each child starts only after the approval of its exact review, and the harness reads its parent and lineage operation with its own credential. The fork edit names a SHA-256 that the harness computes from PI_UI_FORKED, and the harness checks the child run store (manifest lineage fork, parentRunId, lineageEdits, and the replaced answer at the edited occurrence). /wfm-history follows /v1/runs over two pages with a local retention root of 300 legacy entries and lists 309 runs once each in collection order, equal to the harness listing. Evidence (PD/PD5 impl-r2 in the private resume-20260923 directory): npm run check, BUILD of agentic-run and routing-fixed-point-probe with -ftui-tests, pi-client mode PASS 1 to 20 (11 resume, 12 fork, 13 history) and the final PASS line, journey N8. Fess not blocking (fess/pd-PD5-r2.md), findings filed as acat-pd5-fess-followup-z3dh. /wfm-steer and /wfm-redirect keep fake-transport evidence only, so item 5 stays open with items 6 and 8 to 13.",
     "created_at": "2026-10-02T05:43:15Z"
+  },
+  {
+    "id": 593,
+    "issue_id": "acat-phase-e-review-findings-0l73",
+    "author": "johnw",
+    "text": "Subtask PD6 (2026-10-01) completes item 5. The new mode pi-client-controls of manager/test/service_http.py runs ext-pi/test/manager-controls-live.test.ts through the fake Pi UI against the protected manager. /wfm-steer sends the one offered steer of a held profile_steer turn with the typed text; it reaches steered, GET /v1/runs/{id}/routes shows one control record and one steer record, and the run succeeds. /wfm-redirect sends the one offered live redirect of a held profile_live candidate to the spare target; it reaches redirected, the held attempt ends attempt.failed naming the command, the routes show the question to @primary, the control record and the question to @spare, and the run succeeds with the spare answer. Evidence (PD/PD6/impl-r1 in the private resume-20260923 directory): npm run check, BUILD of agentic-run and routing-fixed-point-probe with -ftui-tests, pi-client-controls PASS 1, 2 and the summary line at N8, pi-client PASS 1 to 20, journey N8, tui-controls and tui-redirect. Fess not blocking (fess/pd-PD6-r1.md, which reran the build and pi-client-controls on the final tree). Item 5 is done. Items 6 and 8 to 13 stay open.",
+    "created_at": "2026-10-02T06:11:48Z"
   }
 ]
 #+end_src
@@ -12789,6 +12796,41 @@ Source: fess audit /Users/johnw/Products/agent-cat-workflow-manager/implementati
     "depends_on_id": "acat-dxos",
     "type": "discovered-from",
     "created_at": "2026-09-27T05:44:58.454261Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
+* TODO [#D] Resolve the non-blocking fess findings of subtask PD6
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-qte9
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-01 Thu 23:11]
+:MODIFIED: [2026-10-01 Thu 23:11]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess audit fess/pd-PD6-r1.md (2026-10-01) on subtask PD6 (live pi-client-controls evidence for /wfm-steer and /wfm-redirect, item 5 of acat-phase-e-review-findings-0l73).
+
+1. (low) manager/test/service_http.py changed at 23:07:03, after the implementer last ran pi-client, the N8 journey, tui-controls and tui-redirect. The audit reran only the build and pi-client-controls on the final tree, and both passed. The other modes have no final-tree evidence. Fix: run pi-client, tui-controls and tui-redirect once on the committed tree.
+2. (low) ext-pi/README.md, the live-check command section (about lines 1560 to 1570), names the invocations of pi-client and the pi-host modes but not pi-client-controls. The mode is described near line 1008. Fix: add pi-client-controls to the sentence after the code block.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-qte9",
+    "depends_on_id": "acat-phase-e-review-findings-0l73",
+    "type": "discovered-from",
+    "created_at": "2026-10-02T06:11:49.388882Z",
     "created_by": "johnw",
     "metadata": "{}",
     "thread_id": ""
