@@ -18,6 +18,7 @@ import Agentic.Manager.Profile (Diagnostic, publicRevision)
 import Agentic.Manager.Protocol.Command
 import Agentic.Manager.Protocol.Json (representableEditorSchema)
 import Agentic.Manager.Schema (schemaVersion, schemaStatements)
+import Agentic.Manager.State (RunAssociation (..), readClosedControlSurface)
 import Agentic.Manager.Store
 import qualified Agentic.Manager.Test.AcceptanceAudit as Audit
 import Agentic.Manager.Test.Contention (blocked, withHeldStore, withHeldConfiguration)
@@ -30,7 +31,7 @@ import Control.Concurrent.Async (AsyncCancelled (..), async, cancel, concurrentl
 import Control.Concurrent.MVar (newEmptyMVar, putMVar, readMVar, takeMVar, tryPutMVar)
 import System.Timeout (timeout)
 import Control.DeepSeq (NFData)
-import Control.Exception (AsyncException (UserInterrupt), IOException, bracket, fromException, throwIO, try)
+import Control.Exception (AsyncException (UserInterrupt), IOException, SomeException, bracket, fromException, throwIO, try)
 import Control.Monad (forM, forM_, unless, void, when)
 import Crypto.Hash (Digest, SHA256, hash)
 import Data.Aeson (FromJSON (parseJSON), Value (..), eitherDecodeStrict', object, toJSON, withObject, (.:), (.=))
@@ -973,7 +974,7 @@ ordinaryAdmissionChecks work = withFixture work "ordinary-admission" (64*command
   -- control-surface read meets an ingestion commit. The commit runs inside the
   -- first attempt only to place it there. The second attempt is stable.
   changedAttempts <- newIORef (0 :: Int)
-  (changed, changedLog) <- withPrivateStderr (work </> "changed-read-stderr.log") $ repeatChangedRead "check-changed-read" $ do
+  (changed, changedLog) <- withPrivateStderr (work </> "changed-read-stderr.log") $ repeatChangedRead store "check-changed-read" $ \_ -> do
     modifyIORef' changedAttempts (+1)
     count <- readIORef changedAttempts
     before <- scalarText store "SELECT revision FROM requests WHERE id='request_1'"
@@ -986,7 +987,7 @@ ordinaryAdmissionChecks work = withFixture work "ordinary-admission" (64*command
   -- Every attempt meets a new commit, so the allowance ends with StoreBusy and
   -- one busy record that names the site and the spent allowance.
   churnStarted <- getMonotonicTimeNSec
-  (churn, churnLog) <- withPrivateStderr (work </> "churn-read-stderr.log") $ try @StoreFailure $ repeatChangedRead "check-churn-read" $ do
+  (churn, churnLog) <- withPrivateStderr (work </> "churn-read-stderr.log") $ try @StoreFailure $ repeatChangedRead store "check-churn-read" $ \_ -> do
     mutate store (execute "UPDATE requests SET revision='churn_read_' || hex(randomblob(4)) WHERE id='request_1'" [])
     pure (Nothing :: Maybe ())
   churnFinished <- getMonotonicTimeNSec
@@ -994,6 +995,87 @@ ordinaryAdmissionChecks work = withFixture work "ordinary-admission" (64*command
   check "that read spent its whole five-second allowance" (churnFinished - churnStarted >= 5000000000)
   check "that refusal has one busy record naming the site and no remaining allowance"
     (length [line | line <- T.lines (TE.decodeUtf8 churnLog), "busy site=check-churn-read class=store StoreBusy elapsed=" `T.isInfixOf` line, " remaining=0ms" `T.isSuffixOf` line] == 1)
+  routeDeadlineChecks work store proof
+
+-- One HTTP route has one admission deadline, which 'withStoreRequest' starts
+-- as the dispatcher starts it. The owner reads of the route, its protected
+-- view and every attempt of a repeated read wait within that deadline.
+routeDeadlineChecks :: FilePath -> CoordinationStore -> CredentialProof -> IO ()
+routeDeadlineChecks work store proof = do
+  -- The first owner read of the route waits three seconds behind a held
+  -- Store gate. Inside the protected view of the route, a repeated read
+  -- meets a new commit in every attempt, and each attempt also reads through
+  -- the request store. No new attempt starts after the deadline of the route
+  -- ends, so the route refuses about five seconds after it starts. A fresh
+  -- allowance for the repeated read would let the route run for about eight
+  -- seconds.
+  attempts <- newIORef (0 :: Int)
+  commits <- newIORef (0 :: Int)
+  let route = withStoreRequest store $ \scoped ->
+        withAuthorizedResponse scoped proof "profile_1" [Observe] $ \_ ->
+          repeatChangedRead scoped "check-route-read" $ \reading -> do
+            modifyIORef' attempts (+1)
+            _ <- runRead reading (currentClient proof)
+            mutate store (execute "UPDATE requests SET revision='route_read_' || hex(randomblob(4)) WHERE id='request_1'" [])
+            modifyIORef' commits (+1)
+            pure (Nothing :: Maybe ())
+  ((routeOutcome, routeFor), routeLog) <- withPrivateStderr (work </> "route-read-stderr.log") $
+    withHeldStore store $ \release -> do
+      started <- getMonotonicTimeNSec
+      withAsync (try @StoreFailure route) $ \waiter -> do
+        blocked waiter
+        threadDelay 3000000
+        release
+        outcome <- wait waiter
+        finished <- getMonotonicTimeNSec
+        pure (outcome, finished - started)
+  check "a route whose repeated read meets commits until its deadline ends refuses with StoreBusy" (routeOutcome == Left StoreBusy)
+  check "that route waited about five seconds in total, not a fresh allowance for its repeated read"
+    (routeFor >= 4900000000 && routeFor < 5600000000)
+  (,) <$> readIORef attempts <*> readIORef commits >>= \(ran, committed) ->
+    check "each attempt of that route ran once and committed its own change once" (ran > 1 && ran == committed)
+  check "that refusal has one busy record naming the site of the repeated read"
+    (length [line | line <- T.lines (TE.decodeUtf8 routeLog), "busy site=check-route-read class=store StoreBusy elapsed=" `T.isInfixOf` line] == 1)
+  -- The protected control read of a run returns the same view under a route
+  -- deadline as without one when nothing contends.
+  let association = RunAssociation "run_1" "profile_1" "root_1" (Runtime.RunId "native_1")
+  quiet <- readClosedControlSurface store proof association
+  scopedQuiet <- withStoreRequest store $ \scoped -> readClosedControlSurface scoped proof association
+  check "a control read under a route deadline without contention returns the same view" (quiet == scopedQuiet)
+  -- The control read waits three seconds behind holder A at its first owner
+  -- read. Holder B queues behind it, and the gate admits waiters in order, so
+  -- B takes the gate after that read. The later owner reads of the route then
+  -- wait for B within the rest of the deadline of the route, and the route
+  -- refuses about five seconds after it starts.
+  commandsBefore <- scalarInt store "SELECT count(*) FROM commands"
+  heldB <- newEmptyMVar
+  resumeB <- newEmptyMVar
+  (controlOutcome, controlFor, holderOutcome) <- withCommitDeadline store (putMVar heldB () >> readMVar resumeB >> pure 0) 1 $ \guardB ->
+    withHeldStore store $ \releaseA -> do
+      started <- getMonotonicTimeNSec
+      withAsync (try @SomeException (withStoreRequest store $ \scoped -> readClosedControlSurface scoped proof association)) $ \waiter -> do
+        blocked waiter
+        threadDelay 3000000
+        withAsync (runTransaction store (enforceCommitDeadline guardB >> pure ((), []))) $ \holderB -> do
+          blocked holderB
+          releaseA
+          outcome <- wait waiter
+          finished <- getMonotonicTimeNSec
+          void (tryPutMVar resumeB ())
+          held <- waitCatch holderB
+          pure (outcome, finished - started, held)
+  check "a control read behind two Store holders within one route deadline is refused as storage-unavailable"
+    (either storageRefusal (const False) controlOutcome)
+  check "that control read waited about five seconds in total, not a fresh allowance for each owner read"
+    (controlFor >= 4900000000 && controlFor < 5600000000)
+  check "the second holder ran its transaction once" (either (const False) (const True) holderOutcome)
+  scalarInt store "SELECT count(*) FROM commands" >>= check "the refused control read ran no command" . (== commandsBefore)
+  after <- readClosedControlSurface store proof association
+  check "the refused control read changed nothing that the control view shows" (after == quiet)
+  where
+    storageRefusal failure = case fromException failure of
+      Just refusal -> refusal `elem` [StoreBusy, StoreDeadline]
+      Nothing -> fromException failure == Just StorageUnavailable
 
 commandDeadlineChecks :: FilePath -> IO ()
 commandDeadlineChecks work=withFixture work "command-deadline" (64*commandCapacity) 10 $ \_ root _ store profile proof->do

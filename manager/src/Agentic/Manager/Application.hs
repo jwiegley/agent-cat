@@ -75,8 +75,33 @@ methods path = case path of
     | C.validId ident && leaf `elem` ("routes" : runPages) -> ["GET"]
   _ -> []
 
+-- | Each non-streaming GET route runs under one admission deadline, which
+-- 'Service.withServiceRequest' starts before the first lock wait of the
+-- route. A GET request has no body, and 'serve' refuses a GET request with
+-- a body before that wait. The owners of the route, their nested scopes and
+-- their repeated reads share the deadline. The event stream and the route
+-- streams start no route deadline, so each batch starts its own deadlines,
+-- and an artifact download keeps the deadlines of its owner. A POST route
+-- keeps the deadlines of its owners, which start after its body read: the
+-- one deadline of a command submission, and a fresh allowance for each lock
+-- of a capture upload.
 dispatch :: Service.Service -> Pages.PageSets -> Events.StreamReaders -> Transport.AuthenticatedApplication
-dispatch service pages streams proof request respond = do
+dispatch service pages streams proof request respond
+  | routeScoped = Service.withServiceRequest service $ \scoped -> serve scoped pages streams proof request respond
+  | otherwise = serve service pages streams proof request respond
+  where
+    routeScoped = Wai.requestMethod request == "GET" && not streamed && not downloaded
+    streamed = lookup "Accept" (Wai.requestHeaders request) == Just "text/event-stream" && case Wai.pathInfo request of
+      ["v1", "events"] -> True
+      ["v1", "routes"] -> True
+      ["v1", "runs", _, "routes"] -> True
+      _ -> False
+    downloaded = case Wai.pathInfo request of
+      ["v1", "artifacts", _] -> True
+      _ -> False
+
+serve :: Service.Service -> Pages.PageSets -> Events.StreamReaders -> Transport.AuthenticatedApplication
+serve service pages streams proof request respond = do
   when (Wai.requestMethod request == "GET") $ case Wai.requestBodyLength request of
     Wai.KnownLength 0 -> pure ()
     _ -> throwIO C.InvalidRequest

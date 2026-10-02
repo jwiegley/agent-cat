@@ -1272,15 +1272,18 @@ refuseBusyAt site end action = action `catch` \failure -> do
 
 -- | A read that is safe to repeat, and that a concurrent commit can change
 -- between its parts. Each attempt returns Nothing when it observed such a
--- change and Just its value otherwise. The first attempt starts one
--- five-second allowance, and a new attempt starts only while that allowance
--- lasts, after a pause of 10 ms. The Store actions of each attempt keep their
--- own allowances. When changes keep arriving for the whole allowance, the read
+-- change and Just its value otherwise. The read uses the admission deadline
+-- of the request of the given store value, or a fresh deadline when the value
+-- serves no request scope. Each attempt receives the store value of that
+-- request, so the Store actions of every attempt wait within the same
+-- deadline. A new attempt starts only while the deadline lasts, after a pause
+-- of 10 ms. When changes keep arriving until the deadline ends, the read
 -- refuses with 'StoreBusy' and one busy record that names the site. An
 -- attempt changes no state, so a new attempt repeats no effect.
-repeatChangedRead :: Text -> IO (Maybe a) -> IO a
-repeatChangedRead site attempt = Admission.newDeadline >>= \end ->
-  let go = attempt >>= maybe again pure
+repeatChangedRead :: CoordinationStore -> Text -> (CoordinationStore -> IO (Maybe a)) -> IO a
+repeatChangedRead store site attempt = admissionDeadline store >>= \end ->
+  let request = scopedTo end store
+      go = attempt request >>= maybe again pure
       again = try @Admission.AdmissionFailure (Admission.remainingMicros end)
         >>= either (const (refuseBusy site (Just end))) (const (threadDelay 10000 >> go))
   in go

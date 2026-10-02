@@ -3,7 +3,7 @@
 
 -- | One live coordinator and bounded indexes of its original owned associations.
 module Agentic.Manager.Service
-  ( Service, withService, serviceStore, serviceFault, wakeAdmission,
+  ( Service, withService, withServiceRequest, serviceStore, serviceFault, wakeAdmission,
     enqueue, editInput, withdraw, approve, discard, submitExport, submitLineage, controlRun, controlDecision, readControl, withControl,
     withSnapshot, withSnapshotSource, withOverviewSource, Overview.Collection (..), withCollectionSource,
     withRun, withOutputs, withOutputsSource, withExportsSource, withExport, withLineageSource, download
@@ -25,7 +25,7 @@ import Agentic.Manager.Protocol.Command
 import qualified Agentic.Manager.Protocol.Preparation as P
 import qualified Agentic.Manager.State as State
 import qualified Agentic.Manager.Observation as Observation
-import Agentic.Manager.Store (CoordinationStore, StoreFailure (..), refuseBusy, withStoreFileLoan)
+import Agentic.Manager.Store (CoordinationStore, StoreFailure (..), refuseBusy, withStoreFileLoan, withStoreRequest)
 import qualified Agentic.Manager.Store.Admission as SA
 import Agentic.Manager.Worker (WorkerObservation (..))
 import Agentic.Runtime (FrontendPrepared (..))
@@ -59,6 +59,17 @@ data Service = Service
   { serviceStore :: !CoordinationStore, admission :: !A.Admission, legacyHistory :: ![History.LegacyHistory],
     stopping :: !(TVar Bool), owned :: !(TVar (Map.Map Text Owned)),
     faultCell :: !(TVar (Maybe FaultClass)), scheduler :: !(TMVar (Async ())) }
+
+-- | One HTTP route of this service. The callback receives the same service
+-- with the request store of 'withStoreRequest', so every Store action that an
+-- owner runs through that store, every nested scope of the store and every
+-- attempt of a repeated read share one admission deadline. The deadline
+-- starts when this scope starts. A value that the route keeps after it ends,
+-- such as a command attempt or a dispatch ticket, keeps a store without the
+-- request scope.
+withServiceRequest :: Service -> (Service -> IO a) -> IO a
+withServiceRequest service action = withStoreRequest (serviceStore service) $ \request ->
+  action service {serviceStore = request}
 
 serviceFault :: Service -> IO (Maybe FaultClass)
 serviceFault = readTVarIO . faultCell
@@ -318,7 +329,7 @@ withControl service proof ident respond = do
   association <- State.resolveRun (serviceStore service) proof [Observe] ident
   original <- startFor service ident
   case original of
-    Just start -> State.withControlSurface start proof respond
+    Just start -> State.withControlSurface (serviceStore service) start proof respond
     Nothing -> State.withClosedControlSurface (serviceStore service) proof association respond
 
 withOverviewSource :: Service -> CredentialProof

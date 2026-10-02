@@ -58,12 +58,39 @@ before it is admitted or refused as `storage-unavailable`. A protected view also
 credential read, its reader place, its configuration loan and its first
 authorization observation, which `withAuthorizationRequestReadObservation`
 runs. A scope inside a scope of the same store value keeps the outer
-deadline. A value that is kept after the request, such as a command attempt,
-a dispatch ticket or the store of a later revalidation, starts a fresh
-deadline for each later wait. A Store action that a route owner runs through
-its own store value inside a protected view, and the owners that write a
-file or produce an outside effect before their Store record, such as a
-capture upload, start a fresh allowance for each lock.
+deadline.
+
+Each non-streaming GET route of the HTTP service is one request with one
+admission deadline. The dispatcher runs the route under `withStoreRequest`
+through `Service.withServiceRequest`, and the owners of the route receive the
+request store. The deadline starts before the first lock wait of the route.
+A GET request has no body, and the dispatcher refuses a GET request with a
+body before that wait. The protected view of the route, every owner read
+inside the view, every nested scope of the request store and every attempt
+of `repeatChangedRead` wait within that one deadline. So the sum of the
+admission waits of one route is at most five seconds before the route is
+refused with `StoreBusy`, `StoreDeadline` or `StoreLimit`, which the public
+problem reports as `storage-unavailable`. Under no contention a route
+deadline changes no representation, status or entity tag, because a
+deadline bounds only waits.
+
+The following owners keep a deadline of their own. A value that is kept
+after the request, such as a command attempt, a dispatch ticket or the store
+of a later revalidation, starts a fresh deadline for each later wait. Each
+revalidation of a response view runs through
+`withAuthorizationReadObservation` with a fresh deadline. The event stream of
+`/v1/events` and the route streams start no route deadline, so no deadline
+spans a stream, and each batch of a stream starts its own deadlines. An
+artifact download keeps the deadlines of its owner, including its total
+deadline of 300 seconds. A POST route starts no route deadline, because its
+owners read the request body first. Its resolve read, its command
+submission and its receipt view each have one deadline of their own, which
+starts after the body read. The owners that write a file or produce an
+outside effect before their Store record, such as a capture upload, start a
+fresh allowance for each lock. So a capture whose file is written is never
+refused by an allowance that the body read used up, and its file is never
+left without its record because of a route deadline.
+
 Operation bounds stay separate. The operation allowance of an admitted SQL
 action starts when its wait for the gate starts, as before. The 100 ms busy
 timeout, the rollback bound and the five-second bound of a draft operation do
@@ -357,10 +384,13 @@ reserves anything, the availability read takes the projection and then the
 projection boundary and the control revision. An ingestion commit can fall
 between the parts of each of these reads. Each of them is safe to repeat and
 changes no state, so `repeatChangedRead` starts it again after a pause of
-10 ms. A new attempt starts only while one five-second allowance lasts. The
-Store actions of each attempt keep their own allowances. When commits keep
-arriving for the whole allowance, the read refuses with `StoreBusy` and one
-line for its site.
+10 ms. The read uses the admission deadline of the request of its store
+value: the deadline of the route for the control and decision reads of a GET
+route, and a fresh deadline for the availability read of a command
+submission. A new attempt starts only while that deadline lasts, and the
+Store actions of every attempt wait within it. When commits keep arriving
+until the deadline ends, the read refuses with `StoreBusy` and one line for
+its site.
 
 Inside the command transaction of a control or an answer, the validation
 checks that the control revision is still the revision of the availability

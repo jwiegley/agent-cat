@@ -358,7 +358,7 @@ fork and resume statement. The other findings stay open:
 | --- | --- | --- |
 | Medium | An endpoint switch that binds but whose overview read fails reports the new endpoint as connected, and no event delivery runs until the user selects a profile again. | `ext-pi/src/service-mode.ts`, `ext-pi/src/manager/session.ts` |
 | Medium | An uncertain `/wfm-answer` or recovery choice is reconciled through the decision resource, which answers 404 once the decision is not pending, so the command stays uncertain. Nothing is resent. Reconcile through the command resource or the run state. | `ext-pi/src/manager-ui.ts` (`acat-pe18-fess-followup-3ykw`) |
-| Medium | The admission deadline covers one Store request, not one route. `repeatChangedRead` and about 29 owner reads inside protected views start fresh allowances, so a protected read can wait longer than the 7-second client timeout under contention. `manager/STORAGE.md` states this. | `manager/src/Agentic/Manager/Store.hs` |
+| Medium | Partly fixed by PD3. Each non-streaming GET route now waits for its locks within one five-second admission deadline, and `repeatChangedRead` uses the deadline of its store. A POST route still gives its resolve read, its submission and its receipt view separate deadlines, so one POST route can wait about 15 seconds under contention (`acat-pd3-fess-followup-uo4y`). | `manager/src/Agentic/Manager/Application.hs`, `manager/src/Agentic/Manager/Store.hs` |
 | Medium | The pre-lock crash window above, and engines outside the owner lock under option C. | `manager/src/Agentic/Manager/Quarantine.hs`, `cli/src/Agentic/Cli/Frontend.hs` (`acat-engine-owner-lock-coverage-9snr`) |
 | Medium | `/wfm-steer`, `/wfm-redirect`, `/wfm-resume`, `/wfm-fork` and the two-page history follow have fake-transport evidence only. | `ext-pi/test/manager-ui-live.test.ts` |
 | Low | `assertLocalStateRoot` runs only in the restore path, so a local launch, preview or lineage preflight can still write under a manager root. | `ext-pi/src/launch.ts`, `ext-pi/src/supervisor.ts` |
@@ -807,9 +807,10 @@ adds these:
 - The medium and low findings of the end-of-phase review above stay open.
   PE8 diagnosed the early `StoreBusy` on the answer route. PE9 carries one
   five-second admission deadline through the file slot, the configuration
-  guard and the Store gate of one Store request. One HTTP route can still
-  make several Store requests, and owner reads inside a protected view
-  still start fresh allowances (`acat-pe9-fess-followup-k551`).
+  guard and the Store gate of one Store request. PD3 gives each
+  non-streaming GET route one admission deadline for all its Store
+  requests. A POST route can still make several Store requests with
+  separate deadlines (`acat-pe9-fess-followup-k551`).
 - `release-quarantine` releases only reservations that a restart
   quarantined, with terminal-record or no-launch evidence. A launched run
   with no terminal record reads cleanup-required, and a

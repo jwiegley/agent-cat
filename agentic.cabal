@@ -577,6 +577,12 @@ executable manager-command-check
     Agentic.Manager.Store
     Agentic.Manager.Store.Admission
     Agentic.Manager.Worker.State
+    Agentic.Manager.Admission
+    Agentic.Manager.Admission.Policy
+    Agentic.Manager.Drafts
+    Agentic.Manager.Lineage
+    Agentic.Manager.State
+    Agentic.Manager.Worker
   build-depends:   agentic, direct-sqlite, deepseq, transformers, network
   ghc-options:     -threaded -rtsopts
 

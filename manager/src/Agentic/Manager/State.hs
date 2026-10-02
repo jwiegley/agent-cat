@@ -361,11 +361,16 @@ valid = either (const (throwIO StoreIntegrity)) pure
 
 -- | Current observations only. Neither this view nor its revision grants a pipe.
 readControlSurface :: AcceptedStart -> CredentialProof -> IO Value
-readControlSurface accepted proof = withControlSurface accepted proof (\_ -> pure)
+readControlSurface accepted proof = do
+  (store,_,_,_) <- acceptedControlContext accepted
+  withControlSurface store accepted proof (\_ -> pure)
 
-withControlSurface :: AcceptedStart -> CredentialProof -> (AuthorizedView -> Value -> IO a) -> IO a
-withControlSurface accepted proof respond = do
-  (store,profile,_,prepared) <- acceptedControlContext accepted
+-- | The control surface of a live original run. The Store reads use the
+-- given store value, so a route that runs under 'withStoreRequest' passes
+-- its request store and the reads share the admission deadline of the route.
+withControlSurface :: CoordinationStore -> AcceptedStart -> CredentialProof -> (AuthorizedView -> Value -> IO a) -> IO a
+withControlSurface store accepted proof respond = do
+  (_,profile,_,prepared) <- acceptedControlContext accepted
   let association = RunAssociation (acceptedStartRun accepted) profile (preparedRootIdentity prepared) (preparedRunId prepared)
   withAuthorizedResponse store proof profile [Command.Observe] $ \view -> do
     worker <- observeAcceptedStart accepted
@@ -394,13 +399,13 @@ controlSurfaceBorrowed :: CoordinationStore -> CredentialProof -> RunAssociation
 controlSurfaceBorrowed store proof association approved live = do
   -- An ingestion commit between the parts of the read changes the control
   -- revision or the projection boundary. The read then starts again.
-  (revision,supervision,snapshot,heads) <- repeatChangedRead "state-control-surface" $ do
-    (revision,supervision) <- runRead store $ do
+  (revision,supervision,snapshot,heads) <- repeatChangedRead store "state-control-surface" $ \request -> do
+    (revision,supervision) <- runRead request $ do
       authorizeObservation proof association
       rows <- query "SELECT control_revision,supervision FROM runs WHERE id=?" [text(associationRun association)]
       case rows of [[SQL.SQLText revision,SQL.SQLText supervision]] -> pure(revision,supervision); _ -> refuseTransaction StoreIntegrity
-    snapshot <- maybe (initialRunSnapshot (associationNative association)) checkpointSnapshot <$> restoreProjection store association
-    heads <- runRead store $ do
+    snapshot <- maybe (initialRunSnapshot (associationNative association)) checkpointSnapshot <$> restoreProjection request association
+    heads <- runRead request $ do
       authorizeObservation proof association
       rows <- query "SELECT control_revision,supervision FROM runs WHERE id=?" [text(associationRun association)]
       boundary <- projectionRow association
@@ -510,7 +515,7 @@ decisionInView store root proof view association ident = do
   pure value
 
 decisionBorrowed :: CoordinationStore -> PrivateRoot -> CredentialProof -> RunAssociation -> Text -> IO Value
-decisionBorrowed store root proof association ident = repeatChangedRead "state-decision" (decisionAttempt store root proof association ident)
+decisionBorrowed store root proof association ident = repeatChangedRead store "state-decision" (\request -> decisionAttempt request root proof association ident)
 
 -- | One attempt of a decision read. Nothing means that a concurrent commit
 -- changed the decision row between the parts of the attempt.
@@ -675,9 +680,9 @@ submitControl dispatch accepted proof decision key precondition body = do
           policy <- either (const(throwIO Command.StorageUnavailable)) pure selected
           -- This read precedes every reservation. An ingestion commit between
           -- the projection and the boundary read starts the read again.
-          (snapshot,availabilityRevision) <- repeatChangedRead "state-control-availability" $ do
-            snapshot <- requireProjection store association
-            revision <- runRead store $ do
+          (snapshot,availabilityRevision) <- repeatChangedRead store "state-control-availability" $ \reading -> do
+            snapshot <- requireProjection reading association
+            revision <- runRead reading $ do
               boundary <- projectionRow association
               rows <- query "SELECT control_revision FROM runs WHERE id=?" [text(associationRun association)]
               revision <- case rows of [[SQL.SQLText revision]]->pure revision;_->refuseTransaction StoreIntegrity

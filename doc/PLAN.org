@@ -11216,6 +11216,45 @@ Non-blocking findings of fess audit fess/pd-PD2-r1.md (2026-10-01) on subtask PD
 4. (low) ext-pi/src/manager-ui.ts near 2508-2509: the comment 'The head decision of a run with the reads that its commands bind.' is orphaned above the Reconciliation JSDoc, and type Head has no doc. Fix: move that comment back above type Head.
 5. (low) ext-pi/README.md, added uncertainty and test paragraphs: three lines run past the fill width of the file. Fix: refill the affected paragraphs.
 
+* TODO [#D] Resolve the non-blocking fess findings of subtask PD3
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pd3-fess-followup-uo4y
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-01 Thu 22:06]
+:MODIFIED: [2026-10-01 Thu 22:06]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess audit fess/pd-PD3-r1.md (2026-10-01) on subtask PD3 (one admission deadline per non-streaming GET route, item 3 of acat-phase-e-review-findings-0l73 and items 1 and 2 of acat-pe9-fess-followup-k551).
+
+1. (medium) manager/src/Agentic/Manager/Application.hs near 93: the route deadline covers GET routes only. POST routes (runs/{id}/control, decisions/{id}, requests/{id}, preparations/{id}, exports, lineage) give their resolve read, their submission and their receipt view (Application.hs near 315-319) separate five-second deadlines, so one POST route can wait about 15 seconds. The control availability read (State.hs near 683) still uses the unscoped Admission store. Fix: run each POST handler under withServiceRequest from the point after jsonMutation and mutationHeaders, and keep fresh allowances for captures and the other effect-before-record owners. Otherwise record the GET-only scope as an accepted limitation.
+2. (low, done in the PD3 commit) doc/workflow-manager-handoff.md near 361: the open Medium row said that the deadline covers one Store request. The Integrator updated the row and the current-state text.
+3. (low) manager/test/CommandCheck.hs routeDeadlineChecks: the assertion that the refused control read ran no command cannot fail, because a closed control read never inserts a command, and "ran == committed" passes by construction. Fix: drop the command-count check or replace it with an assertion that can fail, such as no second materialization of the view.
+4. (low) manager/test/CommandCheck.hs (quiet == scopedQuiet): the no-contention check of the control read compares owner-level values only, not HTTP status, ETag and body. Fix (optional): compare GET /v1/runs/{id}/control with and without a route scope in the controls mode.
+5. (low) manager/src/Agentic/Manager/Service.hs near 71: the route deadline starts at dispatch, not at the first lock wait. This is harmless for GET. Fix: if POST routes are scoped later, start the scope after the body read.
+6. (low) manager/test/CommandCheck.hs: no held-gate capture owner case and no dedicated SSE, download or revalidation deadline test. These rest on code-level exclusion and the mutations-captures, mixed and journey modes. Fix (optional): add a held-gate capture case that asserts fresh per-lock allowances and no orphaned file.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-pd3-fess-followup-uo4y",
+    "depends_on_id": "acat-phase-e-review-findings-0l73",
+    "type": "discovered-from",
+    "created_at": "2026-10-02T05:06:53.111427Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
 * TODO [#D] Resolve the non-blocking fess findings of subtask PE10
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -11848,7 +11887,7 @@ Non-blocking findings of fess audit fess/pe-PE8-r1.md (2026-10-01) on subtask PE
 :LABELS:   ["workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-10-01 Thu 13:43]
-:MODIFIED: [2026-10-01 Thu 13:43]
+:MODIFIED: [2026-10-01 Thu 22:07]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -11877,6 +11916,20 @@ Also disclosed by the implementer and still open: effect-first owners (capture u
     "created_by": "johnw",
     "metadata": "{}",
     "thread_id": ""
+  }
+]
+#+end_src
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 590,
+    "issue_id": "acat-pe9-fess-followup-k551",
+    "author": "johnw",
+    "text": "Subtask PD3 (2026-10-01) addresses item 2 and the GET part of item 1: each non-streaming GET route shares one admission deadline across its Store requests, owner reads inside protected views and repeatChangedRead attempts. POST routes keep separate deadlines per Store request (acat-pd3-fess-followup-uo4y item 1). The repeatChangedRead entry of the disclosed fresh-allowance list is resolved. Effect-first owners, capture uploads, Configuration.withActive and artifactResponseWait stay as listed. Evidence: PD/PD3/impl-r1 in the private resume-20260923 directory. Items 3 and 4 stay open.",
+    "created_at": "2026-10-02T05:07:01Z"
   }
 ]
 #+end_src
@@ -12277,7 +12330,7 @@ Deferred security stage for Phase E, Pi service mode (WM-036 to WM-038), under t
 :LABELS:   ["review","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-10-01 Thu 20:45]
-:MODIFIED: [2026-10-01 Thu 21:36]
+:MODIFIED: [2026-10-01 Thu 22:07]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -12317,6 +12370,13 @@ Findings of the Phase E end-of-phase review (two lenses, range 33f84fe4..841ce0c
     "author": "johnw",
     "text": "Subtask PD2 (2026-10-01) fixes item 2 in ext-pi/src/manager-ui.ts, ext-pi/src/manager/session.ts and ext-pi/src/manager/resources.ts. An uncertain answer reconciles from the run snapshot occurrence, with a control-view fallback when the snapshot cannot name the stored answer. Choose-recovery reconciles through the control view. reconcileCommand takes an optional reconciliation read and refresh.ts is unchanged. Nothing is resent. Evidence: npm run check, npm test, BUILD and the pi-client mode passed. Fess not blocking, findings filed as acat-pd2-fess-followup-mrk9. Items 3 to 6 and 8 to 13 stay open.",
     "created_at": "2026-10-02T04:36:02Z"
+  },
+  {
+    "id": 589,
+    "issue_id": "acat-phase-e-review-findings-0l73",
+    "author": "johnw",
+    "text": "Subtask PD3 (2026-10-01) partly fixes item 3. Each non-streaming GET route runs under Service.withServiceRequest, so every owner read, every repeatChangedRead attempt and every nested scope of the route share one five-second admission deadline. repeatChangedRead now takes the CoordinationStore and uses its admissionDeadline. SSE streams, artifact downloads (300 s), revalidations, command attempts, dispatch tickets and capture uploads keep fresh allowances. POST routes still give their resolve read, submission and receipt view separate deadlines (acat-pd3-fess-followup-uo4y item 1). manager/STORAGE.md states the rule. Evidence (PD/PD3/impl-r1 in the private resume-20260923 directory): BUILD, manager-command-check N8 with command_contract.py (new routeDeadlineChecks, failing first against the old fresh retry deadline), manager-store-check N8, manager-draft-check N8 with draft_contract.py, manager-history-check N8, manager-admission-check N8, manager-approval-check N8 with approval_contract.py, modes controls, mixed and mutations-captures, journey N8 with no StoreBusy line, make -C doc check. Fess not blocking, findings filed as acat-pd3-fess-followup-uo4y.",
+    "created_at": "2026-10-02T05:07:01Z"
   }
 ]
 #+end_src
