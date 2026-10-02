@@ -1854,6 +1854,53 @@ export function answerBody(decision: DecisionView, value: JsonValue): JsonObject
   return { operation: "answer", occurrenceId: decimalText(decision.occurrenceId), generation: decision.generation, value };
 }
 
+/** The longest answer text, in code points, that an occurrence of a run snapshot stores whole. */
+const STORED_ANSWER_CHARACTERS = 500;
+
+/** Whether the runtime stores a text unchanged: one line, without ASCII white space at either end, of at most 500 code points. */
+function storedWhole(text: string): boolean {
+  return !text.includes("\n") && text.replace(/^[ \t\r]+|[ \t\r]+$/g, "") === text && [...text].length <= STORED_ANSWER_CHARACTERS;
+}
+
+/**
+ * The text that the occurrence of a run snapshot stores as `answer` after
+ * the runtime accepts the typed value of an answer of a question decision,
+ * or `undefined` when that text does not name the value exactly. The
+ * runtime stores the answer as `sayEl` of `Agentic.Exec` renders it, on one
+ * line and cut to 500 code points: a flag as `yes` or `no`, a receipt as
+ * `done`, a text unchanged, and a verdict as `approve`, `declined` or its
+ * objections joined with `; `. A text that the runtime would change or
+ * cut, a verdict whose objections could be joined from other objections,
+ * and every structured answer give `undefined`, because another answer
+ * could store the same text.
+ *
+ * @public
+ */
+export function storedAnswerText(decision: DecisionView, value: JsonValue): string | undefined {
+  const content = decision.content;
+  if (content.kind !== "question" || typeof content.code !== "string") return undefined;
+  switch (content.code) {
+    case "flag":
+      return typeof value === "boolean" ? (value ? "yes" : "no") : undefined;
+    case "receipt":
+      return value === null ? "done" : undefined;
+    case "text":
+      return typeof value === "string" && storedWhole(value) ? value : undefined;
+    case "verdict": {
+      if (!isJsonObject(value)) return undefined;
+      const tag = jsonMember(value, "tag");
+      const objections = jsonMember(value, "objections");
+      if (Object.keys(value).length === 1 && (tag === "approve" || tag === "declined")) return tag;
+      if (tag !== "object" || Object.keys(value).length !== 2 || objections === undefined || !isJsonArray(objections) || objections.length === 0) return undefined;
+      const texts = objections.filter((item): item is string => typeof item === "string" && item !== "" && !item.includes(";") && storedWhole(item));
+      const joined = texts.join("; ");
+      return texts.length === objections.length && storedWhole(joined) && joined !== "approve" && joined !== "declined" ? joined : undefined;
+    }
+    default:
+      return undefined;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Exports and lineage requests of a run (Agentic.Tui.Service).
 

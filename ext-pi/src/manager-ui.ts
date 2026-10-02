@@ -71,6 +71,7 @@ import {
   forkReplacementValue,
   lineageBody,
   requiredScopes,
+  storedAnswerText,
   type CommandReceipt,
   type ControlOffer,
   type ControlView,
@@ -85,7 +86,7 @@ import {
   type RecoveryOption,
   type RunItem,
 } from "./manager/resources.ts";
-import type { ManagerSession, Observed, PendingCommand, Reference } from "./manager/session.ts";
+import type { ManagerSession, Observed, PendingCommand, ReconcileTarget, Reference } from "./manager/session.ts";
 import type { ServiceMode } from "./service-mode.ts";
 
 /**
@@ -491,6 +492,40 @@ export function redirectPlace(snapshot: JsonObject, occurrenceId: bigint): Redir
     ? attempts.filter((attempt) => memberOf(attempt, "state") === "running").map((attempt) => text(memberOf(memberOf(attempt, "address"), "attemptId")))
     : [];
   return running.length === 1 && running[0] !== undefined ? { kind: "attempt", attemptId: running[0] } : { kind: "unknown" };
+}
+
+/**
+ * Whether one read of a run snapshot shows the effect of an answer of a
+ * question decision: the occurrence of the decision completed, it no longer
+ * waits on that decision, and it stores exactly `stored`, the text of
+ * `storedAnswerText` for the sent value. An occurrence that stores another
+ * answer, for example the answer of another client, shows no effect.
+ *
+ * @public
+ */
+export function answerObserved(snapshot: JsonValue, decision: DecisionView, stored: string): boolean {
+  const items = memberOf(snapshot, "items");
+  const occurrence = items !== undefined && isJsonArray(items)
+    ? items.find((item) => memberOf(item, "occurrenceId") === decision.occurrenceId.toString()) : undefined;
+  if (occurrence === undefined) return false;
+  const waiting = memberOf(occurrence, "personPending") === true && memberOf(occurrence, "decisionId") === decision.id;
+  return !waiting && memberOf(occurrence, "state") === "completed" && memberOf(occurrence, "answer") === stored;
+}
+
+/**
+ * Whether one read of the controls of a run shows that the run went past a
+ * decision. An answer requires a run that is still running, which the
+ * controls state as `cancelAllowed`, with a head that names another
+ * decision. A recovery choice requires only a head that no longer names the
+ * decision, so an abandoned run without a head shows the effect, and a
+ * terminal run whose head still names the decision does not.
+ *
+ * @public
+ */
+export function controlPassed(observed: JsonValue, decision: DecisionView, operation: "answer" | "recovery"): boolean {
+  const control = decodeControl(observed);
+  if (!control.ok || control.value.decisionHeadId === decision.id) return false;
+  return operation === "recovery" || (control.value.cancelAllowed && control.value.decisionHeadId !== null);
 }
 
 function placeText(place: RedirectPlace): string {
@@ -1162,14 +1197,16 @@ export class ManagerRequests {
    * its execution fact.
    *
    * An uncertain send is reconciled with one read under the rules of
-   * `reconcile` in `src/manager/refresh.ts`: the target observes the effect
-   * only when `effectVisible` sees it and the entity tag differs from the
-   * precondition. A reconciled effect gives the receipt state
+   * `reconcile` in `src/manager/refresh.ts`: the read observes the effect
+   * only when `effectVisible` of the reconciliation sees it and the entity
+   * tag differs from the precondition. The read is the target, or the
+   * `read` of the reconciliation with its own precondition when the target
+   * no longer serves the effect. A reconciled effect gives the receipt state
    * `effect-observed`. Otherwise the command stays uncertain. The command is
    * never sent again.
    */
   async #command(ctx: ExtensionContext, session: ManagerSession, operation: Operation, target: string,
-    prepared: Outcome<PendingCommand>, settle = true, effectVisible: (value: JsonValue) => boolean = () => false,
+    prepared: Outcome<PendingCommand>, settle = true, reconciliation: Reconciliation = NO_EFFECT,
     settledWhen: (receipt: CommandReceipt) => boolean = (receipt) => SETTLED.includes(receipt.state)): Promise<
     | { kind: "receipt"; state: string; receipt?: CommandReceipt }
     | { kind: "created"; request: DraftView; location: Reference }
@@ -1188,10 +1225,11 @@ export class ManagerRequests {
       return { kind: "refused", failure: sent.failure };
     }
     if (sent.kind === "uncertain") {
-      const reconciled = await session.reconcileCommand(sent.uncertain, effectVisible);
+      const reconciled = await session.reconcileCommand(sent.uncertain, reconciliation.effectVisible, reconciliation.read);
+      const read = reconciliation.read?.reference.uri ?? target;
       if (reconciled.kind === "effect-observed") {
         this.#record(ctx, session, operation, target, "accepted",
-          `the send was uncertain (${failureText(sent.failure)}), and one read of ${target} observes its effect. The command is not sent again.`);
+          `the send was uncertain (${failureText(sent.failure)}), and one read of ${read} observes its effect. The command is not sent again.`);
         return { kind: "receipt", state: "effect-observed" };
       }
       if (reconciled.kind === "refused") {
@@ -1199,7 +1237,7 @@ export class ManagerRequests {
         return { kind: "receipt", state: "refused" };
       }
       this.#record(ctx, session, operation, target, "uncertain",
-        `${failureText(sent.failure)}. One read of ${target} does not settle it. The command is not sent again. /wfm-status shows the manager state.`);
+        `${failureText(sent.failure)}. One read of ${read} does not settle it. The command is not sent again. /wfm-status shows the manager state.`);
       return { kind: "uncertain" };
     }
     if (sent.capture !== null) {
@@ -1244,7 +1282,7 @@ export class ManagerRequests {
   async #runControl(ctx: ExtensionContext, session: ManagerSession, operation: "cancel" | "steer" | "redirect", controls: Observed,
     body: JsonValue): Promise<CommandReceipt | undefined> {
     const sent = await this.#command(ctx, session, operation, controls.reference.uri, session.prepare(controls.reference, body, controls.etag),
-      true, () => false, (receipt) => controlSettled(operation, receipt));
+      true, NO_EFFECT, (receipt) => controlSettled(operation, receipt));
     if (sent.kind !== "receipt" || sent.receipt === undefined) return undefined;
     const ack = acknowledgementOf(sent.receipt);
     ctx.ui.notify(acknowledgementLine(sent.receipt), ack !== undefined && ACCEPTING.includes(ack.state) ? "info" : "warning");
@@ -1603,10 +1641,10 @@ export class ManagerRequests {
     }
     const known = new Set(page.value.children.map((child) => child.id));
     const sent = await this.#command(ctx, session, operation, collection.value.uri,
-      session.prepare(collection.value, lineageBody(operation, edits), observed.value.etag), true, (value) => {
+      session.prepare(collection.value, lineageBody(operation, edits), observed.value.etag), true, { effectVisible: (value) => {
         const current = decodeLineageCollection(value);
         return current.ok && current.value.children.some((child) => !known.has(child.id) && child.lineage === operation);
-      });
+      } });
     if (sent.kind !== "receipt" || sent.state !== "effect-observed") return false;
     const resource = sent.receipt === undefined ? undefined : effectResource(sent.receipt);
     if (sent.receipt === undefined || effectKind(sent.receipt) !== "lineage-created" || resource === undefined || !resource.startsWith("/v1/requests/")) {
@@ -1742,10 +1780,10 @@ export class ManagerRequests {
       if (!(await ctx.ui.confirm("Export manager result?", `scope=verified result of run ${runId}\nname=${name}`))) return declined(ctx, `export ${name} of run ${runId}`);
     }
     const sent = await this.#command(ctx, session, "export", collection.value.uri,
-      session.prepare(collection.value, { name }, observed.value.etag), true, (value) => {
+      session.prepare(collection.value, { name }, observed.value.etag), true, { effectVisible: (value) => {
         const current = decodeExportCollection(value);
         return current.ok && current.value.items.some((item) => item.name === name && item.state === "published");
-      });
+      } });
     if (sent.kind !== "receipt" || sent.state !== "effect-observed") return false;
     if (sent.receipt === undefined || effectKind(sent.receipt) !== "exported" || effectResource(sent.receipt) !== `/v1/exports/export_${sent.receipt.id}`) {
       await this.#listExports(ctx, session, runId);
@@ -2156,11 +2194,9 @@ export class ManagerRequests {
       ctx.ui.notify(`The answer is refused before any send: ${answer.failure.reason}. The draft is kept, and the editor opens again.`, "warning");
     }
     const target = head.decisionObserved.reference;
-    const sent = await this.#command(ctx, session, "answer", target.uri, session.prepare(target, answerBody(decision, value), head.decisionObserved.etag),
-      true, (observed) => {
-        const current = decodeDecision(observed);
-        return current.ok && current.value.state !== "pending";
-      });
+    const prepared = session.prepare(target, answerBody(decision, value), head.decisionObserved.etag);
+    const sent = await this.#command(ctx, session, "answer", target.uri, prepared, true,
+      prepared.ok ? await answerReconciliation(session, head, value) : NO_EFFECT);
     if (sent.kind === "refused" && sent.failure.kind === "Refused" && sent.failure.status === 412) {
       if (supplied !== undefined) {
         return stopped(ctx, `Decision ${decision.id} changed before the answer arrived (412 stale-revision). Nothing was sent again.`, "warning");
@@ -2217,15 +2253,14 @@ export class ManagerRequests {
     const address = { occurrenceId: decision.occurrenceId.toString(), generation: decision.generation };
     const sent = action.operation === "retry"
       ? await this.#command(ctx, session, "retry", head.controlObserved.reference.uri,
-        session.prepare(head.controlObserved.reference, { operation: "retry", ...address }, head.controlObserved.etag), true, (observed) => {
-          const control = decodeControl(observed);
-          return control.ok && control.value.decisionHeadId !== decision.id;
-        })
+        session.prepare(head.controlObserved.reference, { operation: "retry", ...address }, head.controlObserved.etag), true,
+        { effectVisible: (observed) => controlPassed(observed, decision, "recovery") })
       : await this.#command(ctx, session, "choose-recovery", head.decisionObserved.reference.uri,
         session.prepare(head.decisionObserved.reference, { operation: "choose-recovery", ...address, choice: action.option.choice },
-          head.decisionObserved.etag), true, (observed) => {
-          const current = decodeDecision(observed);
-          return current.ok && current.value.state !== "pending";
+          head.decisionObserved.etag), true, {
+          // The manager serves only pending decisions, so the controls of the run reconcile the choice.
+          read: { reference: head.controlObserved.reference, precondition: head.controlObserved.etag },
+          effectVisible: (observed) => controlPassed(observed, decision, "recovery"),
         });
     if (sent.kind !== "receipt" || sent.state !== "effect-observed") return false;
     ctx.ui.notify(`Recovery ${action.label} reached decision ${decision.id} of run ${runId}.`, "info");
@@ -2471,6 +2506,41 @@ function answerKey(session: ManagerSession, decisionId: string): string {
 }
 
 /** The head decision of a run with the reads that its commands bind. */
+/**
+ * How `#command` reconciles an uncertain send: `effectVisible` over the one
+ * read, and `read`, the resource that replaces the target of the command,
+ * with its own precondition.
+ */
+type Reconciliation = { readonly effectVisible: (value: JsonValue) => boolean; readonly read?: ReconcileTarget };
+
+/** The reconciliation of a command whose target never shows its effect. */
+const NO_EFFECT: Reconciliation = { effectVisible: () => false };
+
+/**
+ * The reconciliation of an answer. The manager serves only pending
+ * decisions, so an answered decision reads as 404 and never shows the
+ * effect. When `storedAnswerText` names the value exactly, one read of the
+ * run snapshot made before the send gives the read and its precondition,
+ * and the occurrence must store the sent answer. Otherwise, and when that
+ * read fails, the controls of the head reconcile the answer, and the run
+ * must still run with a head that names another decision.
+ */
+async function answerReconciliation(session: ManagerSession, head: Head, value: JsonValue): Promise<Reconciliation> {
+  const { decision } = head;
+  const stored = storedAnswerText(decision, value);
+  const reference = session.reference(`/v1/runs/${head.runId}/snapshot`);
+  if (stored !== undefined && reference.ok) {
+    const snapshot = await session.get(reference.value);
+    if (snapshot.ok && snapshot.value.etag !== null) {
+      return { read: { reference: reference.value, precondition: snapshot.value.etag }, effectVisible: (observed) => answerObserved(observed, decision, stored) };
+    }
+  }
+  return {
+    read: { reference: head.controlObserved.reference, precondition: head.controlObserved.etag },
+    effectVisible: (observed) => controlPassed(observed, decision, "answer"),
+  };
+}
+
 type Head = {
   readonly runId: string;
   readonly decision: DecisionView;

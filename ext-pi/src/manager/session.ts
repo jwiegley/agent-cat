@@ -75,6 +75,15 @@ export type Reference = { readonly endpoint: string; readonly uri: string };
  *
  * @public
  */
+/**
+ * The resource that reconciles an uncertain command in place of its target,
+ * with the entity tag of that resource from before the send as its
+ * precondition.
+ *
+ * @public
+ */
+export type ReconcileTarget = { readonly reference: Reference; readonly precondition: string | null };
+
 export type Observed = { readonly reference: Reference; readonly status: number; readonly etag: string | null; readonly value: JsonValue };
 
 /**
@@ -824,21 +833,30 @@ export class ManagerSession {
   /**
    * Reconcile an uncertain command with one read: its receipt when the
    * location is known, and otherwise its target, where `effectVisible`
-   * tells whether the caller sees the effect of the command. Nothing is
-   * sent, and an `uncertain` report keeps the command unchanged.
+   * tells whether the caller sees the effect of the command. A command
+   * whose target no longer serves its effect, such as an answered decision
+   * that reads as 404, names another resource in `read`: without a receipt
+   * location, that resource replaces the target, and the entity tag of
+   * `read` replaces the precondition, so the rules of `reconcile` compare
+   * the entity tags of one resource. Nothing is sent, and an `uncertain`
+   * report keeps the command unchanged.
    */
-  async reconcileCommand(uncertain: Uncertain<PendingCommand, Reference>, effectVisible: (value: JsonValue) => boolean)
-    : Promise<Reconciled<PendingCommand, Reference>> {
-    const read = reconcileRead(uncertain);
-    const observed = await this.get(read.location);
-    if (!observed.ok) return reconcile(uncertain, { kind: "failure", failure: observed.failure });
-    if (read.kind === "receipt") {
+  async reconcileCommand(uncertain: Uncertain<PendingCommand, Reference>, effectVisible: (value: JsonValue) => boolean,
+    read?: ReconcileTarget): Promise<Reconciled<PendingCommand, Reference>> {
+    const basis = read === undefined || uncertain.receipt !== null
+      ? uncertain : { ...uncertain, target: read.reference, precondition: read.precondition };
+    const kept = (reconciled: Reconciled<PendingCommand, Reference>): Reconciled<PendingCommand, Reference> =>
+      reconciled.kind === "uncertain" ? { kind: "uncertain", uncertain } : reconciled;
+    const next = reconcileRead(basis);
+    const observed = await this.get(next.location);
+    if (!observed.ok) return kept(reconcile(basis, { kind: "failure", failure: observed.failure }));
+    if (next.kind === "receipt") {
       const receipt = decodeCommandReceipt(observed.value.value);
-      return reconcile(uncertain, receipt.ok ? { kind: "receipt", state: receipt.value.state } : { kind: "failure", failure: receipt.failure });
+      return kept(reconcile(basis, receipt.ok ? { kind: "receipt", state: receipt.value.state } : { kind: "failure", failure: receipt.failure }));
     }
-    return observed.value.etag === null
-      ? reconcile(uncertain, { kind: "failure", failure: { kind: "InvalidResponse" } })
-      : reconcile(uncertain, { kind: "target", etag: observed.value.etag, effectVisible: effectVisible(observed.value.value) });
+    return kept(observed.value.etag === null
+      ? reconcile(basis, { kind: "failure", failure: { kind: "InvalidResponse" } })
+      : reconcile(basis, { kind: "target", etag: observed.value.etag, effectVisible: effectVisible(observed.value.value) }));
   }
 
   /**

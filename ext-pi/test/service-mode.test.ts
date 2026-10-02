@@ -388,50 +388,138 @@ describe("service mode of the extension", () => {
     await service.close();
   });
 
-  it.each([
-    ["pending", '"decision_a1_rev"', "uncertain",
-      "Command answer uncertain: TransportUnavailable. One read of /v1/decisions/decision_a1 does not settle it. The command is not sent again."],
-    ["resolved", '"decision_a1_rev_2"', "accepted",
-      "Command answer accepted: the send was uncertain (TransportUnavailable), and one read of /v1/decisions/decision_a1 observes its effect."],
-  ] as const)("answers a flag question with JSON false and reconciles an uncertain send with one read while the decision is %s",
-    async (later, tag, outcome, notice) => {
+  describe("reconciliation of an uncertain answer or recovery choice", () => {
+    const DECISION_URI = "/v1/decisions/decision_a1";
+    const CONTROL_URI = "/v1/runs/run_a1/control";
+    const SNAPSHOT_URI = "/v1/runs/run_a1/snapshot";
+    /** The manager serves only pending decisions, so an answered decision reads as 404. */
+    const ANSWERED: Reply = { ok: false, failure: { kind: "Refused", status: 404, code: "unavailable-resource" } };
+
+    const flag = (decision("decision_a1", "run_a1") as { decision: Record<string, unknown> }).decision;
+    const text = { ...flag, question: { ...(flag.question as Record<string, unknown>), code: "text", semanticSchema: null } };
+    const recovery = Object.fromEntries([...Object.entries(flag).filter(([name]) => name !== "question"),
+      ["kind", "recovery"], ["gap", "transport"], ["message", "Recovery needs an operator choice."], ["choices", [{ choice: "abandon", target: null }]]]);
+
+    /** The run snapshot of run_a1 with occurrence 0. */
+    function snapshotOf(status: string, occurrence: Record<string, unknown> = {}): unknown {
+      return {
+        snapshotVersion: 1, runId: "run_a1", runtime: { status, lastSequence: "9", protocolVersion: 2 },
+        items: [{ occurrenceId: "0", state: "running", code: "flag", answer: null, decisionId: "decision_a1", personPending: true, attempts: [], ...occurrence }],
+      };
+    }
+
+    /** The controls of run_a1. */
+    function controlsOf(fields: Record<string, unknown> = {}): unknown {
+      return { ...(control("run_a1", "decision_a1") as Record<string, unknown>), ...fields };
+    }
+
+    const RECOVERY_CONTROLS = controlsOf({
+      offers: [{ operation: "choose-recovery", address: { occurrenceId: "0" }, generation: "generation_3", timings: [], choices: [{ choice: "abandon", target: null }], targets: [] }],
+    });
+
+    type Case = {
+      readonly head: Record<string, unknown>;
+      readonly typed: string;
+      readonly controls?: unknown;
+      readonly snapshotAfter?: Reply;
+      readonly controlAfter?: Reply;
+    };
+
+    /**
+     * Answer the head of run_a1 once. The POST fails as a lost connection
+     * does, so the send is uncertain. The first read of each resource gives
+     * its state before the send, and every later read its state after it.
+     */
+    async function uncertainSend(fixture: Case) {
       const { local } = await localState();
       process.env.AGENT_CAT_STATE_DIR = local;
       process.env.AGENT_CAT_MANAGER_PROFILE = profile("answer", "alpha.test");
-      const head = (decision("decision_a1", "run_a1") as { decision: Record<string, unknown> }).decision;
       const base = manager([run("run_a1", "running"), decision("decision_a1", "run_a1")]);
       const fake = transports({
         "alpha.test": (resource, count) => {
           if (resource === "/v1/capabilities") return ok(capabilities({}, ["observe", "submit", "control"]));
           if (resource === "/v1/decisions?runId=run_a1") {
             const page = { setId: "set_q", revision: "rev_q", expiresAt: new Date(Date.now() + 60000).toISOString(), index: 0, totalItems: 1, next: null };
-            return ok({ version: 1, page, items: [head] });
+            return ok({ version: 1, page, items: [fixture.head] });
           }
-          if (resource === "/v1/decisions/decision_a1") return count === 1 ? ok(head, '"decision_a1_rev"') : ok({ ...head, state: later }, tag);
-          if (resource === "/v1/runs/run_a1/control") return ok(control("run_a1", "decision_a1"), '"control_rev"');
+          if (resource === DECISION_URI) return count === 1 ? ok(fixture.head, '"decision_a1_rev"') : ANSWERED;
+          if (resource === CONTROL_URI) return count === 1 ? ok(fixture.controls ?? controlsOf(), '"control_rev"') : fixture.controlAfter ?? ANSWERED;
+          if (resource === SNAPSHOT_URI) return count === 1 ? ok(snapshotOf("running"), '"snapshot_rev"') : fixture.snapshotAfter ?? ANSWERED;
           return base(resource, count);
         },
       });
       const pi = host({ manager: { transport: fake.transport } });
-      const titles: string[] = [];
-      Object.assign(pi.ctx.ui, { editor: async (title: string) => (titles.push(title), "  No ") });
+      Object.assign(pi.ctx.ui, { editor: async () => fixture.typed, select: async (_title: string, choices: string[]) => choices[0] });
       await pi.fire("session_start");
       await until(async () => (await pi.status()).includes("delivery live"));
+      const before = pi.notices.length;
       await pi.commands.get("wfm-answer")!.handler("run_a1", pi.ctx);
       const [made] = fake.made;
-      expect(titles).toEqual(["Answer of decision decision_a1 (flag: yes, no, true or false): Proceed?"]);
-      // One POST of the typed JSON false, bound to the decision revision that was read.
-      expect(made.posts).toEqual(["/v1/decisions/decision_a1"]);
-      expect(made.bodies).toEqual([{ body: '{"generation":"generation_3","occurrenceId":"0","operation":"answer","value":false}', ifMatch: '"decision_a1_rev"' }]);
-      // The uncertain send is reconciled with one read of the decision and never sent again.
-      expect(made.gets.filter((uri) => uri === "/v1/decisions/decision_a1")).toHaveLength(2);
-      const record = pi.notices.find((line) => line.message.startsWith("Command answer "));
-      expect(record?.message).toContain(notice);
-      expect(await pi.status()).toMatch(new RegExp(`\n {2}answer {2}${outcome} {2}`));
-      await new Promise((wake) => setTimeout(wake, 50));
+      const notices = pi.notices.slice(before).map((notice) => notice.message);
+      const status = await pi.status();
       await pi.fire("session_shutdown");
-      expect(made.posts).toEqual(["/v1/decisions/decision_a1"]);
+      const reads = (uri: string) => made.gets.filter((get) => get === uri).length;
+      return { made, notices, status, reads };
+    }
+
+    it.each([
+      ["the occurrence stores the sent answer", ok(snapshotOf("running", { state: "completed", answer: "no", personPending: false }), '"snapshot_rev_2"'), "accepted"],
+      ["the occurrence stores the answer of another client", ok(snapshotOf("running", { state: "completed", answer: "yes", personPending: false }), '"snapshot_rev_2"'), "uncertain"],
+      ["the occurrence still waits on the decision", ok(snapshotOf("running"), '"snapshot_rev_2"'), "uncertain"],
+      ["the run failed without the answer", ok(snapshotOf("failed", { state: "failed", answer: "transport lost", personPending: false }), '"snapshot_rev_2"'), "uncertain"],
+      ["the run was cancelled without the answer", ok(snapshotOf("cancelled", { state: "cancelled", personPending: false }), '"snapshot_rev_2"'), "uncertain"],
+      ["the snapshot keeps the entity tag of the read before the send", ok(snapshotOf("running", { state: "completed", answer: "no", personPending: false }), '"snapshot_rev"'), "uncertain"],
+      ["the snapshot read fails", { ok: false, failure: { kind: "TransportUnavailable" } } as Reply, "uncertain"],
+    ] as const)("reconciles an uncertain flag answer from the occurrence of the run snapshot when %s", async (_name, snapshotAfter, outcome) => {
+      const { made, notices, status, reads } = await uncertainSend({ head: flag, typed: "  No ", snapshotAfter });
+      // One POST of the typed JSON false, bound to the decision revision that was read, and never sent again.
+      expect(made.posts).toEqual([DECISION_URI]);
+      expect(made.bodies).toEqual([{ body: '{"generation":"generation_3","occurrenceId":"0","operation":"answer","value":false}', ifMatch: '"decision_a1_rev"' }]);
+      // The snapshot is read once before the send and once to reconcile. The decision and the controls are read only for the head.
+      expect([reads(SNAPSHOT_URI), reads(DECISION_URI), reads(CONTROL_URI)]).toEqual([2, 1, 1]);
+      const record = notices.find((line) => line.startsWith("Command answer "));
+      expect(record).toContain(outcome === "accepted"
+        ? `Command answer accepted: the send was uncertain (TransportUnavailable), and one read of ${SNAPSHOT_URI} observes its effect.`
+        : `Command answer uncertain: TransportUnavailable. One read of ${SNAPSHOT_URI} does not settle it. The command is not sent again.`);
+      expect(notices.includes("Answer false reached decision decision_a1 of run run_a1.")).toBe(outcome === "accepted");
+      expect(status).toMatch(new RegExp(`\n {2}answer {2}${outcome} {2}`));
     });
+
+    it.each([
+      ["the running run moved its head to a later decision", ok(controlsOf({ decisionHeadId: "decision_a2" }), '"control_rev_2"'), "accepted"],
+      ["the head is unchanged", ok(controlsOf(), '"control_rev_2"'), "uncertain"],
+      ["the controls keep the entity tag of the read before the send", ok(controlsOf({ decisionHeadId: "decision_a2" }), '"control_rev"'), "uncertain"],
+      ["the run has no head", ok(controlsOf({ decisionHeadId: null }), '"control_rev_2"'), "uncertain"],
+      ["the run is terminal", ok(controlsOf({ decisionHeadId: "decision_a2", cancelAllowed: false, offers: [] }), '"control_rev_2"'), "uncertain"],
+    ] as const)("reconciles an uncertain answer that the snapshot does not store whole from the controls when %s", async (_name, controlAfter, outcome) => {
+      // The runtime stores a text answer on one line, so a two-line answer is not stored whole.
+      const { made, notices, status, reads } = await uncertainSend({ head: text, typed: "first line\nsecond line", controlAfter });
+      expect(made.posts).toEqual([DECISION_URI]);
+      expect(made.bodies.map((sent) => sent.ifMatch)).toEqual(['"decision_a1_rev"']);
+      expect([reads(SNAPSHOT_URI), reads(DECISION_URI), reads(CONTROL_URI)]).toEqual([0, 1, 2]);
+      const record = notices.find((line) => line.startsWith("Command answer "));
+      expect(record).toContain(outcome === "accepted"
+        ? `and one read of ${CONTROL_URI} observes its effect.` : `One read of ${CONTROL_URI} does not settle it. The command is not sent again.`);
+      expect(status).toMatch(new RegExp(`\n {2}answer {2}${outcome} {2}`));
+    });
+
+    it.each([
+      ["the abandoned run names no head", ok(controlsOf({ decisionHeadId: null, cancelAllowed: false, offers: [] }), '"control_rev_2"'), "accepted"],
+      ["the run moved its head to a later decision", ok(controlsOf({ decisionHeadId: "decision_a2" }), '"control_rev_2"'), "accepted"],
+      ["the failed run still names the recovery decision", ok(controlsOf({ cancelAllowed: false, offers: [] }), '"control_rev_2"'), "uncertain"],
+      ["the controls keep the entity tag of the read before the send", ok(controlsOf({ decisionHeadId: null }), '"control_rev"'), "uncertain"],
+    ] as const)("reconciles an uncertain recovery choice from the controls when %s", async (_name, controlAfter, outcome) => {
+      const { made, notices, status, reads } = await uncertainSend({ head: recovery, typed: "", controls: RECOVERY_CONTROLS, controlAfter });
+      expect(made.posts).toEqual([DECISION_URI]);
+      expect(made.bodies).toEqual([{ body: '{"choice":"abandon","generation":"generation_3","occurrenceId":"0","operation":"choose-recovery"}', ifMatch: '"decision_a1_rev"' }]);
+      expect([reads(SNAPSHOT_URI), reads(DECISION_URI), reads(CONTROL_URI)]).toEqual([0, 1, 2]);
+      const record = notices.find((line) => line.startsWith("Command choose-recovery "));
+      expect(record).toContain(outcome === "accepted"
+        ? `and one read of ${CONTROL_URI} observes its effect.` : `One read of ${CONTROL_URI} does not settle it. The command is not sent again.`);
+      expect(notices.includes("Recovery Abandon reached decision decision_a1 of run run_a1.")).toBe(outcome === "accepted");
+      expect(status).toMatch(new RegExp(`\n {2}choose-recovery {2}${outcome} {2}`));
+    });
+  });
 
   describe("run controls of /wfm-cancel, /wfm-steer and /wfm-redirect", () => {
     const ACCEPTED_AT = "2026-10-01T12:00:00Z";

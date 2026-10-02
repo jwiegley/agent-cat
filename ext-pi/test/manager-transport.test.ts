@@ -495,6 +495,38 @@ describe("manager session", () => {
     await client.close();
   });
 
+  it("reconciles an uncertain command through another resource with the entity tag of that resource", async () => {
+    const tags: Record<string, string> = { "/v1/runs/r1/snapshot": '"snap-1"' };
+    handler = (request, response) => {
+      if (request.url === "/v1/capabilities") json(response, 200, capabilities("epoch-1"));
+      else if (request.method === "POST") response.socket?.destroy();
+      else if (request.url === "/v1/decisions/d1") json(response, 404, '{"code":"unavailable-resource"}');
+      else json(response, 200, '{"version":1}', { ETag: tags[request.url ?? ""] ?? '"other"' });
+    };
+    const client = await session();
+    const target = client.reference("/v1/decisions/d1");
+    const snapshot = client.reference("/v1/runs/r1/snapshot");
+    if (!target.ok || !snapshot.ok) throw new Error("reference refused");
+    const pending = client.prepare(target.value, { operation: "answer" }, '"decision-1"');
+    if (!pending.ok) throw new Error("prepare refused");
+    const sent = await client.send(pending.value);
+    if (sent.kind !== "uncertain") throw new Error(`send ${sent.kind}`);
+    const read = { reference: snapshot.value, precondition: '"snap-1"' };
+    // The target alone never settles the command, because the decision reads as 404.
+    expect(await client.reconcileCommand(sent.uncertain, () => true)).toEqual({ kind: "uncertain", uncertain: sent.uncertain });
+    // The read compares the entity tag of the snapshot with the precondition of the snapshot, not with that of the decision.
+    expect(await client.reconcileCommand(sent.uncertain, () => true, read)).toEqual({ kind: "uncertain", uncertain: sent.uncertain });
+    tags["/v1/runs/r1/snapshot"] = '"snap-2"';
+    expect(await client.reconcileCommand(sent.uncertain, () => false, read)).toEqual({ kind: "uncertain", uncertain: sent.uncertain });
+    expect(await client.reconcileCommand(sent.uncertain, () => true, { reference: snapshot.value, precondition: '"snap-2"' }))
+      .toEqual({ kind: "uncertain", uncertain: sent.uncertain });
+    expect(await client.reconcileCommand(sent.uncertain, () => true, read)).toEqual({ kind: "effect-observed" });
+    expect(seen.filter((entry) => entry.method === "GET" && entry.url === "/v1/decisions/d1")).toHaveLength(1);
+    expect(seen.filter((entry) => entry.method === "GET" && entry.url === "/v1/runs/r1/snapshot")).toHaveLength(4);
+    expect(seen.filter((entry) => entry.method === "POST")).toHaveLength(1);
+    await client.close();
+  });
+
   it("captures exact raw bytes with application/octet-stream and decodes the capture receipt", async () => {
     const bytes = Buffer.from("  Café λ captured\r\nline two\n", "utf8");
     const digest = createHash("sha256").update(bytes).digest("hex");

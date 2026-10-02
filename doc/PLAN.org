@@ -11194,6 +11194,28 @@ Non-blocking findings of fess audit fess/pd-PD1-r1.md (2026-10-01) on subtask PD
 2. Low. ext-pi/src/service-mode.ts:282-286: no test runs the branch that closes the session and reports 'failed' when the earlier follow loop ended during a switch. Fix: add a unit case where the earlier transport ends its event stream (refused) while the new overview read is held, and assert kind 'failed', a closed session and no follow loop.
 3. Low. ext-pi/src/manager/session.ts:662-664: the new #fetch generation guard has no test. The assertion that the new transport does not receive run_a1 (ext-pi/test/service-mode.test.ts:268) passes without the guard, because no fetch is queued when the switch commits. Fix: add a case that queues a watched-resource fetch of the earlier binding behind a held read, commits a switch, releases the read, and asserts that the new transport never receives the earlier resource.
 
+* TODO [#D] Resolve the non-blocking fess findings of subtask PD2
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pd2-fess-followup-mrk9
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-01 Thu 21:35]
+:MODIFIED: [2026-10-01 Thu 21:35]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess audit fess/pd-PD2-r1.md (2026-10-01) on subtask PD2 (ext-pi reconciliation of an uncertain answer or recovery choice from the run snapshot with a control-view fallback, item 2 of acat-phase-e-review-findings-0l73 and item 1 of acat-pe18-fess-followup-3ykw).
+
+1. (medium) ext-pi/src/manager-ui.ts near 506-513 (answerObserved) and the snapshotOf fixture of test/service-mode.test.ts: the primary snapshot rule is proven only against hand-written fixtures. The live pi-client mode does not exercise an uncertain answer, so no run against the real manager confirms the occurrence shape after an answer (state completed, personPending false, answer text). Fix: add a live assertion that compares a real answered occurrence with storedAnswerText.
+2. (medium) test/service-mode.test.ts, rewritten flag-answer test and uncertainSend helper: the rewrite dropped the editor-title assertion 'Answer of decision decision_a1 (flag: yes, no, true or false): Proceed?'. Only the live-gated manager-ui-live.test.ts checks it now. Fix: restore the assertion in the flag-answer case.
+3. (low) ext-pi/src/manager/session.ts near 72-87: the ReconcileTarget JSDoc sits between the JSDoc of type Observed and its declaration, so Observed has no attached doc comment. Fix: move the ReconcileTarget comment and type below the Observed declaration.
+4. (low) ext-pi/src/manager-ui.ts near 2508-2509: the comment 'The head decision of a run with the reads that its commands bind.' is orphaned above the Reconciliation JSDoc, and type Head has no doc. Fix: move that comment back above type Head.
+5. (low) ext-pi/README.md, added uncertainty and test paragraphs: three lines run past the fill width of the file. Fix: refill the affected paragraphs.
+
 * TODO [#D] Resolve the non-blocking fess findings of subtask PE10
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -11389,7 +11411,7 @@ Deferred under the 2026-09-30 functionality-first direction (not in scope of thi
 :LABELS:   ["workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-10-01 Thu 16:33]
-:MODIFIED: [2026-10-01 Thu 16:33]
+:MODIFIED: [2026-10-01 Thu 21:36]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -11420,6 +11442,20 @@ after close (ManagerSession has no unwatch), fail-over is covered only by a unit
 /wfm-monitor path has no test, and a failed result retrieval is never tried again when the
 snapshot entity tag is null. Fix: add an unwatch to ManagerSession, a live fail-over step, a test of
 the non-TUI monitor, and a retry of a failed retrieval when a new snapshot read is installed.
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 587,
+    "issue_id": "acat-pe18-fess-followup-3ykw",
+    "author": "johnw",
+    "text": "Subtask PD2 (2026-10-01) fixes item 1. An uncertain answer reconciles from the run snapshot (/v1/runs/{id}/snapshot, its own ETag as precondition) when storedAnswerText names the stored answer exactly: the occurrence must be completed, no longer waiting on that decision, and store the sent text. Otherwise it falls back to the control view: cancelAllowed true and decisionHeadId names a later decision. Choose-recovery reconciles through the control view, and a terminal run that still names the recovery decision stays uncertain. Nothing is resent. The fixture in test/service-mode.test.ts now serves 404 for a non-pending decision, and ext-pi/README.md states the rule. Evidence: npm run check, npm test (219 passed, 24 skipped, rerun by fess), BUILD of agentic-run and routing-fixed-point-probe, and the pi-client mode (19 PASS lines) passed. Fess not blocking, findings filed as acat-pd2-fess-followup-mrk9. Items 2 to 4 stay open.",
+    "created_at": "2026-10-02T04:36:02Z"
+  }
+]
+#+end_src
 
 * TODO [#D] Resolve PE2 fess findings in the run owner lock
 :PROPERTIES:
@@ -12241,7 +12277,7 @@ Deferred security stage for Phase E, Pi service mode (WM-036 to WM-038), under t
 :LABELS:   ["review","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-10-01 Thu 20:45]
-:MODIFIED: [2026-10-01 Thu 21:18]
+:MODIFIED: [2026-10-01 Thu 21:36]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -12274,6 +12310,13 @@ Findings of the Phase E end-of-phase review (two lenses, range 33f84fe4..841ce0c
     "author": "johnw",
     "text": "Subtask PD1 (2026-10-01) fixes item 1 and item 7 in ext-pi/src/manager/session.ts and ext-pi/src/service-mode.ts. switchEndpoint commits a new binding only after its complete overview loads through the new transport, stamped with the new endpoint identity. On failure it closes the new transport and keeps the earlier binding, its watched resources and its follow loop, and ServiceMode.select reports 'kept'. No path reports 'connected' while followEnd is set. #fetch drops a fetch of an earlier generation without sending it. Evidence: npm run check, the three targeted vitest suites and npm test passed (integration suites skipped without AGENT_CAT_E2E_RUNNER). The new unit case failed before the fix. Fess not blocking, findings filed as acat-pd1-fess-followup-5511. Items 2 to 6 and 8 to 13 stay open.",
     "created_at": "2026-10-02T04:18:16Z"
+  },
+  {
+    "id": 588,
+    "issue_id": "acat-phase-e-review-findings-0l73",
+    "author": "johnw",
+    "text": "Subtask PD2 (2026-10-01) fixes item 2 in ext-pi/src/manager-ui.ts, ext-pi/src/manager/session.ts and ext-pi/src/manager/resources.ts. An uncertain answer reconciles from the run snapshot occurrence, with a control-view fallback when the snapshot cannot name the stored answer. Choose-recovery reconciles through the control view. reconcileCommand takes an optional reconciliation read and refresh.ts is unchanged. Nothing is resent. Evidence: npm run check, npm test, BUILD and the pi-client mode passed. Fess not blocking, findings filed as acat-pd2-fess-followup-mrk9. Items 3 to 6 and 8 to 13 stay open.",
+    "created_at": "2026-10-02T04:36:02Z"
   }
 ]
 #+end_src

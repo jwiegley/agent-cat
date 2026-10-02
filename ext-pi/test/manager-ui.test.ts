@@ -5,6 +5,8 @@ import { visibleWidth } from "@earendil-works/pi-tui";
 import { describe, expect, it, vi } from "vitest";
 import {
   acknowledgementLine,
+  answerObserved,
+  controlPassed,
   exportLines,
   forkTargets,
   saveExact,
@@ -32,6 +34,7 @@ import {
   decodeLineageCollection,
   forkReplacementValue,
   lineageBody,
+  storedAnswerText,
   type CommandReceipt,
   type ControlView,
   type DecisionView,
@@ -148,6 +151,55 @@ function stateOf(fields: Partial<MonitorState>): MonitorState {
     result: { kind: "none" }, ...fields,
   };
 }
+
+describe("reconciliation of an answer or a recovery choice", () => {
+  const question = (code: unknown, semanticSchema: unknown = null) => decisionOf({ kind: "question", question: { ...QUESTION.question, code, semanticSchema } });
+
+  it("names the answer text that the runtime stores only when that text names the sent value exactly", () => {
+    expect(storedAnswerText(question("flag"), false)).toBe("no");
+    expect(storedAnswerText(question("flag"), true)).toBe("yes");
+    expect(storedAnswerText(question("receipt"), null)).toBe("done");
+    expect(storedAnswerText(question("text"), "Café λ")).toBe("Café λ");
+    expect(storedAnswerText(question("text"), "λ".repeat(500))).toBe("λ".repeat(500));
+    expect(storedAnswerText(question("verdict"), { tag: "approve" })).toBe("approve");
+    expect(storedAnswerText(question("verdict"), { tag: "declined" })).toBe("declined");
+    expect(storedAnswerText(question("verdict"), { tag: "object", objections: ["too long", "no tests"] })).toBe("too long; no tests");
+    // The runtime changes or cuts these texts, or another answer stores the same text.
+    for (const [code, value] of [
+      ["text", "two\nlines"], ["text", " padded"], ["text", "tab\t"], ["text", "λ".repeat(501)], ["flag", "no"], ["receipt", ""],
+      ["verdict", { tag: "object", objections: ["a; b"] }], ["verdict", { tag: "object", objections: ["approve"] }],
+      ["verdict", { tag: "object", objections: [] }], ["verdict", { tag: "approve", objections: [] }],
+    ] as const) expect(storedAnswerText(question(code), value as never), `${code} ${JSON.stringify(value)}`).toBeUndefined();
+    expect(storedAnswerText(question({ json: { schema: "boolean" } }, "boolean"), true)).toBeUndefined();
+    expect(storedAnswerText(decisionOf(RECOVERY), null)).toBeUndefined();
+  });
+
+  it("sees an answer in the snapshot only when the occurrence stopped waiting and stores exactly the sent answer", () => {
+    const decision = decisionOf(QUESTION);
+    const snapshot = (occurrence: Record<string, unknown>) => parseJson(JSON.stringify({
+      items: [{ occurrenceId: "1", state: "completed", answer: "no", decisionId: "decision_9", personPending: false },
+        { occurrenceId: "0", state: "running", answer: null, decisionId: "decision_3", personPending: true, ...occurrence }],
+    }));
+    expect(answerObserved(snapshot({ state: "completed", answer: "no", personPending: false }), decision, "no")).toBe(true);
+    expect(answerObserved(snapshot({ state: "completed", answer: "yes", personPending: false }), decision, "no")).toBe(false);
+    expect(answerObserved(snapshot({ answer: "no" }), decision, "no")).toBe(false);
+    expect(answerObserved(snapshot({ state: "failed", answer: "no", personPending: false }), decision, "no")).toBe(false);
+    expect(answerObserved(parseJson('{"items":[]}'), decision, "no")).toBe(false);
+  });
+
+  it("sees an answer in the controls only for a running run with a later head, and a recovery choice for any other head", () => {
+    const decision = decisionOf(QUESTION);
+    const controls = (fields: Record<string, unknown>) => controlOf([], fields).value;
+    expect(controlPassed(controls({ decisionHeadId: "decision_4" }), decision, "answer")).toBe(true);
+    expect(controlPassed(controls({}), decision, "answer")).toBe(false);
+    expect(controlPassed(controls({ decisionHeadId: null }), decision, "answer")).toBe(false);
+    expect(controlPassed(controls({ decisionHeadId: "decision_4", cancelAllowed: false }), decision, "answer")).toBe(false);
+    expect(controlPassed(controls({ decisionHeadId: null, cancelAllowed: false }), decision, "recovery")).toBe(true);
+    expect(controlPassed(controls({ decisionHeadId: "decision_4" }), decision, "recovery")).toBe(true);
+    expect(controlPassed(controls({ cancelAllowed: false }), decision, "recovery")).toBe(false);
+    expect(controlPassed(parseJson('{"version":1}'), decision, "recovery")).toBe(false);
+  });
+});
 
 describe("manager decisions and the live monitor", () => {
   it("offers only the recovery choices that the manager offers for the head decision", () => {

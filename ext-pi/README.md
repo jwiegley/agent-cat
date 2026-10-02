@@ -507,7 +507,12 @@ endpoint of a loaded profile:
   Every other failure, and a 2xx response that does not agree with the
   command, is `uncertain` and keeps the command unchanged.
   `reconcileCommand` makes the one read of `reconcileRead` and gives the
-  report of `reconcile`. The session never sends a command again by itself.
+  report of `reconcile`. Its optional `read` names another resource with
+  the entity tag of that resource from before the send. Without a receipt
+  location, that resource replaces the target and its entity tag replaces
+  the precondition, so `reconcile` compares two entity tags of one
+  resource. An `uncertain` report keeps the command unchanged. The session
+  never sends a command again by itself.
 - `prepareCapture` gives the `PendingCommand` of a capture of exact raw
   bytes for a request, as `prepareCapture` of `Agentic.Manager.Client`
   does: a POST of `/v1/captures?requestId=ID` with a new idempotency key
@@ -539,7 +544,8 @@ nothing from that stream, the polling fallback, a 410 refusal, `close` during an
 stream with a late response, and the profile refusals before any request.
 For the session it covers the refusal of unsupported capabilities,
 `WrongEndpoint` for a reference after `switchEndpoint`, an uncertain command
-whose reconciliation sends nothing, a capture of exact bytes with
+whose reconciliation sends nothing, the reconciliation of an uncertain
+command through another resource with the entity tag of that resource, a capture of exact bytes with
 `application/octet-stream` and its decoded receipt, a capture response
 without a capture receipt, which is uncertain, and the refusal of bytes that
 are not UTF-8 before any request, a download whose digest or size differs,
@@ -842,11 +848,27 @@ outcome: `accepted` with the receipt identifier and the receipt state,
 `refused` with the status and code, or `uncertain`. An uncertain send is
 reconciled with one read through `ManagerSession.reconcileCommand`, under the
 rules of `reconcile` in `src/manager/refresh.ts`. Without a receipt location,
-the read of the target observes the effect only when the command sees its
-effect there and the entity tag differs from the precondition. An answer or
-a recovery choice sees its effect when the decision is no longer pending, and
-a retry sees its effect when the controls name another head. The other
-commands see no effect in their target, so they stay uncertain. A reconciled
+the read observes the effect only when the command sees its effect there and
+the entity tag differs from the entity tag of the same resource before the
+send. The read is the target of the command, except for an answer and a
+recovery choice. The manager serves only pending decisions, so an answered
+decision reads as 404 and cannot show the effect. An answer is reconciled
+from the run snapshot when `storedAnswerText` names the text that the
+runtime stores for the sent value: a flag, a receipt, a one-line text of at
+most 500 code points, or a verdict whose text names it exactly. `/wfm-answer`
+then reads the snapshot once before the send for its entity tag, and the
+effect is visible only when the occurrence completed, no longer waits on
+the decision, and stores exactly that text. An occurrence that stores
+another answer, for example the answer of another client, stays uncertain.
+Every other answer, and an answer whose snapshot read before the send
+fails, is reconciled from the controls of the run: the effect is visible
+only when the controls allow a cancel, which states a running run, and name
+a head other than the answered decision. A terminal run, a run without a
+head and an unchanged head stay uncertain. A recovery choice and a retry
+are reconciled from the controls: the effect is visible when the head no
+longer names the decision, so a terminal run that still names the recovery
+decision stays uncertain. The other commands see no effect in their target,
+so they stay uncertain. A reconciled
 effect gives an `accepted` notification that names the read. The command is
 never sent again, also when it stays uncertain. For each command except
 `approve`, the command waits until its receipt settles, and the notification
@@ -976,7 +998,10 @@ controls, the lines of a running and a terminal run, the stale and refused
 observation lines, and that the monitor component keeps the Terminal and
 Result lines in view at 12 rows. It also checks that cancel, steer and
 redirect are offered only from owned controls that offer them, the place of
-a redirect offer in a snapshot, and when a control receipt settles.
+a redirect offer in a snapshot, and when a control receipt settles. It
+checks the text that `storedAnswerText` names for each answer code and the
+values for which it names none, and the rules of `answerObserved` and
+`controlPassed` for the snapshot and the controls.
 `test/manager-ui-live.test.ts` runs only when `AGENT_CAT_MANAGER_PROFILE`
 names a client profile. It drives the extension with a fake Pi host, a fake
 UI and a transport that records each POST, against a running manager with the
@@ -1037,9 +1062,18 @@ acknowledgement of a dispatch-window redirect is reported verbatim, that
 `/wfm-cancel` reports the accepting acknowledgement and then the cancelled
 run, and that no control is sent when the controls offer none or the manager
 does not own them. It also requires that `/wfm-answer` sends the flag input
-`No` as JSON `false` with the decision entity tag, and that an uncertain send
-is reconciled with one read of the decision and never sent again, both while
-the decision stays pending and after it changed. The last step of `test/manager-live.test.ts` starts a
+`No` as JSON `false` with the decision entity tag, and that an uncertain
+answer or recovery choice is never sent again. The decision of these cases
+reads as 404 after the send, as the manager serves it. An uncertain flag
+answer is accepted from a snapshot whose occurrence stores the sent answer,
+and it stays uncertain for the answer of another client, an occurrence that
+still waits, a failed or cancelled run, an unchanged snapshot entity tag
+and a failed read. A two-line text answer is reconciled from the controls:
+it is accepted when the running run names a later head, and it stays
+uncertain for an unchanged head, an unchanged entity tag, a run without a
+head and a terminal run. An uncertain recovery choice is accepted when the
+controls name no head or a later head, and it stays uncertain when a
+failed run still names the recovery decision. The last step of `test/manager-live.test.ts` starts a
 second run, closes the extension and the session during their live
 streams, and the `pi-client` mode of `manager/test/service_http.py` then
 confirms over HTTP that the run is still running under owned supervision.
