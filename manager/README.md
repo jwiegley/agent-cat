@@ -416,6 +416,11 @@ history of retained manager roots with the Lean manager oracle. The
 [manager conformance lanes](../bisim/manager/README.md#the-haskell-lanes)
 describe its `admission`, `cases`, `history` and `refusals` lanes, and
 `bisim/ci/manager.sh` runs them as the steps of the manager conformance gate.
+The [capacity ceilings](CAPACITY.md) state the WM-041 workloads and their
+accepted memory, latency, growth and refusal ceilings on the tested macOS
+machine. `manager/test/capacity_summary.py` compares that document with
+`manager/test/capacity-ceilings.json` and compares measurements with the
+ceilings.
 The [approval owner](APPROVAL.md) supplies complete review, exact approval and actual
 accepted-running retention through the original Worker. Its owning gate adds final
 worker/deadline checks and interruption evidence without a new service endpoint.

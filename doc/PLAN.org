@@ -12714,6 +12714,31 @@ Non-blocking findings of fess pf-PF15-r1 (fess/pf-PF15-r1.md) on subtask PF15 (t
 5. (low) bisim/ci/manager.sh lines 145, 151, 186, 193: the counterexample directory is created inside a command substitution in an argument, so a mktemp failure does not trip set -e and the lane receives an empty --counterexamples path. Fix: assign the directory to a local variable first.
 6. (low) bisim/ci/manager.sh lines 257-320: when setup fails, setup_failed exits before require_tree runs and before the cloned Lake packages are removed, so the README sentence on package removal holds on the normal path only. Fix: use an EXIT trap that runs the cleanup and the tree check on every path.
 
+* TODO [#D] Resolve the non-blocking fess findings of subtask PF16
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pf16-fess-followup-7p0l
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-02 Fri 16:58]
+:MODIFIED: [2026-10-02 Fri 16:58]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess pf-PF16-r1 (fess/pf-PF16-r1.md) on subtask PF16 (the WM-041 workloads and ceilings in manager/CAPACITY.md, manager/test/capacity-ceilings.json and manager/test/capacity_summary.py).
+
+1. (medium) manager/CAPACITY.md lines 241 and 246: captures.oversize-refusal-ms and captures.upload-max-ms cite "the upload floor of 1118481 bytes per second". The manager has no such floor, and the Allowances section does not state it. Fix: state a 60-second-per-capture upload allowance under "Allowances and headroom" and cite it as the basis, not as a property of the manager.
+2. (low) manager/CAPACITY.md lines 374-388: the requirement asks for the WAL size before and after a checkpoint, but the document measures it after the ordinary close (growth.wal-bytes-after-close equals 0), which assumes SQLite deletes the WAL on the last close. Fix: record the reinterpretation as a limitation, or measure around an explicit checkpoint.
+3. (low) manager/CAPACITY.md lines 433-444: the disk workload sets RLIMIT_FSIZE to S + 1 MiB with S the largest file, and 100 commands may not grow any file past it, so the disk.* keys can stay MISSING. Fix: in PF19 first show that a write crosses the limit, or set the limit from the size of the file that grows.
+4. (low) manager/CAPACITY.md line 273: the basis of readers.manager-rss-peak-bytes includes one capture of 67108864 bytes, but the readers workload holds no capture. Fix: explain the term as headroom or remove it, and change the JSON in the same edit.
+5. (low) manager/CAPACITY.md lines 252-255: the text describes an ACP fixture adapter that answers with one 1000000-byte agent_message_chunk as if it exists. No adapter in engine/acp/test does this. Fix: PF18 adds the adapter, or the text says it is added for this workload.
+6. (low) manager/CAPACITY.md lines 332 and 528: events per second has no ceiling and reports only UNCHECKED, and the captures, readers, disk and failures workloads give single timings without a p50/p95 pair, without a stated reason. Fix: add an events-per-second floor or state why there is none, and state that workloads with one or two samples report single timings.
+7. (low) manager/CAPACITY.md lines 392-398: the document names storage "case 1" and "case 2", but the harness PASS lines number the same steps 1-2 and 5-6 (manager/test/service_http.py lines 16087, 16095, 16153, 16161). Fix: name the PASS line numbers.
+8. (low) manager/CAPACITY.md line 186 is longer than 80 columns. Fix: rewrap the paragraph.
+
 * TODO [#D] Resolve the non-blocking fess findings of subtask PF2
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -23619,7 +23644,7 @@ legacy workflow build cannot conceal an unchecked manager development.
 :LABELS:   ["p9","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-02 Fri 13:16]
+:MODIFIED: [2026-10-02 Fri 16:58]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-041
 :SOURCE_REPO: agent-cat
@@ -23754,6 +23779,13 @@ workloads rather than extrapolating unmeasured capacity.
     "author": "johnw",
     "text": "Evidence scope: Phase F part 1 closeout (handoff section 'Phase F part 1 of 2026-10-02', remaining-scope report revision 2; evidence under resume-20260923/PF and Z/CLOSEOUT-pf). Not started (PF16 to PF20 did not run). Security items deferred per 2026-09-30.",
     "created_at": "2026-10-02T20:16:20Z"
+  },
+  {
+    "id": 671,
+    "issue_id": "acat-wm-041-17ax",
+    "author": "johnw",
+    "text": "PF16 (2026-10-02): the WM-041 workloads and accepted ceilings are published before any measurement. manager/CAPACITY.md states each workload with exact parameters, the tested platform (macOS 27.0 arm64, M3 Ultra, GHC 9.10.3, manager at -N8) and the deterministic workers (routing-fixed-point-probe --scripted and the ACP fixture adapters), and says the ceilings were set from advertised bounds and stated allowances before measurement. manager/test/capacity-ceilings.json holds the same 129 ceilings under stable keys, and manager/test/capacity_summary.py compares the document with the JSON (ceilings) and measurements with the ceilings (summary). Evidence (private, PF/PF16/impl-r1): py_compile exit 0, ceilings exit 0 with 129 keys in agreement, summary on an empty measurement file exit 1 with 129 MISSING lines, make -C doc check exit 0. No manager, harness mode, build or binary ran in this subtask. Fess pf-PF16-r1 is not blocking; its findings are filed as acat-pf16-fess-followup-7p0l. The package stays open: PF17 to PF20 measure against these ceilings.",
+    "created_at": "2026-10-02T23:58:31Z"
   }
 ]
 #+end_src

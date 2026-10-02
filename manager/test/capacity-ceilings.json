@@ -1,0 +1,543 @@
+{
+  "version": 1,
+  "document": "manager/CAPACITY.md",
+  "platform": {
+    "os": "macOS 27.0 (26A428)",
+    "architecture": "arm64",
+    "processor": "Apple M3 Ultra",
+    "logicalProcessors": 32,
+    "memoryBytes": 549755813888,
+    "compiler": "GHC 9.10.3",
+    "managerRts": "-N8",
+    "workers": [
+      "routing-fixed-point-probe --scripted",
+      "ACP fixture adapters of engine/acp/test"
+    ]
+  },
+  "allowances": {
+    "baseResidentBytes": 268435456,
+    "workerHeldBytes": 2097152,
+    "residentFactor": 2
+  },
+  "ceilings": {
+    "reservations.r1.peak-concurrent-runs": {
+      "unit": "count",
+      "equals": 1
+    },
+    "reservations.r1.fifo-order": {
+      "unit": "flag",
+      "equals": true
+    },
+    "reservations.r1.approve-p50-ms": {
+      "unit": "ms",
+      "max": 1000
+    },
+    "reservations.r1.approve-p95-ms": {
+      "unit": "ms",
+      "max": 5000
+    },
+    "reservations.r1.answer-p50-ms": {
+      "unit": "ms",
+      "max": 1000
+    },
+    "reservations.r1.answer-p95-ms": {
+      "unit": "ms",
+      "max": 5000
+    },
+    "reservations.r1.release-to-review-p50-ms": {
+      "unit": "ms",
+      "max": 1000
+    },
+    "reservations.r1.release-to-review-p95-ms": {
+      "unit": "ms",
+      "max": 5000
+    },
+    "reservations.r1.manager-rss-peak-bytes": {
+      "unit": "bytes",
+      "max": 272629760
+    },
+    "reservations.r16.peak-concurrent-runs": {
+      "unit": "count",
+      "equals": 16
+    },
+    "reservations.r16.fifo-order": {
+      "unit": "flag",
+      "equals": true
+    },
+    "reservations.r16.queued-capacity-reason": {
+      "unit": "flag",
+      "equals": true
+    },
+    "reservations.r16.approve-p50-ms": {
+      "unit": "ms",
+      "max": 1000
+    },
+    "reservations.r16.approve-p95-ms": {
+      "unit": "ms",
+      "max": 5000
+    },
+    "reservations.r16.answer-p50-ms": {
+      "unit": "ms",
+      "max": 1000
+    },
+    "reservations.r16.answer-p95-ms": {
+      "unit": "ms",
+      "max": 5000
+    },
+    "reservations.r16.release-to-review-p50-ms": {
+      "unit": "ms",
+      "max": 1000
+    },
+    "reservations.r16.release-to-review-p95-ms": {
+      "unit": "ms",
+      "max": 5000
+    },
+    "reservations.r16.manager-rss-peak-bytes": {
+      "unit": "bytes",
+      "max": 335544320
+    },
+    "queue.accepted-queued": {
+      "unit": "count",
+      "equals": 100
+    },
+    "queue.refusal-status": {
+      "unit": "status",
+      "equals": 409
+    },
+    "queue.refusal-code": {
+      "unit": "code",
+      "equals": "state-conflict"
+    },
+    "queue.refusal-ms": {
+      "unit": "ms",
+      "max": 5000
+    },
+    "queue.mutations-per-credential-minute": {
+      "unit": "count",
+      "max": 27
+    },
+    "queue.enqueue-p50-ms": {
+      "unit": "ms",
+      "max": 1000
+    },
+    "queue.enqueue-p95-ms": {
+      "unit": "ms",
+      "max": 5000
+    },
+    "queue.requests-first-page-p50-ms": {
+      "unit": "ms",
+      "max": 500
+    },
+    "queue.requests-first-page-p95-ms": {
+      "unit": "ms",
+      "max": 5000
+    },
+    "queue.manager-rss-peak-bytes": {
+      "unit": "bytes",
+      "max": 272629760
+    },
+    "safety.rate-refusal-status": {
+      "unit": "status",
+      "equals": 429
+    },
+    "safety.rate-refusal-code": {
+      "unit": "code",
+      "equals": "rate-limit"
+    },
+    "safety.rate-refusal-ms": {
+      "unit": "ms",
+      "max": 5000
+    },
+    "safety.cancel-accepted": {
+      "unit": "flag",
+      "equals": true
+    },
+    "safety.cancel-ms": {
+      "unit": "ms",
+      "max": 5000
+    },
+    "safety.cancel-to-cancelled-ms": {
+      "unit": "ms",
+      "max": 10000
+    },
+    "safety.manager-rss-peak-bytes": {
+      "unit": "bytes",
+      "max": 272629760
+    },
+    "drafts.client-accepted": {
+      "unit": "count",
+      "equals": 4
+    },
+    "drafts.client-refusal-status": {
+      "unit": "status",
+      "equals": 429
+    },
+    "drafts.client-refusal-code": {
+      "unit": "code",
+      "equals": "storage-quota"
+    },
+    "drafts.client-refusal-ms": {
+      "unit": "ms",
+      "max": 5000
+    },
+    "drafts.global-accepted": {
+      "unit": "count",
+      "equals": 10
+    },
+    "drafts.global-refusal-status": {
+      "unit": "status",
+      "equals": 429
+    },
+    "drafts.global-refusal-code": {
+      "unit": "code",
+      "equals": "storage-quota"
+    },
+    "drafts.global-refusal-ms": {
+      "unit": "ms",
+      "max": 5000
+    },
+    "drafts.create-p50-ms": {
+      "unit": "ms",
+      "max": 1000
+    },
+    "drafts.create-p95-ms": {
+      "unit": "ms",
+      "max": 5000
+    },
+    "drafts.manager-rss-peak-bytes": {
+      "unit": "bytes",
+      "max": 268435456
+    },
+    "captures.max-accepted": {
+      "unit": "flag",
+      "equals": true
+    },
+    "captures.oversize-refusal-status": {
+      "unit": "status",
+      "equals": 413
+    },
+    "captures.oversize-refusal-code": {
+      "unit": "code",
+      "equals": "size-limit"
+    },
+    "captures.oversize-refusal-ms": {
+      "unit": "ms",
+      "max": 60000
+    },
+    "captures.aggregate-accepted-bytes": {
+      "unit": "bytes",
+      "equals": 134217728
+    },
+    "captures.aggregate-refusal-status": {
+      "unit": "status",
+      "equals": 429
+    },
+    "captures.aggregate-refusal-code": {
+      "unit": "code",
+      "equals": "storage-quota"
+    },
+    "captures.aggregate-refusal-ms": {
+      "unit": "ms",
+      "max": 5000
+    },
+    "captures.upload-max-ms": {
+      "unit": "ms",
+      "max": 60000
+    },
+    "captures.root-growth-overhead-bytes": {
+      "unit": "bytes",
+      "max": 1048576
+    },
+    "captures.manager-rss-peak-bytes": {
+      "unit": "bytes",
+      "max": 402653184
+    },
+    "readers.holders-accepted": {
+      "unit": "count",
+      "equals": 2
+    },
+    "readers.holders-verified": {
+      "unit": "flag",
+      "equals": true
+    },
+    "readers.third-refusal-status": {
+      "unit": "status",
+      "equals": 429
+    },
+    "readers.third-refusal-code": {
+      "unit": "code",
+      "equals": "storage-quota"
+    },
+    "readers.third-wait-ms": {
+      "unit": "ms",
+      "range": [
+        5000,
+        6000
+      ]
+    },
+    "readers.manager-rss-peak-bytes": {
+      "unit": "bytes",
+      "max": 671088640
+    },
+    "pages.held-sets": {
+      "unit": "count",
+      "equals": 8
+    },
+    "pages.client-refusal-status": {
+      "unit": "status",
+      "equals": 429
+    },
+    "pages.client-refusal-code": {
+      "unit": "code",
+      "equals": "storage-quota"
+    },
+    "pages.client-refusal-ms": {
+      "unit": "ms",
+      "max": 5000
+    },
+    "pages.global-refusal-status": {
+      "unit": "status",
+      "equals": 429
+    },
+    "pages.global-refusal-code": {
+      "unit": "code",
+      "equals": "storage-quota"
+    },
+    "pages.global-refusal-ms": {
+      "unit": "ms",
+      "max": 5000
+    },
+    "pages.continuation-before-expiry-status": {
+      "unit": "status",
+      "equals": 200
+    },
+    "pages.expired-continuation-status": {
+      "unit": "status",
+      "equals": 410
+    },
+    "pages.expired-continuation-code": {
+      "unit": "code",
+      "equals": "view-expired"
+    },
+    "pages.first-page-after-expiry-status": {
+      "unit": "status",
+      "equals": 200
+    },
+    "pages.set-bytes-max": {
+      "unit": "bytes",
+      "max": 67108864
+    },
+    "pages.first-page-p50-ms": {
+      "unit": "ms",
+      "max": 500
+    },
+    "pages.first-page-p95-ms": {
+      "unit": "ms",
+      "max": 5000
+    },
+    "pages.manager-rss-peak-bytes": {
+      "unit": "bytes",
+      "max": 1342177280
+    },
+    "events.reader-complete": {
+      "unit": "flag",
+      "equals": true
+    },
+    "events.catch-up-p50-ms": {
+      "unit": "ms",
+      "max": 1000
+    },
+    "events.catch-up-p95-ms": {
+      "unit": "ms",
+      "max": 5000
+    },
+    "events.manager-rss-peak-bytes": {
+      "unit": "bytes",
+      "max": 348127232
+    },
+    "slow.pending-bytes-max": {
+      "unit": "bytes",
+      "max": 1048576
+    },
+    "slow.no-loss": {
+      "unit": "flag",
+      "equals": true
+    },
+    "slow.independent-run-succeeded": {
+      "unit": "flag",
+      "equals": true
+    },
+    "slow.independent-answer-ms": {
+      "unit": "ms",
+      "max": 5000
+    },
+    "slow.manager-rss-peak-bytes": {
+      "unit": "bytes",
+      "max": 348127232
+    },
+    "growth.run-log-bytes-per-run": {
+      "unit": "bytes",
+      "max": 1048576
+    },
+    "growth.manager-log-bytes-per-command": {
+      "unit": "bytes",
+      "max": 131072
+    },
+    "growth.ledger-bytes-per-command": {
+      "unit": "bytes",
+      "equals": 131072
+    },
+    "growth.wal-bytes-per-command": {
+      "unit": "bytes",
+      "max": 524288
+    },
+    "growth.wal-bytes-after-close": {
+      "unit": "bytes",
+      "equals": 0
+    },
+    "storage.ledger-refusal-status": {
+      "unit": "status",
+      "equals": 429
+    },
+    "storage.ledger-refusal-code": {
+      "unit": "code",
+      "equals": "storage-quota"
+    },
+    "storage.ledger-refusal-ms": {
+      "unit": "ms",
+      "max": 5000
+    },
+    "storage.ledger-cancel-accepted": {
+      "unit": "flag",
+      "equals": true
+    },
+    "storage.append-refusal-status": {
+      "unit": "status",
+      "equals": 503
+    },
+    "storage.append-refusal-code": {
+      "unit": "code",
+      "equals": "storage-unavailable"
+    },
+    "storage.append-refusal-ms": {
+      "unit": "ms",
+      "max": 5000
+    },
+    "storage.append-cancel-accepted": {
+      "unit": "flag",
+      "equals": true
+    },
+    "storage.manager-rss-peak-bytes": {
+      "unit": "bytes",
+      "max": 272629760
+    },
+    "routes.seal-resume": {
+      "unit": "flag",
+      "equals": true
+    },
+    "routes.prune-floor": {
+      "unit": "flag",
+      "equals": true
+    },
+    "routes.below-floor-status": {
+      "unit": "status",
+      "equals": 410
+    },
+    "routes.below-floor-code": {
+      "unit": "code",
+      "equals": "cursor-expired"
+    },
+    "routes.batch-p50-ms": {
+      "unit": "ms",
+      "max": 500
+    },
+    "routes.batch-p95-ms": {
+      "unit": "ms",
+      "max": 5000
+    },
+    "routes.manager-rss-peak-bytes": {
+      "unit": "bytes",
+      "max": 272629760
+    },
+    "disk.refusal-status": {
+      "unit": "status",
+      "equals": 503
+    },
+    "disk.refusal-code": {
+      "unit": "code",
+      "equals": "storage-unavailable"
+    },
+    "disk.refusal-ms": {
+      "unit": "ms",
+      "max": 5000
+    },
+    "disk.no-receipt": {
+      "unit": "flag",
+      "equals": true
+    },
+    "disk.reopen-verified": {
+      "unit": "flag",
+      "equals": true
+    },
+    "disk.manager-rss-peak-bytes": {
+      "unit": "bytes",
+      "max": 272629760
+    },
+    "failures.worker.passed": {
+      "unit": "flag",
+      "equals": true
+    },
+    "failures.worker.lost-ms": {
+      "unit": "ms",
+      "max": 10000
+    },
+    "failures.worker.manager-rss-peak-bytes": {
+      "unit": "bytes",
+      "max": 272629760
+    },
+    "failures.manager.passed": {
+      "unit": "flag",
+      "equals": true
+    },
+    "failures.manager.restart-ready-ms": {
+      "unit": "ms",
+      "max": 30000
+    },
+    "failures.manager.manager-rss-peak-bytes": {
+      "unit": "bytes",
+      "max": 272629760
+    },
+    "failures.launched.passed": {
+      "unit": "flag",
+      "equals": true
+    },
+    "failures.launched.release-to-review-ms": {
+      "unit": "ms",
+      "max": 5000
+    },
+    "failures.launched.manager-rss-peak-bytes": {
+      "unit": "bytes",
+      "max": 272629760
+    },
+    "failures.tui.passed": {
+      "unit": "flag",
+      "equals": true
+    },
+    "failures.tui.unreachable-ms": {
+      "unit": "ms",
+      "max": 50000
+    },
+    "failures.tui.reconnect-ms": {
+      "unit": "ms",
+      "max": 35000
+    },
+    "failures.tui.manager-rss-peak-bytes": {
+      "unit": "bytes",
+      "max": 272629760
+    },
+    "failures.backup.passed": {
+      "unit": "flag",
+      "equals": true
+    }
+  }
+}
