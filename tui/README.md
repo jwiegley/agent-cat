@@ -948,5 +948,29 @@ fails when it takes more than 900 seconds. The control mode
 confirmation, so the TUI sends no cancel, and the mode must fail with
 `JOURNEY-ASSERT cancel accepted before cancelled`.
 
+The TUI also takes part in the three modes of the cross-client witness of
+`manager/test/service_http.py`, in which the TUI, Pi and Emacs act on one
+manager, each with its own credential and client identifier. Each TUI
+session runs at 80x24 and ends with `q` and the restored terminal, or with
+`Ctrl-C` on the live monitor where the mode states it.
+
+- In the `cross-client` mode, the TUI creates and enqueues a request by
+  keys and quits at its exact review without `y`. A later TUI sends the
+  offered retry of the run from its live monitor and saves the verified
+  result with `s`. The `cross-client-broken-answer` control follows this
+  mode and must fail.
+- In the `cross-client-lifecycle` mode, the TUI follows a run of Pi across
+  a disconnect, an ordinary restart and a manager loss, and creates and
+  enqueues new requests of the same resource key.
+- In the `cross-client-lineage` mode, the History view lists the runs of
+  the fixture in the order of every page of `/v1/runs`. The TUI opens the
+  first parent from its History row, forks it with `l`, `f` and one
+  replacement, and quits at the lineage review of the child without `y`.
+  Pi approves that review.
+
+The witness is local single-machine evidence. The manager, the three
+clients and the harness run on one machine, so the witness is not evidence
+of clients on other machines.
+
 The [manual](../doc/agent-cat.texi) entry for `--service` states the complete
 key behavior.

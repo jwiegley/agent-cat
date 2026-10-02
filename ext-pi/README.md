@@ -255,6 +255,29 @@ The `pi-host-model-decline` control follows the `pi-host-model` mode but
 also declines the approval confirmation of step 2. It must fail with the
 literal message `JOURNEY-ASSERT model start approved after exact review`.
 
+Pi also takes part in the three modes of the cross-client witness of
+`manager/test/service_http.py`, in which the TUI, Pi and Emacs act on one
+manager, each with its own credential and client identifier. Pi starts
+through the same host launcher in each mode:
+
+- In the `cross-client` mode, Pi approves with `/wfm-review` the exact
+  review of a request that the TUI created, answers with `/wfm-answer` the
+  question head that Emacs holds open, and shows with `/wfm-result` the
+  verified result of the run. The `cross-client-broken-answer` control
+  types `true` in place of `false` and must fail.
+- In the `cross-client-lifecycle` mode, Pi creates and approves a request
+  with `/wfm`, quits while the run waits, shows the lost supervision with
+  `/wfm-monitor` after a restart and a manager loss, approves later
+  requests with `/wfm-review`, and sends a retry with `/wfm-answer`.
+- In the `cross-client-lineage` mode, `/wfm-history` lists the runs of the
+  fixture in the order of every page of `/v1/runs`, and `/wfm-review`
+  approves the exact lineage review of a fork child that the TUI created.
+  That review shows the parent run and the replacement.
+
+The witness is local single-machine evidence. The manager, the three
+clients and the harness run on one machine, so the witness is not evidence
+of clients on other machines.
+
 ## Manager client
 
 `src/manager/` holds the TypeScript manager client. It states the behavior of

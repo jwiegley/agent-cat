@@ -1189,10 +1189,12 @@ EMACS_SERVICE_FALSE = "JOURNEY-ASSERT Emacs answer is JSON false"
 # and restart. The cross-client-lineage mode holds history and lineage. The
 # cross-client-broken-answer control follows the cross-client mode. These
 # modes are not control-profile modes and have a dispatch branch of their
-# own. The fixture CrossClientFixture issues four credentials through
-# TuiModeFixture: tui, emacs and pi, each with observe, submit, control and
-# export on profile_1 and profile_2 and with its own client profile, and the
-# credential of the harness. profile_1 and profile_2 run the
+# own. The witness is local single-machine evidence: the manager, the three
+# clients and the harness run on one machine, and the witness is not
+# evidence of clients on other machines. The fixture CrossClientFixture
+# issues four credentials through TuiModeFixture: tui, emacs and pi, each
+# with observe, submit, control and export on profile_1 and profile_2 and
+# with its own client profile, and the credential of the harness. profile_1 and profile_2 run the
 # recovery-offering retry adapter of the mixed fixture. The manager has two
 # execution reservations, and each profile has its own resource key, so
 # that a run of each profile can hold a reservation at the same time. While
@@ -1422,8 +1424,75 @@ EMACS_SERVICE_FALSE = "JOURNEY-ASSERT Emacs answer is JSON false"
 #    credential.
 # 12. The cleanup of step 15 of the cross-client mode closes the mode.
 #
-# The cross-client-lineage mode is not yet implemented. It prints that it
-# is not yet implemented and exits with status 2.
+# The cross-client-lineage mode: the history and the lineage of the runs of
+# the fixture across the three clients. Emacs runs python3 WF_EMACS_UI
+# --service with the client profile of the emacs credential, --service-case
+# witness-lineage and a handshake directory.
+#
+# 1. The harness creates, enqueues and approves a mixed-controls request of
+#    profile_1 and one of profile_2 with its own credential. It answers the
+#    person question of each run with JSON false and sends the offered
+#    retry, so that each run succeeds with one answer and one retry, and it
+#    downloads the verified result of each run. The person question of the
+#    first parent is the completed flag occurrence of its snapshot, and the
+#    lineage collection of the first parent lists fork as eligible and no
+#    child. These parents save time and keep the clients for the steps under
+#    test.
+# 2. The TUI starts at 80x24 with the client profile of the tui credential.
+#    Enter selects profile_1, and H opens the History view, which counts the
+#    two managed runs. Home and Down select each row in turn, and the
+#    details of each row name the run at the same position of every page of
+#    GET /v1/runs.
+# 3. Enter on the row of the first parent opens its run detail. l opens the
+#    lineage menu, which lists fork as eligible, and f opens the fork edits.
+#    Down selects the person occurrence, Enter opens its replacement editor,
+#    the TUI types CROSS_FORKED, and Ctrl-D keeps the replacement true. Ctrl-D
+#    on the fork edits sends the fork, and the lineage collection of the
+#    parent then lists the child request. Enter prepares the review of the
+#    child, which shows the parent, the operation and the replacement with
+#    the SHA-256 of its JSON encoding, as the child preparation states them.
+#    q quits the TUI without y, with exit status 0 and the terminal
+#    restored, and the child waits in review with its preparation live.
+# 4. Pi starts through PiHost with the client profile of the pi credential.
+#    /wfm-history lists the two managed runs, each with its workflow, its
+#    profile, its status and its supervision, in the order of every page of
+#    GET /v1/runs.
+# 5. /wfm-review REQUEST in the same Pi opens the child request. Pi shows
+#    the exact review of its preparation with the five selectors, the
+#    program SHA-256 and the lineage rows of the parent and the replacement,
+#    to which j scrolls. a and Enter on Yes of the confirmation approve it,
+#    the child request names its run, and /quit ends Pi with exit status 0.
+#    The preparation is consumed with the displayed selectors.
+# 6. Emacs starts at 80x24, and M-x wf-service selects the client profile.
+#    The harness names the first parent and the child run in its answer to
+#    the handshake lineage-ready. M-x wf-history lists the three runs, and
+#    the rows of the history buffer equal every page of GET /v1/runs in
+#    order.
+# 7. RET on the row of the first parent opens its view, which shows the
+#    lineage line Lineage: root and terminal success. M-x wf-history again
+#    and RET on the row of the child run open its view, which shows the
+#    lineage line Lineage: fork of run PARENT, terminal success and the
+#    SHA-256 of the verified download of the harness. The session sends no
+#    command, M-x wf-local closes it, and C-x C-c ends Emacs with exit status
+#    0 and the terminal attributes of its start. The report must have
+#    version CROSS_LINEAGE_REPORT_VERSION.
+# 8. The child run and the child request name the parent and the operation
+#    fork, and the child run succeeded with the answer yes at the person
+#    occurrence. The fork command, the enqueue of the child request and the
+#    approve of its preparation are the only commands of these resources,
+#    in this order. The fork and the enqueue name the client of the tui
+#    credential, and the approve names the client of the pi credential. The
+#    fork reached effect-observed with the effect lineage-created on the
+#    child request, and the lineage collection of the parent lists exactly
+#    the child with its run.
+# 9. After the manager stops, the flow verb of TUI_CHECK verifies the
+#    manager log and the three run stores. The mode writes the identity
+#    record cross-client-lineage-witness.json to the fixture, as in step 14
+#    of the cross-client mode. The actors of the steps are the harness for
+#    steps 1 and 8, the TUI for steps 2 and 3, Pi for steps 4 and 5, and
+#    Emacs for steps 6 and 7, and each command is from the credential of
+#    the actor of its step.
+# 10. The cleanup of step 15 of the cross-client mode closes the mode.
 CROSS_CLIENT = "cross-client"
 CROSS_CLIENT_LIFECYCLE = "cross-client-lifecycle"
 CROSS_CLIENT_LINEAGE = "cross-client-lineage"
@@ -1444,8 +1513,15 @@ CROSS_EMACS_ANSWER = "false"
 # The answer that Pi types in step 6, which the control changes.
 CROSS_PI_ANSWER = "true" if len(sys.argv) == 6 and sys.argv[5] == CROSS_CLIENT_BROKEN else "false"
 CROSS_FALSE = "CROSS-ASSERT the cross-client answer is JSON false"
-# The version of the identity record cross-client-witness.json.
+# The version of the identity records cross-client-witness.json and
+# cross-client-lineage-witness.json.
 CROSS_RECORD_VERSION = 1
+# The replacement that the TUI types for the person occurrence of the first
+# parent in the cross-client-lineage mode.
+CROSS_FORKED = "yes"
+# WITNESS_LINEAGE_REPORT_VERSION of ci/emacs-ui.py states the report version
+# of the cross-client-lineage mode.
+CROSS_LINEAGE_REPORT_VERSION = 1
 if emacs_service_mode or emacs_lifecycle_mode or emacs_controls_mode or cross_client_mode:
     emacs_program = os.environ.get("EMACS", "")
     emacs_directory = os.environ.get("WF_EMACS_DIR", "")
@@ -2722,6 +2798,22 @@ def squeeze(text):
 def details(screen):
     """The text of the details pane of a TUI overview screen, joined."""
     return "".join(line.split("\u2502", 1)[1].strip() for line in screen.splitlines() if "\u2502" in line)
+
+
+def history_focus(session, index, expected):
+    """Home and then Down index times select the row at this position of
+    the History view of the TUI. The focused details must name the
+    expected run. Returns the details without spaces, so that a long
+    identifier that wraps across rows stays one string."""
+    session.send(b"\x1b[H")
+    session.settle()
+    if index:
+        session.send(b"\x1b[B" * index)
+    deadline = time.monotonic() + 20
+    while "Run:" + expected not in details(session.screen.text()).replace(" ", ""):
+        assert time.monotonic() < deadline, ("the History row at this position is not the run", index, expected, session.screen.text())
+        session.pump(0.1)
+    return details(session.screen.text()).replace(" ", "")
 
 
 def focus_row(session, label, value, timeout):
@@ -7456,11 +7548,6 @@ def history_checks():
     def save(session, name):
         (work / ("tui-history-" + name + ".screen.txt")).write_text(session.screen.text())
 
-    def details(screen):
-        """The details column joined without separators, so that a long
-        identifier that wraps across rows stays one string."""
-        return "".join(line.split("│", 1)[1].strip() for line in screen.splitlines() if "│" in line).replace(" ", "")
-
     def run_to_success(client):
         """Create, enqueue, approve and complete one prompt-source request of
         profile_1 through HTTP with the credential of the harness. Returns
@@ -7496,19 +7583,6 @@ def history_checks():
             target = value["page"]["next"]
         (work / "tui-history-runs.ndjson").write_bytes(b"\n".join(raws) + b"\n")
         return [item for page in pages for item in page["items"]]
-
-    def focus(session, index, expected):
-        """Home and then Down index times select the row at this position of
-        the History view. The focused details must name the expected run."""
-        session.send(b"\x1b[H")
-        session.settle()
-        if index:
-            session.send(b"\x1b[B" * index)
-        deadline = time.monotonic() + 20
-        while "Run:" + expected not in details(session.screen.text()):
-            assert time.monotonic() < deadline, ("the History row at this position is not the run", index, expected, session.screen.text())
-            session.pump(0.1)
-        return details(session.screen.text())
 
     def open_detail(session, run):
         """Enter opens the read-only detail of the focused run."""
@@ -7574,7 +7648,7 @@ def history_checks():
                 samples = [(order.index(earlier), earlier), (order.index(later), later)] + [
                     (legacy_positions[place], order[legacy_positions[place]]) for place in (0, 255, 256, len(legacy_positions) - 1)]
                 for index, run in sorted(samples):
-                    shown = focus(session, index, run)
+                    shown = history_focus(session, index, run)
                     if run in (earlier, later):
                         supervision = next(item["supervision"] for item in listed if item["id"] == run)
                         assert supervision != "observer", ("a managed run has observer supervision", run)
@@ -7588,7 +7662,7 @@ def history_checks():
                       "named the same runs, both managed runs and the legacy entries on both sides of the window bound", flush=True)
 
                 # 4. The verified result of the earlier run is retrieved and saved with exact bytes.
-                focus(session, order.index(earlier), earlier)
+                history_focus(session, order.index(earlier), earlier)
                 screen = open_detail(session, earlier)
                 assert "Runtime status: Succeeded" in screen and "Result: r retrieves the verified bytes" in screen, (
                     "the run detail of the earlier run is not a succeeded run before retrieval", screen)
@@ -7624,7 +7698,7 @@ def history_checks():
 
                 # 5. The results of both runs are kept by run identifier.
                 back(session)
-                focus(session, order.index(later), later)
+                history_focus(session, order.index(later), later)
                 open_detail(session, later)
                 retrieve(session)
                 save(session, "later-retrieved")
@@ -7634,7 +7708,7 @@ def history_checks():
                 for text in ("Result: verified " + later_result["artifact"]["bytes"] + " bytes", "Result SHA-256: " + later_result["artifact"]["sha256"]):
                     assert squeeze(text) in squeeze(session.screen.text()), ("the later run detail does not show the published result", text)
                 back(session)
-                focus(session, order.index(earlier), earlier)
+                history_focus(session, order.index(earlier), earlier)
                 screen = open_detail(session, earlier)
                 screen = session.wait_screen("Result: verified " + str(size) + " bytes", timeout=10)
                 assert "Result: r retrieves the verified bytes" not in screen and "s SAVE RESULT" in screen, (
@@ -7646,7 +7720,7 @@ def history_checks():
                 # 6. A legacy entry shows its representation and no retrieval.
                 back(session)
                 legacy = order[legacy_positions[0]]
-                focus(session, legacy_positions[0], legacy)
+                history_focus(session, legacy_positions[0], legacy)
                 screen = open_detail(session, legacy)
                 assert "Supervision: observer" in screen and "a legacy entry publishes no size and digest" in screen, (
                     "the legacy detail lacks its supervision or its result line", screen)
@@ -7660,7 +7734,7 @@ def history_checks():
 
                 # 7. The earlier run is exported once, and its export download verifies.
                 back(session)
-                focus(session, order.index(earlier), earlier)
+                history_focus(session, order.index(earlier), earlier)
                 open_detail(session, earlier)
                 session.wait_screen("e EXPORT", timeout=10)
                 export_name = "tui-history-export.json"
@@ -14083,6 +14157,114 @@ def emacs_controls_checks():
           "of the run view, each once, driven only by keys at 80x24, and the harness confirmed each from manager facts", flush=True)
 
 
+class WitnessRecord:
+    """The identity record of a cross-client witness mode. See step 14 of
+    the cross-client mode. pids holds the process identifiers of each
+    client, and steps holds the steps, each with its acting client, the
+    process that acted, its runs and the commands that are new at its
+    end."""
+
+    def __init__(self):
+        self.pids = {"tui": [], "emacs": [], "pi": []}
+        self.steps = []
+        self.receipts = {}
+
+    def step_done(self, step, actor, runs_of_step):
+        """Record the end of a step: the acting client, the process that
+        acted, the runs and the commands that are new. The process of the
+        harness is this process. An Emacs process is known only from its
+        report, so write gives the steps of Emacs the first Emacs
+        process."""
+        known = {ident for entry in self.steps for ident in entry["commands"]}
+        rows = read_coordination("SELECT id FROM commands ORDER BY rowid")
+        process_id = os.getpid() if actor == "harness" else self.pids[actor][-1] if actor in ("tui", "pi") else None
+        self.steps.append({"step": step, "actor": actor, "pid": process_id, "runs": list(runs_of_step),
+                           "commands": [ident for (ident,) in rows if ident not in known]})
+
+    def read_receipts(self, harness):
+        """Read the receipt of every command of the coordination database
+        while the manager runs, and keep the fields of the record."""
+        rows = read_coordination("SELECT id, client_id, operation, resource_uri, request_id, run_id, preparation_id, decision_id, state "
+                                 "FROM commands ORDER BY rowid")
+        for ident, client, operation, resource, request_id, run_id, preparation_id, decision_id, state in rows:
+            status, receipt, raw = request("/v1/commands/" + ident, harness)
+            assert status == 200, ("the receipt of a command", ident, status)
+            validate("CommandReceipt", receipt, raw)
+            assert receipt["id"] == ident and receipt["operation"] == operation and receipt["resource"] == resource, (
+                "the receipt differs from its command row", ident, receipt["operation"], receipt["resource"])
+            self.receipts[ident] = {"id": ident, "client": client, "operation": operation, "resource": resource, "requestId": request_id,
+                                    "runId": run_id, "preparationId": preparation_id, "decisionId": decision_id, "state": receipt["state"],
+                                    "receipt": receipt["links"]["self"], "acceptedAt": receipt["acceptedAt"],
+                                    "dispatchAttemptedAt": receipt["dispatchAttemptedAt"]}
+        return self.receipts
+
+    def write(self, name, mode, endpoint, negotiated, capabilities, manager, summary, downloaded, expected_actors, winners=None):
+        """Write the record to work/NAME after the manager stopped. manager
+        holds the records of the one manager log, and summary is the summary
+        of the flow verb. Every command must be in exactly one step and have
+        exactly one manager-log record in the one lifetime. The steps must
+        have the expected actors, and each command must be from the
+        credential of the actor of its step, or from the credential that
+        winners names for it. A step of Emacs lists no command. The record
+        must hold no bearer of the fixture and no run of 16 bytes of the
+        downloaded result. Returns the path, the lifetime and the commands
+        of each credential."""
+        clients = tui_fixture.client_ids
+        winners = winners or {}
+        lifetimes = summary["joins"]["lifetimes"]
+        assert len(lifetimes) == 1 and lifetimes[0]["shutdown"] is not None, ("the witness has other than one manager lifetime", lifetimes)
+        notice = next(entry for entry in manager if entry["position"] == lifetimes[0]["lifetime"]["position"])
+        assert notice["schema"] == "notice" and notice["body"]["notice"] == "lifetime", ("the lifetime notice of the manager log", notice["schema"])
+        lifetime = {"processGeneration": notice["body"]["processGeneration"], "lifetimePosition": lifetimes[0]["lifetime"]["position"],
+                    "shutdownPosition": lifetimes[0]["shutdown"]}
+        for ident, entry in self.receipts.items():
+            records_of = [item for item in manager if item["schema"] == "command" and item["about"].get("command") == ident]
+            assert len(records_of) == 1 and lifetime["lifetimePosition"] < records_of[0]["position"] < lifetime["shutdownPosition"], (
+                "a command has other than one manager-log record in the lifetime", ident, [item["position"] for item in records_of])
+            entry.update(managerLogPosition=records_of[0]["position"], processGeneration=lifetime["processGeneration"])
+        steps = self.steps
+        listed = [ident for entry in steps for ident in entry["commands"]]
+        assert sorted(listed) == sorted(self.receipts) and len(set(listed)) == len(listed), (
+            "the steps do not list each command once", listed, sorted(self.receipts))
+        names = {clients[name]: name for name in clients}
+        for entry in steps:
+            if entry["actor"] == "emacs":
+                entry["pid"] = self.pids["emacs"][0]
+            entry["commands"] = [self.receipts[ident] | {"credential": names[self.receipts[ident]["client"]]} for ident in entry["commands"]]
+        identity = {"version": CROSS_RECORD_VERSION, "mode": mode, "endpoint": endpoint, "tls": negotiated,
+                    "authorityEpoch": capabilities["authorityEpoch"], "lifetime": lifetime,
+                    "credentials": {name: {"credentialId": tui_fixture.credential_ids[name], "client": clients[name]}
+                                    for name in CrossClientFixture.CLIENTS + ("harness",)},
+                    "processes": self.pids | {"harness": [os.getpid()]}, "steps": steps}
+        encoded = json.dumps(identity, ensure_ascii=False, indent=2).encode()
+        bearers = [path.read_bytes().strip() for path in [work / "credential"] + sorted(work.glob("credential-*"))]
+        assert len(bearers) >= 4 and all(bearers), ("the bearers of the fixture", len(bearers))
+        assert not [secret for secret in bearers if secret in encoded], "the identity record holds a bearer"
+        window = 16
+        fragments = [downloaded[at:at + window] for at in range(len(downloaded) - window + 1)]
+        assert len(downloaded) >= window and not [fragment for fragment in fragments if fragment in encoded], (
+            "the identity record holds bytes of the result")
+        record_keys = {"id", "client", "credential", "operation", "resource", "requestId", "runId", "preparationId", "decisionId",
+                       "state", "receipt", "acceptedAt", "dispatchAttemptedAt", "managerLogPosition", "processGeneration"}
+        assert all(set(command) == record_keys for entry in steps for command in entry["commands"]), (
+            "a command of the identity record has other fields", [sorted(set(command) ^ record_keys)
+                                                                  for entry in steps for command in entry["commands"]])
+        record_path = work / name
+        record_path.write_bytes(encoded)
+        actors = {entry["step"]: entry["actor"] for entry in steps}
+        by_client = {name: [entry["id"] for step in steps for entry in step["commands"] if entry["credential"] == name] for name in clients}
+        assert all(entry["pid"] is not None for entry in steps), ("a step names no process", [entry["step"] for entry in steps])
+        assert actors == expected_actors, ("the steps name other actors", actors)
+        senders = {command["id"]: (winners.get(command["id"], entry["actor"]), command["credential"])
+                   for entry in steps for command in entry["commands"]}
+        assert all(expected == found for expected, found in senders.values()), (
+            "a command of a step is from another credential than the actor of the step",
+            {ident: pair for ident, pair in senders.items() if pair[0] != pair[1]})
+        assert not [command for entry in steps if entry["actor"] == "emacs" for command in entry["commands"]], (
+            "a step of Emacs lists a command", [entry["step"] for entry in steps if entry["actor"] == "emacs" and entry["commands"]])
+        return record_path, lifetime, by_client
+
+
 def cross_client_checks():
     """The cross-client mode and its control: legs 1 and 2, the outputs of
     the leg 1 run and the identity record. See CROSS_CLIENT for the steps."""
@@ -14098,23 +14280,11 @@ def cross_client_checks():
     tui_saved, emacs_saved = work / "cross-client-tui-result.bin", work / "cross-client-emacs-result.bin"
     # The process identifiers of each client, and the steps of the identity
     # record, each with the commands that are new at its end.
-    pids = {"tui": [], "emacs": [], "pi": []}
-    steps = []
+    record = WitnessRecord()
+    pids, steps, step_done = record.pids, record.steps, record.step_done
     # The command of the step 8 race that took effect, and the credential
     # that sent it. Either the emacs or the tui credential can win.
     race_command = None
-
-    def step_done(step, actor, runs_of_step):
-        """Record the end of a step for the identity record: the acting
-        client, the process that acted, the runs and the commands that are
-        new. The process of the harness is this process. The one Emacs
-        process is known only from its report, so the steps of Emacs get
-        it in step 14."""
-        known = {ident for entry in steps for ident in entry["commands"]}
-        rows = read_coordination("SELECT id FROM commands ORDER BY rowid")
-        process_id = os.getpid() if actor == "harness" else pids[actor][-1] if actor in ("tui", "pi") else None
-        steps.append({"step": step, "actor": actor, "pid": process_id, "runs": list(runs_of_step),
-                      "commands": [ident for (ident,) in rows if ident not in known]})
 
     def principal(name):
         """The manager-log principal of the credential name."""
@@ -14630,19 +14800,7 @@ def cross_client_checks():
             step_done("12", "pi", [run])
 
             # The receipt of every command, for the identity record.
-            rows = read_coordination("SELECT id, client_id, operation, resource_uri, request_id, run_id, preparation_id, decision_id, state "
-                                     "FROM commands ORDER BY rowid")
-            receipts = {}
-            for ident, client, operation, resource, request_id, run_id, preparation_id, decision_id, state in rows:
-                status, receipt, raw = request("/v1/commands/" + ident, harness)
-                assert status == 200, ("the receipt of a command", ident, status)
-                validate("CommandReceipt", receipt, raw)
-                assert receipt["id"] == ident and receipt["operation"] == operation and receipt["resource"] == resource, (
-                    "the receipt differs from its command row", ident, receipt["operation"], receipt["resource"])
-                receipts[ident] = {"id": ident, "client": client, "operation": operation, "resource": resource, "requestId": request_id,
-                                   "runId": run_id, "preparationId": preparation_id, "decisionId": decision_id, "state": receipt["state"],
-                                   "receipt": receipt["links"]["self"], "acceptedAt": receipt["acceptedAt"],
-                                   "dispatchAttemptedAt": receipt["dispatchAttemptedAt"]}
+            receipts = record.read_receipts(harness)
     finally:
         if process.poll() is None:
             process.terminate()
@@ -14685,62 +14843,16 @@ def cross_client_checks():
           "run-log start 0 of", store.parent.name + ", and its consent verifies", flush=True)
 
     # 14. The identity record of the witness.
-    lifetimes = summary["joins"]["lifetimes"]
-    assert len(lifetimes) == 1 and lifetimes[0]["shutdown"] is not None, ("the witness has other than one manager lifetime", lifetimes)
-    notice = next(record for record in manager if record["position"] == lifetimes[0]["lifetime"]["position"])
-    assert notice["schema"] == "notice" and notice["body"]["notice"] == "lifetime", ("the lifetime notice of the manager log", notice["schema"])
-    lifetime = {"processGeneration": notice["body"]["processGeneration"], "lifetimePosition": lifetimes[0]["lifetime"]["position"],
-                "shutdownPosition": lifetimes[0]["shutdown"]}
-    assert preparation["processGeneration"] == lifetime["processGeneration"], (
-        "the preparation names another process generation than the lifetime notice", preparation["processGeneration"])
-    for ident, entry in receipts.items():
-        records_of = [record for record in manager if record["schema"] == "command" and record["about"].get("command") == ident]
-        assert len(records_of) == 1 and lifetime["lifetimePosition"] < records_of[0]["position"] < lifetime["shutdownPosition"], (
-            "a command has other than one manager-log record in the lifetime", ident, [record["position"] for record in records_of])
-        entry.update(managerLogPosition=records_of[0]["position"], processGeneration=lifetime["processGeneration"])
-    listed = [ident for entry in steps for ident in entry["commands"]]
-    assert sorted(listed) == sorted(receipts) and len(set(listed)) == len(listed), (
-        "the steps do not list each command once", listed, sorted(receipts))
-    names = {clients[name]: name for name in clients}
-    for entry in steps:
-        if entry["actor"] == "emacs":
-            entry["pid"] = pids["emacs"][0]
-        entry["commands"] = [receipts[ident] | {"credential": names[receipts[ident]["client"]]} for ident in entry["commands"]]
-    identity = {"version": CROSS_RECORD_VERSION, "mode": mode, "endpoint": endpoint, "tls": negotiated,
-                "authorityEpoch": capabilities["authorityEpoch"], "lifetime": lifetime,
-                "credentials": {name: {"credentialId": tui_fixture.credential_ids[name], "client": clients[name]}
-                                for name in CrossClientFixture.CLIENTS + ("harness",)},
-                "processes": pids | {"harness": [os.getpid()]}, "steps": steps}
-    encoded = json.dumps(identity, ensure_ascii=False, indent=2).encode()
-    bearers = [path.read_bytes().strip() for path in [work / "credential"] + sorted(work.glob("credential-*"))]
-    assert len(bearers) >= 4 and all(bearers), ("the bearers of the fixture", len(bearers))
-    assert not [secret for secret in bearers if secret in encoded], "the identity record holds a bearer"
-    window = 16
-    fragments = [downloaded[at:at + window] for at in range(len(downloaded) - window + 1)]
-    assert len(downloaded) >= window and not [fragment for fragment in fragments if fragment in encoded], (
-        "the identity record holds bytes of the result")
-    record_keys = {"id", "client", "credential", "operation", "resource", "requestId", "runId", "preparationId", "decisionId",
-                   "state", "receipt", "acceptedAt", "dispatchAttemptedAt", "managerLogPosition", "processGeneration"}
-    assert all(set(command) == record_keys for entry in steps for command in entry["commands"]), (
-        "a command of the identity record has other fields", [sorted(set(command) ^ record_keys)
-                                                              for entry in steps for command in entry["commands"]])
-    record_path = work / "cross-client-witness.json"
-    record_path.write_bytes(encoded)
-    actors = {entry["step"]: entry["actor"] for entry in steps}
-    by_client = {name: [entry["id"] for step in steps for entry in step["commands"] if entry["credential"] == name] for name in clients}
-    assert all(entry["pid"] is not None for entry in steps), ("a step names no process", [entry["step"] for entry in steps])
+    assert race_command is not None and race_command["id"] in [ident for entry in steps if entry["step"] == "8" for ident in entry["commands"]], (
+        "step 8 does not list the command of the answer race", race_command)
     expected_actors = {"1": "tui", "2": "pi", "3": "emacs", "4": "harness", "5": "harness", "6": "pi", "7": "emacs",
                        "8": "harness", "9": "harness", "10": "tui", "11": "emacs", "12": "pi"}
-    assert actors == expected_actors, ("the steps name other actors", actors)
-    assert race_command is not None and race_command["id"] in [command["id"] for entry in steps if entry["step"] == "8" for command in entry["commands"]], (
-        "step 8 does not list the command of the answer race", race_command)
-    senders = {command["id"]: (race_command["credential"] if command["id"] == race_command["id"] else entry["actor"],
-                               command["credential"]) for entry in steps for command in entry["commands"]}
-    assert all(expected == found for expected, found in senders.values()), (
-        "a command of a step is from another credential than the actor of the step",
-        {ident: pair for ident, pair in senders.items() if pair[0] != pair[1]})
-    assert not [command for entry in steps if entry["actor"] == "emacs" for command in entry["commands"]], (
-        "a step of Emacs lists a command", [entry["step"] for entry in steps if entry["actor"] == "emacs" and entry["commands"]])
+    record_path, lifetime, by_client = record.write(
+        "cross-client-witness.json", mode, endpoint, negotiated, capabilities, manager, summary, downloaded, expected_actors,
+        {race_command["id"]: race_command["credential"]})
+    receipts = record.receipts
+    assert preparation["processGeneration"] == lifetime["processGeneration"], (
+        "the preparation names another process generation than the lifetime notice", preparation["processGeneration"])
     print(f"PASS {mode} 14: wrote", record_path, "with", len(steps), "steps and", len(receipts), "commands in manager lifetime",
           lifetime["processGeneration"], "(" + ", ".join(f"{name}: {len(found)}" for name, found in by_client.items()) + " commands,",
           "with the race command", race_command["id"], "from the", race_command["credential"], "credential);",
@@ -15465,6 +15577,358 @@ def cross_client_lifecycle_checks():
           "(pids " + ", ".join(map(str, pids["emacs"])) + ") and Pi (pids " + ", ".join(map(str, pids["pi"])) + "),",
           f"in {elapsed:.0f} seconds", flush=True)
 
+def cross_client_lineage_checks():
+    """The cross-client-lineage mode: the history and the lineage of the
+    runs of the fixture across the TUI, Pi and Emacs. See
+    CROSS_CLIENT_LINEAGE for the steps."""
+    harness = tui_fixture.harness
+    mode = sys.argv[5]
+    endpoint = f"https://127.0.0.1:{port}/v1"
+    artifacts = work / "cross-lineage-emacs"
+    report_path = work / "cross-lineage-emacs-report.json"
+    handshake = work / "cross-lineage-handshake"
+    handshake.mkdir(mode=0o700)
+    selectors = ("reviewDigest", "requestRevision", "profileRevision", "descriptorRevision", "processGeneration")
+    clients = tui_fixture.client_ids
+    record = WitnessRecord()
+    pids = record.pids
+    hosts = []
+    # The pseudo-terminal of the client process that runs at the moment,
+    # which the helpers below pump while the harness waits.
+    session = None
+
+    def pump(wait=0.1):
+        if session is None:
+            time.sleep(wait)
+        else:
+            assert session.process.poll() is None, ("a client process ended while the harness waited", session.screen.text())
+            session.pump(wait)
+
+    def shown(needles, timeout, what):
+        """Pump until the screen shows every needle, compared without
+        white space so that wrapped rows join, and give the screen."""
+        deadline = time.monotonic() + timeout
+        while True:
+            screen = session.screen.text()
+            if all(squeeze(needle) in squeeze(screen) for needle in needles):
+                session.settle()
+                return session.screen.text()
+            assert time.monotonic() < deadline, (what, needles, screen)
+            pump()
+
+    def until(path, schema, ready, timeout=45):
+        """Read the resource until ready holds, and pump the
+        pseudo-terminal of the running client between the reads, since a
+        client that writes to a full terminal waits."""
+        deadline = time.monotonic() + timeout
+        while True:
+            value, tag, raw = observed(path, schema)
+            if ready(value):
+                return value, tag, raw
+            assert time.monotonic() < deadline, ("observation deadline", path, None if session is None else session.screen.text())
+            pump()
+
+    def save(name):
+        (work / ("cross-lineage-" + name + ".screen.txt")).write_text(session.screen.text())
+
+    with (work / "server-0.stdout").open("wb") as output, (work / "server-0.stderr").open("wb") as errors:
+        process = subprocess.Popen([str(runner), "--manager", "serve", "--config", str(config),
+                                    "+RTS", "-N" + native, "-RTS"], stdout=output, stderr=errors)
+    try:
+        wait_ready(process)
+        status, capabilities, _ = request("/v1/capabilities", harness)
+        assert status == 200, ("capabilities", status)
+        status, overview, _ = request("/v1/snapshot", harness)
+        assert status == 200 and not overview["items"], ("the overview is not empty before the witness", status)
+        probe = ssl.create_default_context(cafile=str(cert))
+        with socket.create_connection(("127.0.0.1", port), timeout=10) as raw, probe.wrap_socket(raw, server_hostname="127.0.0.1") as wrapped:
+            negotiated = wrapped.version()
+        assert negotiated == "TLSv1.3", ("the manager negotiated another TLS version", negotiated)
+
+        # 1. The harness creates and settles the two parents.
+        runs = ControlHarness(harness, capabilities, mode)
+        observed, wait_for = runs.client[0], runs.client[1]
+        first, second = runs.start("profile_1"), runs.start("profile_2")
+        parents = {}
+        for parent in (first, second):
+            _, answered, recovered = drive_mixed(parent, runs.client, overview=False)
+            assert (answered, recovered) == (1, 1), ("the harness settled a parent with other controls", parent, answered, recovered)
+            runs.ended(parent, "succeeded")
+            wait_for("/v1/runs/" + parent, "Run", lambda value: value["supervision"] not in ("owned", "cleanup-pending"))
+            parents[parent] = verified_download(parent, runs.client, harness)
+        snapshot, _, _ = observed("/v1/runs/" + first + "/snapshot", "RunSnapshot")
+        assert snapshot["page"]["next"] is None, "the snapshot of the first parent has more than one page"
+        person = [item for item in snapshot["items"] if item["prompt"].startswith("Independent confirmation?")]
+        assert len(person) == 1 and person[0]["state"] == "completed" and person[0]["code"] == "flag", (
+            "the person occurrence of the first parent", person)
+        occurrence = person[0]["occurrenceId"]
+        lineage_uri = "/v1/runs/" + first + "/lineage-requests"
+        wait_for(lineage_uri, "LineagePage", lambda value: "fork" in value["eligible"] and not value["items"])
+        print(f"PASS {mode} 1: the harness with credential", tui_fixture.credential_ids["harness"], "created, approved and settled the",
+              "mixed-controls runs", first, "of profile_1 and", second, "of profile_2 to terminal success, each with one answer and one",
+              "retry, and downloaded their verified results; the lineage collection of", first, "lists fork as eligible and no child,",
+              "and its person question is occurrence", occurrence, flush=True)
+        record.step_done("1", "harness", [first, second])
+
+        def history_of(count):
+            """Every page of /v1/runs, which must list count runs."""
+            history, observers, pages = run_history(harness)
+            assert len(history) == count and len(set(history)) == count and observers == 0, (
+                "the run history of the fixture", history, observers)
+            return history, pages
+
+        with harness_reads_only():
+            # 2. The TUI History view lists the runs in the order of /v1/runs.
+            history, pages = history_of(2)
+            with tui_fixture.session() as tui:
+                session = tui
+                pids["tui"].append(tui.process.pid)
+                tui.wait_screen("Manager profiles")
+                tui.wait_screen("profile_1")
+                tui.send(b"\r")
+                tui.wait_screen("Manager workflows")
+                tui.wait_screen("H HISTORY")
+                tui.send(b"H")
+                tui.wait_screen("Manager history")
+                tui.wait_screen("History: current; runs: 2 (managed 2, legacy 0)", timeout=30)
+                for index, run in enumerate(history):
+                    history_focus(tui, index, run)
+                save("tui-history")
+                print(f"PASS {mode} 2: the TUI with credential", tui_fixture.credential_ids["tui"], "opened the History view with H at",
+                      "80x24, which counts 2 managed runs, and its rows name", ", ".join(history), "in the order of the", pages,
+                      "pages of /v1/runs", flush=True)
+                record.step_done("2", "tui", history)
+
+                # 3. The TUI forks the first parent with one replacement and leaves its review.
+                history_focus(tui, history.index(first), first)
+                tui.send(b"\r")
+                tui.wait_screen("Manager run detail", timeout=10)
+                shown(["Run detail: current", "Run: " + first], 20, "the TUI did not open the run detail of the first parent")
+                tui.send(b"l")
+                shown(["Lineage of run " + first, "f fork: eligible"], 15, "the TUI did not open the lineage menu of the first parent")
+                tui.send(b"f")
+                shown(["Fork of run " + first], 10, "f did not open the fork edits")
+                target = "> occurrence " + occurrence + " (flag): keep"
+                for _ in range(8):
+                    if squeeze(target) in squeeze(tui.screen.text()):
+                        break
+                    tui.send(b"\x1b[B")
+                    tui.settle()
+                shown([target], 10, "the fork edits do not select the person occurrence")
+                tui.send(b"\r")
+                shown(["Replacement answer for occurrence " + occurrence + " (flag)"], 10, "Enter opened no replacement editor")
+                tui.send(CROSS_FORKED.encode())
+                tui.send(b"\x04")
+                shown(["> occurrence " + occurrence + " (flag): replace with true"], 10, "the fork edits do not hold the replacement")
+                save("tui-fork-edits")
+                mutation_key(tui, b"\x04", "Lineage: fork of run " + first + "; the inputs come from the parent run", 30)
+                tui.wait_screen("Enter REQUEST REVIEW", timeout=30)
+                page, _, _ = observed(lineage_uri, "LineagePage")
+                assert len(page["items"]) == 1 and page["items"][0]["lineage"] == "fork" and page["items"][0]["parentRunId"] == first, (
+                    "the lineage collection of the first parent", page["items"])
+                child_id = page["items"][0]["id"]
+                child_uri = "/v1/requests/" + child_id
+                mutation_key(tui, b"\r", "Approve exact manager review", 45)
+                child, _, _ = until(child_uri, "Request", lambda value: value["phase"] == "review" and value["preparationId"] is not None)
+                preparation_uri = "/v1/preparations/" + child["preparationId"]
+                preparation, _, raw = observed(preparation_uri, "Preparation")
+                (work / "cross-lineage-review.json").write_bytes(raw)
+                forked_sha256 = hashlib.sha256(json.dumps(True, separators=(",", ":")).encode()).hexdigest()
+                edits = [{"occurrenceId": occurrence, "operation": "replace", "sha256": forked_sha256}]
+                assert preparation["state"] == "live" and preparation["review"]["lineage"] == {
+                    "parentRunId": first, "operation": "fork", "edits": edits}, (
+                    "the review lineage of the child", preparation["state"], preparation["review"].get("lineage"))
+                edit_row = "Lineage edits: replace occurrence " + occurrence + " (answer SHA-256 " + forked_sha256 + ")"
+                shown(["Lineage: fork of run " + first, edit_row, "Preparation: " + preparation["id"]], 15,
+                      "the TUI review does not show the lineage of the child")
+                save("tui-review")
+                tui.send(b"q")
+                assert tui.wait_exit(20) == 0, "the TUI did not exit with status 0 at the child review"
+                tui.assert_restored()
+            session = None
+            still, _, _ = observed(child_uri, "Request")
+            kept, _, _ = observed(preparation_uri, "Preparation")
+            assert still["phase"] == "review" and still["runId"] is None and kept["state"] == "live", (
+                "the child request left its review after the TUI quit", still["phase"], kept["state"])
+            print(f"PASS {mode} 3: in the TUI, Enter on the History row of", first, "opened its run detail, and l, f, the person",
+                  "occurrence", occurrence, "the replacement", repr(CROSS_FORKED), "and Ctrl-D forked it as child request", child_id + ";",
+                  "Enter prepared its review", preparation["id"], "and the TUI showed", repr(edit_row) + ", and q quit without y, with exit",
+                  "status 0 and the terminal restored, while the child waits in review", flush=True)
+            record.step_done("3", "tui", [first])
+
+            # 4. Pi lists the same runs with /wfm-history.
+            pi = PiHost("lineage-pi", client_profile=tui_fixture.client_profiles["pi"])
+            hosts.append(pi)
+            with pi:
+                session = pi.session
+                pids["pi"].append(session.process.pid)
+                session.wait_screen("[Extensions]", timeout=60)
+                shown(["Manager connected: " + endpoint], 30, "Pi did not notify the manager connection")
+                assert history_of(2)[0] == history, "the run history changed before /wfm-history"
+                session.send(b"/wfm-history\r")
+                header = "History: 2 managed runs and 0 observer entries"
+                rows = []
+                for run in history:
+                    item, _, _ = observed("/v1/runs/" + run, "Run")
+                    rows.append(f"  {run}  {item['workflowId']}  profile {item['profileId']}  succeeded, supervision {item['supervision']}")
+                screen = shown([header] + rows + ["result verified"], 45, "/wfm-history did not list the runs of the fixture")
+                listed = squeeze(screen)
+                after = listed.rindex(squeeze(header))
+                positions = [listed.find(squeeze(row), after) for row in rows]
+                assert all(position > after for position in positions) and positions == sorted(positions), (
+                    "/wfm-history lists the runs in another order than /v1/runs", positions, history)
+                pi.save_screen("history")
+                print(f"PASS {mode} 4: Pi with credential", tui_fixture.credential_ids["pi"], "ran /wfm-history and showed",
+                      repr(header), "with the rows of", ", ".join(history), "in the order of /v1/runs", flush=True)
+                record.step_done("4", "pi", history)
+
+                # 5. Pi opens the child request and approves its exact lineage review.
+                session.send(("/wfm-review " + child_id + "\r").encode())
+                displayed = [name + ": " + str(preparation[name]) for name in selectors]
+                shown(["Review of request " + child_id + ", preparation " + preparation["id"], "a approve after confirmation",
+                       "Program SHA-256: " + preparation["review"]["programHash"], "Profile: profile_1"] + displayed, 45,
+                      "Pi showed no exact review of the child request")
+                lineage_rows = ["Lineage: fork of run " + first,
+                                "replace occurrence " + occurrence + " with the answer of SHA-256 " + forked_sha256]
+                deadline = time.monotonic() + 15
+                while not all(any(line.strip() == row for line in session.screen.lines()) for row in lineage_rows):
+                    assert time.monotonic() < deadline, ("the child review in Pi shows no lineage rows", session.screen.text())
+                    session.send(b"j")
+                    session.settle()
+                pi.save_screen("review")
+                session.send(b"a")
+                shown(["Approve this exact review?", preparation["reviewDigest"], "→ Yes"], 15, "a opened no approval confirmation")
+                session.send(b"\r")
+                associated, _, _ = until(child_uri, "Request", lambda value: value["runId"] is not None)
+                child_run = associated["runId"]
+                shown(["Execution: the manager started run " + child_run], 45, "Pi did not report the started child run")
+                pi.save_screen("approved")
+                pi.quit()
+            session = None
+            consumed, _, _ = observed(preparation_uri, "Preparation")
+            assert consumed["state"] == "consumed" and all(consumed[name] == preparation[name] for name in selectors), (
+                "the consumed preparation differs from the review that Pi showed", consumed["state"])
+            print(f"PASS {mode} 5: Pi ran /wfm-review", child_id, "and showed the exact review of preparation", preparation["id"], "with",
+                  ", ".join(selectors), "and the rows", " and ".join(repr(row) for row in lineage_rows) + "; a and Yes approved it,",
+                  "child run", child_run, "started, and /quit ended Pi with status 0", flush=True)
+            record.step_done("5", "pi", [child_run])
+
+            # 6 and 7. Emacs lists the history and shows the parent and the child.
+            environment = {name: os.environ[name] for name in EMACS_ALLOWLIST if name in os.environ}
+            command = [sys.executable, "-B", emacs_ui, "--service", str(tui_fixture.client_profiles["emacs"]), str(report_path),
+                       "--service-case", "witness-lineage", "--service-handshake", str(handshake), "--emacs", emacs_program,
+                       "--source", os.path.join(emacs_directory, "wf.el"), "--artifacts", str(artifacts)]
+            script = subprocess.Popen(command, env=environment, stdin=subprocess.DEVNULL)
+            try:
+                ready = handshake / "lineage-ready.json"
+                deadline = time.monotonic() + 240
+                while not ready.exists():
+                    assert script.poll() is None, ("the Emacs witness ended before the handshake lineage-ready", script.returncode)
+                    assert time.monotonic() < deadline, "the Emacs witness did not ask for the handshake lineage-ready"
+                    time.sleep(0.05)
+                staged = handshake / "lineage-ready.done.new"
+                staged.write_text(json.dumps({"parent": first, "child": child_run}))
+                staged.rename(handshake / "lineage-ready.done")
+                deadline = time.monotonic() + 300
+                while script.poll() is None:
+                    assert time.monotonic() < deadline, "the Emacs witness did not end in 300 seconds after lineage-ready"
+                    time.sleep(0.05)
+            finally:
+                if script.poll() is None:
+                    script.kill()
+                script.wait(timeout=25)
+            report = json.loads(report_path.read_bytes()) if report_path.exists() else {"steps": [], "version": None}
+            assert script.returncode == 0, ("the Emacs witness of " + emacs_ui + " failed", script.returncode, report["steps"])
+            assert report["version"] == CROSS_LINEAGE_REPORT_VERSION, (
+                f"The {mode} mode requires report version {CROSS_LINEAGE_REPORT_VERSION}, and {emacs_ui} wrote version {report['version']}.")
+            assert report["steps"] == ["1", "2", "3", "4", "5"] and report["profile"] == str(tui_fixture.client_profiles["emacs"]), (
+                "the steps of the Emacs witness", report["steps"])
+            assert report["exitStatus"] == 0 and report["terminalAfter"] == report["terminalBefore"] and report["sent"] == [], (
+                "Emacs did not end cleanly without a command", report["exitStatus"], report["sent"])
+            pids["emacs"].append(report["emacsPid"])
+            history, pages = history_of(3)
+            assert report["historyRuns"] == history and report["historyPages"] == pages and child_run in history, (
+                "the wf-history rows differ from every page of /v1/runs", report["historyRuns"], history)
+            print(f"PASS {mode} 6: Emacs with credential", tui_fixture.credential_ids["emacs"], "listed with M-x wf-history the",
+                  len(history), "runs", ", ".join(history), "of the", pages, "pages of /v1/runs in the order of the collection", flush=True)
+            record.step_done("6", "emacs", history)
+            child_line = "Lineage: fork of run " + first
+            assert report["parentLines"][0].startswith("Service run " + first) and "Lineage: root" in report["parentLines"] \
+                and "Terminal: succeeded" in report["parentLines"], ("the Emacs view of the parent", report["parentLines"])
+            artifact = verified_download(child_run, runs.client, harness)
+            downloaded = (work / "verified-result.json").read_bytes()
+            assert report["childLines"][0].startswith("Service run " + child_run) and child_line in report["childLines"] \
+                and "Terminal: succeeded" in report["childLines"] \
+                and "Result SHA-256: " + artifact["sha256"] in report["childLines"], ("the Emacs view of the child", report["childLines"])
+            print(f"PASS {mode} 7: RET on the wf-history rows opened the Emacs views of", first, "with 'Lineage: root' and terminal",
+                  "success and of", child_run, "with", repr(child_line) + ", terminal success and", repr("Result SHA-256: " + artifact["sha256"]) + ";",
+                  "the session sent no command, and C-x C-c ended Emacs with status 0 and the terminal attributes of its start", flush=True)
+            record.step_done("7", "emacs", [first, child_run])
+
+            # 8. The child names its parent, its commands name their clients, and its result verifies.
+            run_view, _, _ = observed("/v1/runs/" + child_run, "Run")
+            child, _, _ = observed(child_uri, "Request")
+            assert run_view["parentRunId"] == first and run_view["lineage"] == "fork" and child["parentRunId"] == first \
+                and child["lineage"] == "fork" and child["runId"] == child_run and child["phase"] == "associated", (
+                "the child does not name its parent and its operation", run_view["parentRunId"], run_view["lineage"], child["phase"])
+            child_snapshot, _, _ = observed("/v1/runs/" + child_run + "/snapshot", "RunSnapshot")
+            replaced = occurrence_of(child_snapshot, occurrence)
+            assert child_snapshot["runtime"]["status"] == "succeeded" and replaced["answer"] == "yes", (
+                "the fork child did not succeed with the replacement", child_snapshot["runtime"], replaced.get("answer"))
+            rows = read_coordination("SELECT id, operation, client_id, resource_uri, state FROM commands WHERE resource_uri IN (?, ?, ?) "
+                                     "ORDER BY rowid", (lineage_uri, child_uri, preparation_uri))
+            assert [(row[1], row[2], row[3]) for row in rows] == [("fork", clients["tui"], lineage_uri), ("enqueue", clients["tui"], child_uri),
+                                                                  ("approve", clients["pi"], preparation_uri)], (
+                "the fork, enqueue and approve commands of the child", rows, clients)
+            status, receipt, _ = request("/v1/commands/" + rows[0][0], harness)
+            assert status == 200 and receipt["state"] == "effect-observed" and receipt["effect"]["kind"] == "lineage-created" \
+                and receipt["effect"]["resource"] == child_uri, ("the fork command", status, receipt.get("state"), receipt.get("effect"))
+            page, _, _ = observed(lineage_uri, "LineagePage")
+            assert [(item["id"], item["lineage"], item["parentRunId"], item["runId"]) for item in page["items"]] == [
+                (child_id, "fork", first, child_run)], ("the lineage collection of the first parent", page["items"])
+            print(f"PASS {mode} 8: run", child_run, "and request", child_id, "name parent", first, "and the operation fork, the run",
+                  "succeeded with the answer yes at occurrence", occurrence + ", the fork", rows[0][0], "and the enqueue", rows[1][0], "name",
+                  "client", clients["tui"], "of the tui credential, the approve", rows[2][0], "names client", clients["pi"], "of the pi",
+                  "credential,", lineage_uri, "lists the child, and the verified", artifact["bytes"], "bytes of the child downloaded with",
+                  "SHA-256", artifact["sha256"], flush=True)
+            record.step_done("8", "harness", [child_run])
+            record.read_receipts(harness)
+    finally:
+        if process.poll() is None:
+            process.terminate()
+        process.wait(timeout=25)
+        (work / "server-0.exit").write_text(str(process.returncode) + "\n")
+
+    # 9. The identity record of the witness.
+    flow_dir = work / "manager" / "flow"
+    logs = sorted(flow_dir.glob("*.ndjson"))
+    stores = sorted(work.glob("manager/runs/runs/*/runtime"))
+    assert len(logs) == 1 and len(stores) == 3, ("the witness has other than one manager log and three run stores", logs, stores)
+    status, records, summary = read_flow("cross-lineage-flow", [flow_dir] + stores)
+    assert status == 0 and summary["verified"] and not summary["problems"], ("the flow verb did not verify the witness logs", status, summary["problems"])
+    manager = [entry for entry in records if entry["log"] == str(logs[0])]
+    expected_actors = {"1": "harness", "2": "tui", "3": "tui", "4": "pi", "5": "pi", "6": "emacs", "7": "emacs", "8": "harness"}
+    record_path, lifetime, by_client = record.write("cross-client-lineage-witness.json", mode, endpoint, negotiated, capabilities,
+                                                    manager, summary, downloaded, expected_actors)
+    print(f"PASS {mode} 9: wrote", record_path, "with", len(record.steps), "steps and", len(record.receipts), "commands in manager lifetime",
+          lifetime["processGeneration"], "(" + ", ".join(f"{name}: {len(found)}" for name, found in by_client.items()) + " commands);",
+          "each command is in one step with its client and its manager-log position, and the record holds no bearer and no result bytes",
+          flush=True)
+
+    # 10. No child remains, and the fixture secrets and homes are removed.
+    removed = emacs_service_cleanup(artifacts, [tui_fixture.client_profiles[name] for name in CrossClientFixture.CLIENTS]
+                                    + [host.home for host in hosts] + [host.agent for host in hosts] + [host.state for host in hosts])
+    print(f"PASS {mode} 10: all clients quit, the manager stopped, no TUI, Emacs, Pi or fixture process remains, and the harness",
+          "removed", removed, "credential, client profile and home paths", flush=True)
+    elapsed = time.monotonic() - mode_started
+    assert elapsed <= WITNESS_SECONDS, ("the witness took longer than its budget", round(elapsed), WITNESS_SECONDS)
+    print(f"PASS {mode}: the TUI, Pi and Emacs listed the runs of the fixture in the order of /v1/runs, the TUI forked run", first,
+          "with one replacement, Pi approved the exact lineage review of child request", child_id, "and Emacs showed the parent and the",
+          "succeeded child run", child_run, "with its lineage line; the client processes were the TUI (pid", ", ".join(map(str, pids["tui"])) + "),",
+          "Pi (pid", ", ".join(map(str, pids["pi"])) + ") and Emacs (pid", ", ".join(map(str, pids["emacs"])) + "), over one manager at",
+          endpoint, f"that negotiates {negotiated}, in {elapsed:.0f} seconds", flush=True)
+
+
 def storage_checks():
     """The storage-error endings through four lifetimes of the real HTTPS
     manager. Each numbered case prints one PASS line."""
@@ -15797,13 +16261,11 @@ if person_mode:
     raise SystemExit(0)
 
 
-# The cross-client witness modes are not control-profile modes. The
-# cross-client-lineage mode is not yet implemented and exits with status 2.
+# The cross-client witness modes are not control-profile modes.
 if cross_client_mode:
     if sys.argv[5] == CROSS_CLIENT_LINEAGE:
-        print(f"The {sys.argv[5]} mode is not yet implemented.", flush=True)
-        raise SystemExit(2)
-    if sys.argv[5] == CROSS_CLIENT_LIFECYCLE:
+        cross_client_lineage_checks()
+    elif sys.argv[5] == CROSS_CLIENT_LIFECYCLE:
         cross_client_lifecycle_checks()
     else:
         cross_client_checks()
