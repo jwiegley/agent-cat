@@ -91,6 +91,7 @@ service run view show the delivery state `poll`.
 | PF1 | The PF1 commit | `f9be31a` | The `emacs-service-lifecycle` mode types the steer choice label in the open control prompt and the steer text in the steer editor, and each passes through 40x12, 140x36 and 80x24 with its text kept. Both sides require report version 3. |
 | PF2 | The PF2 commit | `281c5d6` | The `emacs-service-controls` mode sends a fail-over, an abandon and a redirect to the second listed target from the control prompt of the run view by keys at 80x24. The harness confirms each control from manager facts and requires that the session sent only these three, each once. Both sides require report version 1. |
 | PF4 | The PF4 commit | `360adc1` | The `cross-client` mode runs leg 1 of the WM-039 witness: the TUI creates and enqueues a request by keys, Pi approves its exact review with `/wfm-review`, and Emacs shows the run at its pending question and sends no command. Each client has its own credential and client identifier on one manager. The `cross-client-lifecycle` and `cross-client-lineage` modes and the `cross-client-broken-answer` control print that they are not yet implemented and exit with status 2. Both sides require report version 1. |
+| PF5 | The PF5 commit | `6656266` | The `cross-client` mode adds leg 2 of the WM-039 witness. Emacs opens the answer editor of the question head and types `false`, Pi answers the same head with `/wfm-answer`, and the later send of Emacs receives 412 `stale-revision`, which Emacs shows without a second send. A second run of `profile_2` is admitted beside the first, and of two concurrent HTTP answers to its head, with the emacs and tui credentials, one takes effect and the other receives 412 `stale-revision`. A new TUI sends the offered retry of the first run, which succeeds. Both sides require report version 2. |
 
 The gate found two defects, and PD29 fixed each at its owner with a test
 that failed first:
@@ -114,9 +115,10 @@ The Emacs modes of `manager/test/service_http.py` run files of the Emacs
 worktree, so each mode needs a matching pair of the two repositories. The
 `emacs-client` and `emacs-client-controls` modes refuse a report whose
 `harnessVersion` differs from 10 with one sentence. The `emacs-service`
-modes, the `emacs-service-controls` mode and the `cross-client` mode require
-report version 1, and the `emacs-service-lifecycle` mode requires report
-version 3 from `ci/emacs-ui.py`. Each mode needs `EMACS` and `WF_EMACS_DIR`,
+modes and the `emacs-service-controls` mode require report version 1, the
+`cross-client` mode requires report version 2, and the
+`emacs-service-lifecycle` mode requires report version 3 from
+`ci/emacs-ui.py`. Each mode needs `EMACS` and `WF_EMACS_DIR`,
 and the `emacs-service` modes and the `cross-client` modes also need
 `WF_EMACS_UI`.
 The Integrator recorded these pairs in the commit messages:
@@ -128,7 +130,7 @@ The Integrator recorded these pairs in the commit messages:
 | `emacs-service`, `emacs-service-broken-answer` | `75ce6752` with `2477a47` (PD25), and `6a4cbeec` with `8c2b780` (PD29) |
 | `emacs-service-lifecycle` | `14c97821` with `5425213` (PD26, report version 1), `832ea3d3` with `6745f4b` (PD27, report version 2 with `--service-handshake`), `6a4cbeec` with `8c2b780` (PD29), and the PF1 commit with `f9be31a` (PF1, report version 3 with the resize of the open control prompt and the steer editor) |
 | `emacs-service-controls` | The PF2 commit with `281c5d6` (PF2, report version 1 with `--service-case controls`) |
-| `cross-client` | The PF4 commit with `360adc1` (PF4, report version 1 with `--service-case witness`) |
+| `cross-client` | The PF4 commit with `360adc1` (PF4, report version 1 with `--service-case witness`), and the PF5 commit with `6656266` (PF5, report version 2 with the handshake `open-answer`) |
 
 The PD17 commit message names no `emacs-native` commit. The PD18 commit
 `5de5f83` names the follow-up issue `acat-FOLLOWUP`, which is
