@@ -12980,7 +12980,7 @@ Non-blocking findings of fess pf-PF23-r1 (fess/pf-PF23-r1.md) on subtask PF23 (P
 :LABELS:   ["workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-10-03 Sat 00:05]
-:MODIFIED: [2026-10-03 Sat 00:05]
+:MODIFIED: [2026-10-03 Sat 01:16]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -12994,6 +12994,20 @@ Non-blocking findings of fess pf-PF24-r1 (fess/pf-PF24-r1.md) on subtask PF24 (P
 3. (low) PF/PF24/impl-r1/gate-summary.md (capacity-admission and capacity-inputs rows): the load figures have no evidence. The summary gives load 35-48 for capacity-admission, but the only sample reads 29.06/30.86/27.96, and capacity-inputs has no load-*.log file. Fix: state only the load samples on record, or mark the figures as not recorded.
 4. (low) manager/test/service_http.py:9840: the assertion message 'capacity read closed with no response' now also covers a truncated body. Fix: change it to 'capacity read closed with no response or a truncated body'.
 5. (low) PF/PF24/impl-r1/run-mode.sh: the diagnostic reruns overwrote the run-of-record capacity-*.json files in the stage directory, which were then put back by hand with no record. Fix: note the restore in gate-summary.md, or have diagnostic runs write to a separate directory.
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 707,
+    "issue_id": "acat-pf24-fess-followup-o03v",
+    "author": "johnw",
+    "text": "Phase G subtask PG1 (2026-10-03): manager/test/service_http.py records the host load in every capacity mode (capacity-admission, capacity-inputs, capacity-streams, faults-io) and in the measure output of storage, routes, failures-worker, failures-manager, failures-launched and tui-failures. Each workload writes the unchecked keys <prefix>.host-load-1m-start, -1m-end, -5m-start, -5m-end and <prefix>.other-managers-start. manager/CAPACITY.md section 'Measurement rules' states the host-load rule (a run of record starts at a one-minute load of at most 16 with no other manager process) and the cleanup rule. CapacityHarness.serve, reap and reaping now terminate and reap every '--manager serve' process that the harness starts, on every exit path including an exception after Popen and SIGTERM. No ceiling row and no capacity-ceilings.json value changed. Evidence: py_compile, capacity_summary.py ceilings (129 keys agree), BUILD, all ten modes at N8 exit 0, capacity_summary.py lists the new keys as UNCHECKED, CAPACITY_HARNESS_FAULT=after-start leaked a manager before the fix and leaves none after it, the SIGTERM run exits 143 with no manager left, make -C doc check exit 0. No run of record: the orphan precondition did not hold (PIDs 61004, 111 and 9444 alive, orphans.log and orphans-after.log) and the load was above 16. Evidence (private): PG/PG1. Fess pg-PG1-r1 is not blocking; its findings are filed as a follow-up issue.\n",
+    "created_at": "2026-10-03T08:16:55Z"
+  }
+]
+#+end_src
 
 * TODO [#D] Resolve the non-blocking fess findings of subtask PF3
 :PROPERTIES:
@@ -13203,6 +13217,28 @@ Non-blocking findings of fess pf-PF9-r1 (fess/pf-PF9-r1.md):
   }
 ]
 #+end_src
+
+* TODO [#D] Resolve the non-blocking fess findings of subtask PG1
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pg1-fess-followup-s4dp
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-03 Sat 01:16]
+:MODIFIED: [2026-10-03 Sat 01:16]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess pg-PG1-r1 (fess/pg-PG1-r1.md) on subtask PG1 (capacity host-load rule and harness cleanup).
+
+1. (low) manager/test/service_http.py, CapacityHarness.reaping: the previous SIGTERM handler (SIG_DFL) is put back before the reap loop. A second SIGTERM during the loop, which can wait up to 25 s for each process, ends the harness at once, and the managers not yet reaped stay alive. Fix: put back the handler after the reap loop, or ignore SIGTERM while the loop runs.
+2. (low) manager/test/service_http.py (storage, routes and failure measure modes) and manager/CAPACITY.md: the host-load end keys are written only when the mode succeeds, so a failed mode keeps only its start keys. CAPACITY.md does not state this exception. Fix: write the end keys in a finally block, or state the exception in CAPACITY.md.
+3. (low) manager/test/service_http.py per-lifetime finally blocks in route_checks, worker_failure_checks, manager_failure_checks, tui_failure_checks and storage_checks: they still send terminate and wait 25 s with no kill, and only the dispatch-level reaping() completes the cleanup, so two stop paths exist. Fix: route these blocks through CapacityHarness.reap.
+
+Open items from the PG1 limitations: no run of record exists until the orphan processes (PIDs 61004, 111 and 9444) are ended and the one-minute load is at most 16. Frontend processes that the TUI modes start are not in the reaping list.
 
 * TODO [#C] Phase B part 1 review follow-ups: download quota, id row bound, legacy history, precision gaps
 :PROPERTIES:
@@ -13799,7 +13835,7 @@ Findings of the Phase E end-of-phase review (two lenses, range 33f84fe4..841ce0c
 :LABELS:   ["review","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-10-03 Sat 00:15]
-:MODIFIED: [2026-10-03 Sat 00:16]
+:MODIFIED: [2026-10-03 Sat 01:16]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -13818,6 +13854,20 @@ Findings of the Phase F end-of-phase review (two lenses, packages and working, r
 8. (Low) Orphaned managers: CapacityHarness.begin does not end its manager when a step after Popen fails. PID 61004 (PF17) and the stopped PIDs 111 and 9444 (Phase E) were present at 2026-10-03T07:10Z.
 9. (Low) Pin statements: the node_modules/@earendil-works/* entries of ext-pi/package-lock.json still name 0.84.3 and 0.85.1 with registry URLs, and manager/README.md still states coding-agent 0.85.1 (see acat-pf3-fess-followup-ann7).
 10. (Low) Emacs witness search: service_history_open in ci/emacs-ui.py (emacs-native) passes the run id to re-search-forward without regexp-quote, and only a batch check covers a child row listed first.
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 706,
+    "issue_id": "acat-phase-f-review-findings-4e23",
+    "author": "johnw",
+    "text": "Phase G subtask PG1 (2026-10-03): manager/test/service_http.py records the host load in every capacity mode (capacity-admission, capacity-inputs, capacity-streams, faults-io) and in the measure output of storage, routes, failures-worker, failures-manager, failures-launched and tui-failures. Each workload writes the unchecked keys <prefix>.host-load-1m-start, -1m-end, -5m-start, -5m-end and <prefix>.other-managers-start. manager/CAPACITY.md section 'Measurement rules' states the host-load rule (a run of record starts at a one-minute load of at most 16 with no other manager process) and the cleanup rule. CapacityHarness.serve, reap and reaping now terminate and reap every '--manager serve' process that the harness starts, on every exit path including an exception after Popen and SIGTERM. No ceiling row and no capacity-ceilings.json value changed. Evidence: py_compile, capacity_summary.py ceilings (129 keys agree), BUILD, all ten modes at N8 exit 0, capacity_summary.py lists the new keys as UNCHECKED, CAPACITY_HARNESS_FAULT=after-start leaked a manager before the fix and leaves none after it, the SIGTERM run exits 143 with no manager left, make -C doc check exit 0. No run of record: the orphan precondition did not hold (PIDs 61004, 111 and 9444 alive, orphans.log and orphans-after.log) and the load was above 16. Evidence (private): PG/PG1. Fess pg-PG1-r1 is not blocking; its findings are filed as a follow-up issue.\n",
+    "created_at": "2026-10-03T08:16:55Z"
+  }
+]
+#+end_src
 
 * TODO [#D] Resolve the non-blocking fess findings of subtask PD25
 :PROPERTIES:
@@ -23990,7 +24040,7 @@ legacy workflow build cannot conceal an unchecked manager development.
 :LABELS:   ["p9","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-03 Sat 00:15]
+:MODIFIED: [2026-10-03 Sat 01:16]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-041
 :SOURCE_REPO: agent-cat
@@ -24188,6 +24238,13 @@ workloads rather than extrapolating unmeasured capacity.
     "author": "johnw",
     "text": "Phase F closeout (2026-10-03): both review lenses rate WM-041 partial. Every capacity and failure mode passed at N8 in PF24, and capacity_summary.py reported 0 MISSING of 129 ceilings, but four fail: events.catch-up-p50-ms, events.catch-up-p95-ms, pages.first-page-p50-ms and failures.backup.passed (reservations.r16.release-to-review-p50-ms failed only at high host load). No idle-host measurement exists. The open functional items are in acat-phase-f-review-findings-4e23 (items 1 to 3). The security part of WM-041 and the root replacement under a running manager stay deferred. The package stays open. Source: doc/workflow-manager-handoff.md, section 'Phase F part 3 of 2026-10-03'.",
     "created_at": "2026-10-03T07:15:59Z"
+  },
+  {
+    "id": 705,
+    "issue_id": "acat-wm-041-17ax",
+    "author": "johnw",
+    "text": "Phase G subtask PG1 (2026-10-03): manager/test/service_http.py records the host load in every capacity mode (capacity-admission, capacity-inputs, capacity-streams, faults-io) and in the measure output of storage, routes, failures-worker, failures-manager, failures-launched and tui-failures. Each workload writes the unchecked keys <prefix>.host-load-1m-start, -1m-end, -5m-start, -5m-end and <prefix>.other-managers-start. manager/CAPACITY.md section 'Measurement rules' states the host-load rule (a run of record starts at a one-minute load of at most 16 with no other manager process) and the cleanup rule. CapacityHarness.serve, reap and reaping now terminate and reap every '--manager serve' process that the harness starts, on every exit path including an exception after Popen and SIGTERM. No ceiling row and no capacity-ceilings.json value changed. Evidence: py_compile, capacity_summary.py ceilings (129 keys agree), BUILD, all ten modes at N8 exit 0, capacity_summary.py lists the new keys as UNCHECKED, CAPACITY_HARNESS_FAULT=after-start leaked a manager before the fix and leaves none after it, the SIGTERM run exits 143 with no manager left, make -C doc check exit 0. No run of record: the orphan precondition did not hold (PIDs 61004, 111 and 9444 alive, orphans.log and orphans-after.log) and the load was above 16. Evidence (private): PG/PG1. Fess pg-PG1-r1 is not blocking; its findings are filed as a follow-up issue.\n",
+    "created_at": "2026-10-03T08:16:54Z"
   }
 ]
 #+end_src

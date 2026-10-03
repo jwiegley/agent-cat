@@ -395,6 +395,16 @@ CAPACITY_PROBE_MS = 5000
 CAPACITY_SECONDS = 900
 CAPACITY_RECORD = "capacity-admission.json"
 CAPACITY_LITERAL = "capacity"
+# Each capacity mode, and the measurement prints of the storage, routes and
+# failure modes, record the host load at the start and at the end of each
+# workload under the keys of the host-load rule of manager/CAPACITY.md. Each
+# manager process that these modes start ends with the mode on every exit
+# path, as CapacityHarness.reaping states.
+# When the environment variable CAPACITY_HARNESS_FAULT has the value
+# after-start, CapacityHarness.begin raises an exception after the manager of
+# the lifetime is ready. A capacity mode then fails, and the check of the
+# harness cleanup shows that no manager process of the fixture remains.
+CAPACITY_HARNESS_FAULT = "CAPACITY_HARNESS_FAULT"
 # The capacity-inputs mode measures the workloads of the sections "Drafts",
 # "Page sets", "Captures" and "Artifact readers" of manager/CAPACITY.md. The
 # first three run in three lifetimes of the protected manager, each with its
@@ -5649,212 +5659,209 @@ def route_checks():
 
     @contextlib.contextmanager
     def serving(index):
-        with (work / f"server-{index}.stdout").open("wb") as output, (work / f"server-{index}.stderr").open("wb") as errors:
-            process = subprocess.Popen([str(runner), "--manager", "serve", "--config", str(config),
-                                        "+RTS", "-N" + native, "-RTS"], stdout=output, stderr=errors)
-            sampled(process)
-            try:
-                wait_ready(process)
-                yield process
-            finally:
-                stopped()
-                if process.poll() is None:
-                    process.terminate()
-                process.wait(timeout=25)
+        process = meter.serve(index)
+        sampled(process)
+        try:
+            wait_ready(process)
+            yield process
+        finally:
+            stopped()
+            if process.poll() is None:
+                process.terminate()
+            process.wait(timeout=25)
 
     # The measurement prints of the section "Seal and prune cursors" of
     # manager/CAPACITY.md: the flags and refusal of cases 12 and 13, the
     # latency of each served JSON batch of /v1/routes, which excludes the
     # opening of its connection, and the resident memory of each lifetime.
     meter = CapacityHarness(ROUTES_MEASURE_RECORD, ("routes",))
+    meter.host_load("routes", "start")
     residents = []
-    with (work / "server-0.stdout").open("wb") as output, (work / "server-0.stderr").open("wb") as errors:
-        process = subprocess.Popen([str(runner), "--manager", "serve", "--config", str(config),
-                                    "+RTS", "-N" + native, "-RTS"], stdout=output, stderr=errors)
-        sampled(process)
-        try:
-            wait_ready(process)
-            status, capabilities, _ = request("/v1/capabilities", authorized)
-            assert status == 200
-            status, catalogue, _ = request("/v1/workflows?profileId=profile_1", authorized)
-            assert status == 200
-            workflow = next(item for item in catalogue["items"] if item["name"] == "mixed-controls")
-            key = capabilities["authorityEpoch"] + "." + secrets.token_urlsafe(16)
-            body = {"workflowId": workflow["id"], "descriptorRevision": workflow["revision"],
-                    "profileId": workflow["profileId"], "profileRevision": workflow["profileRevision"]}
-            status, created, raw = request("/v1/requests", authorized | {"Content-Type": "application/json", "Idempotency-Key": key},
-                                           method="POST", payload=json.dumps(body, separators=(",", ":")).encode())
-            assert status == 201, ("request creation", status, created.get("code"))
-            run = run_mixed(created, workflow, capabilities, authorized)
-            observer_file = work / "credential-observer"
-            administration({"version": 1, "operation": "issue-credential", "label": "Routes observer",
-                            "scopes": ["observe"], "profileIds": ["profile_1"],
-                            "expiresAt": "2999-01-01T00:00:00Z", "outputFile": str(observer_file)})
-            observer = {"Authorization": "Bearer " + observer_file.read_bytes().decode("ascii")}
-            stranger_file = work / "credential-stranger"
-            administration({"version": 1, "operation": "issue-credential", "label": "Routes other profile",
-                            "scopes": ["observe", "control"], "profileIds": ["profile_2"],
-                            "expiresAt": "2999-01-01T00:00:00Z", "outputFile": str(stranger_file)})
-            stranger = {"Authorization": "Bearer " + stranger_file.read_bytes().decode("ascii")}
+    process = meter.serve(0)
+    sampled(process)
+    try:
+        wait_ready(process)
+        status, capabilities, _ = request("/v1/capabilities", authorized)
+        assert status == 200
+        status, catalogue, _ = request("/v1/workflows?profileId=profile_1", authorized)
+        assert status == 200
+        workflow = next(item for item in catalogue["items"] if item["name"] == "mixed-controls")
+        key = capabilities["authorityEpoch"] + "." + secrets.token_urlsafe(16)
+        body = {"workflowId": workflow["id"], "descriptorRevision": workflow["revision"],
+                "profileId": workflow["profileId"], "profileRevision": workflow["profileRevision"]}
+        status, created, raw = request("/v1/requests", authorized | {"Content-Type": "application/json", "Idempotency-Key": key},
+                                       method="POST", payload=json.dumps(body, separators=(",", ":")).encode())
+        assert status == 201, ("request creation", status, created.get("code"))
+        run = run_mixed(created, workflow, capabilities, authorized)
+        observer_file = work / "credential-observer"
+        administration({"version": 1, "operation": "issue-credential", "label": "Routes observer",
+                        "scopes": ["observe"], "profileIds": ["profile_1"],
+                        "expiresAt": "2999-01-01T00:00:00Z", "outputFile": str(observer_file)})
+        observer = {"Authorization": "Bearer " + observer_file.read_bytes().decode("ascii")}
+        stranger_file = work / "credential-stranger"
+        administration({"version": 1, "operation": "issue-credential", "label": "Routes other profile",
+                        "scopes": ["observe", "control"], "profileIds": ["profile_2"],
+                        "expiresAt": "2999-01-01T00:00:00Z", "outputFile": str(stranger_file)})
+        stranger = {"Authorization": "Bearer " + stranger_file.read_bytes().decode("ascii")}
 
-            # The local run store of the run: its event log and its run log.
-            stores = [entry for entry in (work / "manager" / "runs" / "runs").iterdir()]
-            assert len(stores) == 1, ("run stores", stores)
-            runtime = stores[0] / "runtime"
-            sequences = [int(json.loads(line)["sequence"]) for line in (runtime / "events.ndjson").read_bytes().splitlines()]
-            local = [frozen.parse_json(line) for line in (runtime / "flow.ndjson").read_bytes().splitlines()]
-            schemas = [line["schema"] for line in local]
-            assert sequences and restricted & set(schemas), ("the mixed run log has no event or no restricted record", schemas)
-            before = database_rows()
+        # The local run store of the run: its event log and its run log.
+        stores = [entry for entry in (work / "manager" / "runs" / "runs").iterdir()]
+        assert len(stores) == 1, ("run stores", stores)
+        runtime = stores[0] / "runtime"
+        sequences = [int(json.loads(line)["sequence"]) for line in (runtime / "events.ndjson").read_bytes().splitlines()]
+        local = [frozen.parse_json(line) for line in (runtime / "flow.ndjson").read_bytes().splitlines()]
+        schemas = [line["schema"] for line in local]
+        assert sequences and restricted & set(schemas), ("the mixed run log has no event or no restricted record", schemas)
+        before = database_rows()
 
-            # Case 1. An observe-only credential receives exactly the event
-            # records, each naming a line of the event log in order.
-            public, public_end, _ = walk(run, observer)
-            (work / "routes-observer.json").write_text(json.dumps(public, indent=1, ensure_ascii=False, default=str))
-            assert all(record["class"] == "public" and record["schema"] == "event" for record in public), "observer received a non-public record"
-            assert [record["event"]["sequence"] for record in public] == sequences, ("event records differ from the event log", len(public), len(sequences))
-            assert [record["position"] for record in public] == [i for i, name in enumerate(schemas) if name == "event"]
-            assert number(public_end) == len(local), ("observer cursor end", public_end, len(local))
-            print(f"PASS routes case 1: the observe-only credential received the {len(public)} event records, which name",
-                  "the lines of the event log of the run in order", flush=True)
+        # Case 1. An observe-only credential receives exactly the event
+        # records, each naming a line of the event log in order.
+        public, public_end, _ = walk(run, observer)
+        (work / "routes-observer.json").write_text(json.dumps(public, indent=1, ensure_ascii=False, default=str))
+        assert all(record["class"] == "public" and record["schema"] == "event" for record in public), "observer received a non-public record"
+        assert [record["event"]["sequence"] for record in public] == sequences, ("event records differ from the event log", len(public), len(sequences))
+        assert [record["position"] for record in public] == [i for i, name in enumerate(schemas) if name == "event"]
+        assert number(public_end) == len(local), ("observer cursor end", public_end, len(local))
+        print(f"PASS routes case 1: the observe-only credential received the {len(public)} event records, which name",
+              "the lines of the event log of the run in order", flush=True)
 
-            # Case 2. A control credential of the same profile also receives
-            # the actor records, and no credential receives a restricted one.
-            served, served_end, batches = walk(run, authorized)
-            (work / "routes-control.json").write_text(json.dumps(served, indent=1, ensure_ascii=False, default=str))
-            expected = [i for i, name in enumerate(schemas) if name not in restricted]
-            assert [record["position"] for record in served] == expected, "control credential records differ from the local run log"
-            for record in served:
-                line = local[int(record["position"])]
-                assert record["class"] == ("public" if record["schema"] == "event" else "actor")
-                for field in ("schema", "from", "to", "about", "at"):
-                    assert record[field] == line[field], ("record field differs from the run log", record["position"], field)
-                assert record["replyTo"] == line.get("replyTo"), ("record replyTo differs from the run log", record["position"])
-                content = line["body"]
-                if "inline" in content:
-                    assert record["body"] == content["inline"] and "claim" not in record, ("inline body", record["position"])
-                elif "claim" in content:
-                    assert record["claim"] == content["claim"] and "body" not in record, ("claim check", record["position"])
-                else:
-                    assert record["event"] == {"sequence": content["event"]}, ("event number", record["position"])
-            for name in ("start", "question", "answer", "control"):
-                assert name in {record["schema"] for record in served}, ("control credential missed a record schema", name)
-            assert not restricted & {record["schema"] for record in served + public}, "a restricted record was served"
-            assert number(served_end) == number(public_end) == len(local)
-            print(f"PASS routes case 2: the control credential received {len(served)} public and actor records in {batches}",
-                  f"batches, including start, question, answer and control, and no credential received one of the",
-                  f"{len(local) - len(expected)} restricted records", flush=True)
+        # Case 2. A control credential of the same profile also receives
+        # the actor records, and no credential receives a restricted one.
+        served, served_end, batches = walk(run, authorized)
+        (work / "routes-control.json").write_text(json.dumps(served, indent=1, ensure_ascii=False, default=str))
+        expected = [i for i, name in enumerate(schemas) if name not in restricted]
+        assert [record["position"] for record in served] == expected, "control credential records differ from the local run log"
+        for record in served:
+            line = local[int(record["position"])]
+            assert record["class"] == ("public" if record["schema"] == "event" else "actor")
+            for field in ("schema", "from", "to", "about", "at"):
+                assert record[field] == line[field], ("record field differs from the run log", record["position"], field)
+            assert record["replyTo"] == line.get("replyTo"), ("record replyTo differs from the run log", record["position"])
+            content = line["body"]
+            if "inline" in content:
+                assert record["body"] == content["inline"] and "claim" not in record, ("inline body", record["position"])
+            elif "claim" in content:
+                assert record["claim"] == content["claim"] and "body" not in record, ("claim check", record["position"])
+            else:
+                assert record["event"] == {"sequence": content["event"]}, ("event number", record["position"])
+        for name in ("start", "question", "answer", "control"):
+            assert name in {record["schema"] for record in served}, ("control credential missed a record schema", name)
+        assert not restricted & {record["schema"] for record in served + public}, "a restricted record was served"
+        assert number(served_end) == number(public_end) == len(local)
+        print(f"PASS routes case 2: the control credential received {len(served)} public and actor records in {batches}",
+              f"batches, including start, question, answer and control, and no credential received one of the",
+              f"{len(local) - len(expected)} restricted records", flush=True)
 
-            # Case 3. The route predicate filters.
-            questions, _, _ = walk(run, authorized, "schema=question")
-            assert questions and questions == [record for record in served if record["schema"] == "question"], "route schema=question"
-            workflow_events, _, _ = walk(run, observer, "schema=event,from=workflow:" + local[0]["about"]["nativeRun"])
-            assert workflow_events == public, "route schema=event,from=workflow"
-            hidden, _, _ = walk(run, observer, "schema=question")
-            assert hidden == [], "the route predicate exposed an actor record to the observer"
-            status, problem, _ = batch(run, authorized, route="unknown=1")
-            assert status == 400 and problem["code"] == "malformed-request", ("malformed route", status, problem.get("code"))
-            print(f"PASS routes case 3: schema=question selected the {len(questions)} question records, a sender term kept",
-                  "every event record, the observer received no question, and an unknown field refused", flush=True)
+        # Case 3. The route predicate filters.
+        questions, _, _ = walk(run, authorized, "schema=question")
+        assert questions and questions == [record for record in served if record["schema"] == "question"], "route schema=question"
+        workflow_events, _, _ = walk(run, observer, "schema=event,from=workflow:" + local[0]["about"]["nativeRun"])
+        assert workflow_events == public, "route schema=event,from=workflow"
+        hidden, _, _ = walk(run, observer, "schema=question")
+        assert hidden == [], "the route predicate exposed an actor record to the observer"
+        status, problem, _ = batch(run, authorized, route="unknown=1")
+        assert status == 400 and problem["code"] == "malformed-request", ("malformed route", status, problem.get("code"))
+        print(f"PASS routes case 3: schema=question selected the {len(questions)} question records, a sender term kept",
+              "every event record, the observer received no question, and an unknown field refused", flush=True)
 
-            # Case 4. Paging through after returns every record once.
-            for index, record in enumerate(served):
-                status, value, raw = batch(run, authorized, record["id"])
-                assert status == 200, ("resume", status, value.get("code"))
-                validate("RouteBatch", value, raw)
-                following = served[index + 1:index + 1 + len(value["records"])]
-                assert value["records"] == following, ("resume from a record id", record["id"])
-            status, value, _ = batch(run, authorized, served_end)
-            assert status == 200 and value["records"] == [] and not value["hasMore"] and value["cursor"] == served_end
-            status, problem, _ = batch(run, authorized, served[0]["id"], extra={"Last-Event-ID": served[0]["id"]})
-            assert status == 400 and problem["code"] == "malformed-request", ("after with Last-Event-ID", status)
-            status, value, _ = request(f"/v1/runs/{run}/routes", authorized | json_accept | {"Last-Event-ID": served[0]["id"]})
-            assert status == 200 and value["records"][0] == served[1], "Last-Event-ID resume"
-            print(f"PASS routes case 4: resuming after each of the {len(served)} record ids returned the following records",
-                  "exactly once, the end cursor returned an empty final batch, and Last-Event-ID resumes", flush=True)
+        # Case 4. Paging through after returns every record once.
+        for index, record in enumerate(served):
+            status, value, raw = batch(run, authorized, record["id"])
+            assert status == 200, ("resume", status, value.get("code"))
+            validate("RouteBatch", value, raw)
+            following = served[index + 1:index + 1 + len(value["records"])]
+            assert value["records"] == following, ("resume from a record id", record["id"])
+        status, value, _ = batch(run, authorized, served_end)
+        assert status == 200 and value["records"] == [] and not value["hasMore"] and value["cursor"] == served_end
+        status, problem, _ = batch(run, authorized, served[0]["id"], extra={"Last-Event-ID": served[0]["id"]})
+        assert status == 400 and problem["code"] == "malformed-request", ("after with Last-Event-ID", status)
+        status, value, _ = request(f"/v1/runs/{run}/routes", authorized | json_accept | {"Last-Event-ID": served[0]["id"]})
+        assert status == 200 and value["records"][0] == served[1], "Last-Event-ID resume"
+        print(f"PASS routes case 4: resuming after each of the {len(served)} record ids returned the following records",
+              "exactly once, the end cursor returned an empty final batch, and Last-Event-ID resumes", flush=True)
 
-            # Case 5. A wrong-alias or future cursor returns 410.
-            wrong = "route_" + "0" * 64 + ".1"
-            status, problem, _ = batch(run, authorized, wrong)
-            assert status == 410 and problem["code"] == "view-expired", ("wrong alias", status, problem.get("code"))
-            status, problem, _ = batch(run, authorized, public_end)
-            assert status == 410 and problem["code"] == "view-expired", ("another credential's alias", status, problem.get("code"))
-            future = alias(served_end) + "." + str(number(served_end) + 1)
-            status, problem, _ = batch(run, authorized, future)
-            assert status == 410 and problem["code"] == "cursor-expired", ("future cursor", status, problem.get("code"))
-            status, problem, _ = request(f"/v1/runs/{run}/routes", authorized | {"Accept": "text/plain"})
-            assert status == 409 and problem["code"] == "unsupported-operation", ("route Accept", status, problem.get("code"))
-            print("PASS routes case 5: a wrong alias and the alias of another credential returned 410 view-expired, a",
-                  "future cursor returned 410 cursor-expired, and Accept text/plain returned 409", flush=True)
+        # Case 5. A wrong-alias or future cursor returns 410.
+        wrong = "route_" + "0" * 64 + ".1"
+        status, problem, _ = batch(run, authorized, wrong)
+        assert status == 410 and problem["code"] == "view-expired", ("wrong alias", status, problem.get("code"))
+        status, problem, _ = batch(run, authorized, public_end)
+        assert status == 410 and problem["code"] == "view-expired", ("another credential's alias", status, problem.get("code"))
+        future = alias(served_end) + "." + str(number(served_end) + 1)
+        status, problem, _ = batch(run, authorized, future)
+        assert status == 410 and problem["code"] == "cursor-expired", ("future cursor", status, problem.get("code"))
+        status, problem, _ = request(f"/v1/runs/{run}/routes", authorized | {"Accept": "text/plain"})
+        assert status == 409 and problem["code"] == "unsupported-operation", ("route Accept", status, problem.get("code"))
+        print("PASS routes case 5: a wrong alias and the alias of another credential returned 410 view-expired, a",
+              "future cursor returned 410 cursor-expired, and Accept text/plain returned 409", flush=True)
 
-            # Case 6. Route reads write nothing to the database.
-            after = database_rows()
-            changed = [table for table in sorted(set(before) | set(after)) if before.get(table) != after.get(table)]
-            assert not changed, ("route reads changed the database", changed)
-            print(f"PASS routes case 6: the {len(before)} tables of the database are unchanged across the route reads", flush=True)
+        # Case 6. Route reads write nothing to the database.
+        after = database_rows()
+        changed = [table for table in sorted(set(before) | set(after)) if before.get(table) != after.get(table)]
+        assert not changed, ("route reads changed the database", changed)
+        print(f"PASS routes case 6: the {len(before)} tables of the database are unchanged across the route reads", flush=True)
 
-            # Case 7. A control credential of the profile receives the
-            # manager-log records of the mixed run as actor records.
-            managed, managed_end, floor = manager_walk(authorized)
-            (work / "manager-routes-control.json").write_text(json.dumps(managed, indent=1, ensure_ascii=False, default=str))
-            assert floor == 0, ("manager route floor before any prune", floor)
-            assert managed and all(record["class"] == "actor" for record in managed), "manager route served a record of another class"
-            assert {record["schema"] for record in managed} <= {"command", "receipt", "review", "relay", "notice"}
-            named = manager_named(managed, created["id"], run)
-            print("PASS routes case 7: the control credential received", len(managed), "manager-log records, including the enqueue",
-                  "command at", named["enqueue"]["position"], "and its receipt, the review at", named["review"]["position"],
-                  "the approve command at", named["approve"]["position"], "and its receipt, and the start relay at",
-                  named["start"]["position"], flush=True)
+        # Case 7. A control credential of the profile receives the
+        # manager-log records of the mixed run as actor records.
+        managed, managed_end, floor = manager_walk(authorized)
+        (work / "manager-routes-control.json").write_text(json.dumps(managed, indent=1, ensure_ascii=False, default=str))
+        assert floor == 0, ("manager route floor before any prune", floor)
+        assert managed and all(record["class"] == "actor" for record in managed), "manager route served a record of another class"
+        assert {record["schema"] for record in managed} <= {"command", "receipt", "review", "relay", "notice"}
+        named = manager_named(managed, created["id"], run)
+        print("PASS routes case 7: the control credential received", len(managed), "manager-log records, including the enqueue",
+              "command at", named["enqueue"]["position"], "and its receipt, the review at", named["review"]["position"],
+              "the approve command at", named["approve"]["position"], "and its receipt, and the start relay at",
+              named["start"]["position"], flush=True)
 
-            # Case 8. An observe-only credential receives no manager-log record,
-            # and its cursor advances over every record as a filtered gap.
-            hidden, hidden_end, _ = manager_walk(observer)
-            assert hidden == [], ("the observe-only credential received manager-log records", [r["position"] for r in hidden])
-            assert number(hidden_end) >= number(managed_end) > named["start"]["position"], ("observe-only cursor", hidden_end, managed_end)
-            print("PASS routes case 8: the observe-only credential received no manager-log record, and its cursor advanced to",
-                  number(hidden_end), flush=True)
+        # Case 8. An observe-only credential receives no manager-log record,
+        # and its cursor advances over every record as a filtered gap.
+        hidden, hidden_end, _ = manager_walk(observer)
+        assert hidden == [], ("the observe-only credential received manager-log records", [r["position"] for r in hidden])
+        assert number(hidden_end) >= number(managed_end) > named["start"]["position"], ("observe-only cursor", hidden_end, managed_end)
+        print("PASS routes case 8: the observe-only credential received no manager-log record, and its cursor advanced to",
+              number(hidden_end), flush=True)
 
-            # Case 9. A control credential of another profile receives none of
-            # the records of the first profile.
-            foreign, foreign_end, _ = manager_walk(stranger)
-            assert not {record["position"] for record in foreign} & {record["position"] for record in managed}, "another profile received a record"
-            assert foreign == [] and number(foreign_end) >= number(managed_end), ("other profile manager route", foreign_end)
-            print("PASS routes case 9: a control credential of profile_2 received no manager-log record of profile_1, and its",
-                  "cursor advanced to", number(foreign_end), flush=True)
+        # Case 9. A control credential of another profile receives none of
+        # the records of the first profile.
+        foreign, foreign_end, _ = manager_walk(stranger)
+        assert not {record["position"] for record in foreign} & {record["position"] for record in managed}, "another profile received a record"
+        assert foreign == [] and number(foreign_end) >= number(managed_end), ("other profile manager route", foreign_end)
+        print("PASS routes case 9: a control credential of profile_2 received no manager-log record of profile_1, and its",
+              "cursor advanced to", number(foreign_end), flush=True)
 
-            # Case 10. The route predicate, paging and the 410 cursors of the
-            # manager route behave as those of the run route.
-            commands, _, _ = manager_walk(authorized, "schema=command")
-            expected = [record for record in managed if record["schema"] == "command"]
-            assert commands[:len(expected)] == expected and all(r["schema"] == "command" for r in commands), "manager route schema=command"
-            for index, record in enumerate(managed):
-                status, value, raw = manager_batch(authorized, record["id"])
-                assert status == 200, ("manager resume", status, value.get("code"))
-                validate("ManagerRouteBatch", value, raw)
-                following = managed[index + 1:index + 1 + len(value["records"])]
-                assert value["records"][:len(following)] == following, ("manager resume from a record id", record["id"])
-            status, problem, _ = manager_batch(authorized, "route_" + "0" * 64 + ".1")
-            assert status == 410 and problem["code"] == "view-expired", ("manager wrong alias", status, problem.get("code"))
-            status, problem, _ = manager_batch(authorized, served_end)
-            assert status == 410 and problem["code"] == "view-expired", ("run-route alias on the manager route", status, problem.get("code"))
-            status, problem, _ = manager_batch(authorized, alias(managed_end) + "." + str(number(hidden_end) + 100000))
-            assert status == 410 and problem["code"] == "cursor-expired", ("manager future cursor", status, problem.get("code"))
-            status, problem, _ = request("/v1/routes", authorized | {"Accept": "text/plain"})
-            assert status == 409 and problem["code"] == "unsupported-operation", ("manager route Accept", status, problem.get("code"))
-            status, problem, _ = manager_batch(authorized, managed[0]["id"], extra={"Last-Event-ID": managed[0]["id"]})
-            assert status == 400 and problem["code"] == "malformed-request", ("manager after with Last-Event-ID", status)
-            after = database_rows()
-            changed = [table for table in sorted(set(before) | set(after)) if before.get(table) != after.get(table)]
-            assert not changed, ("manager route reads changed the database", changed)
-            print(f"PASS routes case 10: schema=command selected the {len(expected)} commands, resuming after each of the",
-                  f"{len(managed)} record ids returned the following records, a wrong alias and a run-route cursor returned",
-                  "410 view-expired, a future cursor returned 410 cursor-expired, Accept text/plain returned 409, and the",
-                  "database is unchanged", flush=True)
-        finally:
-            stopped()
-            if process.poll() is None:
-                process.terminate()
-            process.wait(timeout=25)
+        # Case 10. The route predicate, paging and the 410 cursors of the
+        # manager route behave as those of the run route.
+        commands, _, _ = manager_walk(authorized, "schema=command")
+        expected = [record for record in managed if record["schema"] == "command"]
+        assert commands[:len(expected)] == expected and all(r["schema"] == "command" for r in commands), "manager route schema=command"
+        for index, record in enumerate(managed):
+            status, value, raw = manager_batch(authorized, record["id"])
+            assert status == 200, ("manager resume", status, value.get("code"))
+            validate("ManagerRouteBatch", value, raw)
+            following = managed[index + 1:index + 1 + len(value["records"])]
+            assert value["records"][:len(following)] == following, ("manager resume from a record id", record["id"])
+        status, problem, _ = manager_batch(authorized, "route_" + "0" * 64 + ".1")
+        assert status == 410 and problem["code"] == "view-expired", ("manager wrong alias", status, problem.get("code"))
+        status, problem, _ = manager_batch(authorized, served_end)
+        assert status == 410 and problem["code"] == "view-expired", ("run-route alias on the manager route", status, problem.get("code"))
+        status, problem, _ = manager_batch(authorized, alias(managed_end) + "." + str(number(hidden_end) + 100000))
+        assert status == 410 and problem["code"] == "cursor-expired", ("manager future cursor", status, problem.get("code"))
+        status, problem, _ = request("/v1/routes", authorized | {"Accept": "text/plain"})
+        assert status == 409 and problem["code"] == "unsupported-operation", ("manager route Accept", status, problem.get("code"))
+        status, problem, _ = manager_batch(authorized, managed[0]["id"], extra={"Last-Event-ID": managed[0]["id"]})
+        assert status == 400 and problem["code"] == "malformed-request", ("manager after with Last-Event-ID", status)
+        after = database_rows()
+        changed = [table for table in sorted(set(before) | set(after)) if before.get(table) != after.get(table)]
+        assert not changed, ("manager route reads changed the database", changed)
+        print(f"PASS routes case 10: schema=command selected the {len(expected)} commands, resuming after each of the",
+              f"{len(managed)} record ids returned the following records, a wrong alias and a run-route cursor returned",
+              "410 view-expired, a future cursor returned 410 cursor-expired, Accept text/plain returned 409, and the",
+              "database is unchanged", flush=True)
+    finally:
+        stopped()
+        if process.poll() is None:
+            process.terminate()
+        process.wait(timeout=25)
 
     # Case 11. Each served record is the entry that the flow verb reads from
     # the same manager log, and every other retained record is a gap: a
@@ -6158,6 +6165,7 @@ def route_checks():
           f"its receipt and {len(resumed_managed) - 1} later records", flush=True)
     meter.latency_keys("routes", "batch")
     meter.measure({"routes.batches": len(meter.latencies["routes.batch"])})
+    meter.host_load("routes", "end")
     print("MEASURE routes.batch-p50-ms", meter.measured["routes.batch-p50-ms"], "routes.batch-p95-ms", meter.measured["routes.batch-p95-ms"], flush=True)
     print("PASS routes: every run-route and manager-route case held against the running TLS 1.3 manager", flush=True)
 
@@ -9727,7 +9735,11 @@ class CapacityHarness:
     sections of the mode. measured maps each key to its value, latencies
     holds the latency samples of each label, and save() writes measured to
     the record file of the mode in its fixture directory. begin() starts one
-    manager lifetime through CapacityFixture and end() stops it. The other
+    manager lifetime through CapacityFixture and end() stops it. host_load()
+    records the load of the host at the start and at the end of a workload.
+    serve() starts each manager process of the capacity, storage, routes and
+    failure modes and keeps it in started, and reaping() stops each of them
+    that still runs when the mode ends, on every exit path. The other
     methods are the reads and commands of a workload on the persistent
     connection of one CapacityCredential. dropped counts the reads whose
     connection closed with no response, and refused counts the refusals that
@@ -9735,6 +9747,7 @@ class CapacityHarness:
 
     dropped = 0
     refused = 0
+    started = []
 
     def __init__(self, record, sections):
         sys.path.insert(0, str(source / "manager/test"))
@@ -9774,6 +9787,73 @@ class CapacityHarness:
     def sample(self, label, value):
         self.latencies.setdefault(label, []).append(value)
 
+    @staticmethod
+    def other_managers():
+        """The command lines of the '--manager serve' processes on the host
+        whose configuration is not the configuration of this fixture."""
+        listing = subprocess.run(["pgrep", "-fl", "--", "--manager serve"], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                 text=True, timeout=10)
+        assert listing.returncode in (0, 1), ("pgrep of the manager processes", listing.returncode, listing.stderr)
+        return [line for line in listing.stdout.splitlines() if str(config) not in line.split()]
+
+    def host_load(self, prefix, moment):
+        """Record the one-minute and five-minute load averages of the host
+        at the moment start or end of the workload prefix. At the start, also
+        record the count of the other manager processes, and keep their
+        command lines in other-managers-<prefix>.txt. manager/CAPACITY.md
+        states the host-load rule of a run of record. These keys name no
+        ceiling, and the record keeps them whatever their values."""
+        one, five, _ = os.getloadavg()
+        values = {f"{prefix}.host-load-1m-{moment}": round(one, 2), f"{prefix}.host-load-5m-{moment}": round(five, 2)}
+        if moment == "start":
+            others = self.other_managers()
+            (work / f"other-managers-{prefix}.txt").write_text("".join(line + "\n" for line in others))
+            values[f"{prefix}.other-managers-start"] = len(others)
+        self.measure(values)
+
+    @classmethod
+    def serve(cls, name, arguments=(), preexec_fn=None):
+        """Start one foreground manager process with its output in
+        server-<name>.stdout and server-<name>.stderr, and keep it in
+        started for reaping()."""
+        with (work / f"server-{name}.stdout").open("wb") as output, (work / f"server-{name}.stderr").open("wb") as errors:
+            process = subprocess.Popen([str(runner), "--manager", "serve", "--config", str(config), *arguments,
+                                        "+RTS", "-N" + native, "-RTS"], stdout=output, stderr=errors, preexec_fn=preexec_fn)
+        cls.started.append(process)
+        return process
+
+    @staticmethod
+    def reap(process):
+        """Terminate the process when it runs and wait for it at most 25
+        seconds. A process that outlives the bound is killed and reaped.
+        Returns whether the process ended within the bound."""
+        if process.poll() is None:
+            process.terminate()
+        try:
+            process.wait(timeout=25)
+            return True
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait()
+            return False
+
+    @classmethod
+    @contextlib.contextmanager
+    def reaping(cls):
+        """Run one mode, then reap each manager process of started on every
+        exit path: a return, an exception, or SIGTERM, which the mode
+        receives as SystemExit while it runs."""
+        def terminated(number, _):
+            raise SystemExit(128 + number)
+
+        previous = signal.signal(signal.SIGTERM, terminated)
+        try:
+            yield
+        finally:
+            signal.signal(signal.SIGTERM, previous)
+            for process in cls.started:
+                cls.reap(process)
+
     def begin(self, name, root, profiles, limits, names, retention=(), arguments=(), file_limit=None):
         """Start one lifetime with its configuration and issue its
         credentials. retention names the local retention roots of the
@@ -9789,12 +9869,12 @@ class CapacityHarness:
             resource.setrlimit(resource.RLIMIT_FSIZE, (file_limit, file_limit))
 
         self.fixture.begin(root, profiles, limits, retention)
-        with (work / f"server-{name}.stdout").open("wb") as output, (work / f"server-{name}.stderr").open("wb") as errors:
-            process = subprocess.Popen([str(runner), "--manager", "serve", "--config", str(config), *arguments,
-                                        "+RTS", "-N" + native, "-RTS"], stdout=output, stderr=errors,
-                                       preexec_fn=limited if file_limit is not None else None)
+        self.host_load(name, "start")
+        process = self.serve(name, arguments, limited if file_limit is not None else None)
         resident = CapacityResident(process.pid)
         wait_ready(process)
+        if os.environ.get(CAPACITY_HARNESS_FAULT) == "after-start":
+            raise RuntimeError(CAPACITY_HARNESS_FAULT + ": the injected failure after the manager of the lifetime " + name + " started")
         self.fixture.issue_all(names)
         credentials = {credential: CapacityCredential(credential) for credential in names}
         capabilities, _, _ = self.read(credentials[names[0]], "/v1/capabilities", "Capabilities")
@@ -9806,16 +9886,16 @@ class CapacityHarness:
         self.state.update(epoch=capabilities["authorityEpoch"], workflows={}, capabilities=capabilities)
         return process, resident, credentials
 
-    @staticmethod
-    def end(name, process, resident, credentials):
-        """End one lifetime as the operator stops it and keep its exit status."""
+    def end(self, name, process, resident, credentials):
+        """End one lifetime as the operator stops it, keep its exit status
+        and record the host load at the end of the workload."""
         for credential in credentials.values():
             credential.connection.close()
         resident.stop()
-        if process.poll() is None:
-            process.terminate()
-        process.wait(timeout=25)
+        within = self.reap(process)
         (work / f"server-{name}.exit").write_text(str(process.returncode) + "\n")
+        self.host_load(name, "end")
+        assert within, ("the manager of the lifetime outlived the 25-second bound of its stop and was killed", name)
 
     @staticmethod
     def read(credential, path, schema, extra=None, window=5):
@@ -10015,126 +10095,125 @@ def worker_failure_checks():
     # The measurement prints of the section "Failure modes" of
     # manager/CAPACITY.md. They assert nothing.
     meter = CapacityHarness(WORKER_FAILURE + "-measure.json", ("failures",))
-    with (work / "server-0.stdout").open("wb") as output, (work / "server-0.stderr").open("wb") as errors:
-        process = subprocess.Popen([str(runner), "--manager", "serve", "--config", str(config),
-                                    "+RTS", "-N" + native, "-RTS"], stdout=output, stderr=errors)
-        resident = CapacityResident(process.pid)
-        try:
-            wait_ready(process)
-            status, capabilities, raw = request("/v1/capabilities", authorized)
-            assert status == 200
-            validate("Capabilities", capabilities, raw)
-            client = mixed_client(capabilities, authorized)
-            observed, wait_for, _, _ = client
-            status, catalogue, _ = request("/v1/workflows?profileId=profile_1", authorized)
-            assert status == 200
-            workflow = next(item for item in catalogue["items"] if item["name"] == "mixed-controls")
-            create = json.dumps({"workflowId": workflow["id"], "descriptorRevision": workflow["revision"],
-                                 "profileId": workflow["profileId"], "profileRevision": workflow["profileRevision"]},
-                                separators=(",", ":")).encode()
+    meter.host_load("failures.worker", "start")
+    process = meter.serve(0)
+    resident = CapacityResident(process.pid)
+    try:
+        wait_ready(process)
+        status, capabilities, raw = request("/v1/capabilities", authorized)
+        assert status == 200
+        validate("Capabilities", capabilities, raw)
+        client = mixed_client(capabilities, authorized)
+        observed, wait_for, _, _ = client
+        status, catalogue, _ = request("/v1/workflows?profileId=profile_1", authorized)
+        assert status == 200
+        workflow = next(item for item in catalogue["items"] if item["name"] == "mixed-controls")
+        create = json.dumps({"workflowId": workflow["id"], "descriptorRevision": workflow["revision"],
+                             "profileId": workflow["profileId"], "profileRevision": workflow["profileRevision"]},
+                            separators=(",", ":")).encode()
 
-            def create_request():
-                key = capabilities["authorityEpoch"] + "." + secrets.token_urlsafe(16)
-                status, created, raw = request("/v1/requests", authorized | {
-                    "Content-Type": "application/json", "Idempotency-Key": key}, method="POST", payload=create)
-                assert status == 201, ("request creation", status, created.get("code"))
-                validate("Request", created, raw)
-                return created
+        def create_request():
+            key = capabilities["authorityEpoch"] + "." + secrets.token_urlsafe(16)
+            status, created, raw = request("/v1/requests", authorized | {
+                "Content-Type": "application/json", "Idempotency-Key": key}, method="POST", payload=create)
+            assert status == 201, ("request creation", status, created.get("code"))
+            validate("Request", created, raw)
+            return created
 
-            # Case 1. A run waits at its person question with a live worker.
-            _, run = approve_mixed(create_request(), workflow, client)
-            base = "/v1/runs/" + run
-            head, _, _ = drive_mixed(run, client, stop_at_question=True, overview=False)
-            control, _, _ = observed(base + "/control", "RunControl")
-            assert control["supervision"] == "owned" and control["decisionHeadId"] == head, (control["supervision"], control["decisionHeadId"])
-            decision, _, _ = observed("/v1/decisions/" + head, "Decision")
-            # The worker is the frontend proxy that the manager starts, in its
-            # own process group, and the inner frontend worker that the proxy
-            # starts in a second process group with the engine adapter. Both
-            # groups are read from the live processes, never from a stored
-            # PID. The proxy alone is not the worker: the inner worker
-            # inherits the pipes of the manager and continues the run when
-            # only the proxy dies.
-            manager_group = os.getpgid(process.pid)
-            tree = groups(descendants(process.pid))
-            (work / "worker-processes.txt").write_text("".join(f"{pid} {pgid} {command}\n" for pid, pgid, command in tree))
-            targets = sorted({pgid for _, pgid, _ in tree})
-            assert targets and manager_group not in targets, ("worker process groups", targets, manager_group)
-            print("PASS failures-worker case 1: run", run, "waits at person question", head, "under owned supervision, with",
-                  len(tree), "worker processes in process groups", targets, flush=True)
+        # Case 1. A run waits at its person question with a live worker.
+        _, run = approve_mixed(create_request(), workflow, client)
+        base = "/v1/runs/" + run
+        head, _, _ = drive_mixed(run, client, stop_at_question=True, overview=False)
+        control, _, _ = observed(base + "/control", "RunControl")
+        assert control["supervision"] == "owned" and control["decisionHeadId"] == head, (control["supervision"], control["decisionHeadId"])
+        decision, _, _ = observed("/v1/decisions/" + head, "Decision")
+        # The worker is the frontend proxy that the manager starts, in its
+        # own process group, and the inner frontend worker that the proxy
+        # starts in a second process group with the engine adapter. Both
+        # groups are read from the live processes, never from a stored
+        # PID. The proxy alone is not the worker: the inner worker
+        # inherits the pipes of the manager and continues the run when
+        # only the proxy dies.
+        manager_group = os.getpgid(process.pid)
+        tree = groups(descendants(process.pid))
+        (work / "worker-processes.txt").write_text("".join(f"{pid} {pgid} {command}\n" for pid, pgid, command in tree))
+        targets = sorted({pgid for _, pgid, _ in tree})
+        assert targets and manager_group not in targets, ("worker process groups", targets, manager_group)
+        print("PASS failures-worker case 1: run", run, "waits at person question", head, "under owned supervision, with",
+              len(tree), "worker processes in process groups", targets, flush=True)
 
-            # Case 2. SIGKILL of the worker process groups ends in lost
-            # supervision and never in a successful result.
-            for group in targets:
-                os.killpg(group, signal.SIGKILL)
-            killed = time.monotonic()
-            value, _, raw = wait_for(base, "Run", lambda value: value["supervision"] == "lost")
-            lost_after = time.monotonic() - killed
-            meter.measure({"failures.worker.lost-ms": round(lost_after * 1000, 1)})
-            (work / "lost-run.json").write_bytes(raw)
-            assert value["runtime"] is None or value["runtime"]["status"] != "succeeded", ("lost run runtime", value["runtime"])
-            assert value["verification"]["state"] != "verified", ("lost run verification", value["verification"])
-            assert "lost-supervision" in value["limitations"], ("lost run limitations", value["limitations"])
-            control, control_tag, raw = observed(base + "/control", "RunControl")
-            (work / "lost-control.json").write_bytes(raw)
-            assert control["supervision"] == "lost" and not control["cancelAllowed"], ("lost run control", control["supervision"], control["cancelAllowed"])
-            snapshot, _, _ = observed(base + "/snapshot", "RunSnapshot")
-            assert snapshot["runtime"] is None or snapshot["runtime"]["status"] != "succeeded", ("lost run snapshot", snapshot["runtime"])
-            outputs, _, _ = observed(base + "/outputs", "OutputPage")
-            assert not [item for item in outputs["items"] if item["kind"] == "result" and item["verification"]["state"] == "verified"], (
-                "the lost run shows a verified result", outputs["items"])
-            print("PASS failures-worker case 2: after SIGKILL of the worker process groups, run", run, "shows lost supervision after",
-                  round(lost_after, 2), "seconds with runtime", value["runtime"] and value["runtime"]["status"], "verification",
-                  value["verification"]["state"], "and limitations", value["limitations"], flush=True)
+        # Case 2. SIGKILL of the worker process groups ends in lost
+        # supervision and never in a successful result.
+        for group in targets:
+            os.killpg(group, signal.SIGKILL)
+        killed = time.monotonic()
+        value, _, raw = wait_for(base, "Run", lambda value: value["supervision"] == "lost")
+        lost_after = time.monotonic() - killed
+        meter.measure({"failures.worker.lost-ms": round(lost_after * 1000, 1)})
+        (work / "lost-run.json").write_bytes(raw)
+        assert value["runtime"] is None or value["runtime"]["status"] != "succeeded", ("lost run runtime", value["runtime"])
+        assert value["verification"]["state"] != "verified", ("lost run verification", value["verification"])
+        assert "lost-supervision" in value["limitations"], ("lost run limitations", value["limitations"])
+        control, control_tag, raw = observed(base + "/control", "RunControl")
+        (work / "lost-control.json").write_bytes(raw)
+        assert control["supervision"] == "lost" and not control["cancelAllowed"], ("lost run control", control["supervision"], control["cancelAllowed"])
+        snapshot, _, _ = observed(base + "/snapshot", "RunSnapshot")
+        assert snapshot["runtime"] is None or snapshot["runtime"]["status"] != "succeeded", ("lost run snapshot", snapshot["runtime"])
+        outputs, _, _ = observed(base + "/outputs", "OutputPage")
+        assert not [item for item in outputs["items"] if item["kind"] == "result" and item["verification"]["state"] == "verified"], (
+            "the lost run shows a verified result", outputs["items"])
+        print("PASS failures-worker case 2: after SIGKILL of the worker process groups, run", run, "shows lost supervision after",
+              round(lost_after, 2), "seconds with runtime", value["runtime"] and value["runtime"]["status"], "verification",
+              value["verification"]["state"], "and limitations", value["limitations"], flush=True)
 
-            # Case 3. An answer and a cancel for the lost run are refused or
-            # end unresolved, and neither is effect-observed.
-            status, decision_now, raw, headers = exchange("/v1/decisions/" + head, authorized)
-            (work / "lost-decision.json").write_bytes(raw)
-            if status == 200:
-                answer = {"operation": "answer", "occurrenceId": decision["address"]["occurrenceId"],
-                          "generation": decision["generation"], "value": False}
-                outcome = attempt("/v1/decisions/" + head, answer, headers["etag"])
-            else:
-                outcome = (status, decision_now["code"], None)
-            assert outcome[0] != 202 or outcome[1] in ("refused", "unresolved"), ("lost run answer", outcome[:2])
-            assert outcome[2] is None or outcome[2]["effect"] is None, ("lost run answer effect", outcome[2]["effect"])
-            cancel = attempt(base + "/control", {"operation": "cancel"}, control_tag)
-            assert cancel[0] != 202 or cancel[1] in ("refused", "unresolved"), ("lost run cancel", cancel[:2])
-            assert cancel[2] is None or cancel[2]["effect"] is None, ("lost run cancel effect", cancel[2]["effect"])
-            value, _, _ = observed(base, "Run")
-            assert value["supervision"] == "lost" and (value["runtime"] is None or value["runtime"]["status"] != "succeeded")
-            print("PASS failures-worker case 3: the answer of decision", head, "ended as", outcome[:2], "and the cancel ended as",
-                  cancel[:2], "with no effect, and the run stays lost", flush=True)
+        # Case 3. An answer and a cancel for the lost run are refused or
+        # end unresolved, and neither is effect-observed.
+        status, decision_now, raw, headers = exchange("/v1/decisions/" + head, authorized)
+        (work / "lost-decision.json").write_bytes(raw)
+        if status == 200:
+            answer = {"operation": "answer", "occurrenceId": decision["address"]["occurrenceId"],
+                      "generation": decision["generation"], "value": False}
+            outcome = attempt("/v1/decisions/" + head, answer, headers["etag"])
+        else:
+            outcome = (status, decision_now["code"], None)
+        assert outcome[0] != 202 or outcome[1] in ("refused", "unresolved"), ("lost run answer", outcome[:2])
+        assert outcome[2] is None or outcome[2]["effect"] is None, ("lost run answer effect", outcome[2]["effect"])
+        cancel = attempt(base + "/control", {"operation": "cancel"}, control_tag)
+        assert cancel[0] != 202 or cancel[1] in ("refused", "unresolved"), ("lost run cancel", cancel[:2])
+        assert cancel[2] is None or cancel[2]["effect"] is None, ("lost run cancel effect", cancel[2]["effect"])
+        value, _, _ = observed(base, "Run")
+        assert value["supervision"] == "lost" and (value["runtime"] is None or value["runtime"]["status"] != "succeeded")
+        print("PASS failures-worker case 3: the answer of decision", head, "ended as", outcome[:2], "and the cancel ended as",
+              cancel[:2], "with no effect, and the run stays lost", flush=True)
 
-            # Case 4. No worker process remains or starts for the lost run.
-            remaining = descendants(process.pid)
-            assert not remaining, ("processes remain after the worker loss", groups(remaining))
-            stores = sorted(work.glob("manager/runs/runs/*/runtime"))
-            assert len(stores) == 1, ("run stores after the worker loss", stores)
-            lost_store = stores[0]
-            starts = [line for line in (lost_store / "events.ndjson").read_bytes().splitlines()
-                      if json.loads(line)["event"]["type"] == "run.started"]
-            assert len(starts) == 1, ("the lost run started again", len(starts))
-            print("PASS failures-worker case 4: no manager descendant remains and the run store of", run,
-                  "holds one run start", flush=True)
+        # Case 4. No worker process remains or starts for the lost run.
+        remaining = descendants(process.pid)
+        assert not remaining, ("processes remain after the worker loss", groups(remaining))
+        stores = sorted(work.glob("manager/runs/runs/*/runtime"))
+        assert len(stores) == 1, ("run stores after the worker loss", stores)
+        lost_store = stores[0]
+        starts = [line for line in (lost_store / "events.ndjson").read_bytes().splitlines()
+                  if json.loads(line)["event"]["type"] == "run.started"]
+        assert len(starts) == 1, ("the lost run started again", len(starts))
+        print("PASS failures-worker case 4: no manager descendant remains and the run store of", run,
+              "holds one run start", flush=True)
 
-            # Case 5. A new request on the same manager is reviewed,
-            # approved and completes with a verified result.
-            _, fresh = approve_mixed(create_request(), workflow, client)
-            _, answered, recovered = drive_mixed(fresh, client, overview=False)
-            assert answered and recovered, ("new run decisions", answered, recovered)
-            artifact = verified_download(fresh, client, authorized)
-            value, _, _ = observed(base, "Run")
-            assert value["supervision"] == "lost", ("lost run after the new run", value["supervision"])
-            print("PASS failures-worker case 5: new run", fresh, "on the same manager was reviewed, approved, answered and",
-                  "retried, and succeeded with verified result", artifact["id"], flush=True)
-        finally:
-            resident.stop()
-            if process.poll() is None:
-                process.terminate()
-            process.wait(timeout=25)
-            (work / "server-0.exit").write_text(str(process.returncode) + "\n")
+        # Case 5. A new request on the same manager is reviewed,
+        # approved and completes with a verified result.
+        _, fresh = approve_mixed(create_request(), workflow, client)
+        _, answered, recovered = drive_mixed(fresh, client, overview=False)
+        assert answered and recovered, ("new run decisions", answered, recovered)
+        artifact = verified_download(fresh, client, authorized)
+        value, _, _ = observed(base, "Run")
+        assert value["supervision"] == "lost", ("lost run after the new run", value["supervision"])
+        print("PASS failures-worker case 5: new run", fresh, "on the same manager was reviewed, approved, answered and",
+              "retried, and succeeded with verified result", artifact["id"], flush=True)
+    finally:
+        resident.stop()
+        if process.poll() is None:
+            process.terminate()
+        process.wait(timeout=25)
+        (work / "server-0.exit").write_text(str(process.returncode) + "\n")
     meter.measure({"failures.worker.manager-rss-peak-bytes": resident.peak()})
 
     # Case 6. The flow verb reports the run log of the lost run as ended
@@ -10153,10 +10232,12 @@ def worker_failure_checks():
           "uncertain asks", summary["states"]["uncertain"], flush=True)
     print("PASS failures-worker: every worker-loss case held against the running TLS 1.3 manager", flush=True)
     meter.measure({"failures.worker.passed": True})
+    meter.host_load("failures.worker", "end")
 
 
 if worker_failure_mode:
-    worker_failure_checks()
+    with CapacityHarness.reaping():
+        worker_failure_checks()
     raise SystemExit(0)
 
 
@@ -10175,6 +10256,7 @@ def manager_failure_checks():
     # lifetime. The prints assert nothing.
     meter = CapacityHarness(sys.argv[5] + "-measure.json", ("failures",))
     prefix = "failures.launched" if launched_failure_mode else "failures.manager"
+    meter.host_load(prefix, "start")
     started, residents = {}, {}
 
     def sampled(index):
@@ -10187,9 +10269,7 @@ def manager_failure_checks():
         """Start one foreground manager lifetime on the same root and
         configuration and wait for HTTPS readiness."""
         started[index] = time.monotonic()
-        with (work / f"server-{index}.stdout").open("wb") as output, (work / f"server-{index}.stderr").open("wb") as errors:
-            process = subprocess.Popen([str(runner), "--manager", "serve", "--config", str(config),
-                                        "+RTS", "-N" + native, "-RTS"], stdout=output, stderr=errors)
+        process = meter.serve(index)
         residents[index] = CapacityResident(process.pid)
         wait_ready(process)
         return process
@@ -10567,6 +10647,7 @@ def manager_failure_checks():
         print("PASS failures-launched: the launched quarantine of run", run, "was released with owner-released evidence once its",
               "stopped worker processes were gone, and run", second_run, "completed with one execution reservation", flush=True)
         meter.measure({"failures.launched.passed": True})
+        meter.host_load(prefix, "end")
 
     if launched_failure_mode:
         return launched_release()
@@ -10943,10 +11024,12 @@ def manager_failure_checks():
     print("PASS failures-manager: every manager-loss and quarantine-release case held across three lifetimes of the TLS 1.3 manager",
           second_run, third_run, flush=True)
     meter.measure({"failures.manager.passed": True})
+    meter.host_load(prefix, "end")
 
 
 if manager_failure_mode or launched_failure_mode:
-    manager_failure_checks()
+    with CapacityHarness.reaping():
+        manager_failure_checks()
     raise SystemExit(0)
 
 
@@ -10958,6 +11041,7 @@ def tui_failure_checks():
     # manager/CAPACITY.md: the start and the resident sampler of each
     # lifetime. The prints assert nothing.
     meter = CapacityHarness(TUI_FAILURES + "-measure.json", ("failures",))
+    meter.host_load("failures.tui", "start")
     started, residents = {}, {}
 
     def save(session, name):
@@ -10973,9 +11057,7 @@ def tui_failure_checks():
         """Start one foreground manager lifetime on the same root and
         configuration and wait for HTTPS readiness."""
         started[index] = time.monotonic()
-        with (work / f"server-{index}.stdout").open("wb") as output, (work / f"server-{index}.stderr").open("wb") as errors:
-            process = subprocess.Popen([str(runner), "--manager", "serve", "--config", str(config),
-                                        "+RTS", "-N" + native, "-RTS"], stdout=output, stderr=errors)
+        process = meter.serve(index)
         residents[index] = CapacityResident(process.pid)
         wait_ready(process)
         return process
@@ -11382,6 +11464,7 @@ def tui_failure_checks():
               "a held run and an endpoint change during delayed responses", flush=True)
         sampled(1)
         meter.measure({"failures.tui.passed": True})
+        meter.host_load("failures.tui", "end")
     finally:
         for index, process in enumerate(lifetimes):
             residents[index].stop()
@@ -16712,15 +16795,14 @@ def storage_checks():
     # persistent connection, so that their latencies exclude the opening of
     # a connection, and the resident memory of each lifetime is sampled.
     meter = CapacityHarness(STORAGE_MEASURE_RECORD, ("storage",))
+    meter.host_load("storage", "start")
     connection = PersistentConnection()
     residents = {}
 
     def serve(index):
         """Start one foreground manager lifetime on the same root and wait
         for HTTPS readiness."""
-        with (work / f"server-{index}.stdout").open("wb") as output, (work / f"server-{index}.stderr").open("wb") as errors:
-            process = subprocess.Popen([str(runner), "--manager", "serve", "--config", str(config),
-                                        "+RTS", "-N" + native, "-RTS"], stdout=output, stderr=errors)
+        process = meter.serve(index)
         residents[index] = CapacityResident(process.pid)
         wait_ready(process)
         return process
@@ -17034,6 +17116,7 @@ def storage_checks():
     print("PASS storage case 10: the flow verb exits", flow_status, "and reads the new log from position 0 with one lifetime and its",
           "shutdown notice at", lifetimes[0]["shutdown"], "and no gap notice", flush=True)
     print("PASS storage: every storage-error ending held across four lifetimes of the TLS 1.3 manager", flush=True)
+    meter.host_load("storage", "end")
 
 
 def capacity_admission_checks():
@@ -18572,27 +18655,32 @@ def faults_io_checks():
 
 
 if storage_mode:
-    storage_checks()
+    with CapacityHarness.reaping():
+        storage_checks()
     raise SystemExit(0)
 
 
 if faults_io_mode:
-    faults_io_checks()
+    with CapacityHarness.reaping():
+        faults_io_checks()
     raise SystemExit(0)
 
 
 if capacity_admission_mode:
-    capacity_admission_checks()
+    with CapacityHarness.reaping():
+        capacity_admission_checks()
     raise SystemExit(0)
 
 
 if capacity_inputs_mode:
-    capacity_inputs_checks()
+    with CapacityHarness.reaping():
+        capacity_inputs_checks()
     raise SystemExit(0)
 
 
 if capacity_streams_mode:
-    capacity_streams_checks()
+    with CapacityHarness.reaping():
+        capacity_streams_checks()
     raise SystemExit(0)
 
 
@@ -18637,7 +18725,8 @@ if captures_mode:
 
 
 if routes_mode:
-    route_checks()
+    with CapacityHarness.reaping():
+        route_checks()
     raise SystemExit(0)
 
 
@@ -18677,7 +18766,8 @@ if tui_mode == TUI_HISTORY:
 
 
 if tui_mode == TUI_FAILURES:
-    tui_failure_checks()
+    with CapacityHarness.reaping():
+        tui_failure_checks()
     raise SystemExit(0)
 
 

@@ -85,6 +85,30 @@ The measurements of a workload use these rules:
   rate on purpose.
 - **Several lifetimes.** For a workload of more than one lifetime, the
   resident peak is the largest peak of its lifetimes.
+- **Host load.** A run of record starts with a one-minute load average of
+  at most 16, which is half of the 32 logical processors of the tested
+  platform, and with no other manager process on the host. The harness reads
+  `os.getloadavg()` at the start and at the end of each workload. It keeps
+  the one-minute and five-minute load averages under the keys
+  `<workload>.host-load-1m-start`, `<workload>.host-load-1m-end`,
+  `<workload>.host-load-5m-start` and `<workload>.host-load-5m-end`. At the
+  start, it also counts the `--manager serve` processes whose configuration
+  is not the configuration of its fixture. It keeps the count under the key
+  `<workload>.other-managers-start` and their command lines in the file
+  `other-managers-<workload>.txt` of the fixture directory. In a capacity
+  mode, `<workload>` is the name of one lifetime: `reservations.r1`,
+  `reservations.r16`, `cohorts`, `queue`, `drafts`, `pages`, `captures`,
+  `streams`, `io-1`, `io-2` or `io-3`. In the storage, routes and failure
+  modes, it is the key prefix of the mode: `storage`, `routes`,
+  `failures.worker`, `failures.manager`, `failures.launched` or
+  `failures.tui`. These keys name no ceiling, so the summary lists them as
+  unchecked. A run outside the rule keeps its record with its load, and it
+  is not a run of record. The rule states the conditions of a measurement.
+  It sets no ceiling.
+- **Cleanup.** The harness stops each manager process that it started when
+  the mode ends, also when the mode fails or receives SIGTERM. It sends
+  SIGTERM, waits at most 25 seconds and then sends SIGKILL. A failed mode
+  leaves no manager process of its fixture.
 
 ## Allowances and headroom
 
