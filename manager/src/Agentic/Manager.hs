@@ -10,7 +10,7 @@ module Agentic.Manager
     CoordinationStore, StoreIdentity (..), StoreFailure (..), Checkpoint (..),
     withCoordinationStore, withServingStore, storeIdentity, checkpointStore, backupCoordinationStore, RestoreFence (..), StoreRestoration (..), restoreCoordinationStore,
     LocalAdminRequest, decodeLocalAdminRequest, administerCredentials, withLocalAdministration,
-    AdministrationHooks (..), offlineAdministration, StoreState (..), ServeHooks (..), serveManager,
+    AdministrationHooks (..), offlineAdministration, StoreState (..), LifetimeFacts (..), stoppedLifetime, ServeHooks (..), serveManager,
   ) where
 
 import Agentic.Manager.Profile
@@ -20,7 +20,7 @@ import Agentic.Manager.Root
 import Agentic.Manager.Store
 import Agentic.Manager.Credentials (administerCredentials)
 import Agentic.Manager.LocalAdmin (AdministrationHooks (..), offlineAdministration, withLocalAdministration)
-import Agentic.Manager.Quarantine (StoreState (..))
+import Agentic.Manager.Quarantine (StoreState (..), LifetimeFacts (..), stoppedLifetime)
 import Agentic.Manager.Protocol.LocalAdmin (LocalAdminRequest, decodeLocalAdminRequest)
 import qualified Agentic.Manager.Application as Application
 import qualified Agentic.Manager.History as History
@@ -50,7 +50,8 @@ data ServeHooks = ServeHooks
 -- 'InvalidConfiguration'. With an administration root, the local
 -- administration channel serves @reload-profiles@ with 'serveReload',
 -- @drain@ with 'Service.drain' and @shutdown@ with 'serveStop', and @status@
--- reports @draining@ after a drain. After a successful reload, each installed
+-- reports the facts of 'Service.lifetimeFacts', with @draining@ after a
+-- drain. After a successful reload, each installed
 -- profile is probed, as at the start. A drain keeps the listener serving
 -- until the process ends. A shutdown calls 'serveStop' after its reply.
 serveManager :: ServeHooks -> Configuration -> [(FilePath, Text)] -> IO ()
@@ -70,6 +71,6 @@ serveManager hooks configuration legacy = do
         case configurationAdministrationRoot configuration of
           Nothing -> listen
           Just _ -> withLocalAdministration store (AdministrationHooks
-            { hookState = (\closed -> if closed then StoreDraining else StoreServing) <$> Service.draining service,
+            { hookFacts = Service.lifetimeFacts service,
               hookWake = Service.wakeAdmission service, hookReload = Just reload, hookDrain = Just (Service.drain service),
               hookShutdown = Just (serveStop hooks) }) listen

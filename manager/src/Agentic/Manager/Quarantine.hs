@@ -7,12 +7,13 @@
 -- appends to the manager log. No operation reads or signals a stored process
 -- identity, or adopts a worker.
 module Agentic.Manager.Quarantine
-  ( StoreState (..), reportStatus, reportStoreCheck, unavailableStoreCheck,
+  ( StoreState (..), LifetimeFacts (..), stoppedLifetime, reportStatus, reportStoreCheck, unavailableStoreCheck,
     QuarantineState (..), CleanupEvidence (..), inspectQuarantine, checkQuarantine, cleanupEvidenceLifetime,
     releaseQuarantine
   ) where
 
 import Agentic.Manager.Administration (localAdministrator, recordAdministration, recordAdministrationReceipt)
+import Agentic.Manager.Fault (FaultClass, faultClassName)
 import Agentic.Manager.Flow (AdministrationBody (ReleaseAdministration))
 import Agentic.Manager.Protocol.Command (encoded, validId)
 import Agentic.Manager.Protocol.LocalAdmin (AdminFailure (..), adminError, adminSuccess)
@@ -26,11 +27,11 @@ import Control.Exception (IOException, bracket, throwIO, try)
 import Control.Monad (forM, unless)
 import Crypto.Hash (Digest, SHA256, hash)
 import Crypto.Random (getRandomBytes)
-import Data.Aeson (Value (Null), object, (.=))
+import Data.Aeson (Value (Null), object, toJSON, (.=))
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Key as Key
 import Data.ByteArray.Encoding (Base (Base16), convertToBase)
-import Data.Maybe (isJust)
+import Data.Maybe (isJust, isNothing)
 import qualified Data.ByteString as BS
 import qualified Data.Text.Encoding as TE
 import Data.Text (Text)
@@ -52,22 +53,72 @@ stateName state = case state of
   StoreDraining -> "draining"
   StoreStopped -> "stopped"
 
+-- | The facts of the answering lifetime that the Store does not hold: its
+-- state, the count of its owned preparation and run tasks that have not
+-- ended, and the fault class that its service fault cell holds.
+data LifetimeFacts = LifetimeFacts
+  { lifetimeState :: !StoreState, lifetimeOwnedWorkers :: !Int, lifetimeFault :: !(Maybe FaultClass) }
+
+-- | The facts of offline administration: no manager serves, so no worker is
+-- owned and no service fault is held.
+stoppedLifetime :: LifetimeFacts
+stoppedLifetime = LifetimeFacts StoreStopped 0 Nothing
+
 -- | The durable identities of the Store, the process generation of the
--- answering lifetime, and the count of reservations that are not released.
--- Quarantined reservations count, since they keep their slots and resource
--- keys until cleanup evidence releases them.
-reportStatus :: StoreState -> CoordinationStore -> IO BS.ByteString
-reportStatus state store = answered "status" $ do
+-- answering lifetime, the count of reservations that are not released, and
+-- the bounded operational facts. Quarantined reservations count, since they
+-- keep their slots and resource keys until cleanup evidence releases them.
+-- @live@ holds when a serving lifetime answers through its channel, and
+-- @ready@ when that lifetime admits work: it does not drain and its service
+-- fault cell holds no fault. Each Store fact is one SQL aggregate. The
+-- reservations by state partition the active reservations: a held
+-- reservation counts as @review@ while its request is in review, as
+-- @running@ once its start is pending or its run is associated, and as
+-- @preparing@ otherwise. A lost run has no terminal observation, and its
+-- supervision is lost or its cleanup is pending, so it is reported apart from
+-- any subscriber of its events.
+reportStatus :: LifetimeFacts -> CoordinationStore -> IO BS.ByteString
+reportStatus facts store = answered "status" $ do
   identity <- storeIdentity store
-  active <- runRead store $ do
-    rows <- query "SELECT count(*) FROM reservations WHERE state!='released'" []
-    case rows of
-      [[SQL.SQLInteger count]] | count >= 0 && count <= 16 -> pure (fromIntegral count :: Int)
+  (active, byState, (queued, oldest), lost, unresolved) <- runRead store $ do
+    reservations <- query ("SELECT count(*),count(CASE WHEN v.state='held' AND r.phase NOT IN ('review','start-pending','associated') THEN 1 END),"
+      <> "count(CASE WHEN v.state='held' AND r.phase='review' THEN 1 END),"
+      <> "count(CASE WHEN v.state='held' AND r.phase IN ('start-pending','associated') THEN 1 END),"
+      <> "count(CASE WHEN v.state='cleanup-pending' THEN 1 END),count(CASE WHEN v.state='quarantined' THEN 1 END) "
+      <> "FROM reservations v JOIN requests r ON r.id=v.request_id WHERE v.state!='released'") []
+    (active, byState) <- case reservations of
+      [SQL.SQLInteger count : states] | count >= 0 && count <= 16 -> do
+        counts <- forM states $ \value -> case value of
+          SQL.SQLInteger part | part >= 0 -> pure (fromIntegral part :: Int)
+          _ -> refuseTransaction StoreIntegrity
+        pure (fromIntegral count :: Int, counts)
       _ -> refuseTransaction StoreIntegrity
+    queue <- query ("SELECT count(*),CAST(max(0,(julianday('now')-min(julianday(c.accepted_at)))*86400) AS INTEGER) "
+      <> "FROM requests r LEFT JOIN commands c ON c.id=r.enqueue_command WHERE r.phase='queued'") []
+    waiting <- case queue of
+      [[SQL.SQLInteger count, SQL.SQLInteger age]] | count > 0 && age >= 0 -> pure (fromIntegral count :: Int, Just (fromIntegral age :: Int))
+      [[SQL.SQLInteger count, SQL.SQLNull]] | count >= 0 -> pure (fromIntegral count, Nothing)
+      _ -> refuseTransaction StoreIntegrity
+    lost <- counted "SELECT count(*) FROM runs WHERE terminal_observed=0 AND supervision IN ('lost','cleanup-pending')"
+    unresolved <- counted "SELECT count(*) FROM commands WHERE state='unresolved'"
+    pure (active, byState, waiting, lost, unresolved)
+  let state = lifetimeState facts
+      live = case state of StoreStopped -> False; _ -> True
+      ready = case state of StoreServing -> isNothing (lifetimeFault facts); _ -> False
   pure $ object
     ["state" .= stateName state, "authorityEpoch" .= storeAuthorityEpoch identity,
      "streamId" .= storeStreamId identity, "processGeneration" .= storeProcessGeneration identity,
-     "activeReservations" .= active]
+     "activeReservations" .= active, "live" .= live, "ready" .= ready,
+     "queuedRequests" .= queued, "oldestQueuedAgeSeconds" .= oldest,
+     "reservations" .= object (zip ["preparing", "review", "running", "cleanup", "quarantined"] (map toJSON byState)),
+     "ownedWorkers" .= lifetimeOwnedWorkers facts, "lostRuns" .= lost, "unresolvedCommands" .= unresolved,
+     "serviceFault" .= maybe "none" faultClassName (lifetimeFault facts)]
+  where
+    counted statement = do
+      rows <- query statement []
+      case rows of
+        [[SQL.SQLInteger count]] | count >= 0 -> pure (fromIntegral count :: Int)
+        _ -> refuseTransaction StoreIntegrity
 
 -- | A SQLite quick check of the open Store, and the identities of its
 -- quarantined claims in identity order: each reservation in state

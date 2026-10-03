@@ -3,7 +3,7 @@
 
 -- | One live coordinator and bounded indexes of its original owned associations.
 module Agentic.Manager.Service
-  ( Service, withService, withServiceRequest, serviceStore, serviceFault, wakeAdmission, drain, draining,
+  ( Service, withService, withServiceRequest, serviceStore, serviceFault, wakeAdmission, drain, lifetimeFacts,
     enqueue, editInput, withdraw, approve, discard, submitExport, submitLineage, controlRun, controlDecision, readControl, withControl,
     withSnapshot, withSnapshotSource, withOverviewSource, Overview.Collection (..), withCollectionSource,
     withRun, withOutputs, withOutputsSource, withExportsSource, withExport, withLineageSource, download
@@ -15,6 +15,7 @@ import qualified Agentic.Manager.Artifacts as Artifacts
 import qualified Agentic.Manager.Drafts as Drafts
 import Agentic.Manager.Authorization (CredentialProof, AuthorizedView, attachResponseLoan, withAuthorizedCatalogueContext)
 import Agentic.Manager.Fault (FaultClass (CommandRefusal), classifyFault, recordFault)
+import Agentic.Manager.Quarantine (LifetimeFacts (..), StoreState (StoreDraining, StoreServing))
 import qualified Agentic.Manager.History as History
 import qualified Agentic.Manager.Overview as Overview
 import Agentic.Manager.Pages (Producer)
@@ -89,10 +90,17 @@ wakeAdmission = atomically . A.notifyAdmission . admission
 drain :: Service -> IO ()
 drain = A.beginDrain . admission
 
--- | Whether this service no longer admits new work: a drain or a shutdown
--- has begun.
-draining :: Service -> IO Bool
-draining = atomically . A.admissionClosed . admission
+-- | The facts of this lifetime that @status@ reports, read in one
+-- transaction: @draining@ once a drain or a shutdown has begun and @serving@
+-- before, the count of owned preparation and run tasks that have not ended,
+-- and the fault that the service fault cell holds. Each task supervises one
+-- worker and ends after the cleanup of that worker. A task that the service
+-- retains after its end, because its cleanup is not proven, does not count.
+lifetimeFacts :: Service -> IO LifetimeFacts
+lifetimeFacts service = atomically $ do
+  closed <- A.admissionClosed (admission service)
+  jobs <- Map.elems <$> readTVar (owned service)
+  LifetimeFacts (if closed then StoreDraining else StoreServing) (length [() | Working {} <- jobs]) <$> readTVar (faultCell service)
 
 -- | The service of one Store lifetime. The legacy bindings come from
 -- 'History.bindLegacyHistory' and are never controllable.

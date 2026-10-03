@@ -112,7 +112,11 @@ lifecycle = len(sys.argv) == 6 and sys.argv[5] == LIFECYCLE
 # and the completion binding last, and the source Store is unchanged except
 # for the checkpoint of the copy. A second backup into the same directory
 # refuses with output-conflict, and a backup through the live channel of the
-# fourth lifetime refuses with state-conflict.
+# fourth lifetime refuses with state-conflict. Case 5 is restore from that
+# backup. Case 6 is the operational facts of status in a lifetime after the
+# restoration: an idle manager, a queued request, a running run, a worker
+# SIGKILL that the facts report as one more lost run, a drain that leaves the
+# manager live and not ready, and offline status after the lifetime ends.
 OPERATIONS = "operations"
 operations_mode = len(sys.argv) == 6 and sys.argv[5] == OPERATIONS
 mixed = len(sys.argv) == 6 and sys.argv[5] in ("mixed", "mixed-confirm", "tui-approval", "tui-consent-control", APPROVE_FAULT, LIFECYCLE, OPERATIONS, "pages", "routes", "failures-worker", "failures-manager", "failures-launched", "storage", "pi-client", "pi-client-controls", "emacs-client", "emacs-client-controls", "pi-host-smoke", "pi-host", "pi-host-broken-answer", "pi-host-model", "pi-host-model-decline", "emacs-service", "emacs-service-broken-answer") + JOURNEYS
@@ -4750,7 +4754,7 @@ def operations_drain(with_second, completed):
           "and the receipt", replies[0]["body"]["result"], "of each", flush=True)
     print("PASS operations: drain case 2 held through the TLS 1.3 manager", flush=True)
     operations_restart(authorized, waiting, cancelled_at_shutdown, lifetime, stop)
-    operations_restore(authorized, completed, lifetime, stop)
+    operations_restore(authorized, completed, cancelled_at_shutdown[0], lifetime, stop)
 
 
 def operations_shutdown(process, client, authorized, reviewed, workflow, waiting):
@@ -4982,7 +4986,7 @@ def operations_restart(authorized, waiting, shutdown, lifetime, stop):
     print("PASS operations: shutdown case 3 and backup case 4 held through the TLS 1.3 manager", flush=True)
 
 
-def operations_restore(authorized, completed, lifetime, stop):
+def operations_restore(authorized, completed, shutdown_run, lifetime, stop):
     """Case 5 is restore from the backup of case 4. A new lifetime
     completes a new request and stops through shutdown. The operator saves
     the offline status answer as the fencing evidence. Evidence that names
@@ -4992,7 +4996,8 @@ def operations_restore(authorized, completed, lifetime, stop):
     next lifetime refuses the old credential with 401, has no trace of the
     new request and its run, serves the run that case 1b completed with its
     verified result, refuses a restore through the live channel with
-    state-conflict, and completes a new request."""
+    state-conflict, and completes a new request. shutdown_run is the run
+    that the shutdown of case 3 cancelled, which case 6 reads."""
     served = json.loads(config.read_text())
     offline_config = work / "offline-shutdown.json"
     root = Path(served["managerRoot"])
@@ -5118,6 +5123,186 @@ def operations_restore(authorized, completed, lifetime, stop):
     finally:
         stop(5, process, output, errors)
     print("PASS operations: restore case 5 held through the TLS 1.3 manager", flush=True)
+    operations_status(reprovisioned, shutdown_run, lifetime, stop)
+
+
+def operations_status(authorized, shutdown_run, lifetime, stop):
+    """Case 6 is the operational facts of status in a sixth lifetime on the
+    restored Store, through the live channel and then offline. The requests
+    that the restored Store still holds in the queue or in preparation are
+    withdrawn first, so that the manager is idle. The one lost run of the
+    idle manager is shutdown_run, the run that the shutdown of case 3
+    cancelled before the manager observed its terminal record, and which the
+    backup of case 4 holds. Request A of profile_1 then
+    holds the reservation of the resource key of profile_1 in review, and
+    request B of the same profile waits in the queue with the reason
+    profile-busy. A is approved, and its run waits at its person question.
+    The harness kills the process groups of the worker of that run with
+    SIGKILL, and status reports one more lost run than at the idle manager. A
+    drain then leaves the manager live and not ready. After the lifetime
+    ends, offline status reports the facts of the Store with live and ready
+    false."""
+    status_request = {"version": 1, "operation": "status"}
+    served = json.loads(config.read_text())
+    root = Path(served["managerRoot"])
+    offline_config = work / "offline-shutdown.json"
+    states = ("preparing", "review", "running", "cleanup", "quarantined")
+
+    def status():
+        return administration(status_request)["result"]
+
+    def until(label, ready):
+        deadline = time.monotonic() + 40
+        while True:
+            value = status()
+            if ready(value):
+                return value
+            assert time.monotonic() < deadline, ("status deadline", label, value)
+            time.sleep(0.1)
+
+    def consistent(value):
+        assert sorted(value["reservations"]) == sorted(states), value["reservations"]
+        assert sum(value["reservations"].values()) == value["activeReservations"], value
+        return value
+
+    def held(value, **expected):
+        return {state: expected.get(state, 0) for state in states} == value["reservations"]
+
+    def workflow_of(profile):
+        code, catalogue, raw = request("/v1/workflows?profileId=" + profile, authorized)
+        assert code == 200, ("workflows", profile, code)
+        validate("WorkflowPage", catalogue, raw)
+        return next(item for item in catalogue["items"] if item["name"] == "mixed-controls")
+
+    def create_request(capabilities, workflow):
+        body = json.dumps({"workflowId": workflow["id"], "descriptorRevision": workflow["revision"],
+                           "profileId": workflow["profileId"], "profileRevision": workflow["profileRevision"]},
+                          separators=(",", ":")).encode()
+        key = capabilities["authorityEpoch"] + "." + secrets.token_urlsafe(16)
+        code, created, raw = request("/v1/requests", authorized | {
+            "Content-Type": "application/json", "Idempotency-Key": key}, method="POST", payload=body)
+        assert code == 201, ("request creation", code, created.get("code"))
+        validate("Request", created, raw)
+        return created
+
+    process, output, errors = lifetime(6)
+    try:
+        wait_ready(process)
+        code, capabilities, raw = request("/v1/capabilities", authorized)
+        assert code == 200
+        validate("Capabilities", capabilities, raw)
+        client = mixed_client(capabilities, authorized)
+        observed, wait_for, mutate, _ = client
+
+        # 6a. The idle manager.
+        withdrawn, path = [], "/v1/requests"
+        while path is not None:
+            code, page, raw, _ = fetch(path, authorized)
+            assert code == 200, ("the request collection", code, page.get("code"))
+            validate("RequestPage", page, raw)
+            withdrawn += [item["id"] for item in page["items"] if item["phase"] in ("queued", "preparing", "review")]
+            path = page["page"]["next"]
+        for ident in withdrawn:
+            current, tag, _ = observed("/v1/requests/" + ident, "Request")
+            if current["phase"] in ("queued", "preparing", "review"):
+                mutate("/v1/requests/" + ident, {"operation": "withdraw"}, tag)
+        idle = consistent(until("idle", lambda value: value["activeReservations"] == 0 and value["queuedRequests"] == 0
+                                and value["ownedWorkers"] == 0))
+        assert (idle["state"], idle["live"], idle["ready"], idle["serviceFault"]) == ("serving", True, True, "none"), idle
+        assert idle["authorityEpoch"] == capabilities["authorityEpoch"] and idle["oldestQueuedAgeSeconds"] is None, idle
+        assert held(idle), idle["reservations"]
+        lost, unresolved = idle["lostRuns"], idle["unresolvedCommands"]
+        baseline, _, _ = observed("/v1/runs/" + shutdown_run, "Run")
+        assert lost == 1 and baseline["supervision"] == "lost" and (
+            baseline["runtime"] is None or baseline["runtime"]["status"] not in ("succeeded", "failed", "cancelled")), (
+            "the lost runs of the restored Store", idle, baseline["supervision"], baseline["runtime"])
+        print("PASS operations case 6a: after", len(withdrawn), "withdrawals, status at the idle manager reported live and",
+              "ready, no queued request, no reservation, no owned worker,", lost, "lost run (run", shutdown_run,
+              "that the shutdown of case 3 cancelled),", unresolved, "unresolved commands and service fault",
+              idle["serviceFault"], flush=True)
+
+        # 6b. Request A holds the reservation of profile_1 in review, and
+        # request B waits in the queue behind it.
+        workflow = workflow_of("profile_1")
+        first = create_request(capabilities, workflow)
+        enqueue_mixed(first, workflow, client)
+        current, _, _ = wait_for(first["links"]["self"], "Request", lambda value: value["preparationId"] is not None)
+        assert current["phase"] == "review", current["phase"]
+        second = create_request(capabilities, workflow)
+        enqueue_mixed(second, workflow, client)
+        wait_for(second["links"]["self"], "Request",
+                 lambda value: value["phase"] == "queued" and value["admission"]["reasons"] == ["profile-busy"])
+        queued = consistent(status())
+        assert (queued["live"], queued["ready"], queued["queuedRequests"], queued["ownedWorkers"]) == (True, True, 1, 1), queued
+        # The frozen parser reads each number as a Decimal.
+        assert held(queued, review=1) and queued["oldestQueuedAgeSeconds"] is not None \
+            and queued["oldestQueuedAgeSeconds"] >= 0, queued
+        time.sleep(2.5)
+        later = consistent(status())
+        assert later["oldestQueuedAgeSeconds"] >= queued["oldestQueuedAgeSeconds"] + 2, (queued, later)
+        print("PASS operations case 6b: with request", first["id"], "in review and request", second["id"], "queued, status",
+              "reported one queued request aged", queued["oldestQueuedAgeSeconds"], "and then",
+              later["oldestQueuedAgeSeconds"], "seconds, one reservation in review and one owned worker", flush=True)
+
+        # 6c. The run of request A waits at its person question.
+        _, run = approve_review(first, workflow, client)
+        head, _, _ = drive_mixed(run, client, stop_at_question=True, overview=False)
+        assert head is not None, ("the run did not reach its question", run)
+        running = consistent(status())
+        assert (running["ready"], running["queuedRequests"], running["ownedWorkers"]) == (True, 1, 1), running
+        assert held(running, running=1) and running["lostRuns"] == lost and running["unresolvedCommands"] == unresolved, running
+        print("PASS operations case 6c: with run", run, "at its person question, status reported one running reservation,",
+              "one owned worker, one queued request and", running["lostRuns"], "lost runs", flush=True)
+
+        # 6d. SIGKILL of the worker process groups of the run.
+        tree = descendants(process.pid)
+        listing = subprocess.run(["ps", "-o", "pid=,pgid="] + sum((["-p", str(pid)] for pid in tree), []),
+                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=10).stdout
+        targets = sorted({int(line.split()[1]) for line in listing.splitlines() if line.strip()})
+        assert targets and os.getpgid(process.pid) not in targets, ("worker process groups", targets)
+        for group in targets:
+            os.killpg(group, signal.SIGKILL)
+        wait_for("/v1/runs/" + run, "Run", lambda value: value["supervision"] == "lost")
+        killed = consistent(until("lost run", lambda value: value["lostRuns"] == lost + 1
+                                  and value["reservations"]["running"] == 0))
+        assert killed["live"] and killed["reservations"]["quarantined"] == 0, killed
+        print("PASS operations case 6d: after SIGKILL of the worker process groups", targets, "of run", run, "status",
+              "reported lostRuns", killed["lostRuns"], "(one more than the", lost, "of the idle manager) with",
+              killed["activeReservations"], "active reservations and", killed["ownedWorkers"], "owned workers", flush=True)
+
+        # 6e. A drain leaves the manager live and not ready. Request B, which
+        # the released key let the manager prepare, returns to the queue.
+        assert administration({"version": 1, "operation": "drain"})["result"] == {"state": "draining"}
+        drained = consistent(until("drained", lambda value: value["activeReservations"] == 0 and value["ownedWorkers"] == 0))
+        assert (drained["state"], drained["live"], drained["ready"]) == ("draining", True, False), drained
+        assert drained["queuedRequests"] == 1 and drained["lostRuns"] == lost + 1, drained
+        print("PASS operations case 6e: during the drain, status reported state", drained["state"], "live",
+              drained["live"], "ready", drained["ready"], "and", drained["queuedRequests"], "queued request", flush=True)
+    finally:
+        stop(6, process, output, errors)
+
+    # 6f. Offline status reports the facts of the Store with live and ready
+    # false.
+    offline = consistent(administration(status_request, path=offline_config)["result"])
+    assert (offline["state"], offline["live"], offline["ready"], offline["ownedWorkers"], offline["serviceFault"]) == (
+        "stopped", False, False, 0, "none"), offline
+    assert offline["queuedRequests"] == 1 and offline["lostRuns"] == lost + 1 and held(offline), offline
+    import sqlite3
+    copy = Path(tempfile.mkdtemp(prefix="status.", dir=work))
+    for name in ("coordination.sqlite3", "coordination.sqlite3-wal"):
+        if (root / name).exists():
+            shutil.copyfile(root / name, copy / name)
+    connection = sqlite3.connect(str(copy / "coordination.sqlite3"))
+    try:
+        (recorded,), = connection.execute("SELECT count(*) FROM commands WHERE state='unresolved'")
+    finally:
+        connection.close()
+        shutil.rmtree(copy)
+    assert offline["unresolvedCommands"] == recorded >= unresolved, (offline, recorded, unresolved)
+    print("PASS operations case 6f: offline status reported live and ready false, no owned worker,",
+          offline["queuedRequests"], "queued request,", offline["lostRuns"], "lost run and the",
+          offline["unresolvedCommands"], "unresolved commands of the Store", flush=True)
+    print("PASS operations: status case 6 held through the TLS 1.3 manager", flush=True)
 
 
 if operations_mode:

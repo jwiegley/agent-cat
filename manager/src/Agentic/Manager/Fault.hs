@@ -5,7 +5,7 @@
 -- exception message, request content, credential, file path or SQL text.
 module Agentic.Manager.Fault
   ( ManagerFault (..), FaultClass (..), configurationLoan, refuseStorageUnavailable, storeFailureRefusal,
-    recordUndeclaredRefusal, classifyFault, faultProblem, faultLabel, recordFault ) where
+    recordUndeclaredRefusal, classifyFault, faultProblem, faultLabel, faultClassName, recordFault ) where
 
 import Agentic.Manager.Fault.Record
 import Agentic.Manager.Profile (Diagnostic)
@@ -76,6 +76,18 @@ classifyFault failure
 faultProblem :: FaultClass -> (Int, Text)
 faultProblem (CommandRefusal failure) = (failureStatus failure, failureCode failure)
 faultProblem _ = (503, "storage-unavailable")
+
+-- | The fixed word of the class of one fault, without the refusal, the
+-- diagnostic or the exception type that the class holds. The @status@
+-- operation of local administration reports it as @serviceFault@.
+faultClassName :: FaultClass -> Text
+faultClassName fault = case fault of
+  CommandRefusal _ -> "command-refusal"
+  StoreRefusal _ -> "store-refusal"
+  ConfigurationFault _ -> "configuration-fault"
+  WorkerRefusal _ -> "worker-refusal"
+  InternalFault _ -> "internal-fault"
+  UnexpectedFault _ -> "unexpected-fault"
 
 faultLabel :: FaultClass -> Text
 faultLabel fault = case fault of

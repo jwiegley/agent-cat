@@ -13519,6 +13519,51 @@ Open:
    restore-interruption mutation audit was updated and matches Store.hs once, but the audit was not
    run under the fast-validation rule. Run it in a stage that is authorized to run it.
 
+* TODO [#D] Resolve the non-blocking fess findings of subtask PG12
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pg12-fess-followup-8v0s
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-03 Sat 10:26]
+:MODIFIED: [2026-10-03 Sat 10:26]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess pg-PG12-r1 (report fess/pg-PG12-r1.md in the private evidence
+directory). PG12 added the bounded operational facts to the status result of local
+administration.
+
+Open:
+
+1. (medium) manager/test/service_http.py (operations case 6a and 6d): the acceptance item says
+   that status reports lostRuns 1 after a worker SIGKILL. The recorded run shows a change from 1
+   to 2. Case 6a asserts lostRuns 1 as a fixed baseline. That baseline run exists only because of
+   the open shutdown-without-cancel defect, so a fix of that defect makes case 6a fail for a
+   reason unrelated to status. Assert only the SIGKILL delta (lostRuns after the kill equals the
+   idle lostRuns plus 1) and remove the fixed baseline, or approve the delta wording of the
+   acceptance item.
+2. (low) manager/src/Agentic/Manager/Quarantine.hs (reportStatus queue aggregate): the aggregate
+   joins requests.enqueue_command, which is a nullable column. If no queued request has a
+   joinable enqueue command, status reports queuedRequests above 0 with oldestQueuedAgeSeconds
+   null. The documents say that null means that nothing is queued. Accept the null age only when
+   the count is 0 and refuse with StoreIntegrity otherwise, or document the case in
+   manager/COMMANDS.md and doc/api/README.md.
+3. (low) doc/workflow-manager-handoff.md (about line 2099): the WM-042 row of the current-state
+   table still cites operations cases 1 to 5 and does not mention the status facts. Cite case 6
+   and the status facts.
+4. (low) manager/test/CommandCheck.hs and manager/test/service_http.py case 6: a serviceFault
+   other than none, and ready false because of a fault, are exercised only through injected
+   LifetimeFacts. Service.lifetimeFacts was not observed to read a real fault from the fault
+   cell. The reservation buckets preparing, cleanup and quarantined were not observed above 0.
+   Add one integration observation of each when a cheap trigger exists, or record the gap.
+5. (low) manager/test/CommandCheck.hs (offline facts check): the term
+   (queued > 0 || oldest == Null) checks nothing about the age when queued requests exist. When
+   queued is above 0, also check that oldestQueuedAgeSeconds is a non-negative number.
+
 * TODO [#D] Resolve the non-blocking fess findings of subtask PG8
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -24866,7 +24911,7 @@ Publish precommitted workload and resource ceilings. All core advertised bounds 
 :LABELS:   ["p10","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-03 Sat 10:00]
+:MODIFIED: [2026-10-03 Sat 10:26]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-042
 :SOURCE_REPO: agent-cat
@@ -25084,6 +25129,13 @@ recipe that ignores WAL or unresolved effects.
     "author": "johnw",
     "text": "PG11 (2026-10-03): the restore operation of WM-042 now completes a restoration that an interruption fenced. On a root with a restore-in-progress marker, restore compares the fencing evidence with the pre-restore identities that the marker records, requires the backup digest that the marker records, verifies and copies the backup again, applies the recorded revision and claims, rotates the identities, revokes credentials and removes the marker last. Another backup or mismatched evidence refuses with state-conflict and leaves the marker. Markers of the earlier format refuse. Evidence (PG/PG11/impl-r1): build, manager-store-check main and restart at N8 (restart holds the completion case), manager-admission-check main at N8, service_http.py failures-backup at N8 with case 3 reached (completion, serve, history read and a new run), Phase A journey at N8 and make -C doc check, all exit 0. Not a capacity run. Findings in acat-pg11-fess-followup-dygs.",
     "created_at": "2026-10-03T17:00:10Z"
+  },
+  {
+    "id": 726,
+    "issue_id": "acat-wm-042-sdg9",
+    "author": "johnw",
+    "text": "PG12 (2026-10-03): the status result of local administration now carries additive bounded operational facts: live, ready, queuedRequests, oldestQueuedAgeSeconds, reservations by state (preparing, review, running, cleanup, quarantined), ownedWorkers, lostRuns, unresolvedCommands and serviceFault (a fixed class word). The counts are single SQL aggregates or in-memory STM reads. The live channel passes the Service facts through AdministrationHooks.hookFacts. Offline status reports live false and ready false. openapi.yaml adds only nine optional properties to the status result, listed in doc/api/README.md as accepted additive fields. Evidence (PG/PG12/impl-r1): build, manager-command-check at N8 with command_contract.py and credential_cli.py, service_http.py operations at N8 with cases 1 to 6 (case 6: idle, queued request, running run, draining with ready false and live true, worker SIGKILL raises lostRuns by one), make -C doc check, the openapi diff against 88d999b7 and the Phase A journey at N8, all exit 0. Not a capacity run. The lostRuns baseline in case 6 is 1 because of the open shutdown-without-cancel defect, so the SIGKILL shows 1 to 2. Findings in acat-pg12-fess-followup-8v0s.",
+    "created_at": "2026-10-03T17:26:45Z"
   }
 ]
 #+end_src

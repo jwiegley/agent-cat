@@ -7,7 +7,8 @@ module Main (main) where
 import qualified "agentic" Agentic.Manager as Public
 import Agentic.Manager.Credentials (administerCredentials)
 import Agentic.Manager.LocalAdmin (AdministrationHooks (..), administerLocally, offlineAdministration, withLocalAdministration)
-import Agentic.Manager.Quarantine (StoreState (..))
+import Agentic.Manager.Fault (FaultClass (StoreRefusal))
+import Agentic.Manager.Quarantine (LifetimeFacts (..), StoreState (..))
 import qualified Agentic.Manager.Protocol.LocalAdmin as Admin
 import Agentic.Manager.Authorization
 import Agentic.Manager.Commands
@@ -123,7 +124,7 @@ serveCredentialChecks path = do
     -- The live reload of this fixture loads the served file again, as the
     -- serve hook of the CLI does.
     let reload = loadServed >>= either (pure . Left) (reloadConfiguration installed)
-        served action = offlineAdministration {hookState = pure StoreServing, hookReload = Just action}
+        served action = offlineAdministration {hookFacts = pure servingLifetime, hookReload = Just action}
     withCoordinationStore installed $ \store -> withLocalAdministration store (served reload) $ do
       conflict <- try @Diagnostic (withLocalAdministration store (served reload) (pure ()))
       requireCheck "second live endpoint refuses without replacing the original"
@@ -223,6 +224,11 @@ scalarText :: CoordinationStore -> Text -> IO Text
 scalarText store statement = runRead store $ do
   rows <- query statement []
   case rows of [[SQL.SQLText value]] -> pure value; _ -> refuseTransaction StoreIntegrity
+-- | The lifetime facts of a serving manager with no owned worker and no
+-- service fault.
+servingLifetime :: LifetimeFacts
+servingLifetime = LifetimeFacts StoreServing 0 Nothing
+
 scalarInt :: CoordinationStore -> Text -> IO Int64
 scalarInt store statement = runRead store $ do
   rows <- query statement []
@@ -1472,7 +1478,7 @@ credentialAdministrationChecks work = withFixture work "credentials" (64*command
     (adminField "ok" offlineReload == Bool False && adminField "code" (adminField "error" offlineReload) == String "state-conflict")
   reloadWakes <- newIORef (0 :: Int)
   let liveReload outcome = answeredLocally offlineAdministration
-        {hookState = pure StoreServing, hookWake = modifyIORef' reloadWakes (+ 1), hookReload = Just (pure outcome)} store Admin.ReloadProfiles
+        {hookFacts = pure servingLifetime, hookWake = modifyIORef' reloadWakes (+ 1), hookReload = Just (pure outcome)} store Admin.ReloadProfiles
   (_, installedProfiles) <- configurationSnapshot installed >>= right
   reloaded <- liveReload (Right installedProfiles)
   check "a live reload answers the sorted profile identifiers and the digest of the profile revisions"
@@ -1491,40 +1497,67 @@ credentialAdministrationChecks work = withFixture work "credentials" (64*command
   adminRefused "credential owner leaves store status to its owner" Admin.StateConflict store Admin.Status
   identity <- storeIdentity store
   held <- scalarInt store "SELECT count(*) FROM reservations WHERE state!='released'"
+  queued <- scalarInt store "SELECT count(*) FROM requests WHERE phase='queued'"
+  lost <- scalarInt store "SELECT count(*) FROM runs WHERE terminal_observed=0 AND supervision IN ('lost','cleanup-pending')"
+  unresolved <- scalarInt store "SELECT count(*) FROM commands WHERE state='unresolved'"
+  let statusFields value = case adminField "result" value of Object fields -> KM.keys fields; _ -> []
+      reservationSum value = case adminField "reservations" (adminField "result" value) of
+        Object states | KM.size states == 5 -> sum [count | Number count <- KM.elems states]
+        _ -> -1
+      facts value = [adminField name (adminField "result" value) | name <- ["live", "ready", "ownedWorkers", "serviceFault"]]
   stopped <- answeredLocally offlineAdministration store Admin.Status
   check "offline status reports the stopped Store identity and its active reservations"
-    (adminField "ok" stopped == Bool True && adminField "result" stopped == object
-      ["state" .= ("stopped" :: Text), "authorityEpoch" .= storeAuthorityEpoch identity,
-       "streamId" .= storeStreamId identity, "processGeneration" .= storeProcessGeneration identity,
-       "activeReservations" .= held])
-  serving <- answeredLocally offlineAdministration {hookState = pure StoreServing} store Admin.Status
-  check "live status reports a serving Store" (adminField "state" (adminField "result" serving) == String "serving")
+    (adminField "ok" stopped == Bool True && and
+      [adminField name (adminField "result" stopped) == expected | (name, expected) <-
+        [("state", String "stopped"), ("authorityEpoch", toJSON (storeAuthorityEpoch identity)),
+         ("streamId", toJSON (storeStreamId identity)), ("processGeneration", toJSON (storeProcessGeneration identity)),
+         ("activeReservations", toJSON held)]])
+  check "offline status adds the operational facts of the Store and of no live lifetime"
+    (sort (statusFields stopped) == sort ["state", "authorityEpoch", "streamId", "processGeneration", "activeReservations",
+        "live", "ready", "queuedRequests", "oldestQueuedAgeSeconds", "reservations", "ownedWorkers", "lostRuns",
+        "unresolvedCommands", "serviceFault"]
+      && facts stopped == [Bool False, Bool False, Number 0, String "none"]
+      && reservationSum stopped == fromIntegral held
+      && adminField "queuedRequests" (adminField "result" stopped) == toJSON queued
+      && (queued > 0 || adminField "oldestQueuedAgeSeconds" (adminField "result" stopped) == Null)
+      && adminField "lostRuns" (adminField "result" stopped) == toJSON lost
+      && adminField "unresolvedCommands" (adminField "result" stopped) == toJSON unresolved)
+  serving <- answeredLocally offlineAdministration {hookFacts = pure servingLifetime} store Admin.Status
+  check "live status reports a serving Store that is live and ready"
+    (adminField "state" (adminField "result" serving) == String "serving"
+      && facts serving == [Bool True, Bool True, Number 0, String "none"])
+  faulted <- answeredLocally offlineAdministration {hookFacts = pure (LifetimeFacts StoreServing 2 (Just (StoreRefusal StoreBusy)))}
+    store Admin.Status
+  check "live status with a service fault is live and not ready, and names the fault class only"
+    (facts faulted == [Bool True, Bool False, Number 2, String "store-refusal"])
   drains <- newIORef (0 :: Int)
-  let liveDrain = offlineAdministration {hookState = (\count -> if count > 0 then StoreDraining else StoreServing) <$> readIORef drains,
+  let liveDrain = offlineAdministration {hookFacts = (\count -> LifetimeFacts (if count > 0 then StoreDraining else StoreServing) 0 Nothing) <$> readIORef drains,
         hookDrain = Just (modifyIORef' drains (+ 1))}
   drained <- answeredLocally liveDrain store Admin.Drain
   check "a live drain answers the frozen draining result after the drain is published"
     (adminField "ok" drained == Bool True && adminField "result" drained == object ["state" .= ("draining" :: Text)])
   readIORef drains >>= check "a live drain publishes the drain once" . (== 1)
   drainingStatus <- answeredLocally liveDrain store Admin.Status
-  check "live status after a drain reports a draining Store" (adminField "state" (adminField "result" drainingStatus) == String "draining")
+  check "live status after a drain reports a draining Store that is live and not ready"
+    (adminField "state" (adminField "result" drainingStatus) == String "draining"
+      && facts drainingStatus == [Bool True, Bool False, Number 0, String "none"])
   offlineDrain <- answeredLocally offlineAdministration store Admin.Drain
   check "a dispatch without a drain refuses drain"
     (adminField "ok" offlineDrain == Bool False && adminField "code" (adminField "error" offlineDrain) == String "state-conflict")
   stops <- newIORef (0 :: Int)
   (shutdownReply, afterShutdown) <- administerLocally offlineAdministration
-    {hookState = pure StoreServing, hookShutdown = Just (modifyIORef' stops (+ 1))} store Admin.Shutdown
+    {hookFacts = pure servingLifetime, hookShutdown = Just (modifyIORef' stops (+ 1))} store Admin.Shutdown
   stoppedAnswer <- adminValue shutdownReply
   check "a live shutdown answers the frozen stopped result"
     (adminField "ok" stoppedAnswer == Bool True && adminField "result" stoppedAnswer == object ["state" .= ("stopped" :: Text)])
   readIORef stops >>= check "a live shutdown does not stop the manager before its reply" . (== 0)
   afterShutdown
   readIORef stops >>= check "the action after the reply of a live shutdown requests the stop once" . (== 1)
-  liveBackup <- answeredLocally offlineAdministration {hookState = pure StoreServing, hookShutdown = Just (pure ())} store
+  liveBackup <- answeredLocally offlineAdministration {hookFacts = pure servingLifetime, hookShutdown = Just (pure ())} store
     (Admin.Backup (work </> "live-backup"))
   check "the dispatch of a Store lifetime, a serving one included, refuses backup"
     (adminField "ok" liveBackup == Bool False && adminField "code" (adminField "error" liveBackup) == String "state-conflict")
-  liveRestore <- answeredLocally offlineAdministration {hookState = pure StoreServing, hookShutdown = Just (pure ())} store
+  liveRestore <- answeredLocally offlineAdministration {hookFacts = pure servingLifetime, hookShutdown = Just (pure ())} store
     (Admin.Restore (work </> "live-backup") (work </> "live-evidence"))
   check "the dispatch of a Store lifetime, a serving one included, refuses restore"
     (adminField "ok" liveRestore == Bool False && adminField "code" (adminField "error" liveRestore) == String "state-conflict")

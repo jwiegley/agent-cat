@@ -72,7 +72,9 @@ nothing to the manager log. `status` returns the authority epoch and stream
 identity of the Store, the process generation of the lifetime that answers, and
 the count of reservations that are not released, quarantined reservations
 included. Its `state` is `serving` through the live channel, `draining` through
-the live channel after a `drain`, and `stopped` in offline administration. `check-store` runs the SQLite quick check on the open
+the live channel after a `drain`, and `stopped` in offline administration. It
+also returns the bounded operational facts that the section
+[Status facts](#status-facts) defines. `check-store` runs the SQLite quick check on the open
 Store and reports `valid` or `corrupt`. It also lists, in identity order and at
 most 256, the identities of the reservations in state `quarantined` and of the
 claims that a restoration carried forward. A reservation identity is its
@@ -147,18 +149,21 @@ Unix socket and never opens a second Store or falls back after a channel failure
 
 Trusted embedding uses `withLocalAdministration store hooks action` to retain
 a local channel during the action. The `AdministrationHooks` record supplies
-the state that `status` reports, the wake that notifies the admission
+the lifetime facts that `status` reports (`hookFacts`, a `LifetimeFacts`
+value of `Agentic.Manager.Quarantine` with the state, the owned workers and
+the service fault), the wake that notifies the admission
 controller, the action that performs `reload-profiles`, the action that
 performs `drain` and the stop request that `shutdown` calls. Offline
 administration dispatches with `offlineAdministration`, which reports
-`stopped`, wakes nothing and has no reload, drain or stop action.
+`stopped` with no owned worker and no service fault, wakes nothing and has no
+reload, drain or stop action.
 `administerLocally` gives the response and an action that follows the
 reply. The live channel writes the reply, closes the sending half of the
 connection and then runs that action. Only a live `shutdown` gives an action
 other than `pure ()`. `serveManager` builds the reload action from the
 `serveReload` member of its `ServeHooks` argument and the stop request from
 its `serveStop` member, which the CLI supplies, and the drain action and the
-state from its service. The original Store supplies its installed directory
+lifetime facts from its service through `Service.lifetimeFacts`. The original Store supplies its installed directory
 binding and retains the configuration lease. A separate exclusive directory
 lease prevents duplicate listeners and authorizes removal of a stale socket name.
 Regular files and symbolic links are not removed. A scoped listener removes only
@@ -281,6 +286,46 @@ batch into writes of at most 16384 bytes, the bound of one block, and splits no
 block. It therefore makes one check for each such write and not one for each
 block, and at most one of those checks in each second reads the facts while
 the authorization revision is unchanged. No owner recalls bytes that it has already sent.
+
+### Status facts
+
+The `status` result holds these members after the five original members.
+Each Store fact is one SQL aggregate in the read transaction of the answer,
+and each lifetime fact is a value that the service already keeps in memory.
+The answer names no request, run, path or fault content.
+
+| Member | Meaning |
+|---|---|
+| `live` | `true` when a serving lifetime answers through its local channel, and `false` in offline administration. |
+| `ready` | `true` when the serving lifetime admits work: its `state` is `serving` and its service fault cell holds no fault. It is `false` during a drain or a shutdown, in offline administration, and while the fault cell holds a fault. |
+| `queuedRequests` | The count of requests in the phase `queued`. |
+| `oldestQueuedAgeSeconds` | The whole seconds since the enqueue command of the oldest queued request was accepted, or `null` when no request is queued. |
+| `reservations` | The active reservations by state. `preparing`, `review` and `running` count held reservations by the phase of their request: `review` while the request is in review, `running` once its start is pending or its run is associated, and `preparing` otherwise. `cleanup` counts reservations whose cleanup is pending, and `quarantined` counts quarantined reservations. The five counts sum to `activeReservations`. |
+| `ownedWorkers` | The count of preparation and run tasks of the serving lifetime that have not ended. Each task supervises one worker and ends after the cleanup of that worker, so a task whose worker has exited counts until its cleanup ends. A task that the service retains after its end because its cleanup is not proven does not count. Offline it is 0. |
+| `lostRuns` | The count of runs with no terminal observation whose supervision is `lost` or whose cleanup is pending. The count is apart from every subscriber count, so a lost supervisor never reads as a disconnected subscriber. A run that ended normally has a terminal observation and does not count. |
+| `unresolvedCommands` | The count of commands in the state `unresolved`. |
+| `serviceFault` | `none`, or the fixed word of the class of the fault in the service fault cell: `command-refusal`, `store-refusal`, `configuration-fault`, `worker-refusal`, `internal-fault` or `unexpected-fault`. `Agentic.Manager.Fault.faultClassName` gives the word. Offline it is `none`. |
+
+The live channel reads the state, the owned workers and the fault cell in
+one STM transaction through `Service.lifetimeFacts`. A drain or a shutdown
+that has begun reports `draining`.
+
+Case 6 of the `operations` mode of `manager/test/service_http.py` checks
+these facts in a lifetime after the restoration of case 5. The requests that
+the restored Store holds in the queue or in preparation are withdrawn first.
+Status at the idle manager is live and ready with no queued request, no
+reservation, no owned worker and one lost run: the run that the shutdown of
+case 3 cancelled before the manager observed its terminal record, which the
+run resource also reports as lost. With one request in review and
+a second request of the same profile queued behind it, status reports one
+queued request, an age that grows, one reservation in review and one owned
+worker. With the run of the first request at its person question, status
+reports one running reservation. After SIGKILL of the worker process groups
+of that run, `lostRuns` grows by 1, from 1 to 2. During a drain, status reports
+`draining`, `live` `true` and `ready` `false`. After the lifetime ends,
+offline status reports `live` and `ready` `false`, no owned worker, the
+queued request, the lost run and the count of unresolved commands of the
+Store.
 
 ### Two configurations for one manager root
 

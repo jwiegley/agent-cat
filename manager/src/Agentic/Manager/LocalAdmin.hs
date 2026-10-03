@@ -14,7 +14,7 @@ import Agentic.Manager.Flow (AdministrationBody (DrainAdministration, ReloadAdmi
 import Agentic.Manager.Profile (Diagnostic (UnreadableConfiguration), PublicProfile, publicId, publicRevision)
 import Agentic.Manager.Protocol.Json (decodeStrictValue)
 import Agentic.Manager.Protocol.LocalAdmin
-import Agentic.Manager.Quarantine (StoreState (..), checkQuarantine, releaseQuarantine, reportStatus, reportStoreCheck)
+import Agentic.Manager.Quarantine (LifetimeFacts, checkQuarantine, releaseQuarantine, reportStatus, reportStoreCheck, stoppedLifetime)
 import Agentic.Manager.Store (CoordinationStore, RestoreFence (..), StoreBackup (..),
   StoreFailure (StoreFenceMismatch, StoreLimit, StoreOutputConflict), StoreRestoration (..),
   advanceAuthorizationRevision, backupCoordinationStore, restoreCoordinationStore, runTransaction,
@@ -45,7 +45,8 @@ import System.Timeout (timeout)
 type ProfileReload = IO (Either Diagnostic [PublicProfile])
 
 -- | The lifetime facts and actions that one dispatch of a request uses.
--- 'hookState' is the state that @status@ reports. 'hookWake' tells the
+-- 'hookFacts' gives the lifetime facts that @status@ reports with the facts
+-- of the Store: the state, the owned workers and the service fault. 'hookWake' tells the
 -- running admission controller that a committed quarantine release freed its
 -- execution slot and resource keys, or that a profile reload installed new
 -- profiles. 'hookReload' performs @reload-profiles@ and 'hookDrain' performs
@@ -53,13 +54,14 @@ type ProfileReload = IO (Either Diagnostic [PublicProfile])
 -- serving manager, which @shutdown@ calls after its reply. Without them, the
 -- dispatch refuses those operations with 'StateConflict'.
 data AdministrationHooks = AdministrationHooks
-  { hookState :: IO StoreState, hookWake :: IO (), hookReload :: Maybe ProfileReload, hookDrain :: Maybe (IO ()),
+  { hookFacts :: IO LifetimeFacts, hookWake :: IO (), hookReload :: Maybe ProfileReload, hookDrain :: Maybe (IO ()),
     hookShutdown :: Maybe (IO ()) }
 
 -- | The hooks of offline administration: the Store is stopped, no admission
--- controller runs, and nothing can be reloaded, drained or stopped.
+-- controller runs, no worker is owned, and nothing can be reloaded, drained
+-- or stopped.
 offlineAdministration :: AdministrationHooks
-offlineAdministration = AdministrationHooks (pure StoreStopped) (pure ()) Nothing Nothing Nothing
+offlineAdministration = AdministrationHooks (pure stoppedLifetime) (pure ()) Nothing Nothing Nothing
 
 -- | Serve the frozen requests while retaining the original Store configuration
 -- and endpoint lease. The configuration guard is released before any request.
@@ -117,7 +119,7 @@ withLocalAdministration store hooks action = do
 -- with 'StateConflict' too.
 administerLocally :: AdministrationHooks -> CoordinationStore -> LocalAdminRequest -> IO (BS.ByteString, IO ())
 administerLocally hooks store request = case request of
-  Status -> answered (hookState hooks >>= \state -> reportStatus state store)
+  Status -> answered (hookFacts hooks >>= \facts -> reportStatus facts store)
   CheckStore -> answered (reportStoreCheck store)
   CheckQuarantine ident -> answered (checkQuarantine store ident)
   ReleaseQuarantine ident evidence digest -> answered (releaseQuarantine store (hookWake hooks) ident evidence digest)

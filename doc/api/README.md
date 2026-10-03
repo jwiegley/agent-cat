@@ -935,7 +935,14 @@ returns the new `authorityEpoch` and `streamId`, `credentialsRevoked` `true`
 and `reprovisioned` `false`. The operator then issues new credentials with
 `issue-credential`. The work after the backup is absent from the restored
 Store, and the old credentials receive 401. Through the live channel,
-`restore` receives `state-conflict`. Existing `RUNNER --tui` and native frontend commands
+`restore` receives `state-conflict`. `status` also reports the bounded
+operational facts that the section
+[Accepted additive fields](#accepted-additive-fields) lists: whether the
+answering process serves its channel and admits work, the queue, the
+reservations by state, the owned workers, the runs whose supervision is lost,
+the unresolved commands and the class of the current service fault. Offline,
+`live` and `ready` are `false`, no worker is owned and the fault is `none`.
+Existing `RUNNER --tui` and native frontend commands
 remain unchanged.
 
 ```text
@@ -1010,6 +1017,21 @@ A permitted `dNSName` subtree must equal the leaf name, or equal the part of
 the leaf name after a dot, in the same letter case and with the same trailing
 dot. A permitted subtree that starts with a dot therefore matches no name. A
 CA without Name Constraints below a CA that has them is refused.
+
+## Accepted additive fields
+
+Version 1 is frozen. A change to `openapi.yaml` adds only optional
+properties, and it changes no existing property, enumeration or required
+list. A client that ignores an added property keeps its behavior. The
+accepted additive fields are these.
+
+| Schema | Added optional properties |
+|---|---|
+| `LocalAdminResponse`, `status` result | `live` (boolean), `ready` (boolean), `queuedRequests` (integer of at least 0), `oldestQueuedAgeSeconds` (integer of at least 0, or `null` with no queued request), `reservations` (an object with the counts `preparing`, `review`, `running`, `cleanup` and `quarantined`, each from 0 to 16, which sum to `activeReservations`), `ownedWorkers` (integer from 0 to 16), `lostRuns` (integer of at least 0), `unresolvedCommands` (integer of at least 0) and `serviceFault` (`none`, `command-refusal`, `store-refusal`, `configuration-fault`, `worker-refusal`, `internal-fault` or `unexpected-fault`). |
+
+[`manager/COMMANDS.md`](../../manager/COMMANDS.md#status-facts) states the
+meaning of each `status` fact. `lostRuns` is apart from every subscriber
+count, so a lost supervisor never reads as a disconnected subscriber.
 
 ## Verification
 

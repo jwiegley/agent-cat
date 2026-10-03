@@ -7340,6 +7340,68 @@ components:
                 type: integer
                 minimum: 0
                 maximum: 16
+              live:
+                type: boolean
+              ready:
+                type: boolean
+              queuedRequests:
+                type: integer
+                minimum: 0
+              oldestQueuedAgeSeconds:
+                type:
+                - integer
+                - 'null'
+                minimum: 0
+              reservations:
+                type: object
+                properties:
+                  preparing:
+                    type: integer
+                    minimum: 0
+                    maximum: 16
+                  review:
+                    type: integer
+                    minimum: 0
+                    maximum: 16
+                  running:
+                    type: integer
+                    minimum: 0
+                    maximum: 16
+                  cleanup:
+                    type: integer
+                    minimum: 0
+                    maximum: 16
+                  quarantined:
+                    type: integer
+                    minimum: 0
+                    maximum: 16
+                required:
+                - preparing
+                - review
+                - running
+                - cleanup
+                - quarantined
+                additionalProperties: false
+              ownedWorkers:
+                type: integer
+                minimum: 0
+                maximum: 16
+              lostRuns:
+                type: integer
+                minimum: 0
+              unresolvedCommands:
+                type: integer
+                minimum: 0
+              serviceFault:
+                type: string
+                enum:
+                - none
+                - command-refusal
+                - store-refusal
+                - configuration-fault
+                - worker-refusal
+                - internal-fault
+                - unexpected-fault
             required:
             - state
             - authorityEpoch
