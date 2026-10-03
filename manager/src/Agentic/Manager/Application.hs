@@ -32,6 +32,7 @@ import qualified Data.Aeson.KeyMap as KM
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BC
 import qualified Data.ByteString.Builder as Builder
+import Data.Foldable (toList)
 import Data.List (nub)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -158,7 +159,7 @@ serve service pages streams proof request respond = do
             [("Content-Type", "text/event-stream"), ("X-Accel-Buffering", "no")] $ \write flush -> do
               let send view bytes = current view >> write (Builder.byteString bytes) >> flush
                   batch view (Object fields) = case KM.lookup "events" fields of
-                    Just (Array events) -> forM_ events $ \event -> eventBlock event >>= send view
+                    Just (Array events) -> mapM eventBlock (toList events) >>= mapM_ (send view) . sseWrites
                     _ -> throwIO C.StorageUnavailable
                   batch _ _ = throwIO C.StorageUnavailable
               pump batch (\view -> send view ": heartbeat\n\n")
@@ -410,6 +411,19 @@ eventBlock (Object fields)
       when (BS.length bytes > 16384) (throwIO C.ViewTooLarge)
       pure bytes
 eventBlock _ = throwIO C.StorageUnavailable
+
+-- | The complete SSE blocks of one batch in order, packed into writes of at
+-- most 16384 bytes, the bound of one block. No block is split. The stream
+-- revalidates its view before each write, so a batch costs one check for
+-- each write of up to 16 KiB and not one check for each block.
+sseWrites :: [BS.ByteString] -> [BS.ByteString]
+sseWrites = map (BS.concat . reverse) . pack 0 []
+  where
+    pack _ [] [] = []
+    pack _ written [] = [written]
+    pack size written (block:rest)
+      | not (null written) && size + BS.length block > 16384 = written : pack (BS.length block) [block] rest
+      | otherwise = pack (size + BS.length block) (block:written) rest
 
 -- | A JSON representation is encoded under the loans of its view, which
 -- 'Transport.respondBytes' returns before the first network write.

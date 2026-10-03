@@ -220,6 +220,29 @@ the follow-ups of PF2 to PF6 that the section below lists.
 - The `ext-pi` bridge socket path exceeds the macOS limit with a longer
   fixture path (`acat-pf6-fess-followup-hrzg`). The lineage witness uses
   the short host name `lineage-pi` to stay inside it.
+- PF19 changed the writer of `GET /v1/events` SSE responses. It packs the
+  complete blocks of one batch into writes of at most 16384 bytes and checks
+  the view once for each write. A client that drops inside a batch therefore
+  keeps its subscription until the next write fails, at the latest at the
+  next heartbeat, so an immediate reconnection meets 429 `storage-quota`
+  more often. `open_stream` of `manager/test/service_http.py` now tries a
+  registration again for 30 seconds in place of 5. The `events-lifecycle`,
+  `routes`, `storage`, `capacity-streams` and N8 `tui-journey` modes passed
+  after the change. The Emacs, Pi and TUI reconnection suites did not run
+  against it.
+- Under the burst round of `capacity-streams` the read path of the manager
+  saturates. The configuration guard admits one holder at a time,
+  `globalDatabaseReaders` is 2, and runtime ingestion, stream batch reads,
+  the check before each stream write and every page read share them. Stream
+  reads and checks then meet the five-second allowance. The manager ends
+  such streams with 503 `storage-unavailable`, and a response that has
+  started closes with no bytes, which leaves the outcome of a command
+  uncertain for its client. The event readers fall behind the polling
+  reader by seconds, so `events.catch-up-p50-ms` and
+  `events.catch-up-p95-ms` fail their ceilings, while the samples of the
+  two rounds alone stay within them. The independent run reached its
+  terminal event at once after its answer, but the manager observed the
+  terminal status tens of seconds later.
 - The open findings of the section "Phase F part 1 of 2026-10-02" stay
   open, apart from the PF7 question, which the owner answered.
 

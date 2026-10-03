@@ -290,13 +290,15 @@ batch read acquires one reader charge and the configuration guard, in the lock
 order configuration, then database, within one five-second admission deadline
 for the batch read.
 It reads and encodes the batch under these loans and then returns both with
-`releaseResponseLoans`. The stream revalidates its view immediately before
-each block and each heartbeat. A block or heartbeat write therefore holds no
-configuration guard, reader charge, file slot or SQL transaction. A stream
-with nothing more to read waits on the authorization watch of its last batch
-view. The watch is an authorization token only, so the wait holds no loan.
-Each write completes within five seconds, the heartbeat interval is 15
-seconds, and a revocation ends the stream before its next block. Streams that
+`releaseResponseLoans`. The stream packs the complete blocks of one batch
+into writes of at most 16384 bytes and splits no block. It revalidates its
+view immediately before each such write and each heartbeat. A write therefore
+holds no configuration guard, reader charge, file slot or SQL transaction. A
+stream with nothing more to read waits on the authorization watch of its last
+batch view. The watch is an authorization token only, so the wait holds no
+loan. The writes of one batch complete within five seconds, the heartbeat
+interval is 15 seconds, and a revocation ends the stream before its next
+write. Streams that
 stall in a write, up to the Store reader capacity, therefore leave the
 reader places and the configuration guard free for ingestion. The limit of two
 subscriptions for each client is a separate count and not a Store reader

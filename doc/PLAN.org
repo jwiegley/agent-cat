@@ -12801,6 +12801,33 @@ Non-blocking findings of fess pf-PF18-r1 (fess/pf-PF18-r1.md) on subtask PF18 (t
 6. (low) manager/test/service_http.py lines 17299-17302: the harness reads checker.stdout with no timeout. A check that hangs before CAPACITY-READERS stops only at the outer 900-second timeout. Fix: add a bounded wait, for example a timer that kills the checker after 120 s.
 7. (low) doc/workflow-manager-handoff.md: the section "Stop at PF18" described the blocked round-1 readers path. The Integrator replaced it in the PF18 commit with the section "PF18 under decision (a)". No further action.
 
+* TODO [#D] Resolve the non-blocking fess findings of subtask PF19
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pf19-fess-followup-ewpu
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-02 Fri 20:45]
+:MODIFIED: [2026-10-02 Fri 20:45]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess pf-PF19-r2 (fess/pf-PF19-r2.md) on subtask PF19 (the WM-041 mode capacity-streams of manager/test/service_http.py, the event-burst probe workflow, the sseWrites packing of SSE writes in manager/src/Agentic/Manager/Application.hs, and the measurement prints of the storage and routes modes).
+
+1. (medium) Manager read path under the burst round: the configuration guard has one holder and globalDatabaseReaders is 2, shared by runtime ingestion, stream batch reads, the check before each SSE write and page reads. Burst catch-up p95 is 19873.7 ms and delivery p95 is 44606.7 ms. The manager observed the independent run as terminal 53.5 s after the runtime ended it. Started command responses close with no bytes after revalidation fails (StoreBusy or StoreLimit), which leaves the outcome uncertain for the client. This is the diagnosed cause of the FAIL of events.catch-up-p50-ms (1065.4 against 1000) and events.catch-up-p95-ms (19521.6 against 5000). Recorded in doc/workflow-manager-handoff.md under Open findings. Fix: a read-path concurrency change in the manager, and a defined outcome for a started command response that cannot be completed.
+2. (medium) manager/test/service_http.py CapacityHarness.read and capacity_head: the shared read now retries a ConnectionError for 30 s, and capacity_head raises ConnectionResetError in place of an assertion. capacity-admission and capacity-inputs do not record CapacityHarness.dropped and were not rerun. Fix: write the dropped count into every capacity record, or confine the retry to capacity-streams, then rerun capacity-admission once.
+3. (medium) sseWrites: a client that drops inside a batch keeps its subscription until the next write fails, so an immediate reconnect meets 429 more often. The open_stream window grew from 5 to 30 s for every mode. The Emacs, Pi and TUI SSE reconnection suites were not rerun. Fix: run them once against the change.
+4. (low) manager/CAPACITY.md Slow consumer: no ceiling covers the terminal observation of the independent run (slow.independent-terminal-ms 53502 ms). Fix: decide whether a ceiling belongs to WM-041 and record the decision.
+5. (low) slow.independent-runtime-terminal-ms is -147.2, because the reference time is taken after answer() returns. Fix: take the time before the answer is sent, or state the basis in CAPACITY.md.
+6. (low) Delivery latency samples only the terminal event of each run against its last run.changed invalidation, not each append. Fix: record the narrowing in CAPACITY.md, or sample more appends.
+7. (low) Ledger deviation from PF16: the event-flood ceiling keys include the burst round, the catch-up basis changed to "from the first arrival at any reader", and globalConnections 16 was added as a workload value. No ceiling value changed. The two rounds alone pass (p50 14.2 ms, p95 842.9 ms). Fix: the ceiling owner confirms the scoring choice.
+8. (low) manager/test/service_http.py timed_fetch copies the retry loop of fetch. Fix: add an optional timing return to fetch and remove the copy.
+9. (low) Five of six capacity-streams trials failed at a load average of up to 35. Only trial 6 and the final run passed. Fix: run one more start on a quiet machine.
+10. (low) cli/test/RoutingFixedPointProbe.hs: the catalogue gained the row event-burst. The TUI, Emacs and Pi modes that browse the catalogue by row were not rerun. Fix: rerun one such mode, or confirm that every mode selects workflows by name.
+
 * TODO [#D] Resolve the non-blocking fess findings of subtask PF2
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -23720,7 +23747,7 @@ legacy workflow build cannot conceal an unchecked manager development.
 :LABELS:   ["p9","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-02 Fri 19:12]
+:MODIFIED: [2026-10-02 Fri 20:45]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-041
 :SOURCE_REPO: agent-cat
@@ -23883,6 +23910,13 @@ workloads rather than extrapolating unmeasured capacity.
     "author": "johnw",
     "text": "PF18 (2026-10-02, decision (a)): the mode capacity-inputs of manager/test/service_http.py measures the drafts, page sets, captures and artifact readers of WM-041. Drafts run to the PF16 bounds (drafts 4, globalDrafts 10, four credentials) with the per-client and global refusals. A capture of 67108864 bytes is accepted and globalCaptureBytes plus one byte is refused. Page sets run to two for each client and to globalPageSets, expire after 60 s, and manager RSS stays inside its ceiling. Artifact readers are measured below HTTP, because every verified result is a receipt of about 103 bytes: the new manager-artifact-check capacity-readers holds two places through withArtifactDownloadWithin, and a third download waited 5001 ms and was refused with 429 storage-quota; both held bodies matched the metadata size and SHA-256. manager/CAPACITY.md records the readers workload change as a correction before measurement; only readers.manager-rss-peak-bytes changed value (671088640 to 536870912). Evidence (private, PF/PF18/impl-r1): py_compile exit 0, build exit 0, capacity-inputs at N8 exit 0 in 113 s, capacity_summary.py summary 43 PASS, 0 FAIL, 86 MISSING for the other parts, standalone capacity-readers exit 0, make -C doc check exit 0. Fess pf-PF18-r1 is not blocking; its findings are filed as acat-pf18-fess-followup-s432. The capacity-admission regression did not run on the final source. The package stays open: PF19 and PF20 measure the other parts.",
     "created_at": "2026-10-03T02:12:29Z"
+  },
+  {
+    "id": 680,
+    "issue_id": "acat-wm-041-17ax",
+    "author": "johnw",
+    "text": "PF19 (2026-10-02): the mode capacity-streams of manager/test/service_http.py measures the event flood, the slow consumer, the growth of logs and ledger, and the WAL. Two SSE readers for each client read /v1/events and one route reader for each client reads /v1/routes or a run route. All readers matched their references, and E0 held 8384 events once and in order. A burst round of 15 event-burst runs (new probe workflow with 64 model answers) fills the stream of a stopped reader: its peer received 1665622 bytes during the stop, above the 1048576-byte bound, the manager ended the stopped stream through the 5-second write deadline (ResponseWriteTimeout), and the reader drained 124649 bytes, reconnected and lost no event. The independent run answer took 163 ms and the run succeeded. Manager change: SSE batches are packed into writes of at most 16384 bytes (sseWrites), with one view check for each write. The storage and routes modes gained measurement prints into storage-measure.json and routes-measure.json with unchanged assertions. Evidence (private, PF/PF19/impl-r2): py_compile 0, build 0, capacity-streams N8 0 in 124 s (trials 1 to 5 failed under a load average of up to 35, trial 6 passed), storage N8 0, routes N8 0, tui-journey N8 0, make -C doc check 0, capacity_summary.py summary 28 PASS, 2 diagnosed FAIL (events.catch-up-p50-ms 1065.4 against 1000 and p95 19521.6 against 5000, from read-path saturation in the burst round; the two rounds alone pass at 14.2 and 842.9 ms), 99 MISSING for other parts. Fess pf-PF19-r2 is not blocking. Its findings are filed as acat-pf19-fess-followup-ewpu. The package stays open: PF20 measures the remaining parts.\n",
+    "created_at": "2026-10-03T03:45:31Z"
   }
 ]
 #+end_src
@@ -23894,7 +23928,7 @@ workloads rather than extrapolating unmeasured capacity.
 :LABELS:   ["p9","wm-checkpoint","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-02 Fri 19:12]
+:MODIFIED: [2026-10-02 Fri 20:45]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-041-core
 :SOURCE_REPO: agent-cat
@@ -24016,6 +24050,13 @@ Publish precommitted workload and resource ceilings. All core advertised bounds 
     "author": "johnw",
     "text": "PF18 (2026-10-02): capacity-inputs passes at N8 with 43 keys inside their ceilings (drafts, page sets, captures, and artifact readers measured below HTTP under decision (a)). See acat-wm-041-17ax for the evidence scope. Stays open.",
     "created_at": "2026-10-03T02:12:29Z"
+  },
+  {
+    "id": 681,
+    "issue_id": "acat-wm-041-core-3vvz",
+    "author": "johnw",
+    "text": "PF19 (2026-10-02): the mode capacity-streams of manager/test/service_http.py measures the event flood, the slow consumer, the growth of logs and ledger, and the WAL. Two SSE readers for each client read /v1/events and one route reader for each client reads /v1/routes or a run route. All readers matched their references, and E0 held 8384 events once and in order. A burst round of 15 event-burst runs (new probe workflow with 64 model answers) fills the stream of a stopped reader: its peer received 1665622 bytes during the stop, above the 1048576-byte bound, the manager ended the stopped stream through the 5-second write deadline (ResponseWriteTimeout), and the reader drained 124649 bytes, reconnected and lost no event. The independent run answer took 163 ms and the run succeeded. Manager change: SSE batches are packed into writes of at most 16384 bytes (sseWrites), with one view check for each write. The storage and routes modes gained measurement prints into storage-measure.json and routes-measure.json with unchanged assertions. Evidence (private, PF/PF19/impl-r2): py_compile 0, build 0, capacity-streams N8 0 in 124 s (trials 1 to 5 failed under a load average of up to 35, trial 6 passed), storage N8 0, routes N8 0, tui-journey N8 0, make -C doc check 0, capacity_summary.py summary 28 PASS, 2 diagnosed FAIL (events.catch-up-p50-ms 1065.4 against 1000 and p95 19521.6 against 5000, from read-path saturation in the burst round; the two rounds alone pass at 14.2 and 842.9 ms), 99 MISSING for other parts. Fess pf-PF19-r2 is not blocking. Its findings are filed as acat-pf19-fess-followup-ewpu. The package stays open: PF20 measures the remaining parts.\n",
+    "created_at": "2026-10-03T03:45:32Z"
   }
 ]
 #+end_src

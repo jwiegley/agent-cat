@@ -151,7 +151,8 @@ type StreamPump = (AuthorizedView -> Value -> IO ()) -> (AuthorizedView -> IO ()
 -- configuration guard, in the lock order configuration, then database, each
 -- within its five-second allowance. It reads and encodes the batch and returns
 -- both loans with 'releaseResponseLoans'. The view is then revalidated
--- immediately before the block or heartbeat write, and the write holds no
+-- immediately before the blocks or the heartbeat are written, and the writer
+-- of the response checks it again before each write. The write holds no
 -- configuration guard, reader charge, file slot or SQL transaction. Each write
 -- completes within five seconds. A stream that has nothing more to read waits
 -- on the watch of its last batch view, which is an authorization token only,

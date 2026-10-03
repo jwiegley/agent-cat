@@ -54,9 +54,12 @@ The measurements of a workload use these rules:
   idle for ten seconds, before the 15-second connection timeout of the
   server closes it. The latency of a command does not include the opening
   of a connection. A read that receives 503 `storage-unavailable` or 429
-  `storage-quota` is sent again within five seconds, and the latency of a
-  named read runs from before its first attempt to the end of the body of
-  its answer. The p50 and p95 values use the nearest-rank method: for n
+  `storage-quota` is sent again within five seconds. A read whose
+  connection closes with no response is sent again within 30 seconds. The
+  manager closes the connection in this way when the check of the view at
+  response entry meets the Store allowance after the response has started.
+  The latency of a named read runs from before its first attempt to the end
+  of the body of its answer. The p50 and p95 values use the nearest-rank method: for n
   sorted samples, the q percentile is the sample at position ceil(q n),
   counted from 1.
 - **Responsiveness under saturation.** At the saturation point of the
@@ -127,6 +130,17 @@ manager root. The artifact readers run below HTTP in the executable
 `manager-artifact-check`, which the environment variable `ARTIFACT_CHECK`
 of the mode names. The mode writes the file `capacity-inputs.json` in its
 fixture directory after each workload.
+
+The `capacity-streams` mode of `manager/test/service_http.py` runs the
+workloads of the sections "Event flood", "Slow consumer" and "Growth" in one
+manager lifetime with its own manager root. It writes the file
+`capacity-streams.json` in its fixture directory, the file
+`capacity-streams-arrivals.json` with the lag of each event at each reader,
+and the file `capacity-streams-run-logs.json` with the run-log bytes of each
+run store. The `storage` and `routes` modes write the files
+`storage-measure.json` and `routes-measure.json` in their fixture
+directories, as the sections "Storage endings" and "Seal and prune cursors"
+state.
 
 The capacity profiles are `cap_01` to `cap_20`. Each one names the runner of
 `routing-fixed-point-probe` with the target arguments `--scripted`,
@@ -386,44 +400,121 @@ window of the set that `P5` reads in step 4.
 
 ## Event flood
 
-The configuration sets `executionReservations` to 16 and
-`globalMutationLedgerBytes` to 67108864 and installs the profiles `cap_01` to
-`cap_16`. One observe credential `E0` reads `GET /v1/snapshot` and then polls
-`GET /v1/events` with `Accept: application/json` every 250 milliseconds.
-Three observe credentials `E1`, `E2` and `E3` each open two SSE readers of
-`/v1/events` at the cursor of that snapshot, which is six readers in all.
+The configuration sets `executionReservations` to 16,
+`globalMutationLedgerBytes` to 67108864 and `globalConnections` to 16, and
+installs the profiles `cap_01` to `cap_16`. The six SSE readers hold six
+connections for the whole workload, so the base value of 8 would leave two
+connections for the other eight credentials. The four credentials `E0`,
+`E1`, `E2` and `E3` hold `observe` and `control`, so that each manager-log
+record of their profiles is in their view. Each reads `GET /v1/snapshot`
+before any request exists, and the four cursors name one durable position.
+`E0` then polls `GET /v1/events` with `Accept: application/json` every 250
+milliseconds. Each of `E1`, `E2` and `E3` opens two SSE readers, the limit
+of two for each client. The first is an event reader of `/v1/events` at the
+cursor of its own snapshot, because a cursor names the stream of its
+credential. The second is a route reader at the floor of its route stream:
+`E1` and `E2` read `/v1/routes`, and `E3` reads `/v1/runs/{id}/routes` of
+the independent run. Each SSE reader decodes the chunks of the HTTP/1.1
+response itself, and when its stream ends it connects again with
+`Last-Event-ID` set to the identifier of its last complete block.
+
 Five credentials submit and approve the work: one request of the
 `delayed-person` workflow on `cap_16`, which waits at its person question as
-the independent worker of the next section, and then two rounds of 15
-requests of the `prompt-source` workflow on `cap_01` to `cap_15`, which run
-to success without an answer. The second round starts when every run of the
-first round is terminal. The catch-up time of an event at an SSE reader runs
-from the first arrival of that event at any reader to its arrival at that
-reader. The catch-up samples leave out the second SSE reader of `E1` during
-the second round, because the next section stops it. The harness also records
-the events per second that `E0` receives during each round.
+the independent worker of the next section, then two rounds of 15 requests
+of the `prompt-source` workflow on `cap_01` to `cap_15`, and then the burst
+round of the next section. Each of the five creates, supplies and enqueues
+three requests of a round and approves their reviews. A round starts when
+every run of the round before it is terminal. Before the burst round, the
+harness waits for the next UTC minute when a credential would otherwise send
+more than 27 ordinary mutations in the current one. While a round runs, the
+harness reads the request and run pages twice a second, because each read
+holds the configuration guard and one of the two reader places. These
+status reads and the polls of `E0` send a refused read again within 60
+seconds in place of five, because the burst round saturates the read path.
+An approval whose connection closes with no response is not sent again, and
+the harness counts it.
+
+Each event reader must hold the events of `E0` once and in order. Each route
+reader must hold, once and in order, the records that the JSON batches of
+its route give to its credential from the floor, read after the burst round.
+A record of more than one block, such as the review of a burst request,
+arrives as its size notice. The catch-up time of an event at an event reader
+runs from the first arrival of that event at any reader, `E0` included, to
+its arrival at that reader. The catch-up samples are those of the three event
+readers. They leave out each arrival at the event reader of `E1` after the
+next section stops it.
+
+The harness also records these values, which name no ceiling: the events per
+second that `E0` receives during each round
+(`events.round1-per-second`, `events.round2-per-second` and
+`events.burst-per-second`), the number of events of the view
+(`events.count`), the reconnections of the SSE readers
+(`events.reconnects`), the records and the transport bytes of each route
+reader (`events.route.<reader>.records` and `events.route.<reader>.bytes`),
+the reads and stream registrations whose connection closed with no response
+(`events.dropped-reads`), the refusals of reads that the harness sent again
+(`events.refused-reads`), the slowest poll of `E0` and the UTC time of its
+start (`events.poll-slowest-ms` and `events.poll-slowest-at`), the approvals
+whose connection closed with no response (`events.uncertain-approvals`), the
+largest number of ordinary mutations of one credential in one UTC minute
+(`events.mutations-per-credential-minute`), the p50 and p95 of the catch-up
+time at each event reader (`events.reader.<reader>.catch-up-p50-ms` and
+`-p95-ms`), and the p50 and p95 of the delivery time
+(`events.delivery-p50-ms` and `-p95-ms`). The delivery time runs from the
+`at` field of the last record of the run log of a run, its terminal event, to
+the arrival of the last `run.changed` invalidation of that run at an event
+reader, with the same samples left out. The harness also splits both times
+into the two rounds and the burst round (`events.rounds.catch-up-p50-ms`,
+`events.burst.catch-up-p50-ms` and the other keys of the same form). An
+event belongs to the burst round when its first arrival comes after the stop
+of the next section, and a delivery sample belongs to it when its run is a
+burst run or the independent run, which ends during it. The ceiling keys use
+every sample.
 
 | Key | Ceiling | Unit | Basis |
 | --- | --- | --- | --- |
-| `events.reader-complete` | equals `true` | flag | Each reader receives each event of its view once and in order. |
-| `events.catch-up-p50-ms` | at most 1000 | ms | From the terminal event at the polling reader to that event at each SSE reader. One fifth of the five-second write deadline. |
-| `events.catch-up-p95-ms` | at most 5000 | ms | From the terminal event at the polling reader to that event at each SSE reader. The five-second write deadline. |
+| `events.reader-complete` | equals `true` | flag | Each reader receives each event or record of its view once and in order. |
+| `events.catch-up-p50-ms` | at most 1000 | ms | From the first arrival of an event at any reader to its arrival at each event reader. One fifth of the five-second write deadline. |
+| `events.catch-up-p95-ms` | at most 5000 | ms | From the first arrival of an event at any reader to its arrival at each event reader. The five-second write deadline. |
 | `events.manager-rss-peak-bytes` | at most 348127232 | bytes | B + 2 H, where H is 16 supervised workers of 2097152 bytes each and six readers of 1048576 pending bytes each. |
 
 ## Slow consumer
 
-This workload runs inside the event flood. The second SSE reader of `E1` opens
-its connection with a receive buffer (`SO_RCVBUF`) of 4096 bytes. When the
-second round starts, it stops reading. While it is stopped, the harness
-answers the person question of the independent run on `cap_16` with `true`
-through its own credential, and that run must succeed. When the second round
-and the independent run are terminal, the stopped reader reads again. If its
-stream ended, it reconnects with `Last-Event-ID` set to the identifier of its
-last complete block. The pending bytes are the bytes that the stopped reader
-reads from its stopped connection after it reads again. The harness also
-records the bytes that the first SSE reader of `E1` received while the second
-reader was stopped, so that a reader of the evidence can see how close the
-stall came to its bound.
+This workload runs inside the event flood. The event reader of `E1` opens its
+connection with a receive buffer (`SO_RCVBUF`) of 4096 bytes. After the
+second round it stops reading, and the burst round runs: 15 requests of the
+`event-burst` workflow on `cap_01` to `cap_15`. That workflow of
+`routing-fixed-point-probe` asks its model 64 times, so each of its runs
+appends many runtime envelopes, and the manager publishes many invalidations
+for four commands. The event reader of `E2`, of the same view, must receive
+more than 1048576 bytes while the reader of `E1` is stopped, so that the
+stopped stream receives more than the advertised bound. While it is stopped,
+the harness answers the person question of the independent run on `cap_16`
+with `true` through its own credential, and that run must succeed. When the
+burst round and the independent run are terminal, the stopped reader reads
+again. If its stream ended, it reconnects with `Last-Event-ID` set to the
+identifier of its last complete block, and it must then hold every event of
+`E0` once and in order.
+
+The manager bounds the stopped stream in this way. It writes each batch in
+writes of at most 16384 bytes, and the writes of one batch must complete
+within five seconds. When the socket buffers of the stopped connection are
+full, a write cannot complete, and the manager ends the stream at that
+deadline. The pending bytes are the bytes of the response body, chunk framing
+included, that the stopped reader reads from its stopped connection after it
+reads again, until that connection ends or stays silent for one second. The
+harness also records these values, which name no ceiling: the bytes that the
+event reader of `E2` received while the reader of `E1` was stopped
+(`slow.peer-bytes-while-stopped`), whether the manager ended the stopped
+stream (`slow.stream-ended`), the reconnections of the stopped reader after
+it reads again (`slow.reconnects-after-stop`), the length of the stop
+(`slow.stopped-ms`), the bytes that the stopped reader had received before it
+stopped (`slow.stopped-bytes-before`), the largest run log of the burst runs
+(`slow.burst-run-log-bytes-max`), the time from the accepted answer to the
+terminal status of the independent run (`slow.independent-terminal-ms`), and
+the time from the accepted answer to the `at` field of the terminal event of
+its run log (`slow.independent-runtime-terminal-ms`). The independent answer
+is the latency of its command, and the independent run must end succeeded.
 
 | Key | Ceiling | Unit | Basis |
 | --- | --- | --- | --- |
@@ -435,21 +526,26 @@ stall came to its bound.
 
 ## Growth
 
-The growth keys use the lifetimes of the workloads above. The run log of a
-run is its file `flow.ndjson` and its claim-check files `flow-claims` in its
-run store, and the run-log key is the largest run log of the runs of the
-sixteen-reservation workload and of the event flood. The manager log is every
-file under `flow` in the manager root, and the manager-log key is its growth
-across the queue workload divided by the number of accepted ordinary commands
-of that workload. The ledger key is the growth of the ledger charge across one
-accepted ordinary command. The WAL key is the growth of
-`coordination.sqlite3-wal` across the queue workload, read while the manager
-serves, divided by the same number of commands. The serving manager schedules
-no checkpoint, and automatic checkpointing is disabled, so the WAL grows with
-each commit until the Store closes. The after-close key is the size of that
-file after the ordinary shutdown of the queue lifetime, when SQLite has
-checkpointed the WAL at the close of its last connection. An absent file
-counts as 0 bytes.
+The growth keys use the lifetime of the event flood, which the
+`capacity-streams` mode measures. The span of a growth key runs from after
+the readers attach, before the request of the independent run, to the end of
+the second round, while the manager serves. The burst round comes after the
+span. Its commands are the rows that the span adds to the table `commands` of
+`coordination.sqlite3`. The run log of a run is its file `flow.ndjson` and
+its claim-check files `flow-claims` in its run store, and the run-log key is
+the largest run log of the 31 runs of the two rounds and the independent run,
+read after the lifetime ends. The manager log is every file under `flow` in
+the manager root, and the manager-log key is its growth across the span
+divided by the commands of the span. The ledger key is the growth of the
+ledger charge across the span divided by the same commands. The WAL key is
+the growth of `coordination.sqlite3-wal` across the span, divided by the same
+commands. The serving manager schedules no checkpoint, and automatic
+checkpointing is disabled, so the WAL grows with each commit until the Store
+closes. The after-close key is the size of that file after the ordinary
+shutdown of the lifetime, when SQLite has checkpointed the WAL at the close
+of its last connection. An absent file counts as 0 bytes. The harness also
+records the commands of the span (`growth.commands`) and the size of the WAL
+at the end of the span (`growth.wal-bytes-serving`), which name no ceiling.
 
 | Key | Ceiling | Unit | Basis |
 | --- | --- | --- | --- |
@@ -467,7 +563,14 @@ R + 4 C = 2621440, so that the four commands of one run fill the ordinary
 capacity. The next ordinary command is the ledger refusal, and a cancel of the
 run is then accepted. Its case 2 raises the ceiling to 16777216 and renames the
 active manager log away while a run waits at its question. The next ordinary
-command is the append refusal, and a cancel of the run is then accepted.
+command is the append refusal, and a cancel of the run is then accepted. The
+mode sends its ordinary commands and its cancels on one persistent
+connection, samples the resident memory of each of its four lifetimes, and
+prints one `MEASURE` line for each value. It writes the values to
+`storage-measure.json`, with these values that name no ceiling: the ledger
+charge at the refusal (`storage.ledger-bytes-at-ceiling`) and the latency of
+each cancel (`storage.ledger-cancel-ms` and `storage.append-cancel-ms`). The
+prints change no assertion of the mode.
 
 | Key | Ceiling | Unit | Basis |
 | --- | --- | --- | --- |
@@ -488,7 +591,16 @@ The `routes` mode supplies these values through measurement prints. Its case
 lifetime across the seal. Its case 13 seals the second lifetime, removes the
 oldest segment as the pruner removes it, and reads the floor and the cursors
 below it. The batch latency covers every `GET /v1/routes` JSON batch of the
-mode.
+mode that answers 200. Each batch uses a new connection, and its latency
+leaves out the opening of that connection. The mode samples the resident
+memory of each of its five lifetimes and prints one `MEASURE` line for each
+value. It writes the values to `routes-measure.json`, with these values that
+name no ceiling: the position at which the first seal starts the new active
+file (`routes.seal-position`), the position of the create command after the
+seal (`routes.create-after-seal-position`), the floor after the prune
+(`routes.prune-floor-position`), the records of the second sealed segment
+(`routes.second-segment-records`) and the number of batches
+(`routes.batches`). The prints change no assertion of the mode.
 
 | Key | Ceiling | Unit | Basis |
 | --- | --- | --- | --- |

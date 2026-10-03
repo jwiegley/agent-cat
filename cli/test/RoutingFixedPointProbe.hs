@@ -130,6 +130,7 @@ registry =
           ("parallel-person", row (Needs $ taking (input "input" :> noInputs) parallelPersonProgram)),
           ("structured-person", row (Needs $ taking (input "input" :> noInputs) structuredPersonProgram)),
           ("prompt-source", row (Needs $ taking (input "input" :> noInputs) sourceProgram)),
+          ("event-burst", row (Needs $ taking (input "input" :> noInputs) eventBurstProgram)),
           ("captured-input", row (Needs $ taking (stdinInputAs "input" :> noInputs) capturedInputProgram)),
           ("tail-source", row (Needs $ taking (argsInputAs "input" :> noInputs) sourceProgram)),
           ("stdin-source", row (Needs $ taking (stdinInputAs "input" :> noInputs) sourceProgram)),
@@ -298,6 +299,22 @@ structuredPersonProgram body = B.program [] $
   where
     reviewCode = S.SStructured (S.schemaProperty @"ok" S.schemaBoolean
       (S.schemaProperty @"notes" (S.schemaArray S.schemaString) S.schemaObject))
+
+-- | Many model answers in one run. Each answer appends runtime envelopes to the
+-- run log, so a few commands make many manager invalidations. The event flood
+-- of manager/CAPACITY.md uses it to fill the stream of a stopped reader.
+eventBurstProgram :: Text -> Program
+eventBurstProgram body = B.program [] (steps eventBurstSteps)
+  where
+    steps :: Int -> B.Blk s 'S.CodeAck
+    steps 0 = B.stop
+    steps index =
+      B.bindAsI @"step" S.SText ("step-" <> T.pack (show index))
+        (B.one (B.askModel "fixed-point" [B.lit "fixed-point burst: ", B.lit body])) (steps (index - 1))
+
+-- | The model answers of one 'eventBurstProgram' run.
+eventBurstSteps :: Int
+eventBurstSteps = 64
 
 pinnedProgram :: Text -> Program
 pinnedProgram pin = workflow W.do

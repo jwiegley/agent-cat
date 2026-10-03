@@ -246,7 +246,10 @@ Storage contention remains distinct from credential revocation.
 
 Transport, page, cursor, and SSE owners check the supplied view before they
 release protected data. An SSE response revalidates its view before each write
-and ends when the check fails. No owner recalls bytes that it has already sent.
+and ends when the check fails. An event stream packs the complete blocks of one
+batch into writes of at most 16384 bytes, the bound of one block, and splits no
+block. It therefore makes one check for each such write and not one for each
+block. No owner recalls bytes that it has already sent.
 
 ## Credential lifecycle through the serving manager
 

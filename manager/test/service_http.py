@@ -116,7 +116,13 @@ events_mode = len(sys.argv) == 6 and sys.argv[5] == EVENTS
 # cursor, reconnection after a partial block, cursor blocks, a live manager-log
 # record before the next heartbeat, the shared reader quota, the end of open
 # streams at an ordinary shutdown, and cursors across a restart. Each numbered
-# case prints its own PASS line. It runs five manager lifetimes.
+# case prints its own PASS line. It runs five manager lifetimes. The
+# measurement prints of the mode write ROUTES_MEASURE_RECORD with the values
+# of the section "Seal and prune cursors" of manager/CAPACITY.md: the seal
+# and prune positions and flags of cases 12 and 13, the refusal of a cursor
+# below the floor, the latency of each served JSON batch of /v1/routes and
+# the resident peak of the five lifetimes. Each print is a MEASURE line, and
+# no print asserts anything.
 ROUTES = "routes"
 routes_mode = len(sys.argv) == 6 and sys.argv[5] == ROUTES
 # The mutations-captures mode checks POST /v1/captures through the running
@@ -320,7 +326,13 @@ launched_failure_mode = len(sys.argv) == 6 and sys.argv[5] == LAUNCHED_FAILURE
 # succeeded run and corrupts the result file of a second one. The run stays
 # succeeded, its result becomes unavailable with the reason missing or
 # corrupt, and the artifact download refuses with unavailable-resource and
-# serves no bytes. Each numbered case prints its own PASS line.
+# serves no bytes. Each numbered case prints its own PASS line. The
+# measurement prints of the mode write STORAGE_MEASURE_RECORD with the
+# values of the section "Storage endings" of manager/CAPACITY.md: the
+# refusals of cases 1 and 5 with their latencies, the ledger charge at the
+# refusal, the cancels of cases 2 and 6 with their latencies, and the
+# resident peak of the four lifetimes. Each print is a MEASURE line, and no
+# print asserts anything.
 STORAGE = "storage"
 storage_mode = len(sys.argv) == 6 and sys.argv[5] == STORAGE
 # The capacity-admission mode measures the workloads of the sections
@@ -424,6 +436,66 @@ capacity_inputs_mode = len(sys.argv) == 6 and sys.argv[5] == CAPACITY_INPUTS
 CAPACITY_INPUTS_RECORD = "capacity-inputs.json"
 CAPACITY_CAPTURE_BYTES = 67108864
 CAPACITY_LEGACY_ENTRIES = 4096
+# The capacity-streams mode measures the workloads of the sections "Event
+# flood", "Slow consumer" and "Growth" of manager/CAPACITY.md in one
+# lifetime of the protected manager with its own manager root. It uses the
+# harness of the capacity-admission mode. The configuration installs the
+# profiles CAPACITY_STREAM_PROFILES and sets executionReservations 16,
+# globalMutationLedgerBytes 67108864 and globalConnections 16.
+# 1. The credentials E0 to E3, each with observe and control, read GET
+#    /v1/snapshot. E0 polls GET /v1/events with Accept: application/json
+#    from its cursor every 250 milliseconds. Each of E1, E2 and E3 opens one
+#    SSE reader of /v1/events at the cursor of its own snapshot and one SSE
+#    reader of a route stream at its floor: E1 and E2 read /v1/routes, and E3
+#    reads the run route of the independent run. The event reader of E1
+#    opens its connection with SO_RCVBUF CAPACITY_SLOW_RECEIVE_BUFFER. Each
+#    SSE reader decodes the HTTP/1.1 chunks itself and counts the transport
+#    bytes of the response body. One delayed-person request on cap_16 is
+#    approved and waits at its person question as the independent run. Then
+#    15 prompt-source requests on cap_01 to cap_15 run to success.
+# 2. A second round of 15 prompt-source requests runs with every reader
+#    reading. The mode reads the command-ledger charge, the command rows, the
+#    bytes under flow and the WAL of the coordination database before the
+#    independent request and after this round, while the manager serves.
+# 3. The event reader of E1 stops reading, and 15 requests of the
+#    CAPACITY_BURST_WORKFLOW workflow run. Each of their runs appends many
+#    runtime envelopes, so the stream of the stopped reader receives more
+#    than CAPACITY_PENDING_BOUND bytes, which the event reader of E2, of the
+#    same view, measures. While the reader is stopped, the credential
+#    independent answers the person question, and the independent run must
+#    succeed.
+# 4. The stopped reader reads again. The bytes that it reads from its
+#    stopped connection until the connection ends or stays silent for one
+#    second are its pending bytes. If the stream ended, the reader
+#    reconnects with Last-Event-ID set to its last complete block, as every
+#    reader of the mode does when its stream ends, and it must then hold
+#    every event of E0 once and in order.
+# 5. Each event reader must hold the events of E0 once and in order, and
+#    each route reader must hold the records of the JSON batches of its
+#    route. The mode records the catch-up time of each event at each event
+#    reader, from its first arrival at any reader, without the arrivals at
+#    the stopped reader after it stopped, the events per second that E0
+#    receives in each round, and the delivery time from the at field of the
+#    last record of each run log, its terminal event, to the last
+#    run.changed invalidation of that run at each event reader.
+# 6. After the ordinary shutdown the mode reads the WAL again and the run
+#    log of each run store.
+# 7. The mode writes CAPACITY_STREAMS_RECORD with a measured value for each
+#    ceiling key of these three sections. A value outside its ceiling is a
+#    finding for capacity_summary.py and does not end the mode. Each step
+#    prints its own PASS line, and the mode ends within CAPACITY_SECONDS.
+CAPACITY_STREAMS = "capacity-streams"
+capacity_streams_mode = len(sys.argv) == 6 and sys.argv[5] == CAPACITY_STREAMS
+CAPACITY_STREAMS_RECORD = "capacity-streams.json"
+CAPACITY_STREAM_PROFILES = CAPACITY_PROFILES[:16]
+CAPACITY_SLOW_RECEIVE_BUFFER = 4096
+CAPACITY_FLOOD_REQUESTS = 15
+CAPACITY_BURST_WORKFLOW = "event-burst"
+CAPACITY_PENDING_BOUND = 1048576
+# The seconds within which the status reads of the harness and the polls of
+# E0 send a refused read again. The burst round saturates the read path, so
+# a refusal can last longer than the five seconds of an ordinary read.
+STATUS_WINDOW = 60
 # The modes that configure the control fixture profiles in place of the
 # scripted profile: profile_1 runs the recovery-offering retry adapter and
 # profile_steer runs the steerable adapter. The controls-routing mode also
@@ -2232,7 +2304,7 @@ def lifecycle_elapsed():
 # and emacs-service-controls modes configure the control fixture profiles.
 control_profiles = (control_profiles or tui_mode in (TUI_CONTROLS, TUI_REDIRECT) or client_controls_mode or emacs_lifecycle_mode
                     or emacs_controls_mode)
-assert len(sys.argv) == 5 or mixed or boundary or pages_mode or events_mode or captures_mode or discard_mode or exports_mode or lineage_mode or control_profiles or person_mode or endpoints_mode or tui_mode or cross_client_mode or capacity_admission_mode or capacity_inputs_mode
+assert len(sys.argv) == 5 or mixed or boundary or pages_mode or events_mode or captures_mode or discard_mode or exports_mode or lineage_mode or control_profiles or person_mode or endpoints_mode or tui_mode or cross_client_mode or capacity_admission_mode or capacity_inputs_mode or capacity_streams_mode
 assert not tui_approval or os.environ.get("TUI_CHECK")
 assert not (endpoints_mode or tui_mode or cross_client_mode) or os.environ.get("TUI_CHECK")
 assert not capacity_inputs_mode or os.environ.get("ARTIFACT_CHECK")
@@ -2317,6 +2389,8 @@ if manager_failure_mode:
 STORAGE_COMMAND_CAPACITY = 131072
 STORAGE_LEDGER = 16 * STORAGE_COMMAND_CAPACITY + 4 * STORAGE_COMMAND_CAPACITY
 STORAGE_RAISED_LEDGER = 16777216
+STORAGE_MEASURE_RECORD = "storage-measure.json"
+ROUTES_MEASURE_RECORD = "routes-measure.json"
 if storage_mode:
     configuration["limits"]["globalMutationLedgerBytes"] = STORAGE_LEDGER
 # The pages mode also configures one local retention root. A local frontend
@@ -2382,7 +2456,7 @@ if cross_client_mode:
 # cap_key_NN, so that only the execution reservations limit how many of
 # their runs are active at once. The profiles of CAPACITY_COHORTS run the
 # same fixture with their stated keys.
-if capacity_admission_mode or capacity_inputs_mode:
+if capacity_admission_mode or capacity_inputs_mode or capacity_streams_mode:
     capacity_base = configuration["profiles"][0]
     configuration["profiles"] = [dict(capacity_base, id=name, workspaceLabel="HTTPS capacity fixture " + name[4:],
                                       resourceKeys=["cap_key_" + name[4:]]) for name in CAPACITY_PROFILES] + [
@@ -2777,7 +2851,7 @@ class CapacityFixture(TuiModeFixture):
 issued = administration({"version": 1, "operation": "issue-credential", "label": "HTTPS fixture",
                          "scopes": ["observe", "submit"] + (["control", "export"] if mixed else ["control"] if captures_mode or discard_mode or lineage_mode or control_profiles or person_mode else ["control", "export"] if exports_mode else []),
                          "profileIds": CONTROL_PROFILES or (["profile_1", "profile_plain"] if person_mode else
-                                                            CAPACITY_PROFILES if capacity_admission_mode or capacity_inputs_mode else ["profile_1"]),
+                                                            CAPACITY_PROFILES if capacity_admission_mode or capacity_inputs_mode or capacity_streams_mode else ["profile_1"]),
                          "expiresAt": "2999-01-01T00:00:00Z", "outputFile": str(work / "credential")})
 bearer = (work / "credential").read_bytes().decode("ascii")
 if collections:
@@ -2810,6 +2884,7 @@ tui_fixture = (TuiModeFixture(*TUI_MODES[tui_mode]) if tui_mode else
                CrossClientFixture() if cross_client_mode else
                CapacityFixture("r1-1") if capacity_admission_mode else
                CapacityFixture("inputs-module") if capacity_inputs_mode else
+               CapacityFixture("streams-module") if capacity_streams_mode else
                client_controls_fixture(CLIENT_CONTROLS_MODES[sys.argv[5]]) if client_controls_mode else
                TuiModeFixture(["profile_1"], ["observe", "submit", "control", "export"], client="pi") if pi_client_mode or pi_host_smoke_mode or pi_host_mode or pi_host_model_mode else
                TuiModeFixture(["profile_1"], ["observe", "submit", "control", "export"], client="emacs") if emacs_service_mode else
@@ -2938,6 +3013,28 @@ def fetch(path, headers=None, method="GET", payload=None):
         # Fresh read observations may contend with original coordinator work
         # or with the page sets of the TUI. Each retry is a new bounded read.
         # No POST enters this loop.
+        time.sleep(0.05)
+
+
+def timed_fetch(path, headers):
+    """A GET as fetch sends it, on a new connection for each attempt, with
+    its latency in milliseconds as manager/CAPACITY.md measures a named
+    read: from before its first attempt to the end of the body of its
+    answer, without the opening of each connection."""
+    started, opening = time.monotonic(), 0.0
+    deadline = started + 5
+    while True:
+        connection = PersistentConnection()
+        try:
+            before = time.monotonic()
+            connection.ready()
+            opening += time.monotonic() - before
+            status, value, raw, received = exchange(path, headers, persistent=connection)
+        finally:
+            connection.close()
+        if time.monotonic() >= deadline or not (status == 503 or (status == 429 and value["code"] == "storage-quota")):
+            return status, value, raw, received, (time.monotonic() - started - opening) * 1000
+        assert status == 429 or value["code"] == "storage-unavailable"
         time.sleep(0.05)
 
 
@@ -3763,8 +3860,12 @@ def process_environment(pid):
 
 def open_stream(path, authorized):
     """Open one SSE response and read its first complete block, which the
-    manager writes at once as an event batch or a heartbeat."""
-    deadline = time.monotonic() + 5
+    manager writes at once as an event batch or a heartbeat. A registration
+    refused with 429 storage-quota is tried again within 30 seconds, as in
+    route_open: a stream whose client closed its connection keeps its
+    subscription until its next write fails, at the latest at its next
+    heartbeat, as manager/STORAGE.md states."""
+    deadline = time.monotonic() + 30
     while True:
         connection = http.client.HTTPSConnection("127.0.0.1", port, context=context, timeout=7)
         connection.request("GET", path, headers=authorized | {"Accept": "text/event-stream"})
@@ -5291,12 +5392,18 @@ def route_checks():
             connection.close()
 
     def manager_batch(credential, after=None, route=None, extra=None):
+        """One GET /v1/routes JSON batch. The latency of each served batch
+        is a sample of routes.batch."""
         query = []
         if after is not None:
             query.append("after=" + after)
         if route is not None:
             query.append("route=" + urllib.parse.quote(route, safe=""))
-        return request("/v1/routes" + ("?" + "&".join(query) if query else ""), credential | json_accept | (extra or {}))
+        status, value, raw, _, elapsed = timed_fetch("/v1/routes" + ("?" + "&".join(query) if query else ""),
+                                                     credential | json_accept | (extra or {}))
+        if status == 200:
+            meter.sample("routes.batch", elapsed)
+        return status, value, raw
 
     def manager_walk(credential, route=None, after=None):
         """Every manager route batch from the cursor, or from the floor, until
@@ -5476,22 +5583,39 @@ def route_checks():
         response.close()
         connection.close()
 
+    def sampled(process):
+        """Sample the resident memory of one lifetime until stopped()."""
+        residents.append(CapacityResident(process.pid))
+
+    def stopped():
+        residents[-1].stop()
+        meter.measure({"routes.manager-rss-peak-bytes": max(max(item.samples) for item in residents if item.samples)})
+
     @contextlib.contextmanager
     def serving(index):
         with (work / f"server-{index}.stdout").open("wb") as output, (work / f"server-{index}.stderr").open("wb") as errors:
             process = subprocess.Popen([str(runner), "--manager", "serve", "--config", str(config),
                                         "+RTS", "-N" + native, "-RTS"], stdout=output, stderr=errors)
+            sampled(process)
             try:
                 wait_ready(process)
                 yield process
             finally:
+                stopped()
                 if process.poll() is None:
                     process.terminate()
                 process.wait(timeout=25)
 
+    # The measurement prints of the section "Seal and prune cursors" of
+    # manager/CAPACITY.md: the flags and refusal of cases 12 and 13, the
+    # latency of each served JSON batch of /v1/routes, which excludes the
+    # opening of its connection, and the resident memory of each lifetime.
+    meter = CapacityHarness(ROUTES_MEASURE_RECORD, ("routes",))
+    residents = []
     with (work / "server-0.stdout").open("wb") as output, (work / "server-0.stderr").open("wb") as errors:
         process = subprocess.Popen([str(runner), "--manager", "serve", "--config", str(config),
                                     "+RTS", "-N" + native, "-RTS"], stdout=output, stderr=errors)
+        sampled(process)
         try:
             wait_ready(process)
             status, capabilities, _ = request("/v1/capabilities", authorized)
@@ -5671,6 +5795,7 @@ def route_checks():
                   "410 view-expired, a future cursor returned 410 cursor-expired, Accept text/plain returned 409, and the",
                   "database is unchanged", flush=True)
         finally:
+            stopped()
             if process.poll() is None:
                 process.terminate()
             process.wait(timeout=25)
@@ -5724,6 +5849,7 @@ def route_checks():
         assert len(replies) == 1, "draft create receipt after the seal"
         whole, whole_end, _ = manager_walk(authorized)
         assert whole[:len(managed)] == managed and whole[len(managed):] == later, "a walk from the floor crosses the sealed segment"
+    meter.measure({"routes.seal-resume": True, "routes.seal-position": first_count, "routes.create-after-seal-position": int(creation[0]["position"])})
     print(f"PASS routes case 12: after a seal at position {first_count}, a cursor of the first lifetime resumed across the",
           f"sealed segment with the same alias, and the create command at {creation[0]['position']} and its receipt followed",
           "in the new active file", flush=True)
@@ -5736,6 +5862,8 @@ def route_checks():
     (sealed_dir / ("%020d.ndjson" % 0)).unlink()
     with serving(2):
         kept, kept_end, floor = manager_walk(authorized)
+        meter.measure({"routes.prune-floor": floor == first_count, "routes.prune-floor-position": floor,
+                       "routes.second-segment-records": second_count})
         assert floor == first_count, ("retained floor after a prune", floor, first_count)
         assert alias(kept_end) == alias(managed_end)
         retained = [record for record in later if record["position"] >= first_count]
@@ -5744,6 +5872,7 @@ def route_checks():
         assert status == 200 and value["oldestCursor"] == alias(managed_end) + "." + str(first_count), ("oldest cursor", value["oldestCursor"])
         for position in (0, first_count - 1):
             status, problem, _ = manager_batch(authorized, alias(managed_end) + "." + str(position))
+            meter.measure({"routes.below-floor-status": status, "routes.below-floor-code": problem.get("code")})
             assert status == 410 and problem["code"] == "cursor-expired", ("cursor below the floor", position, status, problem.get("code"))
         status, value, raw = manager_batch(authorized, alias(managed_end) + "." + str(first_count))
         assert status == 200 and value["records"][:1] == retained[:1], "cursor at the floor"
@@ -5971,6 +6100,9 @@ def route_checks():
     print(f"PASS routes case 20: after an ordinary restart the streamId is unchanged, the run-route cursor of record",
           f"{middle} resumed with {len(later)} records, and the manager-route cursor of the live command resumed with",
           f"its receipt and {len(resumed_managed) - 1} later records", flush=True)
+    meter.latency_keys("routes", "batch")
+    meter.measure({"routes.batches": len(meter.latencies["routes.batch"])})
+    print("MEASURE routes.batch-p50-ms", meter.measured["routes.batch-p50-ms"], "routes.batch-p95-ms", meter.measured["routes.batch-p95-ms"], flush=True)
     print("PASS routes: every run-route and manager-route case held against the running TLS 1.3 manager", flush=True)
 
 
@@ -16140,6 +16272,13 @@ def storage_checks():
     reserve = 16 * capacity
     ordinary_ceiling = STORAGE_LEDGER - reserve - capacity
     terminal = ("succeeded", "failed", "cancelled")
+    # The measurement prints of the sections "Storage endings" of
+    # manager/CAPACITY.md. The ordinary commands and the cancels use one
+    # persistent connection, so that their latencies exclude the opening of
+    # a connection, and the resident memory of each lifetime is sampled.
+    meter = CapacityHarness(STORAGE_MEASURE_RECORD, ("storage",))
+    connection = PersistentConnection()
+    residents = {}
 
     def serve(index):
         """Start one foreground manager lifetime on the same root and wait
@@ -16147,11 +16286,15 @@ def storage_checks():
         with (work / f"server-{index}.stdout").open("wb") as output, (work / f"server-{index}.stderr").open("wb") as errors:
             process = subprocess.Popen([str(runner), "--manager", "serve", "--config", str(config),
                                         "+RTS", "-N" + native, "-RTS"], stdout=output, stderr=errors)
+        residents[index] = CapacityResident(process.pid)
         wait_ready(process)
         return process
 
     def stop(process, index):
         """End one lifetime as the operator stops it and keep its exit status."""
+        connection.close()
+        residents[index].stop()
+        meter.measure({"storage.manager-rss-peak-bytes": max(max(item.samples) for item in residents.values() if item.samples)})
         if process.poll() is None:
             process.terminate()
         process.wait(timeout=25)
@@ -16197,7 +16340,7 @@ def storage_checks():
         decoded body and the idempotency key."""
         key = capabilities["authorityEpoch"] + "." + secrets.token_urlsafe(16)
         status, value, raw, _ = exchange("/v1/requests", authorized | {"Content-Type": "application/json", "Idempotency-Key": key},
-                                         method="POST", payload=create)
+                                         method="POST", payload=create, persistent=connection)
         if status == 201:
             validate("Request", value, raw)
         return status, value, key
@@ -16219,7 +16362,9 @@ def storage_checks():
         assert control["cancelAllowed"] and control["supervision"] == "owned", ("cancel not allowed", control["cancelAllowed"], control["supervision"])
         key = capabilities["authorityEpoch"] + "." + secrets.token_urlsafe(16)
         status, receipt, raw, _ = exchange(base + "/control", authorized | {"Content-Type": "application/json", "Idempotency-Key": key,
-                                           "If-Match": tag}, method="POST", payload=b'{"operation":"cancel"}')
+                                           "If-Match": tag}, method="POST", payload=b'{"operation":"cancel"}', persistent=connection)
+        prefix = {"ceiling": "storage.ledger-cancel", "fault": "storage.append-cancel"}[name]
+        meter.measure({prefix + "-accepted": status == 202, prefix + "-ms": round(connection.elapsed, 1)})
         assert status == 202, (name + " cancel", status, receipt.get("code"))
         validate("CommandReceipt", receipt, raw)
         command, _, raw = wait_for(receipt["links"]["self"], "CommandReceipt",
@@ -16280,6 +16425,8 @@ def storage_checks():
                 assert status == 201, ("ordinary command below the ledger ceiling", used, status, value.get("code"))
                 accepted.append(value["id"])
                 continue
+            meter.measure({"storage.ledger-refusal-status": status, "storage.ledger-refusal-code": value.get("code"),
+                           "storage.ledger-refusal-ms": round(connection.elapsed, 1), "storage.ledger-bytes-at-ceiling": used})
             assert status == 429 and value["code"] == "storage-quota", ("ordinary command at the ledger ceiling", used, status, value.get("code"))
             assert unknown_key(key), "the refused command left a command row"
             break
@@ -16349,6 +16496,8 @@ def storage_checks():
         os.rename(actives[0], archived)
         rows = commands()
         status, value, key = create_attempt(capabilities, create)
+        meter.measure({"storage.append-refusal-status": status, "storage.append-refusal-code": value.get("code"),
+                       "storage.append-refusal-ms": round(connection.elapsed, 1)})
         assert status == 503 and value["code"] == "storage-unavailable", ("ordinary command with every append failing", status, value.get("code"))
         assert commands() == rows and unknown_key(key), ("the refused command left a command row", rows, commands())
         print("PASS storage case 5: with the active manager log renamed away while run", fault_run, "waits at question", head,
@@ -16522,7 +16671,12 @@ class CapacityHarness:
     the record file of the mode in its fixture directory. begin() starts one
     manager lifetime through CapacityFixture and end() stops it. The other
     methods are the reads and commands of a workload on the persistent
-    connection of one CapacityCredential."""
+    connection of one CapacityCredential. dropped counts the reads whose
+    connection closed with no response, and refused counts the refusals that
+    read sent again."""
+
+    dropped = 0
+    refused = 0
 
     def __init__(self, record, sections):
         sys.path.insert(0, str(source / "manager/test"))
@@ -16536,6 +16690,15 @@ class CapacityHarness:
 
     def save(self):
         (work / self.record).write_text(json.dumps(self.measured, indent=1, sort_keys=True) + "\n")
+
+    def measure(self, values):
+        """Add measured values, write the record and print one MEASURE line
+        for each value. The storage and routes modes use it for their
+        measurement prints, which assert nothing."""
+        self.measured.update(values)
+        self.save()
+        for key, value in values.items():
+            print("MEASURE", key, json.dumps(value), flush=True)
 
     @staticmethod
     def percentile(samples, fraction):
@@ -16587,19 +16750,32 @@ class CapacityHarness:
         (work / f"server-{name}.exit").write_text(str(process.returncode) + "\n")
 
     @staticmethod
-    def read(credential, path, schema):
-        """One schema-valid read on the connection of the credential. A
-        read that meets the five-second Store allowance or the page-set
-        capacity is a new bounded read, as in fetch. credential.read_ms
-        times the read from before its first attempt."""
+    def read(credential, path, schema, extra=None, window=5):
+        """One schema-valid read on the connection of the credential, with
+        the further request headers extra. A read that meets the
+        five-second Store allowance or the page-set capacity is a new
+        bounded read within window seconds, as in fetch, and refused counts
+        each such refusal. A read whose connection closes with no
+        response is also a new bounded read within 30 seconds, and dropped
+        counts it: the manager closes the connection when the check of the
+        view at response entry meets the Store allowance after the response
+        has started. credential.read_ms times the read from before its first
+        attempt."""
         started = time.monotonic()
-        deadline = started + 5
+        deadline = started + window
         while True:
-            status, value, raw, received = exchange(path, credential.headers, persistent=credential.connection)
+            try:
+                status, value, raw, received = exchange(path, credential.headers | (extra or {}), persistent=credential.connection)
+            except ConnectionError as failure:
+                CapacityHarness.dropped += 1
+                assert time.monotonic() < started + 30, ("capacity read closed with no response", path, repr(failure))
+                time.sleep(0.05)
+                continue
             if status == 200:
                 break
             assert time.monotonic() < deadline and (status == 503 or (status == 429 and value["code"] == "storage-quota")), (
                 "capacity read", path, status, value.get("code"))
+            CapacityHarness.refused += 1
             time.sleep(0.05)
         credential.read_ms = (time.monotonic() - started) * 1000
         validate(schema, value, raw)
@@ -16686,8 +16862,8 @@ class CapacityHarness:
         self.effected(credential, receipt, "answer")
         return elapsed
 
-    def one_page(self, credential, path, schema):
-        value, _, _ = self.read(credential, path, schema)
+    def one_page(self, credential, path, schema, window=5):
+        value, _, _ = self.read(credential, path, schema, window=window)
         assert value["page"]["next"] is None, ("collection beyond one page", path)
         return value
 
@@ -17023,10 +17199,13 @@ def capacity_admission_checks():
 def capacity_head(connection, buffered):
     """Read the status line and the headers of one HTTP/1.1 response from
     the TLS connection, after the bytes already read. Returns the status,
-    the headers by lower-case name and the bytes after the headers."""
+    the headers by lower-case name and the bytes after the headers. A
+    connection that closes before the end of the headers raises
+    ConnectionResetError."""
     while b"\r\n\r\n" not in buffered:
         chunk = connection.recv(65536)
-        assert chunk, "the connection closed before the end of the response headers"
+        if not chunk:
+            raise ConnectionResetError("the connection closed before the end of the response headers")
         buffered += chunk
     head, rest = buffered.split(b"\r\n\r\n", 1)
     lines = head.decode("latin-1").split("\r\n")
@@ -17325,6 +17504,686 @@ def capacity_inputs_checks():
     meter.finish(CAPACITY_INPUTS, 5, "the draft, capture, artifact reader and page-set workloads")
 
 
+def stream_position(event_id):
+    """The durable position of an event identifier, the number after its
+    last dot."""
+    alias, _, position = event_id.rpartition(".")
+    assert alias and position.isdigit(), ("event identifier form", event_id)
+    return int(position)
+
+
+class CapacityStreamReader(threading.Thread):
+    """One SSE reader of the capacity-streams mode, on its own TLS
+    connection: an event reader of GET /v1/events, or a route reader of
+    GET /v1/routes or GET /v1/runs/{id}/routes when path names a route
+    stream. It writes the request and decodes the chunks of the HTTP/1.1
+    response itself, so that received counts the transport bytes of the
+    response body, chunk framing included. An event reader attaches at
+    cursor with Last-Event-ID, and events holds each event of each complete
+    block as (position, event, resource, revision, monotonic arrival, wall
+    arrival). A route reader without a cursor attaches at the floor of its
+    route stream, and records holds the record of each complete record
+    block. position is the position of the last complete block of either
+    kind. When its stream ends, the reader connects again with
+    Last-Event-ID set to the identifier of its last complete block, as a
+    client does, and ends records the time of each end. receive_buffer sets
+    SO_RCVBUF before the connection opens. pause() stops the reads after the
+    current one. resume() starts them again, and the reader then counts in
+    pending the bytes that it reads from the same connection until that
+    connection ends or stays silent for one second. stop() ends the reader."""
+
+    SILENCE = 1.0
+
+    def __init__(self, name, credential, cursor, receive_buffer=None, path="/v1/events"):
+        super().__init__(daemon=True)
+        self.label, self.cursor, self.receive_buffer, self.path = name, cursor, receive_buffer, path
+        self.routes = path != "/v1/events"
+        self.authorization = credential.headers["Authorization"]
+        self.events, self.records, self.ends, self.received, self.connections = [], [], [], 0, 0
+        self.position, self.pending, self.pending_ended, self.failure = None, None, None, None
+        self.reading, self.paused, self.drained, self.halt, self.attached = (threading.Event() for _ in range(5))
+        self.reading.set()
+        self.lock = threading.Lock()
+        self.start()
+
+    def connect(self):
+        """Open the stream at the cursor. A registration refused with 429 or
+        503 is tried again within 30 seconds: the subscription of an ended
+        stream is released when its next write fails, at the latest at its
+        next heartbeat. A registration whose connection closes before the
+        end of the response headers is a refusal at response entry, as in
+        CapacityHarness.read, and is tried again within the same 30
+        seconds."""
+        deadline = time.monotonic() + 30
+        while True:
+            plain = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            if self.receive_buffer:
+                plain.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, self.receive_buffer)
+            plain.settimeout(7)
+            plain.connect(("127.0.0.1", port))
+            connection = context.wrap_socket(plain, server_hostname="127.0.0.1")
+            resume = f"Last-Event-ID: {self.cursor}\r\n" if self.cursor else ""
+            connection.sendall((f"GET {self.path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nAuthorization: {self.authorization}\r\n"
+                                f"Accept: text/event-stream\r\n{resume}\r\n").encode("ascii"))
+            try:
+                status, headers, rest = capacity_head(connection, b"")
+            except ConnectionError as failure:
+                connection.close()
+                CapacityHarness.dropped += 1
+                assert time.monotonic() < deadline, ("stream admission closed with no response", self.label, repr(failure))
+                time.sleep(0.05)
+                continue
+            if status == 200:
+                assert headers.get("content-type") == "text/event-stream" and headers.get("transfer-encoding") == "chunked", (
+                    "SSE response framing", self.label, headers)
+                self.connections += 1
+                return connection, rest
+            length = int(headers.get("content-length", "0"))
+            while len(rest) < length:
+                chunk = connection.recv(65536)
+                assert chunk, ("the refusal of a stream ended early", self.label, status)
+                rest += chunk
+            connection.close()
+            problem = frozen.parse_json(rest[:length])
+            validate("Problem", problem)
+            assert status in (429, 503) and time.monotonic() < deadline, ("stream admission", self.label, status, problem["code"])
+            time.sleep(0.05)
+
+    def run(self):
+        try:
+            while not self.halt.is_set():
+                connection, rest = self.connect()
+                self.attached.set()
+                try:
+                    self.consume(connection, rest)
+                finally:
+                    connection.close()
+                if not self.halt.is_set():
+                    self.ends.append(time.monotonic())
+        except BaseException as failure:
+            self.failure = failure
+            self.attached.set()
+            self.drained.set()
+
+    def drain_end(self, drained, ended):
+        self.pending, self.pending_ended = drained, ended
+        self.drained.set()
+
+    def consume(self, connection, chunked):
+        """Read one response until its end. Returns when the stream ends or
+        the reader stops."""
+        connection.settimeout(0.25)
+        text, draining, drained, last_data = b"", False, 0, 0.0
+        with self.lock:
+            self.received += len(chunked)
+        while not self.halt.is_set():
+            if not self.reading.is_set():
+                self.paused.set()
+                self.reading.wait(0.25)
+                continue
+            if self.paused.is_set():
+                self.paused.clear()
+                draining, drained, last_data = True, 0, time.monotonic()
+            try:
+                data = connection.recv(65536)
+            except TimeoutError:
+                if draining and time.monotonic() - last_data >= self.SILENCE:
+                    draining = False
+                    self.drain_end(drained, False)
+                continue
+            except (ConnectionError, ssl.SSLError):
+                data = b""
+            if not data:
+                if draining:
+                    self.drain_end(drained, True)
+                return
+            arrival, wall = time.monotonic(), time.time()
+            with self.lock:
+                self.received += len(data)
+            if draining:
+                drained, last_data = drained + len(data), arrival
+            chunked += data
+            while True:
+                line_end = chunked.find(b"\r\n")
+                if line_end < 0:
+                    break
+                size = int(chunked[:line_end].split(b";")[0], 16)
+                if size == 0:
+                    if draining:
+                        self.drain_end(drained, True)
+                    return
+                if len(chunked) < line_end + 4 + size:
+                    break
+                text += chunked[line_end + 2:line_end + 2 + size]
+                chunked = chunked[line_end + 4 + size:]
+            while b"\n\n" in text:
+                block, text = text.split(b"\n\n", 1)
+                if self.routes:
+                    entries = frozen.parse_route_sse(block + b"\n\n")
+                    with self.lock:
+                        self.records += [entry["data"] for entry in entries if "data" in entry]
+                        if entries:
+                            self.position = stream_position(entries[-1]["id"])
+                else:
+                    entries = frozen.parse_sse(block + b"\n\n")
+                    with self.lock:
+                        self.events += [(stream_position(event["id"]), event["event"], event["data"]["resource"],
+                                         event["data"]["revision"], arrival, wall) for event in entries]
+                        if entries:
+                            self.position = stream_position(entries[-1]["id"])
+                if entries:
+                    self.cursor = entries[-1]["id"]
+
+    def check(self):
+        if self.failure is not None:
+            raise AssertionError(("SSE reader failed", self.label, repr(self.failure))) from self.failure
+
+    def pause(self):
+        """Stop reading and return the bytes received until then."""
+        self.reading.clear()
+        assert self.paused.wait(5), ("the reader did not stop", self.label)
+        with self.lock:
+            return self.received
+
+    def resume(self):
+        self.drained.clear()
+        self.reading.set()
+
+    def last(self):
+        """The position of the last complete block."""
+        with self.lock:
+            return self.position
+
+    def stop(self):
+        self.halt.set()
+        self.reading.set()
+        self.join(timeout=10)
+
+
+class CapacityPoller(threading.Thread):
+    """The polling reader E0 of the event flood: GET /v1/events with
+    Accept: application/json from its cursor every 250 milliseconds, each
+    batch until hasMore is false. events holds each event as
+    CapacityStreamReader holds it. slowest holds the milliseconds of the
+    slowest read and the UTC time of its start, and a failure keeps the UTC
+    time and the milliseconds of the read that failed."""
+
+    def __init__(self, credential, cursor):
+        super().__init__(daemon=True)
+        self.credential, self.cursor = credential, cursor
+        self.events, self.failure, self.halt, self.lock = [], None, threading.Event(), threading.Lock()
+        self.slowest, self.failed = (0.0, None), None
+        self.start()
+
+    def run(self):
+        try:
+            while not self.halt.is_set():
+                while True:
+                    started, begun = time.monotonic(), datetime.datetime.now(datetime.timezone.utc).isoformat()
+                    try:
+                        batch, _, _ = CapacityHarness.read(self.credential, "/v1/events?after=" + self.cursor, "EventBatch",
+                                                           {"Accept": "application/json"}, STATUS_WINDOW)
+                    except BaseException:
+                        self.failed = (begun, round((time.monotonic() - started) * 1000))
+                        raise
+                    self.slowest = max(self.slowest, (round((time.monotonic() - started) * 1000, 1), begun))
+                    arrival, wall = time.monotonic(), time.time()
+                    with self.lock:
+                        self.events += [(stream_position(event["id"]), event["event"], event["data"]["resource"],
+                                         event["data"]["revision"], arrival, wall) for event in batch["events"]]
+                    self.cursor = batch["cursor"]
+                    if not batch["hasMore"]:
+                        break
+                self.halt.wait(0.25)
+        except BaseException as failure:
+            self.failure = failure
+
+    def check(self):
+        if self.failure is not None:
+            raise AssertionError(("the polling reader failed", self.failed, repr(self.failure))) from self.failure
+
+    def last(self):
+        with self.lock:
+            return self.events[-1][0] if self.events else None
+
+    def stop(self):
+        self.halt.set()
+        self.join(timeout=15)
+
+
+def capacity_streams_checks():
+    """The workloads of the sections "Event flood", "Slow consumer" and
+    "Growth" of manager/CAPACITY.md, in one lifetime of the real HTTPS
+    manager with its own manager root. Each numbered step prints one PASS
+    line. The mode writes CAPACITY_STREAMS_RECORD with a measured value for
+    each ceiling key of these sections."""
+    import decimal
+    import sqlite3
+    meter = CapacityHarness(CAPACITY_STREAMS_RECORD, ("events", "slow", "growth"))
+    measured, sample, latency_keys = meter.measured, meter.sample, meter.latency_keys
+    read, submit, approve, answer, one_page, settle = meter.read, meter.submit, meter.approve, meter.answer, meter.one_page, meter.settle
+    terminal = ("succeeded", "failed", "cancelled")
+    in_review = lambda value: value["phase"] == "review" and value["preparationId"] is not None
+    root = work / "capacity-streams"
+    observers = ["E0", "E1", "E2", "E3"]
+    submitter_names = ["flood-%d" % index for index in range(1, 6)]
+    # The approvals of the rounds that closed with no response.
+    uncertain = []
+
+    def coordination(statement, parameters=()):
+        """The rows of one query through a read-only connection to the
+        coordination database."""
+        connection = sqlite3.connect(database.as_uri() + "?mode=ro", uri=True)
+        try:
+            return connection.execute(statement, parameters).fetchall()
+        finally:
+            connection.close()
+
+    def stored():
+        """The command-ledger charge and the number of command rows."""
+        (charge,), = coordination("SELECT bytes FROM command_ledger_usage WHERE singleton=1")
+        (rows,), = coordination("SELECT count(*) FROM commands")
+        return charge, rows
+
+    def tree_bytes(path):
+        """The bytes of the regular files under path, from stat."""
+        return sum(item.lstat().st_size for item in path.rglob("*") if stat.S_ISREG(item.lstat().st_mode))
+
+    def wal_bytes():
+        wal = database.with_name(database.name + "-wal")
+        return wal.lstat().st_size if wal.exists() else 0
+
+    def check_readers():
+        poller.check()
+        for reader in readers:
+            reader.check()
+
+    def caught_up(watched, what):
+        """Wait until E0 has read no new event for one second and each
+        watched event reader holds the last event of E0. Returns that
+        position."""
+        deadline = time.monotonic() + 60
+        last, since = None, time.monotonic()
+        while True:
+            check_readers()
+            top = poller.last()
+            if top != last:
+                last, since = top, time.monotonic()
+            elif time.monotonic() - since >= 1.0 and all(reader.last() == top for reader in watched):
+                return top
+            assert time.monotonic() < deadline, (what, top, {reader.label: reader.last() for reader in watched})
+            time.sleep(0.1)
+
+    def route_walk(reader):
+        """Every record of the route stream of the reader in JSON batches of
+        its credential, from the floor until hasMore is false. Returns the
+        records and the position of the final cursor."""
+        credential = credentials[reader.label.split("-")[0]]
+        schema = "ManagerRouteBatch" if reader.path == "/v1/routes" else "RouteBatch"
+        records, after = [], ""
+        try:
+            for _ in range(1024):
+                value, _, _ = read(credential, reader.path + after, schema, {"Accept": "application/json"})
+                records += value["records"]
+                if not value["hasMore"]:
+                    return records, stream_position(value["cursor"])
+                after = "?after=" + value["cursor"]
+            raise AssertionError(("the route batches did not end", reader.label))
+        finally:
+            # The connection of the walk holds none of the 16 connection
+            # places after the walk.
+            credential.connection.close()
+
+    def same_record(streamed, polled):
+        """Whether a streamed record is the polled record, or the polled
+        record with its body replaced by the size notice of an oversized
+        block. The SSE parser reads JSON numbers as decimal.Decimal."""
+        if streamed == polled:
+            return True
+        body = streamed.get("body")
+        rest = {key: value for key, value in streamed.items() if key != "body"}
+        return ("body" in polled and isinstance(body, dict) and body.get("omitted") == "size"
+                and isinstance(body.get("bytes"), (int, decimal.Decimal)) and body["bytes"] > 0
+                and rest == {key: value for key, value in polled.items() if key != "body"})
+
+    def flood_round(label, workflow, after_submit=None):
+        """One round of CAPACITY_FLOOD_REQUESTS requests of the workflow on
+        cap_01 to cap_15. Each submitter creates, supplies and enqueues three
+        requests and approves their reviews. Returns the runs and the
+        monotonic start and end of the round."""
+        started = time.monotonic()
+        order, owner, runs, approved = [], {}, {}, set()
+        for index, profile in enumerate(CAPACITY_STREAM_PROFILES[:CAPACITY_FLOOD_REQUESTS]):
+            credential = submitters[index % len(submitters)]
+            created, status, receipt, _ = submit(credential, profile, workflow)
+            assert status == 202, (label + " enqueue", index + 1, status, receipt.get("code"))
+            order.append(created["id"])
+            owner[created["id"]] = credential
+        if after_submit is not None:
+            after_submit()
+        deadline = time.monotonic() + 240
+        while True:
+            check_readers()
+            items = {item["id"]: item for item in one_page(harness, "/v1/requests", "RequestPage", STATUS_WINDOW)["items"]}
+            for ident in order:
+                if items[ident]["runId"] is not None:
+                    runs[ident] = items[ident]["runId"]
+                if in_review(items[ident]) and ident not in approved:
+                    approved.add(ident)
+                    try:
+                        approve(owner[ident], items[ident]["preparationId"], ident)
+                    except ConnectionError as failure:
+                        # The approval closed with no response, so its outcome
+                        # is uncertain, and nothing sends it again. A round
+                        # whose request stays in review ends at its deadline.
+                        uncertain.append((ident, repr(failure)))
+            statuses = {run["id"]: run["runtime"]["status"] if run["runtime"] is not None else None
+                        for run in one_page(harness, "/v1/runs", "RunPage", STATUS_WINDOW)["items"]}
+            if all(ident in runs and statuses.get(runs[ident]) in terminal for ident in order):
+                break
+            assert time.monotonic() < deadline, (label + " deadline", len(approved), len(runs), uncertain)
+            # Each status read holds the configuration guard and one of the
+            # two reader places, so the harness reads twice a second and
+            # leaves the read path to the readers of the workload.
+            time.sleep(0.5)
+        failed = {runs[ident]: statuses[runs[ident]] for ident in order if statuses[runs[ident]] != "succeeded"}
+        assert not failed, (label + " runs did not succeed", failed)
+        return [runs[ident] for ident in order], started, time.monotonic()
+
+    def fresh_minute(mutations):
+        """Wait for the next UTC minute when a submitter would otherwise send
+        more than 27 ordinary mutations in the current one."""
+        minute = int(time.time() // 60)
+        if any(credential.minutes.get(minute, 0) + mutations > 27 for credential in submitters):
+            time.sleep((minute + 1) * 60 - time.time() + 0.5)
+
+    def per_second(start, end):
+        with poller.lock:
+            count = sum(1 for event in poller.events if start <= event[4] <= end)
+        return round(count / (end - start), 1), count
+
+    process, resident, credentials = meter.begin(
+        "streams", root, CAPACITY_STREAM_PROFILES,
+        {"executionReservations": 16, "globalMutationLedgerBytes": 67108864, "globalConnections": 16},
+        ["streams-harness", "independent"] + submitter_names)
+    readers, poller = [], None
+    try:
+        harness, independent = credentials["streams-harness"], credentials["independent"]
+        submitters = [credentials[name] for name in submitter_names]
+        databases = sorted(root.rglob("coordination.sqlite3"))
+        assert len(databases) == 1, ("coordination database", databases)
+        database = databases[0]
+
+        # Step 1. The readers attach, the independent run waits at its
+        # question, and the first round runs.
+        cursors = {}
+        for name in observers:
+            meter.fixture.issue(name, ["observe", "control"])
+            credentials[name] = CapacityCredential(name)
+        for name in observers:
+            snapshot, _, _ = read(credentials[name], "/v1/snapshot", "OverviewSnapshot")
+            cursors[name] = snapshot["cursor"]
+            # The SSE readers of E1 to E3 use connections of their own, so
+            # the connection of the snapshot read closes and holds none of
+            # the 16 connection places.
+            if name != "E0":
+                credentials[name].connection.close()
+        assert len({stream_position(cursor) for cursor in cursors.values()}) == 1, ("the snapshots name different positions", cursors)
+        poller = CapacityPoller(credentials["E0"], cursors["E0"])
+        slow = CapacityStreamReader("E1-2", credentials["E1"], cursors["E1"], CAPACITY_SLOW_RECEIVE_BUFFER)
+        peer = CapacityStreamReader("E2-1", credentials["E2"], cursors["E2"])
+        readers += [CapacityStreamReader("E1-1", credentials["E1"], None, path="/v1/routes"), slow, peer,
+                    CapacityStreamReader("E2-2", credentials["E2"], None, path="/v1/routes"),
+                    CapacityStreamReader("E3-1", credentials["E3"], cursors["E3"])]
+        for reader in readers:
+            assert reader.attached.wait(35), ("the reader did not attach", reader.label)
+        check_readers()
+        ledger_before, commands_before = stored()
+        log_before, wal_before = tree_bytes(root / "flow"), wal_bytes()
+        created, status, receipt, _ = submit(submitters[0], "cap_16", "delayed-person")
+        assert status == 202, ("the independent enqueue", status, receipt.get("code"))
+        current, _ = settle(harness, created["links"]["self"], in_review, "the independent request did not reach review")
+        approve(submitters[1], current["preparationId"], created["id"])
+        deadline = time.monotonic() + 60
+        while True:
+            current, _, _ = read(harness, created["links"]["self"], "Request")
+            independent_run = current["runId"]
+            control = read(harness, "/v1/runs/" + independent_run + "/control", "RunControl")[0] if independent_run else None
+            if control is not None and control["decisionHeadId"] is not None:
+                question = control["decisionHeadId"]
+                break
+            assert time.monotonic() < deadline, "the independent run did not reach its person question"
+            time.sleep(0.05)
+        readers.append(CapacityStreamReader("E3-2", credentials["E3"], None, path="/v1/runs/" + independent_run + "/routes"))
+        assert readers[-1].attached.wait(35), ("the reader did not attach", readers[-1].label)
+        events_readers = [reader for reader in readers if not reader.routes]
+        route_readers = [reader for reader in readers if reader.routes]
+        first_runs, first_start, first_end = flood_round("round 1", "prompt-source")
+        first_rate, first_count = per_second(first_start, first_end)
+        check_readers()
+        print("PASS capacity-streams step 1: E0 polls, the event readers E1-2, E2-1 and E3-1 attached at their snapshots at position",
+              stream_position(cursors["E0"]), "and the route readers E1-1 and E2-2 of /v1/routes and E3-2 of the run route of",
+              "independent run", independent_run, "attached at their floors; the run waits at question", question, "and the",
+              len(first_runs), "runs of round 1 succeeded in", f"{first_end - first_start:.1f} s", "while E0 received", first_count,
+              "events,", first_rate, "per second", flush=True)
+
+        # Step 2. The second round runs with every reader reading, and the
+        # span of the growth keys ends.
+        second_runs, second_start, second_end = flood_round("round 2", "prompt-source")
+        second_rate, second_count = per_second(second_start, second_end)
+        ledger_after, commands_after = stored()
+        log_after, wal_serving = tree_bytes(root / "flow"), wal_bytes()
+        commands = commands_after - commands_before
+        assert commands > 0, "no command row was added"
+        charge = ledger_after - ledger_before
+        measured.update({"growth.ledger-bytes-per-command": charge // commands if charge % commands == 0 else round(charge / commands, 1),
+                         "growth.manager-log-bytes-per-command": round((log_after - log_before) / commands, 1),
+                         "growth.wal-bytes-per-command": round((wal_serving - wal_before) / commands, 1),
+                         "growth.commands": commands, "growth.wal-bytes-serving": wal_serving})
+        meter.save()
+        check_readers()
+        print("PASS capacity-streams step 2: the", len(second_runs), "runs of round 2 succeeded in", f"{second_end - second_start:.1f} s",
+              "while E0 received", second_count, "events,", second_rate, "per second; the growth span added", commands, "commands,",
+              charge, "ledger bytes,", log_after - log_before, "manager-log bytes and", wal_serving - wal_before, "WAL bytes", flush=True)
+
+        # Step 3. Reader E1-2 stops. The burst round writes more than the
+        # pending-byte bound to its stream, and the independent run is
+        # answered and succeeds.
+        fresh_minute(12)
+        stalled_from = slow.pause()
+        with peer.lock:
+            peer_from = peer.received
+        stopped_at = time.monotonic()
+        answered = {}
+
+        def answer_independent():
+            answered["ms"] = answer(independent, question)
+            answered["at"], answered["wall"] = time.monotonic(), time.time()
+
+        burst_runs, burst_start, burst_end = flood_round("burst round", CAPACITY_BURST_WORKFLOW, answer_independent)
+        deadline = time.monotonic() + 60
+        while True:
+            snapshot, _, _ = read(harness, "/v1/runs/" + independent_run + "/snapshot", "RunSnapshot", window=STATUS_WINDOW)
+            if snapshot["runtime"] is not None and snapshot["runtime"]["status"] in terminal:
+                independent_done = time.monotonic()
+                break
+            assert time.monotonic() < deadline, "the independent run did not end"
+            time.sleep(0.05)
+        burst_rate, burst_count = per_second(burst_start, burst_end)
+        independent_succeeded = snapshot["runtime"]["status"] == "succeeded"
+        measured.update({"slow.independent-answer-ms": round(answered["ms"], 1), "slow.independent-run-succeeded": independent_succeeded,
+                         "slow.independent-terminal-ms": round((independent_done - answered["at"]) * 1000, 1)})
+        meter.save()
+        assert independent_succeeded, ("the independent run", snapshot["runtime"]["status"])
+        caught_up([reader for reader in events_readers if reader is not slow], "the reading readers did not catch up after the burst round")
+        with peer.lock:
+            peer_stalled = peer.received - peer_from
+        stopped_seconds = time.monotonic() - stopped_at
+        measured.update({"slow.peer-bytes-while-stopped": peer_stalled, "slow.stopped-bytes-before": stalled_from,
+                         "slow.stopped-ms": round(stopped_seconds * 1000), "events.burst-per-second": burst_rate})
+        meter.save()
+        assert peer_stalled > CAPACITY_PENDING_BOUND, ("the burst round wrote no more than the pending-byte bound", peer_stalled)
+        print("PASS capacity-streams step 3: while reader E1-2 was stopped for", f"{stopped_seconds:.1f} s,", "the", len(burst_runs),
+              CAPACITY_BURST_WORKFLOW, "runs succeeded in", f"{burst_end - burst_start:.1f} s", "while E0 received", burst_count,
+              "events,", burst_rate, "per second, and reader E2-1 of the same view received", peer_stalled, "bytes, more than the",
+              CAPACITY_PENDING_BOUND, "byte bound; the independent answer was accepted in", f"{answered['ms']:.0f} ms", "and run",
+              independent_run, "succeeded", f"{(independent_done - answered['at']) * 1000:.0f} ms", "after it", flush=True)
+
+        # Step 4. The stopped reader reads again: its pending bytes, the end
+        # of its stream, its reconnection and no loss.
+        ends_before, connections_before = len(slow.ends), slow.connections
+        slow.resume()
+        assert slow.drained.wait(30), "the resumed reader did not drain its connection"
+        slow.check()
+        caught_up([slow], "the resumed reader did not reach the last event of E0")
+        stream_ended = bool(slow.pending_ended)
+        with slow.lock:
+            slow_events = [event[:4] for event in slow.events]
+        with poller.lock:
+            polled = [event[:4] for event in poller.events]
+        no_loss = slow_events == polled and len({event[0] for event in slow_events}) == len(slow_events)
+        measured.update({"slow.pending-bytes-max": slow.pending, "slow.no-loss": no_loss, "slow.stream-ended": stream_ended,
+                         "slow.reconnects-after-stop": slow.connections - connections_before})
+        meter.save()
+        assert no_loss, ("the resumed reader lost or repeated events", len(slow_events), len(polled))
+        print("PASS capacity-streams step 4: reader E1-2 read", slow.pending, "pending bytes from its stopped connection, which",
+              "the manager had ended" if stream_ended else "stayed open", "while", peer_stalled, "bytes were written to its view; with",
+              slow.connections - connections_before, "reconnections and", len(slow.ends) - ends_before, "ends after the stop it holds the",
+              len(polled), "events of E0 once and in order", flush=True)
+
+        # Step 5. Completeness, catch-up and delivery.
+        with poller.lock:
+            polled_events = list(poller.events)
+        held = {}
+        for reader in events_readers:
+            with reader.lock:
+                held[reader.label] = list(reader.events)
+        events_complete = all([event[:4] for event in held[reader.label]] == polled for reader in events_readers)
+        routes_complete, route_counts, route_differences = True, {}, {}
+        for reader in route_readers:
+            walked, end = route_walk(reader)
+            deadline = time.monotonic() + 60
+            while reader.last() is None or reader.last() < end:
+                reader.check()
+                assert time.monotonic() < deadline, ("the route reader did not reach the end of its route", reader.label, reader.last(), end)
+                time.sleep(0.1)
+            with reader.lock:
+                streamed = [record for record in reader.records if stream_position(record["id"]) <= end]
+            route_counts[reader.label] = len(walked)
+            differing = [index for index, (a, b) in enumerate(zip(streamed, walked)) if not same_record(a, b)]
+            if differing or not walked or len(streamed) != len(walked):
+                routes_complete = False
+                route_differences[reader.label] = {"streamed": len(streamed), "walked": len(walked), "differing": len(differing),
+                                                   "first": [streamed[differing[0]], walked[differing[0]]] if differing else None}
+        complete = events_complete and routes_complete
+        first_arrival = {}
+        for events in [polled_events] + list(held.values()):
+            for event in events:
+                first_arrival[event[0]] = min(first_arrival.get(event[0], event[4]), event[4])
+        # The arrival record keeps, for each event, its first arrival in
+        # milliseconds after the start of round 1 and its lag at each event
+        # reader, E0 included, so that the evidence shows which reader leads.
+        lags = {}
+        for label, events in [("E0", polled_events)] + list(held.items()):
+            for event in events:
+                lags.setdefault(event[0], {})[label] = round((event[4] - first_arrival[event[0]]) * 1000, 1)
+        (work / "capacity-streams-arrivals.json").write_text(json.dumps({
+            "round1": [0, round((first_end - first_start) * 1000)],
+            "round2": [round((second_start - first_start) * 1000), round((second_end - first_start) * 1000)],
+            "stopped": round((stopped_at - first_start) * 1000),
+            "burst": [round((burst_start - first_start) * 1000), round((burst_end - first_start) * 1000)],
+            "events": [[position, round((first_arrival[position] - first_start) * 1000), lags[position]] for position in sorted(lags)]}) + "\n")
+        for reader in events_readers:
+            for event in held[reader.label]:
+                if reader is slow and event[4] >= stopped_at:
+                    continue
+                sample("events.catch-up", (event[4] - first_arrival[event[0]]) * 1000)
+                sample("events.reader." + reader.label.lower() + ".catch-up", (event[4] - first_arrival[event[0]]) * 1000)
+                # The same samples split at the stop: the two rounds, and the
+                # burst round with the events after the second round.
+                phase = "events.rounds" if first_arrival[event[0]] < stopped_at else "events.burst"
+                sample(phase + ".catch-up", (event[4] - first_arrival[event[0]]) * 1000)
+        for event in polled_events:
+            sample("events.reader.e0.catch-up", (event[4] - first_arrival[event[0]]) * 1000)
+        for run in first_runs + second_runs + burst_runs + [independent_run]:
+            records, after = [], ""
+            while True:
+                value, _, _ = read(harness, f"/v1/runs/{run}/routes" + after, "RouteBatch", {"Accept": "application/json"})
+                records += value["records"]
+                if not value["hasMore"]:
+                    break
+                after = "?after=" + value["cursor"]
+            assert records and records[-1]["schema"] == "event", ("the run log does not end with its terminal event", run, records[-1:])
+            done_at = datetime.datetime.fromisoformat(records[-1]["at"]).timestamp()
+            if run == independent_run:
+                # The time from the accepted answer to the terminal event of
+                # the run log, which separates the runtime of the independent
+                # run from the observation of its terminal status.
+                measured["slow.independent-runtime-terminal-ms"] = round((done_at - answered["wall"]) * 1000, 1)
+            for reader in events_readers:
+                changes = [event for event in held[reader.label] if event[1] == "run.changed" and event[2] == "/v1/runs/" + run]
+                assert changes, ("no run.changed invalidation of the run", reader.label, run)
+                if reader is slow and changes[-1][4] >= stopped_at:
+                    continue
+                sample("events.delivery", (changes[-1][5] - done_at) * 1000)
+                sample(("events.rounds" if run in first_runs or run in second_runs else "events.burst") + ".delivery",
+                       (changes[-1][5] - done_at) * 1000)
+        rate = max(max(credential.minutes.values()) for credential in submitters + [independent])
+        measured.update({"events.reader-complete": complete, "events.round1-per-second": first_rate, "events.round2-per-second": second_rate,
+                         "events.count": len(polled), "events.reconnects": sum(len(reader.ends) for reader in readers),
+                         "events.mutations-per-credential-minute": rate, "events.poll-slowest-ms": poller.slowest[0], "events.poll-slowest-at": poller.slowest[1] or "",
+                         "events.dropped-reads": CapacityHarness.dropped, "events.refused-reads": CapacityHarness.refused, "events.uncertain-approvals": len(uncertain),
+                         **{f"events.route.{reader.label.lower()}.records": route_counts[reader.label] for reader in route_readers},
+                         **{f"events.route.{reader.label.lower()}.bytes": reader.received for reader in route_readers}})
+        latency_keys("events", "catch-up")
+        latency_keys("events", "delivery")
+        for phase in ("events.rounds", "events.burst"):
+            latency_keys(phase, "catch-up")
+            latency_keys(phase, "delivery")
+        for label in ["e0"] + [reader.label.lower() for reader in events_readers]:
+            latency_keys("events.reader." + label, "catch-up")
+        meter.save()
+        assert events_complete, ("an event reader differs from E0", {label: len(events) for label, events in held.items()}, len(polled))
+        assert routes_complete, ("a route reader differs from the JSON batches of its route", route_differences)
+        assert rate <= 27, ("a credential sent more than 27 ordinary mutations in one UTC minute", rate)
+        print("PASS capacity-streams step 5: each of the three event readers holds the", len(polled), "events of E0 once and in order,",
+              "and the route readers hold the", route_counts, "records of the JSON batches of their routes, with",
+              measured["events.reconnects"], "reconnections; catch-up p50", measured["events.catch-up-p50-ms"], "ms and p95",
+              measured["events.catch-up-p95-ms"], "ms (the two rounds", measured["events.rounds.catch-up-p50-ms"], "and",
+              measured["events.rounds.catch-up-p95-ms"], "ms, the burst round", measured["events.burst.catch-up-p50-ms"], "and",
+              measured["events.burst.catch-up-p95-ms"], "ms); from the terminal event of each run log to its last run.changed invalidation p50",
+              measured["events.delivery-p50-ms"], "ms and p95", measured["events.delivery-p95-ms"], "ms (the two rounds",
+              measured["events.rounds.delivery-p50-ms"], "and", measured["events.rounds.delivery-p95-ms"], "ms, the burst round",
+              measured["events.burst.delivery-p50-ms"], "and", measured["events.burst.delivery-p95-ms"], "ms);",
+              CapacityHarness.dropped, "reads and stream registrations and", len(uncertain), "approvals closed with no response", flush=True)
+        natives = {native: run for run in first_runs + second_runs + burst_runs + [independent_run]
+                   for (native,) in coordination("SELECT native_run_id FROM runs WHERE id=?", (run,))}
+        assert len(natives) == 3 * CAPACITY_FLOOD_REQUESTS + 1, ("native runs of the flood", len(natives))
+    finally:
+        for reader in readers:
+            reader.stop()
+        if poller is not None:
+            poller.stop()
+        meter.end("streams", process, resident, credentials)
+    peak = resident.peak()
+    run_logs = {}
+    for store in sorted((root / "runs" / "runs").glob("*/runtime")):
+        run_logs[store.parent.name] = (store / "flow.ndjson").lstat().st_size + (tree_bytes(store / "flow-claims") if (store / "flow-claims").exists() else 0)
+    (work / "capacity-streams-run-logs.json").write_text(json.dumps(run_logs, indent=1, sort_keys=True) + "\n")
+    assert set(run_logs) == set(natives), ("run stores of the flood", len(run_logs), len(natives))
+    burst = set(burst_runs)
+    rounds = [size for native, size in run_logs.items() if natives[native] not in burst]
+    measured.update({"growth.run-log-bytes-per-run": max(rounds), "growth.wal-bytes-after-close": wal_bytes(),
+                     "slow.burst-run-log-bytes-max": max(size for native, size in run_logs.items() if natives[native] in burst),
+                     "events.manager-rss-peak-bytes": peak, "slow.manager-rss-peak-bytes": peak})
+    meter.save()
+    print("PASS capacity-streams step 6: after the ordinary shutdown the WAL holds", measured["growth.wal-bytes-after-close"],
+          "bytes, the largest of the", len(rounds), "run logs of the rounds and the independent run holds",
+          measured["growth.run-log-bytes-per-run"], "bytes, the largest of the", len(burst), "burst run logs holds",
+          measured["slow.burst-run-log-bytes-max"], "bytes, and the resident peak was", peak, "bytes", flush=True)
+    meter.finish(CAPACITY_STREAMS, 7, "the event flood, slow consumer and growth workloads")
+
+
 if storage_mode:
     storage_checks()
     raise SystemExit(0)
@@ -17337,6 +18196,11 @@ if capacity_admission_mode:
 
 if capacity_inputs_mode:
     capacity_inputs_checks()
+    raise SystemExit(0)
+
+
+if capacity_streams_mode:
+    capacity_streams_checks()
     raise SystemExit(0)
 
 
