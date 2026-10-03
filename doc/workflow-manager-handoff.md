@@ -11,9 +11,11 @@ reconciliation, and the functional part of G5. The run kept the operator
 directions of 2026-09-29 for fast validation and of 2026-09-30 for
 functionality first, and the operator decisions of 2026-10-01 for the
 Emacs client and of 2026-10-02 for the Lean builds of WM-040 and the
-`ext-pi` pins. The Phase G commits are `86c1e9e9` to `17a5ec73` and the
-PG30 change that follows them. `origin/workflow-manager-checkpoint-20260923`
-reads `1bb9dba4`, so no Phase G commit is pushed. The PG20 change to the
+`ext-pi` pins. The Phase G commits are `86c1e9e9` to `c2355ca8`, 27
+commits after `1bb9dba4`, and the closeout change that follows them.
+`origin/workflow-manager-checkpoint-20260923` reads `1bb9dba4`, so no
+Phase G commit is pushed. The run did not stop early. It ends with the
+pending authorizations of PG3, PG4, PG18, PG26 and PG27. The PG20 change to the
 README of the `emacs-native` branch of agent-workflows in
 `~/src/agent-workflows-emacs-native` is the local commit `db7d212` after
 `6e8eac0`. Nothing on that branch is pushed.
@@ -54,14 +56,21 @@ directory.
 | PG26 | `e8c04cd4` | `CapacityHarness` applies the host-load rule at the start of each workload, and `capacity_summary.py` takes `--exclude-section`. |
 | PG27 | `e898b8b9` | `manager/CAPACITY.md` records the measured values of the G5 capacity and failure modes. |
 | PG28 | `381875e7` | `doc/workflow-manager-release-evidence.md` records the package identities and the latest package, schema and rollback runs. |
-| PG30 | This change | This section and the release evidence record the result of the gate. |
+| PG30 | `c2355ca8` | This section and the release evidence record the result of the gate. |
+| Closeout | This change | This section records the closeout review, and the G5 row of the release evidence reads partial. |
 
 ### Gate of Phase G
 
 The gate of Phase G ran as PG24 to PG30, one part for each subtask, on
 2026-10-03. Each step ran once, in order, one at a time, and every step
 exited with its expected status. Every control failed with its expected
-message. Only PG24 needed a fix. The gate summary of PG24 to PG30 is
+message. Two parts changed the tree. PG24 fixed `agentic.cabal`, and
+PG26 needed a second round with the capacity-harness change `e8c04cd4`.
+No manager source changed in the gate. The `e8c04cd4` change touches
+only `CapacityHarness` in `manager/test/service_http.py` and
+`capacity_summary.py`, so JOURNEY-ONCE at N8 did not run again for it.
+PG28 to PG30 ran on a tree that contains it, and the closeout review ran
+the journey pair again on `c2355ca8`. The gate summary of PG24 to PG30 is
 `PG/PG30/impl-r1/g5-summary.md` in the resume directory. It lists each
 step with its commit, its exit status and its evidence path.
 
@@ -74,23 +83,40 @@ step with its commit, its exit status and its evidence path.
 | PG28 | BUILD, `nix build .#agentic-run`, `operations`, `credential-lifecycle`, the schema fixtures, `package`, `rollback`, `manager-store-check`, `manager-command-check`, `manager-admission-check`, `test/cabal.sh sdist` and `make -C doc check` | `e898b8b9` | Passed. |
 | PG29 | BUILD, `cross-client`, `cross-client-lifecycle`, `cross-client-lineage`, `emacs-service`, `emacs-service-lifecycle`, `emacs-service-controls`, the controls `cross-client-broken-answer` and `emacs-service-broken-answer`, `ci/emacs.sh` and `ci/emacs-ui.py` | `381875e7` with `emacs-native` `db7d212` | Passed. |
 | PG30 | BUILD, `npm run check`, `npm test` (220 passed, 29 live-gated skipped), `npm run test:integration` (9 of 9), `pi-host` at N8, `bash tui/ci/tui.sh`, the incremental BUILD after it and `make -C doc check` | `17a5ec73` | Passed. |
+| Closeout review | BUILD of `agentic-run` and `routing-fixed-point-probe`, then the journey pair at N1 and N8 | `c2355ca8` | Passed, with 46 PASS lines and no process left after the run. |
 
 No run of PG26 or PG27 is a run of record under the host-load rule of
 `manager/CAPACITY.md`, because the PF17 manager, PID 61004, ran on the host
-during every workload. Apart from that process, every workload met the
-rule.
+during every workload (`other-managers-start=1`). Apart from that process,
+every workload started inside the rule.
 
-**Functional G5 status.** G5 is met for function on local macOS
-(`aarch64-darwin`). This status does not claim the items that stay
-pending:
+**Functional G5 status.** G5 is partial. Every functional step of the gate
+passed on local macOS (`aarch64-darwin`). One gate item is not met: the
+WM-041 summary over runs of record, which needs a host with no other
+manager. The items below also stay pending:
 
 - the security stage, which the operator direction of 2026-09-30 defers,
 - the exercise of `manager/OPERATIONS.md` by another human operator,
 - cross-machine evidence, because no second machine took part,
-- the capacity runs of record of WM-041,
 - the independent closure review of G5.
 
 Production activation is not authorized.
+
+### Closeout review
+
+Two agent lenses reviewed `1bb9dba4..c2355ca8` and the `emacs-native`
+commit `db7d212`. Both returned "approve with notes" with no critical or
+high finding. Both rate WM-042, WM-043 and WM-044 met for function, and
+WM-041 and G5 partial. The working lens built the two journey
+executables and ran the journey pair at N1 and N8 on `c2355ca8` with a
+clean tree (fixture root
+`/Users/johnw/Products/k.M0a5ItPm/tmp/review-pg.kwIBfss1`). It passed.
+No fix round ran. The closeout corrected the documentation findings:
+this section no longer says that only PG24 needed a fix, the G5 row of
+`doc/workflow-manager-release-evidence.md` and the table below now read
+partial, and the package table of "Phase F part 3 of 2026-10-03" carries
+a note that this section supersedes it. The other findings are in "Open
+findings" below.
 
 ### Checks run by the subtasks
 
@@ -102,22 +128,47 @@ record under the PG1 rule, because the PF17 manager, PID 61004, ran on the
 host during both runs. PG10 ran `failures-backup` at N8, PG13 ran
 `operations` with case 7, PG15 and PG16 ran `package`, and PG17 ran
 `rollback`. PG19 and PG20 ran `make -C doc check`. PG20 also validated the
-offline reference configuration with offline `reload-profiles`.
+offline reference configuration with offline `reload-profiles`. The
+closeout ran `make -C doc check` after this change.
 
 ### Checks not run
 
 - The checks that the operator directions remove from routine validation:
   `cli/ci/policies.sh`, `manager/ci/approval.sh`, `manager/ci/controls.sh`,
   the `admission_audit.py` mutation audits, `bisim/ci/tier0.sh`,
-  `bisim/ci/tier1.sh`, mutant suites, `-fforce-recomp` builds and stability
-  samples. The gate ran only the WM-040 bridge `bisim/ci/manager.sh` under
-  the operator decision of 2026-10-02.
+  `bisim/ci/tier1.sh`, `cli/ci/routing-config.sh`, `cli/ci/examples.sh`,
+  `engine/agent-deck/ci/deck.sh`, `manager/ci/vertical.sh`,
+  `manager/ci/supervision.sh`, `manager/test/proof_opacity.py`,
+  `ci/emacs-tramp.py`, mutant suites, `-fforce-recomp` builds and
+  stability samples. The gate ran only the WM-040 bridge
+  `bisim/ci/manager.sh` under the operator decision of 2026-10-02.
 - `engine/acp/ci/route-live.sh` and the live-gated tests of `npm test`,
-  because they need a paid provider.
+  because they need a paid provider. `engine/acp/ci/acp.sh` did not run,
+  because no subtask changed engine code.
 - No capacity run of record exists (`acat-n50o`, `acat-jkas`). The modes of
   PG26 and PG27 need one run each while no other manager runs on the host.
-- Linux builds, Linux tests and Linux containment, because the governing
-  goal limits validation to local macOS.
+  Each mode ran once at N8 only, with no N1 run and no repeated sample.
+- A bit-for-bit comparison of two package builds. Equal derivation paths
+  from the worktree, from a copy of its tracked files and after a
+  documentation-only edit, and the recorded output path and binary digest
+  stand for it.
+- Linux builds, Linux tests, Linux packaging and Linux containment,
+  because the governing goal limits validation to local macOS.
+- An upgrade of a database that an older binary wrote with pending and
+  completed work, and the refusal of a newer database by a real older
+  binary. No older binary was built. The schema 1 to 11 fixtures come from
+  the statement prefixes of `Schema.hs`, and the current binary refuses a
+  `user_version` 13 root through the same code path.
+- The Nix packaging of the Emacs client and of `ext-pi`. Both ship as
+  source from their repositories.
+- The restart-interruption case of `manager-admission-check`. The
+  real-path `failures-backup` mode replaces it.
+- The drain deadline through local administration. `drain` has no
+  deadline, and only `manager-admission-check` exercises the expiry path
+  of `DrainUntil`.
+- The status facts that no counter supports: subscriber counts, retention
+  misses, checkpoint latency and storage use against the configured
+  limits. `manager/OPERATIONS.md` names the reads that exist instead.
 - The exercise of the runbook procedures by another human operator, which
   WM-042 requires. Case 7 of `operations` is an automated exercise and does
   not stand for it.
@@ -133,59 +184,154 @@ offline reference configuration with offline `reload-profiles`.
   produces it.
 - `npm ci` in `ext-pi`, which the stale lock entries do not support.
 - The Emacs 29.1 minimum-version check, because no Emacs 29.1 is available
-  locally.
+  locally. Every Emacs check ran GNU Emacs 30.2.
+- The comparison of `/v1` with its earlier contract is a script of the
+  stage directory, checked against the list of `doc/api/README.md`. No
+  repository check holds it.
 
 ### Deferred security items
 
-No item of the security stage was done. These items stay deferred with
+No item of the security stage was done, as the operator direction of
+2026-09-30 requires. The existing authentication, authorization, consent
+and bounds stay in force. These items wait for the security stage, with
 the items of the earlier sections and of section 8 of the remaining-scope
 report:
 
-- The security part of the WM-044 integrated review and of G5: a threat
-  model, a security gate and an independent security review.
-- The hostile-input negatives of the local administration operations, such
-  as malformed or hostile backup, restore and evidence paths.
-- Redaction projections of the protected diagnostics of WM-042 beyond the
-  existing scopes.
-- The revocation and rotation matrices during a POST, an artifact download,
-  a pagination and an event stream, and the authority fencing after a
-  restore from an older backup as a security matrix.
-- The remaining Name Constraints work and TLS for catalogue discovery
-  (`acat-routing-discovery-tls-3m8u`).
+- WM-042: protection of the diagnostic resources beyond the same-user
+  local channel, and any network health, readiness or liveness route with
+  its authorization matrix.
+- WM-042: scans that show that no log, status answer, runbook example or
+  evidence file holds a synthetic secret or content marker.
+- WM-042 and WM-028 I13 (A17): authority fencing after a restore from an
+  older backup beyond the functional checks (old cursors, authority keys
+  and idempotency keys across every route), and the hardening and release
+  of `restoration_quarantine` claims.
+- WM-042: hardening of the restore fencing evidence (forged, replayed or
+  stale evidence, and races between the check and the restore) and of the
+  completion of an interrupted restoration (a forged marker or a
+  substituted backup).
+- WM-042: hardening of the two-configuration rule (an offline
+  configuration that names another root or another `administrationRoot`,
+  and concurrent offline administrators).
+- WM-042: hardening of the quarantine release evidence (forged or
+  replayed identifiers, `expiresAt` enforcement and escaped process
+  groups), carried from Phase C.
+- WM-042: hardening of the administration socket beyond the peer user
+  check, of `shutdown` and `drain` against an unexpected local caller, and
+  of a live profile reload against a hostile configuration file.
+- PG3: a negative matrix that shows that every commit that changes
+  authorization and every live reload advances the authorization revision
+  during a stream, a page set and a download.
+- WM-043: protected sockets, file permissions and certificate handling in
+  the packaged defaults, a review that the defaults expose no unprotected
+  listener and no reusable shared token, the hardening of the reference
+  proxy configuration, certificate rotation procedures, package signing
+  and supply-chain records.
+- WM-044: the security half of the integrated review and a review of the
+  final difference for secrets.
+- WM-041 security part, carried from Phase F: hostile and slow input,
+  header floods, connection exhaustion, partial and malformed frames, the
+  framing-limit negatives of the `boundary` mode, root replacement under a
+  running manager, and a review that no high-impact security finding hides
+  behind a passing throughput result.
+- WM-039 and WM-040, carried from Phase F: authorization difference
+  matrices across client credentials, revocation and rotation during a
+  POST, a download, a pagination and a stream, disclosure scans of the
+  identities and of the witness record, TLS hardening of the witness, the
+  conformance of the authorization and credential transitions, the threat
+  model and security gate of the witness, and the G2 observation-only
+  witness.
+- Every deferred item of Phases B part 2, C, D and E in section 8 of the
+  remaining-scope report: credential-file and TLS hardening of the Emacs
+  and TypeScript clients, Name Constraints parity and patch B18,
+  secret-marker scans, redaction projections, hostile-input negatives,
+  revocation during a stream, the design of route-class projections, the
+  binding of a cursor to the authorization revision, owner-lock spoofing
+  analyses, the review of the test hooks, strict JSON in the TypeScript
+  client, threat models and security gates, and TLS for catalogue
+  discovery (`acat-routing-discovery-tls-3m8u`).
 
 ### Authorizations
 
+- **PG3, PG4, PG26 and PG27 (pending).** The operator or the Integrator
+  ends the stale PF17 manager, PID 61004
+  (`routing-fixed-point-probe --manager serve --config
+  /Users/johnw/Products/k.M0a5ItPm/tmp/pf17-capacity.ocD2VsSb/N8/configuration.json
+  +RTS -N8`), with `kill -TERM 61004` and, after 25 seconds,
+  `kill -KILL 61004` if it still runs. The stopped frontends, PIDs 111 and
+  9444, end with `kill -CONT` and then `kill -TERM`. No stage of this run
+  had the authority to stop them. After that, the six capacity modes and
+  the five failure modes run once each at N8 under the host-load rule
+  (the scripts are `PG/PG3/impl-r2/run-streams.sh`,
+  `PG/PG4/impl-r1/run-inputs.sh record` and `PG/PG26/impl-r2/step.sh`).
 - **PG18 (pending).** A JSON edit of `ext-pi/package-lock.json` with no
   install: replace the registry entries of
   `node_modules/@earendil-works/{pi-ai, pi-client, pi-coding-agent,
   pi-protocol, pi-server, pi-telemetry, pi-tui}` with link entries to the
-  matching packages of `~/src/fork/pi/packages`. Until the operator
-  authorizes it, the lock file keeps the stale entries, and
-  `ext-pi/README.md` records them.
-- PG3 and PG4 returned `needs-authorization` only for the stale PF17
-  manager, PID 61004. The PG1 rule leaves it alone.
+  matching packages of `~/src/fork/pi/packages`, add a link entry for
+  `@earendil-works/chord`, delete the nested registry subtree under
+  `node_modules/@earendil-works/pi-coding-agent/node_modules/`, and add the
+  fork target entries at 0.99.1. Until the operator authorizes it, the
+  lock file keeps the stale entries, and `ext-pi/README.md` records them.
 
 ### Package status
 
 | Package or item | Status | Tracker |
 | --- | --- | --- |
-| WM-041 | Partial. All 129 ceiling keys passed in the gate runs of PG26 and PG27. The runs of record wait for a host with no other manager. | `acat-wm-041-17ax`, `acat-wm-041-core-3vvz`, `acat-n50o`, `acat-jkas` |
+| WM-041 | Partial. All 129 ceiling keys passed in the gate runs of PG26 and PG27. The runs of record wait for a host with no other manager. Root replacement and the security part are deferred. | `acat-wm-041-17ax`, `acat-wm-041-core-3vvz`, `acat-n50o`, `acat-jkas` |
 | WM-042 | Met for function apart from the exercise by another human operator, which is pending. | `acat-wm-042-sdg9` |
-| WM-043 | Met for function: the package, its acceptance, the schema upgrades, the newer-schema refusal and the rollback. | `acat-wm-043-zm3d` |
-| WM-044 | Met for function. PG19 and PG20 reconcile the documentation, PG21 adds the release evidence matrix, PG22 is the integrated review with no critical or high finding, and the gate records its result. The security review is deferred. | `acat-wm-044-6utw`, `acat-gbh8` |
-| G5 | Met for function. The security stage, the human operator exercise, cross-machine evidence, the capacity runs of record and the independent closure review are pending. Production activation is not authorized. | `acat-g5-u0w2` |
+| WM-043 | Met for function on `aarch64-darwin`: the package, its acceptance, the schema upgrades, the newer-schema refusal and the rollback. | `acat-wm-043-zm3d` |
+| WM-044 | Met for function. PG19 and PG20 reconcile the documentation, PG21 adds the release evidence matrix, PG22 is the integrated review with no critical or high finding, and the gate and the closeout record its result. The independent human review is pending, and the security review is deferred. | `acat-wm-044-6utw`, `acat-gbh8` |
+| G5 | Partial. Every functional step passed. The WM-041 runs of record are missing. The security stage, the human operator exercise, cross-machine evidence and the independent closure review are pending. Production activation is not authorized. | `acat-g5-u0w2` |
 
 The fess follow-up issues of Phase G are `acat-pg1-fess-followup-s4dp`,
 `acat-sicz` (PG2), `acat-0rda` (PG3), `acat-uvwy` (PG4), `acat-g971`
 (PG5), `acat-69jk` (PG6), `acat-5j0l` (PG7), `acat-pg8-fess-followup-8x8u`
-to `acat-pg17-fess-followup-ngjm` and `acat-gbh8` (PG19).
+to `acat-pg17-fess-followup-ngjm`, `acat-gbh8` (PG19) and
+`acat-pg30-fess-followup-zmqy` (PG30).
 
 ### Open findings
 
+- **No capacity run of record (medium).** This is R3 of the PG22 review
+  and the medium finding of both closeout lenses. See "Authorizations".
+- **First page of `/v1/runs` (medium).** `pages.first-page-p50-ms` passes
+  by a thin margin. The first PG26 run measured 740.5 ms against the
+  ceiling of 500 ms, and later runs measured 397 ms and 399.8 ms. PG4
+  measured 131.2 ms on the same `History.hs`. PG26 round 2 refuted its own
+  explanation by host load, and the cause is not known. When the runs of
+  record run on an idle host, compare the value with 131 ms. If it stays
+  near 400 ms, measure the first-page path between `76da0f5c` and the
+  head before G5 is declared.
+- **Reload and the authorization revision (low, PG22 R1).** A live reload
+  installs the new profile revisions and probes every profile before it
+  advances the authorization revision. During that window the fast path
+  of a view can keep the earlier facts for at most one second.
+- **Reload and the client deadline (low, PG22 R4).** The administration
+  channel serves one connection at a time, and a live reload probes every
+  profile before it replies. A probe set that takes longer than the
+  15-second client deadline shows `storage-unavailable` for a reload that
+  completed and recorded its receipt.
+- **Exception in an administration operation (low).** `administerLocally`
+  runs without a handler in `recordedServing`. An exception that is not an
+  `IOException`, `AdminFailure` or `StoreFailure` ends the linked server
+  thread, and with it the manager, and the command record gets no receipt.
+  This is the earlier pattern of the channel, but the new mutating
+  operations make it easier to reach.
+- **Stale comment (low).** The comment of `advanceAuthorizationRevision`
+  in `manager/src/Agentic/Manager/Store.hs` says that the manager has no
+  such change, but `reloadServing` in `LocalAdmin.hs` now calls it.
+- **Strict status schema (low).** The status result of
+  `LocalAdminResponse` at `88d999b7` had `additionalProperties: false`. A
+  client that validates strictly against that schema refuses the nine
+  added properties. No client in the tree reads local-administration
+  status.
+- **Build coverage of the subtasks (low).** PG6 and PG12 changed the
+  import graph of manager modules without building every executable that
+  imports them, and the first ALLBUILD of the gate found it. A subtask that
+  changes that graph builds every executable that imports the module.
 - **Orphaned processes (low).** The PF17 manager, PID 61004, and the
-  stopped frontends, PIDs 111 and 9444, still run with parent 1 on
-  2026-10-03. The operator or the Integrator ends them with `kill -CONT`
-  and then `kill -KILL`.
+  stopped frontends, PIDs 111 and 9444, still run with parent 1 at the
+  closeout of 2026-10-03.
 - **Service-mode limits of the Emacs client (low).** An uncertain send of
   a request or review command is not reconciled, a command waits in the
   foreground for up to 120 seconds, the snapshot is read as its first page
@@ -200,15 +346,44 @@ to `acat-pg17-fess-followup-ngjm` and `acat-gbh8` (PG19).
   closes the disk write failure, the SSE 429 rule, the pin statements, the
   POST route deadlines and the redirect after an answer as documented.
 
+### Functional first version
+
+The functional first version of the actor-flow architecture is complete on
+local macOS, apart from the WM-041 runs of record. The runtime stays the
+sole workflow interpreter. The broker appends, carries and serves, and
+`DataBroker` keeps its nine operations. The `/v1` contract changed only by
+additions. One `agentic-run --manager serve` process owns the Store, admits
+requests, launches and supervises runners, records approvals, controls,
+exports and lineage, and serves history, snapshots, artifacts and the
+event stream to three clients: the TUI in service mode, the Pi extension
+`ext-pi` and the Emacs client of the `emacs-native` branch. The three
+clients pass the cross-client witness against one manager. The bridge
+`bisim/ci/manager.sh` ties the manager to its Lean model with no mismatch.
+An operator reloads profiles, drains, shuts down, backs up, restores with
+fencing evidence and completes an interrupted restoration through local
+administration, reads the bounded status facts, and follows
+`manager/OPERATIONS.md`. The flake builds the manager as a package, the
+package upgrades schema 1 to 11 roots, refuses a newer schema, and rolls
+back to `agentic-run --tui --local` with the manager history read only.
+The security stage, the exercise by another human operator, cross-machine
+evidence and the independent closure review remain.
+
 ### Next action
 
-1. The operator decides PG18, and the Integrator or the operator ends PIDs
-   61004, 111 and 9444. Then the capacity and failure modes of PG26 and
-   PG27 run once each as runs of record.
-2. Another human operator exercises `manager/OPERATIONS.md` against a
+1. The operator or the Integrator ends PIDs 61004, 111 and 9444. Then the
+   six capacity modes and the five failure modes run once each at N8 as
+   runs of record, `capacity_summary.py` runs over the 11 files, and
+   `manager/CAPACITY.md` and the release evidence record the result. This
+   closes the last unmet item of G5 for function.
+2. The operator decides PG18.
+3. Another human operator exercises `manager/OPERATIONS.md` against a
    disposable local fixture.
-3. An independent closure review of G5 follows. The security stage and
-   the cross-machine evidence wait for the operator to schedule them.
+4. The deferred security stage runs over the items of "Deferred security
+   items", followed by an independent closure review of G5. Cross-machine
+   evidence waits for the operator to schedule it.
+5. The Integrator pushes the Phase G commits `86c1e9e9` to `c2355ca8` and
+   the closeout commit when the operator permits it. The `emacs-native`
+   commit `db7d212` stays local under the operator decision of 2026-10-01.
 
 ## Phase F part 3 of 2026-10-03
 
@@ -426,6 +601,10 @@ WM-040 met for function and WM-041 partial. Their findings are in "Open
 findings" below and in `acat-phase-f-review-findings-4e23`.
 
 ### Package status and open tracker items
+
+The section "Phase G of 2026-10" supersedes this table. Phase G updated
+its WM-042 and WM-043 rows, and its WM-041 and "WM-044, G5" rows state
+the status at the end of Phase F.
 
 | Package or item | Status | Tracker |
 | --- | --- | --- |
