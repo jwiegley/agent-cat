@@ -3345,6 +3345,8 @@ repository.  Terminal service mode uses the selected manager's catalogue.
 @example
 agentic-run --tui [--local]
 agentic-run --tui --service CLIENT_PROFILE [CLIENT_PROFILE ...]
+agentic-run --manager serve --config FILE [--legacy-history ROOT=PROFILE ...]
+agentic-run --manager admin --config FILE
 agentic-run frontend --capabilities
 agentic-run frontend
 agentic-run frontend-io < request.json
@@ -4325,6 +4327,154 @@ chains.  The source and every existing destination are refused rather than
 overwritten.
 @end table
 
+@section Workflow manager service
+
+@cindex workflow manager service
+@cindex local administration
+@cindex two-configuration rule
+Two forms of @command{agentic-run} serve and administer the workflow manager.
+The runner reads these forms before every other form, and each form takes
+exactly the words that the synopsis shows:
+
+@example
+agentic-run --manager serve --config FILE [--legacy-history ROOT=PROFILE ...]
+agentic-run --manager admin --config FILE
+@end example
+
+@var{FILE} is the absolute path of a private version-1 operator configuration
+file, which @code{loadManagerConfiguration} reads.  @file{manager/CONFIGURATION.md}
+documents its format, @file{doc/api/README.md} specifies the @code{/v1} routes
+that the manager serves, and @file{manager/README.md} describes the owners of
+the manager.  Each refusal line below starts with the name of the executable
+and a colon.
+
+@table @code
+@item --manager serve --config FILE [--legacy-history ROOT=PROFILE @dots{}]
+Start the manager in the foreground.  The command loads the configuration,
+opens the coordination Store under @code{managerRoot}, opens the HTTPS
+listener of the @code{https} section, and serves until it stops.  When the
+configuration names @code{administrationRoot}, the manager also serves the
+local administration channel through a Unix socket in that private directory.
+
+Each @option{--legacy-history} option binds the configured local retention
+root @var{ROOT} to the configured profile @var{PROFILE}.  @var{ROOT} is an
+absolute path that appears once, and @var{PROFILE} follows the last equals
+sign.  @code{/v1/runs} then also lists the legacy run entries of the bound
+roots with @code{observer} supervision.  Without the option, the run
+collection lists managed runs only.
+
+A termination signal, or a @code{shutdown} request through the local channel,
+stops the manager.  Each owned run is then cancelled with its cleanup, the
+open event and route streams end, the manager log receives the shutdown
+notice, and the process exits with status 0.  A keyboard interrupt performs
+the same cleanup and ends the process as an interrupted command.
+
+An option other than @option{--legacy-history}, a relative or repeated
+@var{ROOT}, or an empty @var{PROFILE} exits with status 1 and the line
+@samp{manager serve takes only --legacy-history ROOT=PROFILE options with
+distinct absolute roots}.  A relative @var{FILE} exits with status 1 and the
+line @samp{manager --config requires an absolute file}.  An invalid
+configuration, a binding that the configuration refuses, or a listener that
+cannot open exits with status 1 and the line @samp{manager configuration or
+HTTPS listener is unavailable}.  Any other failure of the service exits with
+status 2 and the line @samp{manager service is unavailable}.  A Store whose
+schema version is newer than 12 is such a failure.
+
+@item --manager admin --config FILE
+Read one JSON request of at most 2 MiB from standard input until end of file,
+perform one local administration operation, and write one JSON line to
+standard output.  An answer with @code{"ok": true} exits with status 0.  A
+refusal has the answer @code{"ok": false} with a fixed error code, and it
+exits with status 1.  A malformed request, an unknown field, or an unknown
+operation is refused before dispatch, and its answer has
+@code{"operation": null}.  Local administration has no HTTP equivalent.
+@end table
+
+The configuration file selects the channel of an administration request.  The
+operator therefore keeps two configuration files for one @code{managerRoot}.
+The serve configuration names @code{administrationRoot}.  The manager serves
+with it, and @samp{--manager admin} with it sends the request to the serving
+manager through the local channel.  The offline configuration is the same
+file without @code{administrationRoot}.  @samp{--manager admin} with it
+acquires the configuration lease and opens the Store itself, so it serves
+only while no manager serves.  A configured @code{administrationRoot} is
+authoritative even when no manager serves.  A request through the serve
+configuration then refuses with @code{storage-unavailable} and never falls
+back to the offline path.  An offline request while a manager serves refuses
+with @code{storage-unavailable}, because the serving manager holds the
+configuration lease.  When one file changes, the operator makes the same
+change in the other file.
+
+The local administration protocol has thirteen operations.  Each one is
+implemented, and the channel decides its effect.  The table names the effect
+through the serve configuration while a manager serves, and through the
+offline configuration while no manager serves.
+
+@multitable @columnfractions .22 .39 .39
+@headitem Operation @tab Serving manager @tab No manager serves
+@item @code{status}
+@tab The current facts of the lifetime, with @code{state} @code{serving} or
+@code{draining}.
+@tab Opens the Store as a restart does and answers with @code{state}
+@code{stopped}.
+@item @code{check-store}
+@tab The integrity of the Store and at most 256 quarantine identities.
+@tab The same facts from the stopped Store.
+@item @code{check-quarantine}
+@tab The cleanup state of one quarantined reservation, with cleanup evidence
+when it is clean.
+@tab The same answer from the stopped Store.
+@item @code{release-quarantine}
+@tab Frees the slot and resources of a quarantined reservation whose cleanup
+evidence is verified again.
+@tab The same release in the stopped Store.
+@item @code{list-credentials}
+@tab At most 256 credential records with their metadata.
+@tab The same records from the stopped Store.
+@item @code{issue-credential}
+@tab Creates a client and its credential and writes the bearer to a new
+private output file.
+@tab The same issuance in the stopped Store.
+@item @code{rotate-credential}
+@tab Creates the successor credential, with an overlap of at most 60 seconds.
+@tab The same rotation in the stopped Store.
+@item @code{revoke-credential}
+@tab Revokes a credential, which then receives 401 at its next check.
+@tab The same revocation in the stopped Store.
+@item @code{reload-profiles}
+@tab Loads the configuration again and installs its profiles with new
+revisions.
+@tab Validates the given file and opens no Store.
+@item @code{drain}
+@tab Stops the admission of new work and lets the started runs continue.
+@tab Refuses with @code{state-conflict}, because no lifetime serves.
+@item @code{shutdown}
+@tab Answers @code{stopped} and then stops the manager as a termination signal
+does.
+@tab Answers @code{stopped} and changes nothing.
+@item @code{backup}
+@tab Refuses with @code{state-conflict}.
+@tab Copies the stopped Store into a new private directory.
+@item @code{restore}
+@tab Refuses with @code{state-conflict}.
+@tab Replaces the stopped Store with a backup after a check of the fencing
+evidence, rotates the authority epoch and the stream identity, and revokes
+every credential.
+@end multitable
+
+The operator runbook @file{manager/OPERATIONS.md} gives the procedure for each
+operation with its preconditions, the exact request body, the expected answer,
+the diagnostics, and the failure answers.  It also covers manager-log
+pruning, quarantine release, disk pressure, lost replies, a corrupt Store, the
+restoration of an older backup, and rollback to explicit local clients.  The
+section @samp{Command-line boundary} of @file{doc/api/README.md} states the
+fields and the answers of each operation.
+
+A terminal client of the manager is @samp{agentic-run --tui --service
+@var{CLIENT_PROFILE} @dots{}}, and @samp{agentic-run --tui --local} or
+@samp{agentic-run --tui} selects the local backend.  The section
+@samp{Terminal frontend} of this chapter describes both selections.
+
 
 @section Common inspection options
 
@@ -4710,7 +4860,9 @@ older clients require disjoint configured directories.
 @findex validateRootSeparation
 @code{Agentic.Manager} provides a private profile registry and bounded trusted
 runner discovery, with registry-based operator-file composition in the CLI.
-It is not a manager service.  Trusted composition supplies
+The registry is not itself a manager service, and the section
+@samp{Workflow manager service} describes the service that uses it.  Trusted
+composition supplies
 @code{OperatorProfile} values with an exact configured invocation, working
 directory, target arguments, explicit environment, public labels, ownership
 classification, quarantine state, person-answering mode, resource keys, and

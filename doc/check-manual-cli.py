@@ -25,8 +25,8 @@ EXPECTED_NAMES = {
 }
 
 
-def run(runner: str, *args: str, code: int = 0) -> subprocess.CompletedProcess[str]:
-    result = subprocess.run([runner, *args], text=True, capture_output=True, check=False)
+def run(runner: str, *args: str, code: int = 0, stdin: str = "") -> subprocess.CompletedProcess[str]:
+    result = subprocess.run([runner, *args], input=stdin, text=True, capture_output=True, check=False)
     if result.returncode != code:
         raise SystemExit(
             f"{' '.join(args) or '<no arguments>'}: expected exit {code}, got {result.returncode}\n"
@@ -84,6 +84,25 @@ def main() -> int:
     run(runner, "--help")
     run(runner, code=1)
 
+    manager_refusals = [
+        (
+            ["--manager", "serve", "--config", "/absent/manager.json", "--unknown"],
+            "manager serve takes only --legacy-history ROOT=PROFILE options with distinct absolute roots",
+        ),
+        (["--manager", "serve", "--config", "manager.json"], "manager --config requires an absolute file"),
+    ]
+    for args, line in manager_refusals:
+        stderr = run(runner, *args, code=1).stderr
+        if line not in stderr:
+            raise SystemExit(f"{' '.join(args)}: stderr lacks documented line: {line}")
+        if " ".join(line.split()) not in " ".join(MANUAL.split()):
+            raise SystemExit(f"manual lacks manager refusal line: {line}")
+    admin = json.loads(run(runner, "--manager", "admin", "--config", "/absent/manager.json", code=1, stdin="{").stdout)
+    if admin.get("operation", "absent") is not None or admin.get("ok") is not False:
+        raise SystemExit(f"malformed administration request was not refused before dispatch: {admin}")
+    if '@code{"operation": null}' not in MANUAL:
+        raise SystemExit("manual lacks the pre-dispatch administration answer")
+
     acp = (ROOT / "engine/acp/src/Agentic/Acp.hs").read_text()
     deck = (ROOT / "engine/agent-deck/src/Agentic/AgentDeck.hs").read_text()
     defaults = {
@@ -95,7 +114,7 @@ def main() -> int:
         if value not in MANUAL:
             raise SystemExit(f"manual lacks current {label} default {value}")
 
-    print("manual CLI: registry, help, plan, cost, scripted run, exits, and defaults verified")
+    print("manual CLI: registry, help, plan, cost, scripted run, manager refusals, exits, and defaults verified")
     return 0
 
 

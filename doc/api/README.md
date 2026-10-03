@@ -1,7 +1,10 @@
 # Workflow-manager protocol version 1
 
 This directory specifies the manager contract established by WM-003. The
-service and service-mode clients implement only part of this contract. The
+manager service serves every method that the
+[resource and scope ledger](#resource-and-scope-ledger) lists, and the
+[version and compatibility matrix](#version-and-compatibility-matrix) names
+the clients and versions that the checks exercise. The
 [approved design](../research/workflow-manager.md) and
 [implementation plan](../research/workflow-manager-implementation-plan.md)
 remain authoritative for execution meaning, ownership, and release gates.
@@ -821,6 +824,74 @@ editor text in `input`. Its projection is the answer body that the TUI sends
 for the typed value of that text, and the refusal `InvalidAnswer` states that
 the TUI refuses the answer before it prepares a command.
 
+## Truncated responses under Store contention
+
+The manager sends a JSON response, a page and a verified download in writes
+of at most 16384 bytes. Before each write it checks the authorization view
+of the response again, and that check waits for the Store within the
+five-second allowance of the
+[storage contract](../../manager/STORAGE.md). A check that refuses after the
+status and the headers are sent stops the response before its next write,
+for example when its allowance expires under ordinary Store contention. The
+client then receives a truncated body. A refusal can also close the
+connection with no response. The manager records the cause of the refusal,
+and it never sends the response or a part of it again. A download past its
+300-second deadline ends in the same way.
+
+A GET has no effect. A client therefore treats a truncated GET response, or
+a connection that closes before a complete GET response, as a failed read.
+It installs nothing from that response and reads the resource again before
+it relies on the resource. A POST whose response ends early has an uncertain
+outcome. The client keeps the exact command, reconciles it through a read of
+the command or its target, and never sends it again by itself.
+
+The clients follow this rule in these ways:
+
+- The terminal frontend of `agentic-run` receives the truncated read as a
+  transport failure of `Agentic.Manager.Client`. Its header row shows
+  `manager unreachable since TIME`, and it keeps the last observation as
+  stale. The read of the selection repeats every second, or every five
+  seconds as a safety read while the event stream is live. The first read
+  that reaches the manager ends the state, and every view is then read again
+  when it is shown.
+- The Emacs client receives the truncated read from url.el as a failure with
+  no complete response, or as a body that fails to decode. Its session
+  installs the failure and reads the resource again at the next related
+  invalidation of its polling delivery, or when the operator reads the view
+  again.
+- The Pi extension receives the truncated read as `TransportUnavailable`. Its
+  session installs the failure and reads the resource again at the next
+  related invalidation, and `waitFor` continues to wait until its timeout.
+
+The Emacs client and the Pi extension read a resource again by themselves
+only after a refusal with 429 `storage-quota` or 503 `storage-unavailable`.
+They wait 0.1 seconds and then read it again, because no invalidation
+follows such a refusal.
+
+## Stream reconnection after a 429 refusal
+
+Each client holds at most two subscriptions across `/events`,
+`/runs/{id}/routes` and `/routes`, and a third stream receives 429
+`storage-quota`. A stream whose client closed the connection keeps its
+subscription until a write to that stream fails. After an orderly close the
+first write can still succeed, so the subscription ends at the latest at the
+second heartbeat after the last write, about 30 seconds later. A client that
+connects again at once, for example after a drop inside a batch, can
+therefore receive 429 `storage-quota` while its earlier subscription still
+counts.
+
+This refusal is transient, and the cursor stays valid. The client keeps its
+last complete event identifier and reads the same events by bounded polling
+from that cursor, because a polling batch holds no subscription. It then
+connects the stream again after its backoff of 1 second, doubled after each
+failure up to 30 seconds. It continues until a stream connects, and it takes
+no new snapshot because of this refusal. The terminal frontend of
+`agentic-run` and the Pi extension follow this rule: after a refusal of the
+stream they poll every second from the same cursor and try the stream again
+after the backoff, and the Pi extension adds jitter to the wait. The Emacs
+client always reads events by polling, so it holds no subscription and never
+receives this refusal.
+
 ## Refusals
 
 Problems use `application/problem+json`, with a bounded stable `code`, status,
@@ -852,12 +923,15 @@ storage failures are not converted into successful receipts.
 ## Command-line boundary
 
 `RUNNER` denotes the configured registry executable. The following forms define
-the command boundary. Offline administration and a configured same-user local
-channel implement credential listing, issuance, rotation and revocation, the
-read-only `status`, `check-store` and `check-quarantine` operations, and
-`release-quarantine`. The configured local channel also implements
-`reload-profiles`, `drain` and `shutdown`. Offline administration also
-implements `backup`.
+the command boundary. Local administration implements all thirteen
+operations. Both the configured same-user local channel of a serving manager
+and offline administration implement `status`, `check-store`,
+`check-quarantine`, `release-quarantine`, `list-credentials`,
+`issue-credential`, `rotate-credential`, `revoke-credential`,
+`reload-profiles` and `shutdown`. The local channel also implements `drain`,
+and offline administration also implements `backup` and `restore`. The
+channel decides the effect of an operation, as the following paragraphs
+state for each one.
 `check-quarantine` answers `clean` with cleanup evidence when the reservation
 never launched a run, when the run log of its run holds the terminal record
 of the runtime, or when that run has no terminal record and the exclusive lock
@@ -1022,10 +1096,12 @@ CA without Name Constraints below a CA that has them is refused.
 
 ## Accepted additive fields
 
-Version 1 is frozen. A change to `openapi.yaml` adds only optional
-properties, and it changes no existing property, enumeration or required
-list. A client that ignores an added property keeps its behavior. The
-accepted additive fields are these.
+Version 1 is frozen. A change to `openapi.yaml` adds only paths, schemas and
+optional properties, and it changes no existing property, enumeration or
+required list. A client that ignores an added property keeps its behavior.
+
+Since commit `88d999b7`, the accepted additive fields are these. No path or
+schema was added in that time.
 
 | Schema | Added optional properties |
 |---|---|
@@ -1034,6 +1110,50 @@ accepted additive fields are these.
 [`manager/COMMANDS.md`](../../manager/COMMANDS.md#status-facts) states the
 meaning of each `status` fact. `lostRuns` is apart from every subscriber
 count, so a lost supervisor never reads as a disconnected subscriber.
+
+Before that commit, and since commit `5e8bbf9f`, the contract received these
+additions:
+
+| Addition | Content |
+|---|---|
+| Paths | `GET /runs/{id}/routes` and `GET /routes`. |
+| Schemas | `RouteCursor`, `RouteRecord`, `RouteBatch`, `ManagerRouteCursor`, `ManagerRouteRecord`, `ManagerRouteBatch`, `ReviewLineage` and `ReviewEdit`. |
+| `Review` | The optional property `lineage` (`ReviewLineage`), present only on a restart, resume or fork review. |
+| `PublicPolicy` | The optional property `personAnswers`, the model and tool addresses whose asks a person answers. |
+
+`Capabilities` keeps its bytes across these additions.
+
+## Version and compatibility matrix
+
+The `versions` member of `GET /v1/capabilities` states the version domains
+that the manager accepts. A client refuses a manager whose API version it
+does not support, and the manager refuses a version outside its domain with
+no downgrade.
+
+| Domain | Accepted versions |
+|---|---|
+| API (`api`) | 1. |
+| Snapshot (`snapshot`) | 1. |
+| Event (`event`) | 1. |
+| Workflow descriptor (`descriptor`) | 2 and 3. |
+| Frontend session (`frontendSession`) | 1 and 2. |
+| Control protocol (`control`) | 1 and 2. |
+| Runtime observation protocol (`runtimeProtocol`) | 1, 2 and 3. |
+| Frontend manifest (`frontendManifest`) | `legacy`, `2` and `3`. |
+| Runtime store (`runtimeStore`) | 1 and 2. |
+| Coordination schema (`managerStore`) | 1 to 12. The manager migrates a Store of schema 1 to 11 to schema 12 when it opens it. A Store of schema 13 or later is refused: offline administration answers `storage-unavailable`, `RUNNER --manager serve` exits with status 2, and the Store keeps its version. |
+| Stored invocation (`invocation`) | 1. |
+
+The clients and platforms below are the ones that the checks of the
+repository exercise against this manager.
+
+| Component | Version that the checks exercise |
+|---|---|
+| Terminal frontend | `agentic-run --tui --service` of the same `agentic` package as the manager, version 0.1.0.0. |
+| Emacs client | `wf.el`, `wf-manager.el` and `wf-service.el` 0.1.0 of the `agent-workflows` repository, branch `emacs-native`, commit `6e8eac0bc0fc9a235f9eab66bfec0f3f9cda1c15`. |
+| Emacs | GNU Emacs 30.2 is tested. The client declares Emacs 29.1 in `Package-Requires`, and no check runs Emacs 29.1. |
+| Pi extension | `ext-pi` of this repository on the built Pi fork 0.99.1, commit `7857926ee`, as [the extension README](../../ext-pi/README.md#supported-host) states, with Node 22.23.3. |
+| Platform | macOS 27.0 on arm64 is the only tested platform. |
 
 ## Verification
 

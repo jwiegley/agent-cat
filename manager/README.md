@@ -3,7 +3,11 @@
 This directory provides trusted profile configuration, registry, and discovery
 operations and scoped private SQLite coordination storage through
 `Agentic.Manager`, alongside dependency probes and import checks. The CLI
-composes operator files through the existing registry-based target parser. It does not yet contain a workflow-manager service.
+composes operator files through the existing registry-based target parser.
+`Agentic.Manager.serveManager` is the workflow-manager service. It serves the
+[`/v1` protocol](../doc/api/README.md) and the local administration channel.
+`RUNNER --manager serve` starts it, and `RUNNER --manager admin` administers
+it or the stopped Store.
 Implementation follows the [approved design](../doc/research/workflow-manager.md), its
 [work packages](../doc/research/workflow-manager-implementation-plan.md), and the
 [operator-approved SQLite scope amendment](../doc/research/workflow-manager-storage-amendment.md).
@@ -260,12 +264,17 @@ owning client acceptance gates run.
 
 These minima are support-policy decisions, not inferred compatibility limits.
 The [native frontend evidence](../doc/tui-release-evidence.md) records Emacs 30.2
-byte-compilation, checkdoc, and smoke execution. The Pi package pins coding-agent
-0.85.1 for development, and the installed host reports that version. Companion
-Pi client, server, and TUI package pins are separate dependencies rather than
-coding-agent version floors. The current pinned development shell reports Node
-22.23.2, which is a reproducible build-runtime observation rather than an
-independently established Node compatibility minimum.
+byte-compilation, checkdoc, and smoke execution. The Pi extension develops and
+runs against the built Pi fork 0.99.1. The `devDependencies` of
+`ext-pi/package.json` name 0.99.1 for the Pi client, coding-agent, server and
+TUI packages, and `node_modules` links each host package into the fork, which
+reports 0.99.1, as the [extension README](../ext-pi/README.md#supported-host)
+states. These development pins are not coding-agent version floors. The
+current pinned development shell reports Node 22.23.3, which is a reproducible
+build-runtime observation rather than an independently established Node
+compatibility minimum. The
+[version and compatibility matrix](../doc/api/README.md#version-and-compatibility-matrix)
+lists the client versions that the checks exercise.
 
 No older-version compatibility or manager service-mode test is implied by these
 records. Each released client must pass its owning acceptance gate on its actual
