@@ -7286,7 +7286,7 @@ Request, approval, control, export, and lineage routes pass hostile-input, repla
 :LABELS:   ["wm-release-gate","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-02 Fri 22:01]
+:MODIFIED: [2026-10-02 Fri 22:48]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/G4
 :SOURCE_REPO: agent-cat
@@ -7504,6 +7504,13 @@ Emacs, TUI, and Pi service modes pass their native UI gates and cross-client/cro
     "author": "johnw",
     "text": "PF22 (2026-10-02), Phase F gate part 2, on the clean tree at bd721ffb, each step once and alone (no Lean build beside a cabal build): the nine subcommands of bisim/ci/manager.sh exited 0 (closure holds only Agentic.Manager, Lean core and Mathlib.Data.Finmap; lean 1379 jobs; build; cases 45 cases, 0 mismatches; admission seed 20261002, 500 situations, 4286 submissions, 0 mismatches; vertical N8 with 20 managed/direct comparisons; history 40 manager roots, 277 ledger entries, 577 accepted entries, 0 mismatches; refusals 271 variants, 0 mismatches; corpus unchanged). The controls failed as required: control-oracle exit 1 with 'MANAGER-CONFORMANCE mismatch' (4 cases and 10 history entries, 14 counterexamples kept), control-model exit 1 at Exec.lean:161 (answerExec_eq), control-case exit 1 with the literal byte-for-byte mismatch. git status --short bisim/corpus is empty. git diff 91fb0ad4 -- doc/api/openapi.yaml is empty, so additive only. DataBroker in runtime/src/Agentic/Runtime/Broker.hs keeps its nine operations (PD30 broker-check approach). No source change. Evidence (private): PF/PF22/impl-r1. Fess pf-PF22-r1 is not blocking; its findings are filed as a follow-up issue. The package stays open for the closeout.\n",
     "created_at": "2026-10-03T05:01:32Z"
+  },
+  {
+    "id": 692,
+    "issue_id": "acat-g4-pech",
+    "author": "johnw",
+    "text": "PF23 (2026-10-02), Phase F gate part 3, after the build of agentic-run and routing-fixed-point-probe with -ftui-tests (exit 0). Cross-client modes at N8 with real TUI, Emacs and Pi processes: cross-client exit 0 (15 numbered PASS lines, 82 s), cross-client-lifecycle exit 0 (171 s), cross-client-lineage exit 0 (131 s), and cross-client-broken-answer exit 1 with exactly 'CROSS-ASSERT the cross-client answer is JSON false'. Emacs client: ci/emacs.sh exit 0 (97 of 97 transport tests), the local cases of ci/emacs-ui.py passed at 40x12, 80x24 and 140x36, emacs-service, emacs-service-lifecycle and emacs-service-controls exit 0 at N8, and emacs-service-broken-answer exit 1 with exactly 'JOURNEY-ASSERT Emacs answer is JSON false'. ext-pi: npm run check exit 0, npm test exit 0, npm run test:integration exit 0 (9 of 9), and the pi-host mode at N8 exit 0. Fixes made before the failed checks were run again: the ext-pi current-session bridge moves its socket to a private mkdtemp directory when the path in the state directory is longer than 103 bytes (the cause of a Pi EADDRINUSE in cross-client-lifecycle), three supervisor restore tests set a current createdAt so that the 30-day retention does not prune them, and the Emacs witness script (emacs-native 6e8eac0) anchors the history search to the row that starts with the run id and waits 60 s for Emacs -Q to start. Evidence (private): PF/PF23/impl-r1. Fess pf-PF23-r1 is not blocking; its findings are filed as a follow-up issue. Limitation: cross-client passed before the bridge fix and did not run again after it. The package stays open for the closeout.\n",
+    "created_at": "2026-10-03T05:48:46Z"
   }
 ]
 #+end_src
@@ -12924,6 +12931,26 @@ Non-blocking findings of fess pf-PF22-r1 (fess/pf-PF22-r1.md) on subtask PF22 (P
 
 1. (low) PF/PF22/impl-r1 (control-model.log, control-case.log): the counterexamples of control-model and control-case are kept only in temporary copies under the private TMPDIR (manager-control-model.5kKfMk, manager-control-case.pbQytp). Only the control-oracle counterexamples were copied into the gate directory. Fix: copy both counterexample directories into the gate directory so that the evidence survives a cleanup of the temporary directory.
 2. (low) PF/PF22/impl-r1/openapi-additive.log: the additive-only contract result is trivially true, because the diff against 91fb0ad4 is empty. The check cannot detect a non-additive change made before that base. Fix: if a stronger contract check is wanted, also compare against the frozen /v1 origin commit.
+
+* TODO [#D] Resolve the non-blocking fess findings of subtask PF23
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pf23-fess-followup-d1ok
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-02 Fri 22:48]
+:MODIFIED: [2026-10-02 Fri 22:48]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess pf-PF23-r1 (fess/pf-PF23-r1.md) on subtask PF23 (Phase F gate, part 3).
+
+1. (low) PF/PF23/impl-r1/cross-client.log against ext-pi/src/current-bridge.ts: cross-client passed before the bridge change and did not run again. In that fixture the Pi state path is longer than 103 bytes, so the passing run bound a truncated socket path. cross-client-lifecycle, cross-client-lineage and pi-host passed later on the new mkdtemp path. Fix: run cross-client once at N8 on the final tree.
+2. (low) ext-pi/src/current-bridge.ts:60-79: the mkdtemp socket directory is made before the token write and before listen. If either step fails, the directory stays on disk unless close() is called, and a killed Pi also leaves $TMPDIR/acat-bridge-* behind. The old socket in the state directory had the same leak on a kill, so this is not a regression. Fix: remove the socket directory in a catch around the token write and listen in start().
+3. (low) /Users/johnw/src/agent-workflows-emacs-native/ci/emacs-ui.py:866: the run id goes into re-search-forward as a regular expression without quoting. The current run_<hex> ids contain no metacharacters, so the search works. No run covered the order in which the child row comes first. Fix: quote the run id, for example with regexp-quote or an escape in Python.
 
 * TODO [#D] Resolve the non-blocking fess findings of subtask PF3
 :PROPERTIES:
@@ -23417,7 +23444,7 @@ WM-008 completed handoff 2026-09-12T02:36:23+00:00: Adopt the shared root-role r
 :LABELS:   ["p9","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-02 Fri 21:46]
+:MODIFIED: [2026-10-02 Fri 22:48]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-039
 :SOURCE_REPO: agent-cat
@@ -23589,6 +23616,13 @@ configuration is changed.
     "author": "johnw",
     "text": "PF21 (2026-10-02), Phase F gate part 1, on the final tree at 537f1795: ALLBUILD exit 0, make -C doc check exit 0, tui-model-test at +RTS -N1 and -N8 exit 0, JOURNEY-PAIR(pf-gate) at N1 and N8 exit 0 (PASS flow line on both), the three journey controls at N8 failed with their literal messages, and the six N8 owner checks with the PD28 gate arguments exited 0. One command-check attempt failed on the gate invocation (credential_cli.py requires a work directory named N1 or N8) and passed on rerun; both runs are kept. No source change. Evidence (private): PF/PF21/impl-r1. Fess pf-PF21-r1 is not blocking; its findings are filed as a follow-up issue. The package stays open: PF22 to PF24 run the rest of the Phase F gate.\n",
     "created_at": "2026-10-03T04:46:31Z"
+  },
+  {
+    "id": 691,
+    "issue_id": "acat-wm-039-0vfi",
+    "author": "johnw",
+    "text": "PF23 (2026-10-02), Phase F gate part 3, after the build of agentic-run and routing-fixed-point-probe with -ftui-tests (exit 0). Cross-client modes at N8 with real TUI, Emacs and Pi processes: cross-client exit 0 (15 numbered PASS lines, 82 s), cross-client-lifecycle exit 0 (171 s), cross-client-lineage exit 0 (131 s), and cross-client-broken-answer exit 1 with exactly 'CROSS-ASSERT the cross-client answer is JSON false'. Emacs client: ci/emacs.sh exit 0 (97 of 97 transport tests), the local cases of ci/emacs-ui.py passed at 40x12, 80x24 and 140x36, emacs-service, emacs-service-lifecycle and emacs-service-controls exit 0 at N8, and emacs-service-broken-answer exit 1 with exactly 'JOURNEY-ASSERT Emacs answer is JSON false'. ext-pi: npm run check exit 0, npm test exit 0, npm run test:integration exit 0 (9 of 9), and the pi-host mode at N8 exit 0. Fixes made before the failed checks were run again: the ext-pi current-session bridge moves its socket to a private mkdtemp directory when the path in the state directory is longer than 103 bytes (the cause of a Pi EADDRINUSE in cross-client-lifecycle), three supervisor restore tests set a current createdAt so that the 30-day retention does not prune them, and the Emacs witness script (emacs-native 6e8eac0) anchors the history search to the row that starts with the run id and waits 60 s for Emacs -Q to start. Evidence (private): PF/PF23/impl-r1. Fess pf-PF23-r1 is not blocking; its findings are filed as a follow-up issue. Limitation: cross-client passed before the bridge fix and did not run again after it. The package stays open for the closeout.\n",
+    "created_at": "2026-10-03T05:48:44Z"
   }
 ]
 #+end_src

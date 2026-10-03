@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import readline from "node:readline";
 import { afterEach, describe, expect, it } from "vitest";
 import { CurrentSessionBridge } from "../src/current-bridge.ts";
@@ -71,6 +71,34 @@ describe("current Pi session ACP bridge", () => {
     await new Promise((resolve) => child.once("close", resolve));
     await bridge.close();
     expect(aborted).toBe(true);
+  });
+
+  it("binds a socket path that fits the address limit when the state directory is long", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "cb-"));
+    created.push(directory);
+    // The truncated form of the socket path in the state directory is the
+    // state directory itself, which made an earlier bridge fail with
+    // EADDRINUSE. Other lengths bound a truncated path silently.
+    const fill = "x".repeat(Math.max(1, 103 - Buffer.byteLength(join(directory, "s/state"))));
+    const stateDir = join(directory, `s${fill}`, "state");
+    await mkdir(stateDir, { recursive: true });
+    expect(Buffer.byteLength(stateDir)).toBeGreaterThanOrEqual(103);
+    const pi = { startTaskTurn: () => { throw new Error("no turn in this test"); } };
+    const bridge = new CurrentSessionBridge(pi as never, () => ({ isIdle: () => true }) as never);
+    await bridge.start(stateDir);
+    const target = bridge.target();
+    const socketPath = target.env.AGENT_CAT_PI_BRIDGE_SOCKET!;
+    expect(Buffer.byteLength(socketPath)).toBeLessThanOrEqual(103);
+    expect((await stat(socketPath)).isSocket()).toBe(true);
+    const child = spawn(process.execPath, [target.args.at(-1)!], { env: { ...process.env, ...target.env }, stdio: ["pipe", "pipe", "pipe"] });
+    const lines = readline.createInterface({ input: child.stdout })[Symbol.asyncIterator]();
+    child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 0, method: "initialize", params: { protocolVersion: 1 } })}\n`);
+    expect(JSON.parse((await lines.next()).value).result.agentInfo.name).toBe("pi-current-session");
+    child.stdin.end();
+    await new Promise((resolve) => child.once("close", resolve));
+    await bridge.close();
+    await expect(stat(socketPath)).rejects.toThrow();
+    await expect(stat(dirname(socketPath))).rejects.toThrow();
   });
 });
 

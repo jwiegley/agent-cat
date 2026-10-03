@@ -97,6 +97,9 @@ describe("run supervisor", () => {
     await mkdir(join(runDir, "runtime"), { recursive: true, mode: 0o700 });
     const manifest = JSON.parse(await readFile(resolve("../test/fixtures/runtime/frontend-manifest/v2.json"), "utf8"));
     manifest.runId = "run-1";
+    // A recent createdAt keeps the restored run inside the default 30-day
+    // retention, whatever the date of the shared fixture.
+    manifest.createdAt = new Date().toISOString();
     await writeFile(join(runDir, "supervisor-manifest.json"), `${JSON.stringify(manifest)}\n`, { mode: 0o600 });
     const personResult = await installResult(join(runDir, "runtime"), "run-1", "receipt", { ok: true });
     const personEvents = withResult(await readFile(resolve("../test/fixtures/runtime/protocol-v2/person-result.ndjson"), "utf8"), personResult);
@@ -133,6 +136,9 @@ describe("run supervisor", () => {
     await mkdir(runtimeDir, { recursive: true, mode: 0o700 });
     const manifest = JSON.parse(await readFile(resolve("../test/fixtures/runtime/frontend-manifest/v2.json"), "utf8"));
     manifest.runId = runId;
+    // A recent createdAt keeps the restored run inside the default 30-day
+    // retention, whatever the date of the shared fixture.
+    manifest.createdAt = new Date().toISOString();
     await writeFile(join(runDir, "supervisor-manifest.json"), `${JSON.stringify(manifest)}\n`, { mode: 0o600 });
     let sequence = 0;
     const envelope = (event: Record<string, unknown>): string => JSON.stringify({
@@ -168,6 +174,9 @@ describe("run supervisor", () => {
     await mkdir(runtimeDir, { recursive: true, mode: 0o700 });
     const manifest = JSON.parse(await readFile(resolve("../test/fixtures/runtime/frontend-manifest/v2.json"), "utf8"));
     manifest.runId = runId;
+    // A recent createdAt keeps the restored run inside the default 30-day
+    // retention, whatever the date of the shared fixture.
+    manifest.createdAt = new Date().toISOString();
     await writeFile(join(runDir, "supervisor-manifest.json"), `${JSON.stringify(manifest)}\n`, { mode: 0o600 });
     let sequence = 0;
     const envelope = (event: Record<string, unknown>): string => JSON.stringify({

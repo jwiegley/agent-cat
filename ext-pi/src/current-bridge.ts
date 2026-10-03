@@ -1,11 +1,16 @@
 import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import net, { type Server, type Socket } from "node:net";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 const MAX_FRAME = 1024 * 1024;
+// The longest Unix socket path, in bytes, that both macOS (104 with the
+// terminating NUL) and Linux (108) accept. Node truncates a longer path
+// without an error, so the bridge never passes one to listen.
+const MAX_SOCKET_PATH = 103;
 
 type TaskTurnHandle = {
   id: string;
@@ -22,6 +27,7 @@ export class CurrentSessionBridge {
   readonly #context: () => ExtensionContext | undefined;
   #server?: Server;
   #socketPath?: string;
+  #socketDirectory?: string;
   #tokenFile?: string;
   #token?: Buffer;
   #client?: Socket;
@@ -47,6 +53,18 @@ export class CurrentSessionBridge {
     await mkdir(directory, { recursive: true, mode: 0o700 });
     const instance = `${process.pid}-${randomUUID()}`;
     this.#socketPath = join(directory, `current-${instance}.sock`);
+    if (Buffer.byteLength(this.#socketPath) > MAX_SOCKET_PATH) {
+      // A long state directory gives a socket path that does not fit. The
+      // socket then goes in a new private temporary directory. The token
+      // file stays in the state directory.
+      this.#socketDirectory = await mkdtemp(join(tmpdir(), "acat-bridge-"));
+      this.#socketPath = join(this.#socketDirectory, "current.sock");
+      if (Buffer.byteLength(this.#socketPath) > MAX_SOCKET_PATH) {
+        await rm(this.#socketDirectory, { recursive: true, force: true });
+        this.#socketDirectory = undefined;
+        throw new Error(`current-session bridge socket path exceeds ${MAX_SOCKET_PATH} bytes: ${this.#socketPath}`);
+      }
+    }
     this.#tokenFile = join(directory, `current-${instance}.token`);
     this.#token = randomBytes(32);
     await writeFile(this.#tokenFile, this.#token.toString("hex"), { mode: 0o600, flag: "wx" });
@@ -77,6 +95,8 @@ export class CurrentSessionBridge {
     if (this.#server) await new Promise<void>((resolve) => this.#server!.close(() => resolve()));
     this.#server = undefined;
     await Promise.all([this.#socketPath ? rm(this.#socketPath, { force: true }) : Promise.resolve(), this.#tokenFile ? rm(this.#tokenFile, { force: true }) : Promise.resolve()]);
+    if (this.#socketDirectory) await rm(this.#socketDirectory, { recursive: true, force: true });
+    this.#socketDirectory = undefined;
   }
 
   #accept(socket: Socket): void {

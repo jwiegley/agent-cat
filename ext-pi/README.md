@@ -1600,7 +1600,13 @@ Remote discovery and control use Pi's Chord `SessionDirectory`,
 `SessionManagement`, `AgentController`, and `Transcript` services. Boundary
 follow-up uses `AgentController.followUp`. Correlated current-session turns
 require `ExtensionAPI.startTaskTurn`, and the current-session choice is hidden
-when that method is absent.
+when that method is absent. The current-session bridge listens on a Unix
+socket in the `bridge` directory of the state directory, next to its token
+file. When that socket path is longer than 103 bytes, the limit that both
+macOS and Linux accept, the bridge puts the socket in a new private directory
+under the temporary directory and removes that directory when it closes. When
+that path is also too long, session start fails with an error that names the
+path.
 
 Set `PI_PACKAGE_DIR` to the coding-agent package directory of a built Pi
 checkout to use it for the adapters and integration fixtures. For
