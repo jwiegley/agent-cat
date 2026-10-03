@@ -46,3 +46,51 @@ flake source. The edit was then reverted.
 The listing of the source distribution from `test/cabal.sh sdist` includes
 `nix/haskell-overrides.nix`, `nix/crypton-x509-validation-san.patch` and
 `nix/process-close-fds-linux.patch`.
+
+## Acceptance of the packaged artifact
+
+The `package` mode of `manager/test/service_http.py` accepts the packaged
+executable through a running manager. It reads the path of `bin/agentic-run`
+from `PACKAGE_RUNNER` and uses that file in place of the runner argument of
+the harness. The file is the manager process and the runner of the one
+profile of the fixture, whose target arguments are `--scripted`. The mode
+issues a credential with `observe`, `submit` and `control`, creates a request
+of the `hello` workflow, which needs no provider and no input, enqueues it and
+approves the exact review. It waits for the terminal run, downloads the
+verified result and compares the SHA-256 of the downloaded bytes with the
+published digest. It requires that the supervisor manifest of the worker run
+names the packaged executable. It then reads `status` through the live
+channel, stops the manager through `shutdown` and requires exit status 0.
+
+```sh
+out=$(nix build .#agentic-run --no-update-lock-file --option substitute false --print-out-paths --no-link)
+fixture=$(mktemp -d)
+mkdir "$fixture/N8"
+PACKAGE_RUNNER="$out/bin/agentic-run" direnv exec . python3 -B manager/test/service_http.py \
+  "$PWD" "$fixture/N8" "$out/bin/agentic-run" 8 package
+```
+
+The run of record passed at `-N8` on 2026-10-03. The base revision was
+`5710785a3de642c166929c3dff7204a76af62fa0`, and the working copy held the
+change to `manager/test/service_http.py` and to the documentation without a
+commit. These files are outside the filtered source, so `nix build` with
+substitution disabled built nothing and printed the output path of the table
+above. The one-minute load average was 8.5 at the start and 8.3 at the end.
+
+| Item | Identity |
+|---|---|
+| Derivation path | `/nix/store/6y76igrq76s9g2byl8wdjimbc4vsrn9h-agentic-run-0.1.0.0.drv` |
+| Output path | `/nix/store/lc8qfj9nwxrlm4582wswn9vk3h48zigv-agentic-run-0.1.0.0` |
+| SHA-256 of `bin/agentic-run` | `6ad55c59c69d57923b2ec929d3cd937405ada1fe430f36ef0f056dbfa995e4fc` |
+| Runner version in the catalogue and the supervisor manifest | `0.1.0.0` |
+| Workflow | `hello`, `workflow_117d409316e9bd8244415684a88f2d8327304e414da4a7ca078e905906abce16` |
+| Program hash in the supervisor manifest | `785260762a2848e71d20e3e522a8e477d76b13142cc18e3fe7fcdfebaf085cbb` |
+| Run | `run_60ead7e72ec2880e4439e45aa232b106808eaf05086fc063`, worker run `native-13321-1539500648564000` |
+| Verified result | `artifact_aede23c426668a33b6ae22874bdd2ec39c6a52f0e58fd8465c7e40f532cc6046`, 103 bytes |
+| SHA-256 of the downloaded result | `54b4cee307f3dc2eb37cd42f48d70e6bd01f9be94e859ed43f7bc34da31fb6c9`, equal to the published digest |
+
+The live `status` answered `state` `serving`, `live` and `ready` `true`, with
+0 active reservations and 0 owned workers after the run. `shutdown` answered
+`{"state": "stopped"}`, and the serve process exited with status 0. The result
+holds the identifier of the worker run, so its digest differs from one run to
+the next.

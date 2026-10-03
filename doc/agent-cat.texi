@@ -2294,6 +2294,15 @@ and @file{nix/process-close-fds-linux.patch}, so the dependency patches travel
 with the source.  @file{doc/workflow-manager-release-evidence.md} records the
 identities of the package, the executable, and the source distribution.
 
+The @code{package} mode of @file{manager/test/service_http.py} accepts the
+built executable.  It reads the path of @file{bin/agentic-run} from the
+environment variable @env{PACKAGE_RUNNER} and runs that file as the manager and
+as the runner of a scripted profile.  It completes one request of the
+@code{hello} workflow through exact approval, downloads the verified result and
+compares its digest, reads @code{status} through the live administration
+channel, and stops the manager through @code{shutdown} with exit status 0.  The
+release evidence also records the identities of that run.
+
 @section Building the Lean model and the oracle
 
 @cindex one-build rule

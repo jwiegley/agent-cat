@@ -424,6 +424,10 @@ path unchanged. From a Git working copy, Nix reads only the tracked files. The
 source distribution that `test/cabal.sh sdist` writes beneath `CABAL_BUILDDIR`
 includes the three files under `nix/`.
 `doc/workflow-manager-release-evidence.md` records the package identities.
+The `package` mode of `manager/test/service_http.py` accepts the built
+executable. It runs the file that `PACKAGE_RUNNER` names as the manager and as
+the runner of a scripted profile, completes one `hello` request with a verified
+result, and stops the manager through `shutdown`.
 
 Never run two full model builds at once. The module
 `model/Agentic/Core/DslFlagship.lean` proves its theorems by running the

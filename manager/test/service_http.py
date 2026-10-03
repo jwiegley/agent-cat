@@ -126,6 +126,26 @@ lifecycle = len(sys.argv) == 6 and sys.argv[5] == LIFECYCLE
 # for the steps that they own.
 OPERATIONS = "operations"
 operations_mode = len(sys.argv) == 6 and sys.argv[5] == OPERATIONS
+# The package mode is the WM-043 acceptance of the packaged artifact. It
+# reads the bin/agentic-run of the Nix package from PACKAGE_RUNNER and uses
+# that file in place of the runner argument, both as the manager process and
+# as the runner of profile_1, whose target arguments stay --scripted. In one
+# manager lifetime it creates a request of the hello workflow, which needs no
+# provider and no input, enqueues it, approves the exact review, observes
+# the terminal run, downloads the verified result and compares the digest of
+# its bytes with the published digest. It then reads status through the live
+# channel and stops the manager through shutdown, and the serve process must
+# exit with status 0. The PASS lines print the identities of the run: the
+# packaged path, the SHA-256 of the binary and the runner version of the
+# catalogue.
+PACKAGE = "package"
+package_mode = len(sys.argv) == 6 and sys.argv[5] == PACKAGE
+if package_mode:
+    if not os.environ.get("PACKAGE_RUNNER"):
+        raise SystemExit("The package mode needs PACKAGE_RUNNER, the bin/agentic-run of the Nix package, and PACKAGE_RUNNER is unset.")
+    runner = Path(os.environ["PACKAGE_RUNNER"])
+    if not (runner.is_file() and os.access(runner, os.X_OK)):
+        raise SystemExit(f"The package mode needs PACKAGE_RUNNER, the bin/agentic-run of the Nix package, and {runner} is not an executable file.")
 mixed = len(sys.argv) == 6 and sys.argv[5] in ("mixed", "mixed-confirm", "tui-approval", "tui-consent-control", APPROVE_FAULT, LIFECYCLE, OPERATIONS, "pages", "routes", "failures-worker", "failures-manager", "failures-launched", "storage", "pi-client", "pi-client-controls", "emacs-client", "emacs-client-controls", "pi-host-smoke", "pi-host", "pi-host-broken-answer", "pi-host-model", "pi-host-model-decline", "emacs-service", "emacs-service-broken-answer") + JOURNEYS
 confirm_uncertain = mixed and sys.argv[5] == "mixed-confirm"
 # The boundary mode checks WM-024 through the running protected manager with
@@ -2473,7 +2493,7 @@ def lifecycle_elapsed():
 # and emacs-service-controls modes configure the control fixture profiles.
 control_profiles = (control_profiles or tui_mode in (TUI_CONTROLS, TUI_REDIRECT) or client_controls_mode or emacs_lifecycle_mode
                     or emacs_controls_mode)
-assert len(sys.argv) == 5 or mixed or boundary or pages_mode or events_mode or captures_mode or discard_mode or exports_mode or lineage_mode or control_profiles or person_mode or endpoints_mode or tui_mode or cross_client_mode or capacity_admission_mode or capacity_inputs_mode or capacity_streams_mode or faults_io_mode or failures_backup_mode
+assert len(sys.argv) == 5 or mixed or boundary or pages_mode or events_mode or captures_mode or discard_mode or exports_mode or lineage_mode or control_profiles or person_mode or endpoints_mode or tui_mode or cross_client_mode or capacity_admission_mode or capacity_inputs_mode or capacity_streams_mode or faults_io_mode or failures_backup_mode or package_mode
 assert not tui_approval or os.environ.get("TUI_CHECK")
 assert not (endpoints_mode or tui_mode or cross_client_mode) or os.environ.get("TUI_CHECK")
 assert not capacity_inputs_mode or os.environ.get("ARTIFACT_CHECK")
@@ -3027,7 +3047,7 @@ class CapacityFixture(TuiModeFixture):
 
 
 issued = administration({"version": 1, "operation": "issue-credential", "label": "HTTPS fixture",
-                         "scopes": ["observe", "submit"] + (["control", "export"] if mixed else ["control"] if captures_mode or discard_mode or lineage_mode or control_profiles or person_mode else ["control", "export"] if exports_mode else []),
+                         "scopes": ["observe", "submit"] + (["control", "export"] if mixed else ["control"] if captures_mode or discard_mode or lineage_mode or control_profiles or person_mode or package_mode else ["control", "export"] if exports_mode else []),
                          "profileIds": CONTROL_PROFILES or (["profile_1", "profile_plain"] if person_mode else
                                                             CAPACITY_PROFILES if capacity_admission_mode or capacity_inputs_mode or capacity_streams_mode or faults_io_mode or failures_backup_mode else ["profile_1"]),
                          "expiresAt": "2999-01-01T00:00:00Z", "outputFile": str(work / "credential")})
@@ -5603,8 +5623,106 @@ def operations_runbook(lifetime, stop):
           "failure is faults-io and the proxy failure is tui-failures, which this case cites and does not run", flush=True)
 
 
+def package_checks():
+    """WM-043 acceptance of the packaged artifact through the real HTTPS
+    manager. runner is the bin/agentic-run of PACKAGE_RUNNER, and the
+    configuration names it as the manager executable and as the runner of
+    profile_1. One request of the hello workflow runs to terminal success,
+    its verified result is downloaded and its digest compared, status is
+    read through the live channel, and shutdown stops the serve process with
+    exit status 0."""
+    authorized = {"Authorization": "Bearer " + bearer}
+    served = json.loads(config.read_text())
+    assert served["runners"] == [{"alias": "runner", "executable": str(runner), "prefix": []}], served["runners"]
+    assert [(item["runner"], item["targetArguments"]) for item in served["profiles"]] == [("runner", ["--scripted"])], served["profiles"]
+    binary_sha256 = hashlib.sha256(runner.read_bytes()).hexdigest()
+    print("PACKAGE runner", runner, "sha256", binary_sha256, "is the manager executable and the runner of profile_1", flush=True)
+    with (work / "server-0.stdout").open("wb") as output, (work / "server-0.stderr").open("wb") as errors:
+        process = subprocess.Popen([str(runner), "--manager", "serve", "--config", str(config),
+                                    "+RTS", "-N" + native, "-RTS"], stdout=output, stderr=errors)
+        try:
+            wait_ready(process)
+            status, capabilities, raw = request("/v1/capabilities", authorized)
+            assert status == 200, ("capabilities", status)
+            validate("Capabilities", capabilities, raw)
+            status, catalogue, raw = request("/v1/workflows?profileId=profile_1", authorized)
+            assert status == 200 and catalogue["page"]["next"] is None, ("workflows", status)
+            validate("WorkflowPage", catalogue, raw)
+            (work / "workflows.json").write_bytes(raw)
+            workflow = next(item for item in catalogue["items"] if item["name"] == "hello")
+            assert workflow["inputs"] == [], ("the hello workflow declares inputs", workflow["inputs"])
+            print("PASS package catalogue: the packaged runner described", len(catalogue["items"]), "workflows with runner",
+                  "version", repr(workflow["runnerVersion"]) + "; hello is", workflow["id"], "revision", workflow["revision"], flush=True)
+
+            body = json.dumps({"workflowId": workflow["id"], "descriptorRevision": workflow["revision"],
+                               "profileId": workflow["profileId"], "profileRevision": workflow["profileRevision"]},
+                              separators=(",", ":")).encode()
+            key = capabilities["authorityEpoch"] + "." + secrets.token_urlsafe(16)
+            status, created, raw = request("/v1/requests", authorized | {
+                "Content-Type": "application/json", "Idempotency-Key": key}, method="POST", payload=body)
+            assert status == 201, ("request creation", status, created.get("code"))
+            validate("Request", created, raw)
+            client = mixed_client(capabilities, authorized)
+            observed, wait_for, _, _ = client
+            enqueue_mixed(created, workflow, client)
+            approval, run = approve_review(created, workflow, client)
+            snapshot, _, raw = wait_for("/v1/runs/" + run + "/snapshot", "RunSnapshot",
+                                        lambda value: value["runtime"] is not None
+                                        and value["runtime"]["status"] in ("succeeded", "failed", "cancelled"))
+            (work / "terminal-snapshot.json").write_bytes(raw)
+            assert snapshot["runtime"]["status"] == "succeeded", ("the hello run ended", snapshot["runtime"]["status"])
+            artifact = verified_download(run, client, authorized)
+            result_bytes = (work / "verified-result.json").read_bytes()
+            downloaded = hashlib.sha256(result_bytes).hexdigest()
+            assert downloaded == artifact["sha256"], ("the digest of the downloaded result", downloaded, artifact["sha256"])
+            # The supervisor manifest of the run names the executable that
+            # the manager launched as the worker.
+            manifests = list(work.glob("manager/runs/runs/*/supervisor-manifest.json"))
+            assert len(manifests) == 1, ("the supervisor manifests of the package run", manifests)
+            manifest = json.loads(manifests[0].read_bytes())
+            assert manifest["runId"] == json.loads(result_bytes)["runId"], (manifest["runId"], result_bytes)
+            assert manifest["runnerExecutable"] == manifest["invocation"]["executable"] == str(runner), manifest
+            assert (manifest["workflow"], manifest["targetArgs"], manifest["runnerVersion"]) == (
+                "hello", ["--scripted"], workflow["runnerVersion"]), manifest
+            print("PASS package run: request", created["id"], "was approved at its exact review with receipt", approval,
+                  "and run", run, "succeeded; the verified result", artifact["id"], "of", artifact["bytes"], "bytes has",
+                  "SHA-256", downloaded, "equal to the published digest; the supervisor manifest of worker run",
+                  manifest["runId"], "names the packaged runner and the program hash", manifest["programHash"], flush=True)
+
+            status_request = {"version": 1, "operation": "status"}
+            deadline = time.monotonic() + 40
+            while True:
+                reported = administration(status_request)["result"]
+                if reported["activeReservations"] == 0 and reported["ownedWorkers"] == 0:
+                    break
+                assert time.monotonic() < deadline, ("status deadline", reported)
+                time.sleep(0.1)
+            assert reported["state"] == "serving" and reported["live"] and reported["ready"], reported
+            print("PASS package status: the live channel reported state", reported["state"] + ", live and ready, with",
+                  reported["activeReservations"], "active reservations and", reported["ownedWorkers"], "owned workers", flush=True)
+
+            stopped = administration({"version": 1, "operation": "shutdown"})
+            assert stopped["result"] == {"state": "stopped"}, stopped
+            process.wait(timeout=60)
+        finally:
+            if process.poll() is None:
+                process.terminate()
+            process.wait(timeout=25)
+            (work / "server-0.exit").write_text(str(process.returncode) + "\n")
+    assert process.returncode == 0, ("the packaged manager exit after shutdown", process.returncode)
+    print("PASS package shutdown: shutdown answered", stopped["result"], "and the packaged serve process exited with status 0",
+          flush=True)
+    print("PASS package: the packaged agentic-run", runner, "with SHA-256", binary_sha256, "and runner version",
+          repr(workflow["runnerVersion"]), "served, ran and stopped the hello workflow at -N" + native, flush=True)
+
+
 if operations_mode:
     operations_checks()
+    raise SystemExit(0)
+
+
+if package_mode:
+    package_checks()
     raise SystemExit(0)
 
 
