@@ -34,18 +34,25 @@ import Data.Text (Text)
 -- | The actions that the composition of a serving manager supplies.
 -- 'serveReload' loads the configuration file of the manager again and
 -- installs it with 'reloadConfiguration' on the given installation.
-newtype ServeHooks = ServeHooks
-  { serveReload :: InstalledConfiguration -> IO (Either Diagnostic [PublicProfile]) }
+-- 'serveStop' requests the end of the serving process with the same effect as
+-- the termination signal: the action of 'serveManager' is interrupted, its
+-- scopes end with their original cleanup, and the process exits with status
+-- 0.
+data ServeHooks = ServeHooks
+  { serveReload :: InstalledConfiguration -> IO (Either Diagnostic [PublicProfile]),
+    serveStop :: IO ()
+  }
 
 -- | One foreground listener within the original configuration and Store
 -- lifetimes. Each legacy binding names a configured local retention root and
 -- a configured profile. It is bound through 'History.bindLegacyHistory'
 -- before the service starts, and a binding that fails refuses the start with
 -- 'InvalidConfiguration'. With an administration root, the local
--- administration channel serves @reload-profiles@ with 'serveReload' and
--- @drain@ with 'Service.drain', and @status@ reports @draining@ after a
--- drain. After a successful reload, each installed profile is probed, as at
--- the start. A drain keeps the listener serving until the process ends.
+-- administration channel serves @reload-profiles@ with 'serveReload',
+-- @drain@ with 'Service.drain' and @shutdown@ with 'serveStop', and @status@
+-- reports @draining@ after a drain. After a successful reload, each installed
+-- profile is probed, as at the start. A drain keeps the listener serving
+-- until the process ends. A shutdown calls 'serveStop' after its reply.
 serveManager :: ServeHooks -> Configuration -> [(FilePath, Text)] -> IO ()
 serveManager hooks configuration legacy = do
   https <- maybe (throwIO InvalidConfiguration) pure (configurationHttps configuration)
@@ -64,4 +71,5 @@ serveManager hooks configuration legacy = do
           Nothing -> listen
           Just _ -> withLocalAdministration store (AdministrationHooks
             { hookState = (\closed -> if closed then StoreDraining else StoreServing) <$> Service.draining service,
-              hookWake = Service.wakeAdmission service, hookReload = Just reload, hookDrain = Just (Service.drain service) }) listen
+              hookWake = Service.wakeAdmission service, hookReload = Just reload, hookDrain = Just (Service.drain service),
+              hookShutdown = Just (serveStop hooks) }) listen

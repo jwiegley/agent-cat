@@ -221,8 +221,8 @@ closed fence and, when no mode is set, the mode `DrainUntil maxBound`. The
 supervisor then runs the shutdown that this section describes, and the
 watchdog never expires the drain. The drain lasts until the scope ends or a
 caller selects `CancelNow`, which the mode merge of `shutdownAdmission` lets
-win. A termination signal ends the listener, and the scope exit then selects
-`CancelNow`. `admissionClosed` reports the closed fence. The scheduler of
+win. A termination signal or the local `shutdown` operation ends the
+listener, and the scope exit then selects `CancelNow`. `admissionClosed` reports the closed fence. The scheduler of
 `Agentic.Manager.Service` does not poll a closed controller, so a drain
 records no admission fault, and `status` reports `draining` while the fence
 is closed. When the last owned run has ended, the supervisor completes the

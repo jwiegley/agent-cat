@@ -980,9 +980,9 @@ legacyHistoryOptions options = do
 managerServeCmd :: Registry -> FilePath -> [(FilePath, Text)] -> IO ()
 managerServeCmd reg path legacy = do
   unless (isAbsolute path) (die reg 1 "manager --config requires an absolute file")
-  withManagerSignals $ (do
+  withManagerSignals $ \stop -> (do
     configuration <- loadManagerConfiguration reg path >>= either throwIO pure
-    Manager.serveManager (Manager.ServeHooks (\installed -> reloadManagerConfiguration reg installed path)) configuration legacy)
+    Manager.serveManager (Manager.ServeHooks (\installed -> reloadManagerConfiguration reg installed path) stop) configuration legacy)
     `catches`
       [ Handler $ \(_ :: Manager.Diagnostic) ->
           die reg 1 "manager configuration or HTTPS listener is unavailable",
@@ -996,17 +996,23 @@ managerServeCmd reg path legacy = do
 -- Signals do not reconstruct workers from process identifiers. When the
 -- termination signal stopped the owner, the process exits with status 0
 -- after that cleanup. The keyboard signal propagates the interrupt, so the
--- process ends as an interrupted command.
-withManagerSignals :: IO () -> IO ()
+-- process ends as an interrupted command. The action receives the stop
+-- request, which has the effect of the termination signal, so that a local
+-- shutdown ends the process through the same path. Only the first stop
+-- request or termination signal interrupts the owner, so a later one cannot
+-- interrupt the cleanup of the first.
+withManagerSignals :: (IO () -> IO ()) -> IO ()
 withManagerSignals action = do
   owner <- myThreadId
   terminated <- newIORef False
-  let install signal mark = Signals.installHandler signal
-        (Signals.CatchOnce (mark >> throwTo owner UserInterrupt)) Nothing
+  let terminate = do
+        earlier <- atomicModifyIORef' terminated (\stopping -> (True, stopping))
+        unless earlier (throwTo owner UserInterrupt)
+      install signal stop = Signals.installHandler signal (Signals.CatchOnce stop) Nothing
       restore signal previous = void (Signals.installHandler signal previous Nothing)
   stopped <- try $
-    bracket (install Signals.softwareTermination (writeIORef terminated True)) (restore Signals.softwareTermination) $ \_ ->
-      bracket (install Signals.keyboardSignal (pure ())) (restore Signals.keyboardSignal) $ \_ -> action
+    bracket (install Signals.softwareTermination terminate) (restore Signals.softwareTermination) $ \_ ->
+      bracket (install Signals.keyboardSignal (throwTo owner UserInterrupt)) (restore Signals.keyboardSignal) $ \_ -> action terminate
   case stopped of
     Right () -> pure ()
     Left UserInterrupt -> readIORef terminated >>= \byTermination -> if byTermination then exitSuccess else throwIO UserInterrupt

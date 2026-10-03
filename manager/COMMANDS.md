@@ -65,7 +65,7 @@ refuse before dispatch with `operation: null`. Errors do not reflect input or
 parser diagnostics. The implemented operations are `issue-credential`,
 `rotate-credential`, `revoke-credential`, `list-credentials`, `status`,
 `check-store`, `check-quarantine`, `release-quarantine`, `reload-profiles`,
-and `drain`. The other recognized operations, `shutdown`, `backup`, and
+`drain`, and `shutdown`. The other recognized operations, `backup` and
 `restore`, receive `state-conflict` before the CLI reads the configuration.
 
 `status` and `check-store` are read-only. They change no Store row and append
@@ -149,12 +149,17 @@ Unix socket and never opens a second Store or falls back after a channel failure
 Trusted embedding uses `withLocalAdministration store hooks action` to retain
 a local channel during the action. The `AdministrationHooks` record supplies
 the state that `status` reports, the wake that notifies the admission
-controller, the action that performs `reload-profiles` and the action that
-performs `drain`. Offline administration dispatches with
-`offlineAdministration`, which reports `stopped`, wakes nothing and has no
-reload or drain action. `serveManager` builds the reload action from the
-`serveReload` member of its `ServeHooks` argument, which the CLI supplies,
-and the drain action and the state from its service. The original Store supplies its installed directory
+controller, the action that performs `reload-profiles`, the action that
+performs `drain` and the stop request that `shutdown` calls. Offline
+administration dispatches with `offlineAdministration`, which reports
+`stopped`, wakes nothing and has no reload, drain or stop action.
+`administerLocally` gives the response and an action that follows the
+reply. The live channel writes the reply, closes the sending half of the
+connection and then runs that action. Only a live `shutdown` gives an action
+other than `pure ()`. `serveManager` builds the reload action from the
+`serveReload` member of its `ServeHooks` argument and the stop request from
+its `serveStop` member, which the CLI supplies, and the drain action and the
+state from its service. The original Store supplies its installed directory
 binding and retains the configuration lease. A separate exclusive directory
 lease prevents duplicate listeners and authorizes removal of a stale socket name.
 Regular files and symbolic links are not removed. A scoped listener removes only
@@ -337,8 +342,8 @@ registry and equals no installed revision. An invalid file refuses with
 `command` record of the drain to the manager log, publishes the drain, and
 then answers and appends the response as the `receipt`. The drain lasts for
 the rest of the lifetime and cannot be reversed. A repeated `drain` answers
-`draining` again. The process ends at a termination signal, as before, and
-that signal cancels the work that the drain still waits for.
+`draining` again. The process ends at a termination signal or at a
+`shutdown`, and either cancels the work that the drain still waits for.
 
 During the drain the manager admits no new work. An enqueue, an input change
 and a withdrawal of a request refuse with 503 `storage-unavailable`, and so do
@@ -359,6 +364,48 @@ ends.
 
 Offline, `drain` refuses with `state-conflict` before it acquires the
 configuration lease, because no serving lifetime exists to drain.
+
+### Shutdown
+
+`shutdown` has no request field. Its result is the frozen `state`
+`stopped`. Through the live channel, the serving manager appends the
+`command` record of the shutdown to the manager log and commits, appends the
+response as the `receipt`, writes the reply and closes the sending half of
+the connection. It then calls the stop request of `withManagerSignals`, which
+has the effect of the termination signal. The stop request marks the stop as
+a termination and interrupts the foreground thread of `serveManager`. The
+termination path then runs as for the signal. The listener and the local
+administration channel close, the service scope ends, and
+`shutdownService` selects `CancelNow`. The admission controller stops each
+preparation, and each owned run is cancelled with its original cleanup,
+which ends its worker processes and releases its reservation. Open event
+and route streams end. The Store appends the `shutdown` notice of the
+lifetime to the manager log, and the process exits with status 0. A drain
+in progress does not delay the shutdown, because the mode merge of
+`shutdownAdmission` lets `CancelNow` win over the drain. A command record
+that cannot be appended refuses the shutdown with `storage-unavailable`, and
+the manager keeps serving.
+
+A run that the shutdown cancelled has no terminal record in its run log, as
+after a termination signal. The next lifetime publishes it with the
+supervision `lost`, the limitation `lost-supervision` and no cancel. That
+lifetime reconciles the Store, and a request that waits in the queue, such
+as a request whose review a drain returned to the queue, is prepared with no
+other client command. No command executes again.
+
+Offline, with the offline configuration, `shutdown` acquires the
+configuration lease, which proves that no manager serves the configuration,
+and releases it. It opens no Store, answers `stopped` and changes nothing.
+When a manager holds the lease, offline `shutdown` refuses with
+`storage-unavailable`, as the other offline operations do.
+
+Case 3 of the `operations` mode of `manager/test/service_http.py` checks a
+shutdown during a drain: the reply, the end of an open event stream, the
+end of the worker processes of a run at its person question, the exit status
+0, offline `status` with no active reservation, offline `shutdown` with no
+Store file change, a new lifetime that prepares the queued request with no
+client command, and the shutdown records in the manager log with one receipt
+for each command and one start relay for each run.
 
 ## Credential lifecycle through the serving manager
 
@@ -592,8 +639,8 @@ a request ending or a review ending, and `recordReceipt` appends them after the
 receipt or after the gap entry of a failed receipt. A replay appends none.
 
 The local administration channel of a serving manager records its credential
-operations, its quarantine releases, its profile reloads and its drain in the
-same log,
+operations, its quarantine releases, its profile reloads, its drain and its
+shutdown in the same log,
 through the shared helper `Agentic.Manager.Administration`. `administerCredentials` appends the
 `command` record of `issue-credential`, `rotate-credential` and
 `revoke-credential`, and `releaseQuarantine` appends the `command` record of
@@ -606,9 +653,10 @@ rotates to or revokes, the credential that a rotation supersedes, and the label,
 scopes, profiles and expiry of that credential. The bearer, its verifier and the
 output file never enter a record. The body of a release names the
 reservation, its request, and the cleanup evidence identity and digest that
-the release verified. The body of a profile reload or a drain holds only the
-operation. Its transaction appends only the `command` record and commits
-before the reload or the drain runs, because neither changes a Store row. The
+the release verified. The body of a profile reload, a drain or a shutdown
+holds only the operation. Its transaction appends only the `command` record
+and commits before the reload, the drain or the shutdown runs, because none
+of them changes a Store row. The
 `receipt` then carries the result or the refusal. A lifetime that ends
 between the two leaves the operation `outcome-uncertain` at the next open. The
 appends use the ceiling with which the

@@ -23,7 +23,10 @@ import System.IO (stdin, stdout)
 -- Operations without an implementation refuse before either path. Offline
 -- reload-profiles validates the given file through the loader and answers
 -- before the configuration lease and the Store are acquired. Offline drain
--- has no serving lifetime to drain and refuses at the same point.
+-- has no serving lifetime to drain and refuses at the same point. Offline
+-- shutdown acquires the configuration lease, which proves that no manager
+-- serves the configuration, and answers that the manager is stopped without
+-- opening the Store, so it changes nothing.
 runLocalAdmin :: (FilePath -> IO (Either Diagnostic Configuration)) -> FilePath -> IO ()
 runLocalAdmin load path = do
   input <- try @IOException (BS.hGet stdin 2097153)
@@ -51,9 +54,10 @@ runLocalAdmin load path = do
                       (Nothing, Drain) -> pure (adminError (Just (adminOperation request)) StateConflict)
                       (Nothing, _) -> do
                         installed <- installConfiguration value
-                        case installed of
-                          Left _ -> pure (adminError (Just (adminOperation request)) StorageUnavailable)
-                          Right owner -> bracket (pure owner) closeConfiguration $ \active ->
+                        case (installed, request) of
+                          (Left _, _) -> pure (adminError (Just (adminOperation request)) StorageUnavailable)
+                          (Right owner, Shutdown) -> closeConfiguration owner >> pure stoppedManager
+                          (Right owner, _) -> bracket (pure owner) closeConfiguration $ \active ->
                             offline request (withCoordinationStore active)
         pure $ case result of
           Right (Right (Right response)) -> response
@@ -79,7 +83,7 @@ validateOffline value = do
 offline :: LocalAdminRequest -> ((CoordinationStore -> IO BS.ByteString) -> IO BS.ByteString) -> IO BS.ByteString
 offline request open = do
   entered <- newIORef False
-  result <- try @StoreFailure (open (\store -> writeIORef entered True >> administerLocally offlineAdministration store request))
+  result <- try @StoreFailure (open (\store -> writeIORef entered True >> fst <$> administerLocally offlineAdministration store request))
   opened <- readIORef entered
   case (request, result) of
     (_, Right response) -> pure response

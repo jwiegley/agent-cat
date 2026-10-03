@@ -5,7 +5,7 @@
 -- | The frozen local stdin request and metadata-only response vocabulary.
 module Agentic.Manager.Protocol.LocalAdmin
   ( LocalAdminRequest (..), adminOperation, validAdminRequest, decodeLocalAdminRequest,
-    AdminFailure (..), adminFailureCode, adminError, adminSuccess, reloadedProfiles,
+    AdminFailure (..), adminFailureCode, adminError, adminSuccess, reloadedProfiles, stoppedManager,
     CredentialMetadata (..), validCredentialMetadata, validLocalFile
   ) where
 
@@ -47,6 +47,10 @@ data LocalAdminRequest
   | -- | Stop admitting new work for the rest of the serving lifetime, and let
     -- the owned runs continue to their ends. The request has no deadline.
     Drain
+  | -- | Stop the serving manager after the reply: the owned runs are
+    -- cancelled with their cleanup and the process ends. Offline
+    -- administration changes nothing and answers that the manager is stopped.
+    Shutdown
   | OtherAdmin !Text
 
 -- | Fixed refusals. Storage failure makes no assertion about publication or COMMIT.
@@ -83,10 +87,11 @@ adminOperation request = case request of
   ReleaseQuarantine {} -> "release-quarantine"
   ReloadProfiles -> "reload-profiles"
   Drain -> "drain"
+  Shutdown -> "shutdown"
   OtherAdmin name -> name
 
 otherOperations :: [Text]
-otherOperations = ["shutdown", "backup", "restore"]
+otherOperations = ["backup", "restore"]
 
 validLocalFile :: FilePath -> Bool
 validLocalFile path = let value = T.pack path in T.length value >= 2 && T.length value <= 8192
@@ -117,6 +122,7 @@ validAdminRequest request = case request of
   ReleaseQuarantine ident evidence digest -> validId ident && validId evidence && validDigest digest
   ReloadProfiles -> True
   Drain -> True
+  Shutdown -> True
   OtherAdmin name -> name `elem` otherOperations
 
 decodeLocalAdminRequest :: BS.ByteString -> Either AdminFailure LocalAdminRequest
@@ -126,7 +132,7 @@ decodeLocalAdminRequest bytes
       value <- either (\failure -> Left (if failure == "duplicate-field" then DuplicateField else MalformedRequest)) Right (decodeStrictValue bytes)
       fields <- case value of Object fields -> Right fields; _ -> Left MalformedRequest
       operation <- case KM.lookup "operation" fields of Just (String name) -> Right name; _ -> Left MalformedRequest
-      unless (operation `elem` (["issue-credential","rotate-credential","revoke-credential","list-credentials","status","check-store","check-quarantine","release-quarantine","reload-profiles","drain"] <> otherOperations)) (Left UnknownOperation)
+      unless (operation `elem` (["issue-credential","rotate-credential","revoke-credential","list-credentials","status","check-store","check-quarantine","release-quarantine","reload-profiles","drain","shutdown"] <> otherOperations)) (Left UnknownOperation)
       case KM.lookup "version" fields of
         Just (Number 1) -> Right ()
         Just (Number _) -> Left UnsupportedVersion
@@ -162,6 +168,7 @@ parseRequest operation fields = case operation of
   "release-quarantine" -> ReleaseQuarantine <$> fields .: "quarantineId" <*> fields .: "cleanupEvidenceId" <*> fields .: "cleanupEvidenceDigest"
   "reload-profiles" -> pure ReloadProfiles
   "drain" -> pure Drain
+  "shutdown" -> pure Shutdown
   _ -> do
     case operation of
       "backup" -> localFile "outputFile"
@@ -206,6 +213,11 @@ adminSuccess operation result =
   let bytes = encoded $ object ["version" .= (1 :: Int), "operation" .= operation, "ok" .= True, "result" .= result]
   -- Reserve the CLI's terminating newline within the frozen response byte ceiling.
   in if BS.length bytes < 1048576 then bytes else adminError (Just operation) SizeLimit
+
+-- | The frozen answer of @shutdown@: the manager is stopped, or it stops
+-- after this reply.
+stoppedManager :: BS.ByteString
+stoppedManager = adminSuccess "shutdown" (object ["state" .= ("stopped" :: Text)])
 
 -- | The result of @reload-profiles@ from the identifier and revision of each
 -- installed profile: the identifiers in ascending order and the profile-set

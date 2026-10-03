@@ -53,9 +53,8 @@ for payload, code in [
     assert value["operation"] is None and value["error"]["code"] == code
     assert value["error"]["message"] == ""
 
-for operation in ["drain", "shutdown"]:
-    value = call({"version": 1, "operation": operation})
-    assert not value["ok"] and value["error"]["code"] == "state-conflict"
+value = call({"version": 1, "operation": "drain"})
+assert not value["ok"] and value["error"]["code"] == "state-conflict"
 
 
 def store_files():
@@ -81,6 +80,12 @@ invalid.chmod(0o644)
 unreadable = call(RELOAD, invalid)
 assert not unreadable["ok"] and unreadable["error"]["code"] == "storage-unavailable", unreadable
 assert store_files() == before, "offline reload-profiles changed a Store file"
+# Offline shutdown takes the free configuration lease, opens no Store and
+# answers that the manager is stopped.
+SHUTDOWN = {"version": 1, "operation": "shutdown"}
+offline_stopped = call(SHUTDOWN)
+assert offline_stopped["ok"] and offline_stopped["result"] == {"state": "stopped"}, offline_stopped
+assert store_files() == before, "offline shutdown changed a Store file"
 
 # Offline status and check-store answer from the Store that the CLI opens.
 status = call({"version": 1, "operation": "status"})
@@ -106,6 +111,9 @@ try:
     assert not value["ok"] and value["error"]["code"] == "storage-unavailable"
     # Offline reload-profiles takes no lease, so a Store owner does not refuse it.
     assert call(RELOAD)["ok"], "offline reload-profiles waited for the configuration lease"
+    # Offline shutdown takes the lease, so a Store owner refuses it.
+    held_shutdown = call(SHUTDOWN)
+    assert not held_shutdown["ok"] and held_shutdown["error"]["code"] == "storage-unavailable", held_shutdown
 finally:
     holding.terminate()
     holding.communicate(timeout=10)
@@ -128,7 +136,7 @@ assert rotated["ok"] and rotated["result"]["credential"]["clientId"] == issued["
 revoked = call({"version": 1, "operation": "revoke-credential",
                 "credentialId": rotated["result"]["credential"]["credentialId"]})
 assert revoked["ok"]
-print("PASS frozen stdin CLI, offline status, check-store, check-quarantine and release-quarantine, offline reload-profiles validation without the lease or the Store, exclusive offline ownership, private issuance and revocation")
+print("PASS frozen stdin CLI, offline status, check-store, check-quarantine and release-quarantine, offline reload-profiles validation without the lease or the Store, offline shutdown without the Store, exclusive offline ownership, private issuance and revocation")
 
 # A separate, short private namespace avoids Unix socket path limits on the data root.
 admin_root = Path(tempfile.mkdtemp(prefix="admin.", dir=os.environ["TMPDIR"]))

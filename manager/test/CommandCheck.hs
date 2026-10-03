@@ -1148,6 +1148,11 @@ adminText _ = error "admin metadata field missing"
 adminValue :: BS.ByteString -> IO Value
 adminValue = either (const (error "admin response is not JSON")) pure . eitherDecodeStrict'
 
+-- | One local dispatch and its decoded response. Only a live shutdown gives
+-- an action that follows the reply, and its checks use 'administerLocally'.
+answeredLocally :: AdministrationHooks -> CoordinationStore -> Admin.LocalAdminRequest -> IO Value
+answeredLocally hooks store requestValue = administerLocally hooks store requestValue >>= adminValue . fst
+
 adminOK :: CoordinationStore -> Admin.LocalAdminRequest -> IO Value
 adminOK store requestValue = do
   value <- administerCredentials store requestValue >>= adminValue
@@ -1193,9 +1198,9 @@ quarantineChecks :: FilePath -> CoordinationStore -> IO ()
 quarantineChecks root store = do
   wakes <- newIORef (0 :: Int)
   let write statements = withRaw root (\db -> mapM_ (SQL.exec db) statements)
-      answer ident = administerLocally offlineAdministration store (Admin.CheckQuarantine ident) >>= adminValue
+      answer ident = answeredLocally offlineAdministration store (Admin.CheckQuarantine ident)
       release ident evidence digest =
-        administerLocally offlineAdministration {hookWake = modifyIORef' wakes (+ 1)} store (Admin.ReleaseQuarantine ident evidence digest) >>= adminValue
+        answeredLocally offlineAdministration {hookWake = modifyIORef' wakes (+ 1)} store (Admin.ReleaseQuarantine ident evidence digest)
       refusedWith operation code label value = check label (adminField "ok" value == Bool False
         && adminField "operation" value == String operation
         && adminField "code" (adminField "error" value) == String code)
@@ -1289,8 +1294,8 @@ launchedQuarantineChecks root store = do
       native = Runtime.RunId "native_pe3"
       manifest = Runtime.RunManifest native "review" "0.1.0.0" (object ["program" .= ("fixture" :: Text)]) "scripted" (object ["kind" .= ("scripted" :: Text)]) Nothing Runtime.RootRun Nothing (Just Runtime.PersonAnswerLocalControl)
       start = Runtime.Start native (T.replicate 64 "a") ("sha256:" <> T.replicate 64 "b") (Just Runtime.PersonAnswerLocalControl) "scripted" Runtime.RootRun Nothing []
-      answer = administerLocally offlineAdministration store (Admin.CheckQuarantine "reservation_pe3") >>= adminValue
-      release suppliedId suppliedDigest = administerLocally offlineAdministration store (Admin.ReleaseQuarantine "reservation_pe3" suppliedId suppliedDigest) >>= adminValue
+      answer = answeredLocally offlineAdministration store (Admin.CheckQuarantine "reservation_pe3")
+      release suppliedId suppliedDigest = answeredLocally offlineAdministration store (Admin.ReleaseQuarantine "reservation_pe3" suppliedId suppliedDigest)
       needsCleanup label value = check label (adminField "ok" value == Bool True
         && adminField "result" value == object ["quarantineId" .= ("reservation_pe3" :: Text), "state" .= ("cleanup-required" :: Text),
              "cleanupEvidenceId" .= Null, "cleanupEvidenceDigest" .= Null, "processGeneration" .= generation, "expiresAt" .= Null])
@@ -1346,9 +1351,9 @@ launchedQuarantineChecks root store = do
      "DELETE FROM requests WHERE id='request_pe3'"]
   removeDirectoryRecursive runPath
   let windowRun suffix = runsPath </> "runs" </> ("native_" <> suffix)
-      windowAnswer suffix = administerLocally offlineAdministration store (Admin.CheckQuarantine ("reservation_" <> T.pack suffix)) >>= adminValue
-      windowRelease suffix suppliedId suppliedDigest = administerLocally offlineAdministration store
-        (Admin.ReleaseQuarantine ("reservation_" <> T.pack suffix) suppliedId suppliedDigest) >>= adminValue
+      windowAnswer suffix = answeredLocally offlineAdministration store (Admin.CheckQuarantine ("reservation_" <> T.pack suffix))
+      windowRelease suffix suppliedId suppliedDigest = answeredLocally offlineAdministration store
+        (Admin.ReleaseQuarantine ("reservation_" <> T.pack suffix) suppliedId suppliedDigest)
       windowState suffix = withRaw root (\db -> rawRows db ("SELECT state,slot FROM reservations WHERE id='reservation_" <> T.pack suffix <> "'"))
       windowEvidence kind suffix =
         let bytes = "{\"evidence\":\"" <> kind <> "\",\"processGeneration\":\"" <> TE.encodeUtf8 generation
@@ -1457,15 +1462,16 @@ credentialAdministrationChecks work = withFixture work "credentials" (64*command
   adminRefused "exclusive publication collision" Admin.OutputConflict store (issue destination)
   BS.readFile destination >>= check "collision never replaces one-time bytes" . (== bearer)
   scalarInt store "SELECT count(*) FROM credentials" >>= check "collision never activates another credential" . (==4)
-  adminRefused "other admin owner not falsely implemented" Admin.StateConflict store (Admin.OtherAdmin "shutdown")
+  adminRefused "other admin owner not falsely implemented" Admin.StateConflict store (Admin.OtherAdmin "backup")
   adminRefused "credential owner leaves drain to its owner" Admin.StateConflict store Admin.Drain
+  adminRefused "credential owner leaves shutdown to its owner" Admin.StateConflict store Admin.Shutdown
   adminRefused "credential owner leaves reload-profiles to its owner" Admin.StateConflict store Admin.ReloadProfiles
-  offlineReload <- administerLocally offlineAdministration store Admin.ReloadProfiles >>= adminValue
+  offlineReload <- answeredLocally offlineAdministration store Admin.ReloadProfiles
   check "a dispatch without a reload refuses reload-profiles"
     (adminField "ok" offlineReload == Bool False && adminField "code" (adminField "error" offlineReload) == String "state-conflict")
   reloadWakes <- newIORef (0 :: Int)
-  let liveReload outcome = administerLocally offlineAdministration
-        {hookState = pure StoreServing, hookWake = modifyIORef' reloadWakes (+ 1), hookReload = Just (pure outcome)} store Admin.ReloadProfiles >>= adminValue
+  let liveReload outcome = answeredLocally offlineAdministration
+        {hookState = pure StoreServing, hookWake = modifyIORef' reloadWakes (+ 1), hookReload = Just (pure outcome)} store Admin.ReloadProfiles
   (_, installedProfiles) <- configurationSnapshot installed >>= right
   reloaded <- liveReload (Right installedProfiles)
   check "a live reload answers the sorted profile identifiers and the digest of the profile revisions"
@@ -1484,28 +1490,40 @@ credentialAdministrationChecks work = withFixture work "credentials" (64*command
   adminRefused "credential owner leaves store status to its owner" Admin.StateConflict store Admin.Status
   identity <- storeIdentity store
   held <- scalarInt store "SELECT count(*) FROM reservations WHERE state!='released'"
-  stopped <- administerLocally offlineAdministration store Admin.Status >>= adminValue
+  stopped <- answeredLocally offlineAdministration store Admin.Status
   check "offline status reports the stopped Store identity and its active reservations"
     (adminField "ok" stopped == Bool True && adminField "result" stopped == object
       ["state" .= ("stopped" :: Text), "authorityEpoch" .= storeAuthorityEpoch identity,
        "streamId" .= storeStreamId identity, "processGeneration" .= storeProcessGeneration identity,
        "activeReservations" .= held])
-  serving <- administerLocally offlineAdministration {hookState = pure StoreServing} store Admin.Status >>= adminValue
+  serving <- answeredLocally offlineAdministration {hookState = pure StoreServing} store Admin.Status
   check "live status reports a serving Store" (adminField "state" (adminField "result" serving) == String "serving")
   drains <- newIORef (0 :: Int)
   let liveDrain = offlineAdministration {hookState = (\count -> if count > 0 then StoreDraining else StoreServing) <$> readIORef drains,
         hookDrain = Just (modifyIORef' drains (+ 1))}
-  drained <- administerLocally liveDrain store Admin.Drain >>= adminValue
+  drained <- answeredLocally liveDrain store Admin.Drain
   check "a live drain answers the frozen draining result after the drain is published"
     (adminField "ok" drained == Bool True && adminField "result" drained == object ["state" .= ("draining" :: Text)])
   readIORef drains >>= check "a live drain publishes the drain once" . (== 1)
-  drainingStatus <- administerLocally liveDrain store Admin.Status >>= adminValue
+  drainingStatus <- answeredLocally liveDrain store Admin.Status
   check "live status after a drain reports a draining Store" (adminField "state" (adminField "result" drainingStatus) == String "draining")
-  offlineDrain <- administerLocally offlineAdministration store Admin.Drain >>= adminValue
+  offlineDrain <- answeredLocally offlineAdministration store Admin.Drain
   check "a dispatch without a drain refuses drain"
     (adminField "ok" offlineDrain == Bool False && adminField "code" (adminField "error" offlineDrain) == String "state-conflict")
+  stops <- newIORef (0 :: Int)
+  (shutdownReply, afterShutdown) <- administerLocally offlineAdministration
+    {hookState = pure StoreServing, hookShutdown = Just (modifyIORef' stops (+ 1))} store Admin.Shutdown
+  stoppedAnswer <- adminValue shutdownReply
+  check "a live shutdown answers the frozen stopped result"
+    (adminField "ok" stoppedAnswer == Bool True && adminField "result" stoppedAnswer == object ["state" .= ("stopped" :: Text)])
+  readIORef stops >>= check "a live shutdown does not stop the manager before its reply" . (== 0)
+  afterShutdown
+  readIORef stops >>= check "the action after the reply of a live shutdown requests the stop once" . (== 1)
+  offlineShutdown <- answeredLocally offlineAdministration store Admin.Shutdown
+  check "a dispatch without a stop request refuses shutdown"
+    (adminField "ok" offlineShutdown == Bool False && adminField "code" (adminField "error" offlineShutdown) == String "state-conflict")
   quarantined <- runRead store ((\rows -> [claim | [SQL.SQLText claim] <- rows]) <$> query "SELECT id FROM reservations WHERE state='quarantined' UNION SELECT id FROM restoration_quarantine ORDER BY id" [])
-  checked <- administerLocally offlineAdministration store Admin.CheckStore >>= adminValue
+  checked <- answeredLocally offlineAdministration store Admin.CheckStore
   check "check-store reports a valid quick check and the quarantined claims"
     (adminField "ok" checked == Bool True && adminField "result" checked == object
       ["integrity" .= ("valid" :: Text), "quarantineIds" .= quarantined])
@@ -2207,6 +2225,8 @@ flowAdministrationChecks work = do
       && isLeftEither (administrationFromFlowBody (withField (administrationFlowBody ReloadAdministration)))
       && administrationFromFlowBody (administrationFlowBody DrainAdministration) == Right DrainAdministration
       && isLeftEither (administrationFromFlowBody (withField (administrationFlowBody DrainAdministration)))
+      && administrationFromFlowBody (administrationFlowBody ShutdownAdministration) == Right ShutdownAdministration
+      && isLeftEither (administrationFromFlowBody (withField (administrationFlowBody ShutdownAdministration)))
       && isLeftEither (administrationFromFlowBody (withField (administrationFlowBody sample)))
       && isLeftEither (administrationFromFlowBody (withField (administrationFlowBody releaseSample)))
       && isLeftEither (administrationFromFlowBody (administrationFlowBody (AdministrationBody AdministerRelease "client_1" "credential_2" Nothing "Terminal" ["observe"] ["profile_1"] "2999-01-01T00:00:00Z")))

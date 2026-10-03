@@ -10,7 +10,7 @@ module Agentic.Manager.LocalAdmin
 import Agentic.Manager.Administration (localAdministrator, recordAdministration, recordAdministrationReceipt)
 import Agentic.Manager.Configuration (Configuration, configurationAdministrationRoot)
 import Agentic.Manager.Credentials (administerCredentials)
-import Agentic.Manager.Flow (AdministrationBody (DrainAdministration, ReloadAdministration))
+import Agentic.Manager.Flow (AdministrationBody (DrainAdministration, ReloadAdministration, ShutdownAdministration))
 import Agentic.Manager.Profile (Diagnostic (UnreadableConfiguration), PublicProfile, publicId, publicRevision)
 import Agentic.Manager.Protocol.Json (decodeStrictValue)
 import Agentic.Manager.Protocol.LocalAdmin
@@ -20,11 +20,12 @@ import Agentic.Manager.Store (CoordinationStore, StoreFailure (StoreLimit), adva
 import Agentic.Runtime (PrivateRoot, assertPrivateRoot, closePrivateRoot, openPrivateRoot, privateRootPath)
 import Control.Concurrent.Async (link, withAsync)
 import Control.Exception (IOException, bracket, finally, throwIO, try)
-import Control.Monad (forever, unless, void)
+import Control.Monad (forever, unless, void, when)
 import Data.Aeson (Value (..), object, (.=))
 import qualified Data.Aeson.KeyMap as KM
 import Data.Bits ((.&.))
 import qualified Data.ByteString as BS
+import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.Text (Text)
 import Network.Socket (Family (AF_UNIX), Socket, SocketType (Stream), SockAddr (SockAddrUnix),
   ShutdownCmd (ShutdownSend), accept, bind, close, connect, defaultProtocol, getPeerCredential,
@@ -46,19 +47,24 @@ type ProfileReload = IO (Either Diagnostic [PublicProfile])
 -- running admission controller that a committed quarantine release freed its
 -- execution slot and resource keys, or that a profile reload installed new
 -- profiles. 'hookReload' performs @reload-profiles@ and 'hookDrain' performs
--- @drain@ on a serving manager. Without them, the dispatch refuses those
--- operations with 'StateConflict'.
+-- @drain@ on a serving manager. 'hookShutdown' is the stop request of a
+-- serving manager, which @shutdown@ calls after its reply. Without them, the
+-- dispatch refuses those operations with 'StateConflict'.
 data AdministrationHooks = AdministrationHooks
-  { hookState :: IO StoreState, hookWake :: IO (), hookReload :: Maybe ProfileReload, hookDrain :: Maybe (IO ()) }
+  { hookState :: IO StoreState, hookWake :: IO (), hookReload :: Maybe ProfileReload, hookDrain :: Maybe (IO ()),
+    hookShutdown :: Maybe (IO ()) }
 
 -- | The hooks of offline administration: the Store is stopped, no admission
--- controller runs, and nothing can be reloaded or drained.
+-- controller runs, and nothing can be reloaded, drained or stopped.
 offlineAdministration :: AdministrationHooks
-offlineAdministration = AdministrationHooks (pure StoreStopped) (pure ()) Nothing Nothing
+offlineAdministration = AdministrationHooks (pure StoreStopped) (pure ()) Nothing Nothing Nothing
 
 -- | Serve the frozen requests while retaining the original Store configuration
 -- and endpoint lease. The configuration guard is released before any request.
--- The hooks are those of the serving manager.
+-- The hooks are those of the serving manager. Each reply is written and the
+-- sending half of its connection is closed, so that the client reads the end
+-- of the reply. The action that the dispatch gives then runs, whether or not
+-- the reply reached the client.
 withLocalAdministration :: CoordinationStore -> AdministrationHooks -> IO a -> IO a
 withLocalAdministration store hooks action = do
   result <- withStoreAdministration store $ \root -> do
@@ -84,33 +90,41 @@ withLocalAdministration store hooks action = do
         Left _ -> pure ()
         Right () -> do
           input <- try @IOException (boundedIO 5000000 (receiveBounded 2097152 connection))
-          response <- case input of
-            Left _ -> pure (adminError Nothing MalformedRequest)
+          (response, after) <- case input of
+            Left _ -> pure (adminError Nothing MalformedRequest, pure ())
             Right bytes -> case decodeLocalAdminRequest bytes of
-              Left failure -> pure (adminError Nothing failure)
+              Left failure -> pure (adminError Nothing failure, pure ())
               Right request -> administerLocally hooks store request
           -- Only connection IO has an outer deadline. An admitted mutation is
           -- neither interrupted by this timer nor retried after a lost reply.
-          void (try @IOException (boundedIO 5000000 (Net.sendAll connection response)))
+          void (try @IOException (boundedIO 5000000 (Net.sendAll connection response >> shutdown connection ShutdownSend)))
+          after
 
--- | Dispatch one decoded request to its owner on the original Store. The live
--- channel passes the hooks of the serving manager. Offline administration
--- passes 'offlineAdministration'. Offline @reload-profiles@ only validates a
--- file, before any Store opens, and offline @drain@ has no lifetime to drain,
--- so without their hooks this dispatch refuses them with 'StateConflict'.
-administerLocally :: AdministrationHooks -> CoordinationStore -> LocalAdminRequest -> IO BS.ByteString
+-- | Dispatch one decoded request to its owner on the original Store, and give
+-- the response and the action that follows its reply. Only @shutdown@ gives
+-- an action other than @pure ()@. The live channel passes the hooks of the
+-- serving manager. Offline administration passes 'offlineAdministration'.
+-- Offline @reload-profiles@ only validates a file and offline @shutdown@
+-- changes nothing, both before any Store opens, and offline @drain@ has no
+-- lifetime to drain, so without their hooks this dispatch refuses them with
+-- 'StateConflict'.
+administerLocally :: AdministrationHooks -> CoordinationStore -> LocalAdminRequest -> IO (BS.ByteString, IO ())
 administerLocally hooks store request = case request of
-  Status -> hookState hooks >>= \state -> reportStatus state store
-  CheckStore -> reportStoreCheck store
-  CheckQuarantine ident -> checkQuarantine store ident
-  ReleaseQuarantine ident evidence digest -> releaseQuarantine store (hookWake hooks) ident evidence digest
-  IssueCredential {} -> administerCredentials store request
-  RotateCredential {} -> administerCredentials store request
-  RevokeCredential {} -> administerCredentials store request
-  ListCredentials -> administerCredentials store request
-  ReloadProfiles -> maybe (pure (adminError (Just (adminOperation request)) StateConflict)) (reloadServing store (hookWake hooks)) (hookReload hooks)
-  Drain -> maybe (pure (adminError (Just (adminOperation request)) StateConflict)) (drainServing store) (hookDrain hooks)
-  OtherAdmin _ -> administerCredentials store request
+  Status -> answered (hookState hooks >>= \state -> reportStatus state store)
+  CheckStore -> answered (reportStoreCheck store)
+  CheckQuarantine ident -> answered (checkQuarantine store ident)
+  ReleaseQuarantine ident evidence digest -> answered (releaseQuarantine store (hookWake hooks) ident evidence digest)
+  IssueCredential {} -> answered (administerCredentials store request)
+  RotateCredential {} -> answered (administerCredentials store request)
+  RevokeCredential {} -> answered (administerCredentials store request)
+  ListCredentials -> answered (administerCredentials store request)
+  ReloadProfiles -> maybe refused (answered . reloadServing store (hookWake hooks)) (hookReload hooks)
+  Drain -> maybe refused (answered . drainServing store) (hookDrain hooks)
+  Shutdown -> maybe refused (shutdownServing store) (hookShutdown hooks)
+  OtherAdmin _ -> answered (administerCredentials store request)
+  where
+    answered = fmap (\response -> (response, pure ()))
+    refused = pure (adminError (Just (adminOperation request)) StateConflict, pure ())
 
 -- | @reload-profiles@ on a serving manager. A transaction appends the command
 -- record of the reload to the manager log and commits. The reload then loads
@@ -146,6 +160,23 @@ drainServing :: CoordinationStore -> IO () -> IO BS.ByteString
 drainServing store drain = recordedServing store "drain" DrainAdministration $ do
   drain
   pure (adminSuccess "drain" (object ["state" .= ("draining" :: Text)]), pure ())
+
+-- | @shutdown@ on a serving manager. A transaction appends the command record
+-- of the shutdown to the manager log and commits. The answer
+-- @{state: stopped}@ and its receipt follow, and the stop request runs after
+-- the reply. The termination path of the manager then cancels the owned runs
+-- with their original cleanup, ends the open streams, appends the shutdown
+-- notice and closes the listener. A command record that cannot be appended
+-- refuses the shutdown with 'StorageUnavailable', and the manager keeps
+-- serving.
+shutdownServing :: CoordinationStore -> IO () -> IO (BS.ByteString, IO ())
+shutdownServing store stop = do
+  admitted <- newIORef False
+  response <- recordedServing store "shutdown" ShutdownAdministration $ do
+    writeIORef admitted True
+    pure (stoppedManager, pure ())
+  stopping <- readIORef admitted
+  pure (response, when stopping stop)
 
 -- | One mutating operation of a serving manager that changes no Store row. A
 -- transaction appends its command record to the manager log and commits. The

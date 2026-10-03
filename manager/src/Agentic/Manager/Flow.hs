@@ -585,9 +585,10 @@ commandFromFlowBody value = do
 -- ---------------------------------------------------------------------------
 
 -- | A recorded operation of the local administration channel: a credential
--- operation, the release of a quarantined reservation, a profile reload, or a
--- drain.
+-- operation, the release of a quarantined reservation, a profile reload, a
+-- drain, or a shutdown.
 data AdministrationOperation = AdministerIssue | AdministerRotate | AdministerRevoke | AdministerRelease | AdministerReload | AdministerDrain
+  | AdministerShutdown
   deriving (Eq, Show, Enum, Bounded)
 
 administrationOperationName :: AdministrationOperation -> Text
@@ -598,14 +599,15 @@ administrationOperationName = \case
   AdministerRelease -> "release-quarantine"
   AdministerReload -> "reload-profiles"
   AdministerDrain -> "drain"
+  AdministerShutdown -> "shutdown"
 
 -- | An admitted operation of the local administration channel.
 --
 -- 'AdministrationBody' is a credential operation: the client, the credential
 -- that the operation issues, rotates to or revokes, the credential that a
 -- rotation supersedes, and the label, scopes, profiles and expiry of the
--- credential. Its operation is never 'AdministerRelease', 'AdministerReload'
--- or 'AdministerDrain'. The bearer, its verifier and the output file never
+-- credential. Its operation is never 'AdministerRelease', 'AdministerReload',
+-- 'AdministerDrain' or 'AdministerShutdown'. The bearer, its verifier and the output file never
 -- appear.
 --
 -- 'ReleaseAdministration' is the release of a quarantined reservation: the
@@ -617,6 +619,9 @@ administrationOperationName = \case
 --
 -- 'DrainAdministration' is the drain of the serving manager. The request has
 -- no field.
+--
+-- 'ShutdownAdministration' is the shutdown of the serving manager. The
+-- request has no field.
 data AdministrationBody
   = AdministrationBody
       { administrationOperation :: !AdministrationOperation,
@@ -631,6 +636,7 @@ data AdministrationBody
   | ReleaseAdministration !Text !Text !Text !Text
   | ReloadAdministration
   | DrainAdministration
+  | ShutdownAdministration
   deriving (Eq, Show)
 
 administrationFlowBody :: AdministrationBody -> Value
@@ -658,6 +664,8 @@ administrationFlowBody = \case
     object ["administration" .= administrationOperationName AdministerReload]
   DrainAdministration ->
     object ["administration" .= administrationOperationName AdministerDrain]
+  ShutdownAdministration ->
+    object ["administration" .= administrationOperationName AdministerShutdown]
 
 administrationFromFlowBody :: Value -> Either Text AdministrationBody
 administrationFromFlowBody value = do
@@ -671,6 +679,9 @@ administrationFromFlowBody value = do
     AdministerDrain -> do
       flowExactKeys "administration body" ["administration"] fields
       pure DrainAdministration
+    AdministerShutdown -> do
+      flowExactKeys "administration body" ["administration"] fields
+      pure ShutdownAdministration
     _ -> credentialFromFlowBody operation fields
   where
     releaseFromFlowBody fields = do

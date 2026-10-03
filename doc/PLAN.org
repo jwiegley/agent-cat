@@ -1841,6 +1841,30 @@ A2 fess finding (low). Manager.Client.clientIO catches only HttpException and Cl
 ]
 #+end_src
 
+* TODO [#D] Resolve the non-blocking fess findings of subtask PG7
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-5j0l
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-03 Sat 08:16]
+:MODIFIED: [2026-10-03 Sat 08:16]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess pg-PG7-r1 (report fess/pg-PG7-r1.md in the private evidence directory). All stay open:
+
+1. (medium) manager/test/service_http.py operations_restart and manager/COMMANDS.md: a run that a shutdown cancels has no runtime cancel record. Its runtime status stays running, its workers end and its reservation is released, and the next lifetime publishes it as lost supervision with no cancel. This matches the existing termination-signal behavior. Fix: an operator decision to have a local shutdown record a runtime cancel for owned runs, or to restate the acceptance wording and the doc/api/README.md text as the lost-supervision outcome.
+2. (medium) manager/test/service_http.py operations_shutdown: case 3 drains before the shutdown so that the waiting request of case 2 is queued. A shutdown without a drain leaves a request whose review is live in phase draft, and the next lifetime may not prepare it again with no client command. Fix: add a no-drain variant of case 3 and file a defect against the termination path if the request is stranded.
+3. (low) manager/test/service_http.py stream_ends: it returns True on any EOF or connection error, so case 3a cannot tell a stream that the service ends from a socket that the process exit closes. Fix: assert a server-side stream end before process.wait, or record the timing.
+4. (low) manager/ADMISSION.md near line 225 and the AdministrationBody Haddock in manager/src/Agentic/Manager/Flow.hs: an edited line exceeds the wrap width. Fix: reflow both paragraphs.
+5. (low) manager/src/Agentic/Manager/LocalAdmin.hs: if recordAdministrationReceipt throws after a committed shutdown command, the stop never runs and the exception ends the serve thread. The other recorded operations share this pattern. Fix: handle it with the other recorded-operation receipt failures.
+
+Also recorded from the implementer limitations: the live channel of the manager-command-check serve-credentials fixture has no stop hook, so a live shutdown through it answers state-conflict (the live shutdown is checked through the real serve process in operations case 3). manager-command-check, check-haskell, the inventory and make -C doc check ran before the final idempotent-stop edit in cli/src/Agentic/Cli.hs, which changed no exported type. The stale PF17 manager (PID 61004) was running, so no PG7 run is a run of record.
+
 * TODO [#C] Exercise the TUI App approval wiring in a test
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -2206,6 +2230,30 @@ Follow-up from the F13 fess audit of the command notices, review endings and req
 8. (low) manager/src/Agentic/Manager/Commands.hs:731 and :462: a command notice goes out on any receipt change, even when the state stays the same, and reconciliation can repeat a logged state. The journey shows acknowledged twice. Fix: emit a notice only when receiptState or receiptRefusal changes, or document that notices may repeat a state.
 
 9. (low) manager/test/AdmissionCheck.hs:1602-1606: the assertion that command notices of the approval follow its start relay passes if any CommandChanged follows the relay, whatever its state. Only the private journey_notices.py checks the journey order. Fix: assert the specific dispatch-attempted state and position, and consider moving the journey-order check into the repository.
+
+* TODO [#D] Resolve the non-blocking fess findings of subtask PG6
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-69jk
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-03 Sat 07:29]
+:MODIFIED: [2026-10-03 Sat 07:29]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess pg-PG6-r1 (report fess/pg-PG6-r1.md in the private evidence directory). The Integrator narrowed the case-2 sentence of the Drain section in manager/COMMANDS.md to the statements that case 2 checks (finding 1, medium) in the PG6 commit. These stay open:
+
+1. (low) manager/src/Agentic/Manager.hs serveManager hookState, manager/COMMANDS.md and doc/api/README.md: status reports draining whenever the Admission closed fence is set, which includes a Store-admission loss and the scope-exit CancelNow, not only an operator drain. Fix: document the other cases, or report draining from a separate drain flag.
+2. (low) manager/src/Agentic/Manager/Service.hs fill: when the fence is closed after the poll, the new branch drops any poll refusal, not only AdmissionStopping. The closed-fence check before the poll also stops the 'service admission-poll' fault record after a Store-admission loss. Fix: drop only the refusal that a closed fence produces and record other refusals as faults.
+3. (low) manager/src/Agentic/Manager/Admission.hs Stop/StopDrain, finalizeKnown requeue: the requeue fix is in Admission, not Service as the task named. Admission owns finalization, so the owner is correct. The new path has no shutdown-races audit coverage (approval.sh excluded by direction). Fix: run the shutdown-races mode of the approval probe when approval.sh is next authorized.
+4. (low) manager/COMMANDS.md and manager/ADMISSION.md: three added lines exceed the wrap width and one line break leaves an orphan 'log,' line. Fix: rewrap the edited paragraphs.
+5. (low) Service.hs fill and Admission.hs finalizeKnown: during a drain the scheduler stops refreshing blocking reasons. A waiting request keeps ['capacity'] after capacity frees, and the returned request shows []. Fix: document the reasons a request shows during a drain (no new /v1 code).
+
+Also recorded from the implementer limitations: the requeue of stopped preparations applies to every drain shutdown, including closeAdmission with a deadline (test-only callers), and a drain after the supervisor shutdown completed still records a command and receipt and changes nothing.
 
 * DONE [#E] Handoff: name only the audit rounds the 2026-09-27 closeout wrote    :documentation:
 :PROPERTIES:
@@ -7568,7 +7616,7 @@ Emacs, TUI, and Pi service modes pass their native UI gates and cross-client/cro
 :LABELS:   ["wm-release-gate","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-03 Sat 06:57]
+:MODIFIED: [2026-10-03 Sat 08:16]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/G5
 :SOURCE_REPO: agent-cat
@@ -7702,6 +7750,20 @@ Full failure/capacity evidence, operational procedures, reproducible packages, r
     "author": "johnw",
     "text": "PG5 (2026-10-03): the functional reload-profiles operation of WM-042 is in place with service_http.py mode operations case 1 passing at N8 (live add, revision change with stale refusal, invalid file and https change refused, offline validation). Not a capacity run. Findings in acat-g971.",
     "created_at": "2026-10-03T13:57:49Z"
+  },
+  {
+    "id": 716,
+    "issue_id": "acat-g5-u0w2",
+    "author": "johnw",
+    "text": "PG6 (WM-042 drain) committed with checks at N8: operations cases 1 and 2, manager-admission-check main suite, manager-command-check, Phase A journey, doc check. Follow-ups in acat-69jk.",
+    "created_at": "2026-10-03T14:29:55Z"
+  },
+  {
+    "id": 718,
+    "issue_id": "acat-g5-u0w2",
+    "author": "johnw",
+    "text": "PG7 (2026-10-03): the functional shutdown operation of WM-042 is in place with service_http.py operations cases 1 to 3 passing at N8 (shutdown with a run at its person question and an open stream, exit 0, offline stopped, next lifetime runs the queued request with no client command). Not a capacity run. Findings in acat-5j0l.",
+    "created_at": "2026-10-03T15:16:10Z"
   }
 ]
 #+end_src
@@ -24610,7 +24672,7 @@ Publish precommitted workload and resource ceilings. All core advertised bounds 
 :LABELS:   ["p10","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-03 Sat 06:57]
+:MODIFIED: [2026-10-03 Sat 08:16]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-042
 :SOURCE_REPO: agent-cat
@@ -24793,6 +24855,20 @@ recipe that ignores WAL or unresolved effects.
     "author": "johnw",
     "text": "PG5 (2026-10-03): reload-profiles is implemented. Live: typed ReloadProfiles constructor, ServeHooks passed through serveManager into withLocalAdministration; reloadServing appends a command record, runs reloadManagerConfiguration, probes the profiles, advances the authorization revision, wakes admission and appends a receipt that agentic-run flow decodes (ReloadAdministration). Answers the frozen {profileIds, revision}; revision is the hex SHA-256 of the sorted (profileId, profile revision) pairs. An invalid file or a changed managerRoot, administrationRoot or https section answers state-conflict, an unreadable file storage-unavailable, and the old profiles keep serving. Offline (no administrationRoot) validates the file before the lease and the Store. manager/COMMANDS.md states the two-configuration rule. Checks passed at N8: build, manager-command-check with command_contract.py and credential_cli.py, service_http.py operations (new mode, case 1) and credential-lifecycle (rerun by fess on the final source), update-haskell-inventory and check-haskell, JOURNEY-ONCE(pg5, 8), make -C doc check. Evidence: PG/PG5 in the private evidence directory, fess pg-PG5-r1 (not blocking; findings in acat-g971). WM-042 stays open: drain and shutdown still answer state-conflict.",
     "created_at": "2026-10-03T13:57:48Z"
+  },
+  {
+    "id": 715,
+    "issue_id": "acat-wm-042-sdg9",
+    "author": "johnw",
+    "text": "PG6: drain is implemented on the live channel. It answers {state: draining}, status reports draining, new admission work refuses 503 storage-unavailable, a queued request stays queued, an unapproved preparation is stopped and its request returns to the queue (new StopDrain in Admission), started runs continue and can be answered or cancelled, and reads and SSE keep serving after the last run ends. Drain command and receipt records decode through agentic-run flow. Offline drain answers state-conflict. Evidence (impl-r1, private evidence directory): build, manager-admission-check main suite at N8 (146 PASS), manager-command-check at N8 with command_contract.py and credential_cli.py, service_http.py operations cases 1 and 2 at N8, ManagerApprovalProbe shutdown-drain mode at N8, Phase A journey at N8 and make -C doc check passed. WM-042 stays open for shutdown. Fess follow-ups in acat-69jk.",
+    "created_at": "2026-10-03T14:29:54Z"
+  },
+  {
+    "id": 717,
+    "issue_id": "acat-wm-042-sdg9",
+    "author": "johnw",
+    "text": "PG7 (2026-10-03): shutdown is implemented. Live: typed Shutdown constructor; ServeHooks gains serveStop, filled by managerServeCmd with the stop request of withManagerSignals (mark termination, throwTo owner UserInterrupt, idempotent) and passed by serveManager as hookShutdown. The live channel commits an administration command record (AdministerShutdown, ShutdownAdministration), appends the receipt, sends {state: stopped}, closes the sending half and then runs the stop request, so the existing termination path cancels owned runs with their cleanup, ends open streams, appends the shutdown notice and exits 0. Offline shutdown takes and releases the configuration lease and answers stopped without opening the Store (storage-unavailable when the lease is held). Checks passed at N8: build, manager-command-check with command_contract.py and credential_cli.py, service_http.py operations cases 1 to 3 and failures-manager (rerun on the final source), update-haskell-inventory and check-haskell, JOURNEY-ONCE(pg7, 8), make -C doc check. A run cancelled by shutdown is published by the next lifetime as lost supervision with no cancel record, as with the termination signal. Evidence: PG/PG7 in the private evidence directory, fess pg-PG7-r1 (not blocking; findings in acat-5j0l). Not a run of record (PID 61004 running). WM-042 stays open: backup and restore still answer state-conflict.",
+    "created_at": "2026-10-03T15:16:09Z"
   }
 ]
 #+end_src

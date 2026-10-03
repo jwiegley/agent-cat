@@ -899,8 +899,17 @@ the queue for the next lifetime. Started runs continue, and their decisions
 and controls, `cancel` included, work as usual. The manager keeps serving
 reads and event streams after the last run ends, until the process ends. The
 manager log records the drain and its receipt. No `/v1` route or problem code
-changes. Offline, `drain` receives `state-conflict`. The operations
-`shutdown`, `backup`, and `restore` receive `state-conflict`.
+changes. Offline, `drain` receives `state-conflict`. `shutdown` takes no
+field. Through the live channel, the serving manager records the shutdown
+and its receipt in the manager log, returns `state` `stopped`, and then
+ends as at a termination signal: each owned run is cancelled with its
+cleanup, open event and route streams end, the manager log receives the
+shutdown notice, and the process exits with status 0. A drain in progress
+does not delay the shutdown. The next lifetime prepares the requests that
+wait in the queue with no client command, and no command executes again.
+Offline, while no manager holds the configuration lease, `shutdown` returns
+`state` `stopped` and changes nothing. No `/v1` route or problem code
+changes. The operations `backup` and `restore` receive `state-conflict`.
 Existing `RUNNER --tui` and native frontend commands remain unchanged.
 
 ```text

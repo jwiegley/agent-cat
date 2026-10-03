@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Exercise the foreground HTTPS boundary with private local credentials and TLS."""
+from collections import Counter
 from pathlib import Path
 import contextlib
 import ctypes
@@ -96,7 +97,15 @@ lifecycle = len(sys.argv) == 6 and sys.argv[5] == LIFECYCLE
 # lifetime that prepares a new review for the request whose review the drain
 # stopped. The manager has three execution reservations, so that the stale
 # review and the new request of case 1 do not wait for each other, and so
-# that the two runs and the review of case 2 fill them.
+# that the two runs and the review of case 2 fill them. Case 3 is shutdown in
+# that third lifetime: a run at its person question, a drain that returns the
+# review of the waiting request of case 2 to the queue, and an open event
+# stream. The shutdown answers stopped, the run is cancelled with its
+# cleanup, the stream ends and the process exits with status 0. Offline
+# status then reports stopped, offline shutdown changes no Store file, a
+# fourth lifetime prepares the waiting request with no client command, and
+# the manager log holds the shutdown records with no command that executed
+# twice.
 OPERATIONS = "operations"
 operations_mode = len(sys.argv) == 6 and sys.argv[5] == OPERATIONS
 mixed = len(sys.argv) == 6 and sys.argv[5] in ("mixed", "mixed-confirm", "tui-approval", "tui-consent-control", APPROVE_FAULT, LIFECYCLE, OPERATIONS, "pages", "routes", "failures-worker", "failures-manager", "failures-launched", "storage", "pi-client", "pi-client-controls", "emacs-client", "emacs-client-controls", "pi-host-smoke", "pi-host", "pi-host-broken-answer", "pi-host-model", "pi-host-model-decline", "emacs-service", "emacs-service-broken-answer") + JOURNEYS
@@ -4637,30 +4646,159 @@ def operations_drain(with_second):
         wait_ready(process)
         status, capabilities, raw = request("/v1/capabilities", authorized)
         assert status == 200
-        observed, wait_for, _, _ = mixed_client(capabilities, authorized)
+        client = mixed_client(capabilities, authorized)
+        observed, wait_for, _, _ = client
         prepared, _, _ = wait_for(reviewed["links"]["self"], "Request",
                                   lambda value: value["preparationId"] not in (None, stopped_preparation))
         preparation, _, _ = observed("/v1/preparations/" + prepared["preparationId"], "Preparation")
         assert preparation["state"] == "live", preparation["state"]
         print("PASS operations case 2d: the next lifetime prepared review", prepared["preparationId"], "for request",
               reviewed["id"], "that the drain returned to the queue", flush=True)
+        cancelled_at_shutdown = operations_shutdown(process, client, authorized, reviewed, workflows["profile_3"], waiting)
     finally:
         stop(2, process, output, errors)
 
-    # 2e. The manager log holds the drain command and its receipt.
+    # 2e. The manager log holds the drain command of case 2 and that of case
+    # 3, each with its receipt.
     flow_dir = work / "manager" / "flow"
     stores = sorted(work.glob("manager/runs/runs/*/runtime"))
     status, records, summary = read_flow("operations-drain-flow", [flow_dir] + stores, runner)
     assert status == 0 and summary["verified"] and not summary["problems"], ("the flow verb", status, summary["problems"])
     commands = [record for record in records if record["schema"] == "command" and record["body"].get("administration") == "drain"]
-    assert len(commands) == 1 and commands[0]["body"] == {"administration": "drain"}, commands
+    assert len(commands) == 2 and all(record["body"] == {"administration": "drain"} for record in commands), commands
+    for command in commands:
+        replies = [reply for reply in records if reply["log"] == command["log"] and reply.get("replyTo") == command["position"]]
+        assert len(replies) == 1 and replies[0]["schema"] == "receipt", replies
+        validate("LocalAdminResponse", replies[0]["body"])
+        assert replies[0]["body"]["result"] == {"state": "draining"}, replies[0]["body"]
+    print("PASS operations case 2e: the flow verb decoded the drain commands at", [record["position"] for record in commands],
+          "and the receipt", replies[0]["body"]["result"], "of each", flush=True)
+    print("PASS operations: drain case 2 held through the TLS 1.3 manager", flush=True)
+    operations_restart(authorized, waiting, cancelled_at_shutdown, lifetime, stop)
+
+
+def operations_shutdown(process, client, authorized, reviewed, workflow, waiting):
+    """Case 3 is shutdown through the live channel of the second drain
+    lifetime. The returned request of case 2 is approved, and its run waits
+    at its person question. A drain then returns the review of the waiting
+    request of case 2 to the queue, and an event stream is open. shutdown
+    answers stopped and selects the cancellation of the drain in progress,
+    the run is cancelled with its cleanup, the stream ends and the serve
+    process exits with status 0. Offline status through the offline
+    configuration then reports stopped with no active reservation, and
+    offline shutdown changes no Store file. Returns the run that the
+    shutdown cancelled and the preparation that the drain stopped."""
+    observed, wait_for, _, _ = client
+    reviewing, _, _ = wait_for(waiting["links"]["self"], "Request", lambda value: value["preparationId"] is not None)
+    _, run = approve_review(reviewed, workflow, client)
+    head, _, _ = drive_mixed(run, client, stop_at_question=True, overview=False)
+    assert head is not None, ("the run did not reach its question", run)
+    assert administration({"version": 1, "operation": "drain"})["result"] == {"state": "draining"}
+    wait_for(waiting["links"]["self"], "Request", lambda value: value["phase"] == "queued" and value["admission"]["state"] == "waiting")
+    overview, _, _ = observed("/v1/snapshot", "OverviewSnapshot")
+    workers = descendants(process.pid)
+    assert workers, "the run has no worker process before the shutdown"
+    connection, stream, block = open_stream("/v1/events?after=" + overview["cursor"], authorized)
+    try:
+        assert block, "the event stream before the shutdown delivered no block"
+        stopped = administration({"version": 1, "operation": "shutdown"})
+        assert stopped["result"] == {"state": "stopped"}, stopped
+        ended = stream_ends(stream, 30)
+    finally:
+        stream.close()
+        connection.close()
+    process.wait(timeout=60)
+    assert ended, "the event stream did not end at the shutdown"
+    assert process.returncode == 0, ("the manager exit after shutdown", process.returncode)
+
+    def alive(pid):
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return False
+        return True
+    deadline = time.monotonic() + 5
+    while any(alive(pid) for pid in workers) and time.monotonic() < deadline:
+        time.sleep(0.1)
+    assert not [pid for pid in workers if alive(pid)], ("worker processes outlived the shutdown", workers)
+    print("PASS operations case 3a: shutdown answered", stopped["result"], "during a drain while run", run, "waited at",
+          "question", head, "and request", waiting["id"], "waited in the queue after the drain stopped its review",
+          reviewing["preparationId"] + "; the open event stream ended, none of", len(workers), "worker processes outlived",
+          "the cleanup, and the serve process exited with status 0", flush=True)
+
+    served = json.loads(config.read_text())
+    offline_config = work / "offline-shutdown.json"
+    offline_config.write_text(json.dumps({name: value for name, value in served.items() if name != "administrationRoot"}))
+    offline_config.chmod(0o600)
+    reported = administration({"version": 1, "operation": "status"}, path=offline_config)["result"]
+    assert reported["state"] == "stopped" and reported["activeReservations"] == 0, reported
+    root = Path(served["managerRoot"])
+    before = {str(path): (path.stat().st_size, path.stat().st_mtime_ns) for path in root.rglob("*") if path.is_file()}
+    again = administration({"version": 1, "operation": "shutdown"}, path=offline_config)
+    assert again["result"] == {"state": "stopped"}, again
+    after = {str(path): (path.stat().st_size, path.stat().st_mtime_ns) for path in root.rglob("*") if path.is_file()}
+    assert after == before, "offline shutdown changed a Store file"
+    print("PASS operations case 3b: offline status through the offline configuration reported stopped with",
+          reported["activeReservations"], "active reservations, so the cleanup of run", run, "released its reservation,",
+          "and offline shutdown answered stopped and changed none of", len(before), "Store files", flush=True)
+    return run, reviewing["preparationId"]
+
+
+def operations_restart(authorized, waiting, shutdown, lifetime, stop):
+    """The end of case 3: a new serve lifetime on the same root reconciles
+    and prepares a new review for the waiting request of case 2 with no other
+    client command. The run that the shutdown cancelled reports lost
+    supervision and no cancel, as after a termination signal. The manager log holds the shutdown command, its one
+    receipt and the shutdown notice of its lifetime, every lifetime ends with
+    its shutdown notice, each command has at most one receipt, and each run
+    has one start relay."""
+    run, stopped_preparation = shutdown
+    process, output, errors = lifetime(3)
+    try:
+        wait_ready(process)
+        status, capabilities, raw = request("/v1/capabilities", authorized)
+        assert status == 200
+        observed, wait_for, _, _ = mixed_client(capabilities, authorized)
+        prepared, _, _ = wait_for(waiting["links"]["self"], "Request",
+                                  lambda value: value["preparationId"] not in (None, stopped_preparation))
+        preparation, _, _ = observed("/v1/preparations/" + prepared["preparationId"], "Preparation")
+        assert preparation["state"] == "live", preparation["state"]
+        run_view, _, _ = observed("/v1/runs/" + run, "Run")
+        control, _, _ = observed("/v1/runs/" + run + "/control", "RunControl")
+        assert run_view["supervision"] == "lost" and "lost-supervision" in run_view["limitations"] \
+            and control["cancelAllowed"] is False, (run_view["supervision"], run_view["limitations"], control["cancelAllowed"])
+        print("PASS operations case 3c: the next lifetime prepared review", prepared["preparationId"], "for request",
+              waiting["id"], "with no client command, and run", run, "reports lost supervision and no cancel", flush=True)
+    finally:
+        stop(3, process, output, errors)
+
+    flow_dir = work / "manager" / "flow"
+    stores = sorted(work.glob("manager/runs/runs/*/runtime"))
+    status, records, summary = read_flow("operations-shutdown-flow", [flow_dir] + stores, runner)
+    assert status == 0 and summary["verified"] and not summary["problems"], ("the flow verb", status, summary["problems"])
+    commands = [record for record in records if record["schema"] == "command" and record["body"].get("administration") == "shutdown"]
+    assert len(commands) == 1 and commands[0]["body"] == {"administration": "shutdown"}, commands
     replies = [reply for reply in records if reply["log"] == commands[0]["log"] and reply.get("replyTo") == commands[0]["position"]]
     assert len(replies) == 1 and replies[0]["schema"] == "receipt", replies
     validate("LocalAdminResponse", replies[0]["body"])
-    assert replies[0]["body"]["result"] == {"state": "draining"}, replies[0]["body"]
-    print("PASS operations case 2e: the flow verb decoded the drain command at", commands[0]["position"],
-          "and its receipt", replies[0]["body"]["result"], flush=True)
-    print("PASS operations: drain case 2 held through the TLS 1.3 manager", flush=True)
+    assert replies[0]["body"]["result"] == {"state": "stopped"}, replies[0]["body"]
+    lifetimes = summary["joins"]["lifetimes"]
+    assert len(lifetimes) == 4 and all(item["shutdown"] is not None for item in lifetimes), ("lifetimes", lifetimes)
+    stopped_lifetime = [item for item in lifetimes if item["lifetime"]["log"] == commands[0]["log"]
+                        and item["lifetime"]["position"] < commands[0]["position"] < item["shutdown"]]
+    assert len(stopped_lifetime) == 1 and replies[0]["position"] < stopped_lifetime[0]["shutdown"], (
+        "the shutdown notice does not follow the shutdown receipt in its lifetime", lifetimes, replies[0]["position"])
+    receipts = Counter((record["log"], record["replyTo"]) for record in records
+                       if record["schema"] == "receipt" and record.get("replyTo") is not None)
+    assert all(count == 1 for count in receipts.values()), ("a command has more than one receipt",
+                                                            [key for key, count in receipts.items() if count > 1])
+    starts = Counter(item["nativeRun"] for item in summary["joins"]["relays"] if item["kind"] == "start")
+    assert len(starts) == len(stores) and all(count == 1 for count in starts.values()), ("start relays", starts, len(stores))
+    print("PASS operations case 3d: the flow verb decoded the shutdown command at", commands[0]["position"], "and its receipt",
+          replies[0]["body"]["result"], "before the shutdown notice at", str(stopped_lifetime[0]["shutdown"]) + "; all",
+          len(lifetimes), "lifetimes ended with their shutdown notices,", len(receipts), "commands have one receipt each,",
+          "and each of", len(starts), "runs has one start relay", flush=True)
+    print("PASS operations: shutdown case 3 held through the TLS 1.3 manager", flush=True)
 
 
 if operations_mode:
