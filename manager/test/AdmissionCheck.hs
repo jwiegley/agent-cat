@@ -1112,7 +1112,11 @@ serviceFaultChecks work native source python=do
                 _->threadDelay 1000>>published
             released=rawRows "SELECT count(*) FROM reservations WHERE state='released'" []
               >>= \rows->unless(rows==[[SQL.SQLInteger 1]])(threadDelay 1000>>released)
-            writable statement=bracket(SQL.open(T.pack(root </> "coordination.sqlite3")))SQL.close(`SQL.exec` statement)
+            -- The separate writable connection waits up to the five-second
+            -- Store allowance for a transaction of the live service, which
+            -- can hold the write lock when the trigger or the repair runs.
+            writable statement=bracket(SQL.open(T.pack(root </> "coordination.sqlite3")))SQL.close $ \database->
+              SQL.exec database "PRAGMA busy_timeout=5000" >> SQL.exec database statement
         (receipt,recorded)<-withPrivateStderr(work </> (name<>"-stderr.log")) $ Service.withService owner [] $ \service->do
           (ident,precondition,approval)<-await published
           writable trigger

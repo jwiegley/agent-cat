@@ -140,7 +140,9 @@ and the file `capacity-streams-run-logs.json` with the run-log bytes of each
 run store. The `storage` and `routes` modes write the files
 `storage-measure.json` and `routes-measure.json` in their fixture
 directories, as the sections "Storage endings" and "Seal and prune cursors"
-state.
+state. The `faults-io` mode writes the file `faults-io.json`, and the four
+failure modes write their files `<mode>-measure.json`, as the sections "Disk
+and I/O failure" and "Failure modes" state.
 
 The capacity profiles are `cap_01` to `cap_20`. Each one names the runner of
 `routing-fixed-point-probe` with the target arguments `--scripted`,
@@ -614,18 +616,54 @@ seal (`routes.create-after-seal-position`), the floor after the prune
 
 ## Disk and I/O failure
 
-The configuration installs profile `cap_01`. The first lifetime runs one
-request of the `prompt-source` workflow to success and then ends with an
-ordinary shutdown. The harness reads the size S of the largest
-regular file under the manager root. The second lifetime starts on the same
+The `faults-io` mode of `manager/test/service_http.py` runs this workload in
+three lifetimes on the manager root of its fixture. The configuration
+installs profile `cap_01` and sets `globalMutationLedgerBytes` to 67108864,
+so that the command ledger does not refuse first.
+
+The first lifetime runs two requests of the `prompt-source` workflow to
+success. A `delayed-person` run then holds the one execution reservation at
+its person question, and a second `delayed-person` request waits queued with
+the reason `capacity`. The harness kills the manager with SIGKILL and waits
+until no process of the worker groups remains. The restart therefore
+quarantines the reservation of the lost run, and the queued request waits
+with no worker. An ordinary shutdown releases the reservation, and the
+restart would then prepare a review of the queued request with a new worker.
+
+The harness reads the size S of the largest of the coordination database,
+its WAL and the active manager log. The second lifetime starts on the same
 root with the file-size limit `RLIMIT_FSIZE` of the manager process set to
 S + 1048576 bytes and with `SIGXFSZ` ignored, both in the child before it
 executes the manager, so that a write past the limit fails with `EFBIG`.
-Worker processes inherit the limit. Two credentials then alternate a create
-and a `set-input` with a literal of 65536 ASCII bytes until the first refusal
-or 100 commands. The harness then stops the manager, and a third lifetime
-starts without the limit. The reopen key holds when that lifetime serves
-`GET /v1/capabilities` and the flow verb verifies its manager log.
+Worker processes inherit the limit, so the harness sends no approval and no
+start in this lifetime. Four credentials then alternate a create of a
+`prompt-source` draft and a `set-input` of that draft with a literal of 65536
+ASCII bytes, until the first refusal or 100 commands. The refused command
+must leave no command row, and the same command with a new idempotency key
+must refuse in the same way. The harness then reads `GET /v1/capabilities`,
+`/v1/requests`, the queued request and `/v1/runs`, and each read must answer
+200 or refuse with 503 `storage-unavailable` or 429 `storage-quota`. It sends
+the `withdraw` of the queued request, which is the control that the manager
+offers for a request without a start. The withdraw must be accepted with its
+command row or refused with 503 `storage-unavailable` and no row. The queued
+request must have no review, and the runs and their run directories must not
+change.
+
+The harness then stops the manager, and a third lifetime starts without the
+limit. Its command rows must equal the rows at the end of the second
+lifetime, so that no command executes again, and no refused command may have
+a row. It must serve every accepted draft, show the queued request withdrawn
+exactly when the withdraw was accepted, and show the run of the first
+lifetime with lost supervision. The reopen key holds when that lifetime
+serves `GET /v1/capabilities` and, after its ordinary end, the flow verb
+verifies its manager log.
+
+The mode writes the file `faults-io.json` in its fixture directory, with
+these values that name no ceiling: the size S (`disk.largest-file-bytes`),
+the limit (`disk.limit-bytes`), the commands accepted before the refusal
+(`disk.accepted-commands`), the outcome and latency of the withdraw
+(`disk.withdraw-accepted` and `disk.withdraw-ms`) and whether the runs stayed
+unchanged (`disk.no-run-started`).
 
 | Key | Ceiling | Unit | Basis |
 | --- | --- | --- | --- |
@@ -639,27 +677,43 @@ starts without the limit. The reopen key holds when that lifetime serves
 ## Failure modes
 
 The failure keys come from existing modes, run once each at N8 with
-measurement prints:
+measurement prints. Each mode samples the resident memory of each of its
+lifetimes, prints one `MEASURE` line for each value, and writes the values
+to the file `<mode>-measure.json` in its fixture directory. The `passed` key
+of a mode is written after its last PASS line. The prints change no
+assertion of a mode.
 
 - `failures-worker` of `manager/test/service_http.py`. The lost time runs
   from the SIGKILL of the worker process groups to the first read that shows
   the run with lost supervision.
 - `failures-manager`. The restart time runs from the start of the second
-  manager lifetime to its first 200 response of `GET /v1/capabilities`.
+  manager lifetime to its first 200 response of `GET /v1/capabilities`. The
+  mode also records the release time of its cases 7 and 9
+  (`failures.manager.release-7-to-review-ms` and
+  `failures.manager.release-9-to-review-ms`), which name no ceiling.
 - `failures-launched`. The release time runs from the reply of the accepted
   `release-quarantine` to the first read that shows the queued request in
   review.
 - `tui-failures`, with its `DelayForwarder`. The unreachable time is the
   elapsed time of its step 2, from the SIGKILL of the manager to the header
-  that shows the unreachable state, and the reconnect time is the elapsed
-  time of its step 3, from the start of the new lifetime to the end of that
-  state.
-- The `restart-interruption` case of `manager-admission-check`, run as
-  `manager-admission-check restart-interruption WORK NATIVE +RTS -N8`. It
-  takes an offline backup, cancels the restoration from that backup after its
-  durable `restore-in-progress` marker, and requires that ordinary Store
-  startup then refuses. It runs no manager process, so it has no resident
-  key.
+  that shows the unreachable state, and the reconnect time runs from the
+  start of the new lifetime in its step 3 to the end of that state. The mode
+  also records two times of the delayed refresh of its step 8, which name no
+  ceiling: from the `g` key that starts the overview read through the
+  forwarder to the switch to the direct profile
+  (`failures.tui.delayed-switch-ms`), and from that switch to the Manager
+  overview of the direct endpoint (`failures.tui.direct-overview-ms`).
+- The `restart-interruption` case of `manager-admission-check`. It takes an
+  offline backup, cancels the restoration from that backup after its durable
+  `restore-in-progress` marker, and requires that ordinary Store startup then
+  refuses. It runs no manager process, so it has no resident key. The case
+  waits at the boundary `restore-marker`, which only the private copy of the
+  tree that `python3 manager/test/admission_audit.py ROOT restore-interruption`
+  builds contains. A direct run of `manager-admission-check
+  restart-interruption WORK NATIVE` stops with the message "actual
+  currentReview boundary was not reached". The suite of
+  `manager-admission-check WORK NATIVE SOURCE PYTHON`, which the gate runs,
+  does not contain the case.
 
 The `failures-worker` mode also covers the loss of the private worker pipes,
 because the SIGKILL of the worker process groups closes them.
@@ -715,3 +769,260 @@ fails or is missing, and 2 when an input file does not have this form.
 A ceiling of the form "at most N" holds when the measured number is N or
 less, "at least N" when it is N or more, "N to M" when it lies between N and M
 inclusive, and "equals" when the measured value has the same type and value.
+
+## Measured values of 2026-10-02 at 9e329971 on macOS 27.0 arm64
+
+These values were measured on 2026-10-02 on the platform of the section
+[Tested platform](#tested-platform), with each mode run once at N8. Each
+mode ran on the tree of one commit:
+
+- `capacity-admission` on `7cf1408b`, the commit that adds the mode.
+- `capacity-inputs` on `89bd367e`, the commit that adds the mode.
+- `capacity-streams`, `storage` and `routes` on `9e329971`, the commit that
+  adds the first mode and the prints of the other two.
+- `faults-io`, `failures-worker`, `failures-manager`, `failures-launched`,
+  `tui-failures` and `manager-admission-check` on `9e329971` with the change
+  that adds this section.
+
+The command `python3 manager/test/capacity_summary.py summary
+manager/test/capacity-ceilings.json` with the seven measurement files
+`capacity-admission.json`, `capacity-inputs.json`, `capacity-streams.json`,
+`storage-measure.json`, `routes-measure.json`, `faults-io.json` and
+`faults.json` reports 126 PASS, 3 FAIL and 0 MISSING for the 129 ceiling
+keys. The file `faults.json` joins the files `<mode>-measure.json` of the
+four failure modes and the outcome of the backup case. No ceiling changed
+after a measurement.
+
+The three FAIL results have these causes:
+
+- `events.catch-up-p50-ms` is 1065.4 against at most 1000, and
+  `events.catch-up-p95-ms` is 19521.6 against at most 5000. The read path of
+  the manager saturates during the burst round of the slow-consumer
+  workload. The two rounds without the burst give 14.2 and 842.9
+  milliseconds (`events.rounds.catch-up-p50-ms` and
+  `events.rounds.catch-up-p95-ms`), and the burst round alone gives 1553.6
+  and 19873.7 milliseconds. This record does not change the manager.
+- `failures.backup.passed` is `false`. The `restart-interruption` case did
+  not run to its assertions. Its direct run stopped with the message "actual
+  currentReview boundary was not reached", because the boundary
+  `restore-marker` exists only in the private copy that `admission_audit.py
+  restore-interruption` builds, as the section
+  [Failure modes](#failure-modes) states. The audits of `admission_audit.py`
+  were not run under the fast-validation direction of 2026-09-29. The suite
+  of the gate, `manager-admission-check WORK NATIVE SOURCE PYTHON +RTS -N8`,
+  passed with 146 PASS lines (`failures.backup.gate-passed` and
+  `failures.backup.gate-pass-lines`). It holds no interrupted-backup case.
+
+Under the file-size limit of the `faults-io` mode, the first refused command
+was the eighth, a `set-input`, after the WAL of the coordination database
+reached the limit of 4830768 bytes. The write failure poisoned the Store, so every
+later command and read of that lifetime refused with 503
+`storage-unavailable`, including `GET /v1/capabilities` and the withdraw of
+the queued request. No command row, run or review was added. The third
+lifetime served the committed state, and no command executed again.
+
+| Key | Measured | Result |
+| --- | --- | --- |
+| `captures.aggregate-accepted-bytes` | 134217728 | PASS |
+| `captures.aggregate-refusal-code` | `storage-quota` | PASS |
+| `captures.aggregate-refusal-ms` | 1.7 | PASS |
+| `captures.aggregate-refusal-status` | 429 | PASS |
+| `captures.manager-rss-peak-bytes` | 287391744 | PASS |
+| `captures.max-accepted` | true | PASS |
+| `captures.oversize-refusal-code` | `size-limit` | PASS |
+| `captures.oversize-refusal-ms` | 0.6 | PASS |
+| `captures.oversize-refusal-status` | 413 | PASS |
+| `captures.root-growth-overhead-bytes` | 137706 | PASS |
+| `captures.upload-max-ms` | 1643.4 | PASS |
+| `disk.manager-rss-peak-bytes` | 94568448 | PASS |
+| `disk.no-receipt` | true | PASS |
+| `disk.refusal-code` | `storage-unavailable` | PASS |
+| `disk.refusal-ms` | 12.5 | PASS |
+| `disk.refusal-status` | 503 | PASS |
+| `disk.reopen-verified` | true | PASS |
+| `drafts.client-accepted` | 4 | PASS |
+| `drafts.client-refusal-code` | `storage-quota` | PASS |
+| `drafts.client-refusal-ms` | 1.1 | PASS |
+| `drafts.client-refusal-status` | 429 | PASS |
+| `drafts.create-p50-ms` | 10.7 | PASS |
+| `drafts.create-p95-ms` | 13.2 | PASS |
+| `drafts.global-accepted` | 10 | PASS |
+| `drafts.global-refusal-code` | `storage-quota` | PASS |
+| `drafts.global-refusal-ms` | 1.9 | PASS |
+| `drafts.global-refusal-status` | 429 | PASS |
+| `drafts.manager-rss-peak-bytes` | 93356032 | PASS |
+| `events.catch-up-p50-ms` | 1065.4 | FAIL |
+| `events.catch-up-p95-ms` | 19521.6 | FAIL |
+| `events.manager-rss-peak-bytes` | 132071424 | PASS |
+| `events.reader-complete` | true | PASS |
+| `failures.backup.passed` | false | FAIL |
+| `failures.launched.manager-rss-peak-bytes` | 102367232 | PASS |
+| `failures.launched.passed` | true | PASS |
+| `failures.launched.release-to-review-ms` | 303.2 | PASS |
+| `failures.manager.manager-rss-peak-bytes` | 111869952 | PASS |
+| `failures.manager.passed` | true | PASS |
+| `failures.manager.restart-ready-ms` | 1011.2 | PASS |
+| `failures.tui.manager-rss-peak-bytes` | 104251392 | PASS |
+| `failures.tui.passed` | true | PASS |
+| `failures.tui.reconnect-ms` | 1336.0 | PASS |
+| `failures.tui.unreachable-ms` | 1389.5 | PASS |
+| `failures.worker.lost-ms` | 147.8 | PASS |
+| `failures.worker.manager-rss-peak-bytes` | 102121472 | PASS |
+| `failures.worker.passed` | true | PASS |
+| `growth.ledger-bytes-per-command` | 131072 | PASS |
+| `growth.manager-log-bytes-per-command` | 3291.2 | PASS |
+| `growth.run-log-bytes-per-run` | 5018 | PASS |
+| `growth.wal-bytes-after-close` | 0 | PASS |
+| `growth.wal-bytes-per-command` | 298401.0 | PASS |
+| `pages.client-refusal-code` | `storage-quota` | PASS |
+| `pages.client-refusal-ms` | 29.1 | PASS |
+| `pages.client-refusal-status` | 429 | PASS |
+| `pages.continuation-before-expiry-status` | 200 | PASS |
+| `pages.expired-continuation-code` | `view-expired` | PASS |
+| `pages.expired-continuation-status` | 410 | PASS |
+| `pages.first-page-after-expiry-status` | 200 | PASS |
+| `pages.first-page-p50-ms` | 281.1 | PASS |
+| `pages.first-page-p95-ms` | 1263.2 | PASS |
+| `pages.global-refusal-code` | `storage-quota` | PASS |
+| `pages.global-refusal-ms` | 29.7 | PASS |
+| `pages.global-refusal-status` | 429 | PASS |
+| `pages.held-sets` | 8 | PASS |
+| `pages.manager-rss-peak-bytes` | 125829120 | PASS |
+| `pages.set-bytes-max` | 1341617 | PASS |
+| `queue.accepted-queued` | 100 | PASS |
+| `queue.enqueue-p50-ms` | 16.6 | PASS |
+| `queue.enqueue-p95-ms` | 19.9 | PASS |
+| `queue.manager-rss-peak-bytes` | 102973440 | PASS |
+| `queue.mutations-per-credential-minute` | 27 | PASS |
+| `queue.refusal-code` | `state-conflict` | PASS |
+| `queue.refusal-ms` | 3.6 | PASS |
+| `queue.refusal-status` | 409 | PASS |
+| `queue.requests-first-page-p50-ms` | 41.9 | PASS |
+| `queue.requests-first-page-p95-ms` | 85.2 | PASS |
+| `readers.holders-accepted` | 2 | PASS |
+| `readers.holders-verified` | true | PASS |
+| `readers.manager-rss-peak-bytes` | 74153984 | PASS |
+| `readers.third-refusal-code` | `storage-quota` | PASS |
+| `readers.third-refusal-status` | 429 | PASS |
+| `readers.third-wait-ms` | 5001.1 | PASS |
+| `reservations.r1.answer-p50-ms` | 26.7 | PASS |
+| `reservations.r1.answer-p95-ms` | 37.0 | PASS |
+| `reservations.r1.approve-p50-ms` | 22.5 | PASS |
+| `reservations.r1.approve-p95-ms` | 25.8 | PASS |
+| `reservations.r1.fifo-order` | true | PASS |
+| `reservations.r1.manager-rss-peak-bytes` | 103841792 | PASS |
+| `reservations.r1.peak-concurrent-runs` | 1 | PASS |
+| `reservations.r1.release-to-review-p50-ms` | 188.1 | PASS |
+| `reservations.r1.release-to-review-p95-ms` | 223.8 | PASS |
+| `reservations.r16.answer-p50-ms` | 27.9 | PASS |
+| `reservations.r16.answer-p95-ms` | 60.3 | PASS |
+| `reservations.r16.approve-p50-ms` | 22.9 | PASS |
+| `reservations.r16.approve-p95-ms` | 26.4 | PASS |
+| `reservations.r16.fifo-order` | true | PASS |
+| `reservations.r16.manager-rss-peak-bytes` | 117555200 | PASS |
+| `reservations.r16.peak-concurrent-runs` | 16 | PASS |
+| `reservations.r16.queued-capacity-reason` | true | PASS |
+| `reservations.r16.release-to-review-p50-ms` | 253.4 | PASS |
+| `reservations.r16.release-to-review-p95-ms` | 275.4 | PASS |
+| `routes.batch-p50-ms` | 4.8 | PASS |
+| `routes.batch-p95-ms` | 7.0 | PASS |
+| `routes.below-floor-code` | `cursor-expired` | PASS |
+| `routes.below-floor-status` | 410 | PASS |
+| `routes.manager-rss-peak-bytes` | 99319808 | PASS |
+| `routes.prune-floor` | true | PASS |
+| `routes.seal-resume` | true | PASS |
+| `safety.cancel-accepted` | true | PASS |
+| `safety.cancel-ms` | 23.3 | PASS |
+| `safety.cancel-to-cancelled-ms` | 150.8 | PASS |
+| `safety.manager-rss-peak-bytes` | 103235584 | PASS |
+| `safety.rate-refusal-code` | `rate-limit` | PASS |
+| `safety.rate-refusal-ms` | 1.7 | PASS |
+| `safety.rate-refusal-status` | 429 | PASS |
+| `slow.independent-answer-ms` | 162.8 | PASS |
+| `slow.independent-run-succeeded` | true | PASS |
+| `slow.manager-rss-peak-bytes` | 132071424 | PASS |
+| `slow.no-loss` | true | PASS |
+| `slow.pending-bytes-max` | 124649 | PASS |
+| `storage.append-cancel-accepted` | true | PASS |
+| `storage.append-refusal-code` | `storage-unavailable` | PASS |
+| `storage.append-refusal-ms` | 3.3 | PASS |
+| `storage.append-refusal-status` | 503 | PASS |
+| `storage.ledger-cancel-accepted` | true | PASS |
+| `storage.ledger-refusal-code` | `storage-quota` | PASS |
+| `storage.ledger-refusal-ms` | 1.6 | PASS |
+| `storage.ledger-refusal-status` | 429 | PASS |
+| `storage.manager-rss-peak-bytes` | 100941824 | PASS |
+
+These measured values name no ceiling:
+
+| Key | Measured |
+| --- | --- |
+| `disk.accepted-commands` | 7 |
+| `disk.largest-file-bytes` | 3782192 |
+| `disk.limit-bytes` | 4830768 |
+| `disk.no-run-started` | true |
+| `disk.withdraw-accepted` | false |
+| `disk.withdraw-ms` | 0.4 |
+| `events.burst-per-second` | 126.0 |
+| `events.burst.catch-up-p50-ms` | 1553.6 |
+| `events.burst.catch-up-p95-ms` | 19873.7 |
+| `events.burst.delivery-p50-ms` | 33553.6 |
+| `events.burst.delivery-p95-ms` | 44606.7 |
+| `events.count` | 8384 |
+| `events.delivery-p50-ms` | 383.1 |
+| `events.delivery-p95-ms` | 41471.7 |
+| `events.dropped-reads` | 2 |
+| `events.mutations-per-credential-minute` | 27 |
+| `events.poll-slowest-at` | `2026-10-03T03:33:34.201526+00:00` |
+| `events.poll-slowest-ms` | 5901.2 |
+| `events.reader.e0.catch-up-p50-ms` | 0.0 |
+| `events.reader.e0.catch-up-p95-ms` | 255.1 |
+| `events.reader.e1-2.catch-up-p50-ms` | 13.7 |
+| `events.reader.e1-2.catch-up-p95-ms` | 787.6 |
+| `events.reader.e2-1.catch-up-p50-ms` | 1189.5 |
+| `events.reader.e2-1.catch-up-p95-ms` | 20711.1 |
+| `events.reader.e3-1.catch-up-p50-ms` | 1121.0 |
+| `events.reader.e3-1.catch-up-p95-ms` | 16187.9 |
+| `events.reconnects` | 5 |
+| `events.refused-reads` | 20 |
+| `events.round1-per-second` | 66.1 |
+| `events.round2-per-second` | 72.4 |
+| `events.rounds.catch-up-p50-ms` | 14.2 |
+| `events.rounds.catch-up-p95-ms` | 842.9 |
+| `events.rounds.delivery-p50-ms` | 303.0 |
+| `events.rounds.delivery-p95-ms` | 1379.6 |
+| `events.route.e1-1.bytes` | 659257 |
+| `events.route.e1-1.records` | 512 |
+| `events.route.e2-2.bytes` | 659257 |
+| `events.route.e2-2.records` | 512 |
+| `events.route.e3-2.bytes` | 9617 |
+| `events.route.e3-2.records` | 19 |
+| `events.uncertain-approvals` | 0 |
+| `failures.backup.boundary-not-reached` | true |
+| `failures.backup.gate-pass-lines` | 146 |
+| `failures.backup.gate-passed` | true |
+| `failures.manager.release-7-to-review-ms` | 284.6 |
+| `failures.manager.release-9-to-review-ms` | 289.5 |
+| `failures.tui.delayed-switch-ms` | 2250.7 |
+| `failures.tui.direct-overview-ms` | 58.0 |
+| `growth.commands` | 124 |
+| `growth.wal-bytes-serving` | 38575592 |
+| `queue.capabilities-saturated-ms` | 3.1 |
+| `reservations.r16.capabilities-saturated-ms` | 3.6 |
+| `routes.batches` | 41 |
+| `routes.create-after-seal-position` | 31 |
+| `routes.prune-floor-position` | 30 |
+| `routes.seal-position` | 30 |
+| `routes.second-segment-records` | 4 |
+| `safety.capabilities-saturated-ms` | 6.0 |
+| `slow.burst-run-log-bytes-max` | 39600 |
+| `slow.independent-runtime-terminal-ms` | -147.2 |
+| `slow.independent-terminal-ms` | 53502.0 |
+| `slow.peer-bytes-while-stopped` | 1665622 |
+| `slow.reconnects-after-stop` | 1 |
+| `slow.stopped-bytes-before` | 297627 |
+| `slow.stopped-ms` | 58400 |
+| `slow.stream-ended` | true |
+| `storage.append-cancel-ms` | 21.9 |
+| `storage.ledger-bytes-at-ceiling` | 524288 |
+| `storage.ledger-cancel-ms` | 29.0 |

@@ -12849,6 +12849,30 @@ Non-blocking findings of fess audit fess/pf-PF2-r1.md (2026-10-02) on subtask PF
 3. (low) manager/test/service_http.py, the ControlHarness docstring names only tui-controls, tui-redirect and the client-controls modes as its users, and the model_questions docstring is out of date in the same way. Fix: name the current users, or describe them generically.
 4. (low, informational) ci/emacs-ui.py of emacs-native, the advice on wf-service--read and wf-service--control-act records readEtag from the same reads that set If-Match, so ifMatch == readEtag is partly self-referential. The stored precondition and the effect-observed state carry the independent proof, and both are checked. Fix (optional): state in the docstring that the precondition check carries the proof.
 
+* TODO [#D] Resolve the non-blocking fess findings of subtask PF20
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pf20-fess-followup-nb2n
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-02 Fri 21:19]
+:MODIFIED: [2026-10-02 Fri 21:19]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess pf-PF20-r1 (fess/pf-PF20-r1.md) on subtask PF20 (the WM-041 failure evidence).
+
+1. (medium) manager/CAPACITY.md, faults.json failures.backup.passed, manager/test/AdmissionCheck.hs, manager/test/admission_audit.py: the interrupted-backup case did not run. The PD28 gate suite does not contain restartInterruptionChecks, and the case waits on the "restore-marker" hook that only the copy patched by admission_audit.py restore-interruption calls. The recorded FAIL is a case that did not run. restore-interruption is a boundary audit, not a mutant. Fix: ask the operator whether "python3 manager/test/admission_audit.py ROOT restore-interruption" may run. If it may, run it once and replace failures.backup.passed with its outcome.
+2. (medium) manager/test/service_http.py, FAULTS_IO comment item 3 and faults_io_checks step 3: "no worker starts under the limit" is inferred from an unchanged run count, unchanged run directories and zero preparations. The code does not check descendants(process.pid) in lifetime 2. Fix: assert not descendants(process.pid) after the withdraw in lifetime 2, or remove the claim from the comment.
+3. (low) manager/test/service_http.py, faults_io_checks step 4 (read_flow): the flow verb exited 2 in the passing run, and the exit status is not asserted. Fix: assert the expected exit status and its reason, or document that exit 2 is accepted.
+4. (low) manager/test/service_http.py, tui_failure_checks: delayed-switch-ms includes a fixed 1.0 s pump, a withdraw and key navigation, and direct-overview-ms measures the direct endpoint. Neither measures the delayed-refresh observation through DelayForwarder. Fix: measure from the g key to the screen state that the delayed refresh produces, or record that no such observation exists.
+5. (low) manager/CAPACITY.md: the workload prose published in PF16 was revised after measurement (lifetime 1 ends by SIGKILL, S is narrowed, four writers in place of two, the backup invocation rewritten). No key, ceiling or unit changed. The PF20 commit message records the revisions. No further action.
+6. (low) manager/test/AdmissionCheck.hs: a test-only busy_timeout was added after one SQLITE_BUSY failure, with one passing run after it. The PF20 commit message records it. Watch for a recurrence.
+7. (low) Process 61004, a routing-fixed-point-probe from an earlier stage, is still running. Fix: stop it.
+
 * TODO [#D] Resolve the non-blocking fess findings of subtask PF3
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -23747,7 +23771,7 @@ legacy workflow build cannot conceal an unchecked manager development.
 :LABELS:   ["p9","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-02 Fri 20:45]
+:MODIFIED: [2026-10-02 Fri 21:19]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-041
 :SOURCE_REPO: agent-cat
@@ -23917,6 +23941,13 @@ workloads rather than extrapolating unmeasured capacity.
     "author": "johnw",
     "text": "PF19 (2026-10-02): the mode capacity-streams of manager/test/service_http.py measures the event flood, the slow consumer, the growth of logs and ledger, and the WAL. Two SSE readers for each client read /v1/events and one route reader for each client reads /v1/routes or a run route. All readers matched their references, and E0 held 8384 events once and in order. A burst round of 15 event-burst runs (new probe workflow with 64 model answers) fills the stream of a stopped reader: its peer received 1665622 bytes during the stop, above the 1048576-byte bound, the manager ended the stopped stream through the 5-second write deadline (ResponseWriteTimeout), and the reader drained 124649 bytes, reconnected and lost no event. The independent run answer took 163 ms and the run succeeded. Manager change: SSE batches are packed into writes of at most 16384 bytes (sseWrites), with one view check for each write. The storage and routes modes gained measurement prints into storage-measure.json and routes-measure.json with unchanged assertions. Evidence (private, PF/PF19/impl-r2): py_compile 0, build 0, capacity-streams N8 0 in 124 s (trials 1 to 5 failed under a load average of up to 35, trial 6 passed), storage N8 0, routes N8 0, tui-journey N8 0, make -C doc check 0, capacity_summary.py summary 28 PASS, 2 diagnosed FAIL (events.catch-up-p50-ms 1065.4 against 1000 and p95 19521.6 against 5000, from read-path saturation in the burst round; the two rounds alone pass at 14.2 and 842.9 ms), 99 MISSING for other parts. Fess pf-PF19-r2 is not blocking. Its findings are filed as acat-pf19-fess-followup-ewpu. The package stays open: PF20 measures the remaining parts.\n",
     "created_at": "2026-10-03T03:45:31Z"
+  },
+  {
+    "id": 683,
+    "issue_id": "acat-wm-041-17ax",
+    "author": "johnw",
+    "text": "PF20 (WM-041 failure evidence): new mode faults-io in manager/test/service_http.py runs three manager lifetimes with RLIMIT_FSIZE in lifetime 2. Under the limit, a write past the limit refused with 503 storage-unavailable and left no command row, the Store was poisoned so every later read and the safety withdraw refused with storage-unavailable, and no run or preparation was added. Lifetime 3 without the limit served the committed state with no command replayed. Timing prints in failures-worker (147.8 ms, ceiling 10000), failures-manager (1011.2 ms, ceiling 30000), failures-launched (303.2 ms, ceiling 5000) and tui-failures (1389.5 ms and 1336.0 ms, ceilings 50000 and 35000); all four passed at N8 with unchanged assertions. manager-admission-check with the PD28 gate arguments passed (146 PASS lines), but it has no interrupted-backup case, so failures.backup.passed is a diagnosed FAIL (the case needs admission_audit.py restore-interruption, which waits on operator approval). Combined capacity_summary.py summary over PF17 to PF20: 126 PASS, 3 diagnosed FAIL, 0 MISSING of 129 keys. manager/CAPACITY.md records the values; make -C doc check passed. Evidence is in the private stage directory. Follow-up findings: acat-pf20-fess-followup-nb2n.",
+    "created_at": "2026-10-03T04:19:09Z"
   }
 ]
 #+end_src
@@ -23928,7 +23959,7 @@ workloads rather than extrapolating unmeasured capacity.
 :LABELS:   ["p9","wm-checkpoint","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-02 Fri 20:45]
+:MODIFIED: [2026-10-02 Fri 21:19]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-041-core
 :SOURCE_REPO: agent-cat
@@ -24057,6 +24088,13 @@ Publish precommitted workload and resource ceilings. All core advertised bounds 
     "author": "johnw",
     "text": "PF19 (2026-10-02): the mode capacity-streams of manager/test/service_http.py measures the event flood, the slow consumer, the growth of logs and ledger, and the WAL. Two SSE readers for each client read /v1/events and one route reader for each client reads /v1/routes or a run route. All readers matched their references, and E0 held 8384 events once and in order. A burst round of 15 event-burst runs (new probe workflow with 64 model answers) fills the stream of a stopped reader: its peer received 1665622 bytes during the stop, above the 1048576-byte bound, the manager ended the stopped stream through the 5-second write deadline (ResponseWriteTimeout), and the reader drained 124649 bytes, reconnected and lost no event. The independent run answer took 163 ms and the run succeeded. Manager change: SSE batches are packed into writes of at most 16384 bytes (sseWrites), with one view check for each write. The storage and routes modes gained measurement prints into storage-measure.json and routes-measure.json with unchanged assertions. Evidence (private, PF/PF19/impl-r2): py_compile 0, build 0, capacity-streams N8 0 in 124 s (trials 1 to 5 failed under a load average of up to 35, trial 6 passed), storage N8 0, routes N8 0, tui-journey N8 0, make -C doc check 0, capacity_summary.py summary 28 PASS, 2 diagnosed FAIL (events.catch-up-p50-ms 1065.4 against 1000 and p95 19521.6 against 5000, from read-path saturation in the burst round; the two rounds alone pass at 14.2 and 842.9 ms), 99 MISSING for other parts. Fess pf-PF19-r2 is not blocking. Its findings are filed as acat-pf19-fess-followup-ewpu. The package stays open: PF20 measures the remaining parts.\n",
     "created_at": "2026-10-03T03:45:32Z"
+  },
+  {
+    "id": 682,
+    "issue_id": "acat-wm-041-core-3vvz",
+    "author": "johnw",
+    "text": "PF20 (WM-041 failure evidence): new mode faults-io in manager/test/service_http.py runs three manager lifetimes with RLIMIT_FSIZE in lifetime 2. Under the limit, a write past the limit refused with 503 storage-unavailable and left no command row, the Store was poisoned so every later read and the safety withdraw refused with storage-unavailable, and no run or preparation was added. Lifetime 3 without the limit served the committed state with no command replayed. Timing prints in failures-worker (147.8 ms, ceiling 10000), failures-manager (1011.2 ms, ceiling 30000), failures-launched (303.2 ms, ceiling 5000) and tui-failures (1389.5 ms and 1336.0 ms, ceilings 50000 and 35000); all four passed at N8 with unchanged assertions. manager-admission-check with the PD28 gate arguments passed (146 PASS lines), but it has no interrupted-backup case, so failures.backup.passed is a diagnosed FAIL (the case needs admission_audit.py restore-interruption, which waits on operator approval). Combined capacity_summary.py summary over PF17 to PF20: 126 PASS, 3 diagnosed FAIL, 0 MISSING of 129 keys. manager/CAPACITY.md records the values; make -C doc check passed. Evidence is in the private stage directory. Follow-up findings: acat-pf20-fess-followup-nb2n.",
+    "created_at": "2026-10-03T04:19:09Z"
   }
 ]
 #+end_src

@@ -240,6 +240,10 @@ person_mode = len(sys.argv) == 6 and sys.argv[5] == PERSON
 # manager exits, the flow verb must report the run log of the lost run as
 # ended without its stop, with lost supervision and the question uncertain.
 # Each numbered case prints its own PASS line. It runs one manager lifetime.
+# Its measurement prints write failures-worker-measure.json with the values
+# of the section "Failure modes" of manager/CAPACITY.md, and no print asserts
+# anything. The failures-manager, failures-launched and tui-failures modes
+# print and write their values in the same way.
 WORKER_FAILURE = "failures-worker"
 worker_failure_mode = len(sys.argv) == 6 and sys.argv[5] == WORKER_FAILURE
 # The failures-manager mode checks the failure ending of a lost manager and
@@ -496,6 +500,57 @@ CAPACITY_PENDING_BOUND = 1048576
 # E0 send a refused read again. The burst round saturates the read path, so
 # a refusal can last longer than the five seconds of an ordinary read.
 STATUS_WINDOW = 60
+# The faults-io mode measures the workload of the section "Disk and I/O
+# failure" of manager/CAPACITY.md in three lifetimes of the protected manager
+# on the manager root of the module. It uses the harness of the
+# capacity-admission mode. The configuration installs the profile cap_01 and
+# sets globalMutationLedgerBytes 67108864, so that the command ledger never
+# refuses first.
+# 1. Lifetime 1 runs FAULTS_SETTLED prompt-source requests to success. One
+#    delayed-person run then holds the one execution reservation at its
+#    person question, and one more delayed-person request waits queued with
+#    the reason capacity. The harness kills the manager with SIGKILL and
+#    waits until no process of the worker groups remains. The restart
+#    therefore quarantines the reservation of the lost run, so that the
+#    queued request waits with no worker.
+# 2. Lifetime 2 starts with RLIMIT_FSIZE of the manager process set to S +
+#    FAULTS_MARGIN bytes and SIGXFSZ ignored, both in the child before it
+#    executes the manager, where S is the size of the largest of the
+#    coordination database, its WAL and the active manager log. A write past
+#    the limit then fails with EFBIG, and the worker processes would inherit
+#    the limit. The harness sends no approval and no start. The credentials
+#    io-1 to io-4 alternate a create of a prompt-source draft and a set-input
+#    of that draft with a literal of FAULTS_LITERAL_BYTES ASCII bytes, until
+#    the first refusal or FAULTS_COMMANDS commands. The refusal must be 503
+#    storage-unavailable and leave no command row, and the same command with
+#    a new idempotency key must refuse in the same way.
+# 3. In the same lifetime, GET /v1/capabilities, /v1/requests, the queued
+#    request and /v1/runs each answer 200 or refuse with 503
+#    storage-unavailable or 429 storage-quota. The withdraw of the queued
+#    request, the control that the manager offers for a request without a
+#    start, is either accepted with a command row or refused with 503
+#    storage-unavailable and no row. The queued request has no review, the
+#    runs and the run directories are unchanged, and no process of the
+#    manager runs a worker.
+# 4. Lifetime 3 starts without the limit on the same root. It serves GET
+#    /v1/capabilities. The command rows equal the rows at the end of
+#    lifetime 2, so no command is executed again, and no refused key has a
+#    row. Every accepted draft of lifetime 2 is served, the queued request
+#    is withdrawn exactly when its withdraw was accepted, and the run of
+#    lifetime 1 shows lost supervision. After the ordinary end of lifetime 3
+#    the flow verb verifies the manager log of the three lifetimes.
+# 5. The mode writes FAULTS_IO_RECORD with a measured value for each ceiling
+#    key of the section and the values that name no ceiling. A value outside
+#    its ceiling is a finding for capacity_summary.py and does not end the
+#    mode. Each step prints its own PASS line, and the mode ends within
+#    CAPACITY_SECONDS.
+FAULTS_IO = "faults-io"
+faults_io_mode = len(sys.argv) == 6 and sys.argv[5] == FAULTS_IO
+FAULTS_IO_RECORD = "faults-io.json"
+FAULTS_SETTLED = 2
+FAULTS_MARGIN = 1048576
+FAULTS_LITERAL_BYTES = 65536
+FAULTS_COMMANDS = 100
 # The modes that configure the control fixture profiles in place of the
 # scripted profile: profile_1 runs the recovery-offering retry adapter and
 # profile_steer runs the steerable adapter. The controls-routing mode also
@@ -2304,7 +2359,7 @@ def lifecycle_elapsed():
 # and emacs-service-controls modes configure the control fixture profiles.
 control_profiles = (control_profiles or tui_mode in (TUI_CONTROLS, TUI_REDIRECT) or client_controls_mode or emacs_lifecycle_mode
                     or emacs_controls_mode)
-assert len(sys.argv) == 5 or mixed or boundary or pages_mode or events_mode or captures_mode or discard_mode or exports_mode or lineage_mode or control_profiles or person_mode or endpoints_mode or tui_mode or cross_client_mode or capacity_admission_mode or capacity_inputs_mode or capacity_streams_mode
+assert len(sys.argv) == 5 or mixed or boundary or pages_mode or events_mode or captures_mode or discard_mode or exports_mode or lineage_mode or control_profiles or person_mode or endpoints_mode or tui_mode or cross_client_mode or capacity_admission_mode or capacity_inputs_mode or capacity_streams_mode or faults_io_mode
 assert not tui_approval or os.environ.get("TUI_CHECK")
 assert not (endpoints_mode or tui_mode or cross_client_mode) or os.environ.get("TUI_CHECK")
 assert not capacity_inputs_mode or os.environ.get("ARTIFACT_CHECK")
@@ -2456,7 +2511,7 @@ if cross_client_mode:
 # cap_key_NN, so that only the execution reservations limit how many of
 # their runs are active at once. The profiles of CAPACITY_COHORTS run the
 # same fixture with their stated keys.
-if capacity_admission_mode or capacity_inputs_mode or capacity_streams_mode:
+if capacity_admission_mode or capacity_inputs_mode or capacity_streams_mode or faults_io_mode:
     capacity_base = configuration["profiles"][0]
     configuration["profiles"] = [dict(capacity_base, id=name, workspaceLabel="HTTPS capacity fixture " + name[4:],
                                       resourceKeys=["cap_key_" + name[4:]]) for name in CAPACITY_PROFILES] + [
@@ -2851,7 +2906,7 @@ class CapacityFixture(TuiModeFixture):
 issued = administration({"version": 1, "operation": "issue-credential", "label": "HTTPS fixture",
                          "scopes": ["observe", "submit"] + (["control", "export"] if mixed else ["control"] if captures_mode or discard_mode or lineage_mode or control_profiles or person_mode else ["control", "export"] if exports_mode else []),
                          "profileIds": CONTROL_PROFILES or (["profile_1", "profile_plain"] if person_mode else
-                                                            CAPACITY_PROFILES if capacity_admission_mode or capacity_inputs_mode or capacity_streams_mode else ["profile_1"]),
+                                                            CAPACITY_PROFILES if capacity_admission_mode or capacity_inputs_mode or capacity_streams_mode or faults_io_mode else ["profile_1"]),
                          "expiresAt": "2999-01-01T00:00:00Z", "outputFile": str(work / "credential")})
 bearer = (work / "credential").read_bytes().decode("ascii")
 if collections:
@@ -2885,6 +2940,7 @@ tui_fixture = (TuiModeFixture(*TUI_MODES[tui_mode]) if tui_mode else
                CapacityFixture("r1-1") if capacity_admission_mode else
                CapacityFixture("inputs-module") if capacity_inputs_mode else
                CapacityFixture("streams-module") if capacity_streams_mode else
+               CapacityFixture("io-1") if faults_io_mode else
                client_controls_fixture(CLIENT_CONTROLS_MODES[sys.argv[5]]) if client_controls_mode else
                TuiModeFixture(["profile_1"], ["observe", "submit", "control", "export"], client="pi") if pi_client_mode or pi_host_smoke_mode or pi_host_mode or pi_host_model_mode else
                TuiModeFixture(["profile_1"], ["observe", "submit", "control", "export"], client="emacs") if emacs_service_mode else
@@ -9601,6 +9657,331 @@ def person_checks():
     print("PASS person-answers: every person-answer case held against the running TLS 1.3 manager", flush=True)
 
 
+class CapacityTaskInfo(ctypes.Structure):
+    """struct proc_taskinfo of <sys/proc_info.h>, the PROC_PIDTASKINFO
+    flavor of proc_pidinfo."""
+    _fields_ = [("virtual_size", ctypes.c_uint64), ("resident_size", ctypes.c_uint64),
+                ("times", ctypes.c_uint64 * 4), ("counts", ctypes.c_int32 * 12)]
+
+
+class CapacityResident(threading.Thread):
+    """The resident memory of the manager process every 250 milliseconds,
+    in bytes, from the start of the lifetime until stop(). Each sample is
+    the resident size of proc_pidinfo with PROC_PIDTASKINFO, which needs no
+    entitlement for a process of the same user. A ps without the task-port
+    entitlement refuses its rss keyword. The sampler stops before the
+    manager is stopped, so every attempt is of a live manager, and peak()
+    refuses a peak when more than one attempt in a hundred failed. A peak
+    read before stop() covers the samples up to that moment."""
+
+    def __init__(self, pid):
+        super().__init__(daemon=True)
+        self.proc_pidinfo = ctypes.CDLL(None).proc_pidinfo
+        self.pid, self.samples, self.failed, self.stopped = pid, [], 0, threading.Event()
+        self.start()
+
+    def run(self):
+        while not self.stopped.is_set():
+            info = CapacityTaskInfo()
+            if self.proc_pidinfo(self.pid, 4, ctypes.c_uint64(0), ctypes.byref(info), ctypes.sizeof(info)) == ctypes.sizeof(info):
+                self.samples.append(info.resident_size)
+            else:
+                self.failed += 1
+            self.stopped.wait(0.25)
+
+    def peak(self):
+        assert self.samples, "no resident memory sample of the manager"
+        assert self.failed * 100 <= len(self.samples) + self.failed, (
+            "resident memory samples failed", self.failed, len(self.samples))
+        return max(self.samples)
+
+    def stop(self):
+        self.stopped.set()
+        self.join(timeout=15)
+
+
+class CapacityCredential:
+    """One issued credential with its persistent connection and the count of
+    its ordinary mutations in each UTC minute. read_ms holds the
+    milliseconds of its last read, from before its first attempt to the end
+    of the body of its answer, and key holds the idempotency key of its last
+    command."""
+
+    def __init__(self, name):
+        self.name = name
+        self.headers = {"Authorization": "Bearer " + (work / ("credential-" + name)).read_bytes().decode("ascii")}
+        self.connection = PersistentConnection()
+        self.minutes = {}
+        self.read_ms = None
+        self.key = None
+
+    def count(self):
+        """Count one ordinary mutation in the UTC minute of its send."""
+        minute = int(time.time() // 60)
+        self.minutes[minute] = self.minutes.get(minute, 0) + 1
+
+
+class CapacityHarness:
+    """The measurement harness of the capacity modes, which measure the
+    workloads of manager/CAPACITY.md. part holds the ceiling keys of the
+    sections of the mode. measured maps each key to its value, latencies
+    holds the latency samples of each label, and save() writes measured to
+    the record file of the mode in its fixture directory. begin() starts one
+    manager lifetime through CapacityFixture and end() stops it. The other
+    methods are the reads and commands of a workload on the persistent
+    connection of one CapacityCredential. dropped counts the reads whose
+    connection closed with no response, and refused counts the refusals that
+    read sent again."""
+
+    dropped = 0
+    refused = 0
+
+    def __init__(self, record, sections):
+        sys.path.insert(0, str(source / "manager/test"))
+        import capacity_summary
+        self.summary = capacity_summary
+        self.fixture = tui_fixture
+        self.record = record
+        self.ceilings = capacity_summary.load_ceilings(str(source / "manager/test/capacity-ceilings.json"))
+        self.part = sorted(key for key in self.ceilings if key.split(".")[0] in sections)
+        self.measured, self.latencies, self.state = {}, {}, {}
+
+    def save(self):
+        (work / self.record).write_text(json.dumps(self.measured, indent=1, sort_keys=True) + "\n")
+
+    def measure(self, values):
+        """Add measured values, write the record and print one MEASURE line
+        for each value. The storage and routes modes use it for their
+        measurement prints, which assert nothing."""
+        self.measured.update(values)
+        self.save()
+        for key, value in values.items():
+            print("MEASURE", key, json.dumps(value), flush=True)
+
+    @staticmethod
+    def percentile(samples, fraction):
+        """The nearest-rank percentile: the sample at position ceil(q n) of
+        the sorted samples, counted from 1."""
+        ordered = sorted(samples)
+        assert ordered, "no latency samples"
+        return round(ordered[max(1, math.ceil(fraction * len(ordered))) - 1], 1)
+
+    def latency_keys(self, prefix, label):
+        """The p50 and p95 keys of the latency samples of label."""
+        self.measured[f"{prefix}.{label}-p50-ms"] = self.percentile(self.latencies[prefix + "." + label], 0.50)
+        self.measured[f"{prefix}.{label}-p95-ms"] = self.percentile(self.latencies[prefix + "." + label], 0.95)
+
+    def sample(self, label, value):
+        self.latencies.setdefault(label, []).append(value)
+
+    def begin(self, name, root, profiles, limits, names, retention=(), arguments=(), file_limit=None):
+        """Start one lifetime with its configuration and issue its
+        credentials. retention names the local retention roots of the
+        configuration, and arguments are further arguments of serve. A
+        file_limit sets RLIMIT_FSIZE of the manager process to that many
+        bytes and ignores SIGXFSZ, both in the child before it executes the
+        manager, so that a write past the limit fails with EFBIG. Returns
+        the process, its resident sampler and the credentials by name."""
+        import resource
+
+        def limited():
+            signal.signal(signal.SIGXFSZ, signal.SIG_IGN)
+            resource.setrlimit(resource.RLIMIT_FSIZE, (file_limit, file_limit))
+
+        self.fixture.begin(root, profiles, limits, retention)
+        with (work / f"server-{name}.stdout").open("wb") as output, (work / f"server-{name}.stderr").open("wb") as errors:
+            process = subprocess.Popen([str(runner), "--manager", "serve", "--config", str(config), *arguments,
+                                        "+RTS", "-N" + native, "-RTS"], stdout=output, stderr=errors,
+                                       preexec_fn=limited if file_limit is not None else None)
+        resident = CapacityResident(process.pid)
+        wait_ready(process)
+        self.fixture.issue_all(names)
+        credentials = {credential: CapacityCredential(credential) for credential in names}
+        capabilities, _, _ = self.read(credentials[names[0]], "/v1/capabilities", "Capabilities")
+        configured = configuration["limits"]
+        assert all(capabilities["limits"][key] == configured[key] for key in configured), (
+            "the capabilities do not report the configured limits", name, capabilities["limits"])
+        assert capabilities["limits"]["queuedRequests"] == 100 and capabilities["limits"]["ordinaryMutationsPerMinute"] == 30, (
+            "the capabilities do not advertise the queue and the rate", capabilities["limits"])
+        self.state.update(epoch=capabilities["authorityEpoch"], workflows={}, capabilities=capabilities)
+        return process, resident, credentials
+
+    @staticmethod
+    def end(name, process, resident, credentials):
+        """End one lifetime as the operator stops it and keep its exit status."""
+        for credential in credentials.values():
+            credential.connection.close()
+        resident.stop()
+        if process.poll() is None:
+            process.terminate()
+        process.wait(timeout=25)
+        (work / f"server-{name}.exit").write_text(str(process.returncode) + "\n")
+
+    @staticmethod
+    def read(credential, path, schema, extra=None, window=5):
+        """One schema-valid read on the connection of the credential, with
+        the further request headers extra. A read that meets the
+        five-second Store allowance or the page-set capacity is a new
+        bounded read within window seconds, as in fetch, and refused counts
+        each such refusal. A read whose connection closes with no
+        response is also a new bounded read within 30 seconds, and dropped
+        counts it: the manager closes the connection when the check of the
+        view at response entry meets the Store allowance after the response
+        has started. credential.read_ms times the read from before its first
+        attempt."""
+        started = time.monotonic()
+        deadline = started + window
+        while True:
+            try:
+                status, value, raw, received = exchange(path, credential.headers | (extra or {}), persistent=credential.connection)
+            except ConnectionError as failure:
+                CapacityHarness.dropped += 1
+                assert time.monotonic() < started + 30, ("capacity read closed with no response", path, repr(failure))
+                time.sleep(0.05)
+                continue
+            if status == 200:
+                break
+            assert time.monotonic() < deadline and (status == 503 or (status == 429 and value["code"] == "storage-quota")), (
+                "capacity read", path, status, value.get("code"))
+            CapacityHarness.refused += 1
+            time.sleep(0.05)
+        credential.read_ms = (time.monotonic() - started) * 1000
+        validate(schema, value, raw)
+        return value, received.get("etag"), raw
+
+    def post(self, credential, path, body, tag, ordinary=True):
+        """One command on the connection of the credential. Returns the
+        status, the decoded body and the latency in milliseconds. An
+        ordinary command counts in the UTC minute of its send."""
+        key = credential.key = self.state["epoch"] + "." + secrets.token_urlsafe(16)
+        payload = json.dumps(body, ensure_ascii=False, separators=(",", ":")).encode()
+        headers = credential.headers | {"Content-Type": "application/json", "Idempotency-Key": key} | ({"If-Match": tag} if tag else {})
+        if ordinary:
+            credential.count()
+        status, value, raw, _ = exchange(path, headers, method="POST", payload=payload, persistent=credential.connection)
+        if status in (201, 202):
+            validate("Request" if status == 201 else "CommandReceipt", value, raw)
+        return status, value, credential.connection.elapsed
+
+    def effected(self, credential, receipt, what):
+        """Wait until the command of the receipt has its effect."""
+        deadline = time.monotonic() + 30
+        while True:
+            value, _, _ = self.read(credential, receipt["links"]["self"], "CommandReceipt")
+            if value["state"] in ("effect-observed", "refused", "unresolved"):
+                break
+            assert time.monotonic() < deadline, ("command effect deadline", what)
+            time.sleep(0.02)
+        assert value["state"] == "effect-observed", ("command not effected", what, value["state"])
+
+    def workflow(self, credential, profile, name="delayed-person"):
+        """The catalogue entry of the named workflow of the profile."""
+        if (profile, name) not in self.state["workflows"]:
+            catalogue, _, _ = self.read(credential, "/v1/workflows?profileId=" + profile, "WorkflowPage")
+            self.state["workflows"][profile, name] = next(item for item in catalogue["items"] if item["name"] == name)
+        return self.state["workflows"][profile, name]
+
+    def create(self, credential, profile, name="delayed-person"):
+        """Create one draft of the named workflow. Returns the status, the
+        body and the latency."""
+        item = self.workflow(credential, profile, name)
+        return self.post(credential, "/v1/requests", {"workflowId": item["id"], "descriptorRevision": item["revision"],
+                                                      "profileId": item["profileId"], "profileRevision": item["profileRevision"]}, None)
+
+    def submit(self, credential, profile, name="delayed-person"):
+        """Create one request of the named workflow, supply the literal of
+        each input and send its enqueue. Returns the created request, the
+        status and body of the enqueue and its latency. An accepted enqueue
+        has its effect before the return."""
+        status, created, _ = self.create(credential, profile, name)
+        assert status == 201, ("request creation", credential.name, status, created.get("code"))
+        uri = created["links"]["self"]
+        for declaration in self.workflow(credential, profile, name)["inputs"]:
+            _, tag, _ = self.read(credential, uri, "Request")
+            status, receipt, _ = self.post(credential, uri, {"operation": "set-input", "input": {
+                "name": declaration["name"], "source": "literal", "value": CAPACITY_LITERAL}}, tag)
+            assert status == 202, ("set-input", credential.name, status, receipt.get("code"))
+            self.effected(credential, receipt, "set-input")
+        current, tag, _ = self.read(credential, uri, "Request")
+        assert not current["readiness"]["missing"] and not current["readiness"]["errors"], ("request readiness", current["readiness"])
+        status, receipt, elapsed = self.post(credential, uri, {"operation": "enqueue"}, tag)
+        if status == 202:
+            self.effected(credential, receipt, "enqueue")
+        return created, status, receipt, elapsed
+
+    def approve(self, credential, preparation_id, request_id):
+        """Approve the exact live review of the request. Returns the latency."""
+        preparation, tag, _ = self.read(credential, "/v1/preparations/" + preparation_id, "Preparation")
+        assert preparation["requestId"] == request_id and preparation["state"] == "live", ("review", request_id, preparation["state"])
+        selectors = ("reviewDigest", "requestRevision", "profileRevision", "descriptorRevision", "processGeneration")
+        status, receipt, elapsed = self.post(credential, "/v1/preparations/" + preparation_id,
+                                             {"operation": "approve", **{key: preparation[key] for key in selectors}}, tag)
+        assert status == 202, ("approval", request_id, status, receipt.get("code"))
+        return elapsed
+
+    def answer(self, credential, decision_id):
+        """Answer the pending person question with true. Returns the latency."""
+        decision, tag, _ = self.read(credential, "/v1/decisions/" + decision_id, "Decision")
+        assert decision["state"] == "pending" and decision["kind"] == "question" and decision["position"] == 0, (
+            "person question", decision_id, decision["state"], decision["kind"])
+        status, receipt, elapsed = self.post(credential, "/v1/decisions/" + decision_id, {
+            "operation": "answer", "occurrenceId": decision["address"]["occurrenceId"], "generation": decision["generation"], "value": True}, tag)
+        assert status == 202, ("answer", decision_id, status, receipt.get("code"))
+        self.effected(credential, receipt, "answer")
+        return elapsed
+
+    def one_page(self, credential, path, schema, window=5):
+        value, _, _ = self.read(credential, path, schema, window=window)
+        assert value["page"]["next"] is None, ("collection beyond one page", path)
+        return value
+
+    def capabilities_probe(self, credential, label):
+        """One GET /v1/capabilities during saturation, with no further
+        attempt. It must answer 200 within CAPACITY_PROBE_MS, timed from
+        before the request, which includes the opening of a connection, to
+        the end of its body."""
+        started = time.monotonic()
+        status, value, raw, _ = exchange("/v1/capabilities", credential.headers, persistent=credential.connection)
+        elapsed = (time.monotonic() - started) * 1000
+        assert status == 200, ("GET /v1/capabilities during saturation", label, status, value.get("code"))
+        validate("Capabilities", value, raw)
+        self.sample(label, elapsed)
+        assert elapsed <= CAPACITY_PROBE_MS, ("GET /v1/capabilities during saturation", label, elapsed)
+        return elapsed
+
+    def settle(self, credential, uri, ready, what):
+        """Read the request until ready holds, within 60 seconds."""
+        deadline = time.monotonic() + 60
+        while True:
+            value, tag, _ = self.read(credential, uri, "Request")
+            if ready(value):
+                return value, tag
+            assert time.monotonic() < deadline, (what, value["phase"], value["admission"]["reasons"])
+            time.sleep(0.05)
+
+    def discard(self, credential, preparation_id):
+        """Discard the live review of one preparation and wait for its effect."""
+        _, tag, _ = self.read(credential, "/v1/preparations/" + preparation_id, "Preparation")
+        status, receipt, _ = self.post(credential, "/v1/preparations/" + preparation_id, {"operation": "discard"}, tag)
+        assert status == 202, ("discard", preparation_id, status, receipt.get("code"))
+        self.effected(credential, receipt, "discard")
+
+    def finish(self, mode, step, workloads):
+        """The last numbered step of a capacity mode: the record holds a
+        measured value for each key of the part, and the mode ended within
+        CAPACITY_SECONDS. A value outside its ceiling is a finding for
+        capacity_summary.py and does not end the mode."""
+        self.save()
+        missing = [key for key in self.part if key not in self.measured]
+        assert not missing, ("the record lacks keys of the part", missing)
+        outside = [key for key in self.part if not self.summary.holds(self.ceilings[key], self.measured[key])]
+        elapsed = time.monotonic() - mode_started
+        assert elapsed <= CAPACITY_SECONDS, ("the " + mode + " mode took longer than its bound", round(elapsed), CAPACITY_SECONDS)
+        print(f"PASS {mode} step {step}:", self.record, "holds a measured value for each of the", len(self.part), "ceiling keys of",
+              workloads + ";", len(outside), "of them outside their ceilings", outside, flush=True)
+        print(f"PASS {mode}:", workloads, "ran to their bounds in", f"{elapsed:.0f} seconds", flush=True)
+
+
 def worker_failure_checks():
     """The failure ending of a lost worker through the real HTTPS manager.
     Each numbered case prints one PASS line."""
@@ -9630,9 +10011,13 @@ def worker_failure_checks():
         (work / ("lost-" + body["operation"] + "-receipt.json")).write_bytes(raw)
         return status, value["state"], value
 
+    # The measurement prints of the section "Failure modes" of
+    # manager/CAPACITY.md. They assert nothing.
+    meter = CapacityHarness(WORKER_FAILURE + "-measure.json", ("failures",))
     with (work / "server-0.stdout").open("wb") as output, (work / "server-0.stderr").open("wb") as errors:
         process = subprocess.Popen([str(runner), "--manager", "serve", "--config", str(config),
                                     "+RTS", "-N" + native, "-RTS"], stdout=output, stderr=errors)
+        resident = CapacityResident(process.pid)
         try:
             wait_ready(process)
             status, capabilities, raw = request("/v1/capabilities", authorized)
@@ -9684,6 +10069,7 @@ def worker_failure_checks():
             killed = time.monotonic()
             value, _, raw = wait_for(base, "Run", lambda value: value["supervision"] == "lost")
             lost_after = time.monotonic() - killed
+            meter.measure({"failures.worker.lost-ms": round(lost_after * 1000, 1)})
             (work / "lost-run.json").write_bytes(raw)
             assert value["runtime"] is None or value["runtime"]["status"] != "succeeded", ("lost run runtime", value["runtime"])
             assert value["verification"]["state"] != "verified", ("lost run verification", value["verification"])
@@ -9743,10 +10129,12 @@ def worker_failure_checks():
             print("PASS failures-worker case 5: new run", fresh, "on the same manager was reviewed, approved, answered and",
                   "retried, and succeeded with verified result", artifact["id"], flush=True)
         finally:
+            resident.stop()
             if process.poll() is None:
                 process.terminate()
             process.wait(timeout=25)
             (work / "server-0.exit").write_text(str(process.returncode) + "\n")
+    meter.measure({"failures.worker.manager-rss-peak-bytes": resident.peak()})
 
     # Case 6. The flow verb reports the run log of the lost run as ended
     # without its stop, never as complete.
@@ -9763,6 +10151,7 @@ def worker_failure_checks():
     print("PASS failures-worker case 6: the flow verb exits 2 for the lost run log, with no stop, lost supervision and",
           "uncertain asks", summary["states"]["uncertain"], flush=True)
     print("PASS failures-worker: every worker-loss case held against the running TLS 1.3 manager", flush=True)
+    meter.measure({"failures.worker.passed": True})
 
 
 if worker_failure_mode:
@@ -9780,13 +10169,27 @@ def manager_failure_checks():
     authorized = {"Authorization": "Bearer " + bearer}
     flow_dir = work / "manager" / "flow"
     half = MANAGER_FAILURE_LEDGER // 2
+    # The measurement prints of the section "Failure modes" of
+    # manager/CAPACITY.md: the start and the resident sampler of each
+    # lifetime. The prints assert nothing.
+    meter = CapacityHarness(sys.argv[5] + "-measure.json", ("failures",))
+    prefix = "failures.launched" if launched_failure_mode else "failures.manager"
+    started, residents = {}, {}
+
+    def sampled(index):
+        """Stop the resident sampler of the lifetime before its process
+        ends, and print the resident peak of the lifetimes so far."""
+        residents[index].stop()
+        meter.measure({prefix + ".manager-rss-peak-bytes": max(item.peak() for item in residents.values())})
 
     def serve(index):
         """Start one foreground manager lifetime on the same root and
         configuration and wait for HTTPS readiness."""
+        started[index] = time.monotonic()
         with (work / f"server-{index}.stdout").open("wb") as output, (work / f"server-{index}.stderr").open("wb") as errors:
             process = subprocess.Popen([str(runner), "--manager", "serve", "--config", str(config),
                                         "+RTS", "-N" + native, "-RTS"], stdout=output, stderr=errors)
+        residents[index] = CapacityResident(process.pid)
         wait_ready(process)
         return process
 
@@ -9824,12 +10227,14 @@ def manager_failure_checks():
         """SIGKILL of the manager process. Each worker process sees its
         control channel end and stops within the bound. Returns the seconds
         until no process of the worker groups remained."""
+        sampled(index)
         process.kill()
         process.wait(timeout=25)
         return vanished(targets, index)
 
     def ended(process, index, killed):
         """End a lifetime that a case left running, and check how it ended."""
+        sampled(index)
         if process.poll() is None:
             process.kill() if killed else process.terminate()
         process.wait(timeout=25)
@@ -9990,7 +10395,11 @@ def manager_failure_checks():
         assert current["phase"] == "queued" and current["preparationId"] is None and current["admission"]["reasons"] == ["capacity"], (
             "the request left the queue after a refused release", case, current["phase"], current["admission"])
         released = release(quarantine, once["cleanupEvidenceId"], digest)["result"]
+        released_at = time.monotonic()
         assert released == {"quarantineId": quarantine, "state": "released"}, ("release-quarantine", case, released)
+        wait_for(waiting_uri, "Request", lambda value: value["preparationId"] is not None)
+        meter.measure({(prefix + ".release-to-review-ms" if launched_failure_mode else f"{prefix}.release-{case}-to-review-ms"):
+                       round((time.monotonic() - released_at) * 1000, 1)})
         _, run = approve_review(waiting, workflow, client)
         held = [ident for (ident,) in read_store("SELECT id FROM reservations WHERE request_id=? AND state='held'", (waiting["id"],))]
         assert len(held) == 1, ("the held reservation of the new run", case, held)
@@ -10068,6 +10477,7 @@ def manager_failure_checks():
             held = stopped(targets)
             assert sorted(pid for pid, _ in held) == sorted(pid for pid, _, _ in tree) and all(halted for _, halted in held), (
                 "the stopped worker processes before the manager loss", held, tree)
+            sampled(0)
             first.kill()
             first.wait(timeout=25)
             time.sleep(1)
@@ -10155,6 +10565,7 @@ def manager_failure_checks():
             ended(second, 1, False)
         print("PASS failures-launched: the launched quarantine of run", run, "was released with owner-released evidence once its",
               "stopped worker processes were gone, and run", second_run, "completed with one execution reservation", flush=True)
+        meter.measure({"failures.launched.passed": True})
 
     if launched_failure_mode:
         return launched_release()
@@ -10280,6 +10691,7 @@ def manager_failure_checks():
         # again. A lost run is terminal for pruning, so the pruning round at
         # open removes the segment of the lost run and moves the floor.
         status, capabilities, raw = request("/v1/capabilities", authorized)
+        meter.measure({"failures.manager.restart-ready-ms": round((time.monotonic() - started[1]) * 1000, 1)})
         assert status == 200
         validate("Capabilities", capabilities, raw)
         client = mixed_client(capabilities, authorized)
@@ -10529,6 +10941,7 @@ def manager_failure_checks():
           "with", last_event["type"], repr(last_event.get("message")), flush=True)
     print("PASS failures-manager: every manager-loss and quarantine-release case held across three lifetimes of the TLS 1.3 manager",
           second_run, third_run, flush=True)
+    meter.measure({"failures.manager.passed": True})
 
 
 if manager_failure_mode or launched_failure_mode:
@@ -10540,16 +10953,29 @@ def tui_failure_checks():
     """The tui-failures mode. See TUI_FAILURES for the steps."""
     import sqlite3
     harness = tui_fixture.harness
+    # The measurement prints of the section "Failure modes" of
+    # manager/CAPACITY.md: the start and the resident sampler of each
+    # lifetime. The prints assert nothing.
+    meter = CapacityHarness(TUI_FAILURES + "-measure.json", ("failures",))
+    started, residents = {}, {}
 
     def save(session, name):
         (work / ("tui-failures-" + name + ".screen.txt")).write_text(session.screen.text())
 
+    def sampled(index):
+        """Stop the resident sampler of the lifetime before its process
+        ends, and print the resident peak of the lifetimes so far."""
+        residents[index].stop()
+        meter.measure({"failures.tui.manager-rss-peak-bytes": max(item.peak() for item in residents.values())})
+
     def serve(index):
         """Start one foreground manager lifetime on the same root and
         configuration and wait for HTTPS readiness."""
+        started[index] = time.monotonic()
         with (work / f"server-{index}.stdout").open("wb") as output, (work / f"server-{index}.stderr").open("wb") as errors:
             process = subprocess.Popen([str(runner), "--manager", "serve", "--config", str(config),
                                         "+RTS", "-N" + native, "-RTS"], stdout=output, stderr=errors)
+        residents[index] = CapacityResident(process.pid)
         wait_ready(process)
         return process
 
@@ -10630,12 +11056,14 @@ def tui_failure_checks():
                   queued["id"], "is queued with capacity behind it", flush=True)
             # 2. SIGKILL of the manager.
             commands_before = command_ids()
+            sampled(0)
             lifetimes[0].kill()
             lifetimes[0].wait(timeout=25)
             assert lifetimes[0].returncode == -signal.SIGKILL, ("the first lifetime did not end by SIGKILL", lifetimes[0].returncode)
             killed_at = time.monotonic()
             session.wait_screen("manager unreachable since", timeout=20)
             elapsed = time.monotonic() - killed_at
+            meter.measure({"failures.tui.unreachable-ms": round(elapsed * 1000, 1)})
             screen = session.wait_screen("Observation: stale (", timeout=10)
             save(session, "unreachable")
             assert "manager unreachable since" in header(session), ("the header lacks the unreachable state", header(session))
@@ -10656,6 +11084,7 @@ def tui_failure_checks():
                 assert time.monotonic() < started_at + 30, ("the TUI did not reconnect", screen)
                 session.pump(0.1)
             reconnected = time.monotonic() - started_at
+            meter.measure({"failures.tui.reconnect-ms": round((started_at + reconnected - started[1]) * 1000, 1)})
             while not re.search(r"delivery (live|polling)", header(session)):
                 assert time.monotonic() < started_at + 60, ("the event worker did not reconnect", header(session))
                 session.pump(0.1)
@@ -10884,6 +11313,7 @@ def tui_failure_checks():
             session.send(b"\x1b[B\r")
             screen = session.wait_screen(f"> 2. active  {direct}", timeout=10)
             switched_at = time.monotonic()
+            meter.measure({"failures.tui.delayed-switch-ms": round((switched_at - opened_at) * 1000, 1)})
             save(session, "switched")
             late = forwarder.pending_at(switched_at)
             assert switched_at < opened_at + FORWARD_DELAY and late, (
@@ -10926,6 +11356,7 @@ def tui_failure_checks():
             assert not any(item["kind"] == "request" and item["request"]["id"] == withdrawn["id"] for item in listed["items"]), (
                 "the manager overview still lists the withdrawn request")
             reached = time.monotonic()
+            meter.measure({"failures.tui.direct-overview-ms": round((reached - switched_at) * 1000, 1)})
             until = max(until, reached + 3)
             screen = watched(b"", None)
             assert "Manager overview" in screen and f"manager 127.0.0.1:{port} " in header(session), (
@@ -10948,8 +11379,11 @@ def tui_failure_checks():
         assert not tui_fixture.client_state.exists(), "the service TUI created local runner state"
         print("PASS tui-failures: the service TUI followed a manager loss and restart, a stale answer, a refused credential, a quit during",
               "a held run and an endpoint change during delayed responses", flush=True)
+        sampled(1)
+        meter.measure({"failures.tui.passed": True})
     finally:
-        for process in lifetimes:
+        for index, process in enumerate(lifetimes):
+            residents[index].stop()
             if process.poll() is None:
                 process.terminate()
             process.wait(timeout=25)
@@ -16601,319 +17035,6 @@ def storage_checks():
     print("PASS storage: every storage-error ending held across four lifetimes of the TLS 1.3 manager", flush=True)
 
 
-class CapacityTaskInfo(ctypes.Structure):
-    """struct proc_taskinfo of <sys/proc_info.h>, the PROC_PIDTASKINFO
-    flavor of proc_pidinfo."""
-    _fields_ = [("virtual_size", ctypes.c_uint64), ("resident_size", ctypes.c_uint64),
-                ("times", ctypes.c_uint64 * 4), ("counts", ctypes.c_int32 * 12)]
-
-
-class CapacityResident(threading.Thread):
-    """The resident memory of the manager process every 250 milliseconds,
-    in bytes, from the start of the lifetime until stop(). Each sample is
-    the resident size of proc_pidinfo with PROC_PIDTASKINFO, which needs no
-    entitlement for a process of the same user. A ps without the task-port
-    entitlement refuses its rss keyword. The sampler stops before the
-    manager is stopped, so every attempt is of a live manager, and peak()
-    refuses a peak when more than one attempt in a hundred failed. A peak
-    read before stop() covers the samples up to that moment."""
-
-    def __init__(self, pid):
-        super().__init__(daemon=True)
-        self.proc_pidinfo = ctypes.CDLL(None).proc_pidinfo
-        self.pid, self.samples, self.failed, self.stopped = pid, [], 0, threading.Event()
-        self.start()
-
-    def run(self):
-        while not self.stopped.is_set():
-            info = CapacityTaskInfo()
-            if self.proc_pidinfo(self.pid, 4, ctypes.c_uint64(0), ctypes.byref(info), ctypes.sizeof(info)) == ctypes.sizeof(info):
-                self.samples.append(info.resident_size)
-            else:
-                self.failed += 1
-            self.stopped.wait(0.25)
-
-    def peak(self):
-        assert self.samples, "no resident memory sample of the manager"
-        assert self.failed * 100 <= len(self.samples) + self.failed, (
-            "resident memory samples failed", self.failed, len(self.samples))
-        return max(self.samples)
-
-    def stop(self):
-        self.stopped.set()
-        self.join(timeout=15)
-
-
-class CapacityCredential:
-    """One issued credential with its persistent connection and the count of
-    its ordinary mutations in each UTC minute. read_ms holds the
-    milliseconds of its last read, from before its first attempt to the end
-    of the body of its answer."""
-
-    def __init__(self, name):
-        self.name = name
-        self.headers = {"Authorization": "Bearer " + (work / ("credential-" + name)).read_bytes().decode("ascii")}
-        self.connection = PersistentConnection()
-        self.minutes = {}
-        self.read_ms = None
-
-    def count(self):
-        """Count one ordinary mutation in the UTC minute of its send."""
-        minute = int(time.time() // 60)
-        self.minutes[minute] = self.minutes.get(minute, 0) + 1
-
-
-class CapacityHarness:
-    """The measurement harness of the capacity modes, which measure the
-    workloads of manager/CAPACITY.md. part holds the ceiling keys of the
-    sections of the mode. measured maps each key to its value, latencies
-    holds the latency samples of each label, and save() writes measured to
-    the record file of the mode in its fixture directory. begin() starts one
-    manager lifetime through CapacityFixture and end() stops it. The other
-    methods are the reads and commands of a workload on the persistent
-    connection of one CapacityCredential. dropped counts the reads whose
-    connection closed with no response, and refused counts the refusals that
-    read sent again."""
-
-    dropped = 0
-    refused = 0
-
-    def __init__(self, record, sections):
-        sys.path.insert(0, str(source / "manager/test"))
-        import capacity_summary
-        self.summary = capacity_summary
-        self.fixture = tui_fixture
-        self.record = record
-        self.ceilings = capacity_summary.load_ceilings(str(source / "manager/test/capacity-ceilings.json"))
-        self.part = sorted(key for key in self.ceilings if key.split(".")[0] in sections)
-        self.measured, self.latencies, self.state = {}, {}, {}
-
-    def save(self):
-        (work / self.record).write_text(json.dumps(self.measured, indent=1, sort_keys=True) + "\n")
-
-    def measure(self, values):
-        """Add measured values, write the record and print one MEASURE line
-        for each value. The storage and routes modes use it for their
-        measurement prints, which assert nothing."""
-        self.measured.update(values)
-        self.save()
-        for key, value in values.items():
-            print("MEASURE", key, json.dumps(value), flush=True)
-
-    @staticmethod
-    def percentile(samples, fraction):
-        """The nearest-rank percentile: the sample at position ceil(q n) of
-        the sorted samples, counted from 1."""
-        ordered = sorted(samples)
-        assert ordered, "no latency samples"
-        return round(ordered[max(1, math.ceil(fraction * len(ordered))) - 1], 1)
-
-    def latency_keys(self, prefix, label):
-        """The p50 and p95 keys of the latency samples of label."""
-        self.measured[f"{prefix}.{label}-p50-ms"] = self.percentile(self.latencies[prefix + "." + label], 0.50)
-        self.measured[f"{prefix}.{label}-p95-ms"] = self.percentile(self.latencies[prefix + "." + label], 0.95)
-
-    def sample(self, label, value):
-        self.latencies.setdefault(label, []).append(value)
-
-    def begin(self, name, root, profiles, limits, names, retention=(), arguments=()):
-        """Start one lifetime with its configuration and issue its
-        credentials. retention names the local retention roots of the
-        configuration, and arguments are further arguments of serve. Returns
-        the process, its resident sampler and the credentials by name."""
-        self.fixture.begin(root, profiles, limits, retention)
-        with (work / f"server-{name}.stdout").open("wb") as output, (work / f"server-{name}.stderr").open("wb") as errors:
-            process = subprocess.Popen([str(runner), "--manager", "serve", "--config", str(config), *arguments,
-                                        "+RTS", "-N" + native, "-RTS"], stdout=output, stderr=errors)
-        resident = CapacityResident(process.pid)
-        wait_ready(process)
-        self.fixture.issue_all(names)
-        credentials = {credential: CapacityCredential(credential) for credential in names}
-        capabilities, _, _ = self.read(credentials[names[0]], "/v1/capabilities", "Capabilities")
-        configured = configuration["limits"]
-        assert all(capabilities["limits"][key] == configured[key] for key in configured), (
-            "the capabilities do not report the configured limits", name, capabilities["limits"])
-        assert capabilities["limits"]["queuedRequests"] == 100 and capabilities["limits"]["ordinaryMutationsPerMinute"] == 30, (
-            "the capabilities do not advertise the queue and the rate", capabilities["limits"])
-        self.state.update(epoch=capabilities["authorityEpoch"], workflows={}, capabilities=capabilities)
-        return process, resident, credentials
-
-    @staticmethod
-    def end(name, process, resident, credentials):
-        """End one lifetime as the operator stops it and keep its exit status."""
-        for credential in credentials.values():
-            credential.connection.close()
-        resident.stop()
-        if process.poll() is None:
-            process.terminate()
-        process.wait(timeout=25)
-        (work / f"server-{name}.exit").write_text(str(process.returncode) + "\n")
-
-    @staticmethod
-    def read(credential, path, schema, extra=None, window=5):
-        """One schema-valid read on the connection of the credential, with
-        the further request headers extra. A read that meets the
-        five-second Store allowance or the page-set capacity is a new
-        bounded read within window seconds, as in fetch, and refused counts
-        each such refusal. A read whose connection closes with no
-        response is also a new bounded read within 30 seconds, and dropped
-        counts it: the manager closes the connection when the check of the
-        view at response entry meets the Store allowance after the response
-        has started. credential.read_ms times the read from before its first
-        attempt."""
-        started = time.monotonic()
-        deadline = started + window
-        while True:
-            try:
-                status, value, raw, received = exchange(path, credential.headers | (extra or {}), persistent=credential.connection)
-            except ConnectionError as failure:
-                CapacityHarness.dropped += 1
-                assert time.monotonic() < started + 30, ("capacity read closed with no response", path, repr(failure))
-                time.sleep(0.05)
-                continue
-            if status == 200:
-                break
-            assert time.monotonic() < deadline and (status == 503 or (status == 429 and value["code"] == "storage-quota")), (
-                "capacity read", path, status, value.get("code"))
-            CapacityHarness.refused += 1
-            time.sleep(0.05)
-        credential.read_ms = (time.monotonic() - started) * 1000
-        validate(schema, value, raw)
-        return value, received.get("etag"), raw
-
-    def post(self, credential, path, body, tag, ordinary=True):
-        """One command on the connection of the credential. Returns the
-        status, the decoded body and the latency in milliseconds. An
-        ordinary command counts in the UTC minute of its send."""
-        key = self.state["epoch"] + "." + secrets.token_urlsafe(16)
-        payload = json.dumps(body, ensure_ascii=False, separators=(",", ":")).encode()
-        headers = credential.headers | {"Content-Type": "application/json", "Idempotency-Key": key} | ({"If-Match": tag} if tag else {})
-        if ordinary:
-            credential.count()
-        status, value, raw, _ = exchange(path, headers, method="POST", payload=payload, persistent=credential.connection)
-        if status in (201, 202):
-            validate("Request" if status == 201 else "CommandReceipt", value, raw)
-        return status, value, credential.connection.elapsed
-
-    def effected(self, credential, receipt, what):
-        """Wait until the command of the receipt has its effect."""
-        deadline = time.monotonic() + 30
-        while True:
-            value, _, _ = self.read(credential, receipt["links"]["self"], "CommandReceipt")
-            if value["state"] in ("effect-observed", "refused", "unresolved"):
-                break
-            assert time.monotonic() < deadline, ("command effect deadline", what)
-            time.sleep(0.02)
-        assert value["state"] == "effect-observed", ("command not effected", what, value["state"])
-
-    def workflow(self, credential, profile, name="delayed-person"):
-        """The catalogue entry of the named workflow of the profile."""
-        if (profile, name) not in self.state["workflows"]:
-            catalogue, _, _ = self.read(credential, "/v1/workflows?profileId=" + profile, "WorkflowPage")
-            self.state["workflows"][profile, name] = next(item for item in catalogue["items"] if item["name"] == name)
-        return self.state["workflows"][profile, name]
-
-    def create(self, credential, profile, name="delayed-person"):
-        """Create one draft of the named workflow. Returns the status, the
-        body and the latency."""
-        item = self.workflow(credential, profile, name)
-        return self.post(credential, "/v1/requests", {"workflowId": item["id"], "descriptorRevision": item["revision"],
-                                                      "profileId": item["profileId"], "profileRevision": item["profileRevision"]}, None)
-
-    def submit(self, credential, profile, name="delayed-person"):
-        """Create one request of the named workflow, supply the literal of
-        each input and send its enqueue. Returns the created request, the
-        status and body of the enqueue and its latency. An accepted enqueue
-        has its effect before the return."""
-        status, created, _ = self.create(credential, profile, name)
-        assert status == 201, ("request creation", credential.name, status, created.get("code"))
-        uri = created["links"]["self"]
-        for declaration in self.workflow(credential, profile, name)["inputs"]:
-            _, tag, _ = self.read(credential, uri, "Request")
-            status, receipt, _ = self.post(credential, uri, {"operation": "set-input", "input": {
-                "name": declaration["name"], "source": "literal", "value": CAPACITY_LITERAL}}, tag)
-            assert status == 202, ("set-input", credential.name, status, receipt.get("code"))
-            self.effected(credential, receipt, "set-input")
-        current, tag, _ = self.read(credential, uri, "Request")
-        assert not current["readiness"]["missing"] and not current["readiness"]["errors"], ("request readiness", current["readiness"])
-        status, receipt, elapsed = self.post(credential, uri, {"operation": "enqueue"}, tag)
-        if status == 202:
-            self.effected(credential, receipt, "enqueue")
-        return created, status, receipt, elapsed
-
-    def approve(self, credential, preparation_id, request_id):
-        """Approve the exact live review of the request. Returns the latency."""
-        preparation, tag, _ = self.read(credential, "/v1/preparations/" + preparation_id, "Preparation")
-        assert preparation["requestId"] == request_id and preparation["state"] == "live", ("review", request_id, preparation["state"])
-        selectors = ("reviewDigest", "requestRevision", "profileRevision", "descriptorRevision", "processGeneration")
-        status, receipt, elapsed = self.post(credential, "/v1/preparations/" + preparation_id,
-                                             {"operation": "approve", **{key: preparation[key] for key in selectors}}, tag)
-        assert status == 202, ("approval", request_id, status, receipt.get("code"))
-        return elapsed
-
-    def answer(self, credential, decision_id):
-        """Answer the pending person question with true. Returns the latency."""
-        decision, tag, _ = self.read(credential, "/v1/decisions/" + decision_id, "Decision")
-        assert decision["state"] == "pending" and decision["kind"] == "question" and decision["position"] == 0, (
-            "person question", decision_id, decision["state"], decision["kind"])
-        status, receipt, elapsed = self.post(credential, "/v1/decisions/" + decision_id, {
-            "operation": "answer", "occurrenceId": decision["address"]["occurrenceId"], "generation": decision["generation"], "value": True}, tag)
-        assert status == 202, ("answer", decision_id, status, receipt.get("code"))
-        self.effected(credential, receipt, "answer")
-        return elapsed
-
-    def one_page(self, credential, path, schema, window=5):
-        value, _, _ = self.read(credential, path, schema, window=window)
-        assert value["page"]["next"] is None, ("collection beyond one page", path)
-        return value
-
-    def capabilities_probe(self, credential, label):
-        """One GET /v1/capabilities during saturation, with no further
-        attempt. It must answer 200 within CAPACITY_PROBE_MS, timed from
-        before the request, which includes the opening of a connection, to
-        the end of its body."""
-        started = time.monotonic()
-        status, value, raw, _ = exchange("/v1/capabilities", credential.headers, persistent=credential.connection)
-        elapsed = (time.monotonic() - started) * 1000
-        assert status == 200, ("GET /v1/capabilities during saturation", label, status, value.get("code"))
-        validate("Capabilities", value, raw)
-        self.sample(label, elapsed)
-        assert elapsed <= CAPACITY_PROBE_MS, ("GET /v1/capabilities during saturation", label, elapsed)
-        return elapsed
-
-    def settle(self, credential, uri, ready, what):
-        """Read the request until ready holds, within 60 seconds."""
-        deadline = time.monotonic() + 60
-        while True:
-            value, tag, _ = self.read(credential, uri, "Request")
-            if ready(value):
-                return value, tag
-            assert time.monotonic() < deadline, (what, value["phase"], value["admission"]["reasons"])
-            time.sleep(0.05)
-
-    def discard(self, credential, preparation_id):
-        """Discard the live review of one preparation and wait for its effect."""
-        _, tag, _ = self.read(credential, "/v1/preparations/" + preparation_id, "Preparation")
-        status, receipt, _ = self.post(credential, "/v1/preparations/" + preparation_id, {"operation": "discard"}, tag)
-        assert status == 202, ("discard", preparation_id, status, receipt.get("code"))
-        self.effected(credential, receipt, "discard")
-
-    def finish(self, mode, step, workloads):
-        """The last numbered step of a capacity mode: the record holds a
-        measured value for each key of the part, and the mode ended within
-        CAPACITY_SECONDS. A value outside its ceiling is a finding for
-        capacity_summary.py and does not end the mode."""
-        self.save()
-        missing = [key for key in self.part if key not in self.measured]
-        assert not missing, ("the record lacks keys of the part", missing)
-        outside = [key for key in self.part if not self.summary.holds(self.ceilings[key], self.measured[key])]
-        elapsed = time.monotonic() - mode_started
-        assert elapsed <= CAPACITY_SECONDS, ("the " + mode + " mode took longer than its bound", round(elapsed), CAPACITY_SECONDS)
-        print(f"PASS {mode} step {step}:", self.record, "holds a measured value for each of the", len(self.part), "ceiling keys of",
-              workloads + ";", len(outside), "of them outside their ceilings", outside, flush=True)
-        print(f"PASS {mode}:", workloads, "ran to their bounds in", f"{elapsed:.0f} seconds", flush=True)
-
-
 def capacity_admission_checks():
     """The workloads of the sections "Execution reservations at one",
     "Execution reservations at sixteen", "Queue at one hundred" and "Safety
@@ -18184,8 +18305,278 @@ def capacity_streams_checks():
     meter.finish(CAPACITY_STREAMS, 7, "the event flood, slow consumer and growth workloads")
 
 
+def faults_io_checks():
+    """The workload of the section "Disk and I/O failure" of
+    manager/CAPACITY.md in three lifetimes of the real HTTPS manager on the
+    manager root of the module. See FAULTS_IO for the steps. Each numbered
+    step prints one PASS line, and the mode writes FAULTS_IO_RECORD after each
+    lifetime, so that a later failure keeps the earlier values."""
+    import sqlite3
+    meter = CapacityHarness(FAULTS_IO_RECORD, ("disk",))
+    measured, read, post, create, submit, approve, settle = (
+        meter.measured, meter.read, meter.post, meter.create, meter.submit, meter.approve, meter.settle)
+    root = work / "manager"
+    limits = {"globalMutationLedgerBytes": 67108864}
+    writer_names = ["io-2", "io-3", "io-4", "io-5"]
+    names = ["harness", "io-1"] + writer_names
+    terminal = ("succeeded", "failed", "cancelled")
+    in_review = lambda value: value["phase"] == "review" and value["preparationId"] is not None
+    residents = []
+    refused_keys = []
+
+    def database():
+        found = sorted(root.rglob("coordination.sqlite3"))
+        assert len(found) == 1, ("coordination database", found)
+        return found[0]
+
+    def coordination(statement, parameters=()):
+        """The rows of one query through a read-only connection to the
+        coordination database."""
+        connection = sqlite3.connect(database().as_uri() + "?mode=ro", uri=True)
+        try:
+            return connection.execute(statement, parameters).fetchall()
+        finally:
+            connection.close()
+
+    def command_ids():
+        return {ident for (ident,) in coordination("SELECT id FROM commands")}
+
+    def keyed(key):
+        return bool(coordination("SELECT id FROM commands WHERE idempotency_key=?", (key,)))
+
+    def runs():
+        """The run rows and the run directories under the manager root."""
+        (count,), = coordination("SELECT count(*) FROM runs")
+        return count, sorted(path.name for path in (root / "runs" / "runs").iterdir()) if (root / "runs" / "runs").exists() else []
+
+    def sizes():
+        """The bytes of the coordination database, its WAL and the active
+        manager log, from stat."""
+        files = [database(), database().with_name(database().name + "-wal")] + sorted((root / "flow").glob("*.ndjson"))
+        return {str(path.relative_to(root)): path.lstat().st_size for path in files if path.exists()}
+
+    def peak():
+        measured["disk.manager-rss-peak-bytes"] = max(item.peak() for item in residents)
+        meter.save()
+
+    def refused_command(credential, send):
+        """Send one command that the limit must refuse. Returns its status,
+        code and latency, and whether it left no command row."""
+        rows = command_ids()
+        status, value, elapsed = send()
+        refused_keys.append(credential.key)
+        clean = command_ids() == rows and not keyed(credential.key)
+        return status, value.get("code"), elapsed, clean
+
+    # Step 1. Settled runs, one run at its question and one queued request,
+    # then SIGKILL of the manager.
+    process, resident, credentials = meter.begin("io-1", root, ["cap_01"], limits, names)
+    residents.append(resident)
+    try:
+        harness, submitter = credentials["harness"], credentials["io-1"]
+        settled = []
+        for _ in range(FAULTS_SETTLED):
+            created, status, receipt, _ = submit(submitter, "cap_01", "prompt-source")
+            assert status == 202, ("prompt-source enqueue", status, receipt.get("code"))
+            current, _ = settle(harness, created["links"]["self"], in_review, "the prompt-source request did not reach review")
+            approve(submitter, current["preparationId"], created["id"])
+            current, _ = settle(harness, created["links"]["self"], lambda value: value["runId"] is not None, "the prompt-source run did not start")
+            deadline = time.monotonic() + 60
+            while True:
+                snapshot, _, _ = read(harness, "/v1/runs/" + current["runId"] + "/snapshot", "RunSnapshot")
+                if snapshot["runtime"] is not None and snapshot["runtime"]["status"] in terminal:
+                    break
+                assert time.monotonic() < deadline, ("the prompt-source run did not end", current["runId"])
+                time.sleep(0.05)
+            assert snapshot["runtime"]["status"] == "succeeded", ("prompt-source run", current["runId"], snapshot["runtime"]["status"])
+            settled.append(current["runId"])
+        held, status, receipt, _ = submit(submitter, "cap_01")
+        assert status == 202, ("held enqueue", status, receipt.get("code"))
+        current, _ = settle(harness, held["links"]["self"], in_review, "the held request did not reach review")
+        approve(submitter, current["preparationId"], held["id"])
+        deadline = time.monotonic() + 60
+        while True:
+            current, _, _ = read(harness, held["links"]["self"], "Request")
+            held_run = current["runId"]
+            control = read(harness, "/v1/runs/" + held_run + "/control", "RunControl")[0] if held_run else None
+            if control is not None and control["decisionHeadId"] is not None:
+                head = read(harness, "/v1/decisions/" + control["decisionHeadId"], "Decision")[0]
+                assert head["kind"] == "question", ("the held run head", head["kind"])
+                break
+            assert time.monotonic() < deadline, "the held run did not reach its person question"
+            time.sleep(0.05)
+        queued, status, receipt, _ = submit(submitter, "cap_01")
+        assert status == 202, ("queued enqueue", status, receipt.get("code"))
+        queued_uri = queued["links"]["self"]
+        settle(harness, queued_uri, lambda value: value["phase"] == "queued" and value["admission"]["reasons"] == ["capacity"],
+               "the second request did not wait with capacity")
+        workers = descendants(process.pid)
+        assert workers, "the held run has no worker process"
+        listing = subprocess.run(["ps", "-o", "pid=,pgid="] + sum((["-p", str(pid)] for pid in workers), []),
+                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=10).stdout
+        groups = {int(line.split()[1]) for line in listing.splitlines() if line.strip()}
+        resident.stop()
+        process.kill()
+        process.wait(timeout=25)
+        killed = time.monotonic()
+        while True:
+            listing = subprocess.run(["ps", "-Ao", "pgid="], stdout=subprocess.PIPE, text=True, timeout=10, check=True).stdout
+            remaining = [int(line) for line in listing.split() if int(line) in groups]
+            if not remaining:
+                break
+            assert time.monotonic() < killed + 30, ("worker processes remain after SIGKILL of the manager", remaining)
+            time.sleep(0.1)
+    finally:
+        meter.end("io-1", process, resident, credentials)
+    assert process.returncode == -signal.SIGKILL, ("the first lifetime did not end by SIGKILL", process.returncode)
+    before = sizes()
+    largest = max(before.values())
+    limit = largest + FAULTS_MARGIN
+    runs_before = runs()
+    measured.update({"disk.largest-file-bytes": largest, "disk.limit-bytes": limit})
+    peak()
+    print("PASS faults-io step 1:", len(settled), "prompt-source runs succeeded, run", held_run, "held the execution reservation at",
+          "question", head["id"], "and request", queued["id"], "waited with capacity; after SIGKILL of the manager no process of",
+          "the worker groups", sorted(groups), "remained, and the largest of", before, "holds", largest, "bytes", flush=True)
+
+    # Step 2. Under the file-size limit, ordinary commands refuse with
+    # storage-unavailable and leave no command row.
+    process, resident, credentials = meter.begin("io-2", root, ["cap_01"], limits, names, file_limit=limit)
+    residents.append(resident)
+    try:
+        harness, safety = credentials["harness"], credentials["io-1"]
+        writers = [credentials[name] for name in writer_names]
+        waiting, waiting_tag, _ = read(harness, queued_uri, "Request")
+        assert waiting["phase"] == "queued" and waiting["admission"]["reasons"] == ["capacity"] and waiting["preparationId"] is None, (
+            "the queued request after the restart", waiting["phase"], waiting["admission"])
+        workflow = meter.workflow(harness, "cap_01", "prompt-source")
+        literal = {"name": workflow["inputs"][0]["name"], "source": "literal", "value": "f" * FAULTS_LITERAL_BYTES}
+        drafts, refusal, sent, tags = [], None, 0, {}
+
+        def set_input(credential, draft):
+            """The set-input of the literal. The ETag of the draft comes from
+            a read, or else from the read of an earlier attempt, because a
+            read of a Store that a write failure poisoned refuses."""
+            if draft["id"] not in tags:
+                _, tags[draft["id"]], _ = read(credential, draft["links"]["self"], "Request")
+            return post(credential, draft["links"]["self"], {"operation": "set-input", "input": literal}, tags[draft["id"]])
+
+        while sent < FAULTS_COMMANDS:
+            credential = writers[(sent // 2) % len(writers)]
+            kind = "create" if sent % 2 == 0 else "set-input"
+            send = (lambda: create(credential, "cap_01", "prompt-source")) if kind == "create" else (lambda: set_input(credential, drafts[-1]))
+            rows = command_ids()
+            status, value, elapsed = send()
+            sent += 1
+            if status not in (201, 202):
+                refused_keys.append(credential.key)
+                refusal = (kind, status, value.get("code"), elapsed, command_ids() == rows and not keyed(credential.key), send, credential)
+                break
+            if kind == "create":
+                drafts.append(value)
+            else:
+                meter.effected(credential, value, "set-input")
+        assert refusal is not None, ("no command was refused under the file-size limit", sent, sizes())
+        kind, status, code, elapsed, clean, send, credential = refusal
+        again = refused_command(credential, send)
+        measured.update({"disk.refusal-status": status, "disk.refusal-code": code, "disk.refusal-ms": round(elapsed, 1),
+                         "disk.no-receipt": clean and again[3], "disk.accepted-commands": sent - 1})
+        meter.save()
+        assert (status, code) == (503, "storage-unavailable"), ("the first refused command under the limit", kind, status, code)
+        assert clean, ("the refused command left a command row", kind)
+        assert again[:2] == (503, "storage-unavailable") and again[3], ("the same command with a new key", kind, again)
+        print("PASS faults-io step 2: with RLIMIT_FSIZE", limit, "bytes the manager accepted", sent - 1, "ordinary commands, and the",
+              kind, "after them was refused with", status, code, "in", f"{elapsed:.0f} ms", "with no command row; the same", kind,
+              "with a new idempotency key was refused with", again[0], again[1], "with no command row; files", sizes(), flush=True)
+
+        # Step 3. Reads answer or refuse with their classified code, and the
+        # withdraw of the queued request is accepted with its row or refused
+        # with no row. A read of the request can refuse, so the withdraw
+        # names the ETag of the read at the start of the lifetime, which no
+        # command has changed since. No run starts.
+        outcomes = {}
+
+        def classified(path, schema):
+            """One read with no further attempt. Returns its value, or None
+            when it refused with a classified code."""
+            status, value, raw, _ = exchange(path, harness.headers, persistent=harness.connection)
+            if status == 200:
+                validate(schema, value, raw)
+                outcomes[path] = 200
+                return value
+            outcomes[path] = (status, value["code"])
+            assert outcomes[path] in ((503, "storage-unavailable"), (429, "storage-quota")), ("a read under the limit", path, outcomes[path])
+            return None
+
+        for path, schema in (("/v1/capabilities", "Capabilities"), ("/v1/requests", "RequestPage"), (queued_uri, "Request"),
+                             ("/v1/runs", "RunPage")):
+            classified(path, schema)
+        rows = command_ids()
+        status, value, withdraw_ms = post(safety, queued_uri, {"operation": "withdraw"}, waiting_tag)
+        if status == 202:
+            withdrawn = True
+            assert keyed(safety.key) and len(command_ids()) == len(rows) + 1, "the accepted withdraw has no command row"
+        else:
+            withdrawn = False
+            refused_keys.append(safety.key)
+            assert (status, value.get("code")) == (503, "storage-unavailable"), ("the withdraw under the limit", status, value.get("code"))
+            assert command_ids() == rows and not keyed(safety.key), "the refused withdraw left a command row"
+        waiting = classified(queued_uri, "Request")
+        assert waiting is None or (waiting["preparationId"] is None and waiting["phase"] in ("queued", "withdrawn")), (
+            "the queued request under the limit", waiting["phase"], waiting["preparationId"])
+        (reviews,), = coordination("SELECT count(*) FROM preparations WHERE request_id=?", (queued["id"],))
+        assert reviews == 0, ("the queued request has a review under the limit", reviews)
+        started = runs() != runs_before
+        measured.update({"disk.withdraw-accepted": withdrawn, "disk.withdraw-ms": round(withdraw_ms, 1), "disk.no-run-started": not started})
+        meter.save()
+        assert not started, ("a run started under the file-size limit", runs_before, runs())
+        after = sizes()
+        assert max(after.values()) <= limit, ("a file grew past the limit", after, limit)
+        print("PASS faults-io step 3: under the limit the reads answered", outcomes, "; the withdraw of request", queued["id"],
+              "was", "accepted with its command row" if withdrawn else f"refused with {status} {value.get('code')} and no command row",
+              "in", f"{withdraw_ms:.0f} ms", "; the request has no review, and the", runs_before[0], "runs and their run directories are unchanged",
+              flush=True)
+    finally:
+        meter.end("io-2", process, resident, credentials)
+    committed = command_ids()
+    peak()
+
+    # Step 4. Without the limit the next lifetime serves the committed state,
+    # and no command is executed again.
+    process, resident, credentials = meter.begin("io-3", root, ["cap_01"], limits, names)
+    residents.append(resident)
+    try:
+        harness = credentials["harness"]
+        assert command_ids() == committed, ("the command rows changed across the restart", len(committed), len(command_ids()))
+        assert not [key for key in refused_keys if keyed(key)], "a refused command has a row after the restart"
+        for draft in drafts:
+            read(harness, draft["links"]["self"], "Request")
+        waiting, _, _ = read(harness, queued_uri, "Request")
+        assert waiting["phase"] == ("withdrawn" if withdrawn else "queued"), ("the queued request after the restart", waiting["phase"], withdrawn)
+        lost, _, _ = read(harness, "/v1/runs/" + held_run, "Run")
+        assert lost["supervision"] == "lost", ("the held run after the restarts", lost["supervision"])
+        assert runs() == runs_before, ("a run started after the limit", runs_before, runs())
+    finally:
+        meter.end("io-3", process, resident, credentials)
+    peak()
+    flow_status, _, summary = read_flow("faults-io-flow", [root / "flow"] + sorted(root.glob("runs/runs/*/runtime")), runner)
+    measured["disk.reopen-verified"] = summary["verified"] and not summary["problems"]
+    meter.save()
+    assert measured["disk.reopen-verified"], ("the flow verb does not verify the manager log", flow_status, summary["problems"])
+    print("PASS faults-io step 4: without the limit the third lifetime served GET /v1/capabilities with the", len(committed),
+          "command rows of the second lifetime and no row for the", len(refused_keys), "refused commands, served the", len(drafts),
+          "accepted drafts, showed request", queued["id"], waiting["phase"], "and run", held_run, "lost; the flow verb exits", flow_status,
+          "and verifies the manager log of", len(summary["joins"]["lifetimes"]), "lifetimes", flush=True)
+    meter.finish(FAULTS_IO, 5, "the disk and I/O failure workload")
+
+
 if storage_mode:
     storage_checks()
+    raise SystemExit(0)
+
+
+if faults_io_mode:
+    faults_io_checks()
     raise SystemExit(0)
 
 
