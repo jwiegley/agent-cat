@@ -437,11 +437,13 @@ an invented workflow identity, manifest version, or runtime state.
 
 ## Pages and live delivery
 
-A page set is materialized at one database boundary, then served outside the
-read transaction. The first-page request reserves the set before
-materialization. The set holds one revision, and a mutation that commits
-after that boundary does not change a later page of the set. A fresh set shows
-the mutation. Clients assemble a complete page set before installing it.
+A page set of one window is materialized at one database boundary, then
+served outside the read transaction. The first-page request reserves the set
+before materialization. Such a set holds one revision, and a mutation that
+commits after that boundary does not change a later page of the set. A fresh
+set shows the mutation. The next paragraph states the boundaries of a set of
+more than one window. Clients assemble a complete page set before installing
+it.
 
 The `/requests` and `/runs` collections are windowed page sets. A window
 holds at most 1024 members in identifier order, and each window is

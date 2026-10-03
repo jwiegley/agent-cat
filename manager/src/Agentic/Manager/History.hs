@@ -17,6 +17,7 @@ import Agentic.Manager.Protocol.Json (decodeStrictValue)
 import Agentic.Manager.Store
 import qualified Agentic.Manager.State as State
 import Agentic.Runtime
+import Control.Concurrent.Async (mapConcurrently)
 import Control.Exception (IOException, SomeException, SomeAsyncException, fromException, bracket, try, throwIO)
 import System.IO.Error (isDoesNotExistError)
 import Control.Monad (forM, forM_, foldM, unless, when)
@@ -278,20 +279,25 @@ observeEntry root now name = do
 -- The legacy entries at these addresses (handle, root identity, profile and
 -- component), each decoded by its component name and rendered with its
 -- handle as the revision. Each result carries the parent component and
--- handle that its manifest names. The parent handles and the result
+-- handle that its manifest names. The addresses are decoded in at most
+-- 'legacyObservers' contiguous groups at the same time, one entry at a time
+-- in each group, and the results keep the order of the addresses. A refusal
+-- in one group cancels the others. The parent handles and the result
 -- references are retained in batches first. The address profile must be the
 -- profile of its bound root.
 observeLegacy :: CoordinationStore -> [(LegacyHistory,PrivateRoot)] -> IO [(Text,FrontendInvocation)]
   -> [(Text,Text,Text,Text)] -> IO [([(Text,Text)],Value)]
 observeLegacy store roots configuration addresses = do
   now <- getCurrentTime
-  observed <- forM addresses $ \(ident,identity,profile,component) -> do
-    root <- case [root | (LegacyHistory _ bound rootIdentity,root) <- roots, rootIdentity == identity, bound == profile] of
-      [root] -> pure root
-      _ -> throwIO C.ResourceUnavailable
-    entry <- observeEntry root now component
-    manifest <- entryManifest root entry
-    pure (ident,identity,profile,root,entry,manifest)
+  let observe (ident,identity,profile,component) = do
+        root <- case [root | (LegacyHistory _ bound rootIdentity,root) <- roots, rootIdentity == identity, bound == profile] of
+          [root] -> pure root
+          _ -> throwIO C.ResourceUnavailable
+        entry <- observeEntry root now component
+        manifest <- entryManifest root entry
+        pure (ident,identity,profile,root,entry,manifest)
+      groupSize = max 1 ((length addresses + legacyObservers - 1) `div` legacyObservers)
+  observed <- concat <$> mapConcurrently (mapM observe) (chunks groupSize addresses)
   parentHandles <- fmap Map.unions $ forM roots $ \(LegacyHistory _ profile identity,root) -> do
     let parents = [runIdText parent | (_,rootIdentity,_,_,_,manifest) <- observed, rootIdentity == identity,
           Just parent <- [manifest >>= frontendParentRunId]]
@@ -312,6 +318,11 @@ observeLegacy store roots configuration addresses = do
     pure (maybe [] pure parent,item)
   forM_ roots (assertPrivateRoot . snd)
   pure values
+
+-- | The most legacy entries that one observation decodes at the same time.
+-- Each decode holds at most three descriptors under the root of its entry.
+legacyObservers :: Int
+legacyObservers = 8
 
 appendItem :: (Int,[Value]) -> Value -> IO (Int,[Value])
 appendItem (size,items) item = do

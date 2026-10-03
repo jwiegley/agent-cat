@@ -139,12 +139,18 @@ is one keyset over the managed run identifiers and the retained handles of
 the opened roots, in one identifier order, for the authorized profiles, and
 the total of the first window counts both. `History.legacyWindow` decodes
 the legacy entries of the window by their component names, at most 256
-entries, and keeps the longest prefix of at most 1 MiB encoded. It retains
-the parent handles, result references and revisions of those entries before
-the window takes its boundary, and the window ends before the first legacy
-entry that it does not hold. The next window starts at that entry. The
-retention bound of 65536 names for each root is therefore the only bound on
-the number of legacy entries that the run collection lists. A handle that a
+entries, and keeps the longest prefix of at most 1 MiB encoded.
+`History.observeLegacy` decodes the entries in at most eight contiguous
+groups at the same time, one entry at a time in each group, and keeps the
+order of the window. Each decode holds at most three descriptors under its
+root. A refusal in one group cancels the other groups. The groups divide the
+wall time of the decode without a change to the work of each entry.
+`History.legacyWindow` retains the parent handles, result references and
+revisions of those entries before the window takes its boundary, and the
+window ends before the first legacy entry that it does not hold. The next
+window starts at that entry. The retention bound of 65536 names for each
+root is therefore the only bound on the number of legacy entries that the
+run collection lists. A handle that a
 retention adds inside the window, for example the handle of a parent that
 the root does not hold, repeats the window, at most three times, and then
 the window refuses with a busy Store. A handle whose entry directory is
