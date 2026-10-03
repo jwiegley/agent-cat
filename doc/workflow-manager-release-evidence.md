@@ -1,9 +1,179 @@
 # Workflow manager release evidence
 
-This record gives the identities of the local release artifacts of the workflow
-manager and the checks that produced them. Every check ran on one macOS host of
-the system `aarch64-darwin`, with no binary cache, no package repository and no
-external host.
+This record maps each release requirement of the workflow manager to its
+evidence. It covers the eleven obligations of section 12 of the
+[implementation plan](research/workflow-manager-implementation-plan.md), the
+packages WM-001 to WM-044, the gates G0 to G5 and the acceptance scenarios A01
+to A24. It also gives the identities of the local release artifacts, the
+accepted additive fields of the `/v1` contract, the tested platform and the
+checks that did not run. Every check ran on one macOS host of the system
+`aarch64-darwin`, with no binary cache, no package repository and no external
+host.
+
+The matrix was written on 2026-10-03 at commit
+`5951ad37bde6c5a77fba1f1959788ab3abf6031a`. It uses only the facts that the
+tracker, `doc/workflow-manager-handoff.md`, the commits and the private
+evidence directories state. Accepted state in the tracker is WM-001 to WM-022
+with G0 and G1, and the Integrator closed WM-023, WM-025, WM-026, WM-027 and
+WM-029 after that. Every other package and gate is open in the tracker.
+
+## Evidence conventions
+
+Two private directories hold the evidence. They are never committed.
+
+- `$R` is
+  `/Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923`.
+  The evidence of subtask `X` of a phase is under `$R/<phase>/X/impl-r1`, for
+  example `$R/PG/PG13/impl-r1`. Each check has a `<name>.log` and a
+  `<name>.exit` file, and a failed first attempt is kept as
+  `<name>-attempt<n>`.
+- `$I` is `/Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH`.
+  It holds the units of the accepted packages WM-001 to WM-022, such as
+  `$I/vertical.d42c7UhQ`.
+
+A mode is a mode of `manager/test/service_http.py`. Unless the row states
+otherwise, a mode ran once at `-N8` against a real manager over local TLS with
+deterministic workers. The path after a check names its latest run.
+
+The evidence ceiling follows invariant I16. Each row names the highest kind
+of evidence that it has, and the kinds are not merged.
+
+| Ceiling | Meaning |
+|---|---|
+| Theorem | A Lean proof with a pinned axiom footprint. |
+| Pure model test | A test of pure code or shared vectors with no process, file or network effect. |
+| Deterministic native fixture | Real manager, worker and Store processes on disposable local roots, driven by a harness. |
+| Actual UI interaction | Keys sent to a real TUI, Emacs or Pi process in a pseudo-terminal, with assertions on the screen and on manager facts. |
+| Package build | The flake package or the source distribution built and run. |
+| Operator exercise | A person who did not write the procedures follows them. No row has this ceiling yet. |
+
+The status of a row is one of these values:
+
+- **Met.** The tracker records acceptance after an independent review.
+- **Met for function.** The functional requirement has passing evidence, and
+  the security items of the row wait for the security stage.
+- **Partial.** Part of the functional requirement has no passing evidence.
+  The row names that part.
+- **Deferred to the security stage.** The operator direction of 2026-09-30
+  defers the item.
+- **Pending human operator exercise.** The function is met, and the exercise
+  by another person has not run.
+- **Not run.** The row states the reason.
+
+No row claims a security-stage item, a cross-machine result or an exercise
+by a human operator as done.
+
+## Release requirement matrix
+
+These rows are the obligations of section 12 of the implementation plan.
+
+| Requirement | Implementation evidence | Executable evidence | Evidence ceiling | Status |
+|---|---|---|---|---|
+| Source-grounded reuse and correct boundaries (sections 2 and 3) | WM-001 to WM-008 accepted in the tracker. One `agentic` package with `manager/src`. `Agentic.Manager.Client` is the only manager module that the TUI imports (PC13 `50ec050b`). `ext-pi` names its host and selects service mode only by profile (PE10 `91e85a43`). | The compiler-parsed import gate of `bash tui/ci/tui.sh` (`$R/PF/PF24/impl-r1/tui-ci.log`). `manager/ci/contract.sh` through `make -C doc check` (`$R/PG/PG21/impl-r1/doc-check.log`). `manager-client-check vectors` (`$R/PE/PE28/impl-r1/05a-client-vectors.log`). Every `tui-journey` checks the run log and the manager log and the consent chain of each start with its `FLOW-ASSERT` lines (`$R/PF/PF21/impl-r1/journey-pair.log`). | Deterministic native fixture | Met for function |
+| Mathematical meaning and unchanged workflow semantics (sections 3 and 10) | WM-004 model under `model/Agentic/Manager`. WM-040 library `bisim/manager/ManagerConformance`, `manager-oracle` and `manager-conformance-check` (PF9 to PF15, `7d57a9b0` to `5cda60da`). WM-022 `manager-vertical-check`. | `bisim/ci/manager.sh`: nine steps, 45 cases with no mismatch, and the controls `control-oracle`, `control-model` and `control-case` failed as required (`$R/PF/PF22/impl-r1`). The direct and managed comparison of answers, traces, bills, policies and lineage at WM-022 acceptance (`$I/vertical.d42c7UhQ`) and in the `vertical` step of PF22. | Theorem | Met for function. `bisim/ci/tier0.sh`, `tier1.sh` and the full default model build did not run (operator direction of 2026-09-29). The conformance of the authorization transitions is deferred to the security stage. |
+| Selection, missing inputs, readiness, capture, admission and concurrent lifecycle (section 4) | WM-008 and WM-011 to WM-016 accepted. WM-027 routes (C12 to C17, `004eef20` to `890dec08`). | Rows A01 to A08. The journey pair at N1 and N8 (`$R/PF/PF21/impl-r1/journey-pair.log`). `tui-inputs` and `tui-controls` (`$R/PC/PC34/impl-r1`). `capacity-admission` (`$R/PG/PG1/impl-r1/capacity-admission.log`). | Actual UI interaction | Met for function |
+| Exact preparation and approval and control ownership (sections 4 and 5) | WM-012, WM-014, WM-016, WM-019 and WM-020 accepted. The quarantine release of PC1 to PC3, PE2 to PE4 and PD4. | Rows A04 to A10 and A20. `manager-approval-check` (`$R/PF/PF21/impl-r1/approval-check-N8.log`). The controls `tui-consent-control` and `tui-flow-approve-fault` failed with their literal messages (`$R/PF/PF21/impl-r1`). `cross-client-lifecycle` shows that a client disconnect sends no control (`$R/PF/PF23/impl-r1/cross-client-lifecycle.log`). | Actual UI interaction | Partial. Containment of escaped descendants and Linux containment did not run (row A20). |
+| Durability, uncertain effects, restart, retention and restore (section 5) | WM-007, WM-009, WM-010 and WM-019 to WM-021 accepted. Offline `backup` and `restore` (PG8 `a1c0ed86`, PG9 `9cf218f7`) and the completion of a fenced restoration (PG11 `5c8f38de`). | Rows A05, A12 to A17, A19, A20 and A24. `failures-backup` (`$R/PG/PG11/impl-r1/failures-backup.log`). `manager-admission-check restart-native` (`$R/PG/PG11/impl-r1/admission-restart-native-N8.log`). `faults-io` (`$R/PG/PG1/impl-r1/faults-io.log`). | Deterministic native fixture | Partial. The crash matrix of every durable boundary did not run: the `admission_audit.py` audits are removed by the operator direction of 2026-09-29, and the per-route crash boundaries were dropped in Phase B part 2. The A16 and A17 matrices are deferred to the security stage. |
+| Complete REST resources, values, validation and errors (section 6) | WM-003 accepted. WM-023 to WM-028 in `Agentic.Manager.Application`, `Transport`, `Pages`, `Events`, `Routes` and the owners of each route. | `manager/ci/contract.sh` through `make -C doc check` (`$R/PG/PG21/impl-r1/doc-check.log`). The base mode with `CLIENT_CHECK` (`$R/PC/PC34/impl-r1/04c-service-base-client-N8.log`). The route modes of rows WM-025 to WM-027. The `/v1` diff is additive only (section [Accepted additive OpenAPI fields](#accepted-additive-openapi-fields)). | Deterministic native fixture | Met for function. WM-024 and WM-028 are open in the tracker. The hostile-input negatives are deferred to the security stage. |
+| Replay, snapshot consistency, duplicates, backpressure and reconnect (section 7) | WM-015 and WM-021 accepted. WM-025, WM-026 and WM-029. PG3 `afd44d78` separates the authorization revision from the reader wakeup. | Rows A14 to A16 and A19. `events-lifecycle` and `capacity-streams` (`$R/PG/PG3/impl-r2`). `client_native.py` (`$R/PE/PE28/impl-r1/05b-client-native-N8.log`). | Deterministic native fixture | Met for function. `capacity-streams` has no run of record (row WM-041). Revocation during a stream is deferred to the security stage. |
+| Remote authentication, authorization, TLS, browser and model boundaries and redaction (section 8) | WM-008 accepted. `Agentic.Manager.Credentials` and `Authorization` (WM-023), the HTTPS boundary (WM-024), the exact model consent of `ext-pi` (PE21 `69a7e2de`, PE22 `c8dca6a2`). | `credential-lifecycle` (`$R/PG/PG3/impl-r2/credential-lifecycle-N8.log`). `boundary` (`$R/B/B19/impl-r1/11d-service-boundary-N8.log`). `pi-host-model` and its control `pi-host-model-decline` (`$R/PE/PE28/impl-r1`). | Actual UI interaction | Partial. Authentication, scopes, credential rotation and revocation and exact consent are met for function. The CORS, Host, Origin and proxy negatives, the secret-marker scans, the redaction projections and the hostile input are deferred to the security stage. |
+| Verified outputs, history, lineage and exclusive export (sections 4 to 6 and 8) | WM-017 and WM-018 accepted. WM-025 and WM-027 routes for exports and lineage requests (C14 `768de34b`, C15 `a3a8720c`). | Rows A11 to A13. `mutations-exports` and `mutations-lineage` (`$R/PE/PE28/impl-r1`). `manager-artifact-check` and `manager-history-check` (`$R/PG/PG3/impl-r2/artifact-history-N8.log`, `$R/PG/PG4/impl-r1/history-check-N8.log`). `cross-client-lineage` (`$R/PF/PF23/impl-r1`). | Actual UI interaction | Met for function |
+| Thin native clients, coexistence, compatibility and rollback (section 9) | WM-029 to WM-039 and WM-043. | The client rows WM-029 to WM-038. The three `cross-client` modes (`$R/PF/PF23/impl-r1`). `rollback` (`$R/PG/PG17/impl-r1/rollback.log`). | Actual UI interaction | Partial. Every client is met for function on one machine. Cross-machine TLS did not run, because the governing goal limits validation to local macOS. No check runs Emacs 29.1. |
+| Operational evidence and supportable release (sections 10 and 11) | WM-039 to WM-044. `manager/OPERATIONS.md`, `manager/CAPACITY.md`, the flake package and this record. | `operations` with case 7 (`$R/PG/PG13/impl-r1/operations.log`). `package` (`$R/PG/PG16/impl-r1/package.log`). The capacity modes of row WM-041. `make -C doc check` (`$R/PG/PG21/impl-r1/doc-check.log`). | Package build | Partial. The exercise by another person is pending. The capacity runs of record, the gate of Phase G and the independent closure review have not run. Linux containment did not run. The security review is deferred to the security stage. |
+
+## Package matrix
+
+The accepted packages WM-001 to WM-022 keep the evidence of their acceptance.
+The tracker item of each one records the close date, and its unit under `$I`
+holds the review, the source and the first failures. Accepted packages were
+revalidated only where their owners changed, as the governing goal directs.
+
+| Requirement | Implementation evidence | Executable evidence | Evidence ceiling | Status |
+|---|---|---|---|---|
+| WM-001 Implementation baseline and verification environment | `flake.nix`, the direnv environment and the recorded baseline. `acat-wm-001-b3k7`. | The baseline gates of `$I/baseline.jyVC2U`. | Deterministic native fixture | Met (2026-09-10) |
+| WM-002 Package boundaries and dependency feasibility | One `agentic` package with `manager/src`, `agentic.cabal`. `acat-wm-002-9xwf`. | `manager/ci/dependencies.sh` and the regressions under `$I/dependencies`. | Deterministic native fixture | Met (2026-09-10) |
+| WM-003 Manager protocol and compatibility fixtures | `doc/api/openapi.yaml`, `test/fixtures/manager/`. `acat-wm-003-dji4`, unit `$I/protocol.vfAWuo`. | `manager/ci/contract.sh` through `make -C doc check` (`$R/PG/PG21/impl-r1/doc-check.log`). | Pure model test | Met (2026-09-11) |
+| WM-004 Abstract coordination model and laws | `model/Agentic/Manager`, `model/test/ManagerChecks.lean`. `acat-wm-004-yo05`, unit `$I/model.JttDpW`. | The model build and `model/ci/check-manager.py` at acceptance. `bisim/ci/manager.sh` step `lean` (`$R/PF/PF22/impl-r1/lean.log`). | Theorem | Met (2026-09-11) |
+| WM-005 Neutral frontend transport contract | `runtime/src/Agentic/Runtime/Frontend` through the Runtime facade. `acat-wm-005-g2i0`, unit `$I/frontend-contract.RMtvkb`. | `runtime-contract-test` (`$R/PE/PE28/impl-r1/04-runtime-contract-N8.log`). | Deterministic native fixture | Met (2026-09-11) |
+| WM-006 Observation and restoration contract | `Agentic.Runtime.Snapshot`, `Frontend` and `Catalogue`. `acat-wm-006-bdxu`, unit `$I/restoration.NRqKwa`. | `runtime-contract-test` (`$R/PE/PE28/impl-r1/04-runtime-contract-N8.log`). | Deterministic native fixture | Met (2026-09-11) |
+| WM-007 Durable private publication | `Agentic.Runtime.PrivateRoot`, `PrivateFile`. `acat-wm-007-lfcg`, unit `$I/durability.1upgl3zs`. | The publication regressions at acceptance. The SQLite directory-replacement experiment was withdrawn by the operator and is not verified. | Deterministic native fixture | Met (2026-09-12) |
+| WM-008 Trusted profiles and composition-root configuration | `Agentic.Manager.Profile`, `Configuration`, `Root`. `acat-wm-008-rr0q`, unit `$I/profiles.EgYE9JIT`. | `manager/ci/profiles.sh` and `configuration.sh` at acceptance. Offline `reload-profiles` of the reference configuration (`$R/PG/PG20/impl-r1/reference-reload.log`). | Deterministic native fixture | Met (2026-09-12) |
+| WM-009 Private coordination database and service lock | `Agentic.Manager.Store`, `Schema`, `Lease`. `acat-wm-009-kmzw`, unit `$I/state.0wnll6Qx`. | `manager-store-check` (`$R/PG/PG11/impl-r1/store-check.log`). | Deterministic native fixture | Met (2026-09-12) |
+| WM-010 Command receipts, revisions and idempotency | `Agentic.Manager.Commands`. `acat-wm-010-hbip`, unit `$I/commands.i0YEDgvB`. | `manager-command-check` (`$R/PG/PG3/impl-r2/command-check-N8.log`). | Deterministic native fixture | Met (2026-09-12) |
+| WM-011 Drafts, immutable captures and readiness | `Agentic.Manager.Drafts`, accepted commit `7fed36ce`. `acat-wm-011-fqny`, unit `$I/drafts.Ex2O7B5k`. | `manager-draft-check` (`$R/PG/PG3/impl-r2/draft-check-N8.log`). | Deterministic native fixture | Met (2026-09-13) |
+| WM-012 Manager-owned frontend worker adapter | `Agentic.Manager.Worker`, accepted commit `3a8340ee`. `acat-wm-012-ma5g`, unit `$I/workers.CM5pvfEh`. | `manager-worker-check` (`$R/PE/PE28/impl-r1/06g-worker-N8.log`). | Deterministic native fixture | Met (2026-09-13) |
+| WM-013 Admission and resource reservations | `Agentic.Manager.Admission`. `acat-wm-013-8oah`, unit `$I/admission.Y7LCRq4c`. | `manager-admission-check` (`$R/PG/PG3/impl-r2/admission-check-N8.log`). | Deterministic native fixture | Met (2026-09-13) |
+| WM-014 Exact review, approval and start intent | `Agentic.Manager.Approval`. `acat-wm-014-5sv9`, unit `$I/approval.YHFzgIkt`. | `manager-approval-check` (`$R/PF/PF21/impl-r1/approval-check-N8.log`). | Deterministic native fixture | Met (2026-09-14) |
+| WM-015 Validated runtime ingestion and durable projections | `Agentic.Manager.State`, `Observation`, accepted commit `546d61b`. `acat-wm-015-wzl9`, unit `$I/ingestion.zid51qsu`. PG3 continues a stored projection from its next sequence. | The ingestion check (`$R/B/B19/impl-r1/09a-ingestion-N8.log`). `capacity-streams` (`$R/PG/PG3/impl-r2/capacity-streams.log`). | Deterministic native fixture | Met (2026-09-15) |
+| WM-016 Decisions and correlated runtime controls | The control owners that `manager/CONTROLS.md` names, accepted commit `430b411a`. `acat-wm-016-bsw2`, unit `$I/controls.qzldrova`. | `test/control_probe.py` and `controls` (`$R/PE/PE28/impl-r1/07-control-probe-N8.log`, `0807-controls-N8.log`). | Deterministic native fixture | Met (2026-09-19) |
+| WM-017 Outputs, verified artifacts and exclusive export | `Agentic.Manager.Artifacts`, accepted commit `5ef7612e`. `acat-wm-017-1hda`, unit `$I/artifacts.Rdk65Wyh`. | `manager-artifact-check` (`$R/PG/PG3/impl-r2/artifact-history-N8.log`). | Deterministic native fixture | Met (2026-09-19) |
+| WM-018 History, lineage requests and legacy observation | `Agentic.Manager.History`, `Lineage`, accepted commit `4ad20a43`. `acat-wm-018-9huh`, unit `$I/history.t5kx5b6A`. | `manager-history-check` (`$R/PG/PG4/impl-r1/history-check-N8.log`). | Deterministic native fixture | Met (2026-09-19) |
+| WM-019 Shutdown, containment and storage-failure supervision | Admission, Store and Worker owners, accepted commit `489a1a4`. `acat-wm-019-9eye`, unit `$I/shutdown.327OnbQj`. | `failures-manager` (`$R/PG/PG7/impl-r1/failures-manager.log`). | Deterministic native fixture | Met (2026-09-20) under the operator exclusion of OS containment |
+| WM-020 Restart reconciliation and fenced backup restoration | Store and Admission owners, accepted commit `626981a7`. `acat-wm-020-5x61`, unit `$I/restart.gQ3o7Iag`. | `manager-admission-check restart-native` (`$R/PG/PG11/impl-r1/admission-restart-native-N8.log`). | Deterministic native fixture | Met (2026-09-20) |
+| WM-021 Quotas, retention and bounded collection | Store owners at schema 11, accepted commit `248e772e`. `acat-wm-021-ez37`, unit `$I/quotas.N3qrqDWt`. | The quota lane of `manager-store-check` (`$R/PG/PG3/impl-r2/quotas-after-N8.log`). | Deterministic native fixture | Met (2026-09-21) |
+| WM-022 Complete non-network vertical slice | `manager-vertical-check` and `manager/ci/vertical.sh`, base `c6698af4`. `acat-wm-022-j655`, unit `$I/vertical.d42c7UhQ`. | The owning gate at N1 and N8 on 2026-09-21. The `vertical` step of `bisim/ci/manager.sh` (`$R/PF/PF22/impl-r1/vertical.log`). | Deterministic native fixture | Met (2026-09-22), local only |
+| WM-023 Local credential administration and authorization | `Agentic.Manager.Credentials`, `Authorization`, `LocalAdmin`. B8 `776be8e7`. | `credential-lifecycle` (`$R/PG/PG3/impl-r2/credential-lifecycle-N8.log`). `credential_cli.py` (`$R/PC/PC34/impl-r1/05b-command-main-N8.log`). | Deterministic native fixture | Met (tracker closed 2026-09-30). A scope change during a retained response is deferred to the security stage. |
+| WM-024 Protected HTTP boundary | `Agentic.Manager.Transport`, `Application`. B9 `8c4140b7`. | `boundary` (`$R/B/B19/impl-r1/11d-service-boundary-N8.log`). | Deterministic native fixture | Met for function. The remaining negatives are deferred to the security stage. The tracker item is open. |
+| WM-025 Catalogue, history, snapshot and artifact queries | `Agentic.Manager.Pages`, `History`, `Overview`. B11 to B13 (`bea2d57b`, `d652b37f`, `87b255b9`), C5 to C7, PC5, PC6, PG4 `76da0f5c`. | `pages` and `capacity-inputs` (`$R/PG/PG4/impl-r1/pages-N8.log`, `capacity-inputs-after.log`, 43 keys inside their ceilings). | Deterministic native fixture | Met for function (tracker closed 2026-10-01) |
+| WM-026 SSE and bounded event polling | `Agentic.Manager.Events`, `Routes`. B14 `ddf3ed93`, C8 to C11 (`73a47ac6` to `e4b9e5c9`), PF19 `9e329971`, PG3 `afd44d78`. | `events-lifecycle`, `routes` and `capacity-streams` (`$R/PG/PG3/impl-r2`, 14 keys inside their ceilings). | Deterministic native fixture | Met for function (tracker closed 2026-10-01) |
+| WM-027 Request, approval, control, export and lineage routes | C12 to C17 (`004eef20` to `890dec08`), C20 `e7810632`, C21 `04ef9db0`. | `mutations-captures`, `mutations-discard`, `mutations-exports`, `mutations-lineage`, `controls` and `controls-routing` (`$R/PE/PE28/impl-r1`). `live-redirect` and `person-answers` (`$R/PC/PC34/impl-r1`). | Deterministic native fixture | Met for function (tracker closed 2026-10-01) |
+| WM-028 HTTP, security and failure-boundary gate | C23 to C25 (`76e65633`, `de22ba49`, `9f1ae979`), PE1 to PE4, PD4 `fe8053ff`, PF20 `537f1795`. | `failures-worker`, `failures-manager`, `failures-launched`, `storage` and `faults-io` (`$R/PG/PG1/impl-r1`). | Deterministic native fixture | Partial. The functional failure endings are met. A database-full case did not run, and a file-size limit stands for it. The hostile-input and transport gate and the authority fencing of an older backup as a security matrix are deferred to the security stage. |
+| WM-029 Shared client contract and Haskell client facade | `Agentic.Manager.Client`, `Client/Events`. PC9 to PC12 (`19a4a001` to `e9ac2ac1`). | `manager-client-check vectors` with 271 cases and `client_native.py` (`$R/PE/PE28/impl-r1/05a-client-vectors.log`, `05b-client-native-N8.log`). | Pure model test | Met for function (tracker closed 2026-10-01) |
+| WM-030 Emacs HTTP, credential and live-delivery support | `emacs/wf-manager.el` on `emacs-native`. PD8 to PD18 (`4ceff269` to `682439d1`, with `0b5c3e9` to `5de5f83`). | `ci/emacs.sh`, 97 of 97 (`$R/PF/PF23/impl-r1/emacs-gate.log`). `emacs-client` (`$R/PD/PD29/impl-r1/emacs-client.log`). | Deterministic native fixture | Met for function. No check runs the declared minimum Emacs 29.1. |
+| WM-031 Emacs lifecycle presentation | `emacs/wf-service.el`. PD19 to PD24 (`db9b9c75` to `a6f54044`, with `70fecf9` to `59f27ed`). | `emacs-service` (`$R/PF/PF23/impl-r1/emacs-service.log`). | Actual UI interaction | Met for function |
+| WM-032 Real Emacs service-mode acceptance | PD25 to PD27 (`75ce6752` to `832ea3d3`, with `2477a47` to `6745f4b`), PF1 `214f3ff0` with `f9be31a`, PF2 `2d02134f` with `281c5d6`. | `emacs-service-lifecycle`, `emacs-service-controls` and the control `emacs-service-broken-answer`, and the local cases of `ci/emacs-ui.py` at three sizes (`$R/PF/PF23/impl-r1`). | Actual UI interaction | Met for function |
+| WM-033 TUI explicit manager transport backend | `Agentic.Tui.Service`, `ServiceLane`, `tui/AGENTS.md`. PC13 `50ec050b`, PC14 `b405854a`. | `tui-endpoints` (`$R/PE/PE28/impl-r1/1002-tui-endpoints-N8.log`). The import gate of `bash tui/ci/tui.sh` (`$R/PF/PF24/impl-r1/tui-ci.log`). | Actual UI interaction | Met for function |
+| WM-034 TUI setup, run views and controls | `Tui.App`, `Tui.Service`, `Tui.Presentation`. PC15 to PC30 (`7d00c5eb` to `d3a2cc66`). | `tui-inputs`, `tui-controls`, `tui-redirect` and `tui-decisions` (`$R/PC/PC34/impl-r1`). `tui-overview` and `tui-history` (`$R/PE/PE28/impl-r1`). The journey pair (`$R/PF/PF21/impl-r1/journey-pair.log`). | Actual UI interaction | Met for function |
+| WM-035 TUI service-mode rendering and PTY acceptance | PC31 to PC33 (`b393be5e`, `540d3ee2`, `b698073e`), PE6 `f71a4a05`, PE7 `c8ee3200`. | `tui-sizes` and its control `tui-sizes-broken-draft`, and the control `tui-failures-broken-stale` (`$R/PE/PE28/impl-r1`). `tui-failures` (`$R/PG/PG1/impl-r1/tui-failures.log`). | Actual UI interaction | Met for function. The terminal-escape suites are deferred to the security stage. |
+| WM-036 Pi manager session and transport adapter | `ext-pi` client and `ManagerSession`. PE10 to PE16 (`91e85a43` to `3421036c`). | `npm run check` and `npm test`, 220 passed (`$R/PF/PF23/impl-r1/ext-pi-test.log`). `pi-client` (`$R/PD/PD29/impl-r1/pi-client.log`). | Deterministic native fixture | Met for function |
+| WM-037 Pi native UI and tool-mediated controls | PE17 to PE22 (`ee40d84d` to `c8dca6a2`). | `pi-client-controls` (`$R/PD/PD29/impl-r1/pi-client-controls.log`). `pi-host` (`$R/PF/PF23/impl-r1/pi-host.log`). | Actual UI interaction | Met for function |
+| WM-038 Pi real-host service-mode acceptance | PE23 to PE26 (`95b8714d` to `3a35f60d`). | `pi-host-smoke`, `pi-host-model` and the controls `pi-host-broken-answer` and `pi-host-model-decline` (`$R/PE/PE28/impl-r1`). `pi-host` and `npm run test:integration`, 9 of 9 (`$R/PF/PF23/impl-r1`). | Actual UI interaction | Met for function |
+| WM-039 Cross-client and cross-machine operation | PF4 to PF8 (`2ccc38fd` to `2a89ef55`, with `360adc1`, `6656266`, `613d70e`, `4f0f5a4`, `cc56b94`), PF23 `870c7b8b`. | `cross-client`, `cross-client-lifecycle`, `cross-client-lineage` and the control `cross-client-broken-answer` (`$R/PF/PF23/impl-r1`). | Actual UI interaction | Met for function on one machine. Cross-machine operation did not run, because the governing goal limits validation to local macOS. The A16 and A17 matrices are deferred to the security stage. |
+| WM-040 Formal-to-implementation conformance bridge | PF9 to PF15 (`7d57a9b0` to `5cda60da`). | `bisim/ci/manager.sh` with its three controls (`$R/PF/PF22/impl-r1`). | Theorem | Met for function. The authorization transitions are deferred to the security stage. |
+| WM-041 Capacity, security and fault-injection evidence | `manager/CAPACITY.md`, `manager/test/capacity-ceilings.json`. PF16 to PF20 (`2808c7ac` to `537f1795`), PF24 `88d999b7`, PG1 `86c1e9e9`, PG2 `26e84d8d`, PG3 `afd44d78`, PG4 `76da0f5c`, PG10 `c550335c`. | `capacity-streams` (`$R/PG/PG3/impl-r2`), `capacity-inputs` (`$R/PG/PG4/impl-r1`), `capacity-admission` and `faults-io` (`$R/PG/PG1/impl-r1`), `failures-backup` (`$R/PG/PG11/impl-r1`). Every ceiling key passed in its latest run. | Deterministic native fixture | Partial. No run is a run of record under the host rule of PG1, because the PF17 manager, PID 61004, ran on the host. Root replacement and the security part are deferred to the security stage. Linux containment did not run. |
+| WM-042 Operator controls, observability and recovery procedures | `Agentic.Manager.LocalAdmin`, `Quarantine`, `Store`, `manager/OPERATIONS.md`. PG5 to PG13 (`b4b8a30d` to `eca320c9`). | `operations` with case 7, which runs the procedures of the runbook in order (`$R/PG/PG13/impl-r1/operations.log`). `failures-backup` (`$R/PG/PG11/impl-r1/failures-backup.log`). | Deterministic native fixture | Pending human operator exercise |
+| WM-043 Reproducible packages and rollback | `flake.nix` outputs `packages.<system>.agentic-run` and `default`. PG14 to PG17 (`5710785a`, `8fcb4999`, `ab186c91`, `c901a10f`). | `nix build .#agentic-run` and `test/cabal.sh sdist` (`$R/PG/PG14/impl-r1`). `package` (`$R/PG/PG16/impl-r1/package.log`). `rollback` (`$R/PG/PG17/impl-r1/rollback.log`). | Package build | Met for function. Only `aarch64-darwin` was built. |
+| WM-044 Documentation, independent review and release handoff | `doc/agent-cat.texi`, `doc/api/README.md`, the client and owner documents and this record. PG19 `2c56102d`, PG20 `5951ad37`, PG21 (this record). | `make -C doc check` (`$R/PG/PG21/impl-r1/doc-check.log`). | Pure model test | Partial. The gate of Phase G and the independent closure review have not run. The security review is deferred to the security stage. |
+
+## Gate matrix
+
+| Requirement | Implementation evidence | Executable evidence | Evidence ceiling | Status |
+|---|---|---|---|---|
+| G0 Implementation baseline | WM-001 to WM-007. `acat-g0-r3r7`. | The baseline acceptance under the storage amendment. | Deterministic native fixture | Met (2026-09-12) |
+| G1 Isolated manager core | WM-008 to WM-022. `acat-g1-h1wc`. | The real-worker lifecycle of WM-022 at N1 and N8 (`$I/vertical.d42c7UhQ`). | Deterministic native fixture | Met (2026-09-22) under the local-only amendment |
+| G2 Authenticated observation | WM-023 to WM-026. `acat-g2-la77`. | The rows WM-023 to WM-026. | Deterministic native fixture | Partial. Observation works with authentication and revocable credentials. The observation-only witness with mutations unavailable and the negative matrices are deferred to the security stage. |
+| G3 Remote mutation candidate | G2, WM-027, WM-028, WM-040 and WM-041. `acat-g3-v1iz`. | The rows of those packages. | Theorem | Partial. The hostile-input, replay and containment gates are deferred to the security stage. WM-028 and WM-041 are partial. Test exposure is not deployment. |
+| G4 Three-client acceptance | WM-029 to WM-039. `acat-g4-pech`. | The client rows and the three `cross-client` modes (`$R/PF/PF23/impl-r1`). Local modes: `ci/emacs-ui.py` local cases (`$R/PF/PF23/impl-r1/emacs-ui.log`) and `agentic-run --tui --local` in `rollback` (`$R/PG/PG17/impl-r1/rollback.log`). | Actual UI interaction | Partial. Met for function on one machine. Cross-machine acceptance did not run, because the governing goal limits validation to local macOS. |
+| G5 Release candidate | G3, G4 and WM-041 to WM-044. `acat-g5-u0w2`. | The rows of WM-041 to WM-044 and the identities below. | Package build | Partial. The gate of Phase G, the exercise by another person and the independent closure review have not run. The security review is deferred to the security stage. Production activation is not authorized. |
+
+## Acceptance scenario matrix
+
+| Requirement | Implementation evidence | Executable evidence | Evidence ceiling | Status |
+|---|---|---|---|---|
+| A01 Missing inputs and readiness | WM-011 Drafts. WM-027 captures. | `manager-draft-check` (`$R/PG/PG3/impl-r2/draft-check-N8.log`). `tui-inputs` (`$R/PC/PC34/impl-r1/09b-tui-inputs-N8.log`). `emacs-service` and `pi-host` (`$R/PF/PF23/impl-r1`). | Actual UI interaction | Met for function |
+| A02 Exact captured bytes | WM-005 codecs, WM-011 captures, C12 `004eef20`. | Every `tui-journey` submits the exact Unicode input (`$R/PF/PF21/impl-r1/journey-pair.log`). `mutations-captures` (`$R/PE/PE28/impl-r1/0803-mutations-captures-N8.log`). The capture workload of `capacity-inputs` (`$R/PG/PG4/impl-r1`). | Actual UI interaction | Partial. The records name no check that changes the original file after capture or uses the server-owned large-file path. |
+| A03 Competing reservations | WM-013 Admission. | `capacity-admission`, with the `reservations.r1` and `reservations.r16` workloads (`$R/PG/PG1/impl-r1/capacity-admission.log`). `manager-admission-check` (`$R/PG/PG3/impl-r2/admission-check-N8.log`). | Deterministic native fixture | Met for function |
+| A04 Changed or expired preparation | WM-014 Approval, WM-020 restart. | `manager-approval-check` (`$R/PF/PF21/impl-r1/approval-check-N8.log`). The control `tui-consent-control` (`$R/PF/PF21/impl-r1`). | Deterministic native fixture | Met for function |
+| A05 Lost reply around start intent | WM-010 Commands, WM-014, WM-020. C24 `de22ba49`. | `manager-command-check` (`$R/PG/PG3/impl-r2/command-check-N8.log`). `failures-manager` and `failures-launched` (`$R/PG/PG1/impl-r1`). | Deterministic native fixture | Partial. The per-route crash boundaries were dropped in Phase B part 2, and the `admission_audit.py` audits are removed by the operator direction of 2026-09-29. |
+| A06 Concurrent runs with decisions | WM-015, WM-016. PC24 `525c4cfa`. | `mixed` (`$R/PE/PE28/impl-r1/0801-mixed-N8.log`). `tui-decisions` (`$R/PC/PC34/impl-r1/09e-tui-decisions-N8.log`). | Actual UI interaction | Met for function |
+| A07 Answer race across clients | WM-016 FIFO reservation. PF5 `d889f241`. | Leg 2 of `cross-client`: 412 `stale-revision` for the later send and a concurrent HTTP answer race (`$R/PF/PF23/impl-r1/cross-client.log`). | Actual UI interaction | Met for function. Two truly simultaneous UI answers were dropped by the Phase F plan, and each race outcome was seen once at N8. |
+| A08 Retry, fail-over, abandon, redirect, steer and cancel | WM-016, C16 to C20, PC22, PC23. | `controls`, `controls-routing` (`$R/PE/PE28/impl-r1`). `live-redirect` and `tui-controls` with its control `tui-controls-broken-cancel` (`$R/PC/PC34/impl-r1`). `emacs-service-controls` (`$R/PF/PF23/impl-r1`). `pi-client-controls` (`$R/PD/PD29/impl-r1`). | Actual UI interaction | Met for function |
+| A09 Network clients closed during work | WM-012 Worker, WM-026. PC30 `d3a2cc66`. | `cross-client-lifecycle` (`$R/PF/PF23/impl-r1/cross-client-lifecycle.log`). `pi-host` quits with the run still owned (`$R/PF/PF23/impl-r1/pi-host.log`). | Actual UI interaction | Met for function |
+| A10 Invalid envelopes | WM-006, WM-015 ingestion. PF12 to PF14. | The `refusals` lane of `manager-conformance-check` (`$R/PF/PF22/impl-r1/refusals.log`). The ingestion check (`$R/B/B19/impl-r1/09a-ingestion-N8.log`). | Deterministic native fixture | Met for function. The refusals that need a live worker were dropped by the Phase F plan. |
+| A11 Missing or corrupt result | WM-017 Artifacts. | `manager-artifact-check` (`$R/PG/PG3/impl-r2/artifact-history-N8.log`). The WM-017 acceptance of its A11 part (`$I/artifacts.Rdk65Wyh`). | Deterministic native fixture | Met for function |
+| A12 Exclusive export under races | WM-007, WM-017. C14 `768de34b`. | `mutations-exports` (`$R/PE/PE28/impl-r1/0805-mutations-exports-N8.log`). The WM-017 acceptance of its A12 part. | Deterministic native fixture | Partial. Export exclusivity is met for function. Root replacement under a running manager is deferred to the security stage. |
+| A13 Restart, resume and fork of parents | WM-018 History and Lineage. C15 `a3a8720c`, PC28 `2bc437ef`. | `mutations-lineage` (`$R/PE/PE28/impl-r1/0806-mutations-lineage-N8.log`). `cross-client-lineage` (`$R/PF/PF23/impl-r1`). `manager-history-check` (`$R/PG/PG4/impl-r1/history-check-N8.log`). | Actual UI interaction | Met for function |
+| A14 SSE at a snapshot boundary | WM-025, WM-026. B14, PC17 `174d7f5b`. | `events-lifecycle` and `capacity-streams` (`$R/PG/PG3/impl-r2`). `client_native.py` stream cases (`$R/PE/PE28/impl-r1/05b-client-native-N8.log`). | Deterministic native fixture | Met for function |
+| A15 Delayed responses and endpoint switch | WM-029 refresh coordinator, WM-033, WM-036. PE5 `e8ca40b0`, PD1 `86556364`. | `tui-failures` with the delayed-response endpoint switch (`$R/PG/PG1/impl-r1/tui-failures.log`). `manager-client-check vectors` (`$R/PE/PE28/impl-r1/05a-client-vectors.log`). | Actual UI interaction | Met for function |
+| A16 Revocation and rotation during operations | WM-023. PF7 `da32a966`. | The rotation with cutoff and the single revocation of `cross-client-lifecycle` (`$R/PF/PF23/impl-r1`) and `credential-lifecycle` (`$R/PG/PG3/impl-r2`). | Actual UI interaction | Deferred to the security stage. Only the functional rotation and revocation have evidence. |
+| A17 Restore of an older backup | WM-020, PG9 `9cf218f7`, PG11 `5c8f38de`. A restoration rotates the authority epoch and the stream and revokes every restored credential. | `failures-backup` case 3 (`$R/PG/PG11/impl-r1/failures-backup.log`). `operations` (`$R/PG/PG13/impl-r1/operations.log`). | Deterministic native fixture | Partial. The functional fencing is met. The negative matrix of old credentials, cursors and authority keys is deferred to the security stage. |
+| A18 CORS, Host, Origin and proxy headers | WM-024 Transport. B9 `8c4140b7`. | The frozen refusal codes of `boundary` (`$R/B/B19/impl-r1/11d-service-boundary-N8.log`). | Deterministic native fixture | Deferred to the security stage |
+| A19 Saturation and a full disk | WM-019, WM-021, PF17 to PF20. | `capacity-admission`, `faults-io` and `storage` (`$R/PG/PG1/impl-r1`). `capacity-inputs` (`$R/PG/PG4/impl-r1`). `capacity-streams` (`$R/PG/PG3/impl-r2`). | Deterministic native fixture | Partial. A file-size limit stands for a full disk, and no check produces a true `ENOSPC`. After the first write failure the Store refuses every request, the safety path included, until a restart, as `manager/STORAGE.md` states. |
+| A20 Death of a manager, worker or group leader | WM-019, WM-020. C23 `76e65633`, C24 `de22ba49`, PE2 `06c0c0db`. | `failures-worker`, `failures-manager` and `failures-launched` (`$R/PG/PG1/impl-r1`). | Deterministic native fixture | Partial. Worker and manager death are met for function on macOS. Escaped descendants and Linux did not run: OS containment is excluded by the scope correction of 2026-09-20, and validation is local macOS only. |
+| A21 Injected secrets and escapes in failure paths | WM-008, WM-017, WM-023. | The WM-017 acceptance of its A21 part (`$I/artifacts.Rdk65Wyh`). | Deterministic native fixture | Deferred to the security stage |
+| A22 Keyboard interaction at three sizes | WM-032, WM-035, WM-038. | `tui-sizes` and `tui-sizes-broken-draft` (`$R/PE/PE28/impl-r1`). `emacs-service-lifecycle` at 40x12, 80x24 and 140x36 (`$R/PF/PF23/impl-r1`). `pi-host` (`$R/PF/PF23/impl-r1/pi-host.log`). | Actual UI interaction | Met for function |
+| A23 Three clients across a machine boundary | WM-039. | The single-machine witness of the three `cross-client` modes (`$R/PF/PF23/impl-r1`). | Actual UI interaction | Not run. The governing goal limits validation to local macOS, and no second machine took part. |
+| A24 Upgrade and rollback | WM-020, WM-042, WM-043. PG16 `ab186c91`, PG17 `c901a10f`. | `package` with the schema 1 to 11 roots and the refused schema 13 root (`$R/PG/PG16/impl-r1/package.log`). `rollback`, which keeps the file stats of the manager root unchanged through the local run (`$R/PG/PG17/impl-r1/rollback.log`). | Package build | Met for function |
 
 ## Package identities
 
@@ -195,3 +365,119 @@ with one receipt each. The local modes of the Emacs client and of the Pi
 extension are covered by their existing local suites, `ci/emacs.sh` of
 agent-workflows-emacs-native and `npm test` and `npm run test:integration` of
 `ext-pi`, which the gate runs. This mode does not run them.
+
+## Source identities
+
+Each packaging subtask ran on an uncommitted working copy, and the Integrator
+then committed it. The table gives the base of each run and the commit that
+holds its change.
+
+| Subtask | Base revision of the run | Commit of the change | Content |
+|---|---|---|---|
+| PG14 | `eca320c9ef1ce6838527acfcf051f5b56e73f910` | `5710785a3de642c166929c3dff7204a76af62fa0` | The flake package and the source distribution. |
+| PG15 | `5710785a3de642c166929c3dff7204a76af62fa0` | `8fcb49991c9b49ac0095275572f49dcf81818fc0` | The `package` mode. |
+| PG16 | `8fcb49991c9b49ac0095275572f49dcf81818fc0` | `ab186c91f4691ac826504c57509b05f997e57372` | The schema fixtures and the upgrade and refusal step of `package`. |
+| PG17 | `ab186c91f4691ac826504c57509b05f997e57372` | `c901a10f95a33ebece0a3a212af71fb12417931b` | The `rollback` mode. |
+
+No file of the filtered source changed between `5710785a` and `5951ad37`:
+the commits in that range change no `.hs`, `.c` or `.h` file under the
+source directories of the package, and no Cabal, Nix or flake file. The
+derivation path of [Package identities](#package-identities) was not
+evaluated again at `5951ad37`.
+
+The Emacs client of the checks is commit
+`6e8eac0bc0fc9a235f9eab66bfec0f3f9cda1c15` of the `emacs-native` branch of
+agent-workflows. PG20 changed only its README, for a local commit by the
+Integrator. No commit of that branch is pushed.
+
+## Accepted additive OpenAPI fields
+
+Version 1 of the `/v1` contract is frozen, and every change since commit
+`5e8bbf9f` adds paths, schemas or optional properties only. The section
+[Accepted additive fields](api/README.md#accepted-additive-fields) of the API
+README is the authoritative list.
+
+| Since | Addition |
+|---|---|
+| `88d999b7` (PG12 `3bf6e8cb`) | The optional members of the `status` result of `LocalAdminResponse`: `live`, `ready`, `queuedRequests`, `oldestQueuedAgeSeconds`, `reservations`, `ownedWorkers`, `lostRuns`, `unresolvedCommands` and `serviceFault`. |
+| `5e8bbf9f` (C9 to C11, C15, C21) | The paths `GET /runs/{id}/routes` and `GET /routes`. The schemas `RouteCursor`, `RouteRecord`, `RouteBatch`, `ManagerRouteCursor`, `ManagerRouteRecord`, `ManagerRouteBatch`, `ReviewLineage` and `ReviewEdit`. The optional properties `Review.lineage` and `PublicPolicy.personAnswers`. |
+
+`Capabilities` keeps its bytes, and `DataBroker` keeps its nine operations
+(`$R/PF/PF22/impl-r1/broker-check.log`). The diff of `doc/api/openapi.yaml`
+for PG12 is `$R/PG/PG12/impl-r1/openapi-diff.log`.
+
+## Tested platform
+
+| Component | Version |
+|---|---|
+| Operating system | macOS 27.0 on arm64, Nix system `aarch64-darwin`. It is the only tested platform. |
+| Compiler and build tool | GHC 9.10.3 and cabal-install 3.16.1.0 from the direnv environment of the worktree. |
+| TLS library | `crypton-x509-validation` 1.9.1 with the subject alternative name patch of `nix/`. |
+| Nix | Nix 2.34.8 (Determinate Nix 3.21.7). |
+| Lean | The toolchains that `model/lean-toolchain` and `bisim/lean-toolchain` pin, built locally under the operator decision of 2026-10-02 for WM-040 only. |
+| Emacs | GNU Emacs 30.2 from the direnv environment of the Emacs worktree. |
+| Pi host | The Pi fork at `~/src/fork/pi`, commit `7857926ee`, with the linked `@earendil-works` packages at 0.99.1, Node 22.23.3, TypeScript 5.9.3 and vitest 4.1.9. |
+
+The [version and compatibility matrix](api/README.md#version-and-compatibility-matrix)
+of the API README gives the version domains that the manager accepts.
+
+## Conditional and unavailable checks
+
+These checks run only when their condition holds:
+
+- `package` needs `PACKAGE_RUNNER` and `SCHEMA_FIXTURES`, and `rollback` needs
+  `PACKAGE_RUNNER`. Each mode stops with a fixed message when its variable is
+  unset (`$R/PG/PG15/impl-r1/package-unset-control.log`,
+  `$R/PG/PG16/impl-r1/control-unset.log`).
+- The Emacs modes need `EMACS`, `WF_EMACS_DIR` and, for the `emacs-service`
+  modes, `WF_EMACS_UI`, with the matching pair of commits that
+  `doc/workflow-manager-handoff.md` lists.
+- The `ext-pi` checks need `ext-pi/node_modules` linked to the built Pi fork,
+  and `npm run test:integration` needs `AGENT_CAT_E2E_RUNNER`. The live-gated
+  tests of `npm test` are skipped without a live provider.
+- The capacity modes give a run of record only under the host rule of
+  `manager/CAPACITY.md`, which PG1 added.
+- Lean and oracle builds run only under the operator decision of 2026-10-02,
+  one at a time and never beside a cabal build.
+
+These checks did not run, each for the reason stated:
+
+- Linux builds, Linux tests and Linux containment: the governing goal limits
+  validation to local macOS.
+- Cross-machine operation (A23 and the cross-machine part of WM-039 and G4):
+  no second machine took part.
+- The exercise of `manager/OPERATIONS.md` by another person (WM-042): it is
+  pending. Case 7 of `operations` is an automated exercise and does not stand
+  for it.
+- The capacity runs of record of `capacity-streams` and `capacity-inputs`
+  (`acat-n50o`, `acat-jkas`): the PF17 manager, PID 61004, ran on the host
+  during the runs of PG3 and PG4.
+- The gate of Phase G and the independent closure review of G5: they follow
+  this record.
+- `cli/ci/policies.sh`, `manager/ci/approval.sh`, `manager/ci/controls.sh`,
+  the `admission_audit.py` mutation audits, `bisim/ci/tier0.sh`,
+  `bisim/ci/tier1.sh`, mutant suites, `-fforce-recomp` builds and stability
+  samples: the operator direction of 2026-09-29 removes them from routine
+  validation.
+- `engine/acp/ci/route-live.sh`: it uses a paid provider.
+- The Emacs 29.1 minimum-version check: no Emacs 29.1 is available locally.
+- `npm ci` in `ext-pi`: the stale `@earendil-works` entries of
+  `ext-pi/package-lock.json` do not support it, and their rewrite (PG18)
+  waits for operator authorization.
+- A true `ENOSPC`, a Store that the quick check reports `corrupt`, root
+  replacement under a running manager and a proxy on another host: no mode
+  produces them, and root replacement is deferred to the security stage.
+- A fixture that truncates a GET body and confirms that each client reads
+  again (`acat-gbh8`), and the measured worst case of a POST route
+  (`acat-pd3-fess-followup-uo4y`): the rules come from the source.
+- Every item of the security stage that section 8 of the remaining-scope
+  report and the handoff list: the operator direction of 2026-09-30 defers
+  them.
+
+## Production activation
+
+Production activation is not authorized. No check of this record deployed
+the manager, exposed it beyond the local host, used a paid provider or
+changed a live client or infrastructure configuration. Deployment and
+production activation remain separate explicit operator actions, and the
+security stage precedes them.

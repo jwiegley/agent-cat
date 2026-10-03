@@ -11,8 +11,8 @@ reconciliation, and the functional part of G5. The run kept the operator
 directions of 2026-09-29 for fast validation and of 2026-09-30 for
 functionality first, and the operator decisions of 2026-10-01 for the
 Emacs client and of 2026-10-02 for the Lean builds of WM-040 and the
-`ext-pi` pins. The Phase G commits are `86c1e9e9` to `2c56102d` and the
-PG20 change that follows them. `origin/workflow-manager-checkpoint-20260923`
+`ext-pi` pins. The Phase G commits are `86c1e9e9` to `5951ad37` and the
+PG21 change that follows them. `origin/workflow-manager-checkpoint-20260923`
 reads `1bb9dba4`, so no Phase G commit is pushed. PG20 changes the README
 of the `emacs-native` branch of agent-workflows in
 `~/src/agent-workflows-emacs-native` with documentation only, for the
@@ -47,7 +47,8 @@ directory.
 | PG17 | `c901a10f` | The `rollback` mode drains, cancels, shuts down and backs up, rolls back to `agentic-run --tui --local` with the manager history read only, and rolls forward with the queued request served once. |
 | PG18 | None | Not applied. It waits for the operator authorization in "Authorizations" below. |
 | PG19 | `2c56102d` | The manual section "Workflow manager service", the version and compatibility matrix, the truncated-GET rule and the SSE 429 rule of `doc/api/README.md`. |
-| PG20 | This change | The client and owner documents. `tui/README.md` and `doc/tui-design.md` state the service-mode behavior during a drain, a shutdown and a restoration, and the SSE 429 rule. `ext-pi/README.md` states the stale lock entries and that `npm ci` is not supported. The Emacs README lists the service-mode limits that stay open and the 429 rule. `manager/CAPACITY.md` and `manager/STORAGE.md` state that a disk write failure stops the Store until a restart, and `manager/STORAGE.md` states the bound of a POST route. `runtime/BROKER.md` and `manager/CONTROLS.md` state the order of a redirect that arrives after the attempt returned its answer. `manager/README.md` states the client targets, Emacs 30.2 and the Pi fork 0.99.1. The reference pair `doc/examples/manager-serve.json` and `doc/examples/manager-offline.json`, which `manager/OPERATIONS.md` links, passes offline `reload-profiles` validation with private fixture paths. |
+| PG20 | `5951ad37` | The client and owner documents. `tui/README.md` and `doc/tui-design.md` state the service-mode behavior during a drain, a shutdown and a restoration, and the SSE 429 rule. `ext-pi/README.md` states the stale lock entries and that `npm ci` is not supported. The Emacs README lists the service-mode limits that stay open and the 429 rule. `manager/CAPACITY.md` and `manager/STORAGE.md` state that a disk write failure stops the Store until a restart, and `manager/STORAGE.md` states the bound of a POST route. `runtime/BROKER.md` and `manager/CONTROLS.md` state the order of a redirect that arrives after the attempt returned its answer. `manager/README.md` states the client targets, Emacs 30.2 and the Pi fork 0.99.1. The reference pair `doc/examples/manager-serve.json` and `doc/examples/manager-offline.json`, which `manager/OPERATIONS.md` links, passes offline `reload-profiles` validation with private fixture paths. |
+| PG21 | This change | `doc/workflow-manager-release-evidence.md` maps each obligation of section 12 of the implementation plan, each package WM-001 to WM-044, each gate G0 to G5 and each scenario A01 to A24 to its implementation evidence, executable evidence, evidence ceiling and status. It adds the source identities of PG14 to PG17, the accepted additive fields, the tested platform, the conditional and unavailable checks and the statement that production activation is not authorized. `make -C doc check` requires the matrix header and the section headings. |
 
 ### Gate of Phase G
 
@@ -127,7 +128,7 @@ report:
 | WM-041 | Partial. Every ceiling key passed in the PG3 and PG4 runs, and `failures.backup.passed` passes through PG10. The runs of record wait for a host with no other manager. | `acat-wm-041-17ax`, `acat-wm-041-core-3vvz`, `acat-n50o`, `acat-jkas` |
 | WM-042 | Met for function apart from the exercise by another human operator, which is pending. | `acat-wm-042-sdg9` |
 | WM-043 | Met for function: the package, its acceptance, the schema upgrades, the newer-schema refusal and the rollback. | `acat-wm-043-zm3d` |
-| WM-044 | Documentation reconciled by PG19 and PG20. The integrated review is the gate. | `acat-wm-044-6utw`, `acat-gbh8` |
+| WM-044 | Documentation reconciled by PG19 and PG20. PG21 completes the release evidence matrix. The integrated review is the gate. | `acat-wm-044-6utw`, `acat-gbh8` |
 | G5 | Open. It needs the gate of Phase G, the human operator exercise and the independent closure review. Production activation stays separately authorized. | `acat-g5-u0w2` |
 
 The fess follow-up issues of Phase G are `acat-pg1-fess-followup-s4dp`,

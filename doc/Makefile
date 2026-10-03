@@ -38,6 +38,12 @@ check: check-api
 	@grep -q '^## Platform and packaging evidence$$' tui-release-evidence.md
 	@grep -q '^## Conditional and unavailable checks$$' tui-release-evidence.md
 	@echo 'tui release evidence: requirement matrix, platforms, and unavailable checks recorded'
+	@test "$$(grep -c '^| Requirement | Implementation evidence | Executable evidence | Evidence ceiling | Status |$$' workflow-manager-release-evidence.md)" -eq 4
+	@for heading in 'Evidence conventions' 'Release requirement matrix' 'Package matrix' 'Gate matrix' 'Acceptance scenario matrix' 'Package identities' 'Source identities' 'Accepted additive OpenAPI fields' 'Tested platform' 'Conditional and unavailable checks' 'Production activation'; do \
+	  grep -qx "## $$heading" workflow-manager-release-evidence.md || { echo "workflow-manager-release-evidence.md lacks the section $$heading" >&2; exit 1; }; \
+	done
+	@grep -q '^Production activation is not authorized\.' workflow-manager-release-evidence.md
+	@echo 'workflow manager release evidence: requirement, package, gate and scenario matrices recorded'
 	cd .. && runghc -Wall -Werror doc/check-model-routing-v2.hs
 
 check-api:
