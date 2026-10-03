@@ -33,10 +33,20 @@ with tempfile.TemporaryDirectory(prefix="agentic-cabal-env-", delete=False) as t
              command, "--offline", f"--builddir={builddir}", *arguments],
             str(root.resolve()), "fixture environment",
         ], reply.stdout
+    # sdist reads no package repository, and Cabal refuses --offline for it.
+    reply = subprocess.run(["bash", str(helper), "sdist", *arguments], cwd=root,
+                           env=env, capture_output=True, text=True, timeout=10)
+    assert reply.returncode == 23, reply
+    assert reply.stderr == "", reply.stderr
+    assert json.loads(reply.stdout) == [
+        [f"--store-dir={builddir}/cabal-store", "--active-repositories=:none",
+         "sdist", f"--builddir={builddir}", *arguments],
+        str(root.resolve()), "fixture environment",
+    ], reply.stdout
     del env["CABAL_BUILDDIR"]
     reply = subprocess.run(["bash", str(helper), "build"], cwd=root, env=env,
                            capture_output=True, text=True, timeout=10)
     assert reply.returncode != 0 and reply.stdout == "", reply
     assert "configured project direnv" in reply.stderr, reply.stderr
 assert root.is_dir() and binary.is_file(), "cabal environment evidence was not retained"
-print("cabal environment: offline/build-directory flags, argv, cwd, environment, and exit status preserved")
+print("cabal environment: offline/build-directory flags, sdist without --offline, argv, cwd, environment, and exit status preserved")

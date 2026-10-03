@@ -13608,6 +13608,42 @@ Open:
    revoke a credential, disk pressure, expired credentials, lost replies, corrupt store, proxy
    or network failure) have no explicit Preconditions or Configuration line. Add them.
 
+* TODO [#D] Resolve the non-blocking fess findings of subtask PG14
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pg14-fess-followup-zqb4
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-03 Sat 11:03]
+:MODIFIED: [2026-10-03 Sat 11:03]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess pg-PG14-r1 (report fess/pg-PG14-r1.md in the private evidence
+directory). PG14 added packages.<system>.agentic-run and packages.<system>.default to flake.nix,
+fixed bash test/cabal.sh sdist, and added doc/workflow-manager-release-evidence.md.
+
+Open:
+
+1. (low) README.md:409-412, doc/agent-cat.texi:2271-2274: the documentation says without
+   condition that the root shell already holds every input and that the build fetches nothing
+   with --option substitute false. That holds only where the devShell is already realized. State
+   the precondition (for example, after de has realized the root shell on the host).
+2. (low) flake.nix:48: pkgs.lib.fileset.maybeMissing ./cabal.project.freeze names a file that
+   does not exist, and a Git flake ignores an untracked freeze file anyway. Remove the entry or
+   justify it in a comment.
+3. (low) flake.nix:84-89,98: installPhase calls the shell function cabalOffline that buildPhase
+   defines. This works only because genericBuild runs all phases in one shell. Define the helper
+   in a shared hook or a let-bound script, or inline the list-bin call.
+4. (low) Output closure: the runtime closure of the package references the warp-3.4.15 store
+   path. Remove the reference (for example with remove-references-to) or record it as accepted
+   in the release evidence.
+5. (low) doc/workflow-manager-release-evidence.md:11-14: the base revision recorded is eca320c9
+   with the change uncommitted. PG21 restates the commit revision when it completes the record.
+
 * TODO [#D] Resolve the non-blocking fess findings of subtask PG8
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -25198,7 +25234,7 @@ recipe that ignores WAL or unresolved effects.
 :LABELS:   ["p10","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-09 Wed 22:34]
+:MODIFIED: [2026-10-03 Sat 11:03]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-043
 :SOURCE_REPO: agent-cat
@@ -25301,6 +25337,20 @@ explicitly authorized operation.
     "created_by": "johnw",
     "metadata": "{}",
     "thread_id": ""
+  }
+]
+#+end_src
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 728,
+    "issue_id": "acat-wm-043-zm3d",
+    "author": "johnw",
+    "text": "PG14: flake.nix adds packages.<system>.agentic-run and packages.<system>.default, a stdenv.mkDerivation whose src is a lib.fileset.toSource limited to agentic.cabal, cabal.project, the three nix/ files and the .hs, .c and .h files of the source and cbits directories that exe:agentic-run needs. The build runs cabal-install offline (--active-repositories=:none) against the devShell GHC with -O1, -j$NIX_BUILD_CORES and --ghc-options=-j, and installs bin/agentic-run. No new input, flake.lock unchanged. bash test/cabal.sh sdist no longer passes --offline (Cabal refused it), with a regression case in test/cabal_env_probe.py. Documentation: 'Building the runner package' in doc/agent-cat.texi and README.md; new doc/workflow-manager-release-evidence.md with 'Package identities' for PG21. Evidence (PG/PG14): nix build .#agentic-run --option substitute false succeeded in 330 s (aarch64-darwin, load 6.3 to 14.6); result/bin/agentic-run list and run hello --scripted gave the documented output; drvPath /nix/store/6y76igrq76s9g2byl8wdjimbc4vsrn9h-agentic-run-0.1.0.0.drv equal from the worktree, from a tracked-file copy (path:) and after a documentation-only edit; output /nix/store/lc8qfj9nwxrlm4582wswn9vk3h48zigv-agentic-run-0.1.0.0; bin sha256 6ad55c59c69d57923b2ec929d3cd937405ada1fe430f36ef0f056dbfa995e4fc; sdist agentic-0.1.0.0.tar.gz sha256 471817ca146cfb0192b3dbcd0d0ab45c5d03799b9b549bfc686e192af1decbce lists the three nix files; BUILD, Phase A journey at N8 and make -C doc check passed. Only aarch64-darwin was built. Upgrade and rollback remain open. WM-043 stays open. Fess findings: acat-pg14-fess-followup-zqb4.",
+    "created_at": "2026-10-03T18:03:17Z"
   }
 ]
 #+end_src

@@ -404,6 +404,27 @@ direnv exec . test/cabal.sh test all
 (cd bisim && direnv exec . bash -c 'lake build && lake exe corpus-gen')
 ```
 
+The root flake also defines the package `agentic-run`, which is its default
+package. The derivation builds `exe:agentic-run` with `cabal-install` offline,
+with no active package repository, against the GHC of the root shell. That GHC
+carries the dependency overrides and patches of `nix/haskell-overrides.nix`.
+The root shell already holds every input, so the build runs with substitution
+disabled and fetches nothing:
+
+```sh
+nix build .#agentic-run --no-update-lock-file --option substitute false
+result/bin/agentic-run run hello --scripted
+direnv exec . test/cabal.sh sdist
+```
+
+The source of the package holds only `agentic.cabal`, `cabal.project`, the
+files under `nix/`, and the Haskell and C sources of the runner and its
+libraries. A change to documentation or tests therefore leaves the derivation
+path unchanged. From a Git working copy, Nix reads only the tracked files. The
+source distribution that `test/cabal.sh sdist` writes beneath `CABAL_BUILDDIR`
+includes the three files under `nix/`.
+`doc/workflow-manager-release-evidence.md` records the package identities.
+
 Never run two full model builds at once. The module
 `model/Agentic/Core/DslFlagship.lean` proves its theorems by running the
 checker inside the kernel, which takes minutes and several gigabytes of memory.

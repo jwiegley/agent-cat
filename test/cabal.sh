@@ -2,5 +2,8 @@
 set -euo pipefail
 
 : "${CABAL_BUILDDIR:?Run this command through the configured project direnv}"
+# sdist reads no package repository, and Cabal refuses --offline for it.
+command=("$1")
+[[ $1 == sdist ]] || command+=(--offline)
 exec cabal --store-dir="$CABAL_BUILDDIR/cabal-store" --active-repositories=:none \
-  "$1" --offline --builddir="$CABAL_BUILDDIR" "${@:2}"
+  "${command[@]}" --builddir="$CABAL_BUILDDIR" "${@:2}"

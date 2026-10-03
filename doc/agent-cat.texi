@@ -2248,6 +2248,52 @@ assembles complete conformance observations.  The executables are the runner
 scripts drive.  The test suite @code{engine-api-test} exercises the neutral
 engine interface against a deterministic fake engine.
 
+@section Building the runner package
+
+@cindex Nix package
+@cindex source distribution
+The root flake defines the package @code{agentic-run}, which is also its
+default package.  @command{nix build} builds it from the same pinned package
+set as the root shell:
+
+@example
+nix build .#agentic-run --no-update-lock-file --option substitute false
+result/bin/agentic-run run hello --scripted
+@end example
+
+The derivation runs @command{cabal-install} offline with no active package
+repository.  It uses the GHC of the root shell, which carries the dependency
+overrides of @file{nix/haskell-overrides.nix}.  These overrides include the
+subject-alternative-name patch of @code{crypton-x509-validation} and, on Linux,
+the descriptor-closing patch of the @code{process} boot library.  The
+derivation builds the component @code{exe:agentic-run} with optimization level
+1 and parallel compilation, and it installs @file{bin/agentic-run}.  The root
+shell already holds every input of the derivation.  The build therefore fetches
+nothing, and the option @code{--option substitute false} prevents any contact
+with a binary cache.
+
+The source of the derivation is a filtered copy of the repository.  It holds
+@file{agentic.cabal}, @file{cabal.project}, the three files under @file{nix},
+and the Haskell and C sources of the library, the @code{examples} library, and
+the runner.  Documentation, tests, fixtures, and the Lean model are outside it,
+so a change to them leaves the derivation path unchanged.  From a Git working
+copy, Nix reads only the files that Git tracks, and a new source file must be
+added to the index before the build can read it.  A copy of the repository that
+is not a Git working copy builds with the reference @code{path:$PWD#agentic-run}.
+
+The source distribution comes from the shared Cabal entry point:
+
+@example
+direnv exec . test/cabal.sh sdist
+@end example
+
+The command writes @file{sdist/agentic-0.1.0.0.tar.gz} beneath
+@code{CABAL_BUILDDIR}.  Its listing includes
+@file{nix/haskell-overrides.nix}, @file{nix/crypton-x509-validation-san.patch},
+and @file{nix/process-close-fds-linux.patch}, so the dependency patches travel
+with the source.  @file{doc/workflow-manager-release-evidence.md} records the
+identities of the package, the executable, and the source distribution.
+
 @section Building the Lean model and the oracle
 
 @cindex one-build rule
